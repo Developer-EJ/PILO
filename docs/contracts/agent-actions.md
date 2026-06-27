@@ -208,7 +208,9 @@ Agent 실행은 app-server가 job queue에 요청을 넣고, ai-worker가 처리
 
 - `jobId`는 idempotency key로 사용한다.
 - `runId`는 `agent_runs.id`와 같아야 한다.
-- `workflowType`은 Agent action `type`과 같을 수도 있지만, orchestration 전용 workflow는 별도 값을 사용할 수 있다.
+- `workflowType`은 `AgentJobMessage` schema에 정의된 workflow name만 사용한다.
+- 허용 값은 `meeting.report.generate`, `review.analysis.generate`, `planning.generate`, `task.draft.generate`, `github.issue.draft.generate`, `orchestrator.run`이다.
+- `workflowType`과 Agent action `type`의 1:1 대응은 보장하지 않는다.
 - `contextRefs`는 원본 payload를 넣지 않고 owner domain의 entity id만 참조한다.
 - message에는 secret, OAuth token, raw private key를 넣지 않는다.
 - AI Worker는 target domain DB를 직접 수정하지 않고 `actions`만 반환한다.
