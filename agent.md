@@ -5,6 +5,7 @@
 ## 1. 먼저 읽을 문서
 
 - `docs/convention.md`: Issue, Branch, PR, Commit 규칙
+- `docs/llm-coding-guidelines.md`: LLM 코딩 행동 지침
 - `docs/design.md`: PILO 화면 디자인 토큰, 레이아웃, 컴포넌트 규칙
 - `docs/agent-collaboration-guide.md`: 도메인 소유권, 폴더 구조, 충돌 방지
 - `docs/contracts/contract-change-rules.md`: contract 변경, 리뷰, self-approve 규칙
@@ -14,6 +15,8 @@
 ## 2. 핵심 원칙
 
 - 서버 단위가 아니라 도메인 단위로 작업한다.
+- 구현 전 가정, 대안, 성공 기준을 먼저 확인한다.
+- 요청 범위 밖의 기능, 추상화, 리팩토링을 추가하지 않는다.
 - 자기 도메인 밖의 파일을 수정하면 PR 설명에 이유와 범위를 남긴다.
 - 다른 도메인의 DB 모델, service, repository를 직접 수정하지 않는다.
 - 도메인 간 연동은 API, event, read model, contract로 처리한다.
