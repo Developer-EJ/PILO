@@ -227,8 +227,7 @@
       "properties": {
         "workspaceId": { "$ref": "#/$defs/uuid" },
         "taskId": { "$ref": "#/$defs/uuid" },
-        "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] },
-        "reason": { "type": ["string", "null"] }
+        "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] }
       }
     },
     "GithubIssueCreateAction": {

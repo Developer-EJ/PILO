@@ -88,8 +88,7 @@ Defined by `docs/contracts/task.md`.
 {
   "workspaceId": "uuid",
   "taskId": "uuid",
-  "status": "in_progress",
-  "reason": "회의에서 우선순위가 변경되었다."
+  "status": "in_progress"
 }
 ```
 
