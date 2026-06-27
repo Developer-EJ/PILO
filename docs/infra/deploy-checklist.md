@@ -35,10 +35,14 @@
 - Next.js/NestJS/FastAPI 초기 배포 앱 작성 완료
 - Next.js/NestJS 로컬 빌드 검증 완료
 - npm production dependency audit 0 vulnerabilities 확인 완료
+- GitHub Actions 애플리케이션 배포 workflow 성공 확인 완료
+- ECR App/Realtime/AI Worker image push 완료
+- S3 frontend static asset upload 완료
 
 아직 하지 않은 작업:
 
-- 애플리케이션 Docker image push
+- ECS service desired count 증설
+- ECS task 실행 후 ALB health check 확인
 
 ## 2. 사전 준비
 
