@@ -404,7 +404,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
-        "type": { "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve.draft"] },
+        "type": { "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"] },
         "source": { "enum": ["meeting", "task", "github", "review", "planning", "orchestrator"] },
         "requiresConfirmation": { "type": "boolean" },
         "payload": { "type": "object" },
@@ -482,7 +482,7 @@
             {
               "type": "object",
               "properties": {
-                "type": { "const": "planning.approve.draft" },
+                "type": { "const": "planning.approve" },
                 "payload": { "$ref": "#/$defs/PlanningApproveAction" }
               }
             }
