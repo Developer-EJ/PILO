@@ -220,16 +220,68 @@
         "shapeType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] }
       }
     },
-    "AgentAction": {
+    "TaskStatusUpdateAction": {
       "type": "object",
-      "required": ["type", "source", "requiresConfirmation", "payload", "status"],
+      "required": ["workspaceId", "taskId", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "taskId": { "$ref": "#/$defs/uuid" },
+        "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "GithubIssueCreateAction": {
+      "type": "object",
+      "required": ["workspaceId", "repositoryId", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "repositoryId": { "$ref": "#/$defs/uuid" },
+        "taskId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "title": { "type": "string", "minLength": 1 },
+        "body": { "type": ["string", "null"] },
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "MeetingReportGenerateAction": {
+      "type": "object",
+      "required": ["workspaceId", "meetingId"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "meetingId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "ReviewAnalysisGenerateAction": {
+      "type": "object",
+      "required": ["workspaceId", "pullRequestId"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "pullRequestId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "PlanningApproveAction": {
+      "type": "object",
+      "required": ["workspaceId", "draftId"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "AgentActionCommon": {
+      "type": "object",
+      "required": ["id", "runId", "type", "source", "requiresConfirmation", "payload", "status"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
-        "type": {
-          "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"]
-        },
+        "type": { "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"] },
         "source": { "enum": ["meeting", "task", "github", "review", "planning", "orchestrator"] },
         "requiresConfirmation": { "type": "boolean" },
         "payload": { "type": "object" },
@@ -239,9 +291,85 @@
         "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
       }
     },
+    "AgentAction": {
+      "oneOf": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "task.create.draft" },
+                "payload": { "$ref": "#/$defs/TaskCreateDraft" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "task.update.status" },
+                "payload": { "$ref": "#/$defs/TaskStatusUpdateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "github.issue.create" },
+                "payload": { "$ref": "#/$defs/GithubIssueCreateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "meeting.report.generate" },
+                "payload": { "$ref": "#/$defs/MeetingReportGenerateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "review.analysis.generate" },
+                "payload": { "$ref": "#/$defs/ReviewAnalysisGenerateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "planning.approve" },
+                "payload": { "$ref": "#/$defs/PlanningApproveAction" }
+              }
+            }
+          ]
+        }
+      ]
+    },
     "AgentJobMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "requestedAt"],
+      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "contextRefs", "requestedAt"],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
@@ -270,7 +398,7 @@
     },
     "AgentResultMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "status", "output", "actions", "trace", "finishedAt"],
+      "required": ["jobId", "runId", "status", "output", "actions", "trace", "error", "finishedAt"],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
