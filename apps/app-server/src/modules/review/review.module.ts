@@ -4,6 +4,9 @@ import { PullRequestAnalysisController } from "./analysis/pull-request-analysis.
 import { PullRequestAnalysisService } from "./analysis/pull-request-analysis.service";
 import { ChangedFilesService } from "./changes/changed-files.service";
 import { InMemoryChangedFilesRepository } from "./changes/in-memory-changed-files.repository";
+import { InMemoryReviewGraphRepository } from "./graph/in-memory-review-graph.repository";
+import { ReviewGraphController } from "./graph/review-graph.controller";
+import { ReviewGraphService } from "./graph/review-graph.service";
 import { ReviewPublicController } from "./public/review-public.controller";
 import { ReviewPublicService } from "./public/review-public.service";
 import { InMemoryCodeReviewRoomRepository } from "./room/in-memory-code-review-room.repository";
@@ -15,6 +18,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     ReviewPublicController,
     ReviewRoomController,
     PullRequestAnalysisController,
+    ReviewGraphController,
   ],
   providers: [
     ReviewPublicService,
@@ -24,6 +28,8 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryPullRequestAnalysisRepository,
     ChangedFilesService,
     InMemoryChangedFilesRepository,
+    ReviewGraphService,
+    InMemoryReviewGraphRepository,
   ],
 })
 export class ReviewModule {}
