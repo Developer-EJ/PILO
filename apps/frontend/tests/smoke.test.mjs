@@ -6,8 +6,15 @@ import {
 } from "../lib/auth/authClient.mjs";
 import {
   createMockAuthClient,
+  markMockAuthSignedIn,
+  markMockAuthSignedOut,
   mockCurrentUser,
 } from "../lib/auth/mockAuthClient.mjs";
+import {
+  createLoginRedirectHref,
+  isProtectedPath,
+  safeNextPath,
+} from "../lib/auth/protectedRoutes.mjs";
 import {
   normalizeCallbackRedirect,
   resolveOAuthCallbackState,
@@ -222,6 +229,55 @@ describe("frontend package", () => {
       authenticated: false,
       user: null,
     });
+  });
+
+  it("supports persistent mock sign-out state for protected route checks", async () => {
+    const storage = new Map();
+    const mockStorage = {
+      getItem(key) {
+        return storage.get(key) ?? null;
+      },
+      removeItem(key) {
+        storage.delete(key);
+      },
+      setItem(key, value) {
+        storage.set(key, value);
+      },
+    };
+
+    markMockAuthSignedOut(mockStorage);
+
+    assert.equal(
+      await createMockAuthClient({ storage: mockStorage }).getCurrentUser(),
+      null,
+    );
+
+    markMockAuthSignedIn(mockStorage);
+
+    assert.equal(
+      (await createMockAuthClient({ storage: mockStorage }).getCurrentUser())
+        .email,
+      mockCurrentUser.email,
+    );
+  });
+
+  it("classifies protected auth routes without guarding login", () => {
+    assert.equal(isProtectedPath("/"), true);
+    assert.equal(isProtectedPath("/dashboard"), true);
+    assert.equal(isProtectedPath("/workspaces/demo"), true);
+    assert.equal(isProtectedPath("/canvas"), true);
+    assert.equal(isProtectedPath("/login"), false);
+    assert.equal(isProtectedPath("/login/callback"), false);
+  });
+
+  it("creates safe login redirect hrefs for protected pages", () => {
+    assert.equal(createLoginRedirectHref("/"), "/login?next=%2F");
+    assert.equal(
+      createLoginRedirectHref("/canvas?filter=task"),
+      "/login?next=%2Fcanvas%3Ffilter%3Dtask",
+    );
+    assert.equal(safeNextPath("https://evil.example"), "/");
+    assert.equal(safeNextPath("//evil.example"), "/");
   });
 
   it("builds auth API URLs from a configured app server base URL", () => {
