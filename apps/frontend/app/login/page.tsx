@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { DraggableCanvasItems } from "./DraggableCanvasItems";
+import { LoginAuthNotice } from "./LoginAuthNotice";
 import { WorkspaceEntryTransition } from "./WorkspaceEntryTransition";
 import { authProviderHref } from "./authProviderHref.mjs";
 
@@ -149,6 +150,10 @@ export default function LoginPage() {
             <h1 id="login-title">PILO에 로그인</h1>
             <p>Workspace로 계속하려면 계정을 선택하세요.</p>
           </div>
+
+          <Suspense fallback={null}>
+            <LoginAuthNotice />
+          </Suspense>
 
           <div className="provider-list">
             {providers.map((provider) => (
