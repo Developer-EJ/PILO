@@ -1,0 +1,38 @@
+language: "ko-KR"
+tone_instructions: "한국어로 간결하고 구체적으로 리뷰한다. 변경 위험도, contract 위반, 테스트 누락을 우선 지적한다."
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "dev"
+      - "main"
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "[skip review]"
+  path_instructions:
+    - path: "docs/contracts/**"
+      instructions: "Contract 변경은 public/internal 여부, owner, consumer, breaking change, migration plan이 PR에 명시되어야 한다. Public contract 변경은 구현보다 먼저 별도 PR로 merge되어야 한다."
+    - path: "apps/**"
+      instructions: "도메인 소유권을 확인한다. 다른 도메인의 DB 모델, service, repository를 직접 수정하거나 contract 없이 결합하는 변경을 지적한다."
+    - path: ".github/workflows/**"
+      instructions: "CI required checks와 branch protection에 영향이 있는지 확인한다."
+    - path: "infra/**"
+      instructions: "AWS 리소스 변경은 Terraform으로 관리되어야 하며, 콘솔 수동 변경을 전제로 한 설명이나 코드가 있으면 지적한다."
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "agent.md"
+      - "docs/design.md"
+      - "docs/agent-collaboration-guide.md"
+      - "docs/contracts/contract-change-rules.md"
+      - "docs/convention.md"
+      - "docs/PILO_5인_분업_상세_명세.md"
