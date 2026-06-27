@@ -41,10 +41,11 @@
 - ECS service desired count 증설 완료
 - ECS task running 상태 확인 완료
 - ALB target group health check 통과 확인 완료
+- Realtime external health endpoint 배포 확인 완료
 
 아직 하지 않은 작업:
 
-- Realtime external health endpoint 배포 확인
+- 실제 애플리케이션 기능 구현 및 DB migration 설계
 
 ## 2. 사전 준비
 
