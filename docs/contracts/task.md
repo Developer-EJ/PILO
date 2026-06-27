@@ -1,0 +1,97 @@
+# Task Contract
+
+## Owner
+
+주형
+
+## Scope
+
+Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크리스트, 댓글, 변경 이력, 의존성을 담당한다.
+
+## Owned Tables
+
+- `tasks`
+- `task_checklist_items`
+- `task_comments`
+- `task_activity_logs`
+- `task_dependencies`
+- `milestones`
+
+## Provided APIs
+
+| Method | Path | 목적 | Consumer |
+|---|---|---|---|
+| `GET` | `/workspaces/:workspaceId/tasks` | Task 목록/필터 조회 | 동현, 주형 |
+| `POST` | `/workspaces/:workspaceId/tasks` | Task 생성 | 주형, 세인 action executor |
+| `GET` | `/tasks/:taskId` | Task 상세 | 전체 |
+| `PATCH` | `/tasks/:taskId` | 제목/설명/담당자/마감일 수정 | 주형 |
+| `PATCH` | `/tasks/:taskId/status` | 상태 변경 | 주형, 세인 action executor |
+| `POST` | `/tasks/:taskId/comments` | 댓글 작성 | 주형 |
+| `POST` | `/tasks/:taskId/checklist-items` | 체크리스트 추가 | 주형 |
+| `POST` | `/tasks/:taskId/dependencies` | 의존성 추가 | 주형 |
+| `POST` | `/workspaces/:workspaceId/task-drafts` | 외부 후보를 Task draft로 변환 | 진호, 세인 |
+
+## Read Models
+
+### TaskSummary
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "title": "GitHub Repository 연결",
+  "status": "in_progress",
+  "priority": "high",
+  "assignee": {
+    "memberId": "uuid",
+    "name": "주형"
+  },
+  "dueDate": "2026-07-03",
+  "isDelayed": false,
+  "linkedIssueCount": 1,
+  "linkedPrCount": 1,
+  "updatedAt": "2026-06-27T12:00:00Z"
+}
+```
+
+### TaskCreateDraft
+
+```json
+{
+  "workspaceId": "uuid",
+  "sourceType": "meeting_action_item",
+  "sourceId": "uuid",
+  "title": "OAuth callback 처리",
+  "description": "Google/GitHub callback을 처리한다.",
+  "assigneeMemberId": "uuid",
+  "priority": "high",
+  "dueDate": "2026-07-03"
+}
+```
+
+## Events
+
+- `task.created`
+- `task.updated`
+- `task.status_changed`
+- `task.assignee_changed`
+- `task.linked_to_github_issue`
+- `task.linked_to_pull_request`
+
+## Agent Actions Consumed
+
+- `task.create.draft`
+- `task.update.status`
+- `task.assign`
+
+## Boundaries
+
+- 주형만 Task 원본을 생성/수정/삭제한다.
+- 진호의 `meeting_action_items`는 Task 후보일 뿐이다. 실제 Task 저장은 주형 API 또는 세인 Agent action executor를 통해 처리한다.
+- 동현 Canvas/Dashboard는 `TaskSummary`만 사용한다.
+- 은재 Review는 PR과 연결된 `TaskSummary`만 소비한다.
+
+## Mock Rule
+
+Task API 미구현 시 consumer는 `TaskSummary` fixture를 사용한다. 임시 `tasks` table이나 별도 Task store를 만들지 않는다.
+

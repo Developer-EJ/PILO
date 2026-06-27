@@ -1,0 +1,35 @@
+{
+  "jobId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "runId": "99999999-9999-4999-8999-999999999901",
+  "status": "succeeded",
+  "output": {
+    "summary": "로그인 구현 범위와 Task 후보를 정리했다."
+  },
+  "actions": [
+    {
+      "id": "99999999-9999-4999-8999-999999999991",
+      "runId": "99999999-9999-4999-8999-999999999901",
+      "type": "task.create.draft",
+      "source": "meeting",
+      "requiresConfirmation": true,
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "title": "OAuth 실패 상태 UI 추가",
+        "priority": "medium"
+      },
+      "status": "waiting_confirmation",
+      "confirmedByMemberId": null,
+      "confirmedAt": null,
+      "executedAt": null
+    }
+  ],
+  "trace": [
+    {
+      "stepName": "summarize",
+      "message": "회의 transcript를 요약했다.",
+      "metadata": {}
+    }
+  ],
+  "error": null,
+  "finishedAt": "2026-06-27T10:01:00.000Z"
+}
