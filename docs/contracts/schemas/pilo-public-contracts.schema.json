@@ -277,6 +277,127 @@
       "type": "object",
       "required": ["id", "runId", "type", "source", "requiresConfirmation", "payload", "status", "confirmedByMemberId", "confirmedAt", "executedAt"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["requiresConfirmation"],
+            "properties": {
+              "requiresConfirmation": { "const": false }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": { "enum": ["draft", "executed", "failed"] },
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "draft" }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" },
+              "executedAt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "waiting_confirmation" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" },
+              "executedAt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "confirmed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "$ref": "#/$defs/uuid" },
+              "confirmedAt": { "$ref": "#/$defs/dateTime" },
+              "executedAt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "rejected" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" },
+              "executedAt": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "executed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "executedAt": { "$ref": "#/$defs/dateTime" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["requiresConfirmation", "status"],
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "status": { "const": "executed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmedByMemberId": { "$ref": "#/$defs/uuid" },
+              "confirmedAt": { "$ref": "#/$defs/dateTime" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "executedAt": { "type": "null" }
+            }
+          }
+        }
+      ],
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
