@@ -287,7 +287,7 @@
           },
           "then": {
             "properties": {
-              "status": { "enum": ["draft", "executed", "failed"] },
+              "status": { "enum": ["draft", "executed"] },
               "confirmedByMemberId": { "type": "null" },
               "confirmedAt": { "type": "null" }
             }
@@ -393,6 +393,9 @@
           },
           "then": {
             "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "$ref": "#/$defs/uuid" },
+              "confirmedAt": { "$ref": "#/$defs/dateTime" },
               "executedAt": { "type": "null" }
             }
           }
@@ -401,7 +404,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
-        "type": { "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"] },
+        "type": { "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve.draft"] },
         "source": { "enum": ["meeting", "task", "github", "review", "planning", "orchestrator"] },
         "requiresConfirmation": { "type": "boolean" },
         "payload": { "type": "object" },
@@ -479,7 +482,7 @@
             {
               "type": "object",
               "properties": {
-                "type": { "const": "planning.approve" },
+                "type": { "const": "planning.approve.draft" },
                 "payload": { "$ref": "#/$defs/PlanningApproveAction" }
               }
             }
