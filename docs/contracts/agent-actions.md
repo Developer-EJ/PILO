@@ -211,7 +211,8 @@ Agent 실행은 app-server가 job queue에 요청을 넣고, ai-worker가 처리
 - `workflowType`은 `AgentJobMessage` schema에 정의된 workflow name만 사용한다.
 - 허용 값은 `meeting.report.generate`, `review.analysis.generate`, `planning.generate`, `task.draft.generate`, `github.issue.draft.generate`, `orchestrator.run`이다.
 - `workflowType`과 Agent action `type`의 1:1 대응은 보장하지 않는다.
-- `contextRefs`는 원본 payload를 넣지 않고 owner domain의 entity id만 참조한다.
+- `contextRefs`는 원본 payload를 넣지 않고 `{ "type": "owner-domain entity type", "id": "entity uuid" }` 구조로 참조한다.
+- `contextRefs.type`은 owner domain의 entity 종류를 나타내고, `contextRefs.id`는 해당 entity id를 가리킨다.
 - message에는 secret, OAuth token, raw private key를 넣지 않는다.
 - AI Worker는 target domain DB를 직접 수정하지 않고 `actions`만 반환한다.
 - App Server는 result를 받은 뒤 `agent_runs`, `agent_run_steps`, `agent_actions`, `agent_traces`를 갱신한다.
