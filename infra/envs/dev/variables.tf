@@ -95,21 +95,21 @@ variable "ai_worker_port" {
 }
 
 variable "app_server_desired_count" {
-  description = "Dev default is 0 until an image exists in ECR."
+  description = "Dev app server task count."
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "realtime_server_desired_count" {
-  description = "Dev default is 0 until an image exists in ECR."
+  description = "Dev realtime server task count."
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "ai_worker_desired_count" {
-  description = "Dev default is 0 until an image exists in ECR."
+  description = "Dev AI worker task count."
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "app_server_cpu" {

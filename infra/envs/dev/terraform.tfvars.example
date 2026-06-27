@@ -16,7 +16,7 @@ ecs_assign_public_ip  = true
 github_owner = "your-github-owner"
 github_repo  = "PILO"
 
-# Set to 1 after Docker images are pushed to ECR.
-app_server_desired_count      = 0
-realtime_server_desired_count = 0
-ai_worker_desired_count       = 0
+# Dev images are available in ECR, so each service runs one task by default.
+app_server_desired_count      = 1
+realtime_server_desired_count = 1
+ai_worker_desired_count       = 1

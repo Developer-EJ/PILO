@@ -38,11 +38,13 @@
 - GitHub Actions 애플리케이션 배포 workflow 성공 확인 완료
 - ECR App/Realtime/AI Worker image push 완료
 - S3 frontend static asset upload 완료
+- ECS service desired count 증설 완료
+- ECS task running 상태 확인 완료
+- ALB target group health check 통과 확인 완료
 
 아직 하지 않은 작업:
 
-- ECS service desired count 증설
-- ECS task 실행 후 ALB health check 확인
+- Realtime external health endpoint 배포 확인
 
 ## 2. 사전 준비
 

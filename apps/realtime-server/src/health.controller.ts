@@ -2,7 +2,7 @@ import { Controller, Get } from "@nestjs/common";
 
 @Controller()
 export class HealthController {
-  @Get("health")
+  @Get(["health", "sync/health"])
   health() {
     return {
       service: "realtime-server",
