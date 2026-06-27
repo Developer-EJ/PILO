@@ -116,6 +116,8 @@ jobs:
   ai-worker:
     name: ai-worker
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
     defaults:
       run:
         working-directory: apps/ai-worker
