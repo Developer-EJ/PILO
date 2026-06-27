@@ -212,6 +212,30 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 }
 ```
 
+### review.analysis_requested
+
+```json
+{
+  "eventType": "review.analysis_requested",
+  "analysisId": "uuid",
+  "pullRequestId": "uuid",
+  "occurredAt": "2026-06-27T10:00:00.000Z"
+}
+```
+
+### review.analysis_completed
+
+```json
+{
+  "eventType": "review.analysis_completed",
+  "analysisId": "uuid",
+  "pullRequestId": "uuid",
+  "analysisStatus": "succeeded",
+  "errorTrace": [],
+  "occurredAt": "2026-06-27T10:01:00.000Z"
+}
+```
+
 ## Agent Actions Consumed
 
 - `review.analysis.generate`
