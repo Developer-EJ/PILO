@@ -1,0 +1,217 @@
+locals {
+  github_oidc_enabled = var.github_owner != "" && var.github_repo != ""
+  s3_object_arns      = [for arn in var.s3_bucket_arns : "${arn}/*"]
+}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_iam_policy_document" "ecs_tasks_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ecs_task_execution" {
+  name               = "${var.name_prefix}-ecs-task-execution-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
+  name = "${var.name_prefix}-ecs-execution-secrets"
+  role = aws_iam_role.ecs_task_execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = var.secrets_manager_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "app_server_task" {
+  name               = "${var.name_prefix}-app-server-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "app_server_task" {
+  name = "${var.name_prefix}-app-server-task-policy"
+  role = aws_iam_role.app_server_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage", "sqs:GetQueueAttributes", "sqs:GetQueueUrl"]
+        Resource = var.sqs_queue_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = local.s3_object_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = var.secrets_manager_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "realtime_server_task" {
+  name               = "${var.name_prefix}-realtime-server-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "realtime_server_task" {
+  name = "${var.name_prefix}-realtime-server-task-policy"
+  role = aws_iam_role.realtime_server_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = local.s3_object_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = var.secrets_manager_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role" "ai_worker_task" {
+  name               = "${var.name_prefix}-ai-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "ai_worker_task" {
+  name = "${var.name_prefix}-ai-worker-task-policy"
+  role = aws_iam_role.ai_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = var.sqs_queue_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = local.s3_object_arns
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = var.secrets_manager_arns
+      }
+    ]
+  })
+}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = var.github_oidc_thumbprints
+}
+
+data "aws_iam_policy_document" "github_actions_assume_role" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github[0].arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values = [
+        "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main",
+        "repo:${var.github_owner}/${var.github_repo}:pull_request",
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_actions" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  name               = "${var.name_prefix}-github-actions-role"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_assume_role[0].json
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_power_user" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  role       = aws_iam_role.github_actions[0].name
+  policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_iam_full_access" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  role       = aws_iam_role.github_actions[0].name
+  policy_arn = "arn:aws:iam::aws:policy/IAMFullAccess"
+}
+
+resource "aws_iam_role_policy" "github_actions_pass_roles" {
+  count = local.github_oidc_enabled ? 1 : 0
+
+  name = "${var.name_prefix}-github-actions-pass-roles"
+  role = aws_iam_role.github_actions[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["iam:PassRole"]
+        Resource = [
+          aws_iam_role.ecs_task_execution.arn,
+          aws_iam_role.app_server_task.arn,
+          aws_iam_role.realtime_server_task.arn,
+          aws_iam_role.ai_worker_task.arn,
+        ]
+      }
+    ]
+  })
+}

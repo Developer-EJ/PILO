@@ -1,0 +1,22 @@
+project_name = "pilo"
+environment  = "dev"
+aws_region   = "ap-northeast-2"
+
+# Fill these when Route53 is ready.
+create_dns_records    = false
+domain_name           = "pilo.example.com"
+frontend_domain_name  = "dev.pilo.example.com"
+api_domain_name       = "api.dev.pilo.example.com"
+hosted_zone_id        = ""
+
+# Dev keeps NAT disabled. ECS tasks run in public subnets with public IPs.
+enable_nat_gateway    = false
+ecs_assign_public_ip  = true
+
+github_owner = "your-github-owner"
+github_repo  = "PILO"
+
+# Set to 1 after Docker images are pushed to ECR.
+app_server_desired_count      = 0
+realtime_server_desired_count = 0
+ai_worker_desired_count       = 0
