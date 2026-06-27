@@ -127,7 +127,7 @@
     },
     "MilestoneSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "title", "status"],
+      "required": ["id", "workspaceId", "title", "status", "taskCount", "doneTaskCount"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },

@@ -60,7 +60,6 @@
 - `POST /workspaces/:workspaceId/milestones` creates milestone.
 - `PATCH /milestones/:milestoneId` updates milestone.
 - `POST /workspaces/:workspaceId/github/connections` starts GitHub App install flow.
-- `GET /github/app/callback` completes GitHub App install flow.
 - `GET /workspaces/:workspaceId/github/repositories` returns `GithubRepositorySummary[]`.
 - `POST /tasks/:taskId/github-issues` creates or links issue.
 - `GET /repositories/:repositoryId/issues` returns `GithubIssueSummary[]`.
@@ -68,6 +67,10 @@
 - `GET /workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
 - `GET /workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
 - Agent action executor for `task.create.draft`, `task.update.status`, `task.assign`, `github.issue.create`.
+
+## External Callbacks
+
+- `GET /github/app/callback` completes GitHub App install flow.
 
 ## Provides To Others
 
