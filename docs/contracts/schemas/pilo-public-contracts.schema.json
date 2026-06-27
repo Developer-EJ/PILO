@@ -276,7 +276,7 @@
     },
     "AgentActionCommon": {
       "type": "object",
-      "required": ["id", "runId", "type", "source", "requiresConfirmation", "payload", "status"],
+      "required": ["id", "runId", "type", "source", "requiresConfirmation", "payload", "status", "confirmedByMemberId", "confirmedAt", "executedAt"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
