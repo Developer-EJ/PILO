@@ -18,7 +18,7 @@ export function WorkspaceEntryTransition() {
       ?.classList.add("is-entering-workspace");
 
     const timeoutId = window.setTimeout(() => {
-      router.push("/");
+      router.replace("/");
     }, 1200);
 
     return () => {

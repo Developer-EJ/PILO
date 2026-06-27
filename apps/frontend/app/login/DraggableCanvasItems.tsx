@@ -82,7 +82,7 @@ export function DraggableCanvasItems() {
   return (
     <section
       className="login-canvas-layer"
-      aria-label="드래그 가능한 PILO canvas preview"
+      aria-hidden="true"
       onPointerMove={(event) => {
         if (!drag) return;
 
@@ -106,7 +106,7 @@ export function DraggableCanvasItems() {
       <div className="login-canvas-line line-c" />
 
       {items.map((item) => (
-        <button
+        <div
           className={`canvas-float canvas-${item.kind}`}
           key={item.id}
           onPointerDown={(event) => {
@@ -123,12 +123,11 @@ export function DraggableCanvasItems() {
             top: item.y,
             transform: `rotate(${item.rotate}deg)`,
           }}
-          type="button"
         >
           <span className="canvas-float-kind">{labelForKind(item.kind)}</span>
           <strong>{item.title}</strong>
           <small>{item.meta}</small>
-        </button>
+        </div>
       ))}
     </section>
   );

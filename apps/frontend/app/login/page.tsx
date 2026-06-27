@@ -1,22 +1,20 @@
 import { Suspense } from "react";
 import { DraggableCanvasItems } from "./DraggableCanvasItems";
 import { WorkspaceEntryTransition } from "./WorkspaceEntryTransition";
-
-const authBaseUrl =
-  process.env.NEXT_PUBLIC_APP_SERVER_URL ?? "http://localhost:4000";
+import { authProviderHref } from "./authProviderHref.mjs";
 
 const providers = [
   {
     name: "Google",
     eyebrow: "Workspace 계정으로 계속",
-    href: `${authBaseUrl}/auth/google/start`,
+    href: authProviderHref("/auth/google/start"),
     mark: "G",
     tone: "google",
   },
   {
     name: "GitHub",
     eyebrow: "개발자 계정으로 계속",
-    href: `${authBaseUrl}/auth/github/start`,
+    href: authProviderHref("/auth/github/start"),
     mark: "GH",
     tone: "github",
   },
