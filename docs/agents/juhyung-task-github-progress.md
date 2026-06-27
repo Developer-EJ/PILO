@@ -40,21 +40,34 @@
 1. Task CRUD with status, priority, assignee, due date.
 2. Task checklist, comments, activity log.
 3. Milestone list and task milestone connection.
-4. GitHub repository connection model and repository list.
-5. GitHub issue and PR sync stubs.
-6. Task to issue and task to PR mapping.
-7. Progress summary calculation and snapshot.
+4. Task draft approval/rejection from meeting and Agent sources.
+5. GitHub App repository connection model and repository list.
+6. GitHub issue and PR sync stubs.
+7. Task to issue and task to PR mapping.
+8. Progress summary calculation and snapshot.
 
 ## Public APIs To Provide
 
 - `GET /workspaces/:workspaceId/tasks` returns `TaskSummary[]`.
 - `POST /workspaces/:workspaceId/tasks` creates task.
 - `PATCH /tasks/:taskId` updates task.
+- `DELETE /tasks/:taskId` soft-deletes task.
+- `GET /workspaces/:workspaceId/task-drafts` returns `TaskDraft[]`.
+- `POST /workspaces/:workspaceId/task-drafts` creates task draft.
+- `POST /task-drafts/:draftId/approve` creates task from approved draft.
+- `POST /task-drafts/:draftId/reject` rejects task draft.
+- `GET /workspaces/:workspaceId/milestones` returns `MilestoneSummary[]`.
+- `POST /workspaces/:workspaceId/milestones` creates milestone.
+- `PATCH /milestones/:milestoneId` updates milestone.
+- `POST /workspaces/:workspaceId/github/connections` starts GitHub App install flow.
+- `GET /github/app/callback` completes GitHub App install flow.
+- `GET /workspaces/:workspaceId/github/repositories` returns `GithubRepositorySummary[]`.
 - `POST /tasks/:taskId/github-issues` creates or links issue.
-- `GET /workspaces/:workspaceId/github/issues` returns `GithubIssueSummary[]`.
-- `GET /workspaces/:workspaceId/github/pull-requests` returns `PullRequestSummary[]`.
-- `GET /workspaces/:workspaceId/progress` returns `ProgressSummary`.
-- Agent action executor for `task.create.draft`, `task.update.status`, `github.issue.create`.
+- `GET /repositories/:repositoryId/issues` returns `GithubIssueSummary[]`.
+- `GET /repositories/:repositoryId/pull-requests` returns `PullRequestSummary[]`.
+- `GET /workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
+- `GET /workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
+- Agent action executor for `task.create.draft`, `task.update.status`, `task.assign`, `github.issue.create`.
 
 ## Provides To Others
 

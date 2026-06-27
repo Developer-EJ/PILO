@@ -18,7 +18,7 @@
 | 담당자 | 소유 contract | 소비자가 의존해도 되는 것 |
 |---|---|---|
 | 동현 | `auth.md`, `workspace.md`, `canvas.md` | CurrentUser, WorkspaceMemberSummary, CanvasEntityRef |
-| 주형 | `task.md`, `github.md`, `progress.md` | TaskSummary, PullRequestSummary, ProgressSummary |
+| 주형 | `task.md`, `github.md`, `progress.md` | TaskSummary, TaskDraft, MilestoneSummary, GithubRepositorySummary, GithubIssueSummary, PullRequestSummary, ProgressSummary |
 | 진호 | `meeting.md` | MeetingReportSummary, MeetingActionItem |
 | 은재 | `review.md` | PRAnalysisSummary, ReviewNodeSummary |
 | 세인 | `agent-actions.md`, `planning.md` | AgentAction, ProjectPlanDraftSummary |
