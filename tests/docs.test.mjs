@@ -307,6 +307,14 @@ describe("contract fixtures", () => {
     }
   });
 
+  it("review changes fixture exists and parses as JSON", () => {
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-changes.fixture.json"));
+
+    assert.ok(fixture.analysisId);
+    assert.ok(Array.isArray(fixture.changedFiles));
+    assert.ok(Array.isArray(fixture.changedFiles[0].functions));
+  });
+
   it("fixture rules are documented and linked from bootstrap docs", () => {
     assert.ok(exists("docs/contracts/fixtures/README.md"));
     assert.match(read("agent.md"), /docs\/contracts\/fixtures/);
