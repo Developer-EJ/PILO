@@ -230,6 +230,34 @@ h1 {
   font-weight: 800;
 }
 
+.logout-button {
+  min-height: 34px;
+  border: 1px solid var(--pilo-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--pilo-text-soft);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 12px;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.logout-button:hover:not(:disabled) {
+  border-color: rgba(109, 91, 214, 0.28);
+  box-shadow: var(--pilo-shadow-soft);
+  color: var(--pilo-primary);
+}
+
+.logout-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .dashboard-content {
   max-width: 1204px;
   margin: 0 auto;

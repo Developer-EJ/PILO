@@ -1,3 +1,6 @@
+import { LogoutButton } from "../components/auth/LogoutButton";
+import { createMockAuthClient } from "../lib/auth/mockAuthClient.mjs";
+
 const stats = [
   { label: "진행 중 Task", value: "3", icon: "⚡", tone: "primary" },
   { label: "리뷰 대기 PR", value: "3", icon: "◆", tone: "warning" },
@@ -58,7 +61,11 @@ const decisions = [
   "배포는 프론트 CloudFront · 백엔드 ECS 기준으로 정리",
 ];
 
-export default function Home() {
+export default async function Home() {
+  const authSession = await createMockAuthClient().getAuthSession();
+  const currentUser = authSession.user;
+  const avatarLabel = currentUser?.name.trim().charAt(0).toUpperCase() ?? "P";
+
   return (
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="PILO navigation preview">
@@ -94,7 +101,10 @@ export default function Home() {
               <span className="live-dot" />
               회의 중<code>03:18</code>
             </div>
-            <div className="avatar">민</div>
+            <LogoutButton />
+            <div className="avatar" title={currentUser?.name ?? "Guest"}>
+              {avatarLabel}
+            </div>
           </div>
         </header>
 

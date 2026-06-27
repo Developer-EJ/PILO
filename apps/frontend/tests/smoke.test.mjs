@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildAuthApiUrl,
+  createAuthApiClient,
+} from "../lib/auth/authClient.mjs";
+import {
+  createMockAuthClient,
+  mockCurrentUser,
+} from "../lib/auth/mockAuthClient.mjs";
+import {
   normalizeCallbackRedirect,
   resolveOAuthCallbackState,
 } from "../app/login/callback/oauthCallbackState.mjs";
@@ -70,5 +78,62 @@ describe("frontend package", () => {
     assert.equal(normalizeCallbackRedirect("https://evil.example"), "/");
     assert.equal(normalizeCallbackRedirect("//evil.example"), "/");
     assert.equal(normalizeCallbackRedirect("/canvas"), "/canvas");
+  });
+
+  it("keeps the mock auth session aligned with the CurrentUser contract", async () => {
+    const authClient = createMockAuthClient();
+    const session = await authClient.getAuthSession();
+
+    assert.equal(session.authenticated, true);
+    assert.equal(session.user.id, mockCurrentUser.id);
+    assert.equal(session.user.email, "donghyun@example.com");
+    assert.deepEqual(session.user.providers, ["google", "github"]);
+  });
+
+  it("marks the mock auth session as signed out after logout", async () => {
+    const authClient = createMockAuthClient();
+
+    await authClient.logout();
+
+    assert.equal(await authClient.getCurrentUser(), null);
+    assert.deepEqual(await authClient.getAuthSession(), {
+      authenticated: false,
+      user: null,
+    });
+  });
+
+  it("builds auth API URLs from a configured app server base URL", () => {
+    assert.equal(buildAuthApiUrl("/auth/me"), "/auth/me");
+    assert.equal(
+      buildAuthApiUrl("/auth/logout", "https://api.pilo.dev/"),
+      "https://api.pilo.dev/auth/logout",
+    );
+  });
+
+  it("calls the auth API client with contract routes and credentials", async () => {
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url, init });
+
+      if (url.endsWith("/auth/me")) {
+        return Response.json(mockCurrentUser);
+      }
+
+      return new Response(null, { status: 204 });
+    };
+    const authClient = createAuthApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    const user = await authClient.getCurrentUser();
+    await authClient.logout();
+
+    assert.equal(user.email, mockCurrentUser.email);
+    assert.equal(requests[0].url, "https://api.pilo.dev/auth/me");
+    assert.equal(requests[0].init.credentials, "include");
+    assert.equal(requests[1].url, "https://api.pilo.dev/auth/logout");
+    assert.equal(requests[1].init.method, "POST");
+    assert.equal(requests[1].init.credentials, "include");
   });
 });
