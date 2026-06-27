@@ -31,6 +31,10 @@
 - 외부 연동 secret 입력용 PowerShell 스크립트 작성 완료
 - Secrets Manager 외부 연동 secret value 입력 완료
 - 기존 generic Docker workflow 정리 완료
+- `apps/` 애플리케이션 기본 구조 생성 완료
+- Next.js/NestJS/FastAPI 초기 배포 앱 작성 완료
+- Next.js/NestJS 로컬 빌드 검증 완료
+- npm production dependency audit 0 vulnerabilities 확인 완료
 
 아직 하지 않은 작업:
 

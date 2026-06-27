@@ -3,6 +3,17 @@
 .env.*
 !.env.example
 
+# App dependencies/build output
+node_modules/
+dist/
+.next/
+out/
+coverage/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
 # Terraform
 .tools/
 **/.terraform/
