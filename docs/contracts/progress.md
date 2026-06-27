@@ -1,0 +1,52 @@
+# Progress Contract
+
+## Owner
+
+주형
+
+## Scope
+
+Progress는 Task와 Milestone 기준으로 진행률, 지연, blocked, review 대기 상태를 계산한다.
+
+## Owned Tables
+
+- `progress_snapshots`
+
+## Provided APIs
+
+| Method | Path | 목적 | Consumer |
+|---|---|---|---|
+| `GET` | `/workspaces/:workspaceId/progress/summary` | 현재 진행률 요약 | 동현 Dashboard, 세인 Agent |
+| `GET` | `/workspaces/:workspaceId/progress/history` | 진행률 스냅샷 히스토리 | 동현 Dashboard |
+| `POST` | `/workspaces/:workspaceId/progress/snapshots` | 스냅샷 생성 | 주형, scheduled worker |
+
+## Read Models
+
+### ProgressSummary
+
+```json
+{
+  "workspaceId": "uuid",
+  "milestoneId": "uuid",
+  "totalTasks": 20,
+  "doneTasks": 8,
+  "blockedTasks": 2,
+  "reviewTasks": 3,
+  "delayedTasks": 1,
+  "progressRate": 40,
+  "capturedAt": "2026-06-27T12:00:00Z"
+}
+```
+
+## Events
+
+- `progress.snapshot_created`
+- `progress.delayed_task_detected`
+- `progress.blocked_task_detected`
+
+## Boundaries
+
+- Progress는 Task 상태를 읽어 계산하지만 Task 상태를 직접 변경하지 않는다.
+- 동현 Dashboard는 `ProgressSummary`만 표시한다.
+- 세인 Agent는 다음 액션 추천을 위해 `ProgressSummary`를 context로 소비한다.
+

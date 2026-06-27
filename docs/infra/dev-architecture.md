@@ -35,7 +35,7 @@ PILO 개발환경 인프라는 비용을 최소화하면서도 실제 MVP 구조
 - 기술: NestJS
 - 실행: ECS Fargate
 - 역할:
-  - 인증
+  - Google/GitHub 소셜 로그인 및 세션 인증
   - workspace/member/task 관리
   - GitHub App 연동
   - 파일 metadata 관리

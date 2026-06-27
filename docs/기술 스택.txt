@@ -1,0 +1,17 @@
+기술 스택
+분야	기술 스택
+Frontend	Next.js + TypeScript
+Canvas	tldraw
+Backend	NestJS + Fastify
+AI Server	FastAPI
+AI Workflow	LangGraph
+LLM	OpenAI Responses API + Function Calling
+Database	PostgreSQL (JSONB 활용 검토)
+ORM	Prisma
+캐시 / Presence	Redis
+비동기 메시지 큐	Amazon SQS
+GitHub 연동	GitHub App + Octokit + Webhooks
+파일 저장소	Amazon S3 (또는 Cloudflare R2)
+검색	PostgreSQL Full-Text Search(FTS) + pg_trgm (필요 시 pgvector 추가)
+RAG	LangChain 기반 RAG 파이프라인 + pgvector
+테스트	Vitest + Playwright

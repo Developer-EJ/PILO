@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pilo-postgres
+    environment:
+      POSTGRES_DB: pilo
+      POSTGRES_USER: pilo
+      POSTGRES_PASSWORD: pilo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pilo_postgres_data:/var/lib/postgresql/data
+      - ./docs/db/pilo_erd_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pilo -d pilo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pilo-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    container_name: pilo-localstack
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: ap-northeast-2
+      DEBUG: "0"
+    ports:
+      - "4566:4566"
+    volumes:
+      - pilo_localstack_data:/var/lib/localstack
+      - ./localstack/init/ready.d:/etc/localstack/init/ready.d:ro
+
+volumes:
+  pilo_postgres_data:
+  pilo_localstack_data:

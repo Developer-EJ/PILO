@@ -34,3 +34,6 @@ override.tf.json
 Thumbs.db
 .idea/
 .vscode/
+
+# 개인 폴더
+.personal/
