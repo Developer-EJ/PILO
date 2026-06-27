@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { markMockAuthSignedIn } from "../../lib/auth/mockAuthClient.mjs";
 
 export function WorkspaceEntryTransition() {
   const router = useRouter();
@@ -12,6 +13,8 @@ export function WorkspaceEntryTransition() {
 
   useEffect(() => {
     if (!active) return;
+
+    markMockAuthSignedIn();
 
     document
       .querySelector(".login-canvas-shell")
