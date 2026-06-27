@@ -31,6 +31,7 @@ knowledge_base:
     enabled: true
     filePatterns:
       - "agent.md"
+      - "docs/design.md"
       - "docs/agent-collaboration-guide.md"
       - "docs/contracts/contract-change-rules.md"
       - "docs/convention.md"
