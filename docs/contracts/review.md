@@ -199,6 +199,18 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 - `review.node_state_changed`
 - `review.comment_created`
 
+### review.comment_created
+
+```json
+{
+  "eventType": "review.comment_created",
+  "roomId": "uuid",
+  "commentId": "uuid",
+  "authorMemberId": "uuid",
+  "occurredAt": "2026-06-27T10:03:00.000Z"
+}
+```
+
 ### review.room_created
 
 ```json
