@@ -134,6 +134,7 @@ describe("machine-readable public contract schema", () => {
       "GithubIssueSummary",
       "PullRequestSummary",
       "MeetingReportSummary",
+      "MeetingActionItem",
       "PRAnalysisSummary",
       "CanvasEntityRef",
       "AgentAction",
@@ -145,6 +146,15 @@ describe("machine-readable public contract schema", () => {
       assert.ok(defs[name], `schema must define ${name}`);
     }
   });
+
+  it("schema defines MeetingActionItem task draft conversion fields", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const meetingActionItem = schema.$defs.MeetingActionItem;
+    assert.deepEqual(meetingActionItem.properties.status.enum, ["draft", "approved", "converted", "rejected"]);
+    assert.ok(meetingActionItem.properties.assigneeSuggestionMemberId);
+    assert.ok(meetingActionItem.properties.dueDateSuggestion);
+    assert.ok(meetingActionItem.properties.convertedTaskId);
+  });
 });
 
 describe("contract fixtures", () => {
@@ -155,6 +165,12 @@ describe("contract fixtures", () => {
     assert.ok(Array.isArray(fixture.tasks));
     assert.ok(Array.isArray(fixture.canvasEntities));
     assert.ok(Array.isArray(fixture.agentActions));
+    assert.ok(Array.isArray(fixture.meetingReports));
+    assert.ok(Array.isArray(fixture.meetingActionItems));
+    assert.ok(fixture.meetingReports.length > 0);
+    assert.ok(fixture.meetingActionItems.length > 0);
+    assert.equal(fixture.meetingActionItems[0].reportId, fixture.meetingReports[0].id);
+    assert.equal(fixture.meetingActionItems[0].status, "draft");
   });
 
   it("agent SQS fixtures exist and parse as JSON", () => {
