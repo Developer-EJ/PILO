@@ -5,16 +5,16 @@
 협업 PR은 아래 GitHub Actions check를 통과해야 merge할 수 있다.
 Required check가 PR 종류별로 누락되지 않도록 CI workflow에는 path filter를 두지 않는다.
 
-- `App CI / frontend`
-- `App CI / app-server`
-- `App CI / realtime-server`
-- `App CI / ai-worker`
-- `Docker CI / app-server-image`
-- `Docker CI / realtime-server-image`
-- `Docker CI / ai-worker-image`
-- `Security CI / secrets`
-- `Security CI / python-audit`
-- `Terraform Validate / terraform`
+- `frontend`
+- `app-server`
+- `realtime-server`
+- `ai-worker`
+- `app-server-image`
+- `realtime-server-image`
+- `ai-worker-image`
+- `secrets`
+- `python-audit`
+- `terraform`
 
 ## App CI
 
