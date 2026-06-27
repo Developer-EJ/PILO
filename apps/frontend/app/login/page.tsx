@@ -102,9 +102,18 @@ export default function LoginPage() {
                 <strong>오늘 해야 할 일</strong>
                 <span>Task 보드</span>
               </div>
-              <p><i className="danger-dot" />로그인 API 연동<span>오늘</span></p>
-              <p><i className="warning-dot" />Canvas card shape<span>D-1</span></p>
-              <p><i className="primary-dot" />PR #42 코드리뷰<span>리뷰</span></p>
+              <p>
+                <i className="danger-dot" />
+                로그인 API 연동<span>오늘</span>
+              </p>
+              <p>
+                <i className="warning-dot" />
+                Canvas card shape<span>D-1</span>
+              </p>
+              <p>
+                <i className="primary-dot" />
+                PR #42 코드리뷰<span>리뷰</span>
+              </p>
             </section>
 
             <section className="backdrop-panel">
@@ -112,8 +121,14 @@ export default function LoginPage() {
                 <strong>Agent 다음 제안</strong>
                 <span>추천</span>
               </div>
-              <p><i className="primary-dot" />리뷰 대기 PR 먼저 확인<span>PR</span></p>
-              <p><i className="warning-dot" />오늘 마감 Task 범위 점검<span>Task</span></p>
+              <p>
+                <i className="primary-dot" />
+                리뷰 대기 PR 먼저 확인<span>PR</span>
+              </p>
+              <p>
+                <i className="warning-dot" />
+                오늘 마감 Task 범위 점검<span>Task</span>
+              </p>
             </section>
           </div>
         </section>

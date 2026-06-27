@@ -693,8 +693,7 @@ h1 {
   inset: 76px 112px;
   border: 1px solid rgba(15, 20, 34, 0.045);
   border-radius: 28px;
-  background:
-    linear-gradient(rgba(15, 20, 34, 0.026) 1px, transparent 1px),
+  background: linear-gradient(rgba(15, 20, 34, 0.026) 1px, transparent 1px),
     linear-gradient(90deg, rgba(15, 20, 34, 0.026) 1px, transparent 1px);
   background-size: 28px 28px;
   content: "";
