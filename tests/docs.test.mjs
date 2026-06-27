@@ -231,6 +231,7 @@ describe("machine-readable public contract schema", () => {
       "PullRequestSummary",
       "MeetingReportSummary",
       "MeetingActionItem",
+      "CodeReviewRoomSummary",
       "PRAnalysisSummary",
       "ReviewCanvasSummary",
       "ReviewCanvasNode",
@@ -283,6 +284,13 @@ describe("contract fixtures", () => {
     assert.equal(job.runId, result.runId);
     assert.equal(job.jobId, result.jobId);
     assert.ok(Array.isArray(result.actions));
+  });
+
+  it("review room fixture matches review room public schema", () => {
+    const schema = JSON.parse(read("docs/contracts/schemas/pilo-public-contracts.schema.json"));
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-room.fixture.json"));
+
+    assertMatchesDefinition(schema.$defs, "CodeReviewRoomSummary", fixture.codeReviewRoom);
   });
 
   it("review analysis fixture matches review public schemas", () => {
