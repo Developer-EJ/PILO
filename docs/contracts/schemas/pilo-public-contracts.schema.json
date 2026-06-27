@@ -201,12 +201,42 @@
         "purposeSummary": { "type": ["string", "null"] },
         "impactSummary": { "type": ["string", "null"] },
         "testRecommendation": { "type": ["string", "null"] },
-        "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
-        "analysisStatus": { "enum": ["pending", "running", "succeeded", "failed"] },
-        "okCount": { "type": "integer", "minimum": 0 },
-        "discussCount": { "type": "integer", "minimum": 0 },
-        "riskCount": { "type": "integer", "minimum": 0 },
+        "riskLevel": { "enum": ["low", "medium", "high", "critical"], "default": "low" },
+        "analysisStatus": { "enum": ["pending", "running", "succeeded", "failed"], "default": "pending" },
+        "okCount": { "type": "integer", "minimum": 0, "default": 0 },
+        "discussCount": { "type": "integer", "minimum": 0, "default": 0 },
+        "riskCount": { "type": "integer", "minimum": 0, "default": 0 },
         "conclusion": { "type": ["string", "null"] }
+      }
+    },
+    "ReviewNodeSummary": {
+      "type": "object",
+      "required": ["id", "analysisId", "nodeType", "label", "riskLevel", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "analysisId": { "$ref": "#/$defs/uuid" },
+        "nodeType": { "enum": ["file", "function", "api", "schema", "risk", "impact"] },
+        "label": { "type": "string" },
+        "filePath": { "type": ["string", "null"] },
+        "functionName": { "type": ["string", "null"] },
+        "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
+        "status": { "enum": ["ok", "discuss", "unknown"] }
+      }
+    },
+    "ReviewRiskSummary": {
+      "type": "object",
+      "required": ["id", "analysisId", "title", "riskLevel", "status", "affectedNodeIds"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "analysisId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
+        "status": { "enum": ["open", "resolved", "accepted"] },
+        "affectedNodeIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+        "recommendation": { "type": ["string", "null"] }
       }
     },
     "CanvasEntityRef": {

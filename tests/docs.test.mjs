@@ -15,6 +15,57 @@ function exists(relPath) {
   return fs.existsSync(path.join(ROOT, relPath));
 }
 
+function assertMatchesSchema(defs, schema, value, fieldPath) {
+  if (schema.$ref === "#/$defs/uuid") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
+    assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    return;
+  }
+
+  if (schema.enum) {
+    assert.ok(schema.enum.includes(value), `${fieldPath} must be one of ${schema.enum.join(", ")}`);
+    return;
+  }
+
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  const actualType = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+  const typeMatches = types.includes(actualType) || (types.includes("integer") && Number.isInteger(value));
+  assert.ok(typeMatches, `${fieldPath} must be ${types.join(" or ")}`);
+
+  if (actualType === "integer") {
+    assert.ok(Number.isInteger(value), `${fieldPath} must be an integer`);
+  }
+
+  if (typeof schema.minimum === "number") {
+    assert.ok(value >= schema.minimum, `${fieldPath} must be >= ${schema.minimum}`);
+  }
+
+  if (actualType === "array" && schema.items) {
+    value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
+  }
+}
+
+function assertMatchesDefinition(defs, defName, value) {
+  const def = defs[defName];
+  assert.equal(def.type, "object", `${defName} must be an object schema`);
+
+  for (const key of def.required || []) {
+    assert.ok(Object.hasOwn(value, key), `${defName}.${key} is required`);
+  }
+
+  if (def.additionalProperties === false) {
+    for (const key of Object.keys(value)) {
+      assert.ok(def.properties[key], `${defName}.${key} is not in the public schema`);
+    }
+  }
+
+  for (const [key, schema] of Object.entries(def.properties)) {
+    if (Object.hasOwn(value, key)) {
+      assertMatchesSchema(defs, schema, value[key], `${defName}.${key}`);
+    }
+  }
+}
+
 describe("agent bootstrap docs", () => {
   it("agent.md points agents to the contract docs and schemas", () => {
     const content = read("agent.md");
@@ -136,6 +187,8 @@ describe("machine-readable public contract schema", () => {
       "MeetingReportSummary",
       "MeetingActionItem",
       "PRAnalysisSummary",
+      "ReviewNodeSummary",
+      "ReviewRiskSummary",
       "CanvasEntityRef",
       "AgentAction",
       "AgentJobMessage",
@@ -179,6 +232,19 @@ describe("contract fixtures", () => {
     assert.equal(job.runId, result.runId);
     assert.equal(job.jobId, result.jobId);
     assert.ok(Array.isArray(result.actions));
+  });
+
+  it("review analysis fixture matches review public schemas", () => {
+    const schema = JSON.parse(read("docs/contracts/schemas/pilo-public-contracts.schema.json"));
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-analysis.fixture.json"));
+
+    assertMatchesDefinition(schema.$defs, "PRAnalysisSummary", fixture.prAnalysis);
+    for (const node of fixture.reviewNodes) {
+      assertMatchesDefinition(schema.$defs, "ReviewNodeSummary", node);
+    }
+    for (const risk of fixture.reviewRisks) {
+      assertMatchesDefinition(schema.$defs, "ReviewRiskSummary", risk);
+    }
   });
 
   it("fixture rules are documented and linked from bootstrap docs", () => {
