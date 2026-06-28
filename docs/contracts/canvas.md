@@ -231,6 +231,83 @@ Saves the current member's board filter state.
 - `shapeCount` and `connectionCount` count non-deleted rows only.
 - `viewSetting` and `filterSetting` are member-scoped. If no row exists, the defaults above are returned.
 
+## Realtime Event Contract
+
+Canvas realtime events use the Socket.IO namespace `/canvas`.
+
+### Room Events
+
+| Event                | Direction        | Purpose                         |
+| -------------------- | ---------------- | ------------------------------- |
+| `canvas:board:join`  | client -> server | Join a board room by `boardId`  |
+| `canvas:board:leave` | client -> server | Leave a board room by `boardId` |
+
+Room payload:
+
+```json
+{
+  "boardId": "uuid"
+}
+```
+
+Room name format is `canvas:board:{boardId}`.
+
+The realtime auth connection point expects `currentMember` in the Socket.IO
+handshake auth. Full permission validation is handled by the follow-up realtime
+auth issue.
+
+```json
+{
+  "auth": {
+    "currentMember": {
+      "workspaceId": "uuid",
+      "memberId": "uuid",
+      "userId": "uuid",
+      "displayName": "Donghyun"
+    }
+  }
+}
+```
+
+### Broadcast Payloads
+
+Shape event payload:
+
+```json
+{
+  "boardId": "uuid",
+  "shapeId": "uuid",
+  "revision": 1,
+  "changeType": "moved"
+}
+```
+
+- `changeType`: `created`, `updated`, `deleted`, `moved`, `resized`
+
+View event payload:
+
+```json
+{
+  "boardId": "uuid",
+  "zoom": 1,
+  "viewportX": 0,
+  "viewportY": 0
+}
+```
+
+Presence event payload:
+
+```json
+{
+  "boardId": "uuid",
+  "cursorX": 120,
+  "cursorY": 140,
+  "tool": "select"
+}
+```
+
+- `tool`: `select`, `hand`, `shape`, `text`, `connector`, `unknown`
+
 ## Boundaries
 
 - Only Donghyun's Canvas domain writes Canvas DB tables.
