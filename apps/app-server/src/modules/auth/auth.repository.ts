@@ -58,6 +58,8 @@ export type AuthSessionRecord = {
   id: string;
   userId: string;
   refreshTokenHash: string;
+  tokenHashAlgorithm: "hmac-sha256";
+  secretVersion: string;
   userAgent: string | null;
   ipAddress: string | null;
   expiresAt: string;
@@ -173,6 +175,8 @@ export class AuthRepository {
   createAuthSession(input: {
     userId: string;
     refreshTokenHash: string;
+    tokenHashAlgorithm: "hmac-sha256";
+    secretVersion: string;
     userAgent?: string | null;
     ipAddress?: string | null;
     expiresAt: Date;
@@ -183,6 +187,8 @@ export class AuthRepository {
       id: randomUUID(),
       userId: input.userId,
       refreshTokenHash: input.refreshTokenHash,
+      tokenHashAlgorithm: input.tokenHashAlgorithm,
+      secretVersion: input.secretVersion,
       userAgent: input.userAgent ?? null,
       ipAddress: input.ipAddress ?? null,
       expiresAt: input.expiresAt.toISOString(),
