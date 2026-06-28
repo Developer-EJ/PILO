@@ -300,3 +300,10 @@ export interface MeetingReportDetail extends MeetingReportSummary {
   risks: MeetingReportRiskReadModel[];
   nextAgendas: MeetingReportNextAgendaReadModel[];
 }
+
+export interface MeetingReportCanvasEntityRef {
+  entityType: "meeting_report";
+  entityId: string;
+  displayTitle: string;
+  shapeType: "meeting_report";
+}
