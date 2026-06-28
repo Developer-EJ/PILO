@@ -1,11 +1,15 @@
 import { Injectable } from "@nestjs/common";
-import { ChangedFileWithFunctions } from "../changes/changed-file.types";
+import {
+  ChangedFileChangeType,
+  ChangedFileWithFunctions,
+  ChangedFunctionChangeType,
+} from "../changes/changed-file.types";
 import { ChangedFilesService } from "../changes/changed-files.service";
 
 export interface AgentChangedFileResult {
   id?: string;
   filePath: string;
-  changeType: string;
+  changeType: ChangedFileChangeType;
   additions?: number;
   deletions?: number;
   summary?: string | null;
@@ -15,7 +19,7 @@ export interface AgentChangedFileResult {
 export interface AgentChangedFunctionResult {
   id?: string;
   name: string;
-  changeType: string;
+  changeType: ChangedFunctionChangeType;
   summary?: string | null;
 }
 
