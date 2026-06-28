@@ -1,8 +1,12 @@
 import { Injectable } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import type {
   CanvasBoardDetail,
   CanvasBoardRecord,
   CanvasBoardSummary,
+  CanvasConnectionCreateResult,
+  CanvasConnectionDeleteResult,
+  CanvasConnectionRequest,
   CanvasConnectionRecord,
   CanvasConnectionSummary,
   CanvasFilterSettingRecord,
@@ -60,6 +64,20 @@ export class CanvasRepository implements CanvasRepositoryPort {
     return board?.workspaceId ?? null;
   }
 
+  async findConnectionWorkspaceId(
+    connectionId: string,
+  ): Promise<string | null> {
+    const connection = this.findVisibleConnection(connectionId);
+
+    if (!connection) {
+      return null;
+    }
+
+    const board = this.findVisibleBoard(connection.boardId);
+
+    return board?.workspaceId ?? null;
+  }
+
   async findBoardDetail(input: {
     boardId: string;
     memberId: string;
@@ -113,6 +131,90 @@ export class CanvasRepository implements CanvasRepositoryPort {
     return this.toShapeSummary(shape);
   }
 
+  async createConnectionForBoard(
+    input: CanvasConnectionRequest & {
+      boardId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasConnectionCreateResult> {
+    const board = this.findVisibleBoard(input.boardId);
+    const sourceShape = this.findVisibleShape(input.sourceShapeId);
+    const targetShape = this.findVisibleShape(input.targetShapeId);
+
+    if (
+      !board ||
+      !sourceShape ||
+      !targetShape ||
+      sourceShape.boardId !== input.boardId ||
+      targetShape.boardId !== input.boardId ||
+      input.sourceShapeId === input.targetShapeId
+    ) {
+      return {
+        status: "invalid",
+      };
+    }
+
+    const duplicate = this.findDuplicateVisibleConnection({
+      boardId: input.boardId,
+      sourceShapeId: input.sourceShapeId,
+      targetShapeId: input.targetShapeId,
+      connectionType: input.connectionType,
+    });
+
+    if (duplicate) {
+      return {
+        status: "duplicate",
+      };
+    }
+
+    const now = (input.now ?? new Date()).toISOString();
+    const connection: CanvasConnectionRecord = {
+      id: randomUUID(),
+      boardId: input.boardId,
+      sourceShapeId: input.sourceShapeId,
+      targetShapeId: input.targetShapeId,
+      connectionType: input.connectionType,
+      label: input.label,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    this.connectionsById.set(connection.id, connection);
+    board.updatedAt = now;
+
+    return {
+      status: "created",
+      connection: this.toConnectionSummary(connection),
+    };
+  }
+
+  async deleteConnection(input: {
+    connectionId: string;
+    now?: Date;
+  }): Promise<CanvasConnectionDeleteResult | null> {
+    const connection = this.findVisibleConnection(input.connectionId);
+
+    if (!connection) {
+      return null;
+    }
+
+    const now = (input.now ?? new Date()).toISOString();
+    connection.deletedAt = now;
+    connection.updatedAt = now;
+
+    const board = this.findVisibleBoard(connection.boardId);
+
+    if (board) {
+      board.updatedAt = now;
+    }
+
+    return {
+      id: connection.id,
+      deleted: true,
+    };
+  }
+
   private findVisibleBoard(boardId: string) {
     const board = this.boardsById.get(boardId);
 
@@ -131,6 +233,32 @@ export class CanvasRepository implements CanvasRepositoryPort {
     }
 
     return shape;
+  }
+
+  private findVisibleConnection(connectionId: string) {
+    const connection = this.connectionsById.get(connectionId);
+
+    if (!connection || connection.deletedAt) {
+      return null;
+    }
+
+    return connection;
+  }
+
+  private findDuplicateVisibleConnection(input: {
+    boardId: string;
+    sourceShapeId: string;
+    targetShapeId: string;
+    connectionType: string;
+  }) {
+    return Array.from(this.connectionsById.values()).find(
+      (connection) =>
+        connection.boardId === input.boardId &&
+        connection.sourceShapeId === input.sourceShapeId &&
+        connection.targetShapeId === input.targetShapeId &&
+        connection.connectionType === input.connectionType &&
+        !connection.deletedAt,
+    );
   }
 
   private listVisibleShapes(boardId: string) {
