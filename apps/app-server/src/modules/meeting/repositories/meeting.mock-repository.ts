@@ -3,16 +3,22 @@ import { randomUUID } from "node:crypto";
 import {
   CreateMeetingInput,
   CreateMeetingAgendaInput,
+  CreateMeetingDecisionInput,
   CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
   CreateMeetingReportInput,
+  CreateMeetingReportNextAgendaInput,
+  CreateMeetingReportRiskInput,
   CreateTranscriptSegmentInput,
   MEETING_STATUS_VALUES,
   MeetingAgendaRecord,
+  MeetingDecisionRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportNextAgendaRecord,
   MeetingReportRecord,
+  MeetingReportRiskRecord,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
@@ -34,6 +40,12 @@ export class MockMeetingRepository implements MeetingRepository {
     TranscriptSegmentRecord
   >();
   private readonly reports = new Map<string, MeetingReportRecord>();
+  private readonly decisions = new Map<string, MeetingDecisionRecord>();
+  private readonly risks = new Map<string, MeetingReportRiskRecord>();
+  private readonly nextAgendas = new Map<
+    string,
+    MeetingReportNextAgendaRecord
+  >();
 
   listMeetingStatusValues(): readonly MeetingStatus[] {
     return MEETING_STATUS_VALUES;
@@ -306,5 +318,119 @@ export class MockMeetingRepository implements MeetingRepository {
 
   listReports(): MeetingReportRecord[] {
     return [...this.reports.values()];
+  }
+
+  createDecision(input: CreateMeetingDecisionInput): MeetingDecisionRecord {
+    const now = new Date().toISOString();
+    const decision: MeetingDecisionRecord = {
+      id: randomUUID(),
+      reportId: input.reportId,
+      content: input.content,
+      status: input.status ?? "decided",
+      linkedTaskId: input.linkedTaskId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.decisions.set(decision.id, decision);
+
+    return decision;
+  }
+
+  listDecisionsByReport(reportId: string): MeetingDecisionRecord[] {
+    return [...this.decisions.values()].filter(
+      (decision) => decision.reportId === reportId,
+    );
+  }
+
+  createRisk(input: CreateMeetingReportRiskInput): MeetingReportRiskRecord {
+    const risk: MeetingReportRiskRecord = {
+      id: randomUUID(),
+      reportId: input.reportId,
+      content: input.content,
+      severity: input.severity ?? "medium",
+      sortOrder: input.sortOrder ?? this.nextRiskSortOrder(input.reportId),
+      createdAt: new Date().toISOString(),
+    };
+
+    this.ensureRiskSortOrderAvailable(risk.reportId, risk.sortOrder);
+    this.risks.set(risk.id, risk);
+
+    return risk;
+  }
+
+  listRisksByReport(reportId: string): MeetingReportRiskRecord[] {
+    return [...this.risks.values()]
+      .filter((risk) => risk.reportId === reportId)
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+  }
+
+  createNextAgenda(
+    input: CreateMeetingReportNextAgendaInput,
+  ): MeetingReportNextAgendaRecord {
+    const nextAgenda: MeetingReportNextAgendaRecord = {
+      id: randomUUID(),
+      reportId: input.reportId,
+      title: input.title,
+      sortOrder:
+        input.sortOrder ?? this.nextReportNextAgendaSortOrder(input.reportId),
+      createdAt: new Date().toISOString(),
+    };
+
+    this.ensureNextAgendaSortOrderAvailable(
+      nextAgenda.reportId,
+      nextAgenda.sortOrder,
+    );
+    this.nextAgendas.set(nextAgenda.id, nextAgenda);
+
+    return nextAgenda;
+  }
+
+  listNextAgendasByReport(reportId: string): MeetingReportNextAgendaRecord[] {
+    return [...this.nextAgendas.values()]
+      .filter((nextAgenda) => nextAgenda.reportId === reportId)
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+  }
+
+  private nextRiskSortOrder(reportId: string): number {
+    const sortOrders = this.listRisksByReport(reportId).map(
+      (risk) => risk.sortOrder,
+    );
+
+    return sortOrders.length === 0 ? 0 : Math.max(...sortOrders) + 1;
+  }
+
+  private ensureRiskSortOrderAvailable(
+    reportId: string,
+    sortOrder: number,
+  ): void {
+    const duplicate = this.listRisksByReport(reportId).some(
+      (risk) => risk.sortOrder === sortOrder,
+    );
+
+    if (duplicate) {
+      throw new Error(`Meeting report risk sort order already exists`);
+    }
+  }
+
+  private nextReportNextAgendaSortOrder(reportId: string): number {
+    const sortOrders = this.listNextAgendasByReport(reportId).map(
+      (nextAgenda) => nextAgenda.sortOrder,
+    );
+
+    return sortOrders.length === 0 ? 0 : Math.max(...sortOrders) + 1;
+  }
+
+  private ensureNextAgendaSortOrderAvailable(
+    reportId: string,
+    sortOrder: number,
+  ): void {
+    const duplicate = this.listNextAgendasByReport(reportId).some(
+      (nextAgenda) => nextAgenda.sortOrder === sortOrder,
+    );
+
+    if (duplicate) {
+      throw new Error(`Meeting report next agenda sort order already exists`);
+    }
   }
 }
