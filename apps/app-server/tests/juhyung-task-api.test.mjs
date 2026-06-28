@@ -21,6 +21,7 @@ const UUIDS = {
   task: "22222222-2222-4222-8222-222222222222",
   member: "33333333-3333-4333-8333-333333333333",
   assignee: "44444444-4444-4444-8444-444444444444",
+  milestone: "66666666-6666-4666-8666-666666666666",
   user: "55555555-5555-4555-8555-555555555555",
 };
 
@@ -51,8 +52,8 @@ describe("JuhyungTaskService", () => {
         },
       },
       repository: {
-        listTasksForWorkspace: async (workspaceId) => {
-          calls.push(["list", workspaceId]);
+        listTasksForWorkspace: async (workspaceId, options) => {
+          calls.push(["list", workspaceId, options]);
           return [];
         },
         listWorkspaceMembersByIds: async () => {
@@ -61,15 +62,107 @@ describe("JuhyungTaskService", () => {
       },
     });
 
-    const result = await service.listTasks(UUIDS.workspace, {
-      userId: UUIDS.user,
-    });
+    const result = await service.listTasks(
+      UUIDS.workspace,
+      {},
+      {
+        userId: UUIDS.user,
+      },
+    );
 
     assert.deepEqual(result, []);
     assert.deepEqual(calls, [
       ["access", UUIDS.workspace, { userId: UUIDS.user }],
-      ["list", UUIDS.workspace],
+      [
+        "list",
+        UUIDS.workspace,
+        {
+          sortBy: "updatedAt",
+          sortDirection: "desc",
+          limit: 50,
+          offset: 0,
+        },
+      ],
     ]);
+  });
+
+  it("passes normalized task list filters, sorting, and pagination to the repository", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        listTasksForWorkspace: async (workspaceId, options) => {
+          calls.push(["list", workspaceId, options]);
+          return [];
+        },
+      },
+    });
+
+    const result = await service.listTasks(
+      UUIDS.workspace,
+      {
+        status: "todo,in_progress",
+        assigneeMemberId: UUIDS.assignee,
+        priority: ["high", "urgent"],
+        dueDateFrom: "2026-07-01",
+        dueDateTo: "2026-07-31",
+        milestoneId: UUIDS.milestone,
+        sortBy: "dueDate",
+        sortDirection: "asc",
+        limit: "25",
+        offset: "50",
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.deepEqual(result, []);
+    assert.deepEqual(calls, [
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      [
+        "list",
+        UUIDS.workspace,
+        {
+          status: ["todo", "in_progress"],
+          assigneeMemberId: UUIDS.assignee,
+          priority: ["high", "urgent"],
+          dueDateFrom: new Date("2026-07-01T00:00:00.000Z"),
+          dueDateTo: new Date("2026-07-31T00:00:00.000Z"),
+          milestoneId: UUIDS.milestone,
+          sortBy: "dueDate",
+          sortDirection: "asc",
+          limit: 25,
+          offset: 50,
+        },
+      ],
+    ]);
+  });
+
+  it("rejects invalid task list query values before reading the repository", async () => {
+    const service = createService({
+      repository: {
+        listTasksForWorkspace: async () => {
+          throw new Error("invalid query should not read tasks");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.listTasks(
+          UUIDS.workspace,
+          {
+            status: "archived",
+            limit: "0",
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
   });
 
   it("creates a task with status, priority, assignee, due date, and creator member", async () => {
@@ -401,8 +494,8 @@ describe("JuhyungTasksController", () => {
   it("forwards task routes with workspace and actor context", async () => {
     const calls = [];
     const controller = new JuhyungTasksController({
-      listTasks: async (workspaceId, actor) => {
-        calls.push(["list", workspaceId, actor]);
+      listTasks: async (workspaceId, query, actor) => {
+        calls.push(["list", workspaceId, query, actor]);
         return [];
       },
       createTask: async (workspaceId, body, actor) => {
@@ -426,7 +519,12 @@ describe("JuhyungTasksController", () => {
       },
     });
 
-    await controller.listTasks(UUIDS.workspace, UUIDS.user, undefined);
+    await controller.listTasks(
+      UUIDS.workspace,
+      { status: "todo" },
+      UUIDS.user,
+      undefined,
+    );
     await controller.createTask(
       UUIDS.workspace,
       { title: "Connect repository" },
@@ -449,7 +547,7 @@ describe("JuhyungTasksController", () => {
     await controller.deleteTask(UUIDS.task, UUIDS.user, UUIDS.member);
 
     assert.deepEqual(calls, [
-      ["list", UUIDS.workspace, { userId: UUIDS.user }],
+      ["list", UUIDS.workspace, { status: "todo" }, { userId: UUIDS.user }],
       [
         "create",
         UUIDS.workspace,

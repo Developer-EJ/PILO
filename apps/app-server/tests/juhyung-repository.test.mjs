@@ -56,6 +56,87 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
+  it("filters tasks by status, assignee, priority, due date, and milestone", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await repository.listTasksForWorkspace("workspace-1", {
+      status: ["todo", "blocked"],
+      assigneeMemberId: "member-2",
+      priority: ["high"],
+      dueDateFrom: new Date("2026-07-01T00:00:00.000Z"),
+      dueDateTo: new Date("2026-07-31T00:00:00.000Z"),
+      milestoneId: "milestone-1",
+      sortBy: "dueDate",
+      sortDirection: "asc",
+      limit: 25,
+      offset: 50,
+    });
+
+    assert.deepEqual(calls, [
+      {
+        where: {
+          workspaceId: "workspace-1",
+          deletedAt: null,
+          status: {
+            in: ["todo", "blocked"],
+          },
+          assigneeMemberId: "member-2",
+          priority: {
+            in: ["high"],
+          },
+          dueDate: {
+            gte: new Date("2026-07-01T00:00:00.000Z"),
+            lte: new Date("2026-07-31T00:00:00.000Z"),
+          },
+          milestoneId: "milestone-1",
+        },
+        orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }, { id: "asc" }],
+        take: 25,
+        skip: 50,
+      },
+    ]);
+  });
+
+  it("applies take and skip so large task lists can be paginated", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        findMany: async (args) => {
+          calls.push(args);
+          return Array.from({ length: 100 }, (_, index) => ({
+            id: `task-${index + 1}`,
+            workspaceId: "workspace-1",
+          }));
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await repository.listTasksForWorkspace("workspace-1", {
+      sortBy: "updatedAt",
+      sortDirection: "desc",
+      limit: 100,
+      offset: 200,
+    });
+
+    assert.equal(calls[0].take, 100);
+    assert.equal(calls[0].skip, 200);
+    assert.deepEqual(calls[0].orderBy, [
+      { updatedAt: "desc" },
+      { createdAt: "desc" },
+      { id: "asc" },
+    ]);
+  });
+
   it("reads one non-deleted task by id", async () => {
     const calls = [];
     const database = {

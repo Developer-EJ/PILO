@@ -4,6 +4,10 @@ import {
   WorkspaceMemberAccessService,
 } from "../workspace/workspace-member-access.service";
 import {
+  parseListTasksQuery,
+  type ListTasksQuery,
+} from "./juhyung-task-list-query";
+import {
   parseCreateTaskInput,
   parseTaskStatus,
   parseUpdateTaskInput,
@@ -25,6 +29,7 @@ export type {
   UpdateTaskBody,
   UpdateTaskStatusBody,
 } from "./juhyung-task-input";
+export type { ListTasksQuery } from "./juhyung-task-list-query";
 
 @Injectable()
 export class JuhyungTaskService {
@@ -36,10 +41,15 @@ export class JuhyungTaskService {
 
   async listTasks(
     workspaceId: string,
+    query: ListTasksQuery = {},
     actor?: CurrentActor,
   ): Promise<TaskSummary[]> {
+    const options = parseListTasksQuery(query);
     await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
-    const tasks = await this.repository.listTasksForWorkspace(workspaceId);
+    const tasks = await this.repository.listTasksForWorkspace(
+      workspaceId,
+      options,
+    );
     return this.toTaskSummaries(workspaceId, tasks);
   }
 
