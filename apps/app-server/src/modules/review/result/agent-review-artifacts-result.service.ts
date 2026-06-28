@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { ReviewChecklistItemRecord } from "../artifacts/review-artifact.types";
+import {
+  ReviewChecklistItemRecord,
+  ReviewChecklistStatus,
+  ReviewChecklistType,
+} from "../artifacts/review-artifact.types";
 import { ReviewArtifactsService } from "../artifacts/review-artifacts.service";
 
 const QUESTION_PRIORITIES = ["low", "medium", "high", "urgent"];
@@ -42,10 +46,10 @@ export interface AgentReviewArtifactsResult {
     recommendation?: string | null;
   }>;
   checklist?: Array<{
-    type?: string;
-    checklistType?: string;
+    type?: ReviewChecklistType;
+    checklistType?: ReviewChecklistType;
     title: string;
-    status?: string;
+    status?: ReviewChecklistStatus;
     sortOrder?: number;
   }>;
 }
