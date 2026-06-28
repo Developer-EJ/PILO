@@ -38,10 +38,26 @@ import {
   resolveWorkspaceDashboardClientMode,
 } from "../lib/workspace/dashboardClient.mjs";
 import {
+  buildCanvasApiUrl,
+  createCanvasApiClient,
+  createCanvasClient,
+  createMockCanvasBoardDetail,
+  createMockCanvasClient,
+  resolveCanvasClientMode,
+} from "../lib/workspace/canvasClient.mjs";
+import {
+  applyCanvasShapeState,
+  canvasStorageKey,
+  filterCanvasBoard,
+  normalizeCanvasFilterSetting,
+  normalizeCanvasShapeState,
+} from "../lib/workspace/canvasStorage.mjs";
+import {
   CURRENT_WORKSPACE_STORAGE_KEY,
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
   resolveCurrentWorkspaceSelection,
+  workspaceCanvasHref,
   workspaceDashboardHref,
   writeStoredWorkspaceId,
 } from "../lib/workspace/currentWorkspace.mjs";
@@ -294,6 +310,10 @@ describe("frontend package", () => {
     assert.equal(
       workspaceDashboardHref(workspaces[0].id),
       `/workspaces/${workspaces[0].id}`,
+    );
+    assert.equal(
+      workspaceCanvasHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/canvas`,
     );
   });
 
@@ -707,5 +727,204 @@ describe("frontend package", () => {
         process.env.NEXT_PUBLIC_PILO_AUTH_MODE = previousMode;
       }
     }
+  });
+
+  it("loads Canvas board data and mutations in mock and api modes", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const boardDetail = createMockCanvasBoardDetail(workspaceId);
+    const boardSummary = {
+      id: boardDetail.id,
+      workspaceId,
+      title: boardDetail.title,
+      boardType: boardDetail.boardType,
+      shapeCount: boardDetail.shapeCount,
+      connectionCount: boardDetail.connectionCount,
+      updatedAt: boardDetail.updatedAt,
+    };
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/canvas-boards`)) {
+        return Response.json([boardSummary]);
+      }
+
+      if (url.endsWith(`/canvas-boards/${boardDetail.id}`)) {
+        return Response.json(boardDetail);
+      }
+
+      if (url.endsWith(`/canvas-boards/${boardDetail.id}/shapes`)) {
+        return Response.json({
+          id: "shape-created",
+          ...JSON.parse(init.body),
+        });
+      }
+
+      if (url.endsWith("/canvas-shapes/shape-1/position")) {
+        return Response.json({
+          id: "shape-1",
+          position: JSON.parse(init.body),
+        });
+      }
+
+      if (url.endsWith(`/canvas-boards/${boardDetail.id}/connections`)) {
+        return Response.json({
+          id: "connection-created",
+          ...JSON.parse(init.body),
+        });
+      }
+
+      if (url.endsWith(`/canvas-boards/${boardDetail.id}/view-settings`)) {
+        return Response.json(JSON.parse(init.body));
+      }
+
+      if (url.endsWith(`/canvas-boards/${boardDetail.id}/filter-settings`)) {
+        return Response.json(JSON.parse(init.body));
+      }
+
+      return new Response(null, { status: 204 });
+    };
+
+    assert.equal(
+      buildCanvasApiUrl("/canvas-boards/board-1", ""),
+      "/canvas-boards/board-1",
+    );
+    assert.equal(resolveCanvasClientMode("api"), "api");
+    assert.equal(resolveCanvasClientMode("fixture"), "mock");
+
+    const mockClient = createMockCanvasClient();
+    assert.equal(
+      (await mockClient.listBoards(workspaceId))[0].workspaceId,
+      workspaceId,
+    );
+    assert.equal(
+      (
+        await createCanvasClient({ mode: "mock" }).getBoardDetail(
+          boardDetail.id,
+          { workspaceId },
+        )
+      ).workspaceId,
+      workspaceId,
+    );
+
+    const apiClient = createCanvasApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+    const boards = await apiClient.listBoards(workspaceId);
+    const detail = await apiClient.getBoardDetail(boards[0].id, {
+      workspaceId,
+    });
+    await apiClient.createShape(boardDetail.id, {
+      shapeType: "task",
+      entityType: "task",
+      entityId: "task-1",
+      displayTitle: "Task",
+      width: 280,
+      height: 160,
+      color: "#6d5bd6",
+    });
+    await apiClient.updateShape("shape-1", {
+      displayTitle: "Updated Task",
+    });
+    await apiClient.updateShapePosition("shape-1", {
+      x: 20,
+      y: 40,
+    });
+    await apiClient.deleteShape("shape-1");
+    await apiClient.createConnection(boardDetail.id, {
+      sourceShapeId: "shape-1",
+      targetShapeId: "shape-2",
+      connectionType: "related_to",
+      label: null,
+    });
+    await apiClient.deleteConnection("connection-1");
+    await apiClient.updateViewSetting(boardDetail.id, {
+      zoom: 1.2,
+      viewportX: 10,
+      viewportY: 30,
+    });
+    await apiClient.updateFilterSetting(boardDetail.id, {
+      enabledEntityTypes: ["task"],
+      assigneeMemberId: null,
+      showDelayedOnly: false,
+      showRiskOnly: true,
+      filters: {},
+    });
+
+    assert.equal(boards[0].id, boardDetail.id);
+    assert.equal(detail.workspaceId, workspaceId);
+    assert.equal(
+      requests[0].url,
+      `https://api.pilo.dev/workspaces/${workspaceId}/canvas-boards`,
+    );
+    assert.equal(requests[0].init.credentials, "include");
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      [
+        "GET",
+        "GET",
+        "POST",
+        "PATCH",
+        "PUT",
+        "DELETE",
+        "POST",
+        "DELETE",
+        "PUT",
+        "PUT",
+      ],
+    );
+  });
+
+  it("keeps Canvas local MVP storage, filtering, and connection visibility deterministic", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const board = createMockCanvasBoardDetail(workspaceId);
+    const shapeState = normalizeCanvasShapeState({
+      [board.shapes[0].id]: {
+        x: 320,
+        y: 180,
+        width: 340,
+        height: 190,
+      },
+      ignored: {
+        x: "bad",
+        y: 0,
+      },
+    });
+    const persistedBoard = {
+      ...board,
+      shapes: applyCanvasShapeState(board.shapes, shapeState),
+    };
+    const taskOnlyFilter = normalizeCanvasFilterSetting(
+      {
+        enabledEntityTypes: ["task"],
+        showDelayedOnly: false,
+        showRiskOnly: false,
+      },
+      board.filterSetting,
+    );
+    const filteredBoard = filterCanvasBoard(
+      persistedBoard,
+      taskOnlyFilter,
+      createWorkspaceDashboardFixture(workspaceId),
+    );
+
+    assert.equal(
+      canvasStorageKey(board.id, "shape-state"),
+      `pilo:canvas:${board.id}:shape-state`,
+    );
+    assert.deepEqual(shapeState[board.shapes[0].id], {
+      x: 320,
+      y: 180,
+      width: 340,
+      height: 190,
+    });
+    assert.equal(persistedBoard.shapes[0].position.x, 320);
+    assert.equal(persistedBoard.shapes[0].width, 340);
+    assert.deepEqual(
+      filteredBoard.shapes.map((shape) => shape.entityType),
+      ["task"],
+    );
+    assert.equal(filteredBoard.connections.length, 0);
   });
 });
