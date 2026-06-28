@@ -15,6 +15,7 @@ import {
   CreateTaskCommentBody,
   CreateChecklistItemBody,
   CreateTaskDependencyBody,
+  CreateTaskDraftBody,
   CreateMilestoneBody,
   CreateTaskBody,
   JuhyungTaskService,
@@ -93,6 +94,44 @@ export class JuhyungTasksController {
     return this.taskService.createTask(
       workspaceId,
       body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("workspaces/:workspaceId/task-drafts")
+  createTaskDraft(
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: CreateTaskDraftBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.createTaskDraft(
+      workspaceId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("task-drafts/:draftId/approve")
+  approveTaskDraft(
+    @Param("draftId") draftId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.approveTaskDraft(
+      draftId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("task-drafts/:draftId/reject")
+  rejectTaskDraft(
+    @Param("draftId") draftId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.rejectTaskDraft(
+      draftId,
       toCurrentActor(userId, memberId),
     );
   }

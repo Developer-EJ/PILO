@@ -41,7 +41,9 @@
           "type": "array",
           "items": { "enum": ["google", "github"] }
         },
-        "lastLoginAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "lastLoginAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "WorkspaceSummary": {
@@ -52,7 +54,15 @@
         "id": { "$ref": "#/$defs/uuid" },
         "name": { "type": "string" },
         "description": { "type": ["string", "null"] },
-        "type": { "enum": ["side_project", "bootcamp", "university", "hackathon", "other"] },
+        "type": {
+          "enum": [
+            "side_project",
+            "bootcamp",
+            "university",
+            "hackathon",
+            "other"
+          ]
+        },
         "status": { "enum": ["active", "archived"] },
         "myRole": { "enum": ["owner", "member", "viewer"] },
         "memberCount": { "type": "integer", "minimum": 0 },
@@ -76,17 +86,33 @@
     },
     "TaskSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "milestoneId", "title", "status", "priority", "isDelayed"],
+      "required": [
+        "id",
+        "workspaceId",
+        "milestoneId",
+        "title",
+        "status",
+        "priority",
+        "isDelayed"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
-        "milestoneId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "milestoneId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
         "title": { "type": "string" },
-        "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] },
+        "status": {
+          "enum": ["todo", "in_progress", "in_review", "done", "blocked"]
+        },
         "priority": { "enum": ["low", "medium", "high", "urgent"] },
-        "assignee": { "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }] },
-        "dueDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "assignee": {
+          "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }]
+        },
+        "dueDate": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+        },
         "isDelayed": { "type": "boolean" },
         "linkedIssueCount": { "type": "integer", "minimum": 0 },
         "linkedPrCount": { "type": "integer", "minimum": 0 },
@@ -95,15 +121,27 @@
     },
     "MilestoneSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "title", "status", "startDate", "endDate", "updatedAt"],
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "status",
+        "startDate",
+        "endDate",
+        "updatedAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
         "title": { "type": "string" },
         "status": { "enum": ["planned", "in_progress", "done"] },
-        "startDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
-        "endDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "startDate": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+        },
+        "endDate": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+        },
         "updatedAt": { "$ref": "#/$defs/dateTime" }
       }
     },
@@ -128,18 +166,70 @@
         "sourceId": { "$ref": "#/$defs/uuid" },
         "title": { "type": "string", "minLength": 1 },
         "description": { "type": ["string", "null"] },
-        "assigneeMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "assigneeMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
         "priority": { "enum": ["low", "medium", "high", "urgent"] },
         "dueDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
       }
     },
+    "TaskDraftSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "sourceType",
+        "sourceId",
+        "title",
+        "description",
+        "assigneeMemberId",
+        "priority",
+        "dueDate",
+        "status",
+        "taskId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "sourceType": { "type": ["string", "null"] },
+        "sourceId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": ["string", "null"] },
+        "assigneeMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "priority": { "enum": ["low", "medium", "high", "urgent"] },
+        "dueDate": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+        },
+        "status": { "enum": ["draft", "approved", "rejected"] },
+        "taskId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "createdAt": { "$ref": "#/$defs/dateTime" },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "ProgressSummary": {
       "type": "object",
-      "required": ["workspaceId", "totalTasks", "doneTasks", "blockedTasks", "reviewTasks", "delayedTasks", "progressRate"],
+      "required": [
+        "workspaceId",
+        "totalTasks",
+        "doneTasks",
+        "blockedTasks",
+        "reviewTasks",
+        "delayedTasks",
+        "progressRate"
+      ],
       "additionalProperties": false,
       "properties": {
         "workspaceId": { "$ref": "#/$defs/uuid" },
-        "milestoneId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "milestoneId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
         "totalTasks": { "type": "integer", "minimum": 0 },
         "doneTasks": { "type": "integer", "minimum": 0 },
         "blockedTasks": { "type": "integer", "minimum": 0 },
@@ -161,8 +251,12 @@
         "state": { "enum": ["open", "closed"] },
         "url": { "type": "string" },
         "labels": { "type": "array", "items": { "type": "string" } },
-        "linkedTaskId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "linkedTaskId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "syncedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "PullRequestSummary": {
@@ -175,20 +269,42 @@
         "number": { "type": "integer", "minimum": 1 },
         "title": { "type": "string" },
         "authorLogin": { "type": ["string", "null"] },
-        "state": { "enum": ["open", "review_requested", "changes_requested", "merged", "closed"] },
+        "state": {
+          "enum": [
+            "open",
+            "review_requested",
+            "changes_requested",
+            "merged",
+            "closed"
+          ]
+        },
         "branch": { "type": ["string", "null"] },
         "baseBranch": { "type": ["string", "null"] },
         "url": { "type": "string" },
         "changedFilesCount": { "type": "integer", "minimum": 0 },
         "additions": { "type": "integer", "minimum": 0 },
         "deletions": { "type": "integer", "minimum": 0 },
-        "linkedTaskIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
-        "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "linkedTaskIds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" }
+        },
+        "syncedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "MeetingReportSummary": {
       "type": "object",
-      "required": ["id", "meetingId", "workspaceId", "title", "summary", "decisionCount", "actionItemCount", "riskCount"],
+      "required": [
+        "id",
+        "meetingId",
+        "workspaceId",
+        "title",
+        "summary",
+        "decisionCount",
+        "actionItemCount",
+        "riskCount"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -211,15 +327,29 @@
         "reportId": { "$ref": "#/$defs/uuid" },
         "title": { "type": "string", "minLength": 1 },
         "description": { "type": ["string", "null"] },
-        "assigneeSuggestionMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "dueDateSuggestion": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "assigneeSuggestionMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "dueDateSuggestion": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+        },
         "status": { "enum": ["draft", "approved", "converted", "rejected"] },
-        "convertedTaskId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "convertedTaskId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        }
       }
     },
     "PRAnalysisSummary": {
       "type": "object",
-      "required": ["id", "pullRequestId", "riskLevel", "analysisStatus", "okCount", "discussCount", "riskCount"],
+      "required": [
+        "id",
+        "pullRequestId",
+        "riskLevel",
+        "analysisStatus",
+        "okCount",
+        "discussCount",
+        "riskCount"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -228,7 +358,9 @@
         "impactSummary": { "type": ["string", "null"] },
         "testRecommendation": { "type": ["string", "null"] },
         "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
-        "analysisStatus": { "enum": ["pending", "running", "succeeded", "failed"] },
+        "analysisStatus": {
+          "enum": ["pending", "running", "succeeded", "failed"]
+        },
         "okCount": { "type": "integer", "minimum": 0 },
         "discussCount": { "type": "integer", "minimum": 0 },
         "riskCount": { "type": "integer", "minimum": 0 },
@@ -240,40 +372,117 @@
       "required": ["entityType", "entityId", "displayTitle", "shapeType"],
       "additionalProperties": false,
       "properties": {
-        "entityType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] },
+        "entityType": {
+          "enum": [
+            "task",
+            "meeting_report",
+            "pull_request",
+            "github_issue",
+            "document",
+            "file",
+            "code",
+            "decision",
+            "risk"
+          ]
+        },
         "entityId": { "$ref": "#/$defs/uuid" },
         "displayTitle": { "type": "string" },
-        "shapeType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] }
+        "shapeType": {
+          "enum": [
+            "task",
+            "meeting_report",
+            "pull_request",
+            "github_issue",
+            "document",
+            "file",
+            "code",
+            "decision",
+            "risk"
+          ]
+        }
       }
     },
     "AgentAction": {
       "type": "object",
-      "required": ["type", "source", "requiresConfirmation", "payload", "status"],
+      "required": [
+        "type",
+        "source",
+        "requiresConfirmation",
+        "payload",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
         "type": {
-          "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"]
+          "enum": [
+            "task.create.draft",
+            "task.update.status",
+            "github.issue.create",
+            "meeting.report.generate",
+            "review.analysis.generate",
+            "planning.approve"
+          ]
         },
-        "source": { "enum": ["meeting", "task", "github", "review", "planning", "orchestrator"] },
+        "source": {
+          "enum": [
+            "meeting",
+            "task",
+            "github",
+            "review",
+            "planning",
+            "orchestrator"
+          ]
+        },
         "requiresConfirmation": { "type": "boolean" },
         "payload": { "type": "object" },
-        "status": { "enum": ["draft", "waiting_confirmation", "confirmed", "executed", "rejected", "failed"] },
-        "confirmedByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "confirmedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
-        "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "status": {
+          "enum": [
+            "draft",
+            "waiting_confirmation",
+            "confirmed",
+            "executed",
+            "rejected",
+            "failed"
+          ]
+        },
+        "confirmedByMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "confirmedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        },
+        "executedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "AgentJobMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "requestedAt"],
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
         "workflowType": {
-          "enum": ["meeting.report.generate", "review.analysis.generate", "planning.generate", "task.draft.generate", "github.issue.draft.generate", "orchestrator.run"]
+          "enum": [
+            "meeting.report.generate",
+            "review.analysis.generate",
+            "planning.generate",
+            "task.draft.generate",
+            "github.issue.draft.generate",
+            "orchestrator.run"
+          ]
         },
         "workflowVersion": { "type": "string" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
@@ -296,7 +505,15 @@
     },
     "AgentResultMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "status", "output", "actions", "trace", "finishedAt"],
+      "required": [
+        "jobId",
+        "runId",
+        "status",
+        "output",
+        "actions",
+        "trace",
+        "finishedAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
@@ -346,7 +563,9 @@
         "type": { "type": "string" },
         "title": { "type": "string" },
         "linkedEntityType": { "type": ["string", "null"] },
-        "linkedEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "linkedEntityId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        }
       }
     },
     "SharedFileRef": {
@@ -360,7 +579,9 @@
         "fileType": { "type": ["string", "null"] },
         "url": { "type": "string" },
         "linkedEntityType": { "type": ["string", "null"] },
-        "linkedEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "linkedEntityId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        }
       }
     }
   }

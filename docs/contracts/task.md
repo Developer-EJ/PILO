@@ -11,6 +11,7 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 ## Owned Tables
 
 - `tasks`
+- `task_drafts`
 - `task_checklist_items`
 - `task_comments`
 - `task_activity_logs`
@@ -37,6 +38,8 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 | `POST`   | `/tasks/:taskId/dependencies`                  | 의존성 추가                   | 주형                       |
 | `DELETE` | `/tasks/:taskId/dependencies/:dependsOnTaskId` | 의존성 삭제                   | 주형                       |
 | `POST`   | `/workspaces/:workspaceId/task-drafts`         | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
+| `POST`   | `/task-drafts/:draftId/approve`                | Task draft를 실제 Task로 승인 | 주형, 세인 action executor |
+| `POST`   | `/task-drafts/:draftId/reject`                 | Task draft 거절               | 주형, 세인 action executor |
 
 ## Read Models
 
@@ -161,6 +164,28 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 }
 ```
 
+### TaskDraftSummary
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "sourceType": "meeting_action_item",
+  "sourceId": "uuid",
+  "title": "OAuth callback 처리",
+  "description": "Google/GitHub callback을 처리한다.",
+  "assigneeMemberId": "uuid",
+  "priority": "high",
+  "dueDate": "2026-07-03",
+  "status": "draft",
+  "taskId": null,
+  "createdAt": "2026-06-28T10:00:00Z",
+  "updatedAt": "2026-06-28T10:00:00Z"
+}
+```
+
+`status`는 `draft`, `approved`, `rejected` 중 하나다. `draft` 상태만 승인 또는 거절할 수 있다. 승인하면 주형의 `tasks` row가 생성되고 `taskId`가 채워진다. 거절하면 Task는 생성되지 않고 `taskId`는 `null`로 남는다.
+
 ## Write Models
 
 ### MilestoneWrite
@@ -199,6 +224,14 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
   "status": "in_review"
 }
 ```
+
+### TaskDraftApproval
+
+`POST /workspaces/:workspaceId/task-drafts`는 `TaskCreateDraft`를 받아 `task_drafts`에 저장하고 `TaskDraftSummary`를 반환한다. 이 호출은 실제 Task를 생성하지 않는다.
+
+`POST /task-drafts/:draftId/approve`는 `draft` 상태의 draft만 승인한다. 승인 시 `tasks` row를 만들고 draft를 `approved`로 닫으며, `TaskDraftSummary.taskId`에 생성된 Task id를 채운다.
+
+`POST /task-drafts/:draftId/reject`는 `draft` 상태의 draft만 거절한다. 거절 시 Task를 생성하지 않고 draft를 `rejected`로 닫는다.
 
 ### TaskDelete
 

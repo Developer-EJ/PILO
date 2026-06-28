@@ -22,6 +22,10 @@ import {
   type CreateTaskDependencyBody,
 } from "./juhyung-dependency-input";
 import {
+  parseCreateTaskDraftInput,
+  type CreateTaskDraftBody,
+} from "./juhyung-task-draft-input";
+import {
   assertMilestoneDateRange,
   parseCreateMilestoneInput,
   parseUpdateMilestoneInput,
@@ -51,6 +55,9 @@ import {
   TaskCommentSummary,
   TaskDependencyRecord,
   TaskDependencySummary,
+  TaskDraftRecord,
+  TaskDraftSummary,
+  TaskPriority,
   MilestoneSummary,
   TaskStatus,
   TaskSummary,
@@ -73,6 +80,7 @@ export type {
 } from "./juhyung-checklist-input";
 export type { CreateTaskCommentBody } from "./juhyung-comment-input";
 export type { CreateTaskDependencyBody } from "./juhyung-dependency-input";
+export type { CreateTaskDraftBody } from "./juhyung-task-draft-input";
 export type { ListTasksQuery } from "./juhyung-task-list-query";
 
 @Injectable()
@@ -162,6 +170,84 @@ export class JuhyungTaskService {
     const task = await this.repository.createTask(input, currentMember.id);
 
     return this.publicAdapter.toTaskSummary(task, { assignee });
+  }
+
+  async createTaskDraft(
+    workspaceId: string,
+    body: CreateTaskDraftBody,
+    actor?: CurrentActor,
+  ): Promise<TaskDraftSummary> {
+    const input = parseCreateTaskDraftInput(workspaceId, body);
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      workspaceId,
+      actor,
+    );
+    if (input.assigneeMemberId) {
+      await this.workspaceAccess.requireWorkspaceMember(workspaceId, {
+        memberId: input.assigneeMemberId,
+      });
+    }
+
+    const draft = await this.repository.createTaskDraft(
+      input,
+      currentMember.id,
+    );
+    return this.publicAdapter.toTaskDraftSummary(draft);
+  }
+
+  async approveTaskDraft(
+    draftId: string,
+    actor?: CurrentActor,
+  ): Promise<TaskDraftSummary> {
+    const { draft, currentMember } = await this.requireTaskDraftAccess(
+      draftId,
+      actor,
+    );
+    assertDraftIsOpen(draft);
+    if (draft.assigneeMemberId) {
+      await this.workspaceAccess.requireWorkspaceMember(draft.workspaceId, {
+        memberId: draft.assigneeMemberId,
+      });
+    }
+
+    const approvedDraft = await this.repository.approveTaskDraft(
+      draftId,
+      {
+        workspaceId: draft.workspaceId,
+        title: draft.title,
+        description: draft.description ?? null,
+        assigneeMemberId: draft.assigneeMemberId ?? null,
+        status: "todo",
+        priority: draft.priority as TaskPriority,
+        dueDate: draft.dueDate ?? null,
+        milestoneId: null,
+      },
+      currentMember.id,
+    );
+    if (!approvedDraft) {
+      throw new BadRequestException("Task draft is already closed");
+    }
+    return this.publicAdapter.toTaskDraftSummary(approvedDraft);
+  }
+
+  async rejectTaskDraft(
+    draftId: string,
+    actor?: CurrentActor,
+  ): Promise<TaskDraftSummary> {
+    const { draft, currentMember } = await this.requireTaskDraftAccess(
+      draftId,
+      actor,
+    );
+    assertDraftIsOpen(draft);
+
+    const rejectedDraft = await this.repository.rejectTaskDraft(
+      draftId,
+      currentMember.id,
+    );
+    if (!rejectedDraft) {
+      throw new BadRequestException("Task draft is already closed");
+    }
+    return this.publicAdapter.toTaskDraftSummary(rejectedDraft);
   }
 
   async getTask(taskId: string, actor?: CurrentActor): Promise<TaskDetail> {
@@ -378,6 +464,19 @@ export class JuhyungTaskService {
     return { task, currentMember };
   }
 
+  private async requireTaskDraftAccess(draftId: string, actor?: CurrentActor) {
+    const draft = await this.repository.getTaskDraftById(draftId);
+    if (!draft) {
+      throw new NotFoundException("Task draft was not found");
+    }
+
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      draft.workspaceId,
+      actor,
+    );
+    return { draft, currentMember };
+  }
+
   private async requireMilestoneAccess(
     milestoneId: string,
     actor?: CurrentActor,
@@ -537,4 +636,10 @@ function wouldCreateTaskDependencyCycle(
     stack.push(...(dependencyByTaskId.get(currentTaskId) ?? []));
   }
   return false;
+}
+
+function assertDraftIsOpen(draft: TaskDraftRecord): void {
+  if (draft.status !== "draft") {
+    throw new BadRequestException("Task draft is already closed");
+  }
 }

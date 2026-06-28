@@ -39,6 +39,8 @@ const UUIDS = {
   snapshot: "99999999-9999-4999-8999-999999999999",
   dependency: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   dependsOnTask: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  taskDraft: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  source: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 };
 
 function assertContract(defName, value) {
@@ -254,6 +256,41 @@ describe("JuhyungPublicAdapter", () => {
       createdAt: "2026-06-28T11:00:00.000Z",
     });
     assertContract("TaskDependencySummary", summary);
+  });
+
+  it("maps a TaskDraft domain record to the TaskDraftSummary public DTO", () => {
+    const summary = adapter.toTaskDraftSummary({
+      id: UUIDS.taskDraft,
+      workspaceId: UUIDS.workspace,
+      sourceType: "meeting_action_item",
+      sourceId: UUIDS.source,
+      title: "Process OAuth callback",
+      description: "Handle Google and GitHub callbacks.",
+      assigneeMemberId: UUIDS.member,
+      priority: "high",
+      dueDate: new Date("2026-07-03T00:00:00.000Z"),
+      status: "approved",
+      taskId: UUIDS.task,
+      createdAt: new Date("2026-06-28T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-28T11:00:00.000Z"),
+    });
+
+    assert.deepEqual(summary, {
+      id: UUIDS.taskDraft,
+      workspaceId: UUIDS.workspace,
+      sourceType: "meeting_action_item",
+      sourceId: UUIDS.source,
+      title: "Process OAuth callback",
+      description: "Handle Google and GitHub callbacks.",
+      assigneeMemberId: UUIDS.member,
+      priority: "high",
+      dueDate: "2026-07-03",
+      status: "approved",
+      taskId: UUIDS.task,
+      createdAt: "2026-06-28T10:00:00.000Z",
+      updatedAt: "2026-06-28T11:00:00.000Z",
+    });
+    assertContract("TaskDraftSummary", summary);
   });
 
   it("maps GitHub and Progress records to public DTOs that match the schema", () => {

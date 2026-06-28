@@ -16,6 +16,7 @@ describe("JuhyungRepository", () => {
     assert.deepEqual(JUHYUNG_OWNER_TABLES, [
       "milestones",
       "tasks",
+      "task_drafts",
       "task_checklist_items",
       "task_comments",
       "task_activity_logs",
@@ -342,6 +343,274 @@ describe("JuhyungRepository", () => {
           dueDate: null,
           milestoneId: null,
           createdByMemberId: "member-1",
+        },
+      },
+    ]);
+  });
+
+  it("writes task drafts with source metadata and creator member", async () => {
+    const calls = [];
+    const database = {
+      taskDraft: {
+        create: async (args) => {
+          calls.push(args);
+          return { id: "draft-1", ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const draft = await repository.createTaskDraft(
+      {
+        workspaceId: "workspace-1",
+        sourceType: "meeting_action_item",
+        sourceId: "action-item-1",
+        title: "Process OAuth callback",
+        description: "Handle provider callbacks",
+        assigneeMemberId: "member-2",
+        priority: "high",
+        dueDate: new Date("2026-07-03T00:00:00.000Z"),
+      },
+      "member-1",
+    );
+
+    assert.equal(draft.createdByMemberId, "member-1");
+    assert.deepEqual(calls, [
+      {
+        data: {
+          workspaceId: "workspace-1",
+          sourceType: "meeting_action_item",
+          sourceId: "action-item-1",
+          title: "Process OAuth callback",
+          description: "Handle provider callbacks",
+          assigneeMemberId: "member-2",
+          priority: "high",
+          dueDate: new Date("2026-07-03T00:00:00.000Z"),
+          status: "draft",
+          taskId: null,
+          createdByMemberId: "member-1",
+        },
+      },
+    ]);
+  });
+
+  it("reads task drafts by id", async () => {
+    const calls = [];
+    const database = {
+      taskDraft: {
+        findUnique: async (args) => {
+          calls.push(args);
+          return { id: "draft-1", workspaceId: "workspace-1" };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const draft = await repository.getTaskDraftById("draft-1");
+
+    assert.deepEqual(draft, { id: "draft-1", workspaceId: "workspace-1" });
+    assert.deepEqual(calls, [
+      {
+        where: {
+          id: "draft-1",
+        },
+      },
+    ]);
+  });
+
+  it("approves task drafts by creating a task and updating the draft in one transaction", async () => {
+    const calls = [];
+    const transaction = {
+      task: {
+        create: async (args) => {
+          calls.push(["task.create", args]);
+          return { id: "task-1", ...args.data };
+        },
+      },
+      taskDraft: {
+        updateMany: async (args) => {
+          calls.push(["draft.updateMany", args]);
+          return { count: 1 };
+        },
+        update: async (args) => {
+          calls.push(["draft.update", args]);
+          return { id: "draft-1", status: "approved", ...args.data };
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const draft = await repository.approveTaskDraft(
+      "draft-1",
+      {
+        workspaceId: "workspace-1",
+        title: "Process OAuth callback",
+        description: "Handle provider callbacks",
+        assigneeMemberId: "member-2",
+        status: "todo",
+        priority: "high",
+        dueDate: null,
+        milestoneId: null,
+      },
+      "member-1",
+    );
+
+    assert.equal(draft.status, "approved");
+    assert.equal(draft.taskId, "task-1");
+    assert.deepEqual(calls[0][0], "draft.updateMany");
+    assert.deepEqual(calls[0][1].where, {
+      id: "draft-1",
+      status: "draft",
+    });
+    assert.deepEqual(
+      {
+        ...calls[0][1].data,
+        approvedAt: undefined,
+        updatedAt: undefined,
+      },
+      {
+        status: "approved",
+        approvedByMemberId: "member-1",
+        approvedAt: undefined,
+        updatedAt: undefined,
+      },
+    );
+    assert.ok(calls[0][1].data.approvedAt instanceof Date);
+    assert.ok(calls[0][1].data.updatedAt instanceof Date);
+    assert.deepEqual(calls[1], [
+      "task.create",
+      {
+        data: {
+          workspaceId: "workspace-1",
+          title: "Process OAuth callback",
+          description: "Handle provider callbacks",
+          assigneeMemberId: "member-2",
+          status: "todo",
+          priority: "high",
+          dueDate: null,
+          milestoneId: null,
+          createdByMemberId: "member-1",
+        },
+      },
+    ]);
+    assert.deepEqual(calls[2][1].where, { id: "draft-1" });
+    assert.deepEqual(
+      {
+        ...calls[2][1].data,
+        updatedAt: undefined,
+      },
+      {
+        taskId: "task-1",
+        updatedAt: undefined,
+      },
+    );
+    assert.ok(calls[2][1].data.updatedAt instanceof Date);
+  });
+
+  it("does not create a task when task draft approval cannot claim the draft", async () => {
+    const calls = [];
+    const transaction = {
+      task: {
+        create: async () => {
+          throw new Error("unclaimed drafts should not create tasks");
+        },
+      },
+      taskDraft: {
+        updateMany: async (args) => {
+          calls.push(["draft.updateMany", args]);
+          return { count: 0 };
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const draft = await repository.approveTaskDraft(
+      "draft-1",
+      {
+        workspaceId: "workspace-1",
+        title: "Process OAuth callback",
+        description: "Handle provider callbacks",
+        assigneeMemberId: "member-2",
+        status: "todo",
+        priority: "high",
+        dueDate: null,
+        milestoneId: null,
+      },
+      "member-1",
+    );
+
+    assert.equal(draft, null);
+    assert.deepEqual(calls, [
+      [
+        "draft.updateMany",
+        {
+          where: {
+            id: "draft-1",
+            status: "draft",
+          },
+          data: {
+            status: "approved",
+            approvedByMemberId: "member-1",
+            approvedAt: calls[0][1].data.approvedAt,
+            updatedAt: calls[0][1].data.updatedAt,
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("rejects task drafts without writing a task", async () => {
+    const calls = [];
+    const database = {
+      taskDraft: {
+        updateMany: async (args) => {
+          calls.push(["draft.updateMany", args]);
+          return { count: 1 };
+        },
+        findUnique: async (args) => {
+          calls.push(["draft.findUnique", args]);
+          return {
+            id: "draft-1",
+            status: "rejected",
+            rejectedByMemberId: "member-1",
+            rejectedAt: calls[0][1].data.rejectedAt,
+            updatedAt: calls[0][1].data.updatedAt,
+          };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const draft = await repository.rejectTaskDraft("draft-1", "member-1");
+
+    assert.equal(draft.status, "rejected");
+    assert.deepEqual(calls[0][1].where, { id: "draft-1", status: "draft" });
+    assert.deepEqual(
+      {
+        ...calls[0][1].data,
+        rejectedAt: undefined,
+        updatedAt: undefined,
+      },
+      {
+        status: "rejected",
+        rejectedByMemberId: "member-1",
+        rejectedAt: undefined,
+        updatedAt: undefined,
+      },
+    );
+    assert.ok(calls[0][1].data.rejectedAt instanceof Date);
+    assert.ok(calls[0][1].data.updatedAt instanceof Date);
+    assert.deepEqual(calls[1], [
+      "draft.findUnique",
+      {
+        where: {
+          id: "draft-1",
         },
       },
     ]);
