@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
 
@@ -182,6 +183,125 @@ describe("app-server package", () => {
       valid: false,
       reason: "expired",
     });
+  });
+
+  it("builds a Google authorization URL with state and nonce", () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      API_BASE_URL: "https://api.pilo.dev",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    const service = new AuthService(new AuthRepository(), { config });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/canvas",
+    );
+    const redirectUrl = new URL(authorization.redirectUrl);
+
+    assert.equal(
+      `${redirectUrl.origin}${redirectUrl.pathname}`,
+      "https://accounts.google.com/o/oauth2/v2/auth",
+    );
+    assert.equal(redirectUrl.searchParams.get("client_id"), "google-client");
+    assert.equal(
+      redirectUrl.searchParams.get("redirect_uri"),
+      "https://api.pilo.dev/auth/google/callback",
+    );
+    assert.equal(redirectUrl.searchParams.get("response_type"), "code");
+    assert.equal(redirectUrl.searchParams.get("scope"), "openid email profile");
+    assert.equal(redirectUrl.searchParams.get("state"), authorization.state);
+    assert.equal(redirectUrl.searchParams.get("nonce"), authorization.nonce);
+    assert.equal(authorization.nextPath, "/canvas");
+  });
+
+  it("handles a Google OAuth callback by fetching token and profile", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      API_BASE_URL: "https://api.pilo.dev",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url: String(url), init });
+
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return globalThis.Response.json({
+          access_token: "google-access-token",
+        });
+      }
+
+      return globalThis.Response.json({
+        sub: "google-user-123",
+        email: "user@example.com",
+        name: "Google User",
+        picture: "https://example.com/avatar.png",
+        email_verified: true,
+      });
+    };
+    const service = new AuthService(new AuthRepository(), { config, fetcher });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/workspaces/demo",
+    );
+    const result = await service.handleOAuthCallback("google", {
+      code: "google-code",
+      state: authorization.state,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.nextPath, "/workspaces/demo");
+    assert.deepEqual(result.profile, {
+      provider: "google",
+      providerAccountId: "google-user-123",
+      email: "user@example.com",
+      name: "Google User",
+      avatarUrl: "https://example.com/avatar.png",
+      emailVerified: true,
+    });
+    assert.equal(requests[0].url, "https://oauth2.googleapis.com/token");
+    assert.equal(requests[0].init.method, "POST");
+    assert.equal(requests[0].init.body.get("code"), "google-code");
+    assert.equal(
+      requests[0].init.body.get("redirect_uri"),
+      "https://api.pilo.dev/auth/google/callback",
+    );
+    assert.equal(
+      requests[1].init.headers.Authorization,
+      "Bearer google-access-token",
+    );
+  });
+
+  it("rejects a Google callback state mismatch before token exchange", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    let fetchCalled = false;
+    const fetcher = async () => {
+      fetchCalled = true;
+      return globalThis.Response.json({});
+    };
+    const service = new AuthService(new AuthRepository(), { config, fetcher });
+    const result = await service.handleOAuthCallback("google", {
+      code: "google-code",
+      state: "wrong-state",
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      provider: "google",
+      errorCode: "oauth_state_missing",
+    });
+    assert.equal(fetchCalled, false);
   });
 
   it("exposes Auth provider readiness without leaking secrets", () => {
