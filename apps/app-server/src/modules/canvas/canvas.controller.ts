@@ -83,6 +83,36 @@ export class CanvasController {
     );
   }
 
+  @Put("canvas-boards/:boardId/view-settings")
+  updateCanvasViewSetting(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("boardId") boardId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.updateCanvasViewSetting({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        boardId,
+        body,
+      }),
+    );
+  }
+
+  @Put("canvas-boards/:boardId/filter-settings")
+  updateCanvasFilterSetting(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("boardId") boardId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.updateCanvasFilterSetting({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        boardId,
+        body,
+      }),
+    );
+  }
+
   @Put("canvas-shapes/:shapeId/position")
   updateCanvasShapePosition(
     @Headers("cookie") cookieHeader: string | undefined,

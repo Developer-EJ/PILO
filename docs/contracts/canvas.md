@@ -122,6 +122,8 @@ Saves the latest position for a shape after drag.
 
 ### CanvasViewSettingRequest
 
+Saves the current member's viewport state for a board.
+
 ```json
 {
   "zoom": 1,
@@ -133,8 +135,11 @@ Saves the latest position for a shape after drag.
 - required: `zoom`, `viewportX`, `viewportY`
 - default: `{ "zoom": 1, "viewportX": 0, "viewportY": 0 }`
 - Settings are scoped by `boardId + memberId`.
+- The update API returns the saved `CanvasViewSetting`.
 
 ### CanvasFilterSettingRequest
+
+Saves the current member's board filter state.
 
 ```json
 {
@@ -150,6 +155,8 @@ Saves the latest position for a shape after drag.
 - default: `{ "enabledEntityTypes": ["task", "meeting_report", "pull_request"], "assigneeMemberId": null, "showDelayedOnly": false, "showRiskOnly": false, "filters": {} }`
 - `assigneeMemberId` is nullable and refers to `workspace_members.member_id`.
 - `filters` is an extension object for non-breaking filter additions.
+- Settings are scoped by `boardId + memberId`.
+- The update API returns the saved `CanvasFilterSetting`.
 
 ## Read Models
 

@@ -8,9 +8,14 @@ import type {
   CanvasConnectionRequest,
   CanvasConnectionSummary,
   CanvasCurrentMemberContext,
+  CanvasEntityType,
+  CanvasFilterSetting,
+  CanvasFilterSettingRequest,
   CanvasRepositoryPort,
   CanvasShapePositionRequest,
   CanvasShapeSummary,
+  CanvasViewSetting,
+  CanvasViewSettingRequest,
 } from "./canvas.types";
 import { CanvasRepository } from "./canvas.repository";
 
@@ -33,6 +38,18 @@ export type CanvasConnectionMutationInput = {
 export type CanvasConnectionDeleteInput = {
   connectionId: string;
   currentUser: CanvasAuthUserRef;
+};
+
+export type CanvasViewSettingMutationInput = {
+  boardId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
+};
+
+export type CanvasFilterSettingMutationInput = {
+  boardId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
 };
 
 export type CanvasShapePositionMutationInput = {
@@ -193,6 +210,42 @@ export class CanvasService {
     return result;
   }
 
+  async updateCanvasViewSetting(
+    input: CanvasViewSettingMutationInput,
+  ): Promise<CanvasViewSetting> {
+    const body = parseCanvasViewSettingBody(input.body);
+    const workspaceAccess = await this.requireBoardWriteAccess(input);
+    const setting = await this.canvasRepository.upsertViewSettingForBoard({
+      boardId: input.boardId,
+      memberId: workspaceAccess.currentMember.memberId,
+      ...body,
+    });
+
+    if (!setting) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    return setting;
+  }
+
+  async updateCanvasFilterSetting(
+    input: CanvasFilterSettingMutationInput,
+  ): Promise<CanvasFilterSetting> {
+    const body = parseCanvasFilterSettingBody(input.body);
+    const workspaceAccess = await this.requireBoardWriteAccess(input);
+    const setting = await this.canvasRepository.upsertFilterSettingForBoard({
+      boardId: input.boardId,
+      memberId: workspaceAccess.currentMember.memberId,
+      ...body,
+    });
+
+    if (!setting) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    return setting;
+  }
+
   async updateCanvasShapePosition(
     input: CanvasShapePositionMutationInput,
   ): Promise<CanvasShapeSummary> {
@@ -221,6 +274,23 @@ export class CanvasService {
     }
 
     return shape;
+  }
+
+  private async requireBoardWriteAccess(
+    input: CanvasBoardResourceInput,
+  ): Promise<CanvasCurrentMemberContext> {
+    const workspaceId = await this.canvasRepository.findBoardWorkspaceId(
+      input.boardId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    return this.requireWorkspaceWriteAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
   }
 
   private async requireWorkspaceWriteAccess(
@@ -302,6 +372,39 @@ function parseCanvasShapePositionBody(
   };
 }
 
+function parseCanvasViewSettingBody(body: unknown): CanvasViewSettingRequest {
+  const record = requirePlainObject(body);
+
+  return {
+    zoom: parseFiniteNumber(record.zoom, "viewSetting.zoom"),
+    viewportX: parseFiniteNumber(record.viewportX, "viewSetting.viewportX"),
+    viewportY: parseFiniteNumber(record.viewportY, "viewSetting.viewportY"),
+  };
+}
+
+function parseCanvasFilterSettingBody(
+  body: unknown,
+): CanvasFilterSettingRequest {
+  const record = requirePlainObject(body);
+
+  return {
+    enabledEntityTypes: parseEnabledEntityTypes(record.enabledEntityTypes),
+    assigneeMemberId: parseNullableString(
+      record.assigneeMemberId,
+      "filterSetting.assigneeMemberId",
+    ),
+    showDelayedOnly: parseRequiredBoolean(
+      record.showDelayedOnly,
+      "filterSetting.showDelayedOnly",
+    ),
+    showRiskOnly: parseRequiredBoolean(
+      record.showRiskOnly,
+      "filterSetting.showRiskOnly",
+    ),
+    filters: parseExtensionObject(record.filters, "filterSetting.filters"),
+  };
+}
+
 function parseRequiredString(value: unknown, field: string) {
   if (typeof value !== "string" || !value.trim()) {
     throw new CanvasValidationError(`Canvas ${field} must be a string.`);
@@ -338,14 +441,82 @@ function requirePlainObject(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>;
 }
 
-function parseFiniteCoordinate(value: unknown, field: "x" | "y") {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function parseEnabledEntityTypes(value: unknown): CanvasEntityType[] {
+  if (!Array.isArray(value)) {
     throw new CanvasValidationError(
-      `Canvas position ${field} must be a finite number.`,
+      "Canvas filterSetting.enabledEntityTypes must be an array.",
     );
   }
 
+  const uniqueTypes = new Set<CanvasEntityType>();
+
+  for (const entityType of value) {
+    if (!isCanvasEntityType(entityType)) {
+      throw new CanvasValidationError(
+        "Canvas filterSetting.enabledEntityTypes contains an unsupported entity type.",
+      );
+    }
+
+    uniqueTypes.add(entityType);
+  }
+
+  return Array.from(uniqueTypes);
+}
+
+function parseNullableString(value: unknown, field: string) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    throw new CanvasValidationError(
+      `Canvas ${field} must be a string or null.`,
+    );
+  }
+
+  return value.trim();
+}
+
+function parseRequiredBoolean(value: unknown, field: string) {
+  if (typeof value !== "boolean") {
+    throw new CanvasValidationError(`Canvas ${field} must be a boolean.`);
+  }
+
   return value;
+}
+
+function parseExtensionObject(value: unknown, field: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CanvasValidationError(`Canvas ${field} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function parseFiniteCoordinate(value: unknown, field: "x" | "y") {
+  return parseFiniteNumber(value, `position.${field}`);
+}
+
+function parseFiniteNumber(value: unknown, field: string) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new CanvasValidationError(`Canvas ${field} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function isCanvasEntityType(value: unknown): value is CanvasEntityType {
+  return (
+    value === "task" ||
+    value === "meeting_report" ||
+    value === "pull_request" ||
+    value === "github_issue" ||
+    value === "document" ||
+    value === "file" ||
+    value === "code" ||
+    value === "decision" ||
+    value === "risk"
+  );
 }
 
 export type CanvasServiceRepositoryPort = CanvasRepositoryPort;

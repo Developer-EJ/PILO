@@ -128,6 +128,24 @@ export type CanvasConnectionDeleteResult = {
   deleted: true;
 };
 
+export type CanvasViewSetting = {
+  zoom: number;
+  viewportX: number;
+  viewportY: number;
+};
+
+export type CanvasViewSettingRequest = CanvasViewSetting;
+
+export type CanvasFilterSetting = {
+  enabledEntityTypes: CanvasEntityType[];
+  assigneeMemberId: string | null;
+  showDelayedOnly: boolean;
+  showRiskOnly: boolean;
+  filters: Record<string, unknown>;
+};
+
+export type CanvasFilterSettingRequest = CanvasFilterSetting;
+
 export type CanvasConnectionCreateResult =
   | {
       status: "created";
@@ -153,18 +171,8 @@ export type CanvasBoardSummary = {
 export type CanvasBoardDetail = CanvasBoardSummary & {
   shapes: CanvasShapeSummary[];
   connections: CanvasConnectionSummary[];
-  viewSetting: {
-    zoom: number;
-    viewportX: number;
-    viewportY: number;
-  };
-  filterSetting: {
-    enabledEntityTypes: CanvasEntityType[];
-    assigneeMemberId: string | null;
-    showDelayedOnly: boolean;
-    showRiskOnly: boolean;
-    filters: Record<string, unknown>;
-  };
+  viewSetting: CanvasViewSetting;
+  filterSetting: CanvasFilterSetting;
 };
 
 export type CanvasCurrentMemberContext = {
@@ -196,6 +204,20 @@ export type CanvasRepositoryPort = {
     now?: Date;
   }): Promise<CanvasConnectionDeleteResult | null>;
   findConnectionWorkspaceId(connectionId: string): Promise<string | null>;
+  upsertViewSettingForBoard(
+    input: CanvasViewSettingRequest & {
+      boardId: string;
+      memberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasViewSetting | null>;
+  upsertFilterSettingForBoard(
+    input: CanvasFilterSettingRequest & {
+      boardId: string;
+      memberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasFilterSetting | null>;
   upsertShapePosition(
     input: CanvasShapePositionRequest & {
       shapeId: string;

@@ -1685,6 +1685,87 @@ describe("app-server package", () => {
     assert.equal(boardAfterDelete.updatedAt, "2026-06-28T00:05:00.000Z");
   });
 
+  it("stores Canvas view and filter settings per member", async () => {
+    const repository = new CanvasRepository();
+    repository.boardsById.set("board-1", {
+      id: "board-1",
+      workspaceId: "workspace-1",
+      title: "Project Map",
+      boardType: "project_map",
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+
+    const memberOneView = await repository.upsertViewSettingForBoard({
+      boardId: "board-1",
+      memberId: "member-1",
+      zoom: 1.25,
+      viewportX: 120,
+      viewportY: -80,
+      now: new Date("2026-06-28T00:06:00.000Z"),
+    });
+    const memberTwoView = await repository.upsertViewSettingForBoard({
+      boardId: "board-1",
+      memberId: "member-2",
+      zoom: 0.75,
+      viewportX: -40,
+      viewportY: 220,
+    });
+    const memberOneFilter = await repository.upsertFilterSettingForBoard({
+      boardId: "board-1",
+      memberId: "member-1",
+      enabledEntityTypes: ["task", "risk"],
+      assigneeMemberId: "member-3",
+      showDelayedOnly: true,
+      showRiskOnly: true,
+      filters: {
+        priority: "high",
+      },
+      now: new Date("2026-06-28T00:07:00.000Z"),
+    });
+    const memberOneBoard = await repository.findBoardDetail({
+      boardId: "board-1",
+      memberId: "member-1",
+    });
+    const memberTwoBoard = await repository.findBoardDetail({
+      boardId: "board-1",
+      memberId: "member-2",
+    });
+
+    assert.deepEqual(memberOneView, {
+      zoom: 1.25,
+      viewportX: 120,
+      viewportY: -80,
+    });
+    assert.deepEqual(memberTwoView, {
+      zoom: 0.75,
+      viewportX: -40,
+      viewportY: 220,
+    });
+    assert.deepEqual(memberOneFilter, {
+      enabledEntityTypes: ["task", "risk"],
+      assigneeMemberId: "member-3",
+      showDelayedOnly: true,
+      showRiskOnly: true,
+      filters: {
+        priority: "high",
+      },
+    });
+    assert.deepEqual(memberOneBoard.viewSetting, memberOneView);
+    assert.deepEqual(memberOneBoard.filterSetting, memberOneFilter);
+    assert.deepEqual(memberTwoBoard.viewSetting, memberTwoView);
+    assert.deepEqual(memberTwoBoard.filterSetting, {
+      enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+      assigneeMemberId: null,
+      showDelayedOnly: false,
+      showRiskOnly: false,
+      filters: {},
+    });
+    assert.equal(memberOneBoard.updatedAt, "2026-06-28T00:07:00.000Z");
+  });
+
   it("connects Canvas board access to the workspace currentMember context", async () => {
     const repositoryCalls = [];
     const accessCalls = [];
@@ -1998,6 +2079,155 @@ describe("app-server package", () => {
         "deleteConnection",
         {
           connectionId: "connection-1",
+        },
+      ],
+    ]);
+  });
+
+  it("updates Canvas view and filter settings through workspace write access", async () => {
+    const repositoryCalls = [];
+    const accessCalls = [];
+    const repository = {
+      storageMode: "test",
+      async listBoardsForWorkspace() {
+        return [];
+      },
+      async findBoardWorkspaceId(boardId) {
+        repositoryCalls.push(["findBoardWorkspace", boardId]);
+        return "workspace-1";
+      },
+      async findShapeWorkspaceId() {
+        return null;
+      },
+      async findConnectionWorkspaceId() {
+        return null;
+      },
+      async findBoardDetail() {
+        return null;
+      },
+      async createConnectionForBoard() {
+        return {
+          status: "invalid",
+        };
+      },
+      async deleteConnection() {
+        return null;
+      },
+      async upsertViewSettingForBoard(input) {
+        repositoryCalls.push(["upsertViewSetting", input]);
+        return {
+          zoom: input.zoom,
+          viewportX: input.viewportX,
+          viewportY: input.viewportY,
+        };
+      },
+      async upsertFilterSettingForBoard(input) {
+        repositoryCalls.push(["upsertFilterSetting", input]);
+        return {
+          enabledEntityTypes: input.enabledEntityTypes,
+          assigneeMemberId: input.assigneeMemberId,
+          showDelayedOnly: input.showDelayedOnly,
+          showRiskOnly: input.showRiskOnly,
+          filters: input.filters,
+        };
+      },
+      async upsertShapePosition() {
+        return null;
+      },
+    };
+    const currentMemberAdapter = {
+      async requireCurrentMember(input) {
+        accessCalls.push(input);
+        return {
+          currentMember: {
+            workspaceId: input.workspaceId,
+            memberId: "member-1",
+            userId: input.currentUser.id,
+            role: "member",
+            displayName: null,
+          },
+          permissions: {
+            canRead: true,
+            canWrite: true,
+            canManage: false,
+          },
+        };
+      },
+    };
+    const service = new CanvasService(repository, currentMemberAdapter);
+    const currentUser = { id: "user-1" };
+    const viewSetting = await service.updateCanvasViewSetting({
+      boardId: "board-1",
+      currentUser,
+      body: {
+        zoom: 1.5,
+        viewportX: 300,
+        viewportY: -120,
+      },
+    });
+    const filterSetting = await service.updateCanvasFilterSetting({
+      boardId: "board-1",
+      currentUser,
+      body: {
+        enabledEntityTypes: ["task", "pull_request", "task"],
+        assigneeMemberId: null,
+        showDelayedOnly: false,
+        showRiskOnly: true,
+        filters: {
+          label: "review",
+        },
+      },
+    });
+
+    assert.deepEqual(viewSetting, {
+      zoom: 1.5,
+      viewportX: 300,
+      viewportY: -120,
+    });
+    assert.deepEqual(filterSetting, {
+      enabledEntityTypes: ["task", "pull_request"],
+      assigneeMemberId: null,
+      showDelayedOnly: false,
+      showRiskOnly: true,
+      filters: {
+        label: "review",
+      },
+    });
+    assert.deepEqual(accessCalls, [
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+    ]);
+    assert.deepEqual(repositoryCalls, [
+      ["findBoardWorkspace", "board-1"],
+      [
+        "upsertViewSetting",
+        {
+          boardId: "board-1",
+          memberId: "member-1",
+          zoom: 1.5,
+          viewportX: 300,
+          viewportY: -120,
+        },
+      ],
+      ["findBoardWorkspace", "board-1"],
+      [
+        "upsertFilterSetting",
+        {
+          boardId: "board-1",
+          memberId: "member-1",
+          enabledEntityTypes: ["task", "pull_request"],
+          assigneeMemberId: null,
+          showDelayedOnly: false,
+          showRiskOnly: true,
+          filters: {
+            label: "review",
+          },
         },
       ],
     ]);
