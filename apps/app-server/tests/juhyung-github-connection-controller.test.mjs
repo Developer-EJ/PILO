@@ -11,7 +11,7 @@ const {
 } = require("../src/modules/juhyung/juhyung-github-connection.controller");
 
 describe("JuhyungGithubConnectionController", () => {
-  it("exposes workspace-scoped start, list, and revoke methods with header actor context", async () => {
+  it("exposes workspace-scoped start, list, and revoke methods with authenticated request context", async () => {
     const calls = [];
     const service = {
       startConnection: async (workspaceId, body, actor) => {
@@ -28,18 +28,22 @@ describe("JuhyungGithubConnectionController", () => {
       },
     };
     const controller = new JuhyungGithubConnectionController(service);
-    const headers = {
-      "x-user-id": "user-1",
-      "x-member-id": "member-1",
+    const request = {
+      auth: {
+        actor: {
+          userId: "user-1",
+          memberId: "member-1",
+        },
+      },
     };
 
     await controller.startConnection(
       "workspace-1",
       { scopes: ["metadata"] },
-      headers,
+      request,
     );
-    await controller.listConnections("workspace-1", headers);
-    await controller.revokeConnection("workspace-1", "connection-1", headers);
+    await controller.listConnections("workspace-1", request);
+    await controller.revokeConnection("workspace-1", "connection-1", request);
 
     assert.deepEqual(calls, [
       [

@@ -3,10 +3,10 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   Param,
   Post,
   Query,
+  Req,
 } from "@nestjs/common";
 import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
@@ -16,7 +16,12 @@ import {
 } from "./juhyung-github-connection.service";
 
 type HeaderValue = string | string[] | undefined;
-type RequestHeaders = Record<string, HeaderValue>;
+
+interface AuthenticatedRequestContext {
+  auth?: {
+    actor?: WorkspaceActor;
+  };
+}
 
 interface GithubAppCallbackQuery {
   state?: HeaderValue;
@@ -37,23 +42,23 @@ export class JuhyungGithubConnectionController {
   startConnection(
     @Param("workspaceId") workspaceId: string,
     @Body() body: StartGithubConnectionInput = {},
-    @Headers() headers: RequestHeaders = {},
+    @Req() request: AuthenticatedRequestContext = {},
   ) {
     return this.githubConnectionService.startConnection(
       workspaceId,
       body,
-      this.actorFromHeaders(headers),
+      this.actorFromRequest(request),
     );
   }
 
   @Get()
   listConnections(
     @Param("workspaceId") workspaceId: string,
-    @Headers() headers: RequestHeaders = {},
+    @Req() request: AuthenticatedRequestContext = {},
   ) {
     return this.githubConnectionService.listConnections(
       workspaceId,
-      this.actorFromHeaders(headers),
+      this.actorFromRequest(request),
     );
   }
 
@@ -61,24 +66,19 @@ export class JuhyungGithubConnectionController {
   revokeConnection(
     @Param("workspaceId") workspaceId: string,
     @Param("connectionId") connectionId: string,
-    @Headers() headers: RequestHeaders = {},
+    @Req() request: AuthenticatedRequestContext = {},
   ) {
     return this.githubConnectionService.revokeConnection(
       workspaceId,
       connectionId,
-      this.actorFromHeaders(headers),
+      this.actorFromRequest(request),
     );
   }
 
-  private actorFromHeaders(headers: RequestHeaders): WorkspaceActor {
-    return {
-      userId: this.firstHeader(headers["x-user-id"]),
-      memberId: this.firstHeader(headers["x-member-id"]),
-    };
-  }
-
-  private firstHeader(value: HeaderValue) {
-    return Array.isArray(value) ? value[0] : value;
+  private actorFromRequest(
+    request: AuthenticatedRequestContext,
+  ): WorkspaceActor | undefined {
+    return request.auth?.actor;
   }
 }
 

@@ -131,7 +131,7 @@ model GithubConnection {
   updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  connectedByMember WorkspaceMember? @relation("GithubConnectionConnectedByMember", fields: [connectedByMemberId], references: [id], onDelete: SetNull)
+  connectedByMember WorkspaceMember? @relation("GithubConnectionConnectedByMember", fields: [workspaceId, connectedByMemberId], references: [workspaceId, id], onDelete: NoAction)
 
   @@map("github_connections")
 }

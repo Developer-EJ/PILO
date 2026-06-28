@@ -26,6 +26,7 @@ export interface GithubConnectionSummary {
   provider: "github_app";
   installationId: string | null;
   githubAccountLogin: string | null;
+  scopes: string[];
   connectedAt: string;
   revokedAt: string | null;
 }
@@ -36,6 +37,7 @@ interface GithubConnectionSummaryRow {
   provider: string;
   installationId: string | null;
   githubAccountLogin: string | null;
+  scopes: string[];
   connectedAt: Date | string;
   revokedAt: Date | string | null;
 }
@@ -92,9 +94,9 @@ export class JuhyungGithubConnectionRepository {
     const now = new Date();
     const scopes =
       input.scopes.length > 0 ? input.scopes : pendingConnection.scopes;
-    const connection = await this.database.githubConnection.update({
-      where: { id: pendingConnection.id },
-      data: {
+    const connection = await this.updatePendingConnection(
+      pendingConnection.id,
+      {
         installationId: input.installationId,
         githubAccountLogin: input.githubAccountLogin,
         scopes,
@@ -102,7 +104,7 @@ export class JuhyungGithubConnectionRepository {
         connectedAt: now,
         updatedAt: now,
       },
-    });
+    );
 
     return this.toSummary(connection);
   }
@@ -130,6 +132,7 @@ export class JuhyungGithubConnectionRepository {
         id: connectionId,
         workspaceId,
         installationId: { not: null },
+        revokedAt: null,
       },
     });
 
@@ -156,9 +159,46 @@ export class JuhyungGithubConnectionRepository {
       provider: "github_app",
       installationId: row.installationId,
       githubAccountLogin: row.githubAccountLogin,
+      scopes: row.scopes,
       connectedAt: this.toIsoString(row.connectedAt),
       revokedAt: row.revokedAt ? this.toIsoString(row.revokedAt) : null,
     };
+  }
+
+  private async updatePendingConnection(
+    connectionId: string,
+    data: {
+      installationId: string;
+      githubAccountLogin: string | null;
+      scopes: string[];
+      stateNonce: null;
+      connectedAt: Date;
+      updatedAt: Date;
+    },
+  ) {
+    try {
+      return await this.database.githubConnection.update({
+        where: { id: connectionId },
+        data,
+      });
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        throw new ConflictException(
+          "GitHub installation is already connected to another workspace",
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "P2002"
+    );
   }
 
   private toIsoString(value: Date | string) {

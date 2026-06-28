@@ -15,56 +15,58 @@ describe("JuhyungGithubConnectionService", () => {
   it("starts a GitHub App installation flow after validating workspace membership", async () => {
     const previousSlug = process.env.GITHUB_APP_SLUG;
     process.env.GITHUB_APP_SLUG = "pilo-dev";
-    const calls = [];
-    const workspaceAccess = {
-      requireWorkspaceMember: async (workspaceId, actor) => {
-        calls.push(["workspace.requireWorkspaceMember", workspaceId, actor]);
-        return { id: "member-1", workspaceId };
-      },
-    };
-    const repository = {
-      createPendingConnectionIntent: async (input) => {
-        calls.push(["repository.createPendingConnectionIntent", input]);
-        return { id: "connection-1", ...input };
-      },
-    };
-    const service = new JuhyungGithubConnectionService(
-      repository,
-      workspaceAccess,
-    );
-
-    const response = await service.startConnection(
-      "workspace-1",
-      { scopes: ["metadata", "contents"] },
-      { userId: "user-1", memberId: "member-1" },
-    );
-
-    assert.match(response.state, /^[A-Za-z0-9_-]+$/);
-    assert.equal(
-      response.installationUrl,
-      `https://github.com/apps/pilo-dev/installations/new?state=${encodeURIComponent(response.state)}`,
-    );
-    assert.deepEqual(calls, [
-      [
-        "workspace.requireWorkspaceMember",
-        "workspace-1",
-        { userId: "user-1", memberId: "member-1" },
-      ],
-      [
-        "repository.createPendingConnectionIntent",
-        {
-          workspaceId: "workspace-1",
-          connectedByMemberId: "member-1",
-          scopes: ["metadata", "contents"],
-          stateNonce: response.state,
+    try {
+      const calls = [];
+      const workspaceAccess = {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["workspace.requireWorkspaceMember", workspaceId, actor]);
+          return { id: "member-1", workspaceId };
         },
-      ],
-    ]);
+      };
+      const repository = {
+        createPendingConnectionIntent: async (input) => {
+          calls.push(["repository.createPendingConnectionIntent", input]);
+          return { id: "connection-1", ...input };
+        },
+      };
+      const service = new JuhyungGithubConnectionService(
+        repository,
+        workspaceAccess,
+      );
 
-    if (previousSlug === undefined) {
-      delete process.env.GITHUB_APP_SLUG;
-    } else {
-      process.env.GITHUB_APP_SLUG = previousSlug;
+      const response = await service.startConnection(
+        "workspace-1",
+        { scopes: ["metadata", "contents"] },
+        { userId: "user-1", memberId: "member-1" },
+      );
+
+      assert.match(response.state, /^[A-Za-z0-9_-]+$/);
+      assert.equal(
+        response.installationUrl,
+        `https://github.com/apps/pilo-dev/installations/new?state=${encodeURIComponent(response.state)}`,
+      );
+      assert.deepEqual(calls, [
+        [
+          "workspace.requireWorkspaceMember",
+          "workspace-1",
+          { userId: "user-1", memberId: "member-1" },
+        ],
+        [
+          "repository.createPendingConnectionIntent",
+          {
+            workspaceId: "workspace-1",
+            connectedByMemberId: "member-1",
+            scopes: ["metadata", "contents"],
+            stateNonce: response.state,
+          },
+        ],
+      ]);
+    } finally {
+      if (previousSlug === undefined) {
+        delete process.env.GITHUB_APP_SLUG;
+      } else {
+        process.env.GITHUB_APP_SLUG = previousSlug;
+      }
     }
   });
 
@@ -79,6 +81,7 @@ describe("JuhyungGithubConnectionService", () => {
           provider: "github_app",
           installationId: "12345678",
           githubAccountLogin: "team-org",
+          scopes: ["metadata"],
           connectedAt: "2026-06-27T12:00:00.000Z",
           revokedAt: null,
         };
@@ -123,6 +126,29 @@ describe("JuhyungGithubConnectionService", () => {
         }),
       BadRequestException,
     );
+  });
+
+  it("rejects callbacks without a valid installation id before touching storage", async () => {
+    let completeConnectionIntentCalled = false;
+    const repository = {
+      completeConnectionIntent: async () => {
+        completeConnectionIntentCalled = true;
+        throw new Error(
+          "should not persist a callback without installation id",
+        );
+      },
+    };
+    const service = new JuhyungGithubConnectionService(repository, {});
+
+    await assert.rejects(
+      () =>
+        service.completeAppCallback({
+          state: "nonce-1",
+          installationId: "",
+        }),
+      BadRequestException,
+    );
+    assert.equal(completeConnectionIntentCalled, false);
   });
 
   it("lists and revokes connections only after workspace membership validation", async () => {

@@ -54,6 +54,7 @@ Workspace 단위 연결과 repository 목록은 `/workspaces/:workspaceId/github
   "provider": "github_app",
   "installationId": "12345678",
   "githubAccountLogin": "team-org",
+  "scopes": ["metadata", "contents"],
   "connectedAt": "2026-06-27T12:00:00Z",
   "revokedAt": null
 }
@@ -182,7 +183,7 @@ Review domain consumes this source read model to create its own `changed_files`.
 
 ## Breaking Change Policy
 
-- `GithubConnectionSummary`, `GithubRepositorySummary`, `PullRequestSummary`, and `PullRequestChangedFileSummary` fields are public read model contract fields.
+- `GithubConnectionSummary`, `GithubConnectionStartResponse`, `GithubRepositorySummary`, `PullRequestSummary`, and `PullRequestChangedFileSummary` fields are public contract fields.
 - Removing or renaming fields requires a separate contract change PR, affected consumer review, and a deprecated-field migration plan.
 - `PullRequestChangedFileSummary.sha` is required because Review uses `pullRequestId + path + sha` as stable source identity for resync.
 

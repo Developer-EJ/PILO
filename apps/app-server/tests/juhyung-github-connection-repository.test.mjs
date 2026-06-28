@@ -5,7 +5,11 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 require("ts-node/register");
 
-const { BadRequestException, ConflictException } = require("@nestjs/common");
+const {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} = require("@nestjs/common");
 const {
   JuhyungGithubConnectionRepository,
 } = require("../src/modules/juhyung/juhyung-github-connection.repository");
@@ -77,6 +81,7 @@ describe("JuhyungGithubConnectionRepository", () => {
             provider: "github_app",
             installationId: args.data.installationId,
             githubAccountLogin: args.data.githubAccountLogin,
+            scopes: args.data.scopes,
             connectedAt,
             revokedAt: null,
           };
@@ -98,6 +103,7 @@ describe("JuhyungGithubConnectionRepository", () => {
       provider: "github_app",
       installationId: "12345678",
       githubAccountLogin: "team-org",
+      scopes: ["metadata", "contents"],
       connectedAt: "2026-06-27T12:00:00.000Z",
       revokedAt: null,
     });
@@ -180,6 +186,38 @@ describe("JuhyungGithubConnectionRepository", () => {
     );
   });
 
+  it("rejects installation ids that lose a database uniqueness race during callback completion", async () => {
+    const database = {
+      githubConnection: {
+        findFirst: async (args) => {
+          if (args.where.stateNonce === "nonce-1") {
+            return {
+              id: "connection-1",
+              workspaceId: "workspace-1",
+              scopes: [],
+            };
+          }
+          return null;
+        },
+        update: async () => {
+          throw { code: "P2002" };
+        },
+      },
+    };
+    const repository = new JuhyungGithubConnectionRepository(database);
+
+    await assert.rejects(
+      () =>
+        repository.completeConnectionIntent({
+          stateNonce: "nonce-1",
+          installationId: "12345678",
+          githubAccountLogin: "team-org",
+          scopes: [],
+        }),
+      ConflictException,
+    );
+  });
+
   it("lists active workspace connections and records revoked state", async () => {
     const calls = [];
     const database = {
@@ -193,6 +231,7 @@ describe("JuhyungGithubConnectionRepository", () => {
               provider: "github_app",
               installationId: "12345678",
               githubAccountLogin: "team-org",
+              scopes: ["metadata"],
               connectedAt,
               revokedAt: null,
             },
@@ -210,6 +249,7 @@ describe("JuhyungGithubConnectionRepository", () => {
             provider: "github_app",
             installationId: "12345678",
             githubAccountLogin: "team-org",
+            scopes: ["metadata"],
             connectedAt,
             revokedAt: args.data.revokedAt,
           };
@@ -243,11 +283,46 @@ describe("JuhyungGithubConnectionRepository", () => {
           id: "connection-1",
           workspaceId: "workspace-1",
           installationId: { not: null },
+          revokedAt: null,
         },
       },
     ]);
     assert.equal(calls[2][1].where.id, "connection-1");
     assert.ok(calls[2][1].data.revokedAt instanceof Date);
     assert.ok(calls[2][1].data.updatedAt instanceof Date);
+  });
+
+  it("throws NotFoundException when revoking a missing or already revoked connection", async () => {
+    const calls = [];
+    const database = {
+      githubConnection: {
+        findFirst: async (args) => {
+          calls.push(["findFirst", args]);
+          return null;
+        },
+        update: async () => {
+          throw new Error("should not update a missing GitHub connection");
+        },
+      },
+    };
+    const repository = new JuhyungGithubConnectionRepository(database);
+
+    await assert.rejects(
+      () => repository.revokeConnection("workspace-1", "connection-1"),
+      NotFoundException,
+    );
+    assert.deepEqual(calls, [
+      [
+        "findFirst",
+        {
+          where: {
+            id: "connection-1",
+            workspaceId: "workspace-1",
+            installationId: { not: null },
+            revokedAt: null,
+          },
+        },
+      ],
+    ]);
   });
 });
