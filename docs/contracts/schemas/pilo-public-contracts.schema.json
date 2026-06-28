@@ -380,38 +380,132 @@
         "shapeType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] }
       }
     },
-    "AgentAction": {
+    "AgentActionCommon": {
       "type": "object",
-      "required": ["type", "source", "requiresConfirmation", "payload", "status"],
+      "required": ["id", "runId", "type", "source", "requiresConfirmation", "payload", "status", "confirmedByMemberId", "confirmedAt", "executedAt"],
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "type": { "const": "task.create.draft" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/TaskCreateDraft" } } }
+          "if": {
+            "required": ["requiresConfirmation"],
+            "properties": {
+              "requiresConfirmation": { "const": false }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": { "enum": ["draft", "executed"] },
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" }
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "task.update.status" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/TaskStatusUpdateAction" } } }
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "draft" }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" },
+              "executedAt": { "type": "null" }
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "task.assign" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/TaskAssignAction" } } }
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "waiting_confirmation" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" },
+              "executedAt": { "type": "null" }
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "github.issue.create" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/GithubIssueCreateAction" } } }
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "confirmed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "$ref": "#/$defs/uuid" },
+              "confirmedAt": { "$ref": "#/$defs/dateTime" },
+              "executedAt": { "type": "null" }
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "meeting.report.generate" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/MeetingReportGenerateAction" } } }
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "rejected" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "type": "null" },
+              "confirmedAt": { "type": "null" },
+              "executedAt": { "type": "null" }
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "review.analysis.generate" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/ReviewAnalysisGenerateAction" } } }
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "executed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "executedAt": { "$ref": "#/$defs/dateTime" }
+            }
+          }
         },
         {
-          "if": { "properties": { "type": { "const": "planning.approve" } }, "required": ["type"] },
-          "then": { "properties": { "payload": { "$ref": "#/$defs/PlanningApproveAction" } } }
+          "if": {
+            "required": ["requiresConfirmation", "status"],
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "status": { "const": "executed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "confirmedByMemberId": { "$ref": "#/$defs/uuid" },
+              "confirmedAt": { "$ref": "#/$defs/dateTime" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "requiresConfirmation": { "const": true },
+              "confirmedByMemberId": { "$ref": "#/$defs/uuid" },
+              "confirmedAt": { "$ref": "#/$defs/dateTime" },
+              "executedAt": { "type": "null" }
+            }
+          }
         }
       ],
       "properties": {
@@ -429,9 +523,97 @@
         "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
       }
     },
+    "AgentAction": {
+      "oneOf": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "task.create.draft" },
+                "payload": { "$ref": "#/$defs/TaskCreateDraft" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "task.update.status" },
+                "payload": { "$ref": "#/$defs/TaskStatusUpdateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "task.assign" },
+                "payload": { "$ref": "#/$defs/TaskAssignAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "github.issue.create" },
+                "payload": { "$ref": "#/$defs/GithubIssueCreateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "meeting.report.generate" },
+                "payload": { "$ref": "#/$defs/MeetingReportGenerateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "review.analysis.generate" },
+                "payload": { "$ref": "#/$defs/ReviewAnalysisGenerateAction" }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/AgentActionCommon" },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "planning.approve" },
+                "payload": { "$ref": "#/$defs/PlanningApproveAction" }
+              }
+            }
+          ]
+        }
+      ]
+    },
     "AgentJobMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "requestedAt"],
+      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "contextRefs", "requestedAt"],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
@@ -460,8 +642,44 @@
     },
     "AgentResultMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "status", "output", "actions", "trace", "finishedAt"],
+      "required": ["jobId", "runId", "status", "output", "actions", "trace", "error", "finishedAt"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "succeeded" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": {
+                "type": "object",
+                "required": ["message"],
+                "additionalProperties": false,
+                "properties": {
+                  "code": { "type": ["string", "null"] },
+                  "message": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },

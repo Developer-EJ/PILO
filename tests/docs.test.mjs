@@ -15,6 +15,148 @@ function exists(relPath) {
   return fs.existsSync(path.join(ROOT, relPath));
 }
 
+function readJson(relPath) {
+  return JSON.parse(read(relPath));
+}
+
+function validateJsonSchema(schema, value, root = schema) {
+  const errors = [];
+
+  function resolveRef(ref) {
+    const parts = ref.replace(/^#\//, "").split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+    return parts.reduce((current, part) => current?.[part], root);
+  }
+
+  function typeMatches(type, data) {
+    if (type === "null") return data === null;
+    if (type === "array") return Array.isArray(data);
+    if (type === "object") return data !== null && typeof data === "object" && !Array.isArray(data);
+    if (type === "integer") return Number.isInteger(data);
+    return typeof data === type;
+  }
+
+  function formatMatches(format, data) {
+    if (format === "uuid") {
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data);
+    }
+
+    if (format === "date-time") {
+      return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(data) && !Number.isNaN(Date.parse(data));
+    }
+
+    if (format === "date") {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(data);
+      if (!match) return false;
+
+      const [, year, month, day] = match.map(Number);
+      const parsed = new Date(Date.UTC(year, month - 1, day));
+      return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+    }
+
+    return true;
+  }
+
+  function check(node, data, currentPath = "$") {
+    const localErrors = [];
+    const fail = (message) => localErrors.push(`${currentPath}: ${message}`);
+
+    if (node.$ref) {
+      return check(resolveRef(node.$ref), data, currentPath);
+    }
+
+    if (node.allOf) {
+      for (const child of node.allOf) {
+        localErrors.push(...check(child, data, currentPath));
+      }
+    }
+
+    if (node.if && check(node.if, data, currentPath).length === 0 && node.then) {
+      localErrors.push(...check(node.then, data, currentPath));
+    }
+
+    if (node.anyOf) {
+      const validCount = node.anyOf.filter((child) => check(child, data, currentPath).length === 0).length;
+      if (validCount === 0) fail("must match at least one anyOf schema");
+    }
+
+    if (node.oneOf) {
+      const validCount = node.oneOf.filter((child) => check(child, data, currentPath).length === 0).length;
+      if (validCount !== 1) fail(`must match exactly one oneOf schema, matched ${validCount}`);
+    }
+
+    if (node.const !== undefined && data !== node.const) {
+      fail(`must equal ${JSON.stringify(node.const)}`);
+    }
+
+    if (node.enum && !node.enum.includes(data)) {
+      fail(`must be one of ${JSON.stringify(node.enum)}`);
+    }
+
+    if (node.type) {
+      const allowedTypes = Array.isArray(node.type) ? node.type : [node.type];
+      if (!allowedTypes.some((type) => typeMatches(type, data))) {
+        fail(`must be type ${allowedTypes.join(" or ")}`);
+      }
+    }
+
+    if (typeMatches("object", data)) {
+      if (node.required) {
+        for (const key of node.required) {
+          if (!Object.hasOwn(data, key)) {
+            fail(`missing required property ${key}`);
+          }
+        }
+      }
+
+      if (node.additionalProperties === false && node.properties) {
+        for (const key of Object.keys(data)) {
+          if (!Object.hasOwn(node.properties, key)) {
+            fail(`unexpected property ${key}`);
+          }
+        }
+      }
+
+      if (node.properties) {
+        for (const [key, child] of Object.entries(node.properties)) {
+          if (Object.hasOwn(data, key)) {
+            localErrors.push(...check(child, data[key], `${currentPath}.${key}`));
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(data) && node.items) {
+      data.forEach((item, index) => {
+        localErrors.push(...check(node.items, item, `${currentPath}[${index}]`));
+      });
+    }
+
+    if (typeof data === "string" && node.minLength !== undefined && data.length < node.minLength) {
+      fail(`must have length >= ${node.minLength}`);
+    }
+
+    if (typeof data === "string" && node.format && !formatMatches(node.format, data)) {
+      fail(`must match format ${node.format}`);
+    }
+
+    if (typeof data === "string" && node.pattern && !new RegExp(node.pattern).test(data)) {
+      fail(`must match pattern ${node.pattern}`);
+    }
+
+    if (typeof data === "number" && node.minimum !== undefined && data < node.minimum) {
+      fail(`must be >= ${node.minimum}`);
+    }
+
+    return localErrors;
+  }
+
+  errors.push(...check(schema, value));
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
 describe("agent bootstrap docs", () => {
   it("agent.md points agents to the contract docs and schemas", () => {
     const content = read("agent.md");
@@ -164,11 +306,12 @@ describe("machine-readable public contract schema", () => {
     const agentAction = schema.$defs.AgentAction;
 
     function payloadRefFor(actionType) {
-      const condition = agentAction.allOf.find((entry) => {
-        return entry.if?.properties?.type?.const === actionType;
+      const actionVariant = agentAction.oneOf.find((entry) => {
+        return entry.allOf?.some((child) => child.properties?.type?.const === actionType);
       });
+      const typedSchema = actionVariant?.allOf.find((child) => child.properties?.payload?.$ref);
 
-      return condition?.then?.properties?.payload?.$ref;
+      return typedSchema?.properties?.payload?.$ref;
     }
 
     const expectedPayloadRefs = new Map([
@@ -181,12 +324,24 @@ describe("machine-readable public contract schema", () => {
       ["planning.approve", "#/$defs/PlanningApproveAction"],
     ]);
 
-    assert.deepEqual([...agentAction.properties.type.enum].sort(), [...expectedPayloadRefs.keys()].sort());
+    assert.deepEqual(schema.$defs.AgentActionCommon.properties.type.enum.toSorted(), [...expectedPayloadRefs.keys()].sort());
     for (const [actionType, expectedRef] of expectedPayloadRefs) {
       assert.equal(payloadRefFor(actionType), expectedRef);
     }
-    assert.deepEqual(agentAction.required, ["type", "source", "requiresConfirmation", "payload", "status"]);
-    assert.equal(agentAction.additionalProperties, false);
+    assert.equal(agentAction.oneOf.length, expectedPayloadRefs.size);
+    assert.deepEqual(schema.$defs.AgentActionCommon.required, [
+      "id",
+      "runId",
+      "type",
+      "source",
+      "requiresConfirmation",
+      "payload",
+      "status",
+      "confirmedByMemberId",
+      "confirmedAt",
+      "executedAt",
+    ]);
+    assert.equal(schema.$defs.AgentActionCommon.additionalProperties, false);
     assert.deepEqual(schema.$defs.TaskAssignAction.required, ["taskId", "assigneeMemberId"]);
   });
 
@@ -243,12 +398,230 @@ describe("machine-readable public contract schema", () => {
   });
 
   it("schema defines MeetingActionItem task draft conversion fields", () => {
-    const schema = JSON.parse(read(schemaPath));
+    const schema = readJson(schemaPath);
     const meetingActionItem = schema.$defs.MeetingActionItem;
     assert.deepEqual(meetingActionItem.properties.status.enum, ["draft", "approved", "converted", "rejected"]);
     assert.ok(meetingActionItem.properties.assigneeSuggestionMemberId);
     assert.ok(meetingActionItem.properties.dueDateSuggestion);
     assert.ok(meetingActionItem.properties.convertedTaskId);
+  });
+
+  it("validates AgentAction type-specific payloads", () => {
+    const schema = readJson(schemaPath);
+    const agentAction = schema.$defs.AgentAction;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const baseAction = (type, payload) => ({
+      id: uuid,
+      runId: "00000000-0000-4000-8000-000000000002",
+      type,
+      source: "orchestrator",
+      requiresConfirmation: true,
+      payload,
+      status: "draft",
+      confirmedByMemberId: null,
+      confirmedAt: null,
+      executedAt: null,
+    });
+    const cases = [
+      ["task.create.draft", { workspaceId: uuid, title: "OAuth callback 처리" }],
+      ["task.update.status", { taskId: uuid, status: "in_progress" }],
+      ["task.assign", { taskId: uuid, assigneeMemberId: uuid }],
+      ["github.issue.create", { workspaceId: uuid, taskId: uuid, repositoryId: uuid, title: "OAuth callback 처리" }],
+      ["meeting.report.generate", { workspaceId: uuid, meetingId: uuid }],
+      ["review.analysis.generate", { pullRequestId: uuid }],
+      ["planning.approve", { workspaceId: uuid, projectPlanDraftId: uuid }],
+    ];
+
+    for (const [type, payload] of cases) {
+      const result = validateJsonSchema(agentAction, baseAction(type, payload), schema);
+      assert.equal(result.valid, true, `${type} should validate: ${result.errors.join(", ")}`);
+    }
+  });
+
+  it("validates AgentAction allowed confirmation state combinations", () => {
+    const schema = readJson(schemaPath);
+    const agentAction = schema.$defs.AgentAction;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const dateTime = "2026-06-27T10:00:00.000Z";
+    const baseAction = {
+      id: uuid,
+      runId: "00000000-0000-4000-8000-000000000002",
+      type: "task.create.draft",
+      source: "orchestrator",
+      requiresConfirmation: true,
+      payload: { workspaceId: uuid, title: "OAuth callback 처리" },
+      status: "draft",
+      confirmedByMemberId: null,
+      confirmedAt: null,
+      executedAt: null,
+    };
+    const cases = [
+      {
+        name: "automatic draft",
+        value: {
+          ...baseAction,
+          requiresConfirmation: false,
+          status: "draft",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: null,
+        },
+      },
+      {
+        name: "automatic executed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: false,
+          status: "executed",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: dateTime,
+        },
+      },
+      {
+        name: "confirmed executed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "executed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: dateTime,
+        },
+      },
+      {
+        name: "waiting confirmation",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "waiting_confirmation",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: null,
+        },
+      },
+      {
+        name: "confirmed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "confirmed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: null,
+        },
+      },
+      {
+        name: "rejected",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "rejected",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: null,
+        },
+      },
+      {
+        name: "failed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "failed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: null,
+        },
+      },
+    ];
+
+    for (const { name, value } of cases) {
+      const result = validateJsonSchema(agentAction, value, schema);
+      assert.equal(result.valid, true, `${name} should validate: ${result.errors.join(", ")}`);
+    }
+  });
+
+  it("rejects invalid AgentAction type and state combinations", () => {
+    const schema = readJson(schemaPath);
+    const agentAction = schema.$defs.AgentAction;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const dateTime = "2026-06-27T10:00:00.000Z";
+    const baseAction = {
+      id: uuid,
+      runId: "00000000-0000-4000-8000-000000000002",
+      type: "task.create.draft",
+      source: "orchestrator",
+      requiresConfirmation: true,
+      payload: { workspaceId: uuid, title: "OAuth callback 처리" },
+      status: "draft",
+      confirmedByMemberId: null,
+      confirmedAt: null,
+      executedAt: null,
+    };
+    const invalidCases = [
+      {
+        name: "type/payload mismatch",
+        value: {
+          ...baseAction,
+          type: "task.update.status",
+        },
+      },
+      {
+        name: "requiresConfirmation=false with failed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: false,
+          status: "failed",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+        },
+      },
+      {
+        name: "executed with executedAt=null",
+        value: {
+          ...baseAction,
+          status: "executed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: null,
+        },
+      },
+      {
+        name: "waiting_confirmation with confirmedAt",
+        value: {
+          ...baseAction,
+          status: "waiting_confirmation",
+          confirmedAt: dateTime,
+        },
+      },
+    ];
+
+    for (const { name, value } of invalidCases) {
+      const result = validateJsonSchema(agentAction, value, schema);
+      assert.equal(result.valid, false, `${name} should fail schema validation`);
+    }
+  });
+
+  it("validates AgentResultMessage status and error coupling", () => {
+    const schema = readJson(schemaPath);
+    const agentResult = schema.$defs.AgentResultMessage;
+    const baseResult = {
+      jobId: "00000000-0000-4000-8000-000000000001",
+      runId: "00000000-0000-4000-8000-000000000002",
+      status: "succeeded",
+      output: {},
+      actions: [],
+      trace: [{ message: "workflow finished" }],
+      error: null,
+      finishedAt: "2026-06-27T10:01:00.000Z",
+    };
+
+    assert.equal(validateJsonSchema(agentResult, baseResult, schema).valid, true);
+    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: { message: "workflow failed" } }, schema).valid, true);
+    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: { code: null, message: "workflow failed" } }, schema).valid, true);
+    assert.equal(validateJsonSchema(agentResult, { ...baseResult, error: { message: "unexpected error" } }, schema).valid, false);
+    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: { code: "WORKFLOW_FAILED" } }, schema).valid, false);
   });
 });
 
