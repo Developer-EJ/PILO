@@ -129,10 +129,22 @@ describe("machine-readable public contract schema", () => {
       "WorkspaceSummary",
       "WorkspaceMemberSummary",
       "TaskSummary",
+      "TaskDraft",
       "TaskCreateDraft",
+      "TaskStatusUpdateAction",
+      "TaskAssignAction",
+      "MilestoneSummary",
       "ProgressSummary",
+      "ProgressSnapshotSummary",
+      "GithubConnectionSummary",
+      "GithubRepositorySummary",
       "GithubIssueSummary",
+      "GithubIssueCreateAction",
       "PullRequestSummary",
+      "PullRequestChangedFileSummary",
+      "MeetingReportGenerateAction",
+      "ReviewAnalysisGenerateAction",
+      "PlanningApproveAction",
       "MeetingReportSummary",
       "MeetingActionItem",
       "PRAnalysisSummary",
@@ -145,6 +157,89 @@ describe("machine-readable public contract schema", () => {
     ]) {
       assert.ok(defs[name], `schema must define ${name}`);
     }
+  });
+
+  it("agent action schema binds every supported action type to a concrete payload schema", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const agentAction = schema.$defs.AgentAction;
+
+    function payloadRefFor(actionType) {
+      const condition = agentAction.allOf.find((entry) => {
+        return entry.if?.properties?.type?.const === actionType;
+      });
+
+      return condition?.then?.properties?.payload?.$ref;
+    }
+
+    const expectedPayloadRefs = new Map([
+      ["task.create.draft", "#/$defs/TaskCreateDraft"],
+      ["task.update.status", "#/$defs/TaskStatusUpdateAction"],
+      ["task.assign", "#/$defs/TaskAssignAction"],
+      ["github.issue.create", "#/$defs/GithubIssueCreateAction"],
+      ["meeting.report.generate", "#/$defs/MeetingReportGenerateAction"],
+      ["review.analysis.generate", "#/$defs/ReviewAnalysisGenerateAction"],
+      ["planning.approve", "#/$defs/PlanningApproveAction"],
+    ]);
+
+    assert.deepEqual([...agentAction.properties.type.enum].sort(), [...expectedPayloadRefs.keys()].sort());
+    for (const [actionType, expectedRef] of expectedPayloadRefs) {
+      assert.equal(payloadRefFor(actionType), expectedRef);
+    }
+    assert.deepEqual(agentAction.required, ["type", "source", "requiresConfirmation", "payload", "status"]);
+    assert.equal(agentAction.additionalProperties, false);
+    assert.deepEqual(schema.$defs.TaskAssignAction.required, ["taskId", "assigneeMemberId"]);
+  });
+
+  it("github contract exposes pull request changed file source for review consumers", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const githubContract = read("docs/contracts/github.md");
+    const reviewContract = read("docs/contracts/review.md");
+    const juhyungBrief = read("docs/agents/juhyung-task-github-progress.md");
+    const changedFileSummary = schema.$defs.PullRequestChangedFileSummary;
+    const breakingChangePolicy = githubContract.slice(githubContract.indexOf("## Breaking Change Policy"));
+
+    assert.ok(changedFileSummary);
+    for (const field of [
+      "pullRequestId",
+      "path",
+      "status",
+      "additions",
+      "deletions",
+      "changes",
+      "patch",
+      "sha",
+      "sourceSyncedAt",
+    ]) {
+      assert.ok(changedFileSummary.required.includes(field));
+    }
+    assert.equal(changedFileSummary.additionalProperties, false);
+    assert.equal(changedFileSummary.properties.path.type, "string");
+    assert.equal(changedFileSummary.properties.path.minLength, 1);
+    assert.equal(changedFileSummary.properties.sha.type, "string");
+    assert.equal(changedFileSummary.properties.sha.minLength, 1);
+    assert.match(githubContract, /PullRequestChangedFileSummary/);
+    assert.match(githubContract, /\/pull-requests\/:pullRequestId\/changed-files/);
+    assert.match(githubContract, /patch/);
+    assert.match(githubContract, /state\/nonce/);
+    assert.match(githubContract, /installationId -> workspaceId/);
+    assert.match(githubContract, /changed_functions/);
+    assert.match(githubContract, /non-null `patch`/);
+    assert.match(githubContract, /patch: null/);
+    assert.match(githubContract, /pullRequestId \+ path \+ sha/);
+    assert.match(githubContract, /## Provided Read Models/);
+    assert.match(githubContract, /## Consumed By/);
+    assert.match(githubContract, /## Breaking Change Policy/);
+    for (const model of [
+      "GithubConnectionSummary",
+      "GithubRepositorySummary",
+      "PullRequestSummary",
+      "PullRequestChangedFileSummary",
+    ]) {
+      assert.match(breakingChangePolicy, new RegExp(model));
+    }
+    assert.match(reviewContract, /PullRequestChangedFileSummary/);
+    assert.match(reviewContract, /non-null `patch`/);
+    assert.match(juhyungBrief, /PullRequestChangedFileSummary/);
   });
 
   it("schema defines MeetingActionItem task draft conversion fields", () => {
@@ -167,6 +262,10 @@ describe("contract fixtures", () => {
     assert.ok(Array.isArray(fixture.agentActions));
     assert.ok(Array.isArray(fixture.meetingReports));
     assert.ok(Array.isArray(fixture.meetingActionItems));
+    assert.ok(Array.isArray(fixture.pullRequestChangedFiles));
+    assert.equal(fixture.pullRequestChangedFiles.length, fixture.pullRequests[0].changedFilesCount);
+    assert.ok(fixture.pullRequestChangedFiles.every((file) => file.pullRequestId === fixture.pullRequests[0].id));
+    assert.ok(fixture.pullRequestChangedFiles.every((file) => typeof file.sha === "string" && file.sha.length > 0));
     assert.ok(fixture.meetingReports.length > 0);
     assert.ok(fixture.meetingActionItems.length > 0);
     assert.equal(fixture.meetingActionItems[0].reportId, fixture.meetingReports[0].id);
