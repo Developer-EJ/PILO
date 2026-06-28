@@ -18,6 +18,7 @@ export type WorkspaceMemberRole = (typeof WORKSPACE_MEMBER_ROLES)[number];
 
 export type WorkspaceAuthUserRef = {
   id: string;
+  name?: string | null;
 };
 
 export type WorkspaceRecord = {
@@ -78,6 +79,24 @@ export type FindWorkspaceForUserInput = {
   userId: string;
 };
 
+export type CreateWorkspaceInput = {
+  currentUser: WorkspaceAuthUserRef;
+  name: string;
+  description: string | null;
+  type: WorkspaceType;
+};
+
+export type UpdateWorkspacePatch = {
+  name?: string;
+  description?: string | null;
+  type?: WorkspaceType;
+  status?: WorkspaceStatus;
+};
+
+export type UpdateWorkspaceForUserInput = FindWorkspaceForUserInput & {
+  patch: UpdateWorkspacePatch;
+};
+
 export type WorkspaceRepositoryPort = {
   readonly storageMode: string;
   listWorkspaceSummariesForUser(userId: string): Promise<WorkspaceSummary[]>;
@@ -87,4 +106,11 @@ export type WorkspaceRepositoryPort = {
   findCurrentMember(
     input: FindWorkspaceForUserInput,
   ): Promise<WorkspaceMemberRecord | null>;
+  createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceSummary>;
+  updateWorkspaceForUser(
+    input: UpdateWorkspaceForUserInput,
+  ): Promise<WorkspaceSummary | null>;
+  softDeleteWorkspaceForUser(
+    input: FindWorkspaceForUserInput,
+  ): Promise<boolean>;
 };

@@ -210,6 +210,101 @@ describe("auth HTTP integration", () => {
     }
   });
 
+  it("serves workspace create, list, detail, and update APIs for the current session", async () => {
+    const oauthRequests = [];
+    const fetcher = createOAuthFetchStub(oauthRequests);
+    const { server, close } = await createAuthIntegrationApp(fetcher);
+
+    try {
+      const startResponse = await server.inject({
+        method: "GET",
+        url: "/auth/google/start?next=%2Fworkspaces",
+      });
+      const authorizationUrl = getRedirectUrl(startResponse);
+      const state = authorizationUrl.searchParams.get("state");
+      const callbackResponse = await server.inject({
+        method: "GET",
+        url: `/auth/google/callback?code=google-code&state=${encodeURIComponent(
+          state,
+        )}`,
+      });
+      const cookieHeader = getCookieHeader(callbackResponse);
+
+      const createResponse = await server.inject({
+        method: "POST",
+        url: "/workspaces",
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          name: "PILO",
+          description: "AI Project OS",
+          type: "side_project",
+        }),
+      });
+      const created = createResponse.json();
+
+      assert.equal(createResponse.statusCode, 201);
+      assert.equal(created.name, "PILO");
+      assert.equal(created.description, "AI Project OS");
+      assert.equal(created.type, "side_project");
+      assert.equal(created.status, "active");
+      assert.equal(created.myRole, "owner");
+      assert.equal(created.memberCount, 1);
+
+      const listResponse = await server.inject({
+        method: "GET",
+        url: "/workspaces",
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(listResponse.statusCode, 200);
+      assert.deepEqual(listResponse.json(), [created]);
+
+      const detailResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(detailResponse.statusCode, 200);
+      assert.deepEqual(detailResponse.json(), created);
+
+      const updateResponse = await server.inject({
+        method: "PATCH",
+        url: `/workspaces/${created.id}`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          name: "PILO Lab",
+          status: "archived",
+        }),
+      });
+      const updated = updateResponse.json();
+
+      assert.equal(updateResponse.statusCode, 200);
+      assert.equal(updated.name, "PILO Lab");
+      assert.equal(updated.status, "archived");
+
+      const anonymousResponse = await server.inject({
+        method: "GET",
+        url: "/workspaces",
+      });
+
+      assert.equal(anonymousResponse.statusCode, 401);
+      assert.equal(oauthRequests.length, 2);
+    } finally {
+      await close();
+    }
+  });
+
   it("redirects callback provider errors without calling OAuth endpoints", async () => {
     const oauthRequests = [];
     const fetcher = createOAuthFetchStub(oauthRequests);
