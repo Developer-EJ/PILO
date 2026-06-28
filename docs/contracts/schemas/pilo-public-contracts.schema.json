@@ -193,7 +193,7 @@
     },
     "CodeReviewRoomSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "pullRequestId", "status", "createdAt", "updatedAt"],
+      "required": ["id", "workspaceId", "pullRequestId", "status", "createdByMemberId", "createdAt", "updatedAt", "pullRequest"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -203,7 +203,7 @@
         "createdByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "createdAt": { "$ref": "#/$defs/dateTime" },
         "updatedAt": { "$ref": "#/$defs/dateTime" },
-        "pullRequest": { "anyOf": [{ "$ref": "#/$defs/PullRequestSummary" }, { "type": "null" }] }
+        "pullRequest": { "$ref": "#/$defs/PullRequestSummary" }
       }
     },
     "PRAnalysisSummary": {

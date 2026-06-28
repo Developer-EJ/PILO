@@ -37,7 +37,7 @@ export interface CodeReviewRoomRecord {
 }
 
 export interface CodeReviewRoomSummary extends CodeReviewRoomRecord {
-  pullRequest: PullRequestSummaryRef | null;
+  pullRequest: PullRequestSummaryRef;
 }
 
 export interface CreateCodeReviewRoomInput {
@@ -46,6 +46,11 @@ export interface CreateCodeReviewRoomInput {
   pullRequestId: string;
   createdByMemberId: string | null;
   createdAt: string;
+}
+
+export interface ReviewRoomActorContext {
+  workspaceId: string;
+  memberId: string | null;
 }
 
 export interface ReviewRoomCreatedEvent {

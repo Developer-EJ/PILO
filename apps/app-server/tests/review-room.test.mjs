@@ -32,7 +32,27 @@ describe("review room API boundary", () => {
     assert.equal(room.pullRequestId, "66666666-6666-4666-8666-666666666661");
     assert.equal(room.workspaceId, "22222222-2222-4222-8222-222222222222");
     assert.equal(room.status, "open");
-    assert.equal(room.pullRequest?.number, 7);
+    assert.equal(room.pullRequest.number, 7);
+  });
+
+  it("stores the caller context instead of a hard-coded room owner", () => {
+    const service = new ReviewRoomService(
+      new InMemoryCodeReviewRoomRepository(),
+    );
+
+    const room = service.openRoomForPullRequest(
+      "66666666-6666-4666-8666-666666666661",
+      {
+        workspaceId: "22222222-2222-4222-8222-222222222229",
+        memberId: "33333333-3333-4333-8333-333333333339",
+      },
+    );
+
+    assert.equal(room.workspaceId, "22222222-2222-4222-8222-222222222229");
+    assert.equal(
+      room.createdByMemberId,
+      "33333333-3333-4333-8333-333333333339",
+    );
   });
 
   it("returns the existing room for the same pull request", () => {

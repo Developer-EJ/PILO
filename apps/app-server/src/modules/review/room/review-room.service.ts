@@ -4,44 +4,30 @@ import {
   CodeReviewRoomRecord,
   CodeReviewRoomSummary,
   PullRequestSummaryRef,
+  ReviewRoomActorContext,
   ReviewRoomCreatedEvent,
 } from "./code-review-room.types";
 import { InMemoryCodeReviewRoomRepository } from "./in-memory-code-review-room.repository";
-
-const CURRENT_MEMBER_FIXTURE = {
-  workspaceId: "22222222-2222-4222-8222-222222222222",
-  memberId: "33333333-3333-4333-8333-333333333331",
-};
-
-const PULL_REQUEST_FIXTURES = new Map<string, PullRequestSummaryRef>([
-  [
-    "66666666-6666-4666-8666-666666666661",
-    {
-      id: "66666666-6666-4666-8666-666666666661",
-      repositoryId: "55555555-5555-4555-8555-555555555501",
-      number: 7,
-      title: "Add OAuth callback shell",
-      authorLogin: "Developer-EJ",
-      state: "review_requested",
-      branch: "feature/donghyun/auth-login",
-      baseBranch: "dev",
-      url: "https://github.com/example/pilo/pull/7",
-      changedFilesCount: 4,
-      additions: 180,
-      deletions: 12,
-      linkedTaskIds: ["44444444-4444-4444-8444-444444444441"],
-      syncedAt: "2026-06-27T10:00:00.000Z",
-    },
-  ],
-]);
+import {
+  DEFAULT_REVIEW_ROOM_CONTEXT,
+  REVIEW_ROOM_PULL_REQUEST_FIXTURES,
+} from "./review-room.fixtures";
 
 @Injectable()
 export class ReviewRoomService {
   constructor(
     private readonly roomRepository: InMemoryCodeReviewRoomRepository,
+    private readonly defaultContext: ReviewRoomActorContext = DEFAULT_REVIEW_ROOM_CONTEXT,
+    private readonly pullRequestSummaries: ReadonlyMap<
+      string,
+      PullRequestSummaryRef
+    > = REVIEW_ROOM_PULL_REQUEST_FIXTURES,
   ) {}
 
-  openRoomForPullRequest(pullRequestId: string): CodeReviewRoomSummary {
+  openRoomForPullRequest(
+    pullRequestId: string,
+    context: ReviewRoomActorContext = this.defaultContext,
+  ): CodeReviewRoomSummary {
     const pullRequest = this.findPullRequestOrThrow(pullRequestId);
     const existingRoom = this.roomRepository.findByPullRequestId(pullRequestId);
 
@@ -52,9 +38,9 @@ export class ReviewRoomService {
     const createdAt = new Date().toISOString();
     const room = this.roomRepository.create({
       id: randomUUID(),
-      workspaceId: CURRENT_MEMBER_FIXTURE.workspaceId,
+      workspaceId: context.workspaceId,
       pullRequestId,
-      createdByMemberId: CURRENT_MEMBER_FIXTURE.memberId,
+      createdByMemberId: context.memberId,
       createdAt,
     });
 
@@ -84,7 +70,7 @@ export class ReviewRoomService {
   }
 
   private findPullRequestOrThrow(pullRequestId: string): PullRequestSummaryRef {
-    const pullRequest = PULL_REQUEST_FIXTURES.get(pullRequestId);
+    const pullRequest = this.pullRequestSummaries.get(pullRequestId);
 
     if (!pullRequest) {
       throw new NotFoundException(
