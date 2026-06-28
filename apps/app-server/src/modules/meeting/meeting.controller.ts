@@ -11,6 +11,7 @@ import {
   CreateMeetingReportRiskRequestDto,
   CreateTranscriptSegmentRequestDto,
   MeetingActionItemResponseDto,
+  MeetingActionItemTaskDraftResponseDto,
   MeetingAgendaResponseDto,
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
@@ -261,5 +262,12 @@ export class MeetingController {
       actionItemId,
       requestBody,
     );
+  }
+
+  @Post("meeting-action-items/:actionItemId/task-draft")
+  requestActionItemTaskDraft(
+    @Param("actionItemId") actionItemId: string,
+  ): MeetingActionItemTaskDraftResponseDto {
+    return this.meetingService.requestActionItemTaskDraft(actionItemId);
   }
 }
