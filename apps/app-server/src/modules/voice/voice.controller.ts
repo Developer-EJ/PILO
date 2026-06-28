@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
+  JoinVoiceSessionRequestDto,
+  UpdateVoiceSessionRecordingStatusRequestDto,
   UpdateVoiceRoomStatusRequestDto,
   VoiceRoomResponseDto,
+  VoiceSessionResponseDto,
   VoiceScaffoldResponseDto,
 } from "./dto/voice-room-response.dto";
 import { VoiceService } from "./voice.service";
@@ -43,5 +46,38 @@ export class VoiceController {
     @Body() requestBody: UpdateVoiceRoomStatusRequestDto,
   ): VoiceRoomResponseDto {
     return this.voiceService.updateVoiceRoomStatus(voiceRoomId, requestBody);
+  }
+
+  @Post("voice-rooms/:voiceRoomId/sessions")
+  joinVoiceSession(
+    @Param("voiceRoomId") voiceRoomId: string,
+    @Body() requestBody: JoinVoiceSessionRequestDto,
+  ): VoiceSessionResponseDto {
+    return this.voiceService.joinVoiceSession(voiceRoomId, requestBody);
+  }
+
+  @Get("voice-rooms/:voiceRoomId/sessions")
+  listVoiceSessions(
+    @Param("voiceRoomId") voiceRoomId: string,
+  ): VoiceSessionResponseDto[] {
+    return this.voiceService.listVoiceSessions(voiceRoomId);
+  }
+
+  @Patch("voice-sessions/:voiceSessionId/leave")
+  leaveVoiceSession(
+    @Param("voiceSessionId") voiceSessionId: string,
+  ): VoiceSessionResponseDto {
+    return this.voiceService.leaveVoiceSession(voiceSessionId);
+  }
+
+  @Patch("voice-sessions/:voiceSessionId/recording-status")
+  updateVoiceSessionRecordingStatus(
+    @Param("voiceSessionId") voiceSessionId: string,
+    @Body() requestBody: UpdateVoiceSessionRecordingStatusRequestDto,
+  ): VoiceSessionResponseDto {
+    return this.voiceService.updateVoiceSessionRecordingStatus(
+      voiceSessionId,
+      requestBody,
+    );
   }
 }
