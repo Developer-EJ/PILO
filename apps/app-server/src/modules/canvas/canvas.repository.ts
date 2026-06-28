@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type {
   CanvasBoardDetail,
+  CanvasBoardCreateRequest,
   CanvasBoardRecord,
   CanvasBoardSummary,
   CanvasConnectionCreateResult,
@@ -14,8 +15,11 @@ import type {
   CanvasFilterSettingRecord,
   CanvasNodePositionRecord,
   CanvasRepositoryPort,
+  CanvasShapeDeleteResult,
   CanvasShapeRecord,
+  CanvasShapeRequest,
   CanvasShapeSummary,
+  CanvasShapeUpdateRequest,
   CanvasViewSetting,
   CanvasViewSettingRequest,
   CanvasViewSettingRecord,
@@ -68,6 +72,30 @@ export class CanvasRepository implements CanvasRepositoryPort {
     return board?.workspaceId ?? null;
   }
 
+  async createBoardForWorkspace(
+    input: CanvasBoardCreateRequest & {
+      workspaceId: string;
+      createdByMemberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasBoardSummary> {
+    const now = (input.now ?? new Date()).toISOString();
+    const board: CanvasBoardRecord = {
+      id: randomUUID(),
+      workspaceId: input.workspaceId,
+      title: input.title,
+      boardType: input.boardType,
+      createdByMemberId: input.createdByMemberId,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    this.boardsById.set(board.id, board);
+
+    return this.toBoardSummary(board);
+  }
+
   async findConnectionWorkspaceId(
     connectionId: string,
   ): Promise<string | null> {
@@ -103,6 +131,114 @@ export class CanvasRepository implements CanvasRepositoryPort {
       ),
       viewSetting: this.toViewSetting(input.boardId, input.memberId),
       filterSetting: this.toFilterSetting(input.boardId, input.memberId),
+    };
+  }
+
+  async createShapeForBoard(
+    input: CanvasShapeRequest & {
+      boardId: string;
+      createdByMemberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasShapeSummary | null> {
+    const board = this.findVisibleBoard(input.boardId);
+
+    if (!board) {
+      return null;
+    }
+
+    const now = (input.now ?? new Date()).toISOString();
+    const zIndex = this.listVisibleShapes(input.boardId).length + 1;
+    const shape: CanvasShapeRecord = {
+      id: randomUUID(),
+      boardId: input.boardId,
+      shapeType: input.shapeType,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      displayTitle: input.displayTitle,
+      width: input.width,
+      height: input.height,
+      color: input.color,
+      isCollapsed: false,
+      zIndex,
+      createdByMemberId: input.createdByMemberId,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    this.shapesById.set(shape.id, shape);
+    board.updatedAt = now;
+
+    return this.toShapeSummary(shape);
+  }
+
+  async updateShape(
+    input: CanvasShapeUpdateRequest & {
+      shapeId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasShapeSummary | null> {
+    const shape = this.findVisibleShape(input.shapeId);
+
+    if (!shape) {
+      return null;
+    }
+
+    if (input.displayTitle !== undefined)
+      shape.displayTitle = input.displayTitle;
+    if (input.width !== undefined) shape.width = input.width;
+    if (input.height !== undefined) shape.height = input.height;
+    if (input.color !== undefined) shape.color = input.color;
+    if (input.isCollapsed !== undefined) shape.isCollapsed = input.isCollapsed;
+    if (input.zIndex !== undefined) shape.zIndex = input.zIndex;
+
+    const updatedAt = (input.now ?? new Date()).toISOString();
+    shape.updatedAt = updatedAt;
+
+    const board = this.findVisibleBoard(shape.boardId);
+
+    if (board) {
+      board.updatedAt = updatedAt;
+    }
+
+    return this.toShapeSummary(shape);
+  }
+
+  async deleteShape(input: {
+    shapeId: string;
+    now?: Date;
+  }): Promise<CanvasShapeDeleteResult | null> {
+    const shape = this.findVisibleShape(input.shapeId);
+
+    if (!shape) {
+      return null;
+    }
+
+    const now = (input.now ?? new Date()).toISOString();
+    shape.deletedAt = now;
+    shape.updatedAt = now;
+
+    for (const connection of this.connectionsById.values()) {
+      if (
+        !connection.deletedAt &&
+        (connection.sourceShapeId === shape.id ||
+          connection.targetShapeId === shape.id)
+      ) {
+        connection.deletedAt = now;
+        connection.updatedAt = now;
+      }
+    }
+
+    const board = this.findVisibleBoard(shape.boardId);
+
+    if (board) {
+      board.updatedAt = now;
+    }
+
+    return {
+      id: shape.id,
+      deleted: true,
     };
   }
 

@@ -9,6 +9,7 @@ import {
   Headers,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Put,
   UnauthorizedException,
@@ -42,6 +43,21 @@ export class CanvasController {
     );
   }
 
+  @Post("workspaces/:workspaceId/canvas-boards")
+  createCanvasBoard(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.createCanvasBoard({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        workspaceId,
+        body,
+      }),
+    );
+  }
+
   @Get("canvas-boards/:boardId")
   getCanvasBoardDetail(
     @Headers("cookie") cookieHeader: string | undefined,
@@ -51,6 +67,49 @@ export class CanvasController {
       this.canvasService.getCanvasBoardDetail({
         currentUser: this.requireCurrentUser(cookieHeader),
         boardId,
+      }),
+    );
+  }
+
+  @Post("canvas-boards/:boardId/shapes")
+  createCanvasShape(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("boardId") boardId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.createCanvasShape({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        boardId,
+        body,
+      }),
+    );
+  }
+
+  @Patch("canvas-shapes/:shapeId")
+  updateCanvasShape(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("shapeId") shapeId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.updateCanvasShape({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        shapeId,
+        body,
+      }),
+    );
+  }
+
+  @Delete("canvas-shapes/:shapeId")
+  deleteCanvasShape(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("shapeId") shapeId: string,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.deleteCanvasShape({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        shapeId,
       }),
     );
   }
