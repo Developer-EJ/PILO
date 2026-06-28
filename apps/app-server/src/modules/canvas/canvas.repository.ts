@@ -9,11 +9,15 @@ import type {
   CanvasConnectionRequest,
   CanvasConnectionRecord,
   CanvasConnectionSummary,
+  CanvasFilterSetting,
+  CanvasFilterSettingRequest,
   CanvasFilterSettingRecord,
   CanvasNodePositionRecord,
   CanvasRepositoryPort,
   CanvasShapeRecord,
   CanvasShapeSummary,
+  CanvasViewSetting,
+  CanvasViewSettingRequest,
   CanvasViewSettingRecord,
 } from "./canvas.types";
 
@@ -215,6 +219,68 @@ export class CanvasRepository implements CanvasRepositoryPort {
     };
   }
 
+  async upsertViewSettingForBoard(
+    input: CanvasViewSettingRequest & {
+      boardId: string;
+      memberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasViewSetting | null> {
+    const board = this.findVisibleBoard(input.boardId);
+
+    if (!board) {
+      return null;
+    }
+
+    const updatedAt = (input.now ?? new Date()).toISOString();
+    this.viewSettingsByKey.set(
+      createMemberSettingKey(input.boardId, input.memberId),
+      {
+        boardId: input.boardId,
+        memberId: input.memberId,
+        zoom: input.zoom,
+        viewportX: input.viewportX,
+        viewportY: input.viewportY,
+        updatedAt,
+      },
+    );
+    board.updatedAt = updatedAt;
+
+    return this.toViewSetting(input.boardId, input.memberId);
+  }
+
+  async upsertFilterSettingForBoard(
+    input: CanvasFilterSettingRequest & {
+      boardId: string;
+      memberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasFilterSetting | null> {
+    const board = this.findVisibleBoard(input.boardId);
+
+    if (!board) {
+      return null;
+    }
+
+    const updatedAt = (input.now ?? new Date()).toISOString();
+    this.filterSettingsByKey.set(
+      createMemberSettingKey(input.boardId, input.memberId),
+      {
+        boardId: input.boardId,
+        memberId: input.memberId,
+        enabledEntityTypes: [...input.enabledEntityTypes],
+        assigneeMemberId: input.assigneeMemberId,
+        showDelayedOnly: input.showDelayedOnly,
+        showRiskOnly: input.showRiskOnly,
+        filters: { ...input.filters },
+        updatedAt,
+      },
+    );
+    board.updatedAt = updatedAt;
+
+    return this.toFilterSetting(input.boardId, input.memberId);
+  }
+
   private findVisibleBoard(boardId: string) {
     const board = this.boardsById.get(boardId);
 
@@ -326,7 +392,7 @@ export class CanvasRepository implements CanvasRepositoryPort {
     };
   }
 
-  private toViewSetting(boardId: string, memberId: string) {
+  private toViewSetting(boardId: string, memberId: string): CanvasViewSetting {
     const setting = this.viewSettingsByKey.get(
       createMemberSettingKey(boardId, memberId),
     );
@@ -338,21 +404,22 @@ export class CanvasRepository implements CanvasRepositoryPort {
     };
   }
 
-  private toFilterSetting(boardId: string, memberId: string) {
+  private toFilterSetting(
+    boardId: string,
+    memberId: string,
+  ): CanvasFilterSetting {
     const setting = this.filterSettingsByKey.get(
       createMemberSettingKey(boardId, memberId),
     );
 
     return {
-      enabledEntityTypes: setting?.enabledEntityTypes ?? [
-        "task",
-        "meeting_report",
-        "pull_request",
-      ],
+      enabledEntityTypes: setting?.enabledEntityTypes
+        ? [...setting.enabledEntityTypes]
+        : ["task", "meeting_report", "pull_request"],
       assigneeMemberId: setting?.assigneeMemberId ?? null,
       showDelayedOnly: setting?.showDelayedOnly ?? false,
       showRiskOnly: setting?.showRiskOnly ?? false,
-      filters: setting?.filters ?? {},
+      filters: setting?.filters ? { ...setting.filters } : {},
     };
   }
 }
