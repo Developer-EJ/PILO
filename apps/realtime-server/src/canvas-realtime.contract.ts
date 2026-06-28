@@ -55,6 +55,21 @@ export type CanvasPresenceEventPayload = {
   tool: "select" | "hand" | "shape" | "text" | "connector" | "unknown";
 };
 
+export type CanvasShapeMutationPayload = {
+  boardId: string;
+  shapeId: string;
+  baseVersion: number;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+};
+
+export type CanvasShapeServerState = CanvasShapeMutationPayload & {
+  version: number;
+  updatedByMemberId: string;
+};
+
 export type CanvasRealtimeAck =
   | {
       ok: true;
@@ -68,10 +83,27 @@ export type CanvasRealtimeAck =
       error:
         | "auth_required"
         | "auth_expired"
+        | "conflict"
         | "invalid_payload"
         | "board_not_found"
         | "forbidden";
       message: string;
+    };
+
+export type CanvasShapeMutationAck =
+  | {
+      ok: true;
+      event: typeof CANVAS_REALTIME_EVENTS.shapeChanged;
+      room: string;
+      currentMember: CanvasRealtimeAuthContext;
+      shape: CanvasShapeServerState;
+    }
+  | {
+      ok: false;
+      event: typeof CANVAS_REALTIME_EVENTS.shapeChanged;
+      error: Exclude<CanvasRealtimeAck, { ok: true }>["error"];
+      message: string;
+      currentVersion?: number;
     };
 
 export function createCanvasBoardRoomName(boardId: string) {
@@ -147,6 +179,41 @@ export function parseCanvasPresenceEventPayload(
     cursorX,
     cursorY,
     tool,
+  };
+}
+
+export function parseCanvasShapeMutationPayload(
+  payload: unknown,
+): CanvasShapeMutationPayload | null {
+  const record = asRecord(payload);
+  const boardId = parseNonEmptyString(record?.boardId);
+  const shapeId = parseNonEmptyString(record?.shapeId);
+  const baseVersion = parseNonNegativeInteger(record?.baseVersion);
+  const x = parseFiniteNumber(record?.x);
+  const y = parseFiniteNumber(record?.y);
+  const width = parseOptionalPositiveNumber(record?.width);
+  const height = parseOptionalPositiveNumber(record?.height);
+
+  if (
+    !boardId ||
+    !shapeId ||
+    baseVersion === null ||
+    x === null ||
+    y === null ||
+    width === undefined ||
+    height === undefined
+  ) {
+    return null;
+  }
+
+  return {
+    boardId,
+    shapeId,
+    baseVersion,
+    x,
+    y,
+    width,
+    height,
   };
 }
 
@@ -243,6 +310,28 @@ function parsePositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0
     ? value
     : null;
+}
+
+function parseNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function parseOptionalPositiveNumber(
+  value: unknown,
+): number | null | undefined {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = parseFiniteNumber(value);
+
+  if (parsed === null || parsed <= 0) {
+    return undefined;
+  }
+
+  return parsed;
 }
 
 function parseShapeChangeType(
