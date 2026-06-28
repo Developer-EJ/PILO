@@ -59,9 +59,18 @@ describe("JuhyungRepository", () => {
   it("writes new tasks with the current workspace member as creator", async () => {
     const calls = [];
     const database = {
+      workspaceMember: {
+        findFirst: async (args) => {
+          calls.push(["member.findFirst", args]);
+          return {
+            id: args.where.id,
+            workspaceId: args.where.workspaceId,
+          };
+        },
+      },
       task: {
         create: async (args) => {
-          calls.push(args);
+          calls.push(["task.create", args]);
           return { id: "task-1", ...args.data };
         },
       },
@@ -84,19 +93,150 @@ describe("JuhyungRepository", () => {
 
     assert.equal(task.createdByMemberId, "member-1");
     assert.deepEqual(calls, [
-      {
-        data: {
-          workspaceId: "workspace-1",
-          title: "Connect GitHub repository",
-          description: null,
-          assigneeMemberId: "member-2",
-          status: "todo",
-          priority: "high",
-          dueDate: null,
-          milestoneId: null,
-          createdByMemberId: "member-1",
+      [
+        "member.findFirst",
+        {
+          where: {
+            id: "member-1",
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
+      [
+        "member.findFirst",
+        {
+          where: {
+            id: "member-2",
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
+      [
+        "task.create",
+        {
+          data: {
+            workspaceId: "workspace-1",
+            title: "Connect GitHub repository",
+            description: null,
+            assigneeMemberId: "member-2",
+            status: "todo",
+            priority: "high",
+            dueDate: null,
+            milestoneId: null,
+            createdByMemberId: "member-1",
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("rejects task creation when the creator is outside the workspace", async () => {
+    const calls = [];
+    const database = {
+      workspaceMember: {
+        findFirst: async (args) => {
+          calls.push(["member.findFirst", args]);
+          return null;
         },
       },
+      task: {
+        create: async () => {
+          throw new Error("should not create a task with an invalid creator");
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await assert.rejects(
+      () =>
+        repository.createTask(
+          {
+            workspaceId: "workspace-1",
+            title: "Connect GitHub repository",
+            description: null,
+            assigneeMemberId: null,
+            status: "todo",
+            priority: "high",
+            dueDate: null,
+            milestoneId: null,
+          },
+          "member-1",
+        ),
+      /creator must belong to the task workspace/,
+    );
+    assert.deepEqual(calls, [
+      [
+        "member.findFirst",
+        {
+          where: {
+            id: "member-1",
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("rejects task creation when the assignee is outside the workspace", async () => {
+    const calls = [];
+    const database = {
+      workspaceMember: {
+        findFirst: async (args) => {
+          calls.push(["member.findFirst", args]);
+          if (args.where.id === "member-1") {
+            return {
+              id: "member-1",
+              workspaceId: "workspace-1",
+            };
+          }
+
+          return null;
+        },
+      },
+      task: {
+        create: async () => {
+          throw new Error("should not create a task with an invalid assignee");
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await assert.rejects(
+      () =>
+        repository.createTask(
+          {
+            workspaceId: "workspace-1",
+            title: "Connect GitHub repository",
+            description: null,
+            assigneeMemberId: "member-2",
+            status: "todo",
+            priority: "high",
+            dueDate: null,
+            milestoneId: null,
+          },
+          "member-1",
+        ),
+      /assignee must belong to the task workspace/,
+    );
+    assert.deepEqual(calls, [
+      [
+        "member.findFirst",
+        {
+          where: {
+            id: "member-1",
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
+      [
+        "member.findFirst",
+        {
+          where: {
+            id: "member-2",
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
     ]);
   });
 });

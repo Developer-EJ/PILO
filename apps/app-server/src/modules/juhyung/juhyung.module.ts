@@ -1,11 +1,11 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../database/database.module";
-import { WorkspaceMemberAccessService } from "../workspace/workspace-member-access.service";
+import { WorkspaceModule } from "../workspace/workspace.module";
 import { JuhyungRepository } from "./juhyung.repository";
 
 @Module({
-  imports: [DatabaseModule],
-  providers: [JuhyungRepository, WorkspaceMemberAccessService],
-  exports: [JuhyungRepository, WorkspaceMemberAccessService],
+  imports: [DatabaseModule, WorkspaceModule],
+  providers: [JuhyungRepository],
+  exports: [JuhyungRepository],
 })
 export class JuhyungModule {}

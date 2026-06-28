@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
 
@@ -46,10 +46,38 @@ export class JuhyungRepository {
     });
   }
 
-  createTask(input: CreateTaskInput, createdByMemberId: string) {
+  async createTask(input: CreateTaskInput, createdByMemberId: string) {
+    const createdByMember = await this.database.workspaceMember.findFirst({
+      where: {
+        id: createdByMemberId,
+        workspaceId: input.workspaceId,
+      },
+    });
+
+    if (!createdByMember) {
+      throw new ForbiddenException(
+        "Task creator must belong to the task workspace",
+      );
+    }
+
+    if (input.assigneeMemberId) {
+      const assigneeMember = await this.database.workspaceMember.findFirst({
+        where: {
+          id: input.assigneeMemberId,
+          workspaceId: input.workspaceId,
+        },
+      });
+
+      if (!assigneeMember) {
+        throw new ForbiddenException(
+          "Task assignee must belong to the task workspace",
+        );
+      }
+    }
+
     const data = {
       ...input,
-      createdByMemberId,
+      createdByMemberId: createdByMember.id,
     } satisfies Prisma.TaskUncheckedCreateInput;
 
     return this.database.task.create({ data });
