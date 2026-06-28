@@ -15,5 +15,8 @@ describe("frontend package", () => {
     assert.match(page, /PR review queue/);
     assert.match(page, /analysisStatus/);
     assert.match(page, /linkedTaskIds/);
+    assert.match(page, /reviewCanvas/);
+    assert.match(page, /Review canvas/);
+    assert.match(page, /reviewOrder/);
   });
 });

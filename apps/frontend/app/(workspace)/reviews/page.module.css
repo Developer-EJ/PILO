@@ -17,7 +17,8 @@
 .summary,
 .panel,
 .prItem,
-.task {
+.task,
+.canvasPanel {
   border: 1px solid #e3e7ef;
   background: #ffffff;
 }
@@ -49,7 +50,8 @@
 .summary strong,
 .metric strong,
 .panel h2,
-.task strong {
+.task strong,
+.intentPanel h2 {
   margin: 0;
   color: #151923;
 }
@@ -86,7 +88,8 @@
 
 .queue,
 .summary,
-.panel {
+.panel,
+.canvasPanel {
   border-radius: 8px;
 }
 
@@ -191,7 +194,9 @@
 }
 
 .panel p,
-.task p {
+.task p,
+.intentPanel p,
+.reviewOrder {
   margin: 0;
   color: #394150;
   font-size: 13px;
@@ -218,6 +223,107 @@
   padding: 12px;
 }
 
+.canvasPanel {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(260px, 0.48fr);
+  min-height: 410px;
+  overflow: hidden;
+}
+
+.canvas {
+  position: relative;
+  min-height: 410px;
+  background-color: #f8fafc;
+  background-image: linear-gradient(#e4e8f0 1px, transparent 1px),
+    linear-gradient(90deg, #e4e8f0 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.canvas::after {
+  position: absolute;
+  top: 132px;
+  left: 230px;
+  width: 180px;
+  height: 2px;
+  background: #697486;
+  content: "";
+  transform: rotate(26deg);
+  transform-origin: left center;
+}
+
+.canvasNode {
+  position: absolute;
+  display: grid;
+  width: 224px;
+  min-height: 78px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+  border: 2px solid #7aa2f7;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+  color: #151923;
+  text-align: left;
+  box-shadow: 0 10px 24px rgb(38 50 71 / 10%);
+}
+
+.canvasNode span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.canvasNode strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.canvasNode small {
+  grid-column: 2;
+  color: #687386;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.nodeLow {
+  border-color: #5dbb7a;
+}
+
+.nodeMedium {
+  border-color: #e2a23a;
+}
+
+.nodeHigh,
+.nodeCritical {
+  border-color: #d84c5b;
+}
+
+.intentPanel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  border-left: 1px solid #e3e7ef;
+  padding: 20px;
+}
+
+.intentPanel h2 {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.reviewOrder {
+  display: grid;
+  gap: 10px;
+  padding-left: 18px;
+}
+
 @media (max-width: 860px) {
   .shell {
     padding: 18px;
@@ -226,7 +332,8 @@
   .header,
   .workspace,
   .panelGrid,
-  .metrics {
+  .metrics,
+  .canvasPanel {
     grid-template-columns: 1fr;
   }
 
@@ -234,5 +341,15 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 14px;
+  }
+
+  .canvas {
+    min-height: 340px;
+    overflow: auto;
+  }
+
+  .intentPanel {
+    border-top: 1px solid #e3e7ef;
+    border-left: 0;
   }
 }
