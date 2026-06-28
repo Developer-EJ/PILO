@@ -300,6 +300,65 @@ describe("machine-readable public contract schema", () => {
     }
   });
 
+  it("validates AgentAction allowed confirmation state combinations", () => {
+    const schema = readJson(schemaPath);
+    const agentAction = schema.$defs.AgentAction;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const dateTime = "2026-06-27T10:00:00.000Z";
+    const baseAction = {
+      id: uuid,
+      runId: "00000000-0000-4000-8000-000000000002",
+      type: "task.create.draft",
+      source: "orchestrator",
+      requiresConfirmation: true,
+      payload: { workspaceId: uuid, title: "OAuth callback 처리" },
+      status: "draft",
+      confirmedByMemberId: null,
+      confirmedAt: null,
+      executedAt: null,
+    };
+    const cases = [
+      {
+        name: "automatic draft",
+        value: {
+          ...baseAction,
+          requiresConfirmation: false,
+          status: "draft",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: null,
+        },
+      },
+      {
+        name: "automatic executed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: false,
+          status: "executed",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: dateTime,
+        },
+      },
+      {
+        name: "confirmed executed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "executed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: dateTime,
+        },
+      },
+    ];
+
+    for (const { name, value } of cases) {
+      const result = validateJsonSchema(agentAction, value, schema);
+      assert.equal(result.valid, true, `${name} should validate: ${result.errors.join(", ")}`);
+    }
+  });
+
   it("rejects invalid AgentAction type and state combinations", () => {
     const schema = readJson(schemaPath);
     const agentAction = schema.$defs.AgentAction;
