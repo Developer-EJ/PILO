@@ -35,6 +35,18 @@ function validateJsonSchema(schema, value, root = schema) {
     return typeof data === type;
   }
 
+  function formatMatches(format, data) {
+    if (format === "uuid") {
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data);
+    }
+
+    if (format === "date-time") {
+      return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(data) && !Number.isNaN(Date.parse(data));
+    }
+
+    return true;
+  }
+
   function check(node, data, currentPath = "$") {
     const localErrors = [];
     const fail = (message) => localErrors.push(`${currentPath}: ${message}`);
@@ -112,6 +124,14 @@ function validateJsonSchema(schema, value, root = schema) {
 
     if (typeof data === "string" && node.minLength !== undefined && data.length < node.minLength) {
       fail(`must have length >= ${node.minLength}`);
+    }
+
+    if (typeof data === "string" && node.format && !formatMatches(node.format, data)) {
+      fail(`must match format ${node.format}`);
+    }
+
+    if (typeof data === "string" && node.pattern && !new RegExp(node.pattern).test(data)) {
+      fail(`must match pattern ${node.pattern}`);
     }
 
     if (typeof data === "number" && node.minimum !== undefined && data < node.minimum) {
@@ -349,6 +369,50 @@ describe("machine-readable public contract schema", () => {
           confirmedByMemberId: uuid,
           confirmedAt: dateTime,
           executedAt: dateTime,
+        },
+      },
+      {
+        name: "waiting confirmation",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "waiting_confirmation",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: null,
+        },
+      },
+      {
+        name: "confirmed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "confirmed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: null,
+        },
+      },
+      {
+        name: "rejected",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "rejected",
+          confirmedByMemberId: null,
+          confirmedAt: null,
+          executedAt: null,
+        },
+      },
+      {
+        name: "failed",
+        value: {
+          ...baseAction,
+          requiresConfirmation: true,
+          status: "failed",
+          confirmedByMemberId: uuid,
+          confirmedAt: dateTime,
+          executedAt: null,
         },
       },
     ];
