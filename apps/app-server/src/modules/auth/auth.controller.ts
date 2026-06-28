@@ -65,4 +65,59 @@ export class AuthController {
       }),
     );
   }
+
+  @Get("github/start")
+  startGithub(
+    @Query("next") nextPath: string | undefined,
+    @Res() reply: FastifyReply,
+  ) {
+    try {
+      const authorization = this.authService.createOAuthAuthorizationRedirect(
+        "github",
+        nextPath,
+      );
+
+      return reply.redirect(authorization.redirectUrl);
+    } catch {
+      return reply.redirect(
+        this.authService.createLoginResultRedirect({
+          provider: "github",
+          status: "error",
+          errorCode: "oauth_provider_not_configured",
+        }),
+      );
+    }
+  }
+
+  @Get("github/callback")
+  async callbackGithub(
+    @Query("code") code: string | undefined,
+    @Query("state") state: string | undefined,
+    @Query("error") error: string | undefined,
+    @Res() reply: FastifyReply,
+  ) {
+    const result = await this.authService.handleOAuthCallback("github", {
+      code,
+      state,
+      error,
+    });
+
+    if (!result.ok) {
+      return reply.redirect(
+        this.authService.createLoginResultRedirect({
+          provider: "github",
+          status: "error",
+          errorCode: result.errorCode,
+        }),
+      );
+    }
+
+    return reply.redirect(
+      this.authService.createLoginResultRedirect({
+        provider: "github",
+        status: "success",
+        nextPath: result.nextPath,
+      }),
+    );
+  }
 }

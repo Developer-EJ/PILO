@@ -304,6 +304,122 @@ describe("app-server package", () => {
     assert.equal(fetchCalled, false);
   });
 
+  it("builds a GitHub authorization URL without repository scope", () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      API_BASE_URL: "https://api.pilo.dev",
+      SESSION_SECRET: "test-session-secret",
+      GITHUB_LOGIN_CLIENT_ID: "github-login-client",
+      GITHUB_LOGIN_CLIENT_SECRET: "github-login-secret",
+    });
+    const service = new AuthService(new AuthRepository(), { config });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "github",
+      "/",
+    );
+    const redirectUrl = new URL(authorization.redirectUrl);
+
+    assert.equal(
+      `${redirectUrl.origin}${redirectUrl.pathname}`,
+      "https://github.com/login/oauth/authorize",
+    );
+    assert.equal(
+      redirectUrl.searchParams.get("client_id"),
+      "github-login-client",
+    );
+    assert.equal(
+      redirectUrl.searchParams.get("redirect_uri"),
+      "https://api.pilo.dev/auth/github/callback",
+    );
+    assert.equal(redirectUrl.searchParams.get("scope"), "read:user user:email");
+    assert.equal(redirectUrl.searchParams.get("scope").includes("repo"), false);
+    assert.equal(redirectUrl.searchParams.get("state"), authorization.state);
+  });
+
+  it("handles a GitHub OAuth callback by fetching token and profile", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      API_BASE_URL: "https://api.pilo.dev",
+      SESSION_SECRET: "test-session-secret",
+      GITHUB_LOGIN_CLIENT_ID: "github-login-client",
+      GITHUB_LOGIN_CLIENT_SECRET: "github-login-secret",
+    });
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url: String(url), init });
+
+      if (String(url).includes("github.com/login/oauth/access_token")) {
+        return globalThis.Response.json({ access_token: "github-token" });
+      }
+
+      return globalThis.Response.json({
+        id: 123456,
+        login: "octo-user",
+        email: "octo@example.com",
+        avatar_url: "https://avatars.githubusercontent.com/u/123456",
+      });
+    };
+    const service = new AuthService(new AuthRepository(), { config, fetcher });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "github",
+      "/canvas",
+    );
+    const result = await service.handleOAuthCallback("github", {
+      code: "github-code",
+      state: authorization.state,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.nextPath, "/canvas");
+    assert.deepEqual(result.profile, {
+      provider: "github",
+      providerAccountId: "123456",
+      email: "octo@example.com",
+      name: "octo-user",
+      avatarUrl: "https://avatars.githubusercontent.com/u/123456",
+      emailVerified: null,
+    });
+    assert.equal(
+      requests[0].url,
+      "https://github.com/login/oauth/access_token",
+    );
+    assert.equal(requests[0].init.body.get("code"), "github-code");
+    assert.equal(
+      requests[0].init.body.get("redirect_uri"),
+      "https://api.pilo.dev/auth/github/callback",
+    );
+    assert.equal(requests[1].url, "https://api.github.com/user");
+    assert.equal(requests[1].init.headers.Authorization, "Bearer github-token");
+  });
+
+  it("creates frontend-compatible GitHub login result redirects", () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      FRONTEND_URL: "https://app.pilo.dev",
+    });
+    const service = new AuthService(new AuthRepository(), { config });
+
+    assert.equal(
+      service.createLoginResultRedirect({
+        provider: "github",
+        status: "success",
+        nextPath: "/canvas",
+      }),
+      "https://app.pilo.dev/login?auth=success&provider=github&next=%2Fcanvas",
+    );
+    assert.equal(
+      service.createLoginResultRedirect({
+        provider: "github",
+        status: "error",
+        errorCode: "access_denied",
+      }),
+      "https://app.pilo.dev/login?auth=error&provider=github&error=access_denied",
+    );
+  });
+
   it("exposes Auth provider readiness without leaking secrets", () => {
     const service = new AuthService(new AuthRepository());
     const response = service.getProviders();

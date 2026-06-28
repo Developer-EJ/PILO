@@ -329,7 +329,7 @@ export class AuthService {
     }
 
     const profileResponse = await response.json();
-    const providerAccountId = getStringField(profileResponse, "sub");
+    const providerAccountId = getProviderAccountId(provider, profileResponse);
 
     if (!providerAccountId) {
       throw new AuthFlowError("oauth_profile_missing_id");
@@ -339,11 +339,29 @@ export class AuthService {
       provider: provider.id,
       providerAccountId,
       email: getStringField(profileResponse, "email"),
-      name: getStringField(profileResponse, "name"),
-      avatarUrl: getStringField(profileResponse, "picture"),
-      emailVerified: getBooleanField(profileResponse, "email_verified"),
+      name:
+        getStringField(profileResponse, "name") ??
+        getStringField(profileResponse, "login"),
+      avatarUrl:
+        getStringField(profileResponse, "picture") ??
+        getStringField(profileResponse, "avatar_url"),
+      emailVerified:
+        provider.id === "google"
+          ? getBooleanField(profileResponse, "email_verified")
+          : null,
     };
   }
+}
+
+function getProviderAccountId(
+  provider: AuthProviderConfig,
+  profileResponse: unknown,
+) {
+  if (provider.id === "github") {
+    return getStringOrNumberField(profileResponse, "id");
+  }
+
+  return getStringField(profileResponse, "sub");
 }
 
 function getStringField(value: unknown, key: string) {
@@ -352,6 +370,20 @@ function getStringField(value: unknown, key: string) {
   }
 
   const field = (value as Record<string, unknown>)[key];
+
+  return typeof field === "string" ? field : null;
+}
+
+function getStringOrNumberField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+
+  if (typeof field === "number" && Number.isFinite(field)) {
+    return String(field);
+  }
 
   return typeof field === "string" ? field : null;
 }
