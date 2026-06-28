@@ -60,13 +60,13 @@
 
 ## Consumes From Others
 
-- 주형: `PullRequestSummary`, changed file source metadata, Task-PR links.
+- 주형: `PullRequestSummary`, `PullRequestChangedFileSummary`, Task-PR links.
 - 동현: Workspace/member identity.
 - 세인: Agent runtime for PR analysis.
 
 ## Mock Rule
 
-주형의 GitHub PR sync가 없으면 `PullRequestSummary` fixture로 review room을 먼저 만든다. 실제 diff가 없으면 changed file/function fixture를 사용하되, PR 본문에는 실제 GitHub diff 연동 Issue를 연결한다.
+주형의 GitHub PR sync가 없으면 `PullRequestSummary`와 `PullRequestChangedFileSummary` fixture로 review room과 changed file/function 저장 흐름을 먼저 검증한다. PR 본문에는 실제 GitHub diff 연동 Issue를 연결한다.
 
 ## Do Not Touch
 
