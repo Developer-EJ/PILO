@@ -47,13 +47,13 @@
 ## Public APIs To Provide
 
 - `POST /pull-requests/:pullRequestId/review-room` creates or returns room.
-- `GET /review-rooms/:roomId` returns room detail.
-- `POST /review-rooms/:roomId/analysis` requests analysis workflow.
+- `GET /code-review-rooms/:roomId` returns room detail.
+- `POST /pull-requests/:pullRequestId/analysis` requests analysis workflow.
 - `GET /pull-requests/:pullRequestId/analysis-summary` returns `PRAnalysisSummary`.
 - `GET /pull-request-analyses/:analysisId/canvas` returns AI review order and canvas nodes.
 - `GET /review-nodes/:nodeId/detail` returns side-by-side diff and node explanation.
 - `PATCH /review-nodes/:nodeId/state` updates reviewer state.
-- `POST /review-rooms/:roomId/comments` creates review comment.
+- `POST /code-review-rooms/:roomId/comments` creates review comment.
 
 ## Provides To Others
 
@@ -63,13 +63,13 @@
 
 ## Consumes From Others
 
-- 주형: `PullRequestSummary`, changed file source metadata, Task-PR links.
+- 주형: `PullRequestSummary`, `PullRequestChangedFileSummary`, Task-PR links.
 - 동현: Workspace/member identity.
 - 세인: Agent runtime for PR analysis.
 
 ## Mock Rule
 
-주형의 GitHub PR sync가 없으면 `PullRequestSummary` fixture로 review room을 먼저 만든다. 실제 diff가 없으면 changed file/function fixture를 사용하되, PR 본문에는 실제 GitHub diff 연동 Issue를 연결한다.
+주형의 GitHub PR sync가 없으면 `PullRequestSummary`와 `PullRequestChangedFileSummary` fixture로 review room과 changed file/function 저장 흐름을 먼저 검증한다. PR 본문에는 실제 GitHub diff 연동 Issue를 연결한다.
 
 ## Do Not Touch
 
