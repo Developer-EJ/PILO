@@ -14,14 +14,20 @@ import {
 } from "./adapters/meeting-report-workflow.adapter";
 import {
   CreateMeetingAgendaRequestDto,
+  CreateMeetingDecisionRequestDto,
   CreateMeetingMemoRequestDto,
+  CreateMeetingReportNextAgendaRequestDto,
+  CreateMeetingReportRiskRequestDto,
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
   CreateTranscriptSegmentRequestDto,
   MeetingAgendaResponseDto,
+  MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
+  MeetingReportRiskResponseDto,
   MeetingReportSummaryDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
@@ -36,13 +42,20 @@ import {
 } from "./repositories/meeting.repository";
 import {
   MEETING_AGENDA_STATUS_VALUES,
+  MEETING_DECISION_STATUS_VALUES,
+  MEETING_REPORT_RISK_SEVERITY_VALUES,
   MEETING_STATUS_VALUES,
   TRANSCRIPT_SOURCE_VALUES,
   MeetingAgendaRecord,
   MeetingAgendaStatus,
+  MeetingDecisionRecord,
+  MeetingDecisionStatus,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportNextAgendaRecord,
   MeetingReportRecord,
+  MeetingReportRiskRecord,
+  MeetingReportRiskSeverity,
   MeetingStatus,
   TranscriptSource,
 } from "./types/meeting.types";
@@ -375,7 +388,7 @@ export class MeetingService {
           report.meetingId,
         );
 
-        return meeting ? this.toReportDetail(report, meeting) : null;
+        return meeting ? this.toReportSummary(report, meeting) : null;
       })
       .filter(
         (report): report is MeetingReportSummaryDto =>
@@ -386,6 +399,96 @@ export class MeetingService {
           new Date(right.createdAt).getTime() -
           new Date(left.createdAt).getTime(),
       );
+  }
+
+  createDecision(
+    reportId: string,
+    requestBody: CreateMeetingDecisionRequestDto,
+  ): MeetingDecisionResponseDto {
+    const report = this.requireReport(reportId);
+
+    return this.toDecisionReadModel(
+      this.meetingRepository.createDecision({
+        reportId: report.id,
+        content: this.requireNonEmptyString(requestBody.content, "content"),
+        status: this.parseDecisionStatus(requestBody.status),
+        linkedTaskId: this.optionalString(
+          requestBody.linkedTaskId,
+          "linkedTaskId",
+        ),
+      }),
+    );
+  }
+
+  listDecisions(reportId: string): MeetingDecisionResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listDecisionsByReport(report.id)
+      .map((decision) => this.toDecisionReadModel(decision));
+  }
+
+  createRisk(
+    reportId: string,
+    requestBody: CreateMeetingReportRiskRequestDto,
+  ): MeetingReportRiskResponseDto {
+    const report = this.requireReport(reportId);
+    const sortOrder = this.optionalNonNegativeInteger(
+      requestBody.sortOrder,
+      "sortOrder",
+    );
+
+    if (sortOrder !== undefined) {
+      this.assertRiskSortOrderAvailable(report.id, sortOrder);
+    }
+
+    return this.toRiskReadModel(
+      this.meetingRepository.createRisk({
+        reportId: report.id,
+        content: this.requireNonEmptyString(requestBody.content, "content"),
+        severity: this.parseRiskSeverity(requestBody.severity),
+        sortOrder,
+      }),
+    );
+  }
+
+  listRisks(reportId: string): MeetingReportRiskResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listRisksByReport(report.id)
+      .map((risk) => this.toRiskReadModel(risk));
+  }
+
+  createNextAgenda(
+    reportId: string,
+    requestBody: CreateMeetingReportNextAgendaRequestDto,
+  ): MeetingReportNextAgendaResponseDto {
+    const report = this.requireReport(reportId);
+    const sortOrder = this.optionalNonNegativeInteger(
+      requestBody.sortOrder,
+      "sortOrder",
+    );
+
+    if (sortOrder !== undefined) {
+      this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
+    }
+
+    return this.toNextAgendaReadModel(
+      this.meetingRepository.createNextAgenda({
+        reportId: report.id,
+        title: this.requireNonEmptyString(requestBody.title, "title"),
+        sortOrder,
+      }),
+    );
+  }
+
+  listNextAgendas(reportId: string): MeetingReportNextAgendaResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listNextAgendasByReport(report.id)
+      .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda));
   }
 
   private requireMeeting(meetingId: string): MeetingRecord {
@@ -445,15 +548,72 @@ export class MeetingService {
     meeting: MeetingRecord,
   ): MeetingReportResponseDto {
     return {
+      ...this.toReportSummary(report, meeting),
+      decisions: this.meetingRepository
+        .listDecisionsByReport(report.id)
+        .map((decision) => this.toDecisionReadModel(decision)),
+      risks: this.meetingRepository
+        .listRisksByReport(report.id)
+        .map((risk) => this.toRiskReadModel(risk)),
+      nextAgendas: this.meetingRepository
+        .listNextAgendasByReport(report.id)
+        .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda)),
+    };
+  }
+
+  private toReportSummary(
+    report: MeetingReportRecord,
+    meeting: MeetingRecord,
+  ): MeetingReportSummaryDto {
+    return {
       id: report.id,
       meetingId: report.meetingId,
       workspaceId: meeting.workspaceId,
       title: meeting.title,
       summary: report.summary,
-      decisionCount: 0,
+      decisionCount: this.meetingRepository.listDecisionsByReport(report.id)
+        .length,
       actionItemCount: 0,
-      riskCount: 0,
+      riskCount: this.meetingRepository.listRisksByReport(report.id).length,
       createdAt: report.createdAt,
+    };
+  }
+
+  private toDecisionReadModel(
+    decision: MeetingDecisionRecord,
+  ): MeetingDecisionResponseDto {
+    return {
+      id: decision.id,
+      reportId: decision.reportId,
+      content: decision.content,
+      status: decision.status,
+      linkedTaskId: decision.linkedTaskId,
+      createdAt: decision.createdAt,
+    };
+  }
+
+  private toRiskReadModel(
+    risk: MeetingReportRiskRecord,
+  ): MeetingReportRiskResponseDto {
+    return {
+      id: risk.id,
+      reportId: risk.reportId,
+      content: risk.content,
+      severity: risk.severity,
+      sortOrder: risk.sortOrder,
+      createdAt: risk.createdAt,
+    };
+  }
+
+  private toNextAgendaReadModel(
+    nextAgenda: MeetingReportNextAgendaRecord,
+  ): MeetingReportNextAgendaResponseDto {
+    return {
+      id: nextAgenda.id,
+      reportId: nextAgenda.reportId,
+      title: nextAgenda.title,
+      sortOrder: nextAgenda.sortOrder,
+      createdAt: nextAgenda.createdAt,
     };
   }
 
@@ -500,6 +660,42 @@ export class MeetingService {
     );
   }
 
+  private parseDecisionStatus(value: unknown): MeetingDecisionStatus {
+    if (value === undefined || value === null) {
+      return "decided";
+    }
+
+    if (
+      typeof value === "string" &&
+      MEETING_DECISION_STATUS_VALUES.includes(value as MeetingDecisionStatus)
+    ) {
+      return value as MeetingDecisionStatus;
+    }
+
+    throw new BadRequestException(
+      `status must be one of: ${MEETING_DECISION_STATUS_VALUES.join(", ")}`,
+    );
+  }
+
+  private parseRiskSeverity(value: unknown): MeetingReportRiskSeverity {
+    if (value === undefined || value === null) {
+      return "medium";
+    }
+
+    if (
+      typeof value === "string" &&
+      MEETING_REPORT_RISK_SEVERITY_VALUES.includes(
+        value as MeetingReportRiskSeverity,
+      )
+    ) {
+      return value as MeetingReportRiskSeverity;
+    }
+
+    throw new BadRequestException(
+      `severity must be one of: ${MEETING_REPORT_RISK_SEVERITY_VALUES.join(", ")}`,
+    );
+  }
+
   private requireNonEmptyString(value: unknown, fieldName: string): string {
     if (typeof value === "string" && value.trim().length > 0) {
       return value.trim();
@@ -539,6 +735,36 @@ export class MeetingService {
     }
 
     return this.requireNonNegativeInteger(value, fieldName);
+  }
+
+  private assertRiskSortOrderAvailable(
+    reportId: string,
+    sortOrder: number,
+  ): void {
+    const duplicate = this.meetingRepository
+      .listRisksByReport(reportId)
+      .some((risk) => risk.sortOrder === sortOrder);
+
+    if (duplicate) {
+      throw new BadRequestException(
+        "sortOrder must be unique within meeting report risks",
+      );
+    }
+  }
+
+  private assertNextAgendaSortOrderAvailable(
+    reportId: string,
+    sortOrder: number,
+  ): void {
+    const duplicate = this.meetingRepository
+      .listNextAgendasByReport(reportId)
+      .some((nextAgenda) => nextAgenda.sortOrder === sortOrder);
+
+    if (duplicate) {
+      throw new BadRequestException(
+        "sortOrder must be unique within meeting report next agendas",
+      );
+    }
   }
 
   private resolveWorkspaceMemberId(

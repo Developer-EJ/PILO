@@ -1,14 +1,20 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
   CreateMeetingAgendaRequestDto,
+  CreateMeetingDecisionRequestDto,
   CreateMeetingMemoRequestDto,
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
+  CreateMeetingReportNextAgendaRequestDto,
+  CreateMeetingReportRiskRequestDto,
   CreateTranscriptSegmentRequestDto,
   MeetingAgendaResponseDto,
+  MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
+  MeetingReportRiskResponseDto,
   MeetingReportSummaryDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
@@ -167,5 +173,50 @@ export class MeetingController {
     @Param("workspaceId") workspaceId: string,
   ): MeetingReportSummaryDto[] {
     return this.meetingService.listRecentReports(workspaceId);
+  }
+
+  @Post("meeting-reports/:reportId/decisions")
+  createDecision(
+    @Param("reportId") reportId: string,
+    @Body() requestBody: CreateMeetingDecisionRequestDto,
+  ): MeetingDecisionResponseDto {
+    return this.meetingService.createDecision(reportId, requestBody);
+  }
+
+  @Get("meeting-reports/:reportId/decisions")
+  listDecisions(
+    @Param("reportId") reportId: string,
+  ): MeetingDecisionResponseDto[] {
+    return this.meetingService.listDecisions(reportId);
+  }
+
+  @Post("meeting-reports/:reportId/risks")
+  createRisk(
+    @Param("reportId") reportId: string,
+    @Body() requestBody: CreateMeetingReportRiskRequestDto,
+  ): MeetingReportRiskResponseDto {
+    return this.meetingService.createRisk(reportId, requestBody);
+  }
+
+  @Get("meeting-reports/:reportId/risks")
+  listRisks(
+    @Param("reportId") reportId: string,
+  ): MeetingReportRiskResponseDto[] {
+    return this.meetingService.listRisks(reportId);
+  }
+
+  @Post("meeting-reports/:reportId/next-agendas")
+  createNextAgenda(
+    @Param("reportId") reportId: string,
+    @Body() requestBody: CreateMeetingReportNextAgendaRequestDto,
+  ): MeetingReportNextAgendaResponseDto {
+    return this.meetingService.createNextAgenda(reportId, requestBody);
+  }
+
+  @Get("meeting-reports/:reportId/next-agendas")
+  listNextAgendas(
+    @Param("reportId") reportId: string,
+  ): MeetingReportNextAgendaResponseDto[] {
+    return this.meetingService.listNextAgendas(reportId);
   }
 }
