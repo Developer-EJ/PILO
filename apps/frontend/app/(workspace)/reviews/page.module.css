@@ -1,0 +1,206 @@
+.page {
+  min-height: 100vh;
+  background: #f4f6f9;
+  color: #151923;
+}
+
+.shell {
+  display: grid;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  gap: 18px;
+  padding: 28px;
+}
+
+.header,
+.summary,
+.panel,
+.task {
+  border: 1px solid #e3e7ef;
+  background: #ffffff;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 8px;
+  padding: 20px 22px;
+}
+
+.eyebrow,
+.meta,
+.label,
+.caption,
+.taskLabel {
+  color: #687386;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.titleBlock {
+  display: grid;
+  gap: 5px;
+}
+
+.titleBlock h1,
+.panel h2,
+.summary strong,
+.task strong,
+.metric strong {
+  margin: 0;
+  color: #151923;
+}
+
+.titleBlock h1 {
+  font-size: 24px;
+  letter-spacing: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.button {
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  padding: 10px 14px;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 18px;
+}
+
+.summary,
+.panel {
+  border-radius: 8px;
+}
+
+.summary {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+}
+
+.prTitle {
+  display: grid;
+  gap: 8px;
+}
+
+.prTitle strong {
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill {
+  border-radius: 999px;
+  background: #eef2ff;
+  padding: 5px 10px;
+  color: #3443a4;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.branchGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.branchBox,
+.metric {
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 12px;
+}
+
+.branchBox code {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: #202635;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 20px;
+}
+
+.side {
+  display: grid;
+  gap: 18px;
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel h2 {
+  margin-bottom: 14px;
+  font-size: 16px;
+}
+
+.analysis {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis p,
+.task p {
+  margin: 0;
+  color: #394150;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.task {
+  display: grid;
+  gap: 4px;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.riskMedium {
+  background: #fff7ed;
+  color: #9a4d10;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    padding: 18px;
+  }
+
+  .header,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+}
