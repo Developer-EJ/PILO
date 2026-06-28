@@ -22,4 +22,16 @@ describe("Prisma workspace member task relations", () => {
       /createdByMember\s+WorkspaceMember\?\s+@relation\("TaskCreatedByMember", fields: \[workspaceId, createdByMemberId\], references: \[workspaceId, id\]/,
     );
   });
+
+  it("maps Agent Runtime registry models to the owner tables", () => {
+    assert.match(schema, /model Agent\s+{[\s\S]*@@map\("agents"\)/);
+    assert.match(
+      schema,
+      /model AgentWorkflow\s+{[\s\S]*agentId\s+String\s+@map\("agent_id"\)[\s\S]*type\s+String\s+@db\.VarChar\(120\)[\s\S]*version\s+String\s+@default\("v1"\)/,
+    );
+    assert.match(
+      schema,
+      /@@unique\(\[agentId, type, version\]\)[\s\S]*@@map\("agent_workflows"\)/,
+    );
+  });
 });
