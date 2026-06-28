@@ -17,6 +17,8 @@ export class AgentResultConsumerService {
     string,
     AgentResultApplicationRecord
   >();
+  private readonly applicationKeysByJobId = new Map<string, string>();
+  private readonly applicationKeysByRunId = new Map<string, string>();
 
   constructor(
     private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
@@ -24,7 +26,7 @@ export class AgentResultConsumerService {
 
   applyResult(message: AgentResultMessage): PullRequestAnalysisRecord {
     const resultKey = this.resultKey(message);
-    const existingApplication = this.applicationsByResultKey.get(resultKey);
+    const existingApplication = this.findExistingApplication(message);
 
     if (existingApplication) {
       const existingAnalysis = this.analysisRepository.findById(
@@ -50,6 +52,8 @@ export class AgentResultConsumerService {
       analysisStatus: message.status,
       appliedAt,
     });
+    this.applicationKeysByJobId.set(message.jobId, resultKey);
+    this.applicationKeysByRunId.set(message.runId, resultKey);
 
     return this.analysisRepository.save(updated);
   }
@@ -91,7 +95,7 @@ export class AgentResultConsumerService {
       okCount: counts.okCount,
       discussCount: counts.discussCount,
       riskCount: output.risks?.length ?? counts.riskCount,
-      conclusion: output.conclusion ?? "리뷰 가능",
+      conclusion: output.conclusion ?? "리뷰 후 merge 가능",
       errorTrace: [],
       updatedAt: appliedAt,
     };
@@ -131,5 +135,16 @@ export class AgentResultConsumerService {
 
   private resultKey(message: AgentResultMessage): string {
     return `${message.jobId}:${message.runId}`;
+  }
+
+  private findExistingApplication(
+    message: AgentResultMessage,
+  ): AgentResultApplicationRecord | null {
+    const resultKey =
+      this.applicationKeysByRunId.get(message.runId) ??
+      this.applicationKeysByJobId.get(message.jobId) ??
+      this.resultKey(message);
+
+    return this.applicationsByResultKey.get(resultKey) ?? null;
   }
 }

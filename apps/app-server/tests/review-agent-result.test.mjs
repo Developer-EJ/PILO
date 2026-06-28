@@ -36,11 +36,11 @@ describe("agent result root analysis consumer", () => {
       finishedAt: "2026-06-27T10:01:00.000Z",
       output: {
         pullRequestId: "66666666-6666-4666-8666-666666666661",
-        purposeSummary: "OAuth callback 화면 골격 추가",
-        impactSummary: "Auth route와 session redirect flow에 영향",
-        testRecommendation: "로그인 실패와 성공 redirect smoke test",
+        purposeSummary: "OAuth callback 화면 골격을 추가했다.",
+        impactSummary: "Auth route와 session redirect flow에 영향이 있다.",
+        testRecommendation: "회귀 smoke test와 실패 경로를 확인한다.",
         riskLevel: "medium",
-        conclusion: "리뷰 가능",
+        conclusion: "리뷰 후 merge 가능",
         graph: {
           nodes: [
             { status: "ok", riskLevel: "low" },
@@ -59,6 +59,47 @@ describe("agent result root analysis consumer", () => {
     assert.equal(first.discussCount, 1);
     assert.equal(first.riskCount, 1);
     assert.equal(second.updatedAt, first.updatedAt);
+  });
+
+  it("treats repeated jobId or runId as the same applied result", () => {
+    const { analysisService, resultConsumer } = createServices();
+    analysisService.requestAnalysis("66666666-6666-4666-8666-666666666661");
+
+    const baseMessage = {
+      jobId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      runId: "99999999-9999-4999-8999-999999999903",
+      status: "succeeded",
+      finishedAt: "2026-06-27T10:03:00.000Z",
+      output: {
+        pullRequestId: "66666666-6666-4666-8666-666666666661",
+        purposeSummary: "First result",
+      },
+    };
+
+    const first = resultConsumer.applyResult(baseMessage);
+    const sameRun = resultConsumer.applyResult({
+      ...baseMessage,
+      jobId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      finishedAt: "2026-06-27T10:04:00.000Z",
+      output: {
+        pullRequestId: "66666666-6666-4666-8666-666666666661",
+        purposeSummary: "Different run replay",
+      },
+    });
+    const sameJob = resultConsumer.applyResult({
+      ...baseMessage,
+      runId: "99999999-9999-4999-8999-999999999904",
+      finishedAt: "2026-06-27T10:05:00.000Z",
+      output: {
+        pullRequestId: "66666666-6666-4666-8666-666666666661",
+        purposeSummary: "Different job replay",
+      },
+    });
+
+    assert.equal(sameRun.updatedAt, first.updatedAt);
+    assert.equal(sameJob.updatedAt, first.updatedAt);
+    assert.equal(sameRun.purposeSummary, "First result");
+    assert.equal(sameJob.purposeSummary, "First result");
   });
 
   it("applies failed result with error trace", () => {
