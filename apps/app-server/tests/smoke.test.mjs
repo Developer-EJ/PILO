@@ -597,6 +597,77 @@ describe("app-server package", () => {
     );
   });
 
+  it("revokes the current session and expires the cookie on logout", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    const fetcher = async (url) => {
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return globalThis.Response.json({
+          access_token: "google-access-token",
+        });
+      }
+
+      return globalThis.Response.json({
+        sub: "google-user-123",
+        email: "user@example.com",
+        name: "Google User",
+      });
+    };
+    const repository = new AuthRepository();
+    const service = new AuthService(repository, { config, fetcher });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/",
+    );
+    const result = await service.handleOAuthCallback("google", {
+      code: "google-code",
+      state: authorization.state,
+    });
+
+    assert.notEqual(
+      service.getCurrentUserFromCookieHeader(result.session.cookieHeader),
+      null,
+    );
+
+    const logoutResult = service.logoutFromCookieHeader(
+      result.session.cookieHeader,
+    );
+
+    assert.equal(logoutResult.revoked, true);
+    assert.equal(logoutResult.cookieHeader.includes("Max-Age=0"), true);
+    assert.equal(
+      logoutResult.cookieHeader.includes(
+        "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+      ),
+      true,
+    );
+    assert.equal(repository.listAuthSessions()[0].revokedAt !== null, true);
+    assert.equal(
+      service.getCurrentUserFromCookieHeader(result.session.cookieHeader),
+      null,
+    );
+
+    const secondLogoutResult = service.logoutFromCookieHeader(
+      result.session.cookieHeader,
+    );
+
+    assert.equal(secondLogoutResult.revoked, true);
+    assert.equal(secondLogoutResult.cookieHeader.includes("Max-Age=0"), true);
+
+    const anonymousLogoutResult = service.logoutFromCookieHeader(undefined);
+
+    assert.equal(anonymousLogoutResult.revoked, false);
+    assert.equal(
+      anonymousLogoutResult.cookieHeader.includes("Max-Age=0"),
+      true,
+    );
+  });
+
   it("exposes Auth provider readiness without leaking secrets", () => {
     const service = new AuthService(new AuthRepository());
     const response = service.getProviders();

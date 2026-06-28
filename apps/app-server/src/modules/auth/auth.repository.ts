@@ -236,6 +236,31 @@ export class AuthRepository {
     };
   }
 
+  revokeAuthSessionByTokenHash(refreshTokenHash: string, now = new Date()) {
+    const sessionId = this.authSessionIdByTokenHash.get(refreshTokenHash);
+    const session = sessionId
+      ? this.authSessionsById.get(sessionId)
+      : undefined;
+
+    if (!session) {
+      return null;
+    }
+
+    if (session.revokedAt) {
+      return session;
+    }
+
+    const revokedSession: AuthSessionRecord = {
+      ...session,
+      revokedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    this.authSessionsById.set(revokedSession.id, revokedSession);
+
+    return revokedSession;
+  }
+
   markUserDeleted(userId: string, now = new Date()) {
     const user = this.usersById.get(userId);
 
