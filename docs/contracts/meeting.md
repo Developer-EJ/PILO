@@ -39,6 +39,21 @@
 | `GET` | `/meeting-reports/:reportId` | 회의록 상세 |
 | `POST` | `/meeting-action-items/:actionItemId/task-draft` | Task draft 요청 |
 
+## Status Values
+
+아래 값은 `docs/db/pilo_erd_schema.sql`의 check constraint와 맞춰야 한다.
+
+| Table / Model | Field | Values | Notes |
+|---|---|---|---|
+| `meetings` | `status` | `scheduled`, `in_progress`, `ended`, `report_generated` | 회의 생성, 진행, 종료, 회의록 생성 완료 상태 |
+| `meeting_agendas` | `status` | `open`, `done`, `skipped` | 회의 중 아젠다 처리 상태 |
+| `voice_rooms` | `status` | `active`, `inactive`, `archived` | 음성방 사용 가능 상태 |
+| `voice_sessions` | `recording_status` | `not_recording`, `recording`, `processing`, `completed`, `failed` | 녹음과 STT 처리 상태 |
+| `transcript_segments` | `source` | `text`, `stt` | 직접 입력 또는 STT 생성 transcript |
+| `meeting_report_risks` | `severity` | `low`, `medium`, `high`, `critical` | 회의록 리스크 심각도 |
+| `meeting_decisions` | `status` | `decided`, `pending`, `reopened` | 결정사항 확정 여부 |
+| `meeting_action_items` | `status` | `draft`, `approved`, `converted`, `rejected` | Task draft 변환 전후 상태 |
+
 ## Read Models
 
 ### MeetingReportSummary
@@ -85,6 +100,21 @@
 - `meeting.report.generate`
 - `task.create.draft`
 
+## Task Draft Mapping
+
+`MeetingActionItem`은 Task 원본이 아니라 Task 후보이다. Task 저장은 Task API 또는 Agent action executor가 담당한다.
+
+| TaskCreateDraft field | Source |
+|---|---|
+| `workspaceId` | action item이 속한 report -> meeting -> workspace |
+| `sourceType` | 고정값 `meeting_action_item` |
+| `sourceId` | `MeetingActionItem.id` |
+| `title` | `MeetingActionItem.title` |
+| `description` | `MeetingActionItem.description` |
+| `assigneeMemberId` | `MeetingActionItem.assigneeSuggestionMemberId` |
+| `priority` | 명시 입력이 없으면 `medium` |
+| `dueDate` | `MeetingActionItem.dueDateSuggestion` |
+
 ## Boundaries
 
 - 진호는 회의록과 Action Item 원본을 소유한다.
@@ -95,4 +125,3 @@
 ## Mock Rule
 
 Task API가 없으면 Action Item은 `draft` 또는 `approved`까지만 처리한다. `converted_task_id`는 실제 Task 생성 후에만 채운다.
-
