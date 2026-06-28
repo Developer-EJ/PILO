@@ -133,3 +133,7 @@ export function resolveCurrentWorkspaceSelection({
 export function workspaceDashboardHref(workspaceId) {
   return `/workspaces/${encodeURIComponent(workspaceId)}`;
 }
+
+export function workspaceCanvasHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/canvas`;
+}

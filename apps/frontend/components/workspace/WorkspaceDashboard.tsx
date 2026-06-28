@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { createWorkspaceDashboardClient } from "../../lib/workspace/dashboardClient.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
-import { extractWorkspaceIdFromPathname } from "../../lib/workspace/currentWorkspace.mjs";
+import {
+  extractWorkspaceIdFromPathname,
+  workspaceCanvasHref,
+  workspaceDashboardHref,
+} from "../../lib/workspace/currentWorkspace.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
 
 type DashboardTask = {
@@ -59,6 +64,7 @@ type DashboardNavItem = {
   label: string;
   active?: boolean;
   badge?: string;
+  href?: string;
 };
 type DashboardState =
   | { status: "loading"; dashboard: null; warnings: string[] }
@@ -134,7 +140,10 @@ function countDueThisWeek(tasks: DashboardRecord["tasks"]) {
   }).length;
 }
 
-function buildDashboardViewModel(dashboard: DashboardRecord) {
+function buildDashboardViewModel(
+  dashboard: DashboardRecord,
+  workspaceId: string,
+) {
   const inProgressTasks = dashboard.tasks.filter(
     (task) => task.status === "in_progress",
   );
@@ -179,8 +188,20 @@ function buildDashboardViewModel(dashboard: DashboardRecord) {
         tone: "danger",
       },
     ],
-    navItems: navLabels.map((label) => {
-      if (label === "홈 / 대시보드") return { label, active: true };
+    navItems: navLabels.map((label, index) => {
+      if (index === 0) {
+        return {
+          label,
+          active: true,
+          href: workspaceDashboardHref(workspaceId),
+        };
+      }
+      if (index === 6) {
+        return {
+          label,
+          href: workspaceCanvasHref(workspaceId),
+        };
+      }
       if (label === "Task 보드") {
         return { label, badge: String(dashboard.tasks.length) };
       }
@@ -271,7 +292,7 @@ export function WorkspaceDashboard() {
   }, [workspaceId]);
 
   const viewModel = state.dashboard
-    ? buildDashboardViewModel(state.dashboard)
+    ? buildDashboardViewModel(state.dashboard, workspaceId)
     : null;
   const navItems: DashboardNavItem[] =
     viewModel?.navItems ?? navLabels.map((label) => ({ label }));
@@ -283,16 +304,30 @@ export function WorkspaceDashboard() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Dashboard only navigation">
-          {navItems.map((item) => (
-            <div
-              key={item.label}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-disabled={!item.active}
-            >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </div>
-          ))}
+          {navItems.map((item) => {
+            const className = item.active ? "nav-item active" : "nav-item";
+            const content = (
+              <>
+                <span>{item.label}</span>
+                {item.badge ? <b>{item.badge}</b> : null}
+              </>
+            );
+
+            return item.href ? (
+              <Link
+                key={item.label}
+                href={item.href}
+                className={className}
+                aria-current={item.active ? "page" : undefined}
+              >
+                {content}
+              </Link>
+            ) : (
+              <div key={item.label} className={className} aria-disabled="true">
+                {content}
+              </div>
+            );
+          })}
         </nav>
       </aside>
 
@@ -398,9 +433,7 @@ export function WorkspaceDashboard() {
                                   #{pr.number} · {pr.authorLogin ?? "unknown"}
                                 </small>
                               </div>
-                              <b className={`pill tone-${tone}`}>
-                                {pr.state}
-                              </b>
+                              <b className={`pill tone-${tone}`}>{pr.state}</b>
                             </div>
                           );
                         })
