@@ -154,7 +154,7 @@
 }
 
 .canvasWorkspace {
-  grid-template-columns: minmax(0, 1fr) 390px;
+  grid-template-columns: minmax(0, 1fr) 10px var(--context-panel-width, 460px);
 }
 
 .canvasStage {
@@ -262,6 +262,22 @@
   background: #ffffff;
 }
 
+.panelResizeHandle {
+  width: 10px;
+  border: 0;
+  border-right: 1px solid #cfd7e3;
+  border-left: 1px solid #cfd7e3;
+  background: linear-gradient(90deg, #eef2f7 0, #ffffff 50%, #eef2f7 100%);
+  cursor: col-resize;
+}
+
+.panelResizeHandle:hover,
+.panelResizeHandle:focus-visible {
+  background: #dbe7ff;
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
 .sideSection {
   display: grid;
   gap: 10px;
@@ -272,6 +288,16 @@
 .sideSection h2 {
   font-size: 22px;
   line-height: 1.35;
+}
+
+.sidePanel .sideSection:first-child {
+  gap: 14px;
+  padding: 24px;
+}
+
+.sidePanel .sideSection:first-child h2 {
+  font-size: 26px;
+  line-height: 1.32;
 }
 
 .sideSection h3 {
@@ -494,6 +520,7 @@
   .topbarGroup,
   .topbarBack,
   .mergeButton,
+  .panelResizeHandle,
   .sidePanel,
   .detailSidePanel {
     border-right: 0;
@@ -502,6 +529,10 @@
 
   .canvasStage {
     min-height: 620px;
+  }
+
+  .panelResizeHandle {
+    display: none;
   }
 
   .sidePanel,

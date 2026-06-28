@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type CSSProperties, useMemo, useState } from "react";
 import styles from "./page.module.css";
 
 type ReviewDecision = "ok" | "discuss" | "unknown";
@@ -122,6 +122,7 @@ export function ReviewNodeWorkspace({
   const [decisions, setDecisions] = useState<Record<string, ReviewDecision>>(
     {},
   );
+  const [contextPanelWidth, setContextPanelWidth] = useState(460);
 
   const selectedSession =
     sessions.find((session) => session.pullRequest.id === selectedSessionId) ??
@@ -329,7 +330,15 @@ export function ReviewNodeWorkspace({
           </aside>
         </section>
       ) : (
-        <section className={styles.canvasWorkspace} aria-label="Review canvas">
+        <section
+          aria-label="Review canvas"
+          className={styles.canvasWorkspace}
+          style={
+            {
+              "--context-panel-width": `${contextPanelWidth}px`,
+            } as CSSProperties
+          }
+        >
           <div className={styles.canvasStage}>
             <svg
               aria-hidden="true"
@@ -396,6 +405,50 @@ export function ReviewNodeWorkspace({
               </button>
             ))}
           </div>
+
+          <button
+            aria-label="PR 설명 패널 크기 조절"
+            aria-valuemax={620}
+            aria-valuemin={360}
+            aria-valuenow={contextPanelWidth}
+            className={styles.panelResizeHandle}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") {
+                setContextPanelWidth((current) => Math.min(620, current + 24));
+              }
+
+              if (event.key === "ArrowRight") {
+                setContextPanelWidth((current) => Math.max(360, current - 24));
+              }
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+
+              const startX = event.clientX;
+              const startWidth = contextPanelWidth;
+
+              const handlePointerMove = (moveEvent: PointerEvent) => {
+                const dragDistance = moveEvent.clientX - startX;
+
+                setContextPanelWidth(
+                  Math.min(620, Math.max(360, startWidth - dragDistance)),
+                );
+              };
+
+              const handlePointerUp = () => {
+                window.removeEventListener("pointermove", handlePointerMove);
+                window.removeEventListener("pointerup", handlePointerUp);
+              };
+
+              window.addEventListener("pointermove", handlePointerMove);
+              window.addEventListener("pointerup", handlePointerUp, {
+                once: true,
+              });
+            }}
+            role="separator"
+            title="드래그해서 PR 설명 패널 크기 조절"
+            type="button"
+          />
 
           <aside className={styles.sidePanel}>
             <section className={styles.sideSection}>

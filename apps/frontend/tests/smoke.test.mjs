@@ -19,6 +19,7 @@ describe("frontend package", () => {
     assert.match(workspace, /ReviewNodeWorkspace/);
     assert.match(workspace, /리뷰할 PR을 선택/);
     assert.match(workspace, /canvasWorkspace/);
+    assert.match(workspace, /PR 설명 패널 크기 조절/);
     assert.match(workspace, /detailWorkspace/);
     assert.match(workspace, /문제 없음/);
     assert.match(workspace, /논의 필요/);
