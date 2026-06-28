@@ -14,3 +14,32 @@ export interface WorkspaceMemberRef {
   workspaceId: string;
   displayName?: string;
 }
+
+export interface MeetingRecord {
+  id: string;
+  workspaceId: string;
+  canvasBoardId: string | null;
+  title: string;
+  purpose: string | null;
+  status: MeetingStatus;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdByMemberId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingInput {
+  workspaceId: string;
+  canvasBoardId?: string | null;
+  title: string;
+  purpose?: string | null;
+  createdByMemberId: string;
+}
+
+export interface UpdateMeetingInput {
+  status: MeetingStatus;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  updatedAt: string;
+}
