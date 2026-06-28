@@ -67,7 +67,7 @@
 - `GET /pull-requests/:pullRequestId/changed-files` returns `PullRequestChangedFileSummary[]`.
 - `GET /workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
 - `GET /workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
-- Agent action executor for `task.create.draft`, `task.update.status`, `task.assign`, `github.issue.create`.
+- Agent action executor for `task.create.draft`, `task.update.status`, `github.issue.create`.
 
 ## External Callbacks
 

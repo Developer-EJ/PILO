@@ -142,8 +142,7 @@ Review domain consumes this source read model to create its own `changed_files`.
   "repositoryId": "uuid",
   "title": "Task API 구현",
   "body": "PILO Task contract 기준으로 Task 생성/목록/상세 API를 구현한다.",
-  "labels": ["backend"],
-  "assignees": ["github-user"]
+  "labels": ["backend"]
 }
 ```
 
