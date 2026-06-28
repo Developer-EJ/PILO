@@ -49,6 +49,7 @@
 - `POST /pull-requests/:pullRequestId/review-room` creates or returns room.
 - `GET /code-review-rooms/:roomId` returns room detail.
 - `POST /pull-requests/:pullRequestId/analysis` requests analysis workflow.
+- `GET /pull-requests/:pullRequestId/analysis` returns analysis workflow result.
 - `GET /pull-requests/:pullRequestId/analysis-summary` returns `PRAnalysisSummary`.
 - `GET /pull-request-analyses/:analysisId/canvas` returns AI review order and canvas nodes.
 - `GET /review-nodes/:nodeId/detail` returns side-by-side diff and node explanation.
