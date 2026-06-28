@@ -94,9 +94,12 @@
                                            "required":  [
                                                             "id",
                                                             "name",
+                                                            "description",
+                                                            "type",
                                                             "status",
                                                             "myRole",
-                                                            "memberCount"
+                                                            "memberCount",
+                                                            "createdAt"
                                                         ],
                                            "additionalProperties":  false,
                                            "properties":  {
@@ -150,7 +153,10 @@
                                                                   "userId",
                                                                   "name",
                                                                   "email",
-                                                                  "role"
+                                                                  "avatarUrl",
+                                                                  "role",
+                                                                  "displayName",
+                                                                  "joinedAt"
                                                               ],
                                                  "additionalProperties":  false,
                                                  "properties":  {
@@ -3146,6 +3152,177 @@
                                                                                "type":  "string"
                                                                            }
                                                            }
-                                        }
+                                        },
+                  "CurrentWorkspaceMember":  {
+                                                 "type":  "object",
+                                                 "required":  [
+                                                                  "workspaceId",
+                                                                  "memberId",
+                                                                  "userId",
+                                                                  "role",
+                                                                  "displayName"
+                                                              ],
+                                                 "additionalProperties":  false,
+                                                 "properties":  {
+                                                                    "workspaceId":  {
+                                                                                        "$ref":  "#/$defs/uuid"
+                                                                                    },
+                                                                    "memberId":  {
+                                                                                     "$ref":  "#/$defs/uuid"
+                                                                                 },
+                                                                    "userId":  {
+                                                                                   "$ref":  "#/$defs/uuid"
+                                                                               },
+                                                                    "role":  {
+                                                                                 "enum":  [
+                                                                                              "owner",
+                                                                                              "member",
+                                                                                              "viewer"
+                                                                                          ]
+                                                                             },
+                                                                    "displayName":  {
+                                                                                        "type":  [
+                                                                                                     "string",
+                                                                                                     "null"
+                                                                                                 ]
+                                                                                    }
+                                                                }
+                                             },
+                  "DashboardPreferences":  {
+                                               "type":  "object",
+                                               "required":  [
+                                                                "workspaceId",
+                                                                "memberId",
+                                                                "layout",
+                                                                "hiddenSections",
+                                                                "updatedAt"
+                                                            ],
+                                               "additionalProperties":  false,
+                                               "properties":  {
+                                                                  "workspaceId":  {
+                                                                                      "$ref":  "#/$defs/uuid"
+                                                                                  },
+                                                                  "memberId":  {
+                                                                                   "$ref":  "#/$defs/uuid"
+                                                                               },
+                                                                  "layout":  {
+                                                                                 "type":  "object"
+                                                                             },
+                                                                  "hiddenSections":  {
+                                                                                         "type":  "array",
+                                                                                         "items":  {
+                                                                                                       "type":  "string"
+                                                                                                   }
+                                                                                     },
+                                                                  "updatedAt":  {
+                                                                                    "anyOf":  [
+                                                                                                  {
+                                                                                                      "$ref":  "#/$defs/dateTime"
+                                                                                                  },
+                                                                                                  {
+                                                                                                      "type":  "null"
+                                                                                                  }
+                                                                                              ]
+                                                                                }
+                                                              }
+                                           },
+                  "WorkspaceDashboardReadModel":  {
+                                                      "type":  "object",
+                                                      "required":  [
+                                                                       "workspace",
+                                                                       "currentMember",
+                                                                       "preferences",
+                                                                       "members",
+                                                                       "tasks",
+                                                                       "progress",
+                                                                       "githubIssues",
+                                                                       "pullRequests",
+                                                                       "meetingReports",
+                                                                       "prAnalyses",
+                                                                       "agentActions",
+                                                                       "canvasEntities",
+                                                                       "source",
+                                                                       "generatedAt"
+                                                                   ],
+                                                      "additionalProperties":  false,
+                                                      "properties":  {
+                                                                         "workspace":  {
+                                                                                           "$ref":  "#/$defs/WorkspaceSummary"
+                                                                                       },
+                                                                         "currentMember":  {
+                                                                                               "$ref":  "#/$defs/CurrentWorkspaceMember"
+                                                                                           },
+                                                                         "preferences":  {
+                                                                                             "$ref":  "#/$defs/DashboardPreferences"
+                                                                                         },
+                                                                         "members":  {
+                                                                                         "type":  "array",
+                                                                                         "items":  {
+                                                                                                       "$ref":  "#/$defs/WorkspaceMemberSummary"
+                                                                                                   }
+                                                                                     },
+                                                                         "tasks":  {
+                                                                                       "type":  "array",
+                                                                                       "items":  {
+                                                                                                     "$ref":  "#/$defs/TaskSummary"
+                                                                                                 }
+                                                                                   },
+                                                                         "progress":  {
+                                                                                          "anyOf":  [
+                                                                                                        {
+                                                                                                            "$ref":  "#/$defs/ProgressSummary"
+                                                                                                        },
+                                                                                                        {
+                                                                                                            "type":  "null"
+                                                                                                        }
+                                                                                                    ]
+                                                                                      },
+                                                                         "githubIssues":  {
+                                                                                              "type":  "array",
+                                                                                              "items":  {
+                                                                                                            "$ref":  "#/$defs/GithubIssueSummary"
+                                                                                                        }
+                                                                                          },
+                                                                         "pullRequests":  {
+                                                                                              "type":  "array",
+                                                                                              "items":  {
+                                                                                                            "$ref":  "#/$defs/PullRequestSummary"
+                                                                                                        }
+                                                                                          },
+                                                                         "meetingReports":  {
+                                                                                                "type":  "array",
+                                                                                                "items":  {
+                                                                                                              "$ref":  "#/$defs/MeetingReportSummary"
+                                                                                                          }
+                                                                                            },
+                                                                         "prAnalyses":  {
+                                                                                            "type":  "array",
+                                                                                            "items":  {
+                                                                                                          "$ref":  "#/$defs/PRAnalysisSummary"
+                                                                                                      }
+                                                                                        },
+                                                                         "agentActions":  {
+                                                                                              "type":  "array",
+                                                                                              "items":  {
+                                                                                                            "$ref":  "#/$defs/AgentAction"
+                                                                                                        }
+                                                                                          },
+                                                                         "canvasEntities":  {
+                                                                                                "type":  "array",
+                                                                                                "items":  {
+                                                                                                              "$ref":  "#/$defs/CanvasEntityRef"
+                                                                                                          }
+                                                                                            },
+                                                                         "source":  {
+                                                                                        "enum":  [
+                                                                                                     "fixture",
+                                                                                                     "empty"
+                                                                                                 ]
+                                                                                    },
+                                                                         "generatedAt":  {
+                                                                                             "$ref":  "#/$defs/dateTime"
+                                                                                         }
+                                                                     }
+                                                  }
               }
 }
