@@ -142,6 +142,9 @@ describe("machine-readable public contract schema", () => {
       "GithubIssueCreateAction",
       "PullRequestSummary",
       "PullRequestChangedFileSummary",
+      "MeetingReportGenerateAction",
+      "ReviewAnalysisGenerateAction",
+      "PlanningApproveAction",
       "MeetingReportSummary",
       "MeetingActionItem",
       "PRAnalysisSummary",
@@ -156,7 +159,7 @@ describe("machine-readable public contract schema", () => {
     }
   });
 
-  it("agent action schema binds Juhyung action types to concrete payload schemas", () => {
+  it("agent action schema binds every supported action type to a concrete payload schema", () => {
     const schema = JSON.parse(read(schemaPath));
     const agentAction = schema.$defs.AgentAction;
 
@@ -168,10 +171,22 @@ describe("machine-readable public contract schema", () => {
       return condition?.then?.properties?.payload?.$ref;
     }
 
-    assert.equal(payloadRefFor("task.create.draft"), "#/$defs/TaskCreateDraft");
-    assert.equal(payloadRefFor("task.update.status"), "#/$defs/TaskStatusUpdateAction");
-    assert.equal(payloadRefFor("task.assign"), "#/$defs/TaskAssignAction");
-    assert.equal(payloadRefFor("github.issue.create"), "#/$defs/GithubIssueCreateAction");
+    const expectedPayloadRefs = new Map([
+      ["task.create.draft", "#/$defs/TaskCreateDraft"],
+      ["task.update.status", "#/$defs/TaskStatusUpdateAction"],
+      ["task.assign", "#/$defs/TaskAssignAction"],
+      ["github.issue.create", "#/$defs/GithubIssueCreateAction"],
+      ["meeting.report.generate", "#/$defs/MeetingReportGenerateAction"],
+      ["review.analysis.generate", "#/$defs/ReviewAnalysisGenerateAction"],
+      ["planning.approve", "#/$defs/PlanningApproveAction"],
+    ]);
+
+    assert.deepEqual([...agentAction.properties.type.enum].sort(), [...expectedPayloadRefs.keys()].sort());
+    for (const [actionType, expectedRef] of expectedPayloadRefs) {
+      assert.equal(payloadRefFor(actionType), expectedRef);
+    }
+    assert.deepEqual(agentAction.required, ["type", "source", "requiresConfirmation", "payload", "status"]);
+    assert.equal(agentAction.additionalProperties, false);
     assert.deepEqual(schema.$defs.TaskAssignAction.required, ["taskId", "assigneeMemberId"]);
   });
 
@@ -181,17 +196,49 @@ describe("machine-readable public contract schema", () => {
     const reviewContract = read("docs/contracts/review.md");
     const juhyungBrief = read("docs/agents/juhyung-task-github-progress.md");
     const changedFileSummary = schema.$defs.PullRequestChangedFileSummary;
+    const breakingChangePolicy = githubContract.slice(githubContract.indexOf("## Breaking Change Policy"));
 
     assert.ok(changedFileSummary);
-    assert.ok(changedFileSummary.required.includes("sha"));
+    for (const field of [
+      "pullRequestId",
+      "path",
+      "status",
+      "additions",
+      "deletions",
+      "changes",
+      "patch",
+      "sha",
+      "sourceSyncedAt",
+    ]) {
+      assert.ok(changedFileSummary.required.includes(field));
+    }
+    assert.equal(changedFileSummary.additionalProperties, false);
+    assert.equal(changedFileSummary.properties.path.type, "string");
+    assert.equal(changedFileSummary.properties.path.minLength, 1);
     assert.equal(changedFileSummary.properties.sha.type, "string");
+    assert.equal(changedFileSummary.properties.sha.minLength, 1);
     assert.match(githubContract, /PullRequestChangedFileSummary/);
     assert.match(githubContract, /\/pull-requests\/:pullRequestId\/changed-files/);
     assert.match(githubContract, /patch/);
+    assert.match(githubContract, /state\/nonce/);
+    assert.match(githubContract, /installationId -> workspaceId/);
+    assert.match(githubContract, /changed_functions/);
+    assert.match(githubContract, /non-null `patch`/);
+    assert.match(githubContract, /patch: null/);
+    assert.match(githubContract, /pullRequestId \+ path \+ sha/);
     assert.match(githubContract, /## Provided Read Models/);
     assert.match(githubContract, /## Consumed By/);
     assert.match(githubContract, /## Breaking Change Policy/);
+    for (const model of [
+      "GithubConnectionSummary",
+      "GithubRepositorySummary",
+      "PullRequestSummary",
+      "PullRequestChangedFileSummary",
+    ]) {
+      assert.match(breakingChangePolicy, new RegExp(model));
+    }
     assert.match(reviewContract, /PullRequestChangedFileSummary/);
+    assert.match(reviewContract, /non-null `patch`/);
     assert.match(juhyungBrief, /PullRequestChangedFileSummary/);
   });
 

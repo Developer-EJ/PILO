@@ -290,6 +290,36 @@
         "assignees": { "type": "array", "items": { "type": "string" } }
       }
     },
+    "MeetingReportGenerateAction": {
+      "type": "object",
+      "required": ["workspaceId", "meetingId"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "meetingId": { "$ref": "#/$defs/uuid" },
+        "requestedByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+      }
+    },
+    "ReviewAnalysisGenerateAction": {
+      "type": "object",
+      "required": ["pullRequestId"],
+      "additionalProperties": false,
+      "properties": {
+        "pullRequestId": { "$ref": "#/$defs/uuid" },
+        "repositoryId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "requestedByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+      }
+    },
+    "PlanningApproveAction": {
+      "type": "object",
+      "required": ["workspaceId", "projectPlanDraftId"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "projectPlanDraftId": { "$ref": "#/$defs/uuid" },
+        "approvedByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+      }
+    },
     "MeetingReportSummary": {
       "type": "object",
       "required": ["id", "meetingId", "workspaceId", "title", "summary", "decisionCount", "actionItemCount", "riskCount"],
@@ -370,6 +400,18 @@
         {
           "if": { "properties": { "type": { "const": "github.issue.create" } }, "required": ["type"] },
           "then": { "properties": { "payload": { "$ref": "#/$defs/GithubIssueCreateAction" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "meeting.report.generate" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/MeetingReportGenerateAction" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "review.analysis.generate" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/ReviewAnalysisGenerateAction" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "planning.approve" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/PlanningApproveAction" } } }
         }
       ],
       "properties": {
