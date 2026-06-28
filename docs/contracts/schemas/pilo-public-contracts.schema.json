@@ -209,6 +209,98 @@
         "conclusion": { "type": ["string", "null"] }
       }
     },
+    "ReviewCanvasSummary": {
+      "type": "object",
+      "required": ["id", "analysisId", "pullRequestId", "intentSummary", "reviewStrategy", "nodes", "edges"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "analysisId": { "$ref": "#/$defs/uuid" },
+        "pullRequestId": { "$ref": "#/$defs/uuid" },
+        "intentSummary": { "type": "string" },
+        "reviewStrategy": { "type": "string" },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/ReviewCanvasNode" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/ReviewCanvasEdge" } }
+      }
+    },
+    "ReviewCanvasNode": {
+      "type": "object",
+      "required": ["id", "analysisId", "nodeType", "label", "riskLevel", "status", "reviewOrder", "roleSummary", "reviewReason", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "analysisId": { "$ref": "#/$defs/uuid" },
+        "nodeType": { "enum": ["file", "function", "api", "schema", "risk", "impact"] },
+        "label": { "type": "string" },
+        "filePath": { "type": ["string", "null"] },
+        "functionName": { "type": ["string", "null"] },
+        "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
+        "status": { "enum": ["ok", "discuss", "unknown"] },
+        "reviewOrder": { "type": "integer", "minimum": 1 },
+        "roleSummary": { "type": "string" },
+        "reviewReason": { "type": "string" },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "integer" },
+            "y": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "ReviewCanvasEdge": {
+      "type": "object",
+      "required": ["id", "sourceNodeId", "targetNodeId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "sourceNodeId": { "$ref": "#/$defs/uuid" },
+        "targetNodeId": { "$ref": "#/$defs/uuid" },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "ReviewNodeDetail": {
+      "type": "object",
+      "required": ["id", "analysisId", "nodeId", "filePath", "roleSummary", "modificationReason", "changeGroups", "diffHunks"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "analysisId": { "$ref": "#/$defs/uuid" },
+        "nodeId": { "$ref": "#/$defs/uuid" },
+        "filePath": { "type": "string" },
+        "roleSummary": { "type": "string" },
+        "modificationReason": { "type": "string" },
+        "changeGroups": { "type": "array", "items": { "$ref": "#/$defs/ReviewChangeGroup" } },
+        "diffHunks": { "type": "array", "items": { "$ref": "#/$defs/ReviewDiffHunk" } }
+      }
+    },
+    "ReviewChangeGroup": {
+      "type": "object",
+      "required": ["id", "title", "summary", "newStartLine"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "newStartLine": { "type": "integer", "minimum": 1 },
+        "newEndLine": { "type": ["integer", "null"] }
+      }
+    },
+    "ReviewDiffHunk": {
+      "type": "object",
+      "required": ["id", "oldStartLine", "newStartLine", "oldCode", "newCode"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "oldStartLine": { "type": "integer", "minimum": 1 },
+        "newStartLine": { "type": "integer", "minimum": 1 },
+        "oldCode": { "type": "string" },
+        "newCode": { "type": "string" },
+        "highlightLines": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
     "ReviewNodeSummary": {
       "type": "object",
       "required": ["id", "analysisId", "nodeType", "label", "riskLevel", "status"],

@@ -8,8 +8,8 @@ import {
 const REVIEW_ANALYSIS_FIXTURE: PRAnalysisSummarySource = {
   id: "88888888-8888-4888-8888-888888888881",
   pullRequestId: "66666666-6666-4666-8666-666666666661",
-  purposeSummary: "OAuth callback 화면 골격 추가",
-  impactSummary: "Auth route와 session redirect flow에 영향",
+  purposeSummary: "OAuth callback 화면 골격을 추가했다.",
+  impactSummary: "Auth route와 session redirect flow에 영향이 있다.",
   testRecommendation:
     "성공/실패 redirect smoke test와 session 만료 케이스를 확인한다.",
   riskLevel: "medium",
@@ -17,16 +17,20 @@ const REVIEW_ANALYSIS_FIXTURE: PRAnalysisSummarySource = {
   okCount: 3,
   discussCount: 1,
   riskCount: 1,
-  conclusion: "리뷰 가능",
+  conclusion: "리뷰 후 merge 가능",
 };
+
+const REVIEW_ANALYSIS_SUMMARY_FIXTURE = toPRAnalysisSummary(
+  REVIEW_ANALYSIS_FIXTURE,
+);
 
 @Injectable()
 export class ReviewPublicService {
   private readonly analysisSummaries = new Map<string, PRAnalysisSummarySource>(
     [
       [
-        REVIEW_ANALYSIS_FIXTURE.pullRequestId as string,
-        REVIEW_ANALYSIS_FIXTURE,
+        REVIEW_ANALYSIS_SUMMARY_FIXTURE.pullRequestId,
+        REVIEW_ANALYSIS_SUMMARY_FIXTURE,
       ],
     ],
   );

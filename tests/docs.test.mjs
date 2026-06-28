@@ -16,7 +16,34 @@ function exists(relPath) {
 }
 
 function assertMatchesSchema(defs, schema, value, fieldPath) {
-  if (schema.$ref === "#/$defs/uuid") {
+  if (schema.$ref) {
+    const refName = schema.$ref.replace("#/$defs/", "");
+    if (refName === "uuid") {
+      assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
+      assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      return;
+    }
+
+    assert.ok(defs[refName], `${fieldPath} references missing schema ${refName}`);
+    assertMatchesSchema(defs, defs[refName], value, fieldPath);
+    return;
+  }
+
+  if (schema.anyOf) {
+    const errors = [];
+    for (const option of schema.anyOf) {
+      try {
+        assertMatchesSchema(defs, option, value, fieldPath);
+        return;
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
+
+    assert.fail(`${fieldPath} must match one anyOf schema: ${errors.join("; ")}`);
+  }
+
+  if (schema.format === "uuid") {
     assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
     assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     return;
@@ -32,7 +59,7 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
   const typeMatches = types.includes(actualType) || (types.includes("integer") && Number.isInteger(value));
   assert.ok(typeMatches, `${fieldPath} must be ${types.join(" or ")}`);
 
-  if (actualType === "integer") {
+  if (types.includes("integer") && actualType !== "null") {
     assert.ok(Number.isInteger(value), `${fieldPath} must be an integer`);
   }
 
@@ -42,6 +69,24 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
 
   if (actualType === "array" && schema.items) {
     value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
+  }
+
+  if (actualType === "object" && schema.properties) {
+    for (const key of schema.required || []) {
+      assert.ok(Object.hasOwn(value, key), `${fieldPath}.${key} is required`);
+    }
+
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        assert.ok(schema.properties[key], `${fieldPath}.${key} is not in the public schema`);
+      }
+    }
+
+    for (const [key, childSchema] of Object.entries(schema.properties)) {
+      if (Object.hasOwn(value, key)) {
+        assertMatchesSchema(defs, childSchema, value[key], `${fieldPath}.${key}`);
+      }
+    }
   }
 }
 
@@ -187,6 +232,12 @@ describe("machine-readable public contract schema", () => {
       "MeetingReportSummary",
       "MeetingActionItem",
       "PRAnalysisSummary",
+      "ReviewCanvasSummary",
+      "ReviewCanvasNode",
+      "ReviewCanvasEdge",
+      "ReviewNodeDetail",
+      "ReviewChangeGroup",
+      "ReviewDiffHunk",
       "ReviewNodeSummary",
       "ReviewRiskSummary",
       "CanvasEntityRef",
@@ -239,8 +290,9 @@ describe("contract fixtures", () => {
     const fixture = JSON.parse(read("docs/contracts/fixtures/review-analysis.fixture.json"));
 
     assertMatchesDefinition(schema.$defs, "PRAnalysisSummary", fixture.prAnalysis);
-    for (const node of fixture.reviewNodes) {
-      assertMatchesDefinition(schema.$defs, "ReviewNodeSummary", node);
+    assertMatchesDefinition(schema.$defs, "ReviewCanvasSummary", fixture.reviewCanvas);
+    for (const detail of fixture.nodeDetails) {
+      assertMatchesDefinition(schema.$defs, "ReviewNodeDetail", detail);
     }
     for (const risk of fixture.reviewRisks) {
       assertMatchesDefinition(schema.$defs, "ReviewRiskSummary", risk);

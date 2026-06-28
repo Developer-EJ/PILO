@@ -42,6 +42,20 @@ export interface PRAnalysisSummarySource {
   conclusion?: string | null;
 }
 
+const REVIEW_RISK_LEVELS: readonly ReviewRiskLevel[] = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+];
+
+const REVIEW_ANALYSIS_STATUSES: readonly ReviewAnalysisStatus[] = [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+];
+
 function firstValue<T>(...values: Array<T | null | undefined>): T | null {
   return values.find((value) => value !== undefined && value !== null) ?? null;
 }
@@ -50,6 +64,14 @@ function countValue(value: number | null): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0
     ? value
     : 0;
+}
+
+function enumValue<T extends string>(
+  value: T | null,
+  allowedValues: readonly T[],
+  fallback: T,
+): T {
+  return value && allowedValues.includes(value) ? value : fallback;
 }
 
 export function toPRAnalysisSummary(
@@ -73,9 +95,16 @@ export function toPRAnalysisSummary(
       source.testRecommendation,
       source.test_recommendation,
     ),
-    riskLevel: firstValue(source.riskLevel, source.risk_level) ?? "low",
-    analysisStatus:
-      firstValue(source.analysisStatus, source.analysis_status) ?? "pending",
+    riskLevel: enumValue(
+      firstValue(source.riskLevel, source.risk_level),
+      REVIEW_RISK_LEVELS,
+      "low",
+    ),
+    analysisStatus: enumValue(
+      firstValue(source.analysisStatus, source.analysis_status),
+      REVIEW_ANALYSIS_STATUSES,
+      "pending",
+    ),
     okCount: countValue(firstValue(source.okCount, source.ok_count)),
     discussCount: countValue(
       firstValue(source.discussCount, source.discuss_count),

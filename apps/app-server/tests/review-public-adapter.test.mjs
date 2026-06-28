@@ -50,7 +50,7 @@ describe("review public adapter", () => {
     const summary = toPRAnalysisSummary({
       id: "88888888-8888-4888-8888-888888888881",
       pullRequestId: "66666666-6666-4666-8666-666666666661",
-      okCount: -1,
+      okCount: null,
       discussCount: null,
       riskCount: undefined,
     });
@@ -61,6 +61,18 @@ describe("review public adapter", () => {
     assert.equal(summary.discussCount, 0);
     assert.equal(summary.riskCount, 0);
     assert.equal(summary.conclusion, null);
+  });
+
+  it("falls back when runtime enum fields are outside the public contract", () => {
+    const summary = toPRAnalysisSummary({
+      id: "88888888-8888-4888-8888-888888888881",
+      pullRequestId: "66666666-6666-4666-8666-666666666661",
+      riskLevel: "blocked",
+      analysisStatus: "done",
+    });
+
+    assert.equal(summary.riskLevel, "low");
+    assert.equal(summary.analysisStatus, "pending");
   });
 });
 
