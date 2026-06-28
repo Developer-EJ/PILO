@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { WorkspaceRepository } from "./workspace.repository";
 import type {
   CurrentWorkspaceMember,
@@ -12,6 +14,7 @@ import type {
   WorkspaceMemberRole,
   WorkspaceMemberRecord,
   WorkspaceMemberSummary,
+  WorkspaceDashboardReadModel,
   WorkspaceStatus,
   WorkspaceSummary,
   WorkspaceType,
@@ -265,6 +268,27 @@ export class WorkspaceService {
     }
 
     return preferences;
+  }
+
+  async getWorkspaceDashboard(
+    input: WorkspaceResourceInput,
+  ): Promise<WorkspaceDashboardReadModel> {
+    const [workspace, currentMember, members, preferences] = await Promise.all([
+      this.getWorkspace(input),
+      this.requireCurrentMember(input),
+      this.listWorkspaceMembers(input),
+      this.getDashboardPreferences(input),
+    ]);
+    const readModels = loadFixtureDashboardReadModels(input.workspaceId);
+
+    return {
+      workspace,
+      currentMember,
+      preferences,
+      members,
+      ...readModels,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async updateDashboardPreferences(
@@ -721,4 +745,137 @@ function toWorkspaceCurrentMemberContext(
     currentMember,
     permissions: createWorkspaceMemberPermissions(currentMember.role),
   };
+}
+
+type FixtureDashboardReadModels = Pick<
+  WorkspaceDashboardReadModel,
+  | "tasks"
+  | "progress"
+  | "githubIssues"
+  | "pullRequests"
+  | "meetingReports"
+  | "prAnalyses"
+  | "agentActions"
+  | "canvasEntities"
+  | "source"
+>;
+
+let cachedFixture: Record<string, unknown> | null | undefined;
+
+function loadFixtureDashboardReadModels(
+  workspaceId: string,
+): FixtureDashboardReadModels {
+  const fixture = readWorkspaceDashboardFixture();
+
+  if (!fixture) {
+    return createEmptyDashboardReadModels();
+  }
+
+  return {
+    tasks: remapWorkspaceIdArray(fixture.tasks, workspaceId),
+    progress: remapWorkspaceIdRecord(fixture.progress, workspaceId),
+    githubIssues: readFixtureArray(fixture.githubIssues),
+    pullRequests: readFixtureArray(fixture.pullRequests),
+    meetingReports: remapWorkspaceIdArray(fixture.meetingReports, workspaceId),
+    prAnalyses: readFixtureArray(fixture.prAnalyses),
+    agentActions: remapAgentActionWorkspaceIds(
+      readFixtureArray(fixture.agentActions),
+      workspaceId,
+    ),
+    canvasEntities: readFixtureArray(fixture.canvasEntities),
+    source: "fixture",
+  };
+}
+
+function createEmptyDashboardReadModels(): FixtureDashboardReadModels {
+  return {
+    tasks: [],
+    progress: null,
+    githubIssues: [],
+    pullRequests: [],
+    meetingReports: [],
+    prAnalyses: [],
+    agentActions: [],
+    canvasEntities: [],
+    source: "empty",
+  };
+}
+
+function readWorkspaceDashboardFixture() {
+  if (cachedFixture !== undefined) {
+    return cachedFixture;
+  }
+
+  for (const fixturePath of createFixturePathCandidates()) {
+    if (existsSync(fixturePath)) {
+      cachedFixture = JSON.parse(
+        readFileSync(fixturePath, "utf8"),
+      ) as Record<string, unknown>;
+      return cachedFixture;
+    }
+  }
+
+  cachedFixture = null;
+  return cachedFixture;
+}
+
+function createFixturePathCandidates() {
+  return [
+    resolve(
+      process.cwd(),
+      "../../docs/contracts/fixtures/workspace-dashboard.fixture.json",
+    ),
+    resolve(
+      process.cwd(),
+      "docs/contracts/fixtures/workspace-dashboard.fixture.json",
+    ),
+  ];
+}
+
+function readFixtureArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value.map(cloneJsonValue) : [];
+}
+
+function remapWorkspaceIdArray(value: unknown, workspaceId: string) {
+  return readFixtureArray(value).map((item) =>
+    remapWorkspaceIdRecord(item, workspaceId),
+  );
+}
+
+function remapWorkspaceIdRecord(
+  value: unknown,
+  workspaceId: string,
+): Record<string, unknown> | null {
+  if (!isPlainJsonObject(value)) {
+    return null;
+  }
+
+  return {
+    ...cloneJsonValue(value),
+    workspaceId,
+  };
+}
+
+function remapAgentActionWorkspaceIds(actions: unknown[], workspaceId: string) {
+  return actions.map((action) => {
+    if (!isPlainJsonObject(action)) {
+      return action;
+    }
+
+    const payload = action.payload;
+
+    return {
+      ...action,
+      payload: isPlainJsonObject(payload)
+        ? {
+            ...payload,
+            workspaceId,
+          }
+        : payload,
+    };
+  });
+}
+
+function cloneJsonValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
