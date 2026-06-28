@@ -13,6 +13,14 @@ import {
   mockWorkspaces,
 } from "../lib/workspace/workspaceClient.mjs";
 import {
+  createMockWorkspaceDashboardClient,
+  createWorkspaceDashboardApiClient,
+  createWorkspaceDashboardClient,
+  createWorkspaceDashboardFixture,
+  normalizeWorkspaceDashboard,
+  resolveWorkspaceDashboardClientMode,
+} from "../lib/workspace/dashboardClient.mjs";
+import {
   CURRENT_WORKSPACE_STORAGE_KEY,
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
@@ -21,6 +29,8 @@ import {
   writeStoredWorkspaceId,
 } from "../lib/workspace/currentWorkspace.mjs";
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
+import contractWorkspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
+import { workspaceDashboardFixture } from "../lib/workspace/workspaceDashboardFixture.mjs";
 import {
   createMockAuthClient,
   markMockAuthSignedIn,
@@ -322,6 +332,133 @@ describe("frontend package", () => {
       }).listWorkspaces(),
       [],
     );
+  });
+
+  it("loads workspace dashboard data in mock and api modes", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const dashboardFixture = createWorkspaceDashboardFixture(workspaceId);
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url, init });
+
+      return Response.json(dashboardFixture);
+    };
+
+    const mockResult =
+      await createMockWorkspaceDashboardClient().getDashboard(workspaceId);
+    assert.equal(mockResult.dashboard.workspace.id, workspaceId);
+    assert.equal(mockResult.dashboard.source, "fixture");
+    assert.equal(mockResult.dashboard.tasks[0].workspaceId, workspaceId);
+
+    const apiResult = await createWorkspaceDashboardApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    }).getDashboard(workspaceId);
+
+    assert.equal(
+      requests[0].url,
+      `https://api.pilo.dev/workspaces/${workspaceId}/dashboard`,
+    );
+    assert.equal(requests[0].init.credentials, "include");
+    assert.equal(apiResult.dashboard.workspace.id, workspaceId);
+    assert.equal(apiResult.dashboard.tasks.length, dashboardFixture.tasks.length);
+
+    assert.equal(resolveWorkspaceDashboardClientMode("api"), "api");
+    assert.equal(resolveWorkspaceDashboardClientMode("fixture"), "mock");
+    assert.equal(
+      (
+        await createWorkspaceDashboardClient({
+          mode: "mock",
+        }).getDashboard(workspaceId)
+      ).dashboard.workspace.id,
+      workspaceId,
+    );
+  });
+
+  it("keeps frontend dashboard fixture sections aligned with the contract fixture", () => {
+    assert.deepEqual(
+      Object.keys(workspaceDashboardFixture).sort(),
+      Object.keys(contractWorkspaceDashboardFixture).sort(),
+    );
+
+    for (const section of [
+      "members",
+      "tasks",
+      "githubIssues",
+      "pullRequests",
+      "meetingReports",
+      "prAnalyses",
+      "agentActions",
+      "canvasEntities",
+    ]) {
+      assert.equal(Array.isArray(workspaceDashboardFixture[section]), true);
+      assert.equal(
+        Array.isArray(contractWorkspaceDashboardFixture[section]),
+        true,
+      );
+    }
+  });
+
+  it("normalizes partial dashboard payloads into quiet fallback sections", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const { dashboard, warnings } = normalizeWorkspaceDashboard(
+      {
+        workspace: mockWorkspaces[0],
+        tasks: "not-an-array",
+        progress: "not-an-object",
+        source: "fixture",
+      },
+      { workspaceId },
+    );
+
+    assert.equal(dashboard.workspace.id, workspaceId);
+    assert.deepEqual(dashboard.tasks, []);
+    assert.deepEqual(dashboard.pullRequests, []);
+    assert.equal(dashboard.progress, null);
+    assert.equal(warnings.includes("tasks_missing"), true);
+    assert.equal(warnings.includes("pullRequests_missing"), true);
+    assert.equal(warnings.includes("progress_invalid"), true);
+    assert.equal(warnings.includes("currentMember_missing"), true);
+    assert.equal(warnings.includes("preferences_missing"), true);
+  });
+
+  it("keeps dashboard frontend contracts aligned with the public schema", () => {
+    const dashboard = contractSchema.$defs.WorkspaceDashboardReadModel;
+
+    assert.deepEqual(dashboard.required, [
+      "workspace",
+      "currentMember",
+      "preferences",
+      "members",
+      "tasks",
+      "progress",
+      "githubIssues",
+      "pullRequests",
+      "meetingReports",
+      "prAnalyses",
+      "agentActions",
+      "canvasEntities",
+      "source",
+      "generatedAt",
+    ]);
+    assert.equal(
+      dashboard.properties.workspace.$ref,
+      "#/$defs/WorkspaceSummary",
+    );
+    assert.equal(
+      dashboard.properties.currentMember.$ref,
+      "#/$defs/CurrentWorkspaceMember",
+    );
+    assert.equal(
+      dashboard.properties.preferences.$ref,
+      "#/$defs/DashboardPreferences",
+    );
+    assert.equal(dashboard.properties.tasks.items.$ref, "#/$defs/TaskSummary");
+    assert.equal(
+      dashboard.properties.pullRequests.items.$ref,
+      "#/$defs/PullRequestSummary",
+    );
+    assert.deepEqual(dashboard.properties.source.enum, ["fixture", "empty"]);
   });
 
   it("resolves current workspace from URL before stored state", () => {

@@ -391,6 +391,38 @@ h1 {
   padding: 26px 28px 72px;
 }
 
+.dashboard-status-panel,
+.dashboard-notice {
+  border: 1px solid #e4e7ee;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--pilo-shadow-soft);
+}
+
+.dashboard-status-panel {
+  padding: 18px;
+}
+
+.dashboard-status-panel strong {
+  color: #171a21;
+  font-size: 15px;
+}
+
+.dashboard-status-panel p {
+  margin-top: 6px;
+  color: var(--pilo-text-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dashboard-notice {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  color: var(--pilo-text-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -595,6 +627,15 @@ h1 {
   color: #2c3140;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.empty-row {
+  border-radius: 11px;
+  margin: 0;
+  padding: 12px;
+  color: var(--pilo-muted);
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .decision-list span {
