@@ -17,7 +17,9 @@ const {
 
 function createController() {
   return new ReviewGraphController(
-    new ReviewGraphService(new InMemoryReviewGraphRepository()),
+    new ReviewGraphService(new InMemoryReviewGraphRepository(), {
+      seedFixture: true,
+    }),
   );
 }
 
@@ -29,7 +31,19 @@ describe("review graph API boundary", () => {
 
     assert.equal(graph.nodes.length, 2);
     assert.equal(graph.nodes[0].status, "unknown");
+    assert.equal(graph.nodes[0].reviewOrder, 1);
+    assert.equal(graph.nodes[0].position.x, 120);
+    assert.match(graph.intentSummary, /callback/);
     assert.equal(graph.reviewOrder[0], graph.nodes[0].id);
+  });
+
+  it("keeps a canvas alias for the AI review workflow screen", () => {
+    const controller = createController();
+
+    const canvas = controller.getCanvas("88888888-8888-4888-8888-888888888881");
+
+    assert.equal(canvas.nodes.length, 2);
+    assert.match(canvas.reviewStrategy, /callback/);
   });
 
   it("upserts reviewer node state by node and reviewer", () => {
@@ -69,6 +83,20 @@ describe("review graph API boundary", () => {
           status: "done",
         }),
       /Invalid review node status/,
+    );
+  });
+
+  it("rejects invalid state timestamps", () => {
+    const controller = createController();
+
+    assert.throws(
+      () =>
+        controller.upsertNodeState("88888888-8888-4888-8888-888888888891", {
+          reviewerMemberId: "33333333-3333-4333-8333-333333333331",
+          status: "ok",
+          changedAt: "tomorrow",
+        }),
+      /changedAt must be a valid ISO timestamp/,
     );
   });
 });

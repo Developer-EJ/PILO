@@ -15,7 +15,14 @@ export interface ReviewGraphRecord {
   id: string;
   analysisId: string;
   summary: string | null;
+  intentSummary: string;
+  reviewStrategy: string;
   reviewOrder: string[];
+}
+
+export interface ReviewCanvasPosition {
+  x: number;
+  y: number;
 }
 
 export interface ReviewNodeRecord {
@@ -26,6 +33,10 @@ export interface ReviewNodeRecord {
   filePath: string | null;
   functionName: string | null;
   riskLevel: ReviewRiskLevel;
+  reviewOrder: number;
+  roleSummary: string;
+  reviewReason: string;
+  position: ReviewCanvasPosition;
 }
 
 export interface NodeReviewStateRecord {
@@ -47,12 +58,18 @@ export interface ReviewNodeSummary {
   functionName: string | null;
   riskLevel: ReviewRiskLevel;
   status: ReviewNodeStatus;
+  reviewOrder: number;
+  roleSummary: string;
+  reviewReason: string;
+  position: ReviewCanvasPosition;
 }
 
 export interface ReviewGraphSummary {
   id: string;
   analysisId: string;
   summary: string | null;
+  intentSummary: string;
+  reviewStrategy: string;
   reviewOrder: string[];
   nodes: ReviewNodeSummary[];
 }

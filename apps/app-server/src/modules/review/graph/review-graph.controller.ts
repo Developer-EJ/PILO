@@ -15,6 +15,11 @@ export class ReviewGraphController {
     return this.graphService.getGraph(analysisId);
   }
 
+  @Get("pull-request-analyses/:analysisId/canvas")
+  getCanvas(@Param("analysisId") analysisId: string): ReviewGraphSummary {
+    return this.graphService.getGraph(analysisId);
+  }
+
   @Patch("review-nodes/:nodeId/state")
   upsertNodeState(
     @Param("nodeId") nodeId: string,
