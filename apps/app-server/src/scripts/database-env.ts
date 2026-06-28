@@ -23,7 +23,7 @@ export function loadDatabaseEnv(options: LoadDatabaseEnvOptions = {}) {
   const configure =
     options.configure ??
     ((path: string) => {
-      config({ path });
+      config({ path, processEnv: env as Record<string, string> });
     });
   const paths = options.paths ?? defaultDatabaseEnvPaths();
 

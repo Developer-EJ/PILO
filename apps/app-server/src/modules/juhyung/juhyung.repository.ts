@@ -47,37 +47,24 @@ export class JuhyungRepository {
   }
 
   async createTask(input: CreateTaskInput, createdByMemberId: string) {
-    const createdByMember = await this.database.workspaceMember.findFirst({
-      where: {
-        id: createdByMemberId,
-        workspaceId: input.workspaceId,
-      },
-    });
-
-    if (!createdByMember) {
-      throw new ForbiddenException(
-        "Task creator must belong to the task workspace",
-      );
-    }
-
-    if (input.assigneeMemberId) {
-      const assigneeMember = await this.database.workspaceMember.findFirst({
+    if (input.milestoneId) {
+      const milestone = await this.database.milestone.findFirst({
         where: {
-          id: input.assigneeMemberId,
+          id: input.milestoneId,
           workspaceId: input.workspaceId,
         },
       });
 
-      if (!assigneeMember) {
+      if (!milestone) {
         throw new ForbiddenException(
-          "Task assignee must belong to the task workspace",
+          "Task milestone must belong to the task workspace",
         );
       }
     }
 
     const data = {
       ...input,
-      createdByMemberId: createdByMember.id,
+      createdByMemberId,
     } satisfies Prisma.TaskUncheckedCreateInput;
 
     return this.database.task.create({ data });

@@ -29,6 +29,7 @@ model WorkspaceMember {
   createdTasks  Task[]    @relation("TaskCreatedByMember")
 
   @@unique([workspaceId, userId])
+  @@unique([workspaceId, id])
   @@map("workspace_members")
 }
 
@@ -61,8 +62,8 @@ model Task {
   deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
 
   workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  assigneeMember  WorkspaceMember? @relation("TaskAssigneeMember", fields: [assigneeMemberId], references: [id], onDelete: SetNull)
-  createdByMember WorkspaceMember? @relation("TaskCreatedByMember", fields: [createdByMemberId], references: [id], onDelete: SetNull)
+  assigneeMember  WorkspaceMember? @relation("TaskAssigneeMember", fields: [workspaceId, assigneeMemberId], references: [workspaceId, id], onDelete: NoAction)
+  createdByMember WorkspaceMember? @relation("TaskCreatedByMember", fields: [workspaceId, createdByMemberId], references: [workspaceId, id], onDelete: NoAction)
 
   @@map("tasks")
 }
