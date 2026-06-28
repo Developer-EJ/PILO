@@ -44,6 +44,15 @@ function validateJsonSchema(schema, value, root = schema) {
       return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(data) && !Number.isNaN(Date.parse(data));
     }
 
+    if (format === "date") {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(data);
+      if (!match) return false;
+
+      const [, year, month, day] = match.map(Number);
+      const parsed = new Date(Date.UTC(year, month - 1, day));
+      return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+    }
+
     return true;
   }
 
