@@ -303,6 +303,20 @@
               "error": { "type": "null" }
             }
           }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "requires_confirmation" }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionRequired": { "const": true },
+              "pendingActionCount": { "type": "integer", "minimum": 1 }
+            }
+          }
         }
       ],
       "properties": {
@@ -380,7 +394,7 @@
     },
     "AgentRunDetail": {
       "type": "object",
-      "required": ["id", "workflowId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "status", "input", "output", "error", "tokenUsage", "steps", "actions", "trace", "startedAt", "finishedAt", "createdAt", "updatedAt"],
+      "required": ["id", "workflowId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "status", "actionRequired", "pendingActionCount", "input", "output", "error", "tokenUsage", "steps", "actions", "trace", "startedAt", "finishedAt", "createdAt", "updatedAt"],
       "additionalProperties": false,
       "allOf": [
         {
@@ -408,6 +422,20 @@
               "error": { "type": "null" }
             }
           }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "requires_confirmation" }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionRequired": { "const": true },
+              "pendingActionCount": { "type": "integer", "minimum": 1 }
+            }
+          }
         }
       ],
       "properties": {
@@ -418,6 +446,8 @@
         "workspaceId": { "$ref": "#/$defs/uuid" },
         "actorMemberId": { "$ref": "#/$defs/uuid" },
         "status": { "$ref": "#/$defs/AgentRunStatus" },
+        "actionRequired": { "type": "boolean" },
+        "pendingActionCount": { "type": "integer", "minimum": 0 },
         "input": { "type": "object" },
         "output": { "type": ["object", "null"] },
         "error": { "anyOf": [{ "$ref": "#/$defs/AgentError" }, { "type": "null" }] },

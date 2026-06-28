@@ -35,13 +35,37 @@ function validateJsonSchema(schema, value, root = schema) {
     return typeof data === type;
   }
 
+  function datePartsMatch(year, month, day) {
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    parsed.setUTCFullYear(year);
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+  }
+
   function formatMatches(format, data) {
     if (format === "uuid") {
       return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data);
     }
 
     if (format === "date-time") {
-      return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(data) && !Number.isNaN(Date.parse(data));
+      const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/.exec(data);
+      if (!match) return false;
+
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      const hour = Number(match[4]);
+      const minute = Number(match[5]);
+      const second = Number(match[6]);
+      const offsetHour = match[8] === undefined ? null : Number(match[8]);
+      const offsetMinute = match[9] === undefined ? null : Number(match[9]);
+
+      return (
+        datePartsMatch(year, month, day) &&
+        hour <= 23 &&
+        minute <= 59 &&
+        second <= 59 &&
+        (offsetHour === null || (offsetHour <= 23 && offsetMinute <= 59))
+      );
     }
 
     if (format === "date") {
@@ -49,8 +73,7 @@ function validateJsonSchema(schema, value, root = schema) {
       if (!match) return false;
 
       const [, year, month, day] = match.map(Number);
-      const parsed = new Date(Date.UTC(year, month - 1, day));
-      return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+      return datePartsMatch(year, month, day);
     }
 
     return true;
@@ -358,6 +381,8 @@ describe("machine-readable public contract schema", () => {
       workspaceId: uuid,
       actorMemberId: uuid,
       status: "requires_confirmation",
+      actionRequired: true,
+      pendingActionCount: 1,
       input: { meetingId: uuid },
       output: {},
       error: null,
@@ -383,11 +408,16 @@ describe("machine-readable public contract schema", () => {
     assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, createRequest, schema).valid, true);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, statusResponse, schema).valid, true);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: { message: "workflow failed" } }, schema).valid, true);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: true, pendingActionCount: 1 }, schema).valid, true);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunDetail, detail, schema).valid, true);
 
     assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, { ...createRequest, workflowType: "unknown.workflow" }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "running", startedAt: "2026-13-27T10:00:00.000Z" }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "running", startedAt: "2026-06-27T25:00:00.000Z" }, schema).valid, false);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: null }, schema).valid, false);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "succeeded", error: { message: "unexpected" } }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: false, pendingActionCount: 1 }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: true, pendingActionCount: 0 }, schema).valid, false);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunDetail, { ...detail, status: "failed", error: null }, schema).valid, false);
   });
 
@@ -637,7 +667,14 @@ describe("contract fixtures", () => {
     const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
     const fixture = readJson("docs/contracts/fixtures/agent-run-detail.fixture.json");
     const result = validateJsonSchema(schema.$defs.AgentRunDetail, fixture, schema);
+    const waitingAction = fixture.actions.find((action) => action.status === "waiting_confirmation");
+
     assert.equal(result.valid, true, result.errors.join(", "));
+    assert.equal(fixture.status, "requires_confirmation");
+    assert.equal(fixture.actionRequired, true);
+    assert.ok(fixture.pendingActionCount > 0);
+    assert.ok(waitingAction);
+    assert.equal(waitingAction.requiresConfirmation, true);
   });
 
   it("fixture rules are documented and linked from bootstrap docs", () => {

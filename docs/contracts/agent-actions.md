@@ -219,6 +219,8 @@ Status polling responses are small enough for repeated reads and must not includ
   "workspaceId": "uuid",
   "actorMemberId": "uuid",
   "status": "requires_confirmation",
+  "actionRequired": true,
+  "pendingActionCount": 1,
   "input": {
     "meetingId": "uuid"
   },
