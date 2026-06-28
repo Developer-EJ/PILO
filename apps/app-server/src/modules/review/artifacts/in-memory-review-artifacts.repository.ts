@@ -54,9 +54,15 @@ export class InMemoryReviewArtifactsRepository {
     analysisId: string,
     checklistType: ReviewChecklistType,
   ): number {
-    return this.listChecklistItems(analysisId).filter(
-      (item) => item.checklistType === checklistType,
-    ).length;
+    const sortOrders = this.listChecklistItems(analysisId)
+      .filter((item) => item.checklistType === checklistType)
+      .map((item) => item.sortOrder);
+
+    if (sortOrders.length === 0) {
+      return 0;
+    }
+
+    return Math.max(...sortOrders) + 1;
   }
 
   saveChecklistItem(

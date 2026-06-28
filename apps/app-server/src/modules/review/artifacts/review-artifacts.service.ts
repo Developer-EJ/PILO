@@ -23,12 +23,15 @@ export class ReviewArtifactsService {
     roomId: string,
     input: CreateReviewCommentInput,
   ): ReviewCommentRecord {
-    const createdAt = input.createdAt ?? new Date().toISOString();
+    const createdAt = this.timestampOrNow(input.createdAt);
 
     return this.artifactsRepository.saveComment({
       id: randomUUID(),
       roomId,
-      authorMemberId: input.authorMemberId ?? null,
+      authorMemberId: this.requiredString(
+        input.authorMemberId,
+        "authorMemberId",
+      ),
       nodeId: input.nodeId ?? null,
       changedFileId: input.changedFileId ?? null,
       changedFunctionId: input.changedFunctionId ?? null,
@@ -43,17 +46,18 @@ export class ReviewArtifactsService {
   ): ReviewChecklistItemRecord {
     const checklistType = this.toChecklistType(input.checklistType ?? "review");
     const status = this.toChecklistStatus(input.status ?? "todo");
-    const changedAt = input.changedAt ?? new Date().toISOString();
+    const changedAt = this.timestampOrNow(input.changedAt);
     const sortOrder =
       input.sortOrder ??
       this.artifactsRepository.nextChecklistSortOrder(
         analysisId,
         checklistType,
       );
+    const normalizedSortOrder = this.nonNegativeInteger("sortOrder", sortOrder);
     const existing = this.artifactsRepository.findChecklistItemBySlot(
       analysisId,
       checklistType,
-      this.nonNegativeInteger(sortOrder),
+      normalizedSortOrder,
     );
     const checked = this.toCheckedFields(status, input, changedAt);
 
@@ -65,7 +69,7 @@ export class ReviewArtifactsService {
       status,
       checkedByMemberId: checked.checkedByMemberId,
       checkedAt: checked.checkedAt,
-      sortOrder: this.nonNegativeInteger(sortOrder),
+      sortOrder: normalizedSortOrder,
       createdAt: existing?.createdAt ?? changedAt,
       updatedAt: changedAt,
     });
@@ -109,7 +113,7 @@ export class ReviewArtifactsService {
         input.checkedByMemberId,
         "checkedByMemberId",
       ),
-      checkedAt: input.checkedAt ?? checkedAt,
+      checkedAt: this.timestampOrNow(input.checkedAt ?? checkedAt),
     };
   }
 
@@ -124,7 +128,25 @@ export class ReviewArtifactsService {
     throw new BadRequestException(`${field} is required`);
   }
 
-  private nonNegativeInteger(value: number): number {
-    return Number.isInteger(value) && value >= 0 ? value : 0;
+  private nonNegativeInteger(fieldName: string, value: number): number {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new BadRequestException(
+        `${fieldName} must be a non-negative integer`,
+      );
+    }
+
+    return value;
+  }
+
+  private timestampOrNow(value?: string | null): string {
+    if (!value) {
+      return new Date().toISOString();
+    }
+
+    if (Number.isNaN(Date.parse(value))) {
+      throw new BadRequestException("timestamp must be a valid ISO timestamp");
+    }
+
+    return value;
   }
 }

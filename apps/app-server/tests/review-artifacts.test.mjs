@@ -43,8 +43,21 @@ describe("review comment/checklist API boundary", () => {
     const controller = createController();
 
     assert.throws(
-      () => controller.createComment("room-1", { body: "   " }),
+      () =>
+        controller.createComment("room-1", {
+          authorMemberId: "33333333-3333-4333-8333-333333333331",
+          body: "   ",
+        }),
       /body is required/,
+    );
+  });
+
+  it("requires an author for human review comments", () => {
+    const controller = createController();
+
+    assert.throws(
+      () => controller.createComment("room-1", { body: "Check this path." }),
+      /authorMemberId is required/,
     );
   });
 
@@ -72,6 +85,28 @@ describe("review comment/checklist API boundary", () => {
     assert.equal(second.checkedAt, "2026-06-27T10:05:00.000Z");
   });
 
+  it("chooses the next checklist sort order from the current maximum", () => {
+    const controller = createController();
+    const analysisId = "88888888-8888-4888-8888-888888888881";
+
+    controller.createChecklistItem(analysisId, {
+      checklistType: "review",
+      title: "First",
+      sortOrder: 0,
+    });
+    controller.createChecklistItem(analysisId, {
+      checklistType: "review",
+      title: "Third",
+      sortOrder: 2,
+    });
+    const next = controller.createChecklistItem(analysisId, {
+      checklistType: "review",
+      title: "Next",
+    });
+
+    assert.equal(next.sortOrder, 3);
+  });
+
   it("rejects invalid checklist fields", () => {
     const controller = createController();
 
@@ -90,6 +125,14 @@ describe("review comment/checklist API boundary", () => {
           status: "blocked",
         }),
       /Invalid checklist status/,
+    );
+    assert.throws(
+      () =>
+        controller.createChecklistItem("analysis-1", {
+          title: "Check release",
+          sortOrder: -1,
+        }),
+      /sortOrder must be a non-negative integer/,
     );
   });
 });

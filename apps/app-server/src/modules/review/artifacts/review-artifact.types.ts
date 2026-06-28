@@ -4,7 +4,7 @@ export type ReviewChecklistStatus = "todo" | "done" | "skipped";
 export interface ReviewCommentRecord {
   id: string;
   roomId: string;
-  authorMemberId: string | null;
+  authorMemberId: string;
   nodeId: string | null;
   changedFileId: string | null;
   changedFunctionId: string | null;
@@ -35,9 +35,9 @@ export interface CreateReviewCommentInput {
 }
 
 export interface CreateReviewChecklistItemInput {
-  checklistType?: string;
+  checklistType?: ReviewChecklistType;
   title?: string | null;
-  status?: string;
+  status?: ReviewChecklistStatus;
   checkedByMemberId?: string | null;
   checkedAt?: string | null;
   sortOrder?: number;
