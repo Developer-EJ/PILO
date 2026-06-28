@@ -2,7 +2,7 @@ import { createMockAuthClient } from "./mockAuthClient.mjs";
 
 const DEFAULT_AUTH_MODE = "mock";
 
-function defaultAppServerUrl() {
+export function defaultAppServerUrl() {
   return (
     process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ??
     process.env.NEXT_PUBLIC_APP_SERVER_URL ??
@@ -12,6 +12,10 @@ function defaultAppServerUrl() {
 
 function defaultAuthMode() {
   return process.env.NEXT_PUBLIC_PILO_AUTH_MODE ?? DEFAULT_AUTH_MODE;
+}
+
+export function resolveAuthClientMode(mode = defaultAuthMode()) {
+  return mode === "api" ? "api" : "mock";
 }
 
 export class AuthApiError extends Error {
@@ -117,7 +121,7 @@ export function createAuthApiClient({
 }
 
 export function createAuthClient(options = {}) {
-  const mode = options.mode ?? defaultAuthMode();
+  const mode = resolveAuthClientMode(options.mode);
 
   if (mode === "api") {
     return createAuthApiClient(options);
