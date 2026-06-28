@@ -1,25 +1,35 @@
 import { Suspense } from "react";
 import { DraggableCanvasItems } from "./DraggableCanvasItems";
 import { LoginAuthNotice } from "./LoginAuthNotice";
+import { LoginProviderButtons } from "./LoginProviderButtons";
+import {
+  LoginProviderList,
+  type LoginProviderEntry,
+} from "./LoginProviderList";
 import { WorkspaceEntryTransition } from "./WorkspaceEntryTransition";
 import { authProviderHref } from "./authProviderHref.mjs";
 
-const providers = [
+const providerEntries: LoginProviderEntry[] = [
   {
     name: "Google",
     eyebrow: "Workspace 계정으로 계속",
-    href: authProviderHref("/auth/google/start"),
+    path: "/auth/google/start",
     mark: "G",
     tone: "google",
   },
   {
     name: "GitHub",
     eyebrow: "개발자 계정으로 계속",
-    href: authProviderHref("/auth/github/start"),
+    path: "/auth/github/start",
     mark: "GH",
     tone: "github",
   },
 ];
+
+const fallbackProviders = providerEntries.map((provider) => ({
+  ...provider,
+  href: authProviderHref(provider.path),
+}));
 
 const backdropNavItems = [
   { label: "홈 / 대시보드", active: true },
@@ -155,24 +165,11 @@ export default function LoginPage() {
             <LoginAuthNotice />
           </Suspense>
 
-          <div className="provider-list">
-            {providers.map((provider) => (
-              <a
-                className="provider-button"
-                href={provider.href}
-                key={provider.name}
-              >
-                <span className={`provider-mark provider-${provider.tone}`}>
-                  {provider.mark}
-                </span>
-                <span>
-                  <strong>{provider.name}로 계속하기</strong>
-                  <small>{provider.eyebrow}</small>
-                </span>
-                <b aria-hidden="true">→</b>
-              </a>
-            ))}
-          </div>
+          <Suspense
+            fallback={<LoginProviderButtons providers={fallbackProviders} />}
+          >
+            <LoginProviderList providers={providerEntries} />
+          </Suspense>
 
           <p className="login-boundary-note">
             GitHub 로그인은 인증용이며 Repository 연결 권한은 별도 단계에서

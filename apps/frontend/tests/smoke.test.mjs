@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildAuthApiUrl,
+  createAuthClient,
   createAuthApiClient,
 } from "../lib/auth/authClient.mjs";
 import {
@@ -171,6 +172,33 @@ describe("frontend package", () => {
     );
   });
 
+  it("uses the PILO app server URL and safe next path for login providers", () => {
+    const previousBaseUrl = process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL;
+    process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL = "https://api.pilo.dev/";
+
+    try {
+      assert.equal(
+        authProviderHref("/auth/google/start", {
+          next: "/canvas?filter=task",
+        }),
+        "https://api.pilo.dev/auth/google/start?next=%2Fcanvas%3Ffilter%3Dtask",
+      );
+      assert.equal(
+        authProviderHref("/auth/github/start", {
+          baseUrl: "",
+          next: "https://evil.example",
+        }),
+        "/auth/github/start?next=%2F",
+      );
+    } finally {
+      if (previousBaseUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL = previousBaseUrl;
+      }
+    }
+  });
+
   it("routes a successful OAuth callback back through the login transition", () => {
     const state = resolveOAuthCallbackState({
       next: "/workspaces/demo",
@@ -313,5 +341,53 @@ describe("frontend package", () => {
     assert.equal(requests[1].url, "https://api.pilo.dev/auth/logout");
     assert.equal(requests[1].init.method, "POST");
     assert.equal(requests[1].init.credentials, "include");
+  });
+
+  it("keeps mock and api auth client modes explicitly testable", async () => {
+    const previousMode = process.env.NEXT_PUBLIC_PILO_AUTH_MODE;
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url, init });
+
+      if (url.endsWith("/auth/me")) {
+        return Response.json(mockCurrentUser);
+      }
+
+      return new Response(null, { status: 204 });
+    };
+
+    try {
+      const mockClient = createAuthClient({
+        mode: "mock",
+        mock: { currentUser: null },
+      });
+
+      assert.deepEqual(await mockClient.getAuthSession(), {
+        authenticated: false,
+        user: null,
+      });
+
+      process.env.NEXT_PUBLIC_PILO_AUTH_MODE = "api";
+
+      const apiClient = createAuthClient({
+        baseUrl: "https://api.pilo.dev",
+        fetcher,
+      });
+      const apiSession = await apiClient.getAuthSession();
+      await apiClient.logout();
+
+      assert.equal(apiSession.authenticated, true);
+      assert.equal(apiSession.user.email, mockCurrentUser.email);
+      assert.equal(requests[0].url, "https://api.pilo.dev/auth/me");
+      assert.equal(requests[0].init.credentials, "include");
+      assert.equal(requests[1].url, "https://api.pilo.dev/auth/logout");
+      assert.equal(requests[1].init.method, "POST");
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_AUTH_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_AUTH_MODE = previousMode;
+      }
+    }
   });
 });
