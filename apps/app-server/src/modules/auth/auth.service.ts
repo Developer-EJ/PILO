@@ -102,6 +102,15 @@ export type AuthSessionIssue = {
   expiresAt: string;
 };
 
+export type CurrentUserResponse = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  providers: AuthProviderName[];
+  lastLoginAt: string | null;
+};
+
 class AuthFlowError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -286,6 +295,37 @@ export class AuthService {
     return redirectUrl.toString();
   }
 
+  getCurrentUserFromCookieHeader(
+    cookieHeader?: string,
+    now = new Date(),
+  ): CurrentUserResponse | null {
+    const rawToken = this.readSessionTokenFromCookieHeader(cookieHeader);
+
+    if (!rawToken) {
+      return null;
+    }
+
+    const identity = this.authRepository.findSessionIdentityByTokenHash(
+      this.hashSessionToken(rawToken),
+      now,
+    );
+
+    if (!identity) {
+      return null;
+    }
+
+    return {
+      id: identity.user.id,
+      name: identity.user.name,
+      email: identity.user.email,
+      avatarUrl: identity.user.avatarUrl,
+      providers: sortAuthProviders(
+        identity.oauthAccounts.map((oauthAccount) => oauthAccount.provider),
+      ),
+      lastLoginAt: identity.user.lastLoginAt,
+    };
+  }
+
   verifyOAuthState(input: {
     provider: AuthProviderName;
     state: string;
@@ -352,6 +392,27 @@ export class AuthService {
     }
 
     return cookieParts.join("; ");
+  }
+
+  private readSessionTokenFromCookieHeader(cookieHeader?: string) {
+    if (!cookieHeader) {
+      return null;
+    }
+
+    const cookiePair = cookieHeader
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) =>
+        part.startsWith(
+          `${encodeURIComponent(this.config.session.cookieName)}=`,
+        ),
+      );
+
+    if (!cookiePair) {
+      return null;
+    }
+
+    return decodeURIComponent(cookiePair.split("=").slice(1).join("="));
   }
 
   private getConfiguredProvider(providerId: AuthProviderName) {
@@ -509,4 +570,15 @@ function createTokenExpiresAt(expiresInSeconds: number | null) {
   }
 
   return new Date(Date.now() + expiresInSeconds * 1000).toISOString();
+}
+
+function sortAuthProviders(providers: AuthProviderName[]) {
+  const providerOrder: Record<AuthProviderName, number> = {
+    google: 0,
+    github: 1,
+  };
+
+  return Array.from(new Set(providers)).sort(
+    (left, right) => providerOrder[left] - providerOrder[right],
+  );
 }

@@ -1,4 +1,12 @@
-import { Controller, Get, Headers, Query, Req, Res } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  Headers,
+  Query,
+  Req,
+  Res,
+  UnauthorizedException,
+} from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuthService } from "./auth.service";
 
@@ -9,6 +17,18 @@ export class AuthController {
   @Get("providers")
   getProviders() {
     return this.authService.getProviders();
+  }
+
+  @Get("me")
+  getMe(@Headers("cookie") cookieHeader: string | undefined) {
+    const currentUser =
+      this.authService.getCurrentUserFromCookieHeader(cookieHeader);
+
+    if (!currentUser) {
+      throw new UnauthorizedException();
+    }
+
+    return currentUser;
   }
 
   @Get("google/start")

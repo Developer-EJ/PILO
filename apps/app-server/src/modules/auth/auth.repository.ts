@@ -17,6 +17,7 @@ export type AuthUserRecord = {
   lastLoginAt: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
 };
 
 export type OAuthAccountRecord = {
@@ -63,6 +64,12 @@ export type AuthSessionRecord = {
   revokedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AuthSessionIdentity = {
+  session: AuthSessionRecord;
+  user: AuthUserRecord;
+  oauthAccounts: OAuthAccountRecord[];
 };
 
 @Injectable()
@@ -197,6 +204,56 @@ export class AuthRepository {
     return Array.from(this.authSessionsById.values());
   }
 
+  findSessionIdentityByTokenHash(
+    refreshTokenHash: string,
+    now = new Date(),
+  ): AuthSessionIdentity | null {
+    const sessionId = this.authSessionIdByTokenHash.get(refreshTokenHash);
+    const session = sessionId
+      ? this.authSessionsById.get(sessionId)
+      : undefined;
+
+    if (!session || session.revokedAt) {
+      return null;
+    }
+
+    if (new Date(session.expiresAt).getTime() <= now.getTime()) {
+      return null;
+    }
+
+    const user = this.usersById.get(session.userId);
+
+    if (!user || user.deletedAt) {
+      return null;
+    }
+
+    return {
+      session,
+      user,
+      oauthAccounts: this.listOAuthAccounts().filter(
+        (oauthAccount) => oauthAccount.userId === user.id,
+      ),
+    };
+  }
+
+  markUserDeleted(userId: string, now = new Date()) {
+    const user = this.usersById.get(userId);
+
+    if (!user) {
+      return null;
+    }
+
+    const deletedUser: AuthUserRecord = {
+      ...user,
+      deletedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    this.usersById.set(userId, deletedUser);
+
+    return deletedUser;
+  }
+
   private createUserFromOAuthProfile(
     profile: OAuthIdentityProfile,
     email: string,
@@ -211,6 +268,7 @@ export class AuthRepository {
       lastLoginAt: nowIso,
       createdAt: nowIso,
       updatedAt: nowIso,
+      deletedAt: null,
     };
 
     this.usersById.set(user.id, user);
