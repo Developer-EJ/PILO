@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { CurrentActor } from "../workspace/workspace-member-access.service";
 import {
+  CreateTaskCommentBody,
   CreateChecklistItemBody,
   CreateTaskBody,
   JuhyungTaskService,
@@ -98,6 +99,44 @@ export class JuhyungTasksController {
     @Headers("x-member-id") memberId?: string | string[],
   ) {
     return this.taskService.deleteTask(
+      taskId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("tasks/:taskId/comments")
+  createTaskComment(
+    @Param("taskId") taskId: string,
+    @Body() body: CreateTaskCommentBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.createTaskComment(
+      taskId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Get("tasks/:taskId/comments")
+  listTaskComments(
+    @Param("taskId") taskId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.listTaskComments(
+      taskId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Get("tasks/:taskId/activity-logs")
+  listTaskActivityLogs(
+    @Param("taskId") taskId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.listTaskActivityLogs(
       taskId,
       toCurrentActor(userId, memberId),
     );

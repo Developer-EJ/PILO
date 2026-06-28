@@ -19,6 +19,8 @@ const {
 const UUIDS = {
   workspace: "11111111-1111-4111-8111-111111111111",
   task: "22222222-2222-4222-8222-222222222222",
+  comment: "88888888-8888-4888-8888-888888888888",
+  activity: "99999999-9999-4999-8999-999999999999",
   checklistItem: "77777777-7777-4777-8777-777777777777",
   member: "33333333-3333-4333-8333-333333333333",
   assignee: "44444444-4444-4444-8444-444444444444",
@@ -50,6 +52,29 @@ const baseChecklistItem = {
   sortOrder: 1,
   createdAt: new Date("2026-06-27T12:30:00.000Z"),
   updatedAt: new Date("2026-06-27T12:30:00.000Z"),
+};
+
+const baseTaskComment = {
+  id: UUIDS.comment,
+  taskId: UUIDS.task,
+  authorMemberId: UUIDS.member,
+  body: "Please connect the GitHub repository before review.",
+  createdAt: new Date("2026-06-28T09:00:00.000Z"),
+  updatedAt: new Date("2026-06-28T09:00:00.000Z"),
+};
+
+const baseTaskActivityLog = {
+  id: UUIDS.activity,
+  taskId: UUIDS.task,
+  actorMemberId: UUIDS.member,
+  action: "task.updated",
+  beforeValue: {
+    title: "Connect repository",
+  },
+  afterValue: {
+    title: "Connect GitHub repository",
+  },
+  createdAt: new Date("2026-06-28T09:10:00.000Z"),
 };
 
 describe("JuhyungTaskService", () => {
@@ -343,8 +368,8 @@ describe("JuhyungTaskService", () => {
           calls.push(["get", taskId]);
           return { ...baseTask, assigneeMemberId: null, dueDate: null };
         },
-        updateTask: async (taskId, input) => {
-          calls.push(["update", taskId, input]);
+        updateTask: async (taskId, input, actorMemberId, previousTask) => {
+          calls.push(["update", taskId, input, actorMemberId, previousTask]);
           return {
             ...baseTask,
             ...input,
@@ -388,6 +413,8 @@ describe("JuhyungTaskService", () => {
           dueDate: new Date("2026-07-04T00:00:00.000Z"),
           milestoneId: null,
         },
+        UUIDS.member,
+        { ...baseTask, assigneeMemberId: null, dueDate: null },
       ],
     ]);
   });
@@ -513,6 +540,182 @@ describe("JuhyungTaskService", () => {
       ["access", UUIDS.workspace, { memberId: UUIDS.member }],
       ["delete", UUIDS.task],
     ]);
+  });
+
+  it("creates task comments after checking task workspace membership", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        createTaskComment: async (taskId, input, authorMemberId) => {
+          calls.push(["createComment", taskId, input, authorMemberId]);
+          return {
+            ...baseTaskComment,
+            taskId,
+            body: input.body,
+            authorMemberId,
+          };
+        },
+      },
+    });
+
+    const result = await service.createTaskComment(
+      UUIDS.task,
+      {
+        body: "  Please connect the GitHub repository before review.  ",
+      },
+      { userId: UUIDS.user },
+    );
+
+    assert.deepEqual(result, {
+      id: UUIDS.comment,
+      taskId: UUIDS.task,
+      body: "Please connect the GitHub repository before review.",
+      author: {
+        memberId: UUIDS.member,
+        userId: UUIDS.user,
+        name: "Creator",
+      },
+      createdAt: "2026-06-28T09:00:00.000Z",
+      updatedAt: "2026-06-28T09:00:00.000Z",
+    });
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
+      [
+        "createComment",
+        UUIDS.task,
+        {
+          body: "Please connect the GitHub repository before review.",
+        },
+        UUIDS.member,
+      ],
+    ]);
+  });
+
+  it("lists task comments with author member summaries", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        listTaskComments: async (taskId) => {
+          calls.push(["comments", taskId]);
+          return [baseTaskComment];
+        },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [currentMember()];
+        },
+      },
+    });
+
+    const result = await service.listTaskComments(UUIDS.task, {
+      memberId: UUIDS.member,
+    });
+
+    assert.equal(result[0].author.name, "Creator");
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["comments", UUIDS.task],
+      ["members", UUIDS.workspace, [UUIDS.member]],
+    ]);
+  });
+
+  it("lists task activity logs with actor member summaries", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        listTaskActivityLogs: async (taskId) => {
+          calls.push(["activity", taskId]);
+          return [baseTaskActivityLog];
+        },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [currentMember()];
+        },
+      },
+    });
+
+    const result = await service.listTaskActivityLogs(UUIDS.task, {
+      memberId: UUIDS.member,
+    });
+
+    assert.deepEqual(result, [
+      {
+        id: UUIDS.activity,
+        taskId: UUIDS.task,
+        action: "task.updated",
+        actor: {
+          memberId: UUIDS.member,
+          userId: UUIDS.user,
+          name: "Creator",
+        },
+        beforeValue: {
+          title: "Connect repository",
+        },
+        afterValue: {
+          title: "Connect GitHub repository",
+        },
+        createdAt: "2026-06-28T09:10:00.000Z",
+      },
+    ]);
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["activity", UUIDS.task],
+      ["members", UUIDS.workspace, [UUIDS.member]],
+    ]);
+  });
+
+  it("rejects blank task comments before writing", async () => {
+    const service = createService({
+      repository: {
+        createTaskComment: async () => {
+          throw new Error("blank comments should not be written");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createTaskComment(
+          UUIDS.task,
+          {
+            body: " ",
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
   });
 
   it("creates checklist items after checking task workspace membership", async () => {
@@ -714,6 +917,18 @@ describe("JuhyungTasksController", () => {
       deleteTask: async (taskId, actor) => {
         calls.push(["delete", taskId, actor]);
       },
+      createTaskComment: async (taskId, body, actor) => {
+        calls.push(["createComment", taskId, body, actor]);
+        return { id: UUIDS.comment };
+      },
+      listTaskComments: async (taskId, actor) => {
+        calls.push(["listComments", taskId, actor]);
+        return [];
+      },
+      listTaskActivityLogs: async (taskId, actor) => {
+        calls.push(["listActivity", taskId, actor]);
+        return [];
+      },
       createChecklistItem: async (taskId, body, actor) => {
         calls.push(["createChecklist", taskId, body, actor]);
         return { id: UUIDS.checklistItem };
@@ -753,6 +968,14 @@ describe("JuhyungTasksController", () => {
       UUIDS.member,
     );
     await controller.deleteTask(UUIDS.task, UUIDS.user, UUIDS.member);
+    await controller.createTaskComment(
+      UUIDS.task,
+      { body: "Ready for review" },
+      UUIDS.user,
+      undefined,
+    );
+    await controller.listTaskComments(UUIDS.task, undefined, UUIDS.member);
+    await controller.listTaskActivityLogs(UUIDS.task, UUIDS.user, UUIDS.member);
     await controller.createChecklistItem(
       UUIDS.task,
       { title: "Install GitHub App" },
@@ -790,6 +1013,18 @@ describe("JuhyungTasksController", () => {
       ],
       ["status", UUIDS.task, { status: "done" }, { memberId: UUIDS.member }],
       ["delete", UUIDS.task, { userId: UUIDS.user, memberId: UUIDS.member }],
+      [
+        "createComment",
+        UUIDS.task,
+        { body: "Ready for review" },
+        { userId: UUIDS.user },
+      ],
+      ["listComments", UUIDS.task, { memberId: UUIDS.member }],
+      [
+        "listActivity",
+        UUIDS.task,
+        { userId: UUIDS.user, memberId: UUIDS.member },
+      ],
       [
         "createChecklist",
         UUIDS.task,

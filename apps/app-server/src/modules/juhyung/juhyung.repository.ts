@@ -59,6 +59,10 @@ export interface UpdateChecklistItemInput {
   sortOrder?: number;
 }
 
+export interface CreateTaskCommentInput {
+  body: string;
+}
+
 export type TaskListSortField =
   | "updatedAt"
   | "createdAt"
@@ -128,10 +132,38 @@ export class JuhyungRepository {
     return this.database.task.create({ data });
   }
 
-  updateTask(taskId: string, input: UpdateTaskInput) {
+  updateTask(
+    taskId: string,
+    input: UpdateTaskInput,
+    actorMemberId?: string,
+    previousTask?: Partial<Record<keyof UpdateTaskInput, unknown>>,
+  ) {
     const data = {
       ...input,
     } satisfies Prisma.TaskUncheckedUpdateInput;
+
+    if (actorMemberId && previousTask) {
+      return this.database.$transaction(async (transaction) => {
+        const task = await transaction.task.update({
+          where: {
+            id: taskId,
+          },
+          data,
+        });
+
+        await transaction.taskActivityLog.create({
+          data: {
+            taskId,
+            actorMemberId,
+            action: "task.updated",
+            beforeValue: buildActivitySnapshot(input, previousTask),
+            afterValue: buildActivitySnapshot(input, input),
+          },
+        });
+
+        return task;
+      });
+    }
 
     return this.database.task.update({
       where: {
@@ -183,6 +215,54 @@ export class JuhyungRepository {
       data: {
         deletedAt: new Date(),
       },
+    });
+  }
+
+  createTaskComment(
+    taskId: string,
+    input: CreateTaskCommentInput,
+    authorMemberId: string,
+  ) {
+    return this.database.$transaction(async (transaction) => {
+      const comment = await transaction.taskComment.create({
+        data: {
+          taskId,
+          body: input.body,
+          authorMemberId,
+        },
+      });
+
+      await transaction.taskActivityLog.create({
+        data: {
+          taskId,
+          actorMemberId: authorMemberId,
+          action: "task.comment_created",
+          beforeValue: Prisma.JsonNull,
+          afterValue: {
+            commentId: comment.id,
+          },
+        },
+      });
+
+      return comment;
+    });
+  }
+
+  listTaskComments(taskId: string) {
+    return this.database.taskComment.findMany({
+      where: {
+        taskId,
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+  }
+
+  listTaskActivityLogs(taskId: string) {
+    return this.database.taskActivityLog.findMany({
+      where: {
+        taskId,
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
   }
 
@@ -294,6 +374,28 @@ export class JuhyungRepository {
     });
     return (aggregate._max.sortOrder ?? -1) + 1;
   }
+}
+
+function buildActivitySnapshot(
+  input: UpdateTaskInput,
+  values: Partial<Record<keyof UpdateTaskInput, unknown>>,
+): Prisma.InputJsonObject {
+  return Object.fromEntries(
+    Object.keys(input).map((field) => [
+      field,
+      toActivityValue(values[field as keyof UpdateTaskInput]),
+    ]),
+  );
+}
+
+function toActivityValue(value: unknown): Prisma.InputJsonValue | null {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (value === undefined) {
+    return null;
+  }
+  return value as Prisma.InputJsonValue;
 }
 
 function buildTaskListWhere(

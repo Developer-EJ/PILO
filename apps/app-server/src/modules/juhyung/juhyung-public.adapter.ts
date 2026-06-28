@@ -9,8 +9,12 @@ import {
   PullRequestRecord,
   PullRequestState,
   PullRequestSummary,
+  TaskActivityLogRecord,
+  TaskActivityLogSummary,
   TaskChecklistItemRecord,
   TaskChecklistItemSummary,
+  TaskCommentRecord,
+  TaskCommentSummary,
   TaskDetail,
   TaskPriority,
   TaskRecord,
@@ -25,6 +29,14 @@ export interface TaskSummaryContext {
   linkedIssueCount?: number;
   linkedPrCount?: number;
   now?: Date;
+}
+
+export interface TaskCommentSummaryContext {
+  author?: WorkspaceMemberRecord | null;
+}
+
+export interface TaskActivityLogSummaryContext {
+  actor?: WorkspaceMemberRecord | null;
 }
 
 export interface GithubIssueSummaryContext {
@@ -81,6 +93,41 @@ export class JuhyungPublicAdapter {
       status: item.status as TaskChecklistItemSummary["status"],
       sortOrder: item.sortOrder,
       updatedAt: toDateTime(item.updatedAt),
+    };
+  }
+
+  toTaskCommentSummary(
+    comment: TaskCommentRecord,
+    context: TaskCommentSummaryContext = {},
+  ): TaskCommentSummary {
+    return {
+      id: comment.id,
+      taskId: comment.taskId,
+      body: comment.body,
+      author: toMemberRef(
+        comment.authorMemberId ?? null,
+        context.author ?? null,
+      ),
+      createdAt: toDateTime(comment.createdAt),
+      updatedAt: toDateTime(comment.updatedAt),
+    };
+  }
+
+  toTaskActivityLogSummary(
+    activityLog: TaskActivityLogRecord,
+    context: TaskActivityLogSummaryContext = {},
+  ): TaskActivityLogSummary {
+    return {
+      id: activityLog.id,
+      taskId: activityLog.taskId,
+      action: activityLog.action,
+      actor: toMemberRef(
+        activityLog.actorMemberId ?? null,
+        context.actor ?? null,
+      ),
+      beforeValue: activityLog.beforeValue ?? null,
+      afterValue: activityLog.afterValue ?? null,
+      createdAt: toDateTime(activityLog.createdAt),
     };
   }
 
