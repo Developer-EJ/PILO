@@ -5,9 +5,12 @@ import type {
   AcceptWorkspaceInviteResult,
   CreateWorkspaceInviteInput,
   CreateWorkspaceInput,
+  DashboardPreferences,
+  DashboardPreferencesRecord,
   FindWorkspaceForUserInput,
   RevokeWorkspaceInviteForUserInput,
   RevokeWorkspaceInviteResult,
+  UpsertDashboardPreferencesForUserInput,
   WorkspaceInviteRecord,
   WorkspaceMemberRecord,
   WorkspaceMemberSummary,
@@ -24,6 +27,10 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   private readonly workspacesById = new Map<string, WorkspaceRecord>();
   private readonly membersById = new Map<string, WorkspaceMemberRecord>();
   private readonly invitesById = new Map<string, WorkspaceInviteRecord>();
+  private readonly dashboardPreferencesByKey = new Map<
+    string,
+    DashboardPreferencesRecord
+  >();
 
   async listWorkspaceSummariesForUser(
     userId: string,
@@ -208,6 +215,61 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     };
   }
 
+  async getDashboardPreferencesForUser(
+    input: FindWorkspaceForUserInput,
+  ): Promise<DashboardPreferences | null> {
+    const workspace = this.findVisibleWorkspace(input.workspaceId);
+    const member = this.findMemberRecord(input);
+
+    if (!workspace || !member) {
+      return null;
+    }
+
+    const preferences = this.dashboardPreferencesByKey.get(
+      createDashboardPreferencesKey(input.workspaceId, member.id),
+    );
+
+    if (!preferences) {
+      return {
+        workspaceId: input.workspaceId,
+        memberId: member.id,
+        layout: {},
+        hiddenSections: [],
+        updatedAt: null,
+      };
+    }
+
+    return this.toDashboardPreferences(preferences);
+  }
+
+  async upsertDashboardPreferencesForUser(
+    input: UpsertDashboardPreferencesForUserInput,
+  ): Promise<DashboardPreferences | null> {
+    const workspace = this.findVisibleWorkspace(input.workspaceId);
+    const member = this.findMemberRecord(input);
+
+    if (!workspace || !member) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const key = createDashboardPreferencesKey(input.workspaceId, member.id);
+    const existing = this.dashboardPreferencesByKey.get(key);
+    const preferences: DashboardPreferencesRecord = {
+      id: existing?.id ?? randomUUID(),
+      workspaceId: input.workspaceId,
+      memberId: member.id,
+      layout: input.layout,
+      hiddenSections: input.hiddenSections,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.dashboardPreferencesByKey.set(key, preferences);
+
+    return this.toDashboardPreferences(preferences);
+  }
+
   async createWorkspace(
     input: CreateWorkspaceInput,
   ): Promise<WorkspaceSummary> {
@@ -354,6 +416,18 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
       joinedAt: member.joinedAt,
     };
   }
+
+  private toDashboardPreferences(
+    preferences: DashboardPreferencesRecord,
+  ): DashboardPreferences {
+    return {
+      workspaceId: preferences.workspaceId,
+      memberId: preferences.memberId,
+      layout: preferences.layout,
+      hiddenSections: preferences.hiddenSections,
+      updatedAt: preferences.updatedAt,
+    };
+  }
 }
 
 type InactiveWorkspaceInviteReason = "accepted" | "revoked" | "expired";
@@ -379,4 +453,8 @@ function getInactiveInviteReason(
 
 function normalizeEmail(email: string | null | undefined) {
   return email?.trim().toLowerCase() ?? "";
+}
+
+function createDashboardPreferencesKey(workspaceId: string, memberId: string) {
+  return `${workspaceId}:${memberId}`;
 }

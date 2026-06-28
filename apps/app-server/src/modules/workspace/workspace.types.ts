@@ -67,6 +67,18 @@ export type WorkspaceInviteRecord = {
   createdAt: string;
 };
 
+export type DashboardPreferencesLayout = Record<string, unknown>;
+
+export type DashboardPreferencesRecord = {
+  id: string;
+  workspaceId: string;
+  memberId: string;
+  layout: DashboardPreferencesLayout;
+  hiddenSections: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type WorkspaceSummary = {
   id: string;
   name: string;
@@ -97,6 +109,14 @@ export type WorkspaceInviteCreated = {
   token: string;
   expiresAt: string;
   createdAt: string;
+};
+
+export type DashboardPreferences = {
+  workspaceId: string;
+  memberId: string;
+  layout: DashboardPreferencesLayout;
+  hiddenSections: string[];
+  updatedAt: string | null;
 };
 
 export type CurrentWorkspaceMember = {
@@ -170,6 +190,12 @@ export type RevokeWorkspaceInviteResult =
       reason: "not_found" | "accepted" | "revoked" | "expired";
     };
 
+export type UpsertDashboardPreferencesForUserInput =
+  FindWorkspaceForUserInput & {
+    layout: DashboardPreferencesLayout;
+    hiddenSections: string[];
+  };
+
 export type UpdateWorkspacePatch = {
   name?: string;
   description?: string | null;
@@ -202,6 +228,12 @@ export type WorkspaceRepositoryPort = {
   revokeWorkspaceInviteForUser(
     input: RevokeWorkspaceInviteForUserInput,
   ): Promise<RevokeWorkspaceInviteResult>;
+  getDashboardPreferencesForUser(
+    input: FindWorkspaceForUserInput,
+  ): Promise<DashboardPreferences | null>;
+  upsertDashboardPreferencesForUser(
+    input: UpsertDashboardPreferencesForUserInput,
+  ): Promise<DashboardPreferences | null>;
   createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceSummary>;
   updateWorkspaceForUser(
     input: UpdateWorkspaceForUserInput,
