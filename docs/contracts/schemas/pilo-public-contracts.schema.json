@@ -523,6 +523,42 @@
       "type": "object",
       "required": ["jobId", "runId", "status", "output", "actions", "trace", "error", "finishedAt"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "succeeded" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": {
+                "type": "object",
+                "required": ["message"],
+                "additionalProperties": false,
+                "properties": {
+                  "code": { "type": ["string", "null"] },
+                  "message": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
