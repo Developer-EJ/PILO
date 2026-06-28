@@ -5,7 +5,11 @@ import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
-const { createAuthConfig } = require("../src/modules/auth/auth.config");
+const {
+  createAuthConfig,
+  normalizeAuthNextPath,
+  normalizeOAuthRedirectUri,
+} = require("../src/modules/auth/auth.config");
 const { AuthRepository } = require("../src/modules/auth/auth.repository");
 const { AuthService } = require("../src/modules/auth/auth.service");
 const { NestFactory } = require("@nestjs/core");
@@ -29,6 +33,10 @@ describe("app-server package", () => {
     assert.equal(config.apiBaseUrl, "http://localhost:4000");
     assert.equal(config.session.source, "local-fallback");
     assert.equal(config.providers.google.configured, false);
+    assert.equal(
+      config.providers.google.callbackUrl,
+      "http://localhost:4000/auth/google/callback",
+    );
     assert.deepEqual(config.providers.google.missingEnv, [
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -63,12 +71,46 @@ describe("app-server package", () => {
     assert.equal(config.providers.github.scopes.includes("repo"), false);
   });
 
+  it("normalizes unsafe Auth next paths to the default route", () => {
+    assert.equal(normalizeAuthNextPath("/workspaces/demo"), "/workspaces/demo");
+    assert.equal(
+      normalizeAuthNextPath("/canvas?filter=task"),
+      "/canvas?filter=task",
+    );
+    assert.equal(normalizeAuthNextPath("https://evil.example"), "/");
+    assert.equal(normalizeAuthNextPath("//evil.example"), "/");
+    assert.equal(normalizeAuthNextPath(""), "/");
+  });
+
+  it("normalizes OAuth redirect_uri to the configured provider callback", () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      API_BASE_URL: "https://api.pilo.dev",
+    });
+    const provider = config.providers.google;
+
+    assert.equal(
+      normalizeOAuthRedirectUri(provider.callbackUrl, provider),
+      "https://api.pilo.dev/auth/google/callback",
+    );
+    assert.equal(
+      normalizeOAuthRedirectUri("https://evil.example/callback", provider),
+      "https://api.pilo.dev/auth/google/callback",
+    );
+    assert.equal(
+      normalizeOAuthRedirectUri(undefined, provider),
+      "https://api.pilo.dev/auth/google/callback",
+    );
+  });
+
   it("exposes Auth provider readiness without leaking secrets", () => {
     const service = new AuthService(new AuthRepository());
     const response = service.getProviders();
 
     assert.equal(response.providers.length, 2);
     assert.equal(response.providers[0].startPath.startsWith("/auth/"), true);
+    assert.equal(response.providers[0].callbackUrl.includes("/auth/"), true);
     assert.equal(JSON.stringify(response).includes("clientSecret"), false);
     assert.equal(JSON.stringify(response).includes("secret"), false);
   });
