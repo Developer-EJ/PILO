@@ -23,6 +23,8 @@ describe("agent result graph adapter", () => {
 
     const first = service.applyGraph(analysisId, {
       summary: "callback review graph",
+      intentSummary: "callback route intent",
+      reviewStrategy: "file first",
       nodes: [
         {
           id: "review-node-file-1",
@@ -30,6 +32,10 @@ describe("agent result graph adapter", () => {
           label: "apps/frontend/app/auth/callback/page.tsx",
           filePath: "apps/frontend/app/auth/callback/page.tsx",
           riskLevel: "medium",
+          reviewOrder: 1,
+          roleSummary: "callback page entry",
+          reviewReason: "auth flow entry point",
+          position: { x: 84, y: 72 },
         },
       ],
     });
@@ -42,14 +48,21 @@ describe("agent result graph adapter", () => {
           label: "apps/frontend/app/auth/callback/page.tsx",
           filePath: "apps/frontend/app/auth/callback/page.tsx",
           riskLevel: "low",
+          reviewOrder: 1,
+          roleSummary: "callback page entry",
+          reviewReason: "auth flow entry point",
+          position: { x: 84, y: 72 },
         },
       ],
     });
 
     assert.equal(second.id, first.id);
     assert.equal(second.summary, "updated callback review graph");
+    assert.equal(first.intentSummary, "callback route intent");
     assert.equal(second.nodes.length, 1);
     assert.equal(second.nodes[0].riskLevel, "low");
+    assert.equal(second.nodes[0].reviewOrder, 1);
+    assert.deepEqual(second.nodes[0].position, { x: 84, y: 72 });
   });
 
   it("rejects invalid node enum values", () => {
@@ -75,6 +88,20 @@ describe("agent result graph adapter", () => {
           ],
         }),
       /Invalid review node risk level/,
+    );
+    assert.throws(
+      () =>
+        service.applyGraph("analysis-1", {
+          nodes: [
+            {
+              id: "node-1",
+              nodeType: "file",
+              label: "bad",
+              reviewOrder: 0,
+            },
+          ],
+        }),
+      /node.reviewOrder must be a positive integer/,
     );
   });
 });

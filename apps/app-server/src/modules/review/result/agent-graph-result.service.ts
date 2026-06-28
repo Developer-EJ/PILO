@@ -21,6 +21,8 @@ const RISK_LEVELS = ["low", "medium", "high", "critical"];
 
 export interface AgentReviewGraphResult {
   summary?: string | null;
+  intentSummary?: string | null;
+  reviewStrategy?: string | null;
   reviewOrder?: string[];
   nodes?: AgentReviewNodeResult[];
 }
@@ -32,6 +34,10 @@ export interface AgentReviewNodeResult {
   filePath?: string | null;
   functionName?: string | null;
   riskLevel?: string;
+  reviewOrder?: number;
+  roleSummary?: string | null;
+  reviewReason?: string | null;
+  position?: { x?: number; y?: number } | null;
 }
 
 @Injectable()
@@ -53,6 +59,11 @@ export class AgentGraphResultService {
       id: graphId,
       analysisId,
       summary: graphResult.summary ?? null,
+      intentSummary:
+        graphResult.intentSummary ?? graphResult.summary ?? "PR 변경 의도",
+      reviewStrategy:
+        graphResult.reviewStrategy ??
+        "AI가 제안한 순서대로 변경 파일을 확인한다.",
       reviewOrder,
     });
 
@@ -64,6 +75,11 @@ export class AgentGraphResultService {
       id: graphId,
       analysisId,
       summary: graphResult.summary ?? null,
+      intentSummary:
+        graphResult.intentSummary ?? graphResult.summary ?? "PR 변경 의도",
+      reviewStrategy:
+        graphResult.reviewStrategy ??
+        "AI가 제안한 순서대로 변경 파일을 확인한다.",
       reviewOrder,
       nodes: this.graphRepository.listNodesByGraph(graphId).map((node) => ({
         id: node.id,
@@ -74,6 +90,10 @@ export class AgentGraphResultService {
         functionName: node.functionName,
         riskLevel: node.riskLevel,
         status: "unknown",
+        reviewOrder: node.reviewOrder,
+        roleSummary: node.roleSummary,
+        reviewReason: node.reviewReason,
+        position: node.position,
       })),
     };
   }
@@ -90,6 +110,22 @@ export class AgentGraphResultService {
       filePath: node.filePath ?? null,
       functionName: node.functionName ?? null,
       riskLevel: this.toRiskLevel(node.riskLevel ?? "low"),
+      reviewOrder: this.positiveInteger(
+        node.reviewOrder ?? 1,
+        "node.reviewOrder",
+      ),
+      roleSummary: this.requiredString(
+        node.roleSummary ?? node.label,
+        "node.roleSummary",
+      ),
+      reviewReason: this.requiredString(
+        node.reviewReason ?? node.roleSummary ?? node.label,
+        "node.reviewReason",
+      ),
+      position: {
+        x: this.nonNegativeInteger(node.position?.x ?? 0, "node.position.x"),
+        y: this.nonNegativeInteger(node.position?.y ?? 0, "node.position.y"),
+      },
     };
   }
 
@@ -115,5 +151,21 @@ export class AgentGraphResultService {
     }
 
     throw new BadRequestException(`${field} is required`);
+  }
+
+  private positiveInteger(value: number, field: string): number {
+    if (Number.isInteger(value) && value >= 1) {
+      return value;
+    }
+
+    throw new BadRequestException(`${field} must be a positive integer`);
+  }
+
+  private nonNegativeInteger(value: number, field: string): number {
+    if (Number.isInteger(value) && value >= 0) {
+      return value;
+    }
+
+    throw new BadRequestException(`${field} must be a non-negative integer`);
   }
 }
