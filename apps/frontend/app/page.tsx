@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { AuthGuard } from "../components/auth/AuthGuard";
 import { CurrentUserAvatar } from "../components/auth/CurrentUserAvatar";
 import { LogoutButton } from "../components/auth/LogoutButton";
+import { CurrentWorkspaceSwitcher } from "../components/workspace/CurrentWorkspaceSwitcher";
 
 const stats = [
   { label: "진행 중 Task", value: "3", icon: "⚡", tone: "primary" },
@@ -70,11 +71,7 @@ export default function Home() {
         <main className="dashboard-shell">
           <aside className="sidebar" aria-label="PILO navigation preview">
             <div className="brand">
-              <div className="brand-mark">P</div>
-              <div>
-                <p>PILO</p>
-                <span>AI Project OS</span>
-              </div>
+              <CurrentWorkspaceSwitcher />
             </div>
             <nav className="nav-list" aria-label="Dashboard only navigation">
               {navItems.map((item) => (

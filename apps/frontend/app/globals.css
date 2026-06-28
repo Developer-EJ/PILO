@@ -90,6 +90,133 @@ body {
   color: #ffffff;
 }
 
+.workspace-brand-switcher {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.workspace-brand-button,
+.workspace-brand-switcher-muted,
+.workspace-brand-switcher-warning {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  padding: 0;
+  color: #ffffff;
+  font-family: inherit;
+  text-align: left;
+}
+
+.workspace-brand-button {
+  cursor: pointer;
+}
+
+.workspace-brand-button:hover .brand-mark,
+.workspace-brand-button[aria-expanded="true"] .brand-mark {
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.16);
+}
+
+.workspace-brand-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.workspace-brand-copy p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-brand-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-brand-caret {
+  flex: none;
+  color: #98a2b8;
+  font-size: 12px;
+  transition: transform 140ms ease;
+}
+
+.workspace-brand-button[aria-expanded="true"] .workspace-brand-caret {
+  transform: rotate(180deg);
+}
+
+.workspace-brand-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 20;
+  left: -10px;
+  width: calc(100% + 20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: #151b2b;
+  box-shadow: 0 18px 42px rgba(4, 9, 20, 0.34);
+  padding: 6px;
+}
+
+.workspace-brand-option {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  cursor: pointer;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 10px;
+  color: #ffffff;
+  font-family: inherit;
+  text-align: left;
+}
+
+.workspace-brand-option:hover,
+.workspace-brand-option.active {
+  background: rgba(109, 91, 214, 0.22);
+}
+
+.workspace-brand-option strong {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-brand-option span,
+.workspace-brand-menu-note {
+  color: #98a2b8;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.workspace-brand-menu-note {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 2px 4px 6px;
+  padding: 7px 6px 10px;
+}
+
+.workspace-brand-switcher-muted {
+  opacity: 0.72;
+}
+
+.workspace-brand-switcher-warning .brand-mark {
+  background: linear-gradient(135deg, #d9941f, #8b5cf6);
+}
+
 .brand-mark {
   display: grid;
   width: 42px;
