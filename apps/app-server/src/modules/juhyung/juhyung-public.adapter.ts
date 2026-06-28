@@ -9,6 +9,9 @@ import {
   PullRequestRecord,
   PullRequestState,
   PullRequestSummary,
+  TaskChecklistItemRecord,
+  TaskChecklistItemSummary,
+  TaskDetail,
   TaskPriority,
   TaskRecord,
   TaskStatus,
@@ -18,6 +21,7 @@ import {
 
 export interface TaskSummaryContext {
   assignee?: WorkspaceMemberRecord | null;
+  checklistItems?: TaskChecklistItemRecord[];
   linkedIssueCount?: number;
   linkedPrCount?: number;
   now?: Date;
@@ -55,6 +59,28 @@ export class JuhyungPublicAdapter {
       linkedIssueCount: context.linkedIssueCount ?? 0,
       linkedPrCount: context.linkedPrCount ?? 0,
       updatedAt: toDateTime(task.updatedAt),
+    };
+  }
+
+  toTaskDetail(task: TaskRecord, context: TaskSummaryContext = {}): TaskDetail {
+    return {
+      ...this.toTaskSummary(task, context),
+      checklistItems: (context.checklistItems ?? []).map((item) =>
+        this.toTaskChecklistItemSummary(item),
+      ),
+    };
+  }
+
+  toTaskChecklistItemSummary(
+    item: TaskChecklistItemRecord,
+  ): TaskChecklistItemSummary {
+    return {
+      id: item.id,
+      taskId: item.taskId,
+      title: item.title,
+      status: item.status as TaskChecklistItemSummary["status"],
+      sortOrder: item.sortOrder,
+      updatedAt: toDateTime(item.updatedAt),
     };
   }
 

@@ -19,18 +19,20 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ## Provided APIs
 
-| Method   | Path                                   | 목적                          | Consumer                   |
-| -------- | -------------------------------------- | ----------------------------- | -------------------------- |
-| `GET`    | `/workspaces/:workspaceId/tasks`       | Task 목록/필터 조회           | 동현, 주형                 |
-| `POST`   | `/workspaces/:workspaceId/tasks`       | Task 생성                     | 주형, 세인 action executor |
-| `GET`    | `/tasks/:taskId`                       | Task 상세                     | 전체                       |
-| `PATCH`  | `/tasks/:taskId`                       | 제목/설명/담당자/마감일 수정  | 주형                       |
-| `PATCH`  | `/tasks/:taskId/status`                | 상태 변경                     | 주형, 세인 action executor |
-| `DELETE` | `/tasks/:taskId`                       | Task soft delete              | 주형                       |
-| `POST`   | `/tasks/:taskId/comments`              | 댓글 작성                     | 주형                       |
-| `POST`   | `/tasks/:taskId/checklist-items`       | 체크리스트 추가               | 주형                       |
-| `POST`   | `/tasks/:taskId/dependencies`          | 의존성 추가                   | 주형                       |
-| `POST`   | `/workspaces/:workspaceId/task-drafts` | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
+| Method   | Path                                     | 목적                          | Consumer                   |
+| -------- | ---------------------------------------- | ----------------------------- | -------------------------- |
+| `GET`    | `/workspaces/:workspaceId/tasks`         | Task 목록/필터 조회           | 동현, 주형                 |
+| `POST`   | `/workspaces/:workspaceId/tasks`         | Task 생성                     | 주형, 세인 action executor |
+| `GET`    | `/tasks/:taskId`                         | Task 상세                     | 전체                       |
+| `PATCH`  | `/tasks/:taskId`                         | 제목/설명/담당자/마감일 수정  | 주형                       |
+| `PATCH`  | `/tasks/:taskId/status`                  | 상태 변경                     | 주형, 세인 action executor |
+| `DELETE` | `/tasks/:taskId`                         | Task soft delete              | 주형                       |
+| `POST`   | `/tasks/:taskId/comments`                | 댓글 작성                     | 주형                       |
+| `POST`   | `/tasks/:taskId/checklist-items`         | 체크리스트 추가               | 주형                       |
+| `PATCH`  | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 수정/완료/reorder  | 주형                       |
+| `DELETE` | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 삭제               | 주형                       |
+| `POST`   | `/tasks/:taskId/dependencies`            | 의존성 추가                   | 주형                       |
+| `POST`   | `/workspaces/:workspaceId/task-drafts`   | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
 
 ## Read Models
 
@@ -74,6 +76,39 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ```text
 GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDateFrom=2026-07-01&dueDateTo=2026-07-31&sortBy=dueDate&sortDirection=asc&limit=25&offset=50
+```
+
+### TaskDetail
+
+`GET /tasks/:taskId`는 `TaskSummary` 필드에 checklist를 포함한다.
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "title": "GitHub Repository 연결",
+  "status": "in_progress",
+  "priority": "high",
+  "assignee": {
+    "memberId": "uuid",
+    "name": "주형"
+  },
+  "dueDate": "2026-07-03",
+  "isDelayed": false,
+  "linkedIssueCount": 1,
+  "linkedPrCount": 1,
+  "updatedAt": "2026-06-27T12:00:00Z",
+  "checklistItems": [
+    {
+      "id": "uuid",
+      "taskId": "uuid",
+      "title": "GitHub App 설치",
+      "status": "todo",
+      "sortOrder": 0,
+      "updatedAt": "2026-06-27T12:30:00Z"
+    }
+  ]
+}
 ```
 
 ### TaskCreateDraft
@@ -120,6 +155,20 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 ### TaskDelete
 
 `DELETE /tasks/:taskId`는 `tasks.deleted_at`을 설정하는 soft delete다. 기본 Task 목록과 상세 조회는 삭제된 Task를 제외한다.
+
+### TaskChecklistItemWrite
+
+`POST /tasks/:taskId/checklist-items`는 `title`, 선택 `status`, 선택 `sortOrder`를 받는다. `PATCH /tasks/:taskId/checklist-items/:itemId`는 `title`, `status`, `sortOrder` 중 하나 이상을 받는다. `status`는 `todo`, `done` 중 하나이며, reorder는 `sortOrder` 수정으로 처리한다.
+
+```json
+{
+  "title": "GitHub App 설치",
+  "status": "todo",
+  "sortOrder": 0
+}
+```
+
+같은 Task 안에서 `sortOrder`가 충돌하면 주형 API가 기존 checklist item을 뒤로 밀어 순서를 보존한다.
 
 ## Events
 

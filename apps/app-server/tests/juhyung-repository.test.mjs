@@ -350,4 +350,279 @@ describe("JuhyungRepository", () => {
     assert.deepEqual(calls[0].where, { id: "task-1" });
     assert.ok(calls[0].data.deletedAt instanceof Date);
   });
+
+  it("reads checklist items in task sort order", async () => {
+    const calls = [];
+    const database = {
+      taskChecklistItem: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [{ id: "item-1", taskId: "task-1", sortOrder: 0 }];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const items = await repository.listChecklistItemsForTask("task-1");
+
+    assert.deepEqual(items, [{ id: "item-1", taskId: "task-1", sortOrder: 0 }]);
+    assert.deepEqual(calls, [
+      {
+        where: {
+          taskId: "task-1",
+        },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      },
+    ]);
+  });
+
+  it("creates checklist items after shifting sort order collisions", async () => {
+    const calls = [];
+    const transaction = {
+      taskChecklistItem: {
+        updateMany: async (args) => {
+          calls.push(["updateMany", args]);
+        },
+        create: async (args) => {
+          calls.push(["create", args]);
+          return { id: "item-1", ...args.data };
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const item = await repository.createChecklistItem("task-1", {
+      title: "Install GitHub App",
+      status: "todo",
+      sortOrder: 1,
+    });
+
+    assert.equal(item.sortOrder, 1);
+    assert.deepEqual(calls, [
+      [
+        "updateMany",
+        {
+          where: {
+            taskId: "task-1",
+            sortOrder: {
+              gte: 1,
+            },
+          },
+          data: {
+            sortOrder: {
+              increment: 1000000,
+            },
+          },
+        },
+      ],
+      [
+        "updateMany",
+        {
+          where: {
+            taskId: "task-1",
+            sortOrder: {
+              gte: 1000001,
+            },
+          },
+          data: {
+            sortOrder: {
+              decrement: 999999,
+            },
+          },
+        },
+      ],
+      [
+        "create",
+        {
+          data: {
+            taskId: "task-1",
+            title: "Install GitHub App",
+            status: "todo",
+            sortOrder: 1,
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("appends checklist items when sort order is not provided", async () => {
+    const calls = [];
+    const database = {
+      taskChecklistItem: {
+        aggregate: async (args) => {
+          calls.push(["aggregate", args]);
+          return { _max: { sortOrder: 2 } };
+        },
+        create: async (args) => {
+          calls.push(["create", args]);
+          return { id: "item-3", ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const item = await repository.createChecklistItem("task-1", {
+      title: "Deploy smoke",
+      status: "todo",
+    });
+
+    assert.equal(item.sortOrder, 3);
+    assert.deepEqual(calls, [
+      [
+        "aggregate",
+        {
+          where: {
+            taskId: "task-1",
+          },
+          _max: {
+            sortOrder: true,
+          },
+        },
+      ],
+      [
+        "create",
+        {
+          data: {
+            taskId: "task-1",
+            title: "Deploy smoke",
+            status: "todo",
+            sortOrder: 3,
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("updates checklist items and reorders collisions inside one transaction", async () => {
+    const calls = [];
+    const transaction = {
+      taskChecklistItem: {
+        findFirst: async (args) => {
+          calls.push(["findFirst", args]);
+          return { id: "item-1", taskId: "task-1", sortOrder: 3 };
+        },
+        update: async (args) => {
+          calls.push(["update", args]);
+          return {
+            id: args.where.id,
+            taskId: "task-1",
+            sortOrder: args.data.sortOrder ?? 1,
+            title: args.data.title ?? "Install GitHub App",
+            status: args.data.status ?? "done",
+          };
+        },
+        updateMany: async (args) => {
+          calls.push(["updateMany", args]);
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const item = await repository.updateChecklistItem("task-1", "item-1", {
+      title: "Install and authorize GitHub App",
+      status: "done",
+      sortOrder: 1,
+    });
+
+    assert.equal(item.sortOrder, 1);
+    assert.deepEqual(calls, [
+      [
+        "findFirst",
+        {
+          where: {
+            id: "item-1",
+            taskId: "task-1",
+          },
+        },
+      ],
+      [
+        "update",
+        {
+          where: {
+            id: "item-1",
+          },
+          data: {
+            sortOrder: -1,
+          },
+        },
+      ],
+      [
+        "updateMany",
+        {
+          where: {
+            taskId: "task-1",
+            sortOrder: {
+              gte: 1,
+              lt: 3,
+            },
+          },
+          data: {
+            sortOrder: {
+              increment: 1000000,
+            },
+          },
+        },
+      ],
+      [
+        "updateMany",
+        {
+          where: {
+            taskId: "task-1",
+            sortOrder: {
+              gte: 1000001,
+              lt: 1000003,
+            },
+          },
+          data: {
+            sortOrder: {
+              decrement: 999999,
+            },
+          },
+        },
+      ],
+      [
+        "update",
+        {
+          where: {
+            id: "item-1",
+          },
+          data: {
+            title: "Install and authorize GitHub App",
+            status: "done",
+            sortOrder: 1,
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("deletes checklist items within the task boundary", async () => {
+    const calls = [];
+    const database = {
+      taskChecklistItem: {
+        deleteMany: async (args) => {
+          calls.push(args);
+          return { count: 1 };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await repository.deleteChecklistItem("task-1", "item-1");
+
+    assert.deepEqual(calls, [
+      {
+        where: {
+          id: "item-1",
+          taskId: "task-1",
+        },
+      },
+    ]);
+  });
 });

@@ -5,6 +5,7 @@ export type TaskStatus =
   | "done"
   | "blocked";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskChecklistStatus = "todo" | "done";
 export type GithubIssueState = "open" | "closed";
 export type PullRequestState =
   | "open"
@@ -50,6 +51,28 @@ export interface TaskSummary {
   linkedIssueCount: number;
   linkedPrCount: number;
   updatedAt: string;
+}
+
+export interface TaskChecklistItemRecord {
+  id: string;
+  taskId: string;
+  title: string;
+  status: string;
+  sortOrder: number;
+  updatedAt: Date | string;
+}
+
+export interface TaskChecklistItemSummary {
+  id: string;
+  taskId: string;
+  title: string;
+  status: TaskChecklistStatus;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+export interface TaskDetail extends TaskSummary {
+  checklistItems: TaskChecklistItemSummary[];
 }
 
 export interface GithubIssueRecord {

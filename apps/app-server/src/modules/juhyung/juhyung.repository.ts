@@ -1,7 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
-import { TaskPriority, TaskStatus } from "./juhyung-public.types";
+import {
+  TaskChecklistStatus,
+  TaskPriority,
+  TaskStatus,
+} from "./juhyung-public.types";
+
+const SORT_ORDER_SHIFT = 1000000;
 
 export const JUHYUNG_OWNER_TABLES = [
   "milestones",
@@ -39,6 +45,18 @@ export interface UpdateTaskInput {
   assigneeMemberId?: string | null;
   dueDate?: Date | string | null;
   milestoneId?: string | null;
+}
+
+export interface CreateChecklistItemInput {
+  title: string;
+  status: TaskChecklistStatus;
+  sortOrder?: number;
+}
+
+export interface UpdateChecklistItemInput {
+  title?: string;
+  status?: TaskChecklistStatus;
+  sortOrder?: number;
 }
 
 export type TaskListSortField =
@@ -167,6 +185,115 @@ export class JuhyungRepository {
       },
     });
   }
+
+  listChecklistItemsForTask(taskId: string) {
+    return this.database.taskChecklistItem.findMany({
+      where: {
+        taskId,
+      },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+  }
+
+  async createChecklistItem(taskId: string, input: CreateChecklistItemInput) {
+    const sortOrder =
+      input.sortOrder ?? (await this.getNextChecklistSortOrder(taskId));
+    const data = {
+      taskId,
+      title: input.title,
+      status: input.status,
+      sortOrder,
+    } satisfies Prisma.TaskChecklistItemUncheckedCreateInput;
+
+    if (input.sortOrder === undefined) {
+      return this.database.taskChecklistItem.create({ data });
+    }
+
+    return this.database.$transaction(async (transaction) => {
+      await shiftChecklistSortOrdersUp(transaction, taskId, sortOrder);
+      return transaction.taskChecklistItem.create({ data });
+    });
+  }
+
+  updateChecklistItem(
+    taskId: string,
+    itemId: string,
+    input: UpdateChecklistItemInput,
+  ) {
+    return this.database.$transaction(async (transaction) => {
+      const existing = await transaction.taskChecklistItem.findFirst({
+        where: {
+          id: itemId,
+          taskId,
+        },
+      });
+      if (!existing) {
+        return null;
+      }
+
+      if (
+        input.sortOrder !== undefined &&
+        input.sortOrder !== existing.sortOrder
+      ) {
+        await transaction.taskChecklistItem.update({
+          where: {
+            id: itemId,
+          },
+          data: {
+            sortOrder: -1,
+          },
+        });
+
+        if (input.sortOrder < existing.sortOrder) {
+          await shiftChecklistSortOrdersUp(
+            transaction,
+            taskId,
+            input.sortOrder,
+            existing.sortOrder,
+          );
+        } else {
+          await shiftChecklistSortOrdersDown(
+            transaction,
+            taskId,
+            existing.sortOrder + 1,
+            input.sortOrder + 1,
+          );
+        }
+      }
+
+      const data = {
+        ...input,
+      } satisfies Prisma.TaskChecklistItemUncheckedUpdateInput;
+
+      return transaction.taskChecklistItem.update({
+        where: {
+          id: itemId,
+        },
+        data,
+      });
+    });
+  }
+
+  deleteChecklistItem(taskId: string, itemId: string) {
+    return this.database.taskChecklistItem.deleteMany({
+      where: {
+        id: itemId,
+        taskId,
+      },
+    });
+  }
+
+  private async getNextChecklistSortOrder(taskId: string): Promise<number> {
+    const aggregate = await this.database.taskChecklistItem.aggregate({
+      where: {
+        taskId,
+      },
+      _max: {
+        sortOrder: true,
+      },
+    });
+    return (aggregate._max.sortOrder ?? -1) + 1;
+  }
 }
 
 function buildTaskListWhere(
@@ -222,4 +349,80 @@ function buildTaskListOrderBy(
   orderBy.push({ id: "asc" });
 
   return orderBy;
+}
+
+async function shiftChecklistSortOrdersUp(
+  transaction: Prisma.TransactionClient,
+  taskId: string,
+  fromSortOrder: number,
+  toSortOrder?: number,
+) {
+  await transaction.taskChecklistItem.updateMany({
+    where: {
+      taskId,
+      sortOrder: {
+        gte: fromSortOrder,
+        ...(toSortOrder !== undefined ? { lt: toSortOrder } : {}),
+      },
+    },
+    data: {
+      sortOrder: {
+        increment: SORT_ORDER_SHIFT,
+      },
+    },
+  });
+
+  await transaction.taskChecklistItem.updateMany({
+    where: {
+      taskId,
+      sortOrder: {
+        gte: fromSortOrder + SORT_ORDER_SHIFT,
+        ...(toSortOrder !== undefined
+          ? { lt: toSortOrder + SORT_ORDER_SHIFT }
+          : {}),
+      },
+    },
+    data: {
+      sortOrder: {
+        decrement: SORT_ORDER_SHIFT - 1,
+      },
+    },
+  });
+}
+
+async function shiftChecklistSortOrdersDown(
+  transaction: Prisma.TransactionClient,
+  taskId: string,
+  fromSortOrder: number,
+  toSortOrder: number,
+) {
+  await transaction.taskChecklistItem.updateMany({
+    where: {
+      taskId,
+      sortOrder: {
+        gte: fromSortOrder,
+        lt: toSortOrder,
+      },
+    },
+    data: {
+      sortOrder: {
+        increment: SORT_ORDER_SHIFT,
+      },
+    },
+  });
+
+  await transaction.taskChecklistItem.updateMany({
+    where: {
+      taskId,
+      sortOrder: {
+        gte: fromSortOrder + SORT_ORDER_SHIFT,
+        lt: toSortOrder + SORT_ORDER_SHIFT,
+      },
+    },
+    data: {
+      sortOrder: {
+        decrement: SORT_ORDER_SHIFT + 1,
+      },
+    },
+  });
 }
