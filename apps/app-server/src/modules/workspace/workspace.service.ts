@@ -3,6 +3,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { WorkspaceRepository } from "./workspace.repository";
 import type {
   CurrentWorkspaceMember,
+  DashboardPreferences,
+  DashboardPreferencesLayout,
   UpdateWorkspacePatch,
   WorkspaceAuthUserRef,
   WorkspaceInviteCreated,
@@ -247,6 +249,45 @@ export class WorkspaceService {
     };
   }
 
+  async getDashboardPreferences(
+    input: WorkspaceResourceInput,
+  ): Promise<DashboardPreferences> {
+    await this.requireCurrentMember(input);
+
+    const preferences =
+      await this.workspaceRepository.getDashboardPreferencesForUser({
+        workspaceId: input.workspaceId,
+        userId: input.currentUser.id,
+      });
+
+    if (!preferences) {
+      throw new WorkspaceAccessError(input.workspaceId, "workspace_not_found");
+    }
+
+    return preferences;
+  }
+
+  async updateDashboardPreferences(
+    input: WorkspaceMutationInput,
+  ): Promise<DashboardPreferences> {
+    await this.requireCurrentMember(input);
+
+    const body = parseDashboardPreferencesBody(input.body);
+    const preferences =
+      await this.workspaceRepository.upsertDashboardPreferencesForUser({
+        workspaceId: input.workspaceId,
+        userId: input.currentUser.id,
+        layout: body.layout,
+        hiddenSections: body.hiddenSections,
+      });
+
+    if (!preferences) {
+      throw new WorkspaceAccessError(input.workspaceId, "workspace_not_found");
+    }
+
+    return preferences;
+  }
+
   async updateWorkspace(
     input: WorkspaceMutationInput,
   ): Promise<WorkspaceSummary> {
@@ -437,6 +478,18 @@ function parseAcceptWorkspaceInviteBody(body: unknown): {
   };
 }
 
+function parseDashboardPreferencesBody(body: unknown): {
+  layout: DashboardPreferencesLayout;
+  hiddenSections: string[];
+} {
+  const record = requirePlainObject(body);
+
+  return {
+    layout: parseDashboardPreferencesLayout(record.layout),
+    hiddenSections: parseHiddenSections(record.hiddenSections),
+  };
+}
+
 function parseUpdateWorkspaceBody(body: unknown): UpdateWorkspacePatch {
   const record = requirePlainObject(body);
   const patch: UpdateWorkspacePatch = {};
@@ -458,6 +511,46 @@ function parseUpdateWorkspaceBody(body: unknown): UpdateWorkspacePatch {
   }
 
   return patch;
+}
+
+function parseDashboardPreferencesLayout(
+  value: unknown,
+): DashboardPreferencesLayout {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isPlainJsonObject(value)) {
+    throw new WorkspaceValidationError(
+      "Dashboard preferences layout must be an object.",
+    );
+  }
+
+  return value;
+}
+
+function parseHiddenSections(value: unknown): string[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new WorkspaceValidationError(
+      "Dashboard preferences hiddenSections must be an array.",
+    );
+  }
+
+  const hiddenSections = value.map((item) => {
+    if (typeof item !== "string" || !item.trim()) {
+      throw new WorkspaceValidationError(
+        "Dashboard preferences hiddenSections must contain strings.",
+      );
+    }
+
+    return item.trim();
+  });
+
+  return Array.from(new Set(hiddenSections));
 }
 
 function parseInviteEmail(value: unknown) {
@@ -523,6 +616,10 @@ function requirePlainObject(body: unknown): Record<string, unknown> {
   }
 
   return body as Record<string, unknown>;
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function parseWorkspaceName(value: unknown, required: true): string;

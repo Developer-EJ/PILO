@@ -61,6 +61,25 @@ Workspace는 PILO의 프로젝트 작업 공간과 멤버 권한을 담당한다
 }
 ```
 
+### DashboardPreferences
+
+```json
+{
+  "workspaceId": "uuid",
+  "memberId": "uuid",
+  "layout": {
+    "density": "compact",
+    "columns": ["tasks", "prs"]
+  },
+  "hiddenSections": ["agent"],
+  "updatedAt": "2026-06-27T12:00:00Z"
+}
+```
+
+- `layout`은 Dashboard UI가 소유하는 JSON object다. 서버는 내부 구조를 해석하지 않고 그대로 저장한다.
+- `hiddenSections`는 string 배열이다. 서버는 값을 trim하고 중복을 제거한다.
+- 설정은 `(workspaceId, memberId)` 단위로 저장하며, 다른 멤버의 설정과 섞이면 안 된다.
+
 ## Events
 
 - `workspace.created`

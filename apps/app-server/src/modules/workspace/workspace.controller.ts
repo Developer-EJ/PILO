@@ -10,6 +10,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -80,6 +81,36 @@ export class WorkspaceController {
       this.workspaceService.listWorkspaceMembers({
         currentUser: this.requireGuardCurrentUser(request),
         workspaceId,
+      }),
+    );
+  }
+
+  @Get(":workspaceId/dashboard-preferences")
+  @UseGuards(WorkspaceMemberGuard)
+  getDashboardPreferences(
+    @Param("workspaceId") workspaceId: string,
+    @Req() request: WorkspaceMemberGuardRequest,
+  ) {
+    return this.handleWorkspaceRequest(() =>
+      this.workspaceService.getDashboardPreferences({
+        currentUser: this.requireGuardCurrentUser(request),
+        workspaceId,
+      }),
+    );
+  }
+
+  @Put(":workspaceId/dashboard-preferences")
+  @UseGuards(WorkspaceMemberGuard)
+  updateDashboardPreferences(
+    @Param("workspaceId") workspaceId: string,
+    @Req() request: WorkspaceMemberGuardRequest,
+    @Body() body: unknown,
+  ) {
+    return this.handleWorkspaceRequest(() =>
+      this.workspaceService.updateDashboardPreferences({
+        currentUser: this.requireGuardCurrentUser(request),
+        workspaceId,
+        body,
       }),
     );
   }

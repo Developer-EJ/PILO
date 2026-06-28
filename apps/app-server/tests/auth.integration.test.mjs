@@ -316,6 +316,44 @@ describe("auth HTTP integration", () => {
       assert.equal(members[0].avatarUrl, "https://example.com/integration.png");
       assert.equal(members[0].role, "owner");
 
+      const defaultPreferencesResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}/dashboard-preferences`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+      const defaultPreferences = defaultPreferencesResponse.json();
+
+      assert.equal(defaultPreferencesResponse.statusCode, 200);
+      assert.deepEqual(defaultPreferences.layout, {});
+      assert.deepEqual(defaultPreferences.hiddenSections, []);
+      assert.equal(defaultPreferences.updatedAt, null);
+
+      const ownerPreferencesResponse = await server.inject({
+        method: "PUT",
+        url: `/workspaces/${created.id}/dashboard-preferences`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          layout: {
+            density: "compact",
+            columns: ["tasks", "prs"],
+          },
+          hiddenSections: ["agent"],
+        }),
+      });
+      const ownerPreferences = ownerPreferencesResponse.json();
+
+      assert.equal(ownerPreferencesResponse.statusCode, 200);
+      assert.deepEqual(ownerPreferences.layout, {
+        density: "compact",
+        columns: ["tasks", "prs"],
+      });
+      assert.deepEqual(ownerPreferences.hiddenSections, ["agent"]);
+
       const inviteResponse = await server.inject({
         method: "POST",
         url: `/workspaces/${created.id}/invites`,
@@ -378,6 +416,44 @@ describe("auth HTTP integration", () => {
 
       assert.equal(updatedMembersResponse.statusCode, 200);
       assert.equal(updatedMembersResponse.json().length, 2);
+
+      const inviteePreferencesResponse = await server.inject({
+        method: "PUT",
+        url: `/workspaces/${created.id}/dashboard-preferences`,
+        headers: {
+          "content-type": "application/json",
+          cookie: inviteeCookieHeader,
+        },
+        payload: JSON.stringify({
+          layout: {
+            density: "comfortable",
+            columns: ["meetings"],
+          },
+          hiddenSections: ["recentDecisions"],
+        }),
+      });
+      const inviteePreferences = inviteePreferencesResponse.json();
+
+      assert.equal(inviteePreferencesResponse.statusCode, 200);
+      assert.notEqual(inviteePreferences.memberId, ownerPreferences.memberId);
+      assert.deepEqual(inviteePreferences.layout, {
+        density: "comfortable",
+        columns: ["meetings"],
+      });
+
+      const reloadedOwnerPreferencesResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}/dashboard-preferences`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(reloadedOwnerPreferencesResponse.statusCode, 200);
+      assert.deepEqual(
+        reloadedOwnerPreferencesResponse.json(),
+        ownerPreferences,
+      );
 
       const updateResponse = await server.inject({
         method: "PATCH",

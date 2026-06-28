@@ -1056,6 +1056,116 @@ describe("app-server package", () => {
     assert.equal(members.length, 2);
   });
 
+  it("keeps dashboard preferences scoped to each workspace member", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const invitee = {
+      id: "user-2",
+      name: "Invited Member",
+      email: "member@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const defaultPreferences = await service.getDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+    const ownerPreferences = await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        layout: {
+          density: "compact",
+          columns: ["tasks", "prs"],
+        },
+        hiddenSections: ["agent", "agent"],
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: invitee.email,
+      },
+    });
+
+    await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: invitee,
+      body: {
+        token: invite.token,
+      },
+    });
+
+    const memberPreferences = await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: invitee,
+      body: {
+        layout: {
+          density: "comfortable",
+          columns: ["meetings"],
+        },
+        hiddenSections: ["recentDecisions"],
+      },
+    });
+    const reloadedOwnerPreferences = await service.getDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.deepEqual(defaultPreferences.layout, {});
+    assert.deepEqual(defaultPreferences.hiddenSections, []);
+    assert.equal(defaultPreferences.updatedAt, null);
+    assert.deepEqual(ownerPreferences.layout, {
+      density: "compact",
+      columns: ["tasks", "prs"],
+    });
+    assert.deepEqual(ownerPreferences.hiddenSections, ["agent"]);
+    assert.notEqual(ownerPreferences.memberId, memberPreferences.memberId);
+    assert.deepEqual(memberPreferences.layout, {
+      density: "comfortable",
+      columns: ["meetings"],
+    });
+    assert.deepEqual(reloadedOwnerPreferences, ownerPreferences);
+  });
+
+  it("rejects invalid dashboard preferences payloads", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.updateDashboardPreferences({
+          workspaceId: workspace.id,
+          currentUser: owner,
+          body: {
+            layout: [],
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceValidationError &&
+        error.code === "workspace_validation_failed",
+    );
+  });
+
   it("handles workspace invite duplicate, expired, accepted, and revoked states", async () => {
     const service = new WorkspaceService(new WorkspaceRepository());
     const owner = {
