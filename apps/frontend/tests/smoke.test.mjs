@@ -30,6 +30,7 @@ import {
   writeStoredWorkspaceId,
 } from "../lib/workspace/currentWorkspace.mjs";
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
+import contractCanvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
 import contractWorkspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
 import { workspaceDashboardFixture } from "../lib/workspace/workspaceDashboardFixture.mjs";
 import {
@@ -463,6 +464,72 @@ describe("frontend package", () => {
       "#/$defs/PullRequestSummary",
     );
     assert.deepEqual(dashboard.properties.source.enum, ["fixture", "empty"]);
+  });
+
+  it("keeps Canvas board detail fixture aligned with the public schema", () => {
+    const defs = contractSchema.$defs;
+    const boardDetail = defs.CanvasBoardDetail;
+
+    assert.deepEqual(Object.keys(contractCanvasBoardDetailFixture).sort(), [
+      "boardType",
+      "connectionCount",
+      "connections",
+      "filterSetting",
+      "id",
+      "shapeCount",
+      "shapes",
+      "title",
+      "updatedAt",
+      "viewSetting",
+      "workspaceId",
+    ]);
+    assert.deepEqual(
+      Object.keys(contractCanvasBoardDetailFixture).sort(),
+      Object.keys(boardDetail.properties).sort(),
+    );
+    assert.equal(
+      boardDetail.properties.shapes.items.$ref,
+      "#/$defs/CanvasShapeSummary",
+    );
+    assert.equal(
+      boardDetail.properties.connections.items.$ref,
+      "#/$defs/CanvasConnectionSummary",
+    );
+    assert.equal(
+      boardDetail.properties.viewSetting.$ref,
+      "#/$defs/CanvasViewSetting",
+    );
+    assert.equal(
+      boardDetail.properties.filterSetting.$ref,
+      "#/$defs/CanvasFilterSetting",
+    );
+    assert.deepEqual(defs.CanvasShapeRequest.required, [
+      "shapeType",
+      "entityType",
+      "entityId",
+      "displayTitle",
+      "width",
+      "height",
+      "color",
+    ]);
+    assert.deepEqual(defs.CanvasConnectionRequest.required, [
+      "sourceShapeId",
+      "targetShapeId",
+      "connectionType",
+      "label",
+    ]);
+    assert.deepEqual(contractCanvasBoardDetailFixture.viewSetting, {
+      zoom: 1,
+      viewportX: 0,
+      viewportY: 0,
+    });
+    assert.deepEqual(contractCanvasBoardDetailFixture.filterSetting, {
+      enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+      assigneeMemberId: null,
+      showDelayedOnly: false,
+      showRiskOnly: false,
+      filters: {},
+    });
   });
 
   it("resolves current workspace from URL before stored state", () => {

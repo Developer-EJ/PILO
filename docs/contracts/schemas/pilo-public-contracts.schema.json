@@ -216,13 +216,7 @@
     },
     "CurrentWorkspaceMember": {
       "type": "object",
-      "required": [
-        "workspaceId",
-        "memberId",
-        "userId",
-        "role",
-        "displayName"
-      ],
+      "required": ["workspaceId", "memberId", "userId", "role", "displayName"],
       "additionalProperties": false,
       "properties": {
         "workspaceId": { "$ref": "#/$defs/uuid" },
@@ -498,39 +492,218 @@
         "conclusion": { "type": ["string", "null"] }
       }
     },
+    "CanvasEntityType": {
+      "enum": [
+        "task",
+        "meeting_report",
+        "pull_request",
+        "github_issue",
+        "document",
+        "file",
+        "code",
+        "decision",
+        "risk"
+      ]
+    },
+    "CanvasBoardType": {
+      "enum": ["project_map", "meeting", "review", "custom"]
+    },
+    "CanvasPosition": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "CanvasViewSetting": {
+      "type": "object",
+      "required": ["zoom", "viewportX", "viewportY"],
+      "additionalProperties": false,
+      "properties": {
+        "zoom": { "type": "number", "minimum": 0.1 },
+        "viewportX": { "type": "number" },
+        "viewportY": { "type": "number" }
+      }
+    },
+    "CanvasFilterSetting": {
+      "type": "object",
+      "required": [
+        "enabledEntityTypes",
+        "assigneeMemberId",
+        "showDelayedOnly",
+        "showRiskOnly",
+        "filters"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabledEntityTypes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasEntityType" }
+        },
+        "assigneeMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "showDelayedOnly": { "type": "boolean" },
+        "showRiskOnly": { "type": "boolean" },
+        "filters": { "type": "object" }
+      }
+    },
+    "CanvasShapeSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "shapeType",
+        "entityType",
+        "entityId",
+        "displayTitle",
+        "width",
+        "height",
+        "color",
+        "isCollapsed",
+        "zIndex",
+        "position"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "shapeType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityId": { "$ref": "#/$defs/uuid" },
+        "displayTitle": { "type": "string", "minLength": 1 },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 },
+        "color": { "type": "string" },
+        "isCollapsed": { "type": "boolean" },
+        "zIndex": { "type": "integer" },
+        "position": { "$ref": "#/$defs/CanvasPosition" }
+      }
+    },
+    "CanvasConnectionSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "sourceShapeId",
+        "targetShapeId",
+        "connectionType",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "sourceShapeId": { "$ref": "#/$defs/uuid" },
+        "targetShapeId": { "$ref": "#/$defs/uuid" },
+        "connectionType": { "type": "string", "minLength": 1 },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "CanvasBoardSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "boardType",
+        "shapeCount",
+        "connectionCount",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "boardType": { "$ref": "#/$defs/CanvasBoardType" },
+        "shapeCount": { "type": "integer", "minimum": 0 },
+        "connectionCount": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "CanvasBoardDetail": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "boardType",
+        "shapeCount",
+        "connectionCount",
+        "updatedAt",
+        "shapes",
+        "connections",
+        "viewSetting",
+        "filterSetting"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "boardType": { "$ref": "#/$defs/CanvasBoardType" },
+        "shapeCount": { "type": "integer", "minimum": 0 },
+        "connectionCount": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "$ref": "#/$defs/dateTime" },
+        "shapes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasShapeSummary" }
+        },
+        "connections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasConnectionSummary" }
+        },
+        "viewSetting": { "$ref": "#/$defs/CanvasViewSetting" },
+        "filterSetting": { "$ref": "#/$defs/CanvasFilterSetting" }
+      }
+    },
+    "CanvasShapeRequest": {
+      "type": "object",
+      "required": [
+        "shapeType",
+        "entityType",
+        "entityId",
+        "displayTitle",
+        "width",
+        "height",
+        "color"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shapeType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityId": { "$ref": "#/$defs/uuid" },
+        "displayTitle": { "type": "string", "minLength": 1 },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 },
+        "color": { "type": "string" }
+      }
+    },
+    "CanvasConnectionRequest": {
+      "type": "object",
+      "required": ["sourceShapeId", "targetShapeId", "connectionType", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "sourceShapeId": { "$ref": "#/$defs/uuid" },
+        "targetShapeId": { "$ref": "#/$defs/uuid" },
+        "connectionType": { "type": "string", "minLength": 1 },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "CanvasViewSettingRequest": {
+      "$ref": "#/$defs/CanvasViewSetting"
+    },
+    "CanvasFilterSettingRequest": {
+      "$ref": "#/$defs/CanvasFilterSetting"
+    },
     "CanvasEntityRef": {
       "type": "object",
       "required": ["entityType", "entityId", "displayTitle", "shapeType"],
       "additionalProperties": false,
       "properties": {
-        "entityType": {
-          "enum": [
-            "task",
-            "meeting_report",
-            "pull_request",
-            "github_issue",
-            "document",
-            "file",
-            "code",
-            "decision",
-            "risk"
-          ]
-        },
+        "entityType": { "$ref": "#/$defs/CanvasEntityType" },
         "entityId": { "$ref": "#/$defs/uuid" },
         "displayTitle": { "type": "string" },
-        "shapeType": {
-          "enum": [
-            "task",
-            "meeting_report",
-            "pull_request",
-            "github_issue",
-            "document",
-            "file",
-            "code",
-            "decision",
-            "risk"
-          ]
-        }
+        "shapeType": { "$ref": "#/$defs/CanvasEntityType" }
       }
     },
     "AgentAction": {
