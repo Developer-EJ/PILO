@@ -4,6 +4,7 @@ import type {
   CreateWorkspaceInput,
   FindWorkspaceForUserInput,
   WorkspaceMemberRecord,
+  WorkspaceMemberSummary,
   WorkspaceRecord,
   WorkspaceRepositoryPort,
   WorkspaceSummary,
@@ -60,6 +61,22 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     return this.findMemberRecord(input);
   }
 
+  async listWorkspaceMemberSummariesForUser(
+    input: FindWorkspaceForUserInput,
+  ): Promise<WorkspaceMemberSummary[] | null> {
+    const workspace = this.findVisibleWorkspace(input.workspaceId);
+    const currentMember = this.findMemberRecord(input);
+
+    if (!workspace || !currentMember) {
+      return null;
+    }
+
+    return Array.from(this.membersById.values())
+      .filter((member) => member.workspaceId === input.workspaceId)
+      .map((member) => this.toWorkspaceMemberSummary(member))
+      .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt));
+  }
+
   async createWorkspace(
     input: CreateWorkspaceInput,
   ): Promise<WorkspaceSummary> {
@@ -79,6 +96,9 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
       id: randomUUID(),
       workspaceId: workspace.id,
       userId: input.currentUser.id,
+      name: input.currentUser.name ?? "Workspace member",
+      email: input.currentUser.email ?? "",
+      avatarUrl: input.currentUser.avatarUrl ?? null,
       role: "owner",
       displayName: input.currentUser.name ?? null,
       joinedAt: now,
@@ -171,6 +191,21 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
       myRole: member.role,
       memberCount: this.countMembers(workspace.id),
       createdAt: workspace.createdAt,
+    };
+  }
+
+  private toWorkspaceMemberSummary(
+    member: WorkspaceMemberRecord,
+  ): WorkspaceMemberSummary {
+    return {
+      memberId: member.id,
+      userId: member.userId,
+      name: member.name,
+      email: member.email,
+      avatarUrl: member.avatarUrl,
+      role: member.role,
+      displayName: member.displayName,
+      joinedAt: member.joinedAt,
     };
   }
 }

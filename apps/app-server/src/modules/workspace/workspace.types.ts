@@ -19,6 +19,8 @@ export type WorkspaceMemberRole = (typeof WORKSPACE_MEMBER_ROLES)[number];
 export type WorkspaceAuthUserRef = {
   id: string;
   name?: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
 };
 
 export type WorkspaceRecord = {
@@ -37,6 +39,9 @@ export type WorkspaceMemberRecord = {
   id: string;
   workspaceId: string;
   userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
   role: WorkspaceMemberRole;
   displayName: string | null;
   joinedAt: string;
@@ -106,6 +111,9 @@ export type WorkspaceRepositoryPort = {
   findCurrentMember(
     input: FindWorkspaceForUserInput,
   ): Promise<WorkspaceMemberRecord | null>;
+  listWorkspaceMemberSummariesForUser(
+    input: FindWorkspaceForUserInput,
+  ): Promise<WorkspaceMemberSummary[] | null>;
   createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceSummary>;
   updateWorkspaceForUser(
     input: UpdateWorkspaceForUserInput,
