@@ -103,6 +103,33 @@ export type CanvasShapeSummary = {
   };
 };
 
+export type CanvasBoardCreateRequest = {
+  title: string;
+  boardType: CanvasBoardType;
+};
+
+export type CanvasShapeRequest = {
+  shapeType: CanvasEntityType;
+  entityType: CanvasEntityType;
+  entityId: string;
+  displayTitle: string;
+  width: number;
+  height: number;
+  color: string;
+};
+
+export type CanvasShapeUpdateRequest = Partial<
+  Pick<
+    CanvasShapeSummary,
+    "displayTitle" | "width" | "height" | "color" | "isCollapsed" | "zIndex"
+  >
+>;
+
+export type CanvasShapeDeleteResult = {
+  id: string;
+  deleted: true;
+};
+
 export type CanvasShapePositionRequest = {
   x: number;
   y: number;
@@ -189,10 +216,34 @@ export type CanvasRepositoryPort = {
   listBoardsForWorkspace(workspaceId: string): Promise<CanvasBoardSummary[]>;
   findBoardWorkspaceId(boardId: string): Promise<string | null>;
   findShapeWorkspaceId(shapeId: string): Promise<string | null>;
+  createBoardForWorkspace(
+    input: CanvasBoardCreateRequest & {
+      workspaceId: string;
+      createdByMemberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasBoardSummary>;
   findBoardDetail(input: {
     boardId: string;
     memberId: string;
   }): Promise<CanvasBoardDetail | null>;
+  createShapeForBoard(
+    input: CanvasShapeRequest & {
+      boardId: string;
+      createdByMemberId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasShapeSummary | null>;
+  updateShape(
+    input: CanvasShapeUpdateRequest & {
+      shapeId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasShapeSummary | null>;
+  deleteShape(input: {
+    shapeId: string;
+    now?: Date;
+  }): Promise<CanvasShapeDeleteResult | null>;
   createConnectionForBoard(
     input: CanvasConnectionRequest & {
       boardId: string;

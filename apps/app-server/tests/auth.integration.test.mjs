@@ -520,6 +520,340 @@ describe("auth HTTP integration", () => {
     }
   });
 
+  it("serves Canvas board, shape, position, connection, and settings APIs", async () => {
+    const { server, close } = await createAuthIntegrationApp();
+
+    try {
+      const startResponse = await server.inject({
+        method: "GET",
+        url: "/auth/google/start?next=%2Fcanvas",
+      });
+      const authorizationUrl = getRedirectUrl(startResponse);
+      const state = authorizationUrl.searchParams.get("state");
+      const callbackResponse = await server.inject({
+        method: "GET",
+        url: `/auth/google/callback?code=google-code&state=${encodeURIComponent(
+          state,
+        )}`,
+      });
+      const cookieHeader = getCookieHeader(callbackResponse);
+
+      const createWorkspaceResponse = await server.inject({
+        method: "POST",
+        url: "/workspaces",
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          name: "Canvas Workspace",
+          type: "side_project",
+        }),
+      });
+      const workspace = createWorkspaceResponse.json();
+
+      assert.equal(createWorkspaceResponse.statusCode, 201);
+
+      const emptyBoardsResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${workspace.id}/canvas-boards`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(emptyBoardsResponse.statusCode, 200);
+      assert.deepEqual(emptyBoardsResponse.json(), []);
+
+      const createBoardResponse = await server.inject({
+        method: "POST",
+        url: `/workspaces/${workspace.id}/canvas-boards`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          title: "Project Map",
+          boardType: "project_map",
+        }),
+      });
+      const board = createBoardResponse.json();
+
+      assert.equal(createBoardResponse.statusCode, 201);
+      assert.equal(board.workspaceId, workspace.id);
+      assert.equal(board.title, "Project Map");
+      assert.equal(board.boardType, "project_map");
+      assert.equal(board.shapeCount, 0);
+
+      const listBoardsResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${workspace.id}/canvas-boards`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(listBoardsResponse.statusCode, 200);
+      assert.equal(listBoardsResponse.json()[0].id, board.id);
+
+      const detailResponse = await server.inject({
+        method: "GET",
+        url: `/canvas-boards/${board.id}`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+      const initialDetail = detailResponse.json();
+
+      assert.equal(detailResponse.statusCode, 200);
+      assert.equal(initialDetail.id, board.id);
+      assert.deepEqual(initialDetail.shapes, []);
+      assert.deepEqual(initialDetail.connections, []);
+      assert.deepEqual(initialDetail.viewSetting, {
+        zoom: 1,
+        viewportX: 0,
+        viewportY: 0,
+      });
+
+      const invalidShapeResponse = await server.inject({
+        method: "POST",
+        url: `/canvas-boards/${board.id}/shapes`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          shapeType: "unknown",
+          entityType: "task",
+          entityId: "task-1",
+          displayTitle: "Invalid",
+          width: 280,
+          height: 160,
+          color: "#6d5bd6",
+        }),
+      });
+
+      assert.equal(invalidShapeResponse.statusCode, 400);
+
+      const createTaskShapeResponse = await server.inject({
+        method: "POST",
+        url: `/canvas-boards/${board.id}/shapes`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          shapeType: "task",
+          entityType: "task",
+          entityId: "task-1",
+          displayTitle: "Login API",
+          width: 280,
+          height: 160,
+          color: "#6d5bd6",
+        }),
+      });
+      const taskShape = createTaskShapeResponse.json();
+
+      assert.equal(createTaskShapeResponse.statusCode, 201);
+      assert.equal(taskShape.displayTitle, "Login API");
+      assert.deepEqual(taskShape.position, {
+        x: 0,
+        y: 0,
+      });
+
+      const createPrShapeResponse = await server.inject({
+        method: "POST",
+        url: `/canvas-boards/${board.id}/shapes`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          shapeType: "pull_request",
+          entityType: "pull_request",
+          entityId: "pr-42",
+          displayTitle: "PR #42",
+          width: 300,
+          height: 172,
+          color: "#2e9e5b",
+        }),
+      });
+      const prShape = createPrShapeResponse.json();
+
+      assert.equal(createPrShapeResponse.statusCode, 201);
+
+      const updateShapeResponse = await server.inject({
+        method: "PATCH",
+        url: `/canvas-shapes/${taskShape.id}`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          displayTitle: "Login API updated",
+          isCollapsed: true,
+        }),
+      });
+      const updatedShape = updateShapeResponse.json();
+
+      assert.equal(updateShapeResponse.statusCode, 200);
+      assert.equal(updatedShape.displayTitle, "Login API updated");
+      assert.equal(updatedShape.isCollapsed, true);
+
+      const positionResponse = await server.inject({
+        method: "PUT",
+        url: `/canvas-shapes/${taskShape.id}/position`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          x: 120,
+          y: 140,
+        }),
+      });
+
+      assert.equal(positionResponse.statusCode, 200);
+      assert.deepEqual(positionResponse.json().position, {
+        x: 120,
+        y: 140,
+      });
+
+      const connectionResponse = await server.inject({
+        method: "POST",
+        url: `/canvas-boards/${board.id}/connections`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          sourceShapeId: taskShape.id,
+          targetShapeId: prShape.id,
+          connectionType: "implemented_by",
+          label: "Task to PR",
+        }),
+      });
+      const connection = connectionResponse.json();
+
+      assert.equal(connectionResponse.statusCode, 201);
+      assert.equal(connection.sourceShapeId, taskShape.id);
+
+      const duplicateConnectionResponse = await server.inject({
+        method: "POST",
+        url: `/canvas-boards/${board.id}/connections`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          sourceShapeId: taskShape.id,
+          targetShapeId: prShape.id,
+          connectionType: "implemented_by",
+          label: "Duplicate",
+        }),
+      });
+
+      assert.equal(duplicateConnectionResponse.statusCode, 409);
+
+      const viewSettingResponse = await server.inject({
+        method: "PUT",
+        url: `/canvas-boards/${board.id}/view-settings`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          zoom: 1.2,
+          viewportX: 10,
+          viewportY: 20,
+        }),
+      });
+
+      assert.equal(viewSettingResponse.statusCode, 200);
+      assert.deepEqual(viewSettingResponse.json(), {
+        zoom: 1.2,
+        viewportX: 10,
+        viewportY: 20,
+      });
+
+      const filterSettingResponse = await server.inject({
+        method: "PUT",
+        url: `/canvas-boards/${board.id}/filter-settings`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          enabledEntityTypes: ["task", "pull_request"],
+          assigneeMemberId: null,
+          showDelayedOnly: false,
+          showRiskOnly: true,
+          filters: {
+            priority: "high",
+          },
+        }),
+      });
+
+      assert.equal(filterSettingResponse.statusCode, 200);
+      assert.equal(filterSettingResponse.json().showRiskOnly, true);
+
+      const updatedDetailResponse = await server.inject({
+        method: "GET",
+        url: `/canvas-boards/${board.id}`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+      const updatedDetail = updatedDetailResponse.json();
+
+      assert.equal(updatedDetailResponse.statusCode, 200);
+      assert.equal(updatedDetail.shapeCount, 2);
+      assert.equal(updatedDetail.connectionCount, 1);
+      assert.deepEqual(updatedDetail.viewSetting, viewSettingResponse.json());
+      assert.deepEqual(
+        updatedDetail.filterSetting,
+        filterSettingResponse.json(),
+      );
+
+      const anonymousListResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${workspace.id}/canvas-boards`,
+      });
+
+      assert.equal(anonymousListResponse.statusCode, 401);
+
+      const deleteConnectionResponse = await server.inject({
+        method: "DELETE",
+        url: `/canvas-connections/${connection.id}`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(deleteConnectionResponse.statusCode, 200);
+      assert.deepEqual(deleteConnectionResponse.json(), {
+        id: connection.id,
+        deleted: true,
+      });
+
+      const deleteShapeResponse = await server.inject({
+        method: "DELETE",
+        url: `/canvas-shapes/${taskShape.id}`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(deleteShapeResponse.statusCode, 200);
+      assert.deepEqual(deleteShapeResponse.json(), {
+        id: taskShape.id,
+        deleted: true,
+      });
+    } finally {
+      await close();
+    }
+  });
+
   it("redirects callback provider errors without calling OAuth endpoints", async () => {
     const oauthRequests = [];
     const fetcher = createOAuthFetchStub(oauthRequests);

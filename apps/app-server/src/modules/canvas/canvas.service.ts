@@ -2,8 +2,10 @@ import { Injectable } from "@nestjs/common";
 import { WorkspaceCurrentMemberAdapter } from "../workspace/workspace-current-member.adapter";
 import type {
   CanvasAuthUserRef,
+  CanvasBoardCreateRequest,
   CanvasBoardDetail,
   CanvasBoardSummary,
+  CanvasBoardType,
   CanvasConnectionDeleteResult,
   CanvasConnectionRequest,
   CanvasConnectionSummary,
@@ -12,8 +14,11 @@ import type {
   CanvasFilterSetting,
   CanvasFilterSettingRequest,
   CanvasRepositoryPort,
+  CanvasShapeDeleteResult,
   CanvasShapePositionRequest,
+  CanvasShapeRequest,
   CanvasShapeSummary,
+  CanvasShapeUpdateRequest,
   CanvasViewSetting,
   CanvasViewSettingRequest,
 } from "./canvas.types";
@@ -26,6 +31,29 @@ export type CanvasWorkspaceResourceInput = {
 
 export type CanvasBoardResourceInput = {
   boardId: string;
+  currentUser: CanvasAuthUserRef;
+};
+
+export type CanvasBoardCreateInput = {
+  workspaceId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
+};
+
+export type CanvasShapeMutationInput = {
+  boardId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
+};
+
+export type CanvasShapeUpdateInput = {
+  shapeId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
+};
+
+export type CanvasShapeDeleteInput = {
+  shapeId: string;
   currentUser: CanvasAuthUserRef;
 };
 
@@ -113,6 +141,22 @@ export class CanvasService {
     return this.canvasRepository.listBoardsForWorkspace(input.workspaceId);
   }
 
+  async createCanvasBoard(
+    input: CanvasBoardCreateInput,
+  ): Promise<CanvasBoardSummary> {
+    const body = parseCanvasBoardCreateBody(input.body);
+    const workspaceAccess = await this.requireWorkspaceWriteAccess({
+      workspaceId: input.workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    return this.canvasRepository.createBoardForWorkspace({
+      workspaceId: input.workspaceId,
+      createdByMemberId: workspaceAccess.currentMember.memberId,
+      ...body,
+    });
+  }
+
   async getCanvasBoardDetail(
     input: CanvasBoardResourceInput,
   ): Promise<CanvasBoardDetail> {
@@ -138,6 +182,80 @@ export class CanvasService {
     }
 
     return board;
+  }
+
+  async createCanvasShape(
+    input: CanvasShapeMutationInput,
+  ): Promise<CanvasShapeSummary> {
+    const body = parseCanvasShapeBody(input.body);
+    const workspaceAccess = await this.requireBoardWriteAccess(input);
+    const shape = await this.canvasRepository.createShapeForBoard({
+      boardId: input.boardId,
+      createdByMemberId: workspaceAccess.currentMember.memberId,
+      ...body,
+    });
+
+    if (!shape) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    return shape;
+  }
+
+  async updateCanvasShape(
+    input: CanvasShapeUpdateInput,
+  ): Promise<CanvasShapeSummary> {
+    const body = parseCanvasShapeUpdateBody(input.body);
+    const workspaceId = await this.canvasRepository.findShapeWorkspaceId(
+      input.shapeId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
+    }
+
+    await this.requireWorkspaceWriteAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    const shape = await this.canvasRepository.updateShape({
+      shapeId: input.shapeId,
+      ...body,
+    });
+
+    if (!shape) {
+      throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
+    }
+
+    return shape;
+  }
+
+  async deleteCanvasShape(
+    input: CanvasShapeDeleteInput,
+  ): Promise<CanvasShapeDeleteResult> {
+    const workspaceId = await this.canvasRepository.findShapeWorkspaceId(
+      input.shapeId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
+    }
+
+    await this.requireWorkspaceWriteAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    const result = await this.canvasRepository.deleteShape({
+      shapeId: input.shapeId,
+    });
+
+    if (!result) {
+      throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
+    }
+
+    return result;
   }
 
   async createCanvasConnection(
@@ -347,6 +465,67 @@ function createCanvasAccessErrorMessage(
   return `Canvas board ${resourceId} was not found.`;
 }
 
+function parseCanvasBoardCreateBody(body: unknown): CanvasBoardCreateRequest {
+  const record = requirePlainObject(body);
+
+  return {
+    title: parseRequiredString(record.title, "board title"),
+    boardType: parseBoardType(record.boardType),
+  };
+}
+
+function parseCanvasShapeBody(body: unknown): CanvasShapeRequest {
+  const record = requirePlainObject(body);
+
+  return {
+    shapeType: parseCanvasEntityType(record.shapeType, "shapeType"),
+    entityType: parseCanvasEntityType(record.entityType, "entityType"),
+    entityId: parseRequiredString(record.entityId, "entityId"),
+    displayTitle: parseRequiredString(record.displayTitle, "displayTitle"),
+    width: parsePositiveFiniteNumber(record.width, "shape.width"),
+    height: parsePositiveFiniteNumber(record.height, "shape.height"),
+    color: parseRequiredString(record.color, "color"),
+  };
+}
+
+function parseCanvasShapeUpdateBody(body: unknown): CanvasShapeUpdateRequest {
+  const record = requirePlainObject(body);
+  const update: CanvasShapeUpdateRequest = {};
+
+  if ("displayTitle" in record) {
+    update.displayTitle = parseRequiredString(
+      record.displayTitle,
+      "displayTitle",
+    );
+  }
+  if ("width" in record) {
+    update.width = parsePositiveFiniteNumber(record.width, "shape.width");
+  }
+  if ("height" in record) {
+    update.height = parsePositiveFiniteNumber(record.height, "shape.height");
+  }
+  if ("color" in record) {
+    update.color = parseRequiredString(record.color, "color");
+  }
+  if ("isCollapsed" in record) {
+    update.isCollapsed = parseRequiredBoolean(
+      record.isCollapsed,
+      "shape.isCollapsed",
+    );
+  }
+  if ("zIndex" in record) {
+    update.zIndex = parseFiniteNumber(record.zIndex, "shape.zIndex");
+  }
+
+  if (!Object.keys(update).length) {
+    throw new CanvasValidationError(
+      "Canvas shape update must include at least one field.",
+    );
+  }
+
+  return update;
+}
+
 function parseCanvasConnectionBody(body: unknown): CanvasConnectionRequest {
   const record = requirePlainObject(body);
 
@@ -411,6 +590,30 @@ function parseRequiredString(value: unknown, field: string) {
   }
 
   return value.trim();
+}
+
+function parseBoardType(value: unknown): CanvasBoardType {
+  if (
+    value === "project_map" ||
+    value === "meeting" ||
+    value === "review" ||
+    value === "custom"
+  ) {
+    return value;
+  }
+
+  throw new CanvasValidationError("Canvas boardType is not supported.");
+}
+
+function parseCanvasEntityType(
+  value: unknown,
+  field: "shapeType" | "entityType",
+): CanvasEntityType {
+  if (!isCanvasEntityType(value)) {
+    throw new CanvasValidationError(`Canvas ${field} is not supported.`);
+  }
+
+  return value;
 }
 
 function parseNullableLabel(record: Record<string, unknown>) {
@@ -503,6 +706,16 @@ function parseFiniteNumber(value: unknown, field: string) {
   }
 
   return value;
+}
+
+function parsePositiveFiniteNumber(value: unknown, field: string) {
+  const number = parseFiniteNumber(value, field);
+
+  if (number <= 0) {
+    throw new CanvasValidationError(`Canvas ${field} must be greater than 0.`);
+  }
+
+  return number;
 }
 
 function isCanvasEntityType(value: unknown): value is CanvasEntityType {
