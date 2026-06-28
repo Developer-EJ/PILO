@@ -103,6 +103,11 @@ export type CanvasShapeSummary = {
   };
 };
 
+export type CanvasShapePositionRequest = {
+  x: number;
+  y: number;
+};
+
 export type CanvasConnectionSummary = {
   id: string;
   sourceShapeId: string;
@@ -151,8 +156,15 @@ export type CanvasRepositoryPort = {
   readonly storageMode: string;
   listBoardsForWorkspace(workspaceId: string): Promise<CanvasBoardSummary[]>;
   findBoardWorkspaceId(boardId: string): Promise<string | null>;
+  findShapeWorkspaceId(shapeId: string): Promise<string | null>;
   findBoardDetail(input: {
     boardId: string;
     memberId: string;
   }): Promise<CanvasBoardDetail | null>;
+  upsertShapePosition(
+    input: CanvasShapePositionRequest & {
+      shapeId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasShapeSummary | null>;
 };

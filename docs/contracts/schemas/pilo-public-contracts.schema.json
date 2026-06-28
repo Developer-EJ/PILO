@@ -517,6 +517,9 @@
         "y": { "type": "number" }
       }
     },
+    "CanvasPositionRequest": {
+      "$ref": "#/$defs/CanvasPosition"
+    },
     "CanvasViewSetting": {
       "type": "object",
       "required": ["zoom", "viewportX", "viewportY"],

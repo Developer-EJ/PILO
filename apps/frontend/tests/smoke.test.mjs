@@ -518,6 +518,7 @@ describe("frontend package", () => {
       "connectionType",
       "label",
     ]);
+    assert.equal(defs.CanvasPositionRequest.$ref, "#/$defs/CanvasPosition");
     assert.deepEqual(contractCanvasBoardDetailFixture.viewSetting, {
       zoom: 1,
       viewportX: 0,

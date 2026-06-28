@@ -1,15 +1,22 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   ForbiddenException,
   Get,
   Headers,
   NotFoundException,
   Param,
+  Put,
   UnauthorizedException,
 } from "@nestjs/common";
 import type { CurrentUserResponse } from "../auth/auth.service";
 import { AuthService } from "../auth/auth.service";
-import { CanvasAccessError, CanvasService } from "./canvas.service";
+import {
+  CanvasAccessError,
+  CanvasService,
+  CanvasValidationError,
+} from "./canvas.service";
 
 @Controller()
 export class CanvasController {
@@ -44,6 +51,21 @@ export class CanvasController {
     );
   }
 
+  @Put("canvas-shapes/:shapeId/position")
+  updateCanvasShapePosition(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("shapeId") shapeId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.updateCanvasShapePosition({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        shapeId,
+        body,
+      }),
+    );
+  }
+
   private requireCurrentUser(
     cookieHeader: string | undefined,
   ): CurrentUserResponse {
@@ -61,6 +83,10 @@ export class CanvasController {
     try {
       return await handler();
     } catch (error) {
+      if (error instanceof CanvasValidationError) {
+        throw new BadRequestException(error.message);
+      }
+
       if (error instanceof CanvasAccessError) {
         if (error.code === "canvas_workspace_forbidden") {
           throw new ForbiddenException(error.message);

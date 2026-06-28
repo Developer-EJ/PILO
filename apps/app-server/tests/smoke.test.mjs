@@ -42,6 +42,7 @@ const { CanvasRepository } = require("../src/modules/canvas/canvas.repository");
 const {
   CanvasAccessError,
   CanvasService,
+  CanvasValidationError,
 } = require("../src/modules/canvas/canvas.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
@@ -1031,6 +1032,7 @@ describe("app-server package", () => {
       "connectionType",
       "label",
     ]);
+    assert.equal(defs.CanvasPositionRequest.$ref, "#/$defs/CanvasPosition");
     assert.deepEqual(defs.CanvasViewSetting.required, [
       "zoom",
       "viewportX",
@@ -1509,6 +1511,58 @@ describe("app-server package", () => {
     );
   });
 
+  it("persists Canvas shape positions and reflects them in board detail", async () => {
+    const repository = new CanvasRepository();
+    repository.boardsById.set("board-1", {
+      id: "board-1",
+      workspaceId: "workspace-1",
+      title: "Project Map",
+      boardType: "project_map",
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+    repository.shapesById.set("shape-1", {
+      id: "shape-1",
+      boardId: "board-1",
+      shapeType: "task",
+      entityType: "task",
+      entityId: "44444444-4444-4444-8444-444444444441",
+      displayTitle: "Login API",
+      width: 280,
+      height: 160,
+      color: "#6d5bd6",
+      isCollapsed: false,
+      zIndex: 1,
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+
+    const savedShape = await repository.upsertShapePosition({
+      shapeId: "shape-1",
+      x: 144,
+      y: 288,
+      now: new Date("2026-06-28T00:03:00.000Z"),
+    });
+    const board = await repository.findBoardDetail({
+      boardId: "board-1",
+      memberId: "member-1",
+    });
+
+    assert.deepEqual(savedShape.position, {
+      x: 144,
+      y: 288,
+    });
+    assert.deepEqual(board.shapes[0].position, {
+      x: 144,
+      y: 288,
+    });
+    assert.equal(board.updatedAt, "2026-06-28T00:03:00.000Z");
+  });
+
   it("connects Canvas board access to the workspace currentMember context", async () => {
     const repositoryCalls = [];
     const accessCalls = [];
@@ -1609,6 +1663,213 @@ describe("app-server package", () => {
         },
       ],
     ]);
+  });
+
+  it("updates Canvas shape position only with workspace write permission", async () => {
+    const repositoryCalls = [];
+    const accessCalls = [];
+    const repository = {
+      storageMode: "test",
+      async listBoardsForWorkspace() {
+        return [];
+      },
+      async findBoardWorkspaceId() {
+        return null;
+      },
+      async findShapeWorkspaceId(shapeId) {
+        repositoryCalls.push(["findShapeWorkspace", shapeId]);
+        return "workspace-1";
+      },
+      async findBoardDetail() {
+        return null;
+      },
+      async upsertShapePosition(input) {
+        repositoryCalls.push(["upsertPosition", input]);
+        return {
+          id: input.shapeId,
+          shapeType: "task",
+          entityType: "task",
+          entityId: "44444444-4444-4444-8444-444444444441",
+          displayTitle: "Login API",
+          width: 280,
+          height: 160,
+          color: "#6d5bd6",
+          isCollapsed: false,
+          zIndex: 1,
+          position: {
+            x: input.x,
+            y: input.y,
+          },
+        };
+      },
+    };
+    const currentMemberAdapter = {
+      async requireCurrentMember(input) {
+        accessCalls.push(input);
+        return {
+          currentMember: {
+            workspaceId: input.workspaceId,
+            memberId: "member-1",
+            userId: input.currentUser.id,
+            role: "member",
+            displayName: null,
+          },
+          permissions: {
+            canRead: true,
+            canWrite: true,
+            canManage: false,
+          },
+        };
+      },
+    };
+    const service = new CanvasService(repository, currentMemberAdapter);
+    const currentUser = { id: "user-1" };
+    const updated = await service.updateCanvasShapePosition({
+      shapeId: "shape-1",
+      currentUser,
+      body: {
+        x: 320,
+        y: -48,
+      },
+    });
+
+    assert.deepEqual(updated.position, {
+      x: 320,
+      y: -48,
+    });
+    assert.deepEqual(accessCalls, [
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+    ]);
+    assert.deepEqual(repositoryCalls, [
+      ["findShapeWorkspace", "shape-1"],
+      [
+        "upsertPosition",
+        {
+          shapeId: "shape-1",
+          x: 320,
+          y: -48,
+        },
+      ],
+    ]);
+  });
+
+  it("rejects Canvas shape position updates without write permission", async () => {
+    let upsertCalled = false;
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async listBoardsForWorkspace() {
+          return [];
+        },
+        async findBoardWorkspaceId() {
+          return null;
+        },
+        async findShapeWorkspaceId() {
+          return "workspace-1";
+        },
+        async findBoardDetail() {
+          return null;
+        },
+        async upsertShapePosition() {
+          upsertCalled = true;
+          return null;
+        },
+      },
+      {
+        async requireCurrentMember(input) {
+          return {
+            currentMember: {
+              workspaceId: input.workspaceId,
+              memberId: "member-1",
+              userId: input.currentUser.id,
+              role: "viewer",
+              displayName: null,
+            },
+            permissions: {
+              canRead: true,
+              canWrite: false,
+              canManage: false,
+            },
+          };
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.updateCanvasShapePosition({
+          shapeId: "shape-1",
+          currentUser: { id: "viewer-1" },
+          body: {
+            x: 1,
+            y: 2,
+          },
+        }),
+      (error) =>
+        error instanceof CanvasAccessError &&
+        error.code === "canvas_workspace_forbidden" &&
+        error.resourceId === "workspace-1",
+    );
+    assert.equal(upsertCalled, false);
+  });
+
+  it("rejects invalid Canvas shape position payloads before storage", async () => {
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async listBoardsForWorkspace() {
+          return [];
+        },
+        async findBoardWorkspaceId() {
+          return null;
+        },
+        async findShapeWorkspaceId() {
+          return "workspace-1";
+        },
+        async findBoardDetail() {
+          return null;
+        },
+        async upsertShapePosition() {
+          return null;
+        },
+      },
+      {
+        async requireCurrentMember(input) {
+          return {
+            currentMember: {
+              workspaceId: input.workspaceId,
+              memberId: "member-1",
+              userId: input.currentUser.id,
+              role: "owner",
+              displayName: null,
+            },
+            permissions: {
+              canRead: true,
+              canWrite: true,
+              canManage: true,
+            },
+          };
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.updateCanvasShapePosition({
+          shapeId: "shape-1",
+          currentUser: { id: "user-1" },
+          body: {
+            x: Number.POSITIVE_INFINITY,
+            y: 2,
+          },
+        }),
+      (error) =>
+        error instanceof CanvasValidationError &&
+        error.code === "canvas_validation_failed",
+    );
   });
 
   it("rejects Canvas board detail before workspace access when board is missing", async () => {

@@ -99,6 +99,23 @@ Creates a relationship between two shapes in the same board.
 - required: `sourceShapeId`, `targetShapeId`, `connectionType`, `label`
 - `label` is nullable. Use `null` when the connection should render without text.
 
+### CanvasPositionRequest
+
+Saves the latest position for a shape after drag.
+
+```json
+{
+  "x": 120,
+  "y": 140
+}
+```
+
+- required: `x`, `y`
+- Both coordinates must be finite numbers.
+- Server policy: last write wins per `shapeId`; repeated requests update the same `canvas_node_positions` row.
+- Client policy: drag interactions should debounce or batch position writes at 150-300ms intervals, then flush the final position on drag end.
+- The API returns the updated `CanvasShapeSummary`.
+
 ### CanvasViewSettingRequest
 
 ```json
