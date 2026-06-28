@@ -29,6 +29,13 @@ import {
   resolveCanvasClientMode,
 } from "../lib/workspace/canvasClient.mjs";
 import {
+  applyCanvasShapeState,
+  canvasStorageKey,
+  filterCanvasBoard,
+  normalizeCanvasFilterSetting,
+  normalizeCanvasShapeState,
+} from "../lib/workspace/canvasStorage.mjs";
+import {
   CURRENT_WORKSPACE_STORAGE_KEY,
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
@@ -688,6 +695,58 @@ describe("frontend package", () => {
         "PUT",
       ],
     );
+  });
+
+  it("keeps Canvas local MVP storage, filtering, and connection visibility deterministic", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const board = createMockCanvasBoardDetail(workspaceId);
+    const shapeState = normalizeCanvasShapeState({
+      [board.shapes[0].id]: {
+        x: 320,
+        y: 180,
+        width: 340,
+        height: 190,
+      },
+      ignored: {
+        x: "bad",
+        y: 0,
+      },
+    });
+    const persistedBoard = {
+      ...board,
+      shapes: applyCanvasShapeState(board.shapes, shapeState),
+    };
+    const taskOnlyFilter = normalizeCanvasFilterSetting(
+      {
+        enabledEntityTypes: ["task"],
+        showDelayedOnly: false,
+        showRiskOnly: false,
+      },
+      board.filterSetting,
+    );
+    const filteredBoard = filterCanvasBoard(
+      persistedBoard,
+      taskOnlyFilter,
+      createWorkspaceDashboardFixture(workspaceId),
+    );
+
+    assert.equal(
+      canvasStorageKey(board.id, "shape-state"),
+      `pilo:canvas:${board.id}:shape-state`,
+    );
+    assert.deepEqual(shapeState[board.shapes[0].id], {
+      x: 320,
+      y: 180,
+      width: 340,
+      height: 190,
+    });
+    assert.equal(persistedBoard.shapes[0].position.x, 320);
+    assert.equal(persistedBoard.shapes[0].width, 340);
+    assert.deepEqual(
+      filteredBoard.shapes.map((shape) => shape.entityType),
+      ["task"],
+    );
+    assert.equal(filteredBoard.connections.length, 0);
   });
 
   it("resolves current workspace from URL before stored state", () => {

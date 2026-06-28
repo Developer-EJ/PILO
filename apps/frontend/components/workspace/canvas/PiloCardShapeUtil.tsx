@@ -26,6 +26,8 @@ export type PiloCardShapeProps = {
   w: number;
   h: number;
   kind: PiloCardKind;
+  canvasShapeId: string;
+  entityType: string;
   title: string;
   subtitle: string;
   body: string;
@@ -77,6 +79,8 @@ export class PiloCardShapeUtil extends ShapeUtil<PiloCardShape> {
       "risk",
       "memo",
     ),
+    canvasShapeId: T.string,
+    entityType: T.string,
     title: T.string,
     subtitle: T.string,
     body: T.string,
@@ -94,6 +98,8 @@ export class PiloCardShapeUtil extends ShapeUtil<PiloCardShape> {
       w: 288,
       h: 164,
       kind: "task",
+      canvasShapeId: "local",
+      entityType: "task",
       title: "Untitled card",
       subtitle: "Canvas entity",
       body: "Project object summary",
@@ -121,8 +127,18 @@ export class PiloCardShapeUtil extends ShapeUtil<PiloCardShape> {
   }
 
   override component(shape: PiloCardShape) {
-    const { accent, body, entityId, h, kind, status, subtitle, title, w } =
-      shape.props;
+    const {
+      accent,
+      body,
+      canvasShapeId,
+      entityId,
+      h,
+      kind,
+      status,
+      subtitle,
+      title,
+      w,
+    } = shape.props;
 
     return (
       <HTMLContainer
@@ -144,7 +160,7 @@ export class PiloCardShapeUtil extends ShapeUtil<PiloCardShape> {
           <p>{body}</p>
           <footer>
             <span>{subtitle}</span>
-            <code>{entityId}</code>
+            <code>{canvasShapeId || entityId}</code>
           </footer>
         </article>
       </HTMLContainer>
