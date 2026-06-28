@@ -1,12 +1,15 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Headers,
   NotFoundException,
   Param,
+  Post,
   Put,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -14,6 +17,7 @@ import type { CurrentUserResponse } from "../auth/auth.service";
 import { AuthService } from "../auth/auth.service";
 import {
   CanvasAccessError,
+  CanvasConflictError,
   CanvasService,
   CanvasValidationError,
 } from "./canvas.service";
@@ -47,6 +51,34 @@ export class CanvasController {
       this.canvasService.getCanvasBoardDetail({
         currentUser: this.requireCurrentUser(cookieHeader),
         boardId,
+      }),
+    );
+  }
+
+  @Post("canvas-boards/:boardId/connections")
+  createCanvasConnection(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("boardId") boardId: string,
+    @Body() body: unknown,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.createCanvasConnection({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        boardId,
+        body,
+      }),
+    );
+  }
+
+  @Delete("canvas-connections/:connectionId")
+  deleteCanvasConnection(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("connectionId") connectionId: string,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.deleteCanvasConnection({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        connectionId,
       }),
     );
   }
@@ -85,6 +117,10 @@ export class CanvasController {
     } catch (error) {
       if (error instanceof CanvasValidationError) {
         throw new BadRequestException(error.message);
+      }
+
+      if (error instanceof CanvasConflictError) {
+        throw new ConflictException(error.message);
       }
 
       if (error instanceof CanvasAccessError) {

@@ -116,6 +116,30 @@ export type CanvasConnectionSummary = {
   label: string | null;
 };
 
+export type CanvasConnectionRequest = {
+  sourceShapeId: string;
+  targetShapeId: string;
+  connectionType: string;
+  label: string | null;
+};
+
+export type CanvasConnectionDeleteResult = {
+  id: string;
+  deleted: true;
+};
+
+export type CanvasConnectionCreateResult =
+  | {
+      status: "created";
+      connection: CanvasConnectionSummary;
+    }
+  | {
+      status: "duplicate";
+    }
+  | {
+      status: "invalid";
+    };
+
 export type CanvasBoardSummary = {
   id: string;
   workspaceId: string;
@@ -161,6 +185,17 @@ export type CanvasRepositoryPort = {
     boardId: string;
     memberId: string;
   }): Promise<CanvasBoardDetail | null>;
+  createConnectionForBoard(
+    input: CanvasConnectionRequest & {
+      boardId: string;
+      now?: Date;
+    },
+  ): Promise<CanvasConnectionCreateResult>;
+  deleteConnection(input: {
+    connectionId: string;
+    now?: Date;
+  }): Promise<CanvasConnectionDeleteResult | null>;
+  findConnectionWorkspaceId(connectionId: string): Promise<string | null>;
   upsertShapePosition(
     input: CanvasShapePositionRequest & {
       shapeId: string;

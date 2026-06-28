@@ -41,6 +41,7 @@ const {
 const { CanvasRepository } = require("../src/modules/canvas/canvas.repository");
 const {
   CanvasAccessError,
+  CanvasConflictError,
   CanvasService,
   CanvasValidationError,
 } = require("../src/modules/canvas/canvas.service");
@@ -1563,6 +1564,127 @@ describe("app-server package", () => {
     assert.equal(board.updatedAt, "2026-06-28T00:03:00.000Z");
   });
 
+  it("creates, deduplicates, and soft-deletes Canvas connections in one board", async () => {
+    const repository = new CanvasRepository();
+    repository.boardsById.set("board-1", {
+      id: "board-1",
+      workspaceId: "workspace-1",
+      title: "Project Map",
+      boardType: "project_map",
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+    repository.boardsById.set("board-2", {
+      id: "board-2",
+      workspaceId: "workspace-1",
+      title: "Review Map",
+      boardType: "review",
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+
+    for (const shape of [
+      {
+        id: "shape-1",
+        boardId: "board-1",
+        displayTitle: "Task",
+        zIndex: 1,
+      },
+      {
+        id: "shape-2",
+        boardId: "board-1",
+        displayTitle: "PR",
+        zIndex: 2,
+      },
+      {
+        id: "shape-3",
+        boardId: "board-2",
+        displayTitle: "Other board",
+        zIndex: 1,
+      },
+    ]) {
+      repository.shapesById.set(shape.id, {
+        id: shape.id,
+        boardId: shape.boardId,
+        shapeType: "task",
+        entityType: "task",
+        entityId: "44444444-4444-4444-8444-444444444441",
+        displayTitle: shape.displayTitle,
+        width: 280,
+        height: 160,
+        color: "#6d5bd6",
+        isCollapsed: false,
+        zIndex: shape.zIndex,
+        createdByMemberId: "member-1",
+        createdAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z",
+        deletedAt: null,
+      });
+    }
+
+    const created = await repository.createConnectionForBoard({
+      boardId: "board-1",
+      sourceShapeId: "shape-1",
+      targetShapeId: "shape-2",
+      connectionType: "implemented_by",
+      label: "Task to PR",
+      now: new Date("2026-06-28T00:04:00.000Z"),
+    });
+    const duplicate = await repository.createConnectionForBoard({
+      boardId: "board-1",
+      sourceShapeId: "shape-1",
+      targetShapeId: "shape-2",
+      connectionType: "implemented_by",
+      label: "Duplicate label",
+    });
+    const crossBoard = await repository.createConnectionForBoard({
+      boardId: "board-1",
+      sourceShapeId: "shape-1",
+      targetShapeId: "shape-3",
+      connectionType: "related_to",
+      label: null,
+    });
+    const boardWithConnection = await repository.findBoardDetail({
+      boardId: "board-1",
+      memberId: "member-1",
+    });
+
+    assert.equal(created.status, "created");
+    assert.equal(duplicate.status, "duplicate");
+    assert.equal(crossBoard.status, "invalid");
+    assert.equal(boardWithConnection.connectionCount, 1);
+    assert.deepEqual(boardWithConnection.connections, [created.connection]);
+    assert.equal(
+      await repository.findConnectionWorkspaceId(created.connection.id),
+      "workspace-1",
+    );
+
+    const deleted = await repository.deleteConnection({
+      connectionId: created.connection.id,
+      now: new Date("2026-06-28T00:05:00.000Z"),
+    });
+    const secondDelete = await repository.deleteConnection({
+      connectionId: created.connection.id,
+    });
+    const boardAfterDelete = await repository.findBoardDetail({
+      boardId: "board-1",
+      memberId: "member-1",
+    });
+
+    assert.deepEqual(deleted, {
+      id: created.connection.id,
+      deleted: true,
+    });
+    assert.equal(secondDelete, null);
+    assert.equal(boardAfterDelete.connectionCount, 0);
+    assert.deepEqual(boardAfterDelete.connections, []);
+    assert.equal(boardAfterDelete.updatedAt, "2026-06-28T00:05:00.000Z");
+  });
+
   it("connects Canvas board access to the workspace currentMember context", async () => {
     const repositoryCalls = [];
     const accessCalls = [];
@@ -1754,6 +1876,200 @@ describe("app-server package", () => {
         },
       ],
     ]);
+  });
+
+  it("creates and deletes Canvas connections through workspace write access", async () => {
+    const repositoryCalls = [];
+    const accessCalls = [];
+    const repository = {
+      storageMode: "test",
+      async listBoardsForWorkspace() {
+        return [];
+      },
+      async findBoardWorkspaceId(boardId) {
+        repositoryCalls.push(["findBoardWorkspace", boardId]);
+        return "workspace-1";
+      },
+      async findShapeWorkspaceId() {
+        return null;
+      },
+      async findConnectionWorkspaceId(connectionId) {
+        repositoryCalls.push(["findConnectionWorkspace", connectionId]);
+        return "workspace-1";
+      },
+      async findBoardDetail() {
+        return null;
+      },
+      async createConnectionForBoard(input) {
+        repositoryCalls.push(["createConnection", input]);
+        return {
+          status: "created",
+          connection: {
+            id: "connection-1",
+            sourceShapeId: input.sourceShapeId,
+            targetShapeId: input.targetShapeId,
+            connectionType: input.connectionType,
+            label: input.label,
+          },
+        };
+      },
+      async deleteConnection(input) {
+        repositoryCalls.push(["deleteConnection", input]);
+        return {
+          id: input.connectionId,
+          deleted: true,
+        };
+      },
+      async upsertShapePosition() {
+        return null;
+      },
+    };
+    const currentMemberAdapter = {
+      async requireCurrentMember(input) {
+        accessCalls.push(input);
+        return {
+          currentMember: {
+            workspaceId: input.workspaceId,
+            memberId: "member-1",
+            userId: input.currentUser.id,
+            role: "member",
+            displayName: null,
+          },
+          permissions: {
+            canRead: true,
+            canWrite: true,
+            canManage: false,
+          },
+        };
+      },
+    };
+    const service = new CanvasService(repository, currentMemberAdapter);
+    const currentUser = { id: "user-1" };
+    const connection = await service.createCanvasConnection({
+      boardId: "board-1",
+      currentUser,
+      body: {
+        sourceShapeId: "shape-1",
+        targetShapeId: "shape-2",
+        connectionType: "implemented_by",
+        label: "Task to PR",
+      },
+    });
+    const deleted = await service.deleteCanvasConnection({
+      connectionId: "connection-1",
+      currentUser,
+    });
+
+    assert.deepEqual(connection, {
+      id: "connection-1",
+      sourceShapeId: "shape-1",
+      targetShapeId: "shape-2",
+      connectionType: "implemented_by",
+      label: "Task to PR",
+    });
+    assert.deepEqual(deleted, {
+      id: "connection-1",
+      deleted: true,
+    });
+    assert.deepEqual(accessCalls, [
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+    ]);
+    assert.deepEqual(repositoryCalls, [
+      ["findBoardWorkspace", "board-1"],
+      [
+        "createConnection",
+        {
+          boardId: "board-1",
+          sourceShapeId: "shape-1",
+          targetShapeId: "shape-2",
+          connectionType: "implemented_by",
+          label: "Task to PR",
+        },
+      ],
+      ["findConnectionWorkspace", "connection-1"],
+      [
+        "deleteConnection",
+        {
+          connectionId: "connection-1",
+        },
+      ],
+    ]);
+  });
+
+  it("rejects duplicate Canvas connection creation", async () => {
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async listBoardsForWorkspace() {
+          return [];
+        },
+        async findBoardWorkspaceId() {
+          return "workspace-1";
+        },
+        async findShapeWorkspaceId() {
+          return null;
+        },
+        async findConnectionWorkspaceId() {
+          return null;
+        },
+        async findBoardDetail() {
+          return null;
+        },
+        async createConnectionForBoard() {
+          return {
+            status: "duplicate",
+          };
+        },
+        async deleteConnection() {
+          return null;
+        },
+        async upsertShapePosition() {
+          return null;
+        },
+      },
+      {
+        async requireCurrentMember(input) {
+          return {
+            currentMember: {
+              workspaceId: input.workspaceId,
+              memberId: "member-1",
+              userId: input.currentUser.id,
+              role: "member",
+              displayName: null,
+            },
+            permissions: {
+              canRead: true,
+              canWrite: true,
+              canManage: false,
+            },
+          };
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.createCanvasConnection({
+          boardId: "board-1",
+          currentUser: { id: "user-1" },
+          body: {
+            sourceShapeId: "shape-1",
+            targetShapeId: "shape-2",
+            connectionType: "implemented_by",
+            label: "Task to PR",
+          },
+        }),
+      (error) =>
+        error instanceof CanvasConflictError &&
+        error.code === "canvas_connection_duplicate",
+    );
   });
 
   it("rejects Canvas shape position updates without write permission", async () => {

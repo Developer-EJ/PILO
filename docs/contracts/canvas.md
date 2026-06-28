@@ -98,6 +98,10 @@ Creates a relationship between two shapes in the same board.
 
 - required: `sourceShapeId`, `targetShapeId`, `connectionType`, `label`
 - `label` is nullable. Use `null` when the connection should render without text.
+- `sourceShapeId` and `targetShapeId` must point to different shapes in the same board.
+- Duplicate connections are rejected by `boardId + sourceShapeId + targetShapeId + connectionType`.
+- Deleting a connection soft-deletes it. A second delete for the same connection returns not found.
+- The create API returns `CanvasConnectionSummary`; the delete API returns `{ "id": "uuid", "deleted": true }`.
 
 ### CanvasPositionRequest
 

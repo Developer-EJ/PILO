@@ -4,6 +4,9 @@ import type {
   CanvasAuthUserRef,
   CanvasBoardDetail,
   CanvasBoardSummary,
+  CanvasConnectionDeleteResult,
+  CanvasConnectionRequest,
+  CanvasConnectionSummary,
   CanvasCurrentMemberContext,
   CanvasRepositoryPort,
   CanvasShapePositionRequest,
@@ -21,6 +24,17 @@ export type CanvasBoardResourceInput = {
   currentUser: CanvasAuthUserRef;
 };
 
+export type CanvasConnectionMutationInput = {
+  boardId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
+};
+
+export type CanvasConnectionDeleteInput = {
+  connectionId: string;
+  currentUser: CanvasAuthUserRef;
+};
+
 export type CanvasShapePositionMutationInput = {
   shapeId: string;
   currentUser: CanvasAuthUserRef;
@@ -29,6 +43,7 @@ export type CanvasShapePositionMutationInput = {
 
 export type CanvasAccessErrorCode =
   | "canvas_board_not_found"
+  | "canvas_connection_not_found"
   | "canvas_shape_not_found"
   | "canvas_workspace_forbidden";
 
@@ -48,6 +63,15 @@ export class CanvasValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CanvasValidationError";
+  }
+}
+
+export class CanvasConflictError extends Error {
+  readonly code = "canvas_connection_duplicate";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CanvasConflictError";
   }
 }
 
@@ -99,6 +123,76 @@ export class CanvasService {
     return board;
   }
 
+  async createCanvasConnection(
+    input: CanvasConnectionMutationInput,
+  ): Promise<CanvasConnectionSummary> {
+    const body = parseCanvasConnectionBody(input.body);
+    const workspaceId = await this.canvasRepository.findBoardWorkspaceId(
+      input.boardId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    await this.requireWorkspaceWriteAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    const result = await this.canvasRepository.createConnectionForBoard({
+      boardId: input.boardId,
+      ...body,
+    });
+
+    if (result.status === "duplicate") {
+      throw new CanvasConflictError(
+        "Canvas connection already exists for source, target, and type.",
+      );
+    }
+
+    if (result.status === "invalid") {
+      throw new CanvasValidationError(
+        "Canvas connection shapes must exist in the same board and be different shapes.",
+      );
+    }
+
+    return result.connection;
+  }
+
+  async deleteCanvasConnection(
+    input: CanvasConnectionDeleteInput,
+  ): Promise<CanvasConnectionDeleteResult> {
+    const workspaceId = await this.canvasRepository.findConnectionWorkspaceId(
+      input.connectionId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError(
+        "canvas_connection_not_found",
+        input.connectionId,
+      );
+    }
+
+    await this.requireWorkspaceWriteAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    const result = await this.canvasRepository.deleteConnection({
+      connectionId: input.connectionId,
+    });
+
+    if (!result) {
+      throw new CanvasAccessError(
+        "canvas_connection_not_found",
+        input.connectionId,
+      );
+    }
+
+    return result;
+  }
+
   async updateCanvasShapePosition(
     input: CanvasShapePositionMutationInput,
   ): Promise<CanvasShapeSummary> {
@@ -111,14 +205,10 @@ export class CanvasService {
       throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
     }
 
-    const workspaceAccess = await this.requireWorkspaceAccess({
+    await this.requireWorkspaceWriteAccess({
       workspaceId,
       currentUser: input.currentUser,
     });
-
-    if (!workspaceAccess.permissions.canWrite) {
-      throw new CanvasAccessError("canvas_workspace_forbidden", workspaceId);
-    }
 
     const shape = await this.canvasRepository.upsertShapePosition({
       shapeId: input.shapeId,
@@ -131,6 +221,21 @@ export class CanvasService {
     }
 
     return shape;
+  }
+
+  private async requireWorkspaceWriteAccess(
+    input: CanvasWorkspaceResourceInput,
+  ): Promise<CanvasCurrentMemberContext> {
+    const workspaceAccess = await this.requireWorkspaceAccess(input);
+
+    if (!workspaceAccess.permissions.canWrite) {
+      throw new CanvasAccessError(
+        "canvas_workspace_forbidden",
+        input.workspaceId,
+      );
+    }
+
+    return workspaceAccess;
   }
 
   private async requireWorkspaceAccess(
@@ -165,7 +270,25 @@ function createCanvasAccessErrorMessage(
     return `Canvas shape ${resourceId} was not found.`;
   }
 
+  if (code === "canvas_connection_not_found") {
+    return `Canvas connection ${resourceId} was not found.`;
+  }
+
   return `Canvas board ${resourceId} was not found.`;
+}
+
+function parseCanvasConnectionBody(body: unknown): CanvasConnectionRequest {
+  const record = requirePlainObject(body);
+
+  return {
+    sourceShapeId: parseRequiredString(record.sourceShapeId, "sourceShapeId"),
+    targetShapeId: parseRequiredString(record.targetShapeId, "targetShapeId"),
+    connectionType: parseRequiredString(
+      record.connectionType,
+      "connectionType",
+    ),
+    label: parseNullableLabel(record),
+  };
 }
 
 function parseCanvasShapePositionBody(
@@ -177,6 +300,34 @@ function parseCanvasShapePositionBody(
     x: parseFiniteCoordinate(record.x, "x"),
     y: parseFiniteCoordinate(record.y, "y"),
   };
+}
+
+function parseRequiredString(value: unknown, field: string) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new CanvasValidationError(`Canvas ${field} must be a string.`);
+  }
+
+  return value.trim();
+}
+
+function parseNullableLabel(record: Record<string, unknown>) {
+  if (!("label" in record)) {
+    throw new CanvasValidationError("Canvas connection label is required.");
+  }
+
+  if (record.label === null) {
+    return null;
+  }
+
+  if (typeof record.label !== "string") {
+    throw new CanvasValidationError(
+      "Canvas connection label must be a string or null.",
+    );
+  }
+
+  const label = record.label.trim();
+
+  return label ? label : null;
 }
 
 function requirePlainObject(body: unknown): Record<string, unknown> {
