@@ -141,6 +141,7 @@ describe("machine-readable public contract schema", () => {
       "GithubIssueSummary",
       "GithubIssueCreateAction",
       "PullRequestSummary",
+      "PullRequestChangedFileSummary",
       "MeetingReportSummary",
       "PRAnalysisSummary",
       "CanvasEntityRef",
@@ -152,6 +153,39 @@ describe("machine-readable public contract schema", () => {
     ]) {
       assert.ok(defs[name], `schema must define ${name}`);
     }
+  });
+
+  it("agent action schema binds Juhyung action types to concrete payload schemas", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const agentAction = schema.$defs.AgentAction;
+
+    function payloadRefFor(actionType) {
+      const condition = agentAction.allOf.find((entry) => {
+        return entry.if?.properties?.type?.const === actionType;
+      });
+
+      return condition?.then?.properties?.payload?.$ref;
+    }
+
+    assert.equal(payloadRefFor("task.create.draft"), "#/$defs/TaskCreateDraft");
+    assert.equal(payloadRefFor("task.update.status"), "#/$defs/TaskStatusUpdateAction");
+    assert.equal(payloadRefFor("task.assign"), "#/$defs/TaskAssignAction");
+    assert.equal(payloadRefFor("github.issue.create"), "#/$defs/GithubIssueCreateAction");
+    assert.deepEqual(schema.$defs.TaskAssignAction.required, ["taskId", "assigneeMemberId"]);
+  });
+
+  it("github contract exposes pull request changed file source for review consumers", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const githubContract = read("docs/contracts/github.md");
+    const reviewContract = read("docs/contracts/review.md");
+    const juhyungBrief = read("docs/agents/juhyung-task-github-progress.md");
+
+    assert.ok(schema.$defs.PullRequestChangedFileSummary);
+    assert.match(githubContract, /PullRequestChangedFileSummary/);
+    assert.match(githubContract, /\/pull-requests\/:pullRequestId\/changed-files/);
+    assert.match(githubContract, /patch/);
+    assert.match(reviewContract, /PullRequestChangedFileSummary/);
+    assert.match(juhyungBrief, /PullRequestChangedFileSummary/);
   });
 });
 

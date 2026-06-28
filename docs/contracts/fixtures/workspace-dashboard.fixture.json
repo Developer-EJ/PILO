@@ -102,6 +102,22 @@
       "syncedAt": "2026-06-27T10:00:00.000Z"
     }
   ],
+  "pullRequestChangedFiles": [
+    {
+      "pullRequestId": "66666666-6666-4666-8666-666666666661",
+      "path": "apps/frontend/app/auth/callback/page.tsx",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 32,
+      "deletions": 4,
+      "changes": 36,
+      "patch": "@@ -8,6 +8,14 @@",
+      "sha": "abc123",
+      "blobUrl": "https://github.com/example/pilo/blob/abc123/apps/frontend/app/auth/callback/page.tsx",
+      "rawUrl": "https://github.com/example/pilo/raw/abc123/apps/frontend/app/auth/callback/page.tsx",
+      "sourceSyncedAt": "2026-06-27T10:00:00.000Z"
+    }
+  ],
   "meetingReports": [
     {
       "id": "77777777-7777-4777-8777-777777777771",

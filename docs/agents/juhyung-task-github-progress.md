@@ -64,6 +64,7 @@
 - `POST /tasks/:taskId/github-issues` creates or links issue.
 - `GET /repositories/:repositoryId/issues` returns `GithubIssueSummary[]`.
 - `GET /repositories/:repositoryId/pull-requests` returns `PullRequestSummary[]`.
+- `GET /pull-requests/:pullRequestId/changed-files` returns `PullRequestChangedFileSummary[]`.
 - `GET /workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
 - `GET /workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
 - Agent action executor for `task.create.draft`, `task.update.status`, `task.assign`, `github.issue.create`.
@@ -76,7 +77,7 @@
 
 - 동현: Task, GitHub Issue, PR, Progress summary for Dashboard and Canvas.
 - 진호: API to convert meeting action item into task draft.
-- 은재: PR original metadata and Task-PR links.
+- 은재: PR original metadata via `PullRequestSummary`, changed file source via `PullRequestChangedFileSummary`, and Task-PR links.
 - 세인: executable action contracts for task and GitHub operations.
 
 ## Consumes From Others
@@ -87,7 +88,7 @@
 
 ## Mock Rule
 
-GitHub App integration이 늦어지면 repository, issue, PR은 fixture-backed sync stub으로 구현한다. stub은 실제 `GithubIssueSummary`, `PullRequestSummary` 필드와 동일해야 하며, PR에는 GitHub 실제 연동 Issue를 연결한다.
+GitHub App integration이 늦어지면 repository, issue, PR, PR changed file source는 fixture-backed sync stub으로 구현한다. stub은 실제 `GithubIssueSummary`, `PullRequestSummary`, `PullRequestChangedFileSummary` 필드와 동일해야 하며, PR에는 GitHub 실제 연동 Issue를 연결한다.
 
 ## Do Not Touch
 

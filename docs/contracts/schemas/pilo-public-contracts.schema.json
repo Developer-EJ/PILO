@@ -257,6 +257,25 @@
         "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
       }
     },
+    "PullRequestChangedFileSummary": {
+      "type": "object",
+      "required": ["pullRequestId", "path", "status", "additions", "deletions", "changes", "patch", "sourceSyncedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "pullRequestId": { "$ref": "#/$defs/uuid" },
+        "path": { "type": "string", "minLength": 1 },
+        "previousPath": { "type": ["string", "null"] },
+        "status": { "enum": ["added", "modified", "removed", "renamed", "copied", "changed", "unchanged"] },
+        "additions": { "type": "integer", "minimum": 0 },
+        "deletions": { "type": "integer", "minimum": 0 },
+        "changes": { "type": "integer", "minimum": 0 },
+        "patch": { "type": ["string", "null"] },
+        "sha": { "type": ["string", "null"] },
+        "blobUrl": { "type": ["string", "null"] },
+        "rawUrl": { "type": ["string", "null"] },
+        "sourceSyncedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "GithubIssueCreateAction": {
       "type": "object",
       "required": ["workspaceId", "taskId", "repositoryId", "title"],
@@ -320,6 +339,24 @@
       "type": "object",
       "required": ["type", "source", "requiresConfirmation", "payload", "status"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "task.create.draft" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/TaskCreateDraft" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "task.update.status" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/TaskStatusUpdateAction" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "task.assign" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/TaskAssignAction" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "github.issue.create" } }, "required": ["type"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/GithubIssueCreateAction" } } }
+        }
+      ],
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
