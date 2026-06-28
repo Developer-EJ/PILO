@@ -1,9 +1,11 @@
 import {
   MeetingAgendaRecord,
+  MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
   MeetingRepositoryMode,
   MeetingStatus,
+  TranscriptSegmentRecord,
 } from "../types/meeting.types";
 
 export interface MeetingScaffoldResponseDto {
@@ -40,8 +42,25 @@ export interface ReorderMeetingAgendaRequestDto {
   sortOrder?: unknown;
 }
 
+export interface CreateMeetingMemoRequestDto {
+  authorMemberId?: unknown;
+  body?: unknown;
+}
+
+export interface CreateTranscriptSegmentRequestDto {
+  speakerMemberId?: unknown;
+  source?: unknown;
+  body?: unknown;
+  startedAt?: unknown;
+  endedAt?: unknown;
+}
+
 export type MeetingResponseDto = MeetingRecord;
 
 export type MeetingParticipantResponseDto = MeetingParticipantRecord;
 
 export type MeetingAgendaResponseDto = MeetingAgendaRecord;
+
+export type MeetingMemoResponseDto = MeetingMemoRecord;
+
+export type TranscriptSegmentResponseDto = TranscriptSegmentRecord;
