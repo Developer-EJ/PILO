@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { authProviderHref } from "../app/login/authProviderHref.mjs";
 import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
+import contractCanvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
 
 describe("frontend package", () => {
   it("keeps the PILO frontend package name", () => {
@@ -60,5 +61,83 @@ describe("frontend package", () => {
       "#/$defs/AuthProviderSummary",
     );
     assert.equal(defs.AuthErrorResponse.properties.statusCode.enum[0], 401);
+  });
+
+  it("keeps dashboard frontend contracts aligned with the public schema", () => {
+    const dashboard = contractSchema.$defs.WorkspaceDashboardReadModel;
+
+    assert.deepEqual(dashboard.required, [
+      "workspace",
+      "currentMember",
+      "preferences",
+      "members",
+      "tasks",
+      "progress",
+      "githubIssues",
+      "pullRequests",
+      "meetingReports",
+      "prAnalyses",
+      "agentActions",
+      "canvasEntities",
+      "source",
+      "generatedAt",
+    ]);
+    assert.equal(
+      dashboard.properties.workspace.$ref,
+      "#/$defs/WorkspaceSummary",
+    );
+    assert.equal(
+      dashboard.properties.currentMember.$ref,
+      "#/$defs/CurrentWorkspaceMember",
+    );
+    assert.equal(
+      dashboard.properties.preferences.$ref,
+      "#/$defs/DashboardPreferences",
+    );
+    assert.equal(dashboard.properties.tasks.items.$ref, "#/$defs/TaskSummary");
+    assert.equal(
+      dashboard.properties.pullRequests.items.$ref,
+      "#/$defs/PullRequestSummary",
+    );
+    assert.deepEqual(dashboard.properties.source.enum, ["fixture", "empty"]);
+  });
+
+  it("keeps Canvas board detail fixture aligned with the public schema", () => {
+    const defs = contractSchema.$defs;
+    const boardDetail = defs.CanvasBoardDetail;
+
+    assert.deepEqual(Object.keys(contractCanvasBoardDetailFixture).sort(), [
+      "boardType",
+      "connectionCount",
+      "connections",
+      "filterSetting",
+      "id",
+      "shapeCount",
+      "shapes",
+      "title",
+      "updatedAt",
+      "viewSetting",
+      "workspaceId",
+    ]);
+    assert.deepEqual(
+      Object.keys(contractCanvasBoardDetailFixture).sort(),
+      Object.keys(boardDetail.properties).sort(),
+    );
+    assert.equal(
+      boardDetail.properties.shapes.items.$ref,
+      "#/$defs/CanvasShapeSummary",
+    );
+    assert.equal(
+      boardDetail.properties.connections.items.$ref,
+      "#/$defs/CanvasConnectionSummary",
+    );
+    assert.equal(
+      boardDetail.properties.viewSetting.$ref,
+      "#/$defs/CanvasViewSetting",
+    );
+    assert.equal(
+      boardDetail.properties.filterSetting.$ref,
+      "#/$defs/CanvasFilterSetting",
+    );
   });
 });
