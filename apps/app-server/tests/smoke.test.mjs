@@ -37,6 +37,13 @@ const {
 const {
   WorkspaceRepository,
 } = require("../src/modules/workspace/workspace.repository");
+const {
+  CanvasRepository,
+} = require("../src/modules/canvas/canvas.repository");
+const {
+  CanvasAccessError,
+  CanvasService,
+} = require("../src/modules/canvas/canvas.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
@@ -1383,6 +1390,170 @@ describe("app-server package", () => {
     assert.equal("providers" in dashboard.currentMember, false);
   });
 
+  it("scaffolds Canvas repository interfaces for boards and member settings", async () => {
+    const repository = new CanvasRepository();
+
+    assert.deepEqual(repository.storageMode, "memory");
+    assert.deepEqual(await repository.listBoardsForWorkspace("workspace-1"), []);
+    assert.equal(await repository.findBoardWorkspaceId("missing-board"), null);
+    assert.equal(
+      await repository.findBoardDetail({
+        boardId: "missing-board",
+        memberId: "member-1",
+      }),
+      null,
+    );
+  });
+
+  it("connects Canvas board access to the workspace currentMember context", async () => {
+    const repositoryCalls = [];
+    const accessCalls = [];
+    const repository = {
+      storageMode: "test",
+      async listBoardsForWorkspace(workspaceId) {
+        repositoryCalls.push(["list", workspaceId]);
+        return [];
+      },
+      async findBoardWorkspaceId(boardId) {
+        repositoryCalls.push(["findWorkspace", boardId]);
+        return "workspace-1";
+      },
+      async findBoardDetail(input) {
+        repositoryCalls.push(["detail", input]);
+        return {
+          id: input.boardId,
+          workspaceId: "workspace-1",
+          title: "Project Map",
+          boardType: "project_map",
+          shapeCount: 0,
+          connectionCount: 0,
+          updatedAt: "2026-06-28T00:00:00.000Z",
+          shapes: [],
+          connections: [],
+          viewSetting: {
+            zoom: 1,
+            viewportX: 0,
+            viewportY: 0,
+          },
+          filterSetting: {
+            enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+            assigneeMemberId: null,
+            showDelayedOnly: false,
+            showRiskOnly: false,
+            filters: {},
+          },
+        };
+      },
+    };
+    const currentMemberAdapter = {
+      async requireCurrentMember(input) {
+        accessCalls.push(input);
+        return {
+          currentMember: {
+            workspaceId: input.workspaceId,
+            memberId: "member-1",
+            userId: input.currentUser.id,
+            role: "owner",
+            displayName: "Canvas Owner",
+          },
+          permissions: {
+            canRead: true,
+            canWrite: true,
+            canManage: true,
+          },
+        };
+      },
+    };
+    const service = new CanvasService(repository, currentMemberAdapter);
+    const currentUser = {
+      id: "user-1",
+      email: "owner@example.com",
+    };
+
+    assert.deepEqual(await service.listCanvasBoards({
+      workspaceId: "workspace-1",
+      currentUser,
+    }), []);
+
+    const board = await service.getCanvasBoardDetail({
+      boardId: "board-1",
+      currentUser,
+    });
+
+    assert.equal(board.id, "board-1");
+    assert.deepEqual(accessCalls, [
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+    ]);
+    assert.deepEqual(repositoryCalls, [
+      ["list", "workspace-1"],
+      ["findWorkspace", "board-1"],
+      [
+        "detail",
+        {
+          boardId: "board-1",
+          memberId: "member-1",
+        },
+      ],
+    ]);
+  });
+
+  it("rejects Canvas board detail before workspace access when board is missing", async () => {
+    const accessCalls = [];
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async listBoardsForWorkspace() {
+          return [];
+        },
+        async findBoardWorkspaceId() {
+          return null;
+        },
+        async findBoardDetail() {
+          return null;
+        },
+      },
+      {
+        async requireCurrentMember(input) {
+          accessCalls.push(input);
+          return {
+            currentMember: {
+              workspaceId: input.workspaceId,
+              memberId: "member-1",
+              userId: input.currentUser.id,
+              role: "owner",
+              displayName: null,
+            },
+            permissions: {
+              canRead: true,
+              canWrite: true,
+              canManage: true,
+            },
+          };
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.getCanvasBoardDetail({
+          boardId: "missing-board",
+          currentUser: { id: "user-1" },
+        }),
+      (error) =>
+        error instanceof CanvasAccessError &&
+        error.code === "canvas_board_not_found" &&
+        error.resourceId === "missing-board",
+    );
+    assert.deepEqual(accessCalls, []);
+  });
+
   it("rejects invalid dashboard preferences payloads", async () => {
     const service = new WorkspaceService(new WorkspaceRepository());
     const owner = {
@@ -1629,13 +1800,16 @@ describe("app-server package", () => {
     );
   });
 
-  it("boots the Nest app module with AuthModule and WorkspaceModule registered", async () => {
+  it("boots the Nest app module with Auth, Workspace, and Canvas modules registered", async () => {
     const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
       logger: false,
     });
 
     await app.init();
     assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
+      storageMode: "memory",
+    });
+    assert.deepEqual(app.get(CanvasService).getRepositoryStatus(), {
       storageMode: "memory",
     });
     await app.close();
