@@ -5,12 +5,14 @@ import {
   CreateMeetingAgendaInput,
   CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
+  CreateMeetingReportInput,
   CreateTranscriptSegmentInput,
   MEETING_STATUS_VALUES,
   MeetingAgendaRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportRecord,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
@@ -31,6 +33,7 @@ export class MockMeetingRepository implements MeetingRepository {
     string,
     TranscriptSegmentRecord
   >();
+  private readonly reports = new Map<string, MeetingReportRecord>();
 
   listMeetingStatusValues(): readonly MeetingStatus[] {
     return MEETING_STATUS_VALUES;
@@ -265,5 +268,43 @@ export class MockMeetingRepository implements MeetingRepository {
     return [...this.transcriptSegments.values()].filter(
       (segment) => segment.meetingId === meetingId,
     );
+  }
+
+  createReport(input: CreateMeetingReportInput): MeetingReportRecord {
+    const existingReport = this.findReportByMeetingId(input.meetingId);
+
+    if (existingReport) {
+      return existingReport;
+    }
+
+    const now = new Date().toISOString();
+    const report: MeetingReportRecord = {
+      id: randomUUID(),
+      meetingId: input.meetingId,
+      summary: input.summary,
+      createdByMemberId: input.createdByMemberId ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.reports.set(report.id, report);
+
+    return report;
+  }
+
+  findReportById(reportId: string): MeetingReportRecord | null {
+    return this.reports.get(reportId) ?? null;
+  }
+
+  findReportByMeetingId(meetingId: string): MeetingReportRecord | null {
+    return (
+      [...this.reports.values()].find(
+        (report) => report.meetingId === meetingId,
+      ) ?? null
+    );
+  }
+
+  listReports(): MeetingReportRecord[] {
+    return [...this.reports.values()];
   }
 }
