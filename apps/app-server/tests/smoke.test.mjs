@@ -233,6 +233,9 @@ describe("app-server package", () => {
       if (String(url).includes("oauth2.googleapis.com/token")) {
         return globalThis.Response.json({
           access_token: "google-access-token",
+          expires_in: 3600,
+          scope: "openid email profile",
+          token_type: "Bearer",
         });
       }
 
@@ -264,6 +267,20 @@ describe("app-server package", () => {
       avatarUrl: "https://example.com/avatar.png",
       emailVerified: true,
     });
+    assert.equal(result.identity.user.email, "user@example.com");
+    assert.equal(result.identity.user.name, "Google User");
+    assert.equal(result.identity.oauthAccount.provider, "google");
+    assert.equal(
+      result.identity.oauthAccount.providerUserId,
+      "google-user-123",
+    );
+    assert.deepEqual(result.identity.oauthAccount.scopes, [
+      "openid",
+      "email",
+      "profile",
+    ]);
+    assert.equal(result.identity.oauthAccount.tokenType, "Bearer");
+    assert.equal(typeof result.identity.oauthAccount.tokenExpiresAt, "string");
     assert.equal(requests[0].url, "https://oauth2.googleapis.com/token");
     assert.equal(requests[0].init.method, "POST");
     assert.equal(requests[0].init.body.get("code"), "google-code");
@@ -302,6 +319,65 @@ describe("app-server package", () => {
       errorCode: "oauth_state_missing",
     });
     assert.equal(fetchCalled, false);
+  });
+
+  it("upserts the same OAuth provider account idempotently", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      API_BASE_URL: "https://api.pilo.dev",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    let profileFetchCount = 0;
+    const fetcher = async (url) => {
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return globalThis.Response.json({
+          access_token: "google-access-token",
+          scope: "openid email profile",
+        });
+      }
+
+      profileFetchCount += 1;
+
+      return globalThis.Response.json({
+        sub: "google-user-123",
+        email: "user@example.com",
+        name: profileFetchCount === 1 ? "Google User" : "Updated User",
+        picture: "https://example.com/avatar.png",
+        email_verified: true,
+      });
+    };
+    const repository = new AuthRepository();
+    const service = new AuthService(repository, { config, fetcher });
+    const firstAuthorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/",
+    );
+    const firstResult = await service.handleOAuthCallback("google", {
+      code: "first-code",
+      state: firstAuthorization.state,
+    });
+    const secondAuthorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/",
+    );
+    const secondResult = await service.handleOAuthCallback("google", {
+      code: "second-code",
+      state: secondAuthorization.state,
+    });
+
+    assert.equal(firstResult.ok, true);
+    assert.equal(secondResult.ok, true);
+    assert.equal(repository.listUsers().length, 1);
+    assert.equal(repository.listOAuthAccounts().length, 1);
+    assert.equal(secondResult.identity.user.id, firstResult.identity.user.id);
+    assert.equal(
+      secondResult.identity.oauthAccount.id,
+      firstResult.identity.oauthAccount.id,
+    );
+    assert.equal(repository.listUsers()[0].name, "Updated User");
   });
 
   it("builds a GitHub authorization URL without repository scope", () => {
