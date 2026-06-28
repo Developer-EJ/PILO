@@ -1,4 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
+import { createHmac } from "node:crypto";
 import {
   type AuthConfig,
   createAuthConfig,
@@ -10,9 +11,11 @@ import {
 import { AuthRepository } from "./auth.repository";
 import type { OAuthStateValidationResult } from "./auth.state";
 import type {
+  AuthSessionRecord,
   OAuthIdentityRecord,
   OAuthTokenMetadata,
 } from "./auth.repository";
+import { createOAuthToken } from "./auth.state";
 
 export type AuthProviderSummary = {
   id: AuthProviderConfig["id"];
@@ -72,6 +75,7 @@ export type OAuthCallbackResult =
       nextPath: string;
       profile: OAuthProviderProfile;
       identity: OAuthIdentityRecord;
+      session: AuthSessionIssue;
     }
   | {
       ok: false;
@@ -84,6 +88,18 @@ type AuthFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 type AuthServiceOptions = {
   config?: AuthConfig;
   fetcher?: AuthFetch;
+};
+
+type AuthSessionMetadata = {
+  userAgent?: string | null;
+  ipAddress?: string | null;
+};
+
+export type AuthSessionIssue = {
+  record: AuthSessionRecord;
+  cookieName: string;
+  cookieHeader: string;
+  expiresAt: string;
 };
 
 class AuthFlowError extends Error {
@@ -176,6 +192,7 @@ export class AuthService {
   async handleOAuthCallback(
     providerId: AuthProviderName,
     query: OAuthCallbackQuery,
+    sessionMetadata: AuthSessionMetadata = {},
   ): Promise<OAuthCallbackResult> {
     if (query.error) {
       return {
@@ -221,6 +238,7 @@ export class AuthService {
           tokenExpiresAt: token.tokenExpiresAt,
         },
       });
+      const session = this.issueAuthSession(identity.user.id, sessionMetadata);
 
       return {
         ok: true,
@@ -228,6 +246,7 @@ export class AuthService {
         nextPath: stateResult.record.nextPath,
         profile,
         identity,
+        session,
       };
     } catch (error) {
       return {
@@ -288,6 +307,51 @@ export class AuthService {
       missingEnv: provider.missingEnv,
       loginOnly: true,
     };
+  }
+
+  private issueAuthSession(
+    userId: string,
+    metadata: AuthSessionMetadata,
+  ): AuthSessionIssue {
+    const rawToken = createOAuthToken(48);
+    const expiresAt = new Date(Date.now() + this.config.session.ttlMs);
+    const record = this.authRepository.createAuthSession({
+      userId,
+      refreshTokenHash: this.hashSessionToken(rawToken),
+      userAgent: metadata.userAgent,
+      ipAddress: metadata.ipAddress,
+      expiresAt,
+    });
+
+    return {
+      record,
+      cookieName: this.config.session.cookieName,
+      cookieHeader: this.createSessionCookieHeader(rawToken, expiresAt),
+      expiresAt: record.expiresAt,
+    };
+  }
+
+  private hashSessionToken(rawToken: string) {
+    return createHmac("sha256", this.config.session.secret)
+      .update(rawToken)
+      .digest("hex");
+  }
+
+  private createSessionCookieHeader(rawToken: string, expiresAt: Date) {
+    const cookieParts = [
+      `${encodeURIComponent(this.config.session.cookieName)}=${encodeURIComponent(rawToken)}`,
+      "Path=/",
+      "HttpOnly",
+      `SameSite=${this.config.session.sameSite}`,
+      `Expires=${expiresAt.toUTCString()}`,
+      `Max-Age=${Math.floor(this.config.session.ttlMs / 1000)}`,
+    ];
+
+    if (this.config.session.secure) {
+      cookieParts.push("Secure");
+    }
+
+    return cookieParts.join("; ");
   }
 
   private getConfiguredProvider(providerId: AuthProviderName) {

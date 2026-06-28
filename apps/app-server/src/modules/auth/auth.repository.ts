@@ -53,6 +53,18 @@ export type OAuthIdentityRecord = {
   oauthAccount: OAuthAccountRecord;
 };
 
+export type AuthSessionRecord = {
+  id: string;
+  userId: string;
+  refreshTokenHash: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 @Injectable()
 export class AuthRepository {
   readonly storageMode = "not-connected";
@@ -66,6 +78,10 @@ export class AuthRepository {
   private readonly oauthAccountsById = new Map<string, OAuthAccountRecord>();
 
   private readonly oauthAccountIdByProviderKey = new Map<string, string>();
+
+  private readonly authSessionsById = new Map<string, AuthSessionRecord>();
+
+  private readonly authSessionIdByTokenHash = new Map<string, string>();
 
   createOAuthState(input: {
     provider: AuthProviderName;
@@ -145,6 +161,40 @@ export class AuthRepository {
 
   listOAuthAccounts() {
     return Array.from(this.oauthAccountsById.values());
+  }
+
+  createAuthSession(input: {
+    userId: string;
+    refreshTokenHash: string;
+    userAgent?: string | null;
+    ipAddress?: string | null;
+    expiresAt: Date;
+    now?: Date;
+  }) {
+    const nowIso = (input.now ?? new Date()).toISOString();
+    const authSession: AuthSessionRecord = {
+      id: randomUUID(),
+      userId: input.userId,
+      refreshTokenHash: input.refreshTokenHash,
+      userAgent: input.userAgent ?? null,
+      ipAddress: input.ipAddress ?? null,
+      expiresAt: input.expiresAt.toISOString(),
+      revokedAt: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    this.authSessionsById.set(authSession.id, authSession);
+    this.authSessionIdByTokenHash.set(
+      authSession.refreshTokenHash,
+      authSession.id,
+    );
+
+    return authSession;
+  }
+
+  listAuthSessions() {
+    return Array.from(this.authSessionsById.values());
   }
 
   private createUserFromOAuthProfile(

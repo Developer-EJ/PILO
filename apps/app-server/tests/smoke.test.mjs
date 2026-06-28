@@ -33,6 +33,8 @@ describe("app-server package", () => {
     assert.equal(config.frontendUrl, "http://localhost:3000");
     assert.equal(config.apiBaseUrl, "http://localhost:4000");
     assert.equal(config.session.source, "local-fallback");
+    assert.equal(config.session.ttlMs, 604800000);
+    assert.equal(config.session.secure, false);
     assert.equal(config.providers.google.configured, false);
     assert.equal(
       config.providers.google.callbackUrl,
@@ -247,15 +249,23 @@ describe("app-server package", () => {
         email_verified: true,
       });
     };
-    const service = new AuthService(new AuthRepository(), { config, fetcher });
+    const repository = new AuthRepository();
+    const service = new AuthService(repository, { config, fetcher });
     const authorization = service.createOAuthAuthorizationRedirect(
       "google",
       "/workspaces/demo",
     );
-    const result = await service.handleOAuthCallback("google", {
-      code: "google-code",
-      state: authorization.state,
-    });
+    const result = await service.handleOAuthCallback(
+      "google",
+      {
+        code: "google-code",
+        state: authorization.state,
+      },
+      {
+        userAgent: "Mozilla/5.0",
+        ipAddress: "127.0.0.1",
+      },
+    );
 
     assert.equal(result.ok, true);
     assert.equal(result.nextPath, "/workspaces/demo");
@@ -281,6 +291,22 @@ describe("app-server package", () => {
     ]);
     assert.equal(result.identity.oauthAccount.tokenType, "Bearer");
     assert.equal(typeof result.identity.oauthAccount.tokenExpiresAt, "string");
+    assert.equal(repository.listAuthSessions().length, 1);
+    assert.equal(result.session.cookieName, "pilo_session");
+    assert.equal(result.session.cookieHeader.includes("HttpOnly"), true);
+    assert.equal(result.session.cookieHeader.includes("SameSite=Lax"), true);
+    assert.equal(result.session.cookieHeader.includes("Max-Age=604800"), true);
+    assert.equal(result.session.cookieHeader.includes("Secure"), false);
+    assert.equal(result.session.record.userId, result.identity.user.id);
+    assert.equal(result.session.record.userAgent, "Mozilla/5.0");
+    assert.equal(result.session.record.ipAddress, "127.0.0.1");
+    assert.equal(result.session.record.refreshTokenHash.length, 64);
+    assert.notEqual(
+      decodeURIComponent(
+        result.session.cookieHeader.match(/^pilo_session=([^;]+)/)?.[1] ?? "",
+      ),
+      result.session.record.refreshTokenHash,
+    );
     assert.equal(requests[0].url, "https://oauth2.googleapis.com/token");
     assert.equal(requests[0].init.method, "POST");
     assert.equal(requests[0].init.body.get("code"), "google-code");
@@ -494,6 +520,20 @@ describe("app-server package", () => {
       }),
       "https://app.pilo.dev/login?auth=error&provider=github&error=access_denied",
     );
+  });
+
+  it("uses Secure session cookies by default in production", () => {
+    const config = createAuthConfig({
+      APP_ENV: "production",
+      NODE_ENV: "production",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+      GITHUB_LOGIN_CLIENT_ID: "github-login-client",
+      GITHUB_LOGIN_CLIENT_SECRET: "github-login-secret",
+    });
+
+    assert.equal(config.session.secure, true);
   });
 
   it("exposes Auth provider readiness without leaking secrets", () => {

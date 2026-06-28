@@ -1,5 +1,5 @@
-import { Controller, Get, Query, Res } from "@nestjs/common";
-import type { FastifyReply } from "fastify";
+import { Controller, Get, Headers, Query, Req, Res } from "@nestjs/common";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuthService } from "./auth.service";
 
 @Controller("auth")
@@ -39,13 +39,22 @@ export class AuthController {
     @Query("code") code: string | undefined,
     @Query("state") state: string | undefined,
     @Query("error") error: string | undefined,
+    @Headers("user-agent") userAgent: string | undefined,
+    @Req() request: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    const result = await this.authService.handleOAuthCallback("google", {
-      code,
-      state,
-      error,
-    });
+    const result = await this.authService.handleOAuthCallback(
+      "google",
+      {
+        code,
+        state,
+        error,
+      },
+      {
+        userAgent,
+        ipAddress: request.ip,
+      },
+    );
 
     if (!result.ok) {
       return reply.redirect(
@@ -56,6 +65,8 @@ export class AuthController {
         }),
       );
     }
+
+    reply.header("Set-Cookie", result.session.cookieHeader);
 
     return reply.redirect(
       this.authService.createLoginResultRedirect({
@@ -94,13 +105,22 @@ export class AuthController {
     @Query("code") code: string | undefined,
     @Query("state") state: string | undefined,
     @Query("error") error: string | undefined,
+    @Headers("user-agent") userAgent: string | undefined,
+    @Req() request: FastifyRequest,
     @Res() reply: FastifyReply,
   ) {
-    const result = await this.authService.handleOAuthCallback("github", {
-      code,
-      state,
-      error,
-    });
+    const result = await this.authService.handleOAuthCallback(
+      "github",
+      {
+        code,
+        state,
+        error,
+      },
+      {
+        userAgent,
+        ipAddress: request.ip,
+      },
+    );
 
     if (!result.ok) {
       return reply.redirect(
@@ -111,6 +131,8 @@ export class AuthController {
         }),
       );
     }
+
+    reply.header("Set-Cookie", result.session.cookieHeader);
 
     return reply.redirect(
       this.authService.createLoginResultRedirect({

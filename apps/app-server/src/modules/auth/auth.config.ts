@@ -20,6 +20,9 @@ export type AuthSessionConfig = {
   cookieName: string;
   secret: string;
   source: "env" | "local-fallback";
+  ttlMs: number;
+  secure: boolean;
+  sameSite: "Lax";
 };
 
 export type AuthConfig = {
@@ -37,6 +40,7 @@ const DEFAULT_FRONTEND_URL = "http://localhost:3000";
 const DEFAULT_API_BASE_URL = "http://localhost:4000";
 const DEFAULT_AUTH_NEXT_PATH = "/";
 const DEFAULT_OAUTH_STATE_TTL_SECONDS = 600;
+const DEFAULT_AUTH_SESSION_TTL_SECONDS = 604800;
 
 function readEnv(env: AuthEnvironment, key: string) {
   const value = env[key]?.trim();
@@ -61,6 +65,20 @@ function readPositiveIntegerEnv(
   const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
 
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readBooleanEnv(env: AuthEnvironment, key: string, fallback: boolean) {
+  const value = readEnv(env, key);
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  return fallback;
 }
 
 function trimTrailingSlash(value: string) {
@@ -112,12 +130,26 @@ function assertNoMissingProductionAuthEnv(
 
 function createSessionConfig(env: AuthEnvironment): AuthSessionConfig {
   const sessionSecret = readEnv(env, "SESSION_SECRET");
+  const ttlMs =
+    readPositiveIntegerEnv(
+      env,
+      "AUTH_SESSION_TTL_SECONDS",
+      DEFAULT_AUTH_SESSION_TTL_SECONDS,
+    ) * 1000;
+  const secure = readBooleanEnv(
+    env,
+    "AUTH_SESSION_COOKIE_SECURE",
+    isProductionAuthEnvironment(env),
+  );
 
   if (sessionSecret) {
     return {
       cookieName: readEnv(env, "AUTH_SESSION_COOKIE_NAME") ?? "pilo_session",
       secret: sessionSecret,
       source: "env",
+      ttlMs,
+      secure,
+      sameSite: "Lax",
     };
   }
 
@@ -127,6 +159,9 @@ function createSessionConfig(env: AuthEnvironment): AuthSessionConfig {
     cookieName: readEnv(env, "AUTH_SESSION_COOKIE_NAME") ?? "pilo_session",
     secret: LOCAL_SESSION_SECRET,
     source: "local-fallback",
+    ttlMs,
+    secure,
+    sameSite: "Lax",
   };
 }
 
