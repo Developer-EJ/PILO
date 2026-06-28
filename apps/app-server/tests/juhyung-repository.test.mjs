@@ -193,6 +193,116 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
+  it("reads milestones for one workspace in date order", async () => {
+    const calls = [];
+    const database = {
+      milestone: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [{ id: "milestone-1", workspaceId: "workspace-1" }];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const milestones =
+      await repository.listMilestonesForWorkspace("workspace-1");
+
+    assert.deepEqual(milestones, [
+      { id: "milestone-1", workspaceId: "workspace-1" },
+    ]);
+    assert.deepEqual(calls, [
+      {
+        where: {
+          workspaceId: "workspace-1",
+        },
+        orderBy: [{ startDate: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      },
+    ]);
+  });
+
+  it("writes milestones with optional dates and status", async () => {
+    const calls = [];
+    const database = {
+      milestone: {
+        create: async (args) => {
+          calls.push(args);
+          return { id: "milestone-1", ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const milestone = await repository.createMilestone({
+      workspaceId: "workspace-1",
+      title: "MVP Backend",
+      status: "in_progress",
+      startDate: new Date("2026-07-01T00:00:00.000Z"),
+      endDate: new Date("2026-07-31T00:00:00.000Z"),
+    });
+
+    assert.equal(milestone.title, "MVP Backend");
+    assert.deepEqual(calls, [
+      {
+        data: {
+          workspaceId: "workspace-1",
+          title: "MVP Backend",
+          status: "in_progress",
+          startDate: new Date("2026-07-01T00:00:00.000Z"),
+          endDate: new Date("2026-07-31T00:00:00.000Z"),
+        },
+      },
+    ]);
+  });
+
+  it("reads and patches milestones by id", async () => {
+    const calls = [];
+    const database = {
+      milestone: {
+        findUnique: async (args) => {
+          calls.push(["findUnique", args]);
+          return { id: "milestone-1", workspaceId: "workspace-1" };
+        },
+        update: async (args) => {
+          calls.push(["update", args]);
+          return { id: "milestone-1", ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const existing = await repository.getMilestoneById("milestone-1");
+    const updated = await repository.updateMilestone("milestone-1", {
+      title: "MVP Backend Updated",
+      endDate: null,
+    });
+
+    assert.equal(existing.workspaceId, "workspace-1");
+    assert.equal(updated.title, "MVP Backend Updated");
+    assert.deepEqual(calls, [
+      [
+        "findUnique",
+        {
+          where: {
+            id: "milestone-1",
+          },
+        },
+      ],
+      [
+        "update",
+        {
+          where: {
+            id: "milestone-1",
+          },
+          data: {
+            title: "MVP Backend Updated",
+            endDate: null,
+          },
+        },
+      ],
+    ]);
+  });
+
   it("writes new tasks with the current workspace member as creator", async () => {
     const calls = [];
     const database = {

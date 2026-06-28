@@ -14,10 +14,12 @@ import { CurrentActor } from "../workspace/workspace-member-access.service";
 import {
   CreateTaskCommentBody,
   CreateChecklistItemBody,
+  CreateMilestoneBody,
   CreateTaskBody,
   JuhyungTaskService,
   ListTasksQuery,
   UpdateChecklistItemBody,
+  UpdateMilestoneBody,
   UpdateTaskBody,
   UpdateTaskStatusBody,
 } from "./juhyung-task.service";
@@ -25,6 +27,46 @@ import {
 @Controller("api")
 export class JuhyungTasksController {
   constructor(private readonly taskService: JuhyungTaskService) {}
+
+  @Get("workspaces/:workspaceId/milestones")
+  listMilestones(
+    @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.listMilestones(
+      workspaceId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("workspaces/:workspaceId/milestones")
+  createMilestone(
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: CreateMilestoneBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.createMilestone(
+      workspaceId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Patch("milestones/:milestoneId")
+  updateMilestone(
+    @Param("milestoneId") milestoneId: string,
+    @Body() body: UpdateMilestoneBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.updateMilestone(
+      milestoneId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
 
   @Get("workspaces/:workspaceId/tasks")
   listTasks(

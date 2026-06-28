@@ -76,11 +76,12 @@
     },
     "TaskSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "title", "status", "priority", "isDelayed"],
+      "required": ["id", "workspaceId", "milestoneId", "title", "status", "priority", "isDelayed"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
+        "milestoneId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "title": { "type": "string" },
         "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] },
         "priority": { "enum": ["low", "medium", "high", "urgent"] },
@@ -89,6 +90,20 @@
         "isDelayed": { "type": "boolean" },
         "linkedIssueCount": { "type": "integer", "minimum": 0 },
         "linkedPrCount": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "MilestoneSummary": {
+      "type": "object",
+      "required": ["id", "workspaceId", "title", "status", "startDate", "endDate", "updatedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string" },
+        "status": { "enum": ["planned", "in_progress", "done"] },
+        "startDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "endDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
         "updatedAt": { "$ref": "#/$defs/dateTime" }
       }
     },

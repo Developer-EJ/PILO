@@ -6,6 +6,7 @@ export type TaskStatus =
   | "blocked";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type TaskChecklistStatus = "todo" | "done";
+export type MilestoneStatus = "planned" | "in_progress" | "done";
 export type GithubIssueState = "open" | "closed";
 export type PullRequestState =
   | "open"
@@ -31,6 +32,7 @@ export interface WorkspaceMemberRecord {
 export interface TaskRecord {
   id: string;
   workspaceId: string;
+  milestoneId?: string | null;
   title: string;
   status: string;
   priority: string;
@@ -42,6 +44,7 @@ export interface TaskRecord {
 export interface TaskSummary {
   id: string;
   workspaceId: string;
+  milestoneId: string | null;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
@@ -50,6 +53,26 @@ export interface TaskSummary {
   isDelayed: boolean;
   linkedIssueCount: number;
   linkedPrCount: number;
+  updatedAt: string;
+}
+
+export interface MilestoneRecord {
+  id: string;
+  workspaceId: string;
+  title: string;
+  status: string;
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
+  updatedAt: Date | string;
+}
+
+export interface MilestoneSummary {
+  id: string;
+  workspaceId: string;
+  title: string;
+  status: MilestoneStatus;
+  startDate: string | null;
+  endDate: string | null;
   updatedAt: string;
 }
 

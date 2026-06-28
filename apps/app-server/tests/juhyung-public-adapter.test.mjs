@@ -168,11 +168,35 @@ function isUuid(value) {
 describe("JuhyungPublicAdapter", () => {
   const adapter = new JuhyungPublicAdapter();
 
+  it("maps a Milestone domain record to the MilestoneSummary public DTO", () => {
+    const summary = adapter.toMilestoneSummary({
+      id: UUIDS.milestone,
+      workspaceId: UUIDS.workspace,
+      title: "MVP Backend",
+      status: "in_progress",
+      startDate: new Date("2026-07-01T00:00:00.000Z"),
+      endDate: new Date("2026-07-31T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-28T12:00:00.000Z"),
+    });
+
+    assert.deepEqual(summary, {
+      id: UUIDS.milestone,
+      workspaceId: UUIDS.workspace,
+      title: "MVP Backend",
+      status: "in_progress",
+      startDate: "2026-07-01",
+      endDate: "2026-07-31",
+      updatedAt: "2026-06-28T12:00:00.000Z",
+    });
+    assertContract("MilestoneSummary", summary);
+  });
+
   it("maps a Task domain record to the TaskSummary public DTO", () => {
     const summary = adapter.toTaskSummary(
       {
         id: UUIDS.task,
         workspaceId: UUIDS.workspace,
+        milestoneId: UUIDS.milestone,
         title: "Connect repository",
         status: "in_progress",
         priority: "high",
@@ -195,6 +219,7 @@ describe("JuhyungPublicAdapter", () => {
     assert.deepEqual(summary, {
       id: UUIDS.task,
       workspaceId: UUIDS.workspace,
+      milestoneId: UUIDS.milestone,
       title: "Connect repository",
       status: "in_progress",
       priority: "high",

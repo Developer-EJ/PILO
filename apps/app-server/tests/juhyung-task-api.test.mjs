@@ -44,6 +44,17 @@ const baseTask = {
   deletedAt: null,
 };
 
+const baseMilestone = {
+  id: UUIDS.milestone,
+  workspaceId: UUIDS.workspace,
+  title: "MVP Backend",
+  status: "planned",
+  startDate: new Date("2026-07-01T00:00:00.000Z"),
+  endDate: new Date("2026-07-31T00:00:00.000Z"),
+  createdAt: new Date("2026-06-27T10:00:00.000Z"),
+  updatedAt: new Date("2026-06-27T12:00:00.000Z"),
+};
+
 const baseChecklistItem = {
   id: UUIDS.checklistItem,
   taskId: UUIDS.task,
@@ -78,6 +89,270 @@ const baseTaskActivityLog = {
 };
 
 describe("JuhyungTaskService", () => {
+  it("lists milestones after workspace membership is verified", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        listMilestonesForWorkspace: async (workspaceId) => {
+          calls.push(["listMilestones", workspaceId]);
+          return [baseMilestone];
+        },
+      },
+    });
+
+    const result = await service.listMilestones(UUIDS.workspace, {
+      memberId: UUIDS.member,
+    });
+
+    assert.deepEqual(result, [
+      {
+        id: UUIDS.milestone,
+        workspaceId: UUIDS.workspace,
+        title: "MVP Backend",
+        status: "planned",
+        startDate: "2026-07-01",
+        endDate: "2026-07-31",
+        updatedAt: "2026-06-27T12:00:00.000Z",
+      },
+    ]);
+    assert.deepEqual(calls, [
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["listMilestones", UUIDS.workspace],
+    ]);
+  });
+
+  it("creates milestones with normalized dates after checking workspace membership", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        createMilestone: async (input) => {
+          calls.push(["createMilestone", input]);
+          return {
+            ...baseMilestone,
+            ...input,
+            updatedAt: new Date("2026-06-28T12:00:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.createMilestone(
+      UUIDS.workspace,
+      {
+        title: " MVP Backend ",
+        status: "in_progress",
+        startDate: "2026-07-01",
+        endDate: "2026-07-31",
+      },
+      { userId: UUIDS.user },
+    );
+
+    assert.equal(result.title, "MVP Backend");
+    assert.equal(result.status, "in_progress");
+    assert.equal(result.startDate, "2026-07-01");
+    assert.deepEqual(calls, [
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
+      [
+        "createMilestone",
+        {
+          workspaceId: UUIDS.workspace,
+          title: "MVP Backend",
+          status: "in_progress",
+          startDate: new Date("2026-07-01T00:00:00.000Z"),
+          endDate: new Date("2026-07-31T00:00:00.000Z"),
+        },
+      ],
+    ]);
+  });
+
+  it("updates milestones after loading the milestone workspace", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getMilestoneById: async (milestoneId) => {
+          calls.push(["getMilestone", milestoneId]);
+          return baseMilestone;
+        },
+        updateMilestone: async (milestoneId, input) => {
+          calls.push(["updateMilestone", milestoneId, input]);
+          return {
+            ...baseMilestone,
+            id: milestoneId,
+            ...input,
+            updatedAt: new Date("2026-06-28T13:00:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.updateMilestone(
+      UUIDS.milestone,
+      {
+        title: "MVP Backend Updated",
+        status: "done",
+        endDate: null,
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.equal(result.title, "MVP Backend Updated");
+    assert.equal(result.status, "done");
+    assert.equal(result.endDate, null);
+    assert.deepEqual(calls, [
+      ["getMilestone", UUIDS.milestone],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      [
+        "updateMilestone",
+        UUIDS.milestone,
+        {
+          title: "MVP Backend Updated",
+          status: "done",
+          endDate: null,
+        },
+      ],
+    ]);
+  });
+
+  it("rejects invalid milestone date ranges before writing", async () => {
+    const service = createService({
+      repository: {
+        createMilestone: async () => {
+          throw new Error("invalid milestone should not be written");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createMilestone(
+          UUIDS.workspace,
+          {
+            title: "MVP Backend",
+            startDate: "2026-08-01",
+            endDate: "2026-07-31",
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
+  });
+
+  it("links tasks only to milestones in the same workspace", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        getMilestoneById: async (milestoneId) => {
+          calls.push(["getMilestone", milestoneId]);
+          return { ...baseMilestone, workspaceId: "other-workspace" };
+        },
+        updateTask: async () => {
+          throw new Error("cross-workspace milestone should not be linked");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.updateTask(
+          UUIDS.task,
+          {
+            milestoneId: UUIDS.milestone,
+          },
+          { memberId: UUIDS.member },
+        ),
+      NotFoundException,
+    );
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["getMilestone", UUIDS.milestone],
+    ]);
+  });
+
+  it("links tasks to milestones in the same workspace", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return { ...baseTask, assigneeMemberId: null };
+        },
+        getMilestoneById: async (milestoneId) => {
+          calls.push(["getMilestone", milestoneId]);
+          return baseMilestone;
+        },
+        updateTask: async (taskId, input, actorMemberId, previousTask) => {
+          calls.push(["update", taskId, input, actorMemberId, previousTask]);
+          return {
+            ...baseTask,
+            assigneeMemberId: null,
+            id: taskId,
+            ...input,
+            updatedAt: new Date("2026-06-28T12:00:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.updateTask(
+      UUIDS.task,
+      {
+        milestoneId: UUIDS.milestone,
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.equal(result.milestoneId, UUIDS.milestone);
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["getMilestone", UUIDS.milestone],
+      [
+        "update",
+        UUIDS.task,
+        {
+          milestoneId: UUIDS.milestone,
+        },
+        UUIDS.member,
+        { ...baseTask, assigneeMemberId: null },
+      ],
+    ]);
+  });
+
   it("returns an empty TaskSummary list after workspace membership is verified", async () => {
     const calls = [];
     const service = createService({
@@ -894,6 +1169,18 @@ describe("JuhyungTasksController", () => {
   it("forwards task routes with workspace and actor context", async () => {
     const calls = [];
     const controller = new JuhyungTasksController({
+      listMilestones: async (workspaceId, actor) => {
+        calls.push(["listMilestones", workspaceId, actor]);
+        return [];
+      },
+      createMilestone: async (workspaceId, body, actor) => {
+        calls.push(["createMilestone", workspaceId, body, actor]);
+        return { id: UUIDS.milestone };
+      },
+      updateMilestone: async (milestoneId, body, actor) => {
+        calls.push(["updateMilestone", milestoneId, body, actor]);
+        return { id: milestoneId };
+      },
       listTasks: async (workspaceId, query, actor) => {
         calls.push(["list", workspaceId, query, actor]);
         return [];
@@ -942,6 +1229,19 @@ describe("JuhyungTasksController", () => {
       },
     });
 
+    await controller.listMilestones(UUIDS.workspace, UUIDS.user, undefined);
+    await controller.createMilestone(
+      UUIDS.workspace,
+      { title: "MVP Backend" },
+      undefined,
+      UUIDS.member,
+    );
+    await controller.updateMilestone(
+      UUIDS.milestone,
+      { status: "done" },
+      UUIDS.user,
+      UUIDS.member,
+    );
     await controller.listTasks(
       UUIDS.workspace,
       { status: "todo" },
@@ -997,6 +1297,19 @@ describe("JuhyungTasksController", () => {
     );
 
     assert.deepEqual(calls, [
+      ["listMilestones", UUIDS.workspace, { userId: UUIDS.user }],
+      [
+        "createMilestone",
+        UUIDS.workspace,
+        { title: "MVP Backend" },
+        { memberId: UUIDS.member },
+      ],
+      [
+        "updateMilestone",
+        UUIDS.milestone,
+        { status: "done" },
+        { userId: UUIDS.user, memberId: UUIDS.member },
+      ],
       ["list", UUIDS.workspace, { status: "todo" }, { userId: UUIDS.user }],
       [
         "create",
