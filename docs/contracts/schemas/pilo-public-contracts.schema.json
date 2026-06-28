@@ -198,15 +198,6 @@
         "revokedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
       }
     },
-    "GithubConnectionStartResponse": {
-      "type": "object",
-      "required": ["state", "installationUrl"],
-      "additionalProperties": false,
-      "properties": {
-        "state": { "type": "string", "minLength": 1 },
-        "installationUrl": { "type": "string", "format": "uri" }
-      }
-    },
     "GithubRepositorySummary": {
       "type": "object",
       "required": ["id", "workspaceId", "owner", "repoName", "url"],
