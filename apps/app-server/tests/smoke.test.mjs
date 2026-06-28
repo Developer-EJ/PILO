@@ -307,6 +307,24 @@ describe("app-server package", () => {
       ),
       result.session.record.refreshTokenHash,
     );
+    assert.deepEqual(
+      service.getCurrentUserFromCookieHeader(result.session.cookieHeader),
+      {
+        id: result.identity.user.id,
+        name: "Google User",
+        email: "user@example.com",
+        avatarUrl: "https://example.com/avatar.png",
+        providers: ["google"],
+        lastLoginAt: result.identity.user.lastLoginAt,
+      },
+    );
+    assert.equal(
+      service.getCurrentUserFromCookieHeader(
+        result.session.cookieHeader,
+        new Date(result.session.expiresAt),
+      ),
+      null,
+    );
     assert.equal(requests[0].url, "https://oauth2.googleapis.com/token");
     assert.equal(requests[0].init.method, "POST");
     assert.equal(requests[0].init.body.get("code"), "google-code");
@@ -534,6 +552,49 @@ describe("app-server package", () => {
     });
 
     assert.equal(config.session.secure, true);
+  });
+
+  it("returns null CurrentUser when session cookie is missing or user is deleted", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    const fetcher = async (url) => {
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return globalThis.Response.json({
+          access_token: "google-access-token",
+        });
+      }
+
+      return globalThis.Response.json({
+        sub: "google-user-123",
+        email: "user@example.com",
+        name: "Google User",
+      });
+    };
+    const repository = new AuthRepository();
+    const service = new AuthService(repository, { config, fetcher });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/",
+    );
+    const result = await service.handleOAuthCallback("google", {
+      code: "google-code",
+      state: authorization.state,
+    });
+
+    assert.equal(service.getCurrentUserFromCookieHeader(undefined), null);
+    assert.equal(result.ok, true);
+
+    repository.markUserDeleted(result.identity.user.id);
+
+    assert.equal(
+      service.getCurrentUserFromCookieHeader(result.session.cookieHeader),
+      null,
+    );
   });
 
   it("exposes Auth provider readiness without leaking secrets", () => {
