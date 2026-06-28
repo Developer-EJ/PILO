@@ -19,9 +19,15 @@ export class CanvasRepository implements CanvasRepositoryPort {
 
   private readonly boardsById = new Map<string, CanvasBoardRecord>();
   private readonly shapesById = new Map<string, CanvasShapeRecord>();
-  private readonly positionsByShapeId = new Map<string, CanvasNodePositionRecord>();
+  private readonly positionsByShapeId = new Map<
+    string,
+    CanvasNodePositionRecord
+  >();
   private readonly connectionsById = new Map<string, CanvasConnectionRecord>();
-  private readonly viewSettingsByKey = new Map<string, CanvasViewSettingRecord>();
+  private readonly viewSettingsByKey = new Map<
+    string,
+    CanvasViewSettingRecord
+  >();
   private readonly filterSettingsByKey = new Map<
     string,
     CanvasFilterSettingRecord
@@ -38,6 +44,18 @@ export class CanvasRepository implements CanvasRepositoryPort {
 
   async findBoardWorkspaceId(boardId: string): Promise<string | null> {
     const board = this.findVisibleBoard(boardId);
+
+    return board?.workspaceId ?? null;
+  }
+
+  async findShapeWorkspaceId(shapeId: string): Promise<string | null> {
+    const shape = this.findVisibleShape(shapeId);
+
+    if (!shape) {
+      return null;
+    }
+
+    const board = this.findVisibleBoard(shape.boardId);
 
     return board?.workspaceId ?? null;
   }
@@ -66,6 +84,35 @@ export class CanvasRepository implements CanvasRepositoryPort {
     };
   }
 
+  async upsertShapePosition(input: {
+    shapeId: string;
+    x: number;
+    y: number;
+    now?: Date;
+  }): Promise<CanvasShapeSummary | null> {
+    const shape = this.findVisibleShape(input.shapeId);
+
+    if (!shape) {
+      return null;
+    }
+
+    const updatedAt = (input.now ?? new Date()).toISOString();
+    this.positionsByShapeId.set(input.shapeId, {
+      shapeId: input.shapeId,
+      x: input.x,
+      y: input.y,
+      updatedAt,
+    });
+
+    const board = this.findVisibleBoard(shape.boardId);
+
+    if (board) {
+      board.updatedAt = updatedAt;
+    }
+
+    return this.toShapeSummary(shape);
+  }
+
   private findVisibleBoard(boardId: string) {
     const board = this.boardsById.get(boardId);
 
@@ -74,6 +121,16 @@ export class CanvasRepository implements CanvasRepositoryPort {
     }
 
     return board;
+  }
+
+  private findVisibleShape(shapeId: string) {
+    const shape = this.shapesById.get(shapeId);
+
+    if (!shape || shape.deletedAt) {
+      return null;
+    }
+
+    return shape;
   }
 
   private listVisibleShapes(boardId: string) {
@@ -142,7 +199,9 @@ export class CanvasRepository implements CanvasRepositoryPort {
   }
 
   private toViewSetting(boardId: string, memberId: string) {
-    const setting = this.viewSettingsByKey.get(createMemberSettingKey(boardId, memberId));
+    const setting = this.viewSettingsByKey.get(
+      createMemberSettingKey(boardId, memberId),
+    );
 
     return {
       zoom: setting?.zoom ?? 1,

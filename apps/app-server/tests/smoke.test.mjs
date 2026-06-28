@@ -5,6 +5,8 @@ import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
+import canvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
+import workspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
 const {
@@ -36,16 +38,25 @@ const {
 const {
   WorkspaceRepository,
 } = require("../src/modules/workspace/workspace.repository");
-const {
-  CanvasRepository,
-} = require("../src/modules/canvas/canvas.repository");
+const { CanvasRepository } = require("../src/modules/canvas/canvas.repository");
 const {
   CanvasAccessError,
   CanvasService,
+  CanvasValidationError,
 } = require("../src/modules/canvas/canvas.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
+
+function assertRequiredFields(value, schema, label) {
+  for (const field of schema.required ?? []) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(value, field),
+      true,
+      `${label} is missing ${field}`,
+    );
+  }
+}
 
 describe("app-server package", () => {
   it("keeps the PILO app-server package name", () => {
@@ -788,6 +799,294 @@ describe("app-server package", () => {
     assert.deepEqual(WORKSPACE_INVITE_ROLES, ["member", "viewer"]);
   });
 
+  it("keeps Workspace dashboard read model schema aligned with fixture fields", () => {
+    const defs = contractSchema.$defs;
+
+    assert.deepEqual(defs.WorkspaceSummary.required, [
+      "id",
+      "name",
+      "description",
+      "type",
+      "status",
+      "myRole",
+      "memberCount",
+      "createdAt",
+    ]);
+    assert.deepEqual(defs.WorkspaceMemberSummary.required, [
+      "memberId",
+      "userId",
+      "name",
+      "email",
+      "avatarUrl",
+      "role",
+      "displayName",
+      "joinedAt",
+    ]);
+    assert.deepEqual(defs.DashboardPreferences.required, [
+      "workspaceId",
+      "memberId",
+      "layout",
+      "hiddenSections",
+      "updatedAt",
+    ]);
+    assert.deepEqual(defs.CurrentWorkspaceMember.required, [
+      "workspaceId",
+      "memberId",
+      "userId",
+      "role",
+      "displayName",
+    ]);
+    assert.deepEqual(defs.WorkspaceDashboardReadModel.required, [
+      "workspace",
+      "currentMember",
+      "preferences",
+      "members",
+      "tasks",
+      "progress",
+      "githubIssues",
+      "pullRequests",
+      "meetingReports",
+      "prAnalyses",
+      "agentActions",
+      "canvasEntities",
+      "source",
+      "generatedAt",
+    ]);
+
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.tasks.items.$ref,
+      "#/$defs/TaskSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.githubIssues.items.$ref,
+      "#/$defs/GithubIssueSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.pullRequests.items.$ref,
+      "#/$defs/PullRequestSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.meetingReports.items.$ref,
+      "#/$defs/MeetingReportSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.prAnalyses.items.$ref,
+      "#/$defs/PRAnalysisSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.agentActions.items.$ref,
+      "#/$defs/AgentAction",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.canvasEntities.items.$ref,
+      "#/$defs/CanvasEntityRef",
+    );
+    assert.deepEqual(defs.WorkspaceDashboardReadModel.properties.source.enum, [
+      "fixture",
+      "empty",
+    ]);
+
+    const currentMember = {
+      workspaceId: workspaceDashboardFixture.workspace.id,
+      memberId: workspaceDashboardFixture.members[0].memberId,
+      userId: workspaceDashboardFixture.currentUser.id,
+      role: workspaceDashboardFixture.members[0].role,
+      displayName: workspaceDashboardFixture.members[0].displayName,
+    };
+    const preferences = {
+      workspaceId: workspaceDashboardFixture.workspace.id,
+      memberId: workspaceDashboardFixture.members[0].memberId,
+      layout: {},
+      hiddenSections: [],
+      updatedAt: null,
+    };
+    const aggregate = {
+      workspace: workspaceDashboardFixture.workspace,
+      currentMember,
+      preferences,
+      members: workspaceDashboardFixture.members,
+      tasks: workspaceDashboardFixture.tasks,
+      progress: workspaceDashboardFixture.progress,
+      githubIssues: workspaceDashboardFixture.githubIssues,
+      pullRequests: workspaceDashboardFixture.pullRequests,
+      meetingReports: workspaceDashboardFixture.meetingReports,
+      prAnalyses: workspaceDashboardFixture.prAnalyses,
+      agentActions: workspaceDashboardFixture.agentActions,
+      canvasEntities: workspaceDashboardFixture.canvasEntities,
+      source: "fixture",
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    };
+
+    assertRequiredFields(
+      aggregate,
+      defs.WorkspaceDashboardReadModel,
+      "WorkspaceDashboardReadModel",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.workspace,
+      defs.WorkspaceSummary,
+      "fixture.workspace",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.members[0],
+      defs.WorkspaceMemberSummary,
+      "fixture.members[0]",
+    );
+    assertRequiredFields(
+      currentMember,
+      defs.CurrentWorkspaceMember,
+      "aggregate.currentMember",
+    );
+    assertRequiredFields(
+      preferences,
+      defs.DashboardPreferences,
+      "aggregate.preferences",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.tasks[0],
+      defs.TaskSummary,
+      "fixture.tasks[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.progress,
+      defs.ProgressSummary,
+      "fixture.progress",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.githubIssues[0],
+      defs.GithubIssueSummary,
+      "fixture.githubIssues[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.pullRequests[0],
+      defs.PullRequestSummary,
+      "fixture.pullRequests[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.meetingReports[0],
+      defs.MeetingReportSummary,
+      "fixture.meetingReports[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.prAnalyses[0],
+      defs.PRAnalysisSummary,
+      "fixture.prAnalyses[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.agentActions[0],
+      defs.AgentAction,
+      "fixture.agentActions[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.canvasEntities[0],
+      defs.CanvasEntityRef,
+      "fixture.canvasEntities[0]",
+    );
+  });
+
+  it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {
+    const defs = contractSchema.$defs;
+
+    assert.deepEqual(defs.CanvasEntityType.enum, [
+      "task",
+      "meeting_report",
+      "pull_request",
+      "github_issue",
+      "document",
+      "file",
+      "code",
+      "decision",
+      "risk",
+    ]);
+    assert.deepEqual(defs.CanvasBoardType.enum, [
+      "project_map",
+      "meeting",
+      "review",
+      "custom",
+    ]);
+    assert.deepEqual(defs.CanvasBoardDetail.required, [
+      "id",
+      "workspaceId",
+      "title",
+      "boardType",
+      "shapeCount",
+      "connectionCount",
+      "updatedAt",
+      "shapes",
+      "connections",
+      "viewSetting",
+      "filterSetting",
+    ]);
+    assert.deepEqual(defs.CanvasShapeRequest.required, [
+      "shapeType",
+      "entityType",
+      "entityId",
+      "displayTitle",
+      "width",
+      "height",
+      "color",
+    ]);
+    assert.deepEqual(defs.CanvasConnectionRequest.required, [
+      "sourceShapeId",
+      "targetShapeId",
+      "connectionType",
+      "label",
+    ]);
+    assert.equal(defs.CanvasPositionRequest.$ref, "#/$defs/CanvasPosition");
+    assert.deepEqual(defs.CanvasViewSetting.required, [
+      "zoom",
+      "viewportX",
+      "viewportY",
+    ]);
+    assert.deepEqual(defs.CanvasFilterSetting.required, [
+      "enabledEntityTypes",
+      "assigneeMemberId",
+      "showDelayedOnly",
+      "showRiskOnly",
+      "filters",
+    ]);
+    assert.equal(
+      defs.CanvasEntityRef.properties.entityType.$ref,
+      "#/$defs/CanvasEntityType",
+    );
+    assert.equal(
+      defs.CanvasEntityRef.properties.shapeType.$ref,
+      "#/$defs/CanvasEntityType",
+    );
+
+    assert.deepEqual(
+      Object.keys(canvasBoardDetailFixture).sort(),
+      Object.keys(defs.CanvasBoardDetail.properties).sort(),
+    );
+    assertRequiredFields(
+      canvasBoardDetailFixture,
+      defs.CanvasBoardDetail,
+      "canvasBoardDetailFixture",
+    );
+    assertRequiredFields(
+      canvasBoardDetailFixture.shapes[0],
+      defs.CanvasShapeSummary,
+      "canvasBoardDetailFixture.shapes[0]",
+    );
+    assertRequiredFields(
+      canvasBoardDetailFixture.connections[0],
+      defs.CanvasConnectionSummary,
+      "canvasBoardDetailFixture.connections[0]",
+    );
+    assert.deepEqual(canvasBoardDetailFixture.viewSetting, {
+      zoom: 1,
+      viewportX: 0,
+      viewportY: 0,
+    });
+    assert.deepEqual(canvasBoardDetailFixture.filterSetting, {
+      enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+      assigneeMemberId: null,
+      showDelayedOnly: false,
+      showRiskOnly: false,
+      filters: {},
+    });
+  });
+
   it("resolves currentMember from currentUser without leaking Auth session details", async () => {
     const repositoryCalls = [];
     const service = new WorkspaceService({
@@ -1198,7 +1497,10 @@ describe("app-server package", () => {
     const repository = new CanvasRepository();
 
     assert.deepEqual(repository.storageMode, "memory");
-    assert.deepEqual(await repository.listBoardsForWorkspace("workspace-1"), []);
+    assert.deepEqual(
+      await repository.listBoardsForWorkspace("workspace-1"),
+      [],
+    );
     assert.equal(await repository.findBoardWorkspaceId("missing-board"), null);
     assert.equal(
       await repository.findBoardDetail({
@@ -1207,6 +1509,58 @@ describe("app-server package", () => {
       }),
       null,
     );
+  });
+
+  it("persists Canvas shape positions and reflects them in board detail", async () => {
+    const repository = new CanvasRepository();
+    repository.boardsById.set("board-1", {
+      id: "board-1",
+      workspaceId: "workspace-1",
+      title: "Project Map",
+      boardType: "project_map",
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+    repository.shapesById.set("shape-1", {
+      id: "shape-1",
+      boardId: "board-1",
+      shapeType: "task",
+      entityType: "task",
+      entityId: "44444444-4444-4444-8444-444444444441",
+      displayTitle: "Login API",
+      width: 280,
+      height: 160,
+      color: "#6d5bd6",
+      isCollapsed: false,
+      zIndex: 1,
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+
+    const savedShape = await repository.upsertShapePosition({
+      shapeId: "shape-1",
+      x: 144,
+      y: 288,
+      now: new Date("2026-06-28T00:03:00.000Z"),
+    });
+    const board = await repository.findBoardDetail({
+      boardId: "board-1",
+      memberId: "member-1",
+    });
+
+    assert.deepEqual(savedShape.position, {
+      x: 144,
+      y: 288,
+    });
+    assert.deepEqual(board.shapes[0].position, {
+      x: 144,
+      y: 288,
+    });
+    assert.equal(board.updatedAt, "2026-06-28T00:03:00.000Z");
   });
 
   it("connects Canvas board access to the workspace currentMember context", async () => {
@@ -1274,10 +1628,13 @@ describe("app-server package", () => {
       email: "owner@example.com",
     };
 
-    assert.deepEqual(await service.listCanvasBoards({
-      workspaceId: "workspace-1",
-      currentUser,
-    }), []);
+    assert.deepEqual(
+      await service.listCanvasBoards({
+        workspaceId: "workspace-1",
+        currentUser,
+      }),
+      [],
+    );
 
     const board = await service.getCanvasBoardDetail({
       boardId: "board-1",
@@ -1306,6 +1663,213 @@ describe("app-server package", () => {
         },
       ],
     ]);
+  });
+
+  it("updates Canvas shape position only with workspace write permission", async () => {
+    const repositoryCalls = [];
+    const accessCalls = [];
+    const repository = {
+      storageMode: "test",
+      async listBoardsForWorkspace() {
+        return [];
+      },
+      async findBoardWorkspaceId() {
+        return null;
+      },
+      async findShapeWorkspaceId(shapeId) {
+        repositoryCalls.push(["findShapeWorkspace", shapeId]);
+        return "workspace-1";
+      },
+      async findBoardDetail() {
+        return null;
+      },
+      async upsertShapePosition(input) {
+        repositoryCalls.push(["upsertPosition", input]);
+        return {
+          id: input.shapeId,
+          shapeType: "task",
+          entityType: "task",
+          entityId: "44444444-4444-4444-8444-444444444441",
+          displayTitle: "Login API",
+          width: 280,
+          height: 160,
+          color: "#6d5bd6",
+          isCollapsed: false,
+          zIndex: 1,
+          position: {
+            x: input.x,
+            y: input.y,
+          },
+        };
+      },
+    };
+    const currentMemberAdapter = {
+      async requireCurrentMember(input) {
+        accessCalls.push(input);
+        return {
+          currentMember: {
+            workspaceId: input.workspaceId,
+            memberId: "member-1",
+            userId: input.currentUser.id,
+            role: "member",
+            displayName: null,
+          },
+          permissions: {
+            canRead: true,
+            canWrite: true,
+            canManage: false,
+          },
+        };
+      },
+    };
+    const service = new CanvasService(repository, currentMemberAdapter);
+    const currentUser = { id: "user-1" };
+    const updated = await service.updateCanvasShapePosition({
+      shapeId: "shape-1",
+      currentUser,
+      body: {
+        x: 320,
+        y: -48,
+      },
+    });
+
+    assert.deepEqual(updated.position, {
+      x: 320,
+      y: -48,
+    });
+    assert.deepEqual(accessCalls, [
+      {
+        workspaceId: "workspace-1",
+        currentUser,
+      },
+    ]);
+    assert.deepEqual(repositoryCalls, [
+      ["findShapeWorkspace", "shape-1"],
+      [
+        "upsertPosition",
+        {
+          shapeId: "shape-1",
+          x: 320,
+          y: -48,
+        },
+      ],
+    ]);
+  });
+
+  it("rejects Canvas shape position updates without write permission", async () => {
+    let upsertCalled = false;
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async listBoardsForWorkspace() {
+          return [];
+        },
+        async findBoardWorkspaceId() {
+          return null;
+        },
+        async findShapeWorkspaceId() {
+          return "workspace-1";
+        },
+        async findBoardDetail() {
+          return null;
+        },
+        async upsertShapePosition() {
+          upsertCalled = true;
+          return null;
+        },
+      },
+      {
+        async requireCurrentMember(input) {
+          return {
+            currentMember: {
+              workspaceId: input.workspaceId,
+              memberId: "member-1",
+              userId: input.currentUser.id,
+              role: "viewer",
+              displayName: null,
+            },
+            permissions: {
+              canRead: true,
+              canWrite: false,
+              canManage: false,
+            },
+          };
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.updateCanvasShapePosition({
+          shapeId: "shape-1",
+          currentUser: { id: "viewer-1" },
+          body: {
+            x: 1,
+            y: 2,
+          },
+        }),
+      (error) =>
+        error instanceof CanvasAccessError &&
+        error.code === "canvas_workspace_forbidden" &&
+        error.resourceId === "workspace-1",
+    );
+    assert.equal(upsertCalled, false);
+  });
+
+  it("rejects invalid Canvas shape position payloads before storage", async () => {
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async listBoardsForWorkspace() {
+          return [];
+        },
+        async findBoardWorkspaceId() {
+          return null;
+        },
+        async findShapeWorkspaceId() {
+          return "workspace-1";
+        },
+        async findBoardDetail() {
+          return null;
+        },
+        async upsertShapePosition() {
+          return null;
+        },
+      },
+      {
+        async requireCurrentMember(input) {
+          return {
+            currentMember: {
+              workspaceId: input.workspaceId,
+              memberId: "member-1",
+              userId: input.currentUser.id,
+              role: "owner",
+              displayName: null,
+            },
+            permissions: {
+              canRead: true,
+              canWrite: true,
+              canManage: true,
+            },
+          };
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.updateCanvasShapePosition({
+          shapeId: "shape-1",
+          currentUser: { id: "user-1" },
+          body: {
+            x: Number.POSITIVE_INFINITY,
+            y: 2,
+          },
+        }),
+      (error) =>
+        error instanceof CanvasValidationError &&
+        error.code === "canvas_validation_failed",
+    );
   });
 
   it("rejects Canvas board detail before workspace access when board is missing", async () => {

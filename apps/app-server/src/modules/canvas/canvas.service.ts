@@ -6,6 +6,8 @@ import type {
   CanvasBoardSummary,
   CanvasCurrentMemberContext,
   CanvasRepositoryPort,
+  CanvasShapePositionRequest,
+  CanvasShapeSummary,
 } from "./canvas.types";
 import { CanvasRepository } from "./canvas.repository";
 
@@ -19,8 +21,15 @@ export type CanvasBoardResourceInput = {
   currentUser: CanvasAuthUserRef;
 };
 
+export type CanvasShapePositionMutationInput = {
+  shapeId: string;
+  currentUser: CanvasAuthUserRef;
+  body: unknown;
+};
+
 export type CanvasAccessErrorCode =
   | "canvas_board_not_found"
+  | "canvas_shape_not_found"
   | "canvas_workspace_forbidden";
 
 export class CanvasAccessError extends Error {
@@ -30,6 +39,15 @@ export class CanvasAccessError extends Error {
   ) {
     super(createCanvasAccessErrorMessage(code, resourceId));
     this.name = "CanvasAccessError";
+  }
+}
+
+export class CanvasValidationError extends Error {
+  readonly code = "canvas_validation_failed";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CanvasValidationError";
   }
 }
 
@@ -81,15 +99,48 @@ export class CanvasService {
     return board;
   }
 
+  async updateCanvasShapePosition(
+    input: CanvasShapePositionMutationInput,
+  ): Promise<CanvasShapeSummary> {
+    const body = parseCanvasShapePositionBody(input.body);
+    const workspaceId = await this.canvasRepository.findShapeWorkspaceId(
+      input.shapeId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
+    }
+
+    const workspaceAccess = await this.requireWorkspaceAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    if (!workspaceAccess.permissions.canWrite) {
+      throw new CanvasAccessError("canvas_workspace_forbidden", workspaceId);
+    }
+
+    const shape = await this.canvasRepository.upsertShapePosition({
+      shapeId: input.shapeId,
+      x: body.x,
+      y: body.y,
+    });
+
+    if (!shape) {
+      throw new CanvasAccessError("canvas_shape_not_found", input.shapeId);
+    }
+
+    return shape;
+  }
+
   private async requireWorkspaceAccess(
     input: CanvasWorkspaceResourceInput,
   ): Promise<CanvasCurrentMemberContext> {
-    const workspaceAccess = await this.currentMemberAdapter.requireCurrentMember(
-      {
+    const workspaceAccess =
+      await this.currentMemberAdapter.requireCurrentMember({
         workspaceId: input.workspaceId,
         currentUser: input.currentUser,
-      },
-    );
+      });
 
     if (!workspaceAccess.permissions.canRead) {
       throw new CanvasAccessError(
@@ -110,7 +161,40 @@ function createCanvasAccessErrorMessage(
     return `Current member cannot access canvas workspace ${resourceId}.`;
   }
 
+  if (code === "canvas_shape_not_found") {
+    return `Canvas shape ${resourceId} was not found.`;
+  }
+
   return `Canvas board ${resourceId} was not found.`;
+}
+
+function parseCanvasShapePositionBody(
+  body: unknown,
+): CanvasShapePositionRequest {
+  const record = requirePlainObject(body);
+
+  return {
+    x: parseFiniteCoordinate(record.x, "x"),
+    y: parseFiniteCoordinate(record.y, "y"),
+  };
+}
+
+function requirePlainObject(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new CanvasValidationError("Canvas request body is required.");
+  }
+
+  return body as Record<string, unknown>;
+}
+
+function parseFiniteCoordinate(value: unknown, field: "x" | "y") {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new CanvasValidationError(
+      `Canvas position ${field} must be a finite number.`,
+    );
+  }
+
+  return value;
 }
 
 export type CanvasServiceRepositoryPort = CanvasRepositoryPort;
