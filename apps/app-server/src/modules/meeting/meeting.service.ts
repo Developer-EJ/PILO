@@ -13,6 +13,8 @@ import {
   MeetingReportWorkflowClient,
 } from "./adapters/meeting-report-workflow.adapter";
 import {
+  ConvertMeetingActionItemRequestDto,
+  CreateMeetingActionItemRequestDto,
   CreateMeetingAgendaRequestDto,
   CreateMeetingDecisionRequestDto,
   CreateMeetingMemoRequestDto,
@@ -21,6 +23,7 @@ import {
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
   CreateTranscriptSegmentRequestDto,
+  MeetingActionItemResponseDto,
   MeetingAgendaResponseDto,
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
@@ -46,6 +49,8 @@ import {
   MEETING_REPORT_RISK_SEVERITY_VALUES,
   MEETING_STATUS_VALUES,
   TRANSCRIPT_SOURCE_VALUES,
+  MeetingActionItemRecord,
+  MeetingActionItemStatus,
   MeetingAgendaRecord,
   MeetingAgendaStatus,
   MeetingDecisionRecord,
@@ -491,6 +496,90 @@ export class MeetingService {
       .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda));
   }
 
+  createActionItem(
+    reportId: string,
+    requestBody: CreateMeetingActionItemRequestDto,
+  ): MeetingActionItemResponseDto {
+    const report = this.requireReport(reportId);
+    const meeting = this.requireMeeting(report.meetingId);
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.createActionItem({
+        reportId: report.id,
+        title: this.requireNonEmptyString(requestBody.title, "title"),
+        description: this.optionalString(
+          requestBody.description,
+          "description",
+        ),
+        assigneeSuggestionMemberId: this.resolveOptionalWorkspaceMemberId(
+          meeting.workspaceId,
+          requestBody.assigneeSuggestionMemberId,
+          "assigneeSuggestionMemberId",
+        ),
+        dueDateSuggestion: this.optionalDate(
+          requestBody.dueDateSuggestion,
+          "dueDateSuggestion",
+        ),
+      }),
+    );
+  }
+
+  listActionItems(reportId: string): MeetingActionItemResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listActionItemsByReport(report.id)
+      .map((actionItem) => this.toActionItemReadModel(actionItem));
+  }
+
+  approveActionItem(actionItemId: string): MeetingActionItemResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "draft", "approve");
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.updateActionItem(actionItem.id, {
+        status: "approved",
+        convertedTaskId: null,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  rejectActionItem(actionItemId: string): MeetingActionItemResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "draft", "reject");
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.updateActionItem(actionItem.id, {
+        status: "rejected",
+        convertedTaskId: null,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  markActionItemConverted(
+    actionItemId: string,
+    requestBody: ConvertMeetingActionItemRequestDto,
+  ): MeetingActionItemResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "approved", "convert");
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.updateActionItem(actionItem.id, {
+        status: "converted",
+        convertedTaskId: this.requireNonEmptyString(
+          requestBody.convertedTaskId,
+          "convertedTaskId",
+        ),
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
   private requireMeeting(meetingId: string): MeetingRecord {
     const meeting = this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
@@ -543,6 +632,18 @@ export class MeetingService {
     return report;
   }
 
+  private requireActionItem(actionItemId: string): MeetingActionItemRecord {
+    const actionItem = this.meetingRepository.findActionItemById(
+      this.requireNonEmptyString(actionItemId, "actionItemId"),
+    );
+
+    if (!actionItem) {
+      throw new NotFoundException("Meeting action item not found");
+    }
+
+    return actionItem;
+  }
+
   private toReportDetail(
     report: MeetingReportRecord,
     meeting: MeetingRecord,
@@ -573,7 +674,8 @@ export class MeetingService {
       summary: report.summary,
       decisionCount: this.meetingRepository.listDecisionsByReport(report.id)
         .length,
-      actionItemCount: 0,
+      actionItemCount: this.meetingRepository.listActionItemsByReport(report.id)
+        .length,
       riskCount: this.meetingRepository.listRisksByReport(report.id).length,
       createdAt: report.createdAt,
     };
@@ -614,6 +716,21 @@ export class MeetingService {
       title: nextAgenda.title,
       sortOrder: nextAgenda.sortOrder,
       createdAt: nextAgenda.createdAt,
+    };
+  }
+
+  private toActionItemReadModel(
+    actionItem: MeetingActionItemRecord,
+  ): MeetingActionItemResponseDto {
+    return {
+      id: actionItem.id,
+      reportId: actionItem.reportId,
+      title: actionItem.title,
+      description: actionItem.description,
+      assigneeSuggestionMemberId: actionItem.assigneeSuggestionMemberId,
+      dueDateSuggestion: actionItem.dueDateSuggestion,
+      status: actionItem.status,
+      convertedTaskId: actionItem.convertedTaskId,
     };
   }
 
@@ -737,6 +854,29 @@ export class MeetingService {
     return this.requireNonNegativeInteger(value, fieldName);
   }
 
+  private optionalDate(value: unknown, fieldName: string): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const date = this.requireNonEmptyString(value, fieldName);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException(`${fieldName} must be a date`);
+    }
+
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
+      throw new BadRequestException(`${fieldName} must be a valid date`);
+    }
+
+    return date;
+  }
+
   private assertRiskSortOrderAvailable(
     reportId: string,
     sortOrder: number,
@@ -789,6 +929,30 @@ export class MeetingService {
     return workspaceMember.id;
   }
 
+  private resolveOptionalWorkspaceMemberId(
+    workspaceId: string,
+    value: unknown,
+    fieldName: string,
+  ): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const memberId = this.requireNonEmptyString(value, fieldName);
+    const workspaceMember = this.currentMemberAdapter.getWorkspaceMember(
+      workspaceId,
+      memberId,
+    );
+
+    if (!workspaceMember) {
+      throw new BadRequestException(
+        `${fieldName} must belong to meeting workspace`,
+      );
+    }
+
+    return workspaceMember.id;
+  }
+
   private optionalIsoDateTime(
     value: unknown,
     fieldName: string,
@@ -816,6 +980,18 @@ export class MeetingService {
       new Date(endedAt).getTime() < new Date(startedAt).getTime()
     ) {
       throw new BadRequestException("endedAt must be after startedAt");
+    }
+  }
+
+  private assertActionItemStatus(
+    actionItem: MeetingActionItemRecord,
+    expectedStatus: MeetingActionItemStatus,
+    actionName: string,
+  ): void {
+    if (actionItem.status !== expectedStatus) {
+      throw new BadRequestException(
+        `Cannot ${actionName} meeting action item from ${actionItem.status} status`,
+      );
     }
   }
 }
