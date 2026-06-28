@@ -1,6 +1,21 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+} from "@nestjs/common";
 import { CurrentActor } from "../workspace/workspace-member-access.service";
-import { CreateTaskBody, JuhyungTaskService } from "./juhyung-task.service";
+import {
+  CreateTaskBody,
+  JuhyungTaskService,
+  UpdateTaskBody,
+  UpdateTaskStatusBody,
+} from "./juhyung-task.service";
 
 @Controller("api")
 export class JuhyungTasksController {
@@ -39,6 +54,47 @@ export class JuhyungTasksController {
     @Headers("x-member-id") memberId?: string | string[],
   ) {
     return this.taskService.getTask(taskId, toCurrentActor(userId, memberId));
+  }
+
+  @Patch("tasks/:taskId")
+  updateTask(
+    @Param("taskId") taskId: string,
+    @Body() body: UpdateTaskBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.updateTask(
+      taskId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Patch("tasks/:taskId/status")
+  updateTaskStatus(
+    @Param("taskId") taskId: string,
+    @Body() body: UpdateTaskStatusBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.updateTaskStatus(
+      taskId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Delete("tasks/:taskId")
+  @HttpCode(204)
+  deleteTask(
+    @Param("taskId") taskId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.deleteTask(
+      taskId,
+      toCurrentActor(userId, memberId),
+    );
   }
 }
 

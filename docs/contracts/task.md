@@ -19,17 +19,18 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ## Provided APIs
 
-| Method | Path | 목적 | Consumer |
-|---|---|---|---|
-| `GET` | `/workspaces/:workspaceId/tasks` | Task 목록/필터 조회 | 동현, 주형 |
-| `POST` | `/workspaces/:workspaceId/tasks` | Task 생성 | 주형, 세인 action executor |
-| `GET` | `/tasks/:taskId` | Task 상세 | 전체 |
-| `PATCH` | `/tasks/:taskId` | 제목/설명/담당자/마감일 수정 | 주형 |
-| `PATCH` | `/tasks/:taskId/status` | 상태 변경 | 주형, 세인 action executor |
-| `POST` | `/tasks/:taskId/comments` | 댓글 작성 | 주형 |
-| `POST` | `/tasks/:taskId/checklist-items` | 체크리스트 추가 | 주형 |
-| `POST` | `/tasks/:taskId/dependencies` | 의존성 추가 | 주형 |
-| `POST` | `/workspaces/:workspaceId/task-drafts` | 외부 후보를 Task draft로 변환 | 진호, 세인 |
+| Method   | Path                                   | 목적                          | Consumer                   |
+| -------- | -------------------------------------- | ----------------------------- | -------------------------- |
+| `GET`    | `/workspaces/:workspaceId/tasks`       | Task 목록/필터 조회           | 동현, 주형                 |
+| `POST`   | `/workspaces/:workspaceId/tasks`       | Task 생성                     | 주형, 세인 action executor |
+| `GET`    | `/tasks/:taskId`                       | Task 상세                     | 전체                       |
+| `PATCH`  | `/tasks/:taskId`                       | 제목/설명/담당자/마감일 수정  | 주형                       |
+| `PATCH`  | `/tasks/:taskId/status`                | 상태 변경                     | 주형, 세인 action executor |
+| `DELETE` | `/tasks/:taskId`                       | Task soft delete              | 주형                       |
+| `POST`   | `/tasks/:taskId/comments`              | 댓글 작성                     | 주형                       |
+| `POST`   | `/tasks/:taskId/checklist-items`       | 체크리스트 추가               | 주형                       |
+| `POST`   | `/tasks/:taskId/dependencies`          | 의존성 추가                   | 주형                       |
+| `POST`   | `/workspaces/:workspaceId/task-drafts` | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
 
 ## Read Models
 
@@ -69,6 +70,36 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 }
 ```
 
+## Write Models
+
+### TaskUpdatePatch
+
+`PATCH /tasks/:taskId`는 아래 필드 중 하나 이상을 받는다. `assigneeMemberId`, `description`, `dueDate`, `milestoneId`는 `null`로 비울 수 있다.
+
+```json
+{
+  "title": "GitHub Repository 연결",
+  "description": "GitHub App 설치 후 repository를 연결한다.",
+  "assigneeMemberId": "uuid",
+  "dueDate": "2026-07-04",
+  "milestoneId": null
+}
+```
+
+### TaskStatusUpdate
+
+`PATCH /tasks/:taskId/status`는 `todo`, `in_progress`, `in_review`, `done`, `blocked` 중 하나를 받는다. 상태 변경은 `task_activity_logs`에 `task.status_changed`로 기록한다.
+
+```json
+{
+  "status": "in_review"
+}
+```
+
+### TaskDelete
+
+`DELETE /tasks/:taskId`는 `tasks.deleted_at`을 설정하는 soft delete다. 기본 Task 목록과 상세 조회는 삭제된 Task를 제외한다.
+
 ## Events
 
 - `task.created`
@@ -94,4 +125,3 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 ## Mock Rule
 
 Task API 미구현 시 consumer는 `TaskSummary` fixture를 사용한다. 임시 `tasks` table이나 별도 Task store를 만들지 않는다.
-
