@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Post } from "@nestjs/common";
+import { Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
 import { PullRequestAnalysisRecord } from "./pull-request-analysis.types";
 import { PullRequestAnalysisService } from "./pull-request-analysis.service";
 
@@ -7,6 +7,7 @@ export class PullRequestAnalysisController {
   constructor(private readonly analysisService: PullRequestAnalysisService) {}
 
   @Post(":pullRequestId/analysis")
+  @HttpCode(202)
   requestAnalysis(
     @Param("pullRequestId") pullRequestId: string,
   ): PullRequestAnalysisRecord {

@@ -10,7 +10,7 @@ export class InMemoryPullRequestAnalysisRepository {
   private readonly analysisIdsByPullRequestId = new Map<string, string>();
 
   findById(analysisId: string): PullRequestAnalysisRecord | null {
-    return this.analysesById.get(analysisId) ?? null;
+    return this.cloneNullable(this.analysesById.get(analysisId));
   }
 
   findByPullRequestId(pullRequestId: string): PullRequestAnalysisRecord | null {
@@ -44,12 +44,24 @@ export class InMemoryPullRequestAnalysisRepository {
 
     this.analysesById.set(analysis.id, analysis);
     this.analysisIdsByPullRequestId.set(analysis.pullRequestId, analysis.id);
-    return analysis;
+    return this.clone(analysis);
   }
 
   save(analysis: PullRequestAnalysisRecord): PullRequestAnalysisRecord {
-    this.analysesById.set(analysis.id, analysis);
+    this.analysesById.set(analysis.id, this.clone(analysis));
     this.analysisIdsByPullRequestId.set(analysis.pullRequestId, analysis.id);
-    return analysis;
+    return this.clone(analysis);
+  }
+
+  private clone(
+    analysis: PullRequestAnalysisRecord,
+  ): PullRequestAnalysisRecord {
+    return { ...analysis, errorTrace: [...analysis.errorTrace] };
+  }
+
+  private cloneNullable(
+    analysis: PullRequestAnalysisRecord | null | undefined,
+  ): PullRequestAnalysisRecord | null {
+    return analysis ? this.clone(analysis) : null;
   }
 }

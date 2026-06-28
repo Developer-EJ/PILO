@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import type { ReviewAnalysisStatus } from "../public";
+import { REVIEW_ROOM_PULL_REQUEST_FIXTURES } from "../room/review-room.fixtures";
 import { InMemoryPullRequestAnalysisRepository } from "./in-memory-pull-request-analysis.repository";
 import {
   CompletePullRequestAnalysisInput,
@@ -12,10 +13,6 @@ import {
   ReviewAnalysisCompletedEvent,
   ReviewAnalysisRequestedEvent,
 } from "./pull-request-analysis.types";
-
-const KNOWN_PULL_REQUEST_IDS = new Set([
-  "66666666-6666-4666-8666-666666666661",
-]);
 
 const ALLOWED_TRANSITIONS: Record<
   ReviewAnalysisStatus,
@@ -31,6 +28,10 @@ const ALLOWED_TRANSITIONS: Record<
 export class PullRequestAnalysisService {
   constructor(
     private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
+    private readonly pullRequestSummaries: ReadonlyMap<
+      string,
+      unknown
+    > = REVIEW_ROOM_PULL_REQUEST_FIXTURES,
   ) {}
 
   requestAnalysis(pullRequestId: string): PullRequestAnalysisRecord {
@@ -124,7 +125,7 @@ export class PullRequestAnalysisService {
   }
 
   private assertKnownPullRequest(pullRequestId: string): void {
-    if (!KNOWN_PULL_REQUEST_IDS.has(pullRequestId)) {
+    if (!this.pullRequestSummaries.has(pullRequestId)) {
       throw new NotFoundException(
         `PullRequestSummary fixture was not found: ${pullRequestId}`,
       );
@@ -144,11 +145,25 @@ export class PullRequestAnalysisService {
       impactSummary: result.impactSummary ?? null,
       testRecommendation: result.testRecommendation ?? null,
       riskLevel: result.riskLevel ?? "low",
-      okCount: result.okCount ?? 0,
-      discussCount: result.discussCount ?? 0,
-      riskCount: result.riskCount ?? 0,
+      okCount: this.countOrDefault("okCount", result.okCount),
+      discussCount: this.countOrDefault("discussCount", result.discussCount),
+      riskCount: this.countOrDefault("riskCount", result.riskCount),
       conclusion: result.conclusion ?? null,
       errorTrace: result.errorTrace ?? [],
     };
+  }
+
+  private countOrDefault(fieldName: string, value?: number): number {
+    if (value === undefined) {
+      return 0;
+    }
+
+    if (!Number.isInteger(value) || value < 0) {
+      throw new BadRequestException(
+        `${fieldName} must be a non-negative integer`,
+      );
+    }
+
+    return value;
   }
 }

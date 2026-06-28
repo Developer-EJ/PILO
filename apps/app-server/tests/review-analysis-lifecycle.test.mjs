@@ -53,6 +53,21 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.equal(second.id, first.id);
     assert.equal(second.createdAt, first.createdAt);
   });
+
+  it("does not expose mutable repository records", () => {
+    const service = createService();
+    const analysis = service.requestAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
+
+    analysis.analysisStatus = "succeeded";
+    analysis.errorTrace.push("mutated outside the state machine");
+
+    const loaded = service.getAnalysis("66666666-6666-4666-8666-666666666661");
+
+    assert.equal(loaded.analysisStatus, "pending");
+    assert.deepEqual(loaded.errorTrace, []);
+  });
 });
 
 describe("PR analysis state machine", () => {
@@ -64,14 +79,14 @@ describe("PR analysis state machine", () => {
 
     const running = service.transitionAnalysis(analysis.id, "running");
     const succeeded = service.transitionAnalysis(running.id, "succeeded", {
-      purposeSummary: "OAuth callback 화면 골격 추가",
-      impactSummary: "Auth route와 session redirect flow에 영향",
+      purposeSummary: "OAuth callback 화면 골격을 추가했다.",
+      impactSummary: "Auth route와 session redirect flow에 영향이 있다.",
       testRecommendation: "성공/실패 redirect smoke test",
       riskLevel: "medium",
       okCount: 3,
       discussCount: 1,
       riskCount: 1,
-      conclusion: "리뷰 가능",
+      conclusion: "리뷰 후 merge 가능",
     });
 
     assert.equal(succeeded.analysisStatus, "succeeded");
@@ -96,6 +111,42 @@ describe("PR analysis state machine", () => {
     assert.throws(
       () => service.transitionAnalysis(analysis.id, "succeeded"),
       /Invalid review analysis transition/,
+    );
+  });
+
+  it("preserves failure error traces in completed events", () => {
+    const service = createService();
+    const analysis = service.requestAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
+
+    const running = service.transitionAnalysis(analysis.id, "running");
+    const failed = service.transitionAnalysis(running.id, "failed", {
+      errorTrace: ["AI worker timed out"],
+    });
+
+    assert.deepEqual(service.toAnalysisCompletedEvent(failed), {
+      eventType: "review.analysis_completed",
+      analysisId: failed.id,
+      pullRequestId: failed.pullRequestId,
+      analysisStatus: "failed",
+      errorTrace: ["AI worker timed out"],
+      occurredAt: failed.updatedAt,
+    });
+  });
+
+  it("rejects invalid result counts instead of hiding upstream errors", () => {
+    const service = createService();
+    const analysis = service.requestAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
+
+    const running = service.transitionAnalysis(analysis.id, "running");
+
+    assert.throws(
+      () =>
+        service.transitionAnalysis(running.id, "succeeded", { okCount: -1 }),
+      /okCount must be a non-negative integer/,
     );
   });
 });
