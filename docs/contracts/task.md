@@ -121,18 +121,9 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 
 ```json
 {
+  "workspaceId": "uuid",
   "taskId": "uuid",
-  "status": "in_review",
-  "reason": "PR이 생성되어 리뷰 대기로 전환한다."
-}
-```
-
-### TaskAssignAction
-
-```json
-{
-  "taskId": "uuid",
-  "assigneeMemberId": "uuid"
+  "status": "in_review"
 }
 ```
 
@@ -149,7 +140,6 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 
 - `task.create.draft`
 - `task.update.status`
-- `task.assign`
 
 ## Boundaries
 

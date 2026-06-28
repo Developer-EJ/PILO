@@ -5,7 +5,7 @@
 ## 현재 기준
 
 - `pilo-public-contracts.schema.json`: 핵심 read model, action payload, 공통 DTO 정의
-  - 주형 Task/GitHub/Progress 기준: `TaskSummary`, `TaskDraft`, `MilestoneSummary`, `TaskStatusUpdateAction`, `TaskAssignAction`, `GithubConnectionSummary`, `GithubRepositorySummary`, `GithubIssueSummary`, `GithubIssueCreateAction`, `PullRequestSummary`, `PullRequestChangedFileSummary`, `ProgressSummary`, `ProgressSnapshotSummary`
+  - 주형 Task/GitHub/Progress 기준: `TaskSummary`, `TaskDraft`, `MilestoneSummary`, `TaskStatusUpdateAction`, `GithubConnectionSummary`, `GithubRepositorySummary`, `GithubIssueSummary`, `GithubIssueCreateAction`, `PullRequestSummary`, `PullRequestChangedFileSummary`, `ProgressSummary`, `ProgressSnapshotSummary`
 
 ## 사용 규칙
 
