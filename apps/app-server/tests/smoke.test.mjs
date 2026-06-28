@@ -104,6 +104,86 @@ describe("app-server package", () => {
     );
   });
 
+  it("creates and consumes OAuth state with a safe next path", () => {
+    const service = new AuthService(new AuthRepository());
+    const loginState = service.beginOAuthLogin(
+      "google",
+      "https://evil.example",
+    );
+
+    assert.equal(loginState.nextPath, "/");
+    assert.equal(loginState.provider.id, "google");
+    assert.equal(loginState.state.length > 20, true);
+    assert.equal(loginState.nonce.length > 20, true);
+
+    const result = service.verifyOAuthState({
+      provider: "google",
+      state: loginState.state,
+      nonce: loginState.nonce,
+    });
+
+    assert.equal(result.valid, true);
+    assert.equal(result.record.nextPath, "/");
+
+    const replayResult = service.verifyOAuthState({
+      provider: "google",
+      state: loginState.state,
+      nonce: loginState.nonce,
+    });
+
+    assert.deepEqual(replayResult, {
+      valid: false,
+      reason: "missing",
+    });
+  });
+
+  it("rejects OAuth state provider and nonce mismatches", () => {
+    const repository = new AuthRepository();
+    const service = new AuthService(repository);
+    const providerState = service.beginOAuthLogin("google", "/");
+    const providerMismatch = service.verifyOAuthState({
+      provider: "github",
+      state: providerState.state,
+      nonce: providerState.nonce,
+    });
+    const nonceState = service.beginOAuthLogin("github", "/canvas");
+    const nonceMismatch = service.verifyOAuthState({
+      provider: "github",
+      state: nonceState.state,
+      nonce: "wrong-nonce",
+    });
+
+    assert.deepEqual(providerMismatch, {
+      valid: false,
+      reason: "provider_mismatch",
+    });
+    assert.deepEqual(nonceMismatch, {
+      valid: false,
+      reason: "nonce_mismatch",
+    });
+  });
+
+  it("rejects expired OAuth state records", () => {
+    const repository = new AuthRepository();
+    const record = repository.createOAuthState({
+      provider: "google",
+      nextPath: "/",
+      ttlMs: 1000,
+      now: new Date("2026-06-28T00:00:00.000Z"),
+    });
+    const result = repository.consumeOAuthState({
+      provider: "google",
+      state: record.state,
+      nonce: record.nonce,
+      now: new Date("2026-06-28T00:00:01.000Z"),
+    });
+
+    assert.deepEqual(result, {
+      valid: false,
+      reason: "expired",
+    });
+  });
+
   it("exposes Auth provider readiness without leaking secrets", () => {
     const service = new AuthService(new AuthRepository());
     const response = service.getProviders();

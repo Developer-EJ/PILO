@@ -25,6 +25,7 @@ export type AuthSessionConfig = {
 export type AuthConfig = {
   frontendUrl: string;
   apiBaseUrl: string;
+  oauthStateTtlMs: number;
   session: AuthSessionConfig;
   providers: Record<AuthProviderName, AuthProviderConfig>;
 };
@@ -35,6 +36,7 @@ const LOCAL_SESSION_SECRET = "pilo-local-session-secret-change-before-release";
 const DEFAULT_FRONTEND_URL = "http://localhost:3000";
 const DEFAULT_API_BASE_URL = "http://localhost:4000";
 const DEFAULT_AUTH_NEXT_PATH = "/";
+const DEFAULT_OAUTH_STATE_TTL_SECONDS = 600;
 
 function readEnv(env: AuthEnvironment, key: string) {
   const value = env[key]?.trim();
@@ -48,6 +50,17 @@ function isProductionAuthEnvironment(env: AuthEnvironment) {
 
 function requireAuthEnv(env: AuthEnvironment, keys: string[]) {
   return keys.filter((key) => !readEnv(env, key));
+}
+
+function readPositiveIntegerEnv(
+  env: AuthEnvironment,
+  key: string,
+  fallback: number,
+) {
+  const value = readEnv(env, key);
+  const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function trimTrailingSlash(value: string) {
@@ -162,6 +175,12 @@ export function createAuthConfig(env: AuthEnvironment = process.env) {
   return {
     frontendUrl,
     apiBaseUrl,
+    oauthStateTtlMs:
+      readPositiveIntegerEnv(
+        env,
+        "OAUTH_STATE_TTL_SECONDS",
+        DEFAULT_OAUTH_STATE_TTL_SECONDS,
+      ) * 1000,
     session: createSessionConfig(env),
     providers: {
       google: createProviderConfig(env, apiBaseUrl, {
