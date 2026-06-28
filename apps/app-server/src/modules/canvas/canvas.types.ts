@@ -1,0 +1,158 @@
+import type {
+  CurrentWorkspaceMember,
+  WorkspaceAuthUserRef,
+} from "../workspace/workspace.types";
+
+export type CanvasAuthUserRef = WorkspaceAuthUserRef;
+
+export type CanvasEntityType =
+  | "task"
+  | "meeting_report"
+  | "pull_request"
+  | "github_issue"
+  | "document"
+  | "file"
+  | "code"
+  | "decision"
+  | "risk";
+
+export type CanvasBoardType = "project_map" | "meeting" | "review" | "custom";
+
+export type CanvasBoardRecord = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  boardType: CanvasBoardType;
+  createdByMemberId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type CanvasShapeRecord = {
+  id: string;
+  boardId: string;
+  shapeType: CanvasEntityType;
+  entityType: CanvasEntityType;
+  entityId: string;
+  displayTitle: string;
+  width: number;
+  height: number;
+  color: string;
+  isCollapsed: boolean;
+  zIndex: number;
+  createdByMemberId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type CanvasNodePositionRecord = {
+  shapeId: string;
+  x: number;
+  y: number;
+  updatedAt: string;
+};
+
+export type CanvasConnectionRecord = {
+  id: string;
+  boardId: string;
+  sourceShapeId: string;
+  targetShapeId: string;
+  connectionType: string;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type CanvasViewSettingRecord = {
+  boardId: string;
+  memberId: string;
+  zoom: number;
+  viewportX: number;
+  viewportY: number;
+  updatedAt: string;
+};
+
+export type CanvasFilterSettingRecord = {
+  boardId: string;
+  memberId: string;
+  enabledEntityTypes: CanvasEntityType[];
+  assigneeMemberId: string | null;
+  showDelayedOnly: boolean;
+  showRiskOnly: boolean;
+  filters: Record<string, unknown>;
+  updatedAt: string;
+};
+
+export type CanvasShapeSummary = {
+  id: string;
+  shapeType: CanvasEntityType;
+  entityType: CanvasEntityType;
+  entityId: string;
+  displayTitle: string;
+  width: number;
+  height: number;
+  color: string;
+  isCollapsed: boolean;
+  zIndex: number;
+  position: {
+    x: number;
+    y: number;
+  };
+};
+
+export type CanvasConnectionSummary = {
+  id: string;
+  sourceShapeId: string;
+  targetShapeId: string;
+  connectionType: string;
+  label: string | null;
+};
+
+export type CanvasBoardSummary = {
+  id: string;
+  workspaceId: string;
+  title: string;
+  boardType: CanvasBoardType;
+  shapeCount: number;
+  connectionCount: number;
+  updatedAt: string;
+};
+
+export type CanvasBoardDetail = CanvasBoardSummary & {
+  shapes: CanvasShapeSummary[];
+  connections: CanvasConnectionSummary[];
+  viewSetting: {
+    zoom: number;
+    viewportX: number;
+    viewportY: number;
+  };
+  filterSetting: {
+    enabledEntityTypes: CanvasEntityType[];
+    assigneeMemberId: string | null;
+    showDelayedOnly: boolean;
+    showRiskOnly: boolean;
+    filters: Record<string, unknown>;
+  };
+};
+
+export type CanvasCurrentMemberContext = {
+  currentMember: CurrentWorkspaceMember;
+  permissions: {
+    canRead: boolean;
+    canWrite: boolean;
+    canManage: boolean;
+  };
+};
+
+export type CanvasRepositoryPort = {
+  readonly storageMode: string;
+  listBoardsForWorkspace(workspaceId: string): Promise<CanvasBoardSummary[]>;
+  findBoardWorkspaceId(boardId: string): Promise<string | null>;
+  findBoardDetail(input: {
+    boardId: string;
+    memberId: string;
+  }): Promise<CanvasBoardDetail | null>;
+};
