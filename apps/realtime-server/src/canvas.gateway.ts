@@ -11,8 +11,8 @@ import {
   CanvasRealtimeAck,
   createCanvasBoardRoomName,
   parseCanvasBoardRoomPayload,
-  parseCanvasRealtimeAuthContext,
 } from "./canvas-realtime.contract";
+import { CanvasRealtimeAccessGuard } from "./canvas-realtime-access.guard";
 
 @WebSocketGateway({
   namespace: CANVAS_REALTIME_NAMESPACE,
@@ -22,27 +22,32 @@ import {
   },
 })
 export class CanvasGateway {
+  constructor(
+    private readonly accessGuard: CanvasRealtimeAccessGuard = new CanvasRealtimeAccessGuard(),
+  ) {}
+
   @SubscribeMessage(CANVAS_REALTIME_EVENTS.boardJoin)
   async joinBoardRoom(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: unknown,
   ): Promise<CanvasRealtimeAck> {
-    const currentMember = this.resolveCurrentMember(client);
     const payload = parseCanvasBoardRoomPayload(body);
-
-    if (!currentMember) {
-      return createCanvasErrorAck(
-        CANVAS_REALTIME_EVENTS.boardJoin,
-        "auth_required",
-        "Canvas realtime currentMember context is required.",
-      );
-    }
 
     if (!payload) {
       return createCanvasErrorAck(
         CANVAS_REALTIME_EVENTS.boardJoin,
         "invalid_payload",
         "Canvas board join payload must include boardId.",
+      );
+    }
+
+    const access = this.accessGuard.requireBoardAccess(client, payload.boardId);
+
+    if (!access.ok) {
+      return createCanvasErrorAck(
+        CANVAS_REALTIME_EVENTS.boardJoin,
+        access.error,
+        access.message,
       );
     }
 
@@ -53,7 +58,7 @@ export class CanvasGateway {
       ok: true,
       event: CANVAS_REALTIME_EVENTS.boardJoin,
       room,
-      currentMember,
+      currentMember: access.currentMember,
     };
   }
 
@@ -62,22 +67,23 @@ export class CanvasGateway {
     @ConnectedSocket() client: Socket,
     @MessageBody() body: unknown,
   ): Promise<CanvasRealtimeAck> {
-    const currentMember = this.resolveCurrentMember(client);
     const payload = parseCanvasBoardRoomPayload(body);
-
-    if (!currentMember) {
-      return createCanvasErrorAck(
-        CANVAS_REALTIME_EVENTS.boardLeave,
-        "auth_required",
-        "Canvas realtime currentMember context is required.",
-      );
-    }
 
     if (!payload) {
       return createCanvasErrorAck(
         CANVAS_REALTIME_EVENTS.boardLeave,
         "invalid_payload",
         "Canvas board leave payload must include boardId.",
+      );
+    }
+
+    const access = this.accessGuard.requireBoardAccess(client, payload.boardId);
+
+    if (!access.ok) {
+      return createCanvasErrorAck(
+        CANVAS_REALTIME_EVENTS.boardLeave,
+        access.error,
+        access.message,
       );
     }
 
@@ -88,18 +94,14 @@ export class CanvasGateway {
       ok: true,
       event: CANVAS_REALTIME_EVENTS.boardLeave,
       room,
-      currentMember,
+      currentMember: access.currentMember,
     };
-  }
-
-  private resolveCurrentMember(client: Socket) {
-    return parseCanvasRealtimeAuthContext(client.handshake.auth?.currentMember);
   }
 }
 
 function createCanvasErrorAck(
   event: CanvasRealtimeAck["event"],
-  error: "auth_required" | "invalid_payload",
+  error: Exclude<CanvasRealtimeAck, { ok: true }>["error"],
   message: string,
 ): CanvasRealtimeAck {
   return {
