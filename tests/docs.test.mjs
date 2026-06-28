@@ -180,11 +180,17 @@ describe("machine-readable public contract schema", () => {
     const githubContract = read("docs/contracts/github.md");
     const reviewContract = read("docs/contracts/review.md");
     const juhyungBrief = read("docs/agents/juhyung-task-github-progress.md");
+    const changedFileSummary = schema.$defs.PullRequestChangedFileSummary;
 
-    assert.ok(schema.$defs.PullRequestChangedFileSummary);
+    assert.ok(changedFileSummary);
+    assert.ok(changedFileSummary.required.includes("sha"));
+    assert.equal(changedFileSummary.properties.sha.type, "string");
     assert.match(githubContract, /PullRequestChangedFileSummary/);
     assert.match(githubContract, /\/pull-requests\/:pullRequestId\/changed-files/);
     assert.match(githubContract, /patch/);
+    assert.match(githubContract, /## Provided Read Models/);
+    assert.match(githubContract, /## Consumed By/);
+    assert.match(githubContract, /## Breaking Change Policy/);
     assert.match(reviewContract, /PullRequestChangedFileSummary/);
     assert.match(juhyungBrief, /PullRequestChangedFileSummary/);
   });
@@ -209,6 +215,10 @@ describe("contract fixtures", () => {
     assert.ok(Array.isArray(fixture.agentActions));
     assert.ok(Array.isArray(fixture.meetingReports));
     assert.ok(Array.isArray(fixture.meetingActionItems));
+    assert.ok(Array.isArray(fixture.pullRequestChangedFiles));
+    assert.equal(fixture.pullRequestChangedFiles.length, fixture.pullRequests[0].changedFilesCount);
+    assert.ok(fixture.pullRequestChangedFiles.every((file) => file.pullRequestId === fixture.pullRequests[0].id));
+    assert.ok(fixture.pullRequestChangedFiles.every((file) => typeof file.sha === "string" && file.sha.length > 0));
     assert.ok(fixture.meetingReports.length > 0);
     assert.ok(fixture.meetingActionItems.length > 0);
     assert.equal(fixture.meetingActionItems[0].reportId, fixture.meetingReports[0].id);

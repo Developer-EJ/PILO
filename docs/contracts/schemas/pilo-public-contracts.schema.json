@@ -259,7 +259,7 @@
     },
     "PullRequestChangedFileSummary": {
       "type": "object",
-      "required": ["pullRequestId", "path", "status", "additions", "deletions", "changes", "patch", "sourceSyncedAt"],
+      "required": ["pullRequestId", "path", "status", "additions", "deletions", "changes", "patch", "sha", "sourceSyncedAt"],
       "additionalProperties": false,
       "properties": {
         "pullRequestId": { "$ref": "#/$defs/uuid" },
@@ -270,7 +270,7 @@
         "deletions": { "type": "integer", "minimum": 0 },
         "changes": { "type": "integer", "minimum": 0 },
         "patch": { "type": ["string", "null"] },
-        "sha": { "type": ["string", "null"] },
+        "sha": { "type": "string", "minLength": 1 },
         "blobUrl": { "type": ["string", "null"] },
         "rawUrl": { "type": ["string", "null"] },
         "sourceSyncedAt": { "$ref": "#/$defs/dateTime" }
