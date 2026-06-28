@@ -5,6 +5,7 @@ import {
   createAuthClient,
   createAuthApiClient,
 } from "../lib/auth/authClient.mjs";
+import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 import {
   createMockAuthClient,
   markMockAuthSignedIn,
@@ -266,6 +267,50 @@ describe("frontend package", () => {
       } else {
         process.env.NEXT_PUBLIC_PILO_AUTH_MODE = previousMode;
       }
+    }
+  });
+
+  it("keeps Auth frontend contracts aligned with the public schema", () => {
+    const defs = contractSchema.$defs;
+
+    assert.deepEqual(defs.AuthProvider.enum, ["google", "github"]);
+    assert.deepEqual(defs.CurrentUser.required, [
+      "id",
+      "email",
+      "name",
+      "avatarUrl",
+      "providers",
+      "lastLoginAt",
+    ]);
+    assert.equal(
+      defs.CurrentUser.properties.providers.items.$ref,
+      "#/$defs/AuthProvider",
+    );
+    assert.equal(defs.AuthSessionState.oneOf.length, 2);
+    assert.equal(
+      defs.AuthSessionState.oneOf[0].properties.user.$ref,
+      "#/$defs/CurrentUser",
+    );
+    assert.deepEqual(defs.AuthSessionState.oneOf[1].properties.user, {
+      type: "null",
+    });
+    assert.equal(
+      defs.AuthProvidersResponse.properties.providers.items.$ref,
+      "#/$defs/AuthProviderSummary",
+    );
+    assert.equal(defs.AuthErrorResponse.properties.statusCode.enum[0], 401);
+
+    for (const errorCode of [
+      "oauth_provider_not_configured",
+      "missing_oauth_callback_params",
+      "oauth_state_missing",
+      "oauth_token_missing_access_token",
+      "oauth_callback_failed",
+    ]) {
+      assert.equal(
+        defs.AuthOAuthCallbackErrorCode.enum.includes(errorCode),
+        true,
+      );
     }
   });
 });

@@ -174,8 +174,21 @@ describe("auth HTTP integration", () => {
       const currentUser = meResponse.json();
 
       assert.equal(meResponse.statusCode, 200);
+      assert.deepEqual(Object.keys(currentUser).sort(), [
+        "avatarUrl",
+        "email",
+        "id",
+        "lastLoginAt",
+        "name",
+        "providers",
+      ]);
       assert.equal(currentUser.email, "integration@example.com");
       assert.equal(currentUser.name, "Integration User");
+      assert.equal(
+        currentUser.avatarUrl,
+        "https://example.com/integration.png",
+      );
+      assert.equal(typeof currentUser.lastLoginAt, "string");
       assert.deepEqual(currentUser.providers, ["google"]);
 
       const logoutResponse = await server.inject({
@@ -275,7 +288,10 @@ describe("auth HTTP integration", () => {
       const body = response.json();
 
       assert.equal(response.statusCode, 401);
-      assert.equal(body.statusCode, 401);
+      assert.deepEqual(body, {
+        message: "Unauthorized",
+        statusCode: 401,
+      });
     } finally {
       await close();
     }
