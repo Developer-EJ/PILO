@@ -1,4 +1,4 @@
-import { Controller } from "@nestjs/common";
+import { Controller, Get } from "@nestjs/common";
 import { MeetingScaffoldResponseDto } from "./dto/meeting-scaffold-response.dto";
 import { MeetingService } from "./meeting.service";
 
@@ -6,6 +6,7 @@ import { MeetingService } from "./meeting.service";
 export class MeetingController {
   constructor(private readonly meetingService: MeetingService) {}
 
+  @Get()
   getScaffoldStatus(): MeetingScaffoldResponseDto {
     return this.meetingService.getScaffoldStatus();
   }

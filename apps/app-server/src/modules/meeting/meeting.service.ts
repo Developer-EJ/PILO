@@ -15,7 +15,6 @@ export class MeetingService {
   getScaffoldStatus(): MeetingScaffoldResponseDto {
     return {
       module: "meeting",
-      repositoryMode: this.meetingRepository.mode,
       meetingStatusValues: this.meetingRepository.listMeetingStatusValues(),
     };
   }
