@@ -364,8 +364,8 @@
         "id": { "$ref": "#/$defs/uuid" },
         "analysisId": { "$ref": "#/$defs/uuid" },
         "pullRequestId": { "$ref": "#/$defs/uuid" },
-        "intentSummary": { "type": "string" },
-        "reviewStrategy": { "type": "string" },
+        "intentSummary": { "type": "string", "minLength": 1 },
+        "reviewStrategy": { "type": "string", "minLength": 1 },
         "nodes": { "type": "array", "items": { "$ref": "#/$defs/ReviewCanvasNode" } },
         "edges": { "type": "array", "items": { "$ref": "#/$defs/ReviewCanvasEdge" } }
       }
@@ -384,8 +384,8 @@
         "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
         "status": { "enum": ["ok", "discuss", "unknown"] },
         "reviewOrder": { "type": "integer", "minimum": 1 },
-        "roleSummary": { "type": "string" },
-        "reviewReason": { "type": "string" },
+        "roleSummary": { "type": "string", "minLength": 1 },
+        "reviewReason": { "type": "string", "minLength": 1 },
         "position": {
           "type": "object",
           "required": ["x", "y"],
@@ -416,9 +416,9 @@
         "id": { "$ref": "#/$defs/uuid" },
         "analysisId": { "$ref": "#/$defs/uuid" },
         "nodeId": { "$ref": "#/$defs/uuid" },
-        "filePath": { "type": "string" },
-        "roleSummary": { "type": "string" },
-        "modificationReason": { "type": "string" },
+        "filePath": { "type": "string", "minLength": 1 },
+        "roleSummary": { "type": "string", "minLength": 1 },
+        "modificationReason": { "type": "string", "minLength": 1 },
         "changeGroups": { "type": "array", "items": { "$ref": "#/$defs/ReviewChangeGroup" } },
         "diffHunks": { "type": "array", "items": { "$ref": "#/$defs/ReviewDiffHunk" } }
       }
@@ -430,7 +430,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "title": { "type": "string", "minLength": 1 },
-        "summary": { "type": "string" },
+        "summary": { "type": "string", "minLength": 1 },
         "newStartLine": { "type": "integer", "minimum": 1 },
         "newEndLine": { "type": ["integer", "null"], "minimum": 1 }
       }
