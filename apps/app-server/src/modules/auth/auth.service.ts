@@ -9,6 +9,10 @@ import {
 } from "./auth.config";
 import { AuthRepository } from "./auth.repository";
 import type { OAuthStateValidationResult } from "./auth.state";
+import type {
+  OAuthIdentityRecord,
+  OAuthTokenMetadata,
+} from "./auth.repository";
 
 export type AuthProviderSummary = {
   id: AuthProviderConfig["id"];
@@ -67,6 +71,7 @@ export type OAuthCallbackResult =
       provider: AuthProviderName;
       nextPath: string;
       profile: OAuthProviderProfile;
+      identity: OAuthIdentityRecord;
     }
   | {
       ok: false;
@@ -204,13 +209,25 @@ export class AuthService {
     try {
       const provider = this.getConfiguredProvider(providerId);
       const token = await this.exchangeOAuthCode(provider, query.code);
-      const profile = await this.fetchProviderProfile(provider, token);
+      const profile = await this.fetchProviderProfile(
+        provider,
+        token.accessToken,
+      );
+      const identity = this.authRepository.upsertOAuthIdentity({
+        profile,
+        token: {
+          scopes: token.scopes.length > 0 ? token.scopes : provider.scopes,
+          tokenType: token.tokenType,
+          tokenExpiresAt: token.tokenExpiresAt,
+        },
+      });
 
       return {
         ok: true,
         provider: providerId,
         nextPath: stateResult.record.nextPath,
         profile,
+        identity,
       };
     } catch (error) {
       return {
@@ -283,7 +300,10 @@ export class AuthService {
     return provider;
   }
 
-  private async exchangeOAuthCode(provider: AuthProviderConfig, code: string) {
+  private async exchangeOAuthCode(
+    provider: AuthProviderConfig,
+    code: string,
+  ): Promise<OAuthTokenMetadata & { accessToken: string }> {
     const response = await this.fetcher(provider.tokenUrl, {
       method: "POST",
       headers: {
@@ -310,7 +330,14 @@ export class AuthService {
       throw new AuthFlowError("oauth_token_missing_access_token");
     }
 
-    return accessToken;
+    return {
+      accessToken,
+      scopes: parseScopeList(getStringField(tokenResponse, "scope")),
+      tokenType: getStringField(tokenResponse, "token_type"),
+      tokenExpiresAt: createTokenExpiresAt(
+        getNumberField(tokenResponse, "expires_in"),
+      ),
+    };
   }
 
   private async fetchProviderProfile(
@@ -388,6 +415,16 @@ function getStringOrNumberField(value: unknown, key: string) {
   return typeof field === "string" ? field : null;
 }
 
+function getNumberField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const field = (value as Record<string, unknown>)[key];
+
+  return typeof field === "number" && Number.isFinite(field) ? field : null;
+}
+
 function getBooleanField(value: unknown, key: string) {
   if (!value || typeof value !== "object") {
     return null;
@@ -396,4 +433,16 @@ function getBooleanField(value: unknown, key: string) {
   const field = (value as Record<string, unknown>)[key];
 
   return typeof field === "boolean" ? field : null;
+}
+
+function parseScopeList(scope: string | null) {
+  return scope?.split(/\s+/).filter(Boolean) ?? [];
+}
+
+function createTokenExpiresAt(expiresInSeconds: number | null) {
+  if (!expiresInSeconds) {
+    return null;
+  }
+
+  return new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 }
