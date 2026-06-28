@@ -33,6 +33,8 @@ describe("app-server package", () => {
     assert.equal(config.frontendUrl, "http://localhost:3000");
     assert.equal(config.apiBaseUrl, "http://localhost:4000");
     assert.equal(config.session.source, "local-fallback");
+    assert.equal(config.session.secretVersion, "v1");
+    assert.equal(config.session.hashAlgorithm, "hmac-sha256");
     assert.equal(config.session.ttlMs, 604800000);
     assert.equal(config.session.secure, false);
     assert.equal(config.providers.google.configured, false);
@@ -300,6 +302,8 @@ describe("app-server package", () => {
     assert.equal(result.session.record.userId, result.identity.user.id);
     assert.equal(result.session.record.userAgent, "Mozilla/5.0");
     assert.equal(result.session.record.ipAddress, "127.0.0.1");
+    assert.equal(result.session.record.tokenHashAlgorithm, "hmac-sha256");
+    assert.equal(result.session.record.secretVersion, "v1");
     assert.equal(result.session.record.refreshTokenHash.length, 64);
     assert.notEqual(
       decodeURIComponent(
@@ -665,6 +669,61 @@ describe("app-server package", () => {
     assert.equal(
       anonymousLogoutResult.cookieHeader.includes("Max-Age=0"),
       true,
+    );
+  });
+
+  it("rejects a session cookie when the session secret no longer matches", async () => {
+    const baseEnv = {
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    };
+    const fetcher = async (url) => {
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return globalThis.Response.json({
+          access_token: "google-access-token",
+        });
+      }
+
+      return globalThis.Response.json({
+        sub: "google-user-123",
+        email: "user@example.com",
+        name: "Google User",
+      });
+    };
+    const repository = new AuthRepository();
+    const issuingService = new AuthService(repository, {
+      config: createAuthConfig({
+        ...baseEnv,
+        SESSION_SECRET: "old-session-secret",
+        AUTH_SESSION_SECRET_VERSION: "old",
+      }),
+      fetcher,
+    });
+    const authorization = issuingService.createOAuthAuthorizationRedirect(
+      "google",
+      "/",
+    );
+    const result = await issuingService.handleOAuthCallback("google", {
+      code: "google-code",
+      state: authorization.state,
+    });
+    const rotatedService = new AuthService(repository, {
+      config: createAuthConfig({
+        ...baseEnv,
+        SESSION_SECRET: "new-session-secret",
+        AUTH_SESSION_SECRET_VERSION: "new",
+      }),
+      fetcher,
+    });
+
+    assert.equal(result.session.record.secretVersion, "old");
+    assert.equal(
+      rotatedService.getCurrentUserFromCookieHeader(
+        result.session.cookieHeader,
+      ),
+      null,
     );
   });
 

@@ -377,6 +377,8 @@ export class AuthService {
     const record = this.authRepository.createAuthSession({
       userId,
       refreshTokenHash: this.hashSessionToken(rawToken),
+      tokenHashAlgorithm: this.config.session.hashAlgorithm,
+      secretVersion: this.config.session.secretVersion,
       userAgent: metadata.userAgent,
       ipAddress: metadata.ipAddress,
       expiresAt,

@@ -19,6 +19,8 @@ export type AuthProviderConfig = {
 export type AuthSessionConfig = {
   cookieName: string;
   secret: string;
+  secretVersion: string;
+  hashAlgorithm: "hmac-sha256";
   source: "env" | "local-fallback";
   ttlMs: number;
   secure: boolean;
@@ -41,6 +43,7 @@ const DEFAULT_API_BASE_URL = "http://localhost:4000";
 const DEFAULT_AUTH_NEXT_PATH = "/";
 const DEFAULT_OAUTH_STATE_TTL_SECONDS = 600;
 const DEFAULT_AUTH_SESSION_TTL_SECONDS = 604800;
+const DEFAULT_AUTH_SESSION_SECRET_VERSION = "v1";
 
 function readEnv(env: AuthEnvironment, key: string) {
   const value = env[key]?.trim();
@@ -141,11 +144,16 @@ function createSessionConfig(env: AuthEnvironment): AuthSessionConfig {
     "AUTH_SESSION_COOKIE_SECURE",
     isProductionAuthEnvironment(env),
   );
+  const secretVersion =
+    readEnv(env, "AUTH_SESSION_SECRET_VERSION") ??
+    DEFAULT_AUTH_SESSION_SECRET_VERSION;
 
   if (sessionSecret) {
     return {
       cookieName: readEnv(env, "AUTH_SESSION_COOKIE_NAME") ?? "pilo_session",
       secret: sessionSecret,
+      secretVersion,
+      hashAlgorithm: "hmac-sha256",
       source: "env",
       ttlMs,
       secure,
@@ -158,6 +166,8 @@ function createSessionConfig(env: AuthEnvironment): AuthSessionConfig {
   return {
     cookieName: readEnv(env, "AUTH_SESSION_COOKIE_NAME") ?? "pilo_session",
     secret: LOCAL_SESSION_SECRET,
+    secretVersion,
+    hashAlgorithm: "hmac-sha256",
     source: "local-fallback",
     ttlMs,
     secure,
