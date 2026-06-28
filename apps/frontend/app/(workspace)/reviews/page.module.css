@@ -18,7 +18,8 @@
 .panel,
 .prItem,
 .task,
-.canvasPanel {
+.canvasPanel,
+.detailPanel {
   border: 1px solid #e3e7ef;
   background: #ffffff;
 }
@@ -36,7 +37,8 @@
 .reviewPanel,
 .summary,
 .panel,
-.task {
+.task,
+.detailPanel {
   display: grid;
 }
 
@@ -51,7 +53,8 @@
 .metric strong,
 .panel h2,
 .task strong,
-.intentPanel h2 {
+.intentPanel h2,
+.explainPanel h2 {
   margin: 0;
   color: #151923;
 }
@@ -89,7 +92,8 @@
 .queue,
 .summary,
 .panel,
-.canvasPanel {
+.canvasPanel,
+.detailPanel {
   border-radius: 8px;
 }
 
@@ -100,7 +104,9 @@
 
 .sectionHead,
 .panelTitle,
-.meta {
+.meta,
+.detailHeader,
+.decisionBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -189,14 +195,17 @@
   padding: 18px;
 }
 
-.panel h2 {
+.panel h2,
+.explainPanel h2 {
   font-size: 16px;
 }
 
 .panel p,
 .task p,
 .intentPanel p,
-.reviewOrder {
+.reviewOrder,
+.explainPanel p,
+.changeGroup p {
   margin: 0;
   color: #394150;
   font-size: 13px;
@@ -324,6 +333,131 @@
   padding-left: 18px;
 }
 
+.detailPanel {
+  overflow: hidden;
+}
+
+.detailHeader {
+  border-bottom: 1px solid #e3e7ef;
+  padding: 12px 14px;
+}
+
+.backButton,
+.decisionButton,
+.changeGroup button {
+  border: 1px solid #d8deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202635;
+  font-weight: 800;
+}
+
+.backButton {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 9px 12px;
+  text-align: left;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.48fr);
+  min-height: 430px;
+}
+
+.diffViewer {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  background: #f8fafc;
+  padding: 16px;
+}
+
+.diffHunk {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.diffHunkActive .diffColumn {
+  border-color: #f0b65d;
+}
+
+.diffColumn {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #d8deea;
+  border-radius: 8px;
+  background: #111827;
+  padding: 12px;
+}
+
+.diffColumn pre {
+  margin: 0;
+  overflow: auto;
+  color: #d8dee9;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre;
+}
+
+.explainPanel {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  border-left: 1px solid #e3e7ef;
+  padding: 18px;
+}
+
+.explainPanel section {
+  display: grid;
+  gap: 8px;
+}
+
+.changeGroups {
+  display: grid;
+  gap: 10px;
+}
+
+.changeGroup {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 10px;
+}
+
+.changeGroup button {
+  justify-self: start;
+  padding: 7px 10px;
+}
+
+.changeGroup span {
+  color: #687386;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.decisionBar {
+  justify-content: flex-end;
+  border-top: 1px solid #e3e7ef;
+  padding: 12px 14px;
+}
+
+.decisionButton {
+  padding: 9px 12px;
+}
+
+.decisionButtonActive {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}
+
 @media (max-width: 860px) {
   .shell {
     padding: 18px;
@@ -333,7 +467,9 @@
   .workspace,
   .panelGrid,
   .metrics,
-  .canvasPanel {
+  .canvasPanel,
+  .detailGrid,
+  .diffHunk {
     grid-template-columns: 1fr;
   }
 
@@ -348,8 +484,17 @@
     overflow: auto;
   }
 
-  .intentPanel {
+  .intentPanel,
+  .explainPanel {
     border-top: 1px solid #e3e7ef;
     border-left: 0;
+  }
+
+  .decisionBar {
+    justify-content: stretch;
+  }
+
+  .decisionButton {
+    flex: 1;
   }
 }

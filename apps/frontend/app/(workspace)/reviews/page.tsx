@@ -1,3 +1,4 @@
+import { ReviewNodeWorkspace } from "./review-node-workspace";
 import styles from "./page.module.css";
 
 const pullRequests = [
@@ -68,6 +69,31 @@ const reviewCanvas = {
       roleSummary:
         "OAuth provider가 돌려준 callback query를 읽어 성공/실패 화면으로 연결한다.",
       position: { x: 84, y: 72 },
+      detail: {
+        filePath: "apps/frontend/app/auth/callback/page.tsx",
+        modificationReason:
+          "기존 placeholder만으로는 로그인 성공/실패 맥락을 설명할 수 없었다.",
+        changeGroups: [
+          {
+            id: "query",
+            title: "callback query 해석",
+            summary:
+              "provider와 error query parameter를 읽어 callback 결과 컴포넌트로 넘긴다.",
+            newStartLine: 12,
+            newEndLine: 18,
+          },
+        ],
+        diffHunks: [
+          {
+            id: "callback-query",
+            oldStartLine: 10,
+            newStartLine: 12,
+            oldCode: "return <div>Loading...</div>;",
+            newCode:
+              "const provider = searchParams.get('provider');\nconst error = searchParams.get('error');\nreturn <CallbackResult provider={provider} error={error} />;",
+          },
+        ],
+      },
     },
     {
       id: "88888888-8888-4888-8888-888888888892",
@@ -78,6 +104,31 @@ const reviewCanvas = {
       roleSummary:
         "callback 결과가 기존 session redirect 흐름과 충돌하지 않는지 확인한다.",
       position: { x: 380, y: 190 },
+      detail: {
+        filePath: "apps/frontend/app/auth/callback/page.tsx",
+        modificationReason:
+          "callback route가 session redirect 흐름에서 성공/실패 상태를 명확히 전달하도록 영향 범위를 확인한다.",
+        changeGroups: [
+          {
+            id: "redirect-copy",
+            title: "redirect 상태 문구",
+            summary:
+              "성공과 실패 상태를 분기해 사용자가 다음 행동을 알 수 있게 한다.",
+            newStartLine: 20,
+            newEndLine: 28,
+          },
+        ],
+        diffHunks: [
+          {
+            id: "redirect-copy",
+            oldStartLine: 20,
+            newStartLine: 20,
+            oldCode: "return <StatusMessage />;",
+            newCode:
+              "return error ? <FailureMessage provider={provider} /> : <SuccessMessage />;",
+          },
+        ],
+      },
     },
   ],
 };
@@ -94,13 +145,6 @@ const analysisStatusLabels: Record<string, string> = {
   running: "분석 중",
   succeeded: "분석 완료",
   failed: "분석 실패",
-};
-
-const riskClassNames: Record<string, string> = {
-  low: styles.nodeLow,
-  medium: styles.nodeMedium,
-  high: styles.nodeHigh,
-  critical: styles.nodeCritical,
 };
 
 export default function ReviewsPage() {
@@ -220,41 +264,7 @@ export default function ReviewsPage() {
               </section>
             </div>
 
-            <section className={styles.canvasPanel} aria-label="Review canvas">
-              <div className={styles.canvas}>
-                {reviewCanvas.nodes.map((node) => (
-                  <button
-                    className={`${styles.canvasNode} ${
-                      riskClassNames[node.riskLevel]
-                    }`}
-                    key={node.id}
-                    style={{
-                      left: node.position.x,
-                      top: node.position.y,
-                    }}
-                    type="button"
-                  >
-                    <span>{node.reviewOrder}</span>
-                    <strong>{node.label}</strong>
-                    <small>{node.nodeType}</small>
-                  </button>
-                ))}
-              </div>
-
-              <aside className={styles.intentPanel}>
-                <span className={styles.eyebrow}>PR intent</span>
-                <h2>{reviewCanvas.intentSummary}</h2>
-                <p>{reviewCanvas.reviewStrategy}</p>
-                <ol className={styles.reviewOrder}>
-                  {reviewCanvas.nodes.map((node) => (
-                    <li key={node.id}>
-                      <strong>{node.reviewOrder}. </strong>
-                      {node.roleSummary}
-                    </li>
-                  ))}
-                </ol>
-              </aside>
-            </section>
+            <ReviewNodeWorkspace reviewCanvas={reviewCanvas} />
           </section>
         </section>
       </div>
