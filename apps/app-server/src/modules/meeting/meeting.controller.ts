@@ -1,13 +1,17 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
   CreateMeetingAgendaRequestDto,
+  CreateMeetingMemoRequestDto,
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
+  CreateTranscriptSegmentRequestDto,
   MeetingAgendaResponseDto,
+  MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
   ReorderMeetingAgendaRequestDto,
+  TranscriptSegmentResponseDto,
   UpdateMeetingAgendaStatusRequestDto,
   UpdateMeetingStatusRequestDto,
 } from "./dto/meeting-scaffold-response.dto";
@@ -107,5 +111,33 @@ export class MeetingController {
     @Body() requestBody: ReorderMeetingAgendaRequestDto,
   ): MeetingAgendaResponseDto {
     return this.meetingService.reorderAgenda(meetingId, agendaId, requestBody);
+  }
+
+  @Post("meetings/:meetingId/memos")
+  createMemo(
+    @Param("meetingId") meetingId: string,
+    @Body() requestBody: CreateMeetingMemoRequestDto,
+  ): MeetingMemoResponseDto {
+    return this.meetingService.createMemo(meetingId, requestBody);
+  }
+
+  @Get("meetings/:meetingId/memos")
+  listMemos(@Param("meetingId") meetingId: string): MeetingMemoResponseDto[] {
+    return this.meetingService.listMemos(meetingId);
+  }
+
+  @Post("meetings/:meetingId/transcript-segments")
+  createTranscriptSegment(
+    @Param("meetingId") meetingId: string,
+    @Body() requestBody: CreateTranscriptSegmentRequestDto,
+  ): TranscriptSegmentResponseDto {
+    return this.meetingService.createTranscriptSegment(meetingId, requestBody);
+  }
+
+  @Get("meetings/:meetingId/transcript-segments")
+  listTranscriptSegments(
+    @Param("meetingId") meetingId: string,
+  ): TranscriptSegmentResponseDto[] {
+    return this.meetingService.listTranscriptSegments(meetingId);
   }
 }

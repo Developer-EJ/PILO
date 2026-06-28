@@ -10,13 +10,17 @@ import {
 } from "./adapters/current-member.adapter";
 import {
   CreateMeetingAgendaRequestDto,
+  CreateMeetingMemoRequestDto,
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
+  CreateTranscriptSegmentRequestDto,
   MeetingAgendaResponseDto,
+  MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
   ReorderMeetingAgendaRequestDto,
+  TranscriptSegmentResponseDto,
   UpdateMeetingAgendaStatusRequestDto,
   UpdateMeetingStatusRequestDto,
 } from "./dto/meeting-scaffold-response.dto";
@@ -27,11 +31,13 @@ import {
 import {
   MEETING_AGENDA_STATUS_VALUES,
   MEETING_STATUS_VALUES,
+  TRANSCRIPT_SOURCE_VALUES,
   MeetingAgendaRecord,
   MeetingAgendaStatus,
   MeetingRecord,
   MeetingParticipantRecord,
   MeetingStatus,
+  TranscriptSource,
 } from "./types/meeting.types";
 
 @Injectable()
@@ -226,6 +232,60 @@ export class MeetingService {
     });
   }
 
+  createMemo(
+    meetingId: string,
+    requestBody: CreateMeetingMemoRequestDto,
+  ): MeetingMemoResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.createMemo({
+      meetingId: meeting.id,
+      authorMemberId: this.resolveWorkspaceMemberId(
+        meeting.workspaceId,
+        requestBody.authorMemberId,
+      ),
+      body: this.requireNonEmptyString(requestBody.body, "body"),
+    });
+  }
+
+  listMemos(meetingId: string): MeetingMemoResponseDto[] {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.listMemosByMeeting(meeting.id);
+  }
+
+  createTranscriptSegment(
+    meetingId: string,
+    requestBody: CreateTranscriptSegmentRequestDto,
+  ): TranscriptSegmentResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+    const startedAt = this.optionalIsoDateTime(
+      requestBody.startedAt,
+      "startedAt",
+    );
+    const endedAt = this.optionalIsoDateTime(requestBody.endedAt, "endedAt");
+
+    this.validateTimeRange(startedAt, endedAt);
+
+    return this.meetingRepository.createTranscriptSegment({
+      meetingId: meeting.id,
+      speakerMemberId: this.resolveWorkspaceMemberId(
+        meeting.workspaceId,
+        requestBody.speakerMemberId,
+      ),
+      source: this.parseTranscriptSource(requestBody.source),
+      body: this.requireNonEmptyString(requestBody.body, "body"),
+      startedAt,
+      endedAt,
+    });
+  }
+
+  listTranscriptSegments(meetingId: string): TranscriptSegmentResponseDto[] {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id);
+  }
+
   private requireMeeting(meetingId: string): MeetingRecord {
     const meeting = this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
@@ -292,6 +352,23 @@ export class MeetingService {
     );
   }
 
+  private parseTranscriptSource(value: unknown): TranscriptSource {
+    if (value === undefined || value === null) {
+      return "text";
+    }
+
+    if (
+      typeof value === "string" &&
+      TRANSCRIPT_SOURCE_VALUES.includes(value as TranscriptSource)
+    ) {
+      return value as TranscriptSource;
+    }
+
+    throw new BadRequestException(
+      `source must be one of: ${TRANSCRIPT_SOURCE_VALUES.join(", ")}`,
+    );
+  }
+
   private requireNonEmptyString(value: unknown, fieldName: string): string {
     if (typeof value === "string" && value.trim().length > 0) {
       return value.trim();
@@ -331,5 +408,57 @@ export class MeetingService {
     }
 
     return this.requireNonNegativeInteger(value, fieldName);
+  }
+
+  private resolveWorkspaceMemberId(
+    workspaceId: string,
+    value: unknown,
+  ): string {
+    const memberId =
+      value === undefined || value === null
+        ? this.currentMemberAdapter.getCurrentMember(workspaceId).id
+        : this.requireNonEmptyString(value, "memberId");
+    const workspaceMember = this.currentMemberAdapter.getWorkspaceMember(
+      workspaceId,
+      memberId,
+    );
+
+    if (!workspaceMember) {
+      throw new BadRequestException(
+        "memberId must belong to meeting workspace",
+      );
+    }
+
+    return workspaceMember.id;
+  }
+
+  private optionalIsoDateTime(
+    value: unknown,
+    fieldName: string,
+  ): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const dateTime = this.requireNonEmptyString(value, fieldName);
+
+    if (Number.isNaN(Date.parse(dateTime))) {
+      throw new BadRequestException(`${fieldName} must be an ISO date-time`);
+    }
+
+    return dateTime;
+  }
+
+  private validateTimeRange(
+    startedAt: string | null,
+    endedAt: string | null,
+  ): void {
+    if (
+      startedAt &&
+      endedAt &&
+      new Date(endedAt).getTime() < new Date(startedAt).getTime()
+    ) {
+      throw new BadRequestException("endedAt must be after startedAt");
+    }
   }
 }
