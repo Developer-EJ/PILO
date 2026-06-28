@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
+import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
 const {
@@ -13,6 +14,15 @@ const {
 } = require("../src/modules/auth/auth.config");
 const { AuthRepository } = require("../src/modules/auth/auth.repository");
 const { AuthService } = require("../src/modules/auth/auth.service");
+const {
+  WORKSPACE_MEMBER_ROLES,
+  WORKSPACE_STATUSES,
+  WORKSPACE_TYPES,
+} = require("../src/modules/workspace/workspace.types");
+const {
+  WorkspaceAccessError,
+  WorkspaceService,
+} = require("../src/modules/workspace/workspace.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
@@ -738,12 +748,101 @@ describe("app-server package", () => {
     assert.equal(JSON.stringify(response).includes("secret"), false);
   });
 
-  it("boots the Nest app module with AuthModule registered", async () => {
+  it("keeps Workspace scaffold enums aligned with the public contract schema", () => {
+    assert.deepEqual(
+      WORKSPACE_TYPES,
+      contractSchema.$defs.WorkspaceSummary.properties.type.enum,
+    );
+    assert.deepEqual(
+      WORKSPACE_STATUSES,
+      contractSchema.$defs.WorkspaceSummary.properties.status.enum,
+    );
+    assert.deepEqual(
+      WORKSPACE_MEMBER_ROLES,
+      contractSchema.$defs.WorkspaceMemberSummary.properties.role.enum,
+    );
+    assert.deepEqual(
+      WORKSPACE_MEMBER_ROLES,
+      contractSchema.$defs.WorkspaceSummary.properties.myRole.enum,
+    );
+  });
+
+  it("resolves currentMember from currentUser without leaking Auth session details", async () => {
+    const repositoryCalls = [];
+    const service = new WorkspaceService({
+      storageMode: "test",
+      async findCurrentMember(input) {
+        repositoryCalls.push(input);
+
+        return {
+          id: "member-1",
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          role: "owner",
+          displayName: "Workspace / Canvas",
+          joinedAt: "2026-06-28T00:00:00.000Z",
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z",
+        };
+      },
+    });
+
+    const currentMember = await service.resolveCurrentMember({
+      workspaceId: "workspace-1",
+      currentUser: {
+        id: "user-1",
+        email: "user@example.com",
+        providers: ["google"],
+      },
+    });
+
+    assert.deepEqual(repositoryCalls, [
+      {
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      },
+    ]);
+    assert.deepEqual(currentMember, {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "owner",
+      displayName: "Workspace / Canvas",
+    });
+    assert.equal("providers" in currentMember, false);
+    assert.equal("email" in currentMember, false);
+  });
+
+  it("requires workspace membership before exposing member-scoped context", async () => {
+    const service = new WorkspaceService({
+      storageMode: "test",
+      async findCurrentMember() {
+        return null;
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.requireCurrentMember({
+          workspaceId: "workspace-1",
+          currentUser: { id: "user-1" },
+        }),
+      (error) =>
+        error instanceof WorkspaceAccessError &&
+        error.code === "workspace_member_not_found" &&
+        error.workspaceId === "workspace-1",
+    );
+  });
+
+  it("boots the Nest app module with AuthModule and WorkspaceModule registered", async () => {
     const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
       logger: false,
     });
 
     await app.init();
+    assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
+      storageMode: "not-connected",
+    });
     await app.close();
   });
 });
