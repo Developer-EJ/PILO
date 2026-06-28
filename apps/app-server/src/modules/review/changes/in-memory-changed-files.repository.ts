@@ -15,13 +15,18 @@ export class InMemoryChangedFilesRepository {
     const fileId = this.fileIdsByAnalysisAndPath.get(
       this.fileKey(analysisId, filePath),
     );
-    return fileId ? (this.filesById.get(fileId) ?? null) : null;
+    return fileId ? this.cloneFileNullable(this.filesById.get(fileId)) : null;
+  }
+
+  findFileById(changedFileId: string): ChangedFileRecord | null {
+    return this.cloneFileNullable(this.filesById.get(changedFileId));
   }
 
   listFilesByAnalysis(analysisId: string): ChangedFileRecord[] {
     return [...this.filesById.values()]
       .filter((file) => file.analysisId === analysisId)
-      .sort((a, b) => a.filePath.localeCompare(b.filePath));
+      .sort((a, b) => a.filePath.localeCompare(b.filePath))
+      .map((file) => this.cloneFile(file));
   }
 
   listFunctionsByFile(changedFileId: string): ChangedFunctionRecord[] {
@@ -29,7 +34,8 @@ export class InMemoryChangedFilesRepository {
       .filter(
         (changedFunction) => changedFunction.changedFileId === changedFileId,
       )
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((changedFunction) => this.cloneFunction(changedFunction));
   }
 
   findFunctionByFileAndName(
@@ -39,25 +45,46 @@ export class InMemoryChangedFilesRepository {
     const functionId = this.functionIdsByFileAndName.get(
       this.functionKey(changedFileId, name),
     );
-    return functionId ? (this.functionsById.get(functionId) ?? null) : null;
+    return functionId
+      ? this.cloneFunctionNullable(this.functionsById.get(functionId))
+      : null;
   }
 
   saveFile(file: ChangedFileRecord): ChangedFileRecord {
-    this.filesById.set(file.id, file);
+    const previous = this.filesById.get(file.id);
+
+    if (previous) {
+      this.fileIdsByAnalysisAndPath.delete(
+        this.fileKey(previous.analysisId, previous.filePath),
+      );
+    }
+
+    this.filesById.set(file.id, this.cloneFile(file));
     this.fileIdsByAnalysisAndPath.set(
       this.fileKey(file.analysisId, file.filePath),
       file.id,
     );
-    return file;
+    return this.cloneFile(file);
   }
 
   saveFunction(changedFunction: ChangedFunctionRecord): ChangedFunctionRecord {
-    this.functionsById.set(changedFunction.id, changedFunction);
+    const previous = this.functionsById.get(changedFunction.id);
+
+    if (previous) {
+      this.functionIdsByFileAndName.delete(
+        this.functionKey(previous.changedFileId, previous.name),
+      );
+    }
+
+    this.functionsById.set(
+      changedFunction.id,
+      this.cloneFunction(changedFunction),
+    );
     this.functionIdsByFileAndName.set(
       this.functionKey(changedFunction.changedFileId, changedFunction.name),
       changedFunction.id,
     );
-    return changedFunction;
+    return this.cloneFunction(changedFunction);
   }
 
   private fileKey(analysisId: string, filePath: string): string {
@@ -66,5 +93,27 @@ export class InMemoryChangedFilesRepository {
 
   private functionKey(changedFileId: string, name: string): string {
     return `${changedFileId}:${name}`;
+  }
+
+  private cloneFile(file: ChangedFileRecord): ChangedFileRecord {
+    return { ...file };
+  }
+
+  private cloneFileNullable(
+    file: ChangedFileRecord | null | undefined,
+  ): ChangedFileRecord | null {
+    return file ? this.cloneFile(file) : null;
+  }
+
+  private cloneFunction(
+    changedFunction: ChangedFunctionRecord,
+  ): ChangedFunctionRecord {
+    return { ...changedFunction };
+  }
+
+  private cloneFunctionNullable(
+    changedFunction: ChangedFunctionRecord | null | undefined,
+  ): ChangedFunctionRecord | null {
+    return changedFunction ? this.cloneFunction(changedFunction) : null;
   }
 }

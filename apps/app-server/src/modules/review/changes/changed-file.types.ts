@@ -35,7 +35,7 @@ export interface UpsertChangedFileInput {
   id?: string;
   analysisId: string;
   filePath: string;
-  changeType: string;
+  changeType: ChangedFileChangeType;
   additions?: number;
   deletions?: number;
   summary?: string | null;
@@ -46,7 +46,7 @@ export interface UpsertChangedFunctionInput {
   id?: string;
   changedFileId: string;
   name: string;
-  changeType: string;
+  changeType: ChangedFunctionChangeType;
   summary?: string | null;
   changedAt?: string;
 }

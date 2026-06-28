@@ -15,12 +15,19 @@ const FILE_CHANGE_TYPES = ["added", "modified", "deleted", "renamed"];
 const FUNCTION_CHANGE_TYPES = ["added", "modified", "deleted"];
 const FIXTURE_ANALYSIS_ID = "88888888-8888-4888-8888-888888888881";
 
+export interface ChangedFilesServiceOptions {
+  seedFixture?: boolean;
+}
+
 @Injectable()
 export class ChangedFilesService {
   constructor(
     private readonly changedFilesRepository: InMemoryChangedFilesRepository,
+    options: ChangedFilesServiceOptions = {},
   ) {
-    this.seedFixture();
+    if (options.seedFixture) {
+      this.seedFixture();
+    }
   }
 
   upsertChangedFile(input: UpsertChangedFileInput): ChangedFileRecord {
@@ -29,15 +36,15 @@ export class ChangedFilesService {
       input.analysisId,
       input.filePath,
     );
-    const changedAt = input.changedAt ?? new Date().toISOString();
+    const changedAt = this.timestampOrNow(input.changedAt);
 
     const file: ChangedFileRecord = {
       id: existing?.id ?? input.id ?? randomUUID(),
       analysisId: input.analysisId,
       filePath: input.filePath,
       changeType,
-      additions: this.nonNegativeInteger(input.additions),
-      deletions: this.nonNegativeInteger(input.deletions),
+      additions: this.nonNegativeInteger("additions", input.additions),
+      deletions: this.nonNegativeInteger("deletions", input.deletions),
       summary: input.summary ?? null,
       createdAt: existing?.createdAt ?? changedAt,
       updatedAt: changedAt,
@@ -49,12 +56,18 @@ export class ChangedFilesService {
   upsertChangedFunction(
     input: UpsertChangedFunctionInput,
   ): ChangedFunctionRecord {
+    if (!this.changedFilesRepository.findFileById(input.changedFileId)) {
+      throw new BadRequestException(
+        `Changed file was not found: ${input.changedFileId}`,
+      );
+    }
+
     const changeType = this.toFunctionChangeType(input.changeType);
     const existing = this.changedFilesRepository.findFunctionByFileAndName(
       input.changedFileId,
       input.name,
     );
-    const changedAt = input.changedAt ?? new Date().toISOString();
+    const changedAt = this.timestampOrNow(input.changedAt);
 
     const changedFunction: ChangedFunctionRecord = {
       id: existing?.id ?? input.id ?? randomUUID(),
@@ -116,7 +129,25 @@ export class ChangedFilesService {
     throw new BadRequestException(`Invalid changed function type: ${value}`);
   }
 
-  private nonNegativeInteger(value = 0): number {
-    return Number.isInteger(value) && value >= 0 ? value : 0;
+  private nonNegativeInteger(fieldName: string, value = 0): number {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new BadRequestException(
+        `${fieldName} must be a non-negative integer`,
+      );
+    }
+
+    return value;
+  }
+
+  private timestampOrNow(value?: string): string {
+    if (!value) {
+      return new Date().toISOString();
+    }
+
+    if (Number.isNaN(Date.parse(value))) {
+      throw new BadRequestException("changedAt must be a valid ISO timestamp");
+    }
+
+    return value;
   }
 }
