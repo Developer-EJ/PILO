@@ -153,6 +153,7 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 - `ReviewCanvasSummary`는 AI가 판단한 리뷰 순서, 노드 위험도, 캔버스 좌표를 포함한다.
 - `ReviewNodeDetail`은 diff와 설명 패널을 위한 read model이며 merge 기능은 MVP 범위에 포함하지 않는다.
 - `ReviewRiskSummary`는 PR list/Canvas가 위험 PR을 표시하기 위한 read model이며 review risk 원본 수정 API가 아니다.
+- MVP stage: `ReviewRiskSummary` is a schema/fixture contract only. Runtime consumers must use `PRAnalysisSummary.riskLevel` and `PRAnalysisSummary.riskCount` until a dedicated risk read API lands.
 
 ## Breaking Change Policy
 
