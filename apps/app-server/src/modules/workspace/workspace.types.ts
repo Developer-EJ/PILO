@@ -10,11 +10,15 @@ export const WORKSPACE_STATUSES = ["active", "archived"] as const;
 
 export const WORKSPACE_MEMBER_ROLES = ["owner", "member", "viewer"] as const;
 
+export const WORKSPACE_INVITE_ROLES = ["member", "viewer"] as const;
+
 export type WorkspaceType = (typeof WORKSPACE_TYPES)[number];
 
 export type WorkspaceStatus = (typeof WORKSPACE_STATUSES)[number];
 
 export type WorkspaceMemberRole = (typeof WORKSPACE_MEMBER_ROLES)[number];
+
+export type WorkspaceInviteRole = (typeof WORKSPACE_INVITE_ROLES)[number];
 
 export type WorkspaceAuthUserRef = {
   id: string;
@@ -49,6 +53,20 @@ export type WorkspaceMemberRecord = {
   updatedAt: string;
 };
 
+export type WorkspaceInviteRecord = {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: WorkspaceInviteRole;
+  tokenHash: string;
+  invitedByMemberId: string;
+  acceptedByMemberId: string | null;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+};
+
 export type WorkspaceSummary = {
   id: string;
   name: string;
@@ -71,6 +89,16 @@ export type WorkspaceMemberSummary = {
   joinedAt: string;
 };
 
+export type WorkspaceInviteCreated = {
+  id: string;
+  workspaceId: string;
+  email: string;
+  role: WorkspaceInviteRole;
+  token: string;
+  expiresAt: string;
+  createdAt: string;
+};
+
 export type CurrentWorkspaceMember = {
   workspaceId: string;
   memberId: string;
@@ -90,6 +118,57 @@ export type CreateWorkspaceInput = {
   description: string | null;
   type: WorkspaceType;
 };
+
+export type CreateWorkspaceInviteInput = {
+  workspaceId: string;
+  email: string;
+  role: WorkspaceInviteRole;
+  tokenHash: string;
+  invitedByMemberId: string;
+  expiresAt: string;
+};
+
+export type AcceptWorkspaceInviteInput = {
+  inviteId: string;
+  tokenHash: string;
+  currentUser: WorkspaceAuthUserRef;
+  now: Date;
+};
+
+export type AcceptWorkspaceInviteResult =
+  | {
+      ok: true;
+      workspaceId: string;
+      member: WorkspaceMemberSummary;
+    }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "token_mismatch"
+        | "expired"
+        | "accepted"
+        | "revoked"
+        | "email_mismatch"
+        | "already_member";
+    };
+
+export type RevokeWorkspaceInviteForUserInput = {
+  workspaceId: string;
+  inviteId: string;
+  userId: string;
+  now: Date;
+};
+
+export type RevokeWorkspaceInviteResult =
+  | {
+      ok: true;
+      invite: WorkspaceInviteRecord;
+    }
+  | {
+      ok: false;
+      reason: "not_found" | "accepted" | "revoked" | "expired";
+    };
 
 export type UpdateWorkspacePatch = {
   name?: string;
@@ -114,6 +193,15 @@ export type WorkspaceRepositoryPort = {
   listWorkspaceMemberSummariesForUser(
     input: FindWorkspaceForUserInput,
   ): Promise<WorkspaceMemberSummary[] | null>;
+  createWorkspaceInvite(
+    input: CreateWorkspaceInviteInput,
+  ): Promise<WorkspaceInviteRecord>;
+  acceptWorkspaceInvite(
+    input: AcceptWorkspaceInviteInput,
+  ): Promise<AcceptWorkspaceInviteResult>;
+  revokeWorkspaceInviteForUser(
+    input: RevokeWorkspaceInviteForUserInput,
+  ): Promise<RevokeWorkspaceInviteResult>;
   createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceSummary>;
   updateWorkspaceForUser(
     input: UpdateWorkspaceForUserInput,

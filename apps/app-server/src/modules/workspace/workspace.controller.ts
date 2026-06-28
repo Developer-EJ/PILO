@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   ForbiddenException,
   Get,
@@ -21,6 +22,7 @@ import {
 } from "./workspace-member.guard";
 import {
   WorkspaceAccessError,
+  WorkspaceInviteError,
   WorkspaceService,
   WorkspaceValidationError,
 } from "./workspace.service";
@@ -47,6 +49,22 @@ export class WorkspaceController {
     return this.handleWorkspaceRequest(() =>
       this.workspaceService.createWorkspace({
         currentUser: this.requireCurrentUser(cookieHeader),
+        body,
+      }),
+    );
+  }
+
+  @Post(":workspaceId/invites")
+  @UseGuards(WorkspaceMemberGuard)
+  createWorkspaceInvite(
+    @Param("workspaceId") workspaceId: string,
+    @Req() request: WorkspaceMemberGuardRequest,
+    @Body() body: unknown,
+  ) {
+    return this.handleWorkspaceRequest(() =>
+      this.workspaceService.createWorkspaceInvite({
+        currentUser: this.requireGuardCurrentUser(request),
+        workspaceId,
         body,
       }),
     );
@@ -131,6 +149,21 @@ export class WorkspaceController {
         }
 
         throw new NotFoundException(error.message);
+      }
+
+      if (error instanceof WorkspaceInviteError) {
+        if (
+          error.code === "workspace_invite_not_found" ||
+          error.code === "workspace_invite_token_invalid"
+        ) {
+          throw new NotFoundException(error.message);
+        }
+
+        if (error.code === "workspace_invite_email_mismatch") {
+          throw new ForbiddenException(error.message);
+        }
+
+        throw new ConflictException(error.message);
       }
 
       throw error;

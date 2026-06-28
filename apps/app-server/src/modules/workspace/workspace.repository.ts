@@ -1,8 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type {
+  AcceptWorkspaceInviteInput,
+  AcceptWorkspaceInviteResult,
+  CreateWorkspaceInviteInput,
   CreateWorkspaceInput,
   FindWorkspaceForUserInput,
+  RevokeWorkspaceInviteForUserInput,
+  RevokeWorkspaceInviteResult,
+  WorkspaceInviteRecord,
   WorkspaceMemberRecord,
   WorkspaceMemberSummary,
   WorkspaceRecord,
@@ -17,6 +23,7 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
 
   private readonly workspacesById = new Map<string, WorkspaceRecord>();
   private readonly membersById = new Map<string, WorkspaceMemberRecord>();
+  private readonly invitesById = new Map<string, WorkspaceInviteRecord>();
 
   async listWorkspaceSummariesForUser(
     userId: string,
@@ -75,6 +82,130 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
       .filter((member) => member.workspaceId === input.workspaceId)
       .map((member) => this.toWorkspaceMemberSummary(member))
       .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt));
+  }
+
+  async createWorkspaceInvite(
+    input: CreateWorkspaceInviteInput,
+  ): Promise<WorkspaceInviteRecord> {
+    const now = new Date().toISOString();
+    const invite: WorkspaceInviteRecord = {
+      id: randomUUID(),
+      workspaceId: input.workspaceId,
+      email: input.email,
+      role: input.role,
+      tokenHash: input.tokenHash,
+      invitedByMemberId: input.invitedByMemberId,
+      acceptedByMemberId: null,
+      expiresAt: input.expiresAt,
+      acceptedAt: null,
+      revokedAt: null,
+      createdAt: now,
+    };
+
+    const activeInvite = this.findActiveInviteByEmail({
+      workspaceId: input.workspaceId,
+      email: input.email,
+      now: new Date(now),
+    });
+
+    if (activeInvite) {
+      return activeInvite;
+    }
+
+    this.invitesById.set(invite.id, invite);
+
+    return invite;
+  }
+
+  async acceptWorkspaceInvite(
+    input: AcceptWorkspaceInviteInput,
+  ): Promise<AcceptWorkspaceInviteResult> {
+    const invite = this.invitesById.get(input.inviteId);
+
+    if (!invite || !this.findVisibleWorkspace(invite.workspaceId)) {
+      return { ok: false, reason: "not_found" };
+    }
+
+    const inactiveReason = getInactiveInviteReason(invite, input.now);
+
+    if (inactiveReason) {
+      return { ok: false, reason: inactiveReason };
+    }
+
+    if (invite.tokenHash !== input.tokenHash) {
+      return { ok: false, reason: "token_mismatch" };
+    }
+
+    if (normalizeEmail(input.currentUser.email) !== invite.email) {
+      return { ok: false, reason: "email_mismatch" };
+    }
+
+    if (
+      this.findMemberRecord({
+        workspaceId: invite.workspaceId,
+        userId: input.currentUser.id,
+      })
+    ) {
+      return { ok: false, reason: "already_member" };
+    }
+
+    const nowIso = input.now.toISOString();
+    const member: WorkspaceMemberRecord = {
+      id: randomUUID(),
+      workspaceId: invite.workspaceId,
+      userId: input.currentUser.id,
+      name: input.currentUser.name ?? "Workspace member",
+      email: invite.email,
+      avatarUrl: input.currentUser.avatarUrl ?? null,
+      role: invite.role,
+      displayName: input.currentUser.name ?? null,
+      joinedAt: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    const acceptedInvite: WorkspaceInviteRecord = {
+      ...invite,
+      acceptedByMemberId: member.id,
+      acceptedAt: nowIso,
+    };
+
+    this.membersById.set(member.id, member);
+    this.invitesById.set(acceptedInvite.id, acceptedInvite);
+
+    return {
+      ok: true,
+      workspaceId: member.workspaceId,
+      member: this.toWorkspaceMemberSummary(member),
+    };
+  }
+
+  async revokeWorkspaceInviteForUser(
+    input: RevokeWorkspaceInviteForUserInput,
+  ): Promise<RevokeWorkspaceInviteResult> {
+    const invite = this.invitesById.get(input.inviteId);
+    const member = this.findMemberRecord(input);
+
+    if (!invite || invite.workspaceId !== input.workspaceId || !member) {
+      return { ok: false, reason: "not_found" };
+    }
+
+    const inactiveReason = getInactiveInviteReason(invite, input.now);
+
+    if (inactiveReason) {
+      return { ok: false, reason: inactiveReason };
+    }
+
+    const revokedInvite: WorkspaceInviteRecord = {
+      ...invite,
+      revokedAt: input.now.toISOString(),
+    };
+
+    this.invitesById.set(revokedInvite.id, revokedInvite);
+
+    return {
+      ok: true,
+      invite: revokedInvite,
+    };
   }
 
   async createWorkspace(
@@ -172,6 +303,21 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     );
   }
 
+  private findActiveInviteByEmail(input: {
+    workspaceId: string;
+    email: string;
+    now: Date;
+  }) {
+    return (
+      Array.from(this.invitesById.values()).find(
+        (invite) =>
+          invite.workspaceId === input.workspaceId &&
+          invite.email === input.email &&
+          getInactiveInviteReason(invite, input.now) === null,
+      ) ?? null
+    );
+  }
+
   private countMembers(workspaceId: string) {
     return Array.from(this.membersById.values()).filter(
       (member) => member.workspaceId === workspaceId,
@@ -208,4 +354,29 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
       joinedAt: member.joinedAt,
     };
   }
+}
+
+type InactiveWorkspaceInviteReason = "accepted" | "revoked" | "expired";
+
+function getInactiveInviteReason(
+  invite: WorkspaceInviteRecord,
+  now: Date,
+): InactiveWorkspaceInviteReason | null {
+  if (invite.acceptedAt) {
+    return "accepted";
+  }
+
+  if (invite.revokedAt) {
+    return "revoked";
+  }
+
+  if (new Date(invite.expiresAt).getTime() <= now.getTime()) {
+    return "expired";
+  }
+
+  return null;
+}
+
+function normalizeEmail(email: string | null | undefined) {
+  return email?.trim().toLowerCase() ?? "";
 }

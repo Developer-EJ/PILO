@@ -4,6 +4,7 @@ import { DatabaseModule } from "../database/database.module";
 import { WorkspaceAccessPublicService } from "./public/workspace-access-public.service";
 import { WorkspaceCurrentMemberAdapter } from "./workspace-current-member.adapter";
 import { WorkspaceController } from "./workspace.controller";
+import { WorkspaceInviteController } from "./workspace-invite.controller";
 import { WorkspaceMemberAccessService } from "./workspace-member-access.service";
 import { WorkspaceMemberGuard } from "./workspace-member.guard";
 import { WorkspaceRepository } from "./workspace.repository";
@@ -11,7 +12,7 @@ import { WorkspaceService } from "./workspace.service";
 
 @Module({
   imports: [AuthModule, DatabaseModule],
-  controllers: [WorkspaceController],
+  controllers: [WorkspaceController, WorkspaceInviteController],
   providers: [
     WorkspaceMemberAccessService,
     WorkspaceAccessPublicService,

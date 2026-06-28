@@ -1,9 +1,12 @@
 import { Injectable } from "@nestjs/common";
+import { createHash, randomBytes } from "node:crypto";
 import { WorkspaceRepository } from "./workspace.repository";
 import type {
   CurrentWorkspaceMember,
   UpdateWorkspacePatch,
   WorkspaceAuthUserRef,
+  WorkspaceInviteCreated,
+  WorkspaceInviteRole,
   WorkspaceMemberRole,
   WorkspaceMemberRecord,
   WorkspaceMemberSummary,
@@ -16,7 +19,13 @@ import {
   hasWorkspaceRole,
   type WorkspaceMemberPermissions,
 } from "./workspace.permissions";
-import { WORKSPACE_STATUSES, WORKSPACE_TYPES } from "./workspace.types";
+import {
+  WORKSPACE_INVITE_ROLES,
+  WORKSPACE_STATUSES,
+  WORKSPACE_TYPES,
+} from "./workspace.types";
+
+const WORKSPACE_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type ResolveCurrentMemberInput = {
   workspaceId: string;
@@ -37,6 +46,15 @@ export type WorkspaceMutationInput = ResolveCurrentMemberInput & {
   body: unknown;
 };
 
+export type AcceptWorkspaceInviteMutationInput = WorkspaceRequestInput & {
+  inviteId: string;
+  body: unknown;
+};
+
+export type RevokeWorkspaceInviteInput = ResolveCurrentMemberInput & {
+  inviteId: string;
+};
+
 export type WorkspaceRoleRequirement = {
   minimumRole?: WorkspaceMemberRole;
 };
@@ -50,6 +68,16 @@ export type WorkspaceAccessErrorCode =
   | "workspace_member_not_found"
   | "workspace_not_found"
   | "workspace_forbidden";
+
+export type WorkspaceInviteErrorCode =
+  | "workspace_invite_not_found"
+  | "workspace_invite_token_invalid"
+  | "workspace_invite_expired"
+  | "workspace_invite_accepted"
+  | "workspace_invite_revoked"
+  | "workspace_invite_email_mismatch"
+  | "workspace_invite_already_member"
+  | "workspace_invite_duplicate_active_email";
 
 export class WorkspaceAccessError extends Error {
   constructor(
@@ -67,6 +95,16 @@ export class WorkspaceValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "WorkspaceValidationError";
+  }
+}
+
+export class WorkspaceInviteError extends Error {
+  constructor(
+    readonly code: WorkspaceInviteErrorCode,
+    readonly inviteId?: string,
+  ) {
+    super(createWorkspaceInviteErrorMessage(code, inviteId));
+    this.name = "WorkspaceInviteError";
   }
 }
 
@@ -131,6 +169,82 @@ export class WorkspaceService {
     }
 
     return members;
+  }
+
+  async createWorkspaceInvite(
+    input: WorkspaceMutationInput,
+  ): Promise<WorkspaceInviteCreated> {
+    const currentMemberContext = await this.requireCurrentMemberContext(input, {
+      minimumRole: "owner",
+    });
+    const body = parseCreateWorkspaceInviteBody(input.body);
+    const token = createInviteToken();
+    const tokenHash = hashInviteToken(token);
+    const expiresAt = new Date(Date.now() + body.ttlMs).toISOString();
+    const invite = await this.workspaceRepository.createWorkspaceInvite({
+      workspaceId: input.workspaceId,
+      email: body.email,
+      role: body.role,
+      tokenHash,
+      invitedByMemberId: currentMemberContext.currentMember.memberId,
+      expiresAt,
+    });
+
+    if (invite.tokenHash !== tokenHash) {
+      throw new WorkspaceInviteError(
+        "workspace_invite_duplicate_active_email",
+        invite.id,
+      );
+    }
+
+    return {
+      id: invite.id,
+      workspaceId: invite.workspaceId,
+      email: invite.email,
+      role: invite.role,
+      token,
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
+    };
+  }
+
+  async acceptWorkspaceInvite(input: AcceptWorkspaceInviteMutationInput) {
+    const body = parseAcceptWorkspaceInviteBody(input.body);
+    const result = await this.workspaceRepository.acceptWorkspaceInvite({
+      inviteId: input.inviteId,
+      tokenHash: hashInviteToken(body.token),
+      currentUser: input.currentUser,
+      now: new Date(),
+    });
+
+    if (!result.ok) {
+      throw workspaceInviteResultError(result.reason, input.inviteId);
+    }
+
+    return result;
+  }
+
+  async revokeWorkspaceInvite(input: RevokeWorkspaceInviteInput) {
+    await this.requireCurrentMemberContext(input, { minimumRole: "owner" });
+
+    const result = await this.workspaceRepository.revokeWorkspaceInviteForUser({
+      workspaceId: input.workspaceId,
+      inviteId: input.inviteId,
+      userId: input.currentUser.id,
+      now: new Date(),
+    });
+
+    if (!result.ok) {
+      throw workspaceInviteResultError(result.reason, input.inviteId);
+    }
+
+    return {
+      id: result.invite.id,
+      workspaceId: result.invite.workspaceId,
+      email: result.invite.email,
+      role: result.invite.role,
+      revokedAt: result.invite.revokedAt,
+    };
   }
 
   async updateWorkspace(
@@ -220,6 +334,67 @@ function createWorkspaceAccessErrorMessage(
   return `Current user is not a member of workspace ${workspaceId}`;
 }
 
+function createWorkspaceInviteErrorMessage(
+  code: WorkspaceInviteErrorCode,
+  inviteId?: string,
+) {
+  const suffix = inviteId ? ` (${inviteId})` : "";
+
+  if (code === "workspace_invite_not_found") {
+    return `Workspace invite was not found${suffix}`;
+  }
+
+  if (code === "workspace_invite_token_invalid") {
+    return `Workspace invite token is invalid${suffix}`;
+  }
+
+  if (code === "workspace_invite_expired") {
+    return `Workspace invite is expired${suffix}`;
+  }
+
+  if (code === "workspace_invite_accepted") {
+    return `Workspace invite is already accepted${suffix}`;
+  }
+
+  if (code === "workspace_invite_revoked") {
+    return `Workspace invite is revoked${suffix}`;
+  }
+
+  if (code === "workspace_invite_email_mismatch") {
+    return `Workspace invite email does not match current user${suffix}`;
+  }
+
+  if (code === "workspace_invite_already_member") {
+    return `Current user is already a workspace member${suffix}`;
+  }
+
+  return `An active workspace invite already exists for this email${suffix}`;
+}
+
+function workspaceInviteResultError(
+  reason:
+    | "not_found"
+    | "token_mismatch"
+    | "expired"
+    | "accepted"
+    | "revoked"
+    | "email_mismatch"
+    | "already_member",
+  inviteId: string,
+) {
+  const errorCodeByReason = {
+    not_found: "workspace_invite_not_found",
+    token_mismatch: "workspace_invite_token_invalid",
+    expired: "workspace_invite_expired",
+    accepted: "workspace_invite_accepted",
+    revoked: "workspace_invite_revoked",
+    email_mismatch: "workspace_invite_email_mismatch",
+    already_member: "workspace_invite_already_member",
+  } satisfies Record<string, WorkspaceInviteErrorCode>;
+
+  return new WorkspaceInviteError(errorCodeByReason[reason], inviteId);
+}
+
 function parseCreateWorkspaceBody(body: unknown): {
   name: string;
   description: string | null;
@@ -231,6 +406,34 @@ function parseCreateWorkspaceBody(body: unknown): {
     name: parseWorkspaceName(record.name, true),
     description: parseWorkspaceDescription(record.description),
     type: parseWorkspaceType(record.type, "side_project"),
+  };
+}
+
+function parseCreateWorkspaceInviteBody(body: unknown): {
+  email: string;
+  role: WorkspaceInviteRole;
+  ttlMs: number;
+} {
+  const record = requirePlainObject(body);
+
+  return {
+    email: parseInviteEmail(record.email),
+    role: parseWorkspaceInviteRole(record.role),
+    ttlMs: parseInviteTtlMs(record.ttlHours),
+  };
+}
+
+function parseAcceptWorkspaceInviteBody(body: unknown): {
+  token: string;
+} {
+  const record = requirePlainObject(body);
+
+  if (typeof record.token !== "string" || !record.token.trim()) {
+    throw new WorkspaceValidationError("Workspace invite token is required.");
+  }
+
+  return {
+    token: record.token.trim(),
   };
 }
 
@@ -255,6 +458,63 @@ function parseUpdateWorkspaceBody(body: unknown): UpdateWorkspacePatch {
   }
 
   return patch;
+}
+
+function parseInviteEmail(value: unknown) {
+  if (typeof value !== "string") {
+    throw new WorkspaceValidationError("Workspace invite email is required.");
+  }
+
+  const email = value.trim().toLowerCase();
+
+  if (!email || !email.includes("@") || email.length > 320) {
+    throw new WorkspaceValidationError("Workspace invite email is invalid.");
+  }
+
+  return email;
+}
+
+function parseWorkspaceInviteRole(value: unknown): WorkspaceInviteRole {
+  if (value === undefined) {
+    return "member";
+  }
+
+  if (
+    typeof value !== "string" ||
+    !WORKSPACE_INVITE_ROLES.includes(value as WorkspaceInviteRole)
+  ) {
+    throw new WorkspaceValidationError("Workspace invite role is invalid.");
+  }
+
+  return value as WorkspaceInviteRole;
+}
+
+function parseInviteTtlMs(value: unknown) {
+  if (value === undefined) {
+    return WORKSPACE_INVITE_TTL_MS;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new WorkspaceValidationError(
+      "Workspace invite ttlHours must be a number.",
+    );
+  }
+
+  if (value < 0 || value > 720) {
+    throw new WorkspaceValidationError(
+      "Workspace invite ttlHours must be between 0 and 720.",
+    );
+  }
+
+  return value * 60 * 60 * 1000;
+}
+
+function createInviteToken() {
+  return randomBytes(24).toString("base64url");
+}
+
+function hashInviteToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 function requirePlainObject(body: unknown): Record<string, unknown> {
