@@ -8,6 +8,10 @@ import {
   parseCanvasRealtimeSessionContext,
 } from "./canvas-realtime.contract";
 
+export type CanvasRealtimeRoleRequirement = {
+  minimumRole?: CanvasRealtimeAuthContext["role"];
+};
+
 export type CanvasRealtimeBoardAccessResult =
   | {
       ok: true;
@@ -24,6 +28,7 @@ export class CanvasRealtimeAccessGuard {
   requireBoardAccess(
     client: Socket,
     boardId: string,
+    requirement: CanvasRealtimeRoleRequirement = {},
     now = new Date(),
   ): CanvasRealtimeBoardAccessResult {
     const session = parseCanvasRealtimeSessionContext(
@@ -67,6 +72,16 @@ export class CanvasRealtimeAccessGuard {
       );
     }
 
+    if (
+      requirement.minimumRole &&
+      !hasWorkspaceRole(currentMember.role, requirement.minimumRole)
+    ) {
+      return deny(
+        "forbidden",
+        "Current member cannot mutate this canvas board.",
+      );
+    }
+
     return {
       ok: true,
       currentMember,
@@ -104,4 +119,17 @@ function isSessionExpired(expiresAt: string | null, now: Date) {
   const expiresAtMs = Date.parse(expiresAt);
 
   return Number.isNaN(expiresAtMs) || expiresAtMs <= now.getTime();
+}
+
+const WORKSPACE_ROLE_RANK: Record<CanvasRealtimeAuthContext["role"], number> = {
+  viewer: 10,
+  member: 20,
+  owner: 30,
+};
+
+function hasWorkspaceRole(
+  role: CanvasRealtimeAuthContext["role"],
+  minimumRole: CanvasRealtimeAuthContext["role"],
+) {
+  return WORKSPACE_ROLE_RANK[role] >= WORKSPACE_ROLE_RANK[minimumRole];
 }

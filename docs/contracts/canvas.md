@@ -298,12 +298,25 @@ Shape event payload:
 {
   "boardId": "uuid",
   "shapeId": "uuid",
-  "revision": 1,
-  "changeType": "moved"
+  "baseVersion": 0,
+  "x": 120,
+  "y": 140,
+  "width": 280,
+  "height": 160
 }
 ```
 
-- `changeType`: `created`, `updated`, `deleted`, `moved`, `resized`
+- Event: `canvas:shape:changed`
+- Direction: client -> server, server -> room broadcast
+- `baseVersion` is the last server accepted shape version known by the client.
+- `x` and `y` are required finite numbers.
+- `width` and `height` are nullable. Use `null` for move-only updates.
+- Server policy: the realtime server accepts the mutation only when
+  `baseVersion` matches the current server version for `boardId + shapeId`.
+  Accepted mutations increment `version` by 1 and broadcast the final state.
+- Conflict policy: stale `baseVersion` is rejected with `error = "conflict"`
+  and `currentVersion`. The client should refresh from the latest board
+  snapshot or retry against the returned version.
 
 View event payload:
 

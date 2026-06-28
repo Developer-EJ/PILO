@@ -14,12 +14,14 @@ const {
   parseCanvasRealtimeSessionContext,
   parseCanvasPresenceEventPayload,
   parseCanvasShapeEventPayload,
+  parseCanvasShapeMutationPayload,
   parseCanvasViewEventPayload,
 } = require("../dist/canvas-realtime.contract");
 
 function createSocketStub(currentMember, options = {}) {
   const joinedRooms = [];
   const leftRooms = [];
+  const broadcasts = [];
   const session =
     "session" in options
       ? options.session
@@ -57,9 +59,17 @@ function createSocketStub(currentMember, options = {}) {
       async leave(room) {
         leftRooms.push(room);
       },
+      to(room) {
+        return {
+          emit(event, payload) {
+            broadcasts.push({ room, event, payload });
+          },
+        };
+      },
     },
     joinedRooms,
     leftRooms,
+    broadcasts,
   };
 }
 
@@ -160,6 +170,36 @@ describe("realtime-server package", () => {
         shapeId: "shape-1",
         revision: 0,
         changeType: "moved",
+      }),
+      null,
+    );
+    assert.deepEqual(
+      parseCanvasShapeMutationPayload({
+        boardId: "board-1",
+        shapeId: "shape-1",
+        baseVersion: 0,
+        x: 120,
+        y: 140,
+        width: 280,
+        height: 160,
+      }),
+      {
+        boardId: "board-1",
+        shapeId: "shape-1",
+        baseVersion: 0,
+        x: 120,
+        y: 140,
+        width: 280,
+        height: 160,
+      },
+    );
+    assert.equal(
+      parseCanvasShapeMutationPayload({
+        boardId: "board-1",
+        shapeId: "shape-1",
+        baseVersion: -1,
+        x: 120,
+        y: 140,
       }),
       null,
     );
@@ -298,5 +338,111 @@ describe("realtime-server package", () => {
     assert.deepEqual(expired.joinedRooms, []);
     assert.deepEqual(forbidden.joinedRooms, []);
     assert.deepEqual(reconnect.joinedRooms, ["canvas:board:board-1"]);
+  });
+
+  it("accepts shape move/resize as server-authoritative state and broadcasts it", async () => {
+    const gateway = new CanvasGateway();
+    const currentMember = {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "member",
+      displayName: null,
+    };
+    const { socket, broadcasts } = createSocketStub(currentMember);
+
+    const ack = await gateway.syncShapeMutation(socket, {
+      boardId: "board-1",
+      shapeId: "shape-1",
+      baseVersion: 0,
+      x: 120,
+      y: 140,
+      width: 280,
+      height: 160,
+    });
+
+    assert.deepEqual(ack, {
+      ok: true,
+      event: "canvas:shape:changed",
+      room: "canvas:board:board-1",
+      currentMember,
+      shape: {
+        boardId: "board-1",
+        shapeId: "shape-1",
+        baseVersion: 0,
+        x: 120,
+        y: 140,
+        width: 280,
+        height: 160,
+        version: 1,
+        updatedByMemberId: "member-1",
+      },
+    });
+    assert.deepEqual(broadcasts, [
+      {
+        room: "canvas:board:board-1",
+        event: "canvas:shape:changed",
+        payload: ack.shape,
+      },
+    ]);
+  });
+
+  it("rejects stale shape mutations and viewer write attempts", async () => {
+    const gateway = new CanvasGateway();
+    const member = {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "member",
+      displayName: null,
+    };
+    const viewer = {
+      workspaceId: "workspace-1",
+      memberId: "member-2",
+      userId: "user-2",
+      role: "viewer",
+      displayName: null,
+    };
+    const memberSocket = createSocketStub(member);
+    const viewerSocket = createSocketStub(viewer);
+
+    await gateway.syncShapeMutation(memberSocket.socket, {
+      boardId: "board-1",
+      shapeId: "shape-1",
+      baseVersion: 0,
+      x: 120,
+      y: 140,
+    });
+    const staleAck = await gateway.syncShapeMutation(memberSocket.socket, {
+      boardId: "board-1",
+      shapeId: "shape-1",
+      baseVersion: 0,
+      x: 160,
+      y: 180,
+    });
+    const viewerAck = await gateway.syncShapeMutation(viewerSocket.socket, {
+      boardId: "board-1",
+      shapeId: "shape-2",
+      baseVersion: 0,
+      x: 10,
+      y: 20,
+    });
+
+    assert.deepEqual(staleAck, {
+      ok: false,
+      event: "canvas:shape:changed",
+      error: "conflict",
+      message:
+        "Canvas shape mutation baseVersion does not match server version.",
+      currentVersion: 1,
+    });
+    assert.deepEqual(viewerAck, {
+      ok: false,
+      event: "canvas:shape:changed",
+      error: "forbidden",
+      message: "Current member cannot mutate this canvas board.",
+    });
+    assert.deepEqual(memberSocket.broadcasts.length, 1);
+    assert.deepEqual(viewerSocket.broadcasts, []);
   });
 });
