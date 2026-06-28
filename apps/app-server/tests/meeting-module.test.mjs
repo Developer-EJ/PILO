@@ -117,4 +117,138 @@ describe("meeting module scaffold", () => {
       service.getMeetingForWorkspace("workspace-2", meeting.id),
     );
   });
+
+  it("adds, lists, and leaves meeting participants by workspace member id", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "member-1",
+      workspaceId: "workspace-1",
+      displayName: "Jinho",
+    });
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Participant meeting",
+    });
+
+    const participant = controller.addParticipant(meeting.id, {
+      memberId: "member-1",
+      role: "facilitator",
+    });
+
+    assert.equal(participant.meetingId, meeting.id);
+    assert.equal(participant.memberId, "member-1");
+    assert.equal(participant.role, "facilitator");
+    assert.equal(participant.leftAt, null);
+    assert.deepEqual(controller.listParticipants(meeting.id), [participant]);
+
+    const leftParticipant = controller.leaveParticipant(
+      meeting.id,
+      participant.id,
+    );
+
+    assert.notEqual(leftParticipant.leftAt, null);
+    assert.equal(
+      new Date(leftParticipant.leftAt).getTime() >=
+        new Date(leftParticipant.joinedAt).getTime(),
+      true,
+    );
+  });
+
+  it("rejects participants from a different workspace", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "member-2",
+      workspaceId: "workspace-2",
+    });
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Workspace member validation meeting",
+    });
+
+    assert.throws(() =>
+      service.addParticipant(meeting.id, {
+        memberId: "member-2",
+      }),
+    );
+  });
+
+  it("creates, lists, updates, and reorders meeting agendas", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Agenda meeting",
+    });
+
+    const firstAgenda = controller.createAgenda(meeting.id, {
+      title: "Scope API",
+    });
+    const secondAgenda = controller.createAgenda(meeting.id, {
+      title: "Review risks",
+    });
+
+    assert.equal(firstAgenda.status, "open");
+    assert.equal(firstAgenda.sortOrder, 0);
+    assert.equal(secondAgenda.sortOrder, 1);
+    assert.deepEqual(controller.listAgendas(meeting.id), [
+      firstAgenda,
+      secondAgenda,
+    ]);
+
+    const doneAgenda = controller.updateAgendaStatus(
+      meeting.id,
+      firstAgenda.id,
+      {
+        status: "done",
+      },
+    );
+
+    assert.equal(doneAgenda.status, "done");
+
+    const reorderedAgenda = controller.reorderAgenda(
+      meeting.id,
+      secondAgenda.id,
+      {
+        sortOrder: 0,
+      },
+    );
+
+    assert.equal(reorderedAgenda.sortOrder, 0);
+    assert.deepEqual(
+      controller
+        .listAgendas(meeting.id)
+        .map((agenda) => [agenda.id, agenda.sortOrder]),
+      [
+        [secondAgenda.id, 0],
+        [firstAgenda.id, 1],
+      ],
+    );
+  });
+
+  it("rejects invalid meeting agenda status and sort order", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Agenda validation meeting",
+    });
+    const agenda = service.createAgenda(meeting.id, {
+      title: "Validate agenda",
+    });
+
+    assert.throws(() =>
+      service.updateAgendaStatus(meeting.id, agenda.id, {
+        status: "invalid",
+      }),
+    );
+    assert.throws(() =>
+      service.reorderAgenda(meeting.id, agenda.id, {
+        sortOrder: -1,
+      }),
+    );
+  });
 });
