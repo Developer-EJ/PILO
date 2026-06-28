@@ -42,12 +42,16 @@ function applyTestEnv(env = AUTH_TEST_ENV) {
   };
 }
 
-function createOAuthFetchStub(requests = []) {
+function createOAuthFetchStub(requests = [], profilesByCode = {}) {
+  let lastCode = "google-code";
+
   return async (url, init) => {
     const request = { url: String(url), init };
     requests.push(request);
 
     if (request.url === "https://oauth2.googleapis.com/token") {
+      lastCode = init?.body?.get("code") ?? "google-code";
+
       return globalThis.Response.json({
         access_token: "google-access-token",
         expires_in: 3600,
@@ -57,13 +61,15 @@ function createOAuthFetchStub(requests = []) {
     }
 
     if (request.url === "https://openidconnect.googleapis.com/v1/userinfo") {
-      return globalThis.Response.json({
-        sub: "google-user-123",
-        email: "integration@example.com",
-        name: "Integration User",
-        picture: "https://example.com/integration.png",
-        email_verified: true,
-      });
+      return globalThis.Response.json(
+        profilesByCode[lastCode] ?? {
+          sub: "google-user-123",
+          email: "integration@example.com",
+          name: "Integration User",
+          picture: "https://example.com/integration.png",
+          email_verified: true,
+        },
+      );
     }
 
     throw new Error(`Unexpected OAuth fetch: ${request.url}`);
@@ -225,7 +231,15 @@ describe("auth HTTP integration", () => {
 
   it("serves workspace create, list, detail, and update APIs for the current session", async () => {
     const oauthRequests = [];
-    const fetcher = createOAuthFetchStub(oauthRequests);
+    const fetcher = createOAuthFetchStub(oauthRequests, {
+      "invitee-code": {
+        sub: "google-user-456",
+        email: "invitee@example.com",
+        name: "Invited User",
+        picture: "https://example.com/invitee.png",
+        email_verified: true,
+      },
+    });
     const { server, close } = await createAuthIntegrationApp(fetcher);
 
     try {
@@ -315,6 +329,69 @@ describe("auth HTTP integration", () => {
       assert.equal(members[0].avatarUrl, "https://example.com/integration.png");
       assert.equal(members[0].role, "owner");
 
+      const inviteResponse = await server.inject({
+        method: "POST",
+        url: `/workspaces/${created.id}/invites`,
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader,
+        },
+        payload: JSON.stringify({
+          email: "invitee@example.com",
+          role: "member",
+        }),
+      });
+      const invite = inviteResponse.json();
+
+      assert.equal(inviteResponse.statusCode, 201);
+      assert.equal(invite.workspaceId, created.id);
+      assert.equal(invite.email, "invitee@example.com");
+      assert.equal(invite.role, "member");
+      assert.equal(typeof invite.token, "string");
+
+      const inviteeStartResponse = await server.inject({
+        method: "GET",
+        url: "/auth/google/start?next=%2Fworkspaces",
+      });
+      const inviteeAuthorizationUrl = getRedirectUrl(inviteeStartResponse);
+      const inviteeState = inviteeAuthorizationUrl.searchParams.get("state");
+      const inviteeCallbackResponse = await server.inject({
+        method: "GET",
+        url: `/auth/google/callback?code=invitee-code&state=${encodeURIComponent(
+          inviteeState,
+        )}`,
+      });
+      const inviteeCookieHeader = getCookieHeader(inviteeCallbackResponse);
+
+      const acceptResponse = await server.inject({
+        method: "POST",
+        url: `/workspace-invites/${invite.id}/accept`,
+        headers: {
+          "content-type": "application/json",
+          cookie: inviteeCookieHeader,
+        },
+        payload: JSON.stringify({
+          token: invite.token,
+        }),
+      });
+      const accepted = acceptResponse.json();
+
+      assert.equal(acceptResponse.statusCode, 201);
+      assert.equal(accepted.workspaceId, created.id);
+      assert.equal(accepted.member.email, "invitee@example.com");
+      assert.equal(accepted.member.role, "member");
+
+      const updatedMembersResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}/members`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(updatedMembersResponse.statusCode, 200);
+      assert.equal(updatedMembersResponse.json().length, 2);
+
       const updateResponse = await server.inject({
         method: "PATCH",
         url: `/workspaces/${created.id}`,
@@ -356,7 +433,7 @@ describe("auth HTTP integration", () => {
       });
 
       assert.equal(missingMembersResponse.statusCode, 404);
-      assert.equal(oauthRequests.length, 2);
+      assert.equal(oauthRequests.length, 4);
     } finally {
       await close();
     }
