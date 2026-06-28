@@ -55,9 +55,9 @@ export class AuthController {
         nextPath,
       );
 
-      return reply.redirect(authorization.redirectUrl);
+      return reply.status(302).redirect(authorization.redirectUrl);
     } catch {
-      return reply.redirect(
+      return reply.status(302).redirect(
         this.authService.createLoginResultRedirect({
           provider: "google",
           status: "error",
@@ -90,7 +90,7 @@ export class AuthController {
     );
 
     if (!result.ok) {
-      return reply.redirect(
+      return reply.status(302).redirect(
         this.authService.createLoginResultRedirect({
           provider: "google",
           status: "error",
@@ -101,7 +101,7 @@ export class AuthController {
 
     reply.header("Set-Cookie", result.session.cookieHeader);
 
-    return reply.redirect(
+    return reply.status(302).redirect(
       this.authService.createLoginResultRedirect({
         provider: "google",
         status: "success",
@@ -121,9 +121,9 @@ export class AuthController {
         nextPath,
       );
 
-      return reply.redirect(authorization.redirectUrl);
+      return reply.status(302).redirect(authorization.redirectUrl);
     } catch {
-      return reply.redirect(
+      return reply.status(302).redirect(
         this.authService.createLoginResultRedirect({
           provider: "github",
           status: "error",
@@ -156,7 +156,7 @@ export class AuthController {
     );
 
     if (!result.ok) {
-      return reply.redirect(
+      return reply.status(302).redirect(
         this.authService.createLoginResultRedirect({
           provider: "github",
           status: "error",
@@ -167,7 +167,7 @@ export class AuthController {
 
     reply.header("Set-Cookie", result.session.cookieHeader);
 
-    return reply.redirect(
+    return reply.status(302).redirect(
       this.authService.createLoginResultRedirect({
         provider: "github",
         status: "success",
