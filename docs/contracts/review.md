@@ -152,7 +152,7 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 - 내부 DB row가 null을 반환해도 `riskLevel = low`, `analysisStatus = pending`, count 필드는 `0`을 기본값으로 보장한다.
 - `ReviewCanvasSummary`는 AI가 판단한 리뷰 순서, 노드 위험도, 캔버스 좌표를 포함한다.
 - `ReviewNodeDetail`은 diff와 설명 패널을 위한 read model이며 merge 기능은 MVP 범위에 포함하지 않는다.
-- `ReviewRiskSummary`는 PR list/Canvas가 위험 PR을 표시하기 위한 read model이며 review risk 원본 수정 API가 아니다.
+- `ReviewRiskSummary`는 dedicated risk read API가 추가되기 전까지 schema/fixture 검증 범위로만 사용한다.
 - MVP stage: `ReviewRiskSummary` is a schema/fixture contract only. Runtime consumers must use `PRAnalysisSummary.riskLevel` and `PRAnalysisSummary.riskCount` until a dedicated risk read API lands.
 
 ## Breaking Change Policy
@@ -181,7 +181,7 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 - 은재는 PR 분석 결과를 소유한다.
 - GitHub PR 원본 동기화는 주형이 소유한다.
 - 은재는 GitHub API token이나 webhook을 직접 구현하지 않는다.
-- 동현 Dashboard/Canvas는 `PRAnalysisSummary`, `ReviewRiskSummary`만 표시한다. 은재의 code review room 내부 캔버스는 `ReviewCanvasSummary`를 사용한다.
+- 동현 Dashboard/Canvas는 MVP에서 `PRAnalysisSummary`만 표시한다. `ReviewRiskSummary`는 dedicated risk read API가 추가되기 전까지 schema/fixture 검증 범위로만 사용한다. 은재의 code review room 내부 캔버스는 `ReviewCanvasSummary`를 사용한다.
 
 ## Mock Rule
 
