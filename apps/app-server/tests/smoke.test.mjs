@@ -5,6 +5,7 @@ import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
+import workspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
 const {
@@ -39,6 +40,16 @@ const {
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
+
+function assertRequiredFields(value, schema, label) {
+  for (const field of schema.required ?? []) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(value, field),
+      true,
+      `${label} is missing ${field}`,
+    );
+  }
+}
 
 describe("app-server package", () => {
   it("keeps the PILO app-server package name", () => {
@@ -779,6 +790,191 @@ describe("app-server package", () => {
       contractSchema.$defs.WorkspaceSummary.properties.myRole.enum,
     );
     assert.deepEqual(WORKSPACE_INVITE_ROLES, ["member", "viewer"]);
+  });
+
+  it("keeps Workspace dashboard read model schema aligned with fixture fields", () => {
+    const defs = contractSchema.$defs;
+
+    assert.deepEqual(defs.WorkspaceSummary.required, [
+      "id",
+      "name",
+      "description",
+      "type",
+      "status",
+      "myRole",
+      "memberCount",
+      "createdAt",
+    ]);
+    assert.deepEqual(defs.WorkspaceMemberSummary.required, [
+      "memberId",
+      "userId",
+      "name",
+      "email",
+      "avatarUrl",
+      "role",
+      "displayName",
+      "joinedAt",
+    ]);
+    assert.deepEqual(defs.DashboardPreferences.required, [
+      "workspaceId",
+      "memberId",
+      "layout",
+      "hiddenSections",
+      "updatedAt",
+    ]);
+    assert.deepEqual(defs.CurrentWorkspaceMember.required, [
+      "workspaceId",
+      "memberId",
+      "userId",
+      "role",
+      "displayName",
+    ]);
+    assert.deepEqual(defs.WorkspaceDashboardReadModel.required, [
+      "workspace",
+      "currentMember",
+      "preferences",
+      "members",
+      "tasks",
+      "progress",
+      "githubIssues",
+      "pullRequests",
+      "meetingReports",
+      "prAnalyses",
+      "agentActions",
+      "canvasEntities",
+      "source",
+      "generatedAt",
+    ]);
+
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.tasks.items.$ref,
+      "#/$defs/TaskSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.githubIssues.items.$ref,
+      "#/$defs/GithubIssueSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.pullRequests.items.$ref,
+      "#/$defs/PullRequestSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.meetingReports.items.$ref,
+      "#/$defs/MeetingReportSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.prAnalyses.items.$ref,
+      "#/$defs/PRAnalysisSummary",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.agentActions.items.$ref,
+      "#/$defs/AgentAction",
+    );
+    assert.equal(
+      defs.WorkspaceDashboardReadModel.properties.canvasEntities.items.$ref,
+      "#/$defs/CanvasEntityRef",
+    );
+    assert.deepEqual(
+      defs.WorkspaceDashboardReadModel.properties.source.enum,
+      ["fixture", "empty"],
+    );
+
+    const currentMember = {
+      workspaceId: workspaceDashboardFixture.workspace.id,
+      memberId: workspaceDashboardFixture.members[0].memberId,
+      userId: workspaceDashboardFixture.currentUser.id,
+      role: workspaceDashboardFixture.members[0].role,
+      displayName: workspaceDashboardFixture.members[0].displayName,
+    };
+    const preferences = {
+      workspaceId: workspaceDashboardFixture.workspace.id,
+      memberId: workspaceDashboardFixture.members[0].memberId,
+      layout: {},
+      hiddenSections: [],
+      updatedAt: null,
+    };
+    const aggregate = {
+      workspace: workspaceDashboardFixture.workspace,
+      currentMember,
+      preferences,
+      members: workspaceDashboardFixture.members,
+      tasks: workspaceDashboardFixture.tasks,
+      progress: workspaceDashboardFixture.progress,
+      githubIssues: workspaceDashboardFixture.githubIssues,
+      pullRequests: workspaceDashboardFixture.pullRequests,
+      meetingReports: workspaceDashboardFixture.meetingReports,
+      prAnalyses: workspaceDashboardFixture.prAnalyses,
+      agentActions: workspaceDashboardFixture.agentActions,
+      canvasEntities: workspaceDashboardFixture.canvasEntities,
+      source: "fixture",
+      generatedAt: "2026-06-28T00:00:00.000Z",
+    };
+
+    assertRequiredFields(
+      aggregate,
+      defs.WorkspaceDashboardReadModel,
+      "WorkspaceDashboardReadModel",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.workspace,
+      defs.WorkspaceSummary,
+      "fixture.workspace",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.members[0],
+      defs.WorkspaceMemberSummary,
+      "fixture.members[0]",
+    );
+    assertRequiredFields(
+      currentMember,
+      defs.CurrentWorkspaceMember,
+      "aggregate.currentMember",
+    );
+    assertRequiredFields(
+      preferences,
+      defs.DashboardPreferences,
+      "aggregate.preferences",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.tasks[0],
+      defs.TaskSummary,
+      "fixture.tasks[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.progress,
+      defs.ProgressSummary,
+      "fixture.progress",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.githubIssues[0],
+      defs.GithubIssueSummary,
+      "fixture.githubIssues[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.pullRequests[0],
+      defs.PullRequestSummary,
+      "fixture.pullRequests[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.meetingReports[0],
+      defs.MeetingReportSummary,
+      "fixture.meetingReports[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.prAnalyses[0],
+      defs.PRAnalysisSummary,
+      "fixture.prAnalyses[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.agentActions[0],
+      defs.AgentAction,
+      "fixture.agentActions[0]",
+    );
+    assertRequiredFields(
+      workspaceDashboardFixture.canvasEntities[0],
+      defs.CanvasEntityRef,
+      "fixture.canvasEntities[0]",
+    );
   });
 
   it("resolves currentMember from currentUser without leaking Auth session details", async () => {
