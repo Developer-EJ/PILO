@@ -59,6 +59,15 @@ Workspace 단위 연결과 repository 목록은 `/workspaces/:workspaceId/github
 }
 ```
 
+### GithubConnectionStartResponse
+
+```json
+{
+  "state": "single-use-nonce",
+  "installationUrl": "https://github.com/apps/pilo/installations/new?state=single-use-nonce"
+}
+```
+
 ### GithubRepositorySummary
 
 ```json

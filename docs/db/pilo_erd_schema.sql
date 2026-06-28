@@ -199,6 +199,7 @@ CREATE TABLE github_connections (
   installation_id VARCHAR(255),
   github_account_login VARCHAR(255),
   scopes TEXT[] NOT NULL DEFAULT '{}',
+  state_nonce VARCHAR(128) UNIQUE,
   connected_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
   connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   revoked_at TIMESTAMPTZ,
