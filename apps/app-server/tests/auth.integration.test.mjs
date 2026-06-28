@@ -367,6 +367,24 @@ describe("auth HTTP integration", () => {
       });
       assert.deepEqual(ownerPreferences.hiddenSections, ["agent"]);
 
+      const dashboardResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}/dashboard`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+      const dashboard = dashboardResponse.json();
+
+      assert.equal(dashboardResponse.statusCode, 200);
+      assert.equal(dashboard.workspace.id, created.id);
+      assert.equal(dashboard.currentMember.userId, currentUser.id);
+      assert.deepEqual(dashboard.preferences, ownerPreferences);
+      assert.equal(dashboard.members.length, 1);
+      assert.equal(dashboard.source, "fixture");
+      assert.equal(dashboard.tasks.length > 0, true);
+      assert.equal(dashboard.progress.workspaceId, created.id);
+
       const inviteResponse = await server.inject({
         method: "POST",
         url: `/workspaces/${created.id}/invites`,

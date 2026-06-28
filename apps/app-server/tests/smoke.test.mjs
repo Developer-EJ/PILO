@@ -1137,6 +1137,56 @@ describe("app-server package", () => {
     assert.deepEqual(reloadedOwnerPreferences, ownerPreferences);
   });
 
+  it("aggregates workspace dashboard read models without owning other domain data", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+
+    await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        layout: {
+          density: "comfortable",
+          sections: ["today", "pullRequests"],
+        },
+        hiddenSections: ["agentSuggestions"],
+      },
+    });
+
+    const dashboard = await service.getWorkspaceDashboard({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.equal(dashboard.workspace.id, workspace.id);
+    assert.equal(dashboard.currentMember.workspaceId, workspace.id);
+    assert.equal(dashboard.currentMember.userId, owner.id);
+    assert.deepEqual(dashboard.preferences.layout, {
+      density: "comfortable",
+      sections: ["today", "pullRequests"],
+    });
+    assert.deepEqual(dashboard.preferences.hiddenSections, [
+      "agentSuggestions",
+    ]);
+    assert.equal(dashboard.members.length, 1);
+    assert.equal(dashboard.source, "fixture");
+    assert.equal(dashboard.tasks.length > 0, true);
+    assert.equal(dashboard.progress.workspaceId, workspace.id);
+    assert.equal(dashboard.meetingReports[0].workspaceId, workspace.id);
+    assert.equal(dashboard.agentActions[0].payload.workspaceId, workspace.id);
+    assert.equal("providers" in dashboard.currentMember, false);
+  });
+
   it("rejects invalid dashboard preferences payloads", async () => {
     const service = new WorkspaceService(new WorkspaceRepository());
     const owner = {

@@ -28,6 +28,7 @@ Workspace는 PILO의 프로젝트 작업 공간과 멤버 권한을 담당한다
 | `POST` | `/workspace-invites/:inviteId/accept` | 초대 수락 | 동현 |
 | `GET` | `/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 조회 | 동현 |
 | `PUT` | `/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 저장 | 동현 |
+| `GET` | `/workspaces/:workspaceId/dashboard` | Dashboard aggregate read model 조회 | 동현 |
 
 ## Read Models
 

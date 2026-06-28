@@ -115,6 +115,20 @@ export class WorkspaceController {
     );
   }
 
+  @Get(":workspaceId/dashboard")
+  @UseGuards(WorkspaceMemberGuard)
+  getWorkspaceDashboard(
+    @Param("workspaceId") workspaceId: string,
+    @Req() request: WorkspaceMemberGuardRequest,
+  ) {
+    return this.handleWorkspaceRequest(() =>
+      this.workspaceService.getWorkspaceDashboard({
+        currentUser: this.requireGuardCurrentUser(request),
+        workspaceId,
+      }),
+    );
+  }
+
   @Get(":workspaceId")
   getWorkspace(
     @Headers("cookie") cookieHeader: string | undefined,

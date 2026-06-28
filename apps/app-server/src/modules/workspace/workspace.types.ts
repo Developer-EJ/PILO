@@ -119,6 +119,23 @@ export type DashboardPreferences = {
   updatedAt: string | null;
 };
 
+export type WorkspaceDashboardReadModel = {
+  workspace: WorkspaceSummary;
+  currentMember: CurrentWorkspaceMember;
+  preferences: DashboardPreferences;
+  members: WorkspaceMemberSummary[];
+  tasks: unknown[];
+  progress: Record<string, unknown> | null;
+  githubIssues: unknown[];
+  pullRequests: unknown[];
+  meetingReports: unknown[];
+  prAnalyses: unknown[];
+  agentActions: unknown[];
+  canvasEntities: unknown[];
+  source: "fixture" | "empty";
+  generatedAt: string;
+};
+
 export type CurrentWorkspaceMember = {
   workspaceId: string;
   memberId: string;
