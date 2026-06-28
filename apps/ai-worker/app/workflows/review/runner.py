@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 SECRET_KEYS = {
@@ -27,6 +26,10 @@ def run_review_analysis_workflow(payload: dict[str, Any]) -> dict[str, Any]:
         payload.get("pullRequestId") or pull_request.get("id"),
         "pullRequestId",
     )
+    summary_pull_request_id = pull_request.get("id")
+    if summary_pull_request_id and summary_pull_request_id != pull_request_id:
+        raise ValueError("pullRequestId must match pullRequestSummary.id")
+
     risky_files = [
         file
         for file in changed_files
@@ -46,11 +49,13 @@ def run_review_analysis_workflow(payload: dict[str, Any]) -> dict[str, Any]:
         "checklist": _build_checklist(risk_level),
         "questions": _build_questions(risky_files),
         "graph": {
-            "summary": f"{len(changed_files)}개 변경 파일 기준 review graph",
+            "summary": f"{len(changed_files)}개 변경 파일 기준 review canvas",
+            "intentSummary": f"{title} PR의 핵심 변경 흐름을 리뷰 순서로 정리했다.",
+            "reviewStrategy": "파일 진입점, 변경 함수, 영향 범위 순서로 확인한다.",
             "reviewOrder": [node["id"] for node in nodes],
             "nodes": nodes,
         },
-        "generatedAt": datetime.now(UTC).isoformat(),
+        "generatedAt": _generated_at(payload),
     }
 
 
@@ -73,7 +78,11 @@ def _build_graph_nodes(changed_files: list[dict[str, Any]]) -> list[dict[str, An
                 "functionName": None,
                 "riskLevel": risk_level,
                 "status": "discuss" if risk_level == "medium" else "unknown",
-                "reason": file.get("summary") or "변경 파일 검토가 필요하다.",
+                "reviewOrder": len(nodes) + 1,
+                "roleSummary": file.get("summary") or "변경 파일의 역할을 확인한다.",
+                "reviewReason": file.get("summary") or "변경 파일 검토가 필요하다.",
+                "position": {"x": 84 + (index - 1) * 280, "y": 72},
+                "detail": _node_detail(file_path, file, "file"),
             }
         )
 
@@ -88,7 +97,13 @@ def _build_graph_nodes(changed_files: list[dict[str, Any]]) -> list[dict[str, An
                     "functionName": function.get("name"),
                     "riskLevel": risk_level,
                     "status": "unknown",
-                    "reason": function.get("summary") or "변경 함수 검토가 필요하다.",
+                    "reviewOrder": len(nodes) + 1,
+                    "roleSummary": function.get("summary")
+                    or "변경 함수의 역할을 확인한다.",
+                    "reviewReason": function.get("summary")
+                    or "변경 함수 검토가 필요하다.",
+                    "position": {"x": 84 + (index - 1) * 280, "y": 190},
+                    "detail": _node_detail(file_path, function, "function"),
                 }
             )
 
@@ -103,7 +118,7 @@ def _build_checklist(risk_level: str) -> list[dict[str, str]]:
 
     if risk_level != "low":
         checklist.append(
-            {"type": "merge", "title": "redirect smoke test 결과를 확인한다."}
+            {"type": "merge", "title": "주요 회귀 smoke test 결과를 확인한다."}
         )
 
     return checklist
@@ -133,9 +148,43 @@ def _impact_summary(
 
 def _test_recommendation(risky_files: list[dict[str, Any]]) -> str:
     if risky_files:
-        return "변경량이 큰 파일을 중심으로 smoke test와 실패 redirect 케이스를 확인한다."
+        return "변경량이 큰 파일을 중심으로 회귀 smoke test와 실패 경로를 확인한다."
 
     return "주요 변경 파일의 happy path smoke test를 확인한다."
+
+
+def _node_detail(file_path: str, source: dict[str, Any], node_kind: str) -> dict[str, Any]:
+    summary = source.get("summary") or f"{node_kind} 변경 내용을 확인한다."
+    return {
+        "filePath": file_path,
+        "modificationReason": summary,
+        "changeGroups": [
+            {
+                "id": f"{node_kind}-change",
+                "title": summary,
+                "summary": summary,
+                "newStartLine": int(source.get("newStartLine", 1)),
+                "newEndLine": int(source.get("newEndLine", source.get("newStartLine", 1))),
+            }
+        ],
+        "diffHunks": [
+            {
+                "id": f"{node_kind}-diff",
+                "oldStartLine": int(source.get("oldStartLine", 1)),
+                "newStartLine": int(source.get("newStartLine", 1)),
+                "oldCode": str(source.get("oldCode", "")),
+                "newCode": str(source.get("newCode", "")),
+            }
+        ],
+    }
+
+
+def _generated_at(payload: dict[str, Any]) -> str:
+    requested_at = payload.get("requestedAt")
+    if isinstance(requested_at, str) and requested_at:
+        return requested_at
+
+    return "1970-01-01T00:00:00+00:00"
 
 
 def _sanitize(value: Any) -> Any:
