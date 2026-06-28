@@ -4,11 +4,18 @@ import type {
   CurrentWorkspaceMember,
   UpdateWorkspacePatch,
   WorkspaceAuthUserRef,
+  WorkspaceMemberRole,
   WorkspaceMemberRecord,
+  WorkspaceMemberSummary,
   WorkspaceStatus,
   WorkspaceSummary,
   WorkspaceType,
 } from "./workspace.types";
+import {
+  createWorkspaceMemberPermissions,
+  hasWorkspaceRole,
+  type WorkspaceMemberPermissions,
+} from "./workspace.permissions";
 import { WORKSPACE_STATUSES, WORKSPACE_TYPES } from "./workspace.types";
 
 export type ResolveCurrentMemberInput = {
@@ -28,6 +35,15 @@ export type CreateWorkspaceMutationInput = WorkspaceRequestInput & {
 
 export type WorkspaceMutationInput = ResolveCurrentMemberInput & {
   body: unknown;
+};
+
+export type WorkspaceRoleRequirement = {
+  minimumRole?: WorkspaceMemberRole;
+};
+
+export type WorkspaceCurrentMemberContext = {
+  currentMember: CurrentWorkspaceMember;
+  permissions: WorkspaceMemberPermissions;
 };
 
 export type WorkspaceAccessErrorCode =
@@ -99,14 +115,28 @@ export class WorkspaceService {
     return workspace;
   }
 
+  async listWorkspaceMembers(
+    input: WorkspaceResourceInput,
+  ): Promise<WorkspaceMemberSummary[]> {
+    await this.requireCurrentMember(input);
+
+    const members =
+      await this.workspaceRepository.listWorkspaceMemberSummariesForUser({
+        workspaceId: input.workspaceId,
+        userId: input.currentUser.id,
+      });
+
+    if (!members) {
+      throw new WorkspaceAccessError(input.workspaceId, "workspace_not_found");
+    }
+
+    return members;
+  }
+
   async updateWorkspace(
     input: WorkspaceMutationInput,
   ): Promise<WorkspaceSummary> {
-    const currentMember = await this.requireCurrentMember(input);
-
-    if (currentMember.role !== "owner") {
-      throw new WorkspaceAccessError(input.workspaceId, "workspace_forbidden");
-    }
+    await this.requireCurrentMemberContext(input, { minimumRole: "owner" });
 
     const workspace = await this.workspaceRepository.updateWorkspaceForUser({
       workspaceId: input.workspaceId,
@@ -132,6 +162,18 @@ export class WorkspaceService {
     return member ? toCurrentWorkspaceMember(member) : null;
   }
 
+  async resolveCurrentMemberContext(
+    input: ResolveCurrentMemberInput,
+  ): Promise<WorkspaceCurrentMemberContext | null> {
+    const currentMember = await this.resolveCurrentMember(input);
+
+    if (!currentMember) {
+      return null;
+    }
+
+    return toWorkspaceCurrentMemberContext(currentMember);
+  }
+
   async requireCurrentMember(input: ResolveCurrentMemberInput) {
     const currentMember = await this.resolveCurrentMember(input);
 
@@ -140,6 +182,26 @@ export class WorkspaceService {
     }
 
     return currentMember;
+  }
+
+  async requireCurrentMemberContext(
+    input: ResolveCurrentMemberInput,
+    requirement: WorkspaceRoleRequirement = {},
+  ) {
+    const context = await this.resolveCurrentMemberContext(input);
+
+    if (!context) {
+      throw new WorkspaceAccessError(input.workspaceId);
+    }
+
+    if (
+      requirement.minimumRole &&
+      !hasWorkspaceRole(context.currentMember.role, requirement.minimumRole)
+    ) {
+      throw new WorkspaceAccessError(input.workspaceId, "workspace_forbidden");
+    }
+
+    return context;
   }
 }
 
@@ -292,5 +354,14 @@ function toCurrentWorkspaceMember(
     userId: member.userId,
     role: member.role,
     displayName: member.displayName,
+  };
+}
+
+function toWorkspaceCurrentMemberContext(
+  currentMember: CurrentWorkspaceMember,
+): WorkspaceCurrentMemberContext {
+  return {
+    currentMember,
+    permissions: createWorkspaceMemberPermissions(currentMember.role),
   };
 }

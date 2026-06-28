@@ -20,10 +20,17 @@ const {
   WORKSPACE_TYPES,
 } = require("../src/modules/workspace/workspace.types");
 const {
+  createWorkspaceMemberPermissions,
+  hasWorkspaceRole,
+} = require("../src/modules/workspace/workspace.permissions");
+const {
   WorkspaceAccessError,
   WorkspaceService,
   WorkspaceValidationError,
 } = require("../src/modules/workspace/workspace.service");
+const {
+  WorkspaceCurrentMemberAdapter,
+} = require("../src/modules/workspace/workspace-current-member.adapter");
 const {
   WorkspaceRepository,
 } = require("../src/modules/workspace/workspace.repository");
@@ -782,6 +789,9 @@ describe("app-server package", () => {
           id: "member-1",
           workspaceId: input.workspaceId,
           userId: input.userId,
+          name: "Workspace User",
+          email: "workspace@example.com",
+          avatarUrl: null,
           role: "owner",
           displayName: "Workspace / Canvas",
           joinedAt: "2026-06-28T00:00:00.000Z",
@@ -817,6 +827,27 @@ describe("app-server package", () => {
     assert.equal("email" in currentMember, false);
   });
 
+  it("maps workspace role helpers to read, write, and manage permissions", () => {
+    assert.equal(hasWorkspaceRole("owner", "viewer"), true);
+    assert.equal(hasWorkspaceRole("owner", "member"), true);
+    assert.equal(hasWorkspaceRole("member", "owner"), false);
+    assert.deepEqual(createWorkspaceMemberPermissions("viewer"), {
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+    });
+    assert.deepEqual(createWorkspaceMemberPermissions("member"), {
+      canRead: true,
+      canWrite: true,
+      canManage: false,
+    });
+    assert.deepEqual(createWorkspaceMemberPermissions("owner"), {
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+    });
+  });
+
   it("requires workspace membership before exposing member-scoped context", async () => {
     const service = new WorkspaceService({
       storageMode: "test",
@@ -836,6 +867,45 @@ describe("app-server package", () => {
         error.code === "workspace_member_not_found" &&
         error.workspaceId === "workspace-1",
     );
+  });
+
+  it("provides currentMember context through the public workspace adapter", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const adapter = new WorkspaceCurrentMemberAdapter(service);
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+      avatarUrl: "https://example.com/owner.png",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const context = await adapter.requireCurrentMember(
+      {
+        workspaceId: created.id,
+        currentUser,
+      },
+      { minimumRole: "owner" },
+    );
+
+    assert.deepEqual(context.currentMember, {
+      workspaceId: created.id,
+      memberId: context.currentMember.memberId,
+      userId: currentUser.id,
+      role: "owner",
+      displayName: "Workspace Owner",
+    });
+    assert.deepEqual(context.permissions, {
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+    });
+    assert.equal("email" in context.currentMember, false);
+    assert.equal("avatarUrl" in context.currentMember, false);
   });
 
   it("creates, lists, reads, and archives workspaces for the current member", async () => {
@@ -888,6 +958,43 @@ describe("app-server package", () => {
       ).status,
       "archived",
     );
+  });
+
+  it("lists workspace members using the WorkspaceMemberSummary contract", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+      avatarUrl: "https://example.com/owner.png",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const members = await service.listWorkspaceMembers({
+      workspaceId: created.id,
+      currentUser,
+    });
+
+    assert.equal(members.length, 1);
+    assert.deepEqual(Object.keys(members[0]).sort(), [
+      "avatarUrl",
+      "displayName",
+      "email",
+      "joinedAt",
+      "memberId",
+      "name",
+      "role",
+      "userId",
+    ]);
+    assert.equal(members[0].userId, currentUser.id);
+    assert.equal(members[0].name, "Workspace Owner");
+    assert.equal(members[0].email, "owner@example.com");
+    assert.equal(members[0].avatarUrl, "https://example.com/owner.png");
+    assert.equal(members[0].role, "owner");
   });
 
   it("hides soft-deleted workspaces from member-scoped reads", async () => {

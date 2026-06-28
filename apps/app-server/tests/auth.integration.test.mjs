@@ -229,6 +229,16 @@ describe("auth HTTP integration", () => {
         )}`,
       });
       const cookieHeader = getCookieHeader(callbackResponse);
+      const meResponse = await server.inject({
+        method: "GET",
+        url: "/auth/me",
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+      const currentUser = meResponse.json();
+
+      assert.equal(meResponse.statusCode, 200);
 
       const createResponse = await server.inject({
         method: "POST",
@@ -275,6 +285,23 @@ describe("auth HTTP integration", () => {
       assert.equal(detailResponse.statusCode, 200);
       assert.deepEqual(detailResponse.json(), created);
 
+      const membersResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}/members`,
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+      const members = membersResponse.json();
+
+      assert.equal(membersResponse.statusCode, 200);
+      assert.equal(members.length, 1);
+      assert.equal(members[0].userId, currentUser.id);
+      assert.equal(members[0].name, "Integration User");
+      assert.equal(members[0].email, "integration@example.com");
+      assert.equal(members[0].avatarUrl, "https://example.com/integration.png");
+      assert.equal(members[0].role, "owner");
+
       const updateResponse = await server.inject({
         method: "PATCH",
         url: `/workspaces/${created.id}`,
@@ -299,6 +326,23 @@ describe("auth HTTP integration", () => {
       });
 
       assert.equal(anonymousResponse.statusCode, 401);
+
+      const anonymousMembersResponse = await server.inject({
+        method: "GET",
+        url: `/workspaces/${created.id}/members`,
+      });
+
+      assert.equal(anonymousMembersResponse.statusCode, 401);
+
+      const missingMembersResponse = await server.inject({
+        method: "GET",
+        url: "/workspaces/00000000-0000-4000-8000-000000000000/members",
+        headers: {
+          cookie: cookieHeader,
+        },
+      });
+
+      assert.equal(missingMembersResponse.statusCode, 404);
       assert.equal(oauthRequests.length, 2);
     } finally {
       await close();

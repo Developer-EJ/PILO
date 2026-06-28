@@ -9,10 +9,16 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UnauthorizedException,
+  UseGuards,
 } from "@nestjs/common";
 import type { CurrentUserResponse } from "../auth/auth.service";
 import { AuthService } from "../auth/auth.service";
+import {
+  WorkspaceMemberGuard,
+  type WorkspaceMemberGuardRequest,
+} from "./workspace-member.guard";
 import {
   WorkspaceAccessError,
   WorkspaceService,
@@ -42,6 +48,20 @@ export class WorkspaceController {
       this.workspaceService.createWorkspace({
         currentUser: this.requireCurrentUser(cookieHeader),
         body,
+      }),
+    );
+  }
+
+  @Get(":workspaceId/members")
+  @UseGuards(WorkspaceMemberGuard)
+  listWorkspaceMembers(
+    @Param("workspaceId") workspaceId: string,
+    @Req() request: WorkspaceMemberGuardRequest,
+  ) {
+    return this.handleWorkspaceRequest(() =>
+      this.workspaceService.listWorkspaceMembers({
+        currentUser: this.requireGuardCurrentUser(request),
+        workspaceId,
       }),
     );
   }
@@ -85,6 +105,16 @@ export class WorkspaceController {
     }
 
     return currentUser;
+  }
+
+  private requireGuardCurrentUser(
+    request: WorkspaceMemberGuardRequest,
+  ): CurrentUserResponse {
+    if (!request.currentUser) {
+      throw new UnauthorizedException();
+    }
+
+    return request.currentUser;
   }
 
   private async handleWorkspaceRequest<T>(handler: () => Promise<T>) {
