@@ -10,20 +10,45 @@ const {
   CANVAS_REALTIME_NAMESPACE,
   createCanvasBoardRoomName,
   parseCanvasBoardRoomPayload,
+  parseCanvasRealtimeBoardAccessList,
+  parseCanvasRealtimeSessionContext,
   parseCanvasPresenceEventPayload,
   parseCanvasShapeEventPayload,
   parseCanvasViewEventPayload,
 } = require("../dist/canvas-realtime.contract");
 
-function createSocketStub(currentMember) {
+function createSocketStub(currentMember, options = {}) {
   const joinedRooms = [];
   const leftRooms = [];
+  const session =
+    "session" in options
+      ? options.session
+      : currentMember
+        ? {
+            authenticated: true,
+            userId: currentMember.userId,
+            expiresAt: null,
+          }
+        : null;
+  const canvasBoards =
+    "canvasBoards" in options
+      ? options.canvasBoards
+      : currentMember
+        ? [
+            {
+              boardId: "board-1",
+              workspaceId: currentMember.workspaceId,
+            },
+          ]
+        : [];
 
   return {
     socket: {
       handshake: {
         auth: {
+          session,
           currentMember,
+          canvasBoards,
         },
       },
       async join(room) {
@@ -56,6 +81,36 @@ describe("realtime-server package", () => {
     assert.deepEqual(parseCanvasBoardRoomPayload({ boardId: "board-1" }), {
       boardId: "board-1",
     });
+    assert.deepEqual(
+      parseCanvasRealtimeSessionContext({
+        authenticated: true,
+        userId: "user-1",
+        expiresAt: null,
+      }),
+      {
+        authenticated: true,
+        userId: "user-1",
+        expiresAt: null,
+      },
+    );
+    assert.deepEqual(
+      parseCanvasRealtimeBoardAccessList([
+        {
+          boardId: "board-1",
+          workspaceId: "workspace-1",
+        },
+        {
+          boardId: "",
+          workspaceId: "workspace-1",
+        },
+      ]),
+      [
+        {
+          boardId: "board-1",
+          workspaceId: "workspace-1",
+        },
+      ],
+    );
     assert.deepEqual(
       parseCanvasShapeEventPayload({
         boardId: "board-1",
@@ -116,6 +171,7 @@ describe("realtime-server package", () => {
       workspaceId: "workspace-1",
       memberId: "member-1",
       userId: "user-1",
+      role: "owner",
       displayName: "Canvas Owner",
     };
     const { socket, joinedRooms, leftRooms } = createSocketStub(currentMember);
@@ -150,6 +206,7 @@ describe("realtime-server package", () => {
       workspaceId: "workspace-1",
       memberId: "member-1",
       userId: "user-1",
+      role: "member",
       displayName: null,
     });
 
@@ -164,7 +221,8 @@ describe("realtime-server package", () => {
       ok: false,
       event: "canvas:board:join",
       error: "auth_required",
-      message: "Canvas realtime currentMember context is required.",
+      message:
+        "Canvas realtime session and currentMember context are required.",
     });
     assert.deepEqual(payloadAck, {
       ok: false,
@@ -174,5 +232,71 @@ describe("realtime-server package", () => {
     });
     assert.deepEqual(unauthenticated.joinedRooms, []);
     assert.deepEqual(authenticated.joinedRooms, []);
+  });
+
+  it("rejects expired sessions and workspace membership mismatches", async () => {
+    const gateway = new CanvasGateway();
+    const currentMember = {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "member",
+      displayName: null,
+    };
+    const expired = createSocketStub(currentMember, {
+      session: {
+        authenticated: true,
+        userId: "user-1",
+        expiresAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    const forbidden = createSocketStub(currentMember, {
+      canvasBoards: [
+        {
+          boardId: "board-1",
+          workspaceId: "workspace-2",
+        },
+      ],
+    });
+    const reconnect = createSocketStub(currentMember, {
+      session: {
+        authenticated: true,
+        userId: "user-1",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    });
+
+    const expiredAck = await gateway.joinBoardRoom(expired.socket, {
+      boardId: "board-1",
+    });
+    const forbiddenAck = await gateway.joinBoardRoom(forbidden.socket, {
+      boardId: "board-1",
+    });
+    const reconnectAck = await gateway.joinBoardRoom(reconnect.socket, {
+      boardId: "board-1",
+    });
+
+    assert.deepEqual(expiredAck, {
+      ok: false,
+      event: "canvas:board:join",
+      error: "auth_expired",
+      message: "Canvas realtime session is expired.",
+    });
+    assert.deepEqual(forbiddenAck, {
+      ok: false,
+      event: "canvas:board:join",
+      error: "forbidden",
+      message:
+        "Current member cannot join a canvas board outside their workspace.",
+    });
+    assert.deepEqual(reconnectAck, {
+      ok: true,
+      event: "canvas:board:join",
+      room: "canvas:board:board-1",
+      currentMember,
+    });
+    assert.deepEqual(expired.joinedRooms, []);
+    assert.deepEqual(forbidden.joinedRooms, []);
+    assert.deepEqual(reconnect.joinedRooms, ["canvas:board:board-1"]);
   });
 });

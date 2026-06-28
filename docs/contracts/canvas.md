@@ -252,22 +252,43 @@ Room payload:
 
 Room name format is `canvas:board:{boardId}`.
 
-The realtime auth connection point expects `currentMember` in the Socket.IO
-handshake auth. Full permission validation is handled by the follow-up realtime
-auth issue.
+The realtime auth connection point expects `session`, `currentMember`, and a
+board access adapter result in the Socket.IO handshake auth. The default local
+adapter reads `canvasBoards` from the handshake; production can replace that
+adapter with DB/app-server lookup without changing the event payload.
 
 ```json
 {
   "auth": {
+    "session": {
+      "authenticated": true,
+      "userId": "uuid",
+      "expiresAt": "2026-06-28T12:00:00.000Z"
+    },
     "currentMember": {
       "workspaceId": "uuid",
       "memberId": "uuid",
       "userId": "uuid",
+      "role": "member",
       "displayName": "Donghyun"
-    }
+    },
+    "canvasBoards": [
+      {
+        "boardId": "uuid",
+        "workspaceId": "uuid"
+      }
+    ]
   }
 }
 ```
+
+Room join/leave is rejected when:
+
+- `session` or `currentMember` is missing or malformed.
+- `session.userId` and `currentMember.userId` do not match.
+- `session.expiresAt` is expired.
+- `boardId` has no board access context.
+- the board's `workspaceId` differs from `currentMember.workspaceId`.
 
 ### Broadcast Payloads
 

@@ -15,7 +15,19 @@ export type CanvasRealtimeAuthContext = {
   workspaceId: string;
   memberId: string;
   userId: string;
+  role: "owner" | "member" | "viewer";
   displayName: string | null;
+};
+
+export type CanvasRealtimeSessionContext = {
+  authenticated: true;
+  userId: string;
+  expiresAt: string | null;
+};
+
+export type CanvasRealtimeBoardAccessContext = {
+  boardId: string;
+  workspaceId: string;
 };
 
 export type CanvasBoardRoomPayload = {
@@ -53,7 +65,12 @@ export type CanvasRealtimeAck =
   | {
       ok: false;
       event: CanvasRealtimeEventName;
-      error: "auth_required" | "invalid_payload";
+      error:
+        | "auth_required"
+        | "auth_expired"
+        | "invalid_payload"
+        | "board_not_found"
+        | "forbidden";
       message: string;
     };
 
@@ -140,8 +157,9 @@ export function parseCanvasRealtimeAuthContext(
   const workspaceId = parseNonEmptyString(record?.workspaceId);
   const memberId = parseNonEmptyString(record?.memberId);
   const userId = parseNonEmptyString(record?.userId);
+  const role = parseWorkspaceMemberRole(record?.role);
 
-  if (!workspaceId || !memberId || !userId) {
+  if (!workspaceId || !memberId || !userId || !role) {
     return null;
   }
 
@@ -149,9 +167,52 @@ export function parseCanvasRealtimeAuthContext(
     workspaceId,
     memberId,
     userId,
+    role,
     displayName:
       typeof record?.displayName === "string" ? record.displayName : null,
   };
+}
+
+export function parseCanvasRealtimeSessionContext(
+  value: unknown,
+): CanvasRealtimeSessionContext | null {
+  const record = asRecord(value);
+  const userId = parseNonEmptyString(record?.userId);
+  const expiresAt = parseOptionalString(record?.expiresAt);
+
+  if (record?.authenticated !== true || !userId || expiresAt === undefined) {
+    return null;
+  }
+
+  return {
+    authenticated: true,
+    userId,
+    expiresAt,
+  };
+}
+
+export function parseCanvasRealtimeBoardAccessContext(
+  value: unknown,
+): CanvasRealtimeBoardAccessContext | null {
+  const record = asRecord(value);
+  const boardId = parseNonEmptyString(record?.boardId);
+  const workspaceId = parseNonEmptyString(record?.workspaceId);
+
+  return boardId && workspaceId ? { boardId, workspaceId } : null;
+}
+
+export function parseCanvasRealtimeBoardAccessList(
+  value: unknown,
+): CanvasRealtimeBoardAccessContext[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    const access = parseCanvasRealtimeBoardAccessContext(item);
+
+    return access ? [access] : [];
+  });
 }
 
 function asRecord(value: unknown) {
@@ -164,6 +225,14 @@ function asRecord(value: unknown) {
 
 function parseNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function parseOptionalString(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return parseNonEmptyString(value) ?? undefined;
 }
 
 function parseFiniteNumber(value: unknown): number | null {
@@ -201,6 +270,14 @@ function parsePresenceTool(value: unknown) {
     value === "connector" ||
     value === "unknown"
   ) {
+    return value;
+  }
+
+  return null;
+}
+
+function parseWorkspaceMemberRole(value: unknown) {
+  if (value === "owner" || value === "member" || value === "viewer") {
     return value;
   }
 
