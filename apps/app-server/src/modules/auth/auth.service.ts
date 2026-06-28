@@ -111,6 +111,11 @@ export type CurrentUserResponse = {
   lastLoginAt: string | null;
 };
 
+export type LogoutSessionResult = {
+  revoked: boolean;
+  cookieHeader: string;
+};
+
 class AuthFlowError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -326,6 +331,20 @@ export class AuthService {
     };
   }
 
+  logoutFromCookieHeader(cookieHeader?: string): LogoutSessionResult {
+    const rawToken = this.readSessionTokenFromCookieHeader(cookieHeader);
+    const revokedSession = rawToken
+      ? this.authRepository.revokeAuthSessionByTokenHash(
+          this.hashSessionToken(rawToken),
+        )
+      : null;
+
+    return {
+      revoked: Boolean(revokedSession),
+      cookieHeader: this.createExpiredSessionCookieHeader(),
+    };
+  }
+
   verifyOAuthState(input: {
     provider: AuthProviderName;
     state: string;
@@ -385,6 +404,23 @@ export class AuthService {
       `SameSite=${this.config.session.sameSite}`,
       `Expires=${expiresAt.toUTCString()}`,
       `Max-Age=${Math.floor(this.config.session.ttlMs / 1000)}`,
+    ];
+
+    if (this.config.session.secure) {
+      cookieParts.push("Secure");
+    }
+
+    return cookieParts.join("; ");
+  }
+
+  private createExpiredSessionCookieHeader() {
+    const cookieParts = [
+      `${encodeURIComponent(this.config.session.cookieName)}=`,
+      "Path=/",
+      "HttpOnly",
+      `SameSite=${this.config.session.sameSite}`,
+      "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+      "Max-Age=0",
     ];
 
     if (this.config.session.secure) {

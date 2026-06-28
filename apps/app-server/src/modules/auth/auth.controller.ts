@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Headers,
+  Post,
   Query,
   Req,
   Res,
@@ -29,6 +30,18 @@ export class AuthController {
     }
 
     return currentUser;
+  }
+
+  @Post("logout")
+  logout(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Res() reply: FastifyReply,
+  ) {
+    const result = this.authService.logoutFromCookieHeader(cookieHeader);
+
+    reply.header("Set-Cookie", result.cookieHeader);
+
+    return reply.status(204).send();
   }
 
   @Get("google/start")
