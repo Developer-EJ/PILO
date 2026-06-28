@@ -17,6 +17,8 @@ import {
   TaskChecklistItemSummary,
   TaskCommentRecord,
   TaskCommentSummary,
+  TaskDependencyRecord,
+  TaskDependencySummary,
   TaskDetail,
   TaskPriority,
   TaskRecord,
@@ -108,6 +110,17 @@ export class JuhyungPublicAdapter {
       status: item.status as TaskChecklistItemSummary["status"],
       sortOrder: item.sortOrder,
       updatedAt: toDateTime(item.updatedAt),
+    };
+  }
+
+  toTaskDependencySummary(
+    dependency: TaskDependencyRecord,
+  ): TaskDependencySummary {
+    return {
+      id: dependency.id,
+      taskId: dependency.taskId,
+      dependsOnTaskId: dependency.dependsOnTaskId,
+      createdAt: toDateTime(dependency.createdAt),
     };
   }
 

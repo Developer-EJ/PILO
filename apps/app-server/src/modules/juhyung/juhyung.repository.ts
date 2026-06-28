@@ -128,6 +128,61 @@ export class JuhyungRepository {
     });
   }
 
+  createTaskDependency(taskId: string, dependsOnTaskId: string) {
+    const data = {
+      taskId,
+      dependsOnTaskId,
+    } satisfies Prisma.TaskDependencyUncheckedCreateInput;
+
+    return this.database.taskDependency.create({ data });
+  }
+
+  getTaskDependency(taskId: string, dependsOnTaskId: string) {
+    return this.database.taskDependency.findFirst({
+      where: {
+        taskId,
+        dependsOnTaskId,
+      },
+    });
+  }
+
+  async listTaskDependenciesForWorkspace(workspaceId: string) {
+    const tasks = await this.database.task.findMany({
+      where: {
+        workspaceId,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+      },
+    });
+    const taskIds = tasks.map((task) => task.id);
+    if (taskIds.length === 0) {
+      return [];
+    }
+
+    return this.database.taskDependency.findMany({
+      where: {
+        taskId: {
+          in: taskIds,
+        },
+        dependsOnTaskId: {
+          in: taskIds,
+        },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+  }
+
+  deleteTaskDependency(taskId: string, dependsOnTaskId: string) {
+    return this.database.taskDependency.deleteMany({
+      where: {
+        taskId,
+        dependsOnTaskId,
+      },
+    });
+  }
+
   listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
     return this.database.workspaceMember.findMany({
       where: {

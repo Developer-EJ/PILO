@@ -98,6 +98,20 @@ export interface TaskDetail extends TaskSummary {
   checklistItems: TaskChecklistItemSummary[];
 }
 
+export interface TaskDependencyRecord {
+  id: string;
+  taskId: string;
+  dependsOnTaskId: string;
+  createdAt: Date | string;
+}
+
+export interface TaskDependencySummary {
+  id: string;
+  taskId: string;
+  dependsOnTaskId: string;
+  createdAt: string;
+}
+
 export interface TaskCommentRecord {
   id: string;
   taskId: string;

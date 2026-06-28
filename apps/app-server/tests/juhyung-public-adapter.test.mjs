@@ -37,6 +37,8 @@ const UUIDS = {
   pullRequest: "77777777-7777-4777-8777-777777777777",
   milestone: "88888888-8888-4888-8888-888888888888",
   snapshot: "99999999-9999-4999-8999-999999999999",
+  dependency: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  dependsOnTask: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 };
 
 function assertContract(defName, value) {
@@ -235,6 +237,23 @@ describe("JuhyungPublicAdapter", () => {
       updatedAt: "2026-06-27T12:00:00.000Z",
     });
     assertContract("TaskSummary", summary);
+  });
+
+  it("maps a TaskDependency domain record to the TaskDependencySummary public DTO", () => {
+    const summary = adapter.toTaskDependencySummary({
+      id: UUIDS.dependency,
+      taskId: UUIDS.task,
+      dependsOnTaskId: UUIDS.dependsOnTask,
+      createdAt: new Date("2026-06-28T11:00:00.000Z"),
+    });
+
+    assert.deepEqual(summary, {
+      id: UUIDS.dependency,
+      taskId: UUIDS.task,
+      dependsOnTaskId: UUIDS.dependsOnTask,
+      createdAt: "2026-06-28T11:00:00.000Z",
+    });
+    assertContract("TaskDependencySummary", summary);
   });
 
   it("maps GitHub and Progress records to public DTOs that match the schema", () => {

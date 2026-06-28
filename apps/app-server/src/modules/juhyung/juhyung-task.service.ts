@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import {
   CurrentActor,
   WorkspaceMemberAccessService,
@@ -13,6 +17,10 @@ import {
   parseCreateTaskCommentInput,
   type CreateTaskCommentBody,
 } from "./juhyung-comment-input";
+import {
+  parseCreateTaskDependencyInput,
+  type CreateTaskDependencyBody,
+} from "./juhyung-dependency-input";
 import {
   assertMilestoneDateRange,
   parseCreateMilestoneInput,
@@ -41,6 +49,8 @@ import {
   TaskChecklistItemSummary,
   TaskCommentRecord,
   TaskCommentSummary,
+  TaskDependencyRecord,
+  TaskDependencySummary,
   MilestoneSummary,
   TaskStatus,
   TaskSummary,
@@ -62,6 +72,7 @@ export type {
   UpdateChecklistItemBody,
 } from "./juhyung-checklist-input";
 export type { CreateTaskCommentBody } from "./juhyung-comment-input";
+export type { CreateTaskDependencyBody } from "./juhyung-dependency-input";
 export type { ListTasksQuery } from "./juhyung-task-list-query";
 
 @Injectable()
@@ -215,6 +226,66 @@ export class JuhyungTaskService {
   async deleteTask(taskId: string, actor?: CurrentActor): Promise<void> {
     await this.requireTaskAccess(taskId, actor);
     await this.repository.softDeleteTask(taskId);
+  }
+
+  async createTaskDependency(
+    taskId: string,
+    body: CreateTaskDependencyBody,
+    actor?: CurrentActor,
+  ): Promise<TaskDependencySummary> {
+    const input = parseCreateTaskDependencyInput(body);
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    if (taskId === input.dependsOnTaskId) {
+      throw new BadRequestException("Task cannot depend on itself");
+    }
+
+    const dependsOnTask = await this.repository.getTaskById(
+      input.dependsOnTaskId,
+    );
+    if (!dependsOnTask || dependsOnTask.workspaceId !== task.workspaceId) {
+      throw new NotFoundException("Dependency target task was not found");
+    }
+
+    const existingDependency = await this.repository.getTaskDependency(
+      taskId,
+      input.dependsOnTaskId,
+    );
+    if (existingDependency) {
+      throw new BadRequestException("Task dependency already exists");
+    }
+
+    const workspaceDependencies =
+      await this.repository.listTaskDependenciesForWorkspace(task.workspaceId);
+    if (
+      wouldCreateTaskDependencyCycle(
+        taskId,
+        input.dependsOnTaskId,
+        workspaceDependencies,
+      )
+    ) {
+      throw new BadRequestException("Task dependency cycle is not allowed");
+    }
+
+    const dependency = await this.repository.createTaskDependency(
+      taskId,
+      input.dependsOnTaskId,
+    );
+    return this.publicAdapter.toTaskDependencySummary(dependency);
+  }
+
+  async deleteTaskDependency(
+    taskId: string,
+    dependsOnTaskId: string,
+    actor?: CurrentActor,
+  ): Promise<void> {
+    await this.requireTaskAccess(taskId, actor);
+    const result = await this.repository.deleteTaskDependency(
+      taskId,
+      dependsOnTaskId,
+    );
+    if (result.count === 0) {
+      throw new NotFoundException("Task dependency was not found");
+    }
   }
 
   async createTaskComment(
@@ -438,4 +509,32 @@ export class JuhyungTaskService {
       members.map((member) => [member.id, member as WorkspaceMemberRecord]),
     );
   }
+}
+
+function wouldCreateTaskDependencyCycle(
+  taskId: string,
+  dependsOnTaskId: string,
+  dependencies: TaskDependencyRecord[],
+): boolean {
+  const dependencyByTaskId = new Map<string, string[]>();
+  for (const dependency of dependencies) {
+    const existing = dependencyByTaskId.get(dependency.taskId) ?? [];
+    existing.push(dependency.dependsOnTaskId);
+    dependencyByTaskId.set(dependency.taskId, existing);
+  }
+
+  const visited = new Set<string>();
+  const stack = [dependsOnTaskId];
+  while (stack.length > 0) {
+    const currentTaskId = stack.pop() as string;
+    if (currentTaskId === taskId) {
+      return true;
+    }
+    if (visited.has(currentTaskId)) {
+      continue;
+    }
+    visited.add(currentTaskId);
+    stack.push(...(dependencyByTaskId.get(currentTaskId) ?? []));
+  }
+  return false;
 }

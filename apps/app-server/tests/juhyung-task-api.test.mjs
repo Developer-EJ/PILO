@@ -22,6 +22,9 @@ const UUIDS = {
   comment: "88888888-8888-4888-8888-888888888888",
   activity: "99999999-9999-4999-8999-999999999999",
   checklistItem: "77777777-7777-4777-8777-777777777777",
+  dependency: "12121212-1212-4121-8121-121212121212",
+  dependsOnTask: "abababab-abab-4aba-8bab-abababababab",
+  cycleTask: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd",
   member: "33333333-3333-4333-8333-333333333333",
   assignee: "44444444-4444-4444-8444-444444444444",
   milestone: "66666666-6666-4666-8666-666666666666",
@@ -42,6 +45,19 @@ const baseTask = {
   createdAt: new Date("2026-06-27T11:00:00.000Z"),
   updatedAt: new Date("2026-06-27T12:00:00.000Z"),
   deletedAt: null,
+};
+
+const baseDependsOnTask = {
+  ...baseTask,
+  id: UUIDS.dependsOnTask,
+  title: "Install GitHub App",
+};
+
+const baseTaskDependency = {
+  id: UUIDS.dependency,
+  taskId: UUIDS.task,
+  dependsOnTaskId: UUIDS.dependsOnTask,
+  createdAt: new Date("2026-06-28T11:00:00.000Z"),
 };
 
 const baseMilestone = {
@@ -817,6 +833,192 @@ describe("JuhyungTaskService", () => {
     ]);
   });
 
+  it("creates task dependencies after checking workspace membership and cycle safety", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return taskId === UUIDS.dependsOnTask ? baseDependsOnTask : baseTask;
+        },
+        getTaskDependency: async (taskId, dependsOnTaskId) => {
+          calls.push(["findDependency", taskId, dependsOnTaskId]);
+          return null;
+        },
+        listTaskDependenciesForWorkspace: async (workspaceId) => {
+          calls.push(["listDependencies", workspaceId]);
+          return [];
+        },
+        createTaskDependency: async (taskId, dependsOnTaskId) => {
+          calls.push(["createDependency", taskId, dependsOnTaskId]);
+          return baseTaskDependency;
+        },
+      },
+    });
+
+    const result = await service.createTaskDependency(
+      UUIDS.task,
+      {
+        dependsOnTaskId: UUIDS.dependsOnTask,
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.deepEqual(result, {
+      id: UUIDS.dependency,
+      taskId: UUIDS.task,
+      dependsOnTaskId: UUIDS.dependsOnTask,
+      createdAt: "2026-06-28T11:00:00.000Z",
+    });
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["get", UUIDS.dependsOnTask],
+      ["findDependency", UUIDS.task, UUIDS.dependsOnTask],
+      ["listDependencies", UUIDS.workspace],
+      ["createDependency", UUIDS.task, UUIDS.dependsOnTask],
+    ]);
+  });
+
+  it("rejects self task dependencies before writing", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        createTaskDependency: async () => {
+          throw new Error("self dependency should not be written");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createTaskDependency(
+          UUIDS.task,
+          {
+            dependsOnTaskId: UUIDS.task,
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+    ]);
+  });
+
+  it("rejects duplicate task dependencies before writing", async () => {
+    const service = createService({
+      repository: {
+        getTaskById: async (taskId) =>
+          taskId === UUIDS.dependsOnTask ? baseDependsOnTask : baseTask,
+        getTaskDependency: async () => baseTaskDependency,
+        createTaskDependency: async () => {
+          throw new Error("duplicate dependency should not be written");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createTaskDependency(
+          UUIDS.task,
+          {
+            dependsOnTaskId: UUIDS.dependsOnTask,
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
+  });
+
+  it("rejects task dependencies that would create a cycle", async () => {
+    const service = createService({
+      repository: {
+        getTaskById: async (taskId) =>
+          taskId === UUIDS.dependsOnTask ? baseDependsOnTask : baseTask,
+        getTaskDependency: async () => null,
+        listTaskDependenciesForWorkspace: async () => [
+          {
+            id: "dependency-2",
+            taskId: UUIDS.dependsOnTask,
+            dependsOnTaskId: UUIDS.cycleTask,
+            createdAt: new Date("2026-06-28T11:00:00.000Z"),
+          },
+          {
+            id: "dependency-3",
+            taskId: UUIDS.cycleTask,
+            dependsOnTaskId: UUIDS.task,
+            createdAt: new Date("2026-06-28T11:05:00.000Z"),
+          },
+        ],
+        createTaskDependency: async () => {
+          throw new Error("cyclic dependency should not be written");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createTaskDependency(
+          UUIDS.task,
+          {
+            dependsOnTaskId: UUIDS.dependsOnTask,
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
+  });
+
+  it("deletes task dependencies after checking task workspace membership", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        deleteTaskDependency: async (taskId, dependsOnTaskId) => {
+          calls.push(["deleteDependency", taskId, dependsOnTaskId]);
+          return { count: 1 };
+        },
+      },
+    });
+
+    await service.deleteTaskDependency(UUIDS.task, UUIDS.dependsOnTask, {
+      memberId: UUIDS.member,
+    });
+
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["deleteDependency", UUIDS.task, UUIDS.dependsOnTask],
+    ]);
+  });
+
   it("creates task comments after checking task workspace membership", async () => {
     const calls = [];
     const service = createService({
@@ -1204,6 +1406,13 @@ describe("JuhyungTasksController", () => {
       deleteTask: async (taskId, actor) => {
         calls.push(["delete", taskId, actor]);
       },
+      createTaskDependency: async (taskId, body, actor) => {
+        calls.push(["createDependency", taskId, body, actor]);
+        return { id: UUIDS.dependency };
+      },
+      deleteTaskDependency: async (taskId, dependsOnTaskId, actor) => {
+        calls.push(["deleteDependency", taskId, dependsOnTaskId, actor]);
+      },
       createTaskComment: async (taskId, body, actor) => {
         calls.push(["createComment", taskId, body, actor]);
         return { id: UUIDS.comment };
@@ -1268,6 +1477,18 @@ describe("JuhyungTasksController", () => {
       UUIDS.member,
     );
     await controller.deleteTask(UUIDS.task, UUIDS.user, UUIDS.member);
+    await controller.createTaskDependency(
+      UUIDS.task,
+      { dependsOnTaskId: UUIDS.dependsOnTask },
+      undefined,
+      UUIDS.member,
+    );
+    await controller.deleteTaskDependency(
+      UUIDS.task,
+      UUIDS.dependsOnTask,
+      UUIDS.user,
+      undefined,
+    );
     await controller.createTaskComment(
       UUIDS.task,
       { body: "Ready for review" },
@@ -1326,6 +1547,18 @@ describe("JuhyungTasksController", () => {
       ],
       ["status", UUIDS.task, { status: "done" }, { memberId: UUIDS.member }],
       ["delete", UUIDS.task, { userId: UUIDS.user, memberId: UUIDS.member }],
+      [
+        "createDependency",
+        UUIDS.task,
+        { dependsOnTaskId: UUIDS.dependsOnTask },
+        { memberId: UUIDS.member },
+      ],
+      [
+        "deleteDependency",
+        UUIDS.task,
+        UUIDS.dependsOnTask,
+        { userId: UUIDS.user },
+      ],
       [
         "createComment",
         UUIDS.task,

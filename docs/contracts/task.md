@@ -19,23 +19,24 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ## Provided APIs
 
-| Method   | Path                                     | 목적                          | Consumer                   |
-| -------- | ---------------------------------------- | ----------------------------- | -------------------------- |
-| `GET`    | `/workspaces/:workspaceId/milestones`    | Milestone 목록 조회           | 주형, 세인 action executor |
-| `POST`   | `/workspaces/:workspaceId/milestones`    | Milestone 생성                | 주형, 세인 action executor |
-| `PATCH`  | `/milestones/:milestoneId`               | Milestone 수정                | 주형, 세인 action executor |
-| `GET`    | `/workspaces/:workspaceId/tasks`         | Task 목록/필터 조회           | 동현, 주형                 |
-| `POST`   | `/workspaces/:workspaceId/tasks`         | Task 생성                     | 주형, 세인 action executor |
-| `GET`    | `/tasks/:taskId`                         | Task 상세                     | 전체                       |
-| `PATCH`  | `/tasks/:taskId`                         | 제목/설명/담당자/마감일 수정  | 주형                       |
-| `PATCH`  | `/tasks/:taskId/status`                  | 상태 변경                     | 주형, 세인 action executor |
-| `DELETE` | `/tasks/:taskId`                         | Task soft delete              | 주형                       |
-| `POST`   | `/tasks/:taskId/comments`                | 댓글 작성                     | 주형                       |
-| `POST`   | `/tasks/:taskId/checklist-items`         | 체크리스트 추가               | 주형                       |
-| `PATCH`  | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 수정/완료/reorder  | 주형                       |
-| `DELETE` | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 삭제               | 주형                       |
-| `POST`   | `/tasks/:taskId/dependencies`            | 의존성 추가                   | 주형                       |
-| `POST`   | `/workspaces/:workspaceId/task-drafts`   | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
+| Method   | Path                                           | 목적                          | Consumer                   |
+| -------- | ---------------------------------------------- | ----------------------------- | -------------------------- |
+| `GET`    | `/workspaces/:workspaceId/milestones`          | Milestone 목록 조회           | 주형, 세인 action executor |
+| `POST`   | `/workspaces/:workspaceId/milestones`          | Milestone 생성                | 주형, 세인 action executor |
+| `PATCH`  | `/milestones/:milestoneId`                     | Milestone 수정                | 주형, 세인 action executor |
+| `GET`    | `/workspaces/:workspaceId/tasks`               | Task 목록/필터 조회           | 동현, 주형                 |
+| `POST`   | `/workspaces/:workspaceId/tasks`               | Task 생성                     | 주형, 세인 action executor |
+| `GET`    | `/tasks/:taskId`                               | Task 상세                     | 전체                       |
+| `PATCH`  | `/tasks/:taskId`                               | 제목/설명/담당자/마감일 수정  | 주형                       |
+| `PATCH`  | `/tasks/:taskId/status`                        | 상태 변경                     | 주형, 세인 action executor |
+| `DELETE` | `/tasks/:taskId`                               | Task soft delete              | 주형                       |
+| `POST`   | `/tasks/:taskId/comments`                      | 댓글 작성                     | 주형                       |
+| `POST`   | `/tasks/:taskId/checklist-items`               | 체크리스트 추가               | 주형                       |
+| `PATCH`  | `/tasks/:taskId/checklist-items/:itemId`       | 체크리스트 수정/완료/reorder  | 주형                       |
+| `DELETE` | `/tasks/:taskId/checklist-items/:itemId`       | 체크리스트 삭제               | 주형                       |
+| `POST`   | `/tasks/:taskId/dependencies`                  | 의존성 추가                   | 주형                       |
+| `DELETE` | `/tasks/:taskId/dependencies/:dependsOnTaskId` | 의존성 삭제                   | 주형                       |
+| `POST`   | `/workspaces/:workspaceId/task-drafts`         | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
 
 ## Read Models
 
@@ -76,6 +77,19 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 ```
 
 `status`는 `planned`, `in_progress`, `done` 중 하나다. `startDate`, `endDate`는 없으면 `null`이며, 두 값이 모두 있으면 `endDate >= startDate`여야 한다.
+
+### TaskDependencySummary
+
+```json
+{
+  "id": "uuid",
+  "taskId": "uuid",
+  "dependsOnTaskId": "uuid",
+  "createdAt": "2026-06-28T11:00:00Z"
+}
+```
+
+`taskId`는 선행 작업을 필요로 하는 Task이고, `dependsOnTaskId`는 먼저 완료되어야 하는 Task다. 두 Task는 같은 workspace에 있어야 하며, 자기 자신 의존성, 중복 의존성, cycle은 허용하지 않는다.
 
 ### TaskListQuery
 
@@ -203,6 +217,16 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 ```
 
 같은 Task 안에서 `sortOrder`가 충돌하면 주형 API가 기존 checklist item을 뒤로 밀어 순서를 보존한다.
+
+### TaskDependencyWrite
+
+`POST /tasks/:taskId/dependencies`는 `dependsOnTaskId`를 받는다. `DELETE /tasks/:taskId/dependencies/:dependsOnTaskId`는 같은 의존성 edge를 삭제한다.
+
+```json
+{
+  "dependsOnTaskId": "uuid"
+}
+```
 
 ## Events
 
