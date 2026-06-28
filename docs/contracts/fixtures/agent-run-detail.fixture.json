@@ -1,0 +1,78 @@
+{
+  "id": "99999999-9999-4999-8999-999999999901",
+  "workflowId": "99999999-9999-4999-8999-999999999900",
+  "workflowType": "meeting.report.generate",
+  "workflowVersion": "v1",
+  "workspaceId": "22222222-2222-4222-8222-222222222222",
+  "actorMemberId": "33333333-3333-4333-8333-333333333331",
+  "status": "requires_confirmation",
+  "input": {
+    "meetingId": "77777777-7777-4777-8777-777777777701"
+  },
+  "output": {
+    "summary": "Login implementation scope and task candidates are ready."
+  },
+  "error": null,
+  "tokenUsage": {
+    "inputTokens": 1200,
+    "outputTokens": 420,
+    "totalTokens": 1620,
+    "model": "local-runner"
+  },
+  "steps": [
+    {
+      "id": "88888888-8888-4888-8888-888888888801",
+      "runId": "99999999-9999-4999-8999-999999999901",
+      "stepName": "summarize",
+      "status": "succeeded",
+      "input": {
+        "meetingId": "77777777-7777-4777-8777-777777777701"
+      },
+      "output": {
+        "summary": "Login implementation scope is ready."
+      },
+      "error": null,
+      "tokenUsage": {
+        "inputTokens": 900,
+        "outputTokens": 260,
+        "totalTokens": 1160,
+        "model": "local-runner"
+      },
+      "startedAt": "2026-06-27T10:00:00.000Z",
+      "finishedAt": "2026-06-27T10:00:20.000Z",
+      "createdAt": "2026-06-27T10:00:00.000Z"
+    }
+  ],
+  "actions": [
+    {
+      "id": "99999999-9999-4999-8999-999999999991",
+      "runId": "99999999-9999-4999-8999-999999999901",
+      "type": "task.create.draft",
+      "source": "meeting",
+      "requiresConfirmation": true,
+      "payload": {
+        "workspaceId": "22222222-2222-4222-8222-222222222222",
+        "title": "Add OAuth failure state UI",
+        "priority": "medium"
+      },
+      "status": "waiting_confirmation",
+      "confirmedByMemberId": null,
+      "confirmedAt": null,
+      "executedAt": null
+    }
+  ],
+  "trace": [
+    {
+      "id": "77777777-7777-4777-8777-777777777711",
+      "runId": "99999999-9999-4999-8999-999999999901",
+      "stepId": "88888888-8888-4888-8888-888888888801",
+      "message": "workflow step completed",
+      "metadata": {},
+      "createdAt": "2026-06-27T10:00:20.000Z"
+    }
+  ],
+  "startedAt": "2026-06-27T10:00:00.000Z",
+  "finishedAt": null,
+  "createdAt": "2026-06-27T09:59:58.000Z",
+  "updatedAt": "2026-06-27T10:00:30.000Z"
+}

@@ -279,6 +279,11 @@ describe("machine-readable public contract schema", () => {
       "MeetingActionItem",
       "PRAnalysisSummary",
       "CanvasEntityRef",
+      "AgentRunCreateRequest",
+      "AgentRunStatusResponse",
+      "AgentRunDetail",
+      "AgentRunStepDetail",
+      "AgentTraceEntry",
       "AgentAction",
       "AgentJobMessage",
       "AgentResultMessage",
@@ -296,6 +301,94 @@ describe("machine-readable public contract schema", () => {
     assert.ok(meetingActionItem.properties.assigneeSuggestionMemberId);
     assert.ok(meetingActionItem.properties.dueDateSuggestion);
     assert.ok(meetingActionItem.properties.convertedTaskId);
+  });
+
+  it("validates AgentRun request, status, and detail contracts", () => {
+    const schema = readJson(schemaPath);
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const runId = "00000000-0000-4000-8000-000000000002";
+    const workflowId = "00000000-0000-4000-8000-000000000003";
+    const stepId = "00000000-0000-4000-8000-000000000004";
+    const traceId = "00000000-0000-4000-8000-000000000005";
+    const dateTime = "2026-06-27T10:00:00.000Z";
+    const tokenUsage = {
+      inputTokens: 120,
+      outputTokens: 40,
+      totalTokens: 160,
+      model: "local-runner",
+    };
+    const createRequest = {
+      workspaceId: uuid,
+      workflowType: "meeting.report.generate",
+      workflowVersion: "v1",
+      input: { meetingId: uuid },
+      contextRefs: [{ type: "meeting", id: uuid }],
+    };
+    const statusResponse = {
+      id: runId,
+      workspaceId: uuid,
+      workflowType: "meeting.report.generate",
+      workflowVersion: "v1",
+      status: "running",
+      actionRequired: false,
+      pendingActionCount: 0,
+      startedAt: dateTime,
+      finishedAt: null,
+      updatedAt: dateTime,
+      error: null,
+    };
+    const step = {
+      id: stepId,
+      runId,
+      stepName: "summarize",
+      status: "succeeded",
+      input: {},
+      output: {},
+      error: null,
+      tokenUsage,
+      startedAt: dateTime,
+      finishedAt: dateTime,
+      createdAt: dateTime,
+    };
+    const detail = {
+      id: runId,
+      workflowId,
+      workflowType: "meeting.report.generate",
+      workflowVersion: "v1",
+      workspaceId: uuid,
+      actorMemberId: uuid,
+      status: "requires_confirmation",
+      input: { meetingId: uuid },
+      output: {},
+      error: null,
+      tokenUsage,
+      steps: [step],
+      actions: [],
+      trace: [
+        {
+          id: traceId,
+          runId,
+          stepId,
+          message: "workflow step completed",
+          metadata: {},
+          createdAt: dateTime,
+        },
+      ],
+      startedAt: dateTime,
+      finishedAt: null,
+      createdAt: dateTime,
+      updatedAt: dateTime,
+    };
+
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, createRequest, schema).valid, true);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, statusResponse, schema).valid, true);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: { message: "workflow failed" } }, schema).valid, true);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunDetail, detail, schema).valid, true);
+
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, { ...createRequest, workflowType: "unknown.workflow" }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "succeeded", error: { message: "unexpected" } }, schema).valid, false);
+    assert.equal(validateJsonSchema(schema.$defs.AgentRunDetail, { ...detail, status: "failed", error: null }, schema).valid, false);
   });
 
   it("validates AgentAction type-specific payloads", () => {
@@ -538,6 +631,13 @@ describe("contract fixtures", () => {
     assert.equal(job.runId, result.runId);
     assert.equal(job.jobId, result.jobId);
     assert.ok(Array.isArray(result.actions));
+  });
+
+  it("agent run detail fixture validates against the public schema", () => {
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const fixture = readJson("docs/contracts/fixtures/agent-run-detail.fixture.json");
+    const result = validateJsonSchema(schema.$defs.AgentRunDetail, fixture, schema);
+    assert.equal(result.valid, true, result.errors.join(", "));
   });
 
   it("fixture rules are documented and linked from bootstrap docs", () => {

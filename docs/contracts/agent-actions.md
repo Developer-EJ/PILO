@@ -161,6 +161,137 @@ failed is terminal
 - 이 경우 `confirmedByMemberId`, `confirmedAt`는 계속 `null`이어야 하며, 상태는 `draft -> executed`로만 진행한다.
 - `executed`, `rejected`, `failed` 상태는 다른 상태로 되돌리지 않는다.
 
+## Agent Run API Contract
+
+Agent run APIs expose long-running workflow state to Dashboard, Canvas, Meeting, Review, Task/GitHub, and Planning consumers.
+
+### AgentRunCreateRequest
+
+`POST /agent-runs` starts one workflow run. The authenticated workspace member is the actor; clients do not send `actorMemberId`.
+
+```json
+{
+  "workspaceId": "uuid",
+  "workflowType": "meeting.report.generate",
+  "workflowVersion": "v1",
+  "input": {
+    "meetingId": "uuid"
+  },
+  "contextRefs": [
+    {
+      "type": "meeting",
+      "id": "uuid"
+    }
+  ]
+}
+```
+
+### AgentRunStatusResponse
+
+Status polling responses are small enough for repeated reads and must not include raw prompt text, secrets, OAuth tokens, or private keys.
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "workflowType": "meeting.report.generate",
+  "workflowVersion": "v1",
+  "status": "running",
+  "actionRequired": false,
+  "pendingActionCount": 0,
+  "startedAt": "2026-06-27T10:00:00.000Z",
+  "finishedAt": null,
+  "updatedAt": "2026-06-27T10:00:30.000Z",
+  "error": null
+}
+```
+
+### AgentRunDetail
+
+`GET /agent-runs/:runId` returns the full run detail for inspection screens.
+
+```json
+{
+  "id": "uuid",
+  "workflowId": "uuid",
+  "workflowType": "meeting.report.generate",
+  "workflowVersion": "v1",
+  "workspaceId": "uuid",
+  "actorMemberId": "uuid",
+  "status": "requires_confirmation",
+  "input": {
+    "meetingId": "uuid"
+  },
+  "output": {
+    "summary": "Meeting summary draft"
+  },
+  "error": null,
+  "tokenUsage": {
+    "inputTokens": 1200,
+    "outputTokens": 420,
+    "totalTokens": 1620,
+    "model": "local-runner"
+  },
+  "steps": [],
+  "actions": [],
+  "trace": [],
+  "startedAt": "2026-06-27T10:00:00.000Z",
+  "finishedAt": null,
+  "createdAt": "2026-06-27T09:59:58.000Z",
+  "updatedAt": "2026-06-27T10:00:30.000Z"
+}
+```
+
+### AgentRunStepDetail
+
+```json
+{
+  "id": "uuid",
+  "runId": "uuid",
+  "stepName": "summarize",
+  "status": "succeeded",
+  "input": {},
+  "output": {},
+  "error": null,
+  "tokenUsage": {
+    "inputTokens": 900,
+    "outputTokens": 260,
+    "totalTokens": 1160,
+    "model": "local-runner"
+  },
+  "startedAt": "2026-06-27T10:00:00.000Z",
+  "finishedAt": "2026-06-27T10:00:20.000Z",
+  "createdAt": "2026-06-27T10:00:00.000Z"
+}
+```
+
+### AgentTraceEntry
+
+```json
+{
+  "id": "uuid",
+  "runId": "uuid",
+  "stepId": "uuid",
+  "message": "workflow step completed",
+  "metadata": {},
+  "createdAt": "2026-06-27T10:00:20.000Z"
+}
+```
+
+### Run Field Rules
+
+| Field | Rule |
+|---|---|
+| `workflowType` | Must use the same enum as `AgentJobMessage.workflowType`. |
+| `workflowVersion` | Defaults to `v1` when the client omits it. Stored/detail responses always include it. |
+| `status` | Run status is one of `pending`, `running`, `succeeded`, `failed`, `requires_confirmation`. |
+| `output` | `null` until a workflow produces result data. |
+| `error` | `null` unless `status = failed`. Failed runs and failed steps require an error object with `message`; `code` is optional/nullable. |
+| `tokenUsage` | `null` when token accounting is unavailable. Otherwise it contains `inputTokens`, `outputTokens`, `totalTokens`, and optional/nullable `model`. |
+| `actionRequired` | `true` when the run is waiting on at least one user-confirmable action. |
+| `pendingActionCount` | Count of non-terminal actions that need user confirmation or execution follow-up. |
+| `contextRefs` | Uses `{ "type": "owner-domain entity type", "id": "entity uuid" }`; raw owner payload is not copied into the request. |
+
 ## SQS Message Contract
 
 Agent 실행은 app-server가 job queue에 요청을 넣고, ai-worker가 처리한 뒤 result queue로 결과를 돌려주는 구조다.

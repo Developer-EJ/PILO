@@ -220,6 +220,226 @@
         "shapeType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] }
       }
     },
+    "AgentWorkflowType": {
+      "enum": ["meeting.report.generate", "review.analysis.generate", "planning.generate", "task.draft.generate", "github.issue.draft.generate", "orchestrator.run"]
+    },
+    "AgentRunStatus": {
+      "enum": ["pending", "running", "succeeded", "failed", "requires_confirmation"]
+    },
+    "AgentRunStepStatus": {
+      "enum": ["pending", "running", "succeeded", "failed"]
+    },
+    "AgentError": {
+      "type": "object",
+      "required": ["message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": ["string", "null"] },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "AgentTokenUsage": {
+      "type": "object",
+      "required": ["inputTokens", "outputTokens", "totalTokens"],
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "totalTokens": { "type": "integer", "minimum": 0 },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "AgentContextRef": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "AgentRunCreateRequest": {
+      "type": "object",
+      "required": ["workspaceId", "workflowType", "input", "contextRefs"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "workflowType": { "$ref": "#/$defs/AgentWorkflowType" },
+        "workflowVersion": { "type": "string", "minLength": 1 },
+        "input": { "type": "object" },
+        "contextRefs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentContextRef" }
+        }
+      }
+    },
+    "AgentRunStatusResponse": {
+      "type": "object",
+      "required": ["id", "workspaceId", "workflowType", "workflowVersion", "status", "actionRequired", "pendingActionCount", "startedAt", "finishedAt", "updatedAt", "error"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "$ref": "#/$defs/AgentError" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["pending", "running", "succeeded", "requires_confirmation"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "type": "null" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "workflowType": { "$ref": "#/$defs/AgentWorkflowType" },
+        "workflowVersion": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/AgentRunStatus" },
+        "actionRequired": { "type": "boolean" },
+        "pendingActionCount": { "type": "integer", "minimum": 0 },
+        "startedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "finishedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "updatedAt": { "$ref": "#/$defs/dateTime" },
+        "error": { "anyOf": [{ "$ref": "#/$defs/AgentError" }, { "type": "null" }] }
+      }
+    },
+    "AgentRunStepDetail": {
+      "type": "object",
+      "required": ["id", "runId", "stepName", "status", "input", "output", "error", "tokenUsage", "startedAt", "finishedAt", "createdAt"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "$ref": "#/$defs/AgentError" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["pending", "running", "succeeded"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "type": "null" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "runId": { "$ref": "#/$defs/uuid" },
+        "stepName": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/AgentRunStepStatus" },
+        "input": { "type": "object" },
+        "output": { "type": ["object", "null"] },
+        "error": { "anyOf": [{ "$ref": "#/$defs/AgentError" }, { "type": "null" }] },
+        "tokenUsage": { "anyOf": [{ "$ref": "#/$defs/AgentTokenUsage" }, { "type": "null" }] },
+        "startedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "finishedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "AgentTraceEntry": {
+      "type": "object",
+      "required": ["id", "runId", "stepId", "message", "metadata", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "runId": { "$ref": "#/$defs/uuid" },
+        "stepId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "message": { "type": "string", "minLength": 1 },
+        "metadata": { "type": "object" },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "AgentRunDetail": {
+      "type": "object",
+      "required": ["id", "workflowId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "status", "input", "output", "error", "tokenUsage", "steps", "actions", "trace", "startedAt", "finishedAt", "createdAt", "updatedAt"],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "const": "failed" }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "$ref": "#/$defs/AgentError" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": { "enum": ["pending", "running", "succeeded", "requires_confirmation"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "error": { "type": "null" }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workflowId": { "$ref": "#/$defs/uuid" },
+        "workflowType": { "$ref": "#/$defs/AgentWorkflowType" },
+        "workflowVersion": { "type": "string", "minLength": 1 },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "actorMemberId": { "$ref": "#/$defs/uuid" },
+        "status": { "$ref": "#/$defs/AgentRunStatus" },
+        "input": { "type": "object" },
+        "output": { "type": ["object", "null"] },
+        "error": { "anyOf": [{ "$ref": "#/$defs/AgentError" }, { "type": "null" }] },
+        "tokenUsage": { "anyOf": [{ "$ref": "#/$defs/AgentTokenUsage" }, { "type": "null" }] },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentRunStepDetail" }
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentAction" }
+        },
+        "trace": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentTraceEntry" }
+        },
+        "startedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "finishedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "createdAt": { "$ref": "#/$defs/dateTime" },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "TaskStatusUpdateAction": {
       "type": "object",
       "required": ["workspaceId", "taskId", "status"],
@@ -497,24 +717,14 @@
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
-        "workflowType": {
-          "enum": ["meeting.report.generate", "review.analysis.generate", "planning.generate", "task.draft.generate", "github.issue.draft.generate", "orchestrator.run"]
-        },
+        "workflowType": { "$ref": "#/$defs/AgentWorkflowType" },
         "workflowVersion": { "type": "string" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
         "actorMemberId": { "$ref": "#/$defs/uuid" },
         "input": { "type": "object" },
         "contextRefs": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["type", "id"],
-            "additionalProperties": false,
-            "properties": {
-              "type": { "type": "string" },
-              "id": { "$ref": "#/$defs/uuid" }
-            }
-          }
+          "items": { "$ref": "#/$defs/AgentContextRef" }
         },
         "requestedAt": { "$ref": "#/$defs/dateTime" }
       }
