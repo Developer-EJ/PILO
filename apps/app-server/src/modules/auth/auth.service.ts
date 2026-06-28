@@ -7,6 +7,7 @@ export type AuthProviderSummary = {
   label: string;
   startPath: string;
   callbackPath: string;
+  callbackUrl: string;
   scopes: string[];
   configured: boolean;
   missingEnv: string[];
@@ -38,6 +39,7 @@ export class AuthService {
         label: provider.label,
         startPath: provider.startPath,
         callbackPath: provider.callbackPath,
+        callbackUrl: provider.callbackUrl,
         scopes: provider.scopes,
         configured: provider.configured,
         missingEnv: provider.missingEnv,
