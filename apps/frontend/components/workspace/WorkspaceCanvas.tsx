@@ -18,6 +18,11 @@ import {
   workspaceDashboardHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
+import {
+  PiloTldrawCanvas,
+  type PiloCanvasActions,
+  type PiloCanvasTool,
+} from "./canvas/PiloTldrawCanvas";
 
 type CanvasEntity = {
   id?: string;
@@ -27,6 +32,7 @@ type CanvasEntity = {
   shapeType: string;
   width?: number;
   height?: number;
+  color?: string;
   position?: {
     x: number;
     y: number;
@@ -80,49 +86,8 @@ const canvasNavLabels = [
   "설정",
 ];
 
-const fallbackNodePositions = [
-  { x: 120, y: 140 },
-  { x: 520, y: 180 },
-  { x: 340, y: 430 },
-  { x: 760, y: 360 },
-  { x: 660, y: 560 },
-];
-
 function resolveCanvasWorkspaceId(pathname: string) {
   return extractWorkspaceIdFromPathname(pathname) ?? mockWorkspaces[0].id;
-}
-
-function labelForEntity(entity: CanvasEntity) {
-  if (entity.entityType === "task") return "Task";
-  if (entity.entityType === "pull_request") return "PR";
-  if (entity.entityType === "meeting_report") return "Meeting";
-  if (entity.entityType === "github_issue") return "Issue";
-
-  return "File";
-}
-
-function toneForEntity(entity: CanvasEntity) {
-  if (entity.entityType === "task") return "task";
-  if (entity.entityType === "pull_request") return "pr";
-  if (entity.entityType === "meeting_report") return "meeting";
-  if (entity.entityType === "github_issue") return "issue";
-
-  return "file";
-}
-
-function resolveNodeStyle(entity: CanvasEntity, index: number) {
-  const fallback = fallbackNodePositions[index] ?? {
-    x: 120 + index * 80,
-    y: 140 + index * 64,
-  };
-  const position = entity.position ?? fallback;
-
-  return {
-    left: `${position.x}px`,
-    top: `${position.y}px`,
-    width: entity.width ? `${entity.width}px` : undefined,
-    minHeight: entity.height ? `${entity.height}px` : undefined,
-  };
 }
 
 function clampZoom(value: number) {
@@ -177,6 +142,9 @@ export function WorkspaceCanvas() {
     source: "fixture",
     status: "loading",
   });
+  const [canvasActions, setCanvasActions] = useState<PiloCanvasActions | null>(
+    null,
+  );
   const [zoom, setZoom] = useState(1);
   const workspaceId = useMemo(
     () => resolveCanvasWorkspaceId(pathname),
@@ -196,7 +164,6 @@ export function WorkspaceCanvas() {
     pullRequestCount: dashboard.pullRequests.length,
   });
   const board = boardState.board ?? fallbackBoard;
-  const canvasEntities = board.shapes.slice(0, 5) as CanvasEntity[];
 
   useEffect(() => {
     let cancelled = false;
@@ -300,6 +267,10 @@ export function WorkspaceCanvas() {
       .catch(() => undefined);
   }
 
+  function selectCanvasTool(tool: PiloCanvasTool) {
+    canvasActions?.selectTool(tool);
+  }
+
   return (
     <main
       className={
@@ -379,7 +350,7 @@ export function WorkspaceCanvas() {
             저장
           </button>
           <button type="button" className="canvas-bar-button">
-            내보내기
+            보기
           </button>
         </header>
 
@@ -399,51 +370,72 @@ export function WorkspaceCanvas() {
         </header>
 
         <nav className="canvas-tool-rail" aria-label="Canvas tools">
-          <button type="button" aria-label="선택" className="is-active">
-            ↖
+          <button
+            type="button"
+            aria-label="선택"
+            className="is-active"
+            onClick={() => selectCanvasTool("select")}
+          >
+            V
           </button>
-          <button type="button" aria-label="템플릿">
-            ⊞
+          <button
+            type="button"
+            aria-label="이동"
+            onClick={() => selectCanvasTool("hand")}
+          >
+            H
           </button>
-          <button type="button" aria-label="프로젝트 카드">
-            ▣
+          <button
+            type="button"
+            aria-label="Task 카드 추가"
+            onClick={() => canvasActions?.createEntityCard("task")}
+          >
+            Task
           </button>
-          <button type="button" aria-label="스티키 메모">
-            ◨
+          <button
+            type="button"
+            aria-label="PR 카드 추가"
+            onClick={() => canvasActions?.createEntityCard("pull_request")}
+          >
+            PR
           </button>
-          <button type="button" aria-label="텍스트">
+          <button
+            type="button"
+            aria-label="회의 카드 추가"
+            onClick={() => canvasActions?.createEntityCard("meeting_report")}
+          >
+            Mtg
+          </button>
+          <button
+            type="button"
+            aria-label="스티키 메모 추가"
+            onClick={() => canvasActions?.createStickyNote()}
+          >
+            Note
+          </button>
+          <button
+            type="button"
+            aria-label="텍스트"
+            onClick={() => selectCanvasTool("text")}
+          >
             T
           </button>
-          <button type="button" aria-label="연결선">
-            ⟶
-          </button>
-          <button type="button" aria-label="파일">
-            #
-          </button>
-          <button type="button" aria-label="더보기">
-            +
+          <button
+            type="button"
+            aria-label="연결선"
+            onClick={() => selectCanvasTool("arrow")}
+          >
+            →
           </button>
         </nav>
 
-        <section className="canvas-content" aria-label="Canvas board preview">
-          <section className="canvas-board" aria-label="Canvas node preview">
-            <div className="canvas-grid" />
-            <span className="canvas-connection-line line-one" />
-            <span className="canvas-connection-line line-two" />
-            <span className="canvas-connection-line line-three" />
-
-            {canvasEntities.map((entity, index) => (
-              <article
-                className={`canvas-node canvas-node-${toneForEntity(entity)}`}
-                key={entity.id ?? `${entity.entityType}-${entity.entityId}`}
-                style={resolveNodeStyle(entity, index)}
-              >
-                <span>{labelForEntity(entity)}</span>
-                <strong>{entity.displayTitle}</strong>
-                <small>{entity.entityType}</small>
-              </article>
-            ))}
-          </section>
+        <section className="canvas-content" aria-label="Canvas board">
+          <PiloTldrawCanvas
+            board={board}
+            dashboard={dashboard}
+            onReady={setCanvasActions}
+            onZoomChange={(nextZoom) => setZoom(clampZoom(nextZoom))}
+          />
         </section>
 
         <div className="canvas-board-hud" aria-label="Canvas board status">
@@ -456,13 +448,20 @@ export function WorkspaceCanvas() {
         </div>
 
         <div className="canvas-zoom-controls" aria-label="Canvas zoom controls">
-          <button type="button" aria-label="화면 맞춤">
-            ⌖
+          <button
+            type="button"
+            aria-label="화면 맞춤"
+            onClick={() => canvasActions?.fit()}
+          >
+            ⌂
           </button>
           <button
             type="button"
             aria-label="축소"
-            onClick={() => saveViewSetting(clampZoom(zoom - 0.1))}
+            onClick={() => {
+              canvasActions?.zoomOut();
+              saveViewSetting(clampZoom(zoom - 0.1));
+            }}
           >
             -
           </button>
@@ -470,7 +469,10 @@ export function WorkspaceCanvas() {
           <button
             type="button"
             aria-label="확대"
-            onClick={() => saveViewSetting(clampZoom(zoom + 0.1))}
+            onClick={() => {
+              canvasActions?.zoomIn();
+              saveViewSetting(clampZoom(zoom + 0.1));
+            }}
           >
             +
           </button>
