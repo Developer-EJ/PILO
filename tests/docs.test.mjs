@@ -15,6 +15,102 @@ function exists(relPath) {
   return fs.existsSync(path.join(ROOT, relPath));
 }
 
+function assertMatchesSchema(defs, schema, value, fieldPath) {
+  if (schema.$ref) {
+    const refName = schema.$ref.replace("#/$defs/", "");
+    if (refName === "uuid") {
+      assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
+      assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      return;
+    }
+
+    assert.ok(defs[refName], `${fieldPath} references missing schema ${refName}`);
+    assertMatchesSchema(defs, defs[refName], value, fieldPath);
+    return;
+  }
+
+  if (schema.anyOf) {
+    const errors = [];
+    for (const option of schema.anyOf) {
+      try {
+        assertMatchesSchema(defs, option, value, fieldPath);
+        return;
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
+
+    assert.fail(`${fieldPath} must match one anyOf schema: ${errors.join("; ")}`);
+  }
+
+  if (schema.format === "uuid") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
+    assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    return;
+  }
+
+  if (schema.enum) {
+    assert.ok(schema.enum.includes(value), `${fieldPath} must be one of ${schema.enum.join(", ")}`);
+    return;
+  }
+
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  const actualType = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+  const typeMatches = types.includes(actualType) || (types.includes("integer") && Number.isInteger(value));
+  assert.ok(typeMatches, `${fieldPath} must be ${types.join(" or ")}`);
+
+  if (types.includes("integer") && actualType !== "null") {
+    assert.ok(Number.isInteger(value), `${fieldPath} must be an integer`);
+  }
+
+  if (typeof schema.minimum === "number") {
+    assert.ok(value >= schema.minimum, `${fieldPath} must be >= ${schema.minimum}`);
+  }
+
+  if (actualType === "array" && schema.items) {
+    value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
+  }
+
+  if (actualType === "object" && schema.properties) {
+    for (const key of schema.required || []) {
+      assert.ok(Object.hasOwn(value, key), `${fieldPath}.${key} is required`);
+    }
+
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        assert.ok(schema.properties[key], `${fieldPath}.${key} is not in the public schema`);
+      }
+    }
+
+    for (const [key, childSchema] of Object.entries(schema.properties)) {
+      if (Object.hasOwn(value, key)) {
+        assertMatchesSchema(defs, childSchema, value[key], `${fieldPath}.${key}`);
+      }
+    }
+  }
+}
+
+function assertMatchesDefinition(defs, defName, value) {
+  const def = defs[defName];
+  assert.equal(def.type, "object", `${defName} must be an object schema`);
+
+  for (const key of def.required || []) {
+    assert.ok(Object.hasOwn(value, key), `${defName}.${key} is required`);
+  }
+
+  if (def.additionalProperties === false) {
+    for (const key of Object.keys(value)) {
+      assert.ok(def.properties[key], `${defName}.${key} is not in the public schema`);
+    }
+  }
+
+  for (const [key, schema] of Object.entries(def.properties)) {
+    if (Object.hasOwn(value, key)) {
+      assertMatchesSchema(defs, schema, value[key], `${defName}.${key}`);
+    }
+  }
+}
+
 function readJson(relPath) {
   return JSON.parse(read(relPath));
 }
@@ -170,6 +266,10 @@ function validateJsonSchema(schema, value, root = schema) {
       fail(`must be >= ${node.minimum}`);
     }
 
+    if (typeof data === "number" && node.maximum !== undefined && data > node.maximum) {
+      fail(`must be <= ${node.maximum}`);
+    }
+
     return localErrors;
   }
 
@@ -312,6 +412,14 @@ describe("machine-readable public contract schema", () => {
       "MeetingReportSummary",
       "MeetingActionItem",
       "PRAnalysisSummary",
+      "ReviewCanvasSummary",
+      "ReviewCanvasNode",
+      "ReviewCanvasEdge",
+      "ReviewNodeDetail",
+      "ReviewChangeGroup",
+      "ReviewDiffHunk",
+      "ReviewNodeSummary",
+      "ReviewRiskSummary",
       "CanvasEntityRef",
       "AgentRunCreateRequest",
       "AgentRunStatusResponse",
@@ -770,6 +878,22 @@ describe("contract fixtures", () => {
     assert.equal(job.runId, result.runId);
     assert.equal(job.jobId, result.jobId);
     assert.ok(Array.isArray(result.actions));
+  });
+
+  it("review analysis fixture matches review public schemas", () => {
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const fixture = readJson("docs/contracts/fixtures/review-analysis.fixture.json");
+
+    assert.equal(validateJsonSchema(schema.$defs.PRAnalysisSummary, fixture.prAnalysis, schema).valid, true);
+    assert.equal(validateJsonSchema(schema.$defs.ReviewCanvasSummary, fixture.reviewCanvas, schema).valid, true);
+    for (const detail of fixture.nodeDetails) {
+      const result = validateJsonSchema(schema.$defs.ReviewNodeDetail, detail, schema);
+      assert.equal(result.valid, true, result.errors.join(", "));
+    }
+    for (const risk of fixture.reviewRisks) {
+      const result = validateJsonSchema(schema.$defs.ReviewRiskSummary, risk, schema);
+      assert.equal(result.valid, true, result.errors.join(", "));
+    }
   });
 
   it("agent run detail fixture validates against the public schema", () => {
