@@ -22,7 +22,11 @@ const {
 const {
   WorkspaceAccessError,
   WorkspaceService,
+  WorkspaceValidationError,
 } = require("../src/modules/workspace/workspace.service");
+const {
+  WorkspaceRepository,
+} = require("../src/modules/workspace/workspace.repository");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
@@ -834,6 +838,105 @@ describe("app-server package", () => {
     );
   });
 
+  it("creates, lists, reads, and archives workspaces for the current member", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: " PILO ",
+        description: "AI Project OS",
+        type: "bootcamp",
+      },
+    });
+
+    assert.equal(created.name, "PILO");
+    assert.equal(created.description, "AI Project OS");
+    assert.equal(created.type, "bootcamp");
+    assert.equal(created.status, "active");
+    assert.equal(created.myRole, "owner");
+    assert.equal(created.memberCount, 1);
+    assert.deepEqual(await service.listWorkspaces({ currentUser }), [created]);
+    assert.deepEqual(
+      await service.getWorkspace({
+        workspaceId: created.id,
+        currentUser,
+      }),
+      created,
+    );
+
+    const archived = await service.updateWorkspace({
+      workspaceId: created.id,
+      currentUser,
+      body: {
+        name: "PILO Lab",
+        status: "archived",
+      },
+    });
+
+    assert.equal(archived.name, "PILO Lab");
+    assert.equal(archived.status, "archived");
+    assert.equal(
+      (
+        await service.getWorkspace({
+          workspaceId: created.id,
+          currentUser,
+        })
+      ).status,
+      "archived",
+    );
+  });
+
+  it("hides soft-deleted workspaces from member-scoped reads", async () => {
+    const repository = new WorkspaceRepository();
+    const service = new WorkspaceService(repository);
+    const currentUser = { id: "user-1" };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const deleted = await repository.softDeleteWorkspaceForUser({
+      workspaceId: created.id,
+      userId: currentUser.id,
+    });
+
+    assert.equal(deleted, true);
+    assert.deepEqual(await service.listWorkspaces({ currentUser }), []);
+    await assert.rejects(
+      () =>
+        service.getWorkspace({
+          workspaceId: created.id,
+          currentUser,
+        }),
+      (error) =>
+        error instanceof WorkspaceAccessError &&
+        error.code === "workspace_not_found" &&
+        error.workspaceId === created.id,
+    );
+  });
+
+  it("rejects invalid workspace create payloads before storage", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+
+    await assert.rejects(
+      () =>
+        service.createWorkspace({
+          currentUser: { id: "user-1" },
+          body: {
+            name: " ",
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceValidationError &&
+        error.code === "workspace_validation_failed",
+    );
+  });
+
   it("boots the Nest app module with AuthModule and WorkspaceModule registered", async () => {
     const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
       logger: false,
@@ -841,7 +944,7 @@ describe("app-server package", () => {
 
     await app.init();
     assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
-      storageMode: "not-connected",
+      storageMode: "memory",
     });
     await app.close();
   });
