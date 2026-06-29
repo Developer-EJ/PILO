@@ -14,6 +14,13 @@ import {
   type CreateTaskCommentBody,
 } from "./juhyung-comment-input";
 import {
+  assertMilestoneDateRange,
+  parseCreateMilestoneInput,
+  parseUpdateMilestoneInput,
+  type CreateMilestoneBody,
+  type UpdateMilestoneBody,
+} from "./juhyung-milestone-input";
+import {
   parseListTasksQuery,
   type ListTasksQuery,
 } from "./juhyung-task-list-query";
@@ -34,6 +41,7 @@ import {
   TaskChecklistItemSummary,
   TaskCommentRecord,
   TaskCommentSummary,
+  MilestoneSummary,
   TaskStatus,
   TaskSummary,
   WorkspaceMemberRecord,
@@ -50,6 +58,10 @@ export type {
   UpdateTaskStatusBody,
 } from "./juhyung-task-input";
 export type {
+  CreateMilestoneBody,
+  UpdateMilestoneBody,
+} from "./juhyung-milestone-input";
+export type {
   CreateChecklistItemBody,
   UpdateChecklistItemBody,
 } from "./juhyung-checklist-input";
@@ -63,6 +75,52 @@ export class JuhyungTaskService {
     private readonly workspaceAccess: WorkspaceAccessPublicService,
     private readonly publicAdapter: JuhyungPublicAdapter = new JuhyungPublicAdapter(),
   ) {}
+
+  async listMilestones(
+    workspaceId: string,
+    actor?: WorkspaceActor,
+  ): Promise<MilestoneSummary[]> {
+    await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
+    const milestones =
+      await this.repository.listMilestonesForWorkspace(workspaceId);
+    return milestones.map((milestone) =>
+      this.publicAdapter.toMilestoneSummary(milestone),
+    );
+  }
+
+  async createMilestone(
+    workspaceId: string,
+    body: CreateMilestoneBody,
+    actor?: WorkspaceActor,
+  ): Promise<MilestoneSummary> {
+    const input = parseCreateMilestoneInput(workspaceId, body);
+    await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
+    const milestone = await this.repository.createMilestone(input);
+    return this.publicAdapter.toMilestoneSummary(milestone);
+  }
+
+  async updateMilestone(
+    milestoneId: string,
+    body: UpdateMilestoneBody,
+    actor?: WorkspaceActor,
+  ): Promise<MilestoneSummary> {
+    const input = parseUpdateMilestoneInput(body);
+    const { milestone } = await this.requireMilestoneAccess(milestoneId, actor);
+    assertMilestoneDateRange(
+      Object.prototype.hasOwnProperty.call(input, "startDate")
+        ? input.startDate
+        : milestone.startDate,
+      Object.prototype.hasOwnProperty.call(input, "endDate")
+        ? input.endDate
+        : milestone.endDate,
+    );
+
+    const updatedMilestone = await this.repository.updateMilestone(
+      milestoneId,
+      input,
+    );
+    return this.publicAdapter.toMilestoneSummary(updatedMilestone);
+  }
 
   async listTasks(
     workspaceId: string,
@@ -113,6 +171,10 @@ export class JuhyungTaskService {
           input.assigneeMemberId,
         )
       : null;
+    await this.requireMilestoneInWorkspace(
+      input.milestoneId,
+      workspaceIdOrInput,
+    );
     const task = await this.repository.createTask(input, currentMember.id);
 
     return this.publicAdapter.toTaskSummary(task, { assignee });
@@ -139,6 +201,7 @@ export class JuhyungTaskService {
     const input = parseUpdateTaskInput(body);
     const { task, currentMember } = await this.requireTaskAccess(taskId, actor);
     const assignee = await this.resolveUpdatedAssignee(task.workspaceId, input);
+    await this.resolveUpdatedMilestone(task.workspaceId, input);
     const updatedTask = await this.repository.updateTask(
       taskId,
       input,
@@ -267,6 +330,10 @@ export class JuhyungTaskService {
       actor,
     );
     await this.requireAssignee(input);
+    await this.requireMilestoneInWorkspace(
+      input.milestoneId,
+      input.workspaceId,
+    );
 
     return this.repository.createTask(input, currentMember.id);
   }
@@ -282,6 +349,22 @@ export class JuhyungTaskService {
       actor,
     );
     return { task, currentMember };
+  }
+
+  private async requireMilestoneAccess(
+    milestoneId: string,
+    actor?: WorkspaceActor,
+  ) {
+    const milestone = await this.repository.getMilestoneById(milestoneId);
+    if (!milestone) {
+      throw new NotFoundException("Milestone was not found");
+    }
+
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      milestone.workspaceId,
+      actor,
+    );
+    return { milestone, currentMember };
   }
 
   private async requireAssignee(input: CreateTaskInput) {
@@ -325,6 +408,29 @@ export class JuhyungTaskService {
     return this.workspaceAccess.requireWorkspaceMember(workspaceId, {
       memberId,
     });
+  }
+
+  private async resolveUpdatedMilestone(
+    workspaceId: string,
+    input: UpdateTaskInput,
+  ): Promise<void> {
+    if (!Object.prototype.hasOwnProperty.call(input, "milestoneId")) {
+      return;
+    }
+    await this.requireMilestoneInWorkspace(input.milestoneId, workspaceId);
+  }
+
+  private async requireMilestoneInWorkspace(
+    milestoneId: string | null | undefined,
+    workspaceId: string,
+  ): Promise<void> {
+    if (!milestoneId) {
+      return;
+    }
+    const milestone = await this.repository.getMilestoneById(milestoneId);
+    if (!milestone || milestone.workspaceId !== workspaceId) {
+      throw new NotFoundException("Milestone was not found");
+    }
   }
 
   private async toTaskSummaries(

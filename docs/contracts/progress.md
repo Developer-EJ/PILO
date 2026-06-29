@@ -7,6 +7,7 @@
 ## Scope
 
 Progress는 Task와 Milestone 기준으로 진행률, 지연, blocked, review 대기 상태를 계산한다.
+`milestoneId`가 있는 ProgressSummary는 주형 Task contract의 `MilestoneSummary`와 같은 Milestone을 기준으로 집계한다.
 
 ## Owned Tables
 
@@ -66,6 +67,6 @@ Canonical public path는 `/workspaces/:workspaceId/progress/summary`다. `/works
 ## Boundaries
 
 - Progress는 Task 상태를 읽어 계산하지만 Task 상태를 직접 변경하지 않는다.
+- Milestone 생성/수정과 Task-Milestone 연결은 Task contract의 Milestone/Task API가 소유한다.
 - 동현 Dashboard는 `ProgressSummary`만 표시한다.
 - 세인 Agent는 다음 액션 추천을 위해 `ProgressSummary`를 context로 소비한다.
-

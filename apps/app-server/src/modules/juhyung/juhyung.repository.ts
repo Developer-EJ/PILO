@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
 import {
+  MilestoneStatus,
   TaskChecklistStatus,
   TaskPriority,
   TaskStatus,
@@ -45,6 +46,21 @@ export interface UpdateTaskInput {
   assigneeMemberId?: string | null;
   dueDate?: Date | string | null;
   milestoneId?: string | null;
+}
+
+export interface CreateMilestoneInput {
+  workspaceId: string;
+  title: string;
+  status: MilestoneStatus;
+  startDate: Date | string | null;
+  endDate: Date | string | null;
+}
+
+export interface UpdateMilestoneInput {
+  title?: string;
+  status?: MilestoneStatus;
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
 }
 
 export interface CreateChecklistItemInput {
@@ -120,6 +136,44 @@ export class JuhyungRepository {
           in: memberIds,
         },
       },
+    });
+  }
+
+  listMilestonesForWorkspace(workspaceId: string) {
+    return this.database.milestone.findMany({
+      where: {
+        workspaceId,
+      },
+      orderBy: [{ startDate: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    });
+  }
+
+  createMilestone(input: CreateMilestoneInput) {
+    const data = {
+      ...input,
+    } satisfies Prisma.MilestoneUncheckedCreateInput;
+
+    return this.database.milestone.create({ data });
+  }
+
+  getMilestoneById(milestoneId: string) {
+    return this.database.milestone.findUnique({
+      where: {
+        id: milestoneId,
+      },
+    });
+  }
+
+  updateMilestone(milestoneId: string, input: UpdateMilestoneInput) {
+    const data = {
+      ...input,
+    } satisfies Prisma.MilestoneUncheckedUpdateInput;
+
+    return this.database.milestone.update({
+      where: {
+        id: milestoneId,
+      },
+      data,
     });
   }
 

@@ -172,6 +172,7 @@
       "required": [
         "id",
         "workspaceId",
+        "milestoneId",
         "title",
         "status",
         "priority",
@@ -184,6 +185,16 @@
         },
         "workspaceId": {
           "$ref": "#/$defs/uuid"
+        },
+        "milestoneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "title": {
           "type": "string"
@@ -228,6 +239,20 @@
         "updatedAt": {
           "$ref": "#/$defs/dateTime"
         }
+      }
+    },
+    "MilestoneSummary": {
+      "type": "object",
+      "required": ["id", "workspaceId", "title", "status", "startDate", "endDate", "updatedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string" },
+        "status": { "enum": ["planned", "in_progress", "done"] },
+        "startDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "endDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
       }
     },
     "TaskCreateDraft": {
@@ -342,60 +367,6 @@
         },
         "createdAt": {
           "$ref": "#/$defs/dateTime"
-        }
-      }
-    },
-    "MilestoneSummary": {
-      "type": "object",
-      "required": [
-        "id",
-        "workspaceId",
-        "title",
-        "status",
-        "taskCount",
-        "doneTaskCount"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/uuid"
-        },
-        "workspaceId": {
-          "$ref": "#/$defs/uuid"
-        },
-        "title": {
-          "type": "string"
-        },
-        "startDate": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/date"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "endDate": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/date"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "status": {
-          "enum": ["planned", "in_progress", "done"]
-        },
-        "taskCount": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "doneTaskCount": {
-          "type": "integer",
-          "minimum": 0
         }
       }
     },

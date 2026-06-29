@@ -52,6 +52,7 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 {
   "id": "uuid",
   "workspaceId": "uuid",
+  "milestoneId": "uuid",
   "title": "GitHub Repository 연결",
   "status": "in_progress",
   "priority": "high",
@@ -66,6 +67,22 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
   "updatedAt": "2026-06-27T12:00:00Z"
 }
 ```
+
+### MilestoneSummary
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "title": "MVP Backend",
+  "status": "in_progress",
+  "startDate": "2026-07-01",
+  "endDate": "2026-07-31",
+  "updatedAt": "2026-06-27T12:00:00Z"
+}
+```
+
+`status`는 `planned`, `in_progress`, `done` 중 하나다. `startDate`, `endDate`는 없으면 `null`이며, 두 값이 모두 있으면 `endDate >= startDate`여야 한다.
 
 ### TaskListQuery
 
@@ -96,6 +113,7 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 {
   "id": "uuid",
   "workspaceId": "uuid",
+  "milestoneId": "uuid",
   "title": "GitHub Repository 연결",
   "status": "in_progress",
   "priority": "high",
@@ -156,21 +174,6 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 }
 ```
 
-### MilestoneSummary
-
-```json
-{
-  "id": "uuid",
-  "workspaceId": "uuid",
-  "title": "MVP 1차 구현",
-  "startDate": "2026-07-01",
-  "endDate": "2026-07-14",
-  "status": "in_progress",
-  "taskCount": 12,
-  "doneTaskCount": 5
-}
-```
-
 ### TaskStatusUpdateAction
 
 ```json
@@ -183,9 +186,22 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 
 ## Write Models
 
+### MilestoneWrite
+
+`POST /workspaces/:workspaceId/milestones`는 `title`, 선택 `status`, 선택 `startDate`, 선택 `endDate`를 받는다. `PATCH /milestones/:milestoneId`는 이 필드 중 하나 이상을 받는다.
+
+```json
+{
+  "title": "MVP Backend",
+  "status": "planned",
+  "startDate": "2026-07-01",
+  "endDate": "2026-07-31"
+}
+```
+
 ### TaskUpdatePatch
 
-`PATCH /tasks/:taskId`는 아래 필드 중 하나 이상을 받는다. `assigneeMemberId`, `description`, `dueDate`, `milestoneId`는 `null`로 비울 수 있다.
+`PATCH /tasks/:taskId`는 아래 필드 중 하나 이상을 받는다. `assigneeMemberId`, `description`, `dueDate`, `milestoneId`는 `null`로 비울 수 있다. `milestoneId`를 설정할 때는 같은 workspace의 Milestone만 연결할 수 있고, `null`은 연결 해제다.
 
 ```json
 {

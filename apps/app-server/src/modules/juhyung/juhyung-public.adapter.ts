@@ -4,6 +4,8 @@ import {
   GithubIssueState,
   GithubIssueSummary,
   MemberRef,
+  MilestoneRecord,
+  MilestoneSummary,
   ProgressRecord,
   ProgressSummary,
   PullRequestRecord,
@@ -59,6 +61,7 @@ export class JuhyungPublicAdapter {
     return {
       id: task.id,
       workspaceId: task.workspaceId,
+      milestoneId: task.milestoneId ?? null,
       title: task.title,
       status: task.status as TaskStatus,
       priority: task.priority as TaskPriority,
@@ -80,6 +83,18 @@ export class JuhyungPublicAdapter {
       checklistItems: (context.checklistItems ?? []).map((item) =>
         this.toTaskChecklistItemSummary(item),
       ),
+    };
+  }
+
+  toMilestoneSummary(milestone: MilestoneRecord): MilestoneSummary {
+    return {
+      id: milestone.id,
+      workspaceId: milestone.workspaceId,
+      title: milestone.title,
+      status: milestone.status as MilestoneSummary["status"],
+      startDate: toDateOnly(milestone.startDate ?? null),
+      endDate: toDateOnly(milestone.endDate ?? null),
+      updatedAt: toDateTime(milestone.updatedAt),
     };
   }
 
