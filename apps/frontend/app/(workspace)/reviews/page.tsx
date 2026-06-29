@@ -53,6 +53,35 @@ const analysis = {
   conclusion: "Ready to merge after reviewer confirmation.",
 };
 
+const reviewCanvas = {
+  intentSummary:
+    "Create the login callback entry point and expose provider errors clearly.",
+  reviewStrategy:
+    "Review the route entry, callback state parsing, and redirect impact in order.",
+  nodes: [
+    {
+      id: "88888888-8888-4888-8888-888888888891",
+      label: "apps/frontend/app/auth/callback/page.tsx",
+      nodeType: "file",
+      riskLevel: "medium",
+      reviewOrder: 1,
+      roleSummary:
+        "Reads provider callback query values and routes users to success or failure states.",
+      position: { x: 84, y: 72 },
+    },
+    {
+      id: "88888888-8888-4888-8888-888888888892",
+      label: "session redirect flow",
+      nodeType: "impact",
+      riskLevel: "low",
+      reviewOrder: 2,
+      roleSummary:
+        "Checks that callback outcomes do not conflict with the existing session redirect flow.",
+      position: { x: 380, y: 190 },
+    },
+  ],
+};
+
 const stateLabels: Record<string, string> = {
   review_requested: "Review requested",
   open: "Open",
@@ -65,6 +94,13 @@ const analysisStatusLabels: Record<string, string> = {
   running: "Running",
   succeeded: "Succeeded",
   failed: "Failed",
+};
+
+const riskClassNames: Record<string, string> = {
+  low: styles.nodeLow,
+  medium: styles.nodeMedium,
+  high: styles.nodeHigh,
+  critical: styles.nodeCritical,
 };
 
 export default function ReviewsPage() {
@@ -183,6 +219,42 @@ export default function ReviewsPage() {
                 ))}
               </section>
             </div>
+
+            <section className={styles.canvasPanel} aria-label="Review canvas">
+              <div className={styles.canvas}>
+                {reviewCanvas.nodes.map((node) => (
+                  <button
+                    className={`${styles.canvasNode} ${
+                      riskClassNames[node.riskLevel]
+                    }`}
+                    key={node.id}
+                    style={{
+                      left: node.position.x,
+                      top: node.position.y,
+                    }}
+                    type="button"
+                  >
+                    <span>{node.reviewOrder}</span>
+                    <strong>{node.label}</strong>
+                    <small>{node.nodeType}</small>
+                  </button>
+                ))}
+              </div>
+
+              <aside className={styles.intentPanel}>
+                <span className={styles.eyebrow}>PR intent</span>
+                <h2>{reviewCanvas.intentSummary}</h2>
+                <p>{reviewCanvas.reviewStrategy}</p>
+                <ol className={styles.reviewOrder}>
+                  {reviewCanvas.nodes.map((node) => (
+                    <li key={node.id}>
+                      <strong>{node.reviewOrder}. </strong>
+                      {node.roleSummary}
+                    </li>
+                  ))}
+                </ol>
+              </aside>
+            </section>
           </section>
         </section>
       </div>
