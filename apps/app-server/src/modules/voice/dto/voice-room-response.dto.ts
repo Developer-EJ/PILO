@@ -13,10 +13,6 @@ export interface UpdateVoiceRoomStatusRequestDto {
   status?: unknown;
 }
 
-export interface JoinVoiceSessionRequestDto {
-  memberId?: unknown;
-}
-
 export interface UpdateVoiceSessionRecordingStatusRequestDto {
   recordingStatus?: unknown;
 }

@@ -1856,7 +1856,7 @@
     },
     "MeetingDecisionSummary": {
       "type": "object",
-      "required": ["id", "reportId", "content", "status", "linkedTaskId", "createdAt"],
+      "required": ["id", "reportId", "title", "status", "createdAt"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -1865,9 +1865,15 @@
         "reportId": {
           "$ref": "#/$defs/uuid"
         },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Deprecated compatibility alias. Use content for new consumers."
+        },
         "content": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Preferred decision text. Additive during the title deprecation rollout."
         },
         "status": {
           "enum": ["decided", "pending", "reopened"]

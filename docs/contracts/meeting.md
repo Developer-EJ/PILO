@@ -34,7 +34,7 @@ Voice provider 세부 상태를 소유하지 않는다.
 | 동현 Dashboard | `MeetingReportSummary` | 최근 회의록 제목, 요약, 결정/액션/리스크 count를 표시한다. |
 | 동현 Canvas | `MeetingReportCanvasEntityRef` | 회의록을 `meeting_report` shape로 표시한다. |
 | 주형 Task | `MeetingActionItem`, task draft request | Action Item을 Task 후보로 변환한다. Meeting이 `tasks` table에 직접 쓰지 않는다. |
-| 세인 Agent Runtime / Planning | `MeetingAgenda`, `meeting.report.generate`, `task.create.draft` | Planning `firstAgendaDraft`를 실제 MeetingAgenda로 저장하고, 회의록 생성 workflow와 Action Item 실행 제안을 만든다. |
+| 세인 Agent Runtime / Planning | `MeetingAgenda`, `meeting.report.generate`, `task.create.draft`, `firstAgendaDraft` | Planning은 `firstAgendaDraft`를 산출하고, 실제 `MeetingAgenda` 저장은 Meeting API 또는 Meeting owner action이 수행한다. 회의록 생성 workflow와 Action Item 실행 제안은 public contract로 연결한다. |
 | 은재 Review | 없음 | Meeting 원본 table을 직접 읽거나 수정하지 않는다. 필요하면 별도 read model을 추가한다. |
 
 Breaking change가 발생하는 필드:
@@ -406,12 +406,18 @@ Dashboard가 소비하는 최소 read model이다. 상세 회의록이 아니라
 {
   "id": "uuid",
   "reportId": "uuid",
+  "title": "회의 Action Item은 Task draft로 먼저 만든다.",
   "content": "회의 Action Item은 Task draft로 먼저 만든다.",
   "status": "decided",
   "linkedTaskId": null,
   "createdAt": "2026-06-27T08:30:00.000Z"
 }
 ```
+
+- `title`: deprecated compatibility alias for existing consumers. New consumers
+  should read `content`; producers keep `title = content` until the next
+  breaking contract version.
+- `linkedTaskId`: additive nullable field during the compatibility rollout.
 
 ### MeetingReportRisk
 

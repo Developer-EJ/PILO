@@ -14,7 +14,6 @@ import {
   VoiceRoomProvider,
 } from "./adapters/voice-room-provider.adapter";
 import {
-  JoinVoiceSessionRequestDto,
   UpdateVoiceSessionRecordingStatusRequestDto,
   UpdateVoiceRoomStatusRequestDto,
   VoiceRoomResponseDto,
@@ -112,18 +111,12 @@ export class VoiceService {
     });
   }
 
-  joinVoiceSession(
-    voiceRoomId: string,
-    requestBody: JoinVoiceSessionRequestDto,
-  ): VoiceSessionResponseDto {
+  joinVoiceSession(voiceRoomId: string): VoiceSessionResponseDto {
     const voiceRoom = this.requireVoiceRoom(voiceRoomId);
 
     this.assertVoiceRoomActive(voiceRoom);
 
-    const memberId = this.resolveWorkspaceMemberId(
-      voiceRoom.workspaceId,
-      requestBody.memberId,
-    );
+    const memberId = this.resolveWorkspaceMemberId(voiceRoom.workspaceId);
     const existingActiveSession =
       this.voiceRepository.findActiveVoiceSessionByMember(
         voiceRoom.id,
@@ -246,14 +239,8 @@ export class VoiceService {
     }
   }
 
-  private resolveWorkspaceMemberId(
-    workspaceId: string,
-    value: unknown,
-  ): string {
-    const memberId =
-      value === undefined || value === null
-        ? this.currentMemberAdapter.getCurrentMember(workspaceId).id
-        : this.requireNonEmptyString(value, "memberId");
+  private resolveWorkspaceMemberId(workspaceId: string): string {
+    const memberId = this.currentMemberAdapter.getCurrentMember(workspaceId).id;
     const workspaceMember = this.currentMemberAdapter.getWorkspaceMember(
       workspaceId,
       memberId,

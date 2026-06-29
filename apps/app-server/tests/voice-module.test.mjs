@@ -147,10 +147,8 @@ describe("voice module", () => {
 
   it("joins, lists, updates recording status, and leaves voice sessions", () => {
     const context = createMeetingContext();
-    context.currentMemberAdapter.registerWorkspaceMember({
-      id: "voice-member-1",
-      workspaceId: "workspace-1",
-    });
+    const currentMember =
+      context.currentMemberAdapter.getCurrentMember("workspace-1");
     const service = createVoiceService(context);
     const controller = new VoiceController(service);
     const meeting = context.meetingService.createMeeting("workspace-1", {
@@ -158,13 +156,11 @@ describe("voice module", () => {
     });
     const voiceRoom = controller.createVoiceRoom("workspace-1", meeting.id);
 
-    const voiceSession = controller.joinVoiceSession(voiceRoom.id, {
-      memberId: "voice-member-1",
-    });
+    const voiceSession = controller.joinVoiceSession(voiceRoom.id);
 
     assert.equal(voiceSession.voiceRoomId, voiceRoom.id);
     assert.equal(voiceSession.meetingId, meeting.id);
-    assert.equal(voiceSession.memberId, "voice-member-1");
+    assert.equal(voiceSession.memberId, currentMember.id);
     assert.equal(voiceSession.recordingStatus, "not_recording");
     assert.notEqual(voiceSession.startedAt, null);
     assert.equal(voiceSession.endedAt, null);
@@ -191,36 +187,17 @@ describe("voice module", () => {
     );
   });
 
-  it("rejects duplicate joins, duplicate leaves, invalid members, and ended session updates", () => {
+  it("rejects duplicate joins, duplicate leaves, invalid recording status, and ended session updates", () => {
     const context = createMeetingContext();
-    context.currentMemberAdapter.registerWorkspaceMember({
-      id: "voice-member-2",
-      workspaceId: "workspace-1",
-    });
-    context.currentMemberAdapter.registerWorkspaceMember({
-      id: "external-voice-member",
-      workspaceId: "workspace-2",
-    });
     const service = createVoiceService(context);
     const controller = new VoiceController(service);
     const meeting = context.meetingService.createMeeting("workspace-1", {
       title: "Voice session validation meeting",
     });
     const voiceRoom = controller.createVoiceRoom("workspace-1", meeting.id);
-    const voiceSession = controller.joinVoiceSession(voiceRoom.id, {
-      memberId: "voice-member-2",
-    });
+    const voiceSession = controller.joinVoiceSession(voiceRoom.id);
 
-    assert.throws(() =>
-      controller.joinVoiceSession(voiceRoom.id, {
-        memberId: "voice-member-2",
-      }),
-    );
-    assert.throws(() =>
-      controller.joinVoiceSession(voiceRoom.id, {
-        memberId: "external-voice-member",
-      }),
-    );
+    assert.throws(() => controller.joinVoiceSession(voiceRoom.id));
     assert.throws(() =>
       controller.updateVoiceSessionRecordingStatus(voiceSession.id, {
         recordingStatus: "paused",

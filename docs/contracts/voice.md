@@ -73,13 +73,14 @@ Breaking change가 발생하는 필드:
 ### JoinVoiceSessionRequest
 
 ```json
-{
-  "memberId": "uuid"
-}
+{}
 ```
 
-- `memberId`: nullable workspace member id
+- client가 `memberId`를 보내지 않는다. 서버가 인증된 `currentMember` context에서
+  workspace member id를 채운다.
 - client가 meeting id를 보내지 않는다. `voiceRoomId`로 연결된 room에서 가져온다.
+- guest/mock join이 필요하면 이 DTO에 `memberId`를 추가하지 말고 별도 guest/mock
+  경로로 분리한다.
 
 ### UpdateVoiceSessionRecordingStatusRequest
 
