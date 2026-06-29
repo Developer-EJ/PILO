@@ -153,7 +153,9 @@ def _test_recommendation(risky_files: list[dict[str, Any]]) -> str:
     return "주요 변경 파일의 happy path smoke test를 확인한다."
 
 
-def _node_detail(file_path: str, source: dict[str, Any], node_kind: str) -> dict[str, Any]:
+def _node_detail(
+    file_path: str, source: dict[str, Any], node_kind: str
+) -> dict[str, Any]:
     summary = source.get("summary") or f"{node_kind} 변경 내용을 확인한다."
     return {
         "filePath": file_path,
@@ -164,7 +166,9 @@ def _node_detail(file_path: str, source: dict[str, Any], node_kind: str) -> dict
                 "title": summary,
                 "summary": summary,
                 "newStartLine": int(source.get("newStartLine", 1)),
-                "newEndLine": int(source.get("newEndLine", source.get("newStartLine", 1))),
+                "newEndLine": int(
+                    source.get("newEndLine", source.get("newStartLine", 1))
+                ),
             }
         ],
         "diffHunks": [
