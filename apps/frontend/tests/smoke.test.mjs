@@ -146,7 +146,10 @@ describe("frontend package", () => {
     );
     assert.equal(requests[0].init.credentials, "include");
     assert.equal(apiResult.dashboard.workspace.id, workspaceId);
-    assert.equal(apiResult.dashboard.tasks.length, dashboardFixture.tasks.length);
+    assert.equal(
+      apiResult.dashboard.tasks.length,
+      dashboardFixture.tasks.length,
+    );
 
     assert.equal(resolveWorkspaceDashboardClientMode("api"), "api");
     assert.equal(resolveWorkspaceDashboardClientMode("fixture"), "mock");

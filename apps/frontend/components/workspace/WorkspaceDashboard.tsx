@@ -403,9 +403,7 @@ export function WorkspaceDashboard() {
                                   #{pr.number} · {pr.authorLogin ?? "unknown"}
                                 </small>
                               </div>
-                              <b className={`pill tone-${tone}`}>
-                                {pr.state}
-                              </b>
+                              <b className={`pill tone-${tone}`}>{pr.state}</b>
                             </div>
                           );
                         })
