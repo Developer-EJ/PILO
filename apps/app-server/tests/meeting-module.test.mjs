@@ -6,16 +6,19 @@ import "reflect-metadata";
 const require = createRequire(import.meta.url);
 require("ts-node/register");
 
+const { NestFactory } = require("@nestjs/core");
+const { FastifyAdapter } = require("@nestjs/platform-fastify");
+const {
+  MockCurrentMemberAdapter,
+} = require("../src/modules/meeting/adapters/mock-current-member.adapter");
 const {
   MeetingController,
 } = require("../src/modules/meeting/meeting.controller");
+const { MeetingModule } = require("../src/modules/meeting/meeting.module");
 const { MeetingService } = require("../src/modules/meeting/meeting.service");
 const {
   MockMeetingRepository,
 } = require("../src/modules/meeting/repositories/meeting.mock-repository");
-const {
-  MockCurrentMemberAdapter,
-} = require("../src/modules/meeting/adapters/mock-current-member.adapter");
 const {
   MEETING_REPOSITORY,
 } = require("../src/modules/meeting/repositories/meeting.repository");
@@ -28,21 +31,38 @@ describe("meeting module scaffold", () => {
     assert.equal(typeof MEETING_REPOSITORY, "symbol");
   });
 
-  it("exposes scaffold status through the service and controller", () => {
+  it("exposes scaffold status through the service", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = new MeetingService(repository, currentMemberAdapter);
-    const controller = new MeetingController(service);
 
     assert.deepEqual(service.getScaffoldStatus(), {
       module: "meeting",
-      repositoryMode: "mock",
       meetingStatusValues: MEETING_STATUS_VALUES,
     });
-    assert.deepEqual(
-      controller.getScaffoldStatus(),
-      service.getScaffoldStatus(),
-    );
+  });
+
+  it("exposes scaffold status through GET /api/meetings", async () => {
+    const app = await NestFactory.create(MeetingModule, new FastifyAdapter(), {
+      logger: false,
+    });
+
+    try {
+      await app.init();
+
+      const response = await app
+        .getHttpAdapter()
+        .getInstance()
+        .inject({ method: "GET", url: "/api/meetings" });
+
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(JSON.parse(response.payload), {
+        module: "meeting",
+        meetingStatusValues: MEETING_STATUS_VALUES,
+      });
+    } finally {
+      await app.close();
+    }
   });
 
   it("creates, lists, and reads meetings by workspace", () => {

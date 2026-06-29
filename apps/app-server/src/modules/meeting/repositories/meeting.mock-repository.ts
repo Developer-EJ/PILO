@@ -1,10 +1,9 @@
-import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { Injectable } from "@nestjs/common";
 import {
   CreateMeetingInput,
   MEETING_STATUS_VALUES,
   MeetingRecord,
-  MeetingRepositoryMode,
   MeetingStatus,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -12,8 +11,6 @@ import { MeetingRepository } from "./meeting.repository";
 
 @Injectable()
 export class MockMeetingRepository implements MeetingRepository {
-  readonly mode: MeetingRepositoryMode = "mock";
-
   private readonly meetings = new Map<string, MeetingRecord>();
 
   listMeetingStatusValues(): readonly MeetingStatus[] {

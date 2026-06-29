@@ -1,7 +1,6 @@
 import {
   CreateMeetingInput,
   MeetingRecord,
-  MeetingRepositoryMode,
   MeetingStatus,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -9,8 +8,6 @@ import {
 export const MEETING_REPOSITORY = Symbol("MEETING_REPOSITORY");
 
 export interface MeetingRepository {
-  readonly mode: MeetingRepositoryMode;
-
   listMeetingStatusValues(): readonly MeetingStatus[];
 
   createMeeting(input: CreateMeetingInput): MeetingRecord;
