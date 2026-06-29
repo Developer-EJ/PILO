@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
 import {
@@ -12,6 +13,12 @@ import {
   MEETING_REPORT_WORKFLOW_CLIENT,
   MeetingReportWorkflowClient,
 } from "./adapters/meeting-report-workflow.adapter";
+import {
+  TASK_DRAFT_CLIENT,
+  TaskCreateDraftPayload,
+  TaskDraftClient,
+  TaskDraftResponse,
+} from "./adapters/task-draft.adapter";
 import {
   ConvertMeetingActionItemRequestDto,
   CreateMeetingActionItemRequestDto,
@@ -24,6 +31,7 @@ import {
   CreateMeetingParticipantRequestDto,
   CreateTranscriptSegmentRequestDto,
   MeetingActionItemResponseDto,
+  MeetingActionItemTaskDraftResponseDto,
   MeetingAgendaResponseDto,
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
@@ -74,6 +82,8 @@ export class MeetingService {
     private readonly currentMemberAdapter: CurrentMemberAdapter,
     @Inject(MEETING_REPORT_WORKFLOW_CLIENT)
     private readonly meetingReportWorkflowClient: MeetingReportWorkflowClient,
+    @Inject(TASK_DRAFT_CLIENT)
+    private readonly taskDraftClient: TaskDraftClient,
   ) {}
 
   getScaffoldStatus(): MeetingScaffoldResponseDto {
@@ -580,6 +590,35 @@ export class MeetingService {
     );
   }
 
+  requestActionItemTaskDraft(
+    actionItemId: string,
+  ): MeetingActionItemTaskDraftResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "approved", "request task draft");
+
+    const report = this.requireReport(actionItem.reportId);
+    const meeting = this.requireMeeting(report.meetingId);
+    const payload = this.toTaskCreateDraftPayload(
+      meeting.workspaceId,
+      actionItem,
+    );
+    const taskDraft = this.createTaskDraft(payload);
+    const convertedActionItem = this.meetingRepository.updateActionItem(
+      actionItem.id,
+      {
+        status: "converted",
+        convertedTaskId: taskDraft.taskId,
+        updatedAt: new Date().toISOString(),
+      },
+    );
+
+    return {
+      actionItem: this.toActionItemReadModel(convertedActionItem),
+      taskDraft,
+    };
+  }
+
   private requireMeeting(meetingId: string): MeetingRecord {
     const meeting = this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
@@ -731,6 +770,22 @@ export class MeetingService {
       dueDateSuggestion: actionItem.dueDateSuggestion,
       status: actionItem.status,
       convertedTaskId: actionItem.convertedTaskId,
+    };
+  }
+
+  private toTaskCreateDraftPayload(
+    workspaceId: string,
+    actionItem: MeetingActionItemRecord,
+  ): TaskCreateDraftPayload {
+    return {
+      workspaceId,
+      sourceType: "meeting_action_item",
+      sourceId: actionItem.id,
+      title: actionItem.title,
+      description: actionItem.description,
+      assigneeMemberId: actionItem.assigneeSuggestionMemberId,
+      priority: "medium",
+      dueDate: actionItem.dueDateSuggestion,
     };
   }
 
@@ -981,6 +1036,24 @@ export class MeetingService {
     ) {
       throw new BadRequestException("endedAt must be after startedAt");
     }
+  }
+
+  private createTaskDraft(payload: TaskCreateDraftPayload): TaskDraftResponse {
+    let taskDraft: TaskDraftResponse;
+
+    try {
+      taskDraft = this.taskDraftClient.createTaskDraft(payload);
+    } catch {
+      throw new InternalServerErrorException("Task draft request failed");
+    }
+
+    if (typeof taskDraft.taskId !== "string" || taskDraft.taskId.length === 0) {
+      throw new InternalServerErrorException(
+        "Task draft response must include taskId",
+      );
+    }
+
+    return taskDraft;
   }
 
   private assertActionItemStatus(
