@@ -169,3 +169,49 @@ export function workspaceAgentHref(workspaceId) {
 export function workspacePlanningHref(workspaceId) {
   return `${workspaceDashboardHref(workspaceId)}/planning`;
 }
+
+export function buildWorkspaceFeatureRoutes(workspaceId) {
+  return {
+    dashboard: workspaceDashboardHref(workspaceId),
+    canvas: workspaceCanvasHref(workspaceId),
+    tasks: workspaceTasksHref(workspaceId),
+    github: workspaceGithubHref(workspaceId),
+    meetings: workspaceMeetingsHref(workspaceId),
+    reviews: workspaceReviewsHref(workspaceId),
+    agent: workspaceAgentHref(workspaceId),
+    planning: workspacePlanningHref(workspaceId),
+  };
+}
+
+const workspaceFeatureTabDefinitions = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "canvas", label: "Canvas" },
+  { key: "tasks", label: "Tasks" },
+  { key: "github", label: "GitHub" },
+  { key: "meetings", label: "Meetings / Voice / Reports" },
+  { key: "reviews", label: "Reviews" },
+  { key: "agent", label: "Agent" },
+  { key: "planning", label: "Planning" },
+];
+
+function formatWorkspaceTabBadge(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  return String(value);
+}
+
+export function buildWorkspaceFeatureTabs(
+  workspaceId,
+  { active = "dashboard", badges = {} } = {},
+) {
+  const routes = buildWorkspaceFeatureRoutes(workspaceId);
+
+  return workspaceFeatureTabDefinitions.map((definition) => ({
+    ...definition,
+    href: routes[definition.key],
+    active: definition.key === active,
+    badge: formatWorkspaceTabBadge(badges[definition.key]),
+  }));
+}

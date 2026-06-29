@@ -9,13 +9,11 @@ import {
   projectStartQuestions,
 } from "../../lib/agent/agentPlanningClient.mjs";
 import {
+  buildWorkspaceFeatureRoutes,
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
   resolveCurrentWorkspaceSelection,
-  workspaceAgentHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
-  workspacePlanningHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
@@ -163,12 +161,7 @@ export function AgentPlanningWorkspace() {
   const pathname = usePathname() ?? "/";
   const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
   const routes = useMemo(
-    () => ({
-      dashboard: workspaceDashboardHref(workspaceId),
-      agent: workspaceAgentHref(workspaceId),
-      planning: workspacePlanningHref(workspaceId),
-      canvas: workspaceCanvasHref(workspaceId),
-    }),
+    () => buildWorkspaceFeatureRoutes(workspaceId),
     [workspaceId],
   );
   const isPlanningRoute = pathname.startsWith(routes.planning);
@@ -180,6 +173,12 @@ export function AgentPlanningWorkspace() {
   const [error, setError] = useState<string | null>(null);
 
   const planDraft = run?.output?.planDraft?.detail ?? null;
+  const navItems = buildWorkspaceFeatureTabs(workspaceId, {
+    active: isPlanningRoute ? "planning" : "agent",
+    badges: {
+      agent: run?.pendingActionCount || undefined,
+    },
+  });
 
   async function createDraft(nextForm = form) {
     setLoading(true);
@@ -246,26 +245,17 @@ export function AgentPlanningWorkspace() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Agent navigation">
-          <Link className="nav-item" href={routes.dashboard}>
-            Dashboard
-          </Link>
-          <Link
-            className={!isPlanningRoute ? "nav-item active" : "nav-item"}
-            href={routes.agent}
-            aria-current={!isPlanningRoute ? "page" : undefined}
-          >
-            Agent runtime
-          </Link>
-          <Link
-            className={isPlanningRoute ? "nav-item active" : "nav-item"}
-            href={routes.planning}
-            aria-current={isPlanningRoute ? "page" : undefined}
-          >
-            Planning
-          </Link>
-          <Link className="nav-item" href={routes.canvas}>
-            Canvas
-          </Link>
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={item.active ? "nav-item active" : "nav-item"}
+              aria-current={item.active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+              {item.badge ? <b>{item.badge}</b> : null}
+            </Link>
+          ))}
         </nav>
       </aside>
 

@@ -7,16 +7,11 @@ import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { createWorkspaceDashboardClient } from "../../lib/workspace/dashboardClient.mjs";
 import {
+  buildWorkspaceFeatureRoutes,
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
   resolveCurrentWorkspaceSelection,
-  workspaceAgentHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
-  workspaceGithubHref,
-  workspaceMeetingsHref,
-  workspaceReviewsHref,
-  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
@@ -88,22 +83,13 @@ const initialState: DashboardState = {
 };
 
 function buildWorkspaceRoutes(workspaceId: string) {
-  return {
-    dashboard: workspaceDashboardHref(workspaceId),
-    canvas: workspaceCanvasHref(workspaceId),
-    tasks: workspaceTasksHref(workspaceId),
-    github: workspaceGithubHref(workspaceId),
-    meetings: workspaceMeetingsHref(workspaceId),
-    reviews: workspaceReviewsHref(workspaceId),
-    agent: workspaceAgentHref(workspaceId),
-  };
+  return buildWorkspaceFeatureRoutes(workspaceId);
 }
 
 function buildDashboardNavItems(
   dashboard: DashboardRecord | null,
   workspaceId: string,
 ): DashboardNavItem[] {
-  const routes = buildWorkspaceRoutes(workspaceId);
   const reviewCount = dashboard
     ? (dashboard.prAnalyses?.length ??
         dashboard.pullRequests.filter((pr) =>
@@ -114,46 +100,16 @@ function buildDashboardNavItems(
     ? (dashboard.githubIssues?.length ?? 0) + dashboard.pullRequests.length
     : 0;
 
-  return [
-    {
-      label: "Dashboard",
-      active: true,
-      href: routes.dashboard,
+  return buildWorkspaceFeatureTabs(workspaceId, {
+    active: "dashboard",
+    badges: {
+      tasks: dashboard ? dashboard.tasks.length : undefined,
+      github: githubCount || undefined,
+      meetings: dashboard?.meetingReports.length || undefined,
+      reviews: reviewCount || undefined,
+      agent: dashboard?.agentActions.length || undefined,
     },
-    {
-      label: "Canvas",
-      href: routes.canvas,
-    },
-    {
-      label: "Tasks",
-      badge: dashboard ? String(dashboard.tasks.length) : undefined,
-      href: routes.tasks,
-    },
-    {
-      label: "GitHub",
-      badge: githubCount ? String(githubCount) : undefined,
-      href: routes.github,
-    },
-    {
-      label: "Meetings / Voice / Reports",
-      badge: dashboard?.meetingReports.length
-        ? String(dashboard.meetingReports.length)
-        : undefined,
-      href: routes.meetings,
-    },
-    {
-      label: "Reviews",
-      badge: reviewCount ? String(reviewCount) : undefined,
-      href: routes.reviews,
-    },
-    {
-      label: "Agent / Planning",
-      badge: dashboard?.agentActions.length
-        ? String(dashboard.agentActions.length)
-        : undefined,
-      href: routes.agent,
-    },
-  ];
+  });
 }
 
 function toneForTask(task: { isDelayed?: boolean; priority?: string }) {
@@ -328,6 +284,7 @@ export function WorkspaceDashboard() {
     [pathname],
   );
   const [state, setState] = useState<DashboardState>(initialState);
+  const routes = useMemo(() => buildWorkspaceRoutes(workspaceId), [workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -396,7 +353,7 @@ export function WorkspaceDashboard() {
             <h1>PILO Dashboard</h1>
           </div>
           <div className="topbar-actions">
-            <Link className="meeting-chip" href={workspaceMeetingsHref(workspaceId)}>
+            <Link className="meeting-chip" href={routes.meetings}>
               <span className="live-dot" />
               Meetings <code>{state.dashboard?.meetingReports.length ?? 0}</code>
             </Link>

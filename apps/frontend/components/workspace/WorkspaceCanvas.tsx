@@ -21,14 +21,8 @@ import {
 } from "../../lib/workspace/canvasStorage.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import {
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
-  workspaceAgentHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
-  workspaceGithubHref,
-  workspaceMeetingsHref,
-  workspaceReviewsHref,
-  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
 import {
@@ -408,40 +402,14 @@ function buildCanvasNavItems({
   taskCount: number;
   pullRequestCount: number;
 }): CanvasNavItem[] {
-  return [
-    {
-      label: "Dashboard",
-      href: workspaceDashboardHref(workspaceId),
+  return buildWorkspaceFeatureTabs(workspaceId, {
+    active: "canvas",
+    badges: {
+      tasks: taskCount,
+      github: pullRequestCount || undefined,
+      reviews: pullRequestCount || undefined,
     },
-    {
-      label: "Agent / Planning",
-      href: workspaceAgentHref(workspaceId),
-    },
-    {
-      label: "Tasks",
-      badge: String(taskCount),
-      href: workspaceTasksHref(workspaceId),
-    },
-    {
-      label: "Meetings / Reports",
-      href: workspaceMeetingsHref(workspaceId),
-    },
-    {
-      label: "Canvas",
-      active: true,
-      href: workspaceCanvasHref(workspaceId),
-    },
-    {
-      label: "GitHub",
-      badge: pullRequestCount ? String(pullRequestCount) : undefined,
-      href: workspaceGithubHref(workspaceId),
-    },
-    {
-      label: "Reviews",
-      badge: pullRequestCount ? String(pullRequestCount) : undefined,
-      href: workspaceReviewsHref(workspaceId),
-    },
-  ];
+  });
 }
 
 function formatPosition(selection: PiloCanvasSelection) {

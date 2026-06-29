@@ -10,14 +10,8 @@ import { createMeetingClient } from "../../lib/meeting/meetingClient.mjs";
 import { createVoiceClient } from "../../lib/voice/voiceClient.mjs";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
-  workspaceAgentHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
-  workspaceGithubHref,
-  workspaceMeetingsHref,
-  workspaceReviewsHref,
-  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 
@@ -246,45 +240,16 @@ export function WorkspaceMeetings() {
     [],
   );
   const navItems = useMemo(
-    () => [
-      {
-        label: "Dashboard",
-        href: workspaceDashboardHref(workspaceId),
-      },
-      {
-        label: "Agent / Planning",
-        href: workspaceAgentHref(workspaceId),
-      },
-      {
-        label: "Tasks",
-        href: workspaceTasksHref(workspaceId),
-        badge: String(dashboard.tasks.length),
-      },
-      {
-        label: "Meetings / Reports",
-        href: workspaceMeetingsHref(workspaceId),
-        badge: recentReports.length ? String(recentReports.length) : undefined,
-        active: true,
-      },
-      {
-        label: "Canvas",
-        href: workspaceCanvasHref(workspaceId),
-      },
-      {
-        label: "GitHub",
-        href: workspaceGithubHref(workspaceId),
-        badge: dashboard.pullRequests.length
-          ? String(dashboard.pullRequests.length)
-          : undefined,
-      },
-      {
-        label: "Reviews",
-        href: workspaceReviewsHref(workspaceId),
-        badge: dashboard.pullRequests.length
-          ? String(dashboard.pullRequests.length)
-          : undefined,
-      },
-    ],
+    () =>
+      buildWorkspaceFeatureTabs(workspaceId, {
+        active: "meetings",
+        badges: {
+          tasks: dashboard.tasks.length,
+          meetings: recentReports.length || undefined,
+          github: dashboard.pullRequests.length || undefined,
+          reviews: dashboard.pullRequests.length || undefined,
+        },
+      }),
     [
       dashboard.pullRequests.length,
       dashboard.tasks.length,

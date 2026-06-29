@@ -26,6 +26,10 @@ export interface PullRequestSummaryRef {
   syncedAt: string | null;
 }
 
+export interface OpenReviewRoomBody {
+  pullRequest?: Partial<PullRequestSummaryRef> | null;
+}
+
 export interface CodeReviewRoomRecord {
   id: string;
   workspaceId: string;

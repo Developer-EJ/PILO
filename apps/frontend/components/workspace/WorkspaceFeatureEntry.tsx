@@ -1,14 +1,8 @@
 import Link from "next/link";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
-  workspaceAgentHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
-  workspaceGithubHref,
-  workspaceMeetingsHref,
-  workspacePlanningHref,
-  workspaceReviewsHref,
-  workspaceTasksHref,
+  buildWorkspaceFeatureRoutes,
+  buildWorkspaceFeatureTabs,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
 
@@ -109,16 +103,7 @@ const surfaceConfig = {
 >;
 
 function createRoutes(workspaceId: string) {
-  return {
-    dashboard: workspaceDashboardHref(workspaceId),
-    canvas: workspaceCanvasHref(workspaceId),
-    tasks: workspaceTasksHref(workspaceId),
-    github: workspaceGithubHref(workspaceId),
-    meetings: workspaceMeetingsHref(workspaceId),
-    reviews: workspaceReviewsHref(workspaceId),
-    agent: workspaceAgentHref(workspaceId),
-    planning: workspacePlanningHref(workspaceId),
-  };
+  return buildWorkspaceFeatureRoutes(workspaceId);
 }
 
 function createFeatureCards(
@@ -181,15 +166,16 @@ export function WorkspaceFeatureEntry({
   const config = surfaceConfig[surface];
   const routes = createRoutes(workspaceId);
   const featureCards = createFeatureCards(surface, dashboard);
-  const navItems = [
-    { label: "Dashboard", href: routes.dashboard },
-    { label: "Canvas", href: routes.canvas },
-    { label: "Tasks", href: routes.tasks },
-    { label: "GitHub", href: routes.github },
-    { label: "Meetings / Voice / Reports", href: routes.meetings },
-    { label: "Reviews", href: routes.reviews },
-    { label: "Agent / Planning", href: routes.agent },
-  ];
+  const navItems = buildWorkspaceFeatureTabs(workspaceId, {
+    active: surface,
+    badges: {
+      tasks: dashboard.tasks.length,
+      github: dashboard.pullRequests.length + dashboard.githubIssues.length,
+      meetings: dashboard.meetingReports.length || undefined,
+      reviews: dashboard.prAnalyses.length || undefined,
+      agent: dashboard.agentActions.length || undefined,
+    },
+  });
 
   return (
     <main className="dashboard-shell feature-entry-shell">

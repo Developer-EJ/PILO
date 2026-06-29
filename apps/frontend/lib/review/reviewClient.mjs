@@ -16,6 +16,10 @@ export const REVIEW_FIXTURE_ANALYSIS_ID =
   "88888888-8888-4888-8888-888888888881";
 
 export const reviewApiPaths = {
+  listGithubRepositories: (workspaceId) =>
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/github/repositories`,
+  listRepositoryPullRequests: (repositoryId) =>
+    `/api/repositories/${encodeURIComponent(repositoryId)}/pull-requests`,
   openReviewRoom: (pullRequestId) =>
     `/api/pull-requests/${encodeURIComponent(pullRequestId)}/review-room`,
   getReviewRoom: (roomId) =>
@@ -545,16 +549,46 @@ export function createReviewApiClient({
   const requestOptions = { baseUrl, fetcher };
 
   return {
-    async listPullRequests() {
-      return clone(fixture.pullRequests);
+    async listPullRequests(workspaceId) {
+      if (!workspaceId) {
+        return clone(fixture.pullRequests);
+      }
+
+      const repositories = await requestReviewJson(
+        reviewApiPaths.listGithubRepositories(workspaceId),
+        undefined,
+        requestOptions,
+      );
+      const repositoryList = Array.isArray(repositories) ? repositories : [];
+      const pullRequestLists = await Promise.all(
+        repositoryList.map((repository) =>
+          requestReviewJson(
+            reviewApiPaths.listRepositoryPullRequests(repository.id),
+            undefined,
+            requestOptions,
+          ),
+        ),
+      );
+      const pullRequests = pullRequestLists.flatMap((list) =>
+        Array.isArray(list) ? list : [],
+      );
+
+      return pullRequests.length
+        ? pullRequests.map((pullRequest) => normalizePullRequest(pullRequest))
+        : clone(fixture.pullRequests);
     },
 
-    async openReviewRoom(pullRequestId, { workspaceId, memberId } = {}) {
+    async openReviewRoom(
+      pullRequestId,
+      { workspaceId, memberId, pullRequest } = {},
+    ) {
       const room = await requestReviewJson(
         reviewApiPaths.openReviewRoom(pullRequestId),
         {
           method: "POST",
+          body: JSON.stringify(pullRequest ? { pullRequest } : {}),
           headers: {
+            "Content-Type": "application/json",
             ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
             ...(memberId ? { "x-member-id": memberId } : {}),
           },

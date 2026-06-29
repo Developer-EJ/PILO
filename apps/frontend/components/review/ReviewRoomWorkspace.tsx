@@ -9,8 +9,7 @@ import {
   reviewFixture,
 } from "../../lib/review/reviewClient.mjs";
 import {
-  workspaceCanvasHref,
-  workspaceDashboardHref,
+  buildWorkspaceFeatureTabs,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import styles from "./ReviewRoomWorkspace.module.css";
 
@@ -200,6 +199,16 @@ export function ReviewRoomWorkspace({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [commentDraft, setCommentDraft] = useState("");
+  const navItems = useMemo(
+    () =>
+      buildWorkspaceFeatureTabs(workspaceId, {
+        active: "reviews",
+        badges: {
+          reviews: pullRequests.length || undefined,
+        },
+      }),
+    [pullRequests.length, workspaceId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -209,7 +218,7 @@ export function ReviewRoomWorkspace({
       setWarnings([]);
 
       try {
-        const nextPullRequests = await client.listPullRequests();
+        const nextPullRequests = await client.listPullRequests(workspaceId);
 
         if (!cancelled) {
           setPullRequests(
@@ -225,7 +234,7 @@ export function ReviewRoomWorkspace({
 
         if (!cancelled) {
           setPullRequests(fallbackPullRequests);
-          setWarnings(["Using the PR fixture while the GitHub PR list is deferred."]);
+          setWarnings(["Using the PR fixture while the GitHub PR list is unavailable."]);
           setStatus("selecting");
         }
       }
@@ -269,11 +278,13 @@ export function ReviewRoomWorkspace({
         room = await client.openReviewRoom(pullRequest.id, {
           workspaceId,
           memberId,
+          pullRequest,
         });
       } catch (error) {
         room = await fallbackClient.openReviewRoom(pullRequest.id, {
           workspaceId,
           memberId,
+          pullRequest,
         });
         nextWarnings.push("Review room is backed by the PR fixture.");
       }
@@ -510,8 +521,15 @@ export function ReviewRoomWorkspace({
             <h1>PR Review Room</h1>
           </div>
           <nav aria-label="Workspace review navigation">
-            <Link href={workspaceDashboardHref(workspaceId)}>Dashboard</Link>
-            <Link href={workspaceCanvasHref(workspaceId)}>Canvas</Link>
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={item.active ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            ))}
           </nav>
         </header>
 
@@ -583,6 +601,17 @@ export function ReviewRoomWorkspace({
           <span>{pullRequest.branch}</span>
           <b>{pullRequest.baseBranch}</b>
         </div>
+        <nav className={styles.roomNav} aria-label="Workspace review navigation">
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={item.active ? "page" : undefined}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
       </header>
 
       <section className={styles.roomLayout}>

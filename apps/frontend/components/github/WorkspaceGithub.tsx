@@ -9,10 +9,9 @@ import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher"
 import { createGithubClient } from "../../lib/github/githubClient.mjs";
 import { createTaskClient } from "../../lib/task/taskClient.mjs";
 import {
+  buildWorkspaceFeatureRoutes,
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
-  workspaceDashboardHref,
-  workspaceReviewsHref,
-  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 
@@ -93,11 +92,7 @@ export function WorkspaceGithub() {
   const pathname = usePathname() ?? "/";
   const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
   const routes = useMemo(
-    () => ({
-      dashboard: workspaceDashboardHref(workspaceId),
-      tasks: workspaceTasksHref(workspaceId),
-      reviews: workspaceReviewsHref(workspaceId),
-    }),
+    () => buildWorkspaceFeatureRoutes(workspaceId),
     [workspaceId],
   );
   const githubClient = useMemo(() => createGithubClient(), []);
@@ -292,6 +287,14 @@ export function WorkspaceGithub() {
   const reviewPrCount = pullRequests.filter((pullRequest) =>
     ["review_requested", "changes_requested"].includes(pullRequest.state),
   ).length;
+  const navItems = buildWorkspaceFeatureTabs(workspaceId, {
+    active: "github",
+    badges: {
+      tasks: tasks.length || undefined,
+      github: pullRequests.length + issues.length,
+      reviews: reviewPrCount || undefined,
+    },
+  });
 
   return (
     <main className="dashboard-shell github-shell">
@@ -300,20 +303,17 @@ export function WorkspaceGithub() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          <Link className="nav-item" href={routes.dashboard}>
-            <span>Dashboard</span>
-          </Link>
-          <Link className="nav-item" href={routes.tasks}>
-            <span>Tasks</span>
-          </Link>
-          <Link className="nav-item active" href={`${routes.dashboard}/github`}>
-            <span>GitHub</span>
-            <b>{pullRequests.length + issues.length}</b>
-          </Link>
-          <Link className="nav-item" href={routes.reviews}>
-            <span>Reviews</span>
-            {reviewPrCount ? <b>{reviewPrCount}</b> : null}
-          </Link>
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={item.active ? "nav-item active" : "nav-item"}
+              aria-current={item.active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+              {item.badge ? <b>{item.badge}</b> : null}
+            </Link>
+          ))}
         </nav>
       </aside>
 

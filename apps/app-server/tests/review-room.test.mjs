@@ -60,6 +60,7 @@ describe("review room API boundary", () => {
 
     const room = controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
+      {},
       "22222222-2222-4222-8222-222222222229",
       "33333333-3333-4333-8333-333333333339",
     );
@@ -83,6 +84,39 @@ describe("review room API boundary", () => {
 
     assert.equal(second.id, first.id);
     assert.equal(second.createdAt, first.createdAt);
+  });
+
+  it("opens a code review room from a runtime PullRequestSummary body", () => {
+    const controller = createController();
+    const pullRequest = {
+      id: "77777777-7777-4777-8777-777777777771",
+      repositoryId: "55555555-5555-4555-8555-555555555501",
+      number: 9,
+      title: "Wire GitHub review flow",
+      authorLogin: "reviewer",
+      state: "changes_requested",
+      branch: "feature/review",
+      baseBranch: "dev",
+      url: "https://github.com/example/pilo/pull/9",
+      changedFilesCount: 3,
+      additions: 80,
+      deletions: 12,
+      linkedTaskIds: ["44444444-4444-4444-8444-444444444441"],
+      syncedAt: "2026-06-30T00:00:00.000Z",
+    };
+
+    const room = controller.openRoomForPullRequest(
+      pullRequest.id,
+      { pullRequest },
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333331",
+    );
+    const loaded = controller.getRoom(room.id);
+
+    assert.equal(room.pullRequestId, pullRequest.id);
+    assert.equal(room.pullRequest.title, pullRequest.title);
+    assert.equal(room.pullRequest.state, "changes_requested");
+    assert.deepEqual(loaded.pullRequest, room.pullRequest);
   });
 
   it("loads a review room by room id", () => {

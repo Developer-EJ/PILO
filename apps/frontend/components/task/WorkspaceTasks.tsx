@@ -8,11 +8,8 @@ import { LogoutButton } from "../auth/LogoutButton";
 import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
 import { createTaskClient } from "../../lib/task/taskClient.mjs";
 import {
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
-  workspaceAgentHref,
-  workspaceDashboardHref,
-  workspaceGithubHref,
-  workspaceMeetingsHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 
@@ -93,15 +90,6 @@ function dueLabel(task: TaskSummary) {
 export function WorkspaceTasks() {
   const pathname = usePathname() ?? "/";
   const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
-  const routes = useMemo(
-    () => ({
-      dashboard: workspaceDashboardHref(workspaceId),
-      github: workspaceGithubHref(workspaceId),
-      meetings: workspaceMeetingsHref(workspaceId),
-      agent: workspaceAgentHref(workspaceId),
-    }),
-    [workspaceId],
-  );
   const taskClient = useMemo(() => createTaskClient(), []);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [drafts, setDrafts] = useState<TaskDraft[]>([]);
@@ -195,6 +183,13 @@ export function WorkspaceTasks() {
     tasks: tasks.filter((task) => task.status === status),
   }));
   const openDrafts = drafts.filter((draft) => draft.status === "draft");
+  const navItems = buildWorkspaceFeatureTabs(workspaceId, {
+    active: "tasks",
+    badges: {
+      tasks: tasks.length,
+      agent: openDrafts.length || undefined,
+    },
+  });
 
   return (
     <main className="dashboard-shell tasks-shell">
@@ -203,23 +198,17 @@ export function WorkspaceTasks() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          <Link className="nav-item" href={routes.dashboard}>
-            <span>Dashboard</span>
-          </Link>
-          <Link className="nav-item active" href={`${routes.dashboard}/tasks`}>
-            <span>Tasks</span>
-            <b>{tasks.length}</b>
-          </Link>
-          <Link className="nav-item" href={routes.github}>
-            <span>GitHub</span>
-          </Link>
-          <Link className="nav-item" href={routes.meetings}>
-            <span>Meetings / Reports</span>
-          </Link>
-          <Link className="nav-item" href={routes.agent}>
-            <span>Agent / Planning</span>
-            {openDrafts.length ? <b>{openDrafts.length}</b> : null}
-          </Link>
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={item.active ? "nav-item active" : "nav-item"}
+              aria-current={item.active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+              {item.badge ? <b>{item.badge}</b> : null}
+            </Link>
+          ))}
         </nav>
       </aside>
 

@@ -54,12 +54,15 @@
   font-size: 24px;
 }
 
-.reviewHeader nav {
+.reviewHeader nav,
+.roomNav {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .reviewHeader a,
+.roomNav a,
 .backButton,
 .prCard button,
 .sectionTitleRow button,
@@ -80,12 +83,20 @@
 }
 
 .reviewHeader a:hover,
+.roomNav a:hover,
 .backButton:hover,
 .prCard button:hover,
 .sectionTitleRow button:hover,
 .nodeActions button:hover,
 .commentComposer button:hover {
   border-color: rgba(109, 91, 214, 0.38);
+  color: #6d5bd6;
+}
+
+.reviewHeader a[aria-current="page"],
+.roomNav a[aria-current="page"] {
+  border-color: rgba(109, 91, 214, 0.38);
+  background: #f1efff;
   color: #6d5bd6;
 }
 
@@ -582,11 +593,13 @@
     flex-direction: column;
   }
 
-  .reviewHeader nav {
+  .reviewHeader nav,
+  .roomNav {
     width: 100%;
   }
 
-  .reviewHeader a {
+  .reviewHeader a,
+  .roomNav a {
     flex: 1;
     text-align: center;
   }

@@ -258,8 +258,8 @@ Deferred action payload.
 ## Consumed By
 
 - 동현 settings UI: `GithubConnectionSummary`
-- 동현 Dashboard/Canvas: deferred `GithubIssueSummary`, `PullRequestSummary`
-- 은재 Review: deferred `PullRequestSummary`, `PullRequestChangedFileSummary`
+- 동현 Dashboard/Canvas: `GithubIssueSummary`, `PullRequestSummary`
+- 은재 Review: `PullRequestSummary`, deferred `PullRequestChangedFileSummary`
 - 세인 Agent: deferred `GithubIssueCreateAction`
 
 ## Boundaries
@@ -285,6 +285,7 @@ Deferred action payload.
 
 ## Mock Rule
 
-repository/issue/PR API가 구현되기 전까지 consumer는 GitHub contract fixture와
-`PullRequestSummary`, `PullRequestChangedFileSummary` read model shape를 사용한다.
-임시 GitHub 원본 table이나 provider token 저장소를 다른 도메인에 만들지 않는다.
+provider sync와 changed-file API가 구현되기 전까지 consumer는 이미 저장된
+repository/issue/PR read API와 GitHub contract fixture를 함께 사용한다.
+`PullRequestChangedFileSummary`가 필요하면 fixture read model shape를 사용한다. 임시
+GitHub 원본 table이나 provider token 저장소를 다른 도메인에 만들지 않는다.

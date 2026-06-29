@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Headers,
@@ -8,6 +9,7 @@ import {
 } from "@nestjs/common";
 import {
   CodeReviewRoomSummary,
+  OpenReviewRoomBody,
   ReviewRoomActorContext,
 } from "./code-review-room.types";
 import { DEFAULT_REVIEW_ROOM_CONTEXT } from "./review-room.fixtures";
@@ -20,12 +22,14 @@ export class ReviewRoomController {
   @Post("pull-requests/:pullRequestId/review-room")
   openRoomForPullRequest(
     @Param("pullRequestId", ParseUUIDPipe) pullRequestId: string,
+    @Body() body: OpenReviewRoomBody = {},
     @Headers("x-workspace-id") workspaceId?: string,
     @Headers("x-member-id") memberId?: string,
   ): CodeReviewRoomSummary {
     return this.reviewRoomService.openRoomForPullRequest(
       pullRequestId,
       this.actorContextFromHeaders(workspaceId, memberId),
+      body,
     );
   }
 

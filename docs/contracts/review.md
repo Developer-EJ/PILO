@@ -48,7 +48,7 @@ The Review controllers are exposed through the app-server global prefix as `/api
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/pull-requests/:pullRequestId/review-room` | Current app-server API for creating a review room from a PR summary |
+| `POST` | `/api/pull-requests/:pullRequestId/review-room` | Current app-server API for creating a review room from fixture or provided `PullRequestSummary` |
 | `GET` | `/api/code-review-rooms/:roomId` | Current app-server API for review room details |
 | `POST` | `/api/pull-requests/:pullRequestId/analysis` | Current app-server API for requesting PR analysis |
 | `GET` | `/api/pull-requests/:pullRequestId/analysis` | Current app-server API for PR analysis lifecycle result |
@@ -72,6 +72,12 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
 ### CodeReviewRoomSummary
 
 리뷰룸은 주형이 제공하는 `PullRequestSummary`를 참조한다. 성공 응답에서는 `pullRequest`가 항상 포함되어야 하며, 은재 도메인은 GitHub PR 원본 table을 별도로 만들지 않는다.
+
+`POST /api/pull-requests/:pullRequestId/review-room` may receive an optional
+`{ "pullRequest": PullRequestSummary }` body. When provided, Review stores that
+summary as the room reference so the review selector can open PRs returned by
+the 주형 GitHub read API. If the body is omitted, Review falls back to its known
+fixture summaries.
 
 ```json
 {

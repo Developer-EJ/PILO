@@ -8,15 +8,9 @@ import { LogoutButton } from "../auth/LogoutButton";
 import { createCanvasClient } from "../../lib/workspace/canvasClient.mjs";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
+  buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
-  workspaceAgentHref,
   workspaceCanvasBoardHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
-  workspaceGithubHref,
-  workspaceMeetingsHref,
-  workspaceReviewsHref,
-  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
@@ -68,47 +62,16 @@ export function WorkspaceCanvasBoards() {
     [workspaceId],
   );
   const navItems = useMemo(
-    () => [
-      {
-        label: "Dashboard",
-        href: workspaceDashboardHref(workspaceId),
-      },
-      {
-        label: "Agent / Planning",
-        href: workspaceAgentHref(workspaceId),
-      },
-      {
-        label: "Tasks",
-        href: workspaceTasksHref(workspaceId),
-        badge: String(dashboard.tasks.length),
-      },
-      {
-        label: "Meetings / Reports",
-        href: workspaceMeetingsHref(workspaceId),
-        badge: dashboard.meetingReports.length
-          ? String(dashboard.meetingReports.length)
-          : undefined,
-      },
-      {
-        label: "Canvas",
-        href: workspaceCanvasHref(workspaceId),
-        active: true,
-      },
-      {
-        label: "GitHub",
-        href: workspaceGithubHref(workspaceId),
-        badge: dashboard.pullRequests.length
-          ? String(dashboard.pullRequests.length)
-          : undefined,
-      },
-      {
-        label: "Reviews",
-        href: workspaceReviewsHref(workspaceId),
-        badge: dashboard.pullRequests.length
-          ? String(dashboard.pullRequests.length)
-          : undefined,
-      },
-    ],
+    () =>
+      buildWorkspaceFeatureTabs(workspaceId, {
+        active: "canvas",
+        badges: {
+          tasks: dashboard.tasks.length,
+          meetings: dashboard.meetingReports.length || undefined,
+          github: dashboard.pullRequests.length || undefined,
+          reviews: dashboard.pullRequests.length || undefined,
+        },
+      }),
     [
       dashboard.meetingReports.length,
       dashboard.pullRequests.length,

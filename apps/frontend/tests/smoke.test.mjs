@@ -84,6 +84,13 @@ import {
   resolveAgentPlanningClientMode,
 } from "../lib/agent/agentPlanningClient.mjs";
 import {
+  buildReviewApiUrl,
+  createMockReviewClient,
+  createReviewApiClient,
+  reviewFixture,
+  resolveReviewClientMode,
+} from "../lib/review/reviewClient.mjs";
+import {
   applyCanvasShapeState,
   canvasStorageKey,
   filterCanvasBoard,
@@ -91,6 +98,8 @@ import {
   normalizeCanvasShapeState,
 } from "../lib/workspace/canvasStorage.mjs";
 import {
+  buildWorkspaceFeatureRoutes,
+  buildWorkspaceFeatureTabs,
   CURRENT_WORKSPACE_STORAGE_KEY,
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
@@ -398,6 +407,45 @@ describe("frontend package", () => {
     assert.equal(
       workspacePlanningHref(workspaces[0].id),
       `/workspaces/${workspaces[0].id}/planning`,
+    );
+
+    const routes = buildWorkspaceFeatureRoutes(workspaces[0].id);
+    assert.deepEqual(Object.keys(routes), [
+      "dashboard",
+      "canvas",
+      "tasks",
+      "github",
+      "meetings",
+      "reviews",
+      "agent",
+      "planning",
+    ]);
+    assert.deepEqual(routes, {
+      dashboard: workspaceDashboardHref(workspaces[0].id),
+      canvas: workspaceCanvasHref(workspaces[0].id),
+      tasks: workspaceTasksHref(workspaces[0].id),
+      github: workspaceGithubHref(workspaces[0].id),
+      meetings: workspaceMeetingsHref(workspaces[0].id),
+      reviews: workspaceReviewsHref(workspaces[0].id),
+      agent: workspaceAgentHref(workspaces[0].id),
+      planning: workspacePlanningHref(workspaces[0].id),
+    });
+
+    const tabs = buildWorkspaceFeatureTabs(workspaces[0].id, {
+      active: "github",
+      badges: { tasks: 2, github: 3 },
+    });
+
+    assert.deepEqual(
+      tabs.map((tab) => tab.key),
+      Object.keys(routes),
+    );
+    assert.equal(tabs.find((tab) => tab.key === "github").active, true);
+    assert.equal(tabs.find((tab) => tab.key === "tasks").badge, "2");
+    assert.equal(tabs.find((tab) => tab.key === "github").badge, "3");
+    assert.equal(
+      tabs.every((tab) => tab.href === routes[tab.key]),
+      true,
     );
   });
 
@@ -1022,6 +1070,104 @@ describe("frontend package", () => {
       requests.map((request) => request.init.method ?? "GET"),
       ["GET", "POST", "GET", "GET", "GET", "POST", "POST", "POST"],
     );
+  });
+
+  it("calls Review API client with GitHub PR selector contracts", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const repositoryId = "repo-review-1";
+    const pullRequest = {
+      id: "66666666-6666-4666-8666-666666666661",
+      repositoryId,
+      number: 14,
+      title: "Wire review room to GitHub PR",
+      authorLogin: "reviewer",
+      state: "review_requested",
+      branch: "feature/review-room",
+      baseBranch: "dev",
+      url: "https://github.com/example/pilo/pull/14",
+      changedFilesCount: 5,
+      additions: 120,
+      deletions: 24,
+      linkedTaskIds: ["task-1"],
+      syncedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/github/repositories`)) {
+        return Response.json([
+          {
+            id: repositoryId,
+            workspaceId,
+            owner: "example",
+            repoName: "pilo",
+            url: "https://github.com/example/pilo",
+          },
+        ]);
+      }
+
+      if (url.endsWith(`/repositories/${repositoryId}/pull-requests`)) {
+        return Response.json([pullRequest]);
+      }
+
+      if (url.endsWith(`/pull-requests/${pullRequest.id}/review-room`)) {
+        return Response.json({
+          id: "88888888-8888-4888-8888-888888888811",
+          workspaceId,
+          pullRequestId: pullRequest.id,
+          status: "open",
+          createdByMemberId: "member-1",
+          createdAt: "2026-06-30T00:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z",
+          pullRequest: JSON.parse(init.body).pullRequest,
+        });
+      }
+
+      return Response.json({});
+    };
+
+    assert.equal(
+      buildReviewApiUrl("/api/code-review-rooms/room-1", ""),
+      "/api/code-review-rooms/room-1",
+    );
+    assert.equal(resolveReviewClientMode("api"), "api");
+    assert.equal(resolveReviewClientMode("fixture"), "mock");
+
+    const mockReviewRoom = await createMockReviewClient().openReviewRoom(
+      reviewFixture.pullRequests[0].id,
+      { workspaceId },
+    );
+    assert.equal(mockReviewRoom.workspaceId, workspaceId);
+
+    const apiClient = createReviewApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+    const pullRequests = await apiClient.listPullRequests(workspaceId);
+    const room = await apiClient.openReviewRoom(pullRequests[0].id, {
+      workspaceId,
+      memberId: "member-1",
+      pullRequest: pullRequests[0],
+    });
+
+    assert.equal(pullRequests[0].id, pullRequest.id);
+    assert.equal(room.pullRequest.title, pullRequest.title);
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories`,
+        `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
+        `https://api.pilo.dev/api/pull-requests/${pullRequest.id}/review-room`,
+      ],
+    );
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["GET", "GET", "POST"],
+    );
+    assert.deepEqual(JSON.parse(requests[2].init.body).pullRequest, pullRequest);
+    assert.equal(requests[2].init.headers["x-workspace-id"], workspaceId);
+    assert.equal(requests[2].init.headers["x-member-id"], "member-1");
   });
 
   it("calls Meeting, Voice, and Agent API clients with MVP route contracts", async () => {

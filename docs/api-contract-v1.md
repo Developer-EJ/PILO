@@ -566,12 +566,15 @@ Rules:
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| POST | `/api/github/pull-requests/:pullRequestId/review-room` | yes | member | Create or open Review Room |
-| GET | `/api/review-rooms/:reviewRoomId` | yes | member | Review Room detail |
-| POST | `/api/review-rooms/:reviewRoomId/analyze` | yes | member | Generate PR analysis |
-| GET | `/api/review-rooms/:reviewRoomId/changed-files` | yes | member | Changed files and diff metadata |
-| PATCH | `/api/review-nodes/:reviewNodeId/decision` | yes | member | Save internal review decision |
-| POST | `/api/review-rooms/:reviewRoomId/checklist` | yes | member | Generate merge checklist |
+| POST | `/api/pull-requests/:pullRequestId/review-room` | yes | member | Create or open Review Room; optional body may include `PullRequestSummary` |
+| GET | `/api/code-review-rooms/:reviewRoomId` | yes | member | Review Room detail |
+| POST | `/api/pull-requests/:pullRequestId/analysis` | yes | member | Request PR analysis |
+| GET | `/api/pull-requests/:pullRequestId/analysis` | yes | member | PR analysis lifecycle result |
+| GET | `/api/pull-requests/:pullRequestId/analysis-summary` | yes | member | PR analysis summary for Dashboard/Canvas |
+| GET | `/api/pull-request-analyses/:analysisId/canvas` | yes | member | Review graph canvas |
+| PATCH | `/api/review-nodes/:reviewNodeId/state` | yes | member | Save internal review node state |
+| POST | `/api/code-review-rooms/:reviewRoomId/comments` | yes | member | Save review comment |
+| POST | `/api/pull-request-analyses/:analysisId/checklist-items` | yes | member | Upsert merge/review checklist item |
 
 ### Review Room DTO
 

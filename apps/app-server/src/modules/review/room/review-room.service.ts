@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import {
   CodeReviewRoomRecord,
   CodeReviewRoomSummary,
+  OpenReviewRoomBody,
   PullRequestSummaryRef,
   ReviewRoomActorContext,
   ReviewRoomCreatedEvent,
@@ -18,10 +19,9 @@ export class ReviewRoomService {
   private readonly defaultContext: ReviewRoomActorContext =
     DEFAULT_REVIEW_ROOM_CONTEXT;
 
-  private readonly pullRequestSummaries: ReadonlyMap<
-    string,
-    PullRequestSummaryRef
-  > = REVIEW_ROOM_PULL_REQUEST_FIXTURES;
+  private readonly pullRequestSummaries = new Map<string, PullRequestSummaryRef>(
+    REVIEW_ROOM_PULL_REQUEST_FIXTURES,
+  );
 
   constructor(
     private readonly roomRepository: InMemoryCodeReviewRoomRepository,
@@ -30,8 +30,9 @@ export class ReviewRoomService {
   openRoomForPullRequest(
     pullRequestId: string,
     context: ReviewRoomActorContext = this.defaultContext,
+    body: OpenReviewRoomBody = {},
   ): CodeReviewRoomSummary {
-    const pullRequest = this.findPullRequestOrThrow(pullRequestId);
+    const pullRequest = this.resolvePullRequest(pullRequestId, body);
     const existingRoom = this.roomRepository.findByPullRequestId(pullRequestId);
 
     if (existingRoom) {
@@ -72,6 +73,20 @@ export class ReviewRoomService {
     };
   }
 
+  private resolvePullRequest(
+    pullRequestId: string,
+    body: OpenReviewRoomBody,
+  ): PullRequestSummaryRef {
+    const fromBody = normalizePullRequestSummary(pullRequestId, body.pullRequest);
+
+    if (fromBody) {
+      this.pullRequestSummaries.set(pullRequestId, fromBody);
+      return fromBody;
+    }
+
+    return this.findPullRequestOrThrow(pullRequestId);
+  }
+
   private findPullRequestOrThrow(pullRequestId: string): PullRequestSummaryRef {
     const pullRequest = this.pullRequestSummaries.get(pullRequestId);
 
@@ -93,4 +108,65 @@ export class ReviewRoomService {
       pullRequest,
     };
   }
+}
+
+function normalizePullRequestSummary(
+  pullRequestId: string,
+  value: OpenReviewRoomBody["pullRequest"],
+): PullRequestSummaryRef | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  if (
+    value.id !== pullRequestId ||
+    typeof value.repositoryId !== "string" ||
+    typeof value.number !== "number" ||
+    typeof value.title !== "string" ||
+    typeof value.state !== "string" ||
+    typeof value.url !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: pullRequestId,
+    repositoryId: value.repositoryId,
+    number: value.number,
+    title: value.title,
+    authorLogin:
+      typeof value.authorLogin === "string" ? value.authorLogin : null,
+    state: normalizePullRequestState(value.state),
+    branch: typeof value.branch === "string" ? value.branch : null,
+    baseBranch:
+      typeof value.baseBranch === "string" ? value.baseBranch : null,
+    url: value.url,
+    changedFilesCount: toInteger(value.changedFilesCount),
+    additions: toInteger(value.additions),
+    deletions: toInteger(value.deletions),
+    linkedTaskIds: Array.isArray(value.linkedTaskIds)
+      ? value.linkedTaskIds.filter((id): id is string => typeof id === "string")
+      : [],
+    syncedAt: typeof value.syncedAt === "string" ? value.syncedAt : null,
+  };
+}
+
+function normalizePullRequestState(
+  state: string,
+): PullRequestSummaryRef["state"] {
+  if (
+    state === "open" ||
+    state === "review_requested" ||
+    state === "changes_requested" ||
+    state === "merged" ||
+    state === "closed"
+  ) {
+    return state;
+  }
+
+  return "open";
+}
+
+function toInteger(value: unknown): number {
+  return Number.isInteger(value) ? (value as number) : 0;
 }
