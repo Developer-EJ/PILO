@@ -3,11 +3,13 @@ import {
   CreateMeetingAgendaInput,
   CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
+  CreateMeetingReportInput,
   CreateTranscriptSegmentInput,
   MeetingAgendaRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportRecord,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
@@ -63,4 +65,12 @@ export interface MeetingRepository {
   ): TranscriptSegmentRecord;
 
   listTranscriptSegmentsByMeeting(meetingId: string): TranscriptSegmentRecord[];
+
+  createReport(input: CreateMeetingReportInput): MeetingReportRecord;
+
+  findReportById(reportId: string): MeetingReportRecord | null;
+
+  findReportByMeetingId(meetingId: string): MeetingReportRecord | null;
+
+  listReports(): MeetingReportRecord[];
 }

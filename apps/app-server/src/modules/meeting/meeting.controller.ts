@@ -8,6 +8,8 @@ import {
   MeetingAgendaResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportResponseDto,
+  MeetingReportSummaryDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
   ReorderMeetingAgendaRequestDto,
@@ -140,5 +142,31 @@ export class MeetingController {
     @Param("meetingId") meetingId: string,
   ): TranscriptSegmentResponseDto[] {
     return this.meetingService.listTranscriptSegments(meetingId);
+  }
+
+  @Post("meetings/:meetingId/report-generation")
+  requestReportGeneration(
+    @Param("meetingId") meetingId: string,
+  ): MeetingReportResponseDto {
+    return this.meetingService.requestReportGeneration(meetingId);
+  }
+
+  @Post("meetings/:meetingId/report")
+  createReport(
+    @Param("meetingId") meetingId: string,
+  ): MeetingReportResponseDto {
+    return this.meetingService.createReport(meetingId);
+  }
+
+  @Get("meeting-reports/:reportId")
+  getReport(@Param("reportId") reportId: string): MeetingReportResponseDto {
+    return this.meetingService.getReport(reportId);
+  }
+
+  @Get("workspaces/:workspaceId/meeting-reports/recent")
+  listRecentReports(
+    @Param("workspaceId") workspaceId: string,
+  ): MeetingReportSummaryDto[] {
+    return this.meetingService.listRecentReports(workspaceId);
   }
 }
