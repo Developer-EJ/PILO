@@ -137,3 +137,7 @@ export function workspaceDashboardHref(workspaceId) {
 export function workspaceCanvasHref(workspaceId) {
   return `${workspaceDashboardHref(workspaceId)}/canvas`;
 }
+
+export function workspaceCanvasBoardHref(workspaceId, boardId) {
+  return `${workspaceCanvasHref(workspaceId)}/${encodeURIComponent(boardId)}`;
+}
