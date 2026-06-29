@@ -47,6 +47,42 @@ import {
   resolveCanvasClientMode,
 } from "../lib/workspace/canvasClient.mjs";
 import {
+  buildTaskApiUrl,
+  createMockTaskClient,
+  createTaskApiClient,
+  createTaskClient,
+  resolveTaskClientMode,
+} from "../lib/task/taskClient.mjs";
+import {
+  buildGithubApiUrl,
+  createGithubApiClient,
+  createGithubClient,
+  createMockGithubClient,
+  resolveGithubClientMode,
+} from "../lib/github/githubClient.mjs";
+import {
+  buildMeetingApiUrl,
+  createMeetingApiClient,
+  createMeetingClient,
+  createMockMeetingClient,
+  resolveMeetingClientMode,
+} from "../lib/meeting/meetingClient.mjs";
+import {
+  buildVoiceApiUrl,
+  createMockVoiceClient,
+  createVoiceApiClient,
+  createVoiceClient,
+  resolveVoiceClientMode,
+} from "../lib/voice/voiceClient.mjs";
+import {
+  buildAgentApiUrl,
+  createAgentPlanningApiClient,
+  createAgentPlanningClient,
+  createMockAgentPlanningClient,
+  defaultProjectStartInput,
+  resolveAgentPlanningClientMode,
+} from "../lib/agent/agentPlanningClient.mjs";
+import {
   applyCanvasShapeState,
   canvasStorageKey,
   filterCanvasBoard,
@@ -744,6 +780,413 @@ describe("frontend package", () => {
         process.env.NEXT_PUBLIC_PILO_AUTH_MODE = previousMode;
       }
     }
+  });
+
+  it("calls Task API client with MVP route contracts", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/tasks`) && !init.method) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/workspaces/${workspaceId}/task-drafts`)) {
+        return Response.json([
+          {
+            id: "draft-1",
+            workspaceId,
+            title: "Draft task",
+            status: "draft",
+            priority: "medium",
+            taskId: null,
+          },
+        ]);
+      }
+
+      if (url.endsWith(`/workspaces/${workspaceId}/progress/summary`)) {
+        return Response.json({
+          workspaceId,
+          totalTasks: 1,
+          doneTasks: 0,
+          blockedTasks: 0,
+          reviewTasks: 0,
+          delayedTasks: 0,
+          progressRate: 0,
+        });
+      }
+
+      if (url.endsWith(`/workspaces/${workspaceId}/progress/history`)) {
+        return Response.json([]);
+      }
+
+      return Response.json({
+        id: url.includes("task-drafts") ? "draft-1" : "task-1",
+        workspaceId,
+        title: "Task",
+        status: "todo",
+        priority: "medium",
+        taskId: null,
+      });
+    };
+
+    assert.equal(buildTaskApiUrl("/api/tasks/task-1", ""), "/api/tasks/task-1");
+    assert.equal(resolveTaskClientMode("api"), "api");
+    assert.equal(resolveTaskClientMode("fixture"), "mock");
+
+    const mockClient = createMockTaskClient();
+    const createdMockTask = await mockClient.createTask(workspaceId, {
+      title: "Mock Task",
+      priority: "high",
+    });
+    assert.equal(createdMockTask.workspaceId, workspaceId);
+    assert.equal(
+      (await createTaskClient({ mode: "mock" }).listTasks(workspaceId)).length >
+        0,
+      true,
+    );
+
+    const apiClient = createTaskApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    await apiClient.listTasks(workspaceId);
+    await apiClient.createTask(workspaceId, {
+      title: "Task",
+      priority: "medium",
+    });
+    await apiClient.updateTaskStatus("task-1", "in_review");
+    await apiClient.listTaskDrafts(workspaceId);
+    await apiClient.approveTaskDraft("draft-1");
+    await apiClient.rejectTaskDraft("draft-1");
+    await apiClient.getProgressSummary(workspaceId);
+    await apiClient.listProgressHistory(workspaceId);
+
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/tasks`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/tasks`,
+        "https://api.pilo.dev/api/tasks/task-1/status",
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/task-drafts`,
+        "https://api.pilo.dev/api/task-drafts/draft-1/approve",
+        "https://api.pilo.dev/api/task-drafts/draft-1/reject",
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/progress/summary`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/progress/history`,
+      ],
+    );
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["GET", "POST", "PATCH", "GET", "POST", "POST", "GET", "GET"],
+    );
+  });
+
+  it("calls GitHub API client with MVP route contracts", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const repositoryId = "repo-1";
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith("/connections") && !init.method) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith("/connections") && init.method === "POST") {
+        return Response.json({
+          state: "state-1",
+          installationUrl: "https://github.com/apps/pilo/installations/new",
+        });
+      }
+
+      if (url.endsWith("/repositories")) {
+        return Response.json([
+          {
+            id: repositoryId,
+            workspaceId,
+            owner: "example",
+            repoName: "pilo",
+            url: "https://github.com/example/pilo",
+          },
+        ]);
+      }
+
+      if (url.endsWith("/issues")) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith("/pull-requests")) {
+        return Response.json([]);
+      }
+
+      return Response.json({});
+    };
+
+    assert.equal(
+      buildGithubApiUrl("/api/workspaces/workspace/github/repositories", ""),
+      "/api/workspaces/workspace/github/repositories",
+    );
+    assert.equal(resolveGithubClientMode("api"), "api");
+    assert.equal(resolveGithubClientMode("fixture"), "mock");
+
+    const mockRepositories =
+      await createMockGithubClient().listRepositories(workspaceId);
+    assert.equal(mockRepositories[0].workspaceId, workspaceId);
+    assert.equal(
+      (await createGithubClient({ mode: "mock" }).listRepositories(workspaceId))
+        .length > 0,
+      true,
+    );
+
+    const apiClient = createGithubApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    await apiClient.listConnections(workspaceId);
+    await apiClient.startConnection(workspaceId);
+    await apiClient.listRepositories(workspaceId);
+    await apiClient.listIssues(repositoryId);
+    await apiClient.listPullRequests(repositoryId);
+
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/github/connections`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/github/connections`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories`,
+        `https://api.pilo.dev/api/repositories/${repositoryId}/issues`,
+        `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
+      ],
+    );
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["GET", "POST", "GET", "GET", "GET"],
+    );
+  });
+
+  it("calls Meeting, Voice, and Agent API clients with MVP route contracts", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const meetingId = "meeting-1";
+    const reportId = "report-1";
+    const actionItemId = "action-item-1";
+    const voiceRoomId = "voice-room-1";
+    const voiceSessionId = "voice-session-1";
+    const runId = "agent-run-1";
+    const actionId = "agent-action-1";
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/meetings`) && !init.method) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/meetings/${meetingId}/agendas`) && !init.method) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/meetings/${meetingId}/memos`) && !init.method) {
+        return Response.json([]);
+      }
+
+      if (
+        url.endsWith(`/meetings/${meetingId}/transcript-segments`) &&
+        !init.method
+      ) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/workspaces/${workspaceId}/meeting-reports/recent`)) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/meeting-reports/${reportId}/action-items`)) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/voice-rooms/${voiceRoomId}/sessions`) && !init.method) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/workspaces/${workspaceId}/agent-actions`)) {
+        return Response.json([]);
+      }
+
+      if (url.endsWith(`/agent-runs/${runId}`)) {
+        return Response.json({ id: runId, actions: [] });
+      }
+
+      if (url.endsWith("/agent-runs") && init.method === "POST") {
+        return Response.json({ id: runId, actions: [] });
+      }
+
+      return Response.json({
+        id: "ok",
+        meetingId,
+        reportId,
+        actionItemId,
+        voiceRoomId,
+        voiceSessionId,
+        actionId,
+      });
+    };
+
+    assert.equal(
+      buildMeetingApiUrl("/api/meetings/meeting-1", ""),
+      "/api/meetings/meeting-1",
+    );
+    assert.equal(
+      buildVoiceApiUrl("/api/voice-rooms/voice-room-1", ""),
+      "/api/voice-rooms/voice-room-1",
+    );
+    assert.equal(
+      buildAgentApiUrl("/api/agent-runs/agent-run-1", ""),
+      "/api/agent-runs/agent-run-1",
+    );
+    assert.equal(resolveMeetingClientMode("api"), "api");
+    assert.equal(resolveVoiceClientMode("api"), "api");
+    assert.equal(resolveAgentPlanningClientMode("api"), "api");
+
+    assert.equal(
+      (await createMockMeetingClient().listMeetings(workspaceId)).length > 0,
+      true,
+    );
+    assert.equal(
+      (await createVoiceClient({ mode: "mock" }).createVoiceRoom(
+        workspaceId,
+        meetingId,
+      )).workspaceId,
+      workspaceId,
+    );
+    const mockRun =
+      await createMockAgentPlanningClient().startPlanningRun(workspaceId);
+    assert.equal(mockRun.workspaceId, workspaceId);
+    assert.equal(
+      (await createAgentPlanningClient({ mode: "mock" }).startPlanningRun(
+        workspaceId,
+      )).workflowType,
+      "planning.generate",
+    );
+
+    const meetingClient = createMeetingApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+    const voiceClient = createVoiceApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+    const agentClient = createAgentPlanningApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    await meetingClient.listMeetings(workspaceId);
+    await meetingClient.createMeeting(workspaceId, { title: "Meeting" });
+    await meetingClient.getMeeting(meetingId);
+    await meetingClient.updateMeetingStatus(meetingId, "ended");
+    await meetingClient.listAgendas(meetingId);
+    await meetingClient.createAgenda(meetingId, { title: "Agenda" });
+    await meetingClient.updateAgendaStatus(meetingId, "agenda-1", "done");
+    await meetingClient.listMemos(meetingId);
+    await meetingClient.createMemo(meetingId, { body: "Memo" });
+    await meetingClient.listTranscriptSegments(meetingId);
+    await meetingClient.createTranscriptSegment(meetingId, { body: "Text" });
+    await meetingClient.requestReportGeneration(meetingId);
+    await meetingClient.getReport(reportId);
+    await meetingClient.listRecentReports(workspaceId);
+    await meetingClient.listActionItems(reportId);
+    await meetingClient.approveActionItem(actionItemId);
+    await meetingClient.rejectActionItem(actionItemId);
+    await meetingClient.requestActionItemTaskDraft(actionItemId);
+
+    await voiceClient.createVoiceRoom(workspaceId, meetingId);
+    await voiceClient.getVoiceRoomForMeeting(workspaceId, meetingId);
+    await voiceClient.updateVoiceRoomStatus(voiceRoomId, "active");
+    await voiceClient.joinVoiceSession(voiceRoomId);
+    await voiceClient.listVoiceSessions(voiceRoomId);
+    await voiceClient.leaveVoiceSession(voiceSessionId);
+    await voiceClient.updateRecordingStatus(voiceSessionId, "recording");
+
+    await agentClient.startPlanningRun(workspaceId, defaultProjectStartInput);
+    await agentClient.getRun(runId);
+    await agentClient.listWorkspaceActions(workspaceId);
+    await agentClient.approveAction(actionId);
+    await agentClient.rejectAction(actionId);
+
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      [
+        "GET",
+        "POST",
+        "GET",
+        "PATCH",
+        "GET",
+        "POST",
+        "PATCH",
+        "GET",
+        "POST",
+        "GET",
+        "POST",
+        "POST",
+        "GET",
+        "GET",
+        "GET",
+        "PATCH",
+        "PATCH",
+        "POST",
+        "POST",
+        "GET",
+        "PATCH",
+        "POST",
+        "GET",
+        "PATCH",
+        "PATCH",
+        "POST",
+        "GET",
+        "GET",
+        "POST",
+        "POST",
+      ],
+    );
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/meetings`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/meetings`,
+        `https://api.pilo.dev/api/meetings/${meetingId}`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/status`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/agendas`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/agendas`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/agendas/agenda-1/status`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/memos`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/memos`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/transcript-segments`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/transcript-segments`,
+        `https://api.pilo.dev/api/meetings/${meetingId}/report-generation`,
+        `https://api.pilo.dev/api/meeting-reports/${reportId}`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/meeting-reports/recent`,
+        `https://api.pilo.dev/api/meeting-reports/${reportId}/action-items`,
+        `https://api.pilo.dev/api/meeting-action-items/${actionItemId}/approve`,
+        `https://api.pilo.dev/api/meeting-action-items/${actionItemId}/reject`,
+        `https://api.pilo.dev/api/meeting-action-items/${actionItemId}/task-draft`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/meetings/${meetingId}/voice-room`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/meetings/${meetingId}/voice-room`,
+        `https://api.pilo.dev/api/voice-rooms/${voiceRoomId}/status`,
+        `https://api.pilo.dev/api/voice-rooms/${voiceRoomId}/sessions`,
+        `https://api.pilo.dev/api/voice-rooms/${voiceRoomId}/sessions`,
+        `https://api.pilo.dev/api/voice-sessions/${voiceSessionId}/leave`,
+        `https://api.pilo.dev/api/voice-sessions/${voiceSessionId}/recording-status`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/agent-runs`,
+        `https://api.pilo.dev/api/agent-runs/${runId}`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/agent-actions`,
+        `https://api.pilo.dev/api/agent-actions/${actionId}/approve`,
+        `https://api.pilo.dev/api/agent-actions/${actionId}/reject`,
+      ],
+    );
   });
 
   it("loads Canvas board data and mutations in mock and api modes", async () => {
