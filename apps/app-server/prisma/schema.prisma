@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String             @db.VarChar(160)
+  members           WorkspaceMember[]
+  tasks             Task[]
+  githubConnections GithubConnection[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  role        String   @db.VarChar(40)
+  displayName String?  @map("display_name") @db.VarChar(120)
+  joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignedTasks     Task[]             @relation("TaskAssigneeMember")
+  createdTasks      Task[]             @relation("TaskCreatedByMember")
+  githubConnections GithubConnection[] @relation("GithubConnectionConnectedByMember")
+
+  @@unique([workspaceId, userId])
+  @@unique([workspaceId, id])
+  @@map("workspace_members")
+}
+
+model Agent {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String          @db.VarChar(160)
+  domain      String          @db.VarChar(40)
+  description String?
+  enabled     Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workflows   AgentWorkflow[]
+
+  @@map("agents")
+}
+
+model AgentWorkflow {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId      String   @map("agent_id") @db.Uuid
+  type         String   @db.VarChar(120)
+  version      String   @default("v1") @db.VarChar(40)
+  inputSchema  Json     @default("{}") @map("input_schema") @db.JsonB
+  outputSchema Json     @default("{}") @map("output_schema") @db.JsonB
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([type, version])
+  @@map("agent_workflows")
+}
+
+model Milestone {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  title       String    @db.VarChar(220)
+  startDate   DateTime? @map("start_date") @db.Date
+  endDate     DateTime? @map("end_date") @db.Date
+  status      String    @default("planned") @db.VarChar(20)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("milestones")
+}
+
+model Task {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  milestoneId       String?   @map("milestone_id") @db.Uuid
+  title             String    @db.VarChar(240)
+  description       String?
+  assigneeMemberId  String?   @map("assignee_member_id") @db.Uuid
+  status            String    @default("todo") @db.VarChar(20)
+  priority          String    @default("medium") @db.VarChar(20)
+  dueDate           DateTime? @map("due_date") @db.Date
+  createdByMemberId String?   @map("created_by_member_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assigneeMember  WorkspaceMember? @relation("TaskAssigneeMember", fields: [workspaceId, assigneeMemberId], references: [workspaceId, id], onDelete: NoAction)
+  createdByMember WorkspaceMember? @relation("TaskCreatedByMember", fields: [workspaceId, createdByMemberId], references: [workspaceId, id], onDelete: NoAction)
+
+  @@map("tasks")
+}
+
+model TaskChecklistItem {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId    String   @map("task_id") @db.Uuid
+  title     String   @db.VarChar(240)
+  status    String   @default("todo") @db.VarChar(20)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([taskId, sortOrder])
+  @@map("task_checklist_items")
+}
+
+model TaskComment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId         String   @map("task_id") @db.Uuid
+  authorMemberId String?  @map("author_member_id") @db.Uuid
+  body           String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("task_comments")
+}
+
+model TaskActivityLog {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId        String   @map("task_id") @db.Uuid
+  actorMemberId String?  @map("actor_member_id") @db.Uuid
+  action        String   @db.VarChar(100)
+  beforeValue   Json?    @map("before_value") @db.JsonB
+  afterValue    Json?    @map("after_value") @db.JsonB
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("task_activity_logs")
+}
+
+model TaskDependency {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId          String   @map("task_id") @db.Uuid
+  dependsOnTaskId String   @map("depends_on_task_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@map("task_dependencies")
+}
+
+model GithubConnection {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId         String    @map("workspace_id") @db.Uuid
+  provider            String    @default("github_app") @db.VarChar(20)
+  installationId      String?   @map("installation_id") @db.VarChar(255)
+  githubAccountLogin  String?   @map("github_account_login") @db.VarChar(255)
+  scopes              String[]  @default([])
+  stateNonce          String?   @unique @map("state_nonce") @db.VarChar(128)
+  connectedByMemberId String?   @map("connected_by_member_id") @db.Uuid
+  connectedAt         DateTime  @default(now()) @map("connected_at") @db.Timestamptz(6)
+  revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedByMember WorkspaceMember? @relation("GithubConnectionConnectedByMember", fields: [workspaceId, connectedByMemberId], references: [workspaceId, id], onDelete: NoAction)
+
+  @@map("github_connections")
+}
+
+model GithubRepository {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  githubConnectionId String?  @map("github_connection_id") @db.Uuid
+  owner              String   @db.VarChar(255)
+  repoName           String   @map("repo_name") @db.VarChar(255)
+  url                String
+  installationId     String?  @map("installation_id") @db.VarChar(255)
+  defaultBranch      String?  @map("default_branch") @db.VarChar(255)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, owner, repoName])
+  @@map("github_repositories")
+}
+
+model GithubIssue {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  repositoryId String    @map("repository_id") @db.Uuid
+  number       Int
+  title        String    @db.VarChar(300)
+  state        String    @default("open") @db.VarChar(20)
+  url          String
+  syncedAt     DateTime? @map("synced_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([repositoryId, number])
+  @@map("github_issues")
+}
+
+model GithubIssueLabel {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  issueId   String   @map("issue_id") @db.Uuid
+  name      String   @db.VarChar(120)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([issueId, name])
+  @@map("github_issue_labels")
+}
+
+model TaskGithubIssue {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId    String   @map("task_id") @db.Uuid
+  issueId   String   @map("issue_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([taskId, issueId])
+  @@map("task_github_issues")
+}
+
+model PullRequest {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  repositoryId      String    @map("repository_id") @db.Uuid
+  number            Int
+  title             String    @db.VarChar(300)
+  authorLogin       String?   @map("author_login") @db.VarChar(255)
+  state             String    @default("open") @db.VarChar(30)
+  branch            String?   @db.VarChar(255)
+  baseBranch        String?   @map("base_branch") @db.VarChar(255)
+  url               String
+  changedFilesCount Int       @default(0) @map("changed_files_count")
+  additions         Int       @default(0)
+  deletions         Int       @default(0)
+  openedAt          DateTime? @map("opened_at") @db.Timestamptz(6)
+  mergedAt          DateTime? @map("merged_at") @db.Timestamptz(6)
+  closedAt          DateTime? @map("closed_at") @db.Timestamptz(6)
+  syncedAt          DateTime? @map("synced_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([repositoryId, number])
+  @@map("pull_requests")
+}
+
+model TaskPullRequest {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  taskId        String   @map("task_id") @db.Uuid
+  pullRequestId String   @map("pull_request_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([taskId, pullRequestId])
+  @@map("task_pull_requests")
+}
+
+model ProgressSnapshot {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  milestoneId  String?  @map("milestone_id") @db.Uuid
+  totalTasks   Int      @default(0) @map("total_tasks")
+  doneTasks    Int      @default(0) @map("done_tasks")
+  blockedTasks Int      @default(0) @map("blocked_tasks")
+  reviewTasks  Int      @default(0) @map("review_tasks")
+  delayedTasks Int      @default(0) @map("delayed_tasks")
+  progressRate Decimal  @default(0) @map("progress_rate") @db.Decimal(5, 2)
+  capturedAt   DateTime @default(now()) @map("captured_at") @db.Timestamptz(6)
+
+  @@map("progress_snapshots")
+}

@@ -2,6 +2,7 @@ name: Terraform Validate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
