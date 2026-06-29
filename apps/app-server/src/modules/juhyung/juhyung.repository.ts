@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
 import { TaskPriority, TaskStatus } from "./juhyung-public.types";
@@ -101,7 +101,22 @@ export class JuhyungRepository {
     });
   }
 
-  createTask(input: CreateTaskInput, createdByMemberId: string) {
+  async createTask(input: CreateTaskInput, createdByMemberId: string) {
+    if (input.milestoneId) {
+      const milestone = await this.database.milestone.findFirst({
+        where: {
+          id: input.milestoneId,
+          workspaceId: input.workspaceId,
+        },
+      });
+
+      if (!milestone) {
+        throw new ForbiddenException(
+          "Task milestone must belong to the task workspace",
+        );
+      }
+    }
+
     const data = {
       ...input,
       createdByMemberId,
