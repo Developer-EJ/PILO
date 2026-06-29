@@ -24,6 +24,17 @@ function isTerminalAction(action: AgentActionDetail) {
   return ["executed", "rejected", "failed"].includes(action.status);
 }
 
+function canApproveAction(action: AgentActionDetail) {
+  return action.requiresConfirmation && action.status === "waiting_confirmation";
+}
+
+function canRejectAction(action: AgentActionDetail) {
+  return (
+    action.requiresConfirmation &&
+    ["draft", "waiting_confirmation"].includes(action.status)
+  );
+}
+
 function currentIsoTimestamp() {
   return new Date().toISOString();
 }
@@ -112,9 +123,15 @@ export class AgentRuntimeService {
       );
     }
 
-    if (decision === "approve" && !action.requiresConfirmation) {
+    if (decision === "approve" && !canApproveAction(action)) {
       throw new AgentRuntimeValidationError(
-        "This Agent action does not require confirmation",
+        "Only waiting_confirmation Agent actions can be approved",
+      );
+    }
+
+    if (decision === "reject" && !canRejectAction(action)) {
+      throw new AgentRuntimeValidationError(
+        "Only draft or waiting_confirmation Agent actions can be rejected",
       );
     }
 

@@ -181,7 +181,8 @@ failed is terminal
 ## Agent Run API Contract
 
 Agent run APIs expose long-running workflow state to Dashboard, Canvas, Meeting, Review, Task/GitHub, and Planning consumers.
-This section is the deferred target contract until the HTTP controller lands.
+The current app-server runtime exposes these routes with a deterministic local
+`planning.generate` runner for MVP use.
 
 ### AgentRunCreateRequest
 

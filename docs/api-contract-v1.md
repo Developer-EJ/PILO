@@ -639,69 +639,95 @@ Rules:
 - If the diff limit is exceeded, API returns `analysisStatus = "limit_exceeded"` and a partial summary.
 - GitHub comments, approvals, change requests, and merge are excluded.
 
-## Agent Runtime / Command Chat API
+## Agent Runtime API
 
 ### Endpoints
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| POST | `/api/workspaces/:workspaceId/agent-runs` | yes | member | Create Agent run |
+| POST | `/api/workspaces/:workspaceId/agent-runs` | yes | member | Create local MVP Agent run |
 | GET | `/api/agent-runs/:agentRunId` | yes | member | Agent run detail |
+| GET | `/api/workspaces/:workspaceId/agent-actions` | yes | member | Workspace Agent actions |
 | POST | `/api/agent-actions/:actionId/approve` | yes | member | Approve Agent action |
 | POST | `/api/agent-actions/:actionId/reject` | yes | member | Reject Agent action |
-| GET | `/api/workspaces/:workspaceId/agent-chat/messages` | yes | member | List Agent chat messages |
-| POST | `/api/workspaces/:workspaceId/agent-chat/messages` | yes | member | Send Agent command |
 
 ### Agent Run Request
 
 ```json
 {
-  "workflow": "task_suggestion",
-  "message": "Break login feature into tasks",
-  "context": {
-    "screen": "task_board",
-    "selectedObject": {
-      "type": "task",
-      "id": "task-id"
-    }
-  }
+  "workflowType": "planning.generate",
+  "workflowVersion": "v1",
+  "input": {
+    "goal": "Launch PILO MVP",
+    "targetUser": "Small MVP team",
+    "problem": "Planning context is split across tools.",
+    "duration": "4 weeks",
+    "outputGoal": "A reviewable MVP plan with owner-action drafts"
+  },
+  "contextRefs": []
 }
 ```
 
-### Agent Run Response
+### Agent Run Detail
 
 ```json
 {
   "id": "agent-run-id",
+  "workflowId": "workflow-id",
+  "workflowType": "planning.generate",
+  "workflowVersion": "v1",
   "workspaceId": "workspace-id",
-  "workflow": "task_suggestion",
-  "status": "requires_approval",
-  "messages": [
-    {
-      "role": "assistant",
-      "content": "I found 3 task candidates."
-    }
-  ],
+  "actorMemberId": "workspace-member-id",
+  "status": "requires_confirmation",
+  "actionRequired": true,
+  "pendingActionCount": 2,
+  "input": {},
+  "output": {
+    "summary": "Drafted MVP plan.",
+    "planDraft": {}
+  },
+  "steps": [],
   "actions": [
     {
       "id": "agent-action-id",
-      "type": "create_task",
-      "status": "pending",
-      "preview": {
-        "title": "Implement OAuth callback",
-        "taskType": "development"
-      }
+      "runId": "agent-run-id",
+      "type": "planning.approve",
+      "source": "planning",
+      "requiresConfirmation": true,
+      "payload": {},
+      "status": "waiting_confirmation",
+      "confirmedByMemberId": null,
+      "confirmedAt": null,
+      "executedAt": null
     }
-  ]
+  ],
+  "trace": []
 }
 ```
 
 Enums:
 
 ```ts
-type AgentWorkflow = "project_start" | "task_suggestion" | "meeting_report" | "pr_review" | "github_link_suggestion" | "general_question";
-type AgentRunStatus = "queued" | "running" | "completed" | "requires_approval" | "failed";
-type AgentActionStatus = "pending" | "approved" | "rejected" | "executed" | "failed";
+type AgentWorkflowType =
+  | "meeting.report.generate"
+  | "review.analysis.generate"
+  | "planning.generate"
+  | "task.draft.generate"
+  | "github.issue.draft.generate"
+  | "orchestrator.run";
+type AgentRunStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "requires_confirmation";
+type AgentActionStatus =
+  | "draft"
+  | "waiting_confirmation"
+  | "confirmed"
+  | "executed"
+  | "rejected"
+  | "failed";
 ```
 
 Rules:
@@ -709,6 +735,9 @@ Rules:
 - Agent context is explicit. No RAG retrieval in MVP.
 - AgentAction execution delegates to owner domain API.
 - Approval does not bypass permission checks.
+- Local MVP runtime currently executes `planning.generate` deterministically.
+- `approve` only accepts `waiting_confirmation` actions. `reject` only accepts `draft` or `waiting_confirmation` actions.
+- `confirmed`, `executed`, `rejected`, and `failed` actions cannot be changed by user approval/rejection endpoints.
 
 ## Notification API
 
