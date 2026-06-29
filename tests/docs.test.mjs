@@ -411,6 +411,7 @@ describe("machine-readable public contract schema", () => {
       "PlanningApproveAction",
       "MeetingReportSummary",
       "MeetingActionItem",
+      "CodeReviewRoomSummary",
       "PRAnalysisSummary",
       "ReviewCanvasSummary",
       "ReviewCanvasNode",
@@ -880,6 +881,13 @@ describe("contract fixtures", () => {
     assert.ok(Array.isArray(result.actions));
   });
 
+  it("review room fixture matches review room public schema", () => {
+    const schema = JSON.parse(read("docs/contracts/schemas/pilo-public-contracts.schema.json"));
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-room.fixture.json"));
+
+    assertMatchesDefinition(schema.$defs, "CodeReviewRoomSummary", fixture.codeReviewRoom);
+  });
+
   it("review analysis fixture matches review public schemas", () => {
     const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
     const fixture = readJson("docs/contracts/fixtures/review-analysis.fixture.json");
@@ -908,6 +916,14 @@ describe("contract fixtures", () => {
     assert.ok(fixture.pendingActionCount > 0);
     assert.ok(waitingAction);
     assert.equal(waitingAction.requiresConfirmation, true);
+  });
+
+  it("review changes fixture exists and parses as JSON", () => {
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-changes.fixture.json"));
+
+    assert.ok(fixture.analysisId);
+    assert.ok(Array.isArray(fixture.changedFiles));
+    assert.ok(Array.isArray(fixture.changedFiles[0].functions));
   });
 
   it("fixture rules are documented and linked from bootstrap docs", () => {

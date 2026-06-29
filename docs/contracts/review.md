@@ -58,7 +58,6 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
 | `GET` | `/code-review-rooms/:roomId` | 리뷰룸 상세 |
 | `POST` | `/pull-requests/:pullRequestId/analysis` | PR 분석 요청 |
 | `GET` | `/pull-requests/:pullRequestId/analysis` | PR 분석 결과 조회 |
-| `GET` | `/pull-requests/:pullRequestId/analysis-summary` | Dashboard/Canvas용 PR 분석 요약 조회 |
 | `GET` | `/pull-request-analyses/:analysisId/canvas` | AI 리뷰 캔버스 조회 |
 | `GET` | `/review-nodes/:nodeId/detail` | 노드별 diff와 상세 분석 조회 |
 | `PATCH` | `/review-nodes/:nodeId/state` | 노드별 리뷰 상태 저장 |
@@ -66,6 +65,38 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
 | `POST` | `/pull-request-analyses/:analysisId/checklist-items` | 체크리스트 항목 생성 |
 
 ## Read Models
+
+### CodeReviewRoomSummary
+
+리뷰룸은 주형이 제공하는 `PullRequestSummary`를 참조한다. 성공 응답에서는 `pullRequest`가 항상 포함되어야 하며, 은재 도메인은 GitHub PR 원본 table을 별도로 만들지 않는다.
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "pullRequestId": "uuid",
+  "status": "open",
+  "createdByMemberId": "uuid",
+  "createdAt": "2026-06-27T10:00:00.000Z",
+  "updatedAt": "2026-06-27T10:00:00.000Z",
+  "pullRequest": {
+    "id": "uuid",
+    "repositoryId": "uuid",
+    "number": 7,
+    "title": "Add OAuth callback shell",
+    "authorLogin": "Developer-EJ",
+    "state": "review_requested",
+    "branch": "feature/donghyun/auth-login",
+    "baseBranch": "dev",
+    "url": "https://github.com/example/pilo/pull/7",
+    "changedFilesCount": 4,
+    "additions": 180,
+    "deletions": 12,
+    "linkedTaskIds": [],
+    "syncedAt": "2026-06-27T10:00:00.000Z"
+  }
+}
+```
 
 ### PRAnalysisSummary
 
@@ -112,7 +143,14 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
       "position": { "x": 120, "y": 96 }
     }
   ],
-  "edges": [{ "id": "uuid", "sourceNodeId": "uuid", "targetNodeId": "uuid", "label": "callback result" }]
+  "edges": [
+    {
+      "id": "uuid",
+      "sourceNodeId": "uuid",
+      "targetNodeId": "uuid",
+      "label": "callback result"
+    }
+  ]
 }
 ```
 
@@ -188,6 +226,43 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 - `review.analysis_completed`
 - `review.node_state_changed`
 - `review.comment_created`
+
+### review.room_created
+
+```json
+{
+  "eventType": "review.room_created",
+  "roomId": "uuid",
+  "pullRequestId": "uuid",
+  "workspaceId": "uuid",
+  "createdByMemberId": "uuid",
+  "occurredAt": "2026-06-27T10:00:00.000Z"
+}
+```
+
+### review.analysis_requested
+
+```json
+{
+  "eventType": "review.analysis_requested",
+  "analysisId": "uuid",
+  "pullRequestId": "uuid",
+  "occurredAt": "2026-06-27T10:00:00.000Z"
+}
+```
+
+### review.analysis_completed
+
+```json
+{
+  "eventType": "review.analysis_completed",
+  "analysisId": "uuid",
+  "pullRequestId": "uuid",
+  "analysisStatus": "succeeded",
+  "errorTrace": [],
+  "occurredAt": "2026-06-27T10:01:00.000Z"
+}
+```
 
 ## Agent Actions Consumed
 

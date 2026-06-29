@@ -3,9 +3,9 @@ import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { URL } from "node:url";
-import "ts-node/register";
 
 const require = createRequire(import.meta.url);
+require("ts-node/register");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");

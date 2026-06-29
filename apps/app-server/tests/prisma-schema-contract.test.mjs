@@ -39,7 +39,7 @@ describe("Prisma workspace member task relations", () => {
   it("enforces one active GitHub installation across workspaces in the logical schema", () => {
     assert.match(
       logicalSchema,
-      /CREATE UNIQUE INDEX github_connections_active_installation_id_unique\s+ON github_connections \(installation_id\)\s+WHERE installation_id IS NOT NULL AND revoked_at IS NULL;/,
+      /CREATE UNIQUE INDEX IF NOT EXISTS github_connections_active_installation_id_unique\s+ON github_connections \(installation_id\)\s+WHERE installation_id IS NOT NULL AND revoked_at IS NULL;/,
     );
   });
 });

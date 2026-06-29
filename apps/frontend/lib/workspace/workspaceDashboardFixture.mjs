@@ -43,6 +43,7 @@ export const workspaceDashboardFixture = {
     {
       id: "44444444-4444-4444-8444-444444444441",
       workspaceId: "22222222-2222-4222-8222-222222222222",
+      milestoneId: null,
       title: "Google/GitHub login flow",
       status: "in_progress",
       priority: "high",
@@ -102,6 +103,24 @@ export const workspaceDashboardFixture = {
       syncedAt: "2026-06-27T10:00:00.000Z",
     },
   ],
+  pullRequestChangedFiles: [
+    {
+      pullRequestId: "66666666-6666-4666-8666-666666666661",
+      path: "apps/frontend/app/auth/callback/page.tsx",
+      previousPath: null,
+      status: "modified",
+      additions: 32,
+      deletions: 4,
+      changes: 36,
+      patch: "@@ -8,6 +8,14 @@",
+      sha: "abc123",
+      blobUrl:
+        "https://github.com/example/pilo/blob/abc123/apps/frontend/app/auth/callback/page.tsx",
+      rawUrl:
+        "https://github.com/example/pilo/raw/abc123/apps/frontend/app/auth/callback/page.tsx",
+      sourceSyncedAt: "2026-06-27T10:00:00.000Z",
+    },
+  ],
   meetingReports: [
     {
       id: "77777777-7777-4777-8777-777777777771",
@@ -113,6 +132,18 @@ export const workspaceDashboardFixture = {
       actionItemCount: 3,
       riskCount: 1,
       createdAt: "2026-06-27T08:30:00.000Z",
+    },
+  ],
+  meetingActionItems: [
+    {
+      id: "77777777-7777-4777-8777-777777777772",
+      reportId: "77777777-7777-4777-8777-777777777771",
+      title: "Add OAuth error state UI",
+      description: "Show login failure cases clearly.",
+      assigneeSuggestionMemberId: "33333333-3333-4333-8333-333333333332",
+      dueDateSuggestion: "2026-07-03",
+      status: "draft",
+      convertedTaskId: null,
     },
   ],
   prAnalyses: [

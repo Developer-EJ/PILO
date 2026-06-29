@@ -212,7 +212,7 @@ CREATE TABLE github_connections (
   CONSTRAINT github_connections_provider_check CHECK (provider IN ('github_app', 'oauth'))
 );
 
-CREATE UNIQUE INDEX github_connections_active_installation_id_unique
+CREATE UNIQUE INDEX IF NOT EXISTS github_connections_active_installation_id_unique
   ON github_connections (installation_id)
   WHERE installation_id IS NOT NULL AND revoked_at IS NULL;
 

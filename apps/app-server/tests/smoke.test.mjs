@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 import { URL } from "node:url";
-import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 import canvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
 import workspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
+require("ts-node/register");
 const {
   createAuthConfig,
   normalizeAuthNextPath,
