@@ -1,16 +1,27 @@
 import {
   CreateMeetingInput,
+  CreateMeetingActionItemInput,
   CreateMeetingAgendaInput,
+  CreateMeetingDecisionInput,
   CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
+  CreateMeetingReportInput,
+  CreateMeetingReportNextAgendaInput,
+  CreateMeetingReportRiskInput,
   CreateTranscriptSegmentInput,
+  MeetingActionItemRecord,
   MeetingAgendaRecord,
+  MeetingDecisionRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportNextAgendaRecord,
+  MeetingReportRecord,
+  MeetingReportRiskRecord,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
+  UpdateMeetingActionItemInput,
   UpdateMeetingAgendaInput,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -63,4 +74,39 @@ export interface MeetingRepository {
   ): TranscriptSegmentRecord;
 
   listTranscriptSegmentsByMeeting(meetingId: string): TranscriptSegmentRecord[];
+
+  createReport(input: CreateMeetingReportInput): MeetingReportRecord;
+
+  findReportById(reportId: string): MeetingReportRecord | null;
+
+  findReportByMeetingId(meetingId: string): MeetingReportRecord | null;
+
+  listReports(): MeetingReportRecord[];
+
+  createDecision(input: CreateMeetingDecisionInput): MeetingDecisionRecord;
+
+  listDecisionsByReport(reportId: string): MeetingDecisionRecord[];
+
+  createRisk(input: CreateMeetingReportRiskInput): MeetingReportRiskRecord;
+
+  listRisksByReport(reportId: string): MeetingReportRiskRecord[];
+
+  createNextAgenda(
+    input: CreateMeetingReportNextAgendaInput,
+  ): MeetingReportNextAgendaRecord;
+
+  listNextAgendasByReport(reportId: string): MeetingReportNextAgendaRecord[];
+
+  createActionItem(
+    input: CreateMeetingActionItemInput,
+  ): MeetingActionItemRecord;
+
+  listActionItemsByReport(reportId: string): MeetingActionItemRecord[];
+
+  findActionItemById(actionItemId: string): MeetingActionItemRecord | null;
+
+  updateActionItem(
+    actionItemId: string,
+    input: UpdateMeetingActionItemInput,
+  ): MeetingActionItemRecord;
 }

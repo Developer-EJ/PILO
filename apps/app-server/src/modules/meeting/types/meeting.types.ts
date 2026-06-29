@@ -13,11 +13,40 @@ export const MEETING_AGENDA_STATUS_VALUES = Object.freeze([
 
 export const TRANSCRIPT_SOURCE_VALUES = ["text", "stt"] as const;
 
+export const MEETING_DECISION_STATUS_VALUES = [
+  "decided",
+  "pending",
+  "reopened",
+] as const;
+
+export const MEETING_REPORT_RISK_SEVERITY_VALUES = [
+  "low",
+  "medium",
+  "high",
+  "critical",
+] as const;
+
+export const MEETING_ACTION_ITEM_STATUS_VALUES = [
+  "draft",
+  "approved",
+  "converted",
+  "rejected",
+] as const;
+
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 
 export type MeetingAgendaStatus = (typeof MEETING_AGENDA_STATUS_VALUES)[number];
 
 export type TranscriptSource = (typeof TRANSCRIPT_SOURCE_VALUES)[number];
+
+export type MeetingDecisionStatus =
+  (typeof MEETING_DECISION_STATUS_VALUES)[number];
+
+export type MeetingReportRiskSeverity =
+  (typeof MEETING_REPORT_RISK_SEVERITY_VALUES)[number];
+
+export type MeetingActionItemStatus =
+  (typeof MEETING_ACTION_ITEM_STATUS_VALUES)[number];
 
 export type MeetingRepositoryMode = "mock";
 
@@ -126,4 +155,148 @@ export interface CreateTranscriptSegmentInput {
   body: string;
   startedAt?: string | null;
   endedAt?: string | null;
+}
+
+export interface MeetingReportRecord {
+  id: string;
+  meetingId: string;
+  summary: string;
+  createdByMemberId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingReportInput {
+  meetingId: string;
+  summary: string;
+  createdByMemberId?: string | null;
+}
+
+export interface MeetingDecisionRecord {
+  id: string;
+  reportId: string;
+  content: string;
+  status: MeetingDecisionStatus;
+  linkedTaskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingDecisionInput {
+  reportId: string;
+  content: string;
+  status?: MeetingDecisionStatus;
+  linkedTaskId?: string | null;
+}
+
+export interface MeetingReportRiskRecord {
+  id: string;
+  reportId: string;
+  content: string;
+  severity: MeetingReportRiskSeverity;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface CreateMeetingReportRiskInput {
+  reportId: string;
+  content: string;
+  severity?: MeetingReportRiskSeverity;
+  sortOrder?: number;
+}
+
+export interface MeetingReportNextAgendaRecord {
+  id: string;
+  reportId: string;
+  title: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface CreateMeetingReportNextAgendaInput {
+  reportId: string;
+  title: string;
+  sortOrder?: number;
+}
+
+export interface MeetingActionItemRecord {
+  id: string;
+  reportId: string;
+  title: string;
+  description: string | null;
+  assigneeSuggestionMemberId: string | null;
+  dueDateSuggestion: string | null;
+  status: MeetingActionItemStatus;
+  convertedTaskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingActionItemInput {
+  reportId: string;
+  title: string;
+  description?: string | null;
+  assigneeSuggestionMemberId?: string | null;
+  dueDateSuggestion?: string | null;
+}
+
+export interface UpdateMeetingActionItemInput {
+  status: MeetingActionItemStatus;
+  convertedTaskId?: string | null;
+  updatedAt: string;
+}
+
+export interface MeetingDecisionReadModel {
+  id: string;
+  reportId: string;
+  content: string;
+  status: MeetingDecisionStatus;
+  linkedTaskId: string | null;
+  createdAt: string;
+}
+
+export interface MeetingReportRiskReadModel {
+  id: string;
+  reportId: string;
+  content: string;
+  severity: MeetingReportRiskSeverity;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface MeetingReportNextAgendaReadModel {
+  id: string;
+  reportId: string;
+  title: string;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface MeetingActionItemReadModel {
+  id: string;
+  reportId: string;
+  title: string;
+  description: string | null;
+  assigneeSuggestionMemberId: string | null;
+  dueDateSuggestion: string | null;
+  status: MeetingActionItemStatus;
+  convertedTaskId: string | null;
+}
+
+export interface MeetingReportSummary {
+  id: string;
+  meetingId: string;
+  workspaceId: string;
+  title: string;
+  summary: string;
+  decisionCount: number;
+  actionItemCount: number;
+  riskCount: number;
+  createdAt: string;
+}
+
+export interface MeetingReportDetail extends MeetingReportSummary {
+  decisions: MeetingDecisionReadModel[];
+  risks: MeetingReportRiskReadModel[];
+  nextAgendas: MeetingReportNextAgendaReadModel[];
 }

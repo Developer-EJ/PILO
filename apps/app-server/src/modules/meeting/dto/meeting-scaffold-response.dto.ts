@@ -1,8 +1,14 @@
 import {
+  MeetingActionItemReadModel,
   MeetingAgendaRecord,
+  MeetingDecisionReadModel,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportDetail,
+  MeetingReportNextAgendaReadModel,
+  MeetingReportRiskReadModel,
+  MeetingReportSummary,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
@@ -55,6 +61,34 @@ export interface CreateTranscriptSegmentRequestDto {
   endedAt?: unknown;
 }
 
+export interface CreateMeetingDecisionRequestDto {
+  content?: unknown;
+  status?: unknown;
+  linkedTaskId?: unknown;
+}
+
+export interface CreateMeetingReportRiskRequestDto {
+  content?: unknown;
+  severity?: unknown;
+  sortOrder?: unknown;
+}
+
+export interface CreateMeetingReportNextAgendaRequestDto {
+  title?: unknown;
+  sortOrder?: unknown;
+}
+
+export interface CreateMeetingActionItemRequestDto {
+  title?: unknown;
+  description?: unknown;
+  assigneeSuggestionMemberId?: unknown;
+  dueDateSuggestion?: unknown;
+}
+
+export interface ConvertMeetingActionItemRequestDto {
+  convertedTaskId?: unknown;
+}
+
 export type MeetingResponseDto = MeetingRecord;
 
 export type MeetingParticipantResponseDto = MeetingParticipantRecord;
@@ -64,3 +98,16 @@ export type MeetingAgendaResponseDto = MeetingAgendaRecord;
 export type MeetingMemoResponseDto = MeetingMemoRecord;
 
 export type TranscriptSegmentResponseDto = TranscriptSegmentRecord;
+
+export type MeetingReportResponseDto = MeetingReportDetail;
+
+export type MeetingReportSummaryDto = MeetingReportSummary;
+
+export type MeetingDecisionResponseDto = MeetingDecisionReadModel;
+
+export type MeetingReportRiskResponseDto = MeetingReportRiskReadModel;
+
+export type MeetingReportNextAgendaResponseDto =
+  MeetingReportNextAgendaReadModel;
+
+export type MeetingActionItemResponseDto = MeetingActionItemReadModel;

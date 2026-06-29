@@ -17,11 +17,22 @@ const {
   MockCurrentMemberAdapter,
 } = require("../src/modules/meeting/adapters/mock-current-member.adapter");
 const {
+  MockMeetingReportWorkflowClient,
+} = require("../src/modules/meeting/adapters/mock-meeting-report-workflow.adapter");
+const {
   MEETING_REPOSITORY,
 } = require("../src/modules/meeting/repositories/meeting.repository");
 const {
   MEETING_STATUS_VALUES,
 } = require("../src/modules/meeting/types/meeting.types");
+
+function createMeetingService(repository, currentMemberAdapter) {
+  return new MeetingService(
+    repository,
+    currentMemberAdapter,
+    new MockMeetingReportWorkflowClient(),
+  );
+}
 
 describe("meeting module scaffold", () => {
   it("keeps the repository behind an injectable token", () => {
@@ -31,7 +42,7 @@ describe("meeting module scaffold", () => {
   it("exposes scaffold status through the service and controller", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
 
     assert.deepEqual(service.getScaffoldStatus(), {
@@ -48,7 +59,7 @@ describe("meeting module scaffold", () => {
   it("creates, lists, and reads meetings by workspace", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
 
     const meeting = controller.createMeeting("workspace-1", {
@@ -71,7 +82,7 @@ describe("meeting module scaffold", () => {
   it("validates meeting status transitions and timestamps", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
 
     const meeting = service.createMeeting("workspace-1", {
       title: "Status meeting",
@@ -102,7 +113,7 @@ describe("meeting module scaffold", () => {
   it("rejects invalid status values and workspace mismatches", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
 
     const meeting = service.createMeeting("workspace-1", {
       title: "Workspace guard meeting",
@@ -126,7 +137,7 @@ describe("meeting module scaffold", () => {
       workspaceId: "workspace-1",
       displayName: "Jinho",
     });
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
     const meeting = controller.createMeeting("workspace-1", {
       title: "Participant meeting",
@@ -163,7 +174,7 @@ describe("meeting module scaffold", () => {
       id: "member-2",
       workspaceId: "workspace-2",
     });
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const meeting = service.createMeeting("workspace-1", {
       title: "Workspace member validation meeting",
     });
@@ -178,7 +189,7 @@ describe("meeting module scaffold", () => {
   it("creates, lists, updates, and reorders meeting agendas", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
     const meeting = controller.createMeeting("workspace-1", {
       title: "Agenda meeting",
@@ -232,7 +243,7 @@ describe("meeting module scaffold", () => {
   it("rejects invalid meeting agenda status and sort order", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const meeting = service.createMeeting("workspace-1", {
       title: "Agenda validation meeting",
     });
@@ -259,7 +270,7 @@ describe("meeting module scaffold", () => {
       id: "memo-author",
       workspaceId: "workspace-1",
     });
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
     const meeting = controller.createMeeting("workspace-1", {
       title: "Memo meeting",
@@ -279,7 +290,7 @@ describe("meeting module scaffold", () => {
   it("defaults memo author to the mock current member", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const meeting = service.createMeeting("workspace-1", {
       title: "Current member memo meeting",
     });
@@ -298,7 +309,7 @@ describe("meeting module scaffold", () => {
       id: "speaker-1",
       workspaceId: "workspace-1",
     });
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
     const meeting = controller.createMeeting("workspace-1", {
       title: "Transcript meeting",
@@ -332,7 +343,7 @@ describe("meeting module scaffold", () => {
       id: "speaker-2",
       workspaceId: "workspace-2",
     });
-    const service = new MeetingService(repository, currentMemberAdapter);
+    const service = createMeetingService(repository, currentMemberAdapter);
     const meeting = service.createMeeting("workspace-1", {
       title: "Transcript validation meeting",
     });
@@ -356,5 +367,339 @@ describe("meeting module scaffold", () => {
         body: "Wrong workspace.",
       }),
     );
+  });
+
+  it("generates, reads, and lists recent meeting reports", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Report meeting",
+    });
+    controller.createMemo(meeting.id, {
+      body: "Memo source.",
+    });
+    controller.createTranscriptSegment(meeting.id, {
+      body: "Transcript source.",
+    });
+
+    const report = controller.requestReportGeneration(meeting.id);
+
+    assert.equal(report.meetingId, meeting.id);
+    assert.equal(report.workspaceId, "workspace-1");
+    assert.equal(report.title, "Report meeting");
+    assert.equal(
+      report.summary,
+      "Report meeting 회의에서 2개 기록을 정리했다.",
+    );
+    assert.equal(report.decisionCount, 0);
+    assert.equal(report.actionItemCount, 0);
+    assert.equal(report.riskCount, 0);
+    assert.deepEqual(report.decisions, []);
+    assert.deepEqual(report.risks, []);
+    assert.deepEqual(report.nextAgendas, []);
+    assert.deepEqual(controller.getReport(report.id), report);
+    const recentReports = controller.listRecentReports("workspace-1");
+
+    assert.deepEqual(recentReports, [
+      {
+        id: report.id,
+        meetingId: report.meetingId,
+        workspaceId: report.workspaceId,
+        title: report.title,
+        summary: report.summary,
+        decisionCount: 0,
+        actionItemCount: 0,
+        riskCount: 0,
+        createdAt: report.createdAt,
+      },
+    ]);
+    assert.equal("decisions" in recentReports[0], false);
+    assert.equal("risks" in recentReports[0], false);
+    assert.equal("nextAgendas" in recentReports[0], false);
+    assert.equal(controller.getMeeting(meeting.id).status, "report_generated");
+  });
+
+  it("creates and lists meeting report read models", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Report read model meeting",
+    });
+    const report = controller.createReport(meeting.id);
+
+    const defaultDecision = controller.createDecision(report.id, {
+      content: "Use the existing meeting contract.",
+    });
+    const pendingDecision = controller.createDecision(report.id, {
+      content: "Confirm production repository migration timing.",
+      status: "pending",
+      linkedTaskId: "task-draft-1",
+    });
+    const defaultRisk = controller.createRisk(report.id, {
+      content: "Task API may not be merged before conversion work.",
+    });
+    const highRisk = controller.createRisk(report.id, {
+      content: "Contract drift can break Dashboard adapters.",
+      severity: "high",
+      sortOrder: 2,
+    });
+    const firstNextAgenda = controller.createNextAgenda(report.id, {
+      title: "Review report generation output.",
+    });
+    const secondNextAgenda = controller.createNextAgenda(report.id, {
+      title: "Confirm Dashboard summary fields.",
+      sortOrder: 2,
+    });
+
+    assert.equal(defaultDecision.status, "decided");
+    assert.equal(defaultDecision.linkedTaskId, null);
+    assert.equal(pendingDecision.status, "pending");
+    assert.equal(pendingDecision.linkedTaskId, "task-draft-1");
+    assert.deepEqual(controller.listDecisions(report.id), [
+      defaultDecision,
+      pendingDecision,
+    ]);
+
+    assert.equal(defaultRisk.severity, "medium");
+    assert.equal(defaultRisk.sortOrder, 0);
+    assert.equal(highRisk.severity, "high");
+    assert.deepEqual(controller.listRisks(report.id), [defaultRisk, highRisk]);
+
+    assert.equal(firstNextAgenda.sortOrder, 0);
+    assert.deepEqual(controller.listNextAgendas(report.id), [
+      firstNextAgenda,
+      secondNextAgenda,
+    ]);
+
+    const reportDetail = controller.getReport(report.id);
+
+    assert.deepEqual(reportDetail.decisions, [
+      defaultDecision,
+      pendingDecision,
+    ]);
+    assert.deepEqual(reportDetail.risks, [defaultRisk, highRisk]);
+    assert.deepEqual(reportDetail.nextAgendas, [
+      firstNextAgenda,
+      secondNextAgenda,
+    ]);
+    assert.equal(reportDetail.decisionCount, 2);
+    assert.equal(reportDetail.actionItemCount, 0);
+    assert.equal(reportDetail.riskCount, 2);
+
+    const [summary] = controller.listRecentReports("workspace-1");
+
+    assert.equal(summary.decisionCount, 2);
+    assert.equal(summary.actionItemCount, 0);
+    assert.equal(summary.riskCount, 2);
+    assert.equal("decisions" in summary, false);
+    assert.equal("risks" in summary, false);
+    assert.equal("nextAgendas" in summary, false);
+  });
+
+  it("rejects invalid report read model enum values and sort orders", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Report read model validation meeting",
+    });
+    const report = service.createReport(meeting.id);
+
+    service.createRisk(report.id, {
+      content: "Known risk.",
+      sortOrder: 0,
+    });
+    service.createNextAgenda(report.id, {
+      title: "Known next agenda.",
+      sortOrder: 0,
+    });
+
+    assert.throws(() =>
+      service.createDecision(report.id, {
+        content: "Invalid decision status.",
+        status: "done",
+      }),
+    );
+    assert.throws(() =>
+      service.createRisk(report.id, {
+        content: "Invalid risk severity.",
+        severity: "urgent",
+      }),
+    );
+    assert.throws(() =>
+      service.createRisk(report.id, {
+        content: "Duplicate risk order.",
+        sortOrder: 0,
+      }),
+    );
+    assert.throws(() =>
+      service.createRisk(report.id, {
+        content: "Negative risk order.",
+        sortOrder: -1,
+      }),
+    );
+    assert.throws(() =>
+      service.createNextAgenda(report.id, {
+        title: "Duplicate next agenda order.",
+        sortOrder: 0,
+      }),
+    );
+  });
+
+  it("creates and lists meeting action items with workspace assignee suggestions", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "assignee-1",
+      workspaceId: "workspace-1",
+      displayName: "Assignee",
+    });
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Action item meeting",
+    });
+    const report = controller.createReport(meeting.id);
+
+    const actionItem = controller.createActionItem(report.id, {
+      title: "Write Task API contract",
+      description: "Align TaskCreateDraft fields before adapter work.",
+      assigneeSuggestionMemberId: "assignee-1",
+      dueDateSuggestion: "2026-07-03",
+    });
+
+    assert.equal(actionItem.reportId, report.id);
+    assert.equal(actionItem.title, "Write Task API contract");
+    assert.equal(
+      actionItem.description,
+      "Align TaskCreateDraft fields before adapter work.",
+    );
+    assert.equal(actionItem.assigneeSuggestionMemberId, "assignee-1");
+    assert.equal(actionItem.dueDateSuggestion, "2026-07-03");
+    assert.equal(actionItem.status, "draft");
+    assert.equal(actionItem.convertedTaskId, null);
+    assert.equal("createdAt" in actionItem, false);
+    assert.deepEqual(controller.listActionItems(report.id), [actionItem]);
+
+    const reportDetail = controller.getReport(report.id);
+    const [summary] = controller.listRecentReports("workspace-1");
+
+    assert.equal(reportDetail.actionItemCount, 1);
+    assert.equal(summary.actionItemCount, 1);
+  });
+
+  it("transitions meeting action items through approved, converted, and rejected states", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Action item lifecycle meeting",
+    });
+    const report = controller.createReport(meeting.id);
+    const convertTarget = controller.createActionItem(report.id, {
+      title: "Convert this item",
+    });
+    const rejectTarget = controller.createActionItem(report.id, {
+      title: "Reject this item",
+    });
+
+    const approved = controller.approveActionItem(convertTarget.id);
+
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.convertedTaskId, null);
+    assert.throws(() => controller.approveActionItem(convertTarget.id));
+
+    const converted = controller.markActionItemConverted(convertTarget.id, {
+      convertedTaskId: "task-1",
+    });
+
+    assert.equal(converted.status, "converted");
+    assert.equal(converted.convertedTaskId, "task-1");
+    assert.throws(() => controller.rejectActionItem(convertTarget.id));
+
+    const rejected = controller.rejectActionItem(rejectTarget.id);
+
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.convertedTaskId, null);
+    assert.throws(() => controller.rejectActionItem(rejectTarget.id));
+  });
+
+  it("rejects invalid meeting action item assignees, dates, and conversions", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "external-assignee",
+      workspaceId: "workspace-2",
+    });
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Action item validation meeting",
+    });
+    const report = service.createReport(meeting.id);
+    const actionItem = service.createActionItem(report.id, {
+      title: "Needs approval before conversion",
+    });
+
+    assert.throws(() =>
+      service.createActionItem(report.id, {
+        title: "Wrong assignee",
+        assigneeSuggestionMemberId: "external-assignee",
+      }),
+    );
+    assert.throws(() =>
+      service.createActionItem(report.id, {
+        title: "Invalid due date",
+        dueDateSuggestion: "2026-02-31",
+      }),
+    );
+    assert.throws(() =>
+      service.markActionItemConverted(actionItem.id, {
+        convertedTaskId: "task-1",
+      }),
+    );
+    assert.throws(() => {
+      const approved = service.approveActionItem(actionItem.id);
+
+      service.markActionItemConverted(approved.id, {});
+    });
+  });
+
+  it("returns the existing report when report creation is requested twice", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Duplicate report meeting",
+    });
+
+    const firstReport = controller.createReport(meeting.id);
+    const secondReport = controller.createReport(meeting.id);
+
+    assert.equal(firstReport.id, secondReport.id);
+    const [summary] = controller.listRecentReports("workspace-1");
+
+    assert.equal(summary.id, firstReport.id);
+    assert.equal("decisions" in summary, false);
+  });
+
+  it("keeps meeting report lookup scoped to workspace", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Report workspace guard meeting",
+    });
+    const report = service.createReport(meeting.id);
+
+    assert.throws(() =>
+      service.getReportForWorkspace("workspace-2", report.id),
+    );
+    assert.deepEqual(service.listRecentReports("workspace-2"), []);
   });
 });

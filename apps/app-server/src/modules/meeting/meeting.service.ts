@@ -9,14 +9,29 @@ import {
   CurrentMemberAdapter,
 } from "./adapters/current-member.adapter";
 import {
+  MEETING_REPORT_WORKFLOW_CLIENT,
+  MeetingReportWorkflowClient,
+} from "./adapters/meeting-report-workflow.adapter";
+import {
+  ConvertMeetingActionItemRequestDto,
+  CreateMeetingActionItemRequestDto,
   CreateMeetingAgendaRequestDto,
+  CreateMeetingDecisionRequestDto,
   CreateMeetingMemoRequestDto,
+  CreateMeetingReportNextAgendaRequestDto,
+  CreateMeetingReportRiskRequestDto,
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
   CreateTranscriptSegmentRequestDto,
+  MeetingActionItemResponseDto,
   MeetingAgendaResponseDto,
+  MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportNextAgendaResponseDto,
+  MeetingReportResponseDto,
+  MeetingReportRiskResponseDto,
+  MeetingReportSummaryDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
   ReorderMeetingAgendaRequestDto,
@@ -30,12 +45,22 @@ import {
 } from "./repositories/meeting.repository";
 import {
   MEETING_AGENDA_STATUS_VALUES,
+  MEETING_DECISION_STATUS_VALUES,
+  MEETING_REPORT_RISK_SEVERITY_VALUES,
   MEETING_STATUS_VALUES,
   TRANSCRIPT_SOURCE_VALUES,
+  MeetingActionItemRecord,
+  MeetingActionItemStatus,
   MeetingAgendaRecord,
   MeetingAgendaStatus,
+  MeetingDecisionRecord,
+  MeetingDecisionStatus,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportNextAgendaRecord,
+  MeetingReportRecord,
+  MeetingReportRiskRecord,
+  MeetingReportRiskSeverity,
   MeetingStatus,
   TranscriptSource,
 } from "./types/meeting.types";
@@ -47,6 +72,8 @@ export class MeetingService {
     private readonly meetingRepository: MeetingRepository,
     @Inject(CURRENT_MEMBER_ADAPTER)
     private readonly currentMemberAdapter: CurrentMemberAdapter,
+    @Inject(MEETING_REPORT_WORKFLOW_CLIENT)
+    private readonly meetingReportWorkflowClient: MeetingReportWorkflowClient,
   ) {}
 
   getScaffoldStatus(): MeetingScaffoldResponseDto {
@@ -286,6 +313,273 @@ export class MeetingService {
     return this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id);
   }
 
+  requestReportGeneration(meetingId: string): MeetingReportResponseDto {
+    return this.createReport(meetingId);
+  }
+
+  createReport(meetingId: string): MeetingReportResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+    const currentMember = this.currentMemberAdapter.getCurrentMember(
+      meeting.workspaceId,
+    );
+    const existingReport = this.meetingRepository.findReportByMeetingId(
+      meeting.id,
+    );
+
+    if (existingReport) {
+      return this.toReportDetail(existingReport, meeting);
+    }
+
+    const workflowOutput = this.meetingReportWorkflowClient.generateReport({
+      meetingTitle: meeting.title,
+      memoBodies: this.meetingRepository
+        .listMemosByMeeting(meeting.id)
+        .map((memo) => memo.body),
+      transcriptBodies: this.meetingRepository
+        .listTranscriptSegmentsByMeeting(meeting.id)
+        .map((segment) => segment.body),
+    });
+    const report = this.meetingRepository.createReport({
+      meetingId: meeting.id,
+      summary: workflowOutput.summary,
+      createdByMemberId: currentMember.id,
+    });
+
+    this.meetingRepository.updateMeeting(meeting.id, {
+      status: "report_generated",
+      updatedAt: new Date().toISOString(),
+    });
+
+    return this.toReportDetail(report, {
+      ...meeting,
+      status: "report_generated",
+    });
+  }
+
+  getReport(reportId: string): MeetingReportResponseDto {
+    const report = this.requireReport(reportId);
+    const meeting = this.requireMeeting(report.meetingId);
+
+    return this.toReportDetail(report, meeting);
+  }
+
+  getReportForWorkspace(
+    workspaceId: string,
+    reportId: string,
+  ): MeetingReportResponseDto {
+    const report = this.getReport(reportId);
+    const expectedWorkspaceId = this.requireNonEmptyString(
+      workspaceId,
+      "workspaceId",
+    );
+
+    if (report.workspaceId !== expectedWorkspaceId) {
+      throw new NotFoundException("Meeting report not found in workspace");
+    }
+
+    return report;
+  }
+
+  listRecentReports(workspaceId: string): MeetingReportSummaryDto[] {
+    const expectedWorkspaceId = this.requireNonEmptyString(
+      workspaceId,
+      "workspaceId",
+    );
+
+    return this.meetingRepository
+      .listReports()
+      .map((report) => {
+        const meeting = this.meetingRepository.findMeetingById(
+          report.meetingId,
+        );
+
+        return meeting ? this.toReportSummary(report, meeting) : null;
+      })
+      .filter(
+        (report): report is MeetingReportSummaryDto =>
+          report !== null && report.workspaceId === expectedWorkspaceId,
+      )
+      .sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() -
+          new Date(left.createdAt).getTime(),
+      );
+  }
+
+  createDecision(
+    reportId: string,
+    requestBody: CreateMeetingDecisionRequestDto,
+  ): MeetingDecisionResponseDto {
+    const report = this.requireReport(reportId);
+
+    return this.toDecisionReadModel(
+      this.meetingRepository.createDecision({
+        reportId: report.id,
+        content: this.requireNonEmptyString(requestBody.content, "content"),
+        status: this.parseDecisionStatus(requestBody.status),
+        linkedTaskId: this.optionalString(
+          requestBody.linkedTaskId,
+          "linkedTaskId",
+        ),
+      }),
+    );
+  }
+
+  listDecisions(reportId: string): MeetingDecisionResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listDecisionsByReport(report.id)
+      .map((decision) => this.toDecisionReadModel(decision));
+  }
+
+  createRisk(
+    reportId: string,
+    requestBody: CreateMeetingReportRiskRequestDto,
+  ): MeetingReportRiskResponseDto {
+    const report = this.requireReport(reportId);
+    const sortOrder = this.optionalNonNegativeInteger(
+      requestBody.sortOrder,
+      "sortOrder",
+    );
+
+    if (sortOrder !== undefined) {
+      this.assertRiskSortOrderAvailable(report.id, sortOrder);
+    }
+
+    return this.toRiskReadModel(
+      this.meetingRepository.createRisk({
+        reportId: report.id,
+        content: this.requireNonEmptyString(requestBody.content, "content"),
+        severity: this.parseRiskSeverity(requestBody.severity),
+        sortOrder,
+      }),
+    );
+  }
+
+  listRisks(reportId: string): MeetingReportRiskResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listRisksByReport(report.id)
+      .map((risk) => this.toRiskReadModel(risk));
+  }
+
+  createNextAgenda(
+    reportId: string,
+    requestBody: CreateMeetingReportNextAgendaRequestDto,
+  ): MeetingReportNextAgendaResponseDto {
+    const report = this.requireReport(reportId);
+    const sortOrder = this.optionalNonNegativeInteger(
+      requestBody.sortOrder,
+      "sortOrder",
+    );
+
+    if (sortOrder !== undefined) {
+      this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
+    }
+
+    return this.toNextAgendaReadModel(
+      this.meetingRepository.createNextAgenda({
+        reportId: report.id,
+        title: this.requireNonEmptyString(requestBody.title, "title"),
+        sortOrder,
+      }),
+    );
+  }
+
+  listNextAgendas(reportId: string): MeetingReportNextAgendaResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listNextAgendasByReport(report.id)
+      .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda));
+  }
+
+  createActionItem(
+    reportId: string,
+    requestBody: CreateMeetingActionItemRequestDto,
+  ): MeetingActionItemResponseDto {
+    const report = this.requireReport(reportId);
+    const meeting = this.requireMeeting(report.meetingId);
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.createActionItem({
+        reportId: report.id,
+        title: this.requireNonEmptyString(requestBody.title, "title"),
+        description: this.optionalString(
+          requestBody.description,
+          "description",
+        ),
+        assigneeSuggestionMemberId: this.resolveOptionalWorkspaceMemberId(
+          meeting.workspaceId,
+          requestBody.assigneeSuggestionMemberId,
+          "assigneeSuggestionMemberId",
+        ),
+        dueDateSuggestion: this.optionalDate(
+          requestBody.dueDateSuggestion,
+          "dueDateSuggestion",
+        ),
+      }),
+    );
+  }
+
+  listActionItems(reportId: string): MeetingActionItemResponseDto[] {
+    const report = this.requireReport(reportId);
+
+    return this.meetingRepository
+      .listActionItemsByReport(report.id)
+      .map((actionItem) => this.toActionItemReadModel(actionItem));
+  }
+
+  approveActionItem(actionItemId: string): MeetingActionItemResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "draft", "approve");
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.updateActionItem(actionItem.id, {
+        status: "approved",
+        convertedTaskId: null,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  rejectActionItem(actionItemId: string): MeetingActionItemResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "draft", "reject");
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.updateActionItem(actionItem.id, {
+        status: "rejected",
+        convertedTaskId: null,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
+  markActionItemConverted(
+    actionItemId: string,
+    requestBody: ConvertMeetingActionItemRequestDto,
+  ): MeetingActionItemResponseDto {
+    const actionItem = this.requireActionItem(actionItemId);
+
+    this.assertActionItemStatus(actionItem, "approved", "convert");
+
+    return this.toActionItemReadModel(
+      this.meetingRepository.updateActionItem(actionItem.id, {
+        status: "converted",
+        convertedTaskId: this.requireNonEmptyString(
+          requestBody.convertedTaskId,
+          "convertedTaskId",
+        ),
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  }
+
   private requireMeeting(meetingId: string): MeetingRecord {
     const meeting = this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
@@ -324,6 +618,120 @@ export class MeetingService {
     }
 
     return agenda;
+  }
+
+  private requireReport(reportId: string): MeetingReportRecord {
+    const report = this.meetingRepository.findReportById(
+      this.requireNonEmptyString(reportId, "reportId"),
+    );
+
+    if (!report) {
+      throw new NotFoundException("Meeting report not found");
+    }
+
+    return report;
+  }
+
+  private requireActionItem(actionItemId: string): MeetingActionItemRecord {
+    const actionItem = this.meetingRepository.findActionItemById(
+      this.requireNonEmptyString(actionItemId, "actionItemId"),
+    );
+
+    if (!actionItem) {
+      throw new NotFoundException("Meeting action item not found");
+    }
+
+    return actionItem;
+  }
+
+  private toReportDetail(
+    report: MeetingReportRecord,
+    meeting: MeetingRecord,
+  ): MeetingReportResponseDto {
+    return {
+      ...this.toReportSummary(report, meeting),
+      decisions: this.meetingRepository
+        .listDecisionsByReport(report.id)
+        .map((decision) => this.toDecisionReadModel(decision)),
+      risks: this.meetingRepository
+        .listRisksByReport(report.id)
+        .map((risk) => this.toRiskReadModel(risk)),
+      nextAgendas: this.meetingRepository
+        .listNextAgendasByReport(report.id)
+        .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda)),
+    };
+  }
+
+  private toReportSummary(
+    report: MeetingReportRecord,
+    meeting: MeetingRecord,
+  ): MeetingReportSummaryDto {
+    return {
+      id: report.id,
+      meetingId: report.meetingId,
+      workspaceId: meeting.workspaceId,
+      title: meeting.title,
+      summary: report.summary,
+      decisionCount: this.meetingRepository.listDecisionsByReport(report.id)
+        .length,
+      actionItemCount: this.meetingRepository.listActionItemsByReport(report.id)
+        .length,
+      riskCount: this.meetingRepository.listRisksByReport(report.id).length,
+      createdAt: report.createdAt,
+    };
+  }
+
+  private toDecisionReadModel(
+    decision: MeetingDecisionRecord,
+  ): MeetingDecisionResponseDto {
+    return {
+      id: decision.id,
+      reportId: decision.reportId,
+      content: decision.content,
+      status: decision.status,
+      linkedTaskId: decision.linkedTaskId,
+      createdAt: decision.createdAt,
+    };
+  }
+
+  private toRiskReadModel(
+    risk: MeetingReportRiskRecord,
+  ): MeetingReportRiskResponseDto {
+    return {
+      id: risk.id,
+      reportId: risk.reportId,
+      content: risk.content,
+      severity: risk.severity,
+      sortOrder: risk.sortOrder,
+      createdAt: risk.createdAt,
+    };
+  }
+
+  private toNextAgendaReadModel(
+    nextAgenda: MeetingReportNextAgendaRecord,
+  ): MeetingReportNextAgendaResponseDto {
+    return {
+      id: nextAgenda.id,
+      reportId: nextAgenda.reportId,
+      title: nextAgenda.title,
+      sortOrder: nextAgenda.sortOrder,
+      createdAt: nextAgenda.createdAt,
+    };
+  }
+
+  private toActionItemReadModel(
+    actionItem: MeetingActionItemRecord,
+  ): MeetingActionItemResponseDto {
+    return {
+      id: actionItem.id,
+      reportId: actionItem.reportId,
+      title: actionItem.title,
+      description: actionItem.description,
+      assigneeSuggestionMemberId: actionItem.assigneeSuggestionMemberId,
+      dueDateSuggestion: actionItem.dueDateSuggestion,
+      status: actionItem.status,
+      convertedTaskId: actionItem.convertedTaskId,
+    };
   }
 
   private parseMeetingStatus(value: unknown): MeetingStatus {
@@ -369,6 +777,42 @@ export class MeetingService {
     );
   }
 
+  private parseDecisionStatus(value: unknown): MeetingDecisionStatus {
+    if (value === undefined || value === null) {
+      return "decided";
+    }
+
+    if (
+      typeof value === "string" &&
+      MEETING_DECISION_STATUS_VALUES.includes(value as MeetingDecisionStatus)
+    ) {
+      return value as MeetingDecisionStatus;
+    }
+
+    throw new BadRequestException(
+      `status must be one of: ${MEETING_DECISION_STATUS_VALUES.join(", ")}`,
+    );
+  }
+
+  private parseRiskSeverity(value: unknown): MeetingReportRiskSeverity {
+    if (value === undefined || value === null) {
+      return "medium";
+    }
+
+    if (
+      typeof value === "string" &&
+      MEETING_REPORT_RISK_SEVERITY_VALUES.includes(
+        value as MeetingReportRiskSeverity,
+      )
+    ) {
+      return value as MeetingReportRiskSeverity;
+    }
+
+    throw new BadRequestException(
+      `severity must be one of: ${MEETING_REPORT_RISK_SEVERITY_VALUES.join(", ")}`,
+    );
+  }
+
   private requireNonEmptyString(value: unknown, fieldName: string): string {
     if (typeof value === "string" && value.trim().length > 0) {
       return value.trim();
@@ -410,6 +854,59 @@ export class MeetingService {
     return this.requireNonNegativeInteger(value, fieldName);
   }
 
+  private optionalDate(value: unknown, fieldName: string): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const date = this.requireNonEmptyString(value, fieldName);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException(`${fieldName} must be a date`);
+    }
+
+    const parsedDate = new Date(`${date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== date
+    ) {
+      throw new BadRequestException(`${fieldName} must be a valid date`);
+    }
+
+    return date;
+  }
+
+  private assertRiskSortOrderAvailable(
+    reportId: string,
+    sortOrder: number,
+  ): void {
+    const duplicate = this.meetingRepository
+      .listRisksByReport(reportId)
+      .some((risk) => risk.sortOrder === sortOrder);
+
+    if (duplicate) {
+      throw new BadRequestException(
+        "sortOrder must be unique within meeting report risks",
+      );
+    }
+  }
+
+  private assertNextAgendaSortOrderAvailable(
+    reportId: string,
+    sortOrder: number,
+  ): void {
+    const duplicate = this.meetingRepository
+      .listNextAgendasByReport(reportId)
+      .some((nextAgenda) => nextAgenda.sortOrder === sortOrder);
+
+    if (duplicate) {
+      throw new BadRequestException(
+        "sortOrder must be unique within meeting report next agendas",
+      );
+    }
+  }
+
   private resolveWorkspaceMemberId(
     workspaceId: string,
     value: unknown,
@@ -426,6 +923,30 @@ export class MeetingService {
     if (!workspaceMember) {
       throw new BadRequestException(
         "memberId must belong to meeting workspace",
+      );
+    }
+
+    return workspaceMember.id;
+  }
+
+  private resolveOptionalWorkspaceMemberId(
+    workspaceId: string,
+    value: unknown,
+    fieldName: string,
+  ): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const memberId = this.requireNonEmptyString(value, fieldName);
+    const workspaceMember = this.currentMemberAdapter.getWorkspaceMember(
+      workspaceId,
+      memberId,
+    );
+
+    if (!workspaceMember) {
+      throw new BadRequestException(
+        `${fieldName} must belong to meeting workspace`,
       );
     }
 
@@ -459,6 +980,18 @@ export class MeetingService {
       new Date(endedAt).getTime() < new Date(startedAt).getTime()
     ) {
       throw new BadRequestException("endedAt must be after startedAt");
+    }
+  }
+
+  private assertActionItemStatus(
+    actionItem: MeetingActionItemRecord,
+    expectedStatus: MeetingActionItemStatus,
+    actionName: string,
+  ): void {
+    if (actionItem.status !== expectedStatus) {
+      throw new BadRequestException(
+        `Cannot ${actionName} meeting action item from ${actionItem.status} status`,
+      );
     }
   }
 }
