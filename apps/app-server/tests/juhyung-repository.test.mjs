@@ -116,7 +116,7 @@ describe("JuhyungRepository", () => {
     const database = {
       task: {
         create: async (args) => {
-          calls.push(args);
+          calls.push(["task.create", args]);
           return { id: "task-1", ...args.data };
         },
       },
@@ -139,19 +139,69 @@ describe("JuhyungRepository", () => {
 
     assert.equal(task.createdByMemberId, "member-1");
     assert.deepEqual(calls, [
-      {
-        data: {
-          workspaceId: "workspace-1",
-          title: "Connect GitHub repository",
-          description: null,
-          assigneeMemberId: "member-2",
-          status: "todo",
-          priority: "high",
-          dueDate: null,
-          milestoneId: null,
-          createdByMemberId: "member-1",
+      [
+        "task.create",
+        {
+          data: {
+            workspaceId: "workspace-1",
+            title: "Connect GitHub repository",
+            description: null,
+            assigneeMemberId: "member-2",
+            status: "todo",
+            priority: "high",
+            dueDate: null,
+            milestoneId: null,
+            createdByMemberId: "member-1",
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("rejects task creation when the milestone is outside the workspace", async () => {
+    const calls = [];
+    const database = {
+      milestone: {
+        findFirst: async (args) => {
+          calls.push(["milestone.findFirst", args]);
+          return null;
         },
       },
+      task: {
+        create: async () => {
+          throw new Error("should not create a task with an invalid creator");
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await assert.rejects(
+      () =>
+        repository.createTask(
+          {
+            workspaceId: "workspace-1",
+            title: "Connect GitHub repository",
+            description: null,
+            assigneeMemberId: null,
+            status: "todo",
+            priority: "high",
+            dueDate: null,
+            milestoneId: "milestone-2",
+          },
+          "member-1",
+        ),
+      /milestone must belong to the task workspace/,
+    );
+    assert.deepEqual(calls, [
+      [
+        "milestone.findFirst",
+        {
+          where: {
+            id: "milestone-2",
+            workspaceId: "workspace-1",
+          },
+        },
+      ],
     ]);
   });
 });

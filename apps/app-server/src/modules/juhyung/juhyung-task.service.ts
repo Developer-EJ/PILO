@@ -4,9 +4,9 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
-  CurrentActor,
-  WorkspaceMemberAccessService,
-} from "../workspace/workspace-member-access.service";
+  WorkspaceAccessPublicService,
+  WorkspaceActor,
+} from "../workspace/public/workspace-access-public.service";
 import { JuhyungPublicAdapter } from "./juhyung-public.adapter";
 import {
   TaskRecord,
@@ -38,13 +38,13 @@ export interface CreateTaskBody {
 export class JuhyungTaskService {
   constructor(
     private readonly repository: JuhyungRepository,
-    private readonly workspaceAccess: WorkspaceMemberAccessService,
-    private readonly publicAdapter: JuhyungPublicAdapter,
+    private readonly workspaceAccess: WorkspaceAccessPublicService,
+    private readonly publicAdapter: JuhyungPublicAdapter = new JuhyungPublicAdapter(),
   ) {}
 
   async listTasks(
     workspaceId: string,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskSummary[]> {
     await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
     const tasks = await this.repository.listTasksForWorkspace(workspaceId);
@@ -52,26 +52,46 @@ export class JuhyungTaskService {
   }
 
   async createTask(
+    input: CreateTaskInput,
+    actor?: WorkspaceActor,
+  ): Promise<TaskRecord>;
+  async createTask(
     workspaceId: string,
     body: CreateTaskBody,
-    actor?: CurrentActor,
-  ): Promise<TaskSummary> {
-    const input = parseCreateTaskInput(workspaceId, body);
+    actor?: WorkspaceActor,
+  ): Promise<TaskSummary>;
+  async createTask(
+    workspaceIdOrInput: string | CreateTaskInput,
+    bodyOrActor?: CreateTaskBody | WorkspaceActor,
+    actor?: WorkspaceActor,
+  ): Promise<TaskRecord | TaskSummary> {
+    if (typeof workspaceIdOrInput !== "string") {
+      return this.createTaskRecord(
+        workspaceIdOrInput,
+        bodyOrActor as WorkspaceActor | undefined,
+      );
+    }
+
+    const input = parseCreateTaskInput(
+      workspaceIdOrInput,
+      bodyOrActor as CreateTaskBody,
+    );
     const currentMember = await this.workspaceAccess.requireWorkspaceMember(
-      workspaceId,
+      workspaceIdOrInput,
       actor,
     );
     const assignee = input.assigneeMemberId
-      ? await this.workspaceAccess.requireWorkspaceMember(workspaceId, {
-          memberId: input.assigneeMemberId,
-        })
+      ? await this.requireWorkspaceMemberById(
+          workspaceIdOrInput,
+          input.assigneeMemberId,
+        )
       : null;
     const task = await this.repository.createTask(input, currentMember.id);
 
     return this.publicAdapter.toTaskSummary(task, { assignee });
   }
 
-  async getTask(taskId: string, actor?: CurrentActor): Promise<TaskSummary> {
+  async getTask(taskId: string, actor?: WorkspaceActor): Promise<TaskSummary> {
     const task = await this.repository.getTaskById(taskId);
     if (!task) {
       throw new NotFoundException("Task was not found");
@@ -80,6 +100,49 @@ export class JuhyungTaskService {
     await this.workspaceAccess.requireWorkspaceMember(task.workspaceId, actor);
     const [summary] = await this.toTaskSummaries(task.workspaceId, [task]);
     return summary;
+  }
+
+  private async createTaskRecord(
+    input: CreateTaskInput,
+    actor?: WorkspaceActor,
+  ): Promise<TaskRecord> {
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      input.workspaceId,
+      actor,
+    );
+    await this.requireAssignee(input);
+
+    return this.repository.createTask(input, currentMember.id);
+  }
+
+  private async requireAssignee(input: CreateTaskInput) {
+    if (!input.assigneeMemberId) {
+      return;
+    }
+
+    await this.requireWorkspaceMemberById(
+      input.workspaceId,
+      input.assigneeMemberId,
+    );
+  }
+
+  private async requireWorkspaceMemberById(
+    workspaceId: string,
+    memberId: string,
+  ) {
+    if (
+      "requireWorkspaceMemberById" in this.workspaceAccess &&
+      typeof this.workspaceAccess.requireWorkspaceMemberById === "function"
+    ) {
+      return this.workspaceAccess.requireWorkspaceMemberById(
+        workspaceId,
+        memberId,
+      );
+    }
+
+    return this.workspaceAccess.requireWorkspaceMember(workspaceId, {
+      memberId,
+    });
   }
 
   private async toTaskSummaries(

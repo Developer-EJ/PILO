@@ -8,8 +8,10 @@ datasource db {
 }
 
 model Workspace {
-  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name String @db.VarChar(160)
+  id      String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name    String            @db.VarChar(160)
+  members WorkspaceMember[]
+  tasks   Task[]
 
   @@map("workspaces")
 }
@@ -22,6 +24,12 @@ model WorkspaceMember {
   displayName String?  @map("display_name") @db.VarChar(120)
   joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
 
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignedTasks Task[]    @relation("TaskAssigneeMember")
+  createdTasks  Task[]    @relation("TaskCreatedByMember")
+
+  @@unique([workspaceId, userId])
+  @@unique([workspaceId, id])
   @@map("workspace_members")
 }
 
@@ -52,6 +60,10 @@ model Task {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assigneeMember  WorkspaceMember? @relation("TaskAssigneeMember", fields: [workspaceId, assigneeMemberId], references: [workspaceId, id], onDelete: NoAction)
+  createdByMember WorkspaceMember? @relation("TaskCreatedByMember", fields: [workspaceId, createdByMemberId], references: [workspaceId, id], onDelete: NoAction)
 
   @@map("tasks")
 }

@@ -19,7 +19,7 @@ export class DatabaseService
   }
 
   async ping() {
-    await this.$queryRawUnsafe("SELECT 1");
+    await this.$queryRaw`SELECT 1`;
     return true;
   }
 }

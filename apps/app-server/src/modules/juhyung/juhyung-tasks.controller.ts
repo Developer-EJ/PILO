@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
-import { CurrentActor } from "../workspace/workspace-member-access.service";
+import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import { CreateTaskBody, JuhyungTaskService } from "./juhyung-task.service";
 
 @Controller("api")
@@ -45,7 +45,7 @@ export class JuhyungTasksController {
 function toCurrentActor(
   userId?: string | string[],
   memberId?: string | string[],
-): CurrentActor {
+): WorkspaceActor {
   const resolvedUserId = firstHeader(userId);
   const resolvedMemberId = firstHeader(memberId);
 
