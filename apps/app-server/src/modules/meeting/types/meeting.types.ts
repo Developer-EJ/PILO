@@ -26,6 +26,13 @@ export const MEETING_REPORT_RISK_SEVERITY_VALUES = [
   "critical",
 ] as const;
 
+export const MEETING_ACTION_ITEM_STATUS_VALUES = [
+  "draft",
+  "approved",
+  "converted",
+  "rejected",
+] as const;
+
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 
 export type MeetingAgendaStatus = (typeof MEETING_AGENDA_STATUS_VALUES)[number];
@@ -37,6 +44,9 @@ export type MeetingDecisionStatus =
 
 export type MeetingReportRiskSeverity =
   (typeof MEETING_REPORT_RISK_SEVERITY_VALUES)[number];
+
+export type MeetingActionItemStatus =
+  (typeof MEETING_ACTION_ITEM_STATUS_VALUES)[number];
 
 export type MeetingRepositoryMode = "mock";
 
@@ -209,6 +219,33 @@ export interface CreateMeetingReportNextAgendaInput {
   sortOrder?: number;
 }
 
+export interface MeetingActionItemRecord {
+  id: string;
+  reportId: string;
+  title: string;
+  description: string | null;
+  assigneeSuggestionMemberId: string | null;
+  dueDateSuggestion: string | null;
+  status: MeetingActionItemStatus;
+  convertedTaskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingActionItemInput {
+  reportId: string;
+  title: string;
+  description?: string | null;
+  assigneeSuggestionMemberId?: string | null;
+  dueDateSuggestion?: string | null;
+}
+
+export interface UpdateMeetingActionItemInput {
+  status: MeetingActionItemStatus;
+  convertedTaskId?: string | null;
+  updatedAt: string;
+}
+
 export interface MeetingDecisionReadModel {
   id: string;
   reportId: string;
@@ -233,6 +270,17 @@ export interface MeetingReportNextAgendaReadModel {
   title: string;
   sortOrder: number;
   createdAt: string;
+}
+
+export interface MeetingActionItemReadModel {
+  id: string;
+  reportId: string;
+  title: string;
+  description: string | null;
+  assigneeSuggestionMemberId: string | null;
+  dueDateSuggestion: string | null;
+  status: MeetingActionItemStatus;
+  convertedTaskId: string | null;
 }
 
 export interface MeetingReportSummary {

@@ -550,6 +550,125 @@ describe("meeting module scaffold", () => {
     );
   });
 
+  it("creates and lists meeting action items with workspace assignee suggestions", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "assignee-1",
+      workspaceId: "workspace-1",
+      displayName: "Assignee",
+    });
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Action item meeting",
+    });
+    const report = controller.createReport(meeting.id);
+
+    const actionItem = controller.createActionItem(report.id, {
+      title: "Write Task API contract",
+      description: "Align TaskCreateDraft fields before adapter work.",
+      assigneeSuggestionMemberId: "assignee-1",
+      dueDateSuggestion: "2026-07-03",
+    });
+
+    assert.equal(actionItem.reportId, report.id);
+    assert.equal(actionItem.title, "Write Task API contract");
+    assert.equal(
+      actionItem.description,
+      "Align TaskCreateDraft fields before adapter work.",
+    );
+    assert.equal(actionItem.assigneeSuggestionMemberId, "assignee-1");
+    assert.equal(actionItem.dueDateSuggestion, "2026-07-03");
+    assert.equal(actionItem.status, "draft");
+    assert.equal(actionItem.convertedTaskId, null);
+    assert.equal("createdAt" in actionItem, false);
+    assert.deepEqual(controller.listActionItems(report.id), [actionItem]);
+
+    const reportDetail = controller.getReport(report.id);
+    const [summary] = controller.listRecentReports("workspace-1");
+
+    assert.equal(reportDetail.actionItemCount, 1);
+    assert.equal(summary.actionItemCount, 1);
+  });
+
+  it("transitions meeting action items through approved, converted, and rejected states", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Action item lifecycle meeting",
+    });
+    const report = controller.createReport(meeting.id);
+    const convertTarget = controller.createActionItem(report.id, {
+      title: "Convert this item",
+    });
+    const rejectTarget = controller.createActionItem(report.id, {
+      title: "Reject this item",
+    });
+
+    const approved = controller.approveActionItem(convertTarget.id);
+
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.convertedTaskId, null);
+    assert.throws(() => controller.approveActionItem(convertTarget.id));
+
+    const converted = controller.markActionItemConverted(convertTarget.id, {
+      convertedTaskId: "task-1",
+    });
+
+    assert.equal(converted.status, "converted");
+    assert.equal(converted.convertedTaskId, "task-1");
+    assert.throws(() => controller.rejectActionItem(convertTarget.id));
+
+    const rejected = controller.rejectActionItem(rejectTarget.id);
+
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.convertedTaskId, null);
+    assert.throws(() => controller.rejectActionItem(rejectTarget.id));
+  });
+
+  it("rejects invalid meeting action item assignees, dates, and conversions", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "external-assignee",
+      workspaceId: "workspace-2",
+    });
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Action item validation meeting",
+    });
+    const report = service.createReport(meeting.id);
+    const actionItem = service.createActionItem(report.id, {
+      title: "Needs approval before conversion",
+    });
+
+    assert.throws(() =>
+      service.createActionItem(report.id, {
+        title: "Wrong assignee",
+        assigneeSuggestionMemberId: "external-assignee",
+      }),
+    );
+    assert.throws(() =>
+      service.createActionItem(report.id, {
+        title: "Invalid due date",
+        dueDateSuggestion: "2026-02-31",
+      }),
+    );
+    assert.throws(() =>
+      service.markActionItemConverted(actionItem.id, {
+        convertedTaskId: "task-1",
+      }),
+    );
+    assert.throws(() => {
+      const approved = service.approveActionItem(actionItem.id);
+
+      service.markActionItemConverted(approved.id, {});
+    });
+  });
+
   it("returns the existing report when report creation is requested twice", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();

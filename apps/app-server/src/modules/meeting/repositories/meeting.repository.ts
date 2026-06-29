@@ -1,5 +1,6 @@
 import {
   CreateMeetingInput,
+  CreateMeetingActionItemInput,
   CreateMeetingAgendaInput,
   CreateMeetingDecisionInput,
   CreateMeetingMemoInput,
@@ -8,6 +9,7 @@ import {
   CreateMeetingReportNextAgendaInput,
   CreateMeetingReportRiskInput,
   CreateTranscriptSegmentInput,
+  MeetingActionItemRecord,
   MeetingAgendaRecord,
   MeetingDecisionRecord,
   MeetingMemoRecord,
@@ -19,6 +21,7 @@ import {
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
+  UpdateMeetingActionItemInput,
   UpdateMeetingAgendaInput,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -93,4 +96,17 @@ export interface MeetingRepository {
   ): MeetingReportNextAgendaRecord;
 
   listNextAgendasByReport(reportId: string): MeetingReportNextAgendaRecord[];
+
+  createActionItem(
+    input: CreateMeetingActionItemInput,
+  ): MeetingActionItemRecord;
+
+  listActionItemsByReport(reportId: string): MeetingActionItemRecord[];
+
+  findActionItemById(actionItemId: string): MeetingActionItemRecord | null;
+
+  updateActionItem(
+    actionItemId: string,
+    input: UpdateMeetingActionItemInput,
+  ): MeetingActionItemRecord;
 }

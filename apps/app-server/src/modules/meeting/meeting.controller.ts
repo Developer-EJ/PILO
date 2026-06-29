@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
+  ConvertMeetingActionItemRequestDto,
+  CreateMeetingActionItemRequestDto,
   CreateMeetingAgendaRequestDto,
   CreateMeetingDecisionRequestDto,
   CreateMeetingMemoRequestDto,
@@ -8,6 +10,7 @@ import {
   CreateMeetingReportNextAgendaRequestDto,
   CreateMeetingReportRiskRequestDto,
   CreateTranscriptSegmentRequestDto,
+  MeetingActionItemResponseDto,
   MeetingAgendaResponseDto,
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
@@ -219,5 +222,45 @@ export class MeetingController {
     @Param("reportId") reportId: string,
   ): MeetingReportNextAgendaResponseDto[] {
     return this.meetingService.listNextAgendas(reportId);
+  }
+
+  @Post("meeting-reports/:reportId/action-items")
+  createActionItem(
+    @Param("reportId") reportId: string,
+    @Body() requestBody: CreateMeetingActionItemRequestDto,
+  ): MeetingActionItemResponseDto {
+    return this.meetingService.createActionItem(reportId, requestBody);
+  }
+
+  @Get("meeting-reports/:reportId/action-items")
+  listActionItems(
+    @Param("reportId") reportId: string,
+  ): MeetingActionItemResponseDto[] {
+    return this.meetingService.listActionItems(reportId);
+  }
+
+  @Patch("meeting-action-items/:actionItemId/approve")
+  approveActionItem(
+    @Param("actionItemId") actionItemId: string,
+  ): MeetingActionItemResponseDto {
+    return this.meetingService.approveActionItem(actionItemId);
+  }
+
+  @Patch("meeting-action-items/:actionItemId/reject")
+  rejectActionItem(
+    @Param("actionItemId") actionItemId: string,
+  ): MeetingActionItemResponseDto {
+    return this.meetingService.rejectActionItem(actionItemId);
+  }
+
+  @Patch("meeting-action-items/:actionItemId/convert")
+  markActionItemConverted(
+    @Param("actionItemId") actionItemId: string,
+    @Body() requestBody: ConvertMeetingActionItemRequestDto,
+  ): MeetingActionItemResponseDto {
+    return this.meetingService.markActionItemConverted(
+      actionItemId,
+      requestBody,
+    );
   }
 }

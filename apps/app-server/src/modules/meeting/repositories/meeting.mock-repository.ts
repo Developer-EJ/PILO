@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   CreateMeetingInput,
+  CreateMeetingActionItemInput,
   CreateMeetingAgendaInput,
   CreateMeetingDecisionInput,
   CreateMeetingMemoInput,
@@ -11,6 +12,7 @@ import {
   CreateMeetingReportRiskInput,
   CreateTranscriptSegmentInput,
   MEETING_STATUS_VALUES,
+  MeetingActionItemRecord,
   MeetingAgendaRecord,
   MeetingDecisionRecord,
   MeetingMemoRecord,
@@ -22,6 +24,7 @@ import {
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
+  UpdateMeetingActionItemInput,
   UpdateMeetingAgendaInput,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -46,6 +49,7 @@ export class MockMeetingRepository implements MeetingRepository {
     string,
     MeetingReportNextAgendaRecord
   >();
+  private readonly actionItems = new Map<string, MeetingActionItemRecord>();
 
   listMeetingStatusValues(): readonly MeetingStatus[] {
     return MEETING_STATUS_VALUES;
@@ -390,6 +394,63 @@ export class MockMeetingRepository implements MeetingRepository {
     return [...this.nextAgendas.values()]
       .filter((nextAgenda) => nextAgenda.reportId === reportId)
       .sort((left, right) => left.sortOrder - right.sortOrder);
+  }
+
+  createActionItem(
+    input: CreateMeetingActionItemInput,
+  ): MeetingActionItemRecord {
+    const now = new Date().toISOString();
+    const actionItem: MeetingActionItemRecord = {
+      id: randomUUID(),
+      reportId: input.reportId,
+      title: input.title,
+      description: input.description ?? null,
+      assigneeSuggestionMemberId: input.assigneeSuggestionMemberId ?? null,
+      dueDateSuggestion: input.dueDateSuggestion ?? null,
+      status: "draft",
+      convertedTaskId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.actionItems.set(actionItem.id, actionItem);
+
+    return actionItem;
+  }
+
+  listActionItemsByReport(reportId: string): MeetingActionItemRecord[] {
+    return [...this.actionItems.values()].filter(
+      (actionItem) => actionItem.reportId === reportId,
+    );
+  }
+
+  findActionItemById(actionItemId: string): MeetingActionItemRecord | null {
+    return this.actionItems.get(actionItemId) ?? null;
+  }
+
+  updateActionItem(
+    actionItemId: string,
+    input: UpdateMeetingActionItemInput,
+  ): MeetingActionItemRecord {
+    const actionItem = this.actionItems.get(actionItemId);
+
+    if (!actionItem) {
+      throw new Error(`Meeting action item not found: ${actionItemId}`);
+    }
+
+    const updatedActionItem: MeetingActionItemRecord = {
+      ...actionItem,
+      status: input.status,
+      convertedTaskId:
+        input.convertedTaskId === undefined
+          ? actionItem.convertedTaskId
+          : input.convertedTaskId,
+      updatedAt: input.updatedAt,
+    };
+
+    this.actionItems.set(actionItemId, updatedActionItem);
+
+    return updatedActionItem;
   }
 
   private nextRiskSortOrder(reportId: string): number {
