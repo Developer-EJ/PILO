@@ -9,9 +9,19 @@ import {
   CurrentMemberAdapter,
 } from "./adapters/current-member.adapter";
 import {
+  CreateMeetingAgendaRequestDto,
+  CreateMeetingMemoRequestDto,
   CreateMeetingRequestDto,
+  CreateMeetingParticipantRequestDto,
+  CreateTranscriptSegmentRequestDto,
+  MeetingAgendaResponseDto,
+  MeetingMemoResponseDto,
+  MeetingParticipantResponseDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
+  ReorderMeetingAgendaRequestDto,
+  TranscriptSegmentResponseDto,
+  UpdateMeetingAgendaStatusRequestDto,
   UpdateMeetingStatusRequestDto,
 } from "./dto/meeting-scaffold-response.dto";
 import {
@@ -19,9 +29,15 @@ import {
   MeetingRepository,
 } from "./repositories/meeting.repository";
 import {
+  MEETING_AGENDA_STATUS_VALUES,
   MEETING_STATUS_VALUES,
+  TRANSCRIPT_SOURCE_VALUES,
+  MeetingAgendaRecord,
+  MeetingAgendaStatus,
   MeetingRecord,
+  MeetingParticipantRecord,
   MeetingStatus,
+  TranscriptSource,
 } from "./types/meeting.types";
 
 @Injectable()
@@ -36,6 +52,7 @@ export class MeetingService {
   getScaffoldStatus(): MeetingScaffoldResponseDto {
     return {
       module: "meeting",
+      repositoryMode: this.meetingRepository.mode,
       meetingStatusValues: this.meetingRepository.listMeetingStatusValues(),
     };
   }
@@ -106,6 +123,169 @@ export class MeetingService {
     });
   }
 
+  addParticipant(
+    meetingId: string,
+    requestBody: CreateMeetingParticipantRequestDto,
+  ): MeetingParticipantResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+    const memberId = this.requireNonEmptyString(
+      requestBody.memberId,
+      "memberId",
+    );
+    const workspaceMember = this.currentMemberAdapter.getWorkspaceMember(
+      meeting.workspaceId,
+      memberId,
+    );
+
+    if (!workspaceMember) {
+      throw new BadRequestException(
+        "memberId must belong to meeting workspace",
+      );
+    }
+
+    const existingParticipant = this.meetingRepository
+      .listParticipantsByMeeting(meeting.id)
+      .find((participant) => participant.memberId === workspaceMember.id);
+
+    if (existingParticipant) {
+      throw new BadRequestException("memberId is already a participant");
+    }
+
+    return this.meetingRepository.addParticipant({
+      meetingId: meeting.id,
+      memberId: workspaceMember.id,
+      role: this.optionalString(requestBody.role, "role"),
+    });
+  }
+
+  listParticipants(meetingId: string): MeetingParticipantResponseDto[] {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.listParticipantsByMeeting(meeting.id);
+  }
+
+  leaveParticipant(
+    meetingId: string,
+    participantId: string,
+  ): MeetingParticipantResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+    const participant = this.requireParticipant(participantId);
+
+    if (participant.meetingId !== meeting.id) {
+      throw new NotFoundException("Meeting participant not found");
+    }
+
+    return this.meetingRepository.leaveParticipant(
+      participant.id,
+      new Date().toISOString(),
+    );
+  }
+
+  createAgenda(
+    meetingId: string,
+    requestBody: CreateMeetingAgendaRequestDto,
+  ): MeetingAgendaResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.createAgenda({
+      meetingId: meeting.id,
+      title: this.requireNonEmptyString(requestBody.title, "title"),
+      sortOrder: this.optionalNonNegativeInteger(
+        requestBody.sortOrder,
+        "sortOrder",
+      ),
+    });
+  }
+
+  listAgendas(meetingId: string): MeetingAgendaResponseDto[] {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.listAgendasByMeeting(meeting.id);
+  }
+
+  updateAgendaStatus(
+    meetingId: string,
+    agendaId: string,
+    requestBody: UpdateMeetingAgendaStatusRequestDto,
+  ): MeetingAgendaResponseDto {
+    const agenda = this.requireAgendaInMeeting(meetingId, agendaId);
+
+    return this.meetingRepository.updateAgenda(agenda.id, {
+      status: this.parseAgendaStatus(requestBody.status),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  reorderAgenda(
+    meetingId: string,
+    agendaId: string,
+    requestBody: ReorderMeetingAgendaRequestDto,
+  ): MeetingAgendaResponseDto {
+    const agenda = this.requireAgendaInMeeting(meetingId, agendaId);
+
+    return this.meetingRepository.updateAgenda(agenda.id, {
+      sortOrder: this.requireNonNegativeInteger(
+        requestBody.sortOrder,
+        "sortOrder",
+      ),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  createMemo(
+    meetingId: string,
+    requestBody: CreateMeetingMemoRequestDto,
+  ): MeetingMemoResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.createMemo({
+      meetingId: meeting.id,
+      authorMemberId: this.resolveWorkspaceMemberId(
+        meeting.workspaceId,
+        requestBody.authorMemberId,
+      ),
+      body: this.requireNonEmptyString(requestBody.body, "body"),
+    });
+  }
+
+  listMemos(meetingId: string): MeetingMemoResponseDto[] {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.listMemosByMeeting(meeting.id);
+  }
+
+  createTranscriptSegment(
+    meetingId: string,
+    requestBody: CreateTranscriptSegmentRequestDto,
+  ): TranscriptSegmentResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+    const startedAt = this.optionalIsoDateTime(
+      requestBody.startedAt,
+      "startedAt",
+    );
+    const endedAt = this.optionalIsoDateTime(requestBody.endedAt, "endedAt");
+
+    this.validateTimeRange(startedAt, endedAt);
+
+    return this.meetingRepository.createTranscriptSegment({
+      meetingId: meeting.id,
+      speakerMemberId: this.resolveWorkspaceMemberId(
+        meeting.workspaceId,
+        requestBody.speakerMemberId,
+      ),
+      source: this.parseTranscriptSource(requestBody.source),
+      body: this.requireNonEmptyString(requestBody.body, "body"),
+      startedAt,
+      endedAt,
+    });
+  }
+
+  listTranscriptSegments(meetingId: string): TranscriptSegmentResponseDto[] {
+    const meeting = this.requireMeeting(meetingId);
+
+    return this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id);
+  }
+
   private requireMeeting(meetingId: string): MeetingRecord {
     const meeting = this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
@@ -118,6 +298,34 @@ export class MeetingService {
     return meeting;
   }
 
+  private requireParticipant(participantId: string): MeetingParticipantRecord {
+    const participant = this.meetingRepository.findParticipantById(
+      this.requireNonEmptyString(participantId, "participantId"),
+    );
+
+    if (!participant) {
+      throw new NotFoundException("Meeting participant not found");
+    }
+
+    return participant;
+  }
+
+  private requireAgendaInMeeting(
+    meetingId: string,
+    agendaId: string,
+  ): MeetingAgendaRecord {
+    const meeting = this.requireMeeting(meetingId);
+    const agenda = this.meetingRepository.findAgendaById(
+      this.requireNonEmptyString(agendaId, "agendaId"),
+    );
+
+    if (!agenda || agenda.meetingId !== meeting.id) {
+      throw new NotFoundException("Meeting agenda not found");
+    }
+
+    return agenda;
+  }
+
   private parseMeetingStatus(value: unknown): MeetingStatus {
     if (
       typeof value === "string" &&
@@ -128,6 +336,36 @@ export class MeetingService {
 
     throw new BadRequestException(
       `status must be one of: ${MEETING_STATUS_VALUES.join(", ")}`,
+    );
+  }
+
+  private parseAgendaStatus(value: unknown): MeetingAgendaStatus {
+    if (
+      typeof value === "string" &&
+      MEETING_AGENDA_STATUS_VALUES.includes(value as MeetingAgendaStatus)
+    ) {
+      return value as MeetingAgendaStatus;
+    }
+
+    throw new BadRequestException(
+      `status must be one of: ${MEETING_AGENDA_STATUS_VALUES.join(", ")}`,
+    );
+  }
+
+  private parseTranscriptSource(value: unknown): TranscriptSource {
+    if (value === undefined || value === null) {
+      return "text";
+    }
+
+    if (
+      typeof value === "string" &&
+      TRANSCRIPT_SOURCE_VALUES.includes(value as TranscriptSource)
+    ) {
+      return value as TranscriptSource;
+    }
+
+    throw new BadRequestException(
+      `source must be one of: ${TRANSCRIPT_SOURCE_VALUES.join(", ")}`,
     );
   }
 
@@ -149,5 +387,78 @@ export class MeetingService {
     }
 
     throw new BadRequestException(`${fieldName} must be a string`);
+  }
+
+  private requireNonNegativeInteger(value: unknown, fieldName: string): number {
+    if (Number.isInteger(value) && Number(value) >= 0) {
+      return Number(value);
+    }
+
+    throw new BadRequestException(
+      `${fieldName} must be a non-negative integer`,
+    );
+  }
+
+  private optionalNonNegativeInteger(
+    value: unknown,
+    fieldName: string,
+  ): number | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    return this.requireNonNegativeInteger(value, fieldName);
+  }
+
+  private resolveWorkspaceMemberId(
+    workspaceId: string,
+    value: unknown,
+  ): string {
+    const memberId =
+      value === undefined || value === null
+        ? this.currentMemberAdapter.getCurrentMember(workspaceId).id
+        : this.requireNonEmptyString(value, "memberId");
+    const workspaceMember = this.currentMemberAdapter.getWorkspaceMember(
+      workspaceId,
+      memberId,
+    );
+
+    if (!workspaceMember) {
+      throw new BadRequestException(
+        "memberId must belong to meeting workspace",
+      );
+    }
+
+    return workspaceMember.id;
+  }
+
+  private optionalIsoDateTime(
+    value: unknown,
+    fieldName: string,
+  ): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    const dateTime = this.requireNonEmptyString(value, fieldName);
+
+    if (Number.isNaN(Date.parse(dateTime))) {
+      throw new BadRequestException(`${fieldName} must be an ISO date-time`);
+    }
+
+    return dateTime;
+  }
+
+  private validateTimeRange(
+    startedAt: string | null,
+    endedAt: string | null,
+  ): void {
+    if (
+      startedAt &&
+      endedAt &&
+      new Date(endedAt).getTime() < new Date(startedAt).getTime()
+    ) {
+      throw new BadRequestException("endedAt must be after startedAt");
+    }
   }
 }

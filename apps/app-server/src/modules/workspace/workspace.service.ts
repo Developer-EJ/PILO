@@ -835,9 +835,10 @@ function readWorkspaceDashboardFixture() {
 
   for (const fixturePath of createFixturePathCandidates()) {
     if (existsSync(fixturePath)) {
-      cachedFixture = JSON.parse(
-        readFileSync(fixturePath, "utf8"),
-      ) as Record<string, unknown>;
+      cachedFixture = JSON.parse(readFileSync(fixturePath, "utf8")) as Record<
+        string,
+        unknown
+      >;
       return cachedFixture;
     }
   }
