@@ -84,7 +84,7 @@ CREATE TABLE workspace_members (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT workspace_members_role_check CHECK (role IN ('owner', 'member', 'viewer')),
   UNIQUE (workspace_id, user_id),
-  UNIQUE (id, workspace_id)
+  UNIQUE (workspace_id, id)
 );
 
 CREATE TABLE workspace_invites (
@@ -199,13 +199,19 @@ CREATE TABLE github_connections (
   installation_id VARCHAR(255),
   github_account_login VARCHAR(255),
   scopes TEXT[] NOT NULL DEFAULT '{}',
-  connected_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  state_nonce VARCHAR(128) UNIQUE,
+  connected_by_member_id UUID,
   connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   revoked_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT github_connections_connected_by_member_fk FOREIGN KEY (workspace_id, connected_by_member_id) REFERENCES workspace_members(workspace_id, id),
   CONSTRAINT github_connections_provider_check CHECK (provider IN ('github_app', 'oauth'))
 );
+
+CREATE UNIQUE INDEX github_connections_active_installation_id_unique
+  ON github_connections (installation_id)
+  WHERE installation_id IS NOT NULL AND revoked_at IS NULL;
 
 CREATE TABLE github_repositories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

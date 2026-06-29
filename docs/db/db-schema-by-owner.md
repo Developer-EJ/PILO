@@ -87,7 +87,7 @@ Task CRUD, 체크리스트, 댓글/활동 로그, 의존성, Milestone, GitHub R
 | `task_comments` | `task_id`, `author_member_id`, `body` | `tasks 1:N task_comments` |
 | `task_activity_logs` | `task_id`, `actor_member_id`, `action`, `before_value`, `after_value` | Task 변경 이력 |
 | `task_dependencies` | `task_id`, `depends_on_task_id` | Task 간 의존성 |
-| `github_connections` | `workspace_id`, `provider`, `installation_id`, `github_account_login`, `scopes`, `connected_by_member_id`, `connected_at`, `revoked_at` | Workspace의 GitHub 연결 권한 |
+| `github_connections` | `workspace_id`, `provider`, `installation_id`, `github_account_login`, `scopes`, `state_nonce`, `connected_by_member_id`, `connected_at`, `revoked_at` | Workspace의 GitHub 연결 권한 |
 | `github_repositories` | `workspace_id`, `github_connection_id`, `owner`, `repo_name`, `url`, `installation_id`, `default_branch` | 연결된 저장소 |
 | `github_issues` | `repository_id`, `number`, `title`, `state`, `url`, `synced_at` | GitHub Issue 원본 |
 | `github_issue_labels` | `issue_id`, `name` | Issue label |

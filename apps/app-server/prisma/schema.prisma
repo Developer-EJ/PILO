@@ -8,10 +8,11 @@ datasource db {
 }
 
 model Workspace {
-  id      String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name    String            @db.VarChar(160)
-  members WorkspaceMember[]
-  tasks   Task[]
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String             @db.VarChar(160)
+  members           WorkspaceMember[]
+  tasks             Task[]
+  githubConnections GithubConnection[]
 
   @@map("workspaces")
 }
@@ -24,9 +25,10 @@ model WorkspaceMember {
   displayName String?  @map("display_name") @db.VarChar(120)
   joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
 
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  assignedTasks Task[]    @relation("TaskAssigneeMember")
-  createdTasks  Task[]    @relation("TaskCreatedByMember")
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignedTasks     Task[]             @relation("TaskAssigneeMember")
+  createdTasks      Task[]             @relation("TaskCreatedByMember")
+  githubConnections GithubConnection[] @relation("GithubConnectionConnectedByMember")
 
   @@unique([workspaceId, userId])
   @@unique([workspaceId, id])
@@ -151,11 +153,15 @@ model GithubConnection {
   installationId      String?   @map("installation_id") @db.VarChar(255)
   githubAccountLogin  String?   @map("github_account_login") @db.VarChar(255)
   scopes              String[]  @default([])
+  stateNonce          String?   @unique @map("state_nonce") @db.VarChar(128)
   connectedByMemberId String?   @map("connected_by_member_id") @db.Uuid
   connectedAt         DateTime  @default(now()) @map("connected_at") @db.Timestamptz(6)
   revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedByMember WorkspaceMember? @relation("GithubConnectionConnectedByMember", fields: [workspaceId, connectedByMemberId], references: [workspaceId, id], onDelete: NoAction)
 
   @@map("github_connections")
 }
