@@ -6,6 +6,7 @@ import { AgentModule } from "./modules/agent/agent.module";
 import { JuhyungModule } from "./modules/juhyung/juhyung.module";
 import { MeetingModule } from "./modules/meeting/meeting.module";
 import { ReviewModule } from "./modules/review/review.module";
+import { VoiceModule } from "./modules/voice/voice.module";
 import { WorkspaceModule } from "./modules/workspace/workspace.module";
 
 @Module({
@@ -17,6 +18,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     JuhyungModule,
     MeetingModule,
     ReviewModule,
+    VoiceModule,
   ],
   controllers: [HealthController],
 })

@@ -4,8 +4,10 @@ import { EventsGateway } from "./events.gateway";
 import { CanvasGateway } from "./canvas.gateway";
 import { CanvasRealtimeAccessGuard } from "./canvas-realtime-access.guard";
 import { CanvasShapeStateStore } from "./canvas-shape-state.store";
+import { VoiceModule } from "./voice/voice.module";
 
 @Module({
+  imports: [VoiceModule],
   controllers: [HealthController],
   providers: [
     EventsGateway,
