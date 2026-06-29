@@ -439,6 +439,28 @@ Required fields:
 }
 ```
 
+### TaskDraftSummary
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "sourceType": "meeting_action_item",
+  "sourceId": "uuid",
+  "title": "OAuth callback 처리",
+  "description": "Google/GitHub callback을 처리한다.",
+  "assigneeMemberId": "uuid",
+  "priority": "high",
+  "dueDate": "2026-07-03",
+  "status": "draft",
+  "taskId": null,
+  "createdAt": "2026-06-28T10:00:00Z",
+  "updatedAt": "2026-06-28T10:00:00Z"
+}
+```
+
+`TaskDraftSummary`는 주형 Task draft API 응답 DTO다. `status`는 `draft`, `approved`, `rejected` 중 하나다. `draft` 상태만 승인 또는 거절할 수 있다. 승인하면 주형의 `tasks` row가 생성되고 `taskId`가 채워진다. 거절하면 Task는 생성되지 않고 `taskId`는 `null`로 남는다.
+
 ### TaskStatusUpdateAction
 
 ```json
