@@ -236,7 +236,9 @@ describe("realtime-server package", () => {
       credentials: false,
     });
     assert.deepEqual(
-      createRealtimeCorsOptions("https://app.pilo.test, https://admin.pilo.test"),
+      createRealtimeCorsOptions(
+        "https://app.pilo.test, https://admin.pilo.test",
+      ),
       {
         origin: ["https://app.pilo.test", "https://admin.pilo.test"],
         credentials: true,

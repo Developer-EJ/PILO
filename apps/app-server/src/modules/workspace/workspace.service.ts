@@ -889,9 +889,10 @@ function remapWorkspaceIdRecord<T extends object>(
   } as unknown as T;
 }
 
-function remapAgentActionWorkspaceIds<
-  T extends { payload?: unknown },
->(actions: T[], workspaceId: string): T[] {
+function remapAgentActionWorkspaceIds<T extends { payload?: unknown }>(
+  actions: T[],
+  workspaceId: string,
+): T[] {
   return actions.map((action) => {
     if (!isPlainJsonObject(action)) {
       return action;

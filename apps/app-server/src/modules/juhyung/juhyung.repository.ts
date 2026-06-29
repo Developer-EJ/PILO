@@ -507,7 +507,8 @@ export class JuhyungRepository {
   async createChecklistItem(taskId: string, input: CreateChecklistItemInput) {
     return this.database.$transaction(async (transaction) => {
       const sortOrder =
-        input.sortOrder ?? (await getNextChecklistSortOrder(transaction, taskId));
+        input.sortOrder ??
+        (await getNextChecklistSortOrder(transaction, taskId));
       const data = {
         taskId,
         title: input.title,

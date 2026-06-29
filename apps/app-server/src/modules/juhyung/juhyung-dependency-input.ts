@@ -14,10 +14,7 @@ export function parseCreateTaskDependencyInput(
   assertBody(body, "Task dependency body is required");
 
   return {
-    dependsOnTaskId: parseRequiredUuid(
-      body.dependsOnTaskId,
-      "dependsOnTaskId",
-    ),
+    dependsOnTaskId: parseRequiredUuid(body.dependsOnTaskId, "dependsOnTaskId"),
   };
 }
 

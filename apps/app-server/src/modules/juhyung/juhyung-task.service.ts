@@ -209,7 +209,10 @@ export class JuhyungTaskService {
         input.assigneeMemberId,
       );
     }
-    await this.requireMilestoneInWorkspace(input.milestoneId, input.workspaceId);
+    await this.requireMilestoneInWorkspace(
+      input.milestoneId,
+      input.workspaceId,
+    );
 
     return this.repository.createTask(input, currentMember.id);
   }

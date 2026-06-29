@@ -733,11 +733,17 @@ function parseInteger(value: unknown, field: string) {
   return number;
 }
 
-function parseMinimumFiniteNumber(value: unknown, field: string, minimum: number) {
+function parseMinimumFiniteNumber(
+  value: unknown,
+  field: string,
+  minimum: number,
+) {
   const number = parseFiniteNumber(value, field);
 
   if (number < minimum) {
-    throw new CanvasValidationError(`Canvas ${field} must be at least ${minimum}.`);
+    throw new CanvasValidationError(
+      `Canvas ${field} must be at least ${minimum}.`,
+    );
   }
 
   return number;

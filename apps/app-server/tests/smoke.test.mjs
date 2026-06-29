@@ -73,7 +73,11 @@ function validateSchema(schema, value, path) {
     }
   }
 
-  if (schema.if && schema.then && validateSchema(schema.if, value, path).length === 0) {
+  if (
+    schema.if &&
+    schema.then &&
+    validateSchema(schema.if, value, path).length === 0
+  ) {
     errors.push(...validateSchema(schema.then, value, path));
   }
 
@@ -104,7 +108,9 @@ function validateSchema(schema, value, path) {
   }
 
   if (schema.type) {
-    const expectedTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+    const expectedTypes = Array.isArray(schema.type)
+      ? schema.type
+      : [schema.type];
     if (!expectedTypes.some((type) => schemaTypeMatches(type, value))) {
       errors.push(`${path} must be ${expectedTypes.join("|")}`);
     }
@@ -758,7 +764,10 @@ describe("app-server package", () => {
     });
 
     assert.equal(duplicateIdentity.user.id, verifiedDuplicateIdentity.user.id);
-    assert.notEqual(verifiedDuplicateIdentity.user.id, originalIdentity.user.id);
+    assert.notEqual(
+      verifiedDuplicateIdentity.user.id,
+      originalIdentity.user.id,
+    );
     assert.equal(laterVerifiedIdentity.user.id, originalIdentity.user.id);
     assert.equal(repository.listUsers().length, 2);
     assert.equal(repository.listOAuthAccounts().length, 3);
@@ -1235,17 +1244,35 @@ describe("app-server package", () => {
 
     assertContract("WorkspaceDashboardReadModel", aggregate);
     assertContract("WorkspaceSummary", workspaceDashboardFixture.workspace);
-    assertContract("WorkspaceMemberSummary", workspaceDashboardFixture.members[0]);
+    assertContract(
+      "WorkspaceMemberSummary",
+      workspaceDashboardFixture.members[0],
+    );
     assertContract("CurrentWorkspaceMember", currentMember);
     assertContract("DashboardPreferences", preferences);
     assertContract("TaskSummary", workspaceDashboardFixture.tasks[0]);
     assertContract("ProgressSummary", workspaceDashboardFixture.progress);
-    assertContract("GithubIssueSummary", workspaceDashboardFixture.githubIssues[0]);
-    assertContract("PullRequestSummary", workspaceDashboardFixture.pullRequests[0]);
-    assertContract("MeetingReportSummary", workspaceDashboardFixture.meetingReports[0]);
-    assertContract("PRAnalysisSummary", workspaceDashboardFixture.prAnalyses[0]);
+    assertContract(
+      "GithubIssueSummary",
+      workspaceDashboardFixture.githubIssues[0],
+    );
+    assertContract(
+      "PullRequestSummary",
+      workspaceDashboardFixture.pullRequests[0],
+    );
+    assertContract(
+      "MeetingReportSummary",
+      workspaceDashboardFixture.meetingReports[0],
+    );
+    assertContract(
+      "PRAnalysisSummary",
+      workspaceDashboardFixture.prAnalyses[0],
+    );
     assertContract("AgentAction", workspaceDashboardFixture.agentActions[0]);
-    assertContract("CanvasEntityRef", workspaceDashboardFixture.canvasEntities[0]);
+    assertContract(
+      "CanvasEntityRef",
+      workspaceDashboardFixture.canvasEntities[0],
+    );
   });
 
   it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {

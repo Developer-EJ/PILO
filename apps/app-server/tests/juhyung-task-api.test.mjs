@@ -1931,7 +1931,10 @@ function createService(overrides = {}) {
     ...accessOverride,
     requireWorkspaceMemberById: async (workspaceId, memberRef) => {
       if (accessOverride.requireWorkspaceMemberById) {
-        return accessOverride.requireWorkspaceMemberById(workspaceId, memberRef);
+        return accessOverride.requireWorkspaceMemberById(
+          workspaceId,
+          memberRef,
+        );
       }
 
       const actor =
