@@ -6,6 +6,8 @@ import { ChangedFilesService } from "./changes/changed-files.service";
 import { InMemoryChangedFilesRepository } from "./changes/in-memory-changed-files.repository";
 import { ReviewPublicController } from "./public/review-public.controller";
 import { ReviewPublicService } from "./public/review-public.service";
+import { AgentChangedFilesResultService } from "./result/agent-changed-files-result.service";
+import { AgentResultConsumerService } from "./result/agent-result-consumer.service";
 import { InMemoryCodeReviewRoomRepository } from "./room/in-memory-code-review-room.repository";
 import { ReviewRoomController } from "./room/review-room.controller";
 import { ReviewRoomService } from "./room/review-room.service";
@@ -24,6 +26,8 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryPullRequestAnalysisRepository,
     ChangedFilesService,
     InMemoryChangedFilesRepository,
+    AgentResultConsumerService,
+    AgentChangedFilesResultService,
   ],
 })
 export class ReviewModule {}
