@@ -23,6 +23,18 @@ CREATE TABLE IF NOT EXISTS agent_workflows (
   CONSTRAINT agent_workflows_type_version_key UNIQUE (type, version)
 );
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM agent_workflows
+    GROUP BY type, version
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'agent_workflows has duplicate type/version rows; deduplicate before applying agent_workflows_type_version_key';
+  END IF;
+END $$;
+
 ALTER TABLE agent_workflows
   DROP CONSTRAINT IF EXISTS agent_workflows_agent_id_type_version_key;
 
