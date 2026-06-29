@@ -15,13 +15,16 @@ import {
 
 @Injectable()
 export class ReviewRoomService {
+  private readonly defaultContext: ReviewRoomActorContext =
+    DEFAULT_REVIEW_ROOM_CONTEXT;
+
+  private readonly pullRequestSummaries: ReadonlyMap<
+    string,
+    PullRequestSummaryRef
+  > = REVIEW_ROOM_PULL_REQUEST_FIXTURES;
+
   constructor(
     private readonly roomRepository: InMemoryCodeReviewRoomRepository,
-    private readonly defaultContext: ReviewRoomActorContext = DEFAULT_REVIEW_ROOM_CONTEXT,
-    private readonly pullRequestSummaries: ReadonlyMap<
-      string,
-      PullRequestSummaryRef
-    > = REVIEW_ROOM_PULL_REQUEST_FIXTURES,
   ) {}
 
   openRoomForPullRequest(

@@ -34,7 +34,7 @@ const selectedPullRequest = pullRequests[0];
 const linkedTasks = [
   {
     id: "44444444-4444-4444-8444-444444444441",
-    title: "Google/GitHub 로그인 구현",
+    title: "Implement Google/GitHub login",
     status: "in_progress",
     priority: "high",
   },
@@ -44,13 +44,13 @@ const analysis = {
   id: "88888888-8888-4888-8888-888888888881",
   analysisStatus: "succeeded",
   riskLevel: "medium",
-  purposeSummary: "OAuth callback 화면 골격을 추가했다.",
-  impactSummary: "Auth route와 session redirect flow에 영향이 있다.",
-  testRecommendation: "성공/실패 redirect smoke test를 확인한다.",
+  purposeSummary: "Adds an OAuth callback page and redirect handling.",
+  impactSummary: "Auth routes and session redirect flow are affected.",
+  testRecommendation: "Verify success and failure redirect smoke tests.",
   okCount: 3,
   discussCount: 1,
   riskCount: 1,
-  conclusion: "리뷰 후 merge 가능",
+  conclusion: "Ready to merge after reviewer confirmation.",
 };
 
 const reviewCanvas = {
@@ -83,17 +83,17 @@ const reviewCanvas = {
 };
 
 const stateLabels: Record<string, string> = {
-  review_requested: "리뷰 요청",
+  review_requested: "Review requested",
   open: "Open",
   merged: "Merged",
   closed: "Closed",
 };
 
 const analysisStatusLabels: Record<string, string> = {
-  pending: "분석 대기",
-  running: "분석 중",
-  succeeded: "분석 완료",
-  failed: "분석 실패",
+  pending: "Pending",
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
 };
 
 const riskClassNames: Record<string, string> = {
@@ -117,7 +117,7 @@ export default function ReviewsPage() {
             <h1>PR review queue</h1>
           </div>
           <button className={styles.primaryButton} type="button">
-            분석 요청
+            Request analysis
           </button>
         </header>
 
@@ -169,7 +169,7 @@ export default function ReviewsPage() {
                   <span>{selectedPullRequest.authorLogin}</span>
                   <span>{stateLabels[selectedPullRequest.state]}</span>
                   <span>
-                    {selectedPullRequest.branch} →{" "}
+                    {selectedPullRequest.branch} -&gt;{" "}
                     {selectedPullRequest.baseBranch}
                   </span>
                 </div>
