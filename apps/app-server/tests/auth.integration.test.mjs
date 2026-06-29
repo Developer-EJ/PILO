@@ -15,6 +15,7 @@ const AUTH_TEST_ENV = {
   NODE_ENV: "test",
   FRONTEND_URL: "https://app.pilo.test",
   APP_SERVER_URL: "https://api.pilo.test",
+  PILO_SKIP_DATABASE_CONNECT: "true",
   SESSION_SECRET: "auth-integration-session-secret",
   AUTH_SESSION_SECRET_VERSION: "integration",
   GOOGLE_OAUTH_CLIENT_ID: "google-client",

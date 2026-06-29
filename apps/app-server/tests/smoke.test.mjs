@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import process from "node:process";
 import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
@@ -739,11 +740,22 @@ describe("app-server package", () => {
   });
 
   it("boots the Nest app module with AuthModule registered", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
     const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
       logger: false,
     });
 
-    await app.init();
-    await app.close();
+    try {
+      await app.init();
+    } finally {
+      await app.close();
+
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
   });
 });
