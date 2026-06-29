@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { InMemoryReviewGraphRepository } from "./in-memory-review-graph.repository";
 import {
@@ -24,6 +25,7 @@ export interface ReviewGraphServiceOptions {
 export class ReviewGraphService {
   constructor(
     private readonly graphRepository: InMemoryReviewGraphRepository,
+    @Optional()
     options: ReviewGraphServiceOptions = {},
   ) {
     if (options.seedFixture) {
