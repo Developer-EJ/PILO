@@ -23,7 +23,7 @@ workflow를 사용한다.
 
 | Consumer | Uses | Impact |
 |---|---|---|
-| 진호 Meeting | `VoiceScaffoldResponse`, `VoiceRoom`, `VoiceSession`, recording status | 회의 중 음성방을 열고 transcript/report workflow의 입력을 만든다. |
+| 진호 Meeting | `VoiceRoom`, `VoiceSession`, recording status | 회의 중 음성방을 열고 transcript/report workflow의 입력을 만든다. |
 | 세인 Agent Runtime | recording/transcript completion signal | STT 처리 후 회의록 workflow를 실행할 수 있다. |
 | 동현 Dashboard/Canvas | 직접 의존 없음 | Dashboard/Canvas는 Voice 상태가 아니라 Meeting report summary만 표시한다. |
 | 주형 Task | 직접 의존 없음 | Voice가 Task를 만들지 않는다. Action Item -> Task는 Meeting/Agent 경유다. |
@@ -94,17 +94,6 @@ Breaking change가 발생하는 필드:
 
 ## Response / Read Models
 
-### VoiceScaffoldResponse
-
-```json
-{
-  "module": "voice",
-  "repositoryMode": "mock"
-}
-```
-
-`GET /api/voice` 응답 DTO다. `repositoryMode`는 현재 scaffold runtime 기준 `mock`만 공개한다.
-
 ### VoiceRoom
 
 ```json
@@ -124,7 +113,7 @@ Field rules:
 | Field | Rule |
 |---|---|
 | `workspaceId` | Voice room이 속한 workspace id |
-| `meetingId` | 현재 public API는 meeting-bound room만 만들고 조회하므로 항상 UUID |
+| `meetingId` | 회의에 묶이지 않은 ad-hoc room이면 `null`, MVP 회의방은 UUID |
 | `livekitRoomName` | provider room name. provider 미연동 mock이면 `null` 가능 |
 | `status` | `active`, `inactive`, `archived` |
 
@@ -149,10 +138,10 @@ Field rules:
 | Field | Rule |
 |---|---|
 | `voiceRoomId` | 세션이 속한 voice room id |
-| `meetingId` | voice room의 meeting id를 복사하므로 항상 UUID |
-| `memberId` | 인증된 `currentMember`에서 채운 세션 소유 workspace member id |
+| `meetingId` | voice room의 meeting id를 복사한다. ad-hoc room이면 `null` |
+| `memberId` | 세션 소유 workspace member id. guest/mock이면 `null` 가능 |
 | `recordingStatus` | `not_recording`, `recording`, `processing`, `completed`, `failed` |
-| `startedAt` | 세션 참여 시각. public DTO에서는 항상 ISO date-time |
+| `startedAt` | 세션 참여 시각. mock이면 `null` 가능 |
 | `endedAt` | 세션이 살아 있으면 `null`, leave 후 ISO date-time |
 
 ## Status Values
@@ -194,7 +183,5 @@ processing -> failed
 
 ## Mock Rule
 
-LiveKit/Realtime provider가 없으면 `livekitRoomName = null`인 mock room을 사용할 수 있다.
-mock 세션도 public DTO field shape는 실제 `VoiceRoom`, `VoiceSession`과 같아야 하며,
-`meetingId`, `memberId`, `startedAt`을 null로 내려보내지 않는다. guest/ad-hoc mock이 필요하면
-public `JoinVoiceSessionRequest`가 아니라 별도 internal/mock-only contract로 분리한다.
+LiveKit/Realtime provider가 없으면 `livekitRoomName = null`인 mock room을 사용한다.
+mock 세션도 public DTO field shape는 실제 `VoiceRoom`, `VoiceSession`과 같아야 한다.
