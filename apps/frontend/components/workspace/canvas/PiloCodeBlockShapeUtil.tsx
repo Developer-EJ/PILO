@@ -1,10 +1,11 @@
 "use client";
 
-import type { PointerEvent } from "react";
+import type { CSSProperties, PointerEvent, WheelEvent } from "react";
 import {
+  BaseFrameLikeShapeUtil,
+  Group2d,
   HTMLContainer,
   Rectangle2d,
-  ShapeUtil,
   T,
   useEditor,
   type TLBaseShape,
@@ -33,6 +34,7 @@ type PiloCodeBlockShapeProps = {
   fileName: string;
   language: PiloCodeLanguage;
   code: string;
+  scrollY?: number;
 };
 
 export type PiloCodeBlockShape = TLBaseShape<
@@ -69,9 +71,39 @@ function PiloCodeBlockComponent({ shape }: { shape: PiloCodeBlockShape }) {
     event.stopPropagation();
   }
 
+  function handleMoveHandlePointerDown(event: PointerEvent<HTMLElement>) {
+    if (isEditing || event.button !== 0) return;
+
+    editor.setCurrentTool("select");
+    editor.select(shape.id);
+    editor.focus();
+  }
+
+  function handleEditingWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!isEditing) return;
+
+    const textarea = event.currentTarget.querySelector("textarea");
+
+    if (!textarea) return;
+
+    const deltaMultiplier =
+      event.deltaMode === 1
+        ? 16
+        : event.deltaMode === 2
+          ? textarea.clientHeight
+          : 1;
+
+    editor.markEventAsHandled(event);
+    event.preventDefault();
+    event.stopPropagation();
+
+    textarea.scrollTop += event.deltaY * deltaMultiplier;
+    textarea.scrollLeft += event.deltaX * deltaMultiplier;
+  }
+
   return (
     <HTMLContainer
-      className="pilo-code-block-shape"
+      className={`pilo-code-block-shape${isEditing ? " is-editing" : ""}`}
       style={{
         width: shape.props.w,
         height: shape.props.h,
@@ -80,9 +112,10 @@ function PiloCodeBlockComponent({ shape }: { shape: PiloCodeBlockShape }) {
         event.stopPropagation();
         editor.setEditingShape(shape.id);
       }}
+      onWheelCapture={handleEditingWheel}
     >
       <article className="pilo-code-block">
-        <header>
+        <header onPointerDownCapture={handleMoveHandlePointerDown}>
           <span className="pilo-code-dot is-red" />
           <span className="pilo-code-dot is-yellow" />
           <span className="pilo-code-dot is-green" />
@@ -135,7 +168,13 @@ function PiloCodeBlockComponent({ shape }: { shape: PiloCodeBlockShape }) {
             onPointerDown={handleEditorPointerDown}
           />
         ) : (
-          <pre>
+          <pre
+            style={
+              {
+                "--pilo-code-scroll-y": `${shape.props.scrollY ?? 0}px`,
+              } as CSSProperties
+            }
+          >
             <code>{shape.props.code}</code>
           </pre>
         )}
@@ -144,7 +183,7 @@ function PiloCodeBlockComponent({ shape }: { shape: PiloCodeBlockShape }) {
   );
 }
 
-export class PiloCodeBlockShapeUtil extends ShapeUtil<PiloCodeBlockShape> {
+export class PiloCodeBlockShapeUtil extends BaseFrameLikeShapeUtil<PiloCodeBlockShape> {
   static override type = "pilo-code-block" as const;
 
   static override props = {
@@ -164,6 +203,7 @@ export class PiloCodeBlockShapeUtil extends ShapeUtil<PiloCodeBlockShape> {
       "py",
     ),
     code: T.string,
+    scrollY: T.number.optional(),
   };
 
   override canEdit() {
@@ -177,14 +217,19 @@ export class PiloCodeBlockShapeUtil extends ShapeUtil<PiloCodeBlockShape> {
       fileName: "canvas-node.tsx",
       language: "tsx",
       code: "export function CanvasNode() {\n  return <div>PILO</div>;\n}",
+      scrollY: 0,
     };
   }
 
   override getGeometry(shape: PiloCodeBlockShape) {
-    return new Rectangle2d({
-      width: shape.props.w,
-      height: shape.props.h,
-      isFilled: true,
+    return new Group2d({
+      children: [
+        new Rectangle2d({
+          width: shape.props.w,
+          height: shape.props.h,
+          isFilled: true,
+        }),
+      ],
     });
   }
 
