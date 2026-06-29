@@ -55,9 +55,9 @@ const analysis = {
 
 const reviewCanvas = {
   intentSummary:
-    "로그인 callback 진입점을 만들고 provider error 상태를 사용자에게 보여준다.",
+    "Create the login callback entry point and expose provider errors clearly.",
   reviewStrategy:
-    "라우트 진입점, callback 상태 해석, redirect 영향 순서로 확인한다.",
+    "Review the route entry, callback state parsing, and redirect impact in order.",
   nodes: [
     {
       id: "88888888-8888-4888-8888-888888888891",
@@ -66,7 +66,7 @@ const reviewCanvas = {
       riskLevel: "medium",
       reviewOrder: 1,
       roleSummary:
-        "OAuth provider가 돌려준 callback query를 읽어 성공/실패 화면으로 연결한다.",
+        "Reads provider callback query values and routes users to success or failure states.",
       position: { x: 84, y: 72 },
     },
     {
@@ -76,7 +76,7 @@ const reviewCanvas = {
       riskLevel: "low",
       reviewOrder: 2,
       roleSummary:
-        "callback 결과가 기존 session redirect 흐름과 충돌하지 않는지 확인한다.",
+        "Checks that callback outcomes do not conflict with the existing session redirect flow.",
       position: { x: 380, y: 190 },
     },
   ],
