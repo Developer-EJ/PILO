@@ -13,7 +13,9 @@ const dashboardArraySections = [
   "tasks",
   "githubIssues",
   "pullRequests",
+  "pullRequestChangedFiles",
   "meetingReports",
+  "meetingActionItems",
   "prAnalyses",
   "agentActions",
   "canvasEntities",
@@ -163,10 +165,12 @@ export function createWorkspaceDashboardFixture(workspaceId) {
     progress: remapWorkspaceId(workspaceDashboardFixture.progress, workspaceId),
     githubIssues: workspaceDashboardFixture.githubIssues,
     pullRequests: workspaceDashboardFixture.pullRequests,
+    pullRequestChangedFiles: workspaceDashboardFixture.pullRequestChangedFiles,
     meetingReports: remapWorkspaceId(
       workspaceDashboardFixture.meetingReports,
       workspaceId,
     ),
+    meetingActionItems: workspaceDashboardFixture.meetingActionItems,
     prAnalyses: workspaceDashboardFixture.prAnalyses,
     agentActions: remapWorkspaceId(
       workspaceDashboardFixture.agentActions,
