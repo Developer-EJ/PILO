@@ -9,10 +9,8 @@
 Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크리스트,
 댓글, 변경 이력, 의존성, Milestone 연결을 담당한다.
 
-`TaskCreateDraft`와 `TaskDraft`는 public schema에 남아 있지만, 최신 dev의
-app-server에는 아직 Task draft HTTP API가 없다. 진호 Meeting이나 세인 Agent가
-Task 후보를 실제 Task로 만들 때는 현재 구현된 `POST /api/workspaces/:workspaceId/tasks`
-또는 Meeting의 task-draft adapter 결과를 기준으로 후속 구현을 붙인다.
+`TaskCreateDraft`와 `TaskDraft`는 현재 app-server runtime API와 SQL baseline에 포함되어 있다.
+진호 Meeting이나 세인 Agent가 Task 후보를 만들 때는 주형의 Task draft API를 사용한다.
 
 ## Owned Tables
 
@@ -21,6 +19,7 @@ Task 후보를 실제 Task로 만들 때는 현재 구현된 `POST /api/workspac
 - `task_comments`
 - `task_activity_logs`
 - `task_dependencies`
+- `task_drafts`
 - `milestones`
 
 ## Base Path
@@ -28,9 +27,9 @@ Task 후보를 실제 Task로 만들 때는 현재 구현된 `POST /api/workspac
 최신 app-server controller는 `@Controller("api")`를 사용한다. 이 문서의 Current
 APIs는 실제 runtime path인 `/api/...`로 적는다.
 
-## Current APIs
+## Current Runtime APIs
 
-최신 `origin/dev`에 구현된 API만 여기에 둔다.
+현재 `dev` app-server controller에 구현된 API만 여기에 둔다.
 
 ### Milestone
 
@@ -77,17 +76,22 @@ APIs는 실제 runtime path인 `/api/...`로 적는다.
 | `PATCH` | `/api/tasks/:taskId/checklist-items/:itemId` | 체크리스트 제목/상태/순서 수정 | 주형 |
 | `DELETE` | `/api/tasks/:taskId/checklist-items/:itemId` | 체크리스트 삭제 | 주형 |
 
-## Planned / Deferred APIs
+### Task Draft
 
-아래 API는 contract 후보이지만 최신 `origin/dev` controller에는 없다. 다른 팀은
-이 API를 현재 호출하면 안 된다.
+| Method | Path | Purpose | Consumer |
+|---|---|---|---|
+| `POST` | `/api/workspaces/:workspaceId/task-drafts` | Task draft 생성 | 진호, 세인 |
+| `POST` | `/api/task-drafts/:draftId/approve` | draft 승인 후 실제 Task 생성 | 주형, 세인 |
+| `POST` | `/api/task-drafts/:draftId/reject` | draft 거절 | 주형, 세인 |
+
+## Deferred APIs
+
+아래 API는 contract 후보이지만 현재 `dev` controller에는 없다. 다른 팀은
+이 API를 runtime에서 호출하면 안 된다.
 
 | Method | Path | Status | Notes |
 |---|---|---|---|
-| `GET` | `/api/workspaces/:workspaceId/task-drafts` | deferred | `TaskDraft` schema는 있지만 HTTP 구현 없음 |
-| `POST` | `/api/workspaces/:workspaceId/task-drafts` | deferred | 외부 후보를 Task draft로 보관하는 API는 후속 PR 필요 |
-| `POST` | `/api/task-drafts/:draftId/approve` | deferred | 승인 후 실제 Task 생성 workflow 후속 PR 필요 |
-| `POST` | `/api/task-drafts/:draftId/reject` | deferred | Task draft 거절 workflow 후속 PR 필요 |
+| `GET` | `/api/workspaces/:workspaceId/task-drafts` | deferred | Task draft 목록 API 후속 PR 필요 |
 | `GET` | `/api/milestones/:milestoneId` | deferred | 단건 Milestone 상세 조회 후속 PR 필요 |
 
 ## Request Rules
@@ -419,7 +423,7 @@ Required fields:
 ```
 
 `TaskCreateDraft`는 Agent action payload와 외부 후보 입력에 쓰는 request DTO다.
-최신 dev에서는 이 DTO를 보관/승인하는 Task draft HTTP API가 아직 없다.
+현재 dev에서는 `POST /api/workspaces/:workspaceId/task-drafts`로 저장할 수 있다.
 
 ### TaskDraft
 

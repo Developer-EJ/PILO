@@ -43,7 +43,7 @@ Breaking change가 발생하는 필드:
 현재 app-server controller는 `@Controller("api")`를 사용한다. 실제 runtime path는
 아래 표의 모든 path 앞에 `/api`가 붙는다.
 
-## Provided APIs
+## Current Runtime APIs
 
 | Method | Path | Purpose |
 |---|---|---|

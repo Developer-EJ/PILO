@@ -30,7 +30,10 @@ GitHub, Review, Agent, or Common domains.
 | Yejin        | `AgentRecommendation`, `ProjectPlanDraftSummary`                             |
 | Common       | `SharedFileRef`                                                              |
 
-## Provided APIs
+## Current Runtime APIs
+
+현재 Canvas controller는 `/api` prefix 없이 아래 path를 제공한다.
+MVP target path는 `docs/api-contract-v1.md`의 `/api/canvas...` 계열로 rebaseline한다.
 
 | Method   | Path                                      | Purpose                           |
 | -------- | ----------------------------------------- | --------------------------------- |

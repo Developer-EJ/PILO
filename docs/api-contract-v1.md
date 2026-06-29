@@ -1,8 +1,9 @@
 # PILO API Contract v1
 
-이 문서는 PILO MVP의 public API 계약을 정의한다.
-현재 `dev`에 이미 구현된 runtime path와 다를 수 있으며, 그런 차이는 `docs/mvp-contract-v0.md`에서 확인한다.
-앞으로 새 구현과 rebaseline은 이 문서를 목표 계약으로 맞춘다.
+이 문서는 PILO MVP의 public API 목표 계약을 정의한다.
+현재 `dev`에 이미 구현된 runtime path와 다를 수 있다.
+지금 당장 호출 가능한 API는 `docs/contracts/*`의 `Current Runtime APIs`를 우선한다.
+새 API 추가와 rebaseline은 이 문서의 `/api` prefix 목표 계약에 맞춘다.
 
 함께 읽을 문서:
 

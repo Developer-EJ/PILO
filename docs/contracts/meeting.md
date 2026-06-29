@@ -55,7 +55,7 @@ Breaking change가 발생하는 필드:
 
 문서에서는 혼동을 줄이기 위해 실제 path인 `/api/...`로 적는다.
 
-## Provided APIs
+## Current Runtime APIs
 
 ### Scaffold
 

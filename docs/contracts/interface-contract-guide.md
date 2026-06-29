@@ -119,7 +119,7 @@ Agent는 다른 도메인 DB를 직접 변경하지 않는다.
 ## Provided Read Models
 - TaskSummary
 
-## Provided APIs
+## Owner API Examples
 - GET /workspaces/:workspaceId/tasks/summary
 - POST /workspaces/:workspaceId/tasks/drafts
 

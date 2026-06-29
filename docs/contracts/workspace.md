@@ -15,7 +15,10 @@ Workspace는 PILO의 프로젝트 작업 공간과 멤버 권한을 담당한다
 - `workspace_invites`
 - `dashboard_preferences`
 
-## Provided APIs
+## Current Runtime APIs
+
+현재 Workspace controller는 `/api` prefix 없이 아래 path를 제공한다.
+MVP target path는 `docs/api-contract-v1.md`의 `/api/workspaces...`를 따른다.
 
 | Method | Path | 목적 | Consumer |
 |---|---|---|---|

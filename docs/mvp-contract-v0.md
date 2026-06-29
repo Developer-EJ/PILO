@@ -135,7 +135,7 @@ runtime path가 된다.
 
 ### Task / Milestone
 
-상태: `Implemented`, `Rebaseline Required`
+상태: `Implemented`
 
 현재 API:
 
@@ -163,7 +163,6 @@ runtime path가 된다.
 주의:
 
 - Task/Milestone/GitHub 일부는 Prisma DB를 사용한다.
-- 기존 `docs/contracts/task.md`의 Task draft deferred 설명은 현재 controller와 맞지 않는다.
 - `task_drafts` table은 SQL bootstrap과 rebaseline migration에 포함되어 있다.
 
 ### GitHub Connection / Repository / Issue / PR
@@ -199,9 +198,9 @@ Deferred:
 
 Deferred:
 
-- `GET /workspaces/:workspaceId/progress/summary`
-- `GET /workspaces/:workspaceId/progress/history`
-- `POST /workspaces/:workspaceId/progress/snapshots`
+- `GET /api/workspaces/:workspaceId/progress/summary`
+- `GET /api/workspaces/:workspaceId/progress/history`
+- `POST /api/workspaces/:workspaceId/progress/snapshots`
 
 주의:
 
@@ -297,11 +296,11 @@ Deferred:
 - Review repositories는 in-memory다.
 - PR source는 현재 fixture/mock 경계다.
 - SQL에는 Review table이 있지만 Prisma 모델에는 없다.
-- 기존 review contract의 Planned API 표는 실제 controller와 맞춰 갱신해야 한다.
+- Review contract의 current/deferred API 표는 현재 controller 기준으로 정리되어 있다.
 
 ### Agent Runtime
 
-상태: `Implemented` for registry only, `Deferred` for run/action runtime, `Rebaseline Required`
+상태: `Implemented` for registry only, `Deferred` for run/action runtime
 
 Implemented:
 
@@ -310,8 +309,8 @@ Implemented:
 
 Deferred:
 
-- `POST /agent-runs`
-- `GET /agent-runs/:runId`
+- `POST /api/workspaces/:workspaceId/agent-runs`
+- `GET /api/agent-runs/:runId`
 - agent run/action confirmation runtime
 - SQS result persistence into `agent_runs`, `agent_actions`, `agent_traces`
 
@@ -328,12 +327,12 @@ Deferred:
 
 Deferred:
 
-- `POST /workspaces/:workspaceId/project-plan-drafts`
-- `GET /project-plan-drafts/:draftId`
-- `POST /project-plan-drafts/:draftId/recommend-tech-stack`
-- `POST /project-plan-drafts/:draftId/breakdown-features`
-- `POST /project-plan-drafts/:draftId/assign-roles`
-- `POST /project-plan-drafts/:draftId/approve`
+- `POST /api/workspaces/:workspaceId/project-plan-drafts`
+- `GET /api/project-plan-drafts/:draftId`
+- `POST /api/project-plan-drafts/:draftId/recommend-tech-stack`
+- `POST /api/project-plan-drafts/:draftId/breakdown-features`
+- `POST /api/project-plan-drafts/:draftId/assign-roles`
+- `POST /api/project-plan-drafts/:draftId/approve`
 
 주의:
 
@@ -395,13 +394,15 @@ Deferred:
 
 ### R4. Contract 문서 정리
 
-수정 대상:
+상태: `Done` for current/deferred 분리.
 
-- `docs/contracts/task.md`: Task draft API를 current로 이동하거나 API 제거 결정
-- `docs/contracts/review.md`: 실제 구현된 graph/comment/checklist API를 current로 이동
-- `docs/contracts/agent-actions.md`: Agent Run API를 deferred로 명확히 표시
-- `docs/contracts/planning.md`: Provided APIs가 아니라 Deferred APIs로 표시
-- `docs/db/db-schema-by-owner.md`: target schema와 implemented schema 구분
+정리된 항목:
+
+- `docs/contracts/task.md`: Task draft API를 Current Runtime APIs로 이동
+- `docs/contracts/review.md`: 실제 구현된 graph/comment/checklist API를 Current Runtime APIs로 이동
+- `docs/contracts/agent-actions.md`: Agent Run API를 Deferred APIs로 명확히 표시
+- `docs/contracts/planning.md`: HTTP API 전체를 Deferred APIs로 표시
+- `docs/contracts/README.md`: Current Runtime / Deferred / MVP Target 용어 정의
 
 ### R5. CI/테스트 보강
 
@@ -419,5 +420,4 @@ Deferred:
 - API prefix 결정 완료
 - DB baseline과 Prisma mapped table 검증 통과
 - Workspace membership source 통일 방향 결정
-- `task.md`, `review.md`, `agent-actions.md`, `planning.md`의 current/deferred 정리
 - CI가 route/DB drift를 최소 1개 이상 잡도록 보강

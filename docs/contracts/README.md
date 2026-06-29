@@ -2,6 +2,23 @@
 
 이 폴더는 AGENT가 독립적으로 구현할 때 반드시 지켜야 하는 도메인 간 인터페이스 계약을 모아둔다.
 
+## Status Vocabulary
+
+이 폴더의 route 표는 아래 의미로 읽는다.
+
+| Label | 의미 |
+| --- | --- |
+| Current Runtime APIs | 현재 `dev` app-server controller에 존재해 호출 가능한 path |
+| Deferred APIs | DTO/schema/fixture 후보는 있지만 현재 runtime controller가 없는 path |
+| MVP Target APIs | `docs/api-contract-v1.md`에 정의된 목표 path. 현재 runtime과 다를 수 있음 |
+
+규칙:
+
+1. 구현 중 호출해야 하는 API는 각 도메인 문서의 `Current Runtime APIs`만 사용한다.
+2. `Deferred APIs`는 mock/fixture 또는 후속 contract PR 전용이다.
+3. 새 API를 추가할 때는 `docs/api-contract-v1.md`의 `/api` prefix 원칙을 따른다.
+4. 기존 controller 중 일부는 아직 `/api` prefix가 없다. 이 차이는 해당 도메인 contract에 명시된 현재 path를 우선한다.
+
 ## 읽는 순서
 
 1. `agent.md`

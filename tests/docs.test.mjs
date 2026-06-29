@@ -364,6 +364,57 @@ describe("contract document set", () => {
       assert.match(content, new RegExp(token.replace("->", "->")));
     }
   });
+  it("contract index defines the active status vocabulary", () => {
+    const content = read("docs/contracts/README.md");
+    for (const token of ["Current Runtime APIs", "Deferred APIs", "MVP Target APIs"]) {
+      assert.match(content, new RegExp(token));
+    }
+  });
+
+  it("current contract docs do not use stale status labels or branch wording", () => {
+    const checkedDocs = [
+      ...requiredContracts,
+      "docs/mvp-contract-v0.md",
+      "docs/api-contract-v1.md",
+    ];
+
+    for (const file of checkedDocs) {
+      const content = read(file);
+      assert.doesNotMatch(content, /origin\/dev/, `${file} must not point agents at origin/dev`);
+      assert.doesNotMatch(content, /## Provided APIs/, `${file} must use Current Runtime APIs or Deferred APIs`);
+      assert.doesNotMatch(content, /## Planned APIs/, `${file} must use Deferred APIs`);
+      assert.doesNotMatch(content, /Planned \/ Deferred APIs/, `${file} must use Deferred APIs`);
+      assert.doesNotMatch(content, /Task draft HTTP API/, `${file} must not describe implemented task drafts as missing`);
+    }
+  });
+
+  it("contract docs keep current runtime APIs separate from deferred MVP targets", () => {
+    const task = read("docs/contracts/task.md");
+    assert.match(task, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
+    assert.match(task, /`POST`\s*\|\s*`\/api\/task-drafts\/:draftId\/approve`/);
+    assert.match(task, /## Deferred APIs/);
+
+    const taskDeferred = task.slice(task.indexOf("## Deferred APIs"));
+    assert.doesNotMatch(taskDeferred, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
+    assert.match(taskDeferred, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
+
+    const review = read("docs/contracts/review.md");
+    assert.match(review, /`GET`\s*\|\s*`\/pull-request-analyses\/:analysisId\/graph`/);
+    assert.match(review, /`GET`\s*\|\s*`\/pull-request-analyses\/:analysisId\/canvas`/);
+    assert.match(review, /`POST`\s*\|\s*`\/code-review-rooms\/:roomId\/comments`/);
+
+    const agent = read("docs/contracts/agent-actions.md");
+    assert.match(agent, /Current Runtime APIs/);
+    assert.match(agent, /Agent run\/action HTTP controller/);
+    assert.match(agent, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/agent-runs`/);
+    assert.doesNotMatch(agent, /`POST \/agent-runs`/);
+
+    const planning = read("docs/contracts/planning.md");
+    assert.match(planning, /Current Runtime APIs/);
+    assert.match(planning, /Planning HTTP controller/);
+    assert.match(planning, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/project-plan-drafts`/);
+    assert.doesNotMatch(planning, /`GET \/project-plan-drafts/);
+  });
 });
 
 describe("independent agent briefs", () => {
