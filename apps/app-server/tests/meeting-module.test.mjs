@@ -28,6 +28,7 @@ const {
 const {
   MEETING_STATUS_VALUES,
 } = require("../src/modules/meeting/types/meeting.types");
+const workspaceDashboardFixture = require("../../../docs/contracts/fixtures/workspace-dashboard.fixture.json");
 
 function createMeetingService(
   repository,
@@ -475,6 +476,47 @@ describe("meeting module scaffold", () => {
     assert.deepEqual(emptyOutput.decisions, []);
     assert.deepEqual(emptyOutput.risks, []);
     assert.deepEqual(emptyOutput.actionItems, []);
+  });
+
+  it("adapts recent meeting reports to Dashboard and Canvas fixture shapes", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Dashboard report meeting",
+    });
+    controller.createMemo(meeting.id, {
+      body: "Dashboard needs report summary counts.",
+    });
+
+    const report = controller.requestReportGeneration(meeting.id);
+    const [summary] = controller.listRecentReports("workspace-1");
+    const [canvasEntityRef] =
+      controller.listRecentReportCanvasEntityRefs("workspace-1");
+    const fixtureSummary = workspaceDashboardFixture.meetingReports[0];
+    const fixtureCanvasEntityRef =
+      workspaceDashboardFixture.canvasEntities.find(
+        (entity) => entity.entityType === "meeting_report",
+      );
+
+    assert.equal(summary.id, report.id);
+    assert.deepEqual(
+      Object.keys(summary).sort(),
+      Object.keys(fixtureSummary).sort(),
+    );
+    assert.equal("decisions" in summary, false);
+    assert.equal("risks" in summary, false);
+    assert.deepEqual(
+      Object.keys(canvasEntityRef).sort(),
+      Object.keys(fixtureCanvasEntityRef).sort(),
+    );
+    assert.deepEqual(canvasEntityRef, {
+      entityType: "meeting_report",
+      entityId: summary.id,
+      displayTitle: summary.title,
+      shapeType: "meeting_report",
+    });
   });
 
   it("creates and lists meeting report read models", () => {

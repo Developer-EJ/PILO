@@ -5,6 +5,7 @@ import {
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportCanvasEntityRef,
   MeetingReportDetail,
   MeetingReportNextAgendaReadModel,
   MeetingReportRiskReadModel,
@@ -108,6 +109,8 @@ export type TranscriptSegmentResponseDto = TranscriptSegmentRecord;
 export type MeetingReportResponseDto = MeetingReportDetail;
 
 export type MeetingReportSummaryDto = MeetingReportSummary;
+
+export type MeetingReportCanvasEntityRefDto = MeetingReportCanvasEntityRef;
 
 export type MeetingDecisionResponseDto = MeetingDecisionReadModel;
 

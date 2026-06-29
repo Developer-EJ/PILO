@@ -20,6 +20,8 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ## Provided APIs
 
+Additional implemented read endpoints: `GET /milestones/:milestoneId`, `GET /workspaces/:workspaceId/task-drafts`.
+
 | Method   | Path                                           | 목적                          | Consumer                   |
 | -------- | ---------------------------------------------- | ----------------------------- | -------------------------- |
 | `GET`    | `/workspaces/:workspaceId/milestones`          | Milestone 목록 조회           | 주형, 세인 action executor |
