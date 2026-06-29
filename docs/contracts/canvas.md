@@ -98,8 +98,31 @@ Creates a relationship between two shapes in the same board.
 
 - required: `sourceShapeId`, `targetShapeId`, `connectionType`, `label`
 - `label` is nullable. Use `null` when the connection should render without text.
+- `sourceShapeId` and `targetShapeId` must point to different shapes in the same board.
+- Duplicate connections are rejected by `boardId + sourceShapeId + targetShapeId + connectionType`.
+- Deleting a connection soft-deletes it. A second delete for the same connection returns not found.
+- The create API returns `CanvasConnectionSummary`; the delete API returns `{ "id": "uuid", "deleted": true }`.
+
+### CanvasPositionRequest
+
+Saves the latest position for a shape after drag.
+
+```json
+{
+  "x": 120,
+  "y": 140
+}
+```
+
+- required: `x`, `y`
+- Both coordinates must be finite numbers.
+- Server policy: last write wins per `shapeId`; repeated requests update the same `canvas_node_positions` row.
+- Client policy: drag interactions should debounce or batch position writes at 150-300ms intervals, then flush the final position on drag end.
+- The API returns the updated `CanvasShapeSummary`.
 
 ### CanvasViewSettingRequest
+
+Saves the current member's viewport state for a board.
 
 ```json
 {
@@ -112,8 +135,11 @@ Creates a relationship between two shapes in the same board.
 - required: `zoom`, `viewportX`, `viewportY`
 - default: `{ "zoom": 1, "viewportX": 0, "viewportY": 0 }`
 - Settings are scoped by `boardId + memberId`.
+- The update API returns the saved `CanvasViewSetting`.
 
 ### CanvasFilterSettingRequest
+
+Saves the current member's board filter state.
 
 ```json
 {
@@ -129,6 +155,8 @@ Creates a relationship between two shapes in the same board.
 - default: `{ "enabledEntityTypes": ["task", "meeting_report", "pull_request"], "assigneeMemberId": null, "showDelayedOnly": false, "showRiskOnly": false, "filters": {} }`
 - `assigneeMemberId` is nullable and refers to `workspace_members.member_id`.
 - `filters` is an extension object for non-breaking filter additions.
+- Settings are scoped by `boardId + memberId`.
+- The update API returns the saved `CanvasFilterSetting`.
 
 ## Read Models
 
@@ -202,6 +230,117 @@ Creates a relationship between two shapes in the same board.
 - `CanvasBoardDetail` extends `CanvasBoardSummary` with `shapes`, `connections`, `viewSetting`, and `filterSetting`.
 - `shapeCount` and `connectionCount` count non-deleted rows only.
 - `viewSetting` and `filterSetting` are member-scoped. If no row exists, the defaults above are returned.
+
+## Realtime Event Contract
+
+Canvas realtime events use the Socket.IO namespace `/canvas`.
+
+### Room Events
+
+| Event                | Direction        | Purpose                         |
+| -------------------- | ---------------- | ------------------------------- |
+| `canvas:board:join`  | client -> server | Join a board room by `boardId`  |
+| `canvas:board:leave` | client -> server | Leave a board room by `boardId` |
+
+Room payload:
+
+```json
+{
+  "boardId": "uuid"
+}
+```
+
+Room name format is `canvas:board:{boardId}`.
+
+The realtime auth connection point expects `session`, `currentMember`, and a
+board access adapter result in the Socket.IO handshake auth. The default local
+adapter reads `canvasBoards` from the handshake; production can replace that
+adapter with DB/app-server lookup without changing the event payload.
+
+```json
+{
+  "auth": {
+    "session": {
+      "authenticated": true,
+      "userId": "uuid",
+      "expiresAt": "2026-06-28T12:00:00.000Z"
+    },
+    "currentMember": {
+      "workspaceId": "uuid",
+      "memberId": "uuid",
+      "userId": "uuid",
+      "role": "member",
+      "displayName": "Donghyun"
+    },
+    "canvasBoards": [
+      {
+        "boardId": "uuid",
+        "workspaceId": "uuid"
+      }
+    ]
+  }
+}
+```
+
+Room join/leave is rejected when:
+
+- `session` or `currentMember` is missing or malformed.
+- `session.userId` and `currentMember.userId` do not match.
+- `session.expiresAt` is expired.
+- `boardId` has no board access context.
+- the board's `workspaceId` differs from `currentMember.workspaceId`.
+
+### Broadcast Payloads
+
+Shape event payload:
+
+```json
+{
+  "boardId": "uuid",
+  "shapeId": "uuid",
+  "baseVersion": 0,
+  "x": 120,
+  "y": 140,
+  "width": 280,
+  "height": 160
+}
+```
+
+- Event: `canvas:shape:changed`
+- Direction: client -> server, server -> room broadcast
+- `baseVersion` is the last server accepted shape version known by the client.
+- `x` and `y` are required finite numbers.
+- `width` and `height` are nullable. Use `null` for move-only updates.
+- Server policy: the realtime server accepts the mutation only when
+  `baseVersion` matches the current server version for `boardId + shapeId`.
+  Accepted mutations increment `version` by 1 and broadcast the final state.
+- Conflict policy: stale `baseVersion` is rejected with `error = "conflict"`
+  and `currentVersion`. The client should refresh from the latest board
+  snapshot or retry against the returned version.
+
+View event payload:
+
+```json
+{
+  "boardId": "uuid",
+  "zoom": 1,
+  "viewportX": 0,
+  "viewportY": 0
+}
+```
+
+Presence event payload:
+
+```json
+{
+  "boardId": "uuid",
+  "cursorX": 120,
+  "cursorY": 140,
+  "tool": "select"
+}
+```
+
+- `tool`: `select`, `hand`, `shape`, `text`, `connector`, `unknown`
 
 ## Boundaries
 

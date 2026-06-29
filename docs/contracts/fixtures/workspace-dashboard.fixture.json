@@ -43,6 +43,7 @@
     {
       "id": "44444444-4444-4444-8444-444444444441",
       "workspaceId": "22222222-2222-4222-8222-222222222222",
+      "milestoneId": null,
       "title": "Google/GitHub 로그인 구현",
       "status": "in_progress",
       "priority": "high",
