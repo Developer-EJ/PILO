@@ -3,6 +3,8 @@ import {
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportDetail,
+  MeetingReportSummary,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
@@ -64,3 +66,7 @@ export type MeetingAgendaResponseDto = MeetingAgendaRecord;
 export type MeetingMemoResponseDto = MeetingMemoRecord;
 
 export type TranscriptSegmentResponseDto = TranscriptSegmentRecord;
+
+export type MeetingReportResponseDto = MeetingReportDetail;
+
+export type MeetingReportSummaryDto = MeetingReportSummary;

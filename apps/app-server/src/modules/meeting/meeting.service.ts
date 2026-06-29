@@ -9,6 +9,10 @@ import {
   CurrentMemberAdapter,
 } from "./adapters/current-member.adapter";
 import {
+  MEETING_REPORT_WORKFLOW_CLIENT,
+  MeetingReportWorkflowClient,
+} from "./adapters/meeting-report-workflow.adapter";
+import {
   CreateMeetingAgendaRequestDto,
   CreateMeetingMemoRequestDto,
   CreateMeetingRequestDto,
@@ -17,6 +21,8 @@ import {
   MeetingAgendaResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportResponseDto,
+  MeetingReportSummaryDto,
   MeetingResponseDto,
   MeetingScaffoldResponseDto,
   ReorderMeetingAgendaRequestDto,
@@ -36,6 +42,7 @@ import {
   MeetingAgendaStatus,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportRecord,
   MeetingStatus,
   TranscriptSource,
 } from "./types/meeting.types";
@@ -47,6 +54,8 @@ export class MeetingService {
     private readonly meetingRepository: MeetingRepository,
     @Inject(CURRENT_MEMBER_ADAPTER)
     private readonly currentMemberAdapter: CurrentMemberAdapter,
+    @Inject(MEETING_REPORT_WORKFLOW_CLIENT)
+    private readonly meetingReportWorkflowClient: MeetingReportWorkflowClient,
   ) {}
 
   getScaffoldStatus(): MeetingScaffoldResponseDto {
@@ -286,6 +295,99 @@ export class MeetingService {
     return this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id);
   }
 
+  requestReportGeneration(meetingId: string): MeetingReportResponseDto {
+    return this.createReport(meetingId);
+  }
+
+  createReport(meetingId: string): MeetingReportResponseDto {
+    const meeting = this.requireMeeting(meetingId);
+    const currentMember = this.currentMemberAdapter.getCurrentMember(
+      meeting.workspaceId,
+    );
+    const existingReport = this.meetingRepository.findReportByMeetingId(
+      meeting.id,
+    );
+
+    if (existingReport) {
+      return this.toReportDetail(existingReport, meeting);
+    }
+
+    const workflowOutput = this.meetingReportWorkflowClient.generateReport({
+      meetingTitle: meeting.title,
+      memoBodies: this.meetingRepository
+        .listMemosByMeeting(meeting.id)
+        .map((memo) => memo.body),
+      transcriptBodies: this.meetingRepository
+        .listTranscriptSegmentsByMeeting(meeting.id)
+        .map((segment) => segment.body),
+    });
+    const report = this.meetingRepository.createReport({
+      meetingId: meeting.id,
+      summary: workflowOutput.summary,
+      createdByMemberId: currentMember.id,
+    });
+
+    this.meetingRepository.updateMeeting(meeting.id, {
+      status: "report_generated",
+      updatedAt: new Date().toISOString(),
+    });
+
+    return this.toReportDetail(report, {
+      ...meeting,
+      status: "report_generated",
+    });
+  }
+
+  getReport(reportId: string): MeetingReportResponseDto {
+    const report = this.requireReport(reportId);
+    const meeting = this.requireMeeting(report.meetingId);
+
+    return this.toReportDetail(report, meeting);
+  }
+
+  getReportForWorkspace(
+    workspaceId: string,
+    reportId: string,
+  ): MeetingReportResponseDto {
+    const report = this.getReport(reportId);
+    const expectedWorkspaceId = this.requireNonEmptyString(
+      workspaceId,
+      "workspaceId",
+    );
+
+    if (report.workspaceId !== expectedWorkspaceId) {
+      throw new NotFoundException("Meeting report not found in workspace");
+    }
+
+    return report;
+  }
+
+  listRecentReports(workspaceId: string): MeetingReportSummaryDto[] {
+    const expectedWorkspaceId = this.requireNonEmptyString(
+      workspaceId,
+      "workspaceId",
+    );
+
+    return this.meetingRepository
+      .listReports()
+      .map((report) => {
+        const meeting = this.meetingRepository.findMeetingById(
+          report.meetingId,
+        );
+
+        return meeting ? this.toReportDetail(report, meeting) : null;
+      })
+      .filter(
+        (report): report is MeetingReportSummaryDto =>
+          report !== null && report.workspaceId === expectedWorkspaceId,
+      )
+      .sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() -
+          new Date(left.createdAt).getTime(),
+      );
+  }
+
   private requireMeeting(meetingId: string): MeetingRecord {
     const meeting = this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
@@ -324,6 +426,35 @@ export class MeetingService {
     }
 
     return agenda;
+  }
+
+  private requireReport(reportId: string): MeetingReportRecord {
+    const report = this.meetingRepository.findReportById(
+      this.requireNonEmptyString(reportId, "reportId"),
+    );
+
+    if (!report) {
+      throw new NotFoundException("Meeting report not found");
+    }
+
+    return report;
+  }
+
+  private toReportDetail(
+    report: MeetingReportRecord,
+    meeting: MeetingRecord,
+  ): MeetingReportResponseDto {
+    return {
+      id: report.id,
+      meetingId: report.meetingId,
+      workspaceId: meeting.workspaceId,
+      title: meeting.title,
+      summary: report.summary,
+      decisionCount: 0,
+      actionItemCount: 0,
+      riskCount: 0,
+      createdAt: report.createdAt,
+    };
   }
 
   private parseMeetingStatus(value: unknown): MeetingStatus {

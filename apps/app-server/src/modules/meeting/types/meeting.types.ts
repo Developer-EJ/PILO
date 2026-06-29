@@ -127,3 +127,32 @@ export interface CreateTranscriptSegmentInput {
   startedAt?: string | null;
   endedAt?: string | null;
 }
+
+export interface MeetingReportRecord {
+  id: string;
+  meetingId: string;
+  summary: string;
+  createdByMemberId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingReportInput {
+  meetingId: string;
+  summary: string;
+  createdByMemberId?: string | null;
+}
+
+export interface MeetingReportDetail {
+  id: string;
+  meetingId: string;
+  workspaceId: string;
+  title: string;
+  summary: string;
+  decisionCount: number;
+  actionItemCount: number;
+  riskCount: number;
+  createdAt: string;
+}
+
+export type MeetingReportSummary = MeetingReportDetail;
