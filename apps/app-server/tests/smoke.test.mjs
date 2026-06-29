@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import process from "node:process";
 import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
@@ -79,6 +80,19 @@ describe("app-server package", () => {
           NODE_ENV: "production",
         }),
       /Missing required Auth env: SESSION_SECRET/,
+    );
+  });
+
+  it("rejects insecure Auth session cookies in production", () => {
+    assert.throws(
+      () =>
+        createAuthConfig({
+          APP_ENV: "production",
+          NODE_ENV: "production",
+          SESSION_SECRET: "production-session-secret",
+          AUTH_SESSION_COOKIE_SECURE: "false",
+        }),
+      /AUTH_SESSION_COOKIE_SECURE must be true in production/,
     );
   });
 
@@ -203,7 +217,7 @@ describe("app-server package", () => {
       provider: "google",
       state: record.state,
       nonce: record.nonce,
-      now: new Date("2026-06-28T00:00:01.000Z"),
+      now: new Date("2026-06-28T00:00:01.001Z"),
     });
 
     assert.deepEqual(result, {
@@ -348,7 +362,7 @@ describe("app-server package", () => {
     assert.equal(
       service.getCurrentUserFromCookieHeader(
         result.session.cookieHeader,
-        new Date(result.session.expiresAt),
+        new Date(new Date(result.session.expiresAt).getTime() + 1),
       ),
       null,
     );
@@ -451,6 +465,41 @@ describe("app-server package", () => {
     assert.equal(repository.listUsers()[0].name, "Updated User");
   });
 
+  it("does not link a new provider to an existing user with unverified email", () => {
+    const repository = new AuthRepository();
+    const token = {
+      scopes: [],
+      tokenType: "Bearer",
+      tokenExpiresAt: null,
+    };
+    const googleIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "google",
+        providerAccountId: "google-verified-user",
+        email: "user@example.com",
+        name: "Verified User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+    const githubIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "github",
+        providerAccountId: "github-unverified-user",
+        email: "user@example.com",
+        name: "Unverified User",
+        avatarUrl: null,
+        emailVerified: false,
+      },
+      token,
+    });
+
+    assert.notEqual(githubIdentity.user.id, googleIdentity.user.id);
+    assert.equal(repository.listUsers().length, 2);
+    assert.equal(repository.listOAuthAccounts().length, 2);
+  });
+
   it("builds a GitHub authorization URL without repository scope", () => {
     const config = createAuthConfig({
       APP_ENV: "local",
@@ -501,6 +550,21 @@ describe("app-server package", () => {
         return globalThis.Response.json({ access_token: "github-token" });
       }
 
+      if (String(url).includes("api.github.com/user/emails")) {
+        return globalThis.Response.json([
+          {
+            email: "octo-private@example.com",
+            primary: false,
+            verified: true,
+          },
+          {
+            email: "octo-primary@example.com",
+            primary: true,
+            verified: true,
+          },
+        ]);
+      }
+
       return globalThis.Response.json({
         id: 123456,
         login: "octo-user",
@@ -523,10 +587,10 @@ describe("app-server package", () => {
     assert.deepEqual(result.profile, {
       provider: "github",
       providerAccountId: "123456",
-      email: "octo@example.com",
+      email: "octo-primary@example.com",
       name: "octo-user",
       avatarUrl: "https://avatars.githubusercontent.com/u/123456",
-      emailVerified: null,
+      emailVerified: true,
     });
     assert.equal(
       requests[0].url,
@@ -539,6 +603,8 @@ describe("app-server package", () => {
     );
     assert.equal(requests[1].url, "https://api.github.com/user");
     assert.equal(requests[1].init.headers.Authorization, "Bearer github-token");
+    assert.equal(requests[2].url, "https://api.github.com/user/emails");
+    assert.equal(requests[2].init.headers.Authorization, "Bearer github-token");
   });
 
   it("creates frontend-compatible GitHub login result redirects", () => {
@@ -614,6 +680,10 @@ describe("app-server package", () => {
     });
 
     assert.equal(service.getCurrentUserFromCookieHeader(undefined), null);
+    assert.equal(
+      service.getCurrentUserFromCookieHeader("pilo_session=%E0%A4%A"),
+      null,
+    );
     assert.equal(result.ok, true);
 
     repository.markUserDeleted(result.identity.user.id);
@@ -1434,14 +1504,28 @@ describe("app-server package", () => {
   });
 
   it("boots the Nest app module with AuthModule and WorkspaceModule registered", async () => {
-    const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
-      logger: false,
-    });
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+    let app;
 
-    await app.init();
-    assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
-      storageMode: "memory",
-    });
-    await app.close();
+    try {
+      app = await NestFactory.create(AppModule, new FastifyAdapter(), {
+        logger: false,
+      });
+      await app.init();
+      assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
+        storageMode: "memory",
+      });
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        if (previousSkipDatabaseConnect === undefined) {
+          delete process.env.PILO_SKIP_DATABASE_CONNECT;
+        } else {
+          process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+        }
+      }
+    }
   });
 });
