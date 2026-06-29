@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional } from "@nestjs/common";
 import {
   ChangedFileChangeType,
   ChangedFileRecord,
@@ -23,6 +23,7 @@ export interface ChangedFilesServiceOptions {
 export class ChangedFilesService {
   constructor(
     private readonly changedFilesRepository: InMemoryChangedFilesRepository,
+    @Optional()
     options: ChangedFilesServiceOptions = {},
   ) {
     if (options.seedFixture) {
