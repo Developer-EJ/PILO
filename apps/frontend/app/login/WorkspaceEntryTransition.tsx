@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { markMockAuthSignedIn } from "../../lib/auth/mockAuthClient.mjs";
+import { safeNextPath } from "../../lib/auth/protectedRoutes.mjs";
 
 export function WorkspaceEntryTransition() {
   const router = useRouter();
@@ -9,16 +11,19 @@ export function WorkspaceEntryTransition() {
   const active =
     searchParams.get("auth") === "success" ||
     searchParams.get("status") === "success";
+  const redirectTo = safeNextPath(searchParams.get("next"));
 
   useEffect(() => {
     if (!active) return;
+
+    markMockAuthSignedIn();
 
     document
       .querySelector(".login-canvas-shell")
       ?.classList.add("is-entering-workspace");
 
     const timeoutId = window.setTimeout(() => {
-      router.replace("/");
+      router.replace(redirectTo);
     }, 1200);
 
     return () => {
@@ -27,7 +32,7 @@ export function WorkspaceEntryTransition() {
         .querySelector(".login-canvas-shell")
         ?.classList.remove("is-entering-workspace");
     };
-  }, [active, router]);
+  }, [active, redirectTo, router]);
 
   return null;
 }

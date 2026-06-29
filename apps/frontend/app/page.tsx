@@ -1,3 +1,8 @@
+import { Suspense } from "react";
+import { AuthGuard } from "../components/auth/AuthGuard";
+import { CurrentUserAvatar } from "../components/auth/CurrentUserAvatar";
+import { LogoutButton } from "../components/auth/LogoutButton";
+
 const stats = [
   { label: "진행 중 Task", value: "3", icon: "⚡", tone: "primary" },
   { label: "리뷰 대기 PR", value: "3", icon: "◆", tone: "warning" },
@@ -60,133 +65,138 @@ const decisions = [
 
 export default function Home() {
   return (
-    <main className="dashboard-shell">
-      <aside className="sidebar" aria-label="PILO navigation preview">
-        <div className="brand">
-          <div className="brand-mark">P</div>
-          <div>
-            <p>PILO</p>
-            <span>AI Project OS</span>
-          </div>
-        </div>
-        <nav className="nav-list" aria-label="Dashboard only navigation">
-          {navItems.map((item) => (
-            <div
-              key={item.label}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-disabled={!item.active}
+    <Suspense fallback={null}>
+      <AuthGuard>
+        <main className="dashboard-shell">
+          <aside className="sidebar" aria-label="PILO navigation preview">
+            <div className="brand">
+              <div className="brand-mark">P</div>
+              <div>
+                <p>PILO</p>
+                <span>AI Project OS</span>
+              </div>
+            </div>
+            <nav className="nav-list" aria-label="Dashboard only navigation">
+              {navItems.map((item) => (
+                <div
+                  key={item.label}
+                  className={item.active ? "nav-item active" : "nav-item"}
+                  aria-disabled={!item.active}
+                >
+                  <span>{item.label}</span>
+                  {item.badge ? <b>{item.badge}</b> : null}
+                </div>
+              ))}
+            </nav>
+          </aside>
+
+          <section className="workspace">
+            <header className="topbar">
+              <div>
+                <p className="eyebrow">DASHBOARD</p>
+                <h1>홈 / 대시보드</h1>
+              </div>
+              <div className="topbar-actions">
+                <div className="meeting-chip">
+                  <span className="live-dot" />
+                  회의 중<code>03:18</code>
+                </div>
+                <LogoutButton />
+                <CurrentUserAvatar />
+              </div>
+            </header>
+
+            <section
+              className="dashboard-content"
+              aria-label="PILO dashboard layout"
             >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </div>
-          ))}
-        </nav>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">DASHBOARD</p>
-            <h1>홈 / 대시보드</h1>
-          </div>
-          <div className="topbar-actions">
-            <div className="meeting-chip">
-              <span className="live-dot" />
-              회의 중<code>03:18</code>
-            </div>
-            <div className="avatar">민</div>
-          </div>
-        </header>
-
-        <section
-          className="dashboard-content"
-          aria-label="PILO dashboard layout"
-        >
-          <div className="stats-grid">
-            {stats.map((stat) => (
-              <article className="stat-card" key={stat.label}>
-                <div>
-                  <span>{stat.label}</span>
-                  <i className={`tone-${stat.tone}`}>{stat.icon}</i>
-                </div>
-                <strong>{stat.value}</strong>
-              </article>
-            ))}
-          </div>
-
-          <div className="content-grid">
-            <div className="left-column">
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>오늘 해야 할 일</h2>
-                  <span>Task 보드</span>
-                </div>
-                <div className="list">
-                  {todayTasks.map((task) => (
-                    <div className="task-row" key={task.title}>
-                      <i className={`status-dot tone-${task.tone}`} />
-                      <strong>{task.title}</strong>
-                      <span className="tag">{task.tag}</span>
-                      <b className={`due tone-${task.tone}`}>{task.due}</b>
+              <div className="stats-grid">
+                {stats.map((stat) => (
+                  <article className="stat-card" key={stat.label}>
+                    <div>
+                      <span>{stat.label}</span>
+                      <i className={`tone-${stat.tone}`}>{stat.icon}</i>
                     </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>리뷰 대기 PR</h2>
-                  <span>전체 PR</span>
-                </div>
-                <div className="list">
-                  {reviewPrs.map((pr) => (
-                    <div className="pr-row" key={pr.num}>
-                      <div className="pr-icon">◇</div>
-                      <div>
-                        <strong>{pr.title}</strong>
-                        <small>
-                          #{pr.num} · {pr.author}
-                        </small>
-                      </div>
-                      <b className={`pill tone-${pr.tone}`}>{pr.status}</b>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-
-            <div className="right-column">
-              <section className="agent-panel">
-                <div className="agent-title">
-                  <span>✦</span>
-                  <h2>Agent 다음 제안</h2>
-                </div>
-                {agentSuggestions.map((item) => (
-                  <article className="agent-card" key={item.cta}>
-                    <p>{item.text}</p>
-                    <span>{item.cta}</span>
+                    <strong>{stat.value}</strong>
                   </article>
                 ))}
-              </section>
+              </div>
 
-              <section className="panel decision-panel">
-                <div className="panel-head">
-                  <h2>최근 회의 결정</h2>
-                  <span>회의록</span>
+              <div className="content-grid">
+                <div className="left-column">
+                  <section className="panel">
+                    <div className="panel-head">
+                      <h2>오늘 해야 할 일</h2>
+                      <span>Task 보드</span>
+                    </div>
+                    <div className="list">
+                      {todayTasks.map((task) => (
+                        <div className="task-row" key={task.title}>
+                          <i className={`status-dot tone-${task.tone}`} />
+                          <strong>{task.title}</strong>
+                          <span className="tag">{task.tag}</span>
+                          <b className={`due tone-${task.tone}`}>{task.due}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="panel">
+                    <div className="panel-head">
+                      <h2>리뷰 대기 PR</h2>
+                      <span>전체 PR</span>
+                    </div>
+                    <div className="list">
+                      {reviewPrs.map((pr) => (
+                        <div className="pr-row" key={pr.num}>
+                          <div className="pr-icon">◇</div>
+                          <div>
+                            <strong>{pr.title}</strong>
+                            <small>
+                              #{pr.num} · {pr.author}
+                            </small>
+                          </div>
+                          <b className={`pill tone-${pr.tone}`}>{pr.status}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
                 </div>
-                <div className="decision-list">
-                  {decisions.map((decision) => (
-                    <p key={decision}>
-                      <span>✓</span>
-                      {decision}
-                    </p>
-                  ))}
+
+                <div className="right-column">
+                  <section className="agent-panel">
+                    <div className="agent-title">
+                      <span>✦</span>
+                      <h2>Agent 다음 제안</h2>
+                    </div>
+                    {agentSuggestions.map((item) => (
+                      <article className="agent-card" key={item.cta}>
+                        <p>{item.text}</p>
+                        <span>{item.cta}</span>
+                      </article>
+                    ))}
+                  </section>
+
+                  <section className="panel decision-panel">
+                    <div className="panel-head">
+                      <h2>최근 회의 결정</h2>
+                      <span>회의록</span>
+                    </div>
+                    <div className="decision-list">
+                      {decisions.map((decision) => (
+                        <p key={decision}>
+                          <span>✓</span>
+                          {decision}
+                        </p>
+                      ))}
+                    </div>
+                  </section>
                 </div>
-              </section>
-            </div>
-          </div>
-        </section>
-      </section>
-    </main>
+              </div>
+            </section>
+          </section>
+        </main>
+      </AuthGuard>
+    </Suspense>
   );
 }

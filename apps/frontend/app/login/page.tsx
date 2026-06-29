@@ -1,20 +1,24 @@
 import { Suspense } from "react";
 import { DraggableCanvasItems } from "./DraggableCanvasItems";
+import { LoginAuthNotice } from "./LoginAuthNotice";
+import {
+  LoginProviderList,
+  type LoginProviderEntry,
+} from "./LoginProviderList";
 import { WorkspaceEntryTransition } from "./WorkspaceEntryTransition";
-import { authProviderHref } from "./authProviderHref.mjs";
 
-const providers = [
+const providerEntries: LoginProviderEntry[] = [
   {
     name: "Google",
     eyebrow: "Workspace 계정으로 계속",
-    href: authProviderHref("/auth/google/start"),
+    path: "/auth/google/start",
     mark: "G",
     tone: "google",
   },
   {
     name: "GitHub",
     eyebrow: "개발자 계정으로 계속",
-    href: authProviderHref("/auth/github/start"),
+    path: "/auth/github/start",
     mark: "GH",
     tone: "github",
   },
@@ -32,6 +36,25 @@ const backdropNavItems = [
   { label: "Code Review" },
   { label: "설정" },
 ];
+
+function LoginProviderFallback() {
+  return (
+    <div className="provider-list" aria-hidden="true">
+      {providerEntries.map((provider) => (
+        <div className="provider-button" key={provider.name}>
+          <span className={`provider-mark provider-${provider.tone}`}>
+            {provider.mark}
+          </span>
+          <span>
+            <strong>{provider.name}</strong>
+            <small>{provider.eyebrow}</small>
+          </span>
+          <b aria-hidden="true">&rarr;</b>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function LoginPage() {
   return (
@@ -125,7 +148,7 @@ export default function LoginPage() {
               </p>
               <p>
                 <i className="warning-dot" />
-                오늘 마감 Task 범위 점검<span>Task</span>
+                오늘 마감 Task 범위 재확인<span>Task</span>
               </p>
             </section>
           </div>
@@ -150,24 +173,13 @@ export default function LoginPage() {
             <p>Workspace로 계속하려면 계정을 선택하세요.</p>
           </div>
 
-          <div className="provider-list">
-            {providers.map((provider) => (
-              <a
-                className="provider-button"
-                href={provider.href}
-                key={provider.name}
-              >
-                <span className={`provider-mark provider-${provider.tone}`}>
-                  {provider.mark}
-                </span>
-                <span>
-                  <strong>{provider.name}로 계속하기</strong>
-                  <small>{provider.eyebrow}</small>
-                </span>
-                <b aria-hidden="true">→</b>
-              </a>
-            ))}
-          </div>
+          <Suspense fallback={null}>
+            <LoginAuthNotice />
+          </Suspense>
+
+          <Suspense fallback={<LoginProviderFallback />}>
+            <LoginProviderList providers={providerEntries} />
+          </Suspense>
 
           <p className="login-boundary-note">
             GitHub 로그인은 인증용이며 Repository 연결 권한은 별도 단계에서
