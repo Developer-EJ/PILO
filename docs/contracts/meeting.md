@@ -100,6 +100,85 @@
 - `meeting.report.generate`
 - `task.create.draft`
 
+## Workflow Output
+
+### `meeting.report.generate` v1
+
+`AgentResultMessage.output`은 DB row가 아니라 회의록 저장을 위한 artifact 초안이다. DB id, `reportId`, `createdAt`, `updatedAt`은 App Server가 저장 시점에 부여한다.
+
+```json
+{
+  "summary": "Task 분배와 GitHub 연동 범위를 결정했다.",
+  "decisions": [
+    {
+      "content": "Task draft 변환은 Task API adapter 뒤에 둔다.",
+      "status": "decided",
+      "linkedTaskId": null
+    }
+  ],
+  "risks": [
+    {
+      "content": "Task API contract merge가 지연될 수 있다.",
+      "severity": "medium",
+      "sortOrder": 0
+    }
+  ],
+  "nextAgendas": [
+    {
+      "title": "TaskCreateDraft adapter 실제 연동 확인",
+      "sortOrder": 0
+    }
+  ],
+  "actionItems": [
+    {
+      "title": "TaskCreateDraft adapter mock 작성",
+      "description": "meeting_action_items를 TaskCreateDraft payload로 매핑한다.",
+      "assigneeSuggestionMemberId": null,
+      "dueDateSuggestion": null,
+      "priority": "medium"
+    }
+  ]
+}
+```
+
+### Output Artifacts
+
+| Artifact | Required | Purpose |
+|---|---:|---|
+| `summary` | Yes | `meeting_reports.summary` 초안 |
+| `decisions` | Yes | `meeting_decisions` 초안 배열 |
+| `risks` | Yes | `meeting_report_risks` 초안 배열 |
+| `nextAgendas` | Yes | `meeting_report_next_agendas` 초안 배열 |
+| `actionItems` | Yes | `meeting_action_items` 초안 배열 |
+
+### Artifact Shapes
+
+| Artifact | Fields | Defaults / Validation |
+|---|---|---|
+| `summary` | non-empty string | 빈 문자열이면 저장하지 않고 workflow 실패로 처리한다. |
+| `decisions[]` | `content`, `status`, `linkedTaskId` | `status` 기본값은 `decided`; 허용값은 `decided`, `pending`, `reopened`; `linkedTaskId`는 없으면 `null`. |
+| `risks[]` | `content`, `severity`, `sortOrder` | `severity` 기본값은 `medium`; 허용값은 `low`, `medium`, `high`, `critical`; `sortOrder`가 없으면 배열 index를 사용한다. |
+| `nextAgendas[]` | `title`, `sortOrder` | `sortOrder`가 없으면 배열 index를 사용한다. |
+| `actionItems[]` | `title`, `description`, `assigneeSuggestionMemberId`, `dueDateSuggestion`, `priority` | 저장 시 `status = draft`, `convertedTaskId = null`; `priority` 기본값은 `medium`; 실제 Task 생성은 하지 않는다. |
+
+### Persistence Mapping
+
+| `AgentResultMessage.output` path | Meeting storage target | Rule |
+|---|---|---|
+| `summary` | `meeting_reports.summary` | 먼저 report를 생성하거나 기존 report를 재사용한다. |
+| `decisions[]` | `meeting_decisions` | `report_id`는 저장된 report id를 사용한다. |
+| `risks[]` | `meeting_report_risks` | `report_id`와 `sort_order` unique 규칙을 지킨다. |
+| `nextAgendas[]` | `meeting_report_next_agendas` | `report_id`와 `sort_order` unique 규칙을 지킨다. |
+| `actionItems[]` | `meeting_action_items` | Task 후보만 저장한다. `tasks` table에 직접 insert하지 않는다. |
+
+### AgentResultMessage Rules
+
+- `status = failed`이면 `output`을 저장하지 않는다.
+- `trace`는 workflow 실행 설명만 담고 meeting table에 저장하지 않는다.
+- `actions`에 `task.create.draft`가 포함될 수 있지만, `meeting_action_items.convertedTaskId`는 Task API 성공 후에만 채운다.
+- enum이나 required field가 contract와 맞지 않으면 App Server는 report 저장을 중단하고 workflow 실패로 기록한다.
+- `meeting_report_open_questions`는 v1 output artifact에 포함하지 않는다. 필요하면 별도 contract issue/PR로 추가한다.
+
 ## Task Draft Mapping
 
 `MeetingActionItem`은 Task 원본이 아니라 Task 후보이다. Task 저장은 Task API 또는 Agent action executor가 담당한다.

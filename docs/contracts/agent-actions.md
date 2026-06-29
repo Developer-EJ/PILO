@@ -339,6 +339,8 @@ Agent 실행은 app-server가 job queue에 요청을 넣고, ai-worker가 처리
 }
 ```
 
+`output`은 `workflowType`별 contract를 따른다. `workflowType = "meeting.report.generate"`의 output shape과 meeting table 매핑 규칙은 `docs/contracts/meeting.md`의 `meeting.report.generate v1` 섹션을 따른다.
+
 ### Queue Rules
 
 - `jobId`는 idempotency key로 사용한다.
