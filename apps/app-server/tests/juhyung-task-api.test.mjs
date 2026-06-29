@@ -308,6 +308,10 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [currentMember()];
+        },
       },
       repository: {
         getTaskById: async (taskId) => {
@@ -406,14 +410,14 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async () => {
+          throw new Error("empty task list should not load members");
+        },
       },
       repository: {
         listTasksForWorkspace: async (workspaceId, options) => {
           calls.push(["list", workspaceId, options]);
           return [];
-        },
-        listWorkspaceMembersByIds: async () => {
-          throw new Error("empty task list should not load members");
         },
       },
     });
@@ -852,15 +856,15 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [assigneeMember()];
+        },
       },
       repository: {
         getTaskById: async (taskId) => {
           calls.push(["get", taskId]);
           return baseTask;
-        },
-        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
-          calls.push(["members", workspaceId, memberIds]);
-          return [assigneeMember()];
         },
         listChecklistItemsForTask: async (taskId) => {
           calls.push(["checklist", taskId]);
@@ -1003,6 +1007,10 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [assigneeMember()];
+        },
       },
       repository: {
         getTaskById: async (taskId) => {
@@ -1022,10 +1030,6 @@ describe("JuhyungTaskService", () => {
             status,
             updatedAt: new Date("2026-06-28T12:00:00.000Z"),
           };
-        },
-        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
-          calls.push(["members", workspaceId, memberIds]);
-          return [assigneeMember()];
         },
       },
     });
@@ -1053,6 +1057,10 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [assigneeMember()];
+        },
       },
       repository: {
         getTaskById: async (taskId) => {
@@ -1061,10 +1069,6 @@ describe("JuhyungTaskService", () => {
         },
         updateTaskStatus: async () => {
           throw new Error("same status should not be written");
-        },
-        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
-          calls.push(["members", workspaceId, memberIds]);
-          return [assigneeMember()];
         },
       },
     });
@@ -1146,19 +1150,20 @@ describe("JuhyungTaskService", () => {
       repository: {
         getTaskById: async (taskId) => {
           calls.push(["get", taskId]);
-          return taskId === UUIDS.dependsOnTask ? baseDependsOnTask : baseTask;
+          return baseTask;
         },
-        getTaskDependency: async (taskId, dependsOnTaskId) => {
-          calls.push(["findDependency", taskId, dependsOnTaskId]);
-          return null;
-        },
-        listTaskDependenciesForWorkspace: async (workspaceId) => {
-          calls.push(["listDependencies", workspaceId]);
-          return [];
-        },
-        createTaskDependency: async (taskId, dependsOnTaskId) => {
-          calls.push(["createDependency", taskId, dependsOnTaskId]);
-          return baseTaskDependency;
+        createTaskDependencyForWorkspace: async (
+          workspaceId,
+          taskId,
+          dependsOnTaskId,
+        ) => {
+          calls.push([
+            "createDependency",
+            workspaceId,
+            taskId,
+            dependsOnTaskId,
+          ]);
+          return { status: "created", dependency: baseTaskDependency };
         },
       },
     });
@@ -1180,10 +1185,7 @@ describe("JuhyungTaskService", () => {
     assert.deepEqual(calls, [
       ["get", UUIDS.task],
       ["access", UUIDS.workspace, { memberId: UUIDS.member }],
-      ["get", UUIDS.dependsOnTask],
-      ["findDependency", UUIDS.task, UUIDS.dependsOnTask],
-      ["listDependencies", UUIDS.workspace],
-      ["createDependency", UUIDS.task, UUIDS.dependsOnTask],
+      ["createDependency", UUIDS.workspace, UUIDS.task, UUIDS.dependsOnTask],
     ]);
   });
 
@@ -1201,7 +1203,7 @@ describe("JuhyungTaskService", () => {
           calls.push(["get", taskId]);
           return baseTask;
         },
-        createTaskDependency: async () => {
+        createTaskDependencyForWorkspace: async () => {
           throw new Error("self dependency should not be written");
         },
       },
@@ -1229,10 +1231,9 @@ describe("JuhyungTaskService", () => {
       repository: {
         getTaskById: async (taskId) =>
           taskId === UUIDS.dependsOnTask ? baseDependsOnTask : baseTask,
-        getTaskDependency: async () => baseTaskDependency,
-        createTaskDependency: async () => {
-          throw new Error("duplicate dependency should not be written");
-        },
+        createTaskDependencyForWorkspace: async () => ({
+          status: "duplicate",
+        }),
       },
     });
 
@@ -1249,29 +1250,37 @@ describe("JuhyungTaskService", () => {
     );
   });
 
+  it("rejects task dependencies when the target is outside the workspace", async () => {
+    const service = createService({
+      repository: {
+        getTaskById: async () => baseTask,
+        createTaskDependencyForWorkspace: async () => ({
+          status: "target_not_found",
+        }),
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createTaskDependency(
+          UUIDS.task,
+          {
+            dependsOnTaskId: UUIDS.dependsOnTask,
+          },
+          { memberId: UUIDS.member },
+        ),
+      NotFoundException,
+    );
+  });
+
   it("rejects task dependencies that would create a cycle", async () => {
     const service = createService({
       repository: {
         getTaskById: async (taskId) =>
           taskId === UUIDS.dependsOnTask ? baseDependsOnTask : baseTask,
-        getTaskDependency: async () => null,
-        listTaskDependenciesForWorkspace: async () => [
-          {
-            id: "dependency-2",
-            taskId: UUIDS.dependsOnTask,
-            dependsOnTaskId: UUIDS.cycleTask,
-            createdAt: new Date("2026-06-28T11:00:00.000Z"),
-          },
-          {
-            id: "dependency-3",
-            taskId: UUIDS.cycleTask,
-            dependsOnTaskId: UUIDS.task,
-            createdAt: new Date("2026-06-28T11:05:00.000Z"),
-          },
-        ],
-        createTaskDependency: async () => {
-          throw new Error("cyclic dependency should not be written");
-        },
+        createTaskDependencyForWorkspace: async () => ({
+          status: "cycle",
+        }),
       },
     });
 
@@ -1388,6 +1397,10 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [currentMember()];
+        },
       },
       repository: {
         getTaskById: async (taskId) => {
@@ -1397,10 +1410,6 @@ describe("JuhyungTaskService", () => {
         listTaskComments: async (taskId) => {
           calls.push(["comments", taskId]);
           return [baseTaskComment];
-        },
-        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
-          calls.push(["members", workspaceId, memberIds]);
-          return [currentMember()];
         },
       },
     });
@@ -1426,6 +1435,10 @@ describe("JuhyungTaskService", () => {
           calls.push(["access", workspaceId, actor]);
           return currentMember();
         },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [currentMember()];
+        },
       },
       repository: {
         getTaskById: async (taskId) => {
@@ -1435,10 +1448,6 @@ describe("JuhyungTaskService", () => {
         listTaskActivityLogs: async (taskId) => {
           calls.push(["activity", taskId]);
           return [baseTaskActivityLog];
-        },
-        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
-          calls.push(["members", workspaceId, memberIds]);
-          return [currentMember()];
         },
       },
     });
@@ -1940,6 +1949,15 @@ function createService(overrides = {}) {
       const actor =
         typeof memberRef === "string" ? { memberId: memberRef } : memberRef;
       return accessOverride.requireWorkspaceMember(workspaceId, actor);
+    },
+    listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+      if (accessOverride.listWorkspaceMembersByIds) {
+        return accessOverride.listWorkspaceMembersByIds(workspaceId, memberIds);
+      }
+
+      return memberIds.map((memberId) =>
+        memberId === UUIDS.assignee ? assigneeMember() : currentMember(),
+      );
     },
   };
   const repository = overrides.repository ?? {};

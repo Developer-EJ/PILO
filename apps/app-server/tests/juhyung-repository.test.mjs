@@ -164,36 +164,6 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
-  it("loads workspace members by ids for public assignee summaries", async () => {
-    const calls = [];
-    const database = {
-      workspaceMember: {
-        findMany: async (args) => {
-          calls.push(args);
-          return [{ id: "member-1", workspaceId: "workspace-1" }];
-        },
-      },
-    };
-    const repository = new JuhyungRepository(database);
-
-    const members = await repository.listWorkspaceMembersByIds("workspace-1", [
-      "member-1",
-      "member-2",
-    ]);
-
-    assert.deepEqual(members, [{ id: "member-1", workspaceId: "workspace-1" }]);
-    assert.deepEqual(calls, [
-      {
-        where: {
-          workspaceId: "workspace-1",
-          id: {
-            in: ["member-1", "member-2"],
-          },
-        },
-      },
-    ]);
-  });
-
   it("reads milestones for one workspace in date order", async () => {
     const calls = [];
     const database = {
@@ -964,7 +934,10 @@ describe("JuhyungRepository", () => {
       },
     };
     const database = {
-      $transaction: async (callback) => callback(transaction),
+      $transaction: async (callback, options) => {
+        calls.push(["transaction", options]);
+        return callback(transaction);
+      },
     };
     const repository = new JuhyungRepository(database);
 
@@ -976,6 +949,10 @@ describe("JuhyungRepository", () => {
 
     assert.equal(item.sortOrder, 1);
     assert.deepEqual(calls, [
+      [
+        "transaction",
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ],
       [
         "updateMany",
         {
@@ -1037,7 +1014,10 @@ describe("JuhyungRepository", () => {
       },
     };
     const database = {
-      $transaction: async (callback) => callback(transaction),
+      $transaction: async (callback, options) => {
+        calls.push(["transaction", options]);
+        return callback(transaction);
+      },
     };
     const repository = new JuhyungRepository(database);
 
@@ -1048,6 +1028,10 @@ describe("JuhyungRepository", () => {
 
     assert.equal(item.sortOrder, 3);
     assert.deepEqual(calls, [
+      [
+        "transaction",
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ],
       [
         "aggregate",
         {
@@ -1071,6 +1055,42 @@ describe("JuhyungRepository", () => {
         },
       ],
     ]);
+  });
+
+  it("retries checklist append when concurrent sort order allocation collides", async () => {
+    const calls = [];
+    let attempt = 0;
+    const transaction = {
+      taskChecklistItem: {
+        aggregate: async (args) => {
+          calls.push(["aggregate", args]);
+          return { _max: { sortOrder: attempt === 0 ? 2 : 3 } };
+        },
+        create: async (args) => {
+          calls.push(["create", args]);
+          if (attempt === 0) {
+            attempt += 1;
+            throw { code: "P2002" };
+          }
+          return { id: "item-4", ...args.data };
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback, options) => {
+        calls.push(["transaction", options]);
+        return callback(transaction);
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const item = await repository.createChecklistItem("task-1", {
+      title: "Retry deploy smoke",
+      status: "todo",
+    });
+
+    assert.equal(item.sortOrder, 4);
+    assert.equal(calls.filter(([name]) => name === "transaction").length, 2);
   });
 
   it("updates checklist items and reorders collisions inside one transaction", async () => {
@@ -1203,33 +1223,143 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
-  it("creates task dependencies with the source and target task ids", async () => {
+  it("creates task dependencies after atomic workspace cycle checks", async () => {
     const calls = [];
-    const database = {
+    const transaction = {
+      task: {
+        findFirst: async (args) => {
+          calls.push(["task.findFirst", args]);
+          return { id: "task-2", workspaceId: "workspace-1" };
+        },
+        findMany: async (args) => {
+          calls.push(["task.findMany", args]);
+          return [{ id: "task-1" }, { id: "task-2" }];
+        },
+      },
       taskDependency: {
+        findFirst: async (args) => {
+          calls.push(["dependency.findFirst", args]);
+          return null;
+        },
+        findMany: async (args) => {
+          calls.push(["dependency.findMany", args]);
+          return [];
+        },
         create: async (args) => {
-          calls.push(args);
+          calls.push(["dependency.create", args]);
           return { id: "dependency-1", createdAt: new Date(), ...args.data };
         },
       },
     };
+    const database = {
+      $transaction: async (callback, options) => {
+        calls.push(["transaction", options]);
+        return callback(transaction);
+      },
+    };
     const repository = new JuhyungRepository(database);
 
-    const dependency = await repository.createTaskDependency(
+    const result = await repository.createTaskDependencyForWorkspace(
+      "workspace-1",
       "task-1",
       "task-2",
     );
 
+    assert.equal(result.status, "created");
+    const dependency = result.dependency;
     assert.equal(dependency.taskId, "task-1");
     assert.equal(dependency.dependsOnTaskId, "task-2");
     assert.deepEqual(calls, [
-      {
-        data: {
-          taskId: "task-1",
-          dependsOnTaskId: "task-2",
+      [
+        "transaction",
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ],
+      [
+        "task.findFirst",
+        {
+          where: {
+            id: "task-2",
+            workspaceId: "workspace-1",
+            deletedAt: null,
+          },
+        },
+      ],
+      [
+        "dependency.findFirst",
+        {
+          where: {
+            taskId: "task-1",
+            dependsOnTaskId: "task-2",
+          },
+        },
+      ],
+      [
+        "task.findMany",
+        {
+          where: {
+            workspaceId: "workspace-1",
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      ],
+      [
+        "dependency.findMany",
+        {
+          where: {
+            taskId: {
+              in: ["task-1", "task-2"],
+            },
+            dependsOnTaskId: {
+              in: ["task-1", "task-2"],
+            },
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        },
+      ],
+      [
+        "dependency.create",
+        {
+          data: {
+            taskId: "task-1",
+            dependsOnTaskId: "task-2",
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("rejects dependency cycles inside the create transaction", async () => {
+    const calls = [];
+    const transaction = {
+      task: {
+        findFirst: async () => ({ id: "task-2", workspaceId: "workspace-1" }),
+        findMany: async () => [{ id: "task-1" }, { id: "task-2" }],
+      },
+      taskDependency: {
+        findFirst: async () => null,
+        findMany: async () => [{ taskId: "task-2", dependsOnTaskId: "task-1" }],
+        create: async () => {
+          calls.push(["create"]);
+          throw new Error("cyclic dependency should not be inserted");
         },
       },
-    ]);
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const result = await repository.createTaskDependencyForWorkspace(
+      "workspace-1",
+      "task-1",
+      "task-2",
+    );
+
+    assert.deepEqual(result, { status: "cycle" });
+    assert.deepEqual(calls, []);
   });
 
   it("reads an existing task dependency by source and target ids", async () => {

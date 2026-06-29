@@ -47,4 +47,20 @@ export class WorkspaceMemberAccessService {
 
     return member;
   }
+
+  async listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
+    const uniqueMemberIds = [...new Set(memberIds)];
+    if (uniqueMemberIds.length === 0) {
+      return [];
+    }
+
+    return this.database.workspaceMember.findMany({
+      where: {
+        workspaceId,
+        id: {
+          in: uniqueMemberIds,
+        },
+      },
+    });
+  }
 }

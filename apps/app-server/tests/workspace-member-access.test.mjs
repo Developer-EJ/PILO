@@ -9,6 +9,9 @@ const { ForbiddenException, UnauthorizedException } = require("@nestjs/common");
 const {
   WorkspaceMemberAccessService,
 } = require("../src/modules/workspace/workspace-member-access.service");
+const {
+  WorkspaceAccessPublicService,
+} = require("../src/modules/workspace/public/workspace-access-public.service");
 
 describe("WorkspaceMemberAccessService", () => {
   it("loads the current member by workspace and user id", async () => {
@@ -104,6 +107,52 @@ describe("WorkspaceMemberAccessService", () => {
           id: "member-1",
           workspaceId: "workspace-1",
           userId: "user-1",
+        },
+      },
+    ]);
+  });
+
+  it("lists workspace members by ids for public consumers", async () => {
+    const calls = [];
+    const memberAccess = new WorkspaceMemberAccessService({
+      workspaceMember: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [
+            {
+              id: "member-1",
+              workspaceId: "workspace-1",
+              userId: "user-1",
+              role: "member",
+              displayName: "Member One",
+            },
+          ];
+        },
+      },
+    });
+    const publicAccess = new WorkspaceAccessPublicService(memberAccess);
+
+    const members = await publicAccess.listWorkspaceMembersByIds(
+      "workspace-1",
+      ["member-1", "member-2", "member-1"],
+    );
+
+    assert.deepEqual(members, [
+      {
+        id: "member-1",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        role: "member",
+        displayName: "Member One",
+      },
+    ]);
+    assert.deepEqual(calls, [
+      {
+        where: {
+          workspaceId: "workspace-1",
+          id: {
+            in: ["member-1", "member-2"],
+          },
         },
       },
     ]);

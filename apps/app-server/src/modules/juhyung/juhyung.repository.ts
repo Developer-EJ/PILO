@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma, type TaskDependency } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
 import {
   MilestoneStatus,
@@ -9,6 +9,7 @@ import {
 } from "./juhyung-public.types";
 
 const SORT_ORDER_SHIFT = 1000000;
+const MAX_TRANSACTION_RETRIES = 3;
 
 export const JUHYUNG_OWNER_TABLES = [
   "milestones",
@@ -91,6 +92,15 @@ export interface CreateTaskCommentInput {
   body: string;
 }
 
+export type CreateTaskDependencyResult =
+  | {
+      status: "created";
+      dependency: TaskDependency;
+    }
+  | {
+      status: "target_not_found" | "duplicate" | "cycle";
+    };
+
 export type TaskListSortField =
   | "updatedAt"
   | "createdAt"
@@ -136,13 +146,68 @@ export class JuhyungRepository {
     });
   }
 
-  createTaskDependency(taskId: string, dependsOnTaskId: string) {
+  async createTaskDependencyForWorkspace(
+    workspaceId: string,
+    taskId: string,
+    dependsOnTaskId: string,
+  ): Promise<CreateTaskDependencyResult> {
     const data = {
       taskId,
       dependsOnTaskId,
     } satisfies Prisma.TaskDependencyUncheckedCreateInput;
 
-    return this.database.taskDependency.create({ data });
+    try {
+      return await runSerializableTransaction(
+        this.database,
+        async (transaction) => {
+          const dependsOnTask = await transaction.task.findFirst({
+            where: {
+              id: dependsOnTaskId,
+              workspaceId,
+              deletedAt: null,
+            },
+          });
+          if (!dependsOnTask) {
+            return { status: "target_not_found" };
+          }
+
+          const existingDependency = await transaction.taskDependency.findFirst(
+            {
+              where: {
+                taskId,
+                dependsOnTaskId,
+              },
+            },
+          );
+          if (existingDependency) {
+            return { status: "duplicate" };
+          }
+
+          const workspaceDependencies =
+            await listTaskDependenciesForWorkspaceInTransaction(
+              transaction,
+              workspaceId,
+            );
+          if (
+            wouldCreateTaskDependencyCycle(
+              taskId,
+              dependsOnTaskId,
+              workspaceDependencies,
+            )
+          ) {
+            return { status: "cycle" };
+          }
+
+          const dependency = await transaction.taskDependency.create({ data });
+          return { status: "created", dependency };
+        },
+      );
+    } catch (error) {
+      if (isPrismaErrorCode(error, "P2002")) {
+        return { status: "duplicate" };
+      }
+      throw error;
+    }
   }
 
   getTaskDependency(taskId: string, dependsOnTaskId: string) {
@@ -155,31 +220,10 @@ export class JuhyungRepository {
   }
 
   async listTaskDependenciesForWorkspace(workspaceId: string) {
-    const tasks = await this.database.task.findMany({
-      where: {
-        workspaceId,
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-      },
-    });
-    const taskIds = tasks.map((task) => task.id);
-    if (taskIds.length === 0) {
-      return [];
-    }
-
-    return this.database.taskDependency.findMany({
-      where: {
-        taskId: {
-          in: taskIds,
-        },
-        dependsOnTaskId: {
-          in: taskIds,
-        },
-      },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
+    return listTaskDependenciesForWorkspaceInTransaction(
+      this.database,
+      workspaceId,
+    );
   }
 
   deleteTaskDependency(taskId: string, dependsOnTaskId: string) {
@@ -187,17 +231,6 @@ export class JuhyungRepository {
       where: {
         taskId,
         dependsOnTaskId,
-      },
-    });
-  }
-
-  listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
-    return this.database.workspaceMember.findMany({
-      where: {
-        workspaceId,
-        id: {
-          in: memberIds,
-        },
       },
     });
   }
@@ -505,23 +538,27 @@ export class JuhyungRepository {
   }
 
   async createChecklistItem(taskId: string, input: CreateChecklistItemInput) {
-    return this.database.$transaction(async (transaction) => {
-      const sortOrder =
-        input.sortOrder ??
-        (await getNextChecklistSortOrder(transaction, taskId));
-      const data = {
-        taskId,
-        title: input.title,
-        status: input.status,
-        sortOrder,
-      } satisfies Prisma.TaskChecklistItemUncheckedCreateInput;
+    return runSerializableTransaction(
+      this.database,
+      async (transaction) => {
+        const sortOrder =
+          input.sortOrder ??
+          (await getNextChecklistSortOrder(transaction, taskId));
+        const data = {
+          taskId,
+          title: input.title,
+          status: input.status,
+          sortOrder,
+        } satisfies Prisma.TaskChecklistItemUncheckedCreateInput;
 
-      if (input.sortOrder !== undefined) {
-        await shiftChecklistSortOrdersUp(transaction, taskId, sortOrder);
-      }
+        if (input.sortOrder !== undefined) {
+          await shiftChecklistSortOrdersUp(transaction, taskId, sortOrder);
+        }
 
-      return transaction.taskChecklistItem.create({ data });
-    });
+        return transaction.taskChecklistItem.create({ data });
+      },
+      isChecklistCreateRetryableError,
+    );
   }
 
   updateChecklistItem(
@@ -613,6 +650,109 @@ function toActivityValue(value: unknown): Prisma.InputJsonValue | null {
     return null;
   }
   return value as Prisma.InputJsonValue;
+}
+
+async function runSerializableTransaction<T>(
+  database: DatabaseService,
+  callback: (transaction: Prisma.TransactionClient) => Promise<T>,
+  shouldRetry: (error: unknown) => boolean = isSerializableConflictError,
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await database.$transaction(callback, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+    } catch (error) {
+      attempt += 1;
+      if (attempt >= MAX_TRANSACTION_RETRIES || !shouldRetry(error)) {
+        throw error;
+      }
+    }
+  }
+}
+
+async function listTaskDependenciesForWorkspaceInTransaction(
+  client: Pick<Prisma.TransactionClient, "task" | "taskDependency">,
+  workspaceId: string,
+) {
+  const tasks = await client.task.findMany({
+    where: {
+      workspaceId,
+      deletedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+  const taskIds = tasks.map((task) => task.id);
+  if (taskIds.length === 0) {
+    return [];
+  }
+
+  return client.taskDependency.findMany({
+    where: {
+      taskId: {
+        in: taskIds,
+      },
+      dependsOnTaskId: {
+        in: taskIds,
+      },
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+}
+
+function wouldCreateTaskDependencyCycle(
+  taskId: string,
+  dependsOnTaskId: string,
+  dependencies: DependencyEdge[],
+): boolean {
+  const dependencyByTaskId = new Map<string, string[]>();
+  for (const dependency of dependencies) {
+    const existing = dependencyByTaskId.get(dependency.taskId) ?? [];
+    existing.push(dependency.dependsOnTaskId);
+    dependencyByTaskId.set(dependency.taskId, existing);
+  }
+
+  const visited = new Set<string>();
+  const stack = [dependsOnTaskId];
+  while (stack.length > 0) {
+    const currentTaskId = stack.pop() as string;
+    if (currentTaskId === taskId) {
+      return true;
+    }
+    if (visited.has(currentTaskId)) {
+      continue;
+    }
+    visited.add(currentTaskId);
+    stack.push(...(dependencyByTaskId.get(currentTaskId) ?? []));
+  }
+  return false;
+}
+
+interface DependencyEdge {
+  taskId: string;
+  dependsOnTaskId: string;
+}
+
+function isChecklistCreateRetryableError(error: unknown) {
+  return (
+    isSerializableConflictError(error) || isPrismaErrorCode(error, "P2002")
+  );
+}
+
+function isSerializableConflictError(error: unknown) {
+  return isPrismaErrorCode(error, "P2034");
+}
+
+function isPrismaErrorCode(error: unknown, code: string) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
 }
 
 function buildTaskListWhere(

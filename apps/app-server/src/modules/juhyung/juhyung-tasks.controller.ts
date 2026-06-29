@@ -6,6 +6,7 @@ import {
   Headers,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -203,8 +204,9 @@ export class JuhyungTasksController {
   @Delete("tasks/:taskId/dependencies/:dependsOnTaskId")
   @HttpCode(204)
   deleteTaskDependency(
-    @Param("taskId") taskId: string,
-    @Param("dependsOnTaskId") dependsOnTaskId: string,
+    @Param("taskId", new ParseUUIDPipe()) taskId: string,
+    @Param("dependsOnTaskId", new ParseUUIDPipe())
+    dependsOnTaskId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
   ) {

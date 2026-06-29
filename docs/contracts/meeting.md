@@ -175,7 +175,7 @@
 
 - `status = failed`이면 `output`을 저장하지 않는다.
 - `trace`는 workflow 실행 설명만 담고 meeting table에 저장하지 않는다.
-- `actions`에 `task.create.draft`가 포함될 수 있지만, `meeting_action_items.convertedTaskId`는 Task API 성공 후에만 채운다.
+- `actions`에 `task.create.draft`가 포함될 수 있지만, `meeting_action_items.convertedTaskId`는 해당 Task draft approve가 성공해 실제 Task가 생성된 뒤에만 채운다.
 - enum이나 required field가 contract와 맞지 않으면 App Server는 report 저장을 중단하고 workflow 실패로 기록한다.
 - `meeting_report_open_questions`는 v1 output artifact에 포함하지 않는다. 필요하면 별도 contract issue/PR로 추가한다.
 

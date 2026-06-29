@@ -44,6 +44,18 @@ export class WorkspaceAccessPublicService {
     return this.toAccessResult(member);
   }
 
+  async listWorkspaceMembersByIds(
+    workspaceId: string,
+    memberIds: string[],
+  ): Promise<WorkspaceMemberAccessResult[]> {
+    const members = await this.workspaceMemberAccess.listWorkspaceMembersByIds(
+      workspaceId,
+      memberIds,
+    );
+
+    return members.map((member) => this.toAccessResult(member));
+  }
+
   private toAccessResult(member: WorkspaceMemberAccessResult) {
     return {
       id: member.id,

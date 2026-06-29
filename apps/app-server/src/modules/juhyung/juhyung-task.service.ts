@@ -53,7 +53,6 @@ import {
   TaskChecklistItemSummary,
   TaskCommentRecord,
   TaskCommentSummary,
-  TaskDependencyRecord,
   TaskDependencySummary,
   TaskDraftRecord,
   TaskDraftSummary,
@@ -375,38 +374,22 @@ export class JuhyungTaskService {
       throw new BadRequestException("Task cannot depend on itself");
     }
 
-    const dependsOnTask = await this.repository.getTaskById(
-      input.dependsOnTaskId,
-    );
-    if (!dependsOnTask || dependsOnTask.workspaceId !== task.workspaceId) {
-      throw new NotFoundException("Dependency target task was not found");
-    }
-
-    const existingDependency = await this.repository.getTaskDependency(
+    const result = await this.repository.createTaskDependencyForWorkspace(
+      task.workspaceId,
       taskId,
       input.dependsOnTaskId,
     );
-    if (existingDependency) {
-      throw new BadRequestException("Task dependency already exists");
-    }
-
-    const workspaceDependencies =
-      await this.repository.listTaskDependenciesForWorkspace(task.workspaceId);
-    if (
-      wouldCreateTaskDependencyCycle(
-        taskId,
-        input.dependsOnTaskId,
-        workspaceDependencies,
-      )
-    ) {
+    if (result.status !== "created") {
+      if (result.status === "target_not_found") {
+        throw new NotFoundException("Dependency target task was not found");
+      }
+      if (result.status === "duplicate") {
+        throw new BadRequestException("Task dependency already exists");
+      }
       throw new BadRequestException("Task dependency cycle is not allowed");
     }
 
-    const dependency = await this.repository.createTaskDependency(
-      taskId,
-      input.dependsOnTaskId,
-    );
-    return this.publicAdapter.toTaskDependencySummary(dependency);
+    return this.publicAdapter.toTaskDependencySummary(result.dependency);
   }
 
   async deleteTaskDependency(
@@ -660,7 +643,7 @@ export class JuhyungTaskService {
       return new Map();
     }
 
-    const members = await this.repository.listWorkspaceMembersByIds(
+    const members = await this.workspaceAccess.listWorkspaceMembersByIds(
       workspaceId,
       uniqueMemberIds,
     );
@@ -668,34 +651,6 @@ export class JuhyungTaskService {
       members.map((member) => [member.id, member as WorkspaceMemberRecord]),
     );
   }
-}
-
-function wouldCreateTaskDependencyCycle(
-  taskId: string,
-  dependsOnTaskId: string,
-  dependencies: TaskDependencyRecord[],
-): boolean {
-  const dependencyByTaskId = new Map<string, string[]>();
-  for (const dependency of dependencies) {
-    const existing = dependencyByTaskId.get(dependency.taskId) ?? [];
-    existing.push(dependency.dependsOnTaskId);
-    dependencyByTaskId.set(dependency.taskId, existing);
-  }
-
-  const visited = new Set<string>();
-  const stack = [dependsOnTaskId];
-  while (stack.length > 0) {
-    const currentTaskId = stack.pop() as string;
-    if (currentTaskId === taskId) {
-      return true;
-    }
-    if (visited.has(currentTaskId)) {
-      continue;
-    }
-    visited.add(currentTaskId);
-    stack.push(...(dependencyByTaskId.get(currentTaskId) ?? []));
-  }
-  return false;
 }
 
 function assertDraftIsOpen(draft: TaskDraftRecord): void {
