@@ -364,9 +364,17 @@ export class AuthRepository {
     }
 
     if (user.emailVerifiedAt) {
-      this.userIdByEmail.set(user.email, user.id);
+      this.setVerifiedEmailIndex(user.email, user.id);
     } else {
       this.deleteVerifiedEmailIndex(user.email, user.id);
+    }
+  }
+
+  private setVerifiedEmailIndex(email: string, userId: string) {
+    const existingUserId = this.userIdByEmail.get(email);
+
+    if (!existingUserId || existingUserId === userId) {
+      this.userIdByEmail.set(email, userId);
     }
   }
 

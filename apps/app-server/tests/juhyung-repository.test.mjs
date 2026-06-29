@@ -758,6 +758,44 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
+  it("updates unchanged task status without writing an activity log", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        update: async (args) => {
+          calls.push(["task.update", args]);
+          return { id: "task-1", status: args.data.status };
+        },
+      },
+      $transaction: async () => {
+        throw new Error("same status should not open a transaction");
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const task = await repository.updateTaskStatus(
+      "task-1",
+      "todo",
+      "member-1",
+      "todo",
+    );
+
+    assert.deepEqual(task, { id: "task-1", status: "todo" });
+    assert.deepEqual(calls, [
+      [
+        "task.update",
+        {
+          where: {
+            id: "task-1",
+          },
+          data: {
+            status: "todo",
+          },
+        },
+      ],
+    ]);
+  });
+
   it("soft deletes tasks by setting deletedAt", async () => {
     const calls = [];
     const database = {
@@ -986,7 +1024,7 @@ describe("JuhyungRepository", () => {
 
   it("appends checklist items when sort order is not provided", async () => {
     const calls = [];
-    const database = {
+    const transaction = {
       taskChecklistItem: {
         aggregate: async (args) => {
           calls.push(["aggregate", args]);
@@ -997,6 +1035,9 @@ describe("JuhyungRepository", () => {
           return { id: "item-3", ...args.data };
         },
       },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
     };
     const repository = new JuhyungRepository(database);
 

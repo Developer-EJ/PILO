@@ -1,3 +1,12 @@
+import type {
+  GithubIssueSummary,
+  ProgressSummary,
+  PullRequestSummary,
+  TaskSummary,
+} from "../juhyung/juhyung-public.types";
+import type { CanvasEntityType } from "../canvas/canvas.types";
+import type { PRAnalysisSummary } from "../review/public/pr-analysis-summary.adapter";
+
 export const WORKSPACE_TYPES = [
   "side_project",
   "bootcamp",
@@ -119,19 +128,69 @@ export type DashboardPreferences = {
   updatedAt: string | null;
 };
 
+export type MeetingReportSummary = {
+  id: string;
+  meetingId: string;
+  workspaceId: string;
+  title: string;
+  summary: string;
+  decisionCount: number;
+  actionItemCount: number;
+  riskCount: number;
+  createdAt?: string;
+};
+
+export type AgentAction = {
+  id: string;
+  runId: string;
+  type:
+    | "task.create.draft"
+    | "task.update.status"
+    | "github.issue.create"
+    | "meeting.report.generate"
+    | "review.analysis.generate"
+    | "planning.approve";
+  source:
+    | "meeting"
+    | "task"
+    | "github"
+    | "review"
+    | "planning"
+    | "orchestrator";
+  requiresConfirmation: boolean;
+  payload: Record<string, unknown>;
+  status:
+    | "draft"
+    | "waiting_confirmation"
+    | "confirmed"
+    | "executed"
+    | "rejected"
+    | "failed";
+  confirmedByMemberId: string | null;
+  confirmedAt: string | null;
+  executedAt: string | null;
+};
+
+export type CanvasEntityRef = {
+  entityType: CanvasEntityType;
+  entityId: string;
+  displayTitle: string;
+  shapeType: CanvasEntityType;
+};
+
 export type WorkspaceDashboardReadModel = {
   workspace: WorkspaceSummary;
   currentMember: CurrentWorkspaceMember;
   preferences: DashboardPreferences;
   members: WorkspaceMemberSummary[];
-  tasks: unknown[];
-  progress: Record<string, unknown> | null;
-  githubIssues: unknown[];
-  pullRequests: unknown[];
-  meetingReports: unknown[];
-  prAnalyses: unknown[];
-  agentActions: unknown[];
-  canvasEntities: unknown[];
+  tasks: TaskSummary[];
+  progress: ProgressSummary | null;
+  githubIssues: GithubIssueSummary[];
+  pullRequests: PullRequestSummary[];
+  meetingReports: MeetingReportSummary[];
+  prAnalyses: PRAnalysisSummary[];
+  agentActions: AgentAction[];
+  canvasEntities: CanvasEntityRef[];
   source: "fixture" | "empty";
   generatedAt: string;
 };
@@ -232,6 +291,10 @@ export type WorkspaceRepositoryPort = {
   ): Promise<WorkspaceSummary | null>;
   findCurrentMember(
     input: FindWorkspaceForUserInput,
+  ): Promise<WorkspaceMemberRecord | null>;
+  findWorkspaceMemberByEmail(
+    workspaceId: string,
+    email: string,
   ): Promise<WorkspaceMemberRecord | null>;
   listWorkspaceMemberSummariesForUser(
     input: FindWorkspaceForUserInput,

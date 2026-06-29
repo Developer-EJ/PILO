@@ -639,7 +639,7 @@ describe("auth HTTP integration", () => {
         payload: JSON.stringify({
           shapeType: "unknown",
           entityType: "task",
-          entityId: "task-1",
+          entityId: "44444444-4444-4444-8444-444444444401",
           displayTitle: "Invalid",
           width: 280,
           height: 160,
@@ -659,7 +659,7 @@ describe("auth HTTP integration", () => {
         payload: JSON.stringify({
           shapeType: "task",
           entityType: "task",
-          entityId: "task-1",
+          entityId: "44444444-4444-4444-8444-444444444401",
           displayTitle: "Login API",
           width: 280,
           height: 160,
@@ -685,7 +685,7 @@ describe("auth HTTP integration", () => {
         payload: JSON.stringify({
           shapeType: "pull_request",
           entityType: "pull_request",
-          entityId: "pr-42",
+          entityId: "44444444-4444-4444-8444-444444444402",
           displayTitle: "PR #42",
           width: 300,
           height: 172,

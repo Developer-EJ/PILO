@@ -5,6 +5,10 @@ import packageJson from "../package.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
 const { CanvasGateway } = require("../dist/canvas.gateway");
+const { createRealtimeCorsOptions } = require("../dist/cors.config");
+const {
+  CanvasRealtimeAccessGuard,
+} = require("../dist/canvas-realtime-access.guard");
 const {
   CANVAS_REALTIME_EVENTS,
   CANVAS_REALTIME_NAMESPACE,
@@ -149,6 +153,15 @@ describe("realtime-server package", () => {
         viewportY: 20,
       },
     );
+    assert.equal(
+      parseCanvasViewEventPayload({
+        boardId: "board-1",
+        zoom: 0.05,
+        viewportX: 10,
+        viewportY: 20,
+      }),
+      null,
+    );
     assert.deepEqual(
       parseCanvasPresenceEventPayload({
         boardId: "board-1",
@@ -203,6 +216,32 @@ describe("realtime-server package", () => {
       }),
       null,
     );
+    assert.equal(
+      parseCanvasShapeMutationPayload({
+        boardId: "board-1",
+        shapeId: "shape-1",
+        baseVersion: 0,
+        x: 120,
+        y: 140,
+        width: 0,
+        height: 160,
+      }),
+      null,
+    );
+  });
+
+  it("uses non-credential wildcard CORS and credentialed explicit allowlists", () => {
+    assert.deepEqual(createRealtimeCorsOptions("*"), {
+      origin: true,
+      credentials: false,
+    });
+    assert.deepEqual(
+      createRealtimeCorsOptions("https://app.pilo.test, https://admin.pilo.test"),
+      {
+        origin: ["https://app.pilo.test", "https://admin.pilo.test"],
+        credentials: true,
+      },
+    );
   });
 
   it("joins and leaves Canvas board rooms with currentMember context", async () => {
@@ -237,6 +276,32 @@ describe("realtime-server package", () => {
       room: "canvas:board:board-1",
       currentMember,
     });
+  });
+
+  it("resolves board access through an injectable server provider", async () => {
+    const accessGuard = new CanvasRealtimeAccessGuard({
+      resolveBoardWorkspaceId({ currentMember }) {
+        return currentMember.workspaceId;
+      },
+    });
+    const gateway = new CanvasGateway(accessGuard);
+    const currentMember = {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "owner",
+      displayName: null,
+    };
+    const { socket, joinedRooms } = createSocketStub(currentMember, {
+      canvasBoards: [],
+    });
+
+    const joinAck = await gateway.joinBoardRoom(socket, {
+      boardId: "board-1",
+    });
+
+    assert.equal(joinAck.ok, true);
+    assert.deepEqual(joinedRooms, ["canvas:board:board-1"]);
   });
 
   it("rejects Canvas room events without auth context or valid board payload", async () => {
@@ -385,6 +450,40 @@ describe("realtime-server package", () => {
         payload: ack.shape,
       },
     ]);
+  });
+
+  it("preserves shape width and height for move-only mutations", async () => {
+    const gateway = new CanvasGateway();
+    const currentMember = {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "member",
+      displayName: null,
+    };
+    const { socket } = createSocketStub(currentMember);
+
+    await gateway.syncShapeMutation(socket, {
+      boardId: "board-1",
+      shapeId: "shape-1",
+      baseVersion: 0,
+      x: 120,
+      y: 140,
+      width: 280,
+      height: 160,
+    });
+    const ack = await gateway.syncShapeMutation(socket, {
+      boardId: "board-1",
+      shapeId: "shape-1",
+      baseVersion: 1,
+      x: 200,
+      y: 240,
+    });
+
+    assert.equal(ack.ok, true);
+    assert.equal(ack.shape.width, 280);
+    assert.equal(ack.shape.height, 160);
+    assert.equal(ack.shape.version, 2);
   });
 
   it("rejects stale shape mutations and viewer write attempts", async () => {

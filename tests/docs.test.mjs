@@ -490,7 +490,14 @@ describe("machine-readable public contract schema", () => {
     assert.equal(detail.properties.approval.$ref, "#/$defs/ProjectPlanApprovalState");
     assert.equal(detail.properties.featureDrafts.items.$ref, "#/$defs/ProjectPlanFeatureDraft");
     assert.equal(detail.properties.milestoneDrafts.items.$ref, "#/$defs/ProjectPlanMilestoneDraft");
-    assert.deepEqual(schema.$defs.ProjectPlanDraftStatus.enum, ["draft", "reviewing", "approved", "rejected"]);
+    assert.deepEqual(schema.$defs.ProjectPlanDraftStatus.enum, [
+      "draft",
+      "reviewing",
+      "approved",
+      "rejected",
+      "waiting_confirmation",
+      "approved_pending_task_creation",
+    ]);
     assert.deepEqual(approval.properties.status.$ref, "#/$defs/PlanningApprovalStatus");
     assert.equal(approval.properties.ownerApiResults.items.$ref, "#/$defs/PlanningOwnerApiResult");
     assert.deepEqual(ownerResult.properties.operation.enum, ["task.create", "milestone.create"]);

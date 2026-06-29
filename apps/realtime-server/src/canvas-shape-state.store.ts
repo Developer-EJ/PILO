@@ -35,6 +35,14 @@ export class CanvasShapeStateStore {
 
     const shape: CanvasShapeServerState = {
       ...payload,
+      width:
+        payload.width === null && currentShape
+          ? currentShape.width
+          : payload.width,
+      height:
+        payload.height === null && currentShape
+          ? currentShape.height
+          : payload.height,
       version: currentVersion + 1,
       updatedByMemberId,
     };

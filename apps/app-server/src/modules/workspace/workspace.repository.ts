@@ -75,6 +75,27 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     return this.findMemberRecord(input);
   }
 
+  async findWorkspaceMemberByEmail(
+    workspaceId: string,
+    email: string,
+  ): Promise<WorkspaceMemberRecord | null> {
+    const workspace = this.findVisibleWorkspace(workspaceId);
+
+    if (!workspace) {
+      return null;
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+
+    return (
+      Array.from(this.membersById.values()).find(
+        (member) =>
+          member.workspaceId === workspaceId &&
+          normalizeEmail(member.email) === normalizedEmail,
+      ) ?? null
+    );
+  }
+
   async listWorkspaceMemberSummariesForUser(
     input: FindWorkspaceForUserInput,
   ): Promise<WorkspaceMemberSummary[] | null> {

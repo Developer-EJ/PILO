@@ -75,9 +75,13 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
   "status": "in_progress",
   "startDate": "2026-07-01",
   "endDate": "2026-07-31",
+  "taskCount": 12,
+  "doneTaskCount": 5,
   "updatedAt": "2026-06-27T12:00:00Z"
 }
 ```
+
+`taskCount` and `doneTaskCount` count tasks linked to the milestone in the same workspace. If task aggregation is not connected yet, both values are `0`.
 
 `status`는 `planned`, `in_progress`, `done` 중 하나다. `startDate`, `endDate`는 없으면 `null`이며, 두 값이 모두 있으면 `endDate >= startDate`여야 한다.
 
@@ -96,7 +100,9 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ### TaskListQuery
 
-`GET /workspaces/:workspaceId/tasks`는 기본적으로 삭제되지 않은 Task를 `updatedAt desc`로 최대 50개 반환한다.
+Default list responses return all matching non-deleted tasks sorted by `updatedAt desc`. Pagination is applied only when `limit` or `offset` is explicitly provided.
+
+`GET /workspaces/:workspaceId/tasks`는 기본적으로 삭제되지 않은 Task 전체를 `updatedAt desc`로 반환한다. `limit` 또는 `offset`을 명시한 경우에만 pagination을 적용한다.
 
 | Query              | Type                                                               | 설명                            |
 | ------------------ | ------------------------------------------------------------------ | ------------------------------- |
@@ -108,8 +114,8 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 | `milestoneId`      | `uuid`                                                             | milestone 필터                  |
 | `sortBy`           | `updatedAt`, `createdAt`, `dueDate`, `priority`, `status`, `title` | 정렬 기준. 기본값은 `updatedAt` |
 | `sortDirection`    | `asc`, `desc`                                                      | 정렬 방향. 기본값은 `desc`      |
-| `limit`            | `1..100`                                                           | 반환 개수. 기본값은 `50`        |
-| `offset`           | `0..`                                                              | 건너뛸 개수. 기본값은 `0`       |
+| `limit`            | `1..100`                                                           | 반환 개수. 명시한 경우에만 적용 |
+| `offset`           | `0..`                                                              | 건너뛸 개수. 명시한 경우에만 적용 |
 
 ```text
 GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDateFrom=2026-07-01&dueDateTo=2026-07-31&sortBy=dueDate&sortDirection=asc&limit=25&offset=50
@@ -165,6 +171,8 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 ```
 
 ### TaskDraftSummary
+
+Canonical `TaskDraftSummary.status` values are `draft`, `waiting_confirmation`, `approved`, and `rejected`. `waiting_confirmation` is reserved for confirmation-gated draft flows and is not approved or rejected until it returns to a Task-owned transition.
 
 ```json
 {

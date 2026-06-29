@@ -9,7 +9,7 @@ import type {
 export class WorkspaceCurrentMemberAdapter {
   constructor(private readonly workspaceService: WorkspaceService) {}
 
-  resolveCurrentMember(input: ResolveCurrentMemberInput) {
+  resolveCurrentMemberContext(input: ResolveCurrentMemberInput) {
     return this.workspaceService.resolveCurrentMemberContext(input);
   }
 

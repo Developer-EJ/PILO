@@ -23,8 +23,42 @@ export type CanvasRealtimeBoardAccessResult =
       message: string;
     };
 
+export type CanvasRealtimeBoardAccessProviderInput = {
+  client: Socket;
+  boardId: string;
+  currentMember: CanvasRealtimeAuthContext;
+};
+
+export abstract class CanvasRealtimeBoardAccessProvider {
+  abstract resolveBoardWorkspaceId(
+    input: CanvasRealtimeBoardAccessProviderInput,
+  ): string | null;
+}
+
+@Injectable()
+export class LocalHandshakeCanvasRealtimeBoardAccessProvider
+  implements CanvasRealtimeBoardAccessProvider
+{
+  readonly mode = "local-handshake-insecure-fallback";
+
+  resolveBoardWorkspaceId(input: CanvasRealtimeBoardAccessProviderInput) {
+    const boardAccessList = parseCanvasRealtimeBoardAccessList(
+      input.client.handshake.auth?.canvasBoards,
+    );
+    const boardAccess = boardAccessList.find(
+      (item) => item.boardId === input.boardId,
+    );
+
+    return boardAccess?.workspaceId ?? null;
+  }
+}
+
 @Injectable()
 export class CanvasRealtimeAccessGuard {
+  constructor(
+    private readonly boardAccessProvider: CanvasRealtimeBoardAccessProvider = new LocalHandshakeCanvasRealtimeBoardAccessProvider(),
+  ) {}
+
   requireBoardAccess(
     client: Socket,
     boardId: string,
@@ -56,7 +90,11 @@ export class CanvasRealtimeAccessGuard {
       return deny("auth_expired", "Canvas realtime session is expired.");
     }
 
-    const boardWorkspaceId = this.resolveBoardWorkspaceId(client, boardId);
+    const boardWorkspaceId = this.boardAccessProvider.resolveBoardWorkspaceId({
+      client,
+      boardId,
+      currentMember,
+    });
 
     if (!boardWorkspaceId) {
       return deny(
@@ -86,17 +124,6 @@ export class CanvasRealtimeAccessGuard {
       ok: true,
       currentMember,
     };
-  }
-
-  private resolveBoardWorkspaceId(client: Socket, boardId: string) {
-    const boardAccessList = parseCanvasRealtimeBoardAccessList(
-      client.handshake.auth?.canvasBoards,
-    );
-    const boardAccess = boardAccessList.find(
-      (item) => item.boardId === boardId,
-    );
-
-    return boardAccess?.workspaceId ?? null;
   }
 }
 

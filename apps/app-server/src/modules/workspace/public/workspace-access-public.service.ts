@@ -11,6 +11,7 @@ export interface WorkspaceMemberAccessResult {
   workspaceId: string;
   userId: string;
   role: string;
+  displayName?: string | null;
 }
 
 @Injectable()
@@ -49,6 +50,7 @@ export class WorkspaceAccessPublicService {
       workspaceId: member.workspaceId,
       userId: member.userId,
       role: member.role,
+      displayName: member.displayName ?? null,
     };
   }
 }

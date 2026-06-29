@@ -2,7 +2,11 @@ import { Module } from "@nestjs/common";
 import { HealthController } from "./health.controller";
 import { EventsGateway } from "./events.gateway";
 import { CanvasGateway } from "./canvas.gateway";
-import { CanvasRealtimeAccessGuard } from "./canvas-realtime-access.guard";
+import {
+  CanvasRealtimeAccessGuard,
+  CanvasRealtimeBoardAccessProvider,
+  LocalHandshakeCanvasRealtimeBoardAccessProvider,
+} from "./canvas-realtime-access.guard";
 import { CanvasShapeStateStore } from "./canvas-shape-state.store";
 
 @Module({
@@ -10,6 +14,11 @@ import { CanvasShapeStateStore } from "./canvas-shape-state.store";
   providers: [
     EventsGateway,
     CanvasGateway,
+    LocalHandshakeCanvasRealtimeBoardAccessProvider,
+    {
+      provide: CanvasRealtimeBoardAccessProvider,
+      useExisting: LocalHandshakeCanvasRealtimeBoardAccessProvider,
+    },
     CanvasRealtimeAccessGuard,
     CanvasShapeStateStore,
   ],

@@ -7,7 +7,11 @@ export type TaskStatus =
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type TaskChecklistStatus = "todo" | "done";
 export type MilestoneStatus = "planned" | "in_progress" | "done";
-export type TaskDraftStatus = "draft" | "approved" | "rejected";
+export type TaskDraftStatus =
+  | "draft"
+  | "waiting_confirmation"
+  | "approved"
+  | "rejected";
 export type GithubIssueState = "open" | "closed";
 export type PullRequestState =
   | "open"
@@ -96,6 +100,8 @@ export interface MilestoneRecord {
   status: string;
   startDate?: Date | string | null;
   endDate?: Date | string | null;
+  taskCount?: number | null;
+  doneTaskCount?: number | null;
   updatedAt: Date | string;
 }
 
@@ -106,6 +112,8 @@ export interface MilestoneSummary {
   status: MilestoneStatus;
   startDate: string | null;
   endDate: string | null;
+  taskCount: number;
+  doneTaskCount: number;
   updatedAt: string;
 }
 

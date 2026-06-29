@@ -145,7 +145,7 @@ export function parseCanvasViewEventPayload(
 ): CanvasViewEventPayload | null {
   const record = asRecord(payload);
   const boardId = parseNonEmptyString(record?.boardId);
-  const zoom = parseFiniteNumber(record?.zoom);
+  const zoom = parseMinimumNumber(record?.zoom, 0.1);
   const viewportX = parseFiniteNumber(record?.viewportX);
   const viewportY = parseFiniteNumber(record?.viewportY);
 
@@ -191,8 +191,8 @@ export function parseCanvasShapeMutationPayload(
   const baseVersion = parseNonNegativeInteger(record?.baseVersion);
   const x = parseFiniteNumber(record?.x);
   const y = parseFiniteNumber(record?.y);
-  const width = parseOptionalPositiveNumber(record?.width);
-  const height = parseOptionalPositiveNumber(record?.height);
+  const width = parseOptionalMinimumNumber(record?.width, 1);
+  const height = parseOptionalMinimumNumber(record?.height, 1);
 
   if (
     !boardId ||
@@ -318,16 +318,27 @@ function parseNonNegativeInteger(value: unknown): number | null {
     : null;
 }
 
-function parseOptionalPositiveNumber(
+function parseMinimumNumber(value: unknown, minimum: number): number | null {
+  const parsed = parseFiniteNumber(value);
+
+  if (parsed === null || parsed < minimum) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseOptionalMinimumNumber(
   value: unknown,
+  minimum: number,
 ): number | null | undefined {
   if (value === undefined || value === null) {
     return null;
   }
 
-  const parsed = parseFiniteNumber(value);
+  const parsed = parseMinimumNumber(value, minimum);
 
-  if (parsed === null || parsed <= 0) {
+  if (parsed === null) {
     return undefined;
   }
 

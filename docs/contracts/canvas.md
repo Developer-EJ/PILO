@@ -252,10 +252,12 @@ Room payload:
 
 Room name format is `canvas:board:{boardId}`.
 
-The realtime auth connection point expects `session`, `currentMember`, and a
-board access adapter result in the Socket.IO handshake auth. The default local
-adapter reads `canvasBoards` from the handshake; production can replace that
-adapter with DB/app-server lookup without changing the event payload.
+The realtime auth connection point expects server-verified `session` and
+`currentMember` context. Board access is resolved through the realtime server's
+`CanvasRealtimeBoardAccessProvider`, which production must back with a
+server-verifiable DB/app-server lookup. Local and test environments may use the
+explicit insecure handshake fallback shown below without changing event
+payloads.
 
 ```json
 {
@@ -292,7 +294,7 @@ Room join/leave is rejected when:
 
 ### Broadcast Payloads
 
-Shape event payload:
+Shape mutation payload (client -> server):
 
 ```json
 {
@@ -307,16 +309,35 @@ Shape event payload:
 ```
 
 - Event: `canvas:shape:changed`
-- Direction: client -> server, server -> room broadcast
+- Direction: client -> server
 - `baseVersion` is the last server accepted shape version known by the client.
 - `x` and `y` are required finite numbers.
-- `width` and `height` are nullable. Use `null` for move-only updates.
+- `width` and `height` are nullable. Use `null` for move-only updates; the server keeps the previous dimensions.
 - Server policy: the realtime server accepts the mutation only when
   `baseVersion` matches the current server version for `boardId + shapeId`.
-  Accepted mutations increment `version` by 1 and broadcast the final state.
 - Conflict policy: stale `baseVersion` is rejected with `error = "conflict"`
   and `currentVersion`. The client should refresh from the latest board
   snapshot or retry against the returned version.
+
+Shape broadcast payload (server -> room broadcast):
+
+```json
+{
+  "boardId": "uuid",
+  "shapeId": "uuid",
+  "baseVersion": 0,
+  "x": 120,
+  "y": 140,
+  "width": 280,
+  "height": 160,
+  "version": 1,
+  "updatedByMemberId": "uuid"
+}
+```
+
+- Event: `canvas:shape:changed`
+- Direction: server -> room broadcast
+- Accepted mutations increment `version` by 1 and broadcast the final server state.
 
 View event payload:
 

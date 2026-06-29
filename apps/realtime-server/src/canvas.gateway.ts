@@ -16,13 +16,11 @@ import {
 } from "./canvas-realtime.contract";
 import { CanvasRealtimeAccessGuard } from "./canvas-realtime-access.guard";
 import { CanvasShapeStateStore } from "./canvas-shape-state.store";
+import { createRealtimeCorsOptions } from "./cors.config";
 
 @WebSocketGateway({
   namespace: CANVAS_REALTIME_NAMESPACE,
-  cors: {
-    origin: process.env.CORS_ORIGIN === "*" ? true : process.env.CORS_ORIGIN,
-    credentials: true,
-  },
+  cors: createRealtimeCorsOptions(),
 })
 export class CanvasGateway {
   constructor(

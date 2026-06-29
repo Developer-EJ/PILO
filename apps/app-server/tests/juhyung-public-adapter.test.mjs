@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 
@@ -14,14 +13,11 @@ const {
 
 const schema = JSON.parse(
   readFileSync(
-    resolve(
-      process.cwd(),
-      "..",
-      "..",
-      "docs",
-      "contracts",
-      "schemas",
-      "pilo-public-contracts.schema.json",
+    fileURLToPath(
+      new URL(
+        "../../../docs/contracts/schemas/pilo-public-contracts.schema.json",
+        import.meta.url,
+      ),
     ),
     "utf8",
   ),
@@ -180,6 +176,8 @@ describe("JuhyungPublicAdapter", () => {
       status: "in_progress",
       startDate: new Date("2026-07-01T00:00:00.000Z"),
       endDate: new Date("2026-07-31T00:00:00.000Z"),
+      taskCount: 5,
+      doneTaskCount: 2,
       updatedAt: new Date("2026-06-28T12:00:00.000Z"),
     });
 
@@ -190,6 +188,8 @@ describe("JuhyungPublicAdapter", () => {
       status: "in_progress",
       startDate: "2026-07-01",
       endDate: "2026-07-31",
+      taskCount: 5,
+      doneTaskCount: 2,
       updatedAt: "2026-06-28T12:00:00.000Z",
     });
     assertContract("MilestoneSummary", summary);

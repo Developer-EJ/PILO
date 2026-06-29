@@ -4,9 +4,9 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
-  CurrentActor,
-  WorkspaceMemberAccessService,
-} from "../workspace/workspace-member-access.service";
+  WorkspaceAccessPublicService,
+  type WorkspaceActor as CurrentActor,
+} from "../workspace/public/workspace-access-public.service";
 import {
   parseCreateChecklistItemInput,
   parseUpdateChecklistItemInput,
@@ -91,7 +91,7 @@ export type { ListTasksQuery } from "./juhyung-task-list-query";
 export class JuhyungTaskService {
   constructor(
     private readonly repository: JuhyungRepository,
-    private readonly workspaceAccess: WorkspaceMemberAccessService,
+    private readonly workspaceAccess: WorkspaceAccessPublicService,
     private readonly publicAdapter: JuhyungPublicAdapter = new JuhyungPublicAdapter(),
   ) {}
 
@@ -338,6 +338,11 @@ export class JuhyungTaskService {
   ): Promise<TaskSummary> {
     const status = parseTaskStatus(body);
     const { task, currentMember } = await this.requireTaskAccess(taskId, actor);
+    if (task.status === status) {
+      const [summary] = await this.toTaskSummaries(task.workspaceId, [task]);
+      return summary;
+    }
+
     const updatedTask = await this.repository.updateTaskStatus(
       taskId,
       status,
@@ -637,19 +642,10 @@ export class JuhyungTaskService {
     workspaceId: string,
     memberId: string,
   ) {
-    const workspaceAccess = this.workspaceAccess as WorkspaceMemberAccessService & {
-      requireWorkspaceMemberById?: (
-        workspaceId: string,
-        memberId: string,
-      ) => Promise<WorkspaceMemberRecord>;
-    };
-    if (typeof workspaceAccess.requireWorkspaceMemberById === "function") {
-      return workspaceAccess.requireWorkspaceMemberById(workspaceId, memberId);
-    }
-
-    return this.workspaceAccess.requireWorkspaceMember(workspaceId, {
+    return this.workspaceAccess.requireWorkspaceMemberById(
+      workspaceId,
       memberId,
-    });
+    );
   }
 
   private async loadWorkspaceMemberMap(

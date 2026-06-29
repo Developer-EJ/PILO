@@ -432,6 +432,8 @@
         "status",
         "startDate",
         "endDate",
+        "taskCount",
+        "doneTaskCount",
         "updatedAt"
       ],
       "additionalProperties": false,
@@ -471,6 +473,14 @@
               "type": "null"
             }
           ]
+        },
+        "taskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "doneTaskCount": {
+          "type": "integer",
+          "minimum": 0
         },
         "updatedAt": {
           "$ref": "#/$defs/dateTime"
@@ -1040,7 +1050,9 @@
         "draft",
         "reviewing",
         "approved",
-        "rejected"
+        "rejected",
+        "waiting_confirmation",
+        "approved_pending_task_creation"
       ]
     },
     "PlanningApprovalStatus": {
@@ -1306,7 +1318,10 @@
           "$ref": "#/$defs/uuid"
         },
         "goal": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "targetUser": {
           "type": [
@@ -1315,14 +1330,7 @@
           ]
         },
         "status": {
-          "enum": [
-            "draft",
-            "reviewing",
-            "approved",
-            "rejected",
-            "waiting_confirmation",
-            "approved_pending_task_creation"
-          ]
+          "$ref": "#/$defs/ProjectPlanDraftStatus"
         },
         "featureDraftCount": {
           "type": "integer",
@@ -4656,6 +4664,7 @@
         "status": {
           "enum": [
             "draft",
+            "waiting_confirmation",
             "approved",
             "rejected"
           ]

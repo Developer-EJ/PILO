@@ -5,18 +5,14 @@ import {
   NestFastifyApplication,
 } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
+import { createRealtimeCorsOptions } from "./cors.config";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
   );
-  const corsOrigin = process.env.CORS_ORIGIN || "*";
-
-  app.enableCors({
-    origin: corsOrigin === "*" ? true : corsOrigin,
-    credentials: true,
-  });
+  app.enableCors(createRealtimeCorsOptions());
 
   const port = Number(process.env.PORT || 3001);
   await app.listen({ port, host: "0.0.0.0" });

@@ -12,6 +12,7 @@ model Workspace {
   name              String             @db.VarChar(160)
   members           WorkspaceMember[]
   tasks             Task[]
+  taskDrafts        TaskDraft[]
   githubConnections GithubConnection[]
 
   @@map("workspaces")
@@ -28,6 +29,10 @@ model WorkspaceMember {
   workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   assignedTasks     Task[]             @relation("TaskAssigneeMember")
   createdTasks      Task[]             @relation("TaskCreatedByMember")
+  assignedTaskDrafts TaskDraft[]        @relation("TaskDraftAssigneeMember")
+  createdTaskDrafts  TaskDraft[]        @relation("TaskDraftCreatedByMember")
+  approvedTaskDrafts TaskDraft[]        @relation("TaskDraftApprovedByMember")
+  rejectedTaskDrafts TaskDraft[]        @relation("TaskDraftRejectedByMember")
   githubConnections GithubConnection[] @relation("GithubConnectionConnectedByMember")
 
   @@unique([workspaceId, userId])
@@ -96,6 +101,7 @@ model Task {
   workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   assigneeMember  WorkspaceMember? @relation("TaskAssigneeMember", fields: [workspaceId, assigneeMemberId], references: [workspaceId, id], onDelete: NoAction)
   createdByMember WorkspaceMember? @relation("TaskCreatedByMember", fields: [workspaceId, createdByMemberId], references: [workspaceId, id], onDelete: NoAction)
+  sourceDrafts    TaskDraft[]      @relation("TaskDraftCreatedTask")
 
   @@map("tasks")
 }
@@ -119,6 +125,13 @@ model TaskDraft {
   rejectedAt         DateTime? @map("rejected_at") @db.Timestamptz(6)
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assigneeMember   WorkspaceMember? @relation("TaskDraftAssigneeMember", fields: [workspaceId, assigneeMemberId], references: [workspaceId, id], onDelete: NoAction)
+  createdByMember  WorkspaceMember? @relation("TaskDraftCreatedByMember", fields: [workspaceId, createdByMemberId], references: [workspaceId, id], onDelete: NoAction)
+  approvedByMember WorkspaceMember? @relation("TaskDraftApprovedByMember", fields: [workspaceId, approvedByMemberId], references: [workspaceId, id], onDelete: NoAction)
+  rejectedByMember WorkspaceMember? @relation("TaskDraftRejectedByMember", fields: [workspaceId, rejectedByMemberId], references: [workspaceId, id], onDelete: NoAction)
+  task             Task?            @relation("TaskDraftCreatedTask", fields: [taskId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, sourceType, sourceId])
   @@index([workspaceId, status])

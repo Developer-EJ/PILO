@@ -50,14 +50,153 @@ const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
 
-function assertRequiredFields(value, schema, label) {
-  for (const field of schema.required ?? []) {
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(value, field),
-      true,
-      `${label} is missing ${field}`,
-    );
+function assertContract(defName, value, label = defName) {
+  const errors = validateSchema(contractSchema.$defs[defName], value, "$");
+
+  assert.deepEqual(
+    errors,
+    [],
+    `${label} contract errors: ${errors.join(", ")}`,
+  );
+}
+
+function validateSchema(schema, value, path) {
+  if (schema.$ref) {
+    return validateSchema(resolveSchemaRef(schema.$ref), value, path);
   }
+
+  const errors = [];
+
+  if (schema.allOf) {
+    for (const child of schema.allOf) {
+      errors.push(...validateSchema(child, value, path));
+    }
+  }
+
+  if (schema.if && schema.then && validateSchema(schema.if, value, path).length === 0) {
+    errors.push(...validateSchema(schema.then, value, path));
+  }
+
+  if (schema.anyOf) {
+    const validCount = schema.anyOf.filter(
+      (child) => validateSchema(child, value, path).length === 0,
+    ).length;
+    if (validCount === 0) {
+      errors.push(`${path} must match at least one anyOf schema`);
+    }
+  }
+
+  if (schema.oneOf) {
+    const validCount = schema.oneOf.filter(
+      (child) => validateSchema(child, value, path).length === 0,
+    ).length;
+    if (validCount !== 1) {
+      errors.push(`${path} must match exactly one oneOf schema`);
+    }
+  }
+
+  if (schema.const !== undefined && value !== schema.const) {
+    errors.push(`${path} must equal ${JSON.stringify(schema.const)}`);
+  }
+
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push(`${path} must be one of ${schema.enum.join(", ")}`);
+  }
+
+  if (schema.type) {
+    const expectedTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+    if (!expectedTypes.some((type) => schemaTypeMatches(type, value))) {
+      errors.push(`${path} must be ${expectedTypes.join("|")}`);
+    }
+  }
+
+  if (schema.format === "uuid" && !isUuid(value)) {
+    errors.push(`${path} must be a uuid`);
+  }
+
+  if (schema.format === "date" && !isDateOnly(value)) {
+    errors.push(`${path} must be a date`);
+  }
+
+  if (schema.format === "date-time" && !isDateTime(value)) {
+    errors.push(`${path} must be a date-time`);
+  }
+
+  if (typeof schema.minimum === "number" && value < schema.minimum) {
+    errors.push(`${path} must be >= ${schema.minimum}`);
+  }
+
+  if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+    errors.push(`${path} length must be >= ${schema.minLength}`);
+  }
+
+  if (isPlainObject(value)) {
+    const properties = schema.properties ?? {};
+
+    for (const required of schema.required ?? []) {
+      if (!Object.hasOwn(value, required)) {
+        errors.push(`${path}.${required} is required`);
+      }
+    }
+
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!Object.hasOwn(properties, key)) {
+          errors.push(`${path}.${key} is not allowed`);
+        }
+      }
+    }
+
+    for (const [key, child] of Object.entries(properties)) {
+      if (Object.hasOwn(value, key)) {
+        errors.push(...validateSchema(child, value[key], `${path}.${key}`));
+      }
+    }
+  }
+
+  if (Array.isArray(value) && schema.items) {
+    value.forEach((item, index) => {
+      errors.push(...validateSchema(schema.items, item, `${path}[${index}]`));
+    });
+  }
+
+  return errors;
+}
+
+function resolveSchemaRef(ref) {
+  return ref
+    .replace("#/", "")
+    .split("/")
+    .reduce((current, segment) => current[segment], contractSchema);
+}
+
+function schemaTypeMatches(type, value) {
+  if (type === "null") return value === null;
+  if (type === "array") return Array.isArray(value);
+  if (type === "object") return isPlainObject(value);
+  if (type === "integer") return Number.isInteger(value);
+  return typeof value === type;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isUuid(value) {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  );
+}
+
+function isDateOnly(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function isDateTime(value) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
 
 describe("app-server package", () => {
@@ -566,6 +705,65 @@ describe("app-server package", () => {
     assert.equal(repository.listOAuthAccounts().length, 3);
   });
 
+  it("does not let a later verified duplicate email take over the original verified owner", () => {
+    const repository = new AuthRepository();
+    const token = {
+      scopes: [],
+      tokenType: "Bearer",
+      tokenExpiresAt: null,
+    };
+    const originalIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "google",
+        providerAccountId: "google-original-user",
+        email: "user@example.com",
+        name: "Original User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+    const duplicateIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "github",
+        providerAccountId: "github-duplicate-user",
+        email: "user@example.com",
+        name: "Duplicate User",
+        avatarUrl: null,
+        emailVerified: false,
+      },
+      token,
+    });
+    const verifiedDuplicateIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "github",
+        providerAccountId: "github-duplicate-user",
+        email: "user@example.com",
+        name: "Verified Duplicate User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+    const laterVerifiedIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "google",
+        providerAccountId: "google-later-user",
+        email: "user@example.com",
+        name: "Later User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+
+    assert.equal(duplicateIdentity.user.id, verifiedDuplicateIdentity.user.id);
+    assert.notEqual(verifiedDuplicateIdentity.user.id, originalIdentity.user.id);
+    assert.equal(laterVerifiedIdentity.user.id, originalIdentity.user.id);
+    assert.equal(repository.listUsers().length, 2);
+    assert.equal(repository.listOAuthAccounts().length, 3);
+  });
+
   it("builds a GitHub authorization URL without repository scope", () => {
     const config = createAuthConfig({
       APP_ENV: "local",
@@ -1035,71 +1233,19 @@ describe("app-server package", () => {
       generatedAt: "2026-06-28T00:00:00.000Z",
     };
 
-    assertRequiredFields(
-      aggregate,
-      defs.WorkspaceDashboardReadModel,
-      "WorkspaceDashboardReadModel",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.workspace,
-      defs.WorkspaceSummary,
-      "fixture.workspace",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.members[0],
-      defs.WorkspaceMemberSummary,
-      "fixture.members[0]",
-    );
-    assertRequiredFields(
-      currentMember,
-      defs.CurrentWorkspaceMember,
-      "aggregate.currentMember",
-    );
-    assertRequiredFields(
-      preferences,
-      defs.DashboardPreferences,
-      "aggregate.preferences",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.tasks[0],
-      defs.TaskSummary,
-      "fixture.tasks[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.progress,
-      defs.ProgressSummary,
-      "fixture.progress",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.githubIssues[0],
-      defs.GithubIssueSummary,
-      "fixture.githubIssues[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.pullRequests[0],
-      defs.PullRequestSummary,
-      "fixture.pullRequests[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.meetingReports[0],
-      defs.MeetingReportSummary,
-      "fixture.meetingReports[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.prAnalyses[0],
-      defs.PRAnalysisSummary,
-      "fixture.prAnalyses[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.agentActions[0],
-      defs.AgentAction,
-      "fixture.agentActions[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.canvasEntities[0],
-      defs.CanvasEntityRef,
-      "fixture.canvasEntities[0]",
-    );
+    assertContract("WorkspaceDashboardReadModel", aggregate);
+    assertContract("WorkspaceSummary", workspaceDashboardFixture.workspace);
+    assertContract("WorkspaceMemberSummary", workspaceDashboardFixture.members[0]);
+    assertContract("CurrentWorkspaceMember", currentMember);
+    assertContract("DashboardPreferences", preferences);
+    assertContract("TaskSummary", workspaceDashboardFixture.tasks[0]);
+    assertContract("ProgressSummary", workspaceDashboardFixture.progress);
+    assertContract("GithubIssueSummary", workspaceDashboardFixture.githubIssues[0]);
+    assertContract("PullRequestSummary", workspaceDashboardFixture.pullRequests[0]);
+    assertContract("MeetingReportSummary", workspaceDashboardFixture.meetingReports[0]);
+    assertContract("PRAnalysisSummary", workspaceDashboardFixture.prAnalyses[0]);
+    assertContract("AgentAction", workspaceDashboardFixture.agentActions[0]);
+    assertContract("CanvasEntityRef", workspaceDashboardFixture.canvasEntities[0]);
   });
 
   it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {
@@ -1176,20 +1322,11 @@ describe("app-server package", () => {
       Object.keys(canvasBoardDetailFixture).sort(),
       Object.keys(defs.CanvasBoardDetail.properties).sort(),
     );
-    assertRequiredFields(
-      canvasBoardDetailFixture,
-      defs.CanvasBoardDetail,
-      "canvasBoardDetailFixture",
-    );
-    assertRequiredFields(
-      canvasBoardDetailFixture.shapes[0],
-      defs.CanvasShapeSummary,
-      "canvasBoardDetailFixture.shapes[0]",
-    );
-    assertRequiredFields(
+    assertContract("CanvasBoardDetail", canvasBoardDetailFixture);
+    assertContract("CanvasShapeSummary", canvasBoardDetailFixture.shapes[0]);
+    assertContract(
+      "CanvasConnectionSummary",
       canvasBoardDetailFixture.connections[0],
-      defs.CanvasConnectionSummary,
-      "canvasBoardDetailFixture.connections[0]",
     );
     assert.deepEqual(canvasBoardDetailFixture.viewSetting, {
       zoom: 1,
@@ -1681,6 +1818,52 @@ describe("app-server package", () => {
     assert.equal(board.updatedAt, "2026-06-28T00:03:00.000Z");
   });
 
+  it("creates Canvas shapes above the current maximum zIndex", async () => {
+    const repository = new CanvasRepository();
+    repository.boardsById.set("board-1", {
+      id: "board-1",
+      workspaceId: "workspace-1",
+      title: "Project Map",
+      boardType: "project_map",
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+    repository.shapesById.set("shape-1", {
+      id: "shape-1",
+      boardId: "board-1",
+      shapeType: "task",
+      entityType: "task",
+      entityId: "44444444-4444-4444-8444-444444444441",
+      displayTitle: "Existing",
+      width: 280,
+      height: 160,
+      color: "#6d5bd6",
+      isCollapsed: false,
+      zIndex: 9,
+      createdByMemberId: "member-1",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      deletedAt: null,
+    });
+
+    const shape = await repository.createShapeForBoard({
+      boardId: "board-1",
+      createdByMemberId: "member-1",
+      shapeType: "task",
+      entityType: "task",
+      entityId: "44444444-4444-4444-8444-444444444442",
+      displayTitle: "Created",
+      width: 280,
+      height: 160,
+      color: "#6d5bd6",
+      now: new Date("2026-06-28T00:03:00.000Z"),
+    });
+
+    assert.equal(shape.zIndex, 10);
+  });
+
   it("creates, deduplicates, and soft-deletes Canvas connections in one board", async () => {
     const repository = new CanvasRepository();
     repository.boardsById.set("board-1", {
@@ -1880,7 +2063,7 @@ describe("app-server package", () => {
       showRiskOnly: false,
       filters: {},
     });
-    assert.equal(memberOneBoard.updatedAt, "2026-06-28T00:07:00.000Z");
+    assert.equal(memberOneBoard.updatedAt, "2026-06-28T00:00:00.000Z");
   });
 
   it("connects Canvas board access to the workspace currentMember context", async () => {
@@ -2201,7 +2384,7 @@ describe("app-server package", () => {
     ]);
   });
 
-  it("updates Canvas view and filter settings through workspace write access", async () => {
+  it("updates Canvas view and filter settings through workspace read access", async () => {
     const repositoryCalls = [];
     const accessCalls = [];
     const repository = {
@@ -2265,7 +2448,7 @@ describe("app-server package", () => {
           },
           permissions: {
             canRead: true,
-            canWrite: true,
+            canWrite: false,
             canManage: false,
           },
         };
@@ -2535,6 +2718,73 @@ describe("app-server package", () => {
     );
   });
 
+  it("rejects Canvas payloads that do not match numeric contract minimums", async () => {
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async findBoardWorkspaceId() {
+          throw new Error("invalid payload should not read board access");
+        },
+        async findShapeWorkspaceId() {
+          throw new Error("invalid payload should not read shape access");
+        },
+      },
+      {
+        async requireCurrentMember() {
+          throw new Error("invalid payload should not check workspace access");
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.createCanvasShape({
+          boardId: "board-1",
+          currentUser: { id: "user-1" },
+          body: {
+            shapeType: "task",
+            entityType: "task",
+            entityId: "44444444-4444-4444-8444-444444444441",
+            displayTitle: "Too small",
+            width: 0,
+            height: 160,
+            color: "#6d5bd6",
+          },
+        }),
+      (error) =>
+        error instanceof CanvasValidationError &&
+        error.code === "canvas_validation_failed",
+    );
+    await assert.rejects(
+      () =>
+        service.updateCanvasShape({
+          shapeId: "shape-1",
+          currentUser: { id: "user-1" },
+          body: {
+            zIndex: 1.5,
+          },
+        }),
+      (error) =>
+        error instanceof CanvasValidationError &&
+        error.code === "canvas_validation_failed",
+    );
+    await assert.rejects(
+      () =>
+        service.updateCanvasViewSetting({
+          boardId: "board-1",
+          currentUser: { id: "user-1" },
+          body: {
+            zoom: 0.05,
+            viewportX: 0,
+            viewportY: 0,
+          },
+        }),
+      (error) =>
+        error instanceof CanvasValidationError &&
+        error.code === "canvas_validation_failed",
+    );
+  });
+
   it("rejects Canvas board detail before workspace access when board is missing", async () => {
     const accessCalls = [];
     const service = new CanvasService(
@@ -2673,6 +2923,19 @@ describe("app-server package", () => {
       (error) =>
         error instanceof WorkspaceInviteError &&
         error.code === "workspace_invite_accepted",
+    );
+    await assert.rejects(
+      () =>
+        service.createWorkspaceInvite({
+          workspaceId: workspace.id,
+          currentUser: owner,
+          body: {
+            email: invitee.email,
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceInviteError &&
+        error.code === "workspace_invite_already_member",
     );
 
     const revokedInvite = await service.createWorkspaceInvite({

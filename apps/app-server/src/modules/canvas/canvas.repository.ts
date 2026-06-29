@@ -148,7 +148,7 @@ export class CanvasRepository implements CanvasRepositoryPort {
     }
 
     const now = (input.now ?? new Date()).toISOString();
-    const zIndex = this.listVisibleShapes(input.boardId).length + 1;
+    const zIndex = this.getNextShapeZIndex(input.boardId);
     const shape: CanvasShapeRecord = {
       id: randomUUID(),
       boardId: input.boardId,
@@ -380,7 +380,6 @@ export class CanvasRepository implements CanvasRepositoryPort {
         updatedAt,
       },
     );
-    board.updatedAt = updatedAt;
 
     return this.toViewSetting(input.boardId, input.memberId);
   }
@@ -412,7 +411,6 @@ export class CanvasRepository implements CanvasRepositoryPort {
         updatedAt,
       },
     );
-    board.updatedAt = updatedAt;
 
     return this.toFilterSetting(input.boardId, input.memberId);
   }
@@ -467,6 +465,15 @@ export class CanvasRepository implements CanvasRepositoryPort {
     return Array.from(this.shapesById.values())
       .filter((shape) => shape.boardId === boardId && !shape.deletedAt)
       .sort((left, right) => left.zIndex - right.zIndex);
+  }
+
+  private getNextShapeZIndex(boardId: string) {
+    const maxZIndex = this.listVisibleShapes(boardId).reduce(
+      (max, shape) => Math.max(max, shape.zIndex),
+      0,
+    );
+
+    return maxZIndex + 1;
   }
 
   private listVisibleConnections(boardId: string) {

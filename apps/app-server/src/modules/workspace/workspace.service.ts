@@ -183,6 +183,16 @@ export class WorkspaceService {
       minimumRole: "owner",
     });
     const body = parseCreateWorkspaceInviteBody(input.body);
+    const existingMember =
+      await this.workspaceRepository.findWorkspaceMemberByEmail(
+        input.workspaceId,
+        body.email,
+      );
+
+    if (existingMember) {
+      throw new WorkspaceInviteError("workspace_invite_already_member");
+    }
+
     const token = createInviteToken();
     const tokenHash = hashInviteToken(token);
     const expiresAt = new Date(Date.now() + body.ttlMs).toISOString();
@@ -772,17 +782,34 @@ function loadFixtureDashboardReadModels(
   }
 
   return {
-    tasks: remapWorkspaceIdArray(fixture.tasks, workspaceId),
-    progress: remapWorkspaceIdRecord(fixture.progress, workspaceId),
-    githubIssues: readFixtureArray(fixture.githubIssues),
-    pullRequests: readFixtureArray(fixture.pullRequests),
-    meetingReports: remapWorkspaceIdArray(fixture.meetingReports, workspaceId),
-    prAnalyses: readFixtureArray(fixture.prAnalyses),
-    agentActions: remapAgentActionWorkspaceIds(
-      readFixtureArray(fixture.agentActions),
+    tasks: remapWorkspaceIdArray<WorkspaceDashboardReadModel["tasks"][number]>(
+      fixture.tasks,
       workspaceId,
     ),
-    canvasEntities: readFixtureArray(fixture.canvasEntities),
+    progress: remapWorkspaceIdRecord<
+      NonNullable<WorkspaceDashboardReadModel["progress"]>
+    >(fixture.progress, workspaceId),
+    githubIssues: readFixtureArray<
+      WorkspaceDashboardReadModel["githubIssues"][number]
+    >(fixture.githubIssues),
+    pullRequests: readFixtureArray<
+      WorkspaceDashboardReadModel["pullRequests"][number]
+    >(fixture.pullRequests),
+    meetingReports: remapWorkspaceIdArray<
+      WorkspaceDashboardReadModel["meetingReports"][number]
+    >(fixture.meetingReports, workspaceId),
+    prAnalyses: readFixtureArray<
+      WorkspaceDashboardReadModel["prAnalyses"][number]
+    >(fixture.prAnalyses),
+    agentActions: remapAgentActionWorkspaceIds(
+      readFixtureArray<WorkspaceDashboardReadModel["agentActions"][number]>(
+        fixture.agentActions,
+      ),
+      workspaceId,
+    ),
+    canvasEntities: readFixtureArray<
+      WorkspaceDashboardReadModel["canvasEntities"][number]
+    >(fixture.canvasEntities),
     source: "fixture",
   };
 }
@@ -832,20 +859,25 @@ function createFixturePathCandidates() {
   ];
 }
 
-function readFixtureArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value.map(cloneJsonValue) : [];
+function readFixtureArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value)
+    ? (value.map((item) => cloneJsonValue(item)) as T[])
+    : [];
 }
 
-function remapWorkspaceIdArray(value: unknown, workspaceId: string) {
-  return readFixtureArray(value).map((item) =>
-    remapWorkspaceIdRecord(item, workspaceId),
-  );
-}
-
-function remapWorkspaceIdRecord(
+function remapWorkspaceIdArray<T extends object>(
   value: unknown,
   workspaceId: string,
-): Record<string, unknown> | null {
+): T[] {
+  return readFixtureArray(value)
+    .map((item) => remapWorkspaceIdRecord<T>(item, workspaceId))
+    .filter((item): item is T => item !== null);
+}
+
+function remapWorkspaceIdRecord<T extends object>(
+  value: unknown,
+  workspaceId: string,
+): T | null {
   if (!isPlainJsonObject(value)) {
     return null;
   }
@@ -853,10 +885,12 @@ function remapWorkspaceIdRecord(
   return {
     ...cloneJsonValue(value),
     workspaceId,
-  };
+  } as unknown as T;
 }
 
-function remapAgentActionWorkspaceIds(actions: unknown[], workspaceId: string) {
+function remapAgentActionWorkspaceIds<
+  T extends { payload?: unknown },
+>(actions: T[], workspaceId: string): T[] {
   return actions.map((action) => {
     if (!isPlainJsonObject(action)) {
       return action;
@@ -872,7 +906,7 @@ function remapAgentActionWorkspaceIds(actions: unknown[], workspaceId: string) {
             workspaceId,
           }
         : payload,
-    };
+    } as T;
   });
 }
 

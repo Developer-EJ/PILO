@@ -90,6 +90,8 @@ const baseMilestone = {
   status: "planned",
   startDate: new Date("2026-07-01T00:00:00.000Z"),
   endDate: new Date("2026-07-31T00:00:00.000Z"),
+  taskCount: 0,
+  doneTaskCount: 0,
   createdAt: new Date("2026-06-27T10:00:00.000Z"),
   updatedAt: new Date("2026-06-27T12:00:00.000Z"),
 };
@@ -159,6 +161,8 @@ describe("JuhyungTaskService", () => {
         status: "planned",
         startDate: "2026-07-01",
         endDate: "2026-07-31",
+        taskCount: 0,
+        doneTaskCount: 0,
         updatedAt: "2026-06-27T12:00:00.000Z",
       },
     ]);
@@ -431,8 +435,6 @@ describe("JuhyungTaskService", () => {
         {
           sortBy: "updatedAt",
           sortDirection: "desc",
-          limit: 50,
-          offset: 0,
         },
       ],
     ]);
@@ -510,6 +512,28 @@ describe("JuhyungTaskService", () => {
           {
             status: "archived",
             limit: "0",
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
+  });
+
+  it("rejects task dependency inputs that are not UUIDs before reading tasks", async () => {
+    const service = createService({
+      repository: {
+        getTaskById: async () => {
+          throw new Error("invalid dependency body should not read tasks");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createTaskDependency(
+          UUIDS.task,
+          {
+            dependsOnTaskId: "not-a-uuid",
           },
           { memberId: UUIDS.member },
         ),
@@ -1017,6 +1041,44 @@ describe("JuhyungTaskService", () => {
       ["get", UUIDS.task],
       ["access", UUIDS.workspace, { userId: UUIDS.user }],
       ["status", UUIDS.task, "in_review", UUIDS.member, "todo"],
+      ["members", UUIDS.workspace, [UUIDS.assignee]],
+    ]);
+  });
+
+  it("returns the existing task summary without writing when status is unchanged", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        updateTaskStatus: async () => {
+          throw new Error("same status should not be written");
+        },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [assigneeMember()];
+        },
+      },
+    });
+
+    const result = await service.updateTaskStatus(
+      UUIDS.task,
+      { status: "todo" },
+      { userId: UUIDS.user },
+    );
+
+    assert.equal(result.status, "todo");
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
       ["members", UUIDS.workspace, [UUIDS.assignee]],
     ]);
   });
@@ -1862,8 +1924,20 @@ describe("JuhyungTasksController", () => {
 });
 
 function createService(overrides = {}) {
-  const access = overrides.access ?? {
+  const accessOverride = overrides.access ?? {
     requireWorkspaceMember: async () => currentMember(),
+  };
+  const access = {
+    ...accessOverride,
+    requireWorkspaceMemberById: async (workspaceId, memberRef) => {
+      if (accessOverride.requireWorkspaceMemberById) {
+        return accessOverride.requireWorkspaceMemberById(workspaceId, memberRef);
+      }
+
+      const actor =
+        typeof memberRef === "string" ? { memberId: memberRef } : memberRef;
+      return accessOverride.requireWorkspaceMember(workspaceId, actor);
+    },
   };
   const repository = overrides.repository ?? {};
   return new JuhyungTaskService(repository, access, new JuhyungPublicAdapter());

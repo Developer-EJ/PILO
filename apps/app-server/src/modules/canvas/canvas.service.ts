@@ -332,7 +332,7 @@ export class CanvasService {
     input: CanvasViewSettingMutationInput,
   ): Promise<CanvasViewSetting> {
     const body = parseCanvasViewSettingBody(input.body);
-    const workspaceAccess = await this.requireBoardWriteAccess(input);
+    const workspaceAccess = await this.requireBoardAccess(input);
     const setting = await this.canvasRepository.upsertViewSettingForBoard({
       boardId: input.boardId,
       memberId: workspaceAccess.currentMember.memberId,
@@ -350,7 +350,7 @@ export class CanvasService {
     input: CanvasFilterSettingMutationInput,
   ): Promise<CanvasFilterSetting> {
     const body = parseCanvasFilterSettingBody(input.body);
-    const workspaceAccess = await this.requireBoardWriteAccess(input);
+    const workspaceAccess = await this.requireBoardAccess(input);
     const setting = await this.canvasRepository.upsertFilterSettingForBoard({
       boardId: input.boardId,
       memberId: workspaceAccess.currentMember.memberId,
@@ -397,6 +397,21 @@ export class CanvasService {
   private async requireBoardWriteAccess(
     input: CanvasBoardResourceInput,
   ): Promise<CanvasCurrentMemberContext> {
+    const workspaceAccess = await this.requireBoardAccess(input);
+
+    if (!workspaceAccess.permissions.canWrite) {
+      throw new CanvasAccessError(
+        "canvas_workspace_forbidden",
+        workspaceAccess.currentMember.workspaceId,
+      );
+    }
+
+    return workspaceAccess;
+  }
+
+  private async requireBoardAccess(
+    input: CanvasBoardResourceInput,
+  ): Promise<CanvasCurrentMemberContext> {
     const workspaceId = await this.canvasRepository.findBoardWorkspaceId(
       input.boardId,
     );
@@ -405,7 +420,7 @@ export class CanvasService {
       throw new CanvasAccessError("canvas_board_not_found", input.boardId);
     }
 
-    return this.requireWorkspaceWriteAccess({
+    return this.requireWorkspaceAccess({
       workspaceId,
       currentUser: input.currentUser,
     });
@@ -480,10 +495,10 @@ function parseCanvasShapeBody(body: unknown): CanvasShapeRequest {
   return {
     shapeType: parseCanvasEntityType(record.shapeType, "shapeType"),
     entityType: parseCanvasEntityType(record.entityType, "entityType"),
-    entityId: parseRequiredString(record.entityId, "entityId"),
+    entityId: parseUuid(record.entityId, "entityId"),
     displayTitle: parseRequiredString(record.displayTitle, "displayTitle"),
-    width: parsePositiveFiniteNumber(record.width, "shape.width"),
-    height: parsePositiveFiniteNumber(record.height, "shape.height"),
+    width: parseMinimumFiniteNumber(record.width, "shape.width", 1),
+    height: parseMinimumFiniteNumber(record.height, "shape.height", 1),
     color: parseRequiredString(record.color, "color"),
   };
 }
@@ -499,10 +514,10 @@ function parseCanvasShapeUpdateBody(body: unknown): CanvasShapeUpdateRequest {
     );
   }
   if ("width" in record) {
-    update.width = parsePositiveFiniteNumber(record.width, "shape.width");
+    update.width = parseMinimumFiniteNumber(record.width, "shape.width", 1);
   }
   if ("height" in record) {
-    update.height = parsePositiveFiniteNumber(record.height, "shape.height");
+    update.height = parseMinimumFiniteNumber(record.height, "shape.height", 1);
   }
   if ("color" in record) {
     update.color = parseRequiredString(record.color, "color");
@@ -514,7 +529,7 @@ function parseCanvasShapeUpdateBody(body: unknown): CanvasShapeUpdateRequest {
     );
   }
   if ("zIndex" in record) {
-    update.zIndex = parseFiniteNumber(record.zIndex, "shape.zIndex");
+    update.zIndex = parseInteger(record.zIndex, "shape.zIndex");
   }
 
   if (!Object.keys(update).length) {
@@ -555,7 +570,7 @@ function parseCanvasViewSettingBody(body: unknown): CanvasViewSettingRequest {
   const record = requirePlainObject(body);
 
   return {
-    zoom: parseFiniteNumber(record.zoom, "viewSetting.zoom"),
+    zoom: parseMinimumFiniteNumber(record.zoom, "viewSetting.zoom", 0.1),
     viewportX: parseFiniteNumber(record.viewportX, "viewSetting.viewportX"),
     viewportY: parseFiniteNumber(record.viewportY, "viewSetting.viewportY"),
   };
@@ -708,14 +723,40 @@ function parseFiniteNumber(value: unknown, field: string) {
   return value;
 }
 
-function parsePositiveFiniteNumber(value: unknown, field: string) {
+function parseInteger(value: unknown, field: string) {
   const number = parseFiniteNumber(value, field);
 
-  if (number <= 0) {
-    throw new CanvasValidationError(`Canvas ${field} must be greater than 0.`);
+  if (!Number.isInteger(number)) {
+    throw new CanvasValidationError(`Canvas ${field} must be an integer.`);
   }
 
   return number;
+}
+
+function parseMinimumFiniteNumber(value: unknown, field: string, minimum: number) {
+  const number = parseFiniteNumber(value, field);
+
+  if (number < minimum) {
+    throw new CanvasValidationError(`Canvas ${field} must be at least ${minimum}.`);
+  }
+
+  return number;
+}
+
+function parseUuid(value: unknown, field: string) {
+  const normalized = parseRequiredString(value, field);
+
+  if (!isUuid(normalized)) {
+    throw new CanvasValidationError(`Canvas ${field} must be a UUID.`);
+  }
+
+  return normalized;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 function isCanvasEntityType(value: unknown): value is CanvasEntityType {

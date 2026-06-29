@@ -24,7 +24,6 @@ const TASK_LIST_SORT_FIELDS = [
   "title",
 ] as const satisfies readonly TaskListSortField[];
 
-const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
 export interface ListTasksQuery {
@@ -77,8 +76,14 @@ export function parseListTasksQuery(
       ["asc", "desc"] as const,
       "sortDirection",
     ),
-    limit: parseInteger(query.limit, "limit", DEFAULT_LIMIT, 1, MAX_LIMIT),
-    offset: parseInteger(query.offset, "offset", 0, 0),
+    ...(query.limit !== undefined && query.limit !== null && query.limit !== ""
+      ? { limit: parseInteger(query.limit, "limit", 1, MAX_LIMIT) }
+      : {}),
+    ...(query.offset !== undefined &&
+    query.offset !== null &&
+    query.offset !== ""
+      ? { offset: parseInteger(query.offset, "offset", 0) }
+      : {}),
   };
 }
 
@@ -165,13 +170,12 @@ function parseEnum<T extends readonly string[]>(
 function parseInteger(
   value: unknown,
   field: string,
-  defaultValue: number,
   min: number,
   max?: number,
 ): number {
   const first = firstQueryValue(value, field);
   if (first === undefined || first === "") {
-    return defaultValue;
+    throw new BadRequestException(`${field} is required`);
   }
   if (!/^\d+$/.test(first)) {
     throw new BadRequestException(`${field} must be an integer`);

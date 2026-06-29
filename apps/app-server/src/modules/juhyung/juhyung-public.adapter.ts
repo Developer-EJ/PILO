@@ -117,6 +117,8 @@ export class JuhyungPublicAdapter {
       status: milestone.status as MilestoneSummary["status"],
       startDate: toDateOnly(milestone.startDate ?? null),
       endDate: toDateOnly(milestone.endDate ?? null),
+      taskCount: milestone.taskCount ?? 0,
+      doneTaskCount: milestone.doneTaskCount ?? 0,
       updatedAt: toDateTime(milestone.updatedAt),
     };
   }
