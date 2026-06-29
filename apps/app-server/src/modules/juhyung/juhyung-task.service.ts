@@ -4,6 +4,12 @@ import {
   WorkspaceActor,
 } from "../workspace/public/workspace-access-public.service";
 import {
+  parseCreateChecklistItemInput,
+  parseUpdateChecklistItemInput,
+  type CreateChecklistItemBody,
+  type UpdateChecklistItemBody,
+} from "./juhyung-checklist-input";
+import {
   parseListTasksQuery,
   type ListTasksQuery,
 } from "./juhyung-task-list-query";
@@ -18,6 +24,8 @@ import {
 import { JuhyungPublicAdapter } from "./juhyung-public.adapter";
 import {
   TaskRecord,
+  TaskDetail,
+  TaskChecklistItemSummary,
   TaskStatus,
   TaskSummary,
   WorkspaceMemberRecord,
@@ -33,6 +41,10 @@ export type {
   UpdateTaskBody,
   UpdateTaskStatusBody,
 } from "./juhyung-task-input";
+export type {
+  CreateChecklistItemBody,
+  UpdateChecklistItemBody,
+} from "./juhyung-checklist-input";
 export type { ListTasksQuery } from "./juhyung-task-list-query";
 
 @Injectable()
@@ -97,10 +109,17 @@ export class JuhyungTaskService {
     return this.publicAdapter.toTaskSummary(task, { assignee });
   }
 
-  async getTask(taskId: string, actor?: WorkspaceActor): Promise<TaskSummary> {
+  async getTask(taskId: string, actor?: WorkspaceActor): Promise<TaskDetail> {
     const { task } = await this.requireTaskAccess(taskId, actor);
     const [summary] = await this.toTaskSummaries(task.workspaceId, [task]);
-    return summary;
+    const checklistItems =
+      await this.repository.listChecklistItemsForTask(taskId);
+    return {
+      ...summary,
+      checklistItems: checklistItems.map((item) =>
+        this.publicAdapter.toTaskChecklistItemSummary(item),
+      ),
+    };
   }
 
   async updateTask(
@@ -146,6 +165,48 @@ export class JuhyungTaskService {
   async deleteTask(taskId: string, actor?: WorkspaceActor): Promise<void> {
     await this.requireTaskAccess(taskId, actor);
     await this.repository.softDeleteTask(taskId);
+  }
+
+  async createChecklistItem(
+    taskId: string,
+    body: CreateChecklistItemBody,
+    actor?: WorkspaceActor,
+  ): Promise<TaskChecklistItemSummary> {
+    const input = parseCreateChecklistItemInput(body);
+    await this.requireTaskAccess(taskId, actor);
+    const item = await this.repository.createChecklistItem(taskId, input);
+    return this.publicAdapter.toTaskChecklistItemSummary(item);
+  }
+
+  async updateChecklistItem(
+    taskId: string,
+    itemId: string,
+    body: UpdateChecklistItemBody,
+    actor?: WorkspaceActor,
+  ): Promise<TaskChecklistItemSummary> {
+    const input = parseUpdateChecklistItemInput(body);
+    await this.requireTaskAccess(taskId, actor);
+    const item = await this.repository.updateChecklistItem(
+      taskId,
+      itemId,
+      input,
+    );
+    if (!item) {
+      throw new NotFoundException("Checklist item was not found");
+    }
+    return this.publicAdapter.toTaskChecklistItemSummary(item);
+  }
+
+  async deleteChecklistItem(
+    taskId: string,
+    itemId: string,
+    actor?: WorkspaceActor,
+  ): Promise<void> {
+    await this.requireTaskAccess(taskId, actor);
+    const result = await this.repository.deleteChecklistItem(taskId, itemId);
+    if (result.count === 0) {
+      throw new NotFoundException("Checklist item was not found");
+    }
   }
 
   private async createTaskRecord(

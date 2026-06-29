@@ -19,6 +19,7 @@ const {
 const UUIDS = {
   workspace: "11111111-1111-4111-8111-111111111111",
   task: "22222222-2222-4222-8222-222222222222",
+  checklistItem: "77777777-7777-4777-8777-777777777777",
   member: "33333333-3333-4333-8333-333333333333",
   assignee: "44444444-4444-4444-8444-444444444444",
   milestone: "66666666-6666-4666-8666-666666666666",
@@ -39,6 +40,16 @@ const baseTask = {
   createdAt: new Date("2026-06-27T11:00:00.000Z"),
   updatedAt: new Date("2026-06-27T12:00:00.000Z"),
   deletedAt: null,
+};
+
+const baseChecklistItem = {
+  id: UUIDS.checklistItem,
+  taskId: UUIDS.task,
+  title: "Install GitHub App",
+  status: "todo",
+  sortOrder: 1,
+  createdAt: new Date("2026-06-27T12:30:00.000Z"),
+  updatedAt: new Date("2026-06-27T12:30:00.000Z"),
 };
 
 describe("JuhyungTaskService", () => {
@@ -272,6 +283,10 @@ describe("JuhyungTaskService", () => {
           calls.push(["members", workspaceId, memberIds]);
           return [assigneeMember()];
         },
+        listChecklistItemsForTask: async (taskId) => {
+          calls.push(["checklist", taskId]);
+          return [baseChecklistItem];
+        },
       },
     });
 
@@ -281,10 +296,21 @@ describe("JuhyungTaskService", () => {
 
     assert.equal(result.id, UUIDS.task);
     assert.equal(result.assignee?.name, "Assignee");
+    assert.deepEqual(result.checklistItems, [
+      {
+        id: UUIDS.checklistItem,
+        taskId: UUIDS.task,
+        title: "Install GitHub App",
+        status: "todo",
+        sortOrder: 1,
+        updatedAt: "2026-06-27T12:30:00.000Z",
+      },
+    ]);
     assert.deepEqual(calls, [
       ["get", UUIDS.task],
       ["access", UUIDS.workspace, { memberId: UUIDS.member }],
       ["members", UUIDS.workspace, [UUIDS.assignee]],
+      ["checklist", UUIDS.task],
     ]);
   });
 
@@ -488,6 +514,177 @@ describe("JuhyungTaskService", () => {
       ["delete", UUIDS.task],
     ]);
   });
+
+  it("creates checklist items after checking task workspace membership", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        createChecklistItem: async (taskId, input) => {
+          calls.push(["createChecklist", taskId, input]);
+          return {
+            ...baseChecklistItem,
+            taskId,
+            ...input,
+            updatedAt: new Date("2026-06-28T10:00:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.createChecklistItem(
+      UUIDS.task,
+      {
+        title: "Install GitHub App",
+        status: "todo",
+        sortOrder: 2,
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.deepEqual(result, {
+      id: UUIDS.checklistItem,
+      taskId: UUIDS.task,
+      title: "Install GitHub App",
+      status: "todo",
+      sortOrder: 2,
+      updatedAt: "2026-06-28T10:00:00.000Z",
+    });
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      [
+        "createChecklist",
+        UUIDS.task,
+        {
+          title: "Install GitHub App",
+          status: "todo",
+          sortOrder: 2,
+        },
+      ],
+    ]);
+  });
+
+  it("updates checklist title, completion status, and sort order", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        updateChecklistItem: async (taskId, itemId, input) => {
+          calls.push(["updateChecklist", taskId, itemId, input]);
+          return {
+            ...baseChecklistItem,
+            id: itemId,
+            taskId,
+            ...input,
+            updatedAt: new Date("2026-06-28T10:10:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.updateChecklistItem(
+      UUIDS.task,
+      UUIDS.checklistItem,
+      {
+        title: "Install and authorize GitHub App",
+        status: "done",
+        sortOrder: 0,
+      },
+      { userId: UUIDS.user },
+    );
+
+    assert.equal(result.title, "Install and authorize GitHub App");
+    assert.equal(result.status, "done");
+    assert.equal(result.sortOrder, 0);
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
+      [
+        "updateChecklist",
+        UUIDS.task,
+        UUIDS.checklistItem,
+        {
+          title: "Install and authorize GitHub App",
+          status: "done",
+          sortOrder: 0,
+        },
+      ],
+    ]);
+  });
+
+  it("rejects invalid checklist input before writing", async () => {
+    const service = createService({
+      repository: {
+        createChecklistItem: async () => {
+          throw new Error("invalid checklist should not be written");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createChecklistItem(
+          UUIDS.task,
+          {
+            title: "",
+            status: "blocked",
+          },
+          { memberId: UUIDS.member },
+        ),
+      BadRequestException,
+    );
+  });
+
+  it("deletes checklist items after checking task workspace membership", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["get", taskId]);
+          return baseTask;
+        },
+        deleteChecklistItem: async (taskId, itemId) => {
+          calls.push(["deleteChecklist", taskId, itemId]);
+          return { count: 1 };
+        },
+      },
+    });
+
+    await service.deleteChecklistItem(UUIDS.task, UUIDS.checklistItem, {
+      memberId: UUIDS.member,
+    });
+
+    assert.deepEqual(calls, [
+      ["get", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["deleteChecklist", UUIDS.task, UUIDS.checklistItem],
+    ]);
+  });
 });
 
 describe("JuhyungTasksController", () => {
@@ -517,6 +714,17 @@ describe("JuhyungTasksController", () => {
       deleteTask: async (taskId, actor) => {
         calls.push(["delete", taskId, actor]);
       },
+      createChecklistItem: async (taskId, body, actor) => {
+        calls.push(["createChecklist", taskId, body, actor]);
+        return { id: UUIDS.checklistItem };
+      },
+      updateChecklistItem: async (taskId, itemId, body, actor) => {
+        calls.push(["updateChecklist", taskId, itemId, body, actor]);
+        return { id: itemId };
+      },
+      deleteChecklistItem: async (taskId, itemId, actor) => {
+        calls.push(["deleteChecklist", taskId, itemId, actor]);
+      },
     });
 
     await controller.listTasks(
@@ -545,6 +753,25 @@ describe("JuhyungTasksController", () => {
       UUIDS.member,
     );
     await controller.deleteTask(UUIDS.task, UUIDS.user, UUIDS.member);
+    await controller.createChecklistItem(
+      UUIDS.task,
+      { title: "Install GitHub App" },
+      UUIDS.user,
+      undefined,
+    );
+    await controller.updateChecklistItem(
+      UUIDS.task,
+      UUIDS.checklistItem,
+      { status: "done" },
+      undefined,
+      UUIDS.member,
+    );
+    await controller.deleteChecklistItem(
+      UUIDS.task,
+      UUIDS.checklistItem,
+      UUIDS.user,
+      UUIDS.member,
+    );
 
     assert.deepEqual(calls, [
       ["list", UUIDS.workspace, { status: "todo" }, { userId: UUIDS.user }],
@@ -563,6 +790,25 @@ describe("JuhyungTasksController", () => {
       ],
       ["status", UUIDS.task, { status: "done" }, { memberId: UUIDS.member }],
       ["delete", UUIDS.task, { userId: UUIDS.user, memberId: UUIDS.member }],
+      [
+        "createChecklist",
+        UUIDS.task,
+        { title: "Install GitHub App" },
+        { userId: UUIDS.user },
+      ],
+      [
+        "updateChecklist",
+        UUIDS.task,
+        UUIDS.checklistItem,
+        { status: "done" },
+        { memberId: UUIDS.member },
+      ],
+      [
+        "deleteChecklist",
+        UUIDS.task,
+        UUIDS.checklistItem,
+        { userId: UUIDS.user, memberId: UUIDS.member },
+      ],
     ]);
   });
 });
