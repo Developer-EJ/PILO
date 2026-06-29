@@ -16,6 +16,34 @@
       "type": "string",
       "format": "date-time"
     },
+    "jsonValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      ]
+    },
     "memberRef": {
       "type": "object",
       "required": ["memberId", "name"],
@@ -457,8 +485,12 @@
             }
           ]
         },
-        "beforeValue": {},
-        "afterValue": {},
+        "beforeValue": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "afterValue": {
+          "$ref": "#/$defs/jsonValue"
+        },
         "createdAt": {
           "$ref": "#/$defs/dateTime"
         }
@@ -576,6 +608,22 @@
         },
         "createdAt": {
           "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "TaskDraftAdapterResponse": {
+      "type": "object",
+      "required": ["taskId", "payload", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "payload": {
+          "$ref": "#/$defs/TaskCreateDraft"
+        },
+        "mode": {
+          "enum": ["mock"]
         }
       }
     },
@@ -1940,6 +1988,19 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "MeetingActionItemTaskDraftResponse": {
+      "type": "object",
+      "required": ["actionItem", "taskDraft"],
+      "additionalProperties": false,
+      "properties": {
+        "actionItem": {
+          "$ref": "#/$defs/MeetingActionItem"
+        },
+        "taskDraft": {
+          "$ref": "#/$defs/TaskDraftAdapterResponse"
         }
       }
     },

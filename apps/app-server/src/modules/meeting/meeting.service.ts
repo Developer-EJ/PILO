@@ -620,17 +620,9 @@ export class MeetingService {
       actionItem,
     );
     const taskDraft = this.createTaskDraft(payload);
-    const convertedActionItem = this.meetingRepository.updateActionItem(
-      actionItem.id,
-      {
-        status: "converted",
-        convertedTaskId: taskDraft.taskId,
-        updatedAt: new Date().toISOString(),
-      },
-    );
 
     return {
-      actionItem: this.toActionItemReadModel(convertedActionItem),
+      actionItem: this.toActionItemReadModel(actionItem),
       taskDraft,
     };
   }

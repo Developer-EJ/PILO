@@ -768,7 +768,7 @@ describe("meeting module scaffold", () => {
     });
   });
 
-  it("maps approved meeting action items to TaskCreateDraft and converts on mock success", () => {
+  it("maps approved meeting action items to TaskCreateDraft without converting the action item", () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -806,12 +806,11 @@ describe("meeting module scaffold", () => {
       priority: "medium",
       dueDate: "2026-07-03",
     });
-    assert.equal(result.actionItem.status, "converted");
-    assert.equal(result.actionItem.convertedTaskId, result.taskDraft.taskId);
-    assert.equal(
-      controller.listActionItems(report.id)[0].convertedTaskId,
-      result.taskDraft.taskId,
-    );
+    assert.equal(result.actionItem.status, "approved");
+    assert.equal(result.actionItem.convertedTaskId, null);
+    assert.deepEqual(controller.listActionItems(report.id), [
+      approvedActionItem,
+    ]);
   });
 
   it("keeps approved action items unchanged when TaskDraftClient fails", () => {
