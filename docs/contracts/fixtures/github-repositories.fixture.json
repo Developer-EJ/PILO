@@ -1,0 +1,13 @@
+{
+  "githubRepositories": [
+    {
+      "id": "55555555-5555-4555-8555-555555555501",
+      "workspaceId": "22222222-2222-4222-8222-222222222222",
+      "owner": "example",
+      "repoName": "pilo",
+      "url": "https://github.com/example/pilo",
+      "defaultBranch": "dev",
+      "syncedAt": "2026-06-27T10:00:00.000Z"
+    }
+  ]
+}
