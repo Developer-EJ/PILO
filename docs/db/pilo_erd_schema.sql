@@ -730,7 +730,7 @@ CREATE TABLE agent_workflows (
   enabled BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (agent_id, type, version)
+  UNIQUE (type, version)
 );
 
 CREATE TABLE agent_runs (
