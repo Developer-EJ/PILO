@@ -5,7 +5,11 @@ import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { createWorkspaceDashboardClient } from "../../lib/workspace/dashboardClient.mjs";
-import { extractWorkspaceIdFromPathname } from "../../lib/workspace/currentWorkspace.mjs";
+import {
+  extractWorkspaceIdFromPathname,
+  readStoredWorkspaceId,
+  resolveCurrentWorkspaceSelection,
+} from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
 
@@ -153,7 +157,7 @@ function buildDashboardViewModel(dashboard: DashboardRecord) {
     dashboard.progress?.delayedTasks ??
     dashboard.tasks.filter((task) => task.isDelayed).length;
   const todayTasks = dashboard.tasks.slice(0, 3);
-  const visiblePrs = dashboard.pullRequests.slice(0, 3);
+  const visiblePrs = reviewPrs.slice(0, 3);
   const visibleActions = dashboard.agentActions.slice(0, 2);
   const visibleMeetings = dashboard.meetingReports.slice(0, 3);
 
@@ -212,7 +216,17 @@ function buildDashboardViewModel(dashboard: DashboardRecord) {
 }
 
 function resolveDashboardWorkspaceId(pathname: string) {
-  return extractWorkspaceIdFromPathname(pathname) ?? mockWorkspaces[0].id;
+  const selection = resolveCurrentWorkspaceSelection({
+    workspaces: mockWorkspaces,
+    urlWorkspaceId: extractWorkspaceIdFromPathname(pathname),
+    storedWorkspaceId: readStoredWorkspaceId(),
+  });
+
+  return (
+    selection.workspace?.id ??
+    selection.fallbackWorkspace?.id ??
+    mockWorkspaces[0].id
+  );
 }
 
 function DashboardStatusPanel({

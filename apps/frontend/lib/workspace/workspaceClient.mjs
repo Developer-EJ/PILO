@@ -1,5 +1,3 @@
-import { defaultAppServerUrl } from "../auth/authClient.mjs";
-
 const DEFAULT_WORKSPACE_MODE = "mock";
 
 export const mockWorkspaces = [
@@ -26,11 +24,11 @@ export const mockWorkspaces = [
 ];
 
 function defaultWorkspaceMode() {
-  return (
-    process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE ??
-    process.env.NEXT_PUBLIC_PILO_AUTH_MODE ??
-    DEFAULT_WORKSPACE_MODE
-  );
+  return process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE ?? DEFAULT_WORKSPACE_MODE;
+}
+
+export function defaultWorkspaceApiBaseUrl() {
+  return process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ?? "";
 }
 
 export function resolveWorkspaceClientMode(mode = defaultWorkspaceMode()) {
@@ -46,7 +44,10 @@ export class WorkspaceApiError extends Error {
   }
 }
 
-export function buildWorkspaceApiUrl(path, baseUrl = defaultAppServerUrl()) {
+export function buildWorkspaceApiUrl(
+  path,
+  baseUrl = defaultWorkspaceApiBaseUrl(),
+) {
   if (!path.startsWith("/")) {
     throw new WorkspaceApiError("Workspace API path must start with /", {
       path,
@@ -83,7 +84,7 @@ async function requestWorkspaceJson(path, init, { baseUrl, fetcher }) {
 }
 
 export function createWorkspaceApiClient({
-  baseUrl = defaultAppServerUrl(),
+  baseUrl = defaultWorkspaceApiBaseUrl(),
   fetcher = fetch,
 } = {}) {
   return {
@@ -93,10 +94,6 @@ export function createWorkspaceApiClient({
         baseUrl,
         fetcher,
       });
-
-      if (response.status === 401) {
-        return [];
-      }
 
       if (!response.ok) {
         throw new WorkspaceApiError("Failed to load workspaces", {

@@ -1,10 +1,10 @@
 import {
   buildWorkspaceApiUrl,
+  defaultWorkspaceApiBaseUrl,
   mockWorkspaces,
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
 import { workspaceDashboardFixture } from "./workspaceDashboardFixture.mjs";
-import { defaultAppServerUrl } from "../auth/authClient.mjs";
 
 const DEFAULT_DASHBOARD_MODE = "mock";
 
@@ -25,7 +25,6 @@ export function defaultWorkspaceDashboardMode() {
   return (
     process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE ??
     process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE ??
-    process.env.NEXT_PUBLIC_PILO_AUTH_MODE ??
     DEFAULT_DASHBOARD_MODE
   );
 }
@@ -96,19 +95,33 @@ export function normalizeWorkspaceDashboard(
 ) {
   const warnings = [];
   const source = isRecord(rawDashboard) ? rawDashboard : {};
+  const requestedWorkspaceId = workspaceId ?? null;
+  const incomingWorkspace = isRecord(source.workspace)
+    ? source.workspace
+    : null;
+  const incomingWorkspaceId =
+    typeof incomingWorkspace?.id === "string" ? incomingWorkspace.id : null;
+  const workspaceIdMismatch =
+    Boolean(requestedWorkspaceId && incomingWorkspaceId) &&
+    requestedWorkspaceId !== incomingWorkspaceId;
   const resolvedWorkspaceId =
     workspaceId ??
-    (isRecord(source.workspace) ? source.workspace.id : null) ??
+    incomingWorkspaceId ??
     workspaceDashboardFixture.workspace.id;
 
   if (!isRecord(rawDashboard)) {
     warnings.push("dashboard_payload_invalid");
   }
 
+  if (workspaceIdMismatch) {
+    warnings.push("workspace_id_mismatch");
+  }
+
   const dashboard = {
-    workspace: isRecord(source.workspace)
-      ? source.workspace
-      : createFallbackWorkspace(resolvedWorkspaceId),
+    workspace:
+      incomingWorkspace && !workspaceIdMismatch
+        ? incomingWorkspace
+        : createFallbackWorkspace(resolvedWorkspaceId),
     currentMember: isRecord(source.currentMember)
       ? source.currentMember
       : createFallbackCurrentMember(resolvedWorkspaceId),
@@ -126,7 +139,7 @@ export function normalizeWorkspaceDashboard(
         : new Date().toISOString(),
   };
 
-  if (!isRecord(source.workspace)) warnings.push("workspace_missing");
+  if (!incomingWorkspace) warnings.push("workspace_missing");
   if (!isRecord(source.currentMember)) warnings.push("currentMember_missing");
   if (!isRecord(source.preferences)) warnings.push("preferences_missing");
   if (source.progress !== null && !isRecord(source.progress)) {
@@ -209,7 +222,7 @@ async function readDashboardJson(response, path) {
 }
 
 export function createWorkspaceDashboardApiClient({
-  baseUrl = defaultAppServerUrl(),
+  baseUrl = defaultWorkspaceApiBaseUrl(),
   fetcher = fetch,
 } = {}) {
   return {

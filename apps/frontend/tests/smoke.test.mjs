@@ -27,6 +27,7 @@ import {
   createWorkspaceApiClient,
   createWorkspaceClient,
   mockWorkspaces,
+  WorkspaceApiError,
 } from "../lib/workspace/workspaceClient.mjs";
 import {
   createMockWorkspaceDashboardClient,
@@ -81,7 +82,7 @@ describe("frontend package", () => {
   });
 
   it("builds workspace API URLs from the configured app server base URL", () => {
-    assert.equal(buildWorkspaceApiUrl("/workspaces"), "/workspaces");
+    assert.equal(buildWorkspaceApiUrl("/workspaces", ""), "/workspaces");
     assert.equal(
       buildWorkspaceApiUrl("/workspaces", "https://api.pilo.dev/"),
       "https://api.pilo.dev/workspaces",
@@ -116,6 +117,17 @@ describe("frontend package", () => {
         mock: { workspaces: [] },
       }).listWorkspaces(),
       [],
+    );
+
+    await assert.rejects(
+      createWorkspaceApiClient({
+        baseUrl: "https://api.pilo.dev",
+        fetcher: async () => new Response(null, { status: 401 }),
+      }).listWorkspaces(),
+      (error) =>
+        error instanceof WorkspaceApiError &&
+        error.status === 401 &&
+        error.path === "/workspaces",
     );
   });
 
@@ -161,6 +173,23 @@ describe("frontend package", () => {
       ).dashboard.workspace.id,
       workspaceId,
     );
+
+    const mismatchedDashboard = normalizeWorkspaceDashboard(
+      {
+        ...dashboardFixture,
+        workspace: {
+          ...dashboardFixture.workspace,
+          id: "99999999-9999-4999-8999-999999999999",
+        },
+      },
+      { workspaceId },
+    );
+
+    assert.equal(mismatchedDashboard.dashboard.workspace.id, workspaceId);
+    assert.equal(
+      mismatchedDashboard.warnings.includes("workspace_id_mismatch"),
+      true,
+    );
   });
 
   it("keeps frontend dashboard fixture sections aligned with the contract fixture", () => {
@@ -174,7 +203,9 @@ describe("frontend package", () => {
       "tasks",
       "githubIssues",
       "pullRequests",
+      "pullRequestChangedFiles",
       "meetingReports",
+      "meetingActionItems",
       "prAnalyses",
       "agentActions",
       "canvasEntities",
@@ -298,6 +329,20 @@ describe("frontend package", () => {
       mockWorkspaces[0].id,
     );
     assert.equal(readStoredWorkspaceId(mockStorage), mockWorkspaces[0].id);
+
+    const blockedStorage = {
+      getItem() {
+        throw new Error("blocked");
+      },
+      setItem() {
+        throw new Error("blocked");
+      },
+    };
+
+    assert.equal(readStoredWorkspaceId(blockedStorage), null);
+    assert.doesNotThrow(() =>
+      writeStoredWorkspaceId(mockWorkspaces[0].id, blockedStorage),
+    );
   });
 
   it("keeps Auth frontend contracts aligned with the public schema", () => {

@@ -11,7 +11,11 @@ function defaultWorkspaceStorage() {
     return null;
   }
 
-  return window.localStorage;
+  try {
+    return window.localStorage;
+  } catch (error) {
+    return null;
+  }
 }
 
 export function extractWorkspaceIdFromPathname(pathname = "") {
