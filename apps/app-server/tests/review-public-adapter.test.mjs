@@ -5,10 +5,7 @@ import { describe, it } from "node:test";
 const require = createRequire(import.meta.url);
 require("ts-node/register");
 
-const {
-  BadRequestException,
-  ParseUUIDPipe,
-} = require("@nestjs/common");
+const { BadRequestException, ParseUUIDPipe } = require("@nestjs/common");
 const {
   toPRAnalysisSummary,
 } = require("../src/modules/review/public/pr-analysis-summary.adapter.ts");

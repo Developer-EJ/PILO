@@ -26,14 +26,12 @@ const REVIEW_ANALYSIS_SUMMARY_FIXTURE = toPRAnalysisSummary(
 
 @Injectable()
 export class ReviewPublicService {
-  private readonly analysisSummaries = new Map<string, PRAnalysisSummary>(
+  private readonly analysisSummaries = new Map<string, PRAnalysisSummary>([
     [
-      [
-        REVIEW_ANALYSIS_SUMMARY_FIXTURE.pullRequestId,
-        REVIEW_ANALYSIS_SUMMARY_FIXTURE,
-      ],
+      REVIEW_ANALYSIS_SUMMARY_FIXTURE.pullRequestId,
+      REVIEW_ANALYSIS_SUMMARY_FIXTURE,
     ],
-  );
+  ]);
 
   getAnalysisSummary(pullRequestId: string): PRAnalysisSummary {
     const summary = this.analysisSummaries.get(pullRequestId);
