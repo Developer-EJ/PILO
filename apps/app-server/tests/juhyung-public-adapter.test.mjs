@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import process from "node:process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 require("ts-node/register");
+const repoRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+);
 
 const {
   JuhyungPublicAdapter,
@@ -15,9 +21,7 @@ const {
 const schema = JSON.parse(
   readFileSync(
     resolve(
-      process.cwd(),
-      "..",
-      "..",
+      repoRoot,
       "docs",
       "contracts",
       "schemas",
