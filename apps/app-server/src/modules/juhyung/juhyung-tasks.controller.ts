@@ -8,11 +8,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from "@nestjs/common";
 import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
   CreateTaskBody,
   JuhyungTaskService,
+  ListTasksQuery,
   UpdateTaskBody,
   UpdateTaskStatusBody,
 } from "./juhyung-task.service";
@@ -24,11 +26,13 @@ export class JuhyungTasksController {
   @Get("workspaces/:workspaceId/tasks")
   listTasks(
     @Param("workspaceId") workspaceId: string,
+    @Query() query: ListTasksQuery,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
   ) {
     return this.taskService.listTasks(
       workspaceId,
+      query,
       toCurrentActor(userId, memberId),
     );
   }

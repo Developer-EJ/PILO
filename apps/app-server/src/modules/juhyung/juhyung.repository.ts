@@ -41,17 +41,43 @@ export interface UpdateTaskInput {
   milestoneId?: string | null;
 }
 
+export type TaskListSortField =
+  | "updatedAt"
+  | "createdAt"
+  | "dueDate"
+  | "priority"
+  | "status"
+  | "title";
+
+export interface ListTasksOptions {
+  status?: TaskStatus[];
+  assigneeMemberId?: string;
+  priority?: TaskPriority[];
+  dueDateFrom?: Date | string;
+  dueDateTo?: Date | string;
+  milestoneId?: string;
+  sortBy: TaskListSortField;
+  sortDirection: Prisma.SortOrder;
+  limit: number;
+  offset: number;
+}
+
 @Injectable()
 export class JuhyungRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  listTasksForWorkspace(workspaceId: string) {
+  listTasksForWorkspace(workspaceId: string, options?: ListTasksOptions) {
     return this.database.task.findMany({
-      where: {
-        workspaceId,
-        deletedAt: null,
-      },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      where: buildTaskListWhere(workspaceId, options),
+      orderBy: options
+        ? buildTaskListOrderBy(options)
+        : [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      ...(options
+        ? {
+            take: options.limit,
+            skip: options.offset,
+          }
+        : {}),
     });
   }
 
@@ -156,4 +182,59 @@ export class JuhyungRepository {
       },
     });
   }
+}
+
+function buildTaskListWhere(
+  workspaceId: string,
+  options?: ListTasksOptions,
+): Prisma.TaskWhereInput {
+  const where: Prisma.TaskWhereInput = {
+    workspaceId,
+    deletedAt: null,
+  };
+  if (!options) {
+    return where;
+  }
+
+  if (options.status?.length) {
+    where.status = {
+      in: options.status,
+    };
+  }
+  if (options.assigneeMemberId) {
+    where.assigneeMemberId = options.assigneeMemberId;
+  }
+  if (options.priority?.length) {
+    where.priority = {
+      in: options.priority,
+    };
+  }
+  if (options.dueDateFrom || options.dueDateTo) {
+    where.dueDate = {
+      ...(options.dueDateFrom ? { gte: options.dueDateFrom } : {}),
+      ...(options.dueDateTo ? { lte: options.dueDateTo } : {}),
+    };
+  }
+  if (options.milestoneId) {
+    where.milestoneId = options.milestoneId;
+  }
+
+  return where;
+}
+
+function buildTaskListOrderBy(
+  options: ListTasksOptions,
+): Prisma.TaskOrderByWithRelationInput[] {
+  const orderBy = [
+    {
+      [options.sortBy]: options.sortDirection,
+    } as Prisma.TaskOrderByWithRelationInput,
+  ];
+
+  if (options.sortBy !== "createdAt") {
+    orderBy.push({ createdAt: "desc" });
+  }
+  orderBy.push({ id: "asc" });
+
+  return orderBy;
 }
