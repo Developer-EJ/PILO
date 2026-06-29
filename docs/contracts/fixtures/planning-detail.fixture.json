@@ -1,0 +1,136 @@
+{
+  "summary": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+    "workspaceId": "22222222-2222-4222-8222-222222222222",
+    "goal": "AI 협업 도구 MVP 구현",
+    "targetUser": "부트캠프 팀 프로젝트",
+    "status": "approved",
+    "featureDraftCount": 2,
+    "milestoneDraftCount": 1,
+    "riskCount": 1,
+    "createdAt": "2026-06-27T12:00:00.000Z"
+  },
+  "detail": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+    "workspaceId": "22222222-2222-4222-8222-222222222222",
+    "goal": "AI 협업 도구 MVP 구현",
+    "targetUser": "부트캠프 팀 프로젝트",
+    "problem": "역할 분배와 진행 현황 공유가 여러 도구에 흩어져 있다.",
+    "duration": "4 weeks",
+    "outputGoal": "협업 가능한 MVP와 발표 자료",
+    "status": "approved",
+    "createdByMemberId": "33333333-3333-4333-8333-333333333331",
+    "techStack": {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa151",
+      "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+      "frontend": "Next.js",
+      "backend": "NestJS",
+      "databaseName": "PostgreSQL",
+      "ai": "OpenAI API",
+      "deploy": "AWS ECS",
+      "reason": "팀원이 TypeScript 기반으로 프론트와 서버를 나눠 빠르게 개발할 수 있다.",
+      "difficulty": "medium",
+      "alternatives": ["FastAPI", "Supabase"],
+      "createdAt": "2026-06-27T12:05:00.000Z"
+    },
+    "featureDrafts": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa152",
+        "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+        "title": "Agent 실행 상태 조회",
+        "description": "workflow 실행 상태와 pending action 수를 표시한다.",
+        "scope": "mvp",
+        "reason": "긴 작업의 상태를 사용자가 확인해야 한다.",
+        "sortOrder": 0,
+        "createdAt": "2026-06-27T12:10:00.000Z"
+      },
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa153",
+        "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+        "title": "Planning 결과 화면",
+        "description": "추천 스택, 기능, 역할, 마일스톤, 리스크를 한 화면에 표시한다.",
+        "scope": "should",
+        "reason": "온보딩 결과를 팀원이 같은 기준으로 확인해야 한다.",
+        "sortOrder": 1,
+        "createdAt": "2026-06-27T12:11:00.000Z"
+      }
+    ],
+    "roleDrafts": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa154",
+        "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+        "member": {
+          "memberId": "33333333-3333-4333-8333-333333333331",
+          "name": "세인"
+        },
+        "suggestedRole": "Agent Runtime / Planning",
+        "reason": "Agent contract와 planning workflow를 담당한다.",
+        "sortOrder": 0,
+        "createdAt": "2026-06-27T12:12:00.000Z"
+      }
+    ],
+    "milestoneDrafts": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa155",
+        "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+        "title": "MVP contract freeze",
+        "startDate": "2026-07-01",
+        "endDate": "2026-07-05",
+        "sortOrder": 0,
+        "createdAt": "2026-06-27T12:14:00.000Z"
+      }
+    ],
+    "riskNotes": [
+      {
+        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa156",
+        "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+        "content": "공통 contract가 늦어지면 각 도메인 UI가 fixture에 오래 머문다.",
+        "severity": "medium",
+        "sortOrder": 0,
+        "createdAt": "2026-06-27T12:16:00.000Z"
+      }
+    ],
+    "firstAgendaDraft": {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa157",
+      "draftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa150",
+      "title": "MVP kickoff",
+      "objective": "역할과 첫 주 contract 우선순위를 확정한다.",
+      "agendaItems": ["계약 우선순위 확인", "owner API 경계 확인", "첫 주 작업 분배"],
+      "attendeeMemberIds": [
+        "33333333-3333-4333-8333-333333333331",
+        "33333333-3333-4333-8333-333333333332"
+      ],
+      "durationMinutes": 45,
+      "createdAt": "2026-06-27T12:18:00.000Z"
+    },
+    "approval": {
+      "status": "executed",
+      "actionId": "99999999-9999-4999-8999-999999999950",
+      "requestedAt": "2026-06-27T12:20:00.000Z",
+      "confirmedAt": "2026-06-27T12:25:00.000Z",
+      "executedAt": "2026-06-27T12:26:00.000Z",
+      "ownerApiResults": [
+        {
+          "owner": "task",
+          "operation": "task.create",
+          "sourceDraftType": "feature",
+          "sourceDraftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa152",
+          "status": "succeeded",
+          "targetEntityId": "44444444-4444-4444-8444-444444444450",
+          "errorMessage": null
+        },
+        {
+          "owner": "task",
+          "operation": "milestone.create",
+          "sourceDraftType": "milestone",
+          "sourceDraftId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa155",
+          "status": "succeeded",
+          "targetEntityId": "55555555-5555-4555-8555-555555555550",
+          "errorMessage": null
+        }
+      ]
+    },
+    "createdAt": "2026-06-27T12:00:00.000Z",
+    "updatedAt": "2026-06-27T12:26:00.000Z"
+  }
+}

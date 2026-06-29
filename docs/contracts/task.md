@@ -6,7 +6,7 @@
 
 ## Scope
 
-Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크리스트, 댓글, 변경 이력, 의존성을 담당한다.
+Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크리스트, 댓글, 변경 이력, 의존성, Task draft, Milestone 연결을 담당한다.
 
 ## Owned Tables
 
@@ -19,18 +19,30 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ## Provided APIs
 
-| Method   | Path                                   | 목적                          | Consumer                   |
-| -------- | -------------------------------------- | ----------------------------- | -------------------------- |
-| `GET`    | `/workspaces/:workspaceId/tasks`       | Task 목록/필터 조회           | 동현, 주형                 |
-| `POST`   | `/workspaces/:workspaceId/tasks`       | Task 생성                     | 주형, 세인 action executor |
-| `GET`    | `/tasks/:taskId`                       | Task 상세                     | 전체                       |
-| `PATCH`  | `/tasks/:taskId`                       | 제목/설명/담당자/마감일 수정  | 주형                       |
-| `PATCH`  | `/tasks/:taskId/status`                | 상태 변경                     | 주형, 세인 action executor |
-| `DELETE` | `/tasks/:taskId`                       | Task soft delete              | 주형                       |
-| `POST`   | `/tasks/:taskId/comments`              | 댓글 작성                     | 주형                       |
-| `POST`   | `/tasks/:taskId/checklist-items`       | 체크리스트 추가               | 주형                       |
-| `POST`   | `/tasks/:taskId/dependencies`          | 의존성 추가                   | 주형                       |
-| `POST`   | `/workspaces/:workspaceId/task-drafts` | 외부 후보를 Task draft로 변환 | 진호, 세인                 |
+| Method | Path | 목적 | Consumer |
+|---|---|---|---|
+| `GET` | `/workspaces/:workspaceId/tasks` | Task 목록/필터 조회 | 동현, 주형 |
+| `POST` | `/workspaces/:workspaceId/tasks` | Task 생성 | 주형, 세인 action executor |
+| `GET` | `/workspaces/:workspaceId/task-drafts` | Task draft 목록 조회 | 주형, 진호, 세인 |
+| `POST` | `/workspaces/:workspaceId/task-drafts` | 외부 후보를 Task draft로 변환 | 진호, 세인 |
+| `POST` | `/task-drafts/:draftId/approve` | Task draft 승인 후 실제 Task 생성 | 주형, 세인 action executor |
+| `POST` | `/task-drafts/:draftId/reject` | Task draft 거절 | 주형, 세인 action executor |
+| `GET` | `/workspaces/:workspaceId/milestones` | Milestone 목록 조회 | 동현, 주형, 세인 |
+| `POST` | `/workspaces/:workspaceId/milestones` | Milestone 생성 | 주형, 세인 planning approve |
+| `GET` | `/milestones/:milestoneId` | Milestone 상세 조회 | 주형, 동현 |
+| `PATCH` | `/milestones/:milestoneId` | Milestone 제목/일정/상태 수정 | 주형 |
+| `GET` | `/tasks/:taskId` | Task 상세 | 전체 |
+| `PATCH` | `/tasks/:taskId` | 제목/설명/담당자/마감일/마일스톤 수정 | 주형 |
+| `DELETE` | `/tasks/:taskId` | Task soft delete | 주형 |
+| `PATCH` | `/tasks/:taskId/status` | 상태 변경 | 주형, 세인 action executor |
+| `POST` | `/tasks/:taskId/comments` | 댓글 작성 | 주형 |
+| `POST` | `/tasks/:taskId/checklist-items` | 체크리스트 추가 | 주형 |
+| `PATCH` | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 제목/상태/순서 수정 | 주형 |
+| `DELETE` | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 삭제 | 주형 |
+| `POST` | `/tasks/:taskId/dependencies` | 의존성 추가 | 주형 |
+| `DELETE` | `/tasks/:taskId/dependencies/:dependencyId` | 의존성 삭제 | 주형 |
+
+Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAfter`, `milestoneId`, `page`, `pageSize`, `sort` query를 지원할 수 있다. 구현 PR에서 일부 query를 나중으로 미루면 PR 본문에 deferred field와 후속 Issue를 적는다.
 
 ## Read Models
 
@@ -67,6 +79,51 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
   "assigneeMemberId": "uuid",
   "priority": "high",
   "dueDate": "2026-07-03"
+}
+```
+
+`TaskCreateDraft`는 Agent action payload와 외부 후보 입력에 쓰는 request DTO다. 사용자가 승인할 때까지 원본 source는 `meeting_action_items`, `agent_actions`, 또는 planning draft owner가 보관하고, 승인 후 실제 `tasks` row 생성은 주형 API가 담당한다.
+
+### TaskDraft
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "sourceType": "meeting_action_item",
+  "sourceId": "uuid",
+  "title": "OAuth callback 처리",
+  "description": "Google/GitHub callback을 처리한다.",
+  "assigneeMemberId": "uuid",
+  "priority": "high",
+  "dueDate": "2026-07-03",
+  "status": "waiting_confirmation",
+  "createdAt": "2026-06-27T12:00:00Z"
+}
+```
+
+### MilestoneSummary
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "title": "MVP 1차 구현",
+  "startDate": "2026-07-01",
+  "endDate": "2026-07-14",
+  "status": "in_progress",
+  "taskCount": 12,
+  "doneTaskCount": 5
+}
+```
+
+### TaskStatusUpdateAction
+
+```json
+{
+  "workspaceId": "uuid",
+  "taskId": "uuid",
+  "status": "in_review"
 }
 ```
 
