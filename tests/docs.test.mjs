@@ -467,6 +467,45 @@ describe("machine-readable public contract schema", () => {
     assert.deepEqual(ownerResult.properties.status.enum, ["not_requested", "pending", "succeeded", "failed", "skipped"]);
   });
 
+  it("validates PlanningOwnerApiResult state and source coupling", () => {
+    const schema = readJson(schemaPath);
+    const ownerResult = schema.$defs.PlanningOwnerApiResult;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const targetId = "00000000-0000-4000-8000-000000000002";
+    const baseResult = {
+      owner: "task",
+      operation: "task.create",
+      sourceDraftType: "feature",
+      sourceDraftId: uuid,
+      status: "succeeded",
+      targetEntityId: targetId,
+      errorMessage: null,
+    };
+
+    assert.equal(validateJsonSchema(ownerResult, baseResult, schema).valid, true);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, targetEntityId: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, errorMessage: "unexpected" }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "Task API failed" }, schema).valid, true);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", errorMessage: "Task API failed" }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "" }, schema).valid, false);
+
+    for (const status of ["not_requested", "pending", "skipped"]) {
+      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: null }, schema).valid, true);
+      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: targetId }, schema).valid, false);
+    }
+
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, operation: "task.create", sourceDraftType: "milestone" }, schema).valid, false);
+    assert.equal(
+      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "feature" }, schema).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "milestone" }, schema).valid,
+      true,
+    );
+  });
+
   it("agent action schema binds every supported action type to a concrete payload schema", () => {
     const schema = JSON.parse(read(schemaPath));
     const agentAction = schema.$defs.AgentAction;
