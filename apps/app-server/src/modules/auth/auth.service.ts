@@ -36,9 +36,6 @@ export type AuthProvidersResponse = {
     configured: boolean;
     source: "env" | "local-fallback";
   };
-  repository: {
-    storageMode: string;
-  };
 };
 
 export type BeginOAuthLoginResponse = {
@@ -154,9 +151,6 @@ export class AuthService {
         cookieName: this.config.session.cookieName,
         configured: this.config.session.source === "env",
         source: this.config.session.source,
-      },
-      repository: {
-        storageMode: this.authRepository.storageMode,
       },
     };
   }

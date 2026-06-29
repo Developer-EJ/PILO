@@ -56,6 +56,61 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
+  it("reads one non-deleted task by id", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        findFirst: async (args) => {
+          calls.push(args);
+          return { id: "task-1", deletedAt: null };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const task = await repository.getTaskById("task-1");
+
+    assert.deepEqual(task, { id: "task-1", deletedAt: null });
+    assert.deepEqual(calls, [
+      {
+        where: {
+          id: "task-1",
+          deletedAt: null,
+        },
+      },
+    ]);
+  });
+
+  it("loads workspace members by ids for public assignee summaries", async () => {
+    const calls = [];
+    const database = {
+      workspaceMember: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [{ id: "member-1", workspaceId: "workspace-1" }];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const members = await repository.listWorkspaceMembersByIds("workspace-1", [
+      "member-1",
+      "member-2",
+    ]);
+
+    assert.deepEqual(members, [{ id: "member-1", workspaceId: "workspace-1" }]);
+    assert.deepEqual(calls, [
+      {
+        where: {
+          workspaceId: "workspace-1",
+          id: {
+            in: ["member-1", "member-2"],
+          },
+        },
+      },
+    ]);
+  });
+
   it("writes new tasks with the current workspace member as creator", async () => {
     const calls = [];
     const database = {
