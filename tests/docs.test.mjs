@@ -439,6 +439,16 @@ describe("machine-readable public contract schema", () => {
       "MeetingReportGenerateAction",
       "ReviewAnalysisGenerateAction",
       "PlanningApproveAction",
+      "ProjectPlanDraftSummary",
+      "ProjectPlanDraftDetail",
+      "ProjectPlanTechStackRecommendation",
+      "ProjectPlanFeatureDraft",
+      "ProjectPlanRoleDraft",
+      "ProjectPlanMilestoneDraft",
+      "ProjectPlanRiskNote",
+      "ProjectPlanFirstAgendaDraft",
+      "ProjectPlanApprovalState",
+      "PlanningOwnerApiResult",
       "MeetingReportSummary",
       "MeetingActionItem",
       "CodeReviewRoomSummary",
@@ -465,6 +475,66 @@ describe("machine-readable public contract schema", () => {
     ]) {
       assert.ok(defs[name], `schema must define ${name}`);
     }
+  });
+
+  it("schema defines planning detail sections and approval result boundaries", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const detail = schema.$defs.ProjectPlanDraftDetail;
+    const approval = schema.$defs.ProjectPlanApprovalState;
+    const ownerResult = schema.$defs.PlanningOwnerApiResult;
+
+    for (const key of ["techStack", "featureDrafts", "roleDrafts", "milestoneDrafts", "riskNotes", "firstAgendaDraft", "approval"]) {
+      assert.ok(detail.required.includes(key), `ProjectPlanDraftDetail must require ${key}`);
+    }
+
+    assert.equal(detail.properties.approval.$ref, "#/$defs/ProjectPlanApprovalState");
+    assert.equal(detail.properties.featureDrafts.items.$ref, "#/$defs/ProjectPlanFeatureDraft");
+    assert.equal(detail.properties.milestoneDrafts.items.$ref, "#/$defs/ProjectPlanMilestoneDraft");
+    assert.deepEqual(schema.$defs.ProjectPlanDraftStatus.enum, ["draft", "reviewing", "approved", "rejected"]);
+    assert.deepEqual(approval.properties.status.$ref, "#/$defs/PlanningApprovalStatus");
+    assert.equal(approval.properties.ownerApiResults.items.$ref, "#/$defs/PlanningOwnerApiResult");
+    assert.deepEqual(ownerResult.properties.operation.enum, ["task.create", "milestone.create"]);
+    assert.deepEqual(ownerResult.properties.sourceDraftType.enum, ["feature", "milestone"]);
+    assert.deepEqual(ownerResult.properties.status.enum, ["not_requested", "pending", "succeeded", "failed", "skipped"]);
+  });
+
+  it("validates PlanningOwnerApiResult state and source coupling", () => {
+    const schema = readJson(schemaPath);
+    const ownerResult = schema.$defs.PlanningOwnerApiResult;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const targetId = "00000000-0000-4000-8000-000000000002";
+    const baseResult = {
+      owner: "task",
+      operation: "task.create",
+      sourceDraftType: "feature",
+      sourceDraftId: uuid,
+      status: "succeeded",
+      targetEntityId: targetId,
+      errorMessage: null,
+    };
+
+    assert.equal(validateJsonSchema(ownerResult, baseResult, schema).valid, true);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, targetEntityId: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, errorMessage: "unexpected" }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "Task API failed" }, schema).valid, true);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", errorMessage: "Task API failed" }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "" }, schema).valid, false);
+
+    for (const status of ["not_requested", "pending", "skipped"]) {
+      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: null }, schema).valid, true);
+      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: targetId }, schema).valid, false);
+    }
+
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, operation: "task.create", sourceDraftType: "milestone" }, schema).valid, false);
+    assert.equal(
+      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "feature" }, schema).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "milestone" }, schema).valid,
+      true,
+    );
   });
 
   it("agent action schema binds every supported action type to a concrete payload schema", () => {
@@ -946,6 +1016,24 @@ describe("contract fixtures", () => {
       const result = validateJsonSchema(schema.$defs.ReviewRiskSummary, risk, schema);
       assert.equal(result.valid, true, result.errors.join(", "));
     }
+  });
+
+  it("planning detail fixture matches planning public schemas", () => {
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const fixture = readJson("docs/contracts/fixtures/planning-detail.fixture.json");
+    const summaryResult = validateJsonSchema(schema.$defs.ProjectPlanDraftSummary, fixture.summary, schema);
+    const detailResult = validateJsonSchema(schema.$defs.ProjectPlanDraftDetail, fixture.detail, schema);
+    const ownerApiResults = fixture.detail.approval.ownerApiResults;
+
+    assert.equal(summaryResult.valid, true, summaryResult.errors.join(", "));
+    assert.equal(detailResult.valid, true, detailResult.errors.join(", "));
+    assert.equal(fixture.summary.id, fixture.detail.id);
+    assert.equal(fixture.detail.approval.status, "executed");
+    assert.ok(fixture.detail.featureDrafts.length > 0);
+    assert.ok(fixture.detail.milestoneDrafts.length > 0);
+    assert.ok(fixture.detail.firstAgendaDraft);
+    assert.ok(ownerApiResults.some((result) => result.operation === "task.create" && result.status === "succeeded" && result.targetEntityId));
+    assert.ok(ownerApiResults.some((result) => result.operation === "milestone.create" && result.status === "succeeded" && result.targetEntityId));
   });
 
   it("agent run detail fixture validates against the public schema", () => {
