@@ -1,38 +1,34 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import {
   WorkspaceAccessPublicService,
   WorkspaceActor,
 } from "../workspace/public/workspace-access-public.service";
+import {
+  parseCreateTaskInput,
+  parseTaskStatus,
+  parseUpdateTaskInput,
+  type CreateTaskBody,
+  type UpdateTaskBody,
+  type UpdateTaskStatusBody,
+} from "./juhyung-task-input";
 import { JuhyungPublicAdapter } from "./juhyung-public.adapter";
 import {
   TaskRecord,
+  TaskStatus,
   TaskSummary,
   WorkspaceMemberRecord,
 } from "./juhyung-public.types";
-import { CreateTaskInput, JuhyungRepository } from "./juhyung.repository";
+import {
+  CreateTaskInput,
+  JuhyungRepository,
+  UpdateTaskInput,
+} from "./juhyung.repository";
 
-const TASK_STATUSES = [
-  "todo",
-  "in_progress",
-  "in_review",
-  "done",
-  "blocked",
-] as const;
-const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
-
-export interface CreateTaskBody {
-  title?: unknown;
-  description?: unknown;
-  assigneeMemberId?: unknown;
-  status?: unknown;
-  priority?: unknown;
-  dueDate?: unknown;
-  milestoneId?: unknown;
-}
+export type {
+  CreateTaskBody,
+  UpdateTaskBody,
+  UpdateTaskStatusBody,
+} from "./juhyung-task-input";
 
 @Injectable()
 export class JuhyungTaskService {
@@ -92,14 +88,54 @@ export class JuhyungTaskService {
   }
 
   async getTask(taskId: string, actor?: WorkspaceActor): Promise<TaskSummary> {
-    const task = await this.repository.getTaskById(taskId);
-    if (!task) {
-      throw new NotFoundException("Task was not found");
-    }
-
-    await this.workspaceAccess.requireWorkspaceMember(task.workspaceId, actor);
+    const { task } = await this.requireTaskAccess(taskId, actor);
     const [summary] = await this.toTaskSummaries(task.workspaceId, [task]);
     return summary;
+  }
+
+  async updateTask(
+    taskId: string,
+    body: UpdateTaskBody,
+    actor?: WorkspaceActor,
+  ): Promise<TaskSummary> {
+    const input = parseUpdateTaskInput(body);
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    const assignee = await this.resolveUpdatedAssignee(task.workspaceId, input);
+    const updatedTask = await this.repository.updateTask(taskId, input);
+
+    if (assignee !== undefined) {
+      return this.publicAdapter.toTaskSummary(updatedTask, { assignee });
+    }
+
+    const [summary] = await this.toTaskSummaries(updatedTask.workspaceId, [
+      updatedTask,
+    ]);
+    return summary;
+  }
+
+  async updateTaskStatus(
+    taskId: string,
+    body: UpdateTaskStatusBody,
+    actor?: WorkspaceActor,
+  ): Promise<TaskSummary> {
+    const status = parseTaskStatus(body);
+    const { task, currentMember } = await this.requireTaskAccess(taskId, actor);
+    const updatedTask = await this.repository.updateTaskStatus(
+      taskId,
+      status,
+      currentMember.id,
+      task.status as TaskStatus,
+    );
+
+    const [summary] = await this.toTaskSummaries(updatedTask.workspaceId, [
+      updatedTask,
+    ]);
+    return summary;
+  }
+
+  async deleteTask(taskId: string, actor?: WorkspaceActor): Promise<void> {
+    await this.requireTaskAccess(taskId, actor);
+    await this.repository.softDeleteTask(taskId);
   }
 
   private async createTaskRecord(
@@ -115,6 +151,19 @@ export class JuhyungTaskService {
     return this.repository.createTask(input, currentMember.id);
   }
 
+  private async requireTaskAccess(taskId: string, actor?: WorkspaceActor) {
+    const task = await this.repository.getTaskById(taskId);
+    if (!task) {
+      throw new NotFoundException("Task was not found");
+    }
+
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      task.workspaceId,
+      actor,
+    );
+    return { task, currentMember };
+  }
+
   private async requireAssignee(input: CreateTaskInput) {
     if (!input.assigneeMemberId) {
       return;
@@ -124,6 +173,19 @@ export class JuhyungTaskService {
       input.workspaceId,
       input.assigneeMemberId,
     );
+  }
+
+  private async resolveUpdatedAssignee(
+    workspaceId: string,
+    input: UpdateTaskInput,
+  ): Promise<WorkspaceMemberRecord | null | undefined> {
+    if (!Object.prototype.hasOwnProperty.call(input, "assigneeMemberId")) {
+      return undefined;
+    }
+    if (!input.assigneeMemberId) {
+      return null;
+    }
+    return this.requireWorkspaceMemberById(workspaceId, input.assigneeMemberId);
   }
 
   private async requireWorkspaceMemberById(
@@ -175,73 +237,4 @@ export class JuhyungTaskService {
       }),
     );
   }
-}
-
-function parseCreateTaskInput(
-  workspaceId: string,
-  body: CreateTaskBody,
-): CreateTaskInput {
-  if (!body || typeof body !== "object") {
-    throw new BadRequestException("Task body is required");
-  }
-
-  return {
-    workspaceId,
-    title: parseRequiredString(body.title, "title"),
-    description: parseNullableString(body.description, "description"),
-    assigneeMemberId: parseNullableString(
-      body.assigneeMemberId,
-      "assigneeMemberId",
-    ),
-    status: parseEnum(body.status ?? "todo", TASK_STATUSES, "status"),
-    priority: parseEnum(body.priority ?? "medium", TASK_PRIORITIES, "priority"),
-    dueDate: parseNullableDate(body.dueDate, "dueDate"),
-    milestoneId: parseNullableString(body.milestoneId, "milestoneId"),
-  };
-}
-
-function parseRequiredString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new BadRequestException(`${field} is required`);
-  }
-  return value.trim();
-}
-
-function parseNullableString(value: unknown, field: string): string | null {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new BadRequestException(`${field} must be a string`);
-  }
-  return value.trim();
-}
-
-function parseEnum<T extends readonly string[]>(
-  value: unknown,
-  allowed: T,
-  field: string,
-): T[number] {
-  if (typeof value !== "string" || !allowed.includes(value)) {
-    throw new BadRequestException(`${field} is invalid`);
-  }
-  return value as T[number];
-}
-
-function parseNullableDate(value: unknown, field: string): Date | null {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new BadRequestException(`${field} must be YYYY-MM-DD`);
-  }
-
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (
-    Number.isNaN(parsed.getTime()) ||
-    parsed.toISOString().slice(0, 10) !== value
-  ) {
-    throw new BadRequestException(`${field} must be a valid date`);
-  }
-  return parsed;
 }

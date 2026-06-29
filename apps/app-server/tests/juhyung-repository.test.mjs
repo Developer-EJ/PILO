@@ -204,4 +204,119 @@ describe("JuhyungRepository", () => {
       ],
     ]);
   });
+
+  it("patches task fields without changing deleted tasks directly", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        update: async (args) => {
+          calls.push(args);
+          return { id: "task-1", ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const task = await repository.updateTask("task-1", {
+      title: "Updated task",
+      description: "Updated description",
+      assigneeMemberId: "member-2",
+      dueDate: new Date("2026-07-04T00:00:00.000Z"),
+      milestoneId: null,
+    });
+
+    assert.equal(task.title, "Updated task");
+    assert.deepEqual(calls, [
+      {
+        where: {
+          id: "task-1",
+        },
+        data: {
+          title: "Updated task",
+          description: "Updated description",
+          assigneeMemberId: "member-2",
+          dueDate: new Date("2026-07-04T00:00:00.000Z"),
+          milestoneId: null,
+        },
+      },
+    ]);
+  });
+
+  it("updates task status and writes the activity log in one transaction", async () => {
+    const calls = [];
+    const transaction = {
+      task: {
+        update: async (args) => {
+          calls.push(["task.update", args]);
+          return { id: "task-1", status: args.data.status };
+        },
+      },
+      taskActivityLog: {
+        create: async (args) => {
+          calls.push(["activity.create", args]);
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const task = await repository.updateTaskStatus(
+      "task-1",
+      "in_review",
+      "member-1",
+      "todo",
+    );
+
+    assert.deepEqual(task, { id: "task-1", status: "in_review" });
+    assert.deepEqual(calls, [
+      [
+        "task.update",
+        {
+          where: {
+            id: "task-1",
+          },
+          data: {
+            status: "in_review",
+          },
+        },
+      ],
+      [
+        "activity.create",
+        {
+          data: {
+            taskId: "task-1",
+            actorMemberId: "member-1",
+            action: "task.status_changed",
+            beforeValue: {
+              status: "todo",
+            },
+            afterValue: {
+              status: "in_review",
+            },
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("soft deletes tasks by setting deletedAt", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        update: async (args) => {
+          calls.push(args);
+          return { id: "task-1", ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const task = await repository.softDeleteTask("task-1");
+
+    assert.ok(task.deletedAt instanceof Date);
+    assert.deepEqual(calls[0].where, { id: "task-1" });
+    assert.ok(calls[0].data.deletedAt instanceof Date);
+  });
 });
