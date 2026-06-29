@@ -21,9 +21,35 @@ import {
   resolveOAuthCallbackState,
 } from "../app/login/callback/oauthCallbackState.mjs";
 import { authProviderHref } from "../app/login/authProviderHref.mjs";
+import {
+  buildWorkspaceApiUrl,
+  createMockWorkspaceClient,
+  createWorkspaceApiClient,
+  createWorkspaceClient,
+  mockWorkspaces,
+  WorkspaceApiError,
+} from "../lib/workspace/workspaceClient.mjs";
+import {
+  createMockWorkspaceDashboardClient,
+  createWorkspaceDashboardApiClient,
+  createWorkspaceDashboardClient,
+  createWorkspaceDashboardFixture,
+  normalizeWorkspaceDashboard,
+  resolveWorkspaceDashboardClientMode,
+} from "../lib/workspace/dashboardClient.mjs";
+import {
+  CURRENT_WORKSPACE_STORAGE_KEY,
+  extractWorkspaceIdFromPathname,
+  readStoredWorkspaceId,
+  resolveCurrentWorkspaceSelection,
+  workspaceDashboardHref,
+  writeStoredWorkspaceId,
+} from "../lib/workspace/currentWorkspace.mjs";
+import { workspaceDashboardFixture } from "../lib/workspace/workspaceDashboardFixture.mjs";
 import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 import contractCanvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
+import contractWorkspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
 
 const sortContractKeys = (values) =>
   [...values].sort((left, right) => left.localeCompare(right));
@@ -52,6 +78,270 @@ describe("frontend package", () => {
     assert.equal(
       authProviderHref("/auth/github/start", "https://api.pilo.dev"),
       "https://api.pilo.dev/auth/github/start",
+    );
+  });
+
+  it("builds workspace API URLs from the configured app server base URL", () => {
+    assert.equal(buildWorkspaceApiUrl("/workspaces", ""), "/workspaces");
+    assert.equal(
+      buildWorkspaceApiUrl("/workspaces", "https://api.pilo.dev/"),
+      "https://api.pilo.dev/workspaces",
+    );
+  });
+
+  it("loads workspaces in mock and api modes", async () => {
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url, init });
+
+      return Response.json(mockWorkspaces);
+    };
+
+    assert.deepEqual(
+      await createMockWorkspaceClient().listWorkspaces(),
+      mockWorkspaces,
+    );
+
+    const apiClient = createWorkspaceApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    assert.deepEqual(await apiClient.listWorkspaces(), mockWorkspaces);
+    assert.equal(requests[0].url, "https://api.pilo.dev/workspaces");
+    assert.equal(requests[0].init.credentials, "include");
+
+    assert.deepEqual(
+      await createWorkspaceClient({
+        mode: "mock",
+        mock: { workspaces: [] },
+      }).listWorkspaces(),
+      [],
+    );
+
+    await assert.rejects(
+      createWorkspaceApiClient({
+        baseUrl: "https://api.pilo.dev",
+        fetcher: async () => new Response(null, { status: 401 }),
+      }).listWorkspaces(),
+      (error) =>
+        error instanceof WorkspaceApiError &&
+        error.status === 401 &&
+        error.path === "/workspaces",
+    );
+  });
+
+  it("loads workspace dashboard data in mock and api modes", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const dashboardFixture = createWorkspaceDashboardFixture(workspaceId);
+    const requests = [];
+    const fetcher = async (url, init) => {
+      requests.push({ url, init });
+
+      return Response.json(dashboardFixture);
+    };
+
+    const mockResult =
+      await createMockWorkspaceDashboardClient().getDashboard(workspaceId);
+    assert.equal(mockResult.dashboard.workspace.id, workspaceId);
+    assert.equal(mockResult.dashboard.source, "fixture");
+    assert.equal(mockResult.dashboard.tasks[0].workspaceId, workspaceId);
+
+    const apiResult = await createWorkspaceDashboardApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    }).getDashboard(workspaceId);
+
+    assert.equal(
+      requests[0].url,
+      `https://api.pilo.dev/workspaces/${workspaceId}/dashboard`,
+    );
+    assert.equal(requests[0].init.credentials, "include");
+    assert.equal(apiResult.dashboard.workspace.id, workspaceId);
+    assert.equal(
+      apiResult.dashboard.tasks.length,
+      dashboardFixture.tasks.length,
+    );
+
+    assert.equal(resolveWorkspaceDashboardClientMode("api"), "api");
+    assert.equal(resolveWorkspaceDashboardClientMode("fixture"), "mock");
+    assert.equal(
+      (
+        await createWorkspaceDashboardClient({
+          mode: "mock",
+        }).getDashboard(workspaceId)
+      ).dashboard.workspace.id,
+      workspaceId,
+    );
+
+    const mismatchedDashboard = normalizeWorkspaceDashboard(
+      {
+        ...dashboardFixture,
+        workspace: {
+          ...dashboardFixture.workspace,
+          id: "99999999-9999-4999-8999-999999999999",
+        },
+      },
+      { workspaceId },
+    );
+
+    assert.equal(mismatchedDashboard.dashboard.workspace.id, workspaceId);
+    assert.equal(
+      mismatchedDashboard.warnings.includes("workspace_id_mismatch"),
+      true,
+    );
+  });
+
+  it("keeps frontend dashboard fixture sections aligned with the contract fixture", () => {
+    assert.deepEqual(
+      Object.keys(workspaceDashboardFixture).sort(),
+      Object.keys(contractWorkspaceDashboardFixture).sort(),
+    );
+
+    for (const section of [
+      "members",
+      "tasks",
+      "githubIssues",
+      "pullRequests",
+      "pullRequestChangedFiles",
+      "meetingReports",
+      "meetingActionItems",
+      "prAnalyses",
+      "agentActions",
+      "canvasEntities",
+    ]) {
+      assert.equal(Array.isArray(workspaceDashboardFixture[section]), true);
+      assert.equal(
+        Array.isArray(contractWorkspaceDashboardFixture[section]),
+        true,
+      );
+    }
+  });
+
+  it("normalizes partial dashboard payloads into quiet fallback sections", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const { dashboard, warnings } = normalizeWorkspaceDashboard(
+      {
+        workspace: mockWorkspaces[0],
+        tasks: "not-an-array",
+        progress: "not-an-object",
+        source: "fixture",
+      },
+      { workspaceId },
+    );
+
+    assert.equal(dashboard.workspace.id, workspaceId);
+    assert.deepEqual(dashboard.tasks, []);
+    assert.deepEqual(dashboard.pullRequests, []);
+    assert.equal(dashboard.progress, null);
+    assert.equal(warnings.includes("tasks_missing"), true);
+    assert.equal(warnings.includes("pullRequests_missing"), true);
+    assert.equal(warnings.includes("progress_invalid"), true);
+    assert.equal(warnings.includes("currentMember_missing"), true);
+    assert.equal(warnings.includes("preferences_missing"), true);
+  });
+
+  it("resolves current workspace from URL before stored state", () => {
+    const workspaces = [
+      mockWorkspaces[0],
+      {
+        ...mockWorkspaces[0],
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Second Workspace",
+      },
+    ];
+    const selection = resolveCurrentWorkspaceSelection({
+      workspaces,
+      urlWorkspaceId: workspaces[1].id,
+      storedWorkspaceId: workspaces[0].id,
+    });
+
+    assert.equal(
+      extractWorkspaceIdFromPathname(`/workspaces/${workspaces[1].id}`),
+      workspaces[1].id,
+    );
+    assert.equal(selection.status, "selected");
+    assert.equal(selection.source, "url");
+    assert.equal(selection.workspace.id, workspaces[1].id);
+    assert.equal(selection.shouldPersist, true);
+    assert.equal(selection.shouldReplaceRoute, false);
+  });
+
+  it("falls back to stored or default workspace when URL has no workspace id", () => {
+    const workspaces = [
+      mockWorkspaces[0],
+      {
+        ...mockWorkspaces[0],
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Second Workspace",
+      },
+    ];
+    const storedSelection = resolveCurrentWorkspaceSelection({
+      workspaces,
+      storedWorkspaceId: workspaces[1].id,
+    });
+    const defaultSelection = resolveCurrentWorkspaceSelection({
+      workspaces,
+      storedWorkspaceId: "missing-workspace",
+    });
+
+    assert.equal(storedSelection.source, "storage");
+    assert.equal(storedSelection.workspace.id, workspaces[1].id);
+    assert.equal(storedSelection.shouldReplaceRoute, true);
+    assert.equal(defaultSelection.source, "default");
+    assert.equal(defaultSelection.workspace.id, workspaces[0].id);
+    assert.equal(defaultSelection.shouldPersist, true);
+    assert.equal(
+      workspaceDashboardHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}`,
+    );
+  });
+
+  it("does not silently use stored workspace when URL workspace is invalid", () => {
+    const selection = resolveCurrentWorkspaceSelection({
+      workspaces: mockWorkspaces,
+      urlWorkspaceId: "missing-workspace",
+      storedWorkspaceId: mockWorkspaces[0].id,
+    });
+
+    assert.equal(selection.status, "url_not_found");
+    assert.equal(selection.workspace, null);
+    assert.equal(selection.invalidWorkspaceId, "missing-workspace");
+    assert.equal(selection.fallbackWorkspace.id, mockWorkspaces[0].id);
+    assert.equal(selection.shouldPersist, false);
+  });
+
+  it("reads and writes the current workspace id in storage", () => {
+    const storage = new Map();
+    const mockStorage = {
+      getItem(key) {
+        return storage.get(key) ?? null;
+      },
+      setItem(key, value) {
+        storage.set(key, value);
+      },
+    };
+
+    writeStoredWorkspaceId(mockWorkspaces[0].id, mockStorage);
+
+    assert.equal(
+      storage.get(CURRENT_WORKSPACE_STORAGE_KEY),
+      mockWorkspaces[0].id,
+    );
+    assert.equal(readStoredWorkspaceId(mockStorage), mockWorkspaces[0].id);
+
+    const blockedStorage = {
+      getItem() {
+        throw new Error("blocked");
+      },
+      setItem() {
+        throw new Error("blocked");
+      },
+    };
+
+    assert.equal(readStoredWorkspaceId(blockedStorage), null);
+    assert.doesNotThrow(() =>
+      writeStoredWorkspaceId(mockWorkspaces[0].id, blockedStorage),
     );
   });
 
