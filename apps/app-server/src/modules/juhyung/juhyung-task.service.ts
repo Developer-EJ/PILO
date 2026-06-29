@@ -427,7 +427,7 @@ export class JuhyungTaskService {
   async createTaskComment(
     taskId: string,
     body: CreateTaskCommentBody,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskCommentSummary> {
     const input = parseCreateTaskCommentInput(body);
     const { currentMember } = await this.requireTaskAccess(taskId, actor);
@@ -443,7 +443,7 @@ export class JuhyungTaskService {
 
   async listTaskComments(
     taskId: string,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskCommentSummary[]> {
     const { task } = await this.requireTaskAccess(taskId, actor);
     const comments = await this.repository.listTaskComments(taskId);
@@ -452,7 +452,7 @@ export class JuhyungTaskService {
 
   async listTaskActivityLogs(
     taskId: string,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskActivityLogSummary[]> {
     const { task } = await this.requireTaskAccess(taskId, actor);
     const activityLogs = await this.repository.listTaskActivityLogs(taskId);
