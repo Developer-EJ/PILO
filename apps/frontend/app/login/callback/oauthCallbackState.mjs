@@ -116,6 +116,7 @@ export function resolveOAuthCallbackState(source = {}) {
         ["provider", provider],
         ["error", errorCode ?? "oauth_callback_failed"],
         ["message", message],
+        ["next", nextPath],
       ]),
       retryHref: LOGIN_RETRY_PATH,
     };

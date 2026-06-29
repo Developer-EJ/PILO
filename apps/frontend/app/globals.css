@@ -230,6 +230,12 @@ h1 {
   font-weight: 800;
 }
 
+.logout-control {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
 .logout-button {
   min-height: 34px;
   border: 1px solid var(--pilo-line);
@@ -256,6 +262,36 @@ h1 {
 .logout-button:disabled {
   cursor: wait;
   opacity: 0.62;
+}
+
+.logout-error {
+  max-width: 180px;
+  color: var(--pilo-danger);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.auth-guard-error {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  gap: 14px;
+  background: #f6f7fb;
+  color: var(--pilo-ink);
+  text-align: center;
+}
+
+.auth-guard-error button {
+  border: 1px solid var(--pilo-line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--pilo-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 10px 16px;
 }
 
 .dashboard-content {
@@ -611,13 +647,13 @@ h1 {
 .login-auth-notice {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr);
-  gap: 10px;
+  gap: 14px;
   align-items: start;
   border: 1px solid var(--pilo-line);
   border-radius: 14px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   background: #ffffff;
-  padding: 12px;
+  padding: 16px;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.035);
 }
 
@@ -652,7 +688,7 @@ h1 {
   border-radius: 8px;
   background: rgba(15, 20, 34, 0.06);
   color: var(--pilo-muted);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11px;
   padding: 3px 6px;
 }

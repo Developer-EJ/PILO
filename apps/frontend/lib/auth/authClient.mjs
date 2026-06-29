@@ -33,7 +33,9 @@ export function buildAuthApiUrl(path, baseUrl = defaultAppServerUrl()) {
   }
 
   if (!baseUrl) {
-    return path;
+    throw new AuthApiError("Auth API base URL is required in api mode", {
+      path,
+    });
   }
 
   return `${baseUrl.replace(/\/$/, "")}${path}`;

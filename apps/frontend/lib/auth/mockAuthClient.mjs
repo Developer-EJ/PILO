@@ -14,19 +14,35 @@ function defaultMockAuthStorage() {
     return null;
   }
 
-  return window.sessionStorage;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
 }
 
 function isStorageSignedOut(storage) {
-  return storage?.getItem(MOCK_AUTH_SIGNED_OUT_KEY) === "true";
+  try {
+    return storage?.getItem(MOCK_AUTH_SIGNED_OUT_KEY) === "true";
+  } catch {
+    return false;
+  }
 }
 
 export function markMockAuthSignedIn(storage = defaultMockAuthStorage()) {
-  storage?.removeItem(MOCK_AUTH_SIGNED_OUT_KEY);
+  try {
+    storage?.removeItem(MOCK_AUTH_SIGNED_OUT_KEY);
+  } catch {
+    // Ignore blocked storage in mock mode.
+  }
 }
 
 export function markMockAuthSignedOut(storage = defaultMockAuthStorage()) {
-  storage?.setItem(MOCK_AUTH_SIGNED_OUT_KEY, "true");
+  try {
+    storage?.setItem(MOCK_AUTH_SIGNED_OUT_KEY, "true");
+  } catch {
+    // Ignore blocked storage in mock mode.
+  }
 }
 
 export function createMockAuthClient({

@@ -1,13 +1,11 @@
 import { Suspense } from "react";
 import { DraggableCanvasItems } from "./DraggableCanvasItems";
 import { LoginAuthNotice } from "./LoginAuthNotice";
-import { LoginProviderButtons } from "./LoginProviderButtons";
 import {
   LoginProviderList,
   type LoginProviderEntry,
 } from "./LoginProviderList";
 import { WorkspaceEntryTransition } from "./WorkspaceEntryTransition";
-import { authProviderHref } from "./authProviderHref.mjs";
 
 const providerEntries: LoginProviderEntry[] = [
   {
@@ -26,11 +24,6 @@ const providerEntries: LoginProviderEntry[] = [
   },
 ];
 
-const fallbackProviders = providerEntries.map((provider) => ({
-  ...provider,
-  href: authProviderHref(provider.path),
-}));
-
 const backdropNavItems = [
   { label: "홈 / 대시보드", active: true },
   { label: "프로젝트 시작" },
@@ -43,6 +36,25 @@ const backdropNavItems = [
   { label: "Code Review" },
   { label: "설정" },
 ];
+
+function LoginProviderFallback() {
+  return (
+    <div className="provider-list" aria-hidden="true">
+      {providerEntries.map((provider) => (
+        <div className="provider-button" key={provider.name}>
+          <span className={`provider-mark provider-${provider.tone}`}>
+            {provider.mark}
+          </span>
+          <span>
+            <strong>{provider.name}</strong>
+            <small>{provider.eyebrow}</small>
+          </span>
+          <b aria-hidden="true">&rarr;</b>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function LoginPage() {
   return (
@@ -136,7 +148,7 @@ export default function LoginPage() {
               </p>
               <p>
                 <i className="warning-dot" />
-                오늘 마감 Task 범위 점검<span>Task</span>
+                오늘 마감 Task 범위 재확인<span>Task</span>
               </p>
             </section>
           </div>
@@ -165,9 +177,7 @@ export default function LoginPage() {
             <LoginAuthNotice />
           </Suspense>
 
-          <Suspense
-            fallback={<LoginProviderButtons providers={fallbackProviders} />}
-          >
+          <Suspense fallback={<LoginProviderFallback />}>
             <LoginProviderList providers={providerEntries} />
           </Suspense>
 

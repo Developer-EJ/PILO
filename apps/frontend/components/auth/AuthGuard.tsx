@@ -33,6 +33,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const searchParams = useSearchParams();
   const searchKey = searchParams.toString();
   const [allowed, setAllowed] = useState(false);
+  const [authError, setAuthError] = useState(false);
 
   const nextPath = useMemo(
     () => createNextPath(pathname, new URLSearchParams(searchKey)),
@@ -48,10 +49,12 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
     async function checkAuth() {
       if (!isProtectedPath(pathname)) {
+        setAuthError(false);
         setAllowed(true);
         return;
       }
 
+      setAuthError(false);
       setAllowed(false);
 
       const authClient = createAuthClient({
@@ -75,7 +78,8 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
     checkAuth().catch(() => {
       if (!cancelled) {
-        router.replace(loginHref);
+        setAuthError(true);
+        setAllowed(false);
       }
     });
 
@@ -83,6 +87,17 @@ export function AuthGuard({ children }: AuthGuardProps) {
       cancelled = true;
     };
   }, [loginHref, pathname, router, searchKey]);
+
+  if (authError) {
+    return (
+      <main className="auth-guard-error" role="alert">
+        <strong>세션 확인에 실패했습니다.</strong>
+        <button onClick={() => window.location.reload()} type="button">
+          다시 시도
+        </button>
+      </main>
+    );
+  }
 
   if (!allowed) {
     return null;

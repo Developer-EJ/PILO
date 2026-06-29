@@ -218,6 +218,7 @@ describe("frontend package", () => {
   it("routes OAuth callback errors back to the login card", () => {
     const state = resolveOAuthCallbackState({
       error: "access_denied",
+      next: "/workspaces/demo",
       provider: "google",
     });
 
@@ -226,7 +227,7 @@ describe("frontend package", () => {
     assert.equal(state.errorCode, "access_denied");
     assert.equal(
       state.loginHref,
-      "/login?auth=error&provider=google&error=access_denied",
+      "/login?auth=error&provider=google&error=access_denied&next=%2Fworkspaces%2Fdemo",
     );
     assert.equal(state.retryHref, "/login");
   });
@@ -309,11 +310,35 @@ describe("frontend package", () => {
   });
 
   it("builds auth API URLs from a configured app server base URL", () => {
-    assert.equal(buildAuthApiUrl("/auth/me"), "/auth/me");
+    assert.throws(
+      () => buildAuthApiUrl("/auth/me", ""),
+      /Auth API base URL is required/,
+    );
     assert.equal(
       buildAuthApiUrl("/auth/logout", "https://api.pilo.dev/"),
       "https://api.pilo.dev/auth/logout",
     );
+  });
+
+  it("keeps mock auth storage safe when Web Storage is blocked", async () => {
+    const blockedStorage = {
+      getItem() {
+        throw new Error("blocked");
+      },
+      removeItem() {
+        throw new Error("blocked");
+      },
+      setItem() {
+        throw new Error("blocked");
+      },
+    };
+
+    assert.doesNotThrow(() => markMockAuthSignedOut(blockedStorage));
+    assert.doesNotThrow(() => markMockAuthSignedIn(blockedStorage));
+
+    const authClient = createMockAuthClient({ storage: blockedStorage });
+
+    assert.equal((await authClient.getCurrentUser()).email, mockCurrentUser.email);
   });
 
   it("calls the auth API client with contract routes and credentials", async () => {
