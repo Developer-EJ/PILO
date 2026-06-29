@@ -67,6 +67,27 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 }
 ```
 
+### TaskListQuery
+
+`GET /workspaces/:workspaceId/tasks`는 기본적으로 삭제되지 않은 Task를 `updatedAt desc`로 최대 50개 반환한다.
+
+| Query              | Type                                                               | 설명                            |
+| ------------------ | ------------------------------------------------------------------ | ------------------------------- |
+| `status`           | `todo,in_progress,in_review,done,blocked` 또는 반복 param          | 상태 필터                       |
+| `assigneeMemberId` | `uuid`                                                             | 담당자 필터                     |
+| `priority`         | `low,medium,high,urgent` 또는 반복 param                           | 우선순위 필터                   |
+| `dueDateFrom`      | `YYYY-MM-DD`                                                       | 마감일 시작 범위                |
+| `dueDateTo`        | `YYYY-MM-DD`                                                       | 마감일 종료 범위                |
+| `milestoneId`      | `uuid`                                                             | milestone 필터                  |
+| `sortBy`           | `updatedAt`, `createdAt`, `dueDate`, `priority`, `status`, `title` | 정렬 기준. 기본값은 `updatedAt` |
+| `sortDirection`    | `asc`, `desc`                                                      | 정렬 방향. 기본값은 `desc`      |
+| `limit`            | `1..100`                                                           | 반환 개수. 기본값은 `50`        |
+| `offset`           | `0..`                                                              | 건너뛸 개수. 기본값은 `0`       |
+
+```text
+GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDateFrom=2026-07-01&dueDateTo=2026-07-31&sortBy=dueDate&sortDirection=asc&limit=25&offset=50
+```
+
 ### TaskCreateDraft
 
 ```json
