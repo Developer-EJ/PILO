@@ -46,6 +46,26 @@ export class JuhyungRepository {
     });
   }
 
+  getTaskById(taskId: string) {
+    return this.database.task.findFirst({
+      where: {
+        id: taskId,
+        deletedAt: null,
+      },
+    });
+  }
+
+  listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
+    return this.database.workspaceMember.findMany({
+      where: {
+        workspaceId,
+        id: {
+          in: memberIds,
+        },
+      },
+    });
+  }
+
   async createTask(input: CreateTaskInput, createdByMemberId: string) {
     if (input.milestoneId) {
       const milestone = await this.database.milestone.findFirst({

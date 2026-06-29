@@ -619,6 +619,7 @@
         "id",
         "workspaceId",
         "provider",
+        "scopes",
         "connectedAt"
       ],
       "additionalProperties": false,
@@ -645,6 +646,12 @@
             "string",
             "null"
           ]
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "connectedAt": {
           "$ref": "#/$defs/dateTime"
@@ -1131,6 +1138,21 @@
             }
           ]
         }
+      }
+    },
+    "CodeReviewRoomSummary": {
+      "type": "object",
+      "required": ["id", "workspaceId", "pullRequestId", "status", "createdByMemberId", "createdAt", "updatedAt", "pullRequest"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "pullRequestId": { "$ref": "#/$defs/uuid" },
+        "status": { "enum": ["open", "reviewing", "completed", "archived"] },
+        "createdByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "createdAt": { "$ref": "#/$defs/dateTime" },
+        "updatedAt": { "$ref": "#/$defs/dateTime" },
+        "pullRequest": { "$ref": "#/$defs/PullRequestSummary" }
       }
     },
     "PRAnalysisSummary": {

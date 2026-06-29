@@ -67,6 +67,36 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
     assert.ok(value >= schema.minimum, `${fieldPath} must be >= ${schema.minimum}`);
   }
 
+  if (typeof schema.maximum === "number") {
+    assert.ok(value <= schema.maximum, `${fieldPath} must be <= ${schema.maximum}`);
+  }
+
+  if (typeof schema.minLength === "number" && actualType !== "null") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a string`);
+    assert.ok(
+      value.length >= schema.minLength,
+      `${fieldPath} must have length >= ${schema.minLength}`,
+    );
+  }
+
+  if (schema.format === "date") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a date string`);
+    assert.match(value, /^\d{4}-\d{2}-\d{2}$/, `${fieldPath} must be an ISO date`);
+  }
+
+  if (schema.format === "date-time") {
+    assert.equal(
+      typeof value,
+      "string",
+      `${fieldPath} must be a date-time string`,
+    );
+    assert.match(
+      value,
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/,
+      `${fieldPath} must be an ISO date-time`,
+    );
+  }
+
   if (actualType === "array" && schema.items) {
     value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
   }
@@ -411,6 +441,7 @@ describe("machine-readable public contract schema", () => {
       "PlanningApproveAction",
       "MeetingReportSummary",
       "MeetingActionItem",
+      "CodeReviewRoomSummary",
       "PRAnalysisSummary",
       "ReviewCanvasSummary",
       "ReviewCanvasNode",
@@ -878,6 +909,13 @@ describe("contract fixtures", () => {
     assert.equal(job.runId, result.runId);
     assert.equal(job.jobId, result.jobId);
     assert.ok(Array.isArray(result.actions));
+  });
+
+  it("review room fixture matches review room public schema", () => {
+    const schema = JSON.parse(read("docs/contracts/schemas/pilo-public-contracts.schema.json"));
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-room.fixture.json"));
+
+    assertMatchesDefinition(schema.$defs, "CodeReviewRoomSummary", fixture.codeReviewRoom);
   });
 
   it("review analysis fixture matches review public schemas", () => {
