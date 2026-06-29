@@ -176,7 +176,12 @@
         "title",
         "status",
         "priority",
-        "isDelayed"
+        "assignee",
+        "dueDate",
+        "isDelayed",
+        "linkedIssueCount",
+        "linkedPrCount",
+        "updatedAt"
       ],
       "additionalProperties": false,
       "properties": {
@@ -241,6 +246,126 @@
         }
       }
     },
+    "TaskChecklistItemSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "taskId",
+        "title",
+        "status",
+        "sortOrder",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["todo", "done"]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "TaskDetail": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "milestoneId",
+        "title",
+        "status",
+        "priority",
+        "assignee",
+        "dueDate",
+        "isDelayed",
+        "linkedIssueCount",
+        "linkedPrCount",
+        "updatedAt",
+        "checklistItems"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "milestoneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "enum": ["todo", "in_progress", "in_review", "done", "blocked"]
+        },
+        "priority": {
+          "enum": ["low", "medium", "high", "urgent"]
+        },
+        "assignee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/memberRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dueDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "isDelayed": {
+          "type": "boolean"
+        },
+        "linkedIssueCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "linkedPrCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "checklistItems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskChecklistItemSummary"
+          }
+        }
+      }
+    },
     "MilestoneSummary": {
       "type": "object",
       "required": ["id", "workspaceId", "title", "status", "startDate", "endDate", "updatedAt"],
@@ -264,6 +389,79 @@
         "taskId": { "$ref": "#/$defs/uuid" },
         "dependsOnTaskId": { "$ref": "#/$defs/uuid" },
         "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "TaskCommentSummary": {
+      "type": "object",
+      "required": ["id", "taskId", "body", "author", "createdAt", "updatedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/memberRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "TaskActivityLogSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "taskId",
+        "action",
+        "actor",
+        "beforeValue",
+        "afterValue",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/memberRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "beforeValue": {},
+        "afterValue": {},
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "TaskCreateDraft": {
@@ -1509,6 +1707,44 @@
         }
       }
     },
+    "MeetingAgenda": {
+      "type": "object",
+      "required": [
+        "id",
+        "meetingId",
+        "title",
+        "status",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "meetingId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["open", "done", "skipped"]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
     "MeetingReportSummary": {
       "type": "object",
       "required": [
@@ -1519,7 +1755,8 @@
         "summary",
         "decisionCount",
         "actionItemCount",
-        "riskCount"
+        "riskCount",
+        "createdAt"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1557,7 +1794,16 @@
     },
     "MeetingActionItem": {
       "type": "object",
-      "required": ["id", "reportId", "title", "status"],
+      "required": [
+        "id",
+        "reportId",
+        "title",
+        "description",
+        "assigneeSuggestionMemberId",
+        "dueDateSuggestion",
+        "status",
+        "convertedTaskId"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -1605,6 +1851,225 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "MeetingDecisionSummary": {
+      "type": "object",
+      "required": ["id", "reportId", "content", "status", "linkedTaskId", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reportId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["decided", "pending", "reopened"]
+        },
+        "linkedTaskId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "MeetingReportRiskSummary": {
+      "type": "object",
+      "required": ["id", "reportId", "content", "severity", "sortOrder", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reportId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": ["low", "medium", "high", "critical"]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "MeetingReportNextAgenda": {
+      "type": "object",
+      "required": ["id", "reportId", "title", "sortOrder", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reportId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "MeetingReportCanvasEntityRef": {
+      "type": "object",
+      "required": ["entityType", "entityId", "displayTitle", "shapeType"],
+      "additionalProperties": false,
+      "properties": {
+        "entityType": {
+          "const": "meeting_report"
+        },
+        "entityId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "displayTitle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shapeType": {
+          "const": "meeting_report"
+        }
+      }
+    },
+    "VoiceRoom": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "meetingId",
+        "livekitRoomName",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "meetingId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "livekitRoomName": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "enum": ["active", "inactive", "archived"]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "VoiceSession": {
+      "type": "object",
+      "required": [
+        "id",
+        "voiceRoomId",
+        "meetingId",
+        "memberId",
+        "recordingStatus",
+        "startedAt",
+        "endedAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "voiceRoomId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "meetingId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recordingStatus": {
+          "enum": ["not_recording", "recording", "processing", "completed", "failed"]
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
         }
       }
     },
@@ -2026,29 +2491,6 @@
         },
         "recommendation": {
           "type": ["string", "null"]
-        }
-      }
-    },
-    "MeetingDecisionSummary": {
-      "type": "object",
-      "required": ["id", "reportId", "title", "status", "createdAt"],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/uuid"
-        },
-        "reportId": {
-          "$ref": "#/$defs/uuid"
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1
-        },
-        "status": {
-          "enum": ["decided", "pending", "reopened"]
-        },
-        "createdAt": {
-          "$ref": "#/$defs/dateTime"
         }
       }
     },

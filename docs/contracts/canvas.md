@@ -25,7 +25,7 @@ GitHub, Review, Agent, or Common domains.
 | Source owner | Read model                                                                   |
 | ------------ | ---------------------------------------------------------------------------- |
 | Joohyung     | `TaskSummary`, `GithubIssueSummary`, `PullRequestSummary`, `ProgressSummary` |
-| Jinho        | `MeetingReportSummary`, `MeetingDecisionSummary`                             |
+| Jinho        | `MeetingReportSummary`, `MeetingReportCanvasEntityRef`                       |
 | Daeun        | `PRAnalysisSummary`, `ReviewRiskSummary`                                     |
 | Yejin        | `AgentRecommendation`, `ProjectPlanDraftSummary`                             |
 | Common       | `SharedFileRef`                                                              |
