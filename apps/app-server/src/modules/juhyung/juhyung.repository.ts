@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
+import { TaskPriority, TaskStatus } from "./juhyung-public.types";
 
 export const JUHYUNG_OWNER_TABLES = [
   "milestones",
@@ -26,10 +27,18 @@ export interface CreateTaskInput {
   title: string;
   description: string | null;
   assigneeMemberId: string | null;
-  status: "todo" | "in_progress" | "in_review" | "done" | "blocked";
-  priority: "low" | "medium" | "high" | "urgent";
+  status: TaskStatus;
+  priority: TaskPriority;
   dueDate: Date | string | null;
   milestoneId: string | null;
+}
+
+export interface UpdateTaskInput {
+  title?: string;
+  description?: string | null;
+  assigneeMemberId?: string | null;
+  dueDate?: Date | string | null;
+  milestoneId?: string | null;
 }
 
 @Injectable()
@@ -43,6 +52,26 @@ export class JuhyungRepository {
         deletedAt: null,
       },
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    });
+  }
+
+  getTaskById(taskId: string) {
+    return this.database.task.findFirst({
+      where: {
+        id: taskId,
+        deletedAt: null,
+      },
+    });
+  }
+
+  listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
+    return this.database.workspaceMember.findMany({
+      where: {
+        workspaceId,
+        id: {
+          in: memberIds,
+        },
+      },
     });
   }
 
@@ -68,5 +97,63 @@ export class JuhyungRepository {
     } satisfies Prisma.TaskUncheckedCreateInput;
 
     return this.database.task.create({ data });
+  }
+
+  updateTask(taskId: string, input: UpdateTaskInput) {
+    const data = {
+      ...input,
+    } satisfies Prisma.TaskUncheckedUpdateInput;
+
+    return this.database.task.update({
+      where: {
+        id: taskId,
+      },
+      data,
+    });
+  }
+
+  updateTaskStatus(
+    taskId: string,
+    status: TaskStatus,
+    actorMemberId: string,
+    previousStatus: TaskStatus,
+  ) {
+    return this.database.$transaction(async (transaction) => {
+      const task = await transaction.task.update({
+        where: {
+          id: taskId,
+        },
+        data: {
+          status,
+        },
+      });
+
+      await transaction.taskActivityLog.create({
+        data: {
+          taskId,
+          actorMemberId,
+          action: "task.status_changed",
+          beforeValue: {
+            status: previousStatus,
+          },
+          afterValue: {
+            status,
+          },
+        },
+      });
+
+      return task;
+    });
+  }
+
+  softDeleteTask(taskId: string) {
+    return this.database.task.update({
+      where: {
+        id: taskId,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
+    });
   }
 }

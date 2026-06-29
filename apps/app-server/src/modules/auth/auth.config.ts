@@ -11,6 +11,7 @@ export type AuthProviderConfig = {
   authorizationUrl: string;
   tokenUrl: string;
   userInfoUrl: string;
+  emailUrl?: string;
   scopes: string[];
   configured: boolean;
   missingEnv: string[];
@@ -139,11 +140,17 @@ function createSessionConfig(env: AuthEnvironment): AuthSessionConfig {
       "AUTH_SESSION_TTL_SECONDS",
       DEFAULT_AUTH_SESSION_TTL_SECONDS,
     ) * 1000;
+  const isProduction = isProductionAuthEnvironment(env);
   const secure = readBooleanEnv(
     env,
     "AUTH_SESSION_COOKIE_SECURE",
-    isProductionAuthEnvironment(env),
+    isProduction,
   );
+
+  if (isProduction && !secure) {
+    throw new Error("AUTH_SESSION_COOKIE_SECURE must be true in production");
+  }
+
   const secretVersion =
     readEnv(env, "AUTH_SESSION_SECRET_VERSION") ??
     DEFAULT_AUTH_SESSION_SECRET_VERSION;
@@ -204,6 +211,7 @@ function createProviderConfig(
     authorizationUrl: provider.authorizationUrl,
     tokenUrl: provider.tokenUrl,
     userInfoUrl: provider.userInfoUrl,
+    emailUrl: provider.emailUrl,
     scopes: provider.scopes,
     configured: missingEnv.length === 0,
     missingEnv,
@@ -250,6 +258,7 @@ export function createAuthConfig(env: AuthEnvironment = process.env) {
         authorizationUrl: "https://github.com/login/oauth/authorize",
         tokenUrl: "https://github.com/login/oauth/access_token",
         userInfoUrl: "https://api.github.com/user",
+        emailUrl: "https://api.github.com/user/emails",
         scopes: ["read:user", "user:email"],
       }),
     },

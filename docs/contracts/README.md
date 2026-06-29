@@ -20,8 +20,8 @@
 | 동현 | `auth.md`, `workspace.md`, `canvas.md` | CurrentUser, WorkspaceMemberSummary, CanvasEntityRef |
 | 주형 | `task.md`, `github.md`, `progress.md` | TaskSummary, TaskDraft, MilestoneSummary, GithubConnectionSummary, GithubRepositorySummary, GithubIssueSummary, PullRequestSummary, PullRequestChangedFileSummary, ProgressSummary |
 | 진호 | `meeting.md` | MeetingReportSummary, MeetingActionItem |
-| 은재 | `review.md` | PRAnalysisSummary, ReviewNodeSummary, ReviewRiskSummary |
-| 세인 | `agent-actions.md`, `planning.md` | AgentAction, ProjectPlanDraftSummary |
+| 은재 | `review.md` | CodeReviewRoomSummary, PRAnalysisSummary, ReviewNodeSummary, ReviewRiskSummary |
+| 세인 | `agent-actions.md`, `planning.md` | AgentAction, ProjectPlanDraftSummary, ProjectPlanDraftDetail, ProjectPlanTechStackRecommendation, ProjectPlanFeatureDraft, ProjectPlanRoleDraft, ProjectPlanMilestoneDraft, ProjectPlanRiskNote, ProjectPlanFirstAgendaDraft, ProjectPlanApprovalState, PlanningOwnerApiResult |
 | DevOps/공통 Backend | `common-system.md` | NotificationCreateRequest, SharedFileRef |
 
 ## 구현 전 필수 확인

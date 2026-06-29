@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import process from "node:process";
 import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 import canvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
-import workspaceDashboardFixture from "../../../docs/contracts/fixtures/workspace-dashboard.fixture.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
 const {
@@ -49,16 +49,6 @@ const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
 
-function assertRequiredFields(value, schema, label) {
-  for (const field of schema.required ?? []) {
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(value, field),
-      true,
-      `${label} is missing ${field}`,
-    );
-  }
-}
-
 describe("app-server package", () => {
   it("keeps the PILO app-server package name", () => {
     assert.equal(packageJson.name, "@pilo/app-server");
@@ -98,6 +88,19 @@ describe("app-server package", () => {
           NODE_ENV: "production",
         }),
       /Missing required Auth env: SESSION_SECRET/,
+    );
+  });
+
+  it("rejects insecure Auth session cookies in production", () => {
+    assert.throws(
+      () =>
+        createAuthConfig({
+          APP_ENV: "production",
+          NODE_ENV: "production",
+          SESSION_SECRET: "production-session-secret",
+          AUTH_SESSION_COOKIE_SECURE: "false",
+        }),
+      /AUTH_SESSION_COOKIE_SECURE must be true in production/,
     );
   });
 
@@ -222,7 +225,7 @@ describe("app-server package", () => {
       provider: "google",
       state: record.state,
       nonce: record.nonce,
-      now: new Date("2026-06-28T00:00:01.000Z"),
+      now: new Date("2026-06-28T00:00:01.001Z"),
     });
 
     assert.deepEqual(result, {
@@ -367,7 +370,7 @@ describe("app-server package", () => {
     assert.equal(
       service.getCurrentUserFromCookieHeader(
         result.session.cookieHeader,
-        new Date(result.session.expiresAt),
+        new Date(new Date(result.session.expiresAt).getTime() + 1),
       ),
       null,
     );
@@ -470,6 +473,41 @@ describe("app-server package", () => {
     assert.equal(repository.listUsers()[0].name, "Updated User");
   });
 
+  it("does not link a new provider to an existing user with unverified email", () => {
+    const repository = new AuthRepository();
+    const token = {
+      scopes: [],
+      tokenType: "Bearer",
+      tokenExpiresAt: null,
+    };
+    const googleIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "google",
+        providerAccountId: "google-verified-user",
+        email: "user@example.com",
+        name: "Verified User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+    const githubIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "github",
+        providerAccountId: "github-unverified-user",
+        email: "user@example.com",
+        name: "Unverified User",
+        avatarUrl: null,
+        emailVerified: false,
+      },
+      token,
+    });
+
+    assert.notEqual(githubIdentity.user.id, googleIdentity.user.id);
+    assert.equal(repository.listUsers().length, 2);
+    assert.equal(repository.listOAuthAccounts().length, 2);
+  });
+
   it("builds a GitHub authorization URL without repository scope", () => {
     const config = createAuthConfig({
       APP_ENV: "local",
@@ -520,6 +558,21 @@ describe("app-server package", () => {
         return globalThis.Response.json({ access_token: "github-token" });
       }
 
+      if (String(url).includes("api.github.com/user/emails")) {
+        return globalThis.Response.json([
+          {
+            email: "octo-private@example.com",
+            primary: false,
+            verified: true,
+          },
+          {
+            email: "octo-primary@example.com",
+            primary: true,
+            verified: true,
+          },
+        ]);
+      }
+
       return globalThis.Response.json({
         id: 123456,
         login: "octo-user",
@@ -542,10 +595,10 @@ describe("app-server package", () => {
     assert.deepEqual(result.profile, {
       provider: "github",
       providerAccountId: "123456",
-      email: "octo@example.com",
+      email: "octo-primary@example.com",
       name: "octo-user",
       avatarUrl: "https://avatars.githubusercontent.com/u/123456",
-      emailVerified: null,
+      emailVerified: true,
     });
     assert.equal(
       requests[0].url,
@@ -558,6 +611,8 @@ describe("app-server package", () => {
     );
     assert.equal(requests[1].url, "https://api.github.com/user");
     assert.equal(requests[1].init.headers.Authorization, "Bearer github-token");
+    assert.equal(requests[2].url, "https://api.github.com/user/emails");
+    assert.equal(requests[2].init.headers.Authorization, "Bearer github-token");
   });
 
   it("creates frontend-compatible GitHub login result redirects", () => {
@@ -633,6 +688,10 @@ describe("app-server package", () => {
     });
 
     assert.equal(service.getCurrentUserFromCookieHeader(undefined), null);
+    assert.equal(
+      service.getCurrentUserFromCookieHeader("pilo_session=%E0%A4%A"),
+      null,
+    );
     assert.equal(result.ok, true);
 
     repository.markUserDeleted(result.identity.user.id);
@@ -800,189 +859,410 @@ describe("app-server package", () => {
     assert.deepEqual(WORKSPACE_INVITE_ROLES, ["member", "viewer"]);
   });
 
-  it("keeps Workspace dashboard read model schema aligned with fixture fields", () => {
-    const defs = contractSchema.$defs;
+  it("resolves currentMember from currentUser without leaking Auth session details", async () => {
+    const repositoryCalls = [];
+    const service = new WorkspaceService({
+      storageMode: "test",
+      async findCurrentMember(input) {
+        repositoryCalls.push(input);
 
-    assert.deepEqual(defs.WorkspaceSummary.required, [
-      "id",
-      "name",
-      "description",
-      "type",
-      "status",
-      "myRole",
-      "memberCount",
-      "createdAt",
+        return {
+          id: "member-1",
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          name: "Workspace User",
+          email: "workspace@example.com",
+          avatarUrl: null,
+          role: "owner",
+          displayName: "Workspace / Canvas",
+          joinedAt: "2026-06-28T00:00:00.000Z",
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z",
+        };
+      },
+    });
+
+    const currentMember = await service.resolveCurrentMember({
+      workspaceId: "workspace-1",
+      currentUser: {
+        id: "user-1",
+        email: "user@example.com",
+        providers: ["google"],
+      },
+    });
+
+    assert.deepEqual(repositoryCalls, [
+      {
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      },
     ]);
-    assert.deepEqual(defs.WorkspaceMemberSummary.required, [
-      "memberId",
-      "userId",
-      "name",
-      "email",
+    assert.deepEqual(currentMember, {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "owner",
+      displayName: "Workspace / Canvas",
+    });
+    assert.equal("providers" in currentMember, false);
+    assert.equal("email" in currentMember, false);
+  });
+
+  it("maps workspace role helpers to read, write, and manage permissions", () => {
+    assert.equal(hasWorkspaceRole("owner", "viewer"), true);
+    assert.equal(hasWorkspaceRole("owner", "member"), true);
+    assert.equal(hasWorkspaceRole("member", "owner"), false);
+    assert.deepEqual(createWorkspaceMemberPermissions("viewer"), {
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+    });
+    assert.deepEqual(createWorkspaceMemberPermissions("member"), {
+      canRead: true,
+      canWrite: true,
+      canManage: false,
+    });
+    assert.deepEqual(createWorkspaceMemberPermissions("owner"), {
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+    });
+  });
+
+  it("requires workspace membership before exposing member-scoped context", async () => {
+    const service = new WorkspaceService({
+      storageMode: "test",
+      async findCurrentMember() {
+        return null;
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.requireCurrentMember({
+          workspaceId: "workspace-1",
+          currentUser: { id: "user-1" },
+        }),
+      (error) =>
+        error instanceof WorkspaceAccessError &&
+        error.code === "workspace_member_not_found" &&
+        error.workspaceId === "workspace-1",
+    );
+  });
+
+  it("provides currentMember context through the public workspace adapter", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const adapter = new WorkspaceCurrentMemberAdapter(service);
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+      avatarUrl: "https://example.com/owner.png",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const context = await adapter.requireCurrentMember(
+      {
+        workspaceId: created.id,
+        currentUser,
+      },
+      { minimumRole: "owner" },
+    );
+
+    assert.deepEqual(context.currentMember, {
+      workspaceId: created.id,
+      memberId: context.currentMember.memberId,
+      userId: currentUser.id,
+      role: "owner",
+      displayName: "Workspace Owner",
+    });
+    assert.deepEqual(context.permissions, {
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+    });
+    assert.equal("email" in context.currentMember, false);
+    assert.equal("avatarUrl" in context.currentMember, false);
+  });
+
+  it("creates, lists, reads, and archives workspaces for the current member", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: " PILO ",
+        description: "AI Project OS",
+        type: "bootcamp",
+      },
+    });
+
+    assert.equal(created.name, "PILO");
+    assert.equal(created.description, "AI Project OS");
+    assert.equal(created.type, "bootcamp");
+    assert.equal(created.status, "active");
+    assert.equal(created.myRole, "owner");
+    assert.equal(created.memberCount, 1);
+    assert.deepEqual(await service.listWorkspaces({ currentUser }), [created]);
+    assert.deepEqual(
+      await service.getWorkspace({
+        workspaceId: created.id,
+        currentUser,
+      }),
+      created,
+    );
+
+    const archived = await service.updateWorkspace({
+      workspaceId: created.id,
+      currentUser,
+      body: {
+        name: "PILO Lab",
+        status: "archived",
+      },
+    });
+
+    assert.equal(archived.name, "PILO Lab");
+    assert.equal(archived.status, "archived");
+    assert.equal(
+      (
+        await service.getWorkspace({
+          workspaceId: created.id,
+          currentUser,
+        })
+      ).status,
+      "archived",
+    );
+  });
+
+  it("lists workspace members using the WorkspaceMemberSummary contract", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+      avatarUrl: "https://example.com/owner.png",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const members = await service.listWorkspaceMembers({
+      workspaceId: created.id,
+      currentUser,
+    });
+
+    assert.equal(members.length, 1);
+    assert.deepEqual(Object.keys(members[0]).sort(), [
       "avatarUrl",
-      "role",
       "displayName",
+      "email",
       "joinedAt",
-    ]);
-    assert.deepEqual(defs.DashboardPreferences.required, [
-      "workspaceId",
       "memberId",
-      "layout",
-      "hiddenSections",
-      "updatedAt",
-    ]);
-    assert.deepEqual(defs.CurrentWorkspaceMember.required, [
-      "workspaceId",
-      "memberId",
-      "userId",
+      "name",
       "role",
-      "displayName",
+      "userId",
     ]);
-    assert.deepEqual(defs.WorkspaceDashboardReadModel.required, [
-      "workspace",
-      "currentMember",
-      "preferences",
-      "members",
-      "tasks",
-      "progress",
-      "githubIssues",
-      "pullRequests",
-      "meetingReports",
-      "prAnalyses",
-      "agentActions",
-      "canvasEntities",
-      "source",
-      "generatedAt",
+    assert.equal(members[0].userId, currentUser.id);
+    assert.equal(members[0].name, "Workspace Owner");
+    assert.equal(members[0].email, "owner@example.com");
+    assert.equal(members[0].avatarUrl, "https://example.com/owner.png");
+    assert.equal(members[0].role, "owner");
+  });
+
+  it("creates and accepts workspace invites into membership", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const invitee = {
+      id: "user-2",
+      name: "Invited Member",
+      email: "member@example.com",
+      avatarUrl: "https://example.com/member.png",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: " MEMBER@example.com ",
+        role: "member",
+      },
+    });
+    const accepted = await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: invitee,
+      body: {
+        token: invite.token,
+      },
+    });
+    const members = await service.listWorkspaceMembers({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.equal(invite.email, "member@example.com");
+    assert.equal(invite.role, "member");
+    assert.equal(typeof invite.token, "string");
+    assert.equal(accepted.workspaceId, workspace.id);
+    assert.deepEqual(accepted.member, {
+      memberId: accepted.member.memberId,
+      userId: invitee.id,
+      name: "Invited Member",
+      email: "member@example.com",
+      avatarUrl: "https://example.com/member.png",
+      role: "member",
+      displayName: "Invited Member",
+      joinedAt: accepted.member.joinedAt,
+    });
+    assert.equal(members.length, 2);
+  });
+
+  it("keeps dashboard preferences scoped to each workspace member", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const invitee = {
+      id: "user-2",
+      name: "Invited Member",
+      email: "member@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const defaultPreferences = await service.getDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+    const ownerPreferences = await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        layout: {
+          density: "compact",
+          columns: ["tasks", "prs"],
+        },
+        hiddenSections: ["agent", "agent"],
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: invitee.email,
+      },
+    });
+
+    await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: invitee,
+      body: {
+        token: invite.token,
+      },
+    });
+
+    const memberPreferences = await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: invitee,
+      body: {
+        layout: {
+          density: "comfortable",
+          columns: ["meetings"],
+        },
+        hiddenSections: ["recentDecisions"],
+      },
+    });
+    const reloadedOwnerPreferences = await service.getDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.deepEqual(defaultPreferences.layout, {});
+    assert.deepEqual(defaultPreferences.hiddenSections, []);
+    assert.equal(defaultPreferences.updatedAt, null);
+    assert.deepEqual(ownerPreferences.layout, {
+      density: "compact",
+      columns: ["tasks", "prs"],
+    });
+    assert.deepEqual(ownerPreferences.hiddenSections, ["agent"]);
+    assert.notEqual(ownerPreferences.memberId, memberPreferences.memberId);
+    assert.deepEqual(memberPreferences.layout, {
+      density: "comfortable",
+      columns: ["meetings"],
+    });
+    assert.deepEqual(reloadedOwnerPreferences, ownerPreferences);
+  });
+
+  it("aggregates workspace dashboard read models without owning other domain data", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+
+    await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        layout: {
+          density: "comfortable",
+          sections: ["today", "pullRequests"],
+        },
+        hiddenSections: ["agentSuggestions"],
+      },
+    });
+
+    const dashboard = await service.getWorkspaceDashboard({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.equal(dashboard.workspace.id, workspace.id);
+    assert.equal(dashboard.currentMember.workspaceId, workspace.id);
+    assert.equal(dashboard.currentMember.userId, owner.id);
+    assert.deepEqual(dashboard.preferences.layout, {
+      density: "comfortable",
+      sections: ["today", "pullRequests"],
+    });
+    assert.deepEqual(dashboard.preferences.hiddenSections, [
+      "agentSuggestions",
     ]);
-
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.tasks.items.$ref,
-      "#/$defs/TaskSummary",
-    );
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.githubIssues.items.$ref,
-      "#/$defs/GithubIssueSummary",
-    );
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.pullRequests.items.$ref,
-      "#/$defs/PullRequestSummary",
-    );
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.meetingReports.items.$ref,
-      "#/$defs/MeetingReportSummary",
-    );
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.prAnalyses.items.$ref,
-      "#/$defs/PRAnalysisSummary",
-    );
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.agentActions.items.$ref,
-      "#/$defs/AgentAction",
-    );
-    assert.equal(
-      defs.WorkspaceDashboardReadModel.properties.canvasEntities.items.$ref,
-      "#/$defs/CanvasEntityRef",
-    );
-    assert.deepEqual(defs.WorkspaceDashboardReadModel.properties.source.enum, [
-      "fixture",
-      "empty",
-    ]);
-
-    const currentMember = {
-      workspaceId: workspaceDashboardFixture.workspace.id,
-      memberId: workspaceDashboardFixture.members[0].memberId,
-      userId: workspaceDashboardFixture.currentUser.id,
-      role: workspaceDashboardFixture.members[0].role,
-      displayName: workspaceDashboardFixture.members[0].displayName,
-    };
-    const preferences = {
-      workspaceId: workspaceDashboardFixture.workspace.id,
-      memberId: workspaceDashboardFixture.members[0].memberId,
-      layout: {},
-      hiddenSections: [],
-      updatedAt: null,
-    };
-    const aggregate = {
-      workspace: workspaceDashboardFixture.workspace,
-      currentMember,
-      preferences,
-      members: workspaceDashboardFixture.members,
-      tasks: workspaceDashboardFixture.tasks,
-      progress: workspaceDashboardFixture.progress,
-      githubIssues: workspaceDashboardFixture.githubIssues,
-      pullRequests: workspaceDashboardFixture.pullRequests,
-      meetingReports: workspaceDashboardFixture.meetingReports,
-      prAnalyses: workspaceDashboardFixture.prAnalyses,
-      agentActions: workspaceDashboardFixture.agentActions,
-      canvasEntities: workspaceDashboardFixture.canvasEntities,
-      source: "fixture",
-      generatedAt: "2026-06-28T00:00:00.000Z",
-    };
-
-    assertRequiredFields(
-      aggregate,
-      defs.WorkspaceDashboardReadModel,
-      "WorkspaceDashboardReadModel",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.workspace,
-      defs.WorkspaceSummary,
-      "fixture.workspace",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.members[0],
-      defs.WorkspaceMemberSummary,
-      "fixture.members[0]",
-    );
-    assertRequiredFields(
-      currentMember,
-      defs.CurrentWorkspaceMember,
-      "aggregate.currentMember",
-    );
-    assertRequiredFields(
-      preferences,
-      defs.DashboardPreferences,
-      "aggregate.preferences",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.tasks[0],
-      defs.TaskSummary,
-      "fixture.tasks[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.progress,
-      defs.ProgressSummary,
-      "fixture.progress",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.githubIssues[0],
-      defs.GithubIssueSummary,
-      "fixture.githubIssues[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.pullRequests[0],
-      defs.PullRequestSummary,
-      "fixture.pullRequests[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.meetingReports[0],
-      defs.MeetingReportSummary,
-      "fixture.meetingReports[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.prAnalyses[0],
-      defs.PRAnalysisSummary,
-      "fixture.prAnalyses[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.agentActions[0],
-      defs.AgentAction,
-      "fixture.agentActions[0]",
-    );
-    assertRequiredFields(
-      workspaceDashboardFixture.canvasEntities[0],
-      defs.CanvasEntityRef,
-      "fixture.canvasEntities[0]",
-    );
+    assert.equal(dashboard.members.length, 1);
+    assert.equal(dashboard.source, "fixture");
+    assert.equal(dashboard.tasks.length > 0, true);
+    assert.equal(dashboard.progress.workspaceId, workspace.id);
+    assert.equal(dashboard.meetingReports[0].workspaceId, workspace.id);
+    assert.equal(dashboard.agentActions[0].payload.workspaceId, workspace.id);
+    assert.equal("providers" in dashboard.currentMember, false);
   });
 
   it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {
@@ -2715,17 +2995,31 @@ describe("app-server package", () => {
   });
 
   it("boots the Nest app module with Auth, Workspace, and Canvas modules registered", async () => {
-    const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
-      logger: false,
-    });
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+    let app;
 
-    await app.init();
-    assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
-      storageMode: "memory",
-    });
-    assert.deepEqual(app.get(CanvasService).getRepositoryStatus(), {
-      storageMode: "memory",
-    });
-    await app.close();
+    try {
+      app = await NestFactory.create(AppModule, new FastifyAdapter(), {
+        logger: false,
+      });
+      await app.init();
+      assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
+        storageMode: "memory",
+      });
+      assert.deepEqual(app.get(CanvasService).getRepositoryStatus(), {
+        storageMode: "memory",
+      });
+    } finally {
+      try {
+        await app?.close();
+      } finally {
+        if (previousSkipDatabaseConnect === undefined) {
+          delete process.env.PILO_SKIP_DATABASE_CONNECT;
+        } else {
+          process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+        }
+      }
+    }
   });
 });

@@ -67,6 +67,36 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
     assert.ok(value >= schema.minimum, `${fieldPath} must be >= ${schema.minimum}`);
   }
 
+  if (typeof schema.maximum === "number") {
+    assert.ok(value <= schema.maximum, `${fieldPath} must be <= ${schema.maximum}`);
+  }
+
+  if (typeof schema.minLength === "number" && actualType !== "null") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a string`);
+    assert.ok(
+      value.length >= schema.minLength,
+      `${fieldPath} must have length >= ${schema.minLength}`,
+    );
+  }
+
+  if (schema.format === "date") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a date string`);
+    assert.match(value, /^\d{4}-\d{2}-\d{2}$/, `${fieldPath} must be an ISO date`);
+  }
+
+  if (schema.format === "date-time") {
+    assert.equal(
+      typeof value,
+      "string",
+      `${fieldPath} must be a date-time string`,
+    );
+    assert.match(
+      value,
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/,
+      `${fieldPath} must be an ISO date-time`,
+    );
+  }
+
   if (actualType === "array" && schema.items) {
     value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
   }
@@ -409,8 +439,19 @@ describe("machine-readable public contract schema", () => {
       "MeetingReportGenerateAction",
       "ReviewAnalysisGenerateAction",
       "PlanningApproveAction",
+      "ProjectPlanDraftSummary",
+      "ProjectPlanDraftDetail",
+      "ProjectPlanTechStackRecommendation",
+      "ProjectPlanFeatureDraft",
+      "ProjectPlanRoleDraft",
+      "ProjectPlanMilestoneDraft",
+      "ProjectPlanRiskNote",
+      "ProjectPlanFirstAgendaDraft",
+      "ProjectPlanApprovalState",
+      "PlanningOwnerApiResult",
       "MeetingReportSummary",
       "MeetingActionItem",
+      "CodeReviewRoomSummary",
       "PRAnalysisSummary",
       "ReviewCanvasSummary",
       "ReviewCanvasNode",
@@ -434,6 +475,66 @@ describe("machine-readable public contract schema", () => {
     ]) {
       assert.ok(defs[name], `schema must define ${name}`);
     }
+  });
+
+  it("schema defines planning detail sections and approval result boundaries", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const detail = schema.$defs.ProjectPlanDraftDetail;
+    const approval = schema.$defs.ProjectPlanApprovalState;
+    const ownerResult = schema.$defs.PlanningOwnerApiResult;
+
+    for (const key of ["techStack", "featureDrafts", "roleDrafts", "milestoneDrafts", "riskNotes", "firstAgendaDraft", "approval"]) {
+      assert.ok(detail.required.includes(key), `ProjectPlanDraftDetail must require ${key}`);
+    }
+
+    assert.equal(detail.properties.approval.$ref, "#/$defs/ProjectPlanApprovalState");
+    assert.equal(detail.properties.featureDrafts.items.$ref, "#/$defs/ProjectPlanFeatureDraft");
+    assert.equal(detail.properties.milestoneDrafts.items.$ref, "#/$defs/ProjectPlanMilestoneDraft");
+    assert.deepEqual(schema.$defs.ProjectPlanDraftStatus.enum, ["draft", "reviewing", "approved", "rejected"]);
+    assert.deepEqual(approval.properties.status.$ref, "#/$defs/PlanningApprovalStatus");
+    assert.equal(approval.properties.ownerApiResults.items.$ref, "#/$defs/PlanningOwnerApiResult");
+    assert.deepEqual(ownerResult.properties.operation.enum, ["task.create", "milestone.create"]);
+    assert.deepEqual(ownerResult.properties.sourceDraftType.enum, ["feature", "milestone"]);
+    assert.deepEqual(ownerResult.properties.status.enum, ["not_requested", "pending", "succeeded", "failed", "skipped"]);
+  });
+
+  it("validates PlanningOwnerApiResult state and source coupling", () => {
+    const schema = readJson(schemaPath);
+    const ownerResult = schema.$defs.PlanningOwnerApiResult;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const targetId = "00000000-0000-4000-8000-000000000002";
+    const baseResult = {
+      owner: "task",
+      operation: "task.create",
+      sourceDraftType: "feature",
+      sourceDraftId: uuid,
+      status: "succeeded",
+      targetEntityId: targetId,
+      errorMessage: null,
+    };
+
+    assert.equal(validateJsonSchema(ownerResult, baseResult, schema).valid, true);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, targetEntityId: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, errorMessage: "unexpected" }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "Task API failed" }, schema).valid, true);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", errorMessage: "Task API failed" }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: null }, schema).valid, false);
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "" }, schema).valid, false);
+
+    for (const status of ["not_requested", "pending", "skipped"]) {
+      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: null }, schema).valid, true);
+      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: targetId }, schema).valid, false);
+    }
+
+    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, operation: "task.create", sourceDraftType: "milestone" }, schema).valid, false);
+    assert.equal(
+      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "feature" }, schema).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "milestone" }, schema).valid,
+      true,
+    );
   });
 
   it("agent action schema binds every supported action type to a concrete payload schema", () => {
@@ -510,6 +611,8 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /patch/);
     assert.match(githubContract, /state\/nonce/);
     assert.match(githubContract, /installationId -> workspaceId/);
+    assert.match(githubContract, /409 Conflict/);
+    assert.match(githubContract, /active GitHub App connection/);
     assert.match(githubContract, /changed_functions/);
     assert.match(githubContract, /non-null `patch`/);
     assert.match(githubContract, /patch: null/);
@@ -517,6 +620,18 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /## Provided Read Models/);
     assert.match(githubContract, /## Consumed By/);
     assert.match(githubContract, /## Breaking Change Policy/);
+    assert.match(githubContract, /additive optional rollout fields/);
+    assert.match(githubContract, /Making them required requires a separate breaking contract PR/);
+    const mockRuleStart = githubContract.indexOf("## Mock Rule");
+    assert.notEqual(
+      mockRuleStart,
+      -1,
+      "github contract must keep a ## Mock Rule section",
+    );
+    assert.doesNotMatch(
+      githubContract.slice(mockRuleStart),
+      /github-repositories\.fixture\.json/,
+    );
     for (const model of [
       "GithubConnectionSummary",
       "GithubRepositorySummary",
@@ -880,6 +995,13 @@ describe("contract fixtures", () => {
     assert.ok(Array.isArray(result.actions));
   });
 
+  it("review room fixture matches review room public schema", () => {
+    const schema = JSON.parse(read("docs/contracts/schemas/pilo-public-contracts.schema.json"));
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-room.fixture.json"));
+
+    assertMatchesDefinition(schema.$defs, "CodeReviewRoomSummary", fixture.codeReviewRoom);
+  });
+
   it("review analysis fixture matches review public schemas", () => {
     const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
     const fixture = readJson("docs/contracts/fixtures/review-analysis.fixture.json");
@@ -894,6 +1016,24 @@ describe("contract fixtures", () => {
       const result = validateJsonSchema(schema.$defs.ReviewRiskSummary, risk, schema);
       assert.equal(result.valid, true, result.errors.join(", "));
     }
+  });
+
+  it("planning detail fixture matches planning public schemas", () => {
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const fixture = readJson("docs/contracts/fixtures/planning-detail.fixture.json");
+    const summaryResult = validateJsonSchema(schema.$defs.ProjectPlanDraftSummary, fixture.summary, schema);
+    const detailResult = validateJsonSchema(schema.$defs.ProjectPlanDraftDetail, fixture.detail, schema);
+    const ownerApiResults = fixture.detail.approval.ownerApiResults;
+
+    assert.equal(summaryResult.valid, true, summaryResult.errors.join(", "));
+    assert.equal(detailResult.valid, true, detailResult.errors.join(", "));
+    assert.equal(fixture.summary.id, fixture.detail.id);
+    assert.equal(fixture.detail.approval.status, "executed");
+    assert.ok(fixture.detail.featureDrafts.length > 0);
+    assert.ok(fixture.detail.milestoneDrafts.length > 0);
+    assert.ok(fixture.detail.firstAgendaDraft);
+    assert.ok(ownerApiResults.some((result) => result.operation === "task.create" && result.status === "succeeded" && result.targetEntityId));
+    assert.ok(ownerApiResults.some((result) => result.operation === "milestone.create" && result.status === "succeeded" && result.targetEntityId));
   });
 
   it("agent run detail fixture validates against the public schema", () => {
@@ -923,6 +1063,9 @@ describe("github collaboration templates", () => {
     for (const heading of ["Contract Impact", "Cross-Domain Access", "Mock / Stub", "DB / Migration", "Validation"]) {
       assert.match(content, new RegExp(`## ${heading.replace("/", "\\/")}`));
     }
+    for (const guideField of ["Contract Used", "Owner", "Internal-only change", "No external consumer", "Consumers", "Mock/Real"]) {
+      assert.match(content, new RegExp(guideField));
+    }
   });
 
   it("issue templates exist for domain task and contract change", () => {
@@ -935,7 +1078,25 @@ describe("local development baseline", () => {
   it("docker compose wires Postgres schema and LocalStack init scripts", () => {
     const compose = read("docker-compose.dev.yml");
     assert.match(compose, /docs\/db\/pilo_erd_schema\.sql/);
+    assert.match(
+      compose,
+      /docs\/db\/migrations\/202606281200_donghyun_auth_workspace_canvas_init\.sql/,
+    );
+    assert.match(
+      compose,
+      /docs\/db\/seeds\/001_donghyun_auth_workspace_canvas_seed\.sql/,
+    );
     assert.match(compose, /localstack\/init\/ready\.d/);
+  });
+
+  it("local DB apply script loads the owner migration and seed", () => {
+    const script = read("infra/scripts/apply-local-db-sql.ps1");
+    assert.match(
+      script,
+      /202606281200_donghyun_auth_workspace_canvas_init\.sql/,
+    );
+    assert.match(script, /001_donghyun_auth_workspace_canvas_seed\.sql/);
+    assert.match(script, /psql -v ON_ERROR_STOP=1/);
   });
 
   it("local SQS bootstrap creates the expected queues", () => {
@@ -967,6 +1128,80 @@ describe("db schema contract alignment", () => {
     for (const ref of refs) {
       assert.ok(uniqueTables.has(ref), `referenced table must exist: ${ref}`);
     }
+  });
+
+  it("auth DB fields are aligned with the implemented session and OAuth records", () => {
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    assert.match(
+      sql,
+      /CREATE TABLE oauth_accounts[\s\S]*token_type VARCHAR\(80\)/,
+    );
+    assert.match(
+      sql,
+      /CREATE TABLE auth_sessions[\s\S]*token_hash_algorithm VARCHAR\(40\)/,
+    );
+    assert.match(
+      sql,
+      /CREATE TABLE auth_sessions[\s\S]*secret_version VARCHAR\(80\)/,
+    );
+
+    const ownerDoc = read("docs/db/db-schema-by-owner.md");
+    assert.match(ownerDoc, /token_type/);
+    assert.match(ownerDoc, /token_hash_algorithm/);
+    assert.match(ownerDoc, /secret_version/);
+  });
+
+  it("db indexes can be replayed during local migration bootstrap", () => {
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    const indexStatements = [...sql.matchAll(/^CREATE (?:UNIQUE )?INDEX .+$/gm)].map(
+      (match) => match[0],
+    );
+
+    assert.ok(indexStatements.length > 0, "schema should define indexes");
+
+    for (const statement of indexStatements) {
+      assert.match(statement, /IF NOT EXISTS/);
+    }
+  });
+
+  it("donghyun DB migration and seed stay inside the owned data boundary", () => {
+    const migrationPath =
+      "docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql";
+    const seedPath =
+      "docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql";
+
+    assert.ok(exists(migrationPath), `${migrationPath} must exist`);
+    assert.ok(exists(seedPath), `${seedPath} must exist`);
+
+    const migration = read(migrationPath);
+    for (const table of [
+      "users",
+      "oauth_accounts",
+      "auth_sessions",
+      "workspaces",
+      "workspace_members",
+      "workspace_invites",
+      "dashboard_preferences",
+      "canvas_boards",
+      "canvas_shapes",
+      "canvas_connections",
+      "canvas_node_positions",
+      "canvas_view_settings",
+      "canvas_filter_settings",
+    ]) {
+      assert.match(
+        migration,
+        new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`),
+      );
+    }
+
+    const seed = read(seedPath);
+    assert.match(seed, /INSERT INTO users/);
+    assert.match(seed, /INSERT INTO canvas_shapes/);
+    assert.doesNotMatch(
+      seed,
+      /INSERT INTO (tasks|github_issues|pull_requests|meetings|meeting_reports|code_review_rooms|agent_runs)\b/,
+    );
   });
 
   it("db owner document uses real owner names", () => {

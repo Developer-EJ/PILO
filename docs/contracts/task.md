@@ -127,6 +127,36 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 }
 ```
 
+## Write Models
+
+### TaskUpdatePatch
+
+`PATCH /tasks/:taskId`는 아래 필드 중 하나 이상을 받는다. `assigneeMemberId`, `description`, `dueDate`, `milestoneId`는 `null`로 비울 수 있다.
+
+```json
+{
+  "title": "GitHub Repository 연결",
+  "description": "GitHub App 설치 후 repository를 연결한다.",
+  "assigneeMemberId": "uuid",
+  "dueDate": "2026-07-04",
+  "milestoneId": null
+}
+```
+
+### TaskStatusUpdate
+
+`PATCH /tasks/:taskId/status`는 `todo`, `in_progress`, `in_review`, `done`, `blocked` 중 하나를 받는다. 상태 변경은 `task_activity_logs`에 `task.status_changed`로 기록한다.
+
+```json
+{
+  "status": "in_review"
+}
+```
+
+### TaskDelete
+
+`DELETE /tasks/:taskId`는 `tasks.deleted_at`을 설정하는 soft delete다. 기본 Task 목록과 상세 조회는 삭제된 Task를 제외한다.
+
 ## Events
 
 - `task.created`
@@ -140,6 +170,7 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 
 - `task.create.draft`
 - `task.update.status`
+- `task.assign`
 
 ## Boundaries
 
@@ -151,4 +182,3 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 ## Mock Rule
 
 Task API 미구현 시 consumer는 `TaskSummary` fixture를 사용한다. 임시 `tasks` table이나 별도 Task store를 만들지 않는다.
-
