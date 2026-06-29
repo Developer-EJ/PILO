@@ -5,6 +5,7 @@ import process from "node:process";
 import { URL } from "node:url";
 import "ts-node/register";
 import packageJson from "../package.json" with { type: "json" };
+import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
 const {
@@ -14,6 +15,28 @@ const {
 } = require("../src/modules/auth/auth.config");
 const { AuthRepository } = require("../src/modules/auth/auth.repository");
 const { AuthService } = require("../src/modules/auth/auth.service");
+const {
+  WORKSPACE_INVITE_ROLES,
+  WORKSPACE_MEMBER_ROLES,
+  WORKSPACE_STATUSES,
+  WORKSPACE_TYPES,
+} = require("../src/modules/workspace/workspace.types");
+const {
+  createWorkspaceMemberPermissions,
+  hasWorkspaceRole,
+} = require("../src/modules/workspace/workspace.permissions");
+const {
+  WorkspaceAccessError,
+  WorkspaceInviteError,
+  WorkspaceService,
+  WorkspaceValidationError,
+} = require("../src/modules/workspace/workspace.service");
+const {
+  WorkspaceCurrentMemberAdapter,
+} = require("../src/modules/workspace/workspace-current-member.adapter");
+const {
+  WorkspaceRepository,
+} = require("../src/modules/workspace/workspace.repository");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
@@ -808,7 +831,679 @@ describe("app-server package", () => {
     assert.equal(JSON.stringify(response).includes("secret"), false);
   });
 
-  it("boots the Nest app module with AuthModule registered", async () => {
+  it("keeps Workspace scaffold enums aligned with the public contract schema", () => {
+    assert.deepEqual(
+      WORKSPACE_TYPES,
+      contractSchema.$defs.WorkspaceSummary.properties.type.enum,
+    );
+    assert.deepEqual(
+      WORKSPACE_STATUSES,
+      contractSchema.$defs.WorkspaceSummary.properties.status.enum,
+    );
+    assert.deepEqual(
+      WORKSPACE_MEMBER_ROLES,
+      contractSchema.$defs.WorkspaceMemberSummary.properties.role.enum,
+    );
+    assert.deepEqual(
+      WORKSPACE_MEMBER_ROLES,
+      contractSchema.$defs.WorkspaceSummary.properties.myRole.enum,
+    );
+    assert.deepEqual(WORKSPACE_INVITE_ROLES, ["member", "viewer"]);
+  });
+
+  it("resolves currentMember from currentUser without leaking Auth session details", async () => {
+    const repositoryCalls = [];
+    const service = new WorkspaceService({
+      storageMode: "test",
+      async findCurrentMember(input) {
+        repositoryCalls.push(input);
+
+        return {
+          id: "member-1",
+          workspaceId: input.workspaceId,
+          userId: input.userId,
+          name: "Workspace User",
+          email: "workspace@example.com",
+          avatarUrl: null,
+          role: "owner",
+          displayName: "Workspace / Canvas",
+          joinedAt: "2026-06-28T00:00:00.000Z",
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z",
+        };
+      },
+    });
+
+    const currentMember = await service.resolveCurrentMember({
+      workspaceId: "workspace-1",
+      currentUser: {
+        id: "user-1",
+        email: "user@example.com",
+        providers: ["google"],
+      },
+    });
+
+    assert.deepEqual(repositoryCalls, [
+      {
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      },
+    ]);
+    assert.deepEqual(currentMember, {
+      workspaceId: "workspace-1",
+      memberId: "member-1",
+      userId: "user-1",
+      role: "owner",
+      displayName: "Workspace / Canvas",
+    });
+    assert.equal("providers" in currentMember, false);
+    assert.equal("email" in currentMember, false);
+  });
+
+  it("maps workspace role helpers to read, write, and manage permissions", () => {
+    assert.equal(hasWorkspaceRole("owner", "viewer"), true);
+    assert.equal(hasWorkspaceRole("owner", "member"), true);
+    assert.equal(hasWorkspaceRole("member", "owner"), false);
+    assert.deepEqual(createWorkspaceMemberPermissions("viewer"), {
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+    });
+    assert.deepEqual(createWorkspaceMemberPermissions("member"), {
+      canRead: true,
+      canWrite: true,
+      canManage: false,
+    });
+    assert.deepEqual(createWorkspaceMemberPermissions("owner"), {
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+    });
+  });
+
+  it("requires workspace membership before exposing member-scoped context", async () => {
+    const service = new WorkspaceService({
+      storageMode: "test",
+      async findCurrentMember() {
+        return null;
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.requireCurrentMember({
+          workspaceId: "workspace-1",
+          currentUser: { id: "user-1" },
+        }),
+      (error) =>
+        error instanceof WorkspaceAccessError &&
+        error.code === "workspace_member_not_found" &&
+        error.workspaceId === "workspace-1",
+    );
+  });
+
+  it("provides currentMember context through the public workspace adapter", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const adapter = new WorkspaceCurrentMemberAdapter(service);
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+      avatarUrl: "https://example.com/owner.png",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const context = await adapter.requireCurrentMember(
+      {
+        workspaceId: created.id,
+        currentUser,
+      },
+      { minimumRole: "owner" },
+    );
+
+    assert.deepEqual(context.currentMember, {
+      workspaceId: created.id,
+      memberId: context.currentMember.memberId,
+      userId: currentUser.id,
+      role: "owner",
+      displayName: "Workspace Owner",
+    });
+    assert.deepEqual(context.permissions, {
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+    });
+    assert.equal("email" in context.currentMember, false);
+    assert.equal("avatarUrl" in context.currentMember, false);
+  });
+
+  it("creates, lists, reads, and archives workspaces for the current member", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: " PILO ",
+        description: "AI Project OS",
+        type: "bootcamp",
+      },
+    });
+
+    assert.equal(created.name, "PILO");
+    assert.equal(created.description, "AI Project OS");
+    assert.equal(created.type, "bootcamp");
+    assert.equal(created.status, "active");
+    assert.equal(created.myRole, "owner");
+    assert.equal(created.memberCount, 1);
+    assert.deepEqual(await service.listWorkspaces({ currentUser }), [created]);
+    assert.deepEqual(
+      await service.getWorkspace({
+        workspaceId: created.id,
+        currentUser,
+      }),
+      created,
+    );
+
+    const archived = await service.updateWorkspace({
+      workspaceId: created.id,
+      currentUser,
+      body: {
+        name: "PILO Lab",
+        status: "archived",
+      },
+    });
+
+    assert.equal(archived.name, "PILO Lab");
+    assert.equal(archived.status, "archived");
+    assert.equal(
+      (
+        await service.getWorkspace({
+          workspaceId: created.id,
+          currentUser,
+        })
+      ).status,
+      "archived",
+    );
+  });
+
+  it("lists workspace members using the WorkspaceMemberSummary contract", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const currentUser = {
+      id: "user-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+      avatarUrl: "https://example.com/owner.png",
+    };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const members = await service.listWorkspaceMembers({
+      workspaceId: created.id,
+      currentUser,
+    });
+
+    assert.equal(members.length, 1);
+    assert.deepEqual(Object.keys(members[0]).sort(), [
+      "avatarUrl",
+      "displayName",
+      "email",
+      "joinedAt",
+      "memberId",
+      "name",
+      "role",
+      "userId",
+    ]);
+    assert.equal(members[0].userId, currentUser.id);
+    assert.equal(members[0].name, "Workspace Owner");
+    assert.equal(members[0].email, "owner@example.com");
+    assert.equal(members[0].avatarUrl, "https://example.com/owner.png");
+    assert.equal(members[0].role, "owner");
+  });
+
+  it("creates and accepts workspace invites into membership", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const invitee = {
+      id: "user-2",
+      name: "Invited Member",
+      email: "member@example.com",
+      avatarUrl: "https://example.com/member.png",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: " MEMBER@example.com ",
+        role: "member",
+      },
+    });
+    const accepted = await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: invitee,
+      body: {
+        token: invite.token,
+      },
+    });
+    const members = await service.listWorkspaceMembers({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.equal(invite.email, "member@example.com");
+    assert.equal(invite.role, "member");
+    assert.equal(typeof invite.token, "string");
+    assert.equal(accepted.workspaceId, workspace.id);
+    assert.deepEqual(accepted.member, {
+      memberId: accepted.member.memberId,
+      userId: invitee.id,
+      name: "Invited Member",
+      email: "member@example.com",
+      avatarUrl: "https://example.com/member.png",
+      role: "member",
+      displayName: "Invited Member",
+      joinedAt: accepted.member.joinedAt,
+    });
+    assert.equal(members.length, 2);
+  });
+
+  it("keeps dashboard preferences scoped to each workspace member", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const invitee = {
+      id: "user-2",
+      name: "Invited Member",
+      email: "member@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const defaultPreferences = await service.getDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+    const ownerPreferences = await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        layout: {
+          density: "compact",
+          columns: ["tasks", "prs"],
+        },
+        hiddenSections: ["agent", "agent"],
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: invitee.email,
+      },
+    });
+
+    await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: invitee,
+      body: {
+        token: invite.token,
+      },
+    });
+
+    const memberPreferences = await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: invitee,
+      body: {
+        layout: {
+          density: "comfortable",
+          columns: ["meetings"],
+        },
+        hiddenSections: ["recentDecisions"],
+      },
+    });
+    const reloadedOwnerPreferences = await service.getDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.deepEqual(defaultPreferences.layout, {});
+    assert.deepEqual(defaultPreferences.hiddenSections, []);
+    assert.equal(defaultPreferences.updatedAt, null);
+    assert.deepEqual(ownerPreferences.layout, {
+      density: "compact",
+      columns: ["tasks", "prs"],
+    });
+    assert.deepEqual(ownerPreferences.hiddenSections, ["agent"]);
+    assert.notEqual(ownerPreferences.memberId, memberPreferences.memberId);
+    assert.deepEqual(memberPreferences.layout, {
+      density: "comfortable",
+      columns: ["meetings"],
+    });
+    assert.deepEqual(reloadedOwnerPreferences, ownerPreferences);
+  });
+
+  it("aggregates workspace dashboard read models without owning other domain data", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+
+    await service.updateDashboardPreferences({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        layout: {
+          density: "comfortable",
+          sections: ["today", "pullRequests"],
+        },
+        hiddenSections: ["agentSuggestions"],
+      },
+    });
+
+    const dashboard = await service.getWorkspaceDashboard({
+      workspaceId: workspace.id,
+      currentUser: owner,
+    });
+
+    assert.equal(dashboard.workspace.id, workspace.id);
+    assert.equal(dashboard.currentMember.workspaceId, workspace.id);
+    assert.equal(dashboard.currentMember.userId, owner.id);
+    assert.deepEqual(dashboard.preferences.layout, {
+      density: "comfortable",
+      sections: ["today", "pullRequests"],
+    });
+    assert.deepEqual(dashboard.preferences.hiddenSections, [
+      "agentSuggestions",
+    ]);
+    assert.equal(dashboard.members.length, 1);
+    assert.equal(dashboard.source, "fixture");
+    assert.equal(dashboard.tasks.length > 0, true);
+    assert.equal(dashboard.progress.workspaceId, workspace.id);
+    assert.equal(dashboard.meetingReports[0].workspaceId, workspace.id);
+    assert.equal(dashboard.agentActions[0].payload.workspaceId, workspace.id);
+    assert.equal("providers" in dashboard.currentMember, false);
+  });
+
+  it("rejects invalid dashboard preferences payloads", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.updateDashboardPreferences({
+          workspaceId: workspace.id,
+          currentUser: owner,
+          body: {
+            layout: [],
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceValidationError &&
+        error.code === "workspace_validation_failed",
+    );
+  });
+
+  it("handles workspace invite duplicate, expired, accepted, and revoked states", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const invitee = {
+      id: "user-2",
+      name: "Invited Member",
+      email: "member@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: "member@example.com",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createWorkspaceInvite({
+          workspaceId: workspace.id,
+          currentUser: owner,
+          body: {
+            email: "member@example.com",
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceInviteError &&
+        error.code === "workspace_invite_duplicate_active_email",
+    );
+
+    await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: invitee,
+      body: {
+        token: invite.token,
+      },
+    });
+    await assert.rejects(
+      () =>
+        service.acceptWorkspaceInvite({
+          inviteId: invite.id,
+          currentUser: invitee,
+          body: {
+            token: invite.token,
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceInviteError &&
+        error.code === "workspace_invite_accepted",
+    );
+
+    const revokedInvite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: "viewer@example.com",
+        role: "viewer",
+      },
+    });
+
+    await service.revokeWorkspaceInvite({
+      workspaceId: workspace.id,
+      inviteId: revokedInvite.id,
+      currentUser: owner,
+    });
+    await assert.rejects(
+      () =>
+        service.acceptWorkspaceInvite({
+          inviteId: revokedInvite.id,
+          currentUser: {
+            id: "user-3",
+            name: "Viewer",
+            email: "viewer@example.com",
+          },
+          body: {
+            token: revokedInvite.token,
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceInviteError &&
+        error.code === "workspace_invite_revoked",
+    );
+
+    const expiredInvite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: "expired@example.com",
+        ttlHours: 0,
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.acceptWorkspaceInvite({
+          inviteId: expiredInvite.id,
+          currentUser: {
+            id: "user-4",
+            name: "Expired",
+            email: "expired@example.com",
+          },
+          body: {
+            token: expiredInvite.token,
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceInviteError &&
+        error.code === "workspace_invite_expired",
+    );
+  });
+
+  it("rejects workspace invite creation without owner permission", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const member = {
+      id: "member-1",
+      name: "Workspace Member",
+      email: "member@example.com",
+    };
+    const workspace = await service.createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const invite = await service.createWorkspaceInvite({
+      workspaceId: workspace.id,
+      currentUser: owner,
+      body: {
+        email: member.email,
+      },
+    });
+
+    await service.acceptWorkspaceInvite({
+      inviteId: invite.id,
+      currentUser: member,
+      body: {
+        token: invite.token,
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.createWorkspaceInvite({
+          workspaceId: workspace.id,
+          currentUser: member,
+          body: {
+            email: "new@example.com",
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceAccessError &&
+        error.code === "workspace_forbidden",
+    );
+  });
+
+  it("hides soft-deleted workspaces from member-scoped reads", async () => {
+    const repository = new WorkspaceRepository();
+    const service = new WorkspaceService(repository);
+    const currentUser = { id: "user-1" };
+    const created = await service.createWorkspace({
+      currentUser,
+      body: {
+        name: "PILO",
+      },
+    });
+    const deleted = await repository.softDeleteWorkspaceForUser({
+      workspaceId: created.id,
+      userId: currentUser.id,
+    });
+
+    assert.equal(deleted, true);
+    assert.deepEqual(await service.listWorkspaces({ currentUser }), []);
+    await assert.rejects(
+      () =>
+        service.getWorkspace({
+          workspaceId: created.id,
+          currentUser,
+        }),
+      (error) =>
+        error instanceof WorkspaceAccessError &&
+        error.code === "workspace_not_found" &&
+        error.workspaceId === created.id,
+    );
+  });
+
+  it("rejects invalid workspace create payloads before storage", async () => {
+    const service = new WorkspaceService(new WorkspaceRepository());
+
+    await assert.rejects(
+      () =>
+        service.createWorkspace({
+          currentUser: { id: "user-1" },
+          body: {
+            name: " ",
+          },
+        }),
+      (error) =>
+        error instanceof WorkspaceValidationError &&
+        error.code === "workspace_validation_failed",
+    );
+  });
+
+  it("boots the Nest app module with AuthModule and WorkspaceModule registered", async () => {
     const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
     process.env.PILO_SKIP_DATABASE_CONNECT = "true";
     let app;
@@ -818,6 +1513,9 @@ describe("app-server package", () => {
         logger: false,
       });
       await app.init();
+      assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
+        storageMode: "memory",
+      });
     } finally {
       try {
         await app?.close();

@@ -5,6 +5,7 @@ import { AgentModule } from "./modules/agent/agent.module";
 import { JuhyungModule } from "./modules/juhyung/juhyung.module";
 import { MeetingModule } from "./modules/meeting/meeting.module";
 import { ReviewModule } from "./modules/review/review.module";
+import { WorkspaceModule } from "./modules/workspace/workspace.module";
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { ReviewModule } from "./modules/review/review.module";
     JuhyungModule,
     MeetingModule,
     ReviewModule,
+    WorkspaceModule,
   ],
   controllers: [HealthController],
 })
