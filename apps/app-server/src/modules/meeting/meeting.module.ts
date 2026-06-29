@@ -3,6 +3,8 @@ import { CURRENT_MEMBER_ADAPTER } from "./adapters/current-member.adapter";
 import { MEETING_REPORT_WORKFLOW_CLIENT } from "./adapters/meeting-report-workflow.adapter";
 import { MockCurrentMemberAdapter } from "./adapters/mock-current-member.adapter";
 import { MockMeetingReportWorkflowClient } from "./adapters/mock-meeting-report-workflow.adapter";
+import { MockTaskDraftClient } from "./adapters/mock-task-draft.adapter";
+import { TASK_DRAFT_CLIENT } from "./adapters/task-draft.adapter";
 import { MeetingController } from "./meeting.controller";
 import { MEETING_REPOSITORY } from "./repositories/meeting.repository";
 import { MockMeetingRepository } from "./repositories/meeting.mock-repository";
@@ -23,6 +25,10 @@ import { MeetingService } from "./meeting.service";
     {
       provide: MEETING_REPORT_WORKFLOW_CLIENT,
       useClass: MockMeetingReportWorkflowClient,
+    },
+    {
+      provide: TASK_DRAFT_CLIENT,
+      useClass: MockTaskDraftClient,
     },
   ],
   exports: [MeetingService],

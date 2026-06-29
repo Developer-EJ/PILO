@@ -13,6 +13,7 @@ import {
   MeetingStatus,
   TranscriptSegmentRecord,
 } from "../types/meeting.types";
+import { TaskDraftResponse } from "../adapters/task-draft.adapter";
 
 export interface MeetingScaffoldResponseDto {
   module: "meeting";
@@ -87,6 +88,11 @@ export interface CreateMeetingActionItemRequestDto {
 
 export interface ConvertMeetingActionItemRequestDto {
   convertedTaskId?: unknown;
+}
+
+export interface MeetingActionItemTaskDraftResponseDto {
+  actionItem: MeetingActionItemResponseDto;
+  taskDraft: TaskDraftResponse;
 }
 
 export type MeetingResponseDto = MeetingRecord;
