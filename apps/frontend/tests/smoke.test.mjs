@@ -5,6 +5,9 @@ import packageJson from "../package.json" with { type: "json" };
 import contractSchema from "../../../docs/contracts/schemas/pilo-public-contracts.schema.json" with { type: "json" };
 import contractCanvasBoardDetailFixture from "../../../docs/contracts/fixtures/canvas-board-detail.fixture.json" with { type: "json" };
 
+const sortContractKeys = (values) =>
+  [...values].sort((left, right) => left.localeCompare(right));
+
 describe("frontend package", () => {
   it("keeps the PILO frontend package name", () => {
     assert.equal(packageJson.name, "@pilo/frontend");
@@ -36,13 +39,13 @@ describe("frontend package", () => {
     const defs = contractSchema.$defs;
 
     assert.deepEqual(defs.AuthProvider.enum, ["google", "github"]);
-    assert.deepEqual(defs.CurrentUser.required, [
-      "id",
-      "email",
-      "name",
+    assert.deepEqual([...defs.CurrentUser.required].sort(), [
       "avatarUrl",
-      "providers",
+      "email",
+      "id",
       "lastLoginAt",
+      "name",
+      "providers",
     ]);
     assert.equal(
       defs.CurrentUser.properties.providers.items.$ref,
@@ -50,12 +53,17 @@ describe("frontend package", () => {
     );
     assert.equal(defs.AuthSessionState.oneOf.length, 2);
     assert.equal(
-      defs.AuthSessionState.oneOf[0].properties.user.$ref,
-      "#/$defs/CurrentUser",
+      defs.AuthSessionState.oneOf.some(
+        (branch) => branch.properties?.user?.$ref === "#/$defs/CurrentUser",
+      ),
+      true,
     );
-    assert.deepEqual(defs.AuthSessionState.oneOf[1].properties.user, {
-      type: "null",
-    });
+    assert.equal(
+      defs.AuthSessionState.oneOf.some(
+        (branch) => branch.properties?.user?.type === "null",
+      ),
+      true,
+    );
     assert.equal(
       defs.AuthProvidersResponse.properties.providers.items.$ref,
       "#/$defs/AuthProviderSummary",
@@ -66,22 +74,25 @@ describe("frontend package", () => {
   it("keeps dashboard frontend contracts aligned with the public schema", () => {
     const dashboard = contractSchema.$defs.WorkspaceDashboardReadModel;
 
-    assert.deepEqual(dashboard.required, [
-      "workspace",
-      "currentMember",
-      "preferences",
-      "members",
-      "tasks",
-      "progress",
-      "githubIssues",
-      "pullRequests",
-      "meetingReports",
-      "prAnalyses",
-      "agentActions",
-      "canvasEntities",
-      "source",
-      "generatedAt",
-    ]);
+    assert.deepEqual(
+      sortContractKeys(dashboard.required),
+      sortContractKeys([
+        "agentActions",
+        "canvasEntities",
+        "currentMember",
+        "generatedAt",
+        "githubIssues",
+        "meetingReports",
+        "members",
+        "preferences",
+        "progress",
+        "prAnalyses",
+        "pullRequests",
+        "source",
+        "tasks",
+        "workspace",
+      ]),
+    );
     assert.equal(
       dashboard.properties.workspace.$ref,
       "#/$defs/WorkspaceSummary",

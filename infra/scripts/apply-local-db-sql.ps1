@@ -31,9 +31,14 @@ try {
   }
 
   $healthy = $false
+  $containerId = docker compose -f $ComposeFile ps -q $Service
+
+  if (-not $containerId) {
+    throw "Could not resolve container for service: $Service"
+  }
 
   for ($attempt = 1; $attempt -le 30; $attempt++) {
-    $health = docker inspect -f "{{.State.Health.Status}}" pilo-postgres 2>$null
+    $health = docker inspect -f "{{.State.Health.Status}}" $containerId 2>$null
 
     if ($LASTEXITCODE -eq 0 -and ($health -eq "healthy" -or [string]::IsNullOrWhiteSpace($health))) {
       $healthy = $true

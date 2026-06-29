@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS workspace_members (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT workspace_members_role_check CHECK (role IN ('owner', 'member', 'viewer')),
   UNIQUE (workspace_id, user_id),
-  UNIQUE (id, workspace_id)
+  UNIQUE (workspace_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS workspace_invites (
@@ -96,13 +96,15 @@ CREATE TABLE IF NOT EXISTS workspace_invites (
   email CITEXT NOT NULL,
   role VARCHAR(20) NOT NULL DEFAULT 'member',
   token_hash TEXT NOT NULL UNIQUE,
-  invited_by_member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
-  accepted_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  invited_by_member_id UUID NOT NULL,
+  accepted_by_member_id UUID,
   expires_at TIMESTAMPTZ NOT NULL,
   accepted_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT workspace_invites_role_check CHECK (role IN ('member', 'viewer'))
+  CONSTRAINT workspace_invites_role_check CHECK (role IN ('member', 'viewer')),
+  CONSTRAINT workspace_invites_invited_by_member_fk FOREIGN KEY (workspace_id, invited_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT workspace_invites_accepted_by_member_fk FOREIGN KEY (workspace_id, accepted_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_invites_active_email
@@ -112,11 +114,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_invites_active_email
 CREATE TABLE IF NOT EXISTS dashboard_preferences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL,
   layout JSONB NOT NULL DEFAULT '{}'::jsonb,
   hidden_sections JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT dashboard_preferences_member_fk FOREIGN KEY (workspace_id, member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
   UNIQUE (workspace_id, member_id)
 );
 
@@ -125,9 +128,11 @@ CREATE TABLE IF NOT EXISTS canvas_boards (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   title VARCHAR(200) NOT NULL,
   board_type VARCHAR(80) NOT NULL DEFAULT 'workspace',
-  created_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  created_by_member_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT canvas_boards_created_by_member_fk FOREIGN KEY (workspace_id, created_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL,
+  UNIQUE (workspace_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS canvas_shapes (
@@ -146,6 +151,7 @@ CREATE TABLE IF NOT EXISTS canvas_shapes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT canvas_shapes_type_check CHECK (shape_type IN ('task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'file', 'code', 'decision', 'risk')),
+  CONSTRAINT canvas_shapes_entity_type_check CHECK (entity_type IN ('task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'file', 'code', 'decision', 'risk')),
   UNIQUE (canvas_board_id, id),
   UNIQUE (canvas_board_id, entity_type, entity_id)
 );
@@ -178,28 +184,35 @@ CREATE TABLE IF NOT EXISTS canvas_node_positions (
 CREATE TABLE IF NOT EXISTS canvas_view_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   canvas_board_id UUID NOT NULL REFERENCES canvas_boards(id) ON DELETE CASCADE,
-  member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL,
   zoom NUMERIC(5, 2) NOT NULL DEFAULT 1,
   viewport_x NUMERIC(12, 2) NOT NULL DEFAULT 0,
   viewport_y NUMERIC(12, 2) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT canvas_view_settings_zoom_check CHECK (zoom > 0),
-  UNIQUE (canvas_board_id, member_id)
+  CONSTRAINT canvas_view_settings_board_workspace_fk FOREIGN KEY (workspace_id, canvas_board_id) REFERENCES canvas_boards(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT canvas_view_settings_member_fk FOREIGN KEY (workspace_id, member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
+  UNIQUE (workspace_id, canvas_board_id, member_id)
 );
 
 CREATE TABLE IF NOT EXISTS canvas_filter_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   canvas_board_id UUID NOT NULL REFERENCES canvas_boards(id) ON DELETE CASCADE,
-  member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL,
   enabled_entity_types TEXT[] NOT NULL DEFAULT '{}',
-  assignee_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  assignee_member_id UUID,
   show_delayed_only BOOLEAN NOT NULL DEFAULT false,
   show_risk_only BOOLEAN NOT NULL DEFAULT false,
   filters JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (canvas_board_id, member_id)
+  CONSTRAINT canvas_filter_settings_board_workspace_fk FOREIGN KEY (workspace_id, canvas_board_id) REFERENCES canvas_boards(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT canvas_filter_settings_member_fk FOREIGN KEY (workspace_id, member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT canvas_filter_settings_assignee_member_fk FOREIGN KEY (workspace_id, assignee_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL,
+  UNIQUE (workspace_id, canvas_board_id, member_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user_id ON oauth_accounts(user_id);

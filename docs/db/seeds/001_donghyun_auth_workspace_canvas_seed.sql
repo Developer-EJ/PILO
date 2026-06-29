@@ -42,16 +42,16 @@ seed_oauth_account AS (
     token_type,
     token_expires_at
   )
-  VALUES (
+  SELECT
     '11111111-1111-4111-8111-111111111112',
-    '11111111-1111-4111-8111-111111111111',
+    seed_user.id,
     'google',
     'google-local-donghyun',
     'donghyun.local@pilo.dev',
     ARRAY['openid', 'email', 'profile'],
     'Bearer',
     NULL
-  )
+  FROM seed_user
   ON CONFLICT (provider, provider_user_id) DO UPDATE SET
     user_id = EXCLUDED.user_id,
     provider_email = EXCLUDED.provider_email,
@@ -73,9 +73,9 @@ seed_session AS (
     expires_at,
     revoked_at
   )
-  VALUES (
+  SELECT
     '11111111-1111-4111-8111-111111111113',
-    '11111111-1111-4111-8111-111111111111',
+    seed_user.id,
     'local-seed-refresh-token-hash',
     'hmac-sha256',
     'local-seed',
@@ -83,7 +83,7 @@ seed_session AS (
     '127.0.0.1',
     '2027-06-28T00:00:00Z',
     NULL
-  )
+  FROM seed_user
   ON CONFLICT (refresh_token_hash) DO UPDATE SET
     user_id = EXCLUDED.user_id,
     token_hash_algorithm = EXCLUDED.token_hash_algorithm,
@@ -106,7 +106,7 @@ seed_workspace AS (
     end_date,
     created_by_user_id
   )
-  VALUES (
+  SELECT
     '22222222-2222-4222-8222-222222222221',
     'PILO Local Workspace',
     'Local fixture workspace for Auth, Workspace, Dashboard, and Canvas development.',
@@ -114,8 +114,8 @@ seed_workspace AS (
     'active',
     '2026-06-28',
     NULL,
-    '11111111-1111-4111-8111-111111111111'
-  )
+    seed_user.id
+  FROM seed_user
   ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     description = EXCLUDED.description,
@@ -135,18 +135,19 @@ seed_member AS (
     role,
     display_name
   )
-  VALUES (
+  SELECT
     '22222222-2222-4222-8222-222222222222',
-    '22222222-2222-4222-8222-222222222221',
-    '11111111-1111-4111-8111-111111111111',
+    seed_workspace.id,
+    seed_user.id,
     'owner',
     'Product / Canvas'
-  )
+  FROM seed_workspace
+  CROSS JOIN seed_user
   ON CONFLICT (workspace_id, user_id) DO UPDATE SET
     role = EXCLUDED.role,
     display_name = EXCLUDED.display_name,
     updated_at = now()
-  RETURNING id
+  RETURNING id, workspace_id
 ),
 seed_dashboard_preferences AS (
   INSERT INTO dashboard_preferences (
@@ -156,13 +157,13 @@ seed_dashboard_preferences AS (
     layout,
     hidden_sections
   )
-  VALUES (
+  SELECT
     '22222222-2222-4222-8222-222222222223',
-    '22222222-2222-4222-8222-222222222221',
-    '22222222-2222-4222-8222-222222222222',
+    seed_member.workspace_id,
+    seed_member.id,
     '{"sections":["today","pullRequests","agentSuggestions","meetingDecisions"],"density":"comfortable"}'::jsonb,
     '[]'::jsonb
-  )
+  FROM seed_member
   ON CONFLICT (workspace_id, member_id) DO UPDATE SET
     layout = EXCLUDED.layout,
     hidden_sections = EXCLUDED.hidden_sections,
@@ -177,20 +178,20 @@ seed_canvas_board AS (
     board_type,
     created_by_member_id
   )
-  VALUES (
+  SELECT
     '33333333-3333-4333-8333-333333333331',
-    '22222222-2222-4222-8222-222222222221',
+    seed_member.workspace_id,
     'PILO Project Map',
     'workspace',
-    '22222222-2222-4222-8222-222222222222'
-  )
+    seed_member.id
+  FROM seed_member
   ON CONFLICT (id) DO UPDATE SET
     workspace_id = EXCLUDED.workspace_id,
     title = EXCLUDED.title,
     board_type = EXCLUDED.board_type,
     created_by_member_id = EXCLUDED.created_by_member_id,
     updated_at = now()
-  RETURNING id
+  RETURNING id, workspace_id
 ),
 seed_canvas_shapes AS (
   INSERT INTO canvas_shapes (
@@ -206,85 +207,89 @@ seed_canvas_shapes AS (
     z_index,
     created_by_member_id
   )
-  VALUES
-    (
-      '33333333-3333-4333-8333-333333333341',
-      '33333333-3333-4333-8333-333333333331',
-      'meeting_report',
-      'meeting_report',
-      '44444444-4444-4444-8444-444444444441',
-      'Kickoff meeting report',
-      320,
-      180,
-      '#7c6ee6',
-      1,
-      '22222222-2222-4222-8222-222222222222'
-    ),
-    (
-      '33333333-3333-4333-8333-333333333342',
-      '33333333-3333-4333-8333-333333333331',
-      'task',
-      'task',
-      '44444444-4444-4444-8444-444444444442',
-      'Implement workspace entry',
-      300,
-      160,
-      '#38bdf8',
-      2,
-      '22222222-2222-4222-8222-222222222222'
-    ),
-    (
-      '33333333-3333-4333-8333-333333333343',
-      '33333333-3333-4333-8333-333333333331',
-      'github_issue',
-      'github_issue',
-      '44444444-4444-4444-8444-444444444443',
-      'GitHub issue #47',
-      280,
-      150,
-      '#22c55e',
-      3,
-      '22222222-2222-4222-8222-222222222222'
-    ),
-    (
-      '33333333-3333-4333-8333-333333333344',
-      '33333333-3333-4333-8333-333333333331',
-      'pull_request',
-      'pull_request',
-      '44444444-4444-4444-8444-444444444444',
-      'PR #47 Login shell',
-      300,
-      160,
-      '#f59e0b',
-      4,
-      '22222222-2222-4222-8222-222222222222'
-    ),
-    (
-      '33333333-3333-4333-8333-333333333345',
-      '33333333-3333-4333-8333-333333333331',
-      'decision',
-      'decision',
-      '44444444-4444-4444-8444-444444444445',
-      'Use workspace_members for permissions',
-      340,
-      150,
-      '#ef4444',
-      5,
-      '22222222-2222-4222-8222-222222222222'
-    ),
-    (
-      '33333333-3333-4333-8333-333333333346',
-      '33333333-3333-4333-8333-333333333331',
-      'document',
-      'document',
-      '44444444-4444-4444-8444-444444444446',
-      'Auth / Workspace contract',
-      300,
-      150,
-      '#64748b',
-      6,
-      '22222222-2222-4222-8222-222222222222'
-    )
+  SELECT
+    shape.id,
+    seed_canvas_board.id,
+    shape.shape_type,
+    shape.entity_type,
+    shape.entity_id,
+    shape.display_title,
+    shape.width,
+    shape.height,
+    shape.color,
+    shape.z_index,
+    seed_member.id
+  FROM seed_canvas_board
+  JOIN seed_member ON seed_member.workspace_id = seed_canvas_board.workspace_id
+  CROSS JOIN (
+    VALUES
+      (
+        '33333333-3333-4333-8333-333333333341'::uuid,
+        'meeting_report',
+        'meeting_report',
+        '44444444-4444-4444-8444-444444444441'::uuid,
+        'Kickoff meeting report',
+        320,
+        180,
+        '#7c6ee6',
+        1
+      ),
+      (
+        '33333333-3333-4333-8333-333333333342'::uuid,
+        'task',
+        'task',
+        '44444444-4444-4444-8444-444444444442'::uuid,
+        'Implement workspace entry',
+        300,
+        160,
+        '#38bdf8',
+        2
+      ),
+      (
+        '33333333-3333-4333-8333-333333333343'::uuid,
+        'github_issue',
+        'github_issue',
+        '44444444-4444-4444-8444-444444444443'::uuid,
+        'GitHub issue #47',
+        280,
+        150,
+        '#22c55e',
+        3
+      ),
+      (
+        '33333333-3333-4333-8333-333333333344'::uuid,
+        'pull_request',
+        'pull_request',
+        '44444444-4444-4444-8444-444444444444'::uuid,
+        'PR #47 Login shell',
+        300,
+        160,
+        '#f59e0b',
+        4
+      ),
+      (
+        '33333333-3333-4333-8333-333333333345'::uuid,
+        'decision',
+        'decision',
+        '44444444-4444-4444-8444-444444444445'::uuid,
+        'Use workspace_members for permissions',
+        340,
+        150,
+        '#ef4444',
+        5
+      ),
+      (
+        '33333333-3333-4333-8333-333333333346'::uuid,
+        'document',
+        'document',
+        '44444444-4444-4444-8444-444444444446'::uuid,
+        'Auth / Workspace contract',
+        300,
+        150,
+        '#64748b',
+        6
+      )
+  ) AS shape(id, shape_type, entity_type, entity_id, display_title, width, height, color, z_index)
   ON CONFLICT (canvas_board_id, entity_type, entity_id) DO UPDATE SET
     shape_type = EXCLUDED.shape_type,
     display_title = EXCLUDED.display_title,
@@ -294,111 +299,161 @@ seed_canvas_shapes AS (
     z_index = EXCLUDED.z_index,
     created_by_member_id = EXCLUDED.created_by_member_id,
     updated_at = now()
+  RETURNING id, canvas_board_id, entity_type
+),
+seed_canvas_node_positions AS (
+  INSERT INTO canvas_node_positions (
+    canvas_shape_id,
+    x,
+    y
+  )
+  SELECT
+    seed_canvas_shapes.id,
+    position.x,
+    position.y
+  FROM seed_canvas_shapes
+  JOIN (
+    VALUES
+      ('meeting_report', -420, -120),
+      ('task', 0, -60),
+      ('github_issue', 400, -120),
+      ('pull_request', 400, 160),
+      ('decision', -20, 220),
+      ('document', -440, 180)
+  ) AS position(entity_type, x, y)
+    ON position.entity_type = seed_canvas_shapes.entity_type
+  ON CONFLICT (canvas_shape_id) DO UPDATE SET
+    x = EXCLUDED.x,
+    y = EXCLUDED.y,
+    updated_at = now()
+  RETURNING id
+),
+seed_canvas_connections AS (
+  INSERT INTO canvas_connections (
+    id,
+    canvas_board_id,
+    source_shape_id,
+    target_shape_id,
+    connection_type,
+    label
+  )
+  SELECT
+    connection.id,
+    seed_canvas_board.id,
+    source_shape.id,
+    target_shape.id,
+    connection.connection_type,
+    connection.label
+  FROM seed_canvas_board
+  JOIN (
+    VALUES
+      (
+        '33333333-3333-4333-8333-333333333351'::uuid,
+        'meeting_report',
+        'task',
+        'created_from',
+        'action item'
+      ),
+      (
+        '33333333-3333-4333-8333-333333333352'::uuid,
+        'task',
+        'github_issue',
+        'implements',
+        'tracked by'
+      ),
+      (
+        '33333333-3333-4333-8333-333333333353'::uuid,
+        'task',
+        'pull_request',
+        'implements',
+        'delivered by'
+      ),
+      (
+        '33333333-3333-4333-8333-333333333354'::uuid,
+        'document',
+        'decision',
+        'references',
+        'contract basis'
+      )
+  ) AS connection(id, source_entity_type, target_entity_type, connection_type, label)
+    ON true
+  JOIN seed_canvas_shapes AS source_shape
+    ON source_shape.entity_type = connection.source_entity_type
+  JOIN seed_canvas_shapes AS target_shape
+    ON target_shape.entity_type = connection.target_entity_type
+  ON CONFLICT (canvas_board_id, source_shape_id, target_shape_id, connection_type) DO UPDATE SET
+    label = EXCLUDED.label
+  RETURNING id
+),
+seed_canvas_view_settings AS (
+  INSERT INTO canvas_view_settings (
+    canvas_board_id,
+    workspace_id,
+    member_id,
+    zoom,
+    viewport_x,
+    viewport_y
+  )
+  SELECT
+    seed_canvas_board.id,
+    seed_canvas_board.workspace_id,
+    seed_member.id,
+    0.9,
+    -80,
+    -40
+  FROM seed_canvas_board
+  JOIN seed_member ON seed_member.workspace_id = seed_canvas_board.workspace_id
+  ON CONFLICT (workspace_id, canvas_board_id, member_id) DO UPDATE SET
+    zoom = EXCLUDED.zoom,
+    viewport_x = EXCLUDED.viewport_x,
+    viewport_y = EXCLUDED.viewport_y,
+    updated_at = now()
+  RETURNING id
+),
+seed_canvas_filter_settings AS (
+  INSERT INTO canvas_filter_settings (
+    canvas_board_id,
+    workspace_id,
+    member_id,
+    enabled_entity_types,
+    assignee_member_id,
+    show_delayed_only,
+    show_risk_only,
+    filters
+  )
+  SELECT
+    seed_canvas_board.id,
+    seed_canvas_board.workspace_id,
+    seed_member.id,
+    ARRAY['task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'decision'],
+    NULL,
+    false,
+    false,
+    '{"source":"local-seed","mode":"workspace-map"}'::jsonb
+  FROM seed_canvas_board
+  JOIN seed_member ON seed_member.workspace_id = seed_canvas_board.workspace_id
+  ON CONFLICT (workspace_id, canvas_board_id, member_id) DO UPDATE SET
+    enabled_entity_types = EXCLUDED.enabled_entity_types,
+    assignee_member_id = EXCLUDED.assignee_member_id,
+    show_delayed_only = EXCLUDED.show_delayed_only,
+    show_risk_only = EXCLUDED.show_risk_only,
+    filters = EXCLUDED.filters,
+    updated_at = now()
   RETURNING id
 )
-INSERT INTO canvas_node_positions (
-  canvas_shape_id,
-  x,
-  y
-)
-VALUES
-  ('33333333-3333-4333-8333-333333333341', -420, -120),
-  ('33333333-3333-4333-8333-333333333342', 0, -60),
-  ('33333333-3333-4333-8333-333333333343', 400, -120),
-  ('33333333-3333-4333-8333-333333333344', 400, 160),
-  ('33333333-3333-4333-8333-333333333345', -20, 220),
-  ('33333333-3333-4333-8333-333333333346', -440, 180)
-ON CONFLICT (canvas_shape_id) DO UPDATE SET
-  x = EXCLUDED.x,
-  y = EXCLUDED.y,
-  updated_at = now();
-
-INSERT INTO canvas_connections (
-  id,
-  canvas_board_id,
-  source_shape_id,
-  target_shape_id,
-  connection_type,
-  label
-)
-VALUES
-  (
-    '33333333-3333-4333-8333-333333333351',
-    '33333333-3333-4333-8333-333333333331',
-    '33333333-3333-4333-8333-333333333341',
-    '33333333-3333-4333-8333-333333333342',
-    'created_from',
-    'action item'
-  ),
-  (
-    '33333333-3333-4333-8333-333333333352',
-    '33333333-3333-4333-8333-333333333331',
-    '33333333-3333-4333-8333-333333333342',
-    '33333333-3333-4333-8333-333333333343',
-    'implements',
-    'tracked by'
-  ),
-  (
-    '33333333-3333-4333-8333-333333333353',
-    '33333333-3333-4333-8333-333333333331',
-    '33333333-3333-4333-8333-333333333342',
-    '33333333-3333-4333-8333-333333333344',
-    'implements',
-    'delivered by'
-  ),
-  (
-    '33333333-3333-4333-8333-333333333354',
-    '33333333-3333-4333-8333-333333333331',
-    '33333333-3333-4333-8333-333333333346',
-    '33333333-3333-4333-8333-333333333345',
-    'references',
-    'contract basis'
-  )
-ON CONFLICT (canvas_board_id, source_shape_id, target_shape_id, connection_type) DO UPDATE SET
-  label = EXCLUDED.label;
-
-INSERT INTO canvas_view_settings (
-  canvas_board_id,
-  member_id,
-  zoom,
-  viewport_x,
-  viewport_y
-)
-VALUES (
-  '33333333-3333-4333-8333-333333333331',
-  '22222222-2222-4222-8222-222222222222',
-  0.9,
-  -80,
-  -40
-)
-ON CONFLICT (canvas_board_id, member_id) DO UPDATE SET
-  zoom = EXCLUDED.zoom,
-  viewport_x = EXCLUDED.viewport_x,
-  viewport_y = EXCLUDED.viewport_y,
-  updated_at = now();
-
-INSERT INTO canvas_filter_settings (
-  canvas_board_id,
-  member_id,
-  enabled_entity_types,
-  assignee_member_id,
-  show_delayed_only,
-  show_risk_only,
-  filters
-)
-VALUES (
-  '33333333-3333-4333-8333-333333333331',
-  '22222222-2222-4222-8222-222222222222',
-  ARRAY['task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'decision'],
-  NULL,
-  false,
-  false,
-  '{"source":"local-seed","mode":"workspace-map"}'::jsonb
-)
-ON CONFLICT (canvas_board_id, member_id) DO UPDATE SET
-  enabled_entity_types = EXCLUDED.enabled_entity_types,
-  assignee_member_id = EXCLUDED.assignee_member_id,
-  show_delayed_only = EXCLUDED.show_delayed_only,
-  show_risk_only = EXCLUDED.show_risk_only,
-  filters = EXCLUDED.filters,
-  updated_at = now();
+SELECT
+  seed_oauth_account.id AS oauth_account_id,
+  seed_session.id AS auth_session_id,
+  seed_dashboard_preferences.id AS dashboard_preferences_id,
+  seed_canvas_node_positions.id AS first_node_position_id,
+  seed_canvas_connections.id AS first_connection_id,
+  seed_canvas_view_settings.id AS view_settings_id,
+  seed_canvas_filter_settings.id AS filter_settings_id
+FROM seed_oauth_account
+CROSS JOIN seed_session
+CROSS JOIN seed_dashboard_preferences
+CROSS JOIN seed_canvas_node_positions
+CROSS JOIN seed_canvas_connections
+CROSS JOIN seed_canvas_view_settings
+CROSS JOIN seed_canvas_filter_settings
+LIMIT 1;

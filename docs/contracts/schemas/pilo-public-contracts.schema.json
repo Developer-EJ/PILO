@@ -1629,8 +1629,151 @@
         "recommendation": {
           "type": [
             "string",
+          "null"
+          ]
+        }
+      }
+    },
+    "MeetingDecisionSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "reportId",
+        "title",
+        "status",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reportId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "decided",
+            "pending",
+            "reopened"
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "AgentRecommendation": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "source",
+        "title",
+        "status",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source": {
+          "enum": [
+            "meeting",
+            "task",
+            "github",
+            "review",
+            "planning",
+            "orchestrator"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": [
+            "string",
             "null"
           ]
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "waiting_confirmation",
+            "confirmed",
+            "executed",
+            "rejected",
+            "failed"
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "ProjectPlanDraftSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "goal",
+        "targetUser",
+        "status",
+        "featureDraftCount",
+        "milestoneDraftCount",
+        "riskCount",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "targetUser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "reviewing",
+            "approved",
+            "rejected",
+            "waiting_confirmation",
+            "approved_pending_task_creation"
+          ]
+        },
+        "featureDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "milestoneDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
         }
       }
     },
@@ -3073,8 +3216,7 @@
       "type": "object",
       "required": [
         "providers",
-        "session",
-        "repository"
+        "session"
       ],
       "additionalProperties": false,
       "properties": {
@@ -3104,18 +3246,6 @@
                 "env",
                 "local-fallback"
               ]
-            }
-          }
-        },
-        "repository": {
-          "type": "object",
-          "required": [
-            "storageMode"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "storageMode": {
-              "type": "string"
             }
           }
         }

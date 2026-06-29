@@ -1075,6 +1075,8 @@ describe("db schema contract alignment", () => {
       "auth_sessions",
       "workspaces",
       "workspace_members",
+      "workspace_invites",
+      "dashboard_preferences",
       "canvas_boards",
       "canvas_shapes",
       "canvas_connections",
