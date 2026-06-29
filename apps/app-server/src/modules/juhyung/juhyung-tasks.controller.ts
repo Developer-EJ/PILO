@@ -98,6 +98,18 @@ export class JuhyungTasksController {
     );
   }
 
+  @Get("workspaces/:workspaceId/task-drafts")
+  listTaskDrafts(
+    @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.listTaskDrafts(
+      workspaceId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
   @Post("workspaces/:workspaceId/task-drafts")
   createTaskDraft(
     @Param("workspaceId") workspaceId: string,

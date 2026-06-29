@@ -89,7 +89,7 @@ export function createWorkspaceApiClient({
 } = {}) {
   return {
     async listWorkspaces() {
-      const path = "/workspaces";
+      const path = "/api/workspaces";
       const response = await requestWorkspaceJson(path, undefined, {
         baseUrl,
         fetcher,

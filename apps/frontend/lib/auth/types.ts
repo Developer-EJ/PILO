@@ -9,6 +9,27 @@ export type CurrentUser = {
   lastLoginAt: string | null;
 };
 
+export type AuthProviderSummary = {
+  id: AuthProvider;
+  label: string;
+  startPath: string;
+  callbackPath: string;
+  callbackUrl: string | null;
+  scopes: string[];
+  configured: boolean;
+  missingEnv: string[];
+  loginOnly: boolean;
+};
+
+export type AuthProvidersResponse = {
+  providers: AuthProviderSummary[];
+  session: {
+    cookieName: string;
+    configured: boolean;
+    source: string;
+  };
+};
+
 export type AuthSessionState =
   | {
       authenticated: true;
@@ -20,6 +41,7 @@ export type AuthSessionState =
     };
 
 export type AuthClient = {
+  getAuthProviders(): Promise<AuthProvidersResponse>;
   getCurrentUser(): Promise<CurrentUser | null>;
   getAuthSession(): Promise<AuthSessionState>;
   logout(): Promise<void>;

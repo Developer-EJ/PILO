@@ -7,6 +7,38 @@ export const mockCurrentUser = {
   lastLoginAt: "2026-06-27T09:00:00.000Z",
 };
 
+export const mockAuthProvidersResponse = {
+  providers: [
+    {
+      id: "google",
+      label: "Google",
+      startPath: "/api/auth/google/start",
+      callbackPath: "/api/auth/google/callback",
+      callbackUrl: null,
+      scopes: ["openid", "email", "profile"],
+      configured: true,
+      missingEnv: [],
+      loginOnly: true,
+    },
+    {
+      id: "github",
+      label: "GitHub",
+      startPath: "/api/auth/github/start",
+      callbackPath: "/api/auth/github/callback",
+      callbackUrl: null,
+      scopes: ["read:user", "user:email"],
+      configured: true,
+      missingEnv: [],
+      loginOnly: true,
+    },
+  ],
+  session: {
+    cookieName: "pilo_session",
+    configured: true,
+    source: "mock",
+  },
+};
+
 export const MOCK_AUTH_SIGNED_OUT_KEY = "pilo.mockAuth.signedOut";
 
 function defaultMockAuthStorage() {
@@ -59,6 +91,10 @@ export function createMockAuthClient({
   }
 
   return {
+    async getAuthProviders() {
+      return mockAuthProvidersResponse;
+    },
+
     async getCurrentUser() {
       return isSignedOut() ? null : currentUser;
     },

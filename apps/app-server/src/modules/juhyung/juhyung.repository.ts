@@ -279,6 +279,16 @@ export class JuhyungRepository {
     return this.database.taskDraft.create({ data });
   }
 
+  listTaskDraftsForWorkspace(workspaceId: string) {
+    return this.database.taskDraft.findMany({
+      where: {
+        workspaceId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }, { id: "asc" }],
+      take: 50,
+    });
+  }
+
   getTaskDraftById(draftId: string) {
     return this.database.taskDraft.findUnique({
       where: {
@@ -582,6 +592,96 @@ export class JuhyungRepository {
         id: itemId,
         taskId,
       },
+    });
+  }
+
+  listGithubRepositoriesForWorkspace(workspaceId: string) {
+    return this.database.githubRepository.findMany({
+      where: {
+        workspaceId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    });
+  }
+
+  getGithubRepositoryById(repositoryId: string) {
+    return this.database.githubRepository.findUnique({
+      where: {
+        id: repositoryId,
+      },
+    });
+  }
+
+  listGithubIssuesForRepository(repositoryId: string) {
+    return this.database.githubIssue.findMany({
+      where: {
+        repositoryId,
+      },
+      orderBy: [{ number: "desc" }, { id: "asc" }],
+    });
+  }
+
+  listGithubIssueLabelsForIssueIds(issueIds: string[]) {
+    if (issueIds.length === 0) {
+      return [];
+    }
+
+    return this.database.githubIssueLabel.findMany({
+      where: {
+        issueId: {
+          in: issueIds,
+        },
+      },
+      orderBy: [{ name: "asc" }],
+    });
+  }
+
+  listTaskGithubIssueLinksForIssueIds(issueIds: string[]) {
+    if (issueIds.length === 0) {
+      return [];
+    }
+
+    return this.database.taskGithubIssue.findMany({
+      where: {
+        issueId: {
+          in: issueIds,
+        },
+      },
+      orderBy: [{ createdAt: "asc" }],
+    });
+  }
+
+  listPullRequestsForRepository(repositoryId: string) {
+    return this.database.pullRequest.findMany({
+      where: {
+        repositoryId,
+      },
+      orderBy: [{ number: "desc" }, { id: "asc" }],
+    });
+  }
+
+  listTaskPullRequestLinksForPullRequestIds(pullRequestIds: string[]) {
+    if (pullRequestIds.length === 0) {
+      return [];
+    }
+
+    return this.database.taskPullRequest.findMany({
+      where: {
+        pullRequestId: {
+          in: pullRequestIds,
+        },
+      },
+      orderBy: [{ createdAt: "asc" }],
+    });
+  }
+
+  listProgressSnapshotsForWorkspace(workspaceId: string, limit = 12) {
+    return this.database.progressSnapshot.findMany({
+      where: {
+        workspaceId,
+      },
+      orderBy: [{ capturedAt: "desc" }, { id: "asc" }],
+      take: limit,
     });
   }
 

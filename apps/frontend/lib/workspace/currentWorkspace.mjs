@@ -145,3 +145,27 @@ export function workspaceCanvasHref(workspaceId) {
 export function workspaceCanvasBoardHref(workspaceId, boardId) {
   return `${workspaceCanvasHref(workspaceId)}/${encodeURIComponent(boardId)}`;
 }
+
+export function workspaceTasksHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/tasks`;
+}
+
+export function workspaceGithubHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/github`;
+}
+
+export function workspaceMeetingsHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/meetings`;
+}
+
+export function workspaceReviewsHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/reviews`;
+}
+
+export function workspaceAgentHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/agent`;
+}
+
+export function workspacePlanningHref(workspaceId) {
+  return `${workspaceDashboardHref(workspaceId)}/planning`;
+}

@@ -336,6 +336,7 @@ h1 {
   color: #171a21;
   font-size: 12px;
   font-weight: 800;
+  text-decoration: none;
 }
 
 .meeting-chip code {
@@ -483,6 +484,18 @@ h1 {
 
 .stat-card {
   padding: 15px 16px;
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.stat-card[href]:hover {
+  border-color: rgba(109, 91, 214, 0.32);
+  box-shadow: var(--pilo-shadow);
+  transform: translateY(-1px);
 }
 
 .stat-card div,
@@ -542,8 +555,22 @@ h1 {
   font-size: 15px;
 }
 
-.panel-head span {
+.panel-head span,
+.panel-action {
   color: var(--pilo-primary);
+}
+
+.panel-action {
+  border-radius: 999px;
+  background: rgba(109, 91, 214, 0.1);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.panel-action:hover {
+  background: rgba(109, 91, 214, 0.18);
 }
 
 .list {
@@ -555,7 +582,14 @@ h1 {
 .pr-row {
   gap: 12px;
   border-radius: 11px;
+  color: inherit;
   padding: 11px 12px;
+  text-decoration: none;
+}
+
+.task-row[href]:hover,
+.pr-row[href]:hover {
+  background: #f7f8fb;
 }
 
 .task-row strong,
@@ -628,11 +662,24 @@ h1 {
   border: 1px solid #ece8fb;
   border-radius: 12px;
   background: #ffffff;
+  color: inherit;
+  display: block;
   padding: 12px;
+  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
 }
 
 .agent-card + .agent-card {
   margin-top: 10px;
+}
+
+.agent-card:hover {
+  border-color: rgba(109, 91, 214, 0.28);
+  box-shadow: var(--pilo-shadow-soft);
+  transform: translateY(-1px);
 }
 
 .agent-card p {
@@ -663,12 +710,18 @@ h1 {
   padding: 0 18px;
 }
 
-.decision-list p {
+.decision-list p,
+.decision-list a {
   display: flex;
   gap: 9px;
   color: #2c3140;
   font-size: 13px;
   line-height: 1.45;
+  text-decoration: none;
+}
+
+.decision-list a:hover {
+  color: var(--pilo-primary);
 }
 
 .empty-row {

@@ -222,6 +222,18 @@ export class JuhyungTaskService {
     return this.publicAdapter.toTaskDraftSummary(draft);
   }
 
+  async listTaskDrafts(
+    workspaceId: string,
+    actor?: WorkspaceActor,
+  ): Promise<TaskDraftSummary[]> {
+    await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
+    const drafts = await this.repository.listTaskDraftsForWorkspace(
+      workspaceId,
+    );
+
+    return drafts.map((draft) => this.publicAdapter.toTaskDraftSummary(draft));
+  }
+
   async approveTaskDraft(
     draftId: string,
     actor?: WorkspaceActor,

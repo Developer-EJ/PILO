@@ -238,6 +238,26 @@ export interface PullRequestSummary {
   syncedAt: string | null;
 }
 
+export interface GithubRepositoryRecord {
+  id: string;
+  workspaceId: string;
+  owner: string;
+  repoName: string;
+  url: string;
+  defaultBranch?: string | null;
+  updatedAt?: Date | string;
+}
+
+export interface GithubRepositorySummary {
+  id: string;
+  workspaceId: string;
+  owner: string;
+  repoName: string;
+  url: string;
+  defaultBranch: string | null;
+  syncedAt: string | null;
+}
+
 export interface ProgressRecord {
   workspaceId: string;
   milestoneId?: string | null;
@@ -260,4 +280,12 @@ export interface ProgressSummary {
   delayedTasks: number;
   progressRate: number;
   capturedAt: string;
+}
+
+export interface ProgressSnapshotRecord extends ProgressRecord {
+  id: string;
+}
+
+export interface ProgressSnapshotSummary extends ProgressSummary {
+  id: string;
 }

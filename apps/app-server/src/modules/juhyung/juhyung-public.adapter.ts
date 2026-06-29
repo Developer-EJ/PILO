@@ -3,11 +3,15 @@ import {
   GithubIssueRecord,
   GithubIssueState,
   GithubIssueSummary,
+  GithubRepositoryRecord,
+  GithubRepositorySummary,
   MemberRef,
   MilestoneRecord,
   MilestoneSummary,
   ProgressRecord,
   ProgressSummary,
+  ProgressSnapshotRecord,
+  ProgressSnapshotSummary,
   PullRequestRecord,
   PullRequestState,
   PullRequestSummary,
@@ -219,6 +223,20 @@ export class JuhyungPublicAdapter {
     };
   }
 
+  toGithubRepositorySummary(
+    repository: GithubRepositoryRecord,
+  ): GithubRepositorySummary {
+    return {
+      id: repository.id,
+      workspaceId: repository.workspaceId,
+      owner: repository.owner,
+      repoName: repository.repoName,
+      url: repository.url,
+      defaultBranch: repository.defaultBranch ?? null,
+      syncedAt: repository.updatedAt ? toDateTime(repository.updatedAt) : null,
+    };
+  }
+
   toProgressSummary(progress: ProgressRecord): ProgressSummary {
     return {
       workspaceId: progress.workspaceId,
@@ -230,6 +248,15 @@ export class JuhyungPublicAdapter {
       delayedTasks: progress.delayedTasks,
       progressRate: toNumber(progress.progressRate),
       capturedAt: toDateTime(progress.capturedAt),
+    };
+  }
+
+  toProgressSnapshotSummary(
+    progress: ProgressSnapshotRecord,
+  ): ProgressSnapshotSummary {
+    return {
+      id: progress.id,
+      ...this.toProgressSummary(progress),
     };
   }
 }

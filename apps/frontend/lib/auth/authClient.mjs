@@ -1,6 +1,7 @@
 import { createMockAuthClient } from "./mockAuthClient.mjs";
 
 const DEFAULT_AUTH_MODE = "mock";
+const authProvidersPath = "/api/auth/providers";
 
 export function defaultAppServerUrl() {
   return (
@@ -74,8 +75,24 @@ export function createAuthApiClient({
   fetcher = fetch,
 } = {}) {
   return {
+    async getAuthProviders() {
+      const response = await requestAuthJson(authProvidersPath, undefined, {
+        baseUrl,
+        fetcher,
+      });
+
+      if (!response.ok) {
+        throw new AuthApiError("Failed to load auth providers", {
+          status: response.status,
+          path: authProvidersPath,
+        });
+      }
+
+      return readJson(response, authProvidersPath);
+    },
+
     async getCurrentUser() {
-      const path = "/auth/me";
+      const path = "/api/auth/me";
       const response = await requestAuthJson(path, undefined, {
         baseUrl,
         fetcher,
@@ -105,7 +122,7 @@ export function createAuthApiClient({
     },
 
     async logout() {
-      const path = "/auth/logout";
+      const path = "/api/auth/logout";
       const response = await requestAuthJson(
         path,
         { method: "POST" },
