@@ -35,6 +35,36 @@ model WorkspaceMember {
   @@map("workspace_members")
 }
 
+model Agent {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String          @db.VarChar(160)
+  domain      String          @db.VarChar(40)
+  description String?
+  enabled     Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workflows   AgentWorkflow[]
+
+  @@map("agents")
+}
+
+model AgentWorkflow {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId      String   @map("agent_id") @db.Uuid
+  type         String   @db.VarChar(120)
+  version      String   @default("v1") @db.VarChar(40)
+  inputSchema  Json     @default("{}") @map("input_schema") @db.JsonB
+  outputSchema Json     @default("{}") @map("output_schema") @db.JsonB
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([type, version])
+  @@map("agent_workflows")
+}
+
 model Milestone {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId String    @map("workspace_id") @db.Uuid

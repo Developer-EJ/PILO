@@ -67,6 +67,36 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
     assert.ok(value >= schema.minimum, `${fieldPath} must be >= ${schema.minimum}`);
   }
 
+  if (typeof schema.maximum === "number") {
+    assert.ok(value <= schema.maximum, `${fieldPath} must be <= ${schema.maximum}`);
+  }
+
+  if (typeof schema.minLength === "number" && actualType !== "null") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a string`);
+    assert.ok(
+      value.length >= schema.minLength,
+      `${fieldPath} must have length >= ${schema.minLength}`,
+    );
+  }
+
+  if (schema.format === "date") {
+    assert.equal(typeof value, "string", `${fieldPath} must be a date string`);
+    assert.match(value, /^\d{4}-\d{2}-\d{2}$/, `${fieldPath} must be an ISO date`);
+  }
+
+  if (schema.format === "date-time") {
+    assert.equal(
+      typeof value,
+      "string",
+      `${fieldPath} must be a date-time string`,
+    );
+    assert.match(
+      value,
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/,
+      `${fieldPath} must be an ISO date-time`,
+    );
+  }
+
   if (actualType === "array" && schema.items) {
     value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
   }
