@@ -81,9 +81,10 @@ async function createAuthIntegrationApp(fetcher = createOAuthFetchStub()) {
   const restoreEnv = applyTestEnv();
   const previousFetch = globalThis.fetch;
   globalThis.fetch = fetcher;
+  let app;
 
   try {
-    const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
+    app = await NestFactory.create(AppModule, new FastifyAdapter(), {
       logger: false,
     });
     await app.init();
@@ -104,8 +105,12 @@ async function createAuthIntegrationApp(fetcher = createOAuthFetchStub()) {
       },
     };
   } catch (error) {
-    globalThis.fetch = previousFetch;
-    restoreEnv();
+    try {
+      await app?.close();
+    } finally {
+      globalThis.fetch = previousFetch;
+      restoreEnv();
+    }
     throw error;
   }
 }

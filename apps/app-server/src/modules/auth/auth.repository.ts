@@ -336,7 +336,7 @@ export class AuthRepository {
           : null;
 
     if (user.email !== email) {
-      this.userIdByEmail.delete(user.email);
+      this.deleteVerifiedEmailIndex(user.email, user.id);
     }
 
     const updatedUser: AuthUserRecord = {
@@ -360,13 +360,19 @@ export class AuthRepository {
     user: AuthUserRecord,
   ) {
     if (previousEmail && previousEmail !== user.email) {
-      this.userIdByEmail.delete(previousEmail);
+      this.deleteVerifiedEmailIndex(previousEmail, user.id);
     }
 
     if (user.emailVerifiedAt) {
       this.userIdByEmail.set(user.email, user.id);
     } else {
-      this.userIdByEmail.delete(user.email);
+      this.deleteVerifiedEmailIndex(user.email, user.id);
+    }
+  }
+
+  private deleteVerifiedEmailIndex(email: string, userId: string) {
+    if (this.userIdByEmail.get(email) === userId) {
+      this.userIdByEmail.delete(email);
     }
   }
 

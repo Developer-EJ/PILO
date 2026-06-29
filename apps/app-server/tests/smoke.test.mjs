@@ -519,6 +519,53 @@ describe("app-server package", () => {
     assert.equal(repository.listOAuthAccounts().length, 2);
   });
 
+  it("keeps verified email linking after an unverified profile with the same email", () => {
+    const repository = new AuthRepository();
+    const token = {
+      scopes: [],
+      tokenType: "Bearer",
+      tokenExpiresAt: null,
+    };
+    const firstVerifiedIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "google",
+        providerAccountId: "google-verified-user",
+        email: "user@example.com",
+        name: "Verified User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+    const unverifiedIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "github",
+        providerAccountId: "github-unverified-user",
+        email: "user@example.com",
+        name: "Unverified User",
+        avatarUrl: null,
+        emailVerified: false,
+      },
+      token,
+    });
+    const secondVerifiedIdentity = repository.upsertOAuthIdentity({
+      profile: {
+        provider: "google",
+        providerAccountId: "google-second-verified-user",
+        email: "user@example.com",
+        name: "Second Verified User",
+        avatarUrl: null,
+        emailVerified: true,
+      },
+      token,
+    });
+
+    assert.notEqual(unverifiedIdentity.user.id, firstVerifiedIdentity.user.id);
+    assert.equal(secondVerifiedIdentity.user.id, firstVerifiedIdentity.user.id);
+    assert.equal(repository.listUsers().length, 2);
+    assert.equal(repository.listOAuthAccounts().length, 3);
+  });
+
   it("builds a GitHub authorization URL without repository scope", () => {
     const config = createAuthConfig({
       APP_ENV: "local",
