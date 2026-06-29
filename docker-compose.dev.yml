@@ -11,6 +11,8 @@ services:
     volumes:
       - pilo_postgres_data:/var/lib/postgresql/data
       - ./docs/db/pilo_erd_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql:/docker-entrypoint-initdb.d/002_donghyun_auth_workspace_canvas_init.sql:ro
+      - ./docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql:/docker-entrypoint-initdb.d/003_donghyun_auth_workspace_canvas_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pilo -d pilo"]
       interval: 5s
