@@ -3,13 +3,17 @@ import { randomUUID } from "node:crypto";
 import {
   CreateMeetingInput,
   CreateMeetingAgendaInput,
+  CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
+  CreateTranscriptSegmentInput,
   MEETING_STATUS_VALUES,
   MeetingAgendaRecord,
+  MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
   MeetingRepositoryMode,
   MeetingStatus,
+  TranscriptSegmentRecord,
   UpdateMeetingAgendaInput,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -22,6 +26,11 @@ export class MockMeetingRepository implements MeetingRepository {
   private readonly meetings = new Map<string, MeetingRecord>();
   private readonly participants = new Map<string, MeetingParticipantRecord>();
   private readonly agendas = new Map<string, MeetingAgendaRecord>();
+  private readonly memos = new Map<string, MeetingMemoRecord>();
+  private readonly transcriptSegments = new Map<
+    string,
+    TranscriptSegmentRecord
+  >();
 
   listMeetingStatusValues(): readonly MeetingStatus[] {
     return MEETING_STATUS_VALUES;
@@ -207,5 +216,54 @@ export class MockMeetingRepository implements MeetingRepository {
       sortOrder: agenda.sortOrder,
       updatedAt,
     });
+  }
+
+  createMemo(input: CreateMeetingMemoInput): MeetingMemoRecord {
+    const now = new Date().toISOString();
+    const memo: MeetingMemoRecord = {
+      id: randomUUID(),
+      meetingId: input.meetingId,
+      authorMemberId: input.authorMemberId ?? null,
+      body: input.body,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.memos.set(memo.id, memo);
+
+    return memo;
+  }
+
+  listMemosByMeeting(meetingId: string): MeetingMemoRecord[] {
+    return [...this.memos.values()].filter(
+      (memo) => memo.meetingId === meetingId,
+    );
+  }
+
+  createTranscriptSegment(
+    input: CreateTranscriptSegmentInput,
+  ): TranscriptSegmentRecord {
+    const segment: TranscriptSegmentRecord = {
+      id: randomUUID(),
+      meetingId: input.meetingId,
+      speakerMemberId: input.speakerMemberId ?? null,
+      source: input.source,
+      body: input.body,
+      startedAt: input.startedAt ?? null,
+      endedAt: input.endedAt ?? null,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.transcriptSegments.set(segment.id, segment);
+
+    return segment;
+  }
+
+  listTranscriptSegmentsByMeeting(
+    meetingId: string,
+  ): TranscriptSegmentRecord[] {
+    return [...this.transcriptSegments.values()].filter(
+      (segment) => segment.meetingId === meetingId,
+    );
   }
 }

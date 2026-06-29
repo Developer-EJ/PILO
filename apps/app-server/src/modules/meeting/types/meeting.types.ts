@@ -11,9 +11,13 @@ export const MEETING_AGENDA_STATUS_VALUES = Object.freeze([
   "skipped",
 ] as const);
 
+export const TRANSCRIPT_SOURCE_VALUES = ["text", "stt"] as const;
+
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 
 export type MeetingAgendaStatus = (typeof MEETING_AGENDA_STATUS_VALUES)[number];
+
+export type TranscriptSource = (typeof TRANSCRIPT_SOURCE_VALUES)[number];
 
 export type MeetingRepositoryMode = "mock";
 
@@ -87,4 +91,39 @@ export interface UpdateMeetingAgendaInput {
   status?: MeetingAgendaStatus;
   sortOrder?: number;
   updatedAt: string;
+}
+
+export interface MeetingMemoRecord {
+  id: string;
+  meetingId: string;
+  authorMemberId: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMeetingMemoInput {
+  meetingId: string;
+  authorMemberId?: string | null;
+  body: string;
+}
+
+export interface TranscriptSegmentRecord {
+  id: string;
+  meetingId: string;
+  speakerMemberId: string | null;
+  source: TranscriptSource;
+  body: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateTranscriptSegmentInput {
+  meetingId: string;
+  speakerMemberId?: string | null;
+  source: TranscriptSource;
+  body: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
 }

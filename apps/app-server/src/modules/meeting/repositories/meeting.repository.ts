@@ -1,12 +1,16 @@
 import {
   CreateMeetingInput,
   CreateMeetingAgendaInput,
+  CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
+  CreateTranscriptSegmentInput,
   MeetingAgendaRecord,
+  MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
   MeetingRepositoryMode,
   MeetingStatus,
+  TranscriptSegmentRecord,
   UpdateMeetingAgendaInput,
   UpdateMeetingInput,
 } from "../types/meeting.types";
@@ -49,4 +53,14 @@ export interface MeetingRepository {
     agendaId: string,
     input: UpdateMeetingAgendaInput,
   ): MeetingAgendaRecord;
+
+  createMemo(input: CreateMeetingMemoInput): MeetingMemoRecord;
+
+  listMemosByMeeting(meetingId: string): MeetingMemoRecord[];
+
+  createTranscriptSegment(
+    input: CreateTranscriptSegmentInput,
+  ): TranscriptSegmentRecord;
+
+  listTranscriptSegmentsByMeeting(meetingId: string): TranscriptSegmentRecord[];
 }
