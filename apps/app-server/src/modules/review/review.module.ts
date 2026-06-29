@@ -5,6 +5,7 @@ import { PullRequestAnalysisService } from "./analysis/pull-request-analysis.ser
 import { InMemoryReviewArtifactsRepository } from "./artifacts/in-memory-review-artifacts.repository";
 import { ReviewArtifactsController } from "./artifacts/review-artifacts.controller";
 import { ReviewArtifactsService } from "./artifacts/review-artifacts.service";
+import { ChangedFilesController } from "./changes/changed-files.controller";
 import { ChangedFilesService } from "./changes/changed-files.service";
 import { InMemoryChangedFilesRepository } from "./changes/in-memory-changed-files.repository";
 import { InMemoryReviewGraphRepository } from "./graph/in-memory-review-graph.repository";
@@ -26,6 +27,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     ReviewRoomController,
     PullRequestAnalysisController,
     ReviewArtifactsController,
+    ChangedFilesController,
     ReviewGraphController,
   ],
   providers: [

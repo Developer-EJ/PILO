@@ -1091,6 +1091,25 @@ describe("frontend package", () => {
       linkedTaskIds: ["task-1"],
       syncedAt: "2026-06-30T00:00:00.000Z",
     };
+    const analysisId = "88888888-8888-4888-8888-888888888881";
+    const changedFile = {
+      id: "88888888-8888-4888-8888-8888888888b1",
+      analysisId,
+      filePath: "apps/frontend/components/review/ReviewRoomWorkspace.tsx",
+      changeType: "modified",
+      additions: 24,
+      deletions: 6,
+      summary: "Loads changed files from the Review API.",
+      functions: [
+        {
+          id: "88888888-8888-4888-8888-8888888888c1",
+          changedFileId: "88888888-8888-4888-8888-8888888888b1",
+          name: "openPullRequest",
+          changeType: "modified",
+          summary: "Passes the analysis id to the changed-files API.",
+        },
+      ],
+    };
     const requests = [];
     const fetcher = async (url, init = {}) => {
       requests.push({ url, init });
@@ -1124,6 +1143,10 @@ describe("frontend package", () => {
         });
       }
 
+      if (url.endsWith(`/pull-request-analyses/${analysisId}/changed-files`)) {
+        return Response.json([changedFile]);
+      }
+
       return Response.json({});
     };
 
@@ -1150,20 +1173,24 @@ describe("frontend package", () => {
       memberId: "member-1",
       pullRequest: pullRequests[0],
     });
+    const changedFiles = await apiClient.listChangedFiles(analysisId);
 
     assert.equal(pullRequests[0].id, pullRequest.id);
     assert.equal(room.pullRequest.title, pullRequest.title);
+    assert.equal(changedFiles[0].filePath, changedFile.filePath);
+    assert.equal(changedFiles[0].functions[0].name, "openPullRequest");
     assert.deepEqual(
       requests.map((request) => request.url),
       [
         `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories`,
         `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
         `https://api.pilo.dev/api/pull-requests/${pullRequest.id}/review-room`,
+        `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/changed-files`,
       ],
     );
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
-      ["GET", "GET", "POST"],
+      ["GET", "GET", "POST", "GET"],
     );
     assert.deepEqual(JSON.parse(requests[2].init.body).pullRequest, pullRequest);
     assert.equal(requests[2].init.headers["x-workspace-id"], workspaceId);

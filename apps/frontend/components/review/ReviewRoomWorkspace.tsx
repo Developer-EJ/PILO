@@ -309,9 +309,10 @@ export function ReviewRoomWorkspace({
       }
 
       try {
-        changedFiles = await client.listChangedFiles();
+        changedFiles = await client.listChangedFiles(analysis.id);
       } catch (error) {
-        changedFiles = await fallbackClient.listChangedFiles();
+        changedFiles = await fallbackClient.listChangedFiles(analysis.id);
+        nextWarnings.push("Changed files are backed by the review fixture.");
       }
 
       try {

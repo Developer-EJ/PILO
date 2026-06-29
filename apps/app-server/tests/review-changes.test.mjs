@@ -9,6 +9,9 @@ const {
   ChangedFilesService,
 } = require("../src/modules/review/changes/changed-files.service.ts");
 const {
+  ChangedFilesController,
+} = require("../src/modules/review/changes/changed-files.controller.ts");
+const {
   InMemoryChangedFilesRepository,
 } = require("../src/modules/review/changes/in-memory-changed-files.repository.ts");
 
@@ -16,7 +19,23 @@ function createService(options = {}) {
   return new ChangedFilesService(new InMemoryChangedFilesRepository(), options);
 }
 
+function createController(options = {}) {
+  return new ChangedFilesController(createService(options));
+}
+
 describe("changed files/functions service", () => {
+  it("exposes changed file/function read models by analysis id", () => {
+    const controller = createController({ seedFixture: true });
+
+    const files = controller.listChangedFiles(
+      "88888888-8888-4888-8888-888888888881",
+    );
+
+    assert.equal(files.length, 1);
+    assert.equal(files[0].analysisId, "88888888-8888-4888-8888-888888888881");
+    assert.equal(files[0].functions[0].changedFileId, files[0].id);
+  });
+
   it("lists changed file/function fixture by analysis id", () => {
     const service = createService({ seedFixture: true });
 

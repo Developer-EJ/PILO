@@ -572,6 +572,7 @@ Rules:
 | GET | `/api/pull-requests/:pullRequestId/analysis` | yes | member | PR analysis lifecycle result |
 | GET | `/api/pull-requests/:pullRequestId/analysis-summary` | yes | member | PR analysis summary for Dashboard/Canvas |
 | GET | `/api/pull-request-analyses/:analysisId/canvas` | yes | member | Review graph canvas |
+| GET | `/api/pull-request-analyses/:analysisId/changed-files` | yes | member | Review-owned changed files and changed functions |
 | PATCH | `/api/review-nodes/:reviewNodeId/state` | yes | member | Save internal review node state |
 | POST | `/api/code-review-rooms/:reviewRoomId/comments` | yes | member | Save review comment |
 | POST | `/api/pull-request-analyses/:analysisId/checklist-items` | yes | member | Upsert merge/review checklist item |

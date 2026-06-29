@@ -32,6 +32,10 @@ export const reviewApiPaths = {
     `/api/pull-requests/${encodeURIComponent(pullRequestId)}/analysis-summary`,
   getCanvas: (analysisId) =>
     `/api/pull-request-analyses/${encodeURIComponent(analysisId)}/canvas`,
+  listChangedFiles: (analysisId) =>
+    `/api/pull-request-analyses/${encodeURIComponent(
+      analysisId,
+    )}/changed-files`,
   setNodeState: (nodeId) =>
     `/api/review-nodes/${encodeURIComponent(nodeId)}/state`,
   createComment: (roomId) =>
@@ -375,6 +379,31 @@ export function normalizeReviewCanvas(rawCanvas, analysisId) {
   };
 }
 
+export function normalizeChangedFiles(rawFiles, analysisId) {
+  const files = Array.isArray(rawFiles) ? rawFiles : reviewFixture.changedFiles;
+
+  return files.map((file, index) => {
+    const fallback =
+      reviewFixture.changedFiles[index % reviewFixture.changedFiles.length];
+    const normalizedFile = isRecord(file) ? file : fallback;
+
+    return {
+      ...fallback,
+      ...normalizedFile,
+      analysisId: normalizedFile.analysisId ?? analysisId ?? fallback.analysisId,
+      additions: Number.isInteger(normalizedFile.additions)
+        ? normalizedFile.additions
+        : 0,
+      deletions: Number.isInteger(normalizedFile.deletions)
+        ? normalizedFile.deletions
+        : 0,
+      functions: Array.isArray(normalizedFile.functions)
+        ? normalizedFile.functions
+        : [],
+    };
+  });
+}
+
 export function createMockReviewClient({
   fixture = reviewFixture,
   now = () => new Date().toISOString(),
@@ -462,8 +491,8 @@ export function createMockReviewClient({
       return clone(canvas);
     },
 
-    async listChangedFiles() {
-      return clone(fixture.changedFiles);
+    async listChangedFiles(analysisId) {
+      return normalizeChangedFiles(fixture.changedFiles, analysisId);
     },
 
     async listChecklistItems() {
@@ -653,8 +682,15 @@ export function createReviewApiClient({
       );
     },
 
-    async listChangedFiles() {
-      return clone(fixture.changedFiles);
+    async listChangedFiles(analysisId) {
+      return normalizeChangedFiles(
+        await requestReviewJson(
+          reviewApiPaths.listChangedFiles(analysisId),
+          undefined,
+          requestOptions,
+        ),
+        analysisId,
+      );
     },
 
     async listChecklistItems() {
