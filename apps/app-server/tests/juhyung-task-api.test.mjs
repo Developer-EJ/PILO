@@ -25,6 +25,8 @@ const UUIDS = {
   dependency: "12121212-1212-4121-8121-121212121212",
   dependsOnTask: "abababab-abab-4aba-8bab-abababababab",
   cycleTask: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd",
+  taskDraft: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  source: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   member: "33333333-3333-4333-8333-333333333333",
   assignee: "44444444-4444-4444-8444-444444444444",
   milestone: "66666666-6666-4666-8666-666666666666",
@@ -51,6 +53,27 @@ const baseDependsOnTask = {
   ...baseTask,
   id: UUIDS.dependsOnTask,
   title: "Install GitHub App",
+};
+
+const baseTaskDraft = {
+  id: UUIDS.taskDraft,
+  workspaceId: UUIDS.workspace,
+  sourceType: "meeting_action_item",
+  sourceId: UUIDS.source,
+  title: "Process OAuth callback",
+  description: "Handle Google and GitHub callbacks.",
+  assigneeMemberId: UUIDS.assignee,
+  priority: "high",
+  dueDate: new Date("2026-07-03T00:00:00.000Z"),
+  status: "draft",
+  taskId: null,
+  createdByMemberId: UUIDS.member,
+  approvedByMemberId: null,
+  rejectedByMemberId: null,
+  approvedAt: null,
+  rejectedAt: null,
+  createdAt: new Date("2026-06-28T10:00:00.000Z"),
+  updatedAt: new Date("2026-06-28T10:00:00.000Z"),
 };
 
 const baseTaskDependency = {
@@ -111,7 +134,9 @@ describe("JuhyungTaskService", () => {
       access: {
         requireWorkspaceMember: async (workspaceId, actor) => {
           calls.push(["access", workspaceId, actor]);
-          return currentMember();
+          return actor.memberId === UUIDS.assignee
+            ? assigneeMember()
+            : currentMember();
         },
       },
       repository: {
@@ -577,6 +602,220 @@ describe("JuhyungTaskService", () => {
           },
           { memberId: UUIDS.member },
         ),
+      BadRequestException,
+    );
+  });
+
+  it("creates task drafts after checking workspace and assignee membership", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return actor.memberId === UUIDS.assignee
+            ? assigneeMember()
+            : currentMember();
+        },
+      },
+      repository: {
+        createTaskDraft: async (input, createdByMemberId) => {
+          calls.push(["createDraft", input, createdByMemberId]);
+          assert.ok(input.dueDate instanceof Date);
+          return {
+            ...baseTaskDraft,
+            ...input,
+            createdByMemberId,
+          };
+        },
+      },
+    });
+
+    const result = await service.createTaskDraft(
+      UUIDS.workspace,
+      {
+        workspaceId: UUIDS.workspace,
+        sourceType: "meeting_action_item",
+        sourceId: UUIDS.source,
+        title: " Process OAuth callback ",
+        description: "Handle Google and GitHub callbacks.",
+        assigneeMemberId: UUIDS.assignee,
+        priority: "high",
+        dueDate: "2026-07-03",
+      },
+      { userId: UUIDS.user },
+    );
+
+    assert.deepEqual(result, {
+      id: UUIDS.taskDraft,
+      workspaceId: UUIDS.workspace,
+      sourceType: "meeting_action_item",
+      sourceId: UUIDS.source,
+      title: "Process OAuth callback",
+      description: "Handle Google and GitHub callbacks.",
+      assigneeMemberId: UUIDS.assignee,
+      priority: "high",
+      dueDate: "2026-07-03",
+      status: "draft",
+      taskId: null,
+      createdAt: "2026-06-28T10:00:00.000Z",
+      updatedAt: "2026-06-28T10:00:00.000Z",
+    });
+    assert.deepEqual(calls, [
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
+      ["access", UUIDS.workspace, { memberId: UUIDS.assignee }],
+      [
+        "createDraft",
+        {
+          workspaceId: UUIDS.workspace,
+          sourceType: "meeting_action_item",
+          sourceId: UUIDS.source,
+          title: "Process OAuth callback",
+          description: "Handle Google and GitHub callbacks.",
+          assigneeMemberId: UUIDS.assignee,
+          priority: "high",
+          dueDate: new Date("2026-07-03T00:00:00.000Z"),
+        },
+        UUIDS.member,
+      ],
+    ]);
+  });
+
+  it("approves task drafts by creating a task from the stored draft", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskDraftById: async (draftId) => {
+          calls.push(["getDraft", draftId]);
+          return baseTaskDraft;
+        },
+        approveTaskDraft: async (draftId, input, actorMemberId) => {
+          calls.push(["approveDraft", draftId, input, actorMemberId]);
+          assert.ok(input.dueDate instanceof Date);
+          return {
+            ...baseTaskDraft,
+            status: "approved",
+            taskId: UUIDS.task,
+            approvedByMemberId: actorMemberId,
+            approvedAt: new Date("2026-06-28T11:00:00.000Z"),
+            updatedAt: new Date("2026-06-28T11:00:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.approveTaskDraft(UUIDS.taskDraft, {
+      memberId: UUIDS.member,
+    });
+
+    assert.equal(result.status, "approved");
+    assert.equal(result.taskId, UUIDS.task);
+    assert.deepEqual(calls, [
+      ["getDraft", UUIDS.taskDraft],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["access", UUIDS.workspace, { memberId: UUIDS.assignee }],
+      [
+        "approveDraft",
+        UUIDS.taskDraft,
+        {
+          workspaceId: UUIDS.workspace,
+          title: "Process OAuth callback",
+          description: "Handle Google and GitHub callbacks.",
+          assigneeMemberId: UUIDS.assignee,
+          status: "todo",
+          priority: "high",
+          dueDate: new Date("2026-07-03T00:00:00.000Z"),
+          milestoneId: null,
+        },
+        UUIDS.member,
+      ],
+    ]);
+  });
+
+  it("rejects task drafts without creating tasks", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskDraftById: async (draftId) => {
+          calls.push(["getDraft", draftId]);
+          return baseTaskDraft;
+        },
+        approveTaskDraft: async () => {
+          throw new Error("rejected draft should not create a task");
+        },
+        rejectTaskDraft: async (draftId, actorMemberId) => {
+          calls.push(["rejectDraft", draftId, actorMemberId]);
+          return {
+            ...baseTaskDraft,
+            status: "rejected",
+            rejectedByMemberId: actorMemberId,
+            rejectedAt: new Date("2026-06-28T11:05:00.000Z"),
+            updatedAt: new Date("2026-06-28T11:05:00.000Z"),
+          };
+        },
+      },
+    });
+
+    const result = await service.rejectTaskDraft(UUIDS.taskDraft, {
+      memberId: UUIDS.member,
+    });
+
+    assert.equal(result.status, "rejected");
+    assert.equal(result.taskId, null);
+    assert.deepEqual(calls, [
+      ["getDraft", UUIDS.taskDraft],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["rejectDraft", UUIDS.taskDraft, UUIDS.member],
+    ]);
+  });
+
+  it("rejects approving terminal task drafts before writing", async () => {
+    const service = createService({
+      repository: {
+        getTaskDraftById: async () => ({
+          ...baseTaskDraft,
+          status: "approved",
+          taskId: UUIDS.task,
+        }),
+        approveTaskDraft: async () => {
+          throw new Error("terminal draft should not be approved twice");
+        },
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.approveTaskDraft(UUIDS.taskDraft, {
+          memberId: UUIDS.member,
+        }),
+      BadRequestException,
+    );
+  });
+
+  it("rejects task draft approvals when the repository cannot claim the draft", async () => {
+    const service = createService({
+      repository: {
+        getTaskDraftById: async () => baseTaskDraft,
+        approveTaskDraft: async () => null,
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        service.approveTaskDraft(UUIDS.taskDraft, {
+          memberId: UUIDS.member,
+        }),
       BadRequestException,
     );
   });
@@ -1391,6 +1630,18 @@ describe("JuhyungTasksController", () => {
         calls.push(["create", workspaceId, body, actor]);
         return { id: UUIDS.task };
       },
+      createTaskDraft: async (workspaceId, body, actor) => {
+        calls.push(["createDraft", workspaceId, body, actor]);
+        return { id: UUIDS.taskDraft };
+      },
+      approveTaskDraft: async (draftId, actor) => {
+        calls.push(["approveDraft", draftId, actor]);
+        return { id: draftId, taskId: UUIDS.task };
+      },
+      rejectTaskDraft: async (draftId, actor) => {
+        calls.push(["rejectDraft", draftId, actor]);
+        return { id: draftId, taskId: null };
+      },
       getTask: async (taskId, actor) => {
         calls.push(["get", taskId, actor]);
         return { id: taskId };
@@ -1463,6 +1714,14 @@ describe("JuhyungTasksController", () => {
       undefined,
       UUIDS.member,
     );
+    await controller.createTaskDraft(
+      UUIDS.workspace,
+      { title: "Process OAuth callback" },
+      UUIDS.user,
+      undefined,
+    );
+    await controller.approveTaskDraft(UUIDS.taskDraft, undefined, UUIDS.member);
+    await controller.rejectTaskDraft(UUIDS.taskDraft, UUIDS.user, undefined);
     await controller.getTask(UUIDS.task, UUIDS.user, UUIDS.member);
     await controller.updateTask(
       UUIDS.task,
@@ -1538,6 +1797,14 @@ describe("JuhyungTasksController", () => {
         { title: "Connect repository" },
         { memberId: UUIDS.member },
       ],
+      [
+        "createDraft",
+        UUIDS.workspace,
+        { title: "Process OAuth callback" },
+        { userId: UUIDS.user },
+      ],
+      ["approveDraft", UUIDS.taskDraft, { memberId: UUIDS.member }],
+      ["rejectDraft", UUIDS.taskDraft, { userId: UUIDS.user }],
       ["get", UUIDS.task, { userId: UUIDS.user, memberId: UUIDS.member }],
       [
         "patch",

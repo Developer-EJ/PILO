@@ -7,6 +7,7 @@ export type TaskStatus =
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 export type TaskChecklistStatus = "todo" | "done";
 export type MilestoneStatus = "planned" | "in_progress" | "done";
+export type TaskDraftStatus = "draft" | "approved" | "rejected";
 export type GithubIssueState = "open" | "closed";
 export type PullRequestState =
   | "open"
@@ -53,6 +54,38 @@ export interface TaskSummary {
   isDelayed: boolean;
   linkedIssueCount: number;
   linkedPrCount: number;
+  updatedAt: string;
+}
+
+export interface TaskDraftRecord {
+  id: string;
+  workspaceId: string;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  title: string;
+  description?: string | null;
+  assigneeMemberId?: string | null;
+  priority: string;
+  dueDate?: Date | string | null;
+  status: string;
+  taskId?: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface TaskDraftSummary {
+  id: string;
+  workspaceId: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  title: string;
+  description: string | null;
+  assigneeMemberId: string | null;
+  priority: TaskPriority;
+  dueDate: string | null;
+  status: TaskDraftStatus;
+  taskId: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 

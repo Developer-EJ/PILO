@@ -13,6 +13,7 @@ const SORT_ORDER_SHIFT = 1000000;
 export const JUHYUNG_OWNER_TABLES = [
   "milestones",
   "tasks",
+  "task_drafts",
   "task_checklist_items",
   "task_comments",
   "task_activity_logs",
@@ -38,6 +39,17 @@ export interface CreateTaskInput {
   priority: TaskPriority;
   dueDate: Date | string | null;
   milestoneId: string | null;
+}
+
+export interface CreateTaskDraftInput {
+  workspaceId: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  title: string;
+  description: string | null;
+  assigneeMemberId: string | null;
+  priority: TaskPriority;
+  dueDate: Date | string | null;
 }
 
 export interface UpdateTaskInput {
@@ -254,6 +266,92 @@ export class JuhyungRepository {
     } satisfies Prisma.TaskUncheckedCreateInput;
 
     return this.database.task.create({ data });
+  }
+
+  createTaskDraft(input: CreateTaskDraftInput, createdByMemberId: string) {
+    const data = {
+      ...input,
+      status: "draft",
+      taskId: null,
+      createdByMemberId,
+    } satisfies Prisma.TaskDraftUncheckedCreateInput;
+
+    return this.database.taskDraft.create({ data });
+  }
+
+  getTaskDraftById(draftId: string) {
+    return this.database.taskDraft.findUnique({
+      where: {
+        id: draftId,
+      },
+    });
+  }
+
+  approveTaskDraft(
+    draftId: string,
+    input: CreateTaskInput,
+    actorMemberId: string,
+  ) {
+    return this.database.$transaction(async (transaction) => {
+      const approvedAt = new Date();
+      const claimed = await transaction.taskDraft.updateMany({
+        where: {
+          id: draftId,
+          status: "draft",
+        },
+        data: {
+          status: "approved",
+          approvedByMemberId: actorMemberId,
+          approvedAt,
+          updatedAt: approvedAt,
+        } satisfies Prisma.TaskDraftUncheckedUpdateInput,
+      });
+      if (claimed.count === 0) {
+        return null;
+      }
+
+      const task = await transaction.task.create({
+        data: {
+          ...input,
+          createdByMemberId: actorMemberId,
+        } satisfies Prisma.TaskUncheckedCreateInput,
+      });
+
+      return transaction.taskDraft.update({
+        where: {
+          id: draftId,
+        },
+        data: {
+          taskId: task.id,
+          updatedAt: approvedAt,
+        } satisfies Prisma.TaskDraftUncheckedUpdateInput,
+      });
+    });
+  }
+
+  async rejectTaskDraft(draftId: string, actorMemberId: string) {
+    const rejectedAt = new Date();
+    const rejected = await this.database.taskDraft.updateMany({
+      where: {
+        id: draftId,
+        status: "draft",
+      },
+      data: {
+        status: "rejected",
+        rejectedByMemberId: actorMemberId,
+        rejectedAt,
+        updatedAt: rejectedAt,
+      } satisfies Prisma.TaskDraftUncheckedUpdateInput,
+    });
+    if (rejected.count === 0) {
+      return null;
+    }
+
+    return this.database.taskDraft.findUnique({
+      where: {
+        id: draftId,
+      },
+    });
   }
 
   updateTask(

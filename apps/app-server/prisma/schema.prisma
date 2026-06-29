@@ -100,6 +100,31 @@ model Task {
   @@map("tasks")
 }
 
+model TaskDraft {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  sourceType         String?   @map("source_type") @db.VarChar(80)
+  sourceId           String?   @map("source_id") @db.Uuid
+  title              String    @db.VarChar(240)
+  description        String?
+  assigneeMemberId   String?   @map("assignee_member_id") @db.Uuid
+  priority           String    @default("medium") @db.VarChar(20)
+  dueDate            DateTime? @map("due_date") @db.Date
+  status             String    @default("draft") @db.VarChar(20)
+  taskId             String?   @map("task_id") @db.Uuid
+  createdByMemberId  String?   @map("created_by_member_id") @db.Uuid
+  approvedByMemberId String?   @map("approved_by_member_id") @db.Uuid
+  rejectedByMemberId String?   @map("rejected_by_member_id") @db.Uuid
+  approvedAt         DateTime? @map("approved_at") @db.Timestamptz(6)
+  rejectedAt         DateTime? @map("rejected_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, sourceType, sourceId])
+  @@index([workspaceId, status])
+  @@map("task_drafts")
+}
+
 model TaskChecklistItem {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   taskId    String   @map("task_id") @db.Uuid

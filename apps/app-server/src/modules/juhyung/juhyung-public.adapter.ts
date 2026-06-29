@@ -20,6 +20,9 @@ import {
   TaskDependencyRecord,
   TaskDependencySummary,
   TaskDetail,
+  TaskDraftRecord,
+  TaskDraftStatus,
+  TaskDraftSummary,
   TaskPriority,
   TaskRecord,
   TaskStatus,
@@ -85,6 +88,24 @@ export class JuhyungPublicAdapter {
       checklistItems: (context.checklistItems ?? []).map((item) =>
         this.toTaskChecklistItemSummary(item),
       ),
+    };
+  }
+
+  toTaskDraftSummary(draft: TaskDraftRecord): TaskDraftSummary {
+    return {
+      id: draft.id,
+      workspaceId: draft.workspaceId,
+      sourceType: draft.sourceType ?? null,
+      sourceId: draft.sourceId ?? null,
+      title: draft.title,
+      description: draft.description ?? null,
+      assigneeMemberId: draft.assigneeMemberId ?? null,
+      priority: draft.priority as TaskPriority,
+      dueDate: toDateOnly(draft.dueDate ?? null),
+      status: draft.status as TaskDraftStatus,
+      taskId: draft.taskId ?? null,
+      createdAt: toDateTime(draft.createdAt),
+      updatedAt: toDateTime(draft.updatedAt),
     };
   }
 
