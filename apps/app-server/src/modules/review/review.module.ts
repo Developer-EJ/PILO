@@ -2,6 +2,9 @@ import { Module } from "@nestjs/common";
 import { InMemoryPullRequestAnalysisRepository } from "./analysis/in-memory-pull-request-analysis.repository";
 import { PullRequestAnalysisController } from "./analysis/pull-request-analysis.controller";
 import { PullRequestAnalysisService } from "./analysis/pull-request-analysis.service";
+import { InMemoryReviewArtifactsRepository } from "./artifacts/in-memory-review-artifacts.repository";
+import { ReviewArtifactsController } from "./artifacts/review-artifacts.controller";
+import { ReviewArtifactsService } from "./artifacts/review-artifacts.service";
 import { ChangedFilesService } from "./changes/changed-files.service";
 import { InMemoryChangedFilesRepository } from "./changes/in-memory-changed-files.repository";
 import { InMemoryReviewGraphRepository } from "./graph/in-memory-review-graph.repository";
@@ -19,6 +22,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     ReviewPublicController,
     ReviewRoomController,
     PullRequestAnalysisController,
+    ReviewArtifactsController,
     ReviewGraphController,
   ],
   providers: [
@@ -27,6 +31,8 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryCodeReviewRoomRepository,
     PullRequestAnalysisService,
     InMemoryPullRequestAnalysisRepository,
+    ReviewArtifactsService,
+    InMemoryReviewArtifactsRepository,
     ChangedFilesService,
     InMemoryChangedFilesRepository,
     ReviewGraphService,
