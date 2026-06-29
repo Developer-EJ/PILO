@@ -15,5 +15,10 @@
 | 파일 | 용도 |
 |---|---|
 | `workspace-dashboard.fixture.json` | Dashboard, Canvas, Review, Meeting, Agent action 화면의 공통 mock |
+| `review-room.fixture.json` | Review room 생성/조회 API와 PR fixture 연동 검증용 mock |
+| `review-analysis.fixture.json` | Review graph, node, risk summary 화면과 contract 검증용 mock |
+| `planning-detail.fixture.json` | Planning 상세 결과 화면과 승인 후 owner API 결과 표시용 mock |
 | `agent-job.fixture.json` | App Server가 AI Worker로 보내는 SQS job message mock |
 | `agent-result.fixture.json` | AI Worker가 App Server로 돌려주는 SQS result message mock |
+| `agent-run-detail.fixture.json` | Agent run detail/status inspection response mock |
+| `github-repositories.fixture.json` | Owner-side GitHub App repository sync fixture for `GithubRepositorySummary` rollout validation; not a consumer mock |
