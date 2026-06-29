@@ -2,7 +2,7 @@
 
 ## 1. 목표
 
-PILO 개발환경 AWS 인프라를 Terraform module 구조로 설계한다. 이 문서는 실제 Terraform 파일 작성 전 구현 순서와 모듈 경계를 정의한다.
+PILO 개발환경 AWS 인프라를 Terraform module 구조로 설계한다. 이 문서는 초기 구현 순서와 모듈 경계를 정의한 계획 문서이며, 실제 진행 상태는 `docs/infra/deploy-checklist.md`를 우선 확인한다.
 
 실제 Terraform 파일은 사용자 승인 후 생성한다. 2026-06-27 기준으로 dev용 Terraform module 뼈대는 생성되었고, 아직 `terraform init`, `terraform plan`, `terraform apply`는 실행하지 않았다.
 

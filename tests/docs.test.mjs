@@ -387,23 +387,38 @@ describe("independent agent briefs", () => {
 
   it("agent docs are linked from the bootstrap and collaboration docs", () => {
     assert.match(read("agent.md"), /docs\/agents\/README\.md/);
-    assert.match(read("docs/agent-collaboration-guide.md"), /docs\/agents\/README\.md/);
+    assert.match(read("docs/collaboration-v1.md"), /docs\/agents\/README\.md/);
     assert.match(read("docs/contracts/README.md"), /docs\/agents\/README\.md/);
   });
 
   it("collaboration guide does not point to deprecated domain paths or missing contract docs", () => {
-    const content = read("docs/agent-collaboration-guide.md");
+    const content = read("docs/collaboration-v1.md");
     assert.doesNotMatch(content, /docs\/contracts\/agent\.md/);
     assert.doesNotMatch(content, /apps\/frontend\/src\/domains/);
     assert.doesNotMatch(content, /apps\/app-server\/src\/domains/);
     assert.doesNotMatch(content, /apps\/ai-worker\/app\/domains/);
   });
 
-  it("division detail docs do not use legacy A/B/C/D/E owner aliases", () => {
-    for (const file of ["docs/PILO_5인_분업_상세_명세.md", "docs/PILO_5인_분업_상세_명세.html"]) {
+  it("current bootstrap docs do not point agents at archived legacy planning docs", () => {
+    const currentDocs = [
+      "agent.md",
+      ".coderabbit.yaml",
+      "docs/README.md",
+      "docs/collaboration-v1.md",
+      "docs/contracts/README.md",
+      "docs/agents/README.md",
+    ];
+
+    for (const file of currentDocs) {
       const content = read(file);
-      assert.doesNotMatch(content, /A에게|B에게|C에게|D에게|E에게|A가|B가|C가|D가|E가|A는|B는|C는|D는|E는/);
+      assert.doesNotMatch(content, /docs\/agent-collaboration-guide\.md/);
+      assert.doesNotMatch(content, /docs\/PILO_5인_분업_상세_명세\.md/);
     }
+  });
+
+  it("archive docs are explicitly historical and not implementation sources", () => {
+    assert.match(read("docs/README.md"), /docs\/archive\/\*\*/);
+    assert.match(read("docs/archive/README.md"), /구현 기준이 아니다/);
   });
 });
 
@@ -1092,6 +1107,10 @@ describe("local development baseline", () => {
     );
     assert.match(
       compose,
+      /docs\/db\/migrations\/202606300500_mvp_task_drafts_rebaseline\.sql/,
+    );
+    assert.match(
+      compose,
       /docs\/db\/seeds\/001_donghyun_auth_workspace_canvas_seed\.sql/,
     );
     assert.match(compose, /localstack\/init\/ready\.d/);
@@ -1103,6 +1122,7 @@ describe("local development baseline", () => {
       script,
       /202606281200_donghyun_auth_workspace_canvas_init\.sql/,
     );
+    assert.match(script, /202606300500_mvp_task_drafts_rebaseline\.sql/);
     assert.match(script, /001_donghyun_auth_workspace_canvas_seed\.sql/);
     assert.match(script, /psql -v ON_ERROR_STOP=1/);
   });
@@ -1130,11 +1150,23 @@ describe("db schema contract alignment", () => {
     const tables = [...sql.matchAll(/CREATE TABLE\s+([a-z_]+)/g)].map((m) => m[1]);
     const uniqueTables = new Set(tables);
     assert.equal(tables.length, uniqueTables.size, "table names must be unique");
-    assert.equal(tables.length, 69, "final hybrid schema should have 69 tables");
+    assert.equal(tables.length, 70, "MVP implementation baseline schema should have 70 tables");
 
     const refs = [...sql.matchAll(/REFERENCES\s+([a-z_]+)\(/g)].map((m) => m[1]);
     for (const ref of refs) {
       assert.ok(uniqueTables.has(ref), `referenced table must exist: ${ref}`);
+    }
+  });
+
+  it("Prisma mapped tables exist in the SQL baseline", () => {
+    const prisma = read("apps/app-server/prisma/schema.prisma");
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    const tables = new Set([...sql.matchAll(/CREATE TABLE\s+([a-z_]+)/g)].map((m) => m[1]));
+    const mappedTables = [...prisma.matchAll(/@@map\("([a-z_]+)"\)/g)].map((m) => m[1]);
+
+    assert.ok(mappedTables.length > 0, "Prisma schema must map DB-backed models to tables");
+    for (const table of mappedTables) {
+      assert.ok(tables.has(table), `Prisma mapped table must exist in SQL baseline: ${table}`);
     }
   });
 
@@ -1210,6 +1242,21 @@ describe("db schema contract alignment", () => {
       seed,
       /INSERT INTO (tasks|github_issues|pull_requests|meetings|meeting_reports|code_review_rooms|agent_runs)\b/,
     );
+  });
+
+  it("MVP task draft rebaseline migration aligns SQL with Prisma", () => {
+    const migrationPath =
+      "docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql";
+
+    assert.ok(exists(migrationPath), `${migrationPath} must exist`);
+
+    const migration = read(migrationPath);
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS task_drafts/);
+    assert.match(migration, /workspace_id UUID NOT NULL REFERENCES workspaces\(id\)/);
+    assert.match(migration, /task_id UUID REFERENCES tasks\(id\) ON DELETE SET NULL/);
+    assert.match(migration, /idx_task_drafts_workspace_status/);
+    assert.match(read("apps/app-server/prisma/schema.prisma"), /@@map\("task_drafts"\)/);
+    assert.match(read("docs/db/db-schema-by-owner.md"), /`task_drafts`/);
   });
 
   it("db owner document uses real owner names", () => {

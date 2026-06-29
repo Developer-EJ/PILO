@@ -4,10 +4,15 @@
 
 ## 1. 먼저 읽을 문서
 
+- `docs/README.md`: 문서 권위 순서와 archive 정책
+- `docs/mvp-scope-v1.md`: MVP 포함/제외 기능 범위
+- `docs/domain-boundary-v1.md`: 도메인 소유권, source of truth, cross-domain 규칙
+- `docs/api-contract-v1.md`: MVP 목표 API 계약
+- `docs/db/mvp-db-schema-v1.md`: MVP 목표 DB 구조
+- `docs/collaboration-v1.md`: 5인 + AI agent 협업 규칙
 - `docs/convention.md`: Issue, Branch, PR, Commit 규칙
 - `docs/llm-coding-guidelines.md`: LLM 코딩 행동 지침
 - `docs/design.md`: PILO 화면 디자인 토큰, 레이아웃, 컴포넌트 규칙
-- `docs/agent-collaboration-guide.md`: 도메인 소유권, 폴더 구조, 충돌 방지
 - `docs/agents/README.md`: 담당자별 독립 구현 지시서 입구
 - `docs/contracts/README.md`: 담당자별 contract 색인
 - `docs/contracts/contract-change-rules.md`: contract 변경, 리뷰, self-approve 규칙
@@ -16,7 +21,27 @@
 - `docs/contracts/schemas/pilo-public-contracts.schema.json`: public DTO와 Agent action payload schema
 - `docs/contracts/fixtures`: provider 미구현 시 사용하는 mock fixture
 - `docs/infra/ci.md`: CI, required checks, branch protection
-- `docs/PILO_5인_분업_상세_명세.md`: 5인 분업과 기능 책임
+
+`docs/archive/**` 문서는 역사적 참고 자료다. archive 문서를 기준으로 구현하지 않는다.
+
+## Agent Start Checklist
+
+모든 agent는 구현 전에 반드시 아래 순서를 완료한다.
+
+1. `dev` 최신 커밋에서 새 작업 브랜치를 만든다.
+2. `agent.md`와 `docs/README.md`를 읽는다.
+3. `docs/mvp-scope-v1.md`, `docs/domain-boundary-v1.md`, `docs/api-contract-v1.md`, `docs/db/mvp-db-schema-v1.md`, `docs/collaboration-v1.md`를 읽는다.
+4. `docs/agents/README.md`와 본인 도메인 brief를 읽는다.
+5. 본인 도메인이 제공하거나 소비하는 `docs/contracts/*` 문서를 읽는다.
+6. 수정 가능 파일, 금지 파일, mock/fixture 사용 여부를 작업 지시 첫머리에 명시한다.
+
+금지:
+
+- `docs/archive/**`를 구현 기준으로 사용하지 않는다.
+- 본인 도메인 밖 DB table, service, repository를 직접 수정하지 않는다.
+- 문서에 없는 API, DTO field, DB field를 임의로 만들지 않는다.
+- contract 변경과 구현 변경을 한 PR에 섞지 않는다.
+- DB 구조 변경은 `docs/db/mvp-db-schema-v1.md`와 Prisma/SQL/migration/test를 함께 맞춘다.
 
 ## 2. 핵심 원칙
 
@@ -35,7 +60,7 @@
 
 ## 3. 담당 도메인
 
-- 동현: Auth / Login / Signup / Workspace / Dashboard / Canvas
+- 동현: Auth / Login / OAuth Signup / Workspace / Dashboard / Canvas
 - 주형: Task / GitHub / Progress
 - 진호: Meeting / Voice / Report
 - 은재: Code Review Room / PR Analysis
@@ -59,6 +84,7 @@
 - AWS/Terraform 관련 파일
 - 계약 문서: `docs/contracts`
 - 담당자별 구현 지시서: `docs/agents`
+- 기준 문서: `docs/mvp-scope-v1.md`, `docs/domain-boundary-v1.md`, `docs/api-contract-v1.md`, `docs/db/mvp-db-schema-v1.md`
 - Contract fixture: `docs/contracts/fixtures`
 - GitHub PR/Issue 템플릿: `.github/PULL_REQUEST_TEMPLATE.md`, `.github/ISSUE_TEMPLATE`
 

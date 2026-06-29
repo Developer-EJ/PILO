@@ -5,13 +5,18 @@
 ## 읽는 순서
 
 1. `agent.md`
-2. `docs/agent-collaboration-guide.md`
-3. `docs/agents/README.md`
-4. `docs/contracts/interface-contract-guide.md`
-5. 본인이 구현할 도메인 contract
-6. 본인이 소비하는 외부 도메인 contract
-7. `docs/contracts/schemas/pilo-public-contracts.schema.json`
-8. `docs/contracts/fixtures`
+2. `docs/README.md`
+3. `docs/mvp-scope-v1.md`
+4. `docs/domain-boundary-v1.md`
+5. `docs/api-contract-v1.md`
+6. `docs/db/mvp-db-schema-v1.md`
+7. `docs/collaboration-v1.md`
+8. `docs/agents/README.md`
+9. `docs/contracts/interface-contract-guide.md`
+10. 본인이 구현할 도메인 contract
+11. 본인이 소비하는 외부 도메인 contract
+12. `docs/contracts/schemas/pilo-public-contracts.schema.json`
+13. `docs/contracts/fixtures`
 
 ## 담당자별 contract
 

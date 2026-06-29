@@ -1,5 +1,10 @@
 # PILO Final DB Schema By Feature Owner
 
+> MVP v1 기준 DB 설계는 `docs/db/mvp-db-schema-v1.md`를 우선한다.
+> 이 문서는 owner별 table 설명을 제공하는 참고 문서다.
+> 실제 MVP DB 기준선, table count, rebaseline 결정은 `docs/db/mvp-db-schema-v1.md`를 우선한다.
+> RAG/embedding처럼 MVP v1에서 제외된 영역은 구현 기준으로 사용하지 않는다.
+
 이 문서는 최종 하이브리드 스키마인 `docs/db/pilo_erd_schema.sql`을 기준으로 각 담당자가 계속 참고할 수 있게 기능별 테이블, 핵심 필드, 관계를 정리한 문서다.
 
 ## 최종 채택 기준
@@ -83,6 +88,7 @@ Task CRUD, 체크리스트, 댓글/활동 로그, 의존성, Milestone, GitHub R
 |---|---|---|
 | `milestones` | `workspace_id`, `title`, `start_date`, `end_date`, `status` | `workspaces 1:N milestones`, `tasks.milestone_id`가 참조 |
 | `tasks` | `workspace_id`, `milestone_id`, `title`, `description`, `assignee_member_id`, `status`, `priority`, `due_date`, `created_by_member_id`, `deleted_at` | Task 핵심. `workspace_members`로 담당자/작성자 연결 |
+| `task_drafts` | `workspace_id`, `source_type`, `source_id`, `title`, `description`, `assignee_member_id`, `priority`, `due_date`, `status`, `task_id` | Meeting/Agent가 제안한 Task 후보. 승인 시 `tasks`와 연결 |
 | `task_checklist_items` | `task_id`, `title`, `status`, `sort_order` | `tasks 1:N task_checklist_items` |
 | `task_comments` | `task_id`, `author_member_id`, `body` | `tasks 1:N task_comments` |
 | `task_activity_logs` | `task_id`, `actor_member_id`, `action`, `before_value`, `after_value` | Task 변경 이력 |
@@ -265,9 +271,9 @@ agent_runs
 |---|---:|
 | 동현 Auth/Workspace | 7 |
 | 동현 Canvas | 6 |
-| 주형 Task/GitHub/Progress | 14 |
+| 주형 Task/GitHub/Progress | 15 |
 | 진호 Meeting/Voice/Report | 13 |
 | 은재 Code Review/PR Analysis | 11 |
 | 세인 Agent/Planning | 15 |
 | DevOps/Common System | 3 |
-| 전체 | 69 |
+| 전체 | 70 |

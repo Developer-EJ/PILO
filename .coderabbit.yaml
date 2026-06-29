@@ -31,9 +31,14 @@ knowledge_base:
     enabled: true
     filePatterns:
       - "agent.md"
+      - "docs/README.md"
+      - "docs/mvp-scope-v1.md"
+      - "docs/domain-boundary-v1.md"
+      - "docs/api-contract-v1.md"
+      - "docs/db/mvp-db-schema-v1.md"
+      - "docs/collaboration-v1.md"
       - "docs/llm-coding-guidelines.md"
       - "docs/design.md"
-      - "docs/agent-collaboration-guide.md"
       - "docs/agents/README.md"
       - "docs/agents/*.md"
       - "docs/contracts/README.md"
@@ -43,4 +48,3 @@ knowledge_base:
       - "docs/contracts/fixtures/README.md"
       - "docs/contracts/fixtures/*.json"
       - "docs/convention.md"
-      - "docs/PILO_5인_분업_상세_명세.md"

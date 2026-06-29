@@ -5,11 +5,25 @@
 ## 시작 순서
 
 1. `agent.md`를 읽는다.
-2. `docs/agent-collaboration-guide.md`를 읽는다.
-3. 본인 담당 파일을 읽는다.
-4. 본인 domain contract와 소비하는 contract를 읽는다.
-5. `docs/contracts/schemas/pilo-public-contracts.schema.json`와 fixture를 확인한다.
-6. DB 변경이 있으면 `docs/db/pilo_erd_schema.sql`와 `docs/db/db-schema-by-owner.md`를 확인한다.
+2. `docs/README.md`를 읽는다.
+3. `docs/mvp-scope-v1.md`, `docs/domain-boundary-v1.md`, `docs/api-contract-v1.md`를 읽는다.
+4. DB 변경이 있으면 `docs/db/mvp-db-schema-v1.md`를 읽는다.
+5. `docs/collaboration-v1.md`를 읽는다.
+6. 본인 담당 파일을 읽는다.
+7. 본인 domain contract와 소비하는 contract를 읽는다.
+8. `docs/contracts/schemas/pilo-public-contracts.schema.json`와 fixture를 확인한다.
+
+`docs/archive/**` 문서는 구현 기준이 아니다.
+
+## Agent Start Checklist
+
+본인 agent에게 작업을 맡기기 전에 아래 조건을 먼저 맞춘다.
+
+1. 작업 브랜치는 최신 `dev`에서 만든다.
+2. 작업 지시 첫머리에 owner, domain, 수정 가능 파일, 금지 파일을 적는다.
+3. DB/API/DTO/Agent action 변경이 있으면 구현 전에 contract 변경 필요 여부를 판단한다.
+4. provider가 없으면 `docs/contracts/fixtures` 또는 domain mock으로 멈추고 follow-up issue를 남긴다.
+5. `docs/archive/**`는 근거로 쓰지 않는다.
 
 ## 담당자별 구현 지시서
 

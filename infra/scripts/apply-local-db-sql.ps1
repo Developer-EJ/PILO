@@ -1,6 +1,7 @@
 param(
   [string[]] $Path = @(
     "docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql",
+    "docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql",
     "docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql"
   ),
   [string] $ComposeFile = "docker-compose.dev.yml",
