@@ -19,7 +19,7 @@
 |---|---|---|
 | 동현 | `auth.md`, `workspace.md`, `canvas.md` | CurrentUser, WorkspaceMemberSummary, CanvasEntityRef |
 | 주형 | `task.md`, `github.md`, `progress.md` | TaskSummary, TaskDetail, TaskChecklistItemSummary, TaskCommentSummary, TaskActivityLogSummary, TaskDependencySummary, TaskDraft, MilestoneSummary, GithubConnectionSummary, GithubRepositorySummary, GithubIssueSummary, PullRequestSummary, PullRequestChangedFileSummary, ProgressSummary |
-| 진호 | `meeting.md`, `voice.md` | MeetingAgenda, MeetingReportSummary, MeetingDecisionSummary, MeetingReportRiskSummary, MeetingReportNextAgenda, MeetingReportCanvasEntityRef, MeetingActionItem, VoiceRoom, VoiceSession |
+| 진호 | `meeting.md`, `voice.md` | MeetingAgenda, MeetingReportSummary, MeetingDecisionSummary, MeetingReportRiskSummary, MeetingReportNextAgenda, MeetingReportCanvasEntityRef, MeetingActionItem, VoiceScaffoldResponse, VoiceRoom, VoiceSession |
 | 은재 | `review.md` | CodeReviewRoomSummary, PRAnalysisSummary, ReviewNodeSummary, ReviewRiskSummary |
 | 세인 | `agent-actions.md`, `planning.md` | AgentAction, ProjectPlanDraftSummary, ProjectPlanDraftDetail, ProjectPlanTechStackRecommendation, ProjectPlanFeatureDraft, ProjectPlanRoleDraft, ProjectPlanMilestoneDraft, ProjectPlanRiskNote, ProjectPlanFirstAgendaDraft, ProjectPlanApprovalState, PlanningOwnerApiResult |
 | DevOps/공통 Backend | `common-system.md` | NotificationCreateRequest, SharedFileRef |

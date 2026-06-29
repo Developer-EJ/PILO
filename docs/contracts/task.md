@@ -452,14 +452,19 @@ Required fields:
   "assigneeMemberId": "uuid",
   "priority": "high",
   "dueDate": "2026-07-03",
-  "status": "draft",
+  "status": "waiting_confirmation",
   "taskId": null,
   "createdAt": "2026-06-28T10:00:00Z",
   "updatedAt": "2026-06-28T10:00:00Z"
 }
 ```
 
-`TaskDraftSummary`는 주형 Task draft API 응답 DTO다. `status`는 `draft`, `approved`, `rejected` 중 하나다. `draft` 상태만 승인 또는 거절할 수 있다. 승인하면 주형의 `tasks` row가 생성되고 `taskId`가 채워진다. 거절하면 Task는 생성되지 않고 `taskId`는 `null`로 남는다.
+`TaskDraftSummary`는 현재 app-server HTTP API 응답이 아니라 Agent action/read model
+DTO다. 최신 dev에는 이 DTO를 직접 반환하는 Task draft HTTP endpoint가 없다.
+`status`는 `draft`, `waiting_confirmation`, `approved`, `rejected` 중 하나다.
+`draft` 또는 `waiting_confirmation` 상태만 승인 또는 거절할 수 있다. 승인하면
+주형 Task owner flow가 `tasks` row를 생성하고 `taskId`를 채운다. 거절하면 Task는
+생성되지 않고 `taskId`는 `null`로 남는다.
 
 ### TaskStatusUpdateAction
 

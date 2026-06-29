@@ -648,7 +648,7 @@
           ]
         },
         "status": {
-          "enum": ["draft", "approved", "rejected"]
+          "enum": ["draft", "waiting_confirmation", "approved", "rejected"]
         },
         "taskId": {
           "anyOf": [
@@ -2053,6 +2053,19 @@
         }
       }
     },
+    "VoiceScaffoldResponse": {
+      "type": "object",
+      "required": ["module", "repositoryMode"],
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "const": "voice"
+        },
+        "repositoryMode": {
+          "enum": ["mock"]
+        }
+      }
+    },
     "VoiceRoom": {
       "type": "object",
       "required": [
@@ -2073,14 +2086,7 @@
           "$ref": "#/$defs/uuid"
         },
         "meetingId": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/uuid"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/uuid"
         },
         "livekitRoomName": {
           "type": ["string", "null"]
@@ -2118,37 +2124,16 @@
           "$ref": "#/$defs/uuid"
         },
         "meetingId": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/uuid"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/uuid"
         },
         "memberId": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/uuid"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/uuid"
         },
         "recordingStatus": {
           "enum": ["not_recording", "recording", "processing", "completed", "failed"]
         },
         "startedAt": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/dateTime"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/dateTime"
         },
         "endedAt": {
           "anyOf": [
