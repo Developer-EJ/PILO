@@ -1251,6 +1251,42 @@ h1 {
   padding: 0 2px;
 }
 
+.pilo-smart-guides {
+  position: absolute;
+  inset: 0;
+  z-index: 32;
+  contain: layout paint;
+  pointer-events: none;
+}
+
+.pilo-smart-guide {
+  position: absolute;
+  display: block;
+  box-shadow: 0 0 12px rgba(56, 88, 246, 0.24);
+}
+
+.pilo-smart-guide.is-vertical {
+  background: repeating-linear-gradient(
+    to bottom,
+    #3858f6 0,
+    #3858f6 8px,
+    transparent 8px,
+    transparent 13px
+  );
+  transform: translateX(-0.5px);
+}
+
+.pilo-smart-guide.is-horizontal {
+  background: repeating-linear-gradient(
+    to right,
+    #3858f6 0,
+    #3858f6 8px,
+    transparent 8px,
+    transparent 13px
+  );
+  transform: translateY(-0.5px);
+}
+
 .pilo-frame-toolbar {
   position: absolute;
   z-index: 35;
@@ -1792,9 +1828,31 @@ h1 {
   white-space: nowrap;
 }
 
-.pilo-sticky-note-shape,
-.pilo-code-block-shape {
+.pilo-sticky-note-shape {
+  contain: layout paint;
   pointer-events: all;
+}
+
+.pilo-code-block-shape {
+  contain: layout paint;
+  pointer-events: none;
+}
+
+.pilo-code-block-shape.is-editing {
+  pointer-events: all;
+}
+
+.pilo-code-block-shape:not(.is-editing) .pilo-code-block {
+  pointer-events: none;
+}
+
+.pilo-code-block-shape:not(.is-editing) .pilo-code-block header {
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.pilo-code-block-shape:not(.is-editing) .pilo-code-block header:active {
+  cursor: grabbing;
 }
 
 .pilo-sticky-note {
@@ -1928,7 +1986,7 @@ h1 {
 .pilo-code-block textarea {
   width: 100%;
   height: 100%;
-  overflow: auto;
+  min-height: 0;
   margin: 0;
   border: 0;
   background:
@@ -1946,9 +2004,20 @@ h1 {
   white-space: pre;
 }
 
+.pilo-code-block pre {
+  overflow: hidden;
+}
+
+.pilo-code-block textarea {
+  overflow: auto;
+}
+
 .pilo-code-block code {
+  display: block;
   color: inherit;
   font: inherit;
+  transform: translateY(calc(var(--pilo-code-scroll-y, 0px) * -1));
+  will-change: transform;
 }
 
 .canvas-detail-panel {
