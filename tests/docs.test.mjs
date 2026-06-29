@@ -1018,6 +1018,14 @@ describe("contract fixtures", () => {
     }
   });
 
+  it("review changes fixture exists and parses as JSON", () => {
+    const fixture = JSON.parse(read("docs/contracts/fixtures/review-changes.fixture.json"));
+
+    assert.ok(fixture.analysisId);
+    assert.ok(Array.isArray(fixture.changedFiles));
+    assert.ok(Array.isArray(fixture.changedFiles[0].functions));
+  });
+
   it("planning detail fixture matches planning public schemas", () => {
     const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
     const fixture = readJson("docs/contracts/fixtures/planning-detail.fixture.json");
