@@ -51,7 +51,11 @@ describe("AgentRegistryRepository", () => {
       agentWorkflow: {
         create: async (args) => {
           calls.push(args);
-          return { id: "workflow-1", ...args.data, agent: { id: args.data.agentId } };
+          return {
+            id: "workflow-1",
+            ...args.data,
+            agent: { id: args.data.agentId },
+          };
         },
       },
     };
