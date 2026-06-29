@@ -17,6 +17,7 @@ import {
   useEditor,
   type Editor,
   type TLCreateShapePartial,
+  type TLShape,
   type TLShapeId,
 } from "tldraw";
 import { useValue } from "@tldraw/state-react";
@@ -106,6 +107,7 @@ export type PiloCanvasShapeState = {
   width?: number;
   height?: number;
 };
+export type PiloCanvasFreeformShape = TLCreateShapePartial<TLShape>;
 
 export type PiloCanvasSelection = {
   canvasShapeId: string;
@@ -184,6 +186,7 @@ type PiloTldrawCanvasProps = {
   dashboard: WorkspaceDashboard;
   hasStoredViewSetting: boolean;
   hydrationVersion: number;
+  freeformShapes: PiloCanvasFreeformShape[];
   shapeStateById: Record<string, PiloCanvasShapeState>;
   viewSetting: CanvasViewSetting;
   onReady: (actions: PiloCanvasActions | null) => void;
@@ -191,6 +194,7 @@ type PiloTldrawCanvasProps = {
   onShapesChange: (
     shapeStateById: Record<string, PiloCanvasShapeState>,
   ) => void;
+  onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onViewChange: (viewSetting: CanvasViewSetting) => void;
 };
 
@@ -428,6 +432,38 @@ function createCodeBlockShape(
   };
 }
 
+function isLocalPiloCardShape(shape: TLShape) {
+  return (
+    isPiloCardShape(shape) &&
+    typeof shape.props.canvasShapeId === "string" &&
+    shape.props.canvasShapeId.startsWith("local-")
+  );
+}
+
+function isPersistableFreeformShape(shape: TLShape) {
+  if (isPiloConnectionArrow(shape)) return false;
+  if (isPiloCardShape(shape)) return isLocalPiloCardShape(shape);
+
+  return true;
+}
+
+function toFreeformSnapshot(shape: TLShape): PiloCanvasFreeformShape {
+  return JSON.parse(JSON.stringify(shape)) as PiloCanvasFreeformShape;
+}
+
+function sortFreeformShapesForCreate(shapes: PiloCanvasFreeformShape[]) {
+  return [...shapes].sort((first, second) => {
+    const firstParent =
+      first.type === "frame" || first.type === "pilo-code-block";
+    const secondParent =
+      second.type === "frame" || second.type === "pilo-code-block";
+
+    if (firstParent === secondParent) return 0;
+
+    return firstParent ? -1 : 1;
+  });
+}
+
 function toCardSnapshot(shape: PiloCardShape) {
   return {
     canvasShapeId: shape.props.canvasShapeId,
@@ -513,11 +549,13 @@ function buildSelectedCardKey(selectedCard: PiloCanvasSelection) {
 function CanvasStateReporter({
   board,
   onSelectionChange,
+  onFreeformShapesChange,
   onShapesChange,
   onViewChange,
 }: {
   board: CanvasBoardDetail;
   onSelectionChange: (selection: PiloCanvasSelection) => void;
+  onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
   onShapesChange: (
     shapeStateById: Record<string, PiloCanvasShapeState>,
   ) => void;
@@ -525,8 +563,12 @@ function CanvasStateReporter({
 }) {
   const editor = useEditor();
   const cardSnapshotsRef = useRef<PiloCanvasCardSnapshot[]>([]);
+  const freeformShapesRef = useRef<PiloCanvasFreeformShape[]>([]);
   const selectedCardRef = useRef<PiloCanvasSelection>(null);
   const viewSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const freeformSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const shapeSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -554,9 +596,22 @@ function CanvasStateReporter({
   const camera = useValue("pilo-camera-state", () => editor.getCamera(), [
     editor,
   ]);
+  const freeformShapes = useValue(
+    "pilo-freeform-shapes",
+    () =>
+      editor
+        .getCurrentPageShapes()
+        .filter(isPersistableFreeformShape)
+        .map(toFreeformSnapshot),
+    [editor],
+  );
   const cardSnapshotsKey = useMemo(
     () => buildCardSnapshotsKey(cardSnapshots),
     [cardSnapshots],
+  );
+  const freeformShapesKey = useMemo(
+    () => JSON.stringify(freeformShapes),
+    [freeformShapes],
   );
   const selectedCardKey = useMemo(
     () => buildSelectedCardKey(selectedCard),
@@ -565,8 +620,9 @@ function CanvasStateReporter({
 
   useEffect(() => {
     cardSnapshotsRef.current = cardSnapshots;
+    freeformShapesRef.current = freeformShapes;
     selectedCardRef.current = selectedCard;
-  }, [cardSnapshots, selectedCard]);
+  }, [cardSnapshots, freeformShapes, selectedCard]);
 
   useEffect(() => {
     if (selectionSyncTimerRef.current) {
@@ -607,6 +663,23 @@ function CanvasStateReporter({
       }
     };
   }, [camera.x, camera.y, camera.z, onViewChange]);
+
+  useEffect(() => {
+    if (freeformSyncTimerRef.current) {
+      clearTimeout(freeformSyncTimerRef.current);
+    }
+
+    freeformSyncTimerRef.current = setTimeout(() => {
+      freeformSyncTimerRef.current = null;
+      onFreeformShapesChange(freeformShapesRef.current);
+    }, 220);
+
+    return () => {
+      if (freeformSyncTimerRef.current) {
+        clearTimeout(freeformSyncTimerRef.current);
+      }
+    };
+  }, [freeformShapesKey, onFreeformShapesChange]);
 
   useEffect(() => {
     if (shapeSyncTimerRef.current) {
@@ -683,11 +756,13 @@ function CanvasStateReporter({
 export function PiloTldrawCanvas({
   board,
   dashboard,
+  freeformShapes,
   hasStoredViewSetting,
   hydrationVersion,
   shapeStateById,
   viewSetting,
   onReady,
+  onFreeformShapesChange,
   onSelectionChange,
   onShapesChange,
   onViewChange,
@@ -703,6 +778,7 @@ export function PiloTldrawCanvas({
     [board.shapes, shapeStateById],
   );
   const boardShapesRef = useRef(boardShapes);
+  const freeformShapesRef = useRef(freeformShapes);
   const viewSettingRef = useRef(viewSetting);
   const seedKey = useMemo(
     () =>
@@ -714,12 +790,14 @@ export function PiloTldrawCanvas({
 
   useEffect(() => {
     boardShapesRef.current = boardShapes;
+    freeformShapesRef.current = freeformShapes;
     viewSettingRef.current = viewSetting;
-  }, [boardShapes, viewSetting]);
+  }, [boardShapes, freeformShapes, viewSetting]);
 
   useEffect(() => {
     const editor = editorRef.current;
     const nextBoardShapes = boardShapesRef.current;
+    const nextFreeformShapes = freeformShapesRef.current;
     const nextViewSetting = viewSettingRef.current;
 
     if (!editor) return;
@@ -735,6 +813,19 @@ export function PiloTldrawCanvas({
 
     if (nextBoardShapes.length) {
       editor.createShapes(nextBoardShapes);
+    }
+
+    const existingFreeformShapeIds = editor
+      .getCurrentPageShapes()
+      .filter(isPersistableFreeformShape)
+      .map((shape) => shape.id as TLShapeId);
+
+    if (existingFreeformShapeIds.length) {
+      editor.deleteShapes(existingFreeformShapeIds);
+    }
+
+    if (nextFreeformShapes.length) {
+      editor.createShapes(sortFreeformShapesForCreate(nextFreeformShapes));
     }
 
     if (hasStoredViewSetting) {
@@ -788,6 +879,10 @@ export function PiloTldrawCanvas({
 
     if (boardShapes.length) {
       editor.createShapes(boardShapes);
+    }
+
+    if (freeformShapes.length) {
+      editor.createShapes(sortFreeformShapesForCreate(freeformShapes));
     }
 
     if (hasStoredViewSetting) {
@@ -1090,6 +1185,7 @@ export function PiloTldrawCanvas({
       >
         <CanvasStateReporter
           board={board}
+          onFreeformShapesChange={onFreeformShapesChange}
           onSelectionChange={onSelectionChange}
           onShapesChange={onShapesChange}
           onViewChange={onViewChange}
