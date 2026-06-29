@@ -13,6 +13,7 @@ import { VoiceService } from "./voice.service";
 export class VoiceController {
   constructor(private readonly voiceService: VoiceService) {}
 
+  @Get("voice")
   getScaffoldStatus(): VoiceScaffoldResponseDto {
     return this.voiceService.getScaffoldStatus();
   }

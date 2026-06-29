@@ -6,6 +6,8 @@ import "reflect-metadata";
 const require = createRequire(import.meta.url);
 require("ts-node/register");
 
+const { RequestMethod } = require("@nestjs/common");
+const { METHOD_METADATA, PATH_METADATA } = require("@nestjs/common/constants");
 const { MeetingService } = require("../src/modules/meeting/meeting.service");
 const {
   MockCurrentMemberAdapter,
@@ -71,6 +73,14 @@ describe("voice module", () => {
     assert.deepEqual(
       controller.getScaffoldStatus(),
       service.getScaffoldStatus(),
+    );
+    assert.equal(
+      Reflect.getMetadata(PATH_METADATA, controller.getScaffoldStatus),
+      "voice",
+    );
+    assert.equal(
+      Reflect.getMetadata(METHOD_METADATA, controller.getScaffoldStatus),
+      RequestMethod.GET,
     );
   });
 
