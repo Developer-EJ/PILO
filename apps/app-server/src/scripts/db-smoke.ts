@@ -1,22 +1,10 @@
 import "reflect-metadata";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { config } from "dotenv";
 import { DatabaseService } from "../modules/database/database.service";
+import { loadDatabaseEnv } from "./database-env";
 
 class SmokeRollback extends Error {}
 
-for (const envPath of [
-  resolve(process.cwd(), ".env"),
-  resolve(process.cwd(), "..", "..", ".env"),
-]) {
-  if (existsSync(envPath)) {
-    config({ path: envPath });
-    break;
-  }
-}
-
-process.env.DATABASE_URL ??= "postgresql://pilo:pilo@localhost:5432/pilo";
+loadDatabaseEnv();
 
 async function verifyJuhyungReadWrite(database: DatabaseService) {
   try {

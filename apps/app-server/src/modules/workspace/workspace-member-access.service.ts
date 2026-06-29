@@ -19,16 +19,26 @@ export class WorkspaceMemberAccessService {
       throw new UnauthorizedException("Authentication is required");
     }
 
-    const member = await this.database.workspaceMember.findFirst({
-      where: actor.memberId
+    const { userId, memberId } = actor;
+    const where =
+      userId && memberId
         ? {
-            id: actor.memberId,
+            id: memberId,
             workspaceId,
+            userId,
           }
-        : {
-            workspaceId,
-            userId: actor.userId,
-          },
+        : memberId
+          ? {
+              id: memberId,
+              workspaceId,
+            }
+          : {
+              workspaceId,
+              userId,
+            };
+
+    const member = await this.database.workspaceMember.findFirst({
+      where,
     });
 
     if (!member) {
