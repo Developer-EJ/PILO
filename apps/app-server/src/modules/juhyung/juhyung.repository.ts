@@ -131,15 +131,6 @@ export class JuhyungRepository {
     });
   }
 
-  getTaskById(taskId: string) {
-    return this.database.task.findFirst({
-      where: {
-        id: taskId,
-        deletedAt: null,
-      },
-    });
-  }
-
   createTaskDependency(taskId: string, dependsOnTaskId: string) {
     const data = {
       taskId,
@@ -195,17 +186,6 @@ export class JuhyungRepository {
     });
   }
 
-  listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
-    return this.database.workspaceMember.findMany({
-      where: {
-        workspaceId,
-        id: {
-          in: memberIds,
-        },
-      },
-    });
-  }
-
   listMilestonesForWorkspace(workspaceId: string) {
     return this.database.milestone.findMany({
       where: {
@@ -241,6 +221,26 @@ export class JuhyungRepository {
         id: milestoneId,
       },
       data,
+    });
+  }
+
+  getTaskById(taskId: string) {
+    return this.database.task.findFirst({
+      where: {
+        id: taskId,
+        deletedAt: null,
+      },
+    });
+  }
+
+  listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
+    return this.database.workspaceMember.findMany({
+      where: {
+        workspaceId,
+        id: {
+          in: memberIds,
+        },
+      },
     });
   }
 
