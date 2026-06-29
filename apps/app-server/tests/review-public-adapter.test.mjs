@@ -6,6 +6,10 @@ const require = createRequire(import.meta.url);
 require("ts-node/register");
 
 const {
+  BadRequestException,
+  ParseUUIDPipe,
+} = require("@nestjs/common");
+const {
   toPRAnalysisSummary,
 } = require("../src/modules/review/public/pr-analysis-summary.adapter.ts");
 const {
@@ -88,5 +92,19 @@ describe("review public API boundary", () => {
     assert.equal(summary.analysisStatus, "succeeded");
     assert.equal(summary.riskLevel, "medium");
     assert.equal(summary.okCount, 3);
+  });
+
+  it("rejects malformed pull request ids at the controller boundary", async () => {
+    const pipe = new ParseUUIDPipe();
+
+    await assert.rejects(
+      async () =>
+        pipe.transform("not-a-uuid", {
+          type: "param",
+          metatype: String,
+          data: "pullRequestId",
+        }),
+      BadRequestException,
+    );
   });
 });

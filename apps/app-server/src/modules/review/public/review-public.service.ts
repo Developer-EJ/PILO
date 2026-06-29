@@ -26,7 +26,7 @@ const REVIEW_ANALYSIS_SUMMARY_FIXTURE = toPRAnalysisSummary(
 
 @Injectable()
 export class ReviewPublicService {
-  private readonly analysisSummaries = new Map<string, PRAnalysisSummarySource>(
+  private readonly analysisSummaries = new Map<string, PRAnalysisSummary>(
     [
       [
         REVIEW_ANALYSIS_SUMMARY_FIXTURE.pullRequestId,
@@ -36,14 +36,14 @@ export class ReviewPublicService {
   );
 
   getAnalysisSummary(pullRequestId: string): PRAnalysisSummary {
-    const source = this.analysisSummaries.get(pullRequestId);
+    const summary = this.analysisSummaries.get(pullRequestId);
 
-    if (!source) {
+    if (!summary) {
       throw new NotFoundException(
         `PR analysis summary was not found for pullRequestId=${pullRequestId}`,
       );
     }
 
-    return toPRAnalysisSummary(source);
+    return summary;
   }
 }
