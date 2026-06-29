@@ -28,6 +28,7 @@ const {
 const {
   MEETING_STATUS_VALUES,
 } = require("../src/modules/meeting/types/meeting.types");
+const workspaceDashboardFixture = require("../../../docs/contracts/fixtures/workspace-dashboard.fixture.json");
 
 function createMeetingService(
   repository,
@@ -401,12 +402,26 @@ describe("meeting module scaffold", () => {
       report.summary,
       "Report meeting 회의에서 2개 기록을 정리했다.",
     );
-    assert.equal(report.decisionCount, 0);
-    assert.equal(report.actionItemCount, 0);
-    assert.equal(report.riskCount, 0);
-    assert.deepEqual(report.decisions, []);
-    assert.deepEqual(report.risks, []);
-    assert.deepEqual(report.nextAgendas, []);
+    assert.equal(report.decisionCount, 1);
+    assert.equal(report.actionItemCount, 1);
+    assert.equal(report.riskCount, 1);
+    assert.deepEqual(report.decisions, [
+      {
+        id: report.decisions[0].id,
+        reportId: report.id,
+        content: "Memo source. 기준으로 후속 작업 범위를 확정했다.",
+        status: "decided",
+        linkedTaskId: null,
+        createdAt: report.decisions[0].createdAt,
+      },
+    ]);
+    assert.equal(report.risks[0].severity, "medium");
+    assert.equal(report.risks[0].sortOrder, 0);
+    assert.equal(
+      report.nextAgendas[0].title,
+      "Report meeting 후속 진행 상황 확인",
+    );
+    assert.equal(controller.listActionItems(report.id)[0].status, "draft");
     assert.deepEqual(controller.getReport(report.id), report);
     const recentReports = controller.listRecentReports("workspace-1");
 
@@ -417,9 +432,9 @@ describe("meeting module scaffold", () => {
         workspaceId: report.workspaceId,
         title: report.title,
         summary: report.summary,
-        decisionCount: 0,
-        actionItemCount: 0,
-        riskCount: 0,
+        decisionCount: 1,
+        actionItemCount: 1,
+        riskCount: 1,
         createdAt: report.createdAt,
       },
     ]);
@@ -427,6 +442,81 @@ describe("meeting module scaffold", () => {
     assert.equal("risks" in recentReports[0], false);
     assert.equal("nextAgendas" in recentReports[0], false);
     assert.equal(controller.getMeeting(meeting.id).status, "report_generated");
+  });
+
+  it("builds deterministic report workflow output with trace and no LLM call", () => {
+    const workflowClient = new MockMeetingReportWorkflowClient();
+
+    const output = workflowClient.generateReport({
+      meetingTitle: "Deterministic report",
+      memoBodies: ["Confirm the TaskCreateDraft adapter scope."],
+      transcriptBodies: [],
+    });
+
+    assert.equal(
+      output.summary,
+      "Deterministic report 회의에서 1개 기록을 정리했다.",
+    );
+    assert.equal(output.decisions[0].status, "decided");
+    assert.equal(output.risks[0].severity, "low");
+    assert.equal(
+      output.nextAgendas[0].title,
+      "Deterministic report 후속 진행 상황 확인",
+    );
+    assert.equal(output.actionItems[0].priority, "medium");
+    assert.equal(output.trace[1].metadata.usesLlm, false);
+    assert.equal(output.error, null);
+
+    const emptyOutput = workflowClient.generateReport({
+      meetingTitle: "Empty report",
+      memoBodies: [],
+      transcriptBodies: [],
+    });
+
+    assert.deepEqual(emptyOutput.decisions, []);
+    assert.deepEqual(emptyOutput.risks, []);
+    assert.deepEqual(emptyOutput.actionItems, []);
+  });
+
+  it("adapts recent meeting reports to Dashboard and Canvas fixture shapes", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Dashboard report meeting",
+    });
+    controller.createMemo(meeting.id, {
+      body: "Dashboard needs report summary counts.",
+    });
+
+    const report = controller.requestReportGeneration(meeting.id);
+    const [summary] = controller.listRecentReports("workspace-1");
+    const [canvasEntityRef] =
+      controller.listRecentReportCanvasEntityRefs("workspace-1");
+    const fixtureSummary = workspaceDashboardFixture.meetingReports[0];
+    const fixtureCanvasEntityRef =
+      workspaceDashboardFixture.canvasEntities.find(
+        (entity) => entity.entityType === "meeting_report",
+      );
+
+    assert.equal(summary.id, report.id);
+    assert.deepEqual(
+      Object.keys(summary).sort(),
+      Object.keys(fixtureSummary).sort(),
+    );
+    assert.equal("decisions" in summary, false);
+    assert.equal("risks" in summary, false);
+    assert.deepEqual(
+      Object.keys(canvasEntityRef).sort(),
+      Object.keys(fixtureCanvasEntityRef).sort(),
+    );
+    assert.deepEqual(canvasEntityRef, {
+      entityType: "meeting_report",
+      entityId: summary.id,
+      displayTitle: summary.title,
+      shapeType: "meeting_report",
+    });
   });
 
   it("creates and lists meeting report read models", () => {

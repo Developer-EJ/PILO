@@ -12,6 +12,7 @@ import {
 import {
   MEETING_REPORT_WORKFLOW_CLIENT,
   MeetingReportWorkflowClient,
+  MeetingReportWorkflowOutput,
 } from "./adapters/meeting-report-workflow.adapter";
 import {
   TASK_DRAFT_CLIENT,
@@ -36,6 +37,7 @@ import {
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportCanvasEntityRefDto,
   MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
   MeetingReportRiskResponseDto,
@@ -349,12 +351,18 @@ export class MeetingService {
         .listTranscriptSegmentsByMeeting(meeting.id)
         .map((segment) => segment.body),
     });
+
+    if (workflowOutput.error) {
+      throw new BadRequestException(workflowOutput.error.message);
+    }
+
     const report = this.meetingRepository.createReport({
       meetingId: meeting.id,
-      summary: workflowOutput.summary,
+      summary: this.requireNonEmptyString(workflowOutput.summary, "summary"),
       createdByMemberId: currentMember.id,
     });
 
+    this.persistWorkflowOutput(report, meeting, workflowOutput);
     this.meetingRepository.updateMeeting(meeting.id, {
       status: "report_generated",
       updatedAt: new Date().toISOString(),
@@ -414,6 +422,14 @@ export class MeetingService {
           new Date(right.createdAt).getTime() -
           new Date(left.createdAt).getTime(),
       );
+  }
+
+  listRecentReportCanvasEntityRefs(
+    workspaceId: string,
+  ): MeetingReportCanvasEntityRefDto[] {
+    return this.listRecentReports(workspaceId).map((report) =>
+      this.toCanvasEntityRef(report),
+    );
   }
 
   createDecision(
@@ -701,6 +717,64 @@ export class MeetingService {
     };
   }
 
+  private persistWorkflowOutput(
+    report: MeetingReportRecord,
+    meeting: MeetingRecord,
+    workflowOutput: MeetingReportWorkflowOutput,
+  ): void {
+    for (const decision of workflowOutput.decisions) {
+      this.meetingRepository.createDecision({
+        reportId: report.id,
+        content: this.requireNonEmptyString(decision.content, "content"),
+        status: this.parseDecisionStatus(decision.status),
+        linkedTaskId: this.optionalString(
+          decision.linkedTaskId,
+          "linkedTaskId",
+        ),
+      });
+    }
+
+    for (const [index, risk] of workflowOutput.risks.entries()) {
+      const sortOrder = this.workflowSortOrder(risk.sortOrder, index);
+
+      this.assertRiskSortOrderAvailable(report.id, sortOrder);
+      this.meetingRepository.createRisk({
+        reportId: report.id,
+        content: this.requireNonEmptyString(risk.content, "content"),
+        severity: this.parseRiskSeverity(risk.severity),
+        sortOrder,
+      });
+    }
+
+    for (const [index, nextAgenda] of workflowOutput.nextAgendas.entries()) {
+      const sortOrder = this.workflowSortOrder(nextAgenda.sortOrder, index);
+
+      this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
+      this.meetingRepository.createNextAgenda({
+        reportId: report.id,
+        title: this.requireNonEmptyString(nextAgenda.title, "title"),
+        sortOrder,
+      });
+    }
+
+    for (const actionItem of workflowOutput.actionItems) {
+      this.meetingRepository.createActionItem({
+        reportId: report.id,
+        title: this.requireNonEmptyString(actionItem.title, "title"),
+        description: this.optionalString(actionItem.description, "description"),
+        assigneeSuggestionMemberId: this.resolveOptionalWorkspaceMemberId(
+          meeting.workspaceId,
+          actionItem.assigneeSuggestionMemberId,
+          "assigneeSuggestionMemberId",
+        ),
+        dueDateSuggestion: this.optionalDate(
+          actionItem.dueDateSuggestion,
+          "dueDateSuggestion",
+        ),
+      });
+    }
+  }
+
   private toReportSummary(
     report: MeetingReportRecord,
     meeting: MeetingRecord,
@@ -717,6 +791,17 @@ export class MeetingService {
         .length,
       riskCount: this.meetingRepository.listRisksByReport(report.id).length,
       createdAt: report.createdAt,
+    };
+  }
+
+  private toCanvasEntityRef(
+    report: MeetingReportSummaryDto,
+  ): MeetingReportCanvasEntityRefDto {
+    return {
+      entityType: "meeting_report",
+      entityId: report.id,
+      displayTitle: report.title,
+      shapeType: "meeting_report",
     };
   }
 
@@ -930,6 +1015,14 @@ export class MeetingService {
     }
 
     return date;
+  }
+
+  private workflowSortOrder(value: unknown, index: number): number {
+    if (value === undefined || value === null) {
+      return index;
+    }
+
+    return this.requireNonNegativeInteger(value, "sortOrder");
   }
 
   private assertRiskSortOrderAvailable(

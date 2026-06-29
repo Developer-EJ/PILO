@@ -16,6 +16,7 @@ import {
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportCanvasEntityRefDto,
   MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
   MeetingReportRiskResponseDto,
@@ -178,6 +179,13 @@ export class MeetingController {
     @Param("workspaceId") workspaceId: string,
   ): MeetingReportSummaryDto[] {
     return this.meetingService.listRecentReports(workspaceId);
+  }
+
+  @Get("workspaces/:workspaceId/meeting-reports/canvas-entity-refs")
+  listRecentReportCanvasEntityRefs(
+    @Param("workspaceId") workspaceId: string,
+  ): MeetingReportCanvasEntityRefDto[] {
+    return this.meetingService.listRecentReportCanvasEntityRefs(workspaceId);
   }
 
   @Post("meeting-reports/:reportId/decisions")
