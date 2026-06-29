@@ -1770,6 +1770,53 @@ h1 {
   text-decoration: none;
 }
 
+.github-task-linkbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  border-bottom: 1px solid var(--pilo-line);
+  padding-bottom: 14px;
+}
+
+.github-task-linkbar label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.github-task-linkbar label span {
+  color: var(--pilo-muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.github-task-linkbar select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--pilo-line);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #222733;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  padding: 9px 10px;
+}
+
+.github-task-linkbar button {
+  min-height: 38px;
+  border: 1px solid rgba(109, 91, 214, 0.22);
+  border-radius: 10px;
+  background: #f2f0ff;
+  color: var(--pilo-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 9px 12px;
+}
+
 .github-data-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1796,12 +1843,15 @@ h1 {
 }
 
 .github-item-actions a,
-.github-item-actions a:visited {
+.github-item-actions a:visited,
+.github-item-actions button {
   min-width: 72px;
   border: 1px solid var(--pilo-line);
   border-radius: 10px;
   background: #ffffff;
   color: var(--pilo-primary);
+  cursor: pointer;
+  font: inherit;
   font-size: 12px;
   font-weight: 850;
   padding: 8px 10px;
@@ -1809,7 +1859,15 @@ h1 {
   text-decoration: none;
 }
 
+.github-task-linkbar button:disabled,
+.github-task-linkbar select:disabled,
+.github-item-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .github-item-actions a:hover,
+.github-item-actions button:hover:not(:disabled),
 .github-data-head a:hover {
   border-color: rgba(109, 91, 214, 0.32);
   box-shadow: var(--pilo-shadow-soft);
@@ -1842,6 +1900,10 @@ h1 {
 
   .github-item-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .github-task-linkbar {
+    grid-template-columns: 1fr;
   }
 }
 

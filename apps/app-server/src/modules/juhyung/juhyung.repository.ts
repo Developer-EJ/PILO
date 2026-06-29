@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DatabaseService } from "../database/database.service";
 import {
+  GithubIssueState,
   MilestoneStatus,
   TaskChecklistStatus,
   TaskPriority,
@@ -58,6 +59,15 @@ export interface UpdateTaskInput {
   assigneeMemberId?: string | null;
   dueDate?: Date | string | null;
   milestoneId?: string | null;
+}
+
+export interface CreateGithubIssueInput {
+  repositoryId: string;
+  number: number;
+  title: string;
+  state: GithubIssueState;
+  url: string;
+  syncedAt: Date | string | null;
 }
 
 export interface CreateMilestoneInput {
@@ -612,6 +622,73 @@ export class JuhyungRepository {
     });
   }
 
+  getGithubIssueById(issueId: string) {
+    return this.database.githubIssue.findUnique({
+      where: {
+        id: issueId,
+      },
+    });
+  }
+
+  getPullRequestById(pullRequestId: string) {
+    return this.database.pullRequest.findUnique({
+      where: {
+        id: pullRequestId,
+      },
+    });
+  }
+
+  async getNextGithubIssueNumber(repositoryId: string) {
+    const result = await this.database.githubIssue.aggregate({
+      where: {
+        repositoryId,
+      },
+      _max: {
+        number: true,
+      },
+    });
+
+    return (result._max.number ?? 0) + 1;
+  }
+
+  createGithubIssue(input: CreateGithubIssueInput) {
+    return this.database.githubIssue.create({
+      data: input,
+    });
+  }
+
+  linkTaskToGithubIssue(taskId: string, issueId: string) {
+    return this.database.taskGithubIssue.upsert({
+      where: {
+        taskId_issueId: {
+          taskId,
+          issueId,
+        },
+      },
+      update: {},
+      create: {
+        taskId,
+        issueId,
+      },
+    });
+  }
+
+  linkTaskToPullRequest(taskId: string, pullRequestId: string) {
+    return this.database.taskPullRequest.upsert({
+      where: {
+        taskId_pullRequestId: {
+          taskId,
+          pullRequestId,
+        },
+      },
+      update: {},
+      create: {
+        taskId,
+        pullRequestId,
+      },
+    });
+  }
+
   listGithubIssuesForRepository(repositoryId: string) {
     return this.database.githubIssue.findMany({
       where: {
@@ -651,6 +728,21 @@ export class JuhyungRepository {
     });
   }
 
+  listTaskGithubIssueLinksForTaskIds(taskIds: string[]) {
+    if (taskIds.length === 0) {
+      return [];
+    }
+
+    return this.database.taskGithubIssue.findMany({
+      where: {
+        taskId: {
+          in: taskIds,
+        },
+      },
+      orderBy: [{ createdAt: "asc" }],
+    });
+  }
+
   listPullRequestsForRepository(repositoryId: string) {
     return this.database.pullRequest.findMany({
       where: {
@@ -669,6 +761,21 @@ export class JuhyungRepository {
       where: {
         pullRequestId: {
           in: pullRequestIds,
+        },
+      },
+      orderBy: [{ createdAt: "asc" }],
+    });
+  }
+
+  listTaskPullRequestLinksForTaskIds(taskIds: string[]) {
+    if (taskIds.length === 0) {
+      return [];
+    }
+
+    return this.database.taskPullRequest.findMany({
+      where: {
+        taskId: {
+          in: taskIds,
         },
       },
       orderBy: [{ createdAt: "asc" }],

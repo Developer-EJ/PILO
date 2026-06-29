@@ -14,8 +14,10 @@ import { WorkspaceActor } from "../workspace/public/workspace-access-public.serv
 import {
   CreateTaskCommentBody,
   CreateChecklistItemBody,
+  CreateGithubIssueForTaskBody,
   CreateTaskDependencyBody,
   CreateTaskDraftBody,
+  LinkTaskBody,
   CreateMilestoneBody,
   CreateTaskBody,
   JuhyungTaskService,
@@ -194,6 +196,62 @@ export class JuhyungTasksController {
   ) {
     return this.taskService.deleteTask(
       taskId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("tasks/:taskId/github-issues")
+  createGithubIssueFromTask(
+    @Param("taskId") taskId: string,
+    @Body() body: CreateGithubIssueForTaskBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.createGithubIssueFromTask(
+      taskId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("github/issues/:issueId/link-task")
+  linkGithubIssueToTask(
+    @Param("issueId") issueId: string,
+    @Body() body: LinkTaskBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.linkGithubIssueToTask(
+      issueId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("tasks/:taskId/pull-requests/:pullRequestId")
+  linkPullRequestFromTask(
+    @Param("taskId") taskId: string,
+    @Param("pullRequestId") pullRequestId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.linkPullRequestFromTask(
+      taskId,
+      pullRequestId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("github/pull-requests/:pullRequestId/link-task")
+  linkPullRequestToTask(
+    @Param("pullRequestId") pullRequestId: string,
+    @Body() body: LinkTaskBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.linkPullRequestToTask(
+      pullRequestId,
+      body,
       toCurrentActor(userId, memberId),
     );
   }

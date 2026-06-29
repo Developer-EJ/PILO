@@ -27,6 +27,9 @@ const UUIDS = {
   cycleTask: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd",
   taskDraft: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
   source: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  repository: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  issue: "fafafafa-fafa-4afa-8afa-fafafafafafa",
+  pullRequest: "fbfbfbfb-fbfb-4bfb-8bfb-fbfbfbfbfbfb",
   member: "33333333-3333-4333-8333-333333333333",
   assignee: "44444444-4444-4444-8444-444444444444",
   milestone: "66666666-6666-4666-8666-666666666666",
@@ -125,6 +128,42 @@ const baseTaskActivityLog = {
     title: "Connect GitHub repository",
   },
   createdAt: new Date("2026-06-28T09:10:00.000Z"),
+};
+
+const baseGithubRepository = {
+  id: UUIDS.repository,
+  workspaceId: UUIDS.workspace,
+  owner: "example",
+  repoName: "pilo",
+  url: "https://github.com/example/pilo",
+  defaultBranch: "dev",
+  updatedAt: new Date("2026-06-28T09:00:00.000Z"),
+};
+
+const baseGithubIssue = {
+  id: UUIDS.issue,
+  repositoryId: UUIDS.repository,
+  number: 42,
+  title: "Connect repository",
+  state: "open",
+  url: "https://github.com/example/pilo/issues/42",
+  syncedAt: new Date("2026-06-28T09:00:00.000Z"),
+};
+
+const basePullRequest = {
+  id: UUIDS.pullRequest,
+  repositoryId: UUIDS.repository,
+  number: 17,
+  title: "feat: connect repository",
+  authorLogin: "juhyung",
+  state: "review_requested",
+  branch: "feature/github",
+  baseBranch: "dev",
+  url: "https://github.com/example/pilo/pull/17",
+  changedFilesCount: 4,
+  additions: 120,
+  deletions: 15,
+  syncedAt: new Date("2026-06-28T09:00:00.000Z"),
 };
 
 describe("JuhyungTaskService", () => {
@@ -1072,6 +1111,152 @@ describe("JuhyungTaskService", () => {
     ]);
   });
 
+  it("creates a GitHub issue from a task and links it after workspace checks", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["getTask", taskId]);
+          return baseTask;
+        },
+        getGithubRepositoryById: async (repositoryId) => {
+          calls.push(["getRepository", repositoryId]);
+          return baseGithubRepository;
+        },
+        getNextGithubIssueNumber: async (repositoryId) => {
+          calls.push(["nextIssueNumber", repositoryId]);
+          return 43;
+        },
+        createGithubIssue: async (input) => {
+          calls.push(["createIssue", input]);
+          return {
+            ...baseGithubIssue,
+            ...input,
+            id: UUIDS.issue,
+          };
+        },
+        linkTaskToGithubIssue: async (taskId, issueId) => {
+          calls.push(["linkIssue", taskId, issueId]);
+          return { taskId, issueId };
+        },
+      },
+    });
+
+    const result = await service.createGithubIssueFromTask(
+      UUIDS.task,
+      {
+        repositoryId: UUIDS.repository,
+        title: "Create issue from task",
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.equal(result.id, UUIDS.issue);
+    assert.equal(result.number, 43);
+    assert.equal(result.title, "Create issue from task");
+    assert.equal(result.linkedTaskId, UUIDS.task);
+    assert.deepEqual(calls, [
+      ["getTask", UUIDS.task],
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["getRepository", UUIDS.repository],
+      ["nextIssueNumber", UUIDS.repository],
+      [
+        "createIssue",
+        {
+          repositoryId: UUIDS.repository,
+          number: 43,
+          title: "Create issue from task",
+          state: "open",
+          url: "https://github.com/example/pilo/issues/43",
+          syncedAt: calls[4][1].syncedAt,
+        },
+      ],
+      ["linkIssue", UUIDS.task, UUIDS.issue],
+    ]);
+    assert.ok(calls[4][1].syncedAt instanceof Date);
+  });
+
+  it("links existing GitHub issues and pull requests to tasks in the same workspace", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        getTaskById: async (taskId) => {
+          calls.push(["getTask", taskId]);
+          return baseTask;
+        },
+        getGithubIssueById: async (issueId) => {
+          calls.push(["getIssue", issueId]);
+          return baseGithubIssue;
+        },
+        getPullRequestById: async (pullRequestId) => {
+          calls.push(["getPullRequest", pullRequestId]);
+          return basePullRequest;
+        },
+        getGithubRepositoryById: async (repositoryId) => {
+          calls.push(["getRepository", repositoryId]);
+          return baseGithubRepository;
+        },
+        linkTaskToGithubIssue: async (taskId, issueId) => {
+          calls.push(["linkIssue", taskId, issueId]);
+          return { taskId, issueId };
+        },
+        listGithubIssueLabelsForIssueIds: async (issueIds) => {
+          calls.push(["labels", issueIds]);
+          return [{ issueId: UUIDS.issue, name: "task" }];
+        },
+        linkTaskToPullRequest: async (taskId, pullRequestId) => {
+          calls.push(["linkPullRequest", taskId, pullRequestId]);
+          return { taskId, pullRequestId };
+        },
+        listTaskPullRequestLinksForPullRequestIds: async (pullRequestIds) => {
+          calls.push(["pullRequestLinks", pullRequestIds]);
+          return [{ taskId: UUIDS.task, pullRequestId: UUIDS.pullRequest }];
+        },
+      },
+    });
+
+    const issue = await service.linkGithubIssueToTask(
+      UUIDS.issue,
+      { taskId: UUIDS.task },
+      { userId: UUIDS.user },
+    );
+    const pullRequest = await service.linkPullRequestToTask(
+      UUIDS.pullRequest,
+      { taskId: UUIDS.task },
+      { userId: UUIDS.user },
+    );
+
+    assert.equal(issue.linkedTaskId, UUIDS.task);
+    assert.deepEqual(issue.labels, ["task"]);
+    assert.deepEqual(pullRequest.linkedTaskIds, [UUIDS.task]);
+    assert.deepEqual(calls, [
+      ["getTask", UUIDS.task],
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
+      ["getIssue", UUIDS.issue],
+      ["getRepository", UUIDS.repository],
+      ["linkIssue", UUIDS.task, UUIDS.issue],
+      ["labels", [UUIDS.issue]],
+      ["getTask", UUIDS.task],
+      ["access", UUIDS.workspace, { userId: UUIDS.user }],
+      ["getPullRequest", UUIDS.pullRequest],
+      ["getRepository", UUIDS.repository],
+      ["linkPullRequest", UUIDS.task, UUIDS.pullRequest],
+      ["pullRequestLinks", [UUIDS.pullRequest]],
+    ]);
+  });
+
   it("creates task dependencies after checking workspace membership and cycle safety", async () => {
     const calls = [];
     const service = createService({
@@ -1657,6 +1842,22 @@ describe("JuhyungTasksController", () => {
       deleteTask: async (taskId, actor) => {
         calls.push(["delete", taskId, actor]);
       },
+      createGithubIssueFromTask: async (taskId, body, actor) => {
+        calls.push(["createGithubIssue", taskId, body, actor]);
+        return { id: UUIDS.issue };
+      },
+      linkGithubIssueToTask: async (issueId, body, actor) => {
+        calls.push(["linkGithubIssue", issueId, body, actor]);
+        return { id: issueId };
+      },
+      linkPullRequestFromTask: async (taskId, pullRequestId, actor) => {
+        calls.push(["linkPullRequestFromTask", taskId, pullRequestId, actor]);
+        return { id: pullRequestId };
+      },
+      linkPullRequestToTask: async (pullRequestId, body, actor) => {
+        calls.push(["linkPullRequestToTask", pullRequestId, body, actor]);
+        return { id: pullRequestId };
+      },
       createTaskDependency: async (taskId, body, actor) => {
         calls.push(["createDependency", taskId, body, actor]);
         return { id: UUIDS.dependency };
@@ -1736,6 +1937,30 @@ describe("JuhyungTasksController", () => {
       UUIDS.member,
     );
     await controller.deleteTask(UUIDS.task, UUIDS.user, UUIDS.member);
+    await controller.createGithubIssueFromTask(
+      UUIDS.task,
+      { repositoryId: UUIDS.repository },
+      UUIDS.user,
+      undefined,
+    );
+    await controller.linkGithubIssueToTask(
+      UUIDS.issue,
+      { taskId: UUIDS.task },
+      undefined,
+      UUIDS.member,
+    );
+    await controller.linkPullRequestFromTask(
+      UUIDS.task,
+      UUIDS.pullRequest,
+      UUIDS.user,
+      undefined,
+    );
+    await controller.linkPullRequestToTask(
+      UUIDS.pullRequest,
+      { taskId: UUIDS.task },
+      UUIDS.user,
+      UUIDS.member,
+    );
     await controller.createTaskDependency(
       UUIDS.task,
       { dependsOnTaskId: UUIDS.dependsOnTask },
@@ -1814,6 +2039,30 @@ describe("JuhyungTasksController", () => {
       ],
       ["status", UUIDS.task, { status: "done" }, { memberId: UUIDS.member }],
       ["delete", UUIDS.task, { userId: UUIDS.user, memberId: UUIDS.member }],
+      [
+        "createGithubIssue",
+        UUIDS.task,
+        { repositoryId: UUIDS.repository },
+        { userId: UUIDS.user },
+      ],
+      [
+        "linkGithubIssue",
+        UUIDS.issue,
+        { taskId: UUIDS.task },
+        { memberId: UUIDS.member },
+      ],
+      [
+        "linkPullRequestFromTask",
+        UUIDS.task,
+        UUIDS.pullRequest,
+        { userId: UUIDS.user },
+      ],
+      [
+        "linkPullRequestToTask",
+        UUIDS.pullRequest,
+        { taskId: UUIDS.task },
+        { userId: UUIDS.user, memberId: UUIDS.member },
+      ],
       [
         "createDependency",
         UUIDS.task,

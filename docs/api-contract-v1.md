@@ -336,17 +336,15 @@ Rules:
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/github/connection` | yes | member | Connection status |
-| POST | `/api/workspaces/:workspaceId/github/connection` | yes | owner | Start/connect GitHub integration |
-| DELETE | `/api/workspaces/:workspaceId/github/connection` | yes | owner | Disconnect integration |
-| GET | `/api/workspaces/:workspaceId/github/repositories` | yes | owner | List accessible repos |
-| PUT | `/api/workspaces/:workspaceId/github/repository` | yes | owner | Select single repo |
-| POST | `/api/workspaces/:workspaceId/github/sync` | yes | member | Manual Issue/PR sync |
-| GET | `/api/workspaces/:workspaceId/github/issues` | yes | member | List Issues |
-| POST | `/api/tasks/:taskId/github-issue` | yes | member | Create Issue from Task |
+| GET | `/api/workspaces/:workspaceId/github/connections` | yes | member | Connection status |
+| POST | `/api/workspaces/:workspaceId/github/connections` | yes | owner | Start/connect GitHub integration |
+| DELETE | `/api/workspaces/:workspaceId/github/connections/:connectionId` | yes | owner | Disconnect integration |
+| GET | `/api/workspaces/:workspaceId/github/repositories` | yes | member | List connected repos |
+| GET | `/api/repositories/:repositoryId/issues` | yes | member | List Issues |
+| POST | `/api/tasks/:taskId/github-issues` | yes | member | Create Issue from Task |
 | POST | `/api/github/issues/:issueId/link-task` | yes | member | Link existing Issue to Task |
-| GET | `/api/workspaces/:workspaceId/github/pull-requests` | yes | member | List PRs |
-| GET | `/api/github/pull-requests/:pullRequestId` | yes | member | PR detail |
+| GET | `/api/repositories/:repositoryId/pull-requests` | yes | member | List PRs |
+| POST | `/api/tasks/:taskId/pull-requests/:pullRequestId` | yes | member | Link PR to Task from Task context |
 | POST | `/api/github/pull-requests/:pullRequestId/link-task` | yes | member | Link PR to Task |
 | POST | `/api/github/pull-requests/:pullRequestId/link-issue` | yes | member | Link PR to Issue |
 

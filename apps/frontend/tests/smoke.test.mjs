@@ -55,6 +55,7 @@ import {
 } from "../lib/task/taskClient.mjs";
 import {
   buildGithubApiUrl,
+  createGithubFixture,
   createGithubApiClient,
   createGithubClient,
   createMockGithubClient,
@@ -961,9 +962,26 @@ describe("frontend package", () => {
     assert.equal(resolveGithubClientMode("api"), "api");
     assert.equal(resolveGithubClientMode("fixture"), "mock");
 
+    const mockGithubClient = createMockGithubClient();
     const mockRepositories =
-      await createMockGithubClient().listRepositories(workspaceId);
+      await mockGithubClient.listRepositories(workspaceId);
     assert.equal(mockRepositories[0].workspaceId, workspaceId);
+    const mockIssue = await mockGithubClient.createIssueFromTask("task-1", {
+      repositoryId: mockRepositories[0].id,
+      title: "Create GitHub issue from Task",
+      workspaceId,
+    });
+    assert.equal(mockIssue.linkedTaskId, "task-1");
+    assert.equal(
+      (
+        await mockGithubClient.linkPullRequestToTask(
+          createGithubFixture(workspaceId).pullRequests[0].id,
+          "task-1",
+          { workspaceId },
+        )
+      ).linkedTaskIds.includes("task-1"),
+      true,
+    );
     assert.equal(
       (await createGithubClient({ mode: "mock" }).listRepositories(workspaceId))
         .length > 0,
@@ -980,6 +998,12 @@ describe("frontend package", () => {
     await apiClient.listRepositories(workspaceId);
     await apiClient.listIssues(repositoryId);
     await apiClient.listPullRequests(repositoryId);
+    await apiClient.createIssueFromTask("task-1", {
+      repositoryId,
+      title: "Create GitHub issue from Task",
+    });
+    await apiClient.linkIssueToTask("issue-1", "task-1");
+    await apiClient.linkPullRequestToTask("pull-request-1", "task-1");
 
     assert.deepEqual(
       requests.map((request) => request.url),
@@ -989,11 +1013,14 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories`,
         `https://api.pilo.dev/api/repositories/${repositoryId}/issues`,
         `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
+        "https://api.pilo.dev/api/tasks/task-1/github-issues",
+        "https://api.pilo.dev/api/github/issues/issue-1/link-task",
+        "https://api.pilo.dev/api/github/pull-requests/pull-request-1/link-task",
       ],
     );
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
-      ["GET", "POST", "GET", "GET", "GET"],
+      ["GET", "POST", "GET", "GET", "GET", "POST", "POST", "POST"],
     );
   });
 

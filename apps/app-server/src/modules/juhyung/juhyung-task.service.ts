@@ -57,8 +57,10 @@ import {
   TaskDependencySummary,
   TaskDraftRecord,
   TaskDraftSummary,
+  GithubIssueSummary,
   TaskPriority,
   MilestoneSummary,
+  PullRequestSummary,
   TaskStatus,
   TaskSummary,
   WorkspaceMemberRecord,
@@ -86,6 +88,15 @@ export type { CreateTaskCommentBody } from "./juhyung-comment-input";
 export type { CreateTaskDependencyBody } from "./juhyung-dependency-input";
 export type { CreateTaskDraftBody } from "./juhyung-task-draft-input";
 export type { ListTasksQuery } from "./juhyung-task-list-query";
+
+export interface CreateGithubIssueForTaskBody {
+  repositoryId?: unknown;
+  title?: unknown;
+}
+
+export interface LinkTaskBody {
+  taskId?: unknown;
+}
 
 @Injectable()
 export class JuhyungTaskService {
@@ -353,6 +364,78 @@ export class JuhyungTaskService {
     await this.repository.softDeleteTask(taskId);
   }
 
+  async createGithubIssueFromTask(
+    taskId: string,
+    body: CreateGithubIssueForTaskBody,
+    actor?: WorkspaceActor,
+  ): Promise<GithubIssueSummary> {
+    const repositoryId = parseRequiredString(body?.repositoryId, "repositoryId");
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    const repository = await this.requireGithubRepositoryInWorkspace(
+      repositoryId,
+      task.workspaceId,
+    );
+    const number = await this.repository.getNextGithubIssueNumber(repository.id);
+    const title = parseOptionalTitle(body?.title, task.title);
+    const issue = await this.repository.createGithubIssue({
+      repositoryId: repository.id,
+      number,
+      title,
+      state: "open",
+      url: buildGithubIssueUrl(repository.url, number),
+      syncedAt: new Date(),
+    });
+
+    await this.repository.linkTaskToGithubIssue(task.id, issue.id);
+
+    return this.publicAdapter.toGithubIssueSummary(issue, {
+      labels: [],
+      linkedTaskId: task.id,
+    });
+  }
+
+  async linkGithubIssueToTask(
+    issueId: string,
+    body: LinkTaskBody,
+    actor?: WorkspaceActor,
+  ): Promise<GithubIssueSummary> {
+    const taskId = parseRequiredString(body?.taskId, "taskId");
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    const issue = await this.requireGithubIssueInWorkspace(
+      issueId,
+      task.workspaceId,
+    );
+
+    await this.repository.linkTaskToGithubIssue(task.id, issue.id);
+
+    const labels = await this.repository.listGithubIssueLabelsForIssueIds([
+      issue.id,
+    ]);
+
+    return this.publicAdapter.toGithubIssueSummary(issue, {
+      labels: labels.map((label) => label.name),
+      linkedTaskId: task.id,
+    });
+  }
+
+  async linkPullRequestToTask(
+    pullRequestId: string,
+    body: LinkTaskBody,
+    actor?: WorkspaceActor,
+  ): Promise<PullRequestSummary> {
+    const taskId = parseRequiredString(body?.taskId, "taskId");
+
+    return this.linkPullRequestToTaskRecord(pullRequestId, taskId, actor);
+  }
+
+  async linkPullRequestFromTask(
+    taskId: string,
+    pullRequestId: string,
+    actor?: WorkspaceActor,
+  ): Promise<PullRequestSummary> {
+    return this.linkPullRequestToTaskRecord(pullRequestId, taskId, actor);
+  }
+
   async createTaskDependency(
     taskId: string,
     body: CreateTaskDependencyBody,
@@ -520,6 +603,79 @@ export class JuhyungTaskService {
     return { task, currentMember };
   }
 
+  private async requireGithubRepositoryInWorkspace(
+    repositoryId: string,
+    workspaceId: string,
+  ) {
+    const repository =
+      await this.repository.getGithubRepositoryById(repositoryId);
+
+    if (!repository || repository.workspaceId !== workspaceId) {
+      throw new NotFoundException("GitHub repository was not found");
+    }
+
+    return repository;
+  }
+
+  private async requireGithubIssueInWorkspace(
+    issueId: string,
+    workspaceId: string,
+  ) {
+    const issue = await this.repository.getGithubIssueById(issueId);
+
+    if (!issue) {
+      throw new NotFoundException("GitHub issue was not found");
+    }
+
+    await this.requireGithubRepositoryInWorkspace(
+      issue.repositoryId,
+      workspaceId,
+    );
+
+    return issue;
+  }
+
+  private async requirePullRequestInWorkspace(
+    pullRequestId: string,
+    workspaceId: string,
+  ) {
+    const pullRequest = await this.repository.getPullRequestById(pullRequestId);
+
+    if (!pullRequest) {
+      throw new NotFoundException("Pull request was not found");
+    }
+
+    await this.requireGithubRepositoryInWorkspace(
+      pullRequest.repositoryId,
+      workspaceId,
+    );
+
+    return pullRequest;
+  }
+
+  private async linkPullRequestToTaskRecord(
+    pullRequestId: string,
+    taskId: string,
+    actor?: WorkspaceActor,
+  ): Promise<PullRequestSummary> {
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    const pullRequest = await this.requirePullRequestInWorkspace(
+      pullRequestId,
+      task.workspaceId,
+    );
+
+    await this.repository.linkTaskToPullRequest(task.id, pullRequest.id);
+
+    const links =
+      await this.repository.listTaskPullRequestLinksForPullRequestIds([
+        pullRequest.id,
+      ]);
+
+    return this.publicAdapter.toPullRequestSummary(pullRequest, {
+      linkedTaskIds: links.map((link) => link.taskId),
+    });
+  }
+
   private async requireTaskDraftAccess(
     draftId: string,
     actor?: WorkspaceActor,
@@ -628,14 +784,67 @@ export class JuhyungTaskService {
         task.assigneeMemberId ? [task.assigneeMemberId] : [],
       ),
     );
+    const linkCountByTaskId = await this.loadTaskLinkCountMap(
+      tasks.map((task) => task.id),
+    );
 
     return tasks.map((task) =>
       this.publicAdapter.toTaskSummary(task, {
         assignee: task.assigneeMemberId
           ? (memberById.get(task.assigneeMemberId) ?? null)
           : null,
+        linkedIssueCount: linkCountByTaskId.get(task.id)?.issueCount ?? 0,
+        linkedPrCount: linkCountByTaskId.get(task.id)?.pullRequestCount ?? 0,
       }),
     );
+  }
+
+  private async loadTaskLinkCountMap(taskIds: string[]) {
+    const result = new Map<
+      string,
+      { issueCount: number; pullRequestCount: number }
+    >();
+
+    if (taskIds.length === 0) {
+      return result;
+    }
+
+    const repository = this.repository as JuhyungRepository & {
+      listTaskGithubIssueLinksForTaskIds?: (
+        taskIds: string[],
+      ) => Promise<Array<{ taskId: string }>>;
+      listTaskPullRequestLinksForTaskIds?: (
+        taskIds: string[],
+      ) => Promise<Array<{ taskId: string }>>;
+    };
+    const [issueLinks, pullRequestLinks] = await Promise.all([
+      repository.listTaskGithubIssueLinksForTaskIds?.(taskIds) ?? [],
+      repository.listTaskPullRequestLinksForTaskIds?.(taskIds) ?? [],
+    ]);
+
+    for (const taskId of taskIds) {
+      result.set(taskId, { issueCount: 0, pullRequestCount: 0 });
+    }
+
+    for (const link of issueLinks) {
+      const counts = result.get(link.taskId) ?? {
+        issueCount: 0,
+        pullRequestCount: 0,
+      };
+      counts.issueCount += 1;
+      result.set(link.taskId, counts);
+    }
+
+    for (const link of pullRequestLinks) {
+      const counts = result.get(link.taskId) ?? {
+        issueCount: 0,
+        pullRequestCount: 0,
+      };
+      counts.pullRequestCount += 1;
+      result.set(link.taskId, counts);
+    }
+
+    return result;
   }
 
   private async toTaskCommentSummaries(
@@ -729,4 +938,26 @@ function assertDraftIsOpen(draft: TaskDraftRecord): void {
   if (draft.status !== "draft") {
     throw new BadRequestException("Task draft is already closed");
   }
+}
+
+function parseRequiredString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new BadRequestException(`${fieldName} is required`);
+  }
+
+  return value.trim();
+}
+
+function parseOptionalTitle(value: unknown, fallback: string): string {
+  const title = typeof value === "string" && value.trim() ? value.trim() : fallback;
+
+  if (title.length > 300) {
+    throw new BadRequestException("GitHub issue title must be 300 characters or fewer");
+  }
+
+  return title;
+}
+
+function buildGithubIssueUrl(repositoryUrl: string, number: number): string {
+  return `${repositoryUrl.replace(/\/+$/, "")}/issues/${number}`;
 }

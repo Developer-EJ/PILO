@@ -7,6 +7,7 @@ import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
 import { createGithubClient } from "../../lib/github/githubClient.mjs";
+import { createTaskClient } from "../../lib/task/taskClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
   workspaceDashboardHref,
@@ -58,6 +59,13 @@ type GithubPullRequest = {
   syncedAt?: string | null;
 };
 
+type TaskSummary = {
+  id: string;
+  title: string;
+  status: string;
+  priority?: string;
+};
+
 function resolveWorkspaceId(pathname: string) {
   return extractWorkspaceIdFromPathname(pathname) ?? mockWorkspaces[0].id;
 }
@@ -93,11 +101,14 @@ export function WorkspaceGithub() {
     [workspaceId],
   );
   const githubClient = useMemo(() => createGithubClient(), []);
+  const taskClient = useMemo(() => createTaskClient(), []);
   const [connections, setConnections] = useState<GithubConnection[]>([]);
   const [repositories, setRepositories] = useState<GithubRepository[]>([]);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(
     null,
   );
+  const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [issues, setIssues] = useState<GithubIssue[]>([]);
   const [pullRequests, setPullRequests] = useState<GithubPullRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,6 +120,8 @@ export function WorkspaceGithub() {
     repositories.find((repository) => repository.id === selectedRepositoryId) ??
     repositories[0] ??
     null;
+  const selectedTask =
+    tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null;
 
   const loadRepositoryData = useCallback(
     async (repository: GithubRepository | null) => {
@@ -134,11 +147,13 @@ export function WorkspaceGithub() {
     setError(null);
 
     try {
-      const [nextConnections, nextRepositories] = await Promise.all([
+      const [nextConnections, nextRepositories, nextTasks] = await Promise.all([
         githubClient.listConnections(workspaceId),
         githubClient.listRepositories(workspaceId),
+        taskClient.listTasks(workspaceId),
       ]);
       const repositoryList = nextRepositories as GithubRepository[];
+      const taskList = nextTasks as TaskSummary[];
       const repository =
         repositoryList.find(
           (candidate) => candidate.id === selectedRepositoryId,
@@ -148,6 +163,12 @@ export function WorkspaceGithub() {
 
       setConnections(nextConnections as GithubConnection[]);
       setRepositories(repositoryList);
+      setTasks(taskList);
+      setSelectedTaskId((currentTaskId) =>
+        taskList.some((task) => task.id === currentTaskId)
+          ? currentTaskId
+          : taskList[0]?.id ?? null,
+      );
       setSelectedRepositoryId(repository?.id ?? null);
       await loadRepositoryData(repository);
     } catch (loadError) {
@@ -155,7 +176,13 @@ export function WorkspaceGithub() {
     } finally {
       setIsLoading(false);
     }
-  }, [githubClient, loadRepositoryData, selectedRepositoryId, workspaceId]);
+  }, [
+    githubClient,
+    loadRepositoryData,
+    selectedRepositoryId,
+    taskClient,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     void loadWorkspace();
@@ -197,6 +224,67 @@ export function WorkspaceGithub() {
       setError("Repository metadata could not be loaded.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function createIssueFromSelectedTask() {
+    if (isWorking || !selectedRepository || !selectedTask) return;
+
+    setIsWorking(true);
+    setError(null);
+
+    try {
+      await githubClient.createIssueFromTask(selectedTask.id, {
+        repositoryId: selectedRepository.id,
+        title: selectedTask.title,
+        workspaceId,
+      });
+      await loadRepositoryData(selectedRepository);
+      setNotice(`Issue created from "${selectedTask.title}".`);
+    } catch (actionError) {
+      setError("GitHub issue could not be created from the selected task.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function linkIssueToSelectedTask(issue: GithubIssue) {
+    if (isWorking || !selectedRepository || !selectedTask) return;
+
+    setIsWorking(true);
+    setError(null);
+
+    try {
+      await githubClient.linkIssueToTask(issue.id, selectedTask.id, {
+        workspaceId,
+      });
+      await loadRepositoryData(selectedRepository);
+      setNotice(`Issue #${issue.number} linked to "${selectedTask.title}".`);
+    } catch (actionError) {
+      setError("GitHub issue could not be linked to the selected task.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function linkPullRequestToSelectedTask(pullRequest: GithubPullRequest) {
+    if (isWorking || !selectedRepository || !selectedTask) return;
+
+    setIsWorking(true);
+    setError(null);
+
+    try {
+      await githubClient.linkPullRequestToTask(pullRequest.id, selectedTask.id, {
+        workspaceId,
+      });
+      await loadRepositoryData(selectedRepository);
+      setNotice(
+        `PR #${pullRequest.number} linked to "${selectedTask.title}".`,
+      );
+    } catch (actionError) {
+      setError("Pull request could not be linked to the selected task.");
+    } finally {
+      setIsWorking(false);
     }
   }
 
@@ -321,6 +409,34 @@ export function WorkspaceGithub() {
                 ) : null}
               </header>
 
+              <div className="github-task-linkbar">
+                <label>
+                  <span>Selected task</span>
+                  <select
+                    value={selectedTask?.id ?? ""}
+                    onChange={(event) => setSelectedTaskId(event.target.value)}
+                    disabled={isWorking || !tasks.length}
+                  >
+                    {tasks.length ? (
+                      tasks.map((task) => (
+                        <option key={task.id} value={task.id}>
+                          {task.title}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No tasks</option>
+                    )}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={isWorking || !selectedRepository || !selectedTask}
+                  onClick={() => void createIssueFromSelectedTask()}
+                >
+                  Create issue from task
+                </button>
+              </div>
+
               <div className="github-data-grid">
                 <section className="github-panel">
                   <header>
@@ -344,9 +460,17 @@ export function WorkspaceGithub() {
                             <a href={issue.url} rel="noreferrer" target="_blank">
                               GitHub
                             </a>
-                            <Link href={routes.tasks}>
-                              {issue.linkedTaskId ? "Task" : "Link task"}
-                            </Link>
+                            {issue.linkedTaskId ? (
+                              <Link href={routes.tasks}>Task</Link>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isWorking || !selectedTask}
+                                onClick={() => void linkIssueToSelectedTask(issue)}
+                              >
+                                Link task
+                              </button>
+                            )}
                           </div>
                         </article>
                       ))
@@ -385,6 +509,26 @@ export function WorkspaceGithub() {
                             >
                               GitHub
                             </a>
+                            <button
+                              type="button"
+                              disabled={
+                                isWorking ||
+                                !selectedTask ||
+                                Boolean(
+                                  pullRequest.linkedTaskIds?.includes(
+                                    selectedTask.id,
+                                  ),
+                                )
+                              }
+                              onClick={() =>
+                                void linkPullRequestToSelectedTask(pullRequest)
+                              }
+                            >
+                              {selectedTask &&
+                              pullRequest.linkedTaskIds?.includes(selectedTask.id)
+                                ? "Task linked"
+                                : "Link task"}
+                            </button>
                             <Link href={routes.reviews}>Review</Link>
                           </div>
                         </article>
