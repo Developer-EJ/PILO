@@ -41,8 +41,8 @@
 | Dashboard 요약 | 주형/진호/은재/세인 | 동현 Dashboard | `TaskSummary`, `MeetingReportSummary`, `PRAnalysisSummary`, `AgentRecommendation` | 동현은 원본 DB를 읽지 않고 각 owner의 summary API를 호출한다 |
 | Canvas 카드 | 동현 Canvas | 주형/진호/은재/세인 | `CanvasEntityRef`, `CanvasShapeRequest` | 외부 도메인은 표시할 entity id/read model만 제공하고 shape 생성은 동현이 한다 |
 | Meeting Action Item -> Task | 진호 Meeting / 주형 Task | 진호/주형/세인 | `MeetingActionItem`, `TaskCreateDraft` | 진호는 후보를 만들고, 주형 API 또는 세인 Agent action으로 Task를 생성한다 |
-| Task -> GitHub Issue | 주형 GitHub | 동현/세인 | `TaskGithubIssueLink` | Issue 생성/동기화는 주형만 수행한다 |
-| Task -> PR -> Review | 주형 GitHub / 은재 Review | 동현/주형/은재 | `PullRequestSummary`, `PRAnalysisSummary` | 주형은 PR 원본, 은재는 분석 결과를 소유한다 |
+| Task -> GitHub Issue | 주형 GitHub | 동현/세인 | `GithubIssueSummary`, `GithubIssueCreateAction` | Issue 생성/동기화 API는 deferred다. 구현 전에는 fixture만 사용한다 |
+| Task -> PR -> Review | 주형 GitHub / 은재 Review | 동현/주형/은재 | `PullRequestSummary`, `PullRequestChangedFileSummary`, `PRAnalysisSummary` | PR sync/changed file API는 deferred다. 은재는 fixture나 mock PR summary로 리뷰룸을 연다 |
 | PR 분석 Agent | 은재 Review / 세인 Agent | 은재/세인 | `review.analysis.generate` | 은재가 분석 workflow 요구사항을 정의하고 세인 runtime으로 실행한다 |
 | 회의록 Agent | 진호 Meeting / 세인 Agent | 진호/세인/주형 | `meeting.report.generate`, `task.create.draft` | 진호가 회의록 결과를 만들고 Task 전환은 주형 contract를 탄다 |
 | 프로젝트 계획 -> Task/Milestone | 세인 Planning / 주형 Task | 세인/주형/동현 | `ProjectPlanDraft`, `TaskCreateDraft`, `MilestoneDraft` | 세인은 초안만 소유하고 승인 후 주형 API로 실제 저장한다 |
@@ -95,9 +95,9 @@ Agent는 다른 도메인 DB를 직접 변경하지 않는다.
 
 | 상황 | 처리 |
 |---|---|
-| 동현이 Canvas에 Task 공간이 필요한데 주형 Task API가 없음 | `TaskSummary` mock fixture로 UI 구현, 실제 DB 저장 금지 |
-| 은재가 PR 리뷰 화면이 필요한데 주형 PR 동기화가 없음 | `PullRequestSummary` mock으로 리뷰 화면 구현 |
-| 진호가 Action Item을 Task로 바꾸고 싶은데 주형 API가 없음 | `TaskCreateDraft` contract만 작성하고 변환 버튼은 pending 상태 처리 |
+| 동현이 Canvas에 Task 공간이 필요한데 Task summary API 호출이 아직 연결되지 않음 | `TaskSummary` fixture로 UI 구현, 실제 DB 저장 금지 |
+| 은재가 PR 리뷰 화면이 필요한데 주형 PR 동기화가 없음 | `PullRequestSummary` and `PullRequestChangedFileSummary` mock으로 리뷰 화면 구현 |
+| 진호가 Action Item을 Task 후보로 바꾸고 싶은데 Task draft API가 없음 | Meeting `task-draft` adapter 또는 `TaskCreateDraft` payload까지만 만들고, 실제 Task 생성은 주형 Task API/후속 draft API로 처리 |
 | 세인이 Agent action을 만들었는데 target API가 없음 | `agent_actions.status = waiting_confirmation`까지만 구현 |
 | 공통 타입이 필요함 | owner contract 문서에 DTO를 먼저 정의하고 consumer는 그 타입만 사용 |
 
