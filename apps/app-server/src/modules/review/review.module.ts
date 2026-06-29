@@ -12,6 +12,7 @@ import { ReviewGraphController } from "./graph/review-graph.controller";
 import { ReviewGraphService } from "./graph/review-graph.service";
 import { ReviewPublicController } from "./public/review-public.controller";
 import { ReviewPublicService } from "./public/review-public.service";
+import { AgentChangedFilesResultService } from "./result/agent-changed-files-result.service";
 import { AgentGraphResultService } from "./result/agent-graph-result.service";
 import { AgentReviewArtifactsResultService } from "./result/agent-review-artifacts-result.service";
 import { AgentResultConsumerService } from "./result/agent-result-consumer.service";
@@ -42,6 +43,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     AgentGraphResultService,
     AgentReviewArtifactsResultService,
     AgentResultConsumerService,
+    AgentChangedFilesResultService,
   ],
 })
 export class ReviewModule {}
