@@ -1,15 +1,15 @@
-export const MEETING_STATUS_VALUES = [
+export const MEETING_STATUS_VALUES = Object.freeze([
   "scheduled",
   "in_progress",
   "ended",
   "report_generated",
-] as const;
+] as const);
 
-export const MEETING_AGENDA_STATUS_VALUES = [
+export const MEETING_AGENDA_STATUS_VALUES = Object.freeze([
   "open",
   "done",
   "skipped",
-] as const;
+] as const);
 
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 

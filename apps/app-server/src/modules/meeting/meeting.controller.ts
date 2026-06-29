@@ -17,6 +17,7 @@ import { MeetingService } from "./meeting.service";
 export class MeetingController {
   constructor(private readonly meetingService: MeetingService) {}
 
+  @Get("meetings")
   getScaffoldStatus(): MeetingScaffoldResponseDto {
     return this.meetingService.getScaffoldStatus();
   }

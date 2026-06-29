@@ -102,6 +102,64 @@
       "syncedAt": "2026-06-27T10:00:00.000Z"
     }
   ],
+  "pullRequestChangedFiles": [
+    {
+      "pullRequestId": "66666666-6666-4666-8666-666666666661",
+      "path": "apps/frontend/app/auth/callback/page.tsx",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 32,
+      "deletions": 4,
+      "changes": 36,
+      "patch": "@@ -8,6 +8,14 @@",
+      "sha": "abc123",
+      "blobUrl": "https://github.com/example/pilo/blob/abc123/apps/frontend/app/auth/callback/page.tsx",
+      "rawUrl": "https://github.com/example/pilo/raw/abc123/apps/frontend/app/auth/callback/page.tsx",
+      "sourceSyncedAt": "2026-06-27T10:00:00.000Z"
+    },
+    {
+      "pullRequestId": "66666666-6666-4666-8666-666666666661",
+      "path": "apps/frontend/app/auth/login/page.tsx",
+      "previousPath": null,
+      "status": "added",
+      "additions": 58,
+      "deletions": 0,
+      "changes": 58,
+      "patch": "@@ -0,0 +1,58 @@",
+      "sha": "def456",
+      "blobUrl": "https://github.com/example/pilo/blob/def456/apps/frontend/app/auth/login/page.tsx",
+      "rawUrl": "https://github.com/example/pilo/raw/def456/apps/frontend/app/auth/login/page.tsx",
+      "sourceSyncedAt": "2026-06-27T10:00:00.000Z"
+    },
+    {
+      "pullRequestId": "66666666-6666-4666-8666-666666666661",
+      "path": "apps/frontend/components/auth/oauth-button.tsx",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 46,
+      "deletions": 6,
+      "changes": 52,
+      "patch": "@@ -12,8 +12,18 @@",
+      "sha": "ghi789",
+      "blobUrl": "https://github.com/example/pilo/blob/ghi789/apps/frontend/components/auth/oauth-button.tsx",
+      "rawUrl": "https://github.com/example/pilo/raw/ghi789/apps/frontend/components/auth/oauth-button.tsx",
+      "sourceSyncedAt": "2026-06-27T10:00:00.000Z"
+    },
+    {
+      "pullRequestId": "66666666-6666-4666-8666-666666666661",
+      "path": "apps/app-server/src/modules/auth/oauth-callback.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 44,
+      "deletions": 2,
+      "changes": 46,
+      "patch": "@@ -18,7 +18,16 @@",
+      "sha": "jkl012",
+      "blobUrl": "https://github.com/example/pilo/blob/jkl012/apps/app-server/src/modules/auth/oauth-callback.ts",
+      "rawUrl": "https://github.com/example/pilo/raw/jkl012/apps/app-server/src/modules/auth/oauth-callback.ts",
+      "sourceSyncedAt": "2026-06-27T10:00:00.000Z"
+    }
+  ],
   "meetingReports": [
     {
       "id": "77777777-7777-4777-8777-777777777771",
