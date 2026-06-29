@@ -49,6 +49,16 @@ const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { AppModule } = require("../src/app.module");
 
+function assertRequiredFields(value, schema, label) {
+  for (const field of schema.required ?? []) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(value, field),
+      true,
+      `${label} is missing ${field}`,
+    );
+  }
+}
+
 describe("app-server package", () => {
   it("keeps the PILO app-server package name", () => {
     assert.equal(packageJson.name, "@pilo/app-server");
