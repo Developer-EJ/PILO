@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/planning.schema.json",
+  "title": "PILO Planning Contract Fragment",
+  "x-owner": "@Sein0104",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": [
+    "ProjectPlanDraftSummary",
+    "ProjectPlanDraftSummaryPage",
+    "PlanningApproveAction"
+  ]
+}

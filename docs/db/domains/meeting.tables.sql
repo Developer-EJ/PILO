@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Meeting.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: meetings, meeting_participants, meeting_agendas, meeting_memos, voice_rooms, voice_sessions, transcript_segments, meeting_reports, meeting_decisions, meeting_action_items.

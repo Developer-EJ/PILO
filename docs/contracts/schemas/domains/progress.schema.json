@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/progress.schema.json",
+  "title": "PILO Progress Contract Fragment",
+  "x-owner": "@rlawngud0428",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": ["ProgressSummary"]
+}

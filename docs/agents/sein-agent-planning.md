@@ -54,11 +54,11 @@
 
 - `POST /agent-runs` starts workflow run.
 - `GET /agent-runs/:runId` returns run detail.
-- `GET /workspaces/:workspaceId/agent-actions` lists pending actions.
-- `POST /agent-actions/:actionId/confirm` confirms action.
-- `POST /agent-actions/:actionId/reject` rejects action.
-- `POST /workspaces/:workspaceId/project-plan-drafts` creates planning draft.
-- `POST /project-plan-drafts/:draftId/approve` approves draft and calls owner APIs.
+- `GET /workspaces/:workspaceId/agent/actions` lists pending actions.
+- `POST /agent/actions/:actionId/confirm` confirms action.
+- `POST /agent/actions/:actionId/reject` rejects action.
+- `POST /workspaces/:workspaceId/planning/drafts` creates planning draft.
+- `POST /planning/drafts/:draftId/approve` approves draft and calls owner APIs.
 
 ## Provides To Others
 

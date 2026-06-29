@@ -8,6 +8,35 @@ permissions:
   contents: read
 
 jobs:
+  contract-guardrails:
+    name: contract-guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check central file edits
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-central-file-edits.mjs
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/app-server/package-lock.json
+
+      - name: Install contract validator dependencies
+        run: npm ci --prefix apps/app-server
+
+      - name: Contract docs guardrails
+        run: node --test tests/docs.test.mjs
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest

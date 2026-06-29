@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/common-system.schema.json",
+  "title": "PILO Common System Contract Fragment",
+  "x-owner": "@Sein0104",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": [
+    "ContractOwner",
+    "CrossDomainEntityType",
+    "ApiErrorCode",
+    "ValidationErrorDetail",
+    "ApiErrorResponse",
+    "PaginationSort",
+    "PaginationQuery",
+    "PageInfo",
+    "NotificationType",
+    "NotificationCreateRequest",
+    "SharedFileRef"
+  ]
+}

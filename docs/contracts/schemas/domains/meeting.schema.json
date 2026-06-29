@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/meeting.schema.json",
+  "title": "PILO Meeting Contract Fragment",
+  "x-owner": "@jinhokingofworld",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": ["MeetingReportSummary", "MeetingActionItem", "MeetingDecisionSummary", "MeetingReportGenerateAction"]
+}

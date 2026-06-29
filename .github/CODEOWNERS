@@ -1,2 +1,112 @@
-# 모든 PR에서 팀 전원이 리뷰어로 자동 요청되도록 전역 owner를 지정한다.
+# Domain owners
+/apps/app-server/src/modules/auth/ @ndh5178
+/apps/app-server/src/modules/workspace/ @ndh5178
+/apps/app-server/src/modules/canvas/ @ndh5178
+/apps/app-server/src/modules/task/ @rlawngud0428
+/apps/app-server/src/modules/github/ @rlawngud0428
+/apps/app-server/src/modules/progress/ @rlawngud0428
+/apps/app-server/src/modules/meeting/ @jinhokingofworld
+/apps/app-server/src/modules/report/ @jinhokingofworld
+/apps/app-server/src/modules/review/ @Developer-EJ
+/apps/app-server/src/modules/agent/ @Sein0104
+/apps/app-server/src/modules/planning/ @Sein0104
+
+/apps/frontend/components/workspace/ @ndh5178
+/apps/frontend/components/canvas/ @ndh5178
+/apps/frontend/components/task/ @rlawngud0428
+/apps/frontend/components/github/ @rlawngud0428
+/apps/frontend/components/meeting/ @jinhokingofworld
+/apps/frontend/components/review/ @Developer-EJ
+/apps/frontend/components/agent/ @Sein0104
+/apps/frontend/hooks/workspace/ @ndh5178
+/apps/frontend/hooks/canvas/ @ndh5178
+/apps/frontend/hooks/task/ @rlawngud0428
+/apps/frontend/hooks/github/ @rlawngud0428
+/apps/frontend/hooks/progress/ @rlawngud0428
+/apps/frontend/hooks/meeting/ @jinhokingofworld
+/apps/frontend/hooks/review/ @Developer-EJ
+/apps/frontend/hooks/agent/ @Sein0104
+/apps/frontend/hooks/planning/ @Sein0104
+
+/apps/realtime-server/src/canvas/ @ndh5178
+/apps/realtime-server/src/meeting/ @jinhokingofworld
+/apps/realtime-server/src/voice/ @jinhokingofworld
+
+/apps/ai-worker/app/runtime/ @Sein0104
+/apps/ai-worker/app/workflows/task/ @rlawngud0428
+/apps/ai-worker/app/workflows/github/ @rlawngud0428
+/apps/ai-worker/app/workflows/meeting/ @jinhokingofworld
+/apps/ai-worker/app/workflows/review/ @Developer-EJ
+/apps/ai-worker/app/workflows/planning/ @Sein0104
+
+/docs/contracts/auth.md @ndh5178
+/docs/contracts/workspace.md @ndh5178
+/docs/contracts/canvas.md @ndh5178
+/docs/contracts/task.md @rlawngud0428
+/docs/contracts/github.md @rlawngud0428
+/docs/contracts/progress.md @rlawngud0428
+/docs/contracts/meeting.md @jinhokingofworld
+/docs/contracts/review.md @Developer-EJ
+/docs/contracts/agent-actions.md @Sein0104
+/docs/contracts/planning.md @Sein0104
+/docs/contracts/common-system.md @Sein0104
+
+# Shared fixture owners.
+/docs/contracts/fixtures/workspace-dashboard.fixture.json @Developer-EJ
+/docs/contracts/fixtures/agent-job.fixture.json @Sein0104
+/docs/contracts/fixtures/agent-result.fixture.json @Sein0104
+
+# Domain-owned machine-readable contract fragments.
+/docs/contracts/openapi/domains/auth.paths.yaml @ndh5178
+/docs/contracts/schemas/domains/auth.schema.json @ndh5178
+/docs/contracts/openapi/domains/workspace.paths.yaml @ndh5178
+/docs/contracts/schemas/domains/workspace.schema.json @ndh5178
+/docs/contracts/openapi/domains/canvas.paths.yaml @ndh5178
+/docs/contracts/schemas/domains/canvas.schema.json @ndh5178
+/docs/contracts/openapi/domains/task.paths.yaml @rlawngud0428
+/docs/contracts/schemas/domains/task.schema.json @rlawngud0428
+/docs/contracts/openapi/domains/github.paths.yaml @rlawngud0428
+/docs/contracts/schemas/domains/github.schema.json @rlawngud0428
+/docs/contracts/openapi/domains/progress.paths.yaml @rlawngud0428
+/docs/contracts/schemas/domains/progress.schema.json @rlawngud0428
+/docs/contracts/openapi/domains/meeting.paths.yaml @jinhokingofworld
+/docs/contracts/schemas/domains/meeting.schema.json @jinhokingofworld
+/docs/contracts/openapi/domains/review.paths.yaml @Developer-EJ
+/docs/contracts/schemas/domains/review.schema.json @Developer-EJ
+/docs/contracts/openapi/domains/agent.paths.yaml @Sein0104
+/docs/contracts/schemas/domains/agent.schema.json @Sein0104
+/docs/contracts/openapi/domains/planning.paths.yaml @Sein0104
+/docs/contracts/schemas/domains/planning.schema.json @Sein0104
+/docs/contracts/openapi/domains/common-system.paths.yaml @Sein0104
+/docs/contracts/schemas/domains/common-system.schema.json @Sein0104
+
+# Domain-owned DB and Prisma shard anchors.
+/docs/db/domains/auth.tables.sql @ndh5178
+/apps/app-server/prisma/domains/auth.prisma @ndh5178
+/docs/db/domains/workspace.tables.sql @ndh5178
+/apps/app-server/prisma/domains/workspace.prisma @ndh5178
+/docs/db/domains/canvas.tables.sql @ndh5178
+/apps/app-server/prisma/domains/canvas.prisma @ndh5178
+/docs/db/domains/task.tables.sql @rlawngud0428
+/apps/app-server/prisma/domains/task.prisma @rlawngud0428
+/docs/db/domains/github.tables.sql @rlawngud0428
+/apps/app-server/prisma/domains/github.prisma @rlawngud0428
+/docs/db/domains/progress.tables.sql @rlawngud0428
+/apps/app-server/prisma/domains/progress.prisma @rlawngud0428
+/docs/db/domains/meeting.tables.sql @jinhokingofworld
+/apps/app-server/prisma/domains/meeting.prisma @jinhokingofworld
+/docs/db/domains/review.tables.sql @Developer-EJ
+/apps/app-server/prisma/domains/review.prisma @Developer-EJ
+/docs/db/domains/agent.tables.sql @Sein0104
+/apps/app-server/prisma/domains/agent.prisma @Sein0104
+/docs/db/domains/planning.tables.sql @Sein0104
+/apps/app-server/prisma/domains/planning.prisma @Sein0104
+/docs/db/domains/common-system.tables.sql @Sein0104
+/apps/app-server/prisma/domains/common-system.prisma @Sein0104
+
+# Shared contract bottlenecks require all owners.
+/docs/contracts/openapi/ @rlawngud0428 @jinhokingofworld @Developer-EJ @Sein0104 @ndh5178
+/docs/contracts/schemas/ @rlawngud0428 @jinhokingofworld @Developer-EJ @Sein0104 @ndh5178
+
+# Fallback for repository-wide changes.
 * @rlawngud0428 @jinhokingofworld @Developer-EJ @Sein0104 @ndh5178

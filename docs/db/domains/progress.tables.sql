@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Progress.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: progress_snapshots.

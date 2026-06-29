@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/review.schema.json",
+  "title": "PILO Review Contract Fragment",
+  "x-owner": "@Developer-EJ",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": [
+    "PRAnalysisSummary",
+    "ReviewNodeSummary",
+    "ReviewRiskType",
+    "ReviewRiskSummary",
+    "ReviewAnalysisGenerateAction"
+  ]
+}

@@ -1,8 +1,12 @@
 {
   "jobId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "runId": "99999999-9999-4999-8999-999999999901",
+  "workflowType": "meeting.report.generate",
   "status": "succeeded",
   "output": {
+    "decisionCount": 1,
+    "actionItemCount": 1,
+    "riskCount": 0,
     "summary": "로그인 구현 범위와 Task 후보를 정리했다."
   },
   "actions": [
@@ -27,7 +31,10 @@
     {
       "stepName": "summarize",
       "message": "회의 transcript를 요약했다.",
-      "metadata": {}
+      "metadata": {
+        "sourceOwner": "agent",
+        "elapsedMs": 1200
+      }
     }
   ],
   "error": null,

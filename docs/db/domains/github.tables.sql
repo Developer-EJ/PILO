@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for GitHub.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: github_connections, github_repositories, github_issues, github_issue_labels, task_github_issues, pull_requests, task_pull_requests.

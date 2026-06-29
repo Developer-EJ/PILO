@@ -1,0 +1,7 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@jinhokingofworld"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/meetings/reports/summary:
+    get:
+      operationId: listMeetingReportSummaries

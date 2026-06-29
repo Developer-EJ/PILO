@@ -1,0 +1,1 @@
+"""GitHub workflow contracts."""

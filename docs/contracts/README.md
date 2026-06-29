@@ -11,7 +11,9 @@
 5. 본인이 구현할 도메인 contract
 6. 본인이 소비하는 외부 도메인 contract
 7. `docs/contracts/schemas/pilo-public-contracts.schema.json`
-8. `docs/contracts/fixtures`
+8. `docs/contracts/openapi/pilo-public-api.yaml`
+9. `docs/contracts/integration-guardrails.md`
+10. `docs/contracts/fixtures`
 
 ## 담당자별 contract
 
@@ -36,7 +38,8 @@
 ## Public Contract 변경 절차
 
 1. `docs/contracts/*.md`와 `docs/contracts/schemas/*.json`을 먼저 수정한다.
-2. 영향을 받는 담당자를 reviewer로 지정한다.
-3. breaking change라면 deprecated 필드와 migration plan을 적는다.
-4. contract PR을 `dev`에 먼저 merge한다.
-5. 구현 브랜치는 최신 `dev`를 반영한 뒤 작업한다.
+2. HTTP API path나 request/response가 바뀌면 `docs/contracts/openapi/pilo-public-api.yaml`도 함께 수정한다.
+3. 영향을 받는 담당자를 reviewer로 지정한다.
+4. breaking change라면 deprecated 필드와 migration plan을 적는다.
+5. contract PR을 `dev`에 먼저 merge한다.
+6. 구현 브랜치는 최신 `dev`를 반영한 뒤 작업한다.

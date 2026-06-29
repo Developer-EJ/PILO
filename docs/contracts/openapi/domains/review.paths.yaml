@@ -1,0 +1,7 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@Developer-EJ"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/review/pr-analyses/summary:
+    get:
+      operationId: listPrAnalysisSummaries

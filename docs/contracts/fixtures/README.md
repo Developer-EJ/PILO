@@ -10,6 +10,13 @@
 - fixture에 없는 필드가 필요하면 먼저 contract를 수정한다.
 - secret, token, 실제 사용자 개인정보는 fixture에 넣지 않는다.
 
+## Shared Fixture Ownership
+
+- Shared fixture owner: @Developer-EJ.
+- Domain owners must not edit workspace-dashboard.fixture.json directly.
+- If a domain needs new mock data, add or update the domain-owned contract fragment first, then ask the shared fixture owner to serialize the shared dashboard fixture.
+- Agent SQS fixtures are owned by @Sein0104 because they mirror the agent runtime contract.
+
 ## 파일
 
 | 파일 | 용도 |

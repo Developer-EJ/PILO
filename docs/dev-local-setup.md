@@ -51,9 +51,27 @@ docker compose -f docker-compose.dev.yml up -d
 | Realtime Server | 4001 |
 | AI Worker | 8000 |
 
+## Fresh Agent Commands
+
+Run commands from the listed working directory.
+
+| Area | Working directory | Commands |
+|---|---|---|
+| Contract guardrails | repo root | `node --test tests/docs.test.mjs apps/app-server/tests/smoke.test.mjs` |
+| App Server | `apps/app-server` | `npm ci`; `npm run build`; `npm run lint`; `npm test`; `npm run start:dev` |
+| Frontend | `apps/frontend` | `npm ci`; `npm run build`; `npm run lint`; `npm test`; `npm run dev` |
+| Realtime Server | `apps/realtime-server` | `npm ci`; `npm run build`; `npm run lint`; `npm test`; `npm run start:dev` |
+| AI Worker | `apps/ai-worker` | `pip install -r requirements.txt -r requirements-dev.txt`; `$env:PYTHONPATH='.'; pytest`; `ruff check app tests`; `black --check app tests` |
+
+## Domain-Owned DB Shards
+
+- Owner-local DB shards live in `docs/db/domains/<domain>.tables.sql`.
+- Owner-local Prisma shards live in `apps/app-server/prisma/domains/<domain>.prisma`.
+- Feature PRs update owner-local shards first; the shared SQL, Prisma schema, and migrations are serialized in a contract PR.
+
 ## 4. DB 변경 규칙
 
-- DB 구조 변경은 `docs/db/pilo_erd_schema.sql`과 실제 migration을 함께 맞춘다.
+- DB 구조 변경은 `docs/db/pilo_erd_schema.sql`, `docs/db/db-schema-by-owner.md`, `apps/app-server/prisma/schema.prisma`, `apps/app-server/prisma/migrations`를 함께 맞춘다.
 - migration 이름은 `YYYYMMDDHHMM_owner-slug_domain_action` 형식을 쓴다.
 - owner slug는 `donghyun`, `juhyung`, `jinho`, `eunjae`, `sein`, `devops` 중 하나를 사용한다.
 - 다른 도메인 테이블 변경은 contract PR을 먼저 올린다.

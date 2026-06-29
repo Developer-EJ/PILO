@@ -4,7 +4,10 @@
     "email": "donghyun@example.com",
     "name": "동현",
     "avatarUrl": null,
-    "providers": ["google", "github"],
+    "providers": [
+      "google",
+      "github"
+    ],
     "lastLoginAt": "2026-06-27T09:00:00.000Z"
   },
   "workspace": {
@@ -79,7 +82,10 @@
       "title": "OAuth callback route",
       "state": "open",
       "url": "https://github.com/example/pilo/issues/12",
-      "labels": ["auth", "frontend"],
+      "labels": [
+        "auth",
+        "frontend"
+      ],
       "linkedTaskId": "44444444-4444-4444-8444-444444444441",
       "syncedAt": "2026-06-27T10:00:00.000Z"
     }
@@ -98,7 +104,9 @@
       "changedFilesCount": 4,
       "additions": 180,
       "deletions": 12,
-      "linkedTaskIds": ["44444444-4444-4444-8444-444444444441"],
+      "linkedTaskIds": [
+        "44444444-4444-4444-8444-444444444441"
+      ],
       "syncedAt": "2026-06-27T10:00:00.000Z"
     }
   ],
@@ -153,19 +161,25 @@
       "entityType": "task",
       "entityId": "44444444-4444-4444-8444-444444444441",
       "displayTitle": "Google/GitHub 로그인 구현",
-      "shapeType": "task"
+      "shapeType": "task",
+      "sourceOwner": "task",
+      "sourceTable": "tasks"
     },
     {
-      "entityType": "pull_request",
+      "entityType": "github_pull_request",
       "entityId": "66666666-6666-4666-8666-666666666661",
       "displayTitle": "Add OAuth callback shell",
-      "shapeType": "pull_request"
+      "shapeType": "github_pull_request",
+      "sourceOwner": "github",
+      "sourceTable": "pull_requests"
     },
     {
       "entityType": "meeting_report",
       "entityId": "77777777-7777-4777-8777-777777777771",
       "displayTitle": "MVP scope sync",
-      "shapeType": "meeting_report"
+      "shapeType": "meeting_report",
+      "sourceOwner": "meeting",
+      "sourceTable": "meeting_reports"
     }
   ]
 }

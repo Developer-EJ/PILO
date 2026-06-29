@@ -1,0 +1,436 @@
+openapi: 3.1.0
+info:
+  title: PILO Public API Contract
+  version: 0.1.0
+  description: Cross-domain HTTP API boundaries for PILO owners and consumers.
+servers:
+  - url: http://localhost:4000
+    description: Local app-server
+tags:
+  - name: Auth
+    description: 동현 Auth owned user/session API.
+  - name: Workspace
+    description: 동현 Workspace owned member and workspace read models.
+  - name: Canvas
+    description: 동현 Canvas owned board and shape placement API.
+  - name: Task
+    description: 주형 Task owned task read/write API.
+  - name: Github
+    description: 주형 GitHub owned repository, issue, and PR API.
+  - name: Progress
+    description: 주형 Progress owned progress summary API.
+  - name: Meeting
+    description: 진호 Meeting/Report owned meeting report API.
+  - name: Review
+    description: 은재 Review owned PR analysis API.
+  - name: Agent
+    description: 세인 Agent Runtime owned action API.
+  - name: Planning
+    description: 세인 Planning owned project plan draft API.
+  - name: CommonSystem
+    description: DevOps/Common owned notification and shared system API.
+paths:
+  /auth/me:
+    get:
+      tags: [Auth]
+      x-owner: donghyun-auth
+      operationId: getCurrentUser
+      summary: Return the authenticated user read model.
+      responses:
+        "200":
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/CurrentUser"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/permissions/resolve:
+    post:
+      tags: [Auth]
+      x-owner: donghyun-auth
+      operationId: resolveWorkspacePermission
+      summary: Resolve whether a workspace member may perform a public action.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/WorkspacePermissionResolveRequest"
+      responses:
+        "200":
+          description: Permission decision.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/WorkspacePermissionDecision"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces:
+    get:
+      tags: [Workspace]
+      x-owner: donghyun-workspace
+      operationId: listWorkspaceSummaries
+      summary: Return workspaces visible to the current member.
+      responses:
+        "200":
+          description: Workspace summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/WorkspaceSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/members:
+    get:
+      tags: [Workspace]
+      x-owner: donghyun-workspace
+      operationId: listWorkspaceMembers
+      summary: Return workspace member summaries for authorization and assignment UI.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Workspace members.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/WorkspaceMemberSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/canvas/boards:
+    get:
+      tags: [Canvas]
+      x-owner: donghyun-canvas
+      operationId: listCanvasBoards
+      summary: Return Canvas board references for a workspace.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Canvas entity refs displayed on boards.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/CanvasBoardSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/tasks/summary:
+    get:
+      tags: [Task]
+      x-owner: juhyung-task
+      operationId: listTaskSummaries
+      summary: Return task summaries for Dashboard, Canvas, Meeting, Review, and Agent consumers.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Task summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/TaskSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/tasks/drafts:
+    post:
+      tags: [Task]
+      x-owner: juhyung-task
+      operationId: createTaskDraft
+      summary: Create or validate a task draft from Meeting or Agent consumers.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/TaskCreateDraftRequest"
+      responses:
+        "201":
+          description: Created task summary.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/TaskSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/github/repositories:
+    get:
+      tags: [Github]
+      x-owner: juhyung-github
+      operationId: listGithubRepositories
+      summary: Return GitHub repository connection summaries for the workspace.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: GitHub repository summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/GithubRepositorySummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/github/issues:
+    get:
+      tags: [Github]
+      x-owner: juhyung-github
+      operationId: listGithubIssueSummaries
+      summary: Return GitHub issue summaries linked to the workspace.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/sort"
+      responses:
+        "200":
+          description: GitHub issue summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/GithubIssueSummaryPage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/github/pull-requests:
+    get:
+      tags: [Github]
+      x-owner: juhyung-github
+      operationId: listPullRequestSummaries
+      summary: Return PR summaries owned by the GitHub domain.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/sort"
+      responses:
+        "200":
+          description: Pull request summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PullRequestSummaryPage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/progress/summary:
+    get:
+      tags: [Progress]
+      x-owner: juhyung-progress
+      operationId: getProgressSummary
+      summary: Return workspace or milestone progress summary.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Progress summary.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ProgressSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/meetings/reports/summary:
+    get:
+      tags: [Meeting]
+      x-owner: jinho-meeting
+      operationId: listMeetingReportSummaries
+      summary: Return meeting report summaries for dashboard and canvas consumers.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Meeting report summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/MeetingReportSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/review/pr-analyses/summary:
+    get:
+      tags: [Review]
+      x-owner: eunjae-review
+      operationId: listPrAnalysisSummaries
+      summary: Return PR analysis summaries owned by the Review domain.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: PR analysis summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PRAnalysisSummary"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/agent/actions:
+    get:
+      tags: [Agent]
+      x-owner: sein-agent
+      operationId: listAgentActions
+      summary: Return pending and historical agent actions for the workspace.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/sort"
+      responses:
+        "200":
+          description: Agent actions.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/AgentActionPage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /workspaces/{workspaceId}/planning/drafts:
+    get:
+      tags: [Planning]
+      x-owner: sein-planning
+      operationId: listPlanningDrafts
+      summary: Return project planning drafts for the workspace.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/sort"
+      responses:
+        "200":
+          description: Planning draft summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ProjectPlanDraftSummaryPage"
+        default:
+          $ref: "#/components/responses/ApiError"
+  /notifications:
+    post:
+      tags: [CommonSystem]
+      x-owner: common-system
+      operationId: createNotification
+      summary: Request creation of a user notification from a domain owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/NotificationCreateRequest"
+      responses:
+        "202":
+          description: Notification creation accepted.
+        default:
+          $ref: "#/components/responses/ApiError"
+components:
+  schemas:
+    CanvasBoardSummary:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/CanvasBoardSummary"
+    CanvasBoardDetail:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/CanvasBoardDetail"
+    CanvasShapeRequest:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/CanvasShapeRequest"
+    CanvasConnectionRequest:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/CanvasConnectionRequest"
+    TaskCreateDraftRequest:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/TaskCreateDraftRequest"
+    GithubIssueSummary:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/GithubIssueSummary"
+    GithubIssueSummaryPage:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/GithubIssueSummaryPage"
+    PullRequestSummaryPage:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PullRequestSummaryPage"
+    MeetingActionItem:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/MeetingActionItem"
+    MeetingDecisionSummary:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/MeetingDecisionSummary"
+    ReviewNodeSummary:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ReviewNodeSummary"
+    ReviewRiskSummary:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ReviewRiskSummary"
+    AgentRecommendation:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/AgentRecommendation"
+    AgentActionPage:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/AgentActionPage"
+    ProjectPlanDraftSummaryPage:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ProjectPlanDraftSummaryPage"
+    SharedFileRef:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/SharedFileRef"
+    TaskStatusUpdateAction:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/TaskStatusUpdateAction"
+    TaskAssignAction:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/TaskAssignAction"
+    GithubIssueCreateAction:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/GithubIssueCreateAction"
+    MeetingReportGenerateAction:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/MeetingReportGenerateAction"
+    ReviewAnalysisGenerateAction:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ReviewAnalysisGenerateAction"
+    PlanningApproveAction:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PlanningApproveAction"
+    AgentJobMessage:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/AgentJobMessage"
+    AgentResultMessage:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/AgentResultMessage"
+    ApiErrorResponse:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ApiErrorResponse"
+    ValidationErrorDetail:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ValidationErrorDetail"
+    PaginationQuery:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PaginationQuery"
+    PageInfo:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PageInfo"
+    WorkspacePermissionResolveRequest:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/WorkspacePermissionResolveRequest"
+    WorkspacePermissionDecision:
+      $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/WorkspacePermissionDecision"
+  responses:
+    ApiError:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/ApiErrorResponse"
+  parameters:
+    workspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema:
+        $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/uuid"
+    cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type:
+          - string
+          - "null"
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    sort:
+      name: sort
+      in: query
+      required: false
+      schema:
+        $ref: "../schemas/pilo-public-contracts.schema.json#/$defs/PaginationSort"

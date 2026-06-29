@@ -8,8 +8,10 @@
 2. `docs/agent-collaboration-guide.md`를 읽는다.
 3. 본인 담당 파일을 읽는다.
 4. 본인 domain contract와 소비하는 contract를 읽는다.
-5. `docs/contracts/schemas/pilo-public-contracts.schema.json`와 fixture를 확인한다.
-6. DB 변경이 있으면 `docs/db/pilo_erd_schema.sql`와 `docs/db/db-schema-by-owner.md`를 확인한다.
+5. 본인 domain OpenAPI/Schema fragment를 먼저 확인한다.
+6. DB 변경이 있으면 본인 domain DB/Prisma shard를 먼저 확인한다.
+7. 중앙 bundle/schema/fixture/DB 파일은 읽기 전용으로 확인한다.
+8. 중앙 파일 변경이 필요하면 Feature PR이 아니라 Contract Integration PR로 분리한다.
 
 ## 담당자별 구현 지시서
 

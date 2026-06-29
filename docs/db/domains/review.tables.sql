@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Review.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: code_review_rooms, pull_request_analyses, review_graphs, changed_files, changed_functions, review_nodes, node_review_states, review_comments, review_questions, review_risks, review_checklist_items.

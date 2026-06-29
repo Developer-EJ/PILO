@@ -48,7 +48,7 @@
 - `POST /pull-requests/:pullRequestId/review-room` creates or returns room.
 - `GET /review-rooms/:roomId` returns room detail.
 - `POST /review-rooms/:roomId/analysis` requests analysis workflow.
-- `GET /pull-requests/:pullRequestId/analysis-summary` returns `PRAnalysisSummary`.
+- `GET /workspaces/:workspaceId/review/pr-analyses/summary` returns `PRAnalysisSummary`.
 - `PATCH /review-nodes/:nodeId/state` updates reviewer state.
 - `POST /review-rooms/:roomId/comments` creates review comment.
 

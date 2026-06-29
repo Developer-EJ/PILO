@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Planning.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: project_plan_drafts, team_profiles, plan_tech_stack_recommendations, plan_feature_drafts, role_assignments, plan_role_assignment_drafts, plan_milestone_drafts, plan_risk_notes.

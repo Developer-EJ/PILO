@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Common System.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: notifications, shared_files, audit_logs.

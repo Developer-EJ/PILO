@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "apps/ai-worker/**"
+      - "docs/contracts/schemas/pilo-public-contracts.schema.json"
   workflow_dispatch:
 
 permissions:
@@ -40,7 +41,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: ${{ env.APP_PATH }}
+          context: .
+          file: apps/ai-worker/Dockerfile
           push: true
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest

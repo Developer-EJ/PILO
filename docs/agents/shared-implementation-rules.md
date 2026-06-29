@@ -11,10 +11,58 @@
 
 ## API Ownership
 
+- Only OpenAPI paths are current cross-domain public APIs. Domain docs and agent briefs may mention owner-internal roadmap APIs, but another owner must not consume them until a contract PR adds OpenAPI, JSON Schema, TS mirror, Python mirror, controller stub, and guardrail coverage.
+
 - write API는 원본 데이터를 소유한 owner만 만든다.
 - consumer는 다른 owner의 write API를 직접 우회하지 않는다.
 - 읽기 전용 화면은 read model 또는 summary API를 사용한다.
 - cross-domain bulk 조회가 필요하면 consumer가 직접 join하지 말고 provider에게 summary endpoint를 요청한다.
+
+## Allowed Fill Points
+
+Feature PRs may fill these owner-local files without touching central bundles:
+
+- `apps/app-server/src/modules/<domain>/<domain>.service.ts`
+- `apps/app-server/src/modules/<domain>/<domain>.repository.ts`
+- `apps/app-server/src/modules/<domain>/dto/*.ts`
+- `apps/frontend/components/<domain>/**`
+- `apps/frontend/hooks/<domain>/**`
+- `apps/ai-worker/app/workflows/<domain>/**`
+- Domain-local tests and fixtures owned by the same domain
+
+Changes to shared bundle files require a contract PR first. This includes `docs/contracts/openapi/pilo-public-api.yaml`, `docs/contracts/schemas/pilo-public-contracts.schema.json`, `apps/app-server/src/common/contracts/public-contracts.ts`, `apps/frontend/lib/types/public-contracts.ts`, and `apps/ai-worker/app/common/schemas/public_contracts.py`.
+
+## Central Files Are Read-Only in Feature PRs
+
+Feature PRs must not directly edit central files. If a feature needs a central contract, DB, fixture, or runtime change, stop and open a contract integration PR first.
+
+PR type rule:
+
+- Feature PRs that do not touch central files may proceed normally.
+- If a change touches central files, split the central-file work into a Contract Integration PR or reclassify the PR as a Contract Integration PR.
+- Contract Integration PRs are allowed to edit central files only when they list the reviewed owner-local fragments or shards they are serializing.
+- Do not merge central-file changes as a normal feature PR.
+
+Central files are:
+
+- `docs/contracts/openapi/pilo-public-api.yaml`
+- `docs/contracts/schemas/pilo-public-contracts.schema.json`
+- `apps/app-server/src/common/contracts/public-contracts.ts`
+- `apps/frontend/lib/types/public-contracts.ts`
+- `apps/ai-worker/app/common/schemas/public_contracts.py`
+- `docs/db/pilo_erd_schema.sql`
+- `apps/app-server/prisma/schema.prisma`
+- `apps/app-server/prisma/migrations/**`
+- `docs/contracts/fixtures/workspace-dashboard.fixture.json`
+- `apps/frontend/app/page.tsx`
+
+Use the owner-local replacement first:
+
+- OpenAPI: `docs/contracts/openapi/domains/<domain>.paths.yaml`
+- JSON Schema ownership: `docs/contracts/schemas/domains/<domain>.schema.json`
+- DB SQL shard: `docs/db/domains/<domain>.tables.sql`
+- Prisma shard: `apps/app-server/prisma/domains/<domain>.prisma`
+- UI implementation: `apps/frontend/components/<domain>/**` and `apps/frontend/hooks/<domain>/**`
 
 ## Mock and Fixture
 
@@ -26,6 +74,7 @@
 ## DB and Migration
 
 - 최종 논리 스키마는 `docs/db/pilo_erd_schema.sql`이다.
+- 물리 migration anchor는 `apps/app-server/prisma/schema.prisma`와 `apps/app-server/prisma/migrations`이다.
 - 실제 migration 이름은 `YYYYMMDDHHMM_owner-slug_domain_action` 형식을 따른다.
 - 다른 owner의 table에는 migration을 추가하지 않는다.
 - 다형 참조(`entity_type`, `entity_id`)는 DB FK 대신 service 검증과 contract test로 보호한다.
@@ -38,12 +87,19 @@
 
 ## Backend
 
+- Public HTTP payload validation must use `ContractBodySchema`, `ContractQuerySchema`, and `ContractResponseSchema`; do not create domain-local public validators.
+- Workspace writes and AI executions must call `AuthPublicContract.resolveWorkspacePermission` or `POST /workspaces/:workspaceId/permissions/resolve`.
+- Do not put `actorMemberId` in public request bodies. Controllers must derive it from the authenticated current member context.
+- Growing public list APIs must return the named page contract (`*Page`) with `items` and `pageInfo`; do not return raw arrays unless the endpoint is an explicit dashboard summary.
+
 - NestJS module은 controller, service, repository, dto, public adapter를 분리한다.
 - public adapter에는 다른 domain이 소비할 read model 변환만 둔다.
 - domain 내부 entity와 public DTO를 같은 타입으로 쓰지 않는다.
 - 외부 provider key, OAuth token, GitHub token은 env 또는 Secrets Manager 기준으로만 다룬다.
 
 ## AI Worker and Agent
+
+- Queue payload validation must use `app/runtime/contract_validation.py`; do not parse SQS public payloads with workflow-local ad hoc checks.
 
 - Agent는 직접 DB를 쓰지 않고 action을 만든다.
 - action 실행은 owner API 또는 app-server command handler가 담당한다.

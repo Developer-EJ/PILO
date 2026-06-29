@@ -52,7 +52,7 @@
 - `POST /meetings/:meetingId/memos` appends memo.
 - `POST /meetings/:meetingId/transcript-segments` appends transcript.
 - `POST /meetings/:meetingId/report-generation` requests report workflow.
-- `GET /workspaces/:workspaceId/meeting-reports/recent` returns `MeetingReportSummary[]`.
+- `GET /workspaces/:workspaceId/meetings/reports/summary` returns `MeetingReportSummary[]`.
 - `POST /meeting-action-items/:actionItemId/task-draft` calls 주형 contract or creates pending request.
 
 ## Provides To Others

@@ -1,0 +1,8 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@Sein0104"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/agent/actions:
+    get:
+      operationId: listAgentActions
+      x-pagination: PaginationQuery

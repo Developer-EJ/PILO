@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Task.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: tasks, task_checklist_items, task_comments, task_activity_logs, task_dependencies, milestones.

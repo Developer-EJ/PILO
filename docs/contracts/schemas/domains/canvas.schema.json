@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/canvas.schema.json",
+  "title": "PILO Canvas Contract Fragment",
+  "x-owner": "@ndh5178",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": ["CanvasBoardSummary", "CanvasBoardDetail", "CanvasShapeRequest", "CanvasConnectionRequest"]
+}

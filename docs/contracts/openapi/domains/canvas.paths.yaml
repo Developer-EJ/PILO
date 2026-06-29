@@ -1,0 +1,7 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@ndh5178"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/canvas/boards:
+    get:
+      operationId: listCanvasBoards

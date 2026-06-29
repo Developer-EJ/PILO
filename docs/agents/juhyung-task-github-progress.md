@@ -47,13 +47,13 @@
 
 ## Public APIs To Provide
 
-- `GET /workspaces/:workspaceId/tasks` returns `TaskSummary[]`.
-- `POST /workspaces/:workspaceId/tasks` creates task.
+- `GET /workspaces/:workspaceId/tasks/summary` returns `TaskSummary[]`.
+- `POST /workspaces/:workspaceId/tasks/drafts` creates task.
 - `PATCH /tasks/:taskId` updates task.
 - `POST /tasks/:taskId/github-issues` creates or links issue.
 - `GET /workspaces/:workspaceId/github/issues` returns `GithubIssueSummary[]`.
 - `GET /workspaces/:workspaceId/github/pull-requests` returns `PullRequestSummary[]`.
-- `GET /workspaces/:workspaceId/progress` returns `ProgressSummary`.
+- `GET /workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
 - Agent action executor for `task.create.draft`, `task.update.status`, `github.issue.create`.
 
 ## Provides To Others

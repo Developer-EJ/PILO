@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Workspace.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: workspaces, workspace_members, workspace_invites, dashboard_preferences.

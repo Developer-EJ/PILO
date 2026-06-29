@@ -1,0 +1,7 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@rlawngud0428"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/progress/summary:
+    get:
+      operationId: getProgressSummary

@@ -16,310 +16,3455 @@
       "type": "string",
       "format": "date-time"
     },
-    "memberRef": {
+    "ContractOwner": {
+      "enum": [
+        "auth",
+        "workspace",
+        "canvas",
+        "task",
+        "github",
+        "progress",
+        "meeting",
+        "review",
+        "agent",
+        "planning",
+        "common-system"
+      ]
+    },
+    "CrossDomainEntityType": {
+      "enum": [
+        "workspace",
+        "workspace_member",
+        "task",
+        "github_repository",
+        "github_issue",
+        "github_pull_request",
+        "meeting",
+        "meeting_report",
+        "meeting_action_item",
+        "review_analysis",
+        "review_node",
+        "review_risk",
+        "planning_draft",
+        "canvas_board",
+        "canvas_shape",
+        "shared_file"
+      ]
+    },
+    "ReviewRiskType": {
+      "enum": [
+        "security",
+        "logic",
+        "performance",
+        "test_gap",
+        "maintainability",
+        "contract",
+        "migration",
+        "ux",
+        "other"
+      ]
+    },
+    "AgentWorkflowType": {
+      "enum": [
+        "meeting.report.generate",
+        "review.analysis.generate",
+        "planning.generate",
+        "task.draft.generate",
+        "github.issue.draft.generate",
+        "orchestrator.run"
+      ]
+    },
+    "NotificationType": {
+      "enum": [
+        "task.status_changed",
+        "task.assigned",
+        "github.issue.created",
+        "github.pull_request.linked",
+        "meeting.report_generated",
+        "review.analysis_completed",
+        "planning.draft_approved",
+        "agent.action_required"
+      ]
+    },
+    "ApiErrorCode": {
+      "enum": [
+        "validation_failed",
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "conflict",
+        "rate_limited",
+        "upstream_unavailable",
+        "internal_error"
+      ]
+    },
+    "ValidationErrorDetail": {
       "type": "object",
-      "required": ["memberId", "name"],
+      "required": [
+        "reason"
+      ],
       "additionalProperties": false,
       "properties": {
-        "memberId": { "$ref": "#/$defs/uuid" },
-        "userId": { "$ref": "#/$defs/uuid" },
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "avatarUrl": { "type": ["string", "null"] }
+        "field": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "expected": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ApiErrorResponse": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/ApiErrorCode"
+            },
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ValidationErrorDetail"
+              }
+            },
+            "traceId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "PaginationSort": {
+      "enum": [
+        "created_at_desc",
+        "updated_at_desc",
+        "priority_desc",
+        "due_date_asc",
+        "risk_desc"
+      ]
+    },
+    "PaginationQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "sort": {
+          "$ref": "#/$defs/PaginationSort"
+        }
+      }
+    },
+    "PageInfo": {
+      "type": "object",
+      "required": [
+        "limit",
+        "hasNextPage"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasNextPage": {
+          "type": "boolean"
+        }
+      }
+    },
+    "WorkspacePermissionAction": {
+      "enum": [
+        "workspace.view",
+        "workspace.manage",
+        "task.view",
+        "task.manage",
+        "github.view",
+        "github.manage",
+        "meeting.view",
+        "meeting.manage",
+        "review.view",
+        "review.manage",
+        "agent.run",
+        "agent.confirm_action",
+        "planning.manage",
+        "file.upload"
+      ]
+    },
+    "WorkspacePermissionResolveRequest": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/WorkspacePermissionAction"
+        },
+        "entityType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossDomainEntityType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entityId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "WorkspacePermissionDecision": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "actorMemberId",
+        "action",
+        "allowed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "action": {
+          "$ref": "#/$defs/WorkspacePermissionAction"
+        },
+        "allowed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "memberRef": {
+      "type": "object",
+      "required": [
+        "memberId",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "memberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "userId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "CurrentUser": {
       "type": "object",
-      "required": ["id", "email", "name", "providers"],
+      "required": [
+        "id",
+        "email",
+        "name",
+        "providers"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "email": { "type": "string" },
-        "name": { "type": "string" },
-        "avatarUrl": { "type": ["string", "null"] },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "providers": {
           "type": "array",
-          "items": { "enum": ["google", "github"] }
+          "items": {
+            "enum": [
+              "google",
+              "github"
+            ]
+          }
         },
-        "lastLoginAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "lastLoginAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "WorkspaceSummary": {
       "type": "object",
-      "required": ["id", "name", "status", "myRole", "memberCount"],
+      "required": [
+        "id",
+        "name",
+        "status",
+        "myRole",
+        "memberCount"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "name": { "type": "string" },
-        "description": { "type": ["string", "null"] },
-        "type": { "enum": ["side_project", "bootcamp", "university", "hackathon", "other"] },
-        "status": { "enum": ["active", "archived"] },
-        "myRole": { "enum": ["owner", "member", "viewer"] },
-        "memberCount": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "side_project",
+            "bootcamp",
+            "university",
+            "hackathon",
+            "other"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "myRole": {
+          "enum": [
+            "owner",
+            "member",
+            "viewer"
+          ]
+        },
+        "memberCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "WorkspaceMemberSummary": {
       "type": "object",
-      "required": ["memberId", "userId", "name", "email", "role"],
+      "required": [
+        "memberId",
+        "userId",
+        "name",
+        "email",
+        "role"
+      ],
       "additionalProperties": false,
       "properties": {
-        "memberId": { "$ref": "#/$defs/uuid" },
-        "userId": { "$ref": "#/$defs/uuid" },
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "avatarUrl": { "type": ["string", "null"] },
-        "role": { "enum": ["owner", "member", "viewer"] },
-        "displayName": { "type": ["string", "null"] },
-        "joinedAt": { "$ref": "#/$defs/dateTime" }
+        "memberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "userId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "avatarUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "enum": [
+            "owner",
+            "member",
+            "viewer"
+          ]
+        },
+        "displayName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "joinedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "TaskSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "title", "status", "priority", "isDelayed"],
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "status",
+        "priority",
+        "isDelayed"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string" },
-        "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] },
-        "priority": { "enum": ["low", "medium", "high", "urgent"] },
-        "assignee": { "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }] },
-        "dueDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
-        "isDelayed": { "type": "boolean" },
-        "linkedIssueCount": { "type": "integer", "minimum": 0 },
-        "linkedPrCount": { "type": "integer", "minimum": 0 },
-        "updatedAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "blocked"
+          ]
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "urgent"
+          ]
+        },
+        "assignee": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/memberRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dueDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "isDelayed": {
+          "type": "boolean"
+        },
+        "linkedIssueCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "linkedPrCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "TaskCreateDraft": {
       "type": "object",
-      "required": ["workspaceId", "title"],
+      "required": [
+        "workspaceId",
+        "title"
+      ],
       "additionalProperties": false,
       "properties": {
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "sourceType": { "type": "string" },
-        "sourceId": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string", "minLength": 1 },
-        "description": { "type": ["string", "null"] },
-        "assigneeMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "priority": { "enum": ["low", "medium", "high", "urgent"] },
-        "dueDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "sourceType": {
+          "$ref": "#/$defs/CrossDomainEntityType"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assigneeMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "urgent"
+          ]
+        },
+        "dueDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "ProgressSummary": {
       "type": "object",
-      "required": ["workspaceId", "totalTasks", "doneTasks", "blockedTasks", "reviewTasks", "delayedTasks", "progressRate"],
+      "required": [
+        "workspaceId",
+        "totalTasks",
+        "doneTasks",
+        "blockedTasks",
+        "reviewTasks",
+        "delayedTasks",
+        "progressRate"
+      ],
       "additionalProperties": false,
       "properties": {
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "milestoneId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "totalTasks": { "type": "integer", "minimum": 0 },
-        "doneTasks": { "type": "integer", "minimum": 0 },
-        "blockedTasks": { "type": "integer", "minimum": 0 },
-        "reviewTasks": { "type": "integer", "minimum": 0 },
-        "delayedTasks": { "type": "integer", "minimum": 0 },
-        "progressRate": { "type": "number", "minimum": 0, "maximum": 100 },
-        "capturedAt": { "$ref": "#/$defs/dateTime" }
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "milestoneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totalTasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "doneTasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blockedTasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reviewTasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delayedTasks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "progressRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "capturedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "GithubIssueSummary": {
       "type": "object",
-      "required": ["id", "repositoryId", "number", "title", "state", "url"],
+      "required": [
+        "id",
+        "repositoryId",
+        "number",
+        "title",
+        "state",
+        "url"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "repositoryId": { "$ref": "#/$defs/uuid" },
-        "number": { "type": "integer", "minimum": 1 },
-        "title": { "type": "string" },
-        "state": { "enum": ["open", "closed"] },
-        "url": { "type": "string" },
-        "labels": { "type": "array", "items": { "type": "string" } },
-        "linkedTaskId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "repositoryId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "closed"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedTaskId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "syncedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "GithubIssueSummaryPage": {
+      "type": "object",
+      "required": [
+        "items",
+        "pageInfo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GithubIssueSummary"
+          }
+        },
+        "pageInfo": {
+          "$ref": "#/$defs/PageInfo"
+        }
       }
     },
     "PullRequestSummary": {
       "type": "object",
-      "required": ["id", "repositoryId", "number", "title", "state", "url"],
+      "required": [
+        "id",
+        "repositoryId",
+        "number",
+        "title",
+        "state",
+        "url"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "repositoryId": { "$ref": "#/$defs/uuid" },
-        "number": { "type": "integer", "minimum": 1 },
-        "title": { "type": "string" },
-        "authorLogin": { "type": ["string", "null"] },
-        "state": { "enum": ["open", "review_requested", "changes_requested", "merged", "closed"] },
-        "branch": { "type": ["string", "null"] },
-        "baseBranch": { "type": ["string", "null"] },
-        "url": { "type": "string" },
-        "changedFilesCount": { "type": "integer", "minimum": 0 },
-        "additions": { "type": "integer", "minimum": 0 },
-        "deletions": { "type": "integer", "minimum": 0 },
-        "linkedTaskIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
-        "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "repositoryId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "authorLogin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "enum": [
+            "open",
+            "review_requested",
+            "changes_requested",
+            "merged",
+            "closed"
+          ]
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseBranch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "changedFilesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "linkedTaskIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "syncedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PullRequestSummaryPage": {
+      "type": "object",
+      "required": [
+        "items",
+        "pageInfo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PullRequestSummary"
+          }
+        },
+        "pageInfo": {
+          "$ref": "#/$defs/PageInfo"
+        }
       }
     },
     "MeetingReportSummary": {
       "type": "object",
-      "required": ["id", "meetingId", "workspaceId", "title", "summary", "decisionCount", "actionItemCount", "riskCount"],
+      "required": [
+        "id",
+        "meetingId",
+        "workspaceId",
+        "title",
+        "summary",
+        "decisionCount",
+        "actionItemCount",
+        "riskCount"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "meetingId": { "$ref": "#/$defs/uuid" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string" },
-        "summary": { "type": "string" },
-        "decisionCount": { "type": "integer", "minimum": 0 },
-        "actionItemCount": { "type": "integer", "minimum": 0 },
-        "riskCount": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "meetingId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "decisionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "actionItemCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "PRAnalysisSummary": {
       "type": "object",
-      "required": ["id", "pullRequestId", "riskLevel", "analysisStatus", "okCount", "discussCount", "riskCount"],
+      "required": [
+        "id",
+        "pullRequestId",
+        "riskLevel",
+        "analysisStatus",
+        "okCount",
+        "discussCount",
+        "riskCount"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "pullRequestId": { "$ref": "#/$defs/uuid" },
-        "purposeSummary": { "type": ["string", "null"] },
-        "impactSummary": { "type": ["string", "null"] },
-        "testRecommendation": { "type": ["string", "null"] },
-        "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
-        "analysisStatus": { "enum": ["pending", "running", "succeeded", "failed"] },
-        "okCount": { "type": "integer", "minimum": 0 },
-        "discussCount": { "type": "integer", "minimum": 0 },
-        "riskCount": { "type": "integer", "minimum": 0 },
-        "conclusion": { "type": ["string", "null"] }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "pullRequestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "purposeSummary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "impactSummary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testRecommendation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "riskLevel": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "analysisStatus": {
+          "enum": [
+            "pending",
+            "running",
+            "succeeded",
+            "failed"
+          ]
+        },
+        "okCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "discussCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conclusion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "CanvasEntityRef": {
       "type": "object",
-      "required": ["entityType", "entityId", "displayTitle", "shapeType"],
+      "required": [
+        "entityType",
+        "entityId",
+        "displayTitle",
+        "shapeType",
+        "sourceOwner",
+        "sourceTable"
+      ],
       "additionalProperties": false,
       "properties": {
-        "entityType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] },
-        "entityId": { "$ref": "#/$defs/uuid" },
-        "displayTitle": { "type": "string" },
-        "shapeType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] }
+        "entityType": {
+          "enum": [
+            "task",
+            "meeting_report",
+            "github_pull_request",
+            "github_issue",
+            "document",
+            "file",
+            "code",
+            "decision",
+            "meeting_risk",
+            "review_risk",
+            "planning_risk",
+            "review_analysis"
+          ]
+        },
+        "entityId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "displayTitle": {
+          "type": "string"
+        },
+        "shapeType": {
+          "enum": [
+            "task",
+            "meeting_report",
+            "github_pull_request",
+            "github_issue",
+            "document",
+            "file",
+            "code",
+            "decision",
+            "meeting_risk",
+            "review_risk",
+            "planning_risk",
+            "review_analysis"
+          ]
+        },
+        "sourceOwner": {
+          "enum": [
+            "auth",
+            "workspace",
+            "canvas",
+            "task",
+            "github",
+            "progress",
+            "meeting",
+            "review",
+            "agent",
+            "planning",
+            "common-system"
+          ]
+        },
+        "sourceTable": {
+          "type": "string"
+        }
       }
     },
     "AgentAction": {
-      "type": "object",
-      "required": ["type", "source", "requiresConfirmation", "payload", "status"],
-      "additionalProperties": false,
-      "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "runId": { "$ref": "#/$defs/uuid" },
-        "type": {
-          "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"]
-        },
-        "source": { "enum": ["meeting", "task", "github", "review", "planning", "orchestrator"] },
-        "requiresConfirmation": { "type": "boolean" },
-        "payload": { "type": "object" },
-        "status": { "enum": ["draft", "waiting_confirmation", "confirmed", "executed", "rejected", "failed"] },
-        "confirmedByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "confirmedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
-        "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
-      }
-    },
-    "AgentJobMessage": {
-      "type": "object",
-      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "requestedAt"],
-      "additionalProperties": false,
-      "properties": {
-        "jobId": { "$ref": "#/$defs/uuid" },
-        "runId": { "$ref": "#/$defs/uuid" },
-        "workflowType": {
-          "enum": ["meeting.report.generate", "review.analysis.generate", "planning.generate", "task.draft.generate", "github.issue.draft.generate", "orchestrator.run"]
-        },
-        "workflowVersion": { "type": "string" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "actorMemberId": { "$ref": "#/$defs/uuid" },
-        "input": { "type": "object" },
-        "contextRefs": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["type", "id"],
-            "additionalProperties": false,
-            "properties": {
-              "type": { "type": "string" },
-              "id": { "$ref": "#/$defs/uuid" }
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "task.create.draft"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/TaskCreateDraft"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         },
-        "requestedAt": { "$ref": "#/$defs/dateTime" }
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "task.update.status"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/TaskStatusUpdateAction"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "task.assign"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/TaskAssignAction"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "github.issue.create"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/GithubIssueCreateAction"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "meeting.report.generate"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/MeetingReportGenerateAction"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "review.analysis.generate"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/ReviewAnalysisGenerateAction"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "source",
+            "requiresConfirmation",
+            "payload",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "runId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "type": {
+              "const": "planning.approve"
+            },
+            "source": {
+              "enum": [
+                "meeting",
+                "task",
+                "github",
+                "review",
+                "planning",
+                "orchestrator"
+              ]
+            },
+            "requiresConfirmation": {
+              "type": "boolean"
+            },
+            "payload": {
+              "$ref": "#/$defs/PlanningApproveAction"
+            },
+            "status": {
+              "enum": [
+                "draft",
+                "waiting_confirmation",
+                "confirmed",
+                "executed",
+                "rejected",
+                "failed"
+              ]
+            },
+            "confirmedByMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "confirmedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "executedAt": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/dateTime"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "AgentActionPage": {
+      "type": "object",
+      "required": [
+        "items",
+        "pageInfo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentAction"
+          }
+        },
+        "pageInfo": {
+          "$ref": "#/$defs/PageInfo"
+        }
+      }
+    },
+    "AgentContextRef": {
+      "type": "object",
+      "required": [
+        "type",
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CrossDomainEntityType"
+            },
+            {
+              "const": "member"
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "MeetingReportWorkflowInput": {
+      "type": "object",
+      "required": [
+        "meetingId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "meetingId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "transcriptSourceFileId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedSections": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "summary",
+              "decisions",
+              "action_items",
+              "risks",
+              "next_agenda"
+            ]
+          }
+        }
+      }
+    },
+    "ReviewAnalysisWorkflowInput": {
+      "type": "object",
+      "required": [
+        "pullRequestId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pullRequestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "repositoryId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "analysisDepth": {
+          "enum": [
+            "summary",
+            "standard",
+            "deep"
+          ]
+        }
+      }
+    },
+    "PlanningWorkflowInput": {
+      "type": "object",
+      "required": [
+        "goal"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "draftId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceDocumentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "targetMilestoneCount": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "TaskDraftWorkflowInput": {
+      "type": "object",
+      "required": [
+        "sourceType",
+        "sourceId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sourceType": {
+          "$ref": "#/$defs/CrossDomainEntityType"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "suggestedTitle": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "GithubIssueDraftWorkflowInput": {
+      "type": "object",
+      "required": [
+        "repositoryId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repositoryId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "sourceType": {
+          "$ref": "#/$defs/CrossDomainEntityType"
+        },
+        "sourceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OrchestratorRunWorkflowInput": {
+      "type": "object",
+      "required": [
+        "objective"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "objective": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowedWorkflowTypes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "meeting.report.generate",
+              "review.analysis.generate",
+              "planning.generate",
+              "task.draft.generate",
+              "github.issue.draft.generate"
+            ]
+          }
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        }
+      }
+    },
+    "AgentJobMessage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MeetingReportAgentJobMessage"
+        },
+        {
+          "$ref": "#/$defs/ReviewAnalysisAgentJobMessage"
+        },
+        {
+          "$ref": "#/$defs/PlanningAgentJobMessage"
+        },
+        {
+          "$ref": "#/$defs/TaskDraftAgentJobMessage"
+        },
+        {
+          "$ref": "#/$defs/GithubIssueDraftAgentJobMessage"
+        },
+        {
+          "$ref": "#/$defs/OrchestratorRunAgentJobMessage"
+        }
+      ]
+    },
+    "MeetingReportAgentJobMessage": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "const": "meeting.report.generate"
+        },
+        "workflowVersion": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/MeetingReportWorkflowInput"
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "ReviewAnalysisAgentJobMessage": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "const": "review.analysis.generate"
+        },
+        "workflowVersion": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/ReviewAnalysisWorkflowInput"
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "PlanningAgentJobMessage": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "const": "planning.generate"
+        },
+        "workflowVersion": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/PlanningWorkflowInput"
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "TaskDraftAgentJobMessage": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "const": "task.draft.generate"
+        },
+        "workflowVersion": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/TaskDraftWorkflowInput"
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "GithubIssueDraftAgentJobMessage": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "const": "github.issue.draft.generate"
+        },
+        "workflowVersion": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/GithubIssueDraftWorkflowInput"
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "OrchestratorRunAgentJobMessage": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "const": "orchestrator.run"
+        },
+        "workflowVersion": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actorMemberId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/OrchestratorRunWorkflowInput"
+        },
+        "contextRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentContextRef"
+          }
+        },
+        "requestedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "AgentTraceMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceOwner": {
+          "$ref": "#/$defs/ContractOwner"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "promptTemplateId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokenCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "MeetingReportWorkflowOutput": {
+      "type": "object",
+      "required": [
+        "summary",
+        "decisionCount",
+        "actionItemCount",
+        "riskCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "reportId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "decisionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "actionItemCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewAnalysisWorkflowOutput": {
+      "type": "object",
+      "required": [
+        "riskLevel",
+        "okCount",
+        "discussCount",
+        "riskCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "analysisId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "riskLevel": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "okCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "discussCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conclusion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PlanningWorkflowOutput": {
+      "type": "object",
+      "required": [
+        "featureDraftCount",
+        "milestoneDraftCount",
+        "riskCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "draftId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "featureDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "milestoneDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "TaskDraftWorkflowOutput": {
+      "type": "object",
+      "required": [
+        "draftCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "draftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "taskDraftIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "GithubIssueDraftWorkflowOutput": {
+      "type": "object",
+      "required": [
+        "issueDraftCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "issueDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issueIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "OrchestratorRunWorkflowOutput": {
+      "type": "object",
+      "required": [
+        "childRunIds",
+        "actionCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "childRunIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "actionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "AgentResultMessage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MeetingReportAgentResultMessage"
+        },
+        {
+          "$ref": "#/$defs/ReviewAnalysisAgentResultMessage"
+        },
+        {
+          "$ref": "#/$defs/PlanningAgentResultMessage"
+        },
+        {
+          "$ref": "#/$defs/TaskDraftAgentResultMessage"
+        },
+        {
+          "$ref": "#/$defs/GithubIssueDraftAgentResultMessage"
+        },
+        {
+          "$ref": "#/$defs/OrchestratorRunAgentResultMessage"
+        }
+      ]
+    },
+    "AgentTraceEntry": {
       "type": "object",
-      "required": ["jobId", "runId", "status", "output", "actions", "trace", "finishedAt"],
+      "required": [
+        "message"
+      ],
       "additionalProperties": false,
       "properties": {
-        "jobId": { "$ref": "#/$defs/uuid" },
-        "runId": { "$ref": "#/$defs/uuid" },
-        "status": { "enum": ["succeeded", "failed"] },
-        "output": { "type": "object" },
+        "stepName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/$defs/AgentTraceMetadata"
+        }
+      }
+    },
+    "AgentResultError": {
+      "type": "object",
+      "required": [
+        "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "AgentResultMessageBase": {
+      "type": "object",
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "status",
+        "output",
+        "actions",
+        "trace",
+        "finishedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workflowType": {
+          "$ref": "#/$defs/AgentWorkflowType"
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "failed"
+          ]
+        },
+        "output": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MeetingReportWorkflowOutput"
+            },
+            {
+              "$ref": "#/$defs/ReviewAnalysisWorkflowOutput"
+            },
+            {
+              "$ref": "#/$defs/PlanningWorkflowOutput"
+            },
+            {
+              "$ref": "#/$defs/TaskDraftWorkflowOutput"
+            },
+            {
+              "$ref": "#/$defs/GithubIssueDraftWorkflowOutput"
+            },
+            {
+              "$ref": "#/$defs/OrchestratorRunWorkflowOutput"
+            }
+          ]
+        },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/AgentAction" }
+          "items": {
+            "$ref": "#/$defs/AgentAction"
+          }
         },
         "trace": {
           "type": "array",
           "items": {
-            "type": "object",
-            "required": ["message"],
-            "additionalProperties": false,
-            "properties": {
-              "stepName": { "type": ["string", "null"] },
-              "message": { "type": "string" },
-              "metadata": { "type": "object" }
-            }
+            "$ref": "#/$defs/AgentTraceEntry"
           }
         },
         "error": {
           "anyOf": [
-            { "type": "null" },
             {
-              "type": "object",
-              "required": ["message"],
-              "additionalProperties": false,
-              "properties": {
-                "code": { "type": ["string", "null"] },
-                "message": { "type": "string" }
-              }
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/AgentResultError"
             }
           ]
         },
-        "finishedAt": { "$ref": "#/$defs/dateTime" }
+        "finishedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
+    },
+    "MeetingReportAgentResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentResultMessageBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "const": "meeting.report.generate"
+            },
+            "output": {
+              "$ref": "#/$defs/MeetingReportWorkflowOutput"
+            }
+          }
+        }
+      ]
+    },
+    "ReviewAnalysisAgentResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentResultMessageBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "const": "review.analysis.generate"
+            },
+            "output": {
+              "$ref": "#/$defs/ReviewAnalysisWorkflowOutput"
+            }
+          }
+        }
+      ]
+    },
+    "PlanningAgentResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentResultMessageBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "const": "planning.generate"
+            },
+            "output": {
+              "$ref": "#/$defs/PlanningWorkflowOutput"
+            }
+          }
+        }
+      ]
+    },
+    "TaskDraftAgentResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentResultMessageBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "const": "task.draft.generate"
+            },
+            "output": {
+              "$ref": "#/$defs/TaskDraftWorkflowOutput"
+            }
+          }
+        }
+      ]
+    },
+    "GithubIssueDraftAgentResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentResultMessageBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "const": "github.issue.draft.generate"
+            },
+            "output": {
+              "$ref": "#/$defs/GithubIssueDraftWorkflowOutput"
+            }
+          }
+        }
+      ]
+    },
+    "OrchestratorRunAgentResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentResultMessageBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workflowType": {
+              "const": "orchestrator.run"
+            },
+            "output": {
+              "$ref": "#/$defs/OrchestratorRunWorkflowOutput"
+            }
+          }
+        }
+      ]
     },
     "NotificationCreateRequest": {
       "type": "object",
-      "required": ["userId", "type", "title"],
+      "required": [
+        "userId",
+        "type",
+        "title"
+      ],
       "additionalProperties": false,
       "properties": {
-        "userId": { "$ref": "#/$defs/uuid" },
-        "type": { "type": "string" },
-        "title": { "type": "string" },
-        "linkedEntityType": { "type": ["string", "null"] },
-        "linkedEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "userId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "type": {
+          "$ref": "#/$defs/NotificationType"
+        },
+        "title": {
+          "type": "string"
+        },
+        "linkedEntityType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossDomainEntityType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "linkedEntityId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "SharedFileRef": {
       "type": "object",
-      "required": ["id", "workspaceId", "filename", "url"],
+      "required": [
+        "id",
+        "workspaceId",
+        "filename",
+        "url"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "filename": { "type": "string" },
-        "fileType": { "type": ["string", "null"] },
-        "url": { "type": "string" },
-        "linkedEntityType": { "type": ["string", "null"] },
-        "linkedEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "fileType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "linkedEntityType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossDomainEntityType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "linkedEntityId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CanvasBoardSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "shapeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "CanvasShapeRequest": {
+      "type": "object",
+      "required": [
+        "shapeType",
+        "entityType",
+        "entityId",
+        "displayTitle",
+        "sourceOwner",
+        "sourceTable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shapeType": {
+          "enum": [
+            "task",
+            "meeting_report",
+            "github_pull_request",
+            "github_issue",
+            "document",
+            "file",
+            "code",
+            "decision",
+            "meeting_risk",
+            "review_risk",
+            "planning_risk",
+            "review_analysis"
+          ]
+        },
+        "entityType": {
+          "enum": [
+            "task",
+            "meeting_report",
+            "github_pull_request",
+            "github_issue",
+            "document",
+            "file",
+            "code",
+            "decision",
+            "meeting_risk",
+            "review_risk",
+            "planning_risk",
+            "review_analysis"
+          ]
+        },
+        "entityId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "sourceOwner": {
+          "enum": [
+            "auth",
+            "workspace",
+            "canvas",
+            "task",
+            "github",
+            "progress",
+            "meeting",
+            "review",
+            "agent",
+            "planning",
+            "common-system"
+          ]
+        },
+        "sourceTable": {
+          "type": "string"
+        },
+        "displayTitle": {
+          "type": "string"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1
+        },
+        "color": {
+          "type": "string"
+        }
+      }
+    },
+    "CanvasConnectionRequest": {
+      "type": "object",
+      "required": [
+        "sourceShapeId",
+        "targetShapeId",
+        "connectionType"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sourceShapeId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "targetShapeId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "connectionType": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "CanvasBoardDetail": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "shapes",
+        "connections"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "shapes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CanvasShapeRequest"
+          }
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CanvasConnectionRequest"
+          }
+        },
+        "viewSetting": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "zoom": {
+              "type": "number"
+            },
+            "viewportX": {
+              "type": "number"
+            },
+            "viewportY": {
+              "type": "number"
+            }
+          }
+        },
+        "filterSetting": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabledEntityTypes": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "task",
+                  "meeting_report",
+                  "github_pull_request",
+                  "github_issue",
+                  "document",
+                  "file",
+                  "code",
+                  "decision",
+                  "meeting_risk",
+                  "review_risk",
+                  "planning_risk",
+                  "review_analysis"
+                ]
+              }
+            },
+            "assigneeMemberId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "showDelayedOnly": {
+              "type": "boolean"
+            },
+            "showRiskOnly": {
+              "type": "boolean"
+            }
+          }
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "GithubRepositorySummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "owner",
+        "repoName",
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "repoName": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "defaultBranch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "syncedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MeetingActionItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "reportId",
+        "title",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reportId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assigneeSuggestionMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dueDateSuggestion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "approved",
+            "converted",
+            "rejected"
+          ]
+        },
+        "convertedTaskId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReviewNodeSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "nodeType",
+        "label",
+        "riskLevel",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "nodeType": {
+          "enum": [
+            "file",
+            "function",
+            "risk",
+            "question",
+            "checklist"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "filePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "riskLevel": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "ok",
+            "discuss",
+            "risk"
+          ]
+        }
+      }
+    },
+    "TaskStatusUpdateAction": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "blocked"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "GithubIssueCreateAction": {
+      "type": "object",
+      "required": [
+        "repositoryId",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repositoryId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedTaskId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MeetingReportGenerateAction": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "meetingId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "meetingId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "ReviewAnalysisGenerateAction": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "pullRequestId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "pullRequestId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "PlanningApproveAction": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "draftId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createTasks": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProjectPlanDraftSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "status",
+        "featureDraftCount",
+        "milestoneDraftCount",
+        "riskCount",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetUser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "reviewing",
+            "approved",
+            "rejected"
+          ]
+        },
+        "featureDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "milestoneDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdByMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "ProjectPlanDraftSummaryPage": {
+      "type": "object",
+      "required": [
+        "items",
+        "pageInfo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectPlanDraftSummary"
+          }
+        },
+        "pageInfo": {
+          "$ref": "#/$defs/PageInfo"
+        }
+      }
+    },
+    "MeetingDecisionSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "reportId",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reportId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewRiskSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "analysisId",
+        "type",
+        "level",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "analysisId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "nodeId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/ReviewRiskType"
+        },
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "AgentRecommendation": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "source",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "meeting",
+            "task",
+            "github",
+            "review",
+            "planning",
+            "orchestrator"
+          ]
+        },
+        "actionType": {
+          "anyOf": [
+            {
+              "enum": [
+                "task.create.draft",
+                "task.update.status",
+                "task.assign",
+                "github.issue.create",
+                "meeting.report.generate",
+                "review.analysis.generate",
+                "planning.approve"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "accepted",
+            "dismissed"
+          ]
+        }
+      }
+    },
+    "TaskCreateDraftRequest": {
+      "type": "object",
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sourceType": {
+          "$ref": "#/$defs/CrossDomainEntityType"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assigneeMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "urgent"
+          ]
+        },
+        "dueDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TaskAssignAction": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "assigneeMemberId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "assigneeMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     }
   }

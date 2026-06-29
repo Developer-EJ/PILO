@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/auth.schema.json",
+  "title": "PILO Auth Contract Fragment",
+  "x-owner": "@ndh5178",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": [
+    "CurrentUser",
+    "WorkspacePermissionAction",
+    "WorkspacePermissionResolveRequest",
+    "WorkspacePermissionDecision"
+  ]
+}

@@ -1,0 +1,15 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@rlawngud0428"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/github/repositories:
+    get:
+      operationId: listGithubRepositories
+  /workspaces/{workspaceId}/github/issues:
+    get:
+      operationId: listGithubIssueSummaries
+      x-pagination: PaginationQuery
+  /workspaces/{workspaceId}/github/pull-requests:
+    get:
+      operationId: listPullRequestSummaries
+      x-pagination: PaginationQuery

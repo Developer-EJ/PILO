@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Auth.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: users, oauth_accounts, auth_sessions.

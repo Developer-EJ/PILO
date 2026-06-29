@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Agent.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: agents, agent_workflows, agent_runs, agent_run_steps, agent_contexts, agent_actions, agent_traces.

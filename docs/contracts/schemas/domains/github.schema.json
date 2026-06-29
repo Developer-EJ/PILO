@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pilo.local/contracts/domains/github.schema.json",
+  "title": "PILO GitHub Contract Fragment",
+  "x-owner": "@rlawngud0428",
+  "x-bundle": "../pilo-public-contracts.schema.json",
+  "x-ownedDefs": [
+    "GithubRepositorySummary",
+    "GithubIssueSummary",
+    "GithubIssueSummaryPage",
+    "GithubIssueCreateAction",
+    "PullRequestSummary",
+    "PullRequestSummaryPage"
+  ]
+}

@@ -1,0 +1,10 @@
+# Domain-owned OpenAPI path fragment.
+x-owner: "@rlawngud0428"
+x-bundle: ../pilo-public-api.yaml
+paths:
+  /workspaces/{workspaceId}/tasks/summary:
+    get:
+      operationId: listTaskSummaries
+  /workspaces/{workspaceId}/tasks/drafts:
+    post:
+      operationId: createTaskDraft

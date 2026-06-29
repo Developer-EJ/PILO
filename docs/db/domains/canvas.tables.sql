@@ -1,0 +1,3 @@
+-- Domain-owned DB shard for Canvas.
+-- Bundled logical schema: ../pilo_erd_schema.sql
+-- Owner tables: canvas_boards, canvas_shapes, canvas_connections, canvas_node_positions, canvas_view_settings, canvas_filter_settings.
