@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
-  CurrentActor,
-  WorkspaceMemberAccessService,
-} from "../workspace/workspace-member-access.service";
+  WorkspaceAccessPublicService,
+  WorkspaceActor,
+} from "../workspace/public/workspace-access-public.service";
 import {
   parseCreateChecklistItemInput,
   parseUpdateChecklistItemInput,
@@ -38,7 +38,11 @@ import {
   TaskSummary,
   WorkspaceMemberRecord,
 } from "./juhyung-public.types";
-import { JuhyungRepository, UpdateTaskInput } from "./juhyung.repository";
+import {
+  CreateTaskInput,
+  JuhyungRepository,
+  UpdateTaskInput,
+} from "./juhyung.repository";
 
 export type {
   CreateTaskBody,
@@ -56,14 +60,14 @@ export type { ListTasksQuery } from "./juhyung-task-list-query";
 export class JuhyungTaskService {
   constructor(
     private readonly repository: JuhyungRepository,
-    private readonly workspaceAccess: WorkspaceMemberAccessService,
-    private readonly publicAdapter: JuhyungPublicAdapter,
+    private readonly workspaceAccess: WorkspaceAccessPublicService,
+    private readonly publicAdapter: JuhyungPublicAdapter = new JuhyungPublicAdapter(),
   ) {}
 
   async listTasks(
     workspaceId: string,
     query: ListTasksQuery = {},
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskSummary[]> {
     const options = parseListTasksQuery(query);
     await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
@@ -75,26 +79,46 @@ export class JuhyungTaskService {
   }
 
   async createTask(
+    input: CreateTaskInput,
+    actor?: WorkspaceActor,
+  ): Promise<TaskRecord>;
+  async createTask(
     workspaceId: string,
     body: CreateTaskBody,
-    actor?: CurrentActor,
-  ): Promise<TaskSummary> {
-    const input = parseCreateTaskInput(workspaceId, body);
+    actor?: WorkspaceActor,
+  ): Promise<TaskSummary>;
+  async createTask(
+    workspaceIdOrInput: string | CreateTaskInput,
+    bodyOrActor?: CreateTaskBody | WorkspaceActor,
+    actor?: WorkspaceActor,
+  ): Promise<TaskRecord | TaskSummary> {
+    if (typeof workspaceIdOrInput !== "string") {
+      return this.createTaskRecord(
+        workspaceIdOrInput,
+        bodyOrActor as WorkspaceActor | undefined,
+      );
+    }
+
+    const input = parseCreateTaskInput(
+      workspaceIdOrInput,
+      bodyOrActor as CreateTaskBody,
+    );
     const currentMember = await this.workspaceAccess.requireWorkspaceMember(
-      workspaceId,
+      workspaceIdOrInput,
       actor,
     );
     const assignee = input.assigneeMemberId
-      ? await this.workspaceAccess.requireWorkspaceMember(workspaceId, {
-          memberId: input.assigneeMemberId,
-        })
+      ? await this.requireWorkspaceMemberById(
+          workspaceIdOrInput,
+          input.assigneeMemberId,
+        )
       : null;
     const task = await this.repository.createTask(input, currentMember.id);
 
     return this.publicAdapter.toTaskSummary(task, { assignee });
   }
 
-  async getTask(taskId: string, actor?: CurrentActor): Promise<TaskDetail> {
+  async getTask(taskId: string, actor?: WorkspaceActor): Promise<TaskDetail> {
     const { task } = await this.requireTaskAccess(taskId, actor);
     const [summary] = await this.toTaskSummaries(task.workspaceId, [task]);
     const checklistItems =
@@ -110,7 +134,7 @@ export class JuhyungTaskService {
   async updateTask(
     taskId: string,
     body: UpdateTaskBody,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskSummary> {
     const input = parseUpdateTaskInput(body);
     const { task, currentMember } = await this.requireTaskAccess(taskId, actor);
@@ -135,7 +159,7 @@ export class JuhyungTaskService {
   async updateTaskStatus(
     taskId: string,
     body: UpdateTaskStatusBody,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskSummary> {
     const status = parseTaskStatus(body);
     const { task, currentMember } = await this.requireTaskAccess(taskId, actor);
@@ -152,7 +176,7 @@ export class JuhyungTaskService {
     return summary;
   }
 
-  async deleteTask(taskId: string, actor?: CurrentActor): Promise<void> {
+  async deleteTask(taskId: string, actor?: WorkspaceActor): Promise<void> {
     await this.requireTaskAccess(taskId, actor);
     await this.repository.softDeleteTask(taskId);
   }
@@ -195,7 +219,7 @@ export class JuhyungTaskService {
   async createChecklistItem(
     taskId: string,
     body: CreateChecklistItemBody,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskChecklistItemSummary> {
     const input = parseCreateChecklistItemInput(body);
     await this.requireTaskAccess(taskId, actor);
@@ -207,7 +231,7 @@ export class JuhyungTaskService {
     taskId: string,
     itemId: string,
     body: UpdateChecklistItemBody,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<TaskChecklistItemSummary> {
     const input = parseUpdateChecklistItemInput(body);
     await this.requireTaskAccess(taskId, actor);
@@ -225,7 +249,7 @@ export class JuhyungTaskService {
   async deleteChecklistItem(
     taskId: string,
     itemId: string,
-    actor?: CurrentActor,
+    actor?: WorkspaceActor,
   ): Promise<void> {
     await this.requireTaskAccess(taskId, actor);
     const result = await this.repository.deleteChecklistItem(taskId, itemId);
@@ -234,7 +258,20 @@ export class JuhyungTaskService {
     }
   }
 
-  private async requireTaskAccess(taskId: string, actor?: CurrentActor) {
+  private async createTaskRecord(
+    input: CreateTaskInput,
+    actor?: WorkspaceActor,
+  ): Promise<TaskRecord> {
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      input.workspaceId,
+      actor,
+    );
+    await this.requireAssignee(input);
+
+    return this.repository.createTask(input, currentMember.id);
+  }
+
+  private async requireTaskAccess(taskId: string, actor?: WorkspaceActor) {
     const task = await this.repository.getTaskById(taskId);
     if (!task) {
       throw new NotFoundException("Task was not found");
@@ -247,6 +284,17 @@ export class JuhyungTaskService {
     return { task, currentMember };
   }
 
+  private async requireAssignee(input: CreateTaskInput) {
+    if (!input.assigneeMemberId) {
+      return;
+    }
+
+    await this.requireWorkspaceMemberById(
+      input.workspaceId,
+      input.assigneeMemberId,
+    );
+  }
+
   private async resolveUpdatedAssignee(
     workspaceId: string,
     input: UpdateTaskInput,
@@ -257,8 +305,25 @@ export class JuhyungTaskService {
     if (!input.assigneeMemberId) {
       return null;
     }
+    return this.requireWorkspaceMemberById(workspaceId, input.assigneeMemberId);
+  }
+
+  private async requireWorkspaceMemberById(
+    workspaceId: string,
+    memberId: string,
+  ) {
+    if (
+      "requireWorkspaceMemberById" in this.workspaceAccess &&
+      typeof this.workspaceAccess.requireWorkspaceMemberById === "function"
+    ) {
+      return this.workspaceAccess.requireWorkspaceMemberById(
+        workspaceId,
+        memberId,
+      );
+    }
+
     return this.workspaceAccess.requireWorkspaceMember(workspaceId, {
-      memberId: input.assigneeMemberId,
+      memberId,
     });
   }
 

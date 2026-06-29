@@ -8,8 +8,11 @@ datasource db {
 }
 
 model Workspace {
-  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name String @db.VarChar(160)
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String             @db.VarChar(160)
+  members           WorkspaceMember[]
+  tasks             Task[]
+  githubConnections GithubConnection[]
 
   @@map("workspaces")
 }
@@ -22,7 +25,44 @@ model WorkspaceMember {
   displayName String?  @map("display_name") @db.VarChar(120)
   joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
 
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignedTasks     Task[]             @relation("TaskAssigneeMember")
+  createdTasks      Task[]             @relation("TaskCreatedByMember")
+  githubConnections GithubConnection[] @relation("GithubConnectionConnectedByMember")
+
+  @@unique([workspaceId, userId])
+  @@unique([workspaceId, id])
   @@map("workspace_members")
+}
+
+model Agent {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String          @db.VarChar(160)
+  domain      String          @db.VarChar(40)
+  description String?
+  enabled     Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workflows   AgentWorkflow[]
+
+  @@map("agents")
+}
+
+model AgentWorkflow {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agentId      String   @map("agent_id") @db.Uuid
+  type         String   @db.VarChar(120)
+  version      String   @default("v1") @db.VarChar(40)
+  inputSchema  Json     @default("{}") @map("input_schema") @db.JsonB
+  outputSchema Json     @default("{}") @map("output_schema") @db.JsonB
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([type, version])
+  @@map("agent_workflows")
 }
 
 model Milestone {
@@ -52,6 +92,10 @@ model Task {
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assigneeMember  WorkspaceMember? @relation("TaskAssigneeMember", fields: [workspaceId, assigneeMemberId], references: [workspaceId, id], onDelete: NoAction)
+  createdByMember WorkspaceMember? @relation("TaskCreatedByMember", fields: [workspaceId, createdByMemberId], references: [workspaceId, id], onDelete: NoAction)
 
   @@map("tasks")
 }
@@ -109,11 +153,15 @@ model GithubConnection {
   installationId      String?   @map("installation_id") @db.VarChar(255)
   githubAccountLogin  String?   @map("github_account_login") @db.VarChar(255)
   scopes              String[]  @default([])
+  stateNonce          String?   @unique @map("state_nonce") @db.VarChar(128)
   connectedByMemberId String?   @map("connected_by_member_id") @db.Uuid
   connectedAt         DateTime  @default(now()) @map("connected_at") @db.Timestamptz(6)
   revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedByMember WorkspaceMember? @relation("GithubConnectionConnectedByMember", fields: [workspaceId, connectedByMemberId], references: [workspaceId, id], onDelete: NoAction)
 
   @@map("github_connections")
 }
