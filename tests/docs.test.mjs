@@ -552,7 +552,16 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /## Breaking Change Policy/);
     assert.match(githubContract, /additive optional rollout fields/);
     assert.match(githubContract, /Making them required requires a separate breaking contract PR/);
-    assert.doesNotMatch(githubContract.slice(githubContract.indexOf("## Mock Rule")), /github-repositories\.fixture\.json/);
+    const mockRuleStart = githubContract.indexOf("## Mock Rule");
+    assert.notEqual(
+      mockRuleStart,
+      -1,
+      "github contract must keep a ## Mock Rule section",
+    );
+    assert.doesNotMatch(
+      githubContract.slice(mockRuleStart),
+      /github-repositories\.fixture\.json/,
+    );
     for (const model of [
       "GithubConnectionSummary",
       "GithubRepositorySummary",
