@@ -1,4 +1,5 @@
 import {
+  MeetingActionItemReadModel,
   MeetingAgendaRecord,
   MeetingDecisionReadModel,
   MeetingMemoRecord,
@@ -77,6 +78,17 @@ export interface CreateMeetingReportNextAgendaRequestDto {
   sortOrder?: unknown;
 }
 
+export interface CreateMeetingActionItemRequestDto {
+  title?: unknown;
+  description?: unknown;
+  assigneeSuggestionMemberId?: unknown;
+  dueDateSuggestion?: unknown;
+}
+
+export interface ConvertMeetingActionItemRequestDto {
+  convertedTaskId?: unknown;
+}
+
 export type MeetingResponseDto = MeetingRecord;
 
 export type MeetingParticipantResponseDto = MeetingParticipantRecord;
@@ -97,3 +109,5 @@ export type MeetingReportRiskResponseDto = MeetingReportRiskReadModel;
 
 export type MeetingReportNextAgendaResponseDto =
   MeetingReportNextAgendaReadModel;
+
+export type MeetingActionItemResponseDto = MeetingActionItemReadModel;
