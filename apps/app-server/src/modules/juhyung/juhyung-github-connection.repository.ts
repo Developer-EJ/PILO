@@ -96,6 +96,7 @@ export class JuhyungGithubConnectionRepository {
       input.scopes.length > 0 ? input.scopes : pendingConnection.scopes;
     const connection = await this.updatePendingConnection(
       pendingConnection.id,
+      input.stateNonce,
       {
         installationId: input.installationId,
         githubAccountLogin: input.githubAccountLogin,
@@ -120,7 +121,9 @@ export class JuhyungGithubConnectionRepository {
       orderBy: [{ connectedAt: "desc" }, { createdAt: "desc" }],
     });
 
-    return connections.map((connection) => this.toSummary(connection));
+    return (connections as GithubConnectionSummaryRow[]).map((connection) =>
+      this.toSummary(connection),
+    );
   }
 
   async revokeConnection(
@@ -167,6 +170,7 @@ export class JuhyungGithubConnectionRepository {
 
   private async updatePendingConnection(
     connectionId: string,
+    stateNonce: string,
     data: {
       installationId: string;
       githubAccountLogin: string | null;
@@ -177,10 +181,33 @@ export class JuhyungGithubConnectionRepository {
     },
   ) {
     try {
-      return await this.database.githubConnection.update({
-        where: { id: connectionId },
+      const updateResult = await this.database.githubConnection.updateMany({
+        where: {
+          id: connectionId,
+          stateNonce,
+          installationId: null,
+          revokedAt: null,
+        },
         data,
       });
+
+      if (updateResult.count !== 1) {
+        throw new BadRequestException(
+          "Valid GitHub connection state is required",
+        );
+      }
+
+      const connection = await this.database.githubConnection.findFirst({
+        where: { id: connectionId },
+      });
+
+      if (!connection) {
+        throw new BadRequestException(
+          "Valid GitHub connection state is required",
+        );
+      }
+
+      return connection;
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
         throw new ConflictException(

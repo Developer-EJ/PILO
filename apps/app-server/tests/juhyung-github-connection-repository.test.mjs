@@ -62,6 +62,10 @@ describe("JuhyungGithubConnectionRepository", () => {
     const calls = [];
     const database = {
       githubConnection: {
+        updateMany: async (args) => {
+          calls.push(["updateMany", args]);
+          return { count: 1 };
+        },
         findFirst: async (args) => {
           calls.push(["findFirst", args]);
           if (args.where.stateNonce === "nonce-1") {
@@ -71,20 +75,22 @@ describe("JuhyungGithubConnectionRepository", () => {
               scopes: ["metadata"],
             };
           }
+          if (args.where.installationId === "12345678") {
+            return null;
+          }
+          if (args.where.id === "connection-1") {
+            return {
+              id: "connection-1",
+              workspaceId: "workspace-1",
+              provider: "github_app",
+              installationId: "12345678",
+              githubAccountLogin: "team-org",
+              scopes: ["metadata", "contents"],
+              connectedAt,
+              revokedAt: null,
+            };
+          }
           return null;
-        },
-        update: async (args) => {
-          calls.push(["update", args]);
-          return {
-            id: "connection-1",
-            workspaceId: "workspace-1",
-            provider: "github_app",
-            installationId: args.data.installationId,
-            githubAccountLogin: args.data.githubAccountLogin,
-            scopes: args.data.scopes,
-            connectedAt,
-            revokedAt: null,
-          };
         },
       },
     };
@@ -107,7 +113,7 @@ describe("JuhyungGithubConnectionRepository", () => {
       connectedAt: "2026-06-27T12:00:00.000Z",
       revokedAt: null,
     });
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 4);
     assert.deepEqual(calls[0], [
       "findFirst",
       {
@@ -128,13 +134,82 @@ describe("JuhyungGithubConnectionRepository", () => {
         },
       },
     ]);
-    assert.equal(calls[2][1].where.id, "connection-1");
+    assert.deepEqual(calls[2][1].where, {
+      id: "connection-1",
+      stateNonce: "nonce-1",
+      installationId: null,
+      revokedAt: null,
+    });
     assert.equal(calls[2][1].data.installationId, "12345678");
     assert.equal(calls[2][1].data.githubAccountLogin, "team-org");
     assert.deepEqual(calls[2][1].data.scopes, ["metadata", "contents"]);
     assert.equal(calls[2][1].data.stateNonce, null);
     assert.ok(calls[2][1].data.connectedAt instanceof Date);
     assert.ok(calls[2][1].data.updatedAt instanceof Date);
+    assert.deepEqual(calls[3], [
+      "findFirst",
+      { where: { id: "connection-1" } },
+    ]);
+  });
+
+  it("allows a single callback to consume a pending state nonce", async () => {
+    let updateCount = 0;
+    const database = {
+      githubConnection: {
+        findFirst: async (args) => {
+          if (args.where.stateNonce === "nonce-1") {
+            return {
+              id: "connection-1",
+              workspaceId: "workspace-1",
+              scopes: [],
+            };
+          }
+          if (args.where.installationId === "12345678") {
+            return null;
+          }
+          if (args.where.id === "connection-1") {
+            return {
+              id: "connection-1",
+              workspaceId: "workspace-1",
+              provider: "github_app",
+              installationId: "12345678",
+              githubAccountLogin: "team-org",
+              scopes: [],
+              connectedAt,
+              revokedAt: null,
+            };
+          }
+          return null;
+        },
+        updateMany: async () => {
+          updateCount += 1;
+          return { count: updateCount === 1 ? 1 : 0 };
+        },
+      },
+    };
+    const repository = new JuhyungGithubConnectionRepository(database);
+    const input = {
+      stateNonce: "nonce-1",
+      installationId: "12345678",
+      githubAccountLogin: "team-org",
+      scopes: [],
+    };
+
+    const results = await Promise.allSettled([
+      repository.completeConnectionIntent(input),
+      repository.completeConnectionIntent(input),
+    ]);
+
+    assert.equal(
+      results.filter((result) => result.status === "fulfilled").length,
+      1,
+    );
+    assert.equal(
+      results.filter((result) => result.status === "rejected").length,
+      1,
+    );
+    const rejection = results.find((result) => result.status === "rejected");
+    assert.ok(rejection.reason instanceof BadRequestException);
   });
 
   it("rejects callbacks with unknown state nonce", async () => {
@@ -168,7 +243,10 @@ describe("JuhyungGithubConnectionRepository", () => {
               scopes: [],
             };
           }
-          return { id: "connection-2", workspaceId: "workspace-2" };
+          return {
+            id: "connection-2",
+            workspaceId: "workspace-2",
+          };
         },
       },
     };
@@ -199,7 +277,7 @@ describe("JuhyungGithubConnectionRepository", () => {
           }
           return null;
         },
-        update: async () => {
+        updateMany: async () => {
           throw { code: "P2002" };
         },
       },
