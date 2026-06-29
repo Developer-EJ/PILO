@@ -37,6 +37,7 @@ import {
   MeetingDecisionResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
+  MeetingReportCanvasEntityRefDto,
   MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
   MeetingReportRiskResponseDto,
@@ -423,6 +424,14 @@ export class MeetingService {
       );
   }
 
+  listRecentReportCanvasEntityRefs(
+    workspaceId: string,
+  ): MeetingReportCanvasEntityRefDto[] {
+    return this.listRecentReports(workspaceId).map((report) =>
+      this.toCanvasEntityRef(report),
+    );
+  }
+
   createDecision(
     reportId: string,
     requestBody: CreateMeetingDecisionRequestDto,
@@ -782,6 +791,17 @@ export class MeetingService {
         .length,
       riskCount: this.meetingRepository.listRisksByReport(report.id).length,
       createdAt: report.createdAt,
+    };
+  }
+
+  private toCanvasEntityRef(
+    report: MeetingReportSummaryDto,
+  ): MeetingReportCanvasEntityRefDto {
+    return {
+      entityType: "meeting_report",
+      entityId: report.id,
+      displayTitle: report.title,
+      shapeType: "meeting_report",
     };
   }
 
