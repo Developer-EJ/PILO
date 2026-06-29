@@ -185,7 +185,7 @@
     },
     "GithubConnectionSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "provider", "connectedAt"],
+      "required": ["id", "workspaceId", "provider", "scopes", "connectedAt"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -193,13 +193,14 @@
         "provider": { "enum": ["github_app"] },
         "installationId": { "type": ["string", "null"] },
         "githubAccountLogin": { "type": ["string", "null"] },
+        "scopes": { "type": "array", "items": { "type": "string" } },
         "connectedAt": { "$ref": "#/$defs/dateTime" },
         "revokedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
       }
     },
     "GithubRepositorySummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "owner", "repoName", "url"],
+      "required": ["id", "workspaceId", "owner", "repoName", "url", "defaultBranch", "syncedAt"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },

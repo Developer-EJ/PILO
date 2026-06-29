@@ -510,6 +510,8 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /patch/);
     assert.match(githubContract, /state\/nonce/);
     assert.match(githubContract, /installationId -> workspaceId/);
+    assert.match(githubContract, /409 Conflict/);
+    assert.match(githubContract, /active GitHub App connection/);
     assert.match(githubContract, /changed_functions/);
     assert.match(githubContract, /non-null `patch`/);
     assert.match(githubContract, /patch: null/);
@@ -922,6 +924,9 @@ describe("github collaboration templates", () => {
     const content = read(".github/PULL_REQUEST_TEMPLATE.md");
     for (const heading of ["Contract Impact", "Cross-Domain Access", "Mock / Stub", "DB / Migration", "Validation"]) {
       assert.match(content, new RegExp(`## ${heading.replace("/", "\\/")}`));
+    }
+    for (const guideField of ["Contract Used", "Owner", "Consumers", "Mock/Real"]) {
+      assert.match(content, new RegExp(guideField));
     }
   });
 
