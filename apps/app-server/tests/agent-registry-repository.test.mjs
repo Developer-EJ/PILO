@@ -84,7 +84,7 @@ describe("AgentRegistryRepository", () => {
     const calls = [];
     const database = {
       agentWorkflow: {
-        findFirst: async (args) => {
+        findUnique: async (args) => {
           calls.push(args);
           return null;
         },
@@ -100,8 +100,10 @@ describe("AgentRegistryRepository", () => {
     assert.deepEqual(calls, [
       {
         where: {
-          type: "review.analysis.generate",
-          version: "v2",
+          type_version: {
+            type: "review.analysis.generate",
+            version: "v2",
+          },
         },
         include: {
           agent: true,

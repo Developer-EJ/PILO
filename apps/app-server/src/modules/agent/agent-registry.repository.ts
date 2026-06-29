@@ -42,10 +42,12 @@ export class AgentRegistryRepository {
   }
 
   findWorkflowByTypeAndVersion(input: FindAgentWorkflowInput) {
-    return this.database.agentWorkflow.findFirst({
+    return this.database.agentWorkflow.findUnique({
       where: {
-        type: input.type,
-        version: input.version ?? DEFAULT_AGENT_WORKFLOW_VERSION,
+        type_version: {
+          type: input.type,
+          version: input.version ?? DEFAULT_AGENT_WORKFLOW_VERSION,
+        },
       },
       include: {
         agent: true,

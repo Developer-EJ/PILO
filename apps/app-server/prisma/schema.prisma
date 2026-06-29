@@ -40,7 +40,7 @@ model Agent {
   description String?
   enabled     Boolean         @default(true)
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   workflows   AgentWorkflow[]
 
   @@map("agents")
@@ -55,11 +55,11 @@ model AgentWorkflow {
   outputSchema Json     @default("{}") @map("output_schema") @db.JsonB
   enabled      Boolean  @default(true)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
-  @@unique([agentId, type, version])
+  @@unique([type, version])
   @@map("agent_workflows")
 }
 

@@ -44,6 +44,37 @@ describe("AgentRegistryService", () => {
     ]);
   });
 
+  it("passes through an explicit workflow version", async () => {
+    const calls = [];
+    const workflow = {
+      id: "workflow-2",
+      type: "meeting.report.generate",
+      version: "v2",
+      enabled: true,
+      agent: { id: "agent-1", enabled: true },
+    };
+    const repository = {
+      findWorkflowByTypeAndVersion: async (input) => {
+        calls.push(input);
+        return workflow;
+      },
+    };
+    const service = new AgentRegistryService(repository);
+
+    const result = await service.requireEnabledWorkflow({
+      type: "meeting.report.generate",
+      version: "v2",
+    });
+
+    assert.equal(result, workflow);
+    assert.deepEqual(calls, [
+      {
+        type: "meeting.report.generate",
+        version: "v2",
+      },
+    ]);
+  });
+
   it("throws a clear domain error when a workflow is not registered", async () => {
     const service = new AgentRegistryService({
       findWorkflowByTypeAndVersion: async () => null,
