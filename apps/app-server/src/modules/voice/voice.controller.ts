@@ -1,6 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
-  JoinVoiceSessionRequestDto,
   UpdateVoiceSessionRecordingStatusRequestDto,
   UpdateVoiceRoomStatusRequestDto,
   VoiceRoomResponseDto,
@@ -13,6 +12,7 @@ import { VoiceService } from "./voice.service";
 export class VoiceController {
   constructor(private readonly voiceService: VoiceService) {}
 
+  @Get("voice")
   getScaffoldStatus(): VoiceScaffoldResponseDto {
     return this.voiceService.getScaffoldStatus();
   }
@@ -51,9 +51,8 @@ export class VoiceController {
   @Post("voice-rooms/:voiceRoomId/sessions")
   joinVoiceSession(
     @Param("voiceRoomId") voiceRoomId: string,
-    @Body() requestBody: JoinVoiceSessionRequestDto,
   ): VoiceSessionResponseDto {
-    return this.voiceService.joinVoiceSession(voiceRoomId, requestBody);
+    return this.voiceService.joinVoiceSession(voiceRoomId);
   }
 
   @Get("voice-rooms/:voiceRoomId/sessions")

@@ -409,6 +409,7 @@ describe("meeting module scaffold", () => {
       {
         id: report.decisions[0].id,
         reportId: report.id,
+        title: "Memo source. 기준으로 후속 작업 범위를 확정했다.",
         content: "Memo source. 기준으로 후속 작업 범위를 확정했다.",
         status: "decided",
         linkedTaskId: null,

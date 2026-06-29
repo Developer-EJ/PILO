@@ -811,6 +811,7 @@ export class MeetingService {
     return {
       id: decision.id,
       reportId: decision.reportId,
+      title: decision.content,
       content: decision.content,
       status: decision.status,
       linkedTaskId: decision.linkedTaskId,

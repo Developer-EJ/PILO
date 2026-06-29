@@ -165,7 +165,8 @@ Dashboard, Canvas, onboarding result 목록이 쓰는 요약 read model이다.
 - 승인 후 주형 Task/Milestone API 호출 결과는 `approval.ownerApiResults`에만 둔다.
 - `ownerApiResults[].targetEntityId`는 호출 성공 시 생성된 owner domain entity id다. 실패, 대기, 미요청 상태에서는 `null`이다.
 - Planning detail은 Task/Milestone 원본 필드를 복제하지 않고, owner API 결과 id만 참조한다.
-- `firstAgendaDraft`는 세인이 소유하는 planning draft 후보이며, 진호 Meeting 원본 DB에 직접 저장하지 않는다. Meeting API가 준비되기 전까지는 Planning detail 안의 후보 데이터로만 유지한다.
+- `firstAgendaDraft`는 세인이 소유하는 planning draft 후보이며, 승인 전에는 진호 Meeting 원본 DB에 직접 저장하지 않는다.
+- 승인 실행 시 실제 회의 아젠다를 만들려면 진호 Meeting contract의 `POST /api/meetings/:meetingId/agendas`를 호출하고, 성공 결과는 `MeetingAgenda` read model로 받는다.
 
 ## Events
 
@@ -185,4 +186,3 @@ Dashboard, Canvas, onboarding result 목록이 쓰는 요약 read model이다.
 ## Mock Rule
 
 Task API가 없으면 approve flow는 `approval.status = waiting_confirmation` 또는 `confirmed`에서 멈춘다. owner API 호출을 시도했지만 실패한 경우에는 `approval.ownerApiResults[].status = failed`와 `errorMessage`로 표현하고, `ProjectPlanDraftDetail.status`에 owner API 실행 상태를 섞지 않는다.
-

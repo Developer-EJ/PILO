@@ -249,6 +249,7 @@ export interface UpdateMeetingActionItemInput {
 export interface MeetingDecisionReadModel {
   id: string;
   reportId: string;
+  title: string;
   content: string;
   status: MeetingDecisionStatus;
   linkedTaskId: string | null;
