@@ -35,7 +35,10 @@ export class CanvasApiError extends WorkspaceApiError {
   }
 }
 
-export function buildCanvasApiUrl(path, baseUrl = defaultWorkspaceApiBaseUrl()) {
+export function buildCanvasApiUrl(
+  path,
+  baseUrl = defaultWorkspaceApiBaseUrl(),
+) {
   return buildWorkspaceApiUrl(path, baseUrl);
 }
 
