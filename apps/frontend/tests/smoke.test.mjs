@@ -338,7 +338,10 @@ describe("frontend package", () => {
 
     const authClient = createMockAuthClient({ storage: blockedStorage });
 
-    assert.equal((await authClient.getCurrentUser()).email, mockCurrentUser.email);
+    assert.equal(
+      (await authClient.getCurrentUser()).email,
+      mockCurrentUser.email,
+    );
   });
 
   it("calls the auth API client with contract routes and credentials", async () => {
