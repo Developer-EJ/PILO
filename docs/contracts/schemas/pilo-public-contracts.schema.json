@@ -185,7 +185,7 @@
     },
     "GithubConnectionSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "provider", "scopes", "connectedAt"],
+      "required": ["id", "workspaceId", "provider", "connectedAt"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -200,7 +200,7 @@
     },
     "GithubRepositorySummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "owner", "repoName", "url", "defaultBranch", "syncedAt"],
+      "required": ["id", "workspaceId", "owner", "repoName", "url"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },

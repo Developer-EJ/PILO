@@ -27,10 +27,12 @@ describe("GitHub repository fixture contract", () => {
 
     assert.ok(Array.isArray(fixture.githubRepositories));
     for (const repository of fixture.githubRepositories) {
-      assert.deepEqual(
-        Object.keys(repository).sort(),
-        Object.keys(repositorySchema.properties).sort(),
-      );
+      for (const field of Object.keys(repository)) {
+        assert.ok(
+          Object.hasOwn(repositorySchema.properties, field),
+          `fixture repository has unknown field ${field}`,
+        );
+      }
       for (const field of repositorySchema.required) {
         assert.ok(
           Object.hasOwn(repository, field),
@@ -43,11 +45,21 @@ describe("GitHub repository fixture contract", () => {
       assert.equal(typeof repository.owner, "string");
       assert.equal(typeof repository.repoName, "string");
       assert.equal(typeof repository.url, "string");
-      assert.ok(
-        typeof repository.defaultBranch === "string" ||
-          repository.defaultBranch === null,
-      );
-      assert.match(repository.syncedAt, /^\d{4}-\d{2}-\d{2}T/);
+      if (Object.hasOwn(repository, "defaultBranch")) {
+        assert.ok(
+          typeof repository.defaultBranch === "string" ||
+            repository.defaultBranch === null,
+        );
+      }
+      if (Object.hasOwn(repository, "syncedAt")) {
+        assert.ok(
+          typeof repository.syncedAt === "string" ||
+            repository.syncedAt === null,
+        );
+        if (typeof repository.syncedAt === "string") {
+          assert.match(repository.syncedAt, /^\d{4}-\d{2}-\d{2}T/);
+        }
+      }
     }
   });
 });

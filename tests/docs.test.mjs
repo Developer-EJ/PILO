@@ -519,6 +519,9 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /## Provided Read Models/);
     assert.match(githubContract, /## Consumed By/);
     assert.match(githubContract, /## Breaking Change Policy/);
+    assert.match(githubContract, /additive optional rollout fields/);
+    assert.match(githubContract, /Making them required requires a separate breaking contract PR/);
+    assert.doesNotMatch(githubContract.slice(githubContract.indexOf("## Mock Rule")), /github-repositories\.fixture\.json/);
     for (const model of [
       "GithubConnectionSummary",
       "GithubRepositorySummary",
@@ -925,7 +928,7 @@ describe("github collaboration templates", () => {
     for (const heading of ["Contract Impact", "Cross-Domain Access", "Mock / Stub", "DB / Migration", "Validation"]) {
       assert.match(content, new RegExp(`## ${heading.replace("/", "\\/")}`));
     }
-    for (const guideField of ["Contract Used", "Owner", "Consumers", "Mock/Real"]) {
+    for (const guideField of ["Contract Used", "Owner", "Internal-only change", "No external consumer", "Consumers", "Mock/Real"]) {
       assert.match(content, new RegExp(guideField));
     }
   });

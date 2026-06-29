@@ -13,6 +13,7 @@
 - Contract Used:
 - Owner:
 - Public contract 변경: Yes/No
+- Internal-only change / No external consumer: Yes/No
 - 변경한 contract 문서:
 - 변경한 schema:
 - Consumers:
