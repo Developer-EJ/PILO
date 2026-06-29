@@ -22,8 +22,13 @@ import {
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
+  workspaceAgentHref,
   workspaceCanvasHref,
   workspaceDashboardHref,
+  workspaceGithubHref,
+  workspaceMeetingsHref,
+  workspaceReviewsHref,
+  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
 import {
@@ -101,19 +106,6 @@ type CanvasNavItem = {
   badge?: string;
   href?: string;
 };
-
-const canvasNavLabels = [
-  "홈 / 대시보드",
-  "프로젝트 시작",
-  "기능 목록",
-  "작업 보드",
-  "회의 / Report",
-  "음성채팅",
-  "Canvas",
-  "GitHub PR",
-  "코드 리뷰",
-  "설정",
-];
 
 const canvasFilterLabels: Record<string, string> = {
   task: "작업",
@@ -416,35 +408,40 @@ function buildCanvasNavItems({
   taskCount: number;
   pullRequestCount: number;
 }): CanvasNavItem[] {
-  return canvasNavLabels.map((label, index) => {
-    if (index === 0) {
-      return {
-        label,
-        href: workspaceDashboardHref(workspaceId),
-      };
-    }
-    if (index === 3) {
-      return {
-        label,
-        badge: String(taskCount),
-      };
-    }
-    if (index === 6) {
-      return {
-        label,
-        active: true,
-        href: workspaceCanvasHref(workspaceId),
-      };
-    }
-    if (index === 7) {
-      return {
-        label,
-        badge: String(pullRequestCount),
-      };
-    }
-
-    return { label };
-  });
+  return [
+    {
+      label: "Dashboard",
+      href: workspaceDashboardHref(workspaceId),
+    },
+    {
+      label: "Agent / Planning",
+      href: workspaceAgentHref(workspaceId),
+    },
+    {
+      label: "Tasks",
+      badge: String(taskCount),
+      href: workspaceTasksHref(workspaceId),
+    },
+    {
+      label: "Meetings / Reports",
+      href: workspaceMeetingsHref(workspaceId),
+    },
+    {
+      label: "Canvas",
+      active: true,
+      href: workspaceCanvasHref(workspaceId),
+    },
+    {
+      label: "GitHub",
+      badge: pullRequestCount ? String(pullRequestCount) : undefined,
+      href: workspaceGithubHref(workspaceId),
+    },
+    {
+      label: "Reviews",
+      badge: pullRequestCount ? String(pullRequestCount) : undefined,
+      href: workspaceReviewsHref(workspaceId),
+    },
+  ];
 }
 
 function formatPosition(selection: PiloCanvasSelection) {

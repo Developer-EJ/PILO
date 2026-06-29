@@ -94,8 +94,14 @@ import {
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
   resolveCurrentWorkspaceSelection,
+  workspaceAgentHref,
   workspaceCanvasHref,
   workspaceDashboardHref,
+  workspaceGithubHref,
+  workspaceMeetingsHref,
+  workspacePlanningHref,
+  workspaceReviewsHref,
+  workspaceTasksHref,
   writeStoredWorkspaceId,
 } from "../lib/workspace/currentWorkspace.mjs";
 import { workspaceDashboardFixture } from "../lib/workspace/workspaceDashboardFixture.mjs";
@@ -367,6 +373,30 @@ describe("frontend package", () => {
     assert.equal(
       workspaceCanvasHref(workspaces[0].id),
       `/workspaces/${workspaces[0].id}/canvas`,
+    );
+    assert.equal(
+      workspaceTasksHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/tasks`,
+    );
+    assert.equal(
+      workspaceGithubHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/github`,
+    );
+    assert.equal(
+      workspaceMeetingsHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/meetings`,
+    );
+    assert.equal(
+      workspaceReviewsHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/reviews`,
+    );
+    assert.equal(
+      workspaceAgentHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/agent`,
+    );
+    assert.equal(
+      workspacePlanningHref(workspaces[0].id),
+      `/workspaces/${workspaces[0].id}/planning`,
     );
   });
 

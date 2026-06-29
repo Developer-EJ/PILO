@@ -9,9 +9,14 @@ import { createCanvasClient } from "../../lib/workspace/canvasClient.mjs";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
+  workspaceAgentHref,
   workspaceCanvasBoardHref,
   workspaceCanvasHref,
   workspaceDashboardHref,
+  workspaceGithubHref,
+  workspaceMeetingsHref,
+  workspaceReviewsHref,
+  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
@@ -61,6 +66,55 @@ export function WorkspaceCanvasBoards() {
   const dashboard = useMemo(
     () => createWorkspaceDashboardFixture(workspaceId),
     [workspaceId],
+  );
+  const navItems = useMemo(
+    () => [
+      {
+        label: "Dashboard",
+        href: workspaceDashboardHref(workspaceId),
+      },
+      {
+        label: "Agent / Planning",
+        href: workspaceAgentHref(workspaceId),
+      },
+      {
+        label: "Tasks",
+        href: workspaceTasksHref(workspaceId),
+        badge: String(dashboard.tasks.length),
+      },
+      {
+        label: "Meetings / Reports",
+        href: workspaceMeetingsHref(workspaceId),
+        badge: dashboard.meetingReports.length
+          ? String(dashboard.meetingReports.length)
+          : undefined,
+      },
+      {
+        label: "Canvas",
+        href: workspaceCanvasHref(workspaceId),
+        active: true,
+      },
+      {
+        label: "GitHub",
+        href: workspaceGithubHref(workspaceId),
+        badge: dashboard.pullRequests.length
+          ? String(dashboard.pullRequests.length)
+          : undefined,
+      },
+      {
+        label: "Reviews",
+        href: workspaceReviewsHref(workspaceId),
+        badge: dashboard.pullRequests.length
+          ? String(dashboard.pullRequests.length)
+          : undefined,
+      },
+    ],
+    [
+      dashboard.meetingReports.length,
+      dashboard.pullRequests.length,
+      dashboard.tasks.length,
+      workspaceId,
+    ],
   );
   const [state, setState] = useState<CanvasBoardListState>(
     initialBoardListState,
@@ -134,39 +188,17 @@ export function WorkspaceCanvasBoards() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          <Link href={workspaceDashboardHref(workspaceId)} className="nav-item">
-            <span>홈 / 대시보드</span>
-          </Link>
-          <div className="nav-item" aria-disabled="true">
-            <span>프로젝트 시작</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>기능 목록</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Task 보드</span>
-            <b>{dashboard.tasks.length}</b>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>회의 / Report</span>
-          </div>
-          <Link
-            href={workspaceCanvasHref(workspaceId)}
-            className="nav-item active"
-            aria-current="page"
-          >
-            <span>Canvas</span>
-          </Link>
-          <div className="nav-item" aria-disabled="true">
-            <span>GitHub PR</span>
-            <b>{dashboard.pullRequests.length}</b>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Code Review</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>설정</span>
-          </div>
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={item.active ? "nav-item active" : "nav-item"}
+              aria-current={item.active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+              {item.badge ? <b>{item.badge}</b> : null}
+            </Link>
+          ))}
         </nav>
       </aside>
 

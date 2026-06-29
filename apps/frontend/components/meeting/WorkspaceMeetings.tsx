@@ -11,8 +11,13 @@ import { createVoiceClient } from "../../lib/voice/voiceClient.mjs";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
+  workspaceAgentHref,
   workspaceCanvasHref,
   workspaceDashboardHref,
+  workspaceGithubHref,
+  workspaceMeetingsHref,
+  workspaceReviewsHref,
+  workspaceTasksHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 
@@ -185,10 +190,6 @@ function resolveWorkspaceId(pathname: string) {
   return extractWorkspaceIdFromPathname(pathname) ?? mockWorkspaces[0].id;
 }
 
-function workspaceMeetingsHref(workspaceId: string) {
-  return `${workspaceDashboardHref(workspaceId)}/meetings`;
-}
-
 function formatDateTime(value: string | null) {
   if (!value) return "Not set";
 
@@ -243,6 +244,53 @@ export function WorkspaceMeetings() {
   const [transcripts, setTranscripts] = useState<TranscriptSegment[]>([]);
   const [recentReports, setRecentReports] = useState<MeetingReportSummary[]>(
     [],
+  );
+  const navItems = useMemo(
+    () => [
+      {
+        label: "Dashboard",
+        href: workspaceDashboardHref(workspaceId),
+      },
+      {
+        label: "Agent / Planning",
+        href: workspaceAgentHref(workspaceId),
+      },
+      {
+        label: "Tasks",
+        href: workspaceTasksHref(workspaceId),
+        badge: String(dashboard.tasks.length),
+      },
+      {
+        label: "Meetings / Reports",
+        href: workspaceMeetingsHref(workspaceId),
+        badge: recentReports.length ? String(recentReports.length) : undefined,
+        active: true,
+      },
+      {
+        label: "Canvas",
+        href: workspaceCanvasHref(workspaceId),
+      },
+      {
+        label: "GitHub",
+        href: workspaceGithubHref(workspaceId),
+        badge: dashboard.pullRequests.length
+          ? String(dashboard.pullRequests.length)
+          : undefined,
+      },
+      {
+        label: "Reviews",
+        href: workspaceReviewsHref(workspaceId),
+        badge: dashboard.pullRequests.length
+          ? String(dashboard.pullRequests.length)
+          : undefined,
+      },
+    ],
+    [
+      dashboard.pullRequests.length,
+      dashboard.tasks.length,
+      recentReports.length,
+      workspaceId,
+    ],
   );
   const [report, setReport] = useState<MeetingReportDetail | null>(null);
   const [actionItems, setActionItems] = useState<MeetingActionItem[]>([]);
@@ -602,40 +650,17 @@ export function WorkspaceMeetings() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          <Link href={workspaceDashboardHref(workspaceId)} className="nav-item">
-            <span>Dashboard</span>
-          </Link>
-          <div className="nav-item" aria-disabled="true">
-            <span>Project start</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Feature list</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Task board</span>
-            <b>{dashboard.tasks.length}</b>
-          </div>
-          <Link
-            href={workspaceMeetingsHref(workspaceId)}
-            className="nav-item active"
-            aria-current="page"
-          >
-            <span>Meeting / Report</span>
-            <b>{recentReports.length}</b>
-          </Link>
-          <Link href={workspaceCanvasHref(workspaceId)} className="nav-item">
-            <span>Canvas</span>
-          </Link>
-          <div className="nav-item" aria-disabled="true">
-            <span>GitHub PR</span>
-            <b>{dashboard.pullRequests.length}</b>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Code Review</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Settings</span>
-          </div>
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={item.active ? "nav-item active" : "nav-item"}
+              aria-current={item.active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+              {item.badge ? <b>{item.badge}</b> : null}
+            </Link>
+          ))}
         </nav>
       </aside>
 
