@@ -1,0 +1,64 @@
+{
+  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+  "workspaceId": "22222222-2222-4222-8222-222222222222",
+  "title": "Project Map",
+  "boardType": "project_map",
+  "shapeCount": 2,
+  "connectionCount": 1,
+  "updatedAt": "2026-06-28T00:00:00.000Z",
+  "shapes": [
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      "shapeType": "task",
+      "entityType": "task",
+      "entityId": "44444444-4444-4444-8444-444444444441",
+      "displayTitle": "Google/GitHub login flow",
+      "width": 280,
+      "height": 160,
+      "color": "#6d5bd6",
+      "isCollapsed": false,
+      "zIndex": 1,
+      "position": {
+        "x": 120,
+        "y": 140
+      }
+    },
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+      "shapeType": "pull_request",
+      "entityType": "pull_request",
+      "entityId": "66666666-6666-4666-8666-666666666661",
+      "displayTitle": "PR #42 Code Review",
+      "width": 300,
+      "height": 172,
+      "color": "#2e9e5b",
+      "isCollapsed": false,
+      "zIndex": 2,
+      "position": {
+        "x": 520,
+        "y": 220
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+      "sourceShapeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      "targetShapeId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+      "connectionType": "implemented_by",
+      "label": "Task to PR"
+    }
+  ],
+  "viewSetting": {
+    "zoom": 1,
+    "viewportX": 0,
+    "viewportY": 0
+  },
+  "filterSetting": {
+    "enabledEntityTypes": ["task", "meeting_report", "pull_request"],
+    "assigneeMemberId": null,
+    "showDelayedOnly": false,
+    "showRiskOnly": false,
+    "filters": {}
+  }
+}
