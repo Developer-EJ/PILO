@@ -12,15 +12,57 @@ const {
   PullRequestAnalysisService,
 } = require("../src/modules/review/analysis/pull-request-analysis.service.ts");
 const {
+  InMemoryReviewArtifactsRepository,
+} = require("../src/modules/review/artifacts/in-memory-review-artifacts.repository.ts");
+const {
+  ReviewArtifactsService,
+} = require("../src/modules/review/artifacts/review-artifacts.service.ts");
+const {
+  ChangedFilesService,
+} = require("../src/modules/review/changes/changed-files.service.ts");
+const {
+  InMemoryChangedFilesRepository,
+} = require("../src/modules/review/changes/in-memory-changed-files.repository.ts");
+const {
+  InMemoryReviewGraphRepository,
+} = require("../src/modules/review/graph/in-memory-review-graph.repository.ts");
+const {
+  ReviewGraphService,
+} = require("../src/modules/review/graph/review-graph.service.ts");
+const {
+  AgentChangedFilesResultService,
+} = require("../src/modules/review/result/agent-changed-files-result.service.ts");
+const {
+  AgentGraphResultService,
+} = require("../src/modules/review/result/agent-graph-result.service.ts");
+const {
+  AgentReviewArtifactsResultService,
+} = require("../src/modules/review/result/agent-review-artifacts-result.service.ts");
+const {
   AgentResultConsumerService,
 } = require("../src/modules/review/result/agent-result-consumer.service.ts");
 
 function createServices() {
   const repository = new InMemoryPullRequestAnalysisRepository();
+  const graphRepository = new InMemoryReviewGraphRepository();
+  const changedFilesService = new ChangedFilesService(
+    new InMemoryChangedFilesRepository(),
+  );
+  const artifactsService = new ReviewArtifactsService(
+    new InMemoryReviewArtifactsRepository(),
+  );
 
   return {
     analysisService: new PullRequestAnalysisService(repository),
-    resultConsumer: new AgentResultConsumerService(repository),
+    artifactsService,
+    changedFilesService,
+    graphService: new ReviewGraphService(graphRepository),
+    resultConsumer: new AgentResultConsumerService(
+      repository,
+      new AgentGraphResultService(graphRepository),
+      new AgentChangedFilesResultService(changedFilesService),
+      new AgentReviewArtifactsResultService(artifactsService),
+    ),
   };
 }
 
@@ -121,5 +163,105 @@ describe("agent result root analysis consumer", () => {
     assert.deepEqual(failed.errorTrace, [
       "[WORKFLOW_FAILED] review workflow failed",
     ]);
+  });
+
+  it("applies graph, changed files, and review artifacts from one succeeded result", () => {
+    const {
+      analysisService,
+      artifactsService,
+      changedFilesService,
+      graphService,
+      resultConsumer,
+    } = createServices();
+    const pullRequestId = "66666666-6666-4666-8666-666666666661";
+    const analysis = analysisService.requestAnalysis(pullRequestId);
+    const message = {
+      jobId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      runId: "99999999-9999-4999-8999-999999999905",
+      status: "succeeded",
+      finishedAt: "2026-06-27T10:06:00.000Z",
+      output: {
+        pullRequestId,
+        purposeSummary: "Connect review result read models.",
+        impactSummary: "Review room can render graph, files, and checklist.",
+        testRecommendation: "Open the review room after result consumption.",
+        riskLevel: "high",
+        conclusion: "Review data is ready for the room.",
+        graph: {
+          summary: "review room data graph",
+          intentSummary: "show generated review order",
+          reviewStrategy: "start with the changed Review room component",
+          nodes: [
+            {
+              id: "review-node-runtime-file",
+              nodeType: "file",
+              label: "apps/frontend/components/review/ReviewRoomWorkspace.tsx",
+              filePath:
+                "apps/frontend/components/review/ReviewRoomWorkspace.tsx",
+              riskLevel: "high",
+              status: "discuss",
+              reviewOrder: 1,
+              roleSummary: "renders review room data",
+              reviewReason: "connects generated result data to UI",
+              position: { x: 120, y: 80 },
+            },
+          ],
+        },
+        changedFiles: [
+          {
+            filePath:
+              "apps/frontend/components/review/ReviewRoomWorkspace.tsx",
+            changeType: "modified",
+            additions: 24,
+            deletions: 6,
+            summary: "loads generated changed files",
+            functions: [
+              {
+                name: "openPullRequest",
+                changeType: "modified",
+                summary: "hydrates the review session",
+              },
+            ],
+          },
+        ],
+        questions: [
+          {
+            question: "Does the room show generated changed files?",
+            priority: "high",
+          },
+        ],
+        risks: [
+          {
+            title: "fixture fallback hides missing generated data",
+            description: "The room could appear ready with stale fixture data.",
+            riskLevel: "high",
+            recommendation: "Prefer runtime changed-files API data.",
+          },
+        ],
+        checklist: [
+          {
+            type: "review",
+            title: "Open generated review room data before merge",
+          },
+        ],
+      },
+    };
+
+    const updated = resultConsumer.applyResult(message);
+    const replay = resultConsumer.applyResult(message);
+    const graph = graphService.getGraph(analysis.id);
+    const changedFiles = changedFilesService.listChangedFiles(analysis.id);
+    const checklistItems = artifactsService.listChecklistItems(analysis.id);
+
+    assert.equal(updated.analysisStatus, "succeeded");
+    assert.equal(updated.riskLevel, "high");
+    assert.equal(updated.riskCount, 1);
+    assert.equal(replay.updatedAt, updated.updatedAt);
+    assert.equal(graph.nodes[0].label, message.output.graph.nodes[0].label);
+    assert.equal(graph.nodes[0].riskLevel, "high");
+    assert.equal(changedFiles[0].filePath, message.output.changedFiles[0].filePath);
+    assert.equal(changedFiles[0].functions[0].name, "openPullRequest");
+    assert.equal(checklistItems.length, 1);
+    assert.equal(checklistItems[0].title, message.output.checklist[0].title);
   });
 });

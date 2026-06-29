@@ -302,6 +302,13 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 
 - `review.analysis.generate`
 
+`review.analysis.generate` result consumption is idempotent by `jobId` and
+`runId`. On `succeeded`, Review applies the root `PRAnalysisSummary` fields and
+also persists any complete `graph`, `changedFiles`, and
+`questions`/`risks`/`checklist` artifacts present in the result output. A graph
+payload with only status/risk counters is used for summary counts but is not
+stored as `ReviewCanvasSummary` until it contains complete node identity fields.
+
 ## Boundaries
 
 - Review creates and owns `changed_files` from `PullRequestChangedFileSummary`; it does not own GitHub PR source sync. Review derives `changed_functions` only from changed files with non-null `patch` or from a separate Review-owned analysis source.

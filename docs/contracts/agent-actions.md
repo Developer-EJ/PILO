@@ -356,7 +356,7 @@ Agent 실행은 app-server가 job queue에 요청을 넣고, ai-worker가 처리
 }
 ```
 
-`output`은 `workflowType`별 contract를 따른다. `workflowType = "meeting.report.generate"`의 output shape과 meeting table 매핑 규칙은 `docs/contracts/meeting.md`의 `meeting.report.generate v1` 섹션을 따른다.
+`output`은 `workflowType`별 contract를 따른다. `workflowType = "meeting.report.generate"`의 output shape과 meeting table 매핑 규칙은 `docs/contracts/meeting.md`의 `meeting.report.generate v1` 섹션을 따른다. `workflowType = "review.analysis.generate"`의 output은 `docs/contracts/review.md`의 Review Agent result rules를 따르며, app-server Review consumer가 analysis summary, graph, changed files, and review artifacts를 Review-owned read models로 반영한다.
 
 ### Queue Rules
 

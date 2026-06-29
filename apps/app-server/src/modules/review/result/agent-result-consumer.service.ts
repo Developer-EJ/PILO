@@ -2,13 +2,18 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { InMemoryPullRequestAnalysisRepository } from "../analysis/in-memory-pull-request-analysis.repository";
 import { PullRequestAnalysisRecord } from "../analysis/pull-request-analysis.types";
+import { AgentChangedFilesResultService } from "./agent-changed-files-result.service";
+import { AgentGraphResultService } from "./agent-graph-result.service";
+import { AgentReviewArtifactsResultService } from "./agent-review-artifacts-result.service";
 import {
   AgentResultApplicationRecord,
   AgentResultMessage,
   ReviewAnalysisGenerateOutput,
+  ReviewAnalysisGenerateGraphOutput,
 } from "./agent-result.types";
 
 @Injectable()
@@ -22,6 +27,12 @@ export class AgentResultConsumerService {
 
   constructor(
     private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
+    @Optional()
+    private readonly graphResultService?: AgentGraphResultService,
+    @Optional()
+    private readonly changedFilesResultService?: AgentChangedFilesResultService,
+    @Optional()
+    private readonly artifactsResultService?: AgentReviewArtifactsResultService,
   ) {}
 
   applyResult(message: AgentResultMessage): PullRequestAnalysisRecord {
@@ -45,17 +56,23 @@ export class AgentResultConsumerService {
         ? this.toFailedAnalysis(analysis, message, appliedAt)
         : this.toSucceededAnalysis(analysis, message.output ?? {}, appliedAt);
 
+    if (message.status === "succeeded") {
+      this.applySecondaryOutputs(updated.id, message.output ?? {});
+    }
+
+    const saved = this.analysisRepository.save(updated);
+
     this.applicationsByResultKey.set(resultKey, {
       jobId: message.jobId,
       runId: message.runId,
-      analysisId: updated.id,
+      analysisId: saved.id,
       analysisStatus: message.status,
       appliedAt,
     });
     this.applicationKeysByJobId.set(message.jobId, resultKey);
     this.applicationKeysByRunId.set(message.runId, resultKey);
 
-    return this.analysisRepository.save(updated);
+    return saved;
   }
 
   private findAnalysis(message: AgentResultMessage): PullRequestAnalysisRecord {
@@ -122,7 +139,10 @@ export class AgentResultConsumerService {
     discussCount: number;
     riskCount: number;
   } {
-    const nodes = output.graph?.nodes ?? [];
+    const nodes = (output.graph?.nodes ?? []) as Array<{
+      status?: "ok" | "discuss" | "unknown";
+      riskLevel?: string | null;
+    }>;
 
     return {
       okCount: nodes.filter((node) => node.status === "ok").length,
@@ -131,6 +151,68 @@ export class AgentResultConsumerService {
         (node) => node.riskLevel && node.riskLevel !== "low",
       ).length,
     };
+  }
+
+  private applySecondaryOutputs(
+    analysisId: string,
+    output: ReviewAnalysisGenerateOutput,
+  ): void {
+    const graph = this.toPersistableGraph(output.graph);
+
+    if (graph && this.graphResultService) {
+      this.graphResultService.applyGraph(analysisId, graph);
+    }
+
+    if (output.changedFiles && this.changedFilesResultService) {
+      this.changedFilesResultService.applyChangedFiles(
+        analysisId,
+        output.changedFiles,
+      );
+    }
+
+    if (this.hasArtifacts(output) && this.artifactsResultService) {
+      this.artifactsResultService.applyArtifacts(analysisId, {
+        questions: output.questions,
+        risks: output.risks,
+        checklist: output.checklist,
+      });
+    }
+  }
+
+  private toPersistableGraph(
+    graph: ReviewAnalysisGenerateGraphOutput | undefined,
+  ): ReviewAnalysisGenerateGraphOutput | null {
+    if (!graph) {
+      return null;
+    }
+
+    const nodes = graph.nodes ?? [];
+    const hasSummary =
+      Boolean(graph.summary) ||
+      Boolean(graph.intentSummary) ||
+      Boolean(graph.reviewStrategy);
+    const hasCompleteNodes =
+      nodes.length > 0 &&
+      nodes.every(
+        (node) =>
+          typeof node.id === "string" &&
+          typeof node.nodeType === "string" &&
+          typeof node.label === "string",
+      );
+
+    if (!hasSummary && !hasCompleteNodes) {
+      return null;
+    }
+
+    return hasCompleteNodes ? graph : { ...graph, nodes: [] };
+  }
+
+  private hasArtifacts(output: ReviewAnalysisGenerateOutput): boolean {
+    return Boolean(
+      output.questions?.length ||
+        output.risks?.length ||
+        output.checklist?.length,
+    );
   }
 
   private resultKey(message: AgentResultMessage): string {

@@ -1,4 +1,10 @@
 import type { ReviewAnalysisStatus, ReviewRiskLevel } from "../public";
+import type { AgentChangedFileResult } from "./agent-changed-files-result.service";
+import type {
+  AgentReviewGraphResult,
+  AgentReviewNodeResult,
+} from "./agent-graph-result.service";
+import type { AgentReviewArtifactsResult } from "./agent-review-artifacts-result.service";
 
 export interface AgentResultMessage {
   jobId: string;
@@ -9,20 +15,25 @@ export interface AgentResultMessage {
   finishedAt?: string;
 }
 
-export interface ReviewAnalysisGenerateOutput {
+export type ReviewAnalysisGenerateGraphOutput = AgentReviewGraphResult & {
+  nodes?: Array<
+    AgentReviewNodeResult & {
+      status?: "ok" | "discuss" | "unknown";
+      riskLevel?: ReviewRiskLevel;
+    }
+  >;
+};
+
+export interface ReviewAnalysisGenerateOutput
+  extends AgentReviewArtifactsResult {
   pullRequestId?: string;
   purposeSummary?: string | null;
   impactSummary?: string | null;
   testRecommendation?: string | null;
   riskLevel?: ReviewRiskLevel;
   conclusion?: string | null;
-  graph?: {
-    nodes?: Array<{
-      status?: "ok" | "discuss" | "unknown";
-      riskLevel?: ReviewRiskLevel;
-    }>;
-  };
-  risks?: unknown[];
+  graph?: ReviewAnalysisGenerateGraphOutput;
+  changedFiles?: AgentChangedFileResult[];
 }
 
 export interface AgentResultApplicationRecord {
