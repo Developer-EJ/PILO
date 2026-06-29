@@ -201,6 +201,7 @@
       "required": [
         "id",
         "workspaceId",
+        "milestoneId",
         "title",
         "status",
         "priority",
@@ -213,6 +214,16 @@
         },
         "workspaceId": {
           "$ref": "#/$defs/uuid"
+        },
+        "milestoneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "title": {
           "type": "string"
@@ -419,8 +430,9 @@
         "workspaceId",
         "title",
         "status",
-        "taskCount",
-        "doneTaskCount"
+        "startDate",
+        "endDate",
+        "updatedAt"
       ],
       "additionalProperties": false,
       "properties": {
@@ -432,6 +444,13 @@
         },
         "title": {
           "type": "string"
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "in_progress",
+            "done"
+          ]
         },
         "startDate": {
           "anyOf": [
@@ -453,20 +472,8 @@
             }
           ]
         },
-        "status": {
-          "enum": [
-            "planned",
-            "in_progress",
-            "done"
-          ]
-        },
-        "taskCount": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "doneTaskCount": {
-          "type": "integer",
-          "minimum": 0
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
         }
       }
     },
@@ -1029,250 +1036,754 @@
       }
     },
     "ProjectPlanDraftStatus": {
-      "enum": ["draft", "reviewing", "approved", "rejected"]
+      "enum": [
+        "draft",
+        "reviewing",
+        "approved",
+        "rejected"
+      ]
     },
     "PlanningApprovalStatus": {
-      "enum": ["not_requested", "waiting_confirmation", "confirmed", "executed", "failed", "rejected"]
+      "enum": [
+        "not_requested",
+        "waiting_confirmation",
+        "confirmed",
+        "executed",
+        "failed",
+        "rejected"
+      ]
     },
     "PlanningOwnerApiResult": {
       "type": "object",
-      "required": ["owner", "operation", "sourceDraftType", "sourceDraftId", "status", "targetEntityId", "errorMessage"],
+      "required": [
+        "owner",
+        "operation",
+        "sourceDraftType",
+        "sourceDraftId",
+        "status",
+        "targetEntityId",
+        "errorMessage"
+      ],
       "additionalProperties": false,
       "allOf": [
         {
           "if": {
-            "required": ["status"],
+            "required": [
+              "status"
+            ],
             "properties": {
-              "status": { "const": "succeeded" }
+              "status": {
+                "const": "succeeded"
+              }
             }
           },
           "then": {
             "properties": {
-              "targetEntityId": { "$ref": "#/$defs/uuid" },
-              "errorMessage": { "type": "null" }
+              "targetEntityId": {
+                "$ref": "#/$defs/uuid"
+              },
+              "errorMessage": {
+                "type": "null"
+              }
             }
           }
         },
         {
           "if": {
-            "required": ["status"],
+            "required": [
+              "status"
+            ],
             "properties": {
-              "status": { "const": "failed" }
+              "status": {
+                "const": "failed"
+              }
             }
           },
           "then": {
             "properties": {
-              "targetEntityId": { "type": "null" },
-              "errorMessage": { "type": "string", "minLength": 1 }
+              "targetEntityId": {
+                "type": "null"
+              },
+              "errorMessage": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         },
         {
           "if": {
-            "required": ["status"],
+            "required": [
+              "status"
+            ],
             "properties": {
-              "status": { "enum": ["not_requested", "pending", "skipped"] }
+              "status": {
+                "enum": [
+                  "not_requested",
+                  "pending",
+                  "skipped"
+                ]
+              }
             }
           },
           "then": {
             "properties": {
-              "targetEntityId": { "type": "null" }
+              "targetEntityId": {
+                "type": "null"
+              }
             }
           }
         },
         {
           "if": {
-            "required": ["operation"],
+            "required": [
+              "operation"
+            ],
             "properties": {
-              "operation": { "const": "task.create" }
+              "operation": {
+                "const": "task.create"
+              }
             }
           },
           "then": {
             "properties": {
-              "sourceDraftType": { "const": "feature" }
+              "sourceDraftType": {
+                "const": "feature"
+              }
             }
           }
         },
         {
           "if": {
-            "required": ["operation"],
+            "required": [
+              "operation"
+            ],
             "properties": {
-              "operation": { "const": "milestone.create" }
+              "operation": {
+                "const": "milestone.create"
+              }
             }
           },
           "then": {
             "properties": {
-              "sourceDraftType": { "const": "milestone" }
+              "sourceDraftType": {
+                "const": "milestone"
+              }
             }
           }
         }
       ],
       "properties": {
-        "owner": { "enum": ["task"] },
-        "operation": { "enum": ["task.create", "milestone.create"] },
-        "sourceDraftType": { "enum": ["feature", "milestone"] },
-        "sourceDraftId": { "$ref": "#/$defs/uuid" },
-        "status": { "enum": ["not_requested", "pending", "succeeded", "failed", "skipped"] },
-        "targetEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "errorMessage": { "type": ["string", "null"] }
+        "owner": {
+          "enum": [
+            "task"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "task.create",
+            "milestone.create"
+          ]
+        },
+        "sourceDraftType": {
+          "enum": [
+            "feature",
+            "milestone"
+          ]
+        },
+        "sourceDraftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "enum": [
+            "not_requested",
+            "pending",
+            "succeeded",
+            "failed",
+            "skipped"
+          ]
+        },
+        "targetEntityId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "ProjectPlanApprovalState": {
       "type": "object",
-      "required": ["status", "actionId", "requestedAt", "confirmedAt", "executedAt", "ownerApiResults"],
+      "required": [
+        "status",
+        "actionId",
+        "requestedAt",
+        "confirmedAt",
+        "executedAt",
+        "ownerApiResults"
+      ],
       "additionalProperties": false,
       "properties": {
-        "status": { "$ref": "#/$defs/PlanningApprovalStatus" },
-        "actionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "requestedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
-        "confirmedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
-        "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "status": {
+          "$ref": "#/$defs/PlanningApprovalStatus"
+        },
+        "actionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "ownerApiResults": {
           "type": "array",
-          "items": { "$ref": "#/$defs/PlanningOwnerApiResult" }
+          "items": {
+            "$ref": "#/$defs/PlanningOwnerApiResult"
+          }
         }
       }
     },
     "ProjectPlanDraftSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "goal", "targetUser", "status", "featureDraftCount", "milestoneDraftCount", "riskCount", "createdAt"],
+      "required": [
+        "id",
+        "workspaceId",
+        "goal",
+        "targetUser",
+        "status",
+        "featureDraftCount",
+        "milestoneDraftCount",
+        "riskCount",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "goal": { "type": ["string", "null"] },
-        "targetUser": { "type": ["string", "null"] },
-        "status": { "$ref": "#/$defs/ProjectPlanDraftStatus" },
-        "featureDraftCount": { "type": "integer", "minimum": 0 },
-        "milestoneDraftCount": { "type": "integer", "minimum": 0 },
-        "riskCount": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "targetUser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "reviewing",
+            "approved",
+            "rejected",
+            "waiting_confirmation",
+            "approved_pending_task_creation"
+          ]
+        },
+        "featureDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "milestoneDraftCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanTechStackRecommendation": {
       "type": "object",
-      "required": ["id", "draftId", "frontend", "backend", "databaseName", "ai", "deploy", "reason", "difficulty", "alternatives", "createdAt"],
+      "required": [
+        "id",
+        "draftId",
+        "frontend",
+        "backend",
+        "databaseName",
+        "ai",
+        "deploy",
+        "reason",
+        "difficulty",
+        "alternatives",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "draftId": { "$ref": "#/$defs/uuid" },
-        "frontend": { "type": ["string", "null"] },
-        "backend": { "type": ["string", "null"] },
-        "databaseName": { "type": ["string", "null"] },
-        "ai": { "type": ["string", "null"] },
-        "deploy": { "type": ["string", "null"] },
-        "reason": { "type": ["string", "null"] },
-        "difficulty": { "type": ["string", "null"] },
-        "alternatives": { "type": "array", "items": { "type": "string" } },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "frontend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "databaseName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ai": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deploy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "difficulty": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanFeatureDraft": {
       "type": "object",
-      "required": ["id", "draftId", "title", "description", "scope", "reason", "sortOrder", "createdAt"],
+      "required": [
+        "id",
+        "draftId",
+        "title",
+        "description",
+        "scope",
+        "reason",
+        "sortOrder",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "draftId": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string", "minLength": 1 },
-        "description": { "type": ["string", "null"] },
-        "scope": { "enum": ["mvp", "should", "could", "excluded"] },
-        "reason": { "type": ["string", "null"] },
-        "sortOrder": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "mvp",
+            "should",
+            "could",
+            "excluded"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanRoleDraft": {
       "type": "object",
-      "required": ["id", "draftId", "member", "suggestedRole", "reason", "sortOrder", "createdAt"],
+      "required": [
+        "id",
+        "draftId",
+        "member",
+        "suggestedRole",
+        "reason",
+        "sortOrder",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "draftId": { "$ref": "#/$defs/uuid" },
-        "member": { "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }] },
-        "suggestedRole": { "type": "string", "minLength": 1 },
-        "reason": { "type": ["string", "null"] },
-        "sortOrder": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "member": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/memberRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suggestedRole": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanMilestoneDraft": {
       "type": "object",
-      "required": ["id", "draftId", "title", "startDate", "endDate", "sortOrder", "createdAt"],
+      "required": [
+        "id",
+        "draftId",
+        "title",
+        "startDate",
+        "endDate",
+        "sortOrder",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "draftId": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string", "minLength": 1 },
-        "startDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
-        "endDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
-        "sortOrder": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanRiskNote": {
       "type": "object",
-      "required": ["id", "draftId", "content", "severity", "sortOrder", "createdAt"],
+      "required": [
+        "id",
+        "draftId",
+        "content",
+        "severity",
+        "sortOrder",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "draftId": { "$ref": "#/$defs/uuid" },
-        "content": { "type": "string", "minLength": 1 },
-        "severity": { "enum": ["low", "medium", "high", "critical"] },
-        "sortOrder": { "type": "integer", "minimum": 0 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "sortOrder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanFirstAgendaDraft": {
       "type": "object",
-      "required": ["id", "draftId", "title", "objective", "agendaItems", "attendeeMemberIds", "durationMinutes", "createdAt"],
+      "required": [
+        "id",
+        "draftId",
+        "title",
+        "objective",
+        "agendaItems",
+        "attendeeMemberIds",
+        "durationMinutes",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "draftId": { "$ref": "#/$defs/uuid" },
-        "title": { "type": "string", "minLength": 1 },
-        "objective": { "type": "string", "minLength": 1 },
-        "agendaItems": { "type": "array", "items": { "type": "string" } },
-        "attendeeMemberIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
-        "durationMinutes": { "type": "integer", "minimum": 1 },
-        "createdAt": { "$ref": "#/$defs/dateTime" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "draftId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agendaItems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "attendeeMemberIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "ProjectPlanDraftDetail": {
       "type": "object",
-      "required": ["id", "workspaceId", "goal", "targetUser", "problem", "duration", "outputGoal", "status", "createdByMemberId", "techStack", "featureDrafts", "roleDrafts", "milestoneDrafts", "riskNotes", "firstAgendaDraft", "approval", "createdAt", "updatedAt"],
+      "required": [
+        "id",
+        "workspaceId",
+        "goal",
+        "targetUser",
+        "problem",
+        "duration",
+        "outputGoal",
+        "status",
+        "createdByMemberId",
+        "techStack",
+        "featureDrafts",
+        "roleDrafts",
+        "milestoneDrafts",
+        "riskNotes",
+        "firstAgendaDraft",
+        "approval",
+        "createdAt",
+        "updatedAt"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "goal": { "type": ["string", "null"] },
-        "targetUser": { "type": ["string", "null"] },
-        "problem": { "type": ["string", "null"] },
-        "duration": { "type": ["string", "null"] },
-        "outputGoal": { "type": ["string", "null"] },
-        "status": { "$ref": "#/$defs/ProjectPlanDraftStatus" },
-        "createdByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "techStack": { "anyOf": [{ "$ref": "#/$defs/ProjectPlanTechStackRecommendation" }, { "type": "null" }] },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetUser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "problem": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outputGoal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ProjectPlanDraftStatus"
+        },
+        "createdByMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "techStack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectPlanTechStackRecommendation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "featureDrafts": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ProjectPlanFeatureDraft" }
+          "items": {
+            "$ref": "#/$defs/ProjectPlanFeatureDraft"
+          }
         },
         "roleDrafts": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ProjectPlanRoleDraft" }
+          "items": {
+            "$ref": "#/$defs/ProjectPlanRoleDraft"
+          }
         },
         "milestoneDrafts": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ProjectPlanMilestoneDraft" }
+          "items": {
+            "$ref": "#/$defs/ProjectPlanMilestoneDraft"
+          }
         },
         "riskNotes": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ProjectPlanRiskNote" }
+          "items": {
+            "$ref": "#/$defs/ProjectPlanRiskNote"
+          }
         },
-        "firstAgendaDraft": { "anyOf": [{ "$ref": "#/$defs/ProjectPlanFirstAgendaDraft" }, { "type": "null" }] },
-        "approval": { "$ref": "#/$defs/ProjectPlanApprovalState" },
-        "createdAt": { "$ref": "#/$defs/dateTime" },
-        "updatedAt": { "$ref": "#/$defs/dateTime" }
+        "firstAgendaDraft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectPlanFirstAgendaDraft"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approval": {
+          "$ref": "#/$defs/ProjectPlanApprovalState"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
       }
     },
     "MeetingReportSummary": {
@@ -1389,17 +1900,54 @@
     },
     "CodeReviewRoomSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "pullRequestId", "status", "createdByMemberId", "createdAt", "updatedAt", "pullRequest"],
+      "required": [
+        "id",
+        "workspaceId",
+        "pullRequestId",
+        "status",
+        "createdByMemberId",
+        "createdAt",
+        "updatedAt",
+        "pullRequest"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/uuid" },
-        "workspaceId": { "$ref": "#/$defs/uuid" },
-        "pullRequestId": { "$ref": "#/$defs/uuid" },
-        "status": { "enum": ["open", "reviewing", "completed", "archived"] },
-        "createdByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "createdAt": { "$ref": "#/$defs/dateTime" },
-        "updatedAt": { "$ref": "#/$defs/dateTime" },
-        "pullRequest": { "$ref": "#/$defs/PullRequestSummary" }
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "pullRequestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "reviewing",
+            "completed",
+            "archived"
+          ]
+        },
+        "createdByMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "pullRequest": {
+          "$ref": "#/$defs/PullRequestSummary"
+        }
       }
     },
     "PRAnalysisSummary": {
@@ -1876,7 +2424,7 @@
         "recommendation": {
           "type": [
             "string",
-          "null"
+            "null"
           ]
         }
       }
@@ -1961,63 +2509,6 @@
             "rejected",
             "failed"
           ]
-        },
-        "createdAt": {
-          "$ref": "#/$defs/dateTime"
-        }
-      }
-    },
-    "ProjectPlanDraftSummary": {
-      "type": "object",
-      "required": [
-        "id",
-        "workspaceId",
-        "goal",
-        "targetUser",
-        "status",
-        "featureDraftCount",
-        "milestoneDraftCount",
-        "riskCount",
-        "createdAt"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/uuid"
-        },
-        "workspaceId": {
-          "$ref": "#/$defs/uuid"
-        },
-        "goal": {
-          "type": "string"
-        },
-        "targetUser": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "enum": [
-            "draft",
-            "reviewing",
-            "approved",
-            "rejected",
-            "waiting_confirmation",
-            "approved_pending_task_creation"
-          ]
-        },
-        "featureDraftCount": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "milestoneDraftCount": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "riskCount": {
-          "type": "integer",
-          "minimum": 0
         },
         "createdAt": {
           "$ref": "#/$defs/dateTime"
@@ -4058,6 +4549,134 @@
     },
     "CanvasFilterSettingRequest": {
       "$ref": "#/$defs/CanvasFilterSetting"
+    },
+    "TaskDependencySummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "taskId",
+        "dependsOnTaskId",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "taskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "dependsOnTaskId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "TaskDraftSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "sourceType",
+        "sourceId",
+        "title",
+        "description",
+        "assigneeMemberId",
+        "priority",
+        "dueDate",
+        "status",
+        "taskId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "sourceType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assigneeMemberId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "urgent"
+          ]
+        },
+        "dueDate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "approved",
+            "rejected"
+          ]
+        },
+        "taskId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
     }
   }
 }

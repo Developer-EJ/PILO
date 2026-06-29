@@ -1,18 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import process from "node:process";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 require("ts-node/register");
-const repoRoot = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-);
 
 const {
   JuhyungPublicAdapter,
@@ -21,7 +15,9 @@ const {
 const schema = JSON.parse(
   readFileSync(
     resolve(
-      repoRoot,
+      process.cwd(),
+      "..",
+      "..",
       "docs",
       "contracts",
       "schemas",
@@ -41,6 +37,10 @@ const UUIDS = {
   pullRequest: "77777777-7777-4777-8777-777777777777",
   milestone: "88888888-8888-4888-8888-888888888888",
   snapshot: "99999999-9999-4999-8999-999999999999",
+  dependency: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  dependsOnTask: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  taskDraft: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  source: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 };
 
 function assertContract(defName, value) {
@@ -172,11 +172,35 @@ function isUuid(value) {
 describe("JuhyungPublicAdapter", () => {
   const adapter = new JuhyungPublicAdapter();
 
+  it("maps a Milestone domain record to the MilestoneSummary public DTO", () => {
+    const summary = adapter.toMilestoneSummary({
+      id: UUIDS.milestone,
+      workspaceId: UUIDS.workspace,
+      title: "MVP Backend",
+      status: "in_progress",
+      startDate: new Date("2026-07-01T00:00:00.000Z"),
+      endDate: new Date("2026-07-31T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-28T12:00:00.000Z"),
+    });
+
+    assert.deepEqual(summary, {
+      id: UUIDS.milestone,
+      workspaceId: UUIDS.workspace,
+      title: "MVP Backend",
+      status: "in_progress",
+      startDate: "2026-07-01",
+      endDate: "2026-07-31",
+      updatedAt: "2026-06-28T12:00:00.000Z",
+    });
+    assertContract("MilestoneSummary", summary);
+  });
+
   it("maps a Task domain record to the TaskSummary public DTO", () => {
     const summary = adapter.toTaskSummary(
       {
         id: UUIDS.task,
         workspaceId: UUIDS.workspace,
+        milestoneId: UUIDS.milestone,
         title: "Connect repository",
         status: "in_progress",
         priority: "high",
@@ -199,6 +223,7 @@ describe("JuhyungPublicAdapter", () => {
     assert.deepEqual(summary, {
       id: UUIDS.task,
       workspaceId: UUIDS.workspace,
+      milestoneId: UUIDS.milestone,
       title: "Connect repository",
       status: "in_progress",
       priority: "high",
@@ -214,6 +239,58 @@ describe("JuhyungPublicAdapter", () => {
       updatedAt: "2026-06-27T12:00:00.000Z",
     });
     assertContract("TaskSummary", summary);
+  });
+
+  it("maps a TaskDependency domain record to the TaskDependencySummary public DTO", () => {
+    const summary = adapter.toTaskDependencySummary({
+      id: UUIDS.dependency,
+      taskId: UUIDS.task,
+      dependsOnTaskId: UUIDS.dependsOnTask,
+      createdAt: new Date("2026-06-28T11:00:00.000Z"),
+    });
+
+    assert.deepEqual(summary, {
+      id: UUIDS.dependency,
+      taskId: UUIDS.task,
+      dependsOnTaskId: UUIDS.dependsOnTask,
+      createdAt: "2026-06-28T11:00:00.000Z",
+    });
+    assertContract("TaskDependencySummary", summary);
+  });
+
+  it("maps a TaskDraft domain record to the TaskDraftSummary public DTO", () => {
+    const summary = adapter.toTaskDraftSummary({
+      id: UUIDS.taskDraft,
+      workspaceId: UUIDS.workspace,
+      sourceType: "meeting_action_item",
+      sourceId: UUIDS.source,
+      title: "Process OAuth callback",
+      description: "Handle Google and GitHub callbacks.",
+      assigneeMemberId: UUIDS.member,
+      priority: "high",
+      dueDate: new Date("2026-07-03T00:00:00.000Z"),
+      status: "approved",
+      taskId: UUIDS.task,
+      createdAt: new Date("2026-06-28T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-28T11:00:00.000Z"),
+    });
+
+    assert.deepEqual(summary, {
+      id: UUIDS.taskDraft,
+      workspaceId: UUIDS.workspace,
+      sourceType: "meeting_action_item",
+      sourceId: UUIDS.source,
+      title: "Process OAuth callback",
+      description: "Handle Google and GitHub callbacks.",
+      assigneeMemberId: UUIDS.member,
+      priority: "high",
+      dueDate: "2026-07-03",
+      status: "approved",
+      taskId: UUIDS.task,
+      createdAt: "2026-06-28T10:00:00.000Z",
+      updatedAt: "2026-06-28T11:00:00.000Z",
+    });
+    assertContract("TaskDraftSummary", summary);
   });
 
   it("maps GitHub and Progress records to public DTOs that match the schema", () => {

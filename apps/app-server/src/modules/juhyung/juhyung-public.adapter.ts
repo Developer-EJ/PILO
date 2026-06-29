@@ -4,11 +4,25 @@ import {
   GithubIssueState,
   GithubIssueSummary,
   MemberRef,
+  MilestoneRecord,
+  MilestoneSummary,
   ProgressRecord,
   ProgressSummary,
   PullRequestRecord,
   PullRequestState,
   PullRequestSummary,
+  TaskActivityLogRecord,
+  TaskActivityLogSummary,
+  TaskChecklistItemRecord,
+  TaskChecklistItemSummary,
+  TaskCommentRecord,
+  TaskCommentSummary,
+  TaskDependencyRecord,
+  TaskDependencySummary,
+  TaskDetail,
+  TaskDraftRecord,
+  TaskDraftStatus,
+  TaskDraftSummary,
   TaskPriority,
   TaskRecord,
   TaskStatus,
@@ -18,9 +32,18 @@ import {
 
 export interface TaskSummaryContext {
   assignee?: WorkspaceMemberRecord | null;
+  checklistItems?: TaskChecklistItemRecord[];
   linkedIssueCount?: number;
   linkedPrCount?: number;
   now?: Date;
+}
+
+export interface TaskCommentSummaryContext {
+  author?: WorkspaceMemberRecord | null;
+}
+
+export interface TaskActivityLogSummaryContext {
+  actor?: WorkspaceMemberRecord | null;
 }
 
 export interface GithubIssueSummaryContext {
@@ -43,6 +66,7 @@ export class JuhyungPublicAdapter {
     return {
       id: task.id,
       workspaceId: task.workspaceId,
+      milestoneId: task.milestoneId ?? null,
       title: task.title,
       status: task.status as TaskStatus,
       priority: task.priority as TaskPriority,
@@ -55,6 +79,104 @@ export class JuhyungPublicAdapter {
       linkedIssueCount: context.linkedIssueCount ?? 0,
       linkedPrCount: context.linkedPrCount ?? 0,
       updatedAt: toDateTime(task.updatedAt),
+    };
+  }
+
+  toTaskDetail(task: TaskRecord, context: TaskSummaryContext = {}): TaskDetail {
+    return {
+      ...this.toTaskSummary(task, context),
+      checklistItems: (context.checklistItems ?? []).map((item) =>
+        this.toTaskChecklistItemSummary(item),
+      ),
+    };
+  }
+
+  toTaskDraftSummary(draft: TaskDraftRecord): TaskDraftSummary {
+    return {
+      id: draft.id,
+      workspaceId: draft.workspaceId,
+      sourceType: draft.sourceType ?? null,
+      sourceId: draft.sourceId ?? null,
+      title: draft.title,
+      description: draft.description ?? null,
+      assigneeMemberId: draft.assigneeMemberId ?? null,
+      priority: draft.priority as TaskPriority,
+      dueDate: toDateOnly(draft.dueDate ?? null),
+      status: draft.status as TaskDraftStatus,
+      taskId: draft.taskId ?? null,
+      createdAt: toDateTime(draft.createdAt),
+      updatedAt: toDateTime(draft.updatedAt),
+    };
+  }
+
+  toMilestoneSummary(milestone: MilestoneRecord): MilestoneSummary {
+    return {
+      id: milestone.id,
+      workspaceId: milestone.workspaceId,
+      title: milestone.title,
+      status: milestone.status as MilestoneSummary["status"],
+      startDate: toDateOnly(milestone.startDate ?? null),
+      endDate: toDateOnly(milestone.endDate ?? null),
+      updatedAt: toDateTime(milestone.updatedAt),
+    };
+  }
+
+  toTaskChecklistItemSummary(
+    item: TaskChecklistItemRecord,
+  ): TaskChecklistItemSummary {
+    return {
+      id: item.id,
+      taskId: item.taskId,
+      title: item.title,
+      status: item.status as TaskChecklistItemSummary["status"],
+      sortOrder: item.sortOrder,
+      updatedAt: toDateTime(item.updatedAt),
+    };
+  }
+
+  toTaskDependencySummary(
+    dependency: TaskDependencyRecord,
+  ): TaskDependencySummary {
+    return {
+      id: dependency.id,
+      taskId: dependency.taskId,
+      dependsOnTaskId: dependency.dependsOnTaskId,
+      createdAt: toDateTime(dependency.createdAt),
+    };
+  }
+
+  toTaskCommentSummary(
+    comment: TaskCommentRecord,
+    context: TaskCommentSummaryContext = {},
+  ): TaskCommentSummary {
+    return {
+      id: comment.id,
+      taskId: comment.taskId,
+      body: comment.body,
+      author: toMemberRef(
+        comment.authorMemberId ?? null,
+        context.author ?? null,
+      ),
+      createdAt: toDateTime(comment.createdAt),
+      updatedAt: toDateTime(comment.updatedAt),
+    };
+  }
+
+  toTaskActivityLogSummary(
+    activityLog: TaskActivityLogRecord,
+    context: TaskActivityLogSummaryContext = {},
+  ): TaskActivityLogSummary {
+    return {
+      id: activityLog.id,
+      taskId: activityLog.taskId,
+      action: activityLog.action,
+      actor: toMemberRef(
+        activityLog.actorMemberId ?? null,
+        context.actor ?? null,
+      ),
+      beforeValue: activityLog.beforeValue ?? null,
+      afterValue: activityLog.afterValue ?? null,
+      createdAt: toDateTime(activityLog.createdAt),
     };
   }
 

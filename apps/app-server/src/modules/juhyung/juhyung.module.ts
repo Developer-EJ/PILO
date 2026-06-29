@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../database/database.module";
+import { WorkspaceMemberAccessService } from "../workspace/workspace-member-access.service";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import {
   JuhyungGithubAppCallbackController,
@@ -25,6 +26,7 @@ import { JuhyungRepository } from "./juhyung.repository";
     JuhyungTaskService,
     JuhyungGithubConnectionRepository,
     JuhyungGithubConnectionService,
+    WorkspaceMemberAccessService,
   ],
   exports: [
     JuhyungRepository,
@@ -32,6 +34,7 @@ import { JuhyungRepository } from "./juhyung.repository";
     JuhyungTaskService,
     JuhyungGithubConnectionRepository,
     JuhyungGithubConnectionService,
+    WorkspaceMemberAccessService,
   ],
 })
 export class JuhyungModule {}

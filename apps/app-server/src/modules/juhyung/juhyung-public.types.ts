@@ -5,6 +5,9 @@ export type TaskStatus =
   | "done"
   | "blocked";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskChecklistStatus = "todo" | "done";
+export type MilestoneStatus = "planned" | "in_progress" | "done";
+export type TaskDraftStatus = "draft" | "approved" | "rejected";
 export type GithubIssueState = "open" | "closed";
 export type PullRequestState =
   | "open"
@@ -30,6 +33,7 @@ export interface WorkspaceMemberRecord {
 export interface TaskRecord {
   id: string;
   workspaceId: string;
+  milestoneId?: string | null;
   title: string;
   status: string;
   priority: string;
@@ -41,6 +45,7 @@ export interface TaskRecord {
 export interface TaskSummary {
   id: string;
   workspaceId: string;
+  milestoneId: string | null;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
@@ -50,6 +55,132 @@ export interface TaskSummary {
   linkedIssueCount: number;
   linkedPrCount: number;
   updatedAt: string;
+}
+
+export interface TaskDraftRecord {
+  id: string;
+  workspaceId: string;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  title: string;
+  description?: string | null;
+  assigneeMemberId?: string | null;
+  priority: string;
+  dueDate?: Date | string | null;
+  status: string;
+  taskId?: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface TaskDraftSummary {
+  id: string;
+  workspaceId: string;
+  sourceType: string | null;
+  sourceId: string | null;
+  title: string;
+  description: string | null;
+  assigneeMemberId: string | null;
+  priority: TaskPriority;
+  dueDate: string | null;
+  status: TaskDraftStatus;
+  taskId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MilestoneRecord {
+  id: string;
+  workspaceId: string;
+  title: string;
+  status: string;
+  startDate?: Date | string | null;
+  endDate?: Date | string | null;
+  updatedAt: Date | string;
+}
+
+export interface MilestoneSummary {
+  id: string;
+  workspaceId: string;
+  title: string;
+  status: MilestoneStatus;
+  startDate: string | null;
+  endDate: string | null;
+  updatedAt: string;
+}
+
+export interface TaskChecklistItemRecord {
+  id: string;
+  taskId: string;
+  title: string;
+  status: string;
+  sortOrder: number;
+  updatedAt: Date | string;
+}
+
+export interface TaskChecklistItemSummary {
+  id: string;
+  taskId: string;
+  title: string;
+  status: TaskChecklistStatus;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+export interface TaskDetail extends TaskSummary {
+  checklistItems: TaskChecklistItemSummary[];
+}
+
+export interface TaskDependencyRecord {
+  id: string;
+  taskId: string;
+  dependsOnTaskId: string;
+  createdAt: Date | string;
+}
+
+export interface TaskDependencySummary {
+  id: string;
+  taskId: string;
+  dependsOnTaskId: string;
+  createdAt: string;
+}
+
+export interface TaskCommentRecord {
+  id: string;
+  taskId: string;
+  authorMemberId?: string | null;
+  body: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface TaskCommentSummary {
+  id: string;
+  taskId: string;
+  body: string;
+  author: MemberRef | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskActivityLogRecord {
+  id: string;
+  taskId: string;
+  actorMemberId?: string | null;
+  action: string;
+  beforeValue?: unknown;
+  afterValue?: unknown;
+  createdAt: Date | string;
+}
+
+export interface TaskActivityLogSummary {
+  id: string;
+  taskId: string;
+  action: string;
+  actor: MemberRef | null;
+  beforeValue: unknown;
+  afterValue: unknown;
+  createdAt: string;
 }
 
 export interface GithubIssueRecord {
