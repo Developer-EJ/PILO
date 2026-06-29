@@ -10,6 +10,10 @@ import {
   type UpdateChecklistItemBody,
 } from "./juhyung-checklist-input";
 import {
+  parseCreateTaskCommentInput,
+  type CreateTaskCommentBody,
+} from "./juhyung-comment-input";
+import {
   parseListTasksQuery,
   type ListTasksQuery,
 } from "./juhyung-task-list-query";
@@ -24,8 +28,12 @@ import {
 import { JuhyungPublicAdapter } from "./juhyung-public.adapter";
 import {
   TaskRecord,
+  TaskActivityLogRecord,
+  TaskActivityLogSummary,
   TaskDetail,
   TaskChecklistItemSummary,
+  TaskCommentRecord,
+  TaskCommentSummary,
   TaskStatus,
   TaskSummary,
   WorkspaceMemberRecord,
@@ -45,6 +53,7 @@ export type {
   CreateChecklistItemBody,
   UpdateChecklistItemBody,
 } from "./juhyung-checklist-input";
+export type { CreateTaskCommentBody } from "./juhyung-comment-input";
 export type { ListTasksQuery } from "./juhyung-task-list-query";
 
 @Injectable()
@@ -128,9 +137,14 @@ export class JuhyungTaskService {
     actor?: WorkspaceActor,
   ): Promise<TaskSummary> {
     const input = parseUpdateTaskInput(body);
-    const { task } = await this.requireTaskAccess(taskId, actor);
+    const { task, currentMember } = await this.requireTaskAccess(taskId, actor);
     const assignee = await this.resolveUpdatedAssignee(task.workspaceId, input);
-    const updatedTask = await this.repository.updateTask(taskId, input);
+    const updatedTask = await this.repository.updateTask(
+      taskId,
+      input,
+      currentMember.id,
+      task,
+    );
 
     if (assignee !== undefined) {
       return this.publicAdapter.toTaskSummary(updatedTask, { assignee });
@@ -165,6 +179,41 @@ export class JuhyungTaskService {
   async deleteTask(taskId: string, actor?: WorkspaceActor): Promise<void> {
     await this.requireTaskAccess(taskId, actor);
     await this.repository.softDeleteTask(taskId);
+  }
+
+  async createTaskComment(
+    taskId: string,
+    body: CreateTaskCommentBody,
+    actor?: WorkspaceActor,
+  ): Promise<TaskCommentSummary> {
+    const input = parseCreateTaskCommentInput(body);
+    const { currentMember } = await this.requireTaskAccess(taskId, actor);
+    const comment = await this.repository.createTaskComment(
+      taskId,
+      input,
+      currentMember.id,
+    );
+    return this.publicAdapter.toTaskCommentSummary(comment, {
+      author: currentMember,
+    });
+  }
+
+  async listTaskComments(
+    taskId: string,
+    actor?: WorkspaceActor,
+  ): Promise<TaskCommentSummary[]> {
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    const comments = await this.repository.listTaskComments(taskId);
+    return this.toTaskCommentSummaries(task.workspaceId, comments);
+  }
+
+  async listTaskActivityLogs(
+    taskId: string,
+    actor?: WorkspaceActor,
+  ): Promise<TaskActivityLogSummary[]> {
+    const { task } = await this.requireTaskAccess(taskId, actor);
+    const activityLogs = await this.repository.listTaskActivityLogs(taskId);
+    return this.toTaskActivityLogSummaries(task.workspaceId, activityLogs);
   }
 
   async createChecklistItem(
@@ -282,22 +331,11 @@ export class JuhyungTaskService {
     workspaceId: string,
     tasks: TaskRecord[],
   ): Promise<TaskSummary[]> {
-    const assigneeIds = [
-      ...new Set(
-        tasks.flatMap((task) =>
-          task.assigneeMemberId ? [task.assigneeMemberId] : [],
-        ),
+    const memberById = await this.loadWorkspaceMemberMap(
+      workspaceId,
+      tasks.flatMap((task) =>
+        task.assigneeMemberId ? [task.assigneeMemberId] : [],
       ),
-    ];
-    const members =
-      assigneeIds.length > 0
-        ? await this.repository.listWorkspaceMembersByIds(
-            workspaceId,
-            assigneeIds,
-          )
-        : [];
-    const memberById = new Map(
-      members.map((member) => [member.id, member as WorkspaceMemberRecord]),
     );
 
     return tasks.map((task) =>
@@ -306,6 +344,64 @@ export class JuhyungTaskService {
           ? (memberById.get(task.assigneeMemberId) ?? null)
           : null,
       }),
+    );
+  }
+
+  private async toTaskCommentSummaries(
+    workspaceId: string,
+    comments: TaskCommentRecord[],
+  ): Promise<TaskCommentSummary[]> {
+    const memberById = await this.loadWorkspaceMemberMap(
+      workspaceId,
+      comments.flatMap((comment) =>
+        comment.authorMemberId ? [comment.authorMemberId] : [],
+      ),
+    );
+
+    return comments.map((comment) =>
+      this.publicAdapter.toTaskCommentSummary(comment, {
+        author: comment.authorMemberId
+          ? (memberById.get(comment.authorMemberId) ?? null)
+          : null,
+      }),
+    );
+  }
+
+  private async toTaskActivityLogSummaries(
+    workspaceId: string,
+    activityLogs: TaskActivityLogRecord[],
+  ): Promise<TaskActivityLogSummary[]> {
+    const memberById = await this.loadWorkspaceMemberMap(
+      workspaceId,
+      activityLogs.flatMap((activityLog) =>
+        activityLog.actorMemberId ? [activityLog.actorMemberId] : [],
+      ),
+    );
+
+    return activityLogs.map((activityLog) =>
+      this.publicAdapter.toTaskActivityLogSummary(activityLog, {
+        actor: activityLog.actorMemberId
+          ? (memberById.get(activityLog.actorMemberId) ?? null)
+          : null,
+      }),
+    );
+  }
+
+  private async loadWorkspaceMemberMap(
+    workspaceId: string,
+    memberIds: string[],
+  ): Promise<Map<string, WorkspaceMemberRecord>> {
+    const uniqueMemberIds = [...new Set(memberIds)];
+    if (uniqueMemberIds.length === 0) {
+      return new Map();
+    }
+
+    const members = await this.repository.listWorkspaceMembersByIds(
+      workspaceId,
+      uniqueMemberIds,
+    );
+    return new Map(
+      members.map((member) => [member.id, member as WorkspaceMemberRecord]),
     );
   }
 }

@@ -9,6 +9,7 @@ const {
   JUHYUNG_OWNER_TABLES,
   JuhyungRepository,
 } = require("../src/modules/juhyung/juhyung.repository");
+const { Prisma } = require("@prisma/client");
 
 describe("JuhyungRepository", () => {
   it("tracks every Task/GitHub/Progress owner table", () => {
@@ -286,40 +287,86 @@ describe("JuhyungRepository", () => {
     ]);
   });
 
-  it("patches task fields without changing deleted tasks directly", async () => {
+  it("patches task fields and records the changed values", async () => {
     const calls = [];
-    const database = {
+    const transaction = {
       task: {
         update: async (args) => {
-          calls.push(args);
+          calls.push(["task.update", args]);
           return { id: "task-1", ...args.data };
         },
       },
+      taskActivityLog: {
+        create: async (args) => {
+          calls.push(["activity.create", args]);
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
     };
     const repository = new JuhyungRepository(database);
 
-    const task = await repository.updateTask("task-1", {
-      title: "Updated task",
-      description: "Updated description",
-      assigneeMemberId: "member-2",
-      dueDate: new Date("2026-07-04T00:00:00.000Z"),
-      milestoneId: null,
-    });
+    const task = await repository.updateTask(
+      "task-1",
+      {
+        title: "Updated task",
+        description: "Updated description",
+        assigneeMemberId: "member-2",
+        dueDate: new Date("2026-07-04T00:00:00.000Z"),
+        milestoneId: null,
+      },
+      "member-1",
+      {
+        title: "Original task",
+        description: null,
+        assigneeMemberId: null,
+        dueDate: null,
+        milestoneId: "milestone-1",
+      },
+    );
 
     assert.equal(task.title, "Updated task");
     assert.deepEqual(calls, [
-      {
-        where: {
-          id: "task-1",
+      [
+        "task.update",
+        {
+          where: {
+            id: "task-1",
+          },
+          data: {
+            title: "Updated task",
+            description: "Updated description",
+            assigneeMemberId: "member-2",
+            dueDate: new Date("2026-07-04T00:00:00.000Z"),
+            milestoneId: null,
+          },
         },
-        data: {
-          title: "Updated task",
-          description: "Updated description",
-          assigneeMemberId: "member-2",
-          dueDate: new Date("2026-07-04T00:00:00.000Z"),
-          milestoneId: null,
+      ],
+      [
+        "activity.create",
+        {
+          data: {
+            taskId: "task-1",
+            actorMemberId: "member-1",
+            action: "task.updated",
+            beforeValue: {
+              title: "Original task",
+              description: null,
+              assigneeMemberId: null,
+              dueDate: null,
+              milestoneId: "milestone-1",
+            },
+            afterValue: {
+              title: "Updated task",
+              description: "Updated description",
+              assigneeMemberId: "member-2",
+              dueDate: "2026-07-04",
+              milestoneId: null,
+            },
+          },
         },
-      },
+      ],
     ]);
   });
 
@@ -399,6 +446,116 @@ describe("JuhyungRepository", () => {
     assert.ok(task.deletedAt instanceof Date);
     assert.deepEqual(calls[0].where, { id: "task-1" });
     assert.ok(calls[0].data.deletedAt instanceof Date);
+  });
+
+  it("creates task comments and records comment activity in one transaction", async () => {
+    const calls = [];
+    const transaction = {
+      taskComment: {
+        create: async (args) => {
+          calls.push(["comment.create", args]);
+          return {
+            id: "comment-1",
+            createdAt: new Date("2026-06-28T09:00:00.000Z"),
+            updatedAt: new Date("2026-06-28T09:00:00.000Z"),
+            ...args.data,
+          };
+        },
+      },
+      taskActivityLog: {
+        create: async (args) => {
+          calls.push(["activity.create", args]);
+        },
+      },
+    };
+    const database = {
+      $transaction: async (callback) => callback(transaction),
+    };
+    const repository = new JuhyungRepository(database);
+
+    const comment = await repository.createTaskComment(
+      "task-1",
+      { body: "Ready for review" },
+      "member-1",
+    );
+
+    assert.equal(comment.body, "Ready for review");
+    assert.deepEqual(calls, [
+      [
+        "comment.create",
+        {
+          data: {
+            taskId: "task-1",
+            body: "Ready for review",
+            authorMemberId: "member-1",
+          },
+        },
+      ],
+      [
+        "activity.create",
+        {
+          data: {
+            taskId: "task-1",
+            actorMemberId: "member-1",
+            action: "task.comment_created",
+            beforeValue: Prisma.JsonNull,
+            afterValue: {
+              commentId: "comment-1",
+            },
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("reads task comments chronologically", async () => {
+    const calls = [];
+    const database = {
+      taskComment: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [{ id: "comment-1", taskId: "task-1" }];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const comments = await repository.listTaskComments("task-1");
+
+    assert.deepEqual(comments, [{ id: "comment-1", taskId: "task-1" }]);
+    assert.deepEqual(calls, [
+      {
+        where: {
+          taskId: "task-1",
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      },
+    ]);
+  });
+
+  it("reads task activity logs newest first", async () => {
+    const calls = [];
+    const database = {
+      taskActivityLog: {
+        findMany: async (args) => {
+          calls.push(args);
+          return [{ id: "activity-1", taskId: "task-1" }];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const activityLogs = await repository.listTaskActivityLogs("task-1");
+
+    assert.deepEqual(activityLogs, [{ id: "activity-1", taskId: "task-1" }]);
+    assert.deepEqual(calls, [
+      {
+        where: {
+          taskId: "task-1",
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      },
+    ]);
   });
 
   it("reads checklist items in task sort order", async () => {

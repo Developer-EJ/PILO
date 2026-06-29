@@ -75,6 +75,44 @@ export interface TaskDetail extends TaskSummary {
   checklistItems: TaskChecklistItemSummary[];
 }
 
+export interface TaskCommentRecord {
+  id: string;
+  taskId: string;
+  authorMemberId?: string | null;
+  body: string;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+export interface TaskCommentSummary {
+  id: string;
+  taskId: string;
+  body: string;
+  author: MemberRef | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskActivityLogRecord {
+  id: string;
+  taskId: string;
+  actorMemberId?: string | null;
+  action: string;
+  beforeValue?: unknown;
+  afterValue?: unknown;
+  createdAt: Date | string;
+}
+
+export interface TaskActivityLogSummary {
+  id: string;
+  taskId: string;
+  action: string;
+  actor: MemberRef | null;
+  beforeValue: unknown;
+  afterValue: unknown;
+  createdAt: string;
+}
+
 export interface GithubIssueRecord {
   id: string;
   repositoryId: string;
