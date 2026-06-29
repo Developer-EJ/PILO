@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from "@nestjs/common";
+import { Controller, Get, Param, ParseUUIDPipe } from "@nestjs/common";
 import { PRAnalysisSummary } from "./pr-analysis-summary.adapter";
 import { ReviewPublicService } from "./review-public.service";
 
@@ -8,7 +8,7 @@ export class ReviewPublicController {
 
   @Get(":pullRequestId/analysis-summary")
   getAnalysisSummary(
-    @Param("pullRequestId") pullRequestId: string,
+    @Param("pullRequestId", ParseUUIDPipe) pullRequestId: string,
   ): PRAnalysisSummary {
     return this.reviewPublicService.getAnalysisSummary(pullRequestId);
   }
