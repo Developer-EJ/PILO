@@ -1,263 +1,167 @@
-import styles from "./page.module.css";
+import {
+  ReviewNodeWorkspace,
+  type ReviewSession,
+} from "./review-node-workspace";
 
-const pullRequests = [
+const reviewSessions: ReviewSession[] = [
   {
-    id: "66666666-6666-4666-8666-666666666661",
-    number: 7,
-    title: "Add OAuth callback shell",
-    authorLogin: "Developer-EJ",
-    state: "review_requested",
-    branch: "feature/donghyun/auth-login",
-    baseBranch: "dev",
-    changedFilesCount: 4,
-    additions: 180,
-    deletions: 12,
-    linkedTaskIds: ["44444444-4444-4444-8444-444444444441"],
-  },
-  {
-    id: "66666666-6666-4666-8666-666666666662",
-    number: 8,
-    title: "Persist review checklist items",
-    authorLogin: "Developer-EJ",
-    state: "open",
-    branch: "feature/eunjae/review-checklist",
-    baseBranch: "dev",
-    changedFilesCount: 3,
-    additions: 96,
-    deletions: 18,
-    linkedTaskIds: [],
-  },
-];
-
-const selectedPullRequest = pullRequests[0];
-
-const linkedTasks = [
-  {
-    id: "44444444-4444-4444-8444-444444444441",
-    title: "Implement Google/GitHub login",
-    status: "in_progress",
-    priority: "high",
-  },
-];
-
-const analysis = {
-  id: "88888888-8888-4888-8888-888888888881",
-  analysisStatus: "succeeded",
-  riskLevel: "medium",
-  purposeSummary: "Adds an OAuth callback page and redirect handling.",
-  impactSummary: "Auth routes and session redirect flow are affected.",
-  testRecommendation: "Verify success and failure redirect smoke tests.",
-  okCount: 3,
-  discussCount: 1,
-  riskCount: 1,
-  conclusion: "Ready to merge after reviewer confirmation.",
-};
-
-const reviewCanvas = {
-  intentSummary:
-    "Create the login callback entry point and expose provider errors clearly.",
-  reviewStrategy:
-    "Review the route entry, callback state parsing, and redirect impact in order.",
-  nodes: [
-    {
-      id: "88888888-8888-4888-8888-888888888891",
-      label: "apps/frontend/app/auth/callback/page.tsx",
-      nodeType: "file",
+    pullRequest: {
+      id: "66666666-6666-4666-8666-666666666661",
+      number: 7,
+      title: "Add OAuth callback shell",
+      authorLogin: "Developer-EJ",
+      state: "review_requested",
+      branch: "feature/donghyun/auth-login",
+      baseBranch: "dev",
+      changedFilesCount: 4,
+      additions: 180,
+      deletions: 12,
+      linkedTaskIds: ["44444444-4444-4444-8444-444444444441"],
+    },
+    linkedTasks: [
+      {
+        id: "44444444-4444-4444-8444-444444444441",
+        title: "Implement Google/GitHub login",
+        status: "in_progress",
+        priority: "high",
+      },
+    ],
+    analysis: {
+      id: "88888888-8888-4888-8888-888888888881",
+      analysisStatus: "succeeded",
       riskLevel: "medium",
-      reviewOrder: 1,
-      roleSummary:
-        "Reads provider callback query values and routes users to success or failure states.",
-      position: { x: 84, y: 72 },
+      purposeSummary: "Adds an OAuth callback page and redirect handling.",
+      impactSummary: "Auth routes and session redirect flow are affected.",
+      testRecommendation: "Verify success and failure redirect smoke tests.",
+      conclusion: "Ready to merge after reviewer confirmation.",
+      reviewNotes: [
+        "Confirm provider callback query values split success and failure states correctly.",
+        "Check session redirect behavior before final UI copy changes.",
+      ],
     },
-    {
-      id: "88888888-8888-4888-8888-888888888892",
-      label: "session redirect flow",
-      nodeType: "impact",
-      riskLevel: "low",
-      reviewOrder: 2,
-      roleSummary:
-        "Checks that callback outcomes do not conflict with the existing session redirect flow.",
-      position: { x: 380, y: 190 },
+    canvas: {
+      intentSummary:
+        "Create the login callback entry point and expose provider errors clearly.",
+      reviewStrategy:
+        "Review the route entry, callback state parsing, and redirect impact in order.",
+      nodes: [
+        {
+          id: "callback-route",
+          label: "app/auth/callback/page.tsx",
+          nodeType: "file",
+          riskLevel: "medium",
+          reviewOrder: 1,
+          roleSummary:
+            "Reads provider callback query values and routes users to success or failure states.",
+          position: { x: 120, y: 108 },
+          detail: {
+            filePath: "apps/frontend/app/auth/callback/page.tsx",
+            modificationReason:
+              "The previous placeholder did not explain login success or failure outcomes.",
+            changeGroups: [
+              {
+                id: "query",
+                title: "Callback query parsing",
+                summary:
+                  "Reads provider and error query parameters before rendering the callback result.",
+                newStartLine: 12,
+                newEndLine: 18,
+                diffHunkId: "callback-query",
+              },
+            ],
+            diffHunks: [
+              {
+                id: "callback-query",
+                oldStartLine: 10,
+                newStartLine: 12,
+                oldCode: "return <div>Loading...</div>;",
+                newCode:
+                  "const provider = searchParams.get('provider');\nconst error = searchParams.get('error');\nreturn <CallbackResult provider={provider} error={error} />;",
+              },
+            ],
+          },
+        },
+        {
+          id: "callback-result",
+          label: "CallbackResult states",
+          nodeType: "component",
+          riskLevel: "low",
+          reviewOrder: 2,
+          roleSummary:
+            "Splits success and failure UI states and guides the user's next action.",
+          position: { x: 122, y: 310 },
+          detail: {
+            filePath: "apps/frontend/app/auth/callback/page.tsx",
+            modificationReason:
+              "Users need a clear outcome after provider authentication completes.",
+            changeGroups: [
+              {
+                id: "result-copy",
+                title: "Callback result copy",
+                summary:
+                  "Branches copy and next-action guidance between success and failure states.",
+                newStartLine: 20,
+                newEndLine: 30,
+                diffHunkId: "result-copy",
+              },
+            ],
+            diffHunks: [
+              {
+                id: "result-copy",
+                oldStartLine: 20,
+                newStartLine: 20,
+                oldCode: "return <StatusMessage />;",
+                newCode:
+                  "return error ? <FailureMessage provider={provider} /> : <SuccessMessage />;",
+              },
+            ],
+          },
+        },
+        {
+          id: "session-impact",
+          label: "session redirect flow",
+          nodeType: "impact",
+          riskLevel: "high",
+          reviewOrder: 3,
+          roleSummary:
+            "Checks that callback outcomes do not conflict with the existing session redirect flow.",
+          position: { x: 430, y: 238 },
+          detail: {
+            filePath: "apps/frontend/app/auth/callback/page.tsx",
+            modificationReason:
+              "The callback route must report success and failure without breaking session redirects.",
+            changeGroups: [
+              {
+                id: "redirect-impact",
+                title: "Redirect impact",
+                summary:
+                  "Checks that existing session redirects do not fight the callback result screen.",
+                newStartLine: 32,
+                newEndLine: 40,
+                diffHunkId: "redirect-impact",
+              },
+            ],
+            diffHunks: [
+              {
+                id: "redirect-impact",
+                oldStartLine: 30,
+                newStartLine: 32,
+                oldCode: "router.replace('/dashboard');",
+                newCode:
+                  "if (!error) {\n  router.replace('/dashboard');\n}\nsetCallbackState({ provider, error });",
+              },
+            ],
+          },
+        },
+      ],
+      edges: [
+        { from: "callback-route", to: "callback-result" },
+        { from: "callback-result", to: "session-impact" },
+      ],
     },
-  ],
-};
-
-const stateLabels: Record<string, string> = {
-  review_requested: "Review requested",
-  open: "Open",
-  merged: "Merged",
-  closed: "Closed",
-};
-
-const analysisStatusLabels: Record<string, string> = {
-  pending: "Pending",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-};
-
-const riskClassNames: Record<string, string> = {
-  low: styles.nodeLow,
-  medium: styles.nodeMedium,
-  high: styles.nodeHigh,
-  critical: styles.nodeCritical,
-};
+  },
+];
 
 export default function ReviewsPage() {
-  const tasks = linkedTasks.filter((task) =>
-    selectedPullRequest.linkedTaskIds.includes(task.id),
-  );
-
-  return (
-    <main className={styles.page}>
-      <div className={styles.shell}>
-        <header className={styles.header}>
-          <div className={styles.titleBlock}>
-            <span className={styles.eyebrow}>CODE REVIEW</span>
-            <h1>PR review queue</h1>
-          </div>
-          <button className={styles.primaryButton} type="button">
-            Request analysis
-          </button>
-        </header>
-
-        <section className={styles.workspace} aria-label="PR review queue">
-          <aside className={styles.queue} aria-label="Pull request list">
-            <div className={styles.sectionHead}>
-              <span className={styles.eyebrow}>Pull requests</span>
-              <strong>{pullRequests.length}</strong>
-            </div>
-
-            <div className={styles.prList}>
-              {pullRequests.map((pullRequest) => {
-                const isSelected = pullRequest.id === selectedPullRequest.id;
-
-                return (
-                  <article
-                    className={
-                      isSelected
-                        ? `${styles.prItem} ${styles.prItemSelected}`
-                        : styles.prItem
-                    }
-                    key={pullRequest.id}
-                  >
-                    <div>
-                      <span className={styles.number}>
-                        #{pullRequest.number}
-                      </span>
-                      <strong>{pullRequest.title}</strong>
-                    </div>
-                    <div className={styles.meta}>
-                      <span>{pullRequest.authorLogin}</span>
-                      <span>{stateLabels[pullRequest.state]}</span>
-                      <span>{pullRequest.changedFilesCount} files</span>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </aside>
-
-          <section className={styles.reviewPanel} id="analysis">
-            <div className={styles.summary}>
-              <div className={styles.prTitle}>
-                <span className={styles.eyebrow}>Selected PR</span>
-                <strong>
-                  #{selectedPullRequest.number} {selectedPullRequest.title}
-                </strong>
-                <div className={styles.meta}>
-                  <span>{selectedPullRequest.authorLogin}</span>
-                  <span>{stateLabels[selectedPullRequest.state]}</span>
-                  <span>
-                    {selectedPullRequest.branch} -&gt;{" "}
-                    {selectedPullRequest.baseBranch}
-                  </span>
-                </div>
-              </div>
-
-              <div className={styles.metrics}>
-                <div className={styles.metric}>
-                  <span className={styles.caption}>Additions</span>
-                  <strong>+{selectedPullRequest.additions}</strong>
-                </div>
-                <div className={styles.metric}>
-                  <span className={styles.caption}>Deletions</span>
-                  <strong>-{selectedPullRequest.deletions}</strong>
-                </div>
-                <div className={styles.metric}>
-                  <span className={styles.caption}>Risk</span>
-                  <strong>{analysis.riskLevel}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.panelGrid}>
-              <section className={styles.panel}>
-                <div className={styles.panelTitle}>
-                  <h2>AI analysis</h2>
-                  <span className={`${styles.pill} ${styles.riskMedium}`}>
-                    {analysisStatusLabels[analysis.analysisStatus]}
-                  </span>
-                </div>
-                <p>{analysis.purposeSummary}</p>
-                <p>{analysis.impactSummary}</p>
-                <p>{analysis.testRecommendation}</p>
-                <p>{analysis.conclusion}</p>
-              </section>
-
-              <section className={styles.panel}>
-                <div className={styles.panelTitle}>
-                  <h2>Linked tasks</h2>
-                  <span className={styles.pill}>{tasks.length}</span>
-                </div>
-                {tasks.map((task) => (
-                  <article className={styles.task} key={task.id}>
-                    <span className={styles.taskLabel}>{task.priority}</span>
-                    <strong>{task.title}</strong>
-                    <p>{task.status}</p>
-                  </article>
-                ))}
-              </section>
-            </div>
-
-            <section className={styles.canvasPanel} aria-label="Review canvas">
-              <div className={styles.canvas}>
-                {reviewCanvas.nodes.map((node) => (
-                  <button
-                    className={`${styles.canvasNode} ${
-                      riskClassNames[node.riskLevel]
-                    }`}
-                    key={node.id}
-                    style={{
-                      left: node.position.x,
-                      top: node.position.y,
-                    }}
-                    type="button"
-                  >
-                    <span>{node.reviewOrder}</span>
-                    <strong>{node.label}</strong>
-                    <small>{node.nodeType}</small>
-                  </button>
-                ))}
-              </div>
-
-              <aside className={styles.intentPanel}>
-                <span className={styles.eyebrow}>PR intent</span>
-                <h2>{reviewCanvas.intentSummary}</h2>
-                <p>{reviewCanvas.reviewStrategy}</p>
-                <ol className={styles.reviewOrder}>
-                  {reviewCanvas.nodes.map((node) => (
-                    <li key={node.id}>
-                      <strong>{node.reviewOrder}. </strong>
-                      {node.roleSummary}
-                    </li>
-                  ))}
-                </ol>
-              </aside>
-            </section>
-          </section>
-        </section>
-      </div>
-    </main>
-  );
+  return <ReviewNodeWorkspace sessions={reviewSessions} />;
 }
