@@ -396,9 +396,158 @@ describe("meeting module scaffold", () => {
     assert.equal(report.decisionCount, 0);
     assert.equal(report.actionItemCount, 0);
     assert.equal(report.riskCount, 0);
+    assert.deepEqual(report.decisions, []);
+    assert.deepEqual(report.risks, []);
+    assert.deepEqual(report.nextAgendas, []);
     assert.deepEqual(controller.getReport(report.id), report);
-    assert.deepEqual(controller.listRecentReports("workspace-1"), [report]);
+    const recentReports = controller.listRecentReports("workspace-1");
+
+    assert.deepEqual(recentReports, [
+      {
+        id: report.id,
+        meetingId: report.meetingId,
+        workspaceId: report.workspaceId,
+        title: report.title,
+        summary: report.summary,
+        decisionCount: 0,
+        actionItemCount: 0,
+        riskCount: 0,
+        createdAt: report.createdAt,
+      },
+    ]);
+    assert.equal("decisions" in recentReports[0], false);
+    assert.equal("risks" in recentReports[0], false);
+    assert.equal("nextAgendas" in recentReports[0], false);
     assert.equal(controller.getMeeting(meeting.id).status, "report_generated");
+  });
+
+  it("creates and lists meeting report read models", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Report read model meeting",
+    });
+    const report = controller.createReport(meeting.id);
+
+    const defaultDecision = controller.createDecision(report.id, {
+      content: "Use the existing meeting contract.",
+    });
+    const pendingDecision = controller.createDecision(report.id, {
+      content: "Confirm production repository migration timing.",
+      status: "pending",
+      linkedTaskId: "task-draft-1",
+    });
+    const defaultRisk = controller.createRisk(report.id, {
+      content: "Task API may not be merged before conversion work.",
+    });
+    const highRisk = controller.createRisk(report.id, {
+      content: "Contract drift can break Dashboard adapters.",
+      severity: "high",
+      sortOrder: 2,
+    });
+    const firstNextAgenda = controller.createNextAgenda(report.id, {
+      title: "Review report generation output.",
+    });
+    const secondNextAgenda = controller.createNextAgenda(report.id, {
+      title: "Confirm Dashboard summary fields.",
+      sortOrder: 2,
+    });
+
+    assert.equal(defaultDecision.status, "decided");
+    assert.equal(defaultDecision.linkedTaskId, null);
+    assert.equal(pendingDecision.status, "pending");
+    assert.equal(pendingDecision.linkedTaskId, "task-draft-1");
+    assert.deepEqual(controller.listDecisions(report.id), [
+      defaultDecision,
+      pendingDecision,
+    ]);
+
+    assert.equal(defaultRisk.severity, "medium");
+    assert.equal(defaultRisk.sortOrder, 0);
+    assert.equal(highRisk.severity, "high");
+    assert.deepEqual(controller.listRisks(report.id), [defaultRisk, highRisk]);
+
+    assert.equal(firstNextAgenda.sortOrder, 0);
+    assert.deepEqual(controller.listNextAgendas(report.id), [
+      firstNextAgenda,
+      secondNextAgenda,
+    ]);
+
+    const reportDetail = controller.getReport(report.id);
+
+    assert.deepEqual(reportDetail.decisions, [
+      defaultDecision,
+      pendingDecision,
+    ]);
+    assert.deepEqual(reportDetail.risks, [defaultRisk, highRisk]);
+    assert.deepEqual(reportDetail.nextAgendas, [
+      firstNextAgenda,
+      secondNextAgenda,
+    ]);
+    assert.equal(reportDetail.decisionCount, 2);
+    assert.equal(reportDetail.actionItemCount, 0);
+    assert.equal(reportDetail.riskCount, 2);
+
+    const [summary] = controller.listRecentReports("workspace-1");
+
+    assert.equal(summary.decisionCount, 2);
+    assert.equal(summary.actionItemCount, 0);
+    assert.equal(summary.riskCount, 2);
+    assert.equal("decisions" in summary, false);
+    assert.equal("risks" in summary, false);
+    assert.equal("nextAgendas" in summary, false);
+  });
+
+  it("rejects invalid report read model enum values and sort orders", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Report read model validation meeting",
+    });
+    const report = service.createReport(meeting.id);
+
+    service.createRisk(report.id, {
+      content: "Known risk.",
+      sortOrder: 0,
+    });
+    service.createNextAgenda(report.id, {
+      title: "Known next agenda.",
+      sortOrder: 0,
+    });
+
+    assert.throws(() =>
+      service.createDecision(report.id, {
+        content: "Invalid decision status.",
+        status: "done",
+      }),
+    );
+    assert.throws(() =>
+      service.createRisk(report.id, {
+        content: "Invalid risk severity.",
+        severity: "urgent",
+      }),
+    );
+    assert.throws(() =>
+      service.createRisk(report.id, {
+        content: "Duplicate risk order.",
+        sortOrder: 0,
+      }),
+    );
+    assert.throws(() =>
+      service.createRisk(report.id, {
+        content: "Negative risk order.",
+        sortOrder: -1,
+      }),
+    );
+    assert.throws(() =>
+      service.createNextAgenda(report.id, {
+        title: "Duplicate next agenda order.",
+        sortOrder: 0,
+      }),
+    );
   });
 
   it("returns the existing report when report creation is requested twice", () => {
@@ -414,9 +563,10 @@ describe("meeting module scaffold", () => {
     const secondReport = controller.createReport(meeting.id);
 
     assert.equal(firstReport.id, secondReport.id);
-    assert.deepEqual(controller.listRecentReports("workspace-1"), [
-      firstReport,
-    ]);
+    const [summary] = controller.listRecentReports("workspace-1");
+
+    assert.equal(summary.id, firstReport.id);
+    assert.equal("decisions" in summary, false);
   });
 
   it("keeps meeting report lookup scoped to workspace", () => {

@@ -1,15 +1,21 @@
 import {
   CreateMeetingInput,
   CreateMeetingAgendaInput,
+  CreateMeetingDecisionInput,
   CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
   CreateMeetingReportInput,
+  CreateMeetingReportNextAgendaInput,
+  CreateMeetingReportRiskInput,
   CreateTranscriptSegmentInput,
   MeetingAgendaRecord,
+  MeetingDecisionRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
+  MeetingReportNextAgendaRecord,
   MeetingReportRecord,
+  MeetingReportRiskRecord,
   MeetingRepositoryMode,
   MeetingStatus,
   TranscriptSegmentRecord,
@@ -73,4 +79,18 @@ export interface MeetingRepository {
   findReportByMeetingId(meetingId: string): MeetingReportRecord | null;
 
   listReports(): MeetingReportRecord[];
+
+  createDecision(input: CreateMeetingDecisionInput): MeetingDecisionRecord;
+
+  listDecisionsByReport(reportId: string): MeetingDecisionRecord[];
+
+  createRisk(input: CreateMeetingReportRiskInput): MeetingReportRiskRecord;
+
+  listRisksByReport(reportId: string): MeetingReportRiskRecord[];
+
+  createNextAgenda(
+    input: CreateMeetingReportNextAgendaInput,
+  ): MeetingReportNextAgendaRecord;
+
+  listNextAgendasByReport(reportId: string): MeetingReportNextAgendaRecord[];
 }
