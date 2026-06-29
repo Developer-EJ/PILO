@@ -191,7 +191,7 @@ Review domain consumes this source read model to create its own `changed_files`.
 
 ## Breaking Change Policy
 
-- `GithubConnectionSummary`, `GithubRepositorySummary`, `PullRequestSummary`, and `PullRequestChangedFileSummary` fields are public read model contract fields.
+- `GithubConnectionSummary`, `GithubRepositorySummary`, `GithubIssueSummary`, `PullRequestSummary`, `PullRequestChangedFileSummary`, and `GithubIssueCreateAction` fields are public contract fields.
 - Removing or renaming fields requires a separate contract change PR, affected consumer review, and a deprecated-field migration plan.
 - `GithubConnectionSummary.scopes`, `GithubRepositorySummary.defaultBranch`, and `GithubRepositorySummary.syncedAt` are additive optional rollout fields. Existing producers may omit them or send `null` where the schema allows it until all consumers migrate. Making them required requires a separate breaking contract PR with affected consumer approval and a migration plan.
 - `PullRequestChangedFileSummary.sha` is required because Review uses `pullRequestId + path + sha` as stable source identity for resync.
