@@ -9,6 +9,7 @@ import { ReviewGraphController } from "./graph/review-graph.controller";
 import { ReviewGraphService } from "./graph/review-graph.service";
 import { ReviewPublicController } from "./public/review-public.controller";
 import { ReviewPublicService } from "./public/review-public.service";
+import { AgentGraphResultService } from "./result/agent-graph-result.service";
 import { InMemoryCodeReviewRoomRepository } from "./room/in-memory-code-review-room.repository";
 import { ReviewRoomController } from "./room/review-room.controller";
 import { ReviewRoomService } from "./room/review-room.service";
@@ -30,6 +31,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryChangedFilesRepository,
     ReviewGraphService,
     InMemoryReviewGraphRepository,
+    AgentGraphResultService,
   ],
 })
 export class ReviewModule {}
