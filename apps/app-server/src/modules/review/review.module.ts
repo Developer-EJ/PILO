@@ -14,6 +14,7 @@ import { ReviewPublicController } from "./public/review-public.controller";
 import { ReviewPublicService } from "./public/review-public.service";
 import { AgentGraphResultService } from "./result/agent-graph-result.service";
 import { AgentReviewArtifactsResultService } from "./result/agent-review-artifacts-result.service";
+import { AgentResultConsumerService } from "./result/agent-result-consumer.service";
 import { InMemoryCodeReviewRoomRepository } from "./room/in-memory-code-review-room.repository";
 import { ReviewRoomController } from "./room/review-room.controller";
 import { ReviewRoomService } from "./room/review-room.service";
@@ -40,6 +41,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryReviewGraphRepository,
     AgentGraphResultService,
     AgentReviewArtifactsResultService,
+    AgentResultConsumerService,
   ],
 })
 export class ReviewModule {}
