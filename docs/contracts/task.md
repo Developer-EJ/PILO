@@ -79,6 +79,7 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 
 | Method | Path | Purpose | Consumer |
 |---|---|---|---|
+| `GET` | `/api/workspaces/:workspaceId/task-drafts` | Task draft 목록 | 주형, 진호, 세인 |
 | `POST` | `/api/workspaces/:workspaceId/task-drafts` | Task draft 생성 | 진호, 세인 |
 | `POST` | `/api/task-drafts/:draftId/approve` | draft 승인 후 실제 Task 생성 | 주형, 세인 |
 | `POST` | `/api/task-drafts/:draftId/reject` | draft 거절 | 주형, 세인 |
@@ -90,7 +91,6 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 
 | Method | Path | Status | Notes |
 |---|---|---|---|
-| `GET` | `/api/workspaces/:workspaceId/task-drafts` | deferred | Task draft 목록 API 후속 PR 필요 |
 | `GET` | `/api/milestones/:milestoneId` | deferred | 단건 Milestone 상세 조회 후속 PR 필요 |
 
 ## Request Rules
@@ -422,7 +422,8 @@ Required fields:
 ```
 
 `TaskCreateDraft`는 Agent action payload와 외부 후보 입력에 쓰는 request DTO다.
-현재 dev에서는 `POST /api/workspaces/:workspaceId/task-drafts`로 저장할 수 있다.
+현재 dev에서는 `GET /api/workspaces/:workspaceId/task-drafts`로 목록을 읽고
+`POST /api/workspaces/:workspaceId/task-drafts`로 저장할 수 있다.
 
 ### TaskDraft
 

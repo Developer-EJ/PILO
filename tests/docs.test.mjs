@@ -395,13 +395,15 @@ describe("contract document set", () => {
 
   it("contract docs keep current runtime APIs separate from deferred MVP targets", () => {
     const task = read("docs/contracts/task.md");
+    assert.match(task, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
     assert.match(task, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
     assert.match(task, /`POST`\s*\|\s*`\/api\/task-drafts\/:draftId\/approve`/);
     assert.match(task, /## Deferred APIs/);
 
     const taskDeferred = task.slice(task.indexOf("## Deferred APIs"));
+    assert.doesNotMatch(taskDeferred, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
     assert.doesNotMatch(taskDeferred, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
-    assert.match(taskDeferred, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
+    assert.match(taskDeferred, /`GET`\s*\|\s*`\/api\/milestones\/:milestoneId`/);
 
     const review = read("docs/contracts/review.md");
     assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/graph`/);
@@ -419,6 +421,19 @@ describe("contract document set", () => {
     assert.match(planning, /Planning HTTP controller/);
     assert.match(planning, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/project-plan-drafts`/);
     assert.doesNotMatch(planning, /`GET \/project-plan-drafts/);
+  });
+
+  it("keeps the MVP API contract aligned with current planning and notification runtime boundaries", () => {
+    const api = read("docs/api-contract-v1.md");
+    assert.doesNotMatch(api, /\/api\/project-start\//);
+    assert.doesNotMatch(api, /\/api\/task-candidates/);
+    assert.match(api, /workflowType": "planning\.generate"/);
+    assert.match(api, /`\/api\/workspaces\/:workspaceId\/agent-runs`/);
+    assert.match(api, /`\/api\/workspaces\/:workspaceId\/task-drafts`/);
+
+    const notificationSection = api.slice(api.indexOf("## Notification Target API"));
+    assert.match(notificationSection, /not\s+current runtime endpoints yet/);
+    assert.match(notificationSection, /### Deferred Endpoints/);
   });
 });
 

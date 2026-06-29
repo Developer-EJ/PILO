@@ -182,82 +182,61 @@ Rules:
 - Invite link creates Member role only.
 - Workspace edit/archive/delete endpoints are excluded.
 
-## Project Start / Planning API
+## Project Start / Planning Runtime
 
-### Endpoints
+Project start is implemented through the Agent Runtime API with
+`workflowType: "planning.generate"`. Do not add or call separate
+Project Start routes in the current MVP runtime.
+
+### Runtime Endpoints
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/project-brief` | yes | member | Current ProjectBrief |
-| PUT | `/api/workspaces/:workspaceId/project-brief` | yes | member | Save edited ProjectBrief |
-| POST | `/api/workspaces/:workspaceId/project-start/runs` | yes | member | Run project start Agent step |
-| POST | `/api/project-start/task-candidates/:candidateId/approve` | yes | member | Approve candidate into Task |
-| POST | `/api/project-start/task-candidates/:candidateId/reject` | yes | member | Reject candidate |
+| POST | `/api/workspaces/:workspaceId/agent-runs` | yes | member | Run `planning.generate` |
+| GET | `/api/agent-runs/:agentRunId` | yes | member | Read planning run detail |
+| GET | `/api/workspaces/:workspaceId/agent-actions` | yes | member | List approval-gated Agent actions |
+| POST | `/api/agent-actions/:actionId/approve` | yes | member | Approve planning action |
+| POST | `/api/agent-actions/:actionId/reject` | yes | member | Reject planning action |
+| GET | `/api/workspaces/:workspaceId/task-drafts` | yes | member | List generated Task drafts |
+| POST | `/api/workspaces/:workspaceId/task-drafts` | yes | member | Create Task draft |
+| POST | `/api/task-drafts/:draftId/approve` | yes | member | Approve draft into Task |
+| POST | `/api/task-drafts/:draftId/reject` | yes | member | Reject draft |
 
 ### Project Start Run Request
 
+Use the Agent Run request shape from the Agent Runtime section:
+
 ```json
 {
-  "step": "project_info",
-  "message": "We are building an AI project management tool",
-  "answers": {
-    "duration": "5 weeks",
-    "teamSize": 5,
-    "experienceLevel": "beginner"
-  }
+  "workflowType": "planning.generate",
+  "workflowVersion": "v1",
+  "input": {
+    "goal": "Launch PILO MVP",
+    "targetUser": "Small MVP team",
+    "problem": "Planning context is split across tools.",
+    "duration": "4 weeks",
+    "outputGoal": "A reviewable MVP plan with owner-action drafts"
+  },
+  "contextRefs": []
 }
 ```
 
 ### Project Start Run Response
 
-```json
-{
-  "agentRunId": "agent-run-id",
-  "status": "completed",
-  "projectBrief": {
-    "oneLine": "string",
-    "problem": "string",
-    "targetUsers": ["string"],
-    "goals": ["string"],
-    "constraints": ["string"]
-  },
-  "techStackOptions": [
-    {
-      "name": "Stable MVP",
-      "stack": {
-        "frontend": "Next.js",
-        "backend": "NestJS",
-        "database": "PostgreSQL"
-      },
-      "reason": "string",
-      "risks": ["string"]
-    }
-  ],
-  "featureCandidates": [
-    {
-      "title": "string",
-      "scope": "must",
-      "reason": "string"
-    }
-  ],
-  "taskCandidates": [
-    {
-      "id": "candidate-id",
-      "title": "string",
-      "description": "string",
-      "taskType": "development",
-      "assigneeId": "user-id|null",
-      "dueDate": "2026-07-03",
-      "acceptanceCriteria": ["string"]
-    }
-  ]
-}
-```
+The response is `AgentRunDetail.output.planDraft.detail`. It contains the
+ProjectBrief-equivalent summary, tech stack recommendation, feature drafts,
+role drafts, milestone drafts, risk notes, first agenda draft, and approval
+state. Task candidates are represented as Task Drafts or Agent actions, not as
+a separate Task Candidate API.
 
 Rules:
 
-- Candidate approval calls Task API internally or delegates to Task owner service.
-- Rejected candidates must not create Task.
+- `planning.generate` is deterministic in the local MVP runtime.
+- Agent approval creates or confirms owner-action drafts; it does not bypass
+  Task owner validation.
+- Rejected Agent actions or Task drafts must not create Tasks.
+- Separate Project Start and Task Candidate routes are not current MVP runtime
+  routes.
 
 ## Task API
 
@@ -271,9 +250,10 @@ Rules:
 | PATCH | `/api/tasks/:taskId` | yes | member | Update Task fields |
 | PATCH | `/api/tasks/:taskId/status` | yes | member | Change Task status |
 | DELETE | `/api/tasks/:taskId` | yes | member | Soft-delete Task |
-| POST | `/api/workspaces/:workspaceId/task-candidates` | yes | member | Create Task candidates |
-| POST | `/api/task-candidates/:candidateId/approve` | yes | member | Approve candidate |
-| POST | `/api/task-candidates/:candidateId/reject` | yes | member | Reject candidate |
+| GET | `/api/workspaces/:workspaceId/task-drafts` | yes | member | List Task drafts |
+| POST | `/api/workspaces/:workspaceId/task-drafts` | yes | member | Create Task draft |
+| POST | `/api/task-drafts/:draftId/approve` | yes | member | Approve draft into Task |
+| POST | `/api/task-drafts/:draftId/reject` | yes | member | Reject draft |
 
 ### Task DTO
 
@@ -739,9 +719,16 @@ Rules:
 - `approve` only accepts `waiting_confirmation` actions. `reject` only accepts `draft` or `waiting_confirmation` actions.
 - `confirmed`, `executed`, `rejected`, and `failed` actions cannot be changed by user approval/rejection endpoints.
 
-## Notification API
+## Notification Target API
 
-### Endpoints
+Notification storage and read APIs are common-system target APIs. They are not
+current runtime endpoints yet; do not call them from MVP screens until
+`docs/contracts/common-system.md` moves them from Deferred APIs to Current
+Runtime APIs. The current MVP notification surface is derived UI only:
+dashboard badges, Agent approval counts, review request counts, and task draft
+counts.
+
+### Deferred Endpoints
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
@@ -778,6 +765,8 @@ Rules:
 
 - Notification executes no business action.
 - Notification links to owner screen.
+- Current runtime callers must use owner-domain lists or dashboard read models
+  instead of these endpoints.
 
 ## Basic Canvas API
 
