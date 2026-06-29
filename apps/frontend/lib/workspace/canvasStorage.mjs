@@ -80,6 +80,20 @@ export function normalizeCanvasShapeState(value) {
   );
 }
 
+export function normalizeCanvasFreeformShapes(value) {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter(
+    (shape) =>
+      isRecord(shape) &&
+      typeof shape.id === "string" &&
+      typeof shape.type === "string" &&
+      isFiniteNumber(shape.x) &&
+      isFiniteNumber(shape.y) &&
+      isRecord(shape.props),
+  );
+}
+
 export function applyCanvasShapeState(shapes, shapeStateById) {
   return shapes.map((shape) => {
     const savedState = shapeStateById[shape.id];

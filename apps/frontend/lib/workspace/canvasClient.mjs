@@ -3,10 +3,12 @@ import {
   defaultWorkspaceApiBaseUrl,
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
+import { readCanvasStorage, writeCanvasStorage } from "./canvasStorage.mjs";
 import { workspaceDashboardFixture } from "./workspaceDashboardFixture.mjs";
 
 const DEFAULT_CANVAS_MODE = "mock";
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+const mockBoardListStorageScope = "mock-board-list";
 
 const fallbackPositions = [
   { x: 120, y: 140 },
@@ -154,6 +156,52 @@ function toBoardSummary(board) {
   };
 }
 
+function defaultCanvasFilterSetting() {
+  return {
+    enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+    assigneeMemberId: null,
+    showDelayedOnly: false,
+    showRiskOnly: false,
+    filters: {},
+  };
+}
+
+function defaultCanvasViewSetting() {
+  return {
+    zoom: 1,
+    viewportX: 0,
+    viewportY: 0,
+  };
+}
+
+function readMockBoards(workspaceId) {
+  const boards = readCanvasStorage(mockBoardListStorageScope, workspaceId);
+
+  return Array.isArray(boards) ? boards.filter(isRecord) : [];
+}
+
+function writeMockBoards(workspaceId, boards) {
+  writeCanvasStorage(mockBoardListStorageScope, workspaceId, boards);
+}
+
+function createMockBlankBoard(workspaceId, title) {
+  const now = new Date().toISOString();
+
+  return {
+    id: `local-canvas-board-${Date.now()}`,
+    workspaceId,
+    title: title?.trim() || "Untitled canvas",
+    boardType: "freeform",
+    shapeCount: 0,
+    connectionCount: 0,
+    updatedAt: now,
+    shapes: [],
+    connections: [],
+    viewSetting: defaultCanvasViewSetting(),
+    filterSetting: defaultCanvasFilterSetting(),
+  };
+}
+
 export function normalizeCanvasBoardDetail(rawBoard, { workspaceId } = {}) {
   if (!isRecord(rawBoard)) {
     return createMockCanvasBoardDetail(workspaceId);
@@ -192,6 +240,14 @@ export function createCanvasApiClient({
       const boards = await requestCanvasJson(path, undefined, requestOptions);
 
       return Array.isArray(boards) ? boards : [];
+    },
+
+    async createBoard(workspaceId, body) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvas-boards`,
+        withJsonBody(body, { method: "POST" }),
+        requestOptions,
+      );
     },
 
     async getBoardDetail(boardId, { workspaceId } = {}) {
@@ -270,11 +326,40 @@ export function createCanvasApiClient({
 export function createMockCanvasClient() {
   return {
     async listBoards(workspaceId) {
-      return [toBoardSummary(createMockCanvasBoardDetail(workspaceId))];
+      return [
+        toBoardSummary(createMockCanvasBoardDetail(workspaceId)),
+        ...readMockBoards(workspaceId).map(toBoardSummary),
+      ];
     },
 
-    async getBoardDetail(_boardId, { workspaceId } = {}) {
-      return createMockCanvasBoardDetail(workspaceId);
+    async createBoard(workspaceId, body = {}) {
+      const boards = readMockBoards(workspaceId);
+      const board = createMockBlankBoard(workspaceId, body.title);
+
+      writeMockBoards(workspaceId, [board, ...boards]);
+
+      return toBoardSummary(board);
+    },
+
+    async getBoardDetail(boardId, { workspaceId } = {}) {
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+
+      if (!boardId || boardId === defaultBoard.id) {
+        return defaultBoard;
+      }
+
+      const storedBoard = readMockBoards(workspaceId).find(
+        (board) => board.id === boardId,
+      );
+
+      if (storedBoard) {
+        return normalizeCanvasBoardDetail(storedBoard, { workspaceId });
+      }
+
+      return {
+        ...createMockBlankBoard(workspaceId, "Untitled canvas"),
+        id: boardId,
+      };
     },
 
     async createShape(_boardId, body) {

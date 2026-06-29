@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { AuthGuard } from "../../../../components/auth/AuthGuard";
-import { WorkspaceCanvas } from "../../../../components/workspace/WorkspaceCanvas";
+import { WorkspaceCanvasBoards } from "../../../../components/workspace/WorkspaceCanvasBoards";
 import { mockWorkspaces } from "../../../../lib/workspace/workspaceClient.mjs";
 
 export function generateStaticParams() {
@@ -13,7 +13,7 @@ export default function WorkspaceCanvasPage() {
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <WorkspaceCanvas />
+        <WorkspaceCanvasBoards />
       </AuthGuard>
     </Suspense>
   );
