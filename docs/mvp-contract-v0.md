@@ -30,21 +30,20 @@
 
 ## 현재 Runtime Prefix
 
-현재 app-server에는 전역 `api` prefix가 없다. 따라서 controller별 경로가 그대로
-runtime path가 된다.
+app-server uses the global `api` prefix. Every public HTTP route exposed by current runtime controllers is `/api/...`.
 
 | 도메인 | 현재 prefix 상태 |
 |---|---|
-| Auth | `/auth/...` |
-| Workspace | `/workspaces/...`, `/workspace-invites/...` |
-| Canvas | `/workspaces/:workspaceId/canvas-boards`, `/canvas-boards/...`, `/canvas-shapes/...` |
+| Auth | `/api/auth/...` |
+| Workspace | `/api/workspaces/...`, `/api/workspace-invites/...` |
+| Canvas | `/api/workspaces/:workspaceId/canvas-boards`, `/api/canvas-boards/...`, `/api/canvas-shapes/...` |
 | Task / Milestone | `/api/workspaces/:workspaceId/...`, `/api/tasks/...`, `/api/milestones/...` |
-| GitHub Connection | `/workspaces/:workspaceId/github/connections`, `/github/app/callback` |
+| GitHub Connection | `/api/workspaces/:workspaceId/github/connections`, `/api/github/app/callback` |
 | Meeting / Voice | `/api/...` |
-| Review | `/pull-requests/...`, `/code-review-rooms/...`, `/pull-request-analyses/...`, `/review-nodes/...` |
+| Review | `/api/pull-requests/...`, `/api/code-review-rooms/...`, `/api/pull-request-analyses/...`, `/api/review-nodes/...` |
 | Agent Run / Planning / Common | 대부분 controller 없음. health만 `/api/health` |
 
-`/api` prefix 통일 여부는 MVP v0 rebaseline의 별도 결정 사항이다.
+`/api` prefix unification is complete in this rebaseline.
 
 ## DB 기준선 상태
 
@@ -71,13 +70,13 @@ runtime path가 된다.
 
 현재 API:
 
-- `GET /auth/providers`
-- `GET /auth/google/start`
-- `GET /auth/google/callback`
-- `GET /auth/github/start`
-- `GET /auth/github/callback`
-- `GET /auth/me`
-- `POST /auth/logout`
+- `GET /api/auth/providers`
+- `GET /api/auth/google/start`
+- `GET /api/auth/google/callback`
+- `GET /api/auth/github/start`
+- `GET /api/auth/github/callback`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
 
 주의:
 
@@ -91,16 +90,16 @@ runtime path가 된다.
 
 현재 API:
 
-- `GET /workspaces`
-- `POST /workspaces`
-- `GET /workspaces/:workspaceId`
-- `PATCH /workspaces/:workspaceId`
-- `GET /workspaces/:workspaceId/members`
-- `POST /workspaces/:workspaceId/invites`
-- `POST /workspace-invites/:inviteId/accept`
-- `GET /workspaces/:workspaceId/dashboard-preferences`
-- `PUT /workspaces/:workspaceId/dashboard-preferences`
-- `GET /workspaces/:workspaceId/dashboard`
+- `GET /api/workspaces`
+- `POST /api/workspaces`
+- `GET /api/workspaces/:workspaceId`
+- `PATCH /api/workspaces/:workspaceId`
+- `GET /api/workspaces/:workspaceId/members`
+- `POST /api/workspaces/:workspaceId/invites`
+- `POST /api/workspace-invites/:inviteId/accept`
+- `GET /api/workspaces/:workspaceId/dashboard-preferences`
+- `PUT /api/workspaces/:workspaceId/dashboard-preferences`
+- `GET /api/workspaces/:workspaceId/dashboard`
 
 주의:
 
@@ -115,17 +114,17 @@ runtime path가 된다.
 
 현재 API:
 
-- `GET /workspaces/:workspaceId/canvas-boards`
-- `POST /workspaces/:workspaceId/canvas-boards`
-- `GET /canvas-boards/:boardId`
-- `POST /canvas-boards/:boardId/shapes`
-- `PATCH /canvas-shapes/:shapeId`
-- `DELETE /canvas-shapes/:shapeId`
-- `PUT /canvas-shapes/:shapeId/position`
-- `POST /canvas-boards/:boardId/connections`
-- `DELETE /canvas-connections/:connectionId`
-- `PUT /canvas-boards/:boardId/view-settings`
-- `PUT /canvas-boards/:boardId/filter-settings`
+- `GET /api/workspaces/:workspaceId/canvas-boards`
+- `POST /api/workspaces/:workspaceId/canvas-boards`
+- `GET /api/canvas-boards/:boardId`
+- `POST /api/canvas-boards/:boardId/shapes`
+- `PATCH /api/canvas-shapes/:shapeId`
+- `DELETE /api/canvas-shapes/:shapeId`
+- `PUT /api/canvas-shapes/:shapeId/position`
+- `POST /api/canvas-boards/:boardId/connections`
+- `DELETE /api/canvas-connections/:connectionId`
+- `PUT /api/canvas-boards/:boardId/view-settings`
+- `PUT /api/canvas-boards/:boardId/filter-settings`
 
 주의:
 
@@ -171,10 +170,10 @@ runtime path가 된다.
 
 현재 API:
 
-- `POST /workspaces/:workspaceId/github/connections`
-- `GET /workspaces/:workspaceId/github/connections`
-- `DELETE /workspaces/:workspaceId/github/connections/:connectionId`
-- `GET /github/app/callback`
+- `POST /api/workspaces/:workspaceId/github/connections`
+- `GET /api/workspaces/:workspaceId/github/connections`
+- `DELETE /api/workspaces/:workspaceId/github/connections/:connectionId`
+- `GET /api/github/app/callback`
 
 Deferred:
 
@@ -280,16 +279,16 @@ Deferred:
 
 현재 API:
 
-- `POST /pull-requests/:pullRequestId/review-room`
-- `GET /code-review-rooms/:roomId`
-- `POST /pull-requests/:pullRequestId/analysis`
-- `GET /pull-requests/:pullRequestId/analysis`
-- `GET /pull-requests/:pullRequestId/analysis-summary`
-- `GET /pull-request-analyses/:analysisId/graph`
-- `GET /pull-request-analyses/:analysisId/canvas`
-- `PATCH /review-nodes/:nodeId/state`
-- `POST /code-review-rooms/:roomId/comments`
-- `POST /pull-request-analyses/:analysisId/checklist-items`
+- `POST /api/pull-requests/:pullRequestId/review-room`
+- `GET /api/code-review-rooms/:roomId`
+- `POST /api/pull-requests/:pullRequestId/analysis`
+- `GET /api/pull-requests/:pullRequestId/analysis`
+- `GET /api/pull-requests/:pullRequestId/analysis-summary`
+- `GET /api/pull-request-analyses/:analysisId/graph`
+- `GET /api/pull-request-analyses/:analysisId/canvas`
+- `PATCH /api/review-nodes/:nodeId/state`
+- `POST /api/code-review-rooms/:roomId/comments`
+- `POST /api/pull-request-analyses/:analysisId/checklist-items`
 
 주의:
 

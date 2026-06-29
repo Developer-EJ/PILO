@@ -17,21 +17,20 @@ Workspace는 PILO의 프로젝트 작업 공간과 멤버 권한을 담당한다
 
 ## Current Runtime APIs
 
-현재 Workspace controller는 `/api` prefix 없이 아래 path를 제공한다.
-MVP target path는 `docs/api-contract-v1.md`의 `/api/workspaces...`를 따른다.
+The Workspace controller is exposed through the app-server global prefix as `/api/workspaces...`.
 
 | Method | Path | 목적 | Consumer |
 |---|---|---|---|
-| `GET` | `/workspaces` | 내가 속한 workspace 목록 | 전체 |
-| `POST` | `/workspaces` | workspace 생성 | 동현 |
-| `GET` | `/workspaces/:workspaceId` | workspace 상세 | 전체 |
-| `PATCH` | `/workspaces/:workspaceId` | workspace 이름/설명/상태 수정 | 동현 |
-| `GET` | `/workspaces/:workspaceId/members` | 멤버 목록 | 전체 |
-| `POST` | `/workspaces/:workspaceId/invites` | 팀원 초대 생성 | 동현 |
-| `POST` | `/workspace-invites/:inviteId/accept` | 초대 수락 | 동현 |
-| `GET` | `/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 조회 | 동현 |
-| `PUT` | `/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 저장 | 동현 |
-| `GET` | `/workspaces/:workspaceId/dashboard` | Dashboard aggregate read model 조회 | 동현 |
+| `GET` | `/api/workspaces` | 내가 속한 workspace 목록 | 전체 |
+| `POST` | `/api/workspaces` | workspace 생성 | 동현 |
+| `GET` | `/api/workspaces/:workspaceId` | workspace 상세 | 전체 |
+| `PATCH` | `/api/workspaces/:workspaceId` | workspace 이름/설명/상태 수정 | 동현 |
+| `GET` | `/api/workspaces/:workspaceId/members` | 멤버 목록 | 전체 |
+| `POST` | `/api/workspaces/:workspaceId/invites` | 팀원 초대 생성 | 동현 |
+| `POST` | `/api/workspace-invites/:inviteId/accept` | 초대 수락 | 동현 |
+| `GET` | `/api/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 조회 | 동현 |
+| `PUT` | `/api/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 저장 | 동현 |
+| `GET` | `/api/workspaces/:workspaceId/dashboard` | Dashboard aggregate read model 조회 | 동현 |
 
 ## Read Models
 
@@ -110,7 +109,7 @@ OAuth provider, session token, Workspace에서 필요하지 않은 원본 profil
 
 ### WorkspaceDashboardReadModel
 
-`GET /workspaces/:workspaceId/dashboard`는 dashboard aggregate read model을 반환한다.
+`GET /api/workspaces/:workspaceId/dashboard`는 dashboard aggregate read model을 반환한다.
 Workspace는 aggregate 경계, member context, dashboard preferences만 소유한다.
 Task, GitHub, PR, meeting, agent, canvas 항목은 각 owner domain이 제공하는
 read model을 사용하거나 mock/local 개발 중 shared fixture를 사용한다.

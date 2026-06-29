@@ -120,8 +120,8 @@ Agent는 다른 도메인 DB를 직접 변경하지 않는다.
 - TaskSummary
 
 ## Owner API Examples
-- GET /workspaces/:workspaceId/tasks/summary
-- POST /workspaces/:workspaceId/tasks/drafts
+- GET /api/workspaces/:workspaceId/tasks/summary
+- POST /api/workspaces/:workspaceId/tasks/drafts
 
 ## Consumed By
 - 동현 Dashboard

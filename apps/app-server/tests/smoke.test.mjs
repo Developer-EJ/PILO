@@ -47,6 +47,7 @@ const {
 } = require("../src/modules/canvas/canvas.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
+const { configureApp } = require("../src/app.config");
 const { AppModule } = require("../src/app.module");
 
 function assertRequiredFields(value, schema, label) {
@@ -82,7 +83,7 @@ describe("app-server package", () => {
     assert.equal(config.providers.google.configured, false);
     assert.equal(
       config.providers.google.callbackUrl,
-      "http://localhost:4000/auth/google/callback",
+      "http://localhost:4000/api/auth/google/callback",
     );
     assert.deepEqual(config.providers.google.missingEnv, [
       "GOOGLE_OAUTH_CLIENT_ID",
@@ -152,15 +153,15 @@ describe("app-server package", () => {
 
     assert.equal(
       normalizeOAuthRedirectUri(provider.callbackUrl, provider),
-      "https://api.pilo.dev/auth/google/callback",
+      "https://api.pilo.dev/api/auth/google/callback",
     );
     assert.equal(
       normalizeOAuthRedirectUri("https://evil.example/callback", provider),
-      "https://api.pilo.dev/auth/google/callback",
+      "https://api.pilo.dev/api/auth/google/callback",
     );
     assert.equal(
       normalizeOAuthRedirectUri(undefined, provider),
-      "https://api.pilo.dev/auth/google/callback",
+      "https://api.pilo.dev/api/auth/google/callback",
     );
   });
 
@@ -267,7 +268,7 @@ describe("app-server package", () => {
     assert.equal(redirectUrl.searchParams.get("client_id"), "google-client");
     assert.equal(
       redirectUrl.searchParams.get("redirect_uri"),
-      "https://api.pilo.dev/auth/google/callback",
+      "https://api.pilo.dev/api/auth/google/callback",
     );
     assert.equal(redirectUrl.searchParams.get("response_type"), "code");
     assert.equal(redirectUrl.searchParams.get("scope"), "openid email profile");
@@ -389,7 +390,7 @@ describe("app-server package", () => {
     assert.equal(requests[0].init.body.get("code"), "google-code");
     assert.equal(
       requests[0].init.body.get("redirect_uri"),
-      "https://api.pilo.dev/auth/google/callback",
+      "https://api.pilo.dev/api/auth/google/callback",
     );
     assert.equal(
       requests[1].init.headers.Authorization,
@@ -544,7 +545,7 @@ describe("app-server package", () => {
     );
     assert.equal(
       redirectUrl.searchParams.get("redirect_uri"),
-      "https://api.pilo.dev/auth/github/callback",
+      "https://api.pilo.dev/api/auth/github/callback",
     );
     assert.equal(redirectUrl.searchParams.get("scope"), "read:user user:email");
     assert.equal(redirectUrl.searchParams.get("scope").includes("repo"), false);
@@ -617,7 +618,7 @@ describe("app-server package", () => {
     assert.equal(requests[0].init.body.get("code"), "github-code");
     assert.equal(
       requests[0].init.body.get("redirect_uri"),
-      "https://api.pilo.dev/auth/github/callback",
+      "https://api.pilo.dev/api/auth/github/callback",
     );
     assert.equal(requests[1].url, "https://api.github.com/user");
     assert.equal(requests[1].init.headers.Authorization, "Bearer github-token");
@@ -843,8 +844,8 @@ describe("app-server package", () => {
     const response = service.getProviders();
 
     assert.equal(response.providers.length, 2);
-    assert.equal(response.providers[0].startPath.startsWith("/auth/"), true);
-    assert.equal(response.providers[0].callbackUrl.includes("/auth/"), true);
+    assert.equal(response.providers[0].startPath.startsWith("/api/auth/"), true);
+    assert.equal(response.providers[0].callbackUrl.includes("/api/auth/"), true);
     assert.equal(JSON.stringify(response).includes("clientSecret"), false);
     assert.equal(JSON.stringify(response).includes("secret"), false);
   });
@@ -3013,6 +3014,7 @@ describe("app-server package", () => {
       app = await NestFactory.create(AppModule, new FastifyAdapter(), {
         logger: false,
       });
+      configureApp(app);
       await app.init();
       assert.deepEqual(app.get(WorkspaceService).getRepositoryStatus(), {
         storageMode: "memory",

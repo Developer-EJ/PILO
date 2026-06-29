@@ -26,7 +26,7 @@ import {
   UpdateTaskStatusBody,
 } from "./juhyung-task.service";
 
-@Controller("api")
+@Controller()
 export class JuhyungTasksController {
   constructor(private readonly taskService: JuhyungTaskService) {}
 

@@ -24,8 +24,7 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 ## Base Path
 
-최신 app-server controller는 `@Controller("api")`를 사용한다. 이 문서의 Current
-APIs는 실제 runtime path인 `/api/...`로 적는다.
+app-server uses the global `api` prefix. Current runtime paths in this document are listed as `/api/...`.
 
 ## Current Runtime APIs
 

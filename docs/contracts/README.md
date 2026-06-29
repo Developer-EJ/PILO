@@ -17,7 +17,7 @@
 1. 구현 중 호출해야 하는 API는 각 도메인 문서의 `Current Runtime APIs`만 사용한다.
 2. `Deferred APIs`는 mock/fixture 또는 후속 contract PR 전용이다.
 3. 새 API를 추가할 때는 `docs/api-contract-v1.md`의 `/api` prefix 원칙을 따른다.
-4. 기존 controller 중 일부는 아직 `/api` prefix가 없다. 이 차이는 해당 도메인 contract에 명시된 현재 path를 우선한다.
+4. app-server uses the global `api` prefix. New public HTTP APIs must be exposed as `/api/...`.
 
 ## 읽는 순서
 
@@ -60,5 +60,5 @@
 1. `docs/contracts/*.md`와 `docs/contracts/schemas/*.json`을 먼저 수정한다.
 2. 영향을 받는 담당자를 reviewer로 지정한다.
 3. breaking change라면 deprecated 필드와 migration plan을 적는다.
-4. contract PR을 `dev`에 먼저 merge한다.
+4. Contract PRs are merged into `dev` before implementation branches depend on them.
 5. 구현 브랜치는 최신 `dev`를 반영한 뒤 작업한다.

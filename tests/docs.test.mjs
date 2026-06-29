@@ -385,6 +385,11 @@ describe("contract document set", () => {
       assert.doesNotMatch(content, /## Planned APIs/, `${file} must use Deferred APIs`);
       assert.doesNotMatch(content, /Planned \/ Deferred APIs/, `${file} must use Deferred APIs`);
       assert.doesNotMatch(content, /Task draft HTTP API/, `${file} must not describe implemented task drafts as missing`);
+      assert.doesNotMatch(
+        content,
+        /`(?:GET|POST|PATCH|PUT|DELETE) \/(?!api\/)(auth|workspaces|workspace-invites|canvas-boards|canvas-shapes|canvas-connections|pull-requests|code-review-rooms|pull-request-analyses|review-nodes|github\/app|repositories|tasks|milestones)\b/,
+        `${file} must expose current and target public routes with /api prefix`,
+      );
     }
   });
 
@@ -399,9 +404,9 @@ describe("contract document set", () => {
     assert.match(taskDeferred, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
 
     const review = read("docs/contracts/review.md");
-    assert.match(review, /`GET`\s*\|\s*`\/pull-request-analyses\/:analysisId\/graph`/);
-    assert.match(review, /`GET`\s*\|\s*`\/pull-request-analyses\/:analysisId\/canvas`/);
-    assert.match(review, /`POST`\s*\|\s*`\/code-review-rooms\/:roomId\/comments`/);
+    assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/graph`/);
+    assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/canvas`/);
+    assert.match(review, /`POST`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/);
 
     const agent = read("docs/contracts/agent-actions.md");
     assert.match(agent, /Current Runtime APIs/);

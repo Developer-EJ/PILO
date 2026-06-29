@@ -8,6 +8,7 @@ import "ts-node/register";
 const require = createRequire(import.meta.url);
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
+const { configureApp } = require("../src/app.config");
 const { AppModule } = require("../src/app.module");
 
 const AUTH_TEST_ENV = {
@@ -86,6 +87,7 @@ async function createAuthIntegrationApp(fetcher = createOAuthFetchStub()) {
     const app = await NestFactory.create(AppModule, new FastifyAdapter(), {
       logger: false,
     });
+    configureApp(app);
     await app.init();
 
     const server = app.getHttpAdapter().getInstance();
@@ -138,7 +140,7 @@ describe("auth HTTP integration", () => {
     try {
       const startResponse = await server.inject({
         method: "GET",
-        url: "/auth/google/start?next=%2Fcanvas",
+        url: "/api/auth/google/start?next=%2Fcanvas",
       });
       const authorizationUrl = getRedirectUrl(startResponse);
       const state = authorizationUrl.searchParams.get("state");
@@ -150,7 +152,7 @@ describe("auth HTTP integration", () => {
       );
       assert.equal(
         authorizationUrl.searchParams.get("redirect_uri"),
-        "https://api.pilo.test/auth/google/callback",
+        "https://api.pilo.test/api/auth/google/callback",
       );
       assert.equal(
         authorizationUrl.searchParams.get("client_id"),
@@ -160,7 +162,7 @@ describe("auth HTTP integration", () => {
 
       const callbackResponse = await server.inject({
         method: "GET",
-        url: `/auth/google/callback?code=google-code&state=${encodeURIComponent(
+        url: `/api/auth/google/callback?code=google-code&state=${encodeURIComponent(
           state,
         )}`,
         headers: {
@@ -181,7 +183,7 @@ describe("auth HTTP integration", () => {
 
       const meResponse = await server.inject({
         method: "GET",
-        url: "/auth/me",
+        url: "/api/auth/me",
         headers: {
           cookie: cookieHeader,
         },
@@ -195,7 +197,7 @@ describe("auth HTTP integration", () => {
 
       const logoutResponse = await server.inject({
         method: "POST",
-        url: "/auth/logout",
+        url: "/api/auth/logout",
         headers: {
           cookie: cookieHeader,
         },
@@ -207,7 +209,7 @@ describe("auth HTTP integration", () => {
 
       const revokedMeResponse = await server.inject({
         method: "GET",
-        url: "/auth/me",
+        url: "/api/auth/me",
         headers: {
           cookie: cookieHeader,
         },
@@ -241,20 +243,20 @@ describe("auth HTTP integration", () => {
     try {
       const startResponse = await server.inject({
         method: "GET",
-        url: "/auth/google/start?next=%2Fworkspaces",
+        url: "/api/auth/google/start?next=%2Fworkspaces",
       });
       const authorizationUrl = getRedirectUrl(startResponse);
       const state = authorizationUrl.searchParams.get("state");
       const callbackResponse = await server.inject({
         method: "GET",
-        url: `/auth/google/callback?code=google-code&state=${encodeURIComponent(
+        url: `/api/auth/google/callback?code=google-code&state=${encodeURIComponent(
           state,
         )}`,
       });
       const cookieHeader = getCookieHeader(callbackResponse);
       const meResponse = await server.inject({
         method: "GET",
-        url: "/auth/me",
+        url: "/api/auth/me",
         headers: {
           cookie: cookieHeader,
         },
@@ -265,7 +267,7 @@ describe("auth HTTP integration", () => {
 
       const createResponse = await server.inject({
         method: "POST",
-        url: "/workspaces",
+        url: "/api/workspaces",
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -288,7 +290,7 @@ describe("auth HTTP integration", () => {
 
       const listResponse = await server.inject({
         method: "GET",
-        url: "/workspaces",
+        url: "/api/workspaces",
         headers: {
           cookie: cookieHeader,
         },
@@ -299,7 +301,7 @@ describe("auth HTTP integration", () => {
 
       const detailResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}`,
+        url: `/api/workspaces/${created.id}`,
         headers: {
           cookie: cookieHeader,
         },
@@ -310,7 +312,7 @@ describe("auth HTTP integration", () => {
 
       const membersResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}/members`,
+        url: `/api/workspaces/${created.id}/members`,
         headers: {
           cookie: cookieHeader,
         },
@@ -327,7 +329,7 @@ describe("auth HTTP integration", () => {
 
       const defaultPreferencesResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}/dashboard-preferences`,
+        url: `/api/workspaces/${created.id}/dashboard-preferences`,
         headers: {
           cookie: cookieHeader,
         },
@@ -341,7 +343,7 @@ describe("auth HTTP integration", () => {
 
       const ownerPreferencesResponse = await server.inject({
         method: "PUT",
-        url: `/workspaces/${created.id}/dashboard-preferences`,
+        url: `/api/workspaces/${created.id}/dashboard-preferences`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -365,7 +367,7 @@ describe("auth HTTP integration", () => {
 
       const dashboardResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}/dashboard`,
+        url: `/api/workspaces/${created.id}/dashboard`,
         headers: {
           cookie: cookieHeader,
         },
@@ -383,7 +385,7 @@ describe("auth HTTP integration", () => {
 
       const inviteResponse = await server.inject({
         method: "POST",
-        url: `/workspaces/${created.id}/invites`,
+        url: `/api/workspaces/${created.id}/invites`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -403,13 +405,13 @@ describe("auth HTTP integration", () => {
 
       const inviteeStartResponse = await server.inject({
         method: "GET",
-        url: "/auth/google/start?next=%2Fworkspaces",
+        url: "/api/auth/google/start?next=%2Fworkspaces",
       });
       const inviteeAuthorizationUrl = getRedirectUrl(inviteeStartResponse);
       const inviteeState = inviteeAuthorizationUrl.searchParams.get("state");
       const inviteeCallbackResponse = await server.inject({
         method: "GET",
-        url: `/auth/google/callback?code=invitee-code&state=${encodeURIComponent(
+        url: `/api/auth/google/callback?code=invitee-code&state=${encodeURIComponent(
           inviteeState,
         )}`,
       });
@@ -417,7 +419,7 @@ describe("auth HTTP integration", () => {
 
       const acceptResponse = await server.inject({
         method: "POST",
-        url: `/workspace-invites/${invite.id}/accept`,
+        url: `/api/workspace-invites/${invite.id}/accept`,
         headers: {
           "content-type": "application/json",
           cookie: inviteeCookieHeader,
@@ -435,7 +437,7 @@ describe("auth HTTP integration", () => {
 
       const updatedMembersResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}/members`,
+        url: `/api/workspaces/${created.id}/members`,
         headers: {
           cookie: cookieHeader,
         },
@@ -446,7 +448,7 @@ describe("auth HTTP integration", () => {
 
       const inviteePreferencesResponse = await server.inject({
         method: "PUT",
-        url: `/workspaces/${created.id}/dashboard-preferences`,
+        url: `/api/workspaces/${created.id}/dashboard-preferences`,
         headers: {
           "content-type": "application/json",
           cookie: inviteeCookieHeader,
@@ -470,7 +472,7 @@ describe("auth HTTP integration", () => {
 
       const reloadedOwnerPreferencesResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}/dashboard-preferences`,
+        url: `/api/workspaces/${created.id}/dashboard-preferences`,
         headers: {
           cookie: cookieHeader,
         },
@@ -484,7 +486,7 @@ describe("auth HTTP integration", () => {
 
       const updateResponse = await server.inject({
         method: "PATCH",
-        url: `/workspaces/${created.id}`,
+        url: `/api/workspaces/${created.id}`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -502,21 +504,21 @@ describe("auth HTTP integration", () => {
 
       const anonymousResponse = await server.inject({
         method: "GET",
-        url: "/workspaces",
+        url: "/api/workspaces",
       });
 
       assert.equal(anonymousResponse.statusCode, 401);
 
       const anonymousMembersResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${created.id}/members`,
+        url: `/api/workspaces/${created.id}/members`,
       });
 
       assert.equal(anonymousMembersResponse.statusCode, 401);
 
       const missingMembersResponse = await server.inject({
         method: "GET",
-        url: "/workspaces/00000000-0000-4000-8000-000000000000/members",
+        url: "/api/workspaces/00000000-0000-4000-8000-000000000000/members",
         headers: {
           cookie: cookieHeader,
         },
@@ -535,13 +537,13 @@ describe("auth HTTP integration", () => {
     try {
       const startResponse = await server.inject({
         method: "GET",
-        url: "/auth/google/start?next=%2Fcanvas",
+        url: "/api/auth/google/start?next=%2Fcanvas",
       });
       const authorizationUrl = getRedirectUrl(startResponse);
       const state = authorizationUrl.searchParams.get("state");
       const callbackResponse = await server.inject({
         method: "GET",
-        url: `/auth/google/callback?code=google-code&state=${encodeURIComponent(
+        url: `/api/auth/google/callback?code=google-code&state=${encodeURIComponent(
           state,
         )}`,
       });
@@ -549,7 +551,7 @@ describe("auth HTTP integration", () => {
 
       const createWorkspaceResponse = await server.inject({
         method: "POST",
-        url: "/workspaces",
+        url: "/api/workspaces",
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -565,7 +567,7 @@ describe("auth HTTP integration", () => {
 
       const emptyBoardsResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${workspace.id}/canvas-boards`,
+        url: `/api/workspaces/${workspace.id}/canvas-boards`,
         headers: {
           cookie: cookieHeader,
         },
@@ -576,7 +578,7 @@ describe("auth HTTP integration", () => {
 
       const createBoardResponse = await server.inject({
         method: "POST",
-        url: `/workspaces/${workspace.id}/canvas-boards`,
+        url: `/api/workspaces/${workspace.id}/canvas-boards`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -596,7 +598,7 @@ describe("auth HTTP integration", () => {
 
       const listBoardsResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${workspace.id}/canvas-boards`,
+        url: `/api/workspaces/${workspace.id}/canvas-boards`,
         headers: {
           cookie: cookieHeader,
         },
@@ -607,7 +609,7 @@ describe("auth HTTP integration", () => {
 
       const detailResponse = await server.inject({
         method: "GET",
-        url: `/canvas-boards/${board.id}`,
+        url: `/api/canvas-boards/${board.id}`,
         headers: {
           cookie: cookieHeader,
         },
@@ -626,7 +628,7 @@ describe("auth HTTP integration", () => {
 
       const invalidShapeResponse = await server.inject({
         method: "POST",
-        url: `/canvas-boards/${board.id}/shapes`,
+        url: `/api/canvas-boards/${board.id}/shapes`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -646,7 +648,7 @@ describe("auth HTTP integration", () => {
 
       const createTaskShapeResponse = await server.inject({
         method: "POST",
-        url: `/canvas-boards/${board.id}/shapes`,
+        url: `/api/canvas-boards/${board.id}/shapes`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -672,7 +674,7 @@ describe("auth HTTP integration", () => {
 
       const createPrShapeResponse = await server.inject({
         method: "POST",
-        url: `/canvas-boards/${board.id}/shapes`,
+        url: `/api/canvas-boards/${board.id}/shapes`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -693,7 +695,7 @@ describe("auth HTTP integration", () => {
 
       const updateShapeResponse = await server.inject({
         method: "PATCH",
-        url: `/canvas-shapes/${taskShape.id}`,
+        url: `/api/canvas-shapes/${taskShape.id}`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -711,7 +713,7 @@ describe("auth HTTP integration", () => {
 
       const positionResponse = await server.inject({
         method: "PUT",
-        url: `/canvas-shapes/${taskShape.id}/position`,
+        url: `/api/canvas-shapes/${taskShape.id}/position`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -730,7 +732,7 @@ describe("auth HTTP integration", () => {
 
       const connectionResponse = await server.inject({
         method: "POST",
-        url: `/canvas-boards/${board.id}/connections`,
+        url: `/api/canvas-boards/${board.id}/connections`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -749,7 +751,7 @@ describe("auth HTTP integration", () => {
 
       const duplicateConnectionResponse = await server.inject({
         method: "POST",
-        url: `/canvas-boards/${board.id}/connections`,
+        url: `/api/canvas-boards/${board.id}/connections`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -766,7 +768,7 @@ describe("auth HTTP integration", () => {
 
       const viewSettingResponse = await server.inject({
         method: "PUT",
-        url: `/canvas-boards/${board.id}/view-settings`,
+        url: `/api/canvas-boards/${board.id}/view-settings`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -787,7 +789,7 @@ describe("auth HTTP integration", () => {
 
       const filterSettingResponse = await server.inject({
         method: "PUT",
-        url: `/canvas-boards/${board.id}/filter-settings`,
+        url: `/api/canvas-boards/${board.id}/filter-settings`,
         headers: {
           "content-type": "application/json",
           cookie: cookieHeader,
@@ -808,7 +810,7 @@ describe("auth HTTP integration", () => {
 
       const updatedDetailResponse = await server.inject({
         method: "GET",
-        url: `/canvas-boards/${board.id}`,
+        url: `/api/canvas-boards/${board.id}`,
         headers: {
           cookie: cookieHeader,
         },
@@ -826,14 +828,14 @@ describe("auth HTTP integration", () => {
 
       const anonymousListResponse = await server.inject({
         method: "GET",
-        url: `/workspaces/${workspace.id}/canvas-boards`,
+        url: `/api/workspaces/${workspace.id}/canvas-boards`,
       });
 
       assert.equal(anonymousListResponse.statusCode, 401);
 
       const deleteConnectionResponse = await server.inject({
         method: "DELETE",
-        url: `/canvas-connections/${connection.id}`,
+        url: `/api/canvas-connections/${connection.id}`,
         headers: {
           cookie: cookieHeader,
         },
@@ -847,7 +849,7 @@ describe("auth HTTP integration", () => {
 
       const deleteShapeResponse = await server.inject({
         method: "DELETE",
-        url: `/canvas-shapes/${taskShape.id}`,
+        url: `/api/canvas-shapes/${taskShape.id}`,
         headers: {
           cookie: cookieHeader,
         },
@@ -871,7 +873,7 @@ describe("auth HTTP integration", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/auth/google/callback?error=access_denied",
+        url: "/api/auth/google/callback?error=access_denied",
       });
       const redirectUrl = getRedirectUrl(response);
 
@@ -895,14 +897,14 @@ describe("auth HTTP integration", () => {
     try {
       const startResponse = await server.inject({
         method: "GET",
-        url: "/auth/google/start",
+        url: "/api/auth/google/start",
       });
 
       assert.equal(startResponse.statusCode, 302);
 
       const response = await server.inject({
         method: "GET",
-        url: "/auth/google/callback?code=google-code&state=wrong-state",
+        url: "/api/auth/google/callback?code=google-code&state=wrong-state",
       });
       const redirectUrl = getRedirectUrl(response);
 
@@ -917,13 +919,13 @@ describe("auth HTTP integration", () => {
     }
   });
 
-  it("returns 401 for /auth/me without a session cookie", async () => {
+  it("returns 401 for /api/auth/me without a session cookie", async () => {
     const { server, close } = await createAuthIntegrationApp();
 
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/auth/me",
+        url: "/api/auth/me",
       });
       const body = response.json();
 

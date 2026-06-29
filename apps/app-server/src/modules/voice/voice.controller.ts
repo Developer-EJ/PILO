@@ -8,7 +8,7 @@ import {
 } from "./dto/voice-room-response.dto";
 import { VoiceService } from "./voice.service";
 
-@Controller("api")
+@Controller()
 export class VoiceController {
   constructor(private readonly voiceService: VoiceService) {}
 

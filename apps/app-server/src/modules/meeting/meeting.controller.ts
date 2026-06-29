@@ -30,7 +30,7 @@ import {
 } from "./dto/meeting-scaffold-response.dto";
 import { MeetingService } from "./meeting.service";
 
-@Controller("api")
+@Controller()
 export class MeetingController {
   constructor(private readonly meetingService: MeetingService) {}
 

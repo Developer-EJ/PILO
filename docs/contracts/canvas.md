@@ -32,22 +32,21 @@ GitHub, Review, Agent, or Common domains.
 
 ## Current Runtime APIs
 
-현재 Canvas controller는 `/api` prefix 없이 아래 path를 제공한다.
-MVP target path는 `docs/api-contract-v1.md`의 `/api/canvas...` 계열로 rebaseline한다.
+The Canvas controller is exposed through the app-server global prefix as `/api/...`.
 
 | Method   | Path                                      | Purpose                           |
 | -------- | ----------------------------------------- | --------------------------------- |
-| `GET`    | `/workspaces/:workspaceId/canvas-boards`  | List Canvas boards                |
-| `POST`   | `/workspaces/:workspaceId/canvas-boards`  | Create Canvas board               |
-| `GET`    | `/canvas-boards/:boardId`                 | Read board + shapes + connections |
-| `POST`   | `/canvas-boards/:boardId/shapes`          | Create shape                      |
-| `PATCH`  | `/canvas-shapes/:shapeId`                 | Update shape display attributes   |
-| `PUT`    | `/canvas-shapes/:shapeId/position`        | Save shape position               |
-| `DELETE` | `/canvas-shapes/:shapeId`                 | Delete shape                      |
-| `POST`   | `/canvas-boards/:boardId/connections`     | Create shape connection           |
-| `DELETE` | `/canvas-connections/:connectionId`       | Delete connection                 |
-| `PUT`    | `/canvas-boards/:boardId/view-settings`   | Save zoom/viewport                |
-| `PUT`    | `/canvas-boards/:boardId/filter-settings` | Save filters                      |
+| `GET`    | `/api/workspaces/:workspaceId/canvas-boards`  | List Canvas boards                |
+| `POST`   | `/api/workspaces/:workspaceId/canvas-boards`  | Create Canvas board               |
+| `GET`    | `/api/canvas-boards/:boardId`                 | Read board + shapes + connections |
+| `POST`   | `/api/canvas-boards/:boardId/shapes`          | Create shape                      |
+| `PATCH`  | `/api/canvas-shapes/:shapeId`                 | Update shape display attributes   |
+| `PUT`    | `/api/canvas-shapes/:shapeId/position`        | Save shape position               |
+| `DELETE` | `/api/canvas-shapes/:shapeId`                 | Delete shape                      |
+| `POST`   | `/api/canvas-boards/:boardId/connections`     | Create shape connection           |
+| `DELETE` | `/api/canvas-connections/:connectionId`       | Delete connection                 |
+| `PUT`    | `/api/canvas-boards/:boardId/view-settings`   | Save zoom/viewport                |
+| `PUT`    | `/api/canvas-boards/:boardId/filter-settings` | Save filters                      |
 
 ## Entity Types
 
