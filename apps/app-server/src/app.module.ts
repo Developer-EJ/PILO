@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "./modules/auth/auth.module";
+import { CanvasModule } from "./modules/canvas/canvas.module";
 import { HealthController } from "./health.controller";
 import { AgentModule } from "./modules/agent/agent.module";
 import { JuhyungModule } from "./modules/juhyung/juhyung.module";
@@ -11,6 +12,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
   imports: [
     AgentModule,
     AuthModule,
+    CanvasModule,
     JuhyungModule,
     MeetingModule,
     ReviewModule,
