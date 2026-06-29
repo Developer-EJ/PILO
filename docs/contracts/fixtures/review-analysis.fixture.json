@@ -1,0 +1,101 @@
+{
+  "prAnalysis": {
+    "id": "88888888-8888-4888-8888-888888888881",
+    "pullRequestId": "66666666-6666-4666-8666-666666666661",
+    "purposeSummary": "OAuth callback 화면 골격을 추가했다.",
+    "impactSummary": "Auth route와 session redirect flow에 영향이 있다.",
+    "testRecommendation": "성공/실패 redirect smoke test와 session 만료 케이스를 확인한다.",
+    "riskLevel": "medium",
+    "analysisStatus": "succeeded",
+    "okCount": 3,
+    "discussCount": 1,
+    "riskCount": 1,
+    "conclusion": "리뷰 후 merge 가능"
+  },
+  "reviewCanvas": {
+    "id": "88888888-8888-4888-8888-8888888888c1",
+    "analysisId": "88888888-8888-4888-8888-888888888881",
+    "pullRequestId": "66666666-6666-4666-8666-666666666661",
+    "intentSummary": "로그인 callback 진입점을 만들고 provider error 상태를 사용자에게 보여준다.",
+    "reviewStrategy": "라우트 진입점, callback 상태 해석, redirect 영향 순서로 확인한다.",
+    "nodes": [
+      {
+        "id": "88888888-8888-4888-8888-888888888891",
+        "analysisId": "88888888-8888-4888-8888-888888888881",
+        "nodeType": "file",
+        "label": "apps/frontend/app/auth/callback/page.tsx",
+        "filePath": "apps/frontend/app/auth/callback/page.tsx",
+        "functionName": null,
+        "riskLevel": "medium",
+        "status": "discuss",
+        "reviewOrder": 1,
+        "roleSummary": "OAuth provider가 돌려준 callback query를 읽어 성공/실패 화면으로 연결한다.",
+        "reviewReason": "로그인 실패와 redirect 처리 모두 사용자 흐름에 직접 영향을 준다.",
+        "position": { "x": 120, "y": 96 }
+      },
+      {
+        "id": "88888888-8888-4888-8888-888888888892",
+        "analysisId": "88888888-8888-4888-8888-888888888881",
+        "nodeType": "impact",
+        "label": "session redirect flow",
+        "filePath": null,
+        "functionName": null,
+        "riskLevel": "low",
+        "status": "ok",
+        "reviewOrder": 2,
+        "roleSummary": "callback 결과가 기존 session redirect 흐름과 충돌하지 않는지 확인한다.",
+        "reviewReason": "성공/실패 상태가 명확히 분기되면 영향 범위가 작다.",
+        "position": { "x": 400, "y": 188 }
+      }
+    ],
+    "edges": [
+      {
+        "id": "88888888-8888-4888-8888-8888888888e1",
+        "sourceNodeId": "88888888-8888-4888-8888-888888888891",
+        "targetNodeId": "88888888-8888-4888-8888-888888888892",
+        "label": "callback result"
+      }
+    ]
+  },
+  "nodeDetails": [
+    {
+      "id": "88888888-8888-4888-8888-8888888888d1",
+      "analysisId": "88888888-8888-4888-8888-888888888881",
+      "nodeId": "88888888-8888-4888-8888-888888888891",
+      "filePath": "apps/frontend/app/auth/callback/page.tsx",
+      "roleSummary": "OAuth callback 화면에서 provider와 error query를 읽고 결과 UI로 전달한다.",
+      "modificationReason": "기존 loading placeholder만으로는 로그인 성공/실패 맥락을 사용자에게 설명할 수 없었다.",
+      "changeGroups": [
+        {
+          "id": "88888888-8888-4888-8888-8888888888f1",
+          "title": "callback query 해석",
+          "summary": "provider와 error query parameter를 읽어 callback 결과 컴포넌트로 넘긴다.",
+          "newStartLine": 12,
+          "newEndLine": 18
+        }
+      ],
+      "diffHunks": [
+        {
+          "id": "88888888-8888-4888-8888-8888888888f2",
+          "oldStartLine": 10,
+          "newStartLine": 12,
+          "oldCode": "return <div>Loading...</div>;",
+          "newCode": "const provider = searchParams.get('provider');\nconst error = searchParams.get('error');\nreturn <CallbackResult provider={provider} error={error} />;",
+          "highlightLines": [12, 13, 14]
+        }
+      ]
+    }
+  ],
+  "reviewRisks": [
+    {
+      "id": "88888888-8888-4888-8888-8888888888a1",
+      "analysisId": "88888888-8888-4888-8888-888888888881",
+      "title": "callback failure state 누락",
+      "description": "OAuth provider error가 UI에 표시되지 않으면 사용자가 재시도 경로를 알기 어렵다.",
+      "riskLevel": "medium",
+      "status": "open",
+      "affectedNodeIds": ["88888888-8888-4888-8888-888888888891"],
+      "recommendation": "provider error query param fixture를 추가해 smoke test를 작성한다."
+    }
+  ]
+}

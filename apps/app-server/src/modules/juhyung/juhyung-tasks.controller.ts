@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
-import { CurrentActor } from "../workspace/workspace-member-access.service";
+import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
   CreateTaskCommentBody,
   CreateChecklistItemBody,
@@ -233,7 +233,7 @@ export class JuhyungTasksController {
 function toCurrentActor(
   userId?: string | string[],
   memberId?: string | string[],
-): CurrentActor {
+): WorkspaceActor {
   const resolvedUserId = firstHeader(userId);
   const resolvedMemberId = firstHeader(memberId);
 
