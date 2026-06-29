@@ -28,6 +28,7 @@ Workspace는 PILO의 프로젝트 작업 공간과 멤버 권한을 담당한다
 | `POST` | `/workspace-invites/:inviteId/accept` | 초대 수락 | 동현 |
 | `GET` | `/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 조회 | 동현 |
 | `PUT` | `/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 저장 | 동현 |
+| `GET` | `/workspaces/:workspaceId/dashboard` | Dashboard aggregate read model 조회 | 동현 |
 
 ## Read Models
 
@@ -60,6 +61,125 @@ Workspace는 PILO의 프로젝트 작업 공간과 멤버 권한을 담당한다
   "joinedAt": "2026-06-27T12:00:00Z"
 }
 ```
+
+### DashboardPreferences
+
+```json
+{
+  "workspaceId": "uuid",
+  "memberId": "uuid",
+  "layout": {
+    "density": "compact",
+    "columns": ["tasks", "prs"]
+  },
+  "hiddenSections": ["agent"],
+  "updatedAt": "2026-06-27T12:00:00Z"
+}
+```
+
+- `layout`은 Dashboard UI가 소유하는 JSON object다. 서버는 내부 구조를 해석하지 않고 그대로 저장한다.
+- `hiddenSections`는 string 배열이다. 서버는 값을 trim하고 중복을 제거한다.
+- 설정은 `(workspaceId, memberId)` 단위로 저장하며, 다른 멤버의 설정과 섞이면 안 된다.
+
+### CurrentWorkspaceMember
+
+`currentMember`는 Workspace consumer에게 제공하는 멤버 기준 컨텍스트다.
+OAuth provider, session token, Workspace에서 필요하지 않은 원본 profile 필드는
+노출하지 않는다.
+
+```json
+{
+  "workspaceId": "uuid",
+  "memberId": "uuid",
+  "userId": "uuid",
+  "role": "owner",
+  "displayName": "Workspace / Canvas"
+}
+```
+
+필수 필드:
+
+- `workspaceId`
+- `memberId`
+- `userId`
+- `role`
+- `displayName`
+
+### WorkspaceDashboardReadModel
+
+`GET /workspaces/:workspaceId/dashboard`는 dashboard aggregate read model을 반환한다.
+Workspace는 aggregate 경계, member context, dashboard preferences만 소유한다.
+Task, GitHub, PR, meeting, agent, canvas 항목은 각 owner domain이 제공하는
+read model을 사용하거나 mock/local 개발 중 shared fixture를 사용한다.
+
+```json
+{
+  "workspace": {
+    "id": "uuid",
+    "name": "PILO MVP",
+    "description": "AI-powered project collaboration workspace",
+    "type": "side_project",
+    "status": "active",
+    "myRole": "owner",
+    "memberCount": 5,
+    "createdAt": "2026-06-20T00:00:00.000Z"
+  },
+  "currentMember": {
+    "workspaceId": "uuid",
+    "memberId": "uuid",
+    "userId": "uuid",
+    "role": "owner",
+    "displayName": "Workspace / Canvas"
+  },
+  "preferences": {
+    "workspaceId": "uuid",
+    "memberId": "uuid",
+    "layout": {},
+    "hiddenSections": [],
+    "updatedAt": null
+  },
+  "members": [],
+  "tasks": [],
+  "progress": null,
+  "githubIssues": [],
+  "pullRequests": [],
+  "meetingReports": [],
+  "prAnalyses": [],
+  "agentActions": [],
+  "canvasEntities": [],
+  "source": "fixture",
+  "generatedAt": "2026-06-28T00:00:00.000Z"
+}
+```
+
+필수 필드:
+
+- `workspace`
+- `currentMember`
+- `preferences`
+- `members`
+- `tasks`
+- `progress`
+- `githubIssues`
+- `pullRequests`
+- `meetingReports`
+- `prAnalyses`
+- `agentActions`
+- `canvasEntities`
+- `source`
+- `generatedAt`
+
+Contract test 기준:
+
+- `WorkspaceSummary`, `WorkspaceMemberSummary`, `DashboardPreferences`,
+  `CurrentWorkspaceMember`, `WorkspaceDashboardReadModel`의 필수 필드는
+  `docs/contracts/schemas/pilo-public-contracts.schema.json`과 일치해야 한다.
+- `docs/contracts/fixtures/workspace-dashboard.fixture.json`의 dashboard section
+  field name은 `WorkspaceDashboardReadModel`에서 사용하는 이름과 일치해야 한다.
+- `source`는 server-side read model provenance이며 현재 값은 `fixture` 또는
+  `empty`다.
+- Consumer는 dashboard 렌더링만을 위해 다른 owner domain의 임시 DB table이나
+  임시 API field를 만들지 않는다.
 
 ## Events
 
