@@ -330,7 +330,10 @@ export class JuhyungTaskService {
       actor,
     );
     await this.requireAssignee(input);
-    await this.requireMilestoneInWorkspace(input.milestoneId, input.workspaceId);
+    await this.requireMilestoneInWorkspace(
+      input.milestoneId,
+      input.workspaceId,
+    );
 
     return this.repository.createTask(input, currentMember.id);
   }
