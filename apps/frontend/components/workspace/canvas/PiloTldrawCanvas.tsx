@@ -453,7 +453,8 @@ function toFreeformSnapshot(shape: TLShape): PiloCanvasFreeformShape {
 
 function sortFreeformShapesForCreate(shapes: PiloCanvasFreeformShape[]) {
   return [...shapes].sort((first, second) => {
-    const firstParent = first.type === "frame" || first.type === "pilo-code-block";
+    const firstParent =
+      first.type === "frame" || first.type === "pilo-code-block";
     const secondParent =
       second.type === "frame" || second.type === "pilo-code-block";
 
