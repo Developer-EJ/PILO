@@ -541,6 +541,8 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /patch/);
     assert.match(githubContract, /state\/nonce/);
     assert.match(githubContract, /installationId -> workspaceId/);
+    assert.match(githubContract, /409 Conflict/);
+    assert.match(githubContract, /active GitHub App connection/);
     assert.match(githubContract, /changed_functions/);
     assert.match(githubContract, /non-null `patch`/);
     assert.match(githubContract, /patch: null/);
@@ -548,6 +550,18 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /## Provided Read Models/);
     assert.match(githubContract, /## Consumed By/);
     assert.match(githubContract, /## Breaking Change Policy/);
+    assert.match(githubContract, /additive optional rollout fields/);
+    assert.match(githubContract, /Making them required requires a separate breaking contract PR/);
+    const mockRuleStart = githubContract.indexOf("## Mock Rule");
+    assert.notEqual(
+      mockRuleStart,
+      -1,
+      "github contract must keep a ## Mock Rule section",
+    );
+    assert.doesNotMatch(
+      githubContract.slice(mockRuleStart),
+      /github-repositories\.fixture\.json/,
+    );
     for (const model of [
       "GithubConnectionSummary",
       "GithubRepositorySummary",
@@ -960,6 +974,9 @@ describe("github collaboration templates", () => {
     const content = read(".github/PULL_REQUEST_TEMPLATE.md");
     for (const heading of ["Contract Impact", "Cross-Domain Access", "Mock / Stub", "DB / Migration", "Validation"]) {
       assert.match(content, new RegExp(`## ${heading.replace("/", "\\/")}`));
+    }
+    for (const guideField of ["Contract Used", "Owner", "Internal-only change", "No external consumer", "Consumers", "Mock/Real"]) {
+      assert.match(content, new RegExp(guideField));
     }
   });
 
