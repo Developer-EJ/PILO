@@ -234,6 +234,69 @@ export function createMockTaskClient() {
     async listTaskDrafts(workspaceId) {
       return [...draftsForWorkspace(workspaceId)];
     },
+    async approveTaskDraft(draftId, { workspaceId } = {}) {
+      const resolvedWorkspaceId = workspaceId ?? "mock-workspace";
+      const drafts = draftsForWorkspace(resolvedWorkspaceId);
+      const draftIndex = drafts.findIndex((draft) => draft.id === draftId);
+
+      if (draftIndex === -1) {
+        throw new TaskApiError("Task draft not found", {
+          status: 404,
+          path: `/api/task-drafts/${draftId}/approve`,
+        });
+      }
+
+      const draft = drafts[draftIndex];
+
+      if (draft.status !== "draft") {
+        return draft;
+      }
+
+      const task = normalizeCreatedTask(resolvedWorkspaceId, {
+        title: draft.title,
+        description: draft.description,
+        priority: draft.priority,
+        dueDate: draft.dueDate,
+      });
+      const approvedDraft = {
+        ...draft,
+        status: "approved",
+        taskId: task.id,
+        updatedAt: new Date().toISOString(),
+      };
+
+      drafts[draftIndex] = approvedDraft;
+      draftByWorkspaceId.set(resolvedWorkspaceId, [...drafts]);
+      taskByWorkspaceId.set(resolvedWorkspaceId, [
+        task,
+        ...tasksForWorkspace(resolvedWorkspaceId),
+      ]);
+
+      return approvedDraft;
+    },
+    async rejectTaskDraft(draftId, { workspaceId } = {}) {
+      const resolvedWorkspaceId = workspaceId ?? "mock-workspace";
+      const drafts = draftsForWorkspace(resolvedWorkspaceId);
+      const draftIndex = drafts.findIndex((draft) => draft.id === draftId);
+
+      if (draftIndex === -1) {
+        throw new TaskApiError("Task draft not found", {
+          status: 404,
+          path: `/api/task-drafts/${draftId}/reject`,
+        });
+      }
+
+      const rejectedDraft = {
+        ...drafts[draftIndex],
+        status: "rejected",
+        updatedAt: new Date().toISOString(),
+      };
+
+      drafts[draftIndex] = rejectedDraft;
+      draftByWorkspaceId.set(resolvedWorkspaceId, [...drafts]);
+
+      return rejectedDraft;
+    },
     async getProgressSummary(workspaceId) {
       return createProgressFixture(workspaceId);
     },
@@ -285,6 +348,20 @@ export function createTaskApiClient({
       return requestTaskJson(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/task-drafts`,
         undefined,
+        { baseUrl, fetcher },
+      );
+    },
+    async approveTaskDraft(draftId) {
+      return requestTaskJson(
+        `/api/task-drafts/${encodeURIComponent(draftId)}/approve`,
+        { method: "POST" },
+        { baseUrl, fetcher },
+      );
+    },
+    async rejectTaskDraft(draftId) {
+      return requestTaskJson(
+        `/api/task-drafts/${encodeURIComponent(draftId)}/reject`,
+        { method: "POST" },
         { baseUrl, fetcher },
       );
     },

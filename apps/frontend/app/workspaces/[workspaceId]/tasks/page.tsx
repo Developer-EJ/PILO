@@ -1,13 +1,7 @@
 import { Suspense } from "react";
 import { AuthGuard } from "../../../../components/auth/AuthGuard";
-import { WorkspaceFeatureEntry } from "../../../../components/workspace/WorkspaceFeatureEntry";
+import { WorkspaceTasks } from "../../../../components/task/WorkspaceTasks";
 import { mockWorkspaces } from "../../../../lib/workspace/workspaceClient.mjs";
-
-type WorkspaceFeaturePageProps = {
-  params: {
-    workspaceId: string;
-  };
-};
 
 export function generateStaticParams() {
   return mockWorkspaces.map((workspace) => ({
@@ -15,16 +9,11 @@ export function generateStaticParams() {
   }));
 }
 
-export default function WorkspaceTasksPage({
-  params,
-}: WorkspaceFeaturePageProps) {
+export default function WorkspaceTasksPage() {
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <WorkspaceFeatureEntry
-          surface="tasks"
-          workspaceId={params.workspaceId}
-        />
+        <WorkspaceTasks />
       </AuthGuard>
     </Suspense>
   );
