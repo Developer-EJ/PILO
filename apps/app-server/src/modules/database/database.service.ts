@@ -7,7 +7,10 @@ export class DatabaseService
   implements OnModuleInit, OnModuleDestroy
 {
   async onModuleInit() {
-    if (process.env.PILO_SKIP_DATABASE_CONNECT === "true") {
+    if (
+      process.env.PILO_SKIP_DATABASE_CONNECT === "true" ||
+      !process.env.DATABASE_URL
+    ) {
       return;
     }
 
@@ -19,7 +22,7 @@ export class DatabaseService
   }
 
   async ping() {
-    await this.$queryRawUnsafe("SELECT 1");
+    await this.$queryRaw`SELECT 1`;
     return true;
   }
 }

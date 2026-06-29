@@ -4,9 +4,9 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
-  CurrentActor,
-  WorkspaceMemberAccessService,
-} from "../workspace/workspace-member-access.service";
+  WorkspaceAccessPublicService,
+  type WorkspaceActor as CurrentActor,
+} from "../workspace/public/workspace-access-public.service";
 import {
   parseCreateChecklistItemInput,
   parseUpdateChecklistItemInput,
@@ -87,7 +87,7 @@ export type { ListTasksQuery } from "./juhyung-task-list-query";
 export class JuhyungTaskService {
   constructor(
     private readonly repository: JuhyungRepository,
-    private readonly workspaceAccess: WorkspaceMemberAccessService,
+    private readonly workspaceAccess: WorkspaceAccessPublicService,
     private readonly publicAdapter: JuhyungPublicAdapter,
   ) {}
 

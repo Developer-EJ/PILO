@@ -6,7 +6,7 @@
 
 ## Scope
 
-Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크리스트, 댓글, 변경 이력, 의존성을 담당한다.
+Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크리스트, 댓글, 변경 이력, 의존성, Task draft, Milestone 연결을 담당한다.
 
 ## Owned Tables
 
@@ -184,6 +184,8 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 }
 ```
 
+`TaskCreateDraft`는 Agent action payload와 외부 후보 입력에 쓰는 request DTO다. 사용자가 승인할 때까지 원본 source는 `meeting_action_items`, `agent_actions`, 또는 planning draft owner가 보관하고, 승인 후 실제 `tasks` row 생성은 주형 API가 담당한다.
+
 `status`는 `draft`, `approved`, `rejected` 중 하나다. `draft` 상태만 승인 또는 거절할 수 있다. 승인하면 주형의 `tasks` row가 생성되고 `taskId`가 채워진다. 거절하면 Task는 생성되지 않고 `taskId`는 `null`로 남는다.
 
 ## Write Models
@@ -215,12 +217,14 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 }
 ```
 
-### TaskStatusUpdate
+### TaskStatusUpdateAction
 
 `PATCH /tasks/:taskId/status`는 `todo`, `in_progress`, `in_review`, `done`, `blocked` 중 하나를 받는다. 상태 변경은 `task_activity_logs`에 `task.status_changed`로 기록한다.
 
 ```json
 {
+  "workspaceId": "uuid",
+  "taskId": "uuid",
   "status": "in_review"
 }
 ```
@@ -274,7 +278,6 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 
 - `task.create.draft`
 - `task.update.status`
-- `task.assign`
 
 ## Boundaries
 

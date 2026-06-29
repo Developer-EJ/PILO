@@ -182,7 +182,8 @@ Auth public contract 변경 PR에는 아래 내용을 반드시 남긴다.
 
 ## Boundaries
 
-- A는 사용자 로그인과 세션을 소유한다.
+- 동현은 사용자 로그인과 세션을 소유한다.
 - 동현은 Repository 목록, Issue, PR, Webhook을 직접 조회하거나 저장하지 않는다.
-- B는 GitHub Repository 연동을 소유하지만 로그인 세션, 회원가입, User 생성 로직을 직접 수정하지 않는다.
-- GitHub OAuth scope는 로그인 기본 scope와 Repository 연동 scope를 분리한다.
+- 주형은 GitHub Repository 연동을 소유하지만 로그인 세션, 회원가입, User 생성 로직을 직접 수정하지 않는다.
+- GitHub 로그인 OAuth scope는 사용자 인증용 기본 scope만 사용한다.
+- Repository 선택, Issue/PR 조회, Webhook, GitHub App 설치는 주형 GitHub contract에서 다룬다.

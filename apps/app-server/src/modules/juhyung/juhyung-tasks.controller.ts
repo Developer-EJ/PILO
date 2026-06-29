@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
-import { CurrentActor } from "../workspace/workspace-member-access.service";
+import { type WorkspaceActor as CurrentActor } from "../workspace/public/workspace-access-public.service";
 import {
   CreateTaskCommentBody,
   CreateChecklistItemBody,
