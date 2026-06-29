@@ -92,6 +92,8 @@ type AuthSessionMetadata = {
   ipAddress?: string | null;
 };
 
+const DEFAULT_OAUTH_FETCH_TIMEOUT_MS = 10_000;
+
 export type AuthSessionIssue = {
   record: AuthSessionRecord;
   cookieName: string;
@@ -444,7 +446,11 @@ export class AuthService {
       return null;
     }
 
-    return decodeURIComponent(cookiePair.split("=").slice(1).join("="));
+    try {
+      return decodeURIComponent(cookiePair.split("=").slice(1).join("="));
+    } catch {
+      return null;
+    }
   }
 
   private getConfiguredProvider(providerId: AuthProviderName) {
@@ -461,7 +467,7 @@ export class AuthService {
     provider: AuthProviderConfig,
     code: string,
   ): Promise<OAuthTokenMetadata & { accessToken: string }> {
-    const response = await this.fetcher(provider.tokenUrl, {
+    const response = await this.fetchWithTimeout(provider.tokenUrl, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -501,7 +507,7 @@ export class AuthService {
     provider: AuthProviderConfig,
     accessToken: string,
   ): Promise<OAuthProviderProfile> {
-    const response = await this.fetcher(provider.userInfoUrl, {
+    const response = await this.fetchWithTimeout(provider.userInfoUrl, {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${accessToken}`,
@@ -519,10 +525,15 @@ export class AuthService {
       throw new AuthFlowError("oauth_profile_missing_id");
     }
 
+    const githubPrimaryEmail =
+      provider.id === "github"
+        ? await this.fetchGithubPrimaryVerifiedEmail(provider, accessToken)
+        : null;
+
     return {
       provider: provider.id,
       providerAccountId,
-      email: getStringField(profileResponse, "email"),
+      email: githubPrimaryEmail ?? getStringField(profileResponse, "email"),
       name:
         getStringField(profileResponse, "name") ??
         getStringField(profileResponse, "login"),
@@ -532,8 +543,69 @@ export class AuthService {
       emailVerified:
         provider.id === "google"
           ? getBooleanField(profileResponse, "email_verified")
-          : null,
+          : githubPrimaryEmail !== null,
     };
+  }
+
+  private async fetchGithubPrimaryVerifiedEmail(
+    provider: AuthProviderConfig,
+    accessToken: string,
+  ) {
+    if (!provider.emailUrl) {
+      return null;
+    }
+
+    const response = await this.fetchWithTimeout(provider.emailUrl, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new AuthFlowError("oauth_email_fetch_failed");
+    }
+
+    const emailResponse = await response.json();
+
+    if (!Array.isArray(emailResponse)) {
+      return null;
+    }
+
+    const primaryVerifiedEmail = emailResponse.find(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        getBooleanField(entry, "primary") === true &&
+        getBooleanField(entry, "verified") === true,
+    );
+
+    return primaryVerifiedEmail
+      ? getStringField(primaryVerifiedEmail, "email")
+      : null;
+  }
+
+  private async fetchWithTimeout(input: string | URL, init: RequestInit) {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      DEFAULT_OAUTH_FETCH_TIMEOUT_MS,
+    );
+
+    try {
+      return await this.fetcher(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new AuthFlowError("oauth_provider_timeout");
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 

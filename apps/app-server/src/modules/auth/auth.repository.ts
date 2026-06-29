@@ -98,11 +98,21 @@ export class AuthRepository {
     ttlMs: number;
     now?: Date;
   }) {
-    const record = createOAuthStateRecord(input);
+    const now = input.now ?? new Date();
+    this.pruneExpiredOAuthStates(now);
+    const record = createOAuthStateRecord({ ...input, now });
 
     this.oauthStates.set(record.state, record);
 
     return record;
+  }
+
+  private pruneExpiredOAuthStates(now: Date) {
+    for (const [state, record] of this.oauthStates.entries()) {
+      if (record.expiresAt.getTime() <= now.getTime()) {
+        this.oauthStates.delete(state);
+      }
+    }
   }
 
   consumeOAuthState(input: {
@@ -137,7 +147,10 @@ export class AuthRepository {
         `${input.profile.provider}-${input.profile.providerAccountId}@oauth.pilo.local`,
     );
     const existingUserId =
-      existingAccount?.userId ?? this.userIdByEmail.get(email);
+      existingAccount?.userId ??
+      (canLinkOAuthProfileByEmail(input.profile)
+        ? this.userIdByEmail.get(email)
+        : undefined);
     const existingUser = existingUserId
       ? this.usersById.get(existingUserId)
       : undefined;
@@ -303,7 +316,7 @@ export class AuthRepository {
     };
 
     this.usersById.set(user.id, user);
-    this.userIdByEmail.set(user.email, user.id);
+    this.syncVerifiedEmailIndex(null, user);
 
     return user;
   }
@@ -314,9 +327,16 @@ export class AuthRepository {
     email: string,
     nowIso: string,
   ) {
+    const previousEmail = user.email;
+    const emailVerifiedAt =
+      profile.emailVerified === true
+        ? nowIso
+        : user.email === email
+          ? user.emailVerifiedAt
+          : null;
+
     if (user.email !== email) {
       this.userIdByEmail.delete(user.email);
-      this.userIdByEmail.set(email, user.id);
     }
 
     const updatedUser: AuthUserRecord = {
@@ -324,15 +344,30 @@ export class AuthRepository {
       email,
       name: profile.name ?? user.name,
       avatarUrl: profile.avatarUrl ?? user.avatarUrl,
-      emailVerifiedAt:
-        profile.emailVerified === true ? nowIso : user.emailVerifiedAt,
+      emailVerifiedAt,
       lastLoginAt: nowIso,
       updatedAt: nowIso,
     };
 
     this.usersById.set(updatedUser.id, updatedUser);
+    this.syncVerifiedEmailIndex(previousEmail, updatedUser);
 
     return updatedUser;
+  }
+
+  private syncVerifiedEmailIndex(
+    previousEmail: string | null,
+    user: AuthUserRecord,
+  ) {
+    if (previousEmail && previousEmail !== user.email) {
+      this.userIdByEmail.delete(previousEmail);
+    }
+
+    if (user.emailVerifiedAt) {
+      this.userIdByEmail.set(user.email, user.id);
+    } else {
+      this.userIdByEmail.delete(user.email);
+    }
   }
 
   private createOAuthAccount(
@@ -387,6 +422,10 @@ export class AuthRepository {
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+function canLinkOAuthProfileByEmail(profile: OAuthIdentityProfile) {
+  return profile.email !== null && profile.emailVerified === true;
 }
 
 function createProviderKey(provider: AuthProviderName, providerUserId: string) {

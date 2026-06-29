@@ -89,9 +89,12 @@ async function createAuthIntegrationApp(fetcher = createOAuthFetchStub()) {
       app,
       server,
       async close() {
-        await app.close();
-        globalThis.fetch = previousFetch;
-        restoreEnv();
+        try {
+          await app.close();
+        } finally {
+          globalThis.fetch = previousFetch;
+          restoreEnv();
+        }
       },
     };
   } catch (error) {
@@ -108,12 +111,16 @@ function getRedirectUrl(response) {
   return new URL(location);
 }
 
-function getCookieHeader(response) {
+function getSetCookieHeader(response) {
   const setCookie = response.headers["set-cookie"];
   const cookie = Array.isArray(setCookie) ? setCookie[0] : setCookie;
   assert.equal(typeof cookie, "string");
 
   return cookie;
+}
+
+function getCookieHeader(response) {
+  return getSetCookieHeader(response).split(";")[0];
 }
 
 describe("auth HTTP integration", () => {
@@ -155,6 +162,7 @@ describe("auth HTTP integration", () => {
         },
       });
       const callbackRedirectUrl = getRedirectUrl(callbackResponse);
+      const setCookieHeader = getSetCookieHeader(callbackResponse);
       const cookieHeader = getCookieHeader(callbackResponse);
 
       assert.equal(callbackResponse.statusCode, 302);
@@ -163,7 +171,7 @@ describe("auth HTTP integration", () => {
         "https://app.pilo.test/login?auth=success&provider=google&next=%2Fcanvas",
       );
       assert.equal(cookieHeader.includes("pilo_session="), true);
-      assert.equal(cookieHeader.includes("HttpOnly"), true);
+      assert.equal(setCookieHeader.includes("HttpOnly"), true);
 
       const meResponse = await server.inject({
         method: "GET",
@@ -186,7 +194,7 @@ describe("auth HTTP integration", () => {
           cookie: cookieHeader,
         },
       });
-      const expiredCookieHeader = getCookieHeader(logoutResponse);
+      const expiredCookieHeader = getSetCookieHeader(logoutResponse);
 
       assert.equal(logoutResponse.statusCode, 204);
       assert.equal(expiredCookieHeader.includes("Max-Age=0"), true);
