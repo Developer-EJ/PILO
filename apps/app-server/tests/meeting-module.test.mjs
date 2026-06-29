@@ -20,17 +20,25 @@ const {
   MockMeetingReportWorkflowClient,
 } = require("../src/modules/meeting/adapters/mock-meeting-report-workflow.adapter");
 const {
+  MockTaskDraftClient,
+} = require("../src/modules/meeting/adapters/mock-task-draft.adapter");
+const {
   MEETING_REPOSITORY,
 } = require("../src/modules/meeting/repositories/meeting.repository");
 const {
   MEETING_STATUS_VALUES,
 } = require("../src/modules/meeting/types/meeting.types");
 
-function createMeetingService(repository, currentMemberAdapter) {
+function createMeetingService(
+  repository,
+  currentMemberAdapter,
+  taskDraftClient = new MockTaskDraftClient(),
+) {
   return new MeetingService(
     repository,
     currentMemberAdapter,
     new MockMeetingReportWorkflowClient(),
+    taskDraftClient,
   );
 }
 
@@ -667,6 +675,83 @@ describe("meeting module scaffold", () => {
 
       service.markActionItemConverted(approved.id, {});
     });
+  });
+
+  it("maps approved meeting action items to TaskCreateDraft and converts on mock success", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "task-assignee",
+      workspaceId: "workspace-1",
+    });
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Task draft meeting",
+    });
+    const report = controller.createReport(meeting.id);
+    const actionItem = controller.createActionItem(report.id, {
+      title: "Create TaskCreateDraft adapter",
+      description: "Map MeetingActionItem to the Task draft contract.",
+      assigneeSuggestionMemberId: "task-assignee",
+      dueDateSuggestion: "2026-07-03",
+    });
+    const approvedActionItem = controller.approveActionItem(actionItem.id);
+
+    const result = controller.requestActionItemTaskDraft(approvedActionItem.id);
+
+    assert.equal(result.taskDraft.mode, "mock");
+    assert.match(
+      result.taskDraft.taskId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    assert.deepEqual(result.taskDraft.payload, {
+      workspaceId: "workspace-1",
+      sourceType: "meeting_action_item",
+      sourceId: actionItem.id,
+      title: "Create TaskCreateDraft adapter",
+      description: "Map MeetingActionItem to the Task draft contract.",
+      assigneeMemberId: "task-assignee",
+      priority: "medium",
+      dueDate: "2026-07-03",
+    });
+    assert.equal(result.actionItem.status, "converted");
+    assert.equal(result.actionItem.convertedTaskId, result.taskDraft.taskId);
+    assert.equal(
+      controller.listActionItems(report.id)[0].convertedTaskId,
+      result.taskDraft.taskId,
+    );
+  });
+
+  it("keeps approved action items unchanged when TaskDraftClient fails", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const failingTaskDraftClient = {
+      createTaskDraft() {
+        throw new Error("Task API unavailable");
+      },
+    };
+    const service = createMeetingService(
+      repository,
+      currentMemberAdapter,
+      failingTaskDraftClient,
+    );
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Task draft failure meeting",
+    });
+    const report = service.createReport(meeting.id);
+    const actionItem = service.createActionItem(report.id, {
+      title: "Keep this approved on failure",
+    });
+
+    assert.throws(() => service.requestActionItemTaskDraft(actionItem.id));
+
+    const approvedActionItem = service.approveActionItem(actionItem.id);
+
+    assert.throws(() =>
+      service.requestActionItemTaskDraft(approvedActionItem.id),
+    );
+    assert.deepEqual(service.listActionItems(report.id), [approvedActionItem]);
   });
 
   it("returns the existing report when report creation is requested twice", () => {
