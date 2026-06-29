@@ -43,6 +43,19 @@ Workspace 단위 연결과 repository 목록은 `/workspaces/:workspaceId/github
 
 `POST /workspaces/:workspaceId/github/connections` creates a pending install intent that stores `workspaceId` with a single-use `state/nonce`. `GET /github/app/callback` must verify that `state/nonce`, recover the same `workspaceId`, and persist the resulting `installationId -> workspaceId` binding on `github_connections`. A callback without a valid `state/nonce` is rejected, and an existing `installationId` cannot be attached to another workspace without a new connection flow.
 
+## Owner-Internal API Responses
+
+`GithubConnectionStartResponse` is owned by the 주형 GitHub connection flow and is not a cross-domain public read model.
+
+### GithubConnectionStartResponse
+
+```json
+{
+  "state": "single-use-nonce",
+  "installationUrl": "https://github.com/apps/pilo/installations/new?state=single-use-nonce"
+}
+```
+
 ## Provided Read Models
 
 ### GithubConnectionSummary
@@ -54,6 +67,7 @@ Workspace 단위 연결과 repository 목록은 `/workspaces/:workspaceId/github
   "provider": "github_app",
   "installationId": "12345678",
   "githubAccountLogin": "team-org",
+  "scopes": ["metadata", "contents"],
   "connectedAt": "2026-06-27T12:00:00Z",
   "revokedAt": null
 }
@@ -173,7 +187,7 @@ Review domain consumes this source read model to create its own `changed_files`.
 
 ## Breaking Change Policy
 
-- `GithubConnectionSummary`, `GithubRepositorySummary`, `PullRequestSummary`, and `PullRequestChangedFileSummary` fields are public read model contract fields.
+- `GithubConnectionSummary`, `GithubRepositorySummary`, `GithubIssueSummary`, `PullRequestSummary`, `PullRequestChangedFileSummary`, and `GithubIssueCreateAction` fields are public contract fields.
 - Removing or renaming fields requires a separate contract change PR, affected consumer review, and a deprecated-field migration plan.
 - `PullRequestChangedFileSummary.sha` is required because Review uses `pullRequestId + path + sha` as stable source identity for resync.
 
