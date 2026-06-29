@@ -88,6 +88,39 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDateFrom=2026-07-01&dueDateTo=2026-07-31&sortBy=dueDate&sortDirection=asc&limit=25&offset=50
 ```
 
+### TaskDetail
+
+`GET /tasks/:taskId`는 `TaskSummary` 필드에 checklist를 포함한다.
+
+```json
+{
+  "id": "uuid",
+  "workspaceId": "uuid",
+  "title": "GitHub Repository 연결",
+  "status": "in_progress",
+  "priority": "high",
+  "assignee": {
+    "memberId": "uuid",
+    "name": "주형"
+  },
+  "dueDate": "2026-07-03",
+  "isDelayed": false,
+  "linkedIssueCount": 1,
+  "linkedPrCount": 1,
+  "updatedAt": "2026-06-27T12:00:00Z",
+  "checklistItems": [
+    {
+      "id": "uuid",
+      "taskId": "uuid",
+      "title": "GitHub App 설치",
+      "status": "todo",
+      "sortOrder": 0,
+      "updatedAt": "2026-06-27T12:30:00Z"
+    }
+  ]
+}
+```
+
 ### TaskCreateDraft
 
 ```json
@@ -177,6 +210,20 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 ### TaskDelete
 
 `DELETE /tasks/:taskId`는 `tasks.deleted_at`을 설정하는 soft delete다. 기본 Task 목록과 상세 조회는 삭제된 Task를 제외한다.
+
+### TaskChecklistItemWrite
+
+`POST /tasks/:taskId/checklist-items`는 `title`, 선택 `status`, 선택 `sortOrder`를 받는다. `PATCH /tasks/:taskId/checklist-items/:itemId`는 `title`, `status`, `sortOrder` 중 하나 이상을 받는다. `status`는 `todo`, `done` 중 하나이며, reorder는 `sortOrder` 수정으로 처리한다.
+
+```json
+{
+  "title": "GitHub App 설치",
+  "status": "todo",
+  "sortOrder": 0
+}
+```
+
+같은 Task 안에서 `sortOrder`가 충돌하면 주형 API가 기존 checklist item을 뒤로 밀어 순서를 보존한다.
 
 ## Events
 

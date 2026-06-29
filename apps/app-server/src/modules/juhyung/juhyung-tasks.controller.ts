@@ -12,9 +12,11 @@ import {
 } from "@nestjs/common";
 import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
+  CreateChecklistItemBody,
   CreateTaskBody,
   JuhyungTaskService,
   ListTasksQuery,
+  UpdateChecklistItemBody,
   UpdateTaskBody,
   UpdateTaskStatusBody,
 } from "./juhyung-task.service";
@@ -97,6 +99,51 @@ export class JuhyungTasksController {
   ) {
     return this.taskService.deleteTask(
       taskId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("tasks/:taskId/checklist-items")
+  createChecklistItem(
+    @Param("taskId") taskId: string,
+    @Body() body: CreateChecklistItemBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.createChecklistItem(
+      taskId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Patch("tasks/:taskId/checklist-items/:itemId")
+  updateChecklistItem(
+    @Param("taskId") taskId: string,
+    @Param("itemId") itemId: string,
+    @Body() body: UpdateChecklistItemBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.updateChecklistItem(
+      taskId,
+      itemId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Delete("tasks/:taskId/checklist-items/:itemId")
+  @HttpCode(204)
+  deleteChecklistItem(
+    @Param("taskId") taskId: string,
+    @Param("itemId") itemId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.deleteChecklistItem(
+      taskId,
+      itemId,
       toCurrentActor(userId, memberId),
     );
   }
