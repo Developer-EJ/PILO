@@ -62,8 +62,9 @@ export function WorkspaceCanvasBoards() {
     () => createWorkspaceDashboardFixture(workspaceId),
     [workspaceId],
   );
-  const [state, setState] =
-    useState<CanvasBoardListState>(initialBoardListState);
+  const [state, setState] = useState<CanvasBoardListState>(
+    initialBoardListState,
+  );
   const [title, setTitle] = useState("Project Map");
   const [isCreating, setIsCreating] = useState(false);
 
@@ -133,10 +134,7 @@ export function WorkspaceCanvasBoards() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Workspace navigation">
-          <Link
-            href={workspaceDashboardHref(workspaceId)}
-            className="nav-item"
-          >
+          <Link href={workspaceDashboardHref(workspaceId)} className="nav-item">
             <span>홈 / 대시보드</span>
           </Link>
           <div className="nav-item" aria-disabled="true">

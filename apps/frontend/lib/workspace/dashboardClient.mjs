@@ -50,7 +50,9 @@ function remapWorkspaceId(value, workspaceId) {
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [
       key,
-      key === "workspaceId" ? workspaceId : remapWorkspaceId(entry, workspaceId),
+      key === "workspaceId"
+        ? workspaceId
+        : remapWorkspaceId(entry, workspaceId),
     ]),
   );
 }
@@ -86,7 +88,10 @@ function createFallbackPreferences(workspaceId) {
   };
 }
 
-export function normalizeWorkspaceDashboard(rawDashboard, { workspaceId } = {}) {
+export function normalizeWorkspaceDashboard(
+  rawDashboard,
+  { workspaceId } = {},
+) {
   const warnings = [];
   const source = isRecord(rawDashboard) ? rawDashboard : {};
   const resolvedWorkspaceId =
@@ -220,9 +225,12 @@ export function createWorkspaceDashboardApiClient({
         });
       }
 
-      return normalizeWorkspaceDashboard(await readDashboardJson(response, path), {
-        workspaceId,
-      });
+      return normalizeWorkspaceDashboard(
+        await readDashboardJson(response, path),
+        {
+          workspaceId,
+        },
+      );
     },
   };
 }

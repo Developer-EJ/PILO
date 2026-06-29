@@ -134,8 +134,16 @@ describe("JuhyungTaskService", () => {
       ForbiddenException,
     );
     assert.deepEqual(calls, [
-      ["workspace.requireWorkspaceMember", UUIDS.workspace, { memberId: UUIDS.member }],
-      ["workspace.requireWorkspaceMember", UUIDS.workspace, { memberId: UUIDS.assignee }],
+      [
+        "workspace.requireWorkspaceMember",
+        UUIDS.workspace,
+        { memberId: UUIDS.member },
+      ],
+      [
+        "workspace.requireWorkspaceMember",
+        UUIDS.workspace,
+        { memberId: UUIDS.assignee },
+      ],
     ]);
   });
 });
