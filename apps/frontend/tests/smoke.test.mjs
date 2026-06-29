@@ -449,6 +449,80 @@ describe("frontend package", () => {
     );
   });
 
+  it("wires workspace dashboard tabs to implemented feature pages", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const routes = buildWorkspaceFeatureRoutes(workspaceId);
+    const tabs = buildWorkspaceFeatureTabs(workspaceId);
+
+    assert.deepEqual(
+      tabs.map((tab) => tab.href),
+      Object.values(routes),
+    );
+
+    const sidebar = readFileSync(
+      "components/workspace/WorkspaceSidebar.tsx",
+      "utf8",
+    );
+    assert.match(sidebar, /href={item\.href}/);
+    assert.match(sidebar, /aria-current={item\.active/);
+
+    const workspacePages = {
+      dashboard: {
+        file: "app/workspaces/[workspaceId]/page.tsx",
+        component: /export \{ default \} from "\.\.\/\.\.\/page"/,
+      },
+      canvas: {
+        file: "app/workspaces/[workspaceId]/canvas/page.tsx",
+        component: /<WorkspaceCanvasBoards \/>/,
+      },
+      tasks: {
+        file: "app/workspaces/[workspaceId]/tasks/page.tsx",
+        component: /<WorkspaceTasks \/>/,
+      },
+      github: {
+        file: "app/workspaces/[workspaceId]/github/page.tsx",
+        component: /<WorkspaceGithub \/>/,
+      },
+      meetings: {
+        file: "app/workspaces/[workspaceId]/meetings/page.tsx",
+        component: /<WorkspaceMeetings \/>/,
+      },
+      reviews: {
+        file: "app/workspaces/[workspaceId]/reviews/page.tsx",
+        component: /<ReviewRoomWorkspace workspaceId={params\.workspaceId} \/>/,
+      },
+      agent: {
+        file: "app/workspaces/[workspaceId]/agent/page.tsx",
+        component: /<AgentPlanningWorkspace \/>/,
+      },
+      planning: {
+        file: "app/workspaces/[workspaceId]/planning/page.tsx",
+        component: /<AgentPlanningWorkspace \/>/,
+      },
+    };
+
+    for (const tab of tabs) {
+      assert.equal(Boolean(workspacePages[tab.key]), true);
+      assert.match(
+        readFileSync(workspacePages[tab.key].file, "utf8"),
+        workspacePages[tab.key].component,
+      );
+    }
+
+    for (const file of [
+      "components/workspace/WorkspaceDashboard.tsx",
+      "components/task/WorkspaceTasks.tsx",
+      "components/github/WorkspaceGithub.tsx",
+      "components/meeting/WorkspaceMeetings.tsx",
+      "components/workspace/WorkspaceCanvasBoards.tsx",
+      "components/workspace/WorkspaceCanvas.tsx",
+      "components/agent/AgentPlanningWorkspace.tsx",
+      "components/review/ReviewRoomWorkspace.tsx",
+    ]) {
+      assert.match(readFileSync(file, "utf8"), /<WorkspaceSidebar/);
+    }
+  });
+
   it("does not silently use stored workspace when URL workspace is invalid", () => {
     const selection = resolveCurrentWorkspaceSelection({
       workspaces: mockWorkspaces,

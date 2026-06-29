@@ -1,11 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
-import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
 import { createTaskClient } from "../../lib/task/taskClient.mjs";
 import {
   buildWorkspaceFeatureTabs,
@@ -193,24 +192,7 @@ export function WorkspaceTasks() {
 
   return (
     <main className="dashboard-shell tasks-shell">
-      <aside className="sidebar" aria-label="PILO navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-current={item.active ? "page" : undefined}
-            >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <WorkspaceSidebar items={navItems} />
 
       <section className="workspace tasks-workspace">
         <header className="topbar">

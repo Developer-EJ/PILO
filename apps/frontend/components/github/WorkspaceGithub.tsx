@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
-import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
 import { createGithubClient } from "../../lib/github/githubClient.mjs";
 import { createTaskClient } from "../../lib/task/taskClient.mjs";
 import {
@@ -298,24 +298,7 @@ export function WorkspaceGithub() {
 
   return (
     <main className="dashboard-shell github-shell">
-      <aside className="sidebar" aria-label="PILO navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-current={item.active ? "page" : undefined}
-            >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <WorkspaceSidebar items={navItems} />
 
       <section className="workspace github-workspace">
         <header className="topbar">

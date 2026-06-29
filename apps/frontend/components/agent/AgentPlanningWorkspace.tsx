@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   createAgentPlanningClient,
@@ -16,7 +15,7 @@ import {
   resolveCurrentWorkspaceSelection,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
-import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
 
 type AgentAction = {
   id: string;
@@ -240,24 +239,12 @@ export function AgentPlanningWorkspace() {
 
   return (
     <main className="agent-workspace-shell">
-      <aside className="agent-sidebar" aria-label="Agent workspace navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Agent navigation">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-current={item.active ? "page" : undefined}
-            >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <WorkspaceSidebar
+        className="agent-sidebar"
+        items={navItems}
+        ariaLabel="Agent workspace navigation"
+        navAriaLabel="Agent navigation"
+      />
 
       <section className="agent-workspace-main">
         <header className="agent-topbar">

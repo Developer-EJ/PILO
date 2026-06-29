@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   createReviewClient,
   normalizeReviewCanvas,
@@ -11,6 +10,7 @@ import {
 import {
   buildWorkspaceFeatureTabs,
 } from "../../lib/workspace/currentWorkspace.mjs";
+import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
 import styles from "./ReviewRoomWorkspace.module.css";
 
 type ReviewRiskLevel = "low" | "medium" | "high" | "critical";
@@ -143,6 +143,7 @@ type ReviewRoomWorkspaceProps = {
   memberId?: string;
 };
 
+type ReviewNavItem = ReturnType<typeof buildWorkspaceFeatureTabs>[number];
 type LoadStatus = "loading" | "selecting" | "opening" | "ready" | "error";
 type BusyAction = "node" | "checklist" | "comment" | null;
 
@@ -179,6 +180,23 @@ function firstFallbackPullRequest(workspaceId: string): ReviewPullRequestSummary
     ...reviewFixture.pullRequests[0],
     workspaceId,
   } as ReviewPullRequestSummary;
+}
+
+function ReviewWorkspaceFrame({
+  navItems,
+  className = styles.reviewShell,
+  children,
+}: {
+  navItems: ReviewNavItem[];
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <main className="dashboard-shell">
+      <WorkspaceSidebar items={navItems} />
+      <section className={`workspace ${className}`}>{children}</section>
+    </main>
+  );
 }
 
 export function ReviewRoomWorkspace({
@@ -493,45 +511,34 @@ export function ReviewRoomWorkspace({
 
   if (status === "loading") {
     return (
-      <main className={styles.reviewShell}>
+      <ReviewWorkspaceFrame navItems={navItems}>
         <section className={styles.statusPanel} aria-live="polite">
           <strong>Loading review workspace</strong>
           <p>Preparing the PR fixture and Review API client.</p>
         </section>
-      </main>
+      </ReviewWorkspaceFrame>
     );
   }
 
   if (status === "error") {
     return (
-      <main className={styles.reviewShell}>
+      <ReviewWorkspaceFrame navItems={navItems}>
         <section className={styles.statusPanel} role="alert">
           <strong>Review workspace could not load</strong>
           <p>Refresh after the app server is available.</p>
         </section>
-      </main>
+      </ReviewWorkspaceFrame>
     );
   }
 
   if (status === "selecting" || status === "opening" || !session) {
     return (
-      <main className={styles.reviewShell}>
+      <ReviewWorkspaceFrame navItems={navItems}>
         <header className={styles.reviewHeader}>
           <div>
             <span>Code Review</span>
             <h1>PR Review Room</h1>
           </div>
-          <nav aria-label="Workspace review navigation">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={item.active ? "page" : undefined}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
         </header>
 
         <section className={styles.selectorGrid} aria-label="Pull requests">
@@ -569,7 +576,7 @@ export function ReviewRoomWorkspace({
             </article>
           ))}
         </section>
-      </main>
+      </ReviewWorkspaceFrame>
     );
   }
 
@@ -579,7 +586,7 @@ export function ReviewRoomWorkspace({
   const sortedNodes = sortNodes(canvas.nodes);
 
   return (
-    <main className={styles.reviewWorkspace}>
+    <ReviewWorkspaceFrame navItems={navItems} className={styles.reviewWorkspace}>
       <header className={styles.roomTopbar}>
         <button
           className={styles.backButton}
@@ -602,17 +609,6 @@ export function ReviewRoomWorkspace({
           <span>{pullRequest.branch}</span>
           <b>{pullRequest.baseBranch}</b>
         </div>
-        <nav className={styles.roomNav} aria-label="Workspace review navigation">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={item.active ? "page" : undefined}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
       </header>
 
       <section className={styles.roomLayout}>
@@ -798,6 +794,6 @@ export function ReviewRoomWorkspace({
           </section>
         </aside>
       </section>
-    </main>
+    </ReviewWorkspaceFrame>
   );
 }

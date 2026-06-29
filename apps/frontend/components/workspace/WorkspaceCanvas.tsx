@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
@@ -24,7 +23,7 @@ import {
   buildWorkspaceFeatureTabs,
   extractWorkspaceIdFromPathname,
 } from "../../lib/workspace/currentWorkspace.mjs";
-import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
@@ -98,7 +97,7 @@ type CanvasNavItem = {
   label: string;
   active?: boolean;
   badge?: string;
-  href?: string;
+  href: string;
 };
 
 const canvasFilterLabels: Record<string, string> = {
@@ -823,41 +822,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         )}
       </button>
 
-      <aside
-        id="canvas-sidebar"
-        className="sidebar"
-        aria-label="PILO navigation"
-      >
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          {navItems.map((item) => {
-            const className = item.active ? "nav-item active" : "nav-item";
-            const content = (
-              <>
-                <span>{item.label}</span>
-                {item.badge ? <b>{item.badge}</b> : null}
-              </>
-            );
-
-            return item.href ? (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={className}
-                aria-current={item.active ? "page" : undefined}
-              >
-                {content}
-              </Link>
-            ) : (
-              <div key={item.label} className={className} aria-disabled="true">
-                {content}
-              </div>
-            );
-          })}
-        </nav>
-      </aside>
+      <WorkspaceSidebar id="canvas-sidebar" items={navItems} />
 
       <section
         className="workspace canvas-workspace"

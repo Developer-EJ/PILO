@@ -13,7 +13,7 @@ import {
   workspaceCanvasBoardHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
-import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 type CanvasBoardSummary = {
   id: string;
@@ -146,24 +146,7 @@ export function WorkspaceCanvasBoards() {
 
   return (
     <main className="dashboard-shell canvas-board-index-shell">
-      <aside className="sidebar" aria-label="PILO navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-current={item.active ? "page" : undefined}
-            >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <WorkspaceSidebar items={navItems} />
 
       <section className="workspace canvas-board-index-workspace">
         <header className="topbar">

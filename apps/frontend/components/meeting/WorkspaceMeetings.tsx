@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
-import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
 import { createMeetingClient } from "../../lib/meeting/meetingClient.mjs";
 import { createVoiceClient } from "../../lib/voice/voiceClient.mjs";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
@@ -610,24 +609,7 @@ export function WorkspaceMeetings() {
 
   return (
     <main className="dashboard-shell meetings-shell">
-      <aside className="sidebar" aria-label="PILO navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={item.active ? "nav-item active" : "nav-item"}
-              aria-current={item.active ? "page" : undefined}
-            >
-              <span>{item.label}</span>
-              {item.badge ? <b>{item.badge}</b> : null}
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <WorkspaceSidebar items={navItems} />
 
       <section className="workspace meetings-workspace">
         <header className="topbar">

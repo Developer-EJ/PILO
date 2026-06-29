@@ -4,7 +4,7 @@ import {
   buildWorkspaceFeatureRoutes,
   buildWorkspaceFeatureTabs,
 } from "../../lib/workspace/currentWorkspace.mjs";
-import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 export type WorkspaceFeatureSurface =
   | "tasks"
@@ -179,25 +179,11 @@ export function WorkspaceFeatureEntry({
 
   return (
     <main className="dashboard-shell feature-entry-shell">
-      <aside className="sidebar" aria-label="Workspace feature navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace feature surfaces">
-          {navItems.map((item) => (
-            <Link
-              aria-current={item.href === routes[surface] ? "page" : undefined}
-              className={
-                item.href === routes[surface] ? "nav-item active" : "nav-item"
-              }
-              href={item.href}
-              key={item.href}
-            >
-              <span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
-      </aside>
+      <WorkspaceSidebar
+        items={navItems}
+        ariaLabel="Workspace feature navigation"
+        navAriaLabel="Workspace feature surfaces"
+      />
 
       <section className="workspace">
         <header className="topbar">
