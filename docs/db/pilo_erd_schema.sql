@@ -33,6 +33,7 @@ CREATE TABLE oauth_accounts (
   provider_user_id VARCHAR(255) NOT NULL,
   provider_email CITEXT,
   scopes TEXT[] NOT NULL DEFAULT '{}',
+  token_type VARCHAR(80),
   access_token_encrypted TEXT,
   refresh_token_encrypted TEXT,
   token_expires_at TIMESTAMPTZ,
@@ -48,6 +49,8 @@ CREATE TABLE auth_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   refresh_token_hash TEXT NOT NULL UNIQUE,
+  token_hash_algorithm VARCHAR(40) NOT NULL DEFAULT 'hmac-sha256',
+  secret_version VARCHAR(80) NOT NULL DEFAULT 'v1',
   user_agent TEXT,
   ip_address INET,
   expires_at TIMESTAMPTZ NOT NULL,
@@ -93,27 +96,30 @@ CREATE TABLE workspace_invites (
   email CITEXT NOT NULL,
   role VARCHAR(20) NOT NULL DEFAULT 'member',
   token_hash TEXT NOT NULL UNIQUE,
-  invited_by_member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
-  accepted_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  invited_by_member_id UUID NOT NULL,
+  accepted_by_member_id UUID,
   expires_at TIMESTAMPTZ NOT NULL,
   accepted_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT workspace_invites_role_check CHECK (role IN ('member', 'viewer'))
+  CONSTRAINT workspace_invites_role_check CHECK (role IN ('member', 'viewer')),
+  CONSTRAINT workspace_invites_invited_by_member_fk FOREIGN KEY (workspace_id, invited_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT workspace_invites_accepted_by_member_fk FOREIGN KEY (workspace_id, accepted_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL
 );
 
-CREATE UNIQUE INDEX uq_workspace_invites_active_email
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workspace_invites_active_email
   ON workspace_invites(workspace_id, email)
   WHERE accepted_at IS NULL AND revoked_at IS NULL;
 
 CREATE TABLE dashboard_preferences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL,
   layout JSONB NOT NULL DEFAULT '{}'::jsonb,
   hidden_sections JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT dashboard_preferences_member_fk FOREIGN KEY (workspace_id, member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
   UNIQUE (workspace_id, member_id)
 );
 
@@ -209,7 +215,7 @@ CREATE TABLE github_connections (
   CONSTRAINT github_connections_provider_check CHECK (provider IN ('github_app', 'oauth'))
 );
 
-CREATE UNIQUE INDEX github_connections_active_installation_id_unique
+CREATE UNIQUE INDEX IF NOT EXISTS github_connections_active_installation_id_unique
   ON github_connections (installation_id)
   WHERE installation_id IS NOT NULL AND revoked_at IS NULL;
 
@@ -319,9 +325,11 @@ CREATE TABLE canvas_boards (
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   title VARCHAR(200) NOT NULL,
   board_type VARCHAR(80) NOT NULL DEFAULT 'workspace',
-  created_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  created_by_member_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT canvas_boards_created_by_member_fk FOREIGN KEY (workspace_id, created_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL,
+  UNIQUE (workspace_id, id)
 );
 
 CREATE TABLE canvas_shapes (
@@ -340,6 +348,7 @@ CREATE TABLE canvas_shapes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT canvas_shapes_type_check CHECK (shape_type IN ('task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'file', 'code', 'decision', 'risk')),
+  CONSTRAINT canvas_shapes_entity_type_check CHECK (entity_type IN ('task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'file', 'code', 'decision', 'risk')),
   UNIQUE (canvas_board_id, id),
   UNIQUE (canvas_board_id, entity_type, entity_id)
 );
@@ -372,28 +381,35 @@ CREATE TABLE canvas_node_positions (
 CREATE TABLE canvas_view_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   canvas_board_id UUID NOT NULL REFERENCES canvas_boards(id) ON DELETE CASCADE,
-  member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL,
   zoom NUMERIC(5, 2) NOT NULL DEFAULT 1,
   viewport_x NUMERIC(12, 2) NOT NULL DEFAULT 0,
   viewport_y NUMERIC(12, 2) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT canvas_view_settings_zoom_check CHECK (zoom > 0),
-  UNIQUE (canvas_board_id, member_id)
+  CONSTRAINT canvas_view_settings_board_workspace_fk FOREIGN KEY (workspace_id, canvas_board_id) REFERENCES canvas_boards(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT canvas_view_settings_member_fk FOREIGN KEY (workspace_id, member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
+  UNIQUE (workspace_id, canvas_board_id, member_id)
 );
 
 CREATE TABLE canvas_filter_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   canvas_board_id UUID NOT NULL REFERENCES canvas_boards(id) ON DELETE CASCADE,
-  member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  member_id UUID NOT NULL,
   enabled_entity_types TEXT[] NOT NULL DEFAULT '{}',
-  assignee_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
+  assignee_member_id UUID,
   show_delayed_only BOOLEAN NOT NULL DEFAULT false,
   show_risk_only BOOLEAN NOT NULL DEFAULT false,
   filters JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (canvas_board_id, member_id)
+  CONSTRAINT canvas_filter_settings_board_workspace_fk FOREIGN KEY (workspace_id, canvas_board_id) REFERENCES canvas_boards(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT canvas_filter_settings_member_fk FOREIGN KEY (workspace_id, member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT canvas_filter_settings_assignee_member_fk FOREIGN KEY (workspace_id, assignee_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL,
+  UNIQUE (workspace_id, canvas_board_id, member_id)
 );
 
 -- ============================================================
@@ -459,7 +475,7 @@ CREATE TABLE voice_rooms (
   CONSTRAINT voice_rooms_status_check CHECK (status IN ('active', 'inactive', 'archived'))
 );
 
-CREATE UNIQUE INDEX uq_voice_rooms_livekit_room_name
+CREATE UNIQUE INDEX IF NOT EXISTS uq_voice_rooms_livekit_room_name
   ON voice_rooms(livekit_room_name)
   WHERE livekit_room_name IS NOT NULL;
 
@@ -951,36 +967,36 @@ CREATE TABLE audit_logs (
 -- Indexes for common reads
 -- ============================================================
 
-CREATE INDEX idx_oauth_accounts_user_id ON oauth_accounts(user_id);
-CREATE INDEX idx_auth_sessions_user_id ON auth_sessions(user_id);
-CREATE INDEX idx_workspace_members_workspace_id ON workspace_members(workspace_id);
-CREATE INDEX idx_workspace_members_user_id ON workspace_members(user_id);
-CREATE INDEX idx_tasks_workspace_status ON tasks(workspace_id, status);
-CREATE INDEX idx_tasks_assignee_status ON tasks(assignee_member_id, status);
-CREATE INDEX idx_tasks_due_date ON tasks(due_date);
-CREATE INDEX idx_task_comments_task_id ON task_comments(task_id);
-CREATE INDEX idx_github_repositories_workspace_id ON github_repositories(workspace_id);
-CREATE INDEX idx_github_issues_repository_id ON github_issues(repository_id);
-CREATE INDEX idx_pull_requests_repository_state ON pull_requests(repository_id, state);
-CREATE INDEX idx_canvas_boards_workspace_id ON canvas_boards(workspace_id);
-CREATE INDEX idx_canvas_shapes_board_id ON canvas_shapes(canvas_board_id);
-CREATE INDEX idx_canvas_shapes_entity ON canvas_shapes(entity_type, entity_id);
-CREATE INDEX idx_canvas_connections_board_id ON canvas_connections(canvas_board_id);
-CREATE INDEX idx_canvas_node_positions_shape_id ON canvas_node_positions(canvas_shape_id);
-CREATE INDEX idx_canvas_view_settings_board_member ON canvas_view_settings(canvas_board_id, member_id);
-CREATE INDEX idx_canvas_filter_settings_board_member ON canvas_filter_settings(canvas_board_id, member_id);
-CREATE INDEX idx_meetings_workspace_status ON meetings(workspace_id, status);
-CREATE INDEX idx_transcript_segments_meeting_id ON transcript_segments(meeting_id);
-CREATE INDEX idx_meeting_reports_meeting_id ON meeting_reports(meeting_id);
-CREATE INDEX idx_code_review_rooms_workspace_id ON code_review_rooms(workspace_id);
-CREATE INDEX idx_pull_request_analyses_pr_id ON pull_request_analyses(pull_request_id);
-CREATE INDEX idx_review_graphs_analysis_id ON review_graphs(analysis_id);
-CREATE INDEX idx_review_nodes_graph_id ON review_nodes(graph_id);
-CREATE INDEX idx_changed_files_analysis_id ON changed_files(analysis_id);
-CREATE INDEX idx_review_comments_room_id ON review_comments(room_id);
-CREATE INDEX idx_agent_runs_workspace_status ON agent_runs(workspace_id, status);
-CREATE INDEX idx_agent_actions_run_status ON agent_actions(run_id, status);
-CREATE INDEX idx_project_plan_drafts_workspace_id ON project_plan_drafts(workspace_id);
-CREATE INDEX idx_notifications_user_id ON notifications(user_id);
-CREATE INDEX idx_shared_files_workspace_id ON shared_files(workspace_id);
-CREATE INDEX idx_audit_logs_target ON audit_logs(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user_id ON oauth_accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_id ON workspace_members(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_user_id ON workspace_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace_status ON tasks(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee_status ON tasks(assignee_member_id, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
+CREATE INDEX IF NOT EXISTS idx_task_comments_task_id ON task_comments(task_id);
+CREATE INDEX IF NOT EXISTS idx_github_repositories_workspace_id ON github_repositories(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_github_issues_repository_id ON github_issues(repository_id);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_repository_state ON pull_requests(repository_id, state);
+CREATE INDEX IF NOT EXISTS idx_canvas_boards_workspace_id ON canvas_boards(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_shapes_board_id ON canvas_shapes(canvas_board_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_shapes_entity ON canvas_shapes(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_connections_board_id ON canvas_connections(canvas_board_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_node_positions_shape_id ON canvas_node_positions(canvas_shape_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_view_settings_board_member ON canvas_view_settings(canvas_board_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_canvas_filter_settings_board_member ON canvas_filter_settings(canvas_board_id, member_id);
+CREATE INDEX IF NOT EXISTS idx_meetings_workspace_status ON meetings(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_transcript_segments_meeting_id ON transcript_segments(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_meeting_reports_meeting_id ON meeting_reports(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_code_review_rooms_workspace_id ON code_review_rooms(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_pull_request_analyses_pr_id ON pull_request_analyses(pull_request_id);
+CREATE INDEX IF NOT EXISTS idx_review_graphs_analysis_id ON review_graphs(analysis_id);
+CREATE INDEX IF NOT EXISTS idx_review_nodes_graph_id ON review_nodes(graph_id);
+CREATE INDEX IF NOT EXISTS idx_changed_files_analysis_id ON changed_files(analysis_id);
+CREATE INDEX IF NOT EXISTS idx_review_comments_room_id ON review_comments(room_id);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_workspace_status ON agent_runs(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_actions_run_status ON agent_actions(run_id, status);
+CREATE INDEX IF NOT EXISTS idx_project_plan_drafts_workspace_id ON project_plan_drafts(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_shared_files_workspace_id ON shared_files(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_type, target_id);

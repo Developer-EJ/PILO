@@ -973,7 +973,25 @@ describe("local development baseline", () => {
   it("docker compose wires Postgres schema and LocalStack init scripts", () => {
     const compose = read("docker-compose.dev.yml");
     assert.match(compose, /docs\/db\/pilo_erd_schema\.sql/);
+    assert.match(
+      compose,
+      /docs\/db\/migrations\/202606281200_donghyun_auth_workspace_canvas_init\.sql/,
+    );
+    assert.match(
+      compose,
+      /docs\/db\/seeds\/001_donghyun_auth_workspace_canvas_seed\.sql/,
+    );
     assert.match(compose, /localstack\/init\/ready\.d/);
+  });
+
+  it("local DB apply script loads the owner migration and seed", () => {
+    const script = read("infra/scripts/apply-local-db-sql.ps1");
+    assert.match(
+      script,
+      /202606281200_donghyun_auth_workspace_canvas_init\.sql/,
+    );
+    assert.match(script, /001_donghyun_auth_workspace_canvas_seed\.sql/);
+    assert.match(script, /psql -v ON_ERROR_STOP=1/);
   });
 
   it("local SQS bootstrap creates the expected queues", () => {
@@ -1005,6 +1023,80 @@ describe("db schema contract alignment", () => {
     for (const ref of refs) {
       assert.ok(uniqueTables.has(ref), `referenced table must exist: ${ref}`);
     }
+  });
+
+  it("auth DB fields are aligned with the implemented session and OAuth records", () => {
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    assert.match(
+      sql,
+      /CREATE TABLE oauth_accounts[\s\S]*token_type VARCHAR\(80\)/,
+    );
+    assert.match(
+      sql,
+      /CREATE TABLE auth_sessions[\s\S]*token_hash_algorithm VARCHAR\(40\)/,
+    );
+    assert.match(
+      sql,
+      /CREATE TABLE auth_sessions[\s\S]*secret_version VARCHAR\(80\)/,
+    );
+
+    const ownerDoc = read("docs/db/db-schema-by-owner.md");
+    assert.match(ownerDoc, /token_type/);
+    assert.match(ownerDoc, /token_hash_algorithm/);
+    assert.match(ownerDoc, /secret_version/);
+  });
+
+  it("db indexes can be replayed during local migration bootstrap", () => {
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    const indexStatements = [...sql.matchAll(/^CREATE (?:UNIQUE )?INDEX .+$/gm)].map(
+      (match) => match[0],
+    );
+
+    assert.ok(indexStatements.length > 0, "schema should define indexes");
+
+    for (const statement of indexStatements) {
+      assert.match(statement, /IF NOT EXISTS/);
+    }
+  });
+
+  it("donghyun DB migration and seed stay inside the owned data boundary", () => {
+    const migrationPath =
+      "docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql";
+    const seedPath =
+      "docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql";
+
+    assert.ok(exists(migrationPath), `${migrationPath} must exist`);
+    assert.ok(exists(seedPath), `${seedPath} must exist`);
+
+    const migration = read(migrationPath);
+    for (const table of [
+      "users",
+      "oauth_accounts",
+      "auth_sessions",
+      "workspaces",
+      "workspace_members",
+      "workspace_invites",
+      "dashboard_preferences",
+      "canvas_boards",
+      "canvas_shapes",
+      "canvas_connections",
+      "canvas_node_positions",
+      "canvas_view_settings",
+      "canvas_filter_settings",
+    ]) {
+      assert.match(
+        migration,
+        new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`),
+      );
+    }
+
+    const seed = read(seedPath);
+    assert.match(seed, /INSERT INTO users/);
+    assert.match(seed, /INSERT INTO canvas_shapes/);
+    assert.doesNotMatch(
+      seed,
+      /INSERT INTO (tasks|github_issues|pull_requests|meetings|meeting_reports|code_review_rooms|agent_runs)\b/,
+    );
   });
 
   it("db owner document uses real owner names", () => {
