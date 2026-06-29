@@ -466,6 +466,25 @@ describe("frontend package", () => {
     assert.match(sidebar, /href={item\.href}/);
     assert.match(sidebar, /aria-current={item\.active/);
 
+    const dashboard = readFileSync(
+      "components/workspace/WorkspaceDashboard.tsx",
+      "utf8",
+    );
+    assert.match(dashboard, /dashboard-feature-links/);
+    assert.match(dashboard, /href={feature\.href}/);
+
+    for (const featureKey of [
+      "canvas",
+      "tasks",
+      "github",
+      "meetings",
+      "reviews",
+      "agent",
+      "planning",
+    ]) {
+      assert.match(dashboard, new RegExp(`href: routes\\.${featureKey}`));
+    }
+
     const workspacePages = {
       dashboard: {
         file: "app/workspaces/[workspaceId]/page.tsx",

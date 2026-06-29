@@ -62,6 +62,7 @@ type DashboardRecord = {
   prAnalyses?: unknown[];
   agentActions: DashboardAgentAction[];
   meetingReports: DashboardMeetingReport[];
+  canvasEntities?: unknown[];
 };
 
 type DashboardNavItem = {
@@ -197,6 +198,9 @@ function buildDashboardViewModel(
   const visiblePrs = reviewPrs.slice(0, 3);
   const visibleActions = dashboard.agentActions.slice(0, 2);
   const visibleMeetings = dashboard.meetingReports.slice(0, 3);
+  const githubCount =
+    (dashboard.githubIssues?.length ?? 0) + dashboard.pullRequests.length;
+  const canvasCount = dashboard.canvasEntities?.length ?? 0;
 
   return {
     stats: [
@@ -227,6 +231,64 @@ function buildDashboardViewModel(
         icon: "!",
         tone: "danger",
         href: routes.agent,
+      },
+    ],
+    featureLinks: [
+      {
+        label: "Canvas",
+        value: String(canvasCount),
+        meta: "linked cards",
+        icon: "C",
+        tone: "primary",
+        href: routes.canvas,
+      },
+      {
+        label: "Tasks",
+        value: String(dashboard.tasks.length),
+        meta: "task board",
+        icon: "T",
+        tone: "danger",
+        href: routes.tasks,
+      },
+      {
+        label: "GitHub",
+        value: String(githubCount),
+        meta: "issues + PRs",
+        icon: "G",
+        tone: "success",
+        href: routes.github,
+      },
+      {
+        label: "Meetings",
+        value: String(dashboard.meetingReports.length),
+        meta: "reports",
+        icon: "M",
+        tone: "warning",
+        href: routes.meetings,
+      },
+      {
+        label: "Reviews",
+        value: String(reviewPrs.length),
+        meta: "review queue",
+        icon: "R",
+        tone: "warning",
+        href: routes.reviews,
+      },
+      {
+        label: "Agent",
+        value: String(dashboard.agentActions.length),
+        meta: "actions",
+        icon: "A",
+        tone: "primary",
+        href: routes.agent,
+      },
+      {
+        label: "Planning",
+        value: "Run",
+        meta: "plan draft",
+        icon: "P",
+        tone: "success",
+        href: routes.planning,
       },
     ],
     navItems: buildDashboardNavItems(dashboard, workspaceId),
@@ -386,6 +448,28 @@ export function WorkspaceDashboard() {
                   </Link>
                 ))}
               </div>
+
+              <section
+                className="dashboard-feature-links"
+                aria-label="Workspace feature shortcuts"
+              >
+                {viewModel.featureLinks.map((feature) => (
+                  <Link
+                    className="dashboard-feature-link"
+                    href={feature.href}
+                    key={feature.label}
+                  >
+                    <div>
+                      <span>{feature.label}</span>
+                      <i className={`tone-${feature.tone}`}>
+                        {feature.icon}
+                      </i>
+                    </div>
+                    <strong>{feature.value}</strong>
+                    <small>{feature.meta}</small>
+                  </Link>
+                ))}
+              </section>
 
               <div className="content-grid">
                 <div className="left-column">
