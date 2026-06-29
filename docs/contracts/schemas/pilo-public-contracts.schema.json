@@ -307,6 +307,184 @@
         "draftId": { "$ref": "#/$defs/uuid" }
       }
     },
+    "ProjectPlanDraftStatus": {
+      "enum": ["draft", "reviewing", "approved", "rejected"]
+    },
+    "PlanningApprovalStatus": {
+      "enum": ["not_requested", "waiting_confirmation", "confirmed", "executed", "failed", "rejected"]
+    },
+    "PlanningOwnerApiResult": {
+      "type": "object",
+      "required": ["owner", "operation", "sourceDraftType", "sourceDraftId", "status", "targetEntityId", "errorMessage"],
+      "additionalProperties": false,
+      "properties": {
+        "owner": { "enum": ["task"] },
+        "operation": { "enum": ["task.create", "milestone.create"] },
+        "sourceDraftType": { "enum": ["feature", "milestone"] },
+        "sourceDraftId": { "$ref": "#/$defs/uuid" },
+        "status": { "enum": ["not_requested", "pending", "succeeded", "failed", "skipped"] },
+        "targetEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "errorMessage": { "type": ["string", "null"] }
+      }
+    },
+    "ProjectPlanApprovalState": {
+      "type": "object",
+      "required": ["status", "actionId", "requestedAt", "confirmedAt", "executedAt", "ownerApiResults"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/$defs/PlanningApprovalStatus" },
+        "actionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "requestedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "confirmedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+        "ownerApiResults": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PlanningOwnerApiResult" }
+        }
+      }
+    },
+    "ProjectPlanDraftSummary": {
+      "type": "object",
+      "required": ["id", "workspaceId", "goal", "targetUser", "status", "featureDraftCount", "milestoneDraftCount", "riskCount", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "goal": { "type": ["string", "null"] },
+        "targetUser": { "type": ["string", "null"] },
+        "status": { "$ref": "#/$defs/ProjectPlanDraftStatus" },
+        "featureDraftCount": { "type": "integer", "minimum": 0 },
+        "milestoneDraftCount": { "type": "integer", "minimum": 0 },
+        "riskCount": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanTechStackRecommendation": {
+      "type": "object",
+      "required": ["id", "draftId", "frontend", "backend", "databaseName", "ai", "deploy", "reason", "difficulty", "alternatives", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" },
+        "frontend": { "type": ["string", "null"] },
+        "backend": { "type": ["string", "null"] },
+        "databaseName": { "type": ["string", "null"] },
+        "ai": { "type": ["string", "null"] },
+        "deploy": { "type": ["string", "null"] },
+        "reason": { "type": ["string", "null"] },
+        "difficulty": { "type": ["string", "null"] },
+        "alternatives": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanFeatureDraft": {
+      "type": "object",
+      "required": ["id", "draftId", "title", "description", "scope", "reason", "sortOrder", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": ["string", "null"] },
+        "scope": { "enum": ["mvp", "should", "could", "excluded"] },
+        "reason": { "type": ["string", "null"] },
+        "sortOrder": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanRoleDraft": {
+      "type": "object",
+      "required": ["id", "draftId", "member", "suggestedRole", "reason", "sortOrder", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" },
+        "member": { "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }] },
+        "suggestedRole": { "type": "string", "minLength": 1 },
+        "reason": { "type": ["string", "null"] },
+        "sortOrder": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanMilestoneDraft": {
+      "type": "object",
+      "required": ["id", "draftId", "title", "startDate", "endDate", "sortOrder", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "startDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "endDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "sortOrder": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanRiskNote": {
+      "type": "object",
+      "required": ["id", "draftId", "content", "severity", "sortOrder", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" },
+        "content": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["low", "medium", "high", "critical"] },
+        "sortOrder": { "type": "integer", "minimum": 0 },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanFirstAgendaDraft": {
+      "type": "object",
+      "required": ["id", "draftId", "title", "objective", "agendaItems", "attendeeMemberIds", "durationMinutes", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draftId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "objective": { "type": "string", "minLength": 1 },
+        "agendaItems": { "type": "array", "items": { "type": "string" } },
+        "attendeeMemberIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+        "durationMinutes": { "type": "integer", "minimum": 1 },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "ProjectPlanDraftDetail": {
+      "type": "object",
+      "required": ["id", "workspaceId", "goal", "targetUser", "problem", "duration", "outputGoal", "status", "createdByMemberId", "techStack", "featureDrafts", "roleDrafts", "milestoneDrafts", "riskNotes", "firstAgendaDraft", "approval", "createdAt", "updatedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "goal": { "type": ["string", "null"] },
+        "targetUser": { "type": ["string", "null"] },
+        "problem": { "type": ["string", "null"] },
+        "duration": { "type": ["string", "null"] },
+        "outputGoal": { "type": ["string", "null"] },
+        "status": { "$ref": "#/$defs/ProjectPlanDraftStatus" },
+        "createdByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "techStack": { "anyOf": [{ "$ref": "#/$defs/ProjectPlanTechStackRecommendation" }, { "type": "null" }] },
+        "featureDrafts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProjectPlanFeatureDraft" }
+        },
+        "roleDrafts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProjectPlanRoleDraft" }
+        },
+        "milestoneDrafts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProjectPlanMilestoneDraft" }
+        },
+        "riskNotes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProjectPlanRiskNote" }
+        },
+        "firstAgendaDraft": { "anyOf": [{ "$ref": "#/$defs/ProjectPlanFirstAgendaDraft" }, { "type": "null" }] },
+        "approval": { "$ref": "#/$defs/ProjectPlanApprovalState" },
+        "createdAt": { "$ref": "#/$defs/dateTime" },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "MeetingReportSummary": {
       "type": "object",
       "required": ["id", "meetingId", "workspaceId", "title", "summary", "decisionCount", "actionItemCount", "riskCount"],
