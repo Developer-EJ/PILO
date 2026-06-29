@@ -251,4 +251,110 @@ describe("meeting module scaffold", () => {
       }),
     );
   });
+
+  it("creates and lists meeting memos with workspace member authors", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "memo-author",
+      workspaceId: "workspace-1",
+    });
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Memo meeting",
+    });
+
+    const memo = controller.createMemo(meeting.id, {
+      authorMemberId: "memo-author",
+      body: "Discussed API shape.",
+    });
+
+    assert.equal(memo.meetingId, meeting.id);
+    assert.equal(memo.authorMemberId, "memo-author");
+    assert.equal(memo.body, "Discussed API shape.");
+    assert.deepEqual(controller.listMemos(meeting.id), [memo]);
+  });
+
+  it("defaults memo author to the mock current member", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Current member memo meeting",
+    });
+
+    const memo = service.createMemo(meeting.id, {
+      body: "Current member wrote this.",
+    });
+
+    assert.equal(memo.authorMemberId, "00000000-0000-4000-8000-000000000001");
+  });
+
+  it("creates and lists transcript segments in append order", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "speaker-1",
+      workspaceId: "workspace-1",
+    });
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const meeting = controller.createMeeting("workspace-1", {
+      title: "Transcript meeting",
+    });
+
+    const textSegment = controller.createTranscriptSegment(meeting.id, {
+      speakerMemberId: "speaker-1",
+      body: "Manual transcript input.",
+    });
+    const sttSegment = controller.createTranscriptSegment(meeting.id, {
+      speakerMemberId: "speaker-1",
+      source: "stt",
+      body: "STT transcript input.",
+      startedAt: "2026-06-28T09:00:00.000Z",
+      endedAt: "2026-06-28T09:00:05.000Z",
+    });
+
+    assert.equal(textSegment.source, "text");
+    assert.equal(textSegment.speakerMemberId, "speaker-1");
+    assert.equal(sttSegment.source, "stt");
+    assert.deepEqual(controller.listTranscriptSegments(meeting.id), [
+      textSegment,
+      sttSegment,
+    ]);
+  });
+
+  it("rejects invalid transcript source, time range, and speaker workspace", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    currentMemberAdapter.registerWorkspaceMember({
+      id: "speaker-2",
+      workspaceId: "workspace-2",
+    });
+    const service = new MeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Transcript validation meeting",
+    });
+
+    assert.throws(() =>
+      service.createTranscriptSegment(meeting.id, {
+        source: "voice",
+        body: "Invalid source.",
+      }),
+    );
+    assert.throws(() =>
+      service.createTranscriptSegment(meeting.id, {
+        body: "Invalid time range.",
+        startedAt: "2026-06-28T09:00:05.000Z",
+        endedAt: "2026-06-28T09:00:00.000Z",
+      }),
+    );
+    assert.throws(() =>
+      service.createTranscriptSegment(meeting.id, {
+        speakerMemberId: "speaker-2",
+        body: "Wrong workspace.",
+      }),
+    );
+  });
 });
