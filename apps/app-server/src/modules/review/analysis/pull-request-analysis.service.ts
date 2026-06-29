@@ -26,12 +26,11 @@ const ALLOWED_TRANSITIONS: Record<
 
 @Injectable()
 export class PullRequestAnalysisService {
+  private readonly pullRequestSummaries: ReadonlyMap<string, unknown> =
+    REVIEW_ROOM_PULL_REQUEST_FIXTURES;
+
   constructor(
     private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
-    private readonly pullRequestSummaries: ReadonlyMap<
-      string,
-      unknown
-    > = REVIEW_ROOM_PULL_REQUEST_FIXTURES,
   ) {}
 
   requestAnalysis(pullRequestId: string): PullRequestAnalysisRecord {
