@@ -73,7 +73,7 @@ type DashboardNavItem = {
   label: string;
   active?: boolean;
   badge?: string;
-  href?: string;
+  href: string;
 };
 
 type DashboardState =
@@ -104,18 +104,19 @@ function buildDashboardNavItems(
   workspaceId: string,
 ): DashboardNavItem[] {
   const routes = buildWorkspaceRoutes(workspaceId);
-  const reviewCount =
-    dashboard?.prAnalyses?.length ??
-    dashboard?.pullRequests.filter((pr) =>
-      ["review_requested", "changes_requested"].includes(pr.state),
-    ).length ??
-    0;
-  const githubCount =
-    (dashboard?.githubIssues?.length ?? 0) + (dashboard?.pullRequests.length ?? 0);
+  const reviewCount = dashboard
+    ? (dashboard.prAnalyses?.length ??
+        dashboard.pullRequests.filter((pr) =>
+          ["review_requested", "changes_requested"].includes(pr.state),
+        ).length)
+    : 0;
+  const githubCount = dashboard
+    ? (dashboard.githubIssues?.length ?? 0) + dashboard.pullRequests.length
+    : 0;
 
   return [
     {
-      label: "홈 / 대시보드",
+      label: "Dashboard",
       active: true,
       href: routes.dashboard,
     },
@@ -130,7 +131,7 @@ function buildDashboardNavItems(
     },
     {
       label: "GitHub",
-      badge: dashboard && githubCount ? String(githubCount) : undefined,
+      badge: githubCount ? String(githubCount) : undefined,
       href: routes.github,
     },
     {
@@ -142,7 +143,7 @@ function buildDashboardNavItems(
     },
     {
       label: "Reviews",
-      badge: dashboard && reviewCount ? String(reviewCount) : undefined,
+      badge: reviewCount ? String(reviewCount) : undefined,
       href: routes.reviews,
     },
     {
@@ -179,7 +180,7 @@ function formatTaskTag(task: {
 }
 
 function formatDue(task: { dueDate?: string | null; isDelayed?: boolean }) {
-  if (task.isDelayed) return "지연";
+  if (task.isDelayed) return "Overdue";
   if (!task.dueDate) return "-";
 
   const today = new Date();
@@ -189,7 +190,7 @@ function formatDue(task: { dueDate?: string | null; isDelayed?: boolean }) {
     (dueDate.getTime() - new Date(today.toDateString()).getTime()) / dayMs,
   );
 
-  if (diffDays <= 0) return "오늘";
+  if (diffDays <= 0) return "Today";
   if (diffDays === 1) return "D-1";
 
   return `D-${diffDays}`;
@@ -207,6 +208,16 @@ function countDueThisWeek(tasks: DashboardRecord["tasks"]) {
 
     return dueTime >= start && dueTime <= start + weekMs;
   }).length;
+}
+
+function formatAgentAction(action: DashboardAgentAction) {
+  const title = action.payload?.title;
+
+  if (typeof title === "string" && title.trim()) {
+    return `${title} is waiting for review.`;
+  }
+
+  return `${action.type} is waiting for review.`;
 }
 
 function buildDashboardViewModel(
@@ -234,30 +245,30 @@ function buildDashboardViewModel(
   return {
     stats: [
       {
-        label: "진행 중 Task",
+        label: "Active tasks",
         value: String(inProgressTasks.length),
-        icon: "⚡",
+        icon: "T",
         tone: "primary",
         href: routes.tasks,
       },
       {
-        label: "리뷰 대기 PR",
+        label: "Review PRs",
         value: String(reviewPrs.length),
-        icon: "◆",
+        icon: "R",
         tone: "warning",
         href: routes.reviews,
       },
       {
-        label: "이번 주 마감",
+        label: "Due this week",
         value: String(countDueThisWeek(dashboard.tasks)),
-        icon: "●",
+        icon: "D",
         tone: "success",
         href: routes.tasks,
       },
       {
-        label: "막힌 작업",
-        value: String(blockedTasks || delayedTasks),
-        icon: "■",
+        label: "Blocked work",
+        value: String(blockedTasks + delayedTasks),
+        icon: "!",
         tone: "danger",
         href: routes.agent,
       },
@@ -267,15 +278,12 @@ function buildDashboardViewModel(
     todayTasks,
     reviewPrs: visiblePrs,
     agentSuggestions: visibleActions.map((action) => ({
-      text:
-        typeof action.payload?.title === "string"
-          ? `${action.payload.title} 작업 제안이 확인을 기다리고 있어요.`
-          : `${action.type} 제안이 확인을 기다리고 있어요.`,
-      cta: action.requiresConfirmation ? "확인 필요" : "상세 보기",
+      text: formatAgentAction(action),
+      cta: action.requiresConfirmation ? "Needs approval" : "View details",
     })),
     decisions: visibleMeetings.map((meeting) => ({
       id: meeting.id,
-      text: `${meeting.title}: 결정 ${meeting.decisionCount}개, 액션 ${meeting.actionItemCount}개, 리스크 ${meeting.riskCount}개`,
+      text: `${meeting.title}: ${meeting.decisionCount} decisions, ${meeting.actionItemCount} actions, ${meeting.riskCount} risks`,
     })),
   };
 }
@@ -362,35 +370,22 @@ export function WorkspaceDashboard() {
 
   return (
     <main className="dashboard-shell">
-      <aside className="sidebar" aria-label="PILO navigation preview">
+      <aside className="sidebar" aria-label="PILO navigation">
         <div className="brand">
           <CurrentWorkspaceSwitcher />
         </div>
-        <nav className="nav-list" aria-label="Dashboard only navigation">
-          {navItems.map((item) => {
-            const className = item.active ? "nav-item active" : "nav-item";
-            const content = (
-              <>
-                <span>{item.label}</span>
-                {item.badge ? <b>{item.badge}</b> : null}
-              </>
-            );
-
-            return item.href ? (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={className}
-                aria-current={item.active ? "page" : undefined}
-              >
-                {content}
-              </Link>
-            ) : (
-              <div key={item.label} className={className} aria-disabled="true">
-                {content}
-              </div>
-            );
-          })}
+        <nav className="nav-list" aria-label="Workspace navigation">
+          {navItems.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className={item.active ? "nav-item active" : "nav-item"}
+              aria-current={item.active ? "page" : undefined}
+            >
+              <span>{item.label}</span>
+              {item.badge ? <b>{item.badge}</b> : null}
+            </Link>
+          ))}
         </nav>
       </aside>
 
@@ -398,12 +393,12 @@ export function WorkspaceDashboard() {
         <header className="topbar">
           <div>
             <p className="eyebrow">DASHBOARD</p>
-            <h1>홈 / 대시보드</h1>
+            <h1>PILO Dashboard</h1>
           </div>
           <div className="topbar-actions">
             <Link className="meeting-chip" href={workspaceMeetingsHref(workspaceId)}>
               <span className="live-dot" />
-              회의 중<code>03:18</code>
+              Meetings <code>{state.dashboard?.meetingReports.length ?? 0}</code>
             </Link>
             <LogoutButton />
             <CurrentUserAvatar />
@@ -416,15 +411,15 @@ export function WorkspaceDashboard() {
         >
           {state.status === "loading" ? (
             <DashboardStatusPanel
-              title="대시보드를 불러오는 중"
-              description="Workspace read model을 확인하고 있어요."
+              title="Loading dashboard"
+              description="Workspace summary data is being prepared."
             />
           ) : null}
 
           {state.status === "error" ? (
             <DashboardStatusPanel
-              title="대시보드를 불러오지 못했어요"
-              description="잠시 후 다시 시도하거나 app-server 연결 상태를 확인해 주세요."
+              title="Dashboard could not be loaded"
+              description="Check the app-server connection or retry the workspace view."
             />
           ) : null}
 
@@ -432,7 +427,7 @@ export function WorkspaceDashboard() {
             <>
               {state.warnings.length ? (
                 <div className="dashboard-notice">
-                  일부 read model이 비어 있어 가능한 데이터만 표시하고 있어요.
+                  Some dashboard sections are using fallback data.
                 </div>
               ) : null}
 
@@ -456,7 +451,7 @@ export function WorkspaceDashboard() {
                 <div className="left-column">
                   <section className="panel">
                     <div className="panel-head">
-                      <h2>오늘 해야 할 일</h2>
+                      <h2>Today's work</h2>
                       <Link className="panel-action" href={viewModel.routes.tasks}>
                         Open Tasks
                       </Link>
@@ -482,14 +477,14 @@ export function WorkspaceDashboard() {
                           );
                         })
                       ) : (
-                        <EmptyRow text="표시할 Task가 아직 없어요." />
+                        <EmptyRow text="No task items yet." />
                       )}
                     </div>
                   </section>
 
                   <section className="panel">
                     <div className="panel-head">
-                      <h2>리뷰 대기 PR</h2>
+                      <h2>PRs waiting for review</h2>
                       <Link className="panel-action" href={viewModel.routes.github}>
                         Open GitHub
                       </Link>
@@ -505,11 +500,11 @@ export function WorkspaceDashboard() {
                               href={viewModel.routes.reviews}
                               key={pr.id}
                             >
-                              <div className="pr-icon">◇</div>
+                              <div className="pr-icon">PR</div>
                               <div>
                                 <strong>{pr.title}</strong>
                                 <small>
-                                  #{pr.number} · {pr.authorLogin ?? "unknown"}
+                                  #{pr.number} by {pr.authorLogin ?? "unknown"}
                                 </small>
                               </div>
                               <b className={`pill tone-${tone}`}>{pr.state}</b>
@@ -517,7 +512,7 @@ export function WorkspaceDashboard() {
                           );
                         })
                       ) : (
-                        <EmptyRow text="리뷰 대기 PR이 없어요." />
+                        <EmptyRow text="No pull requests are waiting." />
                       )}
                     </div>
                   </section>
@@ -526,8 +521,8 @@ export function WorkspaceDashboard() {
                 <div className="right-column">
                   <section className="agent-panel">
                     <div className="agent-title">
-                      <span>✦</span>
-                      <h2>Agent 다음 제안</h2>
+                      <span>AI</span>
+                      <h2>Agent suggestions</h2>
                     </div>
                     {viewModel.agentSuggestions.length ? (
                       viewModel.agentSuggestions.map((item) => (
@@ -541,13 +536,13 @@ export function WorkspaceDashboard() {
                         </Link>
                       ))
                     ) : (
-                      <EmptyRow text="대기 중인 Agent 제안이 없어요." />
+                      <EmptyRow text="No Agent suggestions are waiting." />
                     )}
                   </section>
 
                   <section className="panel decision-panel">
                     <div className="panel-head">
-                      <h2>최근 회의 결정</h2>
+                      <h2>Recent meeting decisions</h2>
                       <Link className="panel-action" href={viewModel.routes.meetings}>
                         Open Meetings
                       </Link>
@@ -559,12 +554,12 @@ export function WorkspaceDashboard() {
                             href={viewModel.routes.meetings}
                             key={decision.id}
                           >
-                            <span>✓</span>
+                            <span>OK</span>
                             {decision.text}
                           </Link>
                         ))
                       ) : (
-                        <EmptyRow text="최근 회의록 요약이 없어요." />
+                        <EmptyRow text="No meeting reports yet." />
                       )}
                     </div>
                   </section>

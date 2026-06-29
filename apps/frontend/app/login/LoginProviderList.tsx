@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createAuthClient } from "../../lib/auth/authClient.mjs";
+import type { AuthProvidersResponse } from "../../lib/auth/types";
 import {
   LoginProviderButtons,
   type LoginProviderButton,
@@ -29,8 +30,12 @@ export function LoginProviderList({ providers }: LoginProviderListProps) {
 
     async function loadProviders() {
       const authClient = createAuthClient();
-      const providerResponse = await authClient.getAuthProviders();
-      const providersById = new Map(
+      const providerResponse =
+        (await authClient.getAuthProviders()) as AuthProvidersResponse;
+      const providersById = new Map<
+        string,
+        AuthProvidersResponse["providers"][number]
+      >(
         providerResponse.providers.map((provider) => [provider.id, provider]),
       );
 

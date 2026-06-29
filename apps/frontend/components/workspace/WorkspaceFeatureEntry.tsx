@@ -31,6 +31,47 @@ type FeatureCard = {
   tone: "primary" | "success" | "warning" | "danger";
 };
 
+type FeatureDashboardFixture = {
+  tasks: Array<{
+    title: string;
+    status: string;
+    priority?: string;
+    isDelayed?: boolean;
+  }>;
+  pullRequests: Array<{
+    number: number;
+    title: string;
+    state: string;
+    branch: string;
+  }>;
+  githubIssues: Array<{
+    number: number;
+    title: string;
+    state: string;
+    labels: string[];
+  }>;
+  meetingReports: Array<{
+    title: string;
+    decisionCount: number;
+    actionItemCount: number;
+    riskCount: number;
+  }>;
+  prAnalyses: Array<{
+    purposeSummary: string;
+    analysisStatus: string;
+    riskLevel: string;
+  }>;
+  agentActions: Array<{
+    type: string;
+    status: string;
+    source: string;
+    requiresConfirmation?: boolean;
+    payload?: {
+      title?: string;
+    };
+  }>;
+};
+
 const surfaceConfig = {
   tasks: {
     eyebrow: "TASKS",
@@ -82,7 +123,7 @@ function createRoutes(workspaceId: string) {
 
 function createFeatureCards(
   surface: WorkspaceFeatureSurface,
-  dashboard: ReturnType<typeof createWorkspaceDashboardFixture>,
+  dashboard: FeatureDashboardFixture,
 ): FeatureCard[] {
   if (surface === "tasks") {
     return dashboard.tasks.map((task) => ({
@@ -134,7 +175,9 @@ export function WorkspaceFeatureEntry({
   workspaceId,
   surface,
 }: WorkspaceFeatureEntryProps) {
-  const dashboard = createWorkspaceDashboardFixture(workspaceId);
+  const dashboard = createWorkspaceDashboardFixture(
+    workspaceId,
+  ) as FeatureDashboardFixture;
   const config = surfaceConfig[surface];
   const routes = createRoutes(workspaceId);
   const featureCards = createFeatureCards(surface, dashboard);

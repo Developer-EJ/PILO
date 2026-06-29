@@ -12,8 +12,10 @@ import {
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
   resolveCurrentWorkspaceSelection,
+  workspaceAgentHref,
   workspaceCanvasHref,
   workspaceDashboardHref,
+  workspacePlanningHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import { CurrentWorkspaceSwitcher } from "../workspace/CurrentWorkspaceSwitcher";
@@ -160,6 +162,16 @@ function statusTone(status: string) {
 export function AgentPlanningWorkspace() {
   const pathname = usePathname() ?? "/";
   const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
+  const routes = useMemo(
+    () => ({
+      dashboard: workspaceDashboardHref(workspaceId),
+      agent: workspaceAgentHref(workspaceId),
+      planning: workspacePlanningHref(workspaceId),
+      canvas: workspaceCanvasHref(workspaceId),
+    }),
+    [workspaceId],
+  );
+  const isPlanningRoute = pathname.startsWith(routes.planning);
   const client = useMemo(() => createAgentPlanningClient(), []);
   const [form, setForm] = useState<ProjectStartInput>(defaultProjectStartInput);
   const [run, setRun] = useState<AgentRunDetail | null>(null);
@@ -234,23 +246,24 @@ export function AgentPlanningWorkspace() {
           <CurrentWorkspaceSwitcher />
         </div>
         <nav className="nav-list" aria-label="Agent navigation">
-          <Link className="nav-item" href={workspaceDashboardHref(workspaceId)}>
+          <Link className="nav-item" href={routes.dashboard}>
             Dashboard
           </Link>
           <Link
-            className="nav-item active"
-            href={`${workspaceDashboardHref(workspaceId)}/agent`}
-            aria-current="page"
+            className={!isPlanningRoute ? "nav-item active" : "nav-item"}
+            href={routes.agent}
+            aria-current={!isPlanningRoute ? "page" : undefined}
           >
             Agent runtime
           </Link>
           <Link
-            className="nav-item"
-            href={`${workspaceDashboardHref(workspaceId)}/planning`}
+            className={isPlanningRoute ? "nav-item active" : "nav-item"}
+            href={routes.planning}
+            aria-current={isPlanningRoute ? "page" : undefined}
           >
             Planning
           </Link>
-          <Link className="nav-item" href={workspaceCanvasHref(workspaceId)}>
+          <Link className="nav-item" href={routes.canvas}>
             Canvas
           </Link>
         </nav>

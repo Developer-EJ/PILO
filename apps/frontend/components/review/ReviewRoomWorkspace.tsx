@@ -209,7 +209,7 @@ export function ReviewRoomWorkspace({
       setWarnings([]);
 
       try {
-        const nextPullRequests = await client.listPullRequests(workspaceId);
+        const nextPullRequests = await client.listPullRequests();
 
         if (!cancelled) {
           setPullRequests(
@@ -221,7 +221,7 @@ export function ReviewRoomWorkspace({
         }
       } catch (error) {
         const fallbackPullRequests =
-          await fallbackClient.listPullRequests(workspaceId);
+          await fallbackClient.listPullRequests();
 
         if (!cancelled) {
           setPullRequests(fallbackPullRequests);
@@ -298,21 +298,21 @@ export function ReviewRoomWorkspace({
       }
 
       try {
-        changedFiles = await client.listChangedFiles(analysis.id);
+        changedFiles = await client.listChangedFiles();
       } catch (error) {
-        changedFiles = await fallbackClient.listChangedFiles(analysis.id);
+        changedFiles = await fallbackClient.listChangedFiles();
       }
 
       try {
-        checklistItems = await client.listChecklistItems(analysis.id);
+        checklistItems = await client.listChecklistItems();
       } catch (error) {
-        checklistItems = await fallbackClient.listChecklistItems(analysis.id);
+        checklistItems = await fallbackClient.listChecklistItems();
       }
 
       try {
-        comments = await client.listComments(room.id);
+        comments = await client.listComments();
       } catch (error) {
-        comments = await fallbackClient.listComments(room.id);
+        comments = await fallbackClient.listComments();
       }
 
       setSession({
