@@ -31,20 +31,27 @@ const {
   VOICE_REPOSITORY,
 } = require("../src/modules/voice/repositories/voice.repository");
 
-function createMeetingService() {
-  return new MeetingService(
+function createMeetingContext() {
+  const currentMemberAdapter = new MockCurrentMemberAdapter();
+  const meetingService = new MeetingService(
     new MockMeetingRepository(),
-    new MockCurrentMemberAdapter(),
+    currentMemberAdapter,
     new MockMeetingReportWorkflowClient(),
     new MockTaskDraftClient(),
   );
+
+  return {
+    currentMemberAdapter,
+    meetingService,
+  };
 }
 
-function createVoiceService(meetingService = createMeetingService()) {
+function createVoiceService(context = createMeetingContext()) {
   return new VoiceService(
     new MockVoiceRepository(),
     new MockVoiceRoomProvider(),
-    meetingService,
+    context.meetingService,
+    context.currentMemberAdapter,
   );
 }
 
@@ -68,10 +75,10 @@ describe("voice module", () => {
   });
 
   it("creates and reads one placeholder voice room per meeting", () => {
-    const meetingService = createMeetingService();
-    const service = createVoiceService(meetingService);
+    const context = createMeetingContext();
+    const service = createVoiceService(context);
     const controller = new VoiceController(service);
-    const meeting = meetingService.createMeeting("workspace-1", {
+    const meeting = context.meetingService.createMeeting("workspace-1", {
       title: "Voice room meeting",
     });
 
@@ -99,10 +106,10 @@ describe("voice module", () => {
   });
 
   it("validates meeting workspace boundaries and voice room statuses", () => {
-    const meetingService = createMeetingService();
-    const service = createVoiceService(meetingService);
+    const context = createMeetingContext();
+    const service = createVoiceService(context);
     const controller = new VoiceController(service);
-    const meeting = meetingService.createMeeting("workspace-1", {
+    const meeting = context.meetingService.createMeeting("workspace-1", {
       title: "Voice room validation meeting",
     });
     const voiceRoom = controller.createVoiceRoom("workspace-1", meeting.id);
@@ -126,5 +133,97 @@ describe("voice module", () => {
 
     assert.equal(inactiveVoiceRoom.status, "inactive");
     assert.equal(archivedVoiceRoom.status, "archived");
+  });
+
+  it("joins, lists, updates recording status, and leaves voice sessions", () => {
+    const context = createMeetingContext();
+    context.currentMemberAdapter.registerWorkspaceMember({
+      id: "voice-member-1",
+      workspaceId: "workspace-1",
+    });
+    const service = createVoiceService(context);
+    const controller = new VoiceController(service);
+    const meeting = context.meetingService.createMeeting("workspace-1", {
+      title: "Voice session meeting",
+    });
+    const voiceRoom = controller.createVoiceRoom("workspace-1", meeting.id);
+
+    const voiceSession = controller.joinVoiceSession(voiceRoom.id, {
+      memberId: "voice-member-1",
+    });
+
+    assert.equal(voiceSession.voiceRoomId, voiceRoom.id);
+    assert.equal(voiceSession.meetingId, meeting.id);
+    assert.equal(voiceSession.memberId, "voice-member-1");
+    assert.equal(voiceSession.recordingStatus, "not_recording");
+    assert.notEqual(voiceSession.startedAt, null);
+    assert.equal(voiceSession.endedAt, null);
+    assert.deepEqual(controller.listVoiceSessions(voiceRoom.id), [
+      voiceSession,
+    ]);
+
+    const recordingSession = controller.updateVoiceSessionRecordingStatus(
+      voiceSession.id,
+      {
+        recordingStatus: "recording",
+      },
+    );
+
+    assert.equal(recordingSession.recordingStatus, "recording");
+
+    const endedSession = controller.leaveVoiceSession(voiceSession.id);
+
+    assert.notEqual(endedSession.endedAt, null);
+    assert.equal(
+      new Date(endedSession.endedAt).getTime() >=
+        new Date(endedSession.startedAt).getTime(),
+      true,
+    );
+  });
+
+  it("rejects duplicate joins, duplicate leaves, invalid members, and ended session updates", () => {
+    const context = createMeetingContext();
+    context.currentMemberAdapter.registerWorkspaceMember({
+      id: "voice-member-2",
+      workspaceId: "workspace-1",
+    });
+    context.currentMemberAdapter.registerWorkspaceMember({
+      id: "external-voice-member",
+      workspaceId: "workspace-2",
+    });
+    const service = createVoiceService(context);
+    const controller = new VoiceController(service);
+    const meeting = context.meetingService.createMeeting("workspace-1", {
+      title: "Voice session validation meeting",
+    });
+    const voiceRoom = controller.createVoiceRoom("workspace-1", meeting.id);
+    const voiceSession = controller.joinVoiceSession(voiceRoom.id, {
+      memberId: "voice-member-2",
+    });
+
+    assert.throws(() =>
+      controller.joinVoiceSession(voiceRoom.id, {
+        memberId: "voice-member-2",
+      }),
+    );
+    assert.throws(() =>
+      controller.joinVoiceSession(voiceRoom.id, {
+        memberId: "external-voice-member",
+      }),
+    );
+    assert.throws(() =>
+      controller.updateVoiceSessionRecordingStatus(voiceSession.id, {
+        recordingStatus: "paused",
+      }),
+    );
+
+    controller.leaveVoiceSession(voiceSession.id);
+
+    assert.throws(() => controller.leaveVoiceSession(voiceSession.id));
+    assert.throws(() =>
+      controller.updateVoiceSessionRecordingStatus(voiceSession.id, {
+        recordingStatus: "completed",
+      }),
+    );
   });
 });

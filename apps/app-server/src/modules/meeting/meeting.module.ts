@@ -31,6 +31,6 @@ import { MeetingService } from "./meeting.service";
       useClass: MockTaskDraftClient,
     },
   ],
-  exports: [MeetingService],
+  exports: [MeetingService, CURRENT_MEMBER_ADAPTER],
 })
 export class MeetingModule {}
