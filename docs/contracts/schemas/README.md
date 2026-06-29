@@ -5,6 +5,7 @@
 ## 현재 기준
 
 - `pilo-public-contracts.schema.json`: 핵심 read model, action payload, 공통 DTO 정의
+  - Auth: `CurrentUser`, `AuthSessionState`, `AuthProvidersResponse`, `AuthErrorResponse`
 
 ## 사용 규칙
 

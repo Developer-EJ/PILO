@@ -16,6 +16,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "AuthProvider": {
+      "enum": ["google", "github"]
+    },
     "memberRef": {
       "type": "object",
       "required": ["memberId", "name"],
@@ -30,7 +33,14 @@
     },
     "CurrentUser": {
       "type": "object",
-      "required": ["id", "email", "name", "providers"],
+      "required": [
+        "id",
+        "email",
+        "name",
+        "avatarUrl",
+        "providers",
+        "lastLoginAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -39,20 +49,141 @@
         "avatarUrl": { "type": ["string", "null"] },
         "providers": {
           "type": "array",
-          "items": { "enum": ["google", "github"] }
+          "items": { "$ref": "#/$defs/AuthProvider" }
         },
-        "lastLoginAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "lastLoginAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
+      }
+    },
+    "AuthSessionState": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["authenticated", "user"],
+          "additionalProperties": false,
+          "properties": {
+            "authenticated": { "const": true },
+            "user": { "$ref": "#/$defs/CurrentUser" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["authenticated", "user"],
+          "additionalProperties": false,
+          "properties": {
+            "authenticated": { "const": false },
+            "user": { "type": "null" }
+          }
+        }
+      ]
+    },
+    "AuthProviderSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "startPath",
+        "callbackPath",
+        "callbackUrl",
+        "scopes",
+        "configured",
+        "missingEnv",
+        "loginOnly"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/AuthProvider" },
+        "label": { "type": "string" },
+        "startPath": { "type": "string" },
+        "callbackPath": { "type": "string" },
+        "callbackUrl": { "type": "string" },
+        "scopes": { "type": "array", "items": { "type": "string" } },
+        "configured": { "type": "boolean" },
+        "missingEnv": { "type": "array", "items": { "type": "string" } },
+        "loginOnly": { "const": true }
+      }
+    },
+    "AuthProvidersResponse": {
+      "type": "object",
+      "required": ["providers", "session", "repository"],
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AuthProviderSummary" }
+        },
+        "session": {
+          "type": "object",
+          "required": ["cookieName", "configured", "source"],
+          "additionalProperties": false,
+          "properties": {
+            "cookieName": { "type": "string" },
+            "configured": { "type": "boolean" },
+            "source": { "enum": ["env", "local-fallback"] }
+          }
+        },
+        "repository": {
+          "type": "object",
+          "required": ["storageMode"],
+          "additionalProperties": false,
+          "properties": {
+            "storageMode": { "type": "string" }
+          }
+        }
+      }
+    },
+    "AuthOAuthCallbackErrorCode": {
+      "enum": [
+        "access_denied",
+        "oauth_provider_not_configured",
+        "missing_oauth_callback_params",
+        "oauth_state_missing",
+        "oauth_state_provider_mismatch",
+        "oauth_state_nonce_mismatch",
+        "oauth_state_expired",
+        "oauth_token_exchange_failed",
+        "oauth_token_missing_access_token",
+        "oauth_profile_fetch_failed",
+        "oauth_profile_missing_id",
+        "oauth_callback_failed"
+      ]
+    },
+    "AuthErrorResponse": {
+      "type": "object",
+      "required": ["statusCode", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": { "enum": [401] },
+        "message": { "type": "string" }
       }
     },
     "WorkspaceSummary": {
       "type": "object",
-      "required": ["id", "name", "status", "myRole", "memberCount"],
+      "required": [
+        "id",
+        "name",
+        "description",
+        "type",
+        "status",
+        "myRole",
+        "memberCount",
+        "createdAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "name": { "type": "string" },
         "description": { "type": ["string", "null"] },
-        "type": { "enum": ["side_project", "bootcamp", "university", "hackathon", "other"] },
+        "type": {
+          "enum": [
+            "side_project",
+            "bootcamp",
+            "university",
+            "hackathon",
+            "other"
+          ]
+        },
         "status": { "enum": ["active", "archived"] },
         "myRole": { "enum": ["owner", "member", "viewer"] },
         "memberCount": { "type": "integer", "minimum": 0 },
@@ -61,7 +192,16 @@
     },
     "WorkspaceMemberSummary": {
       "type": "object",
-      "required": ["memberId", "userId", "name", "email", "role"],
+      "required": [
+        "memberId",
+        "userId",
+        "name",
+        "email",
+        "avatarUrl",
+        "role",
+        "displayName",
+        "joinedAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "memberId": { "$ref": "#/$defs/uuid" },
@@ -74,18 +214,128 @@
         "joinedAt": { "$ref": "#/$defs/dateTime" }
       }
     },
+    "CurrentWorkspaceMember": {
+      "type": "object",
+      "required": ["workspaceId", "memberId", "userId", "role", "displayName"],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "memberId": { "$ref": "#/$defs/uuid" },
+        "userId": { "$ref": "#/$defs/uuid" },
+        "role": { "enum": ["owner", "member", "viewer"] },
+        "displayName": { "type": ["string", "null"] }
+      }
+    },
+    "DashboardPreferences": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "memberId",
+        "layout",
+        "hiddenSections",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "memberId": { "$ref": "#/$defs/uuid" },
+        "layout": { "type": "object" },
+        "hiddenSections": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "updatedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
+      }
+    },
+    "WorkspaceDashboardReadModel": {
+      "type": "object",
+      "required": [
+        "workspace",
+        "currentMember",
+        "preferences",
+        "members",
+        "tasks",
+        "progress",
+        "githubIssues",
+        "pullRequests",
+        "meetingReports",
+        "prAnalyses",
+        "agentActions",
+        "canvasEntities",
+        "source",
+        "generatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspace": { "$ref": "#/$defs/WorkspaceSummary" },
+        "currentMember": { "$ref": "#/$defs/CurrentWorkspaceMember" },
+        "preferences": { "$ref": "#/$defs/DashboardPreferences" },
+        "members": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/WorkspaceMemberSummary" }
+        },
+        "tasks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TaskSummary" }
+        },
+        "progress": {
+          "anyOf": [{ "$ref": "#/$defs/ProgressSummary" }, { "type": "null" }]
+        },
+        "githubIssues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/GithubIssueSummary" }
+        },
+        "pullRequests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PullRequestSummary" }
+        },
+        "meetingReports": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MeetingReportSummary" }
+        },
+        "prAnalyses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PRAnalysisSummary" }
+        },
+        "agentActions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AgentAction" }
+        },
+        "canvasEntities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasEntityRef" }
+        },
+        "source": { "enum": ["fixture", "empty"] },
+        "generatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "TaskSummary": {
       "type": "object",
-      "required": ["id", "workspaceId", "title", "status", "priority", "isDelayed"],
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "status",
+        "priority",
+        "isDelayed"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
         "title": { "type": "string" },
-        "status": { "enum": ["todo", "in_progress", "in_review", "done", "blocked"] },
+        "status": {
+          "enum": ["todo", "in_progress", "in_review", "done", "blocked"]
+        },
         "priority": { "enum": ["low", "medium", "high", "urgent"] },
-        "assignee": { "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }] },
-        "dueDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+        "assignee": {
+          "anyOf": [{ "$ref": "#/$defs/memberRef" }, { "type": "null" }]
+        },
+        "dueDate": {
+          "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }]
+        },
         "isDelayed": { "type": "boolean" },
         "linkedIssueCount": { "type": "integer", "minimum": 0 },
         "linkedPrCount": { "type": "integer", "minimum": 0 },
@@ -102,18 +352,30 @@
         "sourceId": { "$ref": "#/$defs/uuid" },
         "title": { "type": "string", "minLength": 1 },
         "description": { "type": ["string", "null"] },
-        "assigneeMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "assigneeMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
         "priority": { "enum": ["low", "medium", "high", "urgent"] },
         "dueDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
       }
     },
     "ProgressSummary": {
       "type": "object",
-      "required": ["workspaceId", "totalTasks", "doneTasks", "blockedTasks", "reviewTasks", "delayedTasks", "progressRate"],
+      "required": [
+        "workspaceId",
+        "totalTasks",
+        "doneTasks",
+        "blockedTasks",
+        "reviewTasks",
+        "delayedTasks",
+        "progressRate"
+      ],
       "additionalProperties": false,
       "properties": {
         "workspaceId": { "$ref": "#/$defs/uuid" },
-        "milestoneId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "milestoneId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
         "totalTasks": { "type": "integer", "minimum": 0 },
         "doneTasks": { "type": "integer", "minimum": 0 },
         "blockedTasks": { "type": "integer", "minimum": 0 },
@@ -135,8 +397,12 @@
         "state": { "enum": ["open", "closed"] },
         "url": { "type": "string" },
         "labels": { "type": "array", "items": { "type": "string" } },
-        "linkedTaskId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "linkedTaskId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "syncedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "PullRequestSummary": {
@@ -149,20 +415,42 @@
         "number": { "type": "integer", "minimum": 1 },
         "title": { "type": "string" },
         "authorLogin": { "type": ["string", "null"] },
-        "state": { "enum": ["open", "review_requested", "changes_requested", "merged", "closed"] },
+        "state": {
+          "enum": [
+            "open",
+            "review_requested",
+            "changes_requested",
+            "merged",
+            "closed"
+          ]
+        },
         "branch": { "type": ["string", "null"] },
         "baseBranch": { "type": ["string", "null"] },
         "url": { "type": "string" },
         "changedFilesCount": { "type": "integer", "minimum": 0 },
         "additions": { "type": "integer", "minimum": 0 },
         "deletions": { "type": "integer", "minimum": 0 },
-        "linkedTaskIds": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
-        "syncedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "linkedTaskIds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" }
+        },
+        "syncedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "MeetingReportSummary": {
       "type": "object",
-      "required": ["id", "meetingId", "workspaceId", "title", "summary", "decisionCount", "actionItemCount", "riskCount"],
+      "required": [
+        "id",
+        "meetingId",
+        "workspaceId",
+        "title",
+        "summary",
+        "decisionCount",
+        "actionItemCount",
+        "riskCount"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -178,7 +466,15 @@
     },
     "PRAnalysisSummary": {
       "type": "object",
-      "required": ["id", "pullRequestId", "riskLevel", "analysisStatus", "okCount", "discussCount", "riskCount"],
+      "required": [
+        "id",
+        "pullRequestId",
+        "riskLevel",
+        "analysisStatus",
+        "okCount",
+        "discussCount",
+        "riskCount"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
@@ -187,52 +483,313 @@
         "impactSummary": { "type": ["string", "null"] },
         "testRecommendation": { "type": ["string", "null"] },
         "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
-        "analysisStatus": { "enum": ["pending", "running", "succeeded", "failed"] },
+        "analysisStatus": {
+          "enum": ["pending", "running", "succeeded", "failed"]
+        },
         "okCount": { "type": "integer", "minimum": 0 },
         "discussCount": { "type": "integer", "minimum": 0 },
         "riskCount": { "type": "integer", "minimum": 0 },
         "conclusion": { "type": ["string", "null"] }
       }
     },
+    "CanvasEntityType": {
+      "enum": [
+        "task",
+        "meeting_report",
+        "pull_request",
+        "github_issue",
+        "document",
+        "file",
+        "code",
+        "decision",
+        "risk"
+      ]
+    },
+    "CanvasBoardType": {
+      "enum": ["project_map", "meeting", "review", "custom"]
+    },
+    "CanvasPosition": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "CanvasPositionRequest": {
+      "$ref": "#/$defs/CanvasPosition"
+    },
+    "CanvasViewSetting": {
+      "type": "object",
+      "required": ["zoom", "viewportX", "viewportY"],
+      "additionalProperties": false,
+      "properties": {
+        "zoom": { "type": "number", "minimum": 0.1 },
+        "viewportX": { "type": "number" },
+        "viewportY": { "type": "number" }
+      }
+    },
+    "CanvasFilterSetting": {
+      "type": "object",
+      "required": [
+        "enabledEntityTypes",
+        "assigneeMemberId",
+        "showDelayedOnly",
+        "showRiskOnly",
+        "filters"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabledEntityTypes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasEntityType" }
+        },
+        "assigneeMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "showDelayedOnly": { "type": "boolean" },
+        "showRiskOnly": { "type": "boolean" },
+        "filters": { "type": "object" }
+      }
+    },
+    "CanvasShapeSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "shapeType",
+        "entityType",
+        "entityId",
+        "displayTitle",
+        "width",
+        "height",
+        "color",
+        "isCollapsed",
+        "zIndex",
+        "position"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "shapeType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityId": { "$ref": "#/$defs/uuid" },
+        "displayTitle": { "type": "string", "minLength": 1 },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 },
+        "color": { "type": "string" },
+        "isCollapsed": { "type": "boolean" },
+        "zIndex": { "type": "integer" },
+        "position": { "$ref": "#/$defs/CanvasPosition" }
+      }
+    },
+    "CanvasConnectionSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "sourceShapeId",
+        "targetShapeId",
+        "connectionType",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "sourceShapeId": { "$ref": "#/$defs/uuid" },
+        "targetShapeId": { "$ref": "#/$defs/uuid" },
+        "connectionType": { "type": "string", "minLength": 1 },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "CanvasBoardSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "boardType",
+        "shapeCount",
+        "connectionCount",
+        "updatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "boardType": { "$ref": "#/$defs/CanvasBoardType" },
+        "shapeCount": { "type": "integer", "minimum": 0 },
+        "connectionCount": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "CanvasBoardDetail": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "title",
+        "boardType",
+        "shapeCount",
+        "connectionCount",
+        "updatedAt",
+        "shapes",
+        "connections",
+        "viewSetting",
+        "filterSetting"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "workspaceId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "boardType": { "$ref": "#/$defs/CanvasBoardType" },
+        "shapeCount": { "type": "integer", "minimum": 0 },
+        "connectionCount": { "type": "integer", "minimum": 0 },
+        "updatedAt": { "$ref": "#/$defs/dateTime" },
+        "shapes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasShapeSummary" }
+        },
+        "connections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CanvasConnectionSummary" }
+        },
+        "viewSetting": { "$ref": "#/$defs/CanvasViewSetting" },
+        "filterSetting": { "$ref": "#/$defs/CanvasFilterSetting" }
+      }
+    },
+    "CanvasShapeRequest": {
+      "type": "object",
+      "required": [
+        "shapeType",
+        "entityType",
+        "entityId",
+        "displayTitle",
+        "width",
+        "height",
+        "color"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shapeType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityType": { "$ref": "#/$defs/CanvasEntityType" },
+        "entityId": { "$ref": "#/$defs/uuid" },
+        "displayTitle": { "type": "string", "minLength": 1 },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 },
+        "color": { "type": "string" }
+      }
+    },
+    "CanvasConnectionRequest": {
+      "type": "object",
+      "required": ["sourceShapeId", "targetShapeId", "connectionType", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "sourceShapeId": { "$ref": "#/$defs/uuid" },
+        "targetShapeId": { "$ref": "#/$defs/uuid" },
+        "connectionType": { "type": "string", "minLength": 1 },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "CanvasViewSettingRequest": {
+      "$ref": "#/$defs/CanvasViewSetting"
+    },
+    "CanvasFilterSettingRequest": {
+      "$ref": "#/$defs/CanvasFilterSetting"
+    },
     "CanvasEntityRef": {
       "type": "object",
       "required": ["entityType", "entityId", "displayTitle", "shapeType"],
       "additionalProperties": false,
       "properties": {
-        "entityType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] },
+        "entityType": { "$ref": "#/$defs/CanvasEntityType" },
         "entityId": { "$ref": "#/$defs/uuid" },
         "displayTitle": { "type": "string" },
-        "shapeType": { "enum": ["task", "meeting_report", "pull_request", "github_issue", "document", "file", "code", "decision", "risk"] }
+        "shapeType": { "$ref": "#/$defs/CanvasEntityType" }
       }
     },
     "AgentAction": {
       "type": "object",
-      "required": ["type", "source", "requiresConfirmation", "payload", "status"],
+      "required": [
+        "type",
+        "source",
+        "requiresConfirmation",
+        "payload",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
         "type": {
-          "enum": ["task.create.draft", "task.update.status", "github.issue.create", "meeting.report.generate", "review.analysis.generate", "planning.approve"]
+          "enum": [
+            "task.create.draft",
+            "task.update.status",
+            "github.issue.create",
+            "meeting.report.generate",
+            "review.analysis.generate",
+            "planning.approve"
+          ]
         },
-        "source": { "enum": ["meeting", "task", "github", "review", "planning", "orchestrator"] },
+        "source": {
+          "enum": [
+            "meeting",
+            "task",
+            "github",
+            "review",
+            "planning",
+            "orchestrator"
+          ]
+        },
         "requiresConfirmation": { "type": "boolean" },
         "payload": { "type": "object" },
-        "status": { "enum": ["draft", "waiting_confirmation", "confirmed", "executed", "rejected", "failed"] },
-        "confirmedByMemberId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-        "confirmedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
-        "executedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] }
+        "status": {
+          "enum": [
+            "draft",
+            "waiting_confirmation",
+            "confirmed",
+            "executed",
+            "rejected",
+            "failed"
+          ]
+        },
+        "confirmedByMemberId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "confirmedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        },
+        "executedAt": {
+          "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }]
+        }
       }
     },
     "AgentJobMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "workflowType", "workflowVersion", "workspaceId", "actorMemberId", "input", "requestedAt"],
+      "required": [
+        "jobId",
+        "runId",
+        "workflowType",
+        "workflowVersion",
+        "workspaceId",
+        "actorMemberId",
+        "input",
+        "requestedAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
         "runId": { "$ref": "#/$defs/uuid" },
         "workflowType": {
-          "enum": ["meeting.report.generate", "review.analysis.generate", "planning.generate", "task.draft.generate", "github.issue.draft.generate", "orchestrator.run"]
+          "enum": [
+            "meeting.report.generate",
+            "review.analysis.generate",
+            "planning.generate",
+            "task.draft.generate",
+            "github.issue.draft.generate",
+            "orchestrator.run"
+          ]
         },
         "workflowVersion": { "type": "string" },
         "workspaceId": { "$ref": "#/$defs/uuid" },
@@ -255,7 +812,15 @@
     },
     "AgentResultMessage": {
       "type": "object",
-      "required": ["jobId", "runId", "status", "output", "actions", "trace", "finishedAt"],
+      "required": [
+        "jobId",
+        "runId",
+        "status",
+        "output",
+        "actions",
+        "trace",
+        "finishedAt"
+      ],
       "additionalProperties": false,
       "properties": {
         "jobId": { "$ref": "#/$defs/uuid" },
@@ -305,7 +870,9 @@
         "type": { "type": "string" },
         "title": { "type": "string" },
         "linkedEntityType": { "type": ["string", "null"] },
-        "linkedEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "linkedEntityId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        }
       }
     },
     "SharedFileRef": {
@@ -319,7 +886,9 @@
         "fileType": { "type": ["string", "null"] },
         "url": { "type": "string" },
         "linkedEntityType": { "type": ["string", "null"] },
-        "linkedEntityId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+        "linkedEntityId": {
+          "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        }
       }
     }
   }
