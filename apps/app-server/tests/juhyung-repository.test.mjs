@@ -942,4 +942,134 @@ describe("JuhyungRepository", () => {
       },
     ]);
   });
+
+  it("creates task dependencies with the source and target task ids", async () => {
+    const calls = [];
+    const database = {
+      taskDependency: {
+        create: async (args) => {
+          calls.push(args);
+          return { id: "dependency-1", createdAt: new Date(), ...args.data };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const dependency = await repository.createTaskDependency(
+      "task-1",
+      "task-2",
+    );
+
+    assert.equal(dependency.taskId, "task-1");
+    assert.equal(dependency.dependsOnTaskId, "task-2");
+    assert.deepEqual(calls, [
+      {
+        data: {
+          taskId: "task-1",
+          dependsOnTaskId: "task-2",
+        },
+      },
+    ]);
+  });
+
+  it("reads an existing task dependency by source and target ids", async () => {
+    const calls = [];
+    const database = {
+      taskDependency: {
+        findFirst: async (args) => {
+          calls.push(args);
+          return { id: "dependency-1", taskId: "task-1" };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const dependency = await repository.getTaskDependency("task-1", "task-2");
+
+    assert.equal(dependency.id, "dependency-1");
+    assert.deepEqual(calls, [
+      {
+        where: {
+          taskId: "task-1",
+          dependsOnTaskId: "task-2",
+        },
+      },
+    ]);
+  });
+
+  it("lists task dependencies inside one workspace boundary", async () => {
+    const calls = [];
+    const database = {
+      task: {
+        findMany: async (args) => {
+          calls.push(["task.findMany", args]);
+          return [{ id: "task-1" }, { id: "task-2" }];
+        },
+      },
+      taskDependency: {
+        findMany: async (args) => {
+          calls.push(["dependency.findMany", args]);
+          return [{ id: "dependency-1", taskId: "task-1" }];
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    const dependencies =
+      await repository.listTaskDependenciesForWorkspace("workspace-1");
+
+    assert.deepEqual(dependencies, [{ id: "dependency-1", taskId: "task-1" }]);
+    assert.deepEqual(calls, [
+      [
+        "task.findMany",
+        {
+          where: {
+            workspaceId: "workspace-1",
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      ],
+      [
+        "dependency.findMany",
+        {
+          where: {
+            taskId: {
+              in: ["task-1", "task-2"],
+            },
+            dependsOnTaskId: {
+              in: ["task-1", "task-2"],
+            },
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        },
+      ],
+    ]);
+  });
+
+  it("deletes task dependencies within the source task boundary", async () => {
+    const calls = [];
+    const database = {
+      taskDependency: {
+        deleteMany: async (args) => {
+          calls.push(args);
+          return { count: 1 };
+        },
+      },
+    };
+    const repository = new JuhyungRepository(database);
+
+    await repository.deleteTaskDependency("task-1", "task-2");
+
+    assert.deepEqual(calls, [
+      {
+        where: {
+          taskId: "task-1",
+          dependsOnTaskId: "task-2",
+        },
+      },
+    ]);
+  });
 });

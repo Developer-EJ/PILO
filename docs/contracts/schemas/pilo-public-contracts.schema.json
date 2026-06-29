@@ -255,6 +255,17 @@
         "updatedAt": { "$ref": "#/$defs/dateTime" }
       }
     },
+    "TaskDependencySummary": {
+      "type": "object",
+      "required": ["id", "taskId", "dependsOnTaskId", "createdAt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "taskId": { "$ref": "#/$defs/uuid" },
+        "dependsOnTaskId": { "$ref": "#/$defs/uuid" },
+        "createdAt": { "$ref": "#/$defs/dateTime" }
+      }
+    },
     "TaskCreateDraft": {
       "type": "object",
       "required": ["workspaceId", "title"],

@@ -40,7 +40,7 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 | `PATCH` | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 제목/상태/순서 수정 | 주형 |
 | `DELETE` | `/tasks/:taskId/checklist-items/:itemId` | 체크리스트 삭제 | 주형 |
 | `POST` | `/tasks/:taskId/dependencies` | 의존성 추가 | 주형 |
-| `DELETE` | `/tasks/:taskId/dependencies/:dependencyId` | 의존성 삭제 | 주형 |
+| `DELETE` | `/tasks/:taskId/dependencies/:dependsOnTaskId` | 의존성 삭제 | 주형 |
 
 Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAfter`, `milestoneId`, `page`, `pageSize`, `sort` query를 지원할 수 있다. 구현 PR에서 일부 query를 나중으로 미루면 PR 본문에 deferred field와 후속 Issue를 적는다.
 
@@ -83,6 +83,19 @@ Task 목록 API는 `status`, `assigneeMemberId`, `priority`, `dueBefore`, `dueAf
 ```
 
 `status`는 `planned`, `in_progress`, `done` 중 하나다. `startDate`, `endDate`는 없으면 `null`이며, 두 값이 모두 있으면 `endDate >= startDate`여야 한다.
+
+### TaskDependencySummary
+
+```json
+{
+  "id": "uuid",
+  "taskId": "uuid",
+  "dependsOnTaskId": "uuid",
+  "createdAt": "2026-06-28T11:00:00Z"
+}
+```
+
+`taskId`는 선행 작업을 필요로 하는 Task이고, `dependsOnTaskId`는 먼저 완료되어야 하는 Task다. 두 Task는 같은 workspace에 있어야 하며, 자기 자신 의존성, 중복 의존성, cycle은 허용하지 않는다.
 
 ### TaskListQuery
 
@@ -240,6 +253,16 @@ GET /workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&dueDate
 ```
 
 같은 Task 안에서 `sortOrder`가 충돌하면 주형 API가 기존 checklist item을 뒤로 밀어 순서를 보존한다.
+
+### TaskDependencyWrite
+
+`POST /tasks/:taskId/dependencies`는 `dependsOnTaskId`를 받는다. `DELETE /tasks/:taskId/dependencies/:dependsOnTaskId`는 같은 의존성 edge를 삭제한다.
+
+```json
+{
+  "dependsOnTaskId": "uuid"
+}
+```
 
 ## Events
 

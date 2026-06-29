@@ -14,6 +14,7 @@ import { WorkspaceActor } from "../workspace/public/workspace-access-public.serv
 import {
   CreateTaskCommentBody,
   CreateChecklistItemBody,
+  CreateTaskDependencyBody,
   CreateMilestoneBody,
   CreateTaskBody,
   JuhyungTaskService,
@@ -142,6 +143,35 @@ export class JuhyungTasksController {
   ) {
     return this.taskService.deleteTask(
       taskId,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Post("tasks/:taskId/dependencies")
+  createTaskDependency(
+    @Param("taskId") taskId: string,
+    @Body() body: CreateTaskDependencyBody,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.createTaskDependency(
+      taskId,
+      body,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Delete("tasks/:taskId/dependencies/:dependsOnTaskId")
+  @HttpCode(204)
+  deleteTaskDependency(
+    @Param("taskId") taskId: string,
+    @Param("dependsOnTaskId") dependsOnTaskId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.deleteTaskDependency(
+      taskId,
+      dependsOnTaskId,
       toCurrentActor(userId, memberId),
     );
   }
