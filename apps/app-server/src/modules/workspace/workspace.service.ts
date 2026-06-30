@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { JuhyungProgressService } from "../juhyung/juhyung-progress.service";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
+import { MeetingService } from "../meeting/meeting.service";
 import { WorkspaceRepository } from "./workspace.repository";
 import type {
   CurrentWorkspaceMember,
@@ -318,6 +319,7 @@ export class WorkspaceService {
     let hasRuntimeSection = false;
     const taskService = this.getRuntimeProvider(JuhyungTaskService);
     const progressService = this.getRuntimeProvider(JuhyungProgressService);
+    const meetingService = this.getRuntimeProvider(MeetingService);
 
     if (taskService) {
       try {
@@ -339,6 +341,27 @@ export class WorkspaceService {
           actor,
         );
         nextReadModels.progress = { ...progress };
+        hasRuntimeSection = true;
+      } catch {
+        // Dashboard stays available while owner services catch up or are down.
+      }
+    }
+
+    if (meetingService) {
+      try {
+        const meetingReports = await meetingService.listRecentReports(
+          input.workspaceId,
+        );
+        const meetingReportCanvasEntities =
+          await meetingService.listRecentReportCanvasEntityRefs(
+            input.workspaceId,
+          );
+        nextReadModels.meetingReports = meetingReports;
+        nextReadModels.canvasEntities = replaceCanvasEntitiesByType(
+          nextReadModels.canvasEntities,
+          "meeting_report",
+          meetingReportCanvasEntities,
+        );
         hasRuntimeSection = true;
       } catch {
         // Dashboard stays available while owner services catch up or are down.
@@ -873,6 +896,24 @@ function createEmptyDashboardReadModels(): FixtureDashboardReadModels {
     canvasEntities: [],
     source: "empty",
   };
+}
+
+function replaceCanvasEntitiesByType(
+  entities: unknown[],
+  entityType: string,
+  replacements: unknown[],
+) {
+  return [
+    ...entities.filter(
+      (entity) =>
+        !(
+          isPlainJsonObject(entity) &&
+          typeof entity.entityType === "string" &&
+          entity.entityType === entityType
+        ),
+    ),
+    ...replacements,
+  ];
 }
 
 function readWorkspaceDashboardFixture() {

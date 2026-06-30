@@ -1552,6 +1552,85 @@ describe("app-server package", () => {
     }
   });
 
+  it("overlays workspace dashboard meeting reports from the runtime service", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    const repository = new WorkspaceRepository();
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await new WorkspaceService(repository).createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const runtimeMeetingReport = {
+      id: "meeting-report-runtime-1",
+      meetingId: "meeting-runtime-1",
+      workspaceId: workspace.id,
+      title: "Runtime meeting report",
+      summary: "Runtime meeting summary",
+      decisionCount: 1,
+      actionItemCount: 2,
+      riskCount: 0,
+      createdAt: "2026-06-29T00:00:00.000Z",
+    };
+    const runtimeMeetingCanvasEntity = {
+      entityType: "meeting_report",
+      entityId: runtimeMeetingReport.id,
+      displayTitle: runtimeMeetingReport.title,
+      shapeType: "meeting_report",
+    };
+    const calls = [];
+    const moduleRef = {
+      get(token) {
+        if (token.name === "MeetingService") {
+          return {
+            async listRecentReports(workspaceId) {
+              calls.push({ service: "meetingReports", workspaceId });
+              return [runtimeMeetingReport];
+            },
+            async listRecentReportCanvasEntityRefs(workspaceId) {
+              calls.push({ service: "meetingCanvasRefs", workspaceId });
+              return [runtimeMeetingCanvasEntity];
+            },
+          };
+        }
+
+        throw new Error(`Unexpected provider token: ${token.name}`);
+      },
+    };
+
+    delete process.env.PILO_SKIP_DATABASE_CONNECT;
+
+    try {
+      const service = new WorkspaceService(repository, moduleRef);
+      const dashboard = await service.getWorkspaceDashboard({
+        workspaceId: workspace.id,
+        currentUser: owner,
+      });
+      const meetingCanvasEntities = dashboard.canvasEntities.filter(
+        (entity) => entity?.entityType === "meeting_report",
+      );
+
+      assert.equal(dashboard.source, "mixed");
+      assert.deepEqual(dashboard.meetingReports, [runtimeMeetingReport]);
+      assert.deepEqual(meetingCanvasEntities, [runtimeMeetingCanvasEntity]);
+      assert.deepEqual(calls, [
+        { service: "meetingReports", workspaceId: workspace.id },
+        { service: "meetingCanvasRefs", workspaceId: workspace.id },
+      ]);
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
   it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {
     const defs = contractSchema.$defs;
 
