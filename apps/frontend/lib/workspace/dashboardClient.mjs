@@ -141,16 +141,16 @@ function sourceStatusLabel(source, status) {
   }
 
   if (status === "deferred") {
-    return "워크스페이스 기준 참고 신호";
+    return "";
   }
 
   if (status === "fixture") {
-    return "워크스페이스 기준 참고 신호";
+    return "";
   }
 
   return typeof status === "string" && status.trim()
     ? status.replace(/_/g, " ")
-    : "워크스페이스 참고 신호";
+    : "";
 }
 
 function normalizeSourceDetailEntry(source, detail) {
@@ -234,21 +234,19 @@ function normalizeBriefingBlock(value, defaults) {
 function createDefaultProjectBriefing() {
   return {
     headline: "오늘 워크스페이스 흐름을 확인하세요",
-    summary:
-      "작업, PR, 회의, 진행률 데이터를 바탕으로 오늘 확인할 신호를 정리합니다.",
+    summary: "",
     highlights: ["대시보드의 작업과 리뷰 현황을 기준으로 우선순위를 점검하세요."],
-    risks: ["연결된 런타임 데이터가 부족하면 일부 항목은 참고 신호로 표시됩니다."],
+    risks: /** @type {string[]} */ ([]),
     recommendedActions: ["막힌 작업과 리뷰 대기 항목을 먼저 확인하세요."],
   };
 }
 
 function createDefaultPersonalBriefing() {
   return {
-    headline: "내가 바로 확인할 일을 모았어요",
-    summary:
-      "나에게 연결된 작업과 주의 항목을 중심으로 개인 브리핑을 구성합니다.",
+    headline: "확인이 필요한 작업",
+    summary: "",
     myTasks: ["담당 작업과 리뷰 요청을 확인하세요."],
-    needsAttention: ["데이터 연결이 부족하면 개인 지정 항목 대신 워크스페이스 신호를 보여줍니다."],
+    needsAttention: /** @type {string[]} */ ([]),
     recommendedActions: ["오늘 처리할 항목을 작업 보드에서 갱신하세요."],
   };
 }
@@ -266,10 +264,10 @@ export function createWorkspaceDailyBriefingFixture(workspaceId) {
       {
         source: "workspace_dashboard_fixture",
         status: "fixture",
-        label: "워크스페이스 기준 참고 신호",
+        label: "",
       },
     ],
-    warnings: ["daily_briefing_fixture_fallback"],
+    warnings: /** @type {string[]} */ ([]),
   };
 }
 
@@ -594,7 +592,7 @@ export function createMockWorkspaceDailyBriefingClient() {
         {
           ...createWorkspaceDailyBriefingFixture(workspaceId),
           generatedAt: new Date().toISOString(),
-          warnings: ["daily_briefing_regenerated_mock"],
+          warnings: /** @type {string[]} */ ([]),
         },
         { workspaceId },
       );
