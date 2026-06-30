@@ -42,7 +42,7 @@
 | Canvas 카드 | 동현 Canvas | 주형/진호/은재/세인 | `CanvasEntityRef`, `CanvasShapeRequest` | 외부 도메인은 표시할 entity id/read model만 제공하고 shape 생성은 동현이 한다 |
 | Meeting Action Item -> Task | 진호 Meeting / 주형 Task | 진호/주형/세인 | `MeetingActionItem`, `TaskCreateDraft` | 진호는 후보를 만들고, 주형 API 또는 세인 Agent action으로 Task를 생성한다 |
 | Task -> GitHub Issue | 주형 GitHub | 동현/세인 | `GithubIssueSummary`, `GithubIssueCreateAction` | Issue 생성/동기화 API는 deferred다. 구현 전에는 fixture만 사용한다 |
-| Task -> PR -> Review | 주형 GitHub / 은재 Review | 동현/주형/은재 | `PullRequestSummary`, `PullRequestChangedFileSummary`, `PRAnalysisSummary` | PR sync/changed file API는 deferred다. 은재는 fixture나 mock PR summary로 리뷰룸을 연다 |
+| Task -> PR -> Review | 주형 GitHub / 은재 Review | 동현/주형/은재 | `PullRequestSummary`, `PullRequestChangedFileSummary`, `PRAnalysisSummary` | PR provider sync와 changed-file source API는 deferred다. 은재는 주형 GitHub read API의 `PullRequestSummary` 또는 명시 body로 리뷰룸을 연다 |
 | PR 분석 Agent | 은재 Review / 세인 Agent | 은재/세인 | `review.analysis.generate` | 은재가 분석 workflow 요구사항을 정의하고 세인 runtime으로 실행한다 |
 | 회의록 Agent | 진호 Meeting / 세인 Agent | 진호/세인/주형 | `meeting.report.generate`, `task.create.draft` | 진호가 회의록 결과를 만들고 Task 전환은 주형 contract를 탄다 |
 | 프로젝트 계획 -> Task/Milestone | 세인 Planning / 주형 Task | 세인/주형/동현 | `ProjectPlanDraft`, `TaskCreateDraft`, `MilestoneDraft` | 세인은 초안만 소유하고 승인 후 주형 API로 실제 저장한다 |
