@@ -138,6 +138,11 @@ export type CanvasShapeDeleteResult = {
   deleted: true;
 };
 
+export type CanvasBoardDeleteResult = {
+  id: string;
+  deleted: true;
+};
+
 export type CanvasShapePositionRequest = {
   x: number;
   y: number;
@@ -231,6 +236,10 @@ export type CanvasRepositoryPort = {
       now?: Date;
     },
   ): Promise<CanvasBoardSummary>;
+  deleteBoard(input: {
+    boardId: string;
+    now?: Date;
+  }): Promise<CanvasBoardDeleteResult | null>;
   findBoardDetail(input: {
     boardId: string;
     memberId: string;

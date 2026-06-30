@@ -494,6 +494,69 @@ describe("JuhyungTaskService", () => {
     ]);
   });
 
+  it("calculates a live ProgressSummary from workspace tasks", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+      },
+      repository: {
+        listTasksForWorkspace: async (workspaceId) => {
+          calls.push(["listTasks", workspaceId]);
+          return [
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222221",
+              status: "done",
+              dueDate: "2000-01-01",
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222222",
+              status: "in_progress",
+              dueDate: "2999-01-01",
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222223",
+              status: "blocked",
+              dueDate: "2000-01-01",
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222224",
+              status: "in_review",
+              dueDate: null,
+            },
+          ];
+        },
+      },
+    });
+
+    const result = await service.getProgressSummary(
+      UUIDS.workspace,
+      {},
+      { memberId: UUIDS.member },
+    );
+
+    assert.equal(result.workspaceId, UUIDS.workspace);
+    assert.equal(result.milestoneId, null);
+    assert.equal(result.totalTasks, 4);
+    assert.equal(result.doneTasks, 1);
+    assert.equal(result.blockedTasks, 1);
+    assert.equal(result.reviewTasks, 1);
+    assert.equal(result.delayedTasks, 1);
+    assert.equal(result.progressRate, 25);
+    assert.equal(Number.isNaN(Date.parse(result.capturedAt)), false);
+    assert.deepEqual(calls, [
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["listTasks", UUIDS.workspace],
+    ]);
+  });
+
   it("rejects invalid task list query values before reading the repository", async () => {
     const service = createService({
       repository: {
@@ -1626,6 +1689,10 @@ describe("JuhyungTasksController", () => {
         calls.push(["list", workspaceId, query, actor]);
         return [];
       },
+      getProgressSummary: async (workspaceId, query, actor) => {
+        calls.push(["progress", workspaceId, query, actor]);
+        return { workspaceId, totalTasks: 0 };
+      },
       createTask: async (workspaceId, body, actor) => {
         calls.push(["create", workspaceId, body, actor]);
         return { id: UUIDS.task };
@@ -1707,6 +1774,12 @@ describe("JuhyungTasksController", () => {
       { status: "todo" },
       UUIDS.user,
       undefined,
+    );
+    await controller.getProgressSummary(
+      UUIDS.workspace,
+      { milestoneId: UUIDS.milestone },
+      undefined,
+      UUIDS.member,
     );
     await controller.createTask(
       UUIDS.workspace,
@@ -1791,6 +1864,12 @@ describe("JuhyungTasksController", () => {
         { userId: UUIDS.user, memberId: UUIDS.member },
       ],
       ["list", UUIDS.workspace, { status: "todo" }, { userId: UUIDS.user }],
+      [
+        "progress",
+        UUIDS.workspace,
+        { milestoneId: UUIDS.milestone },
+        { memberId: UUIDS.member },
+      ],
       [
         "create",
         UUIDS.workspace,

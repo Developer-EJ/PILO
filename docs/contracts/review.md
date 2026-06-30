@@ -53,6 +53,7 @@ The Review controllers are exposed through the app-server global prefix as `/api
 | `POST` | `/api/pull-requests/:pullRequestId/analysis` | Current app-server API for requesting PR analysis |
 | `GET` | `/api/pull-requests/:pullRequestId/analysis` | Current app-server API for PR analysis lifecycle result |
 | `GET` | `/api/pull-requests/:pullRequestId/analysis-summary` | Current app-server API for Dashboard/Canvas PR analysis summary |
+| `GET` | `/api/workspaces/:workspaceId/review-summary` | Current app-server API for Workspace dashboard review metrics |
 | `GET` | `/api/pull-request-analyses/:analysisId/graph` | Current app-server API for review graph |
 | `GET` | `/api/pull-request-analyses/:analysisId/canvas` | Current app-server API alias for review graph canvas |
 | `PATCH` | `/api/review-nodes/:nodeId/state` | Current app-server API for reviewer node state |
@@ -86,7 +87,7 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
     "id": "uuid",
     "repositoryId": "uuid",
     "number": 7,
-    "title": "Add OAuth callback shell",
+    "title": "OAuth callback 화면 골격 추가",
     "authorLogin": "Developer-EJ",
     "state": "review_requested",
     "branch": "feature/donghyun/auth-login",
@@ -116,6 +117,55 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
   "discussCount": 2,
   "riskCount": 1,
   "conclusion": "리뷰 후 merge 가능"
+}
+```
+
+### WorkspaceReviewSummary
+
+Workspace dashboard는 Review 내부 table을 직접 읽지 않고 이 read model만 소비한다. `pullRequests[].changedFilesCount`는 GitHub `PullRequestSummary` read model에서 온 PR 단위 변경 파일 수이고, `pullRequests[].analyzedChangedFilesCount`는 은재 Review가 현재 분석 ID 기준으로 보유한 `changed_files` 수다.
+
+```json
+{
+  "workspaceId": "uuid",
+  "reviewPendingPullRequestCount": 1,
+  "totalChangedFilesCount": 4,
+  "analyzedChangedFilesCount": 1,
+  "totalRiskCount": 1,
+  "runningAnalysisCount": 0,
+  "failedAnalysisCount": 0,
+  "highRiskPullRequestCount": 0,
+  "pullRequests": [
+    {
+      "pullRequestId": "uuid",
+      "repositoryId": "uuid",
+      "number": 7,
+      "title": "OAuth callback 화면 골격 추가",
+      "authorLogin": "Developer-EJ",
+      "state": "review_requested",
+      "branch": "feature/donghyun/auth-login",
+      "baseBranch": "temp-dev",
+      "url": "https://github.com/example/pilo/pull/7",
+      "linkedTaskIds": ["uuid"],
+      "changedFilesCount": 4,
+      "analyzedChangedFilesCount": 1,
+      "additions": 180,
+      "deletions": 12,
+      "roomId": "uuid",
+      "reviewRoomStatus": "open",
+      "analysisId": "uuid",
+      "analysisStatus": "succeeded",
+      "riskLevel": "medium",
+      "okCount": 3,
+      "discussCount": 1,
+      "riskCount": 1,
+      "analysisSource": "runtime"
+    }
+  ],
+  "source": "review_runtime",
+  "warnings": [
+    "GitHub PR provider는 Deferred라 PullRequestSummary fixture/read model 경계만 사용합니다."
+  ],
+  "generatedAt": "2026-06-30T00:00:00.000Z"
 }
 ```
 
@@ -209,6 +259,7 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
 ## Public Adapter Rules
 
 - `PRAnalysisSummary`는 PR list와 Canvas가 원본 review DB를 읽지 않기 위한 public read model이다.
+- `WorkspaceReviewSummary`는 Workspace dashboard가 리뷰 대기 PR 수, 변경 파일 수, 분석 상태, 리스크 수를 반영하기 위한 public read model이다.
 - 내부 DB row가 null을 반환해도 `riskLevel = low`, `analysisStatus = pending`, count 필드는 `0`을 기본값으로 보장한다.
 - `ReviewCanvasSummary`는 AI가 판단한 리뷰 순서, 노드 위험도, 캔버스 좌표를 포함한다.
 - `ReviewNodeDetail`은 diff와 설명 패널을 위한 read model이며 merge 기능은 MVP 범위에 포함하지 않는다.

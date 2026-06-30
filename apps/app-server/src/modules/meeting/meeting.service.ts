@@ -558,6 +558,16 @@ export class MeetingService {
       .map((actionItem) => this.toActionItemReadModel(actionItem));
   }
 
+  listWorkspaceActionItems(
+    workspaceId: string,
+  ): MeetingActionItemResponseDto[] {
+    return this.listRecentReports(workspaceId).flatMap((report) =>
+      this.meetingRepository
+        .listActionItemsByReport(report.id)
+        .map((actionItem) => this.toActionItemReadModel(actionItem)),
+    );
+  }
+
   approveActionItem(actionItemId: string): MeetingActionItemResponseDto {
     const actionItem = this.requireActionItem(actionItemId);
 

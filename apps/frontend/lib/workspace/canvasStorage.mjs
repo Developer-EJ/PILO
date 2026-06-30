@@ -51,6 +51,20 @@ export function writeCanvasStorage(
   return true;
 }
 
+export function deleteCanvasStorage(
+  scope,
+  boardId,
+  storage = globalThis.localStorage,
+) {
+  try {
+    storage?.removeItem(canvasStorageKey(boardId, scope));
+  } catch (error) {
+    return false;
+  }
+
+  return true;
+}
+
 export function normalizeCanvasShapeState(value) {
   if (!isRecord(value)) return {};
 

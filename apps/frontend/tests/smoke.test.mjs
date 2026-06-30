@@ -14,6 +14,7 @@ import {
 } from "../lib/auth/mockAuthClient.mjs";
 import {
   createLoginRedirectHref,
+  isLocalMvpAuthFallbackAllowed,
   isProtectedPath,
   safeNextPath,
 } from "../lib/auth/protectedRoutes.mjs";
@@ -47,6 +48,21 @@ import {
   resolveCanvasClientMode,
 } from "../lib/workspace/canvasClient.mjs";
 import {
+  buildReviewApiUrl,
+  createMockReviewClient,
+  createReviewApiClient,
+  createReviewClient,
+  resolveReviewClientMode,
+} from "../lib/review/reviewClient.mjs";
+import {
+  reviewMockAnalysisSummary,
+  reviewMockGraph,
+  reviewMockMemberId,
+  reviewMockPullRequestId,
+  reviewMockRoom,
+  reviewMockWorkspaceId,
+} from "../lib/review/reviewFixtures.mjs";
+import {
   applyCanvasShapeState,
   canvasStorageKey,
   filterCanvasBoard,
@@ -79,17 +95,164 @@ describe("frontend package", () => {
   it("exposes the PR selector, canvas workspace, and node detail workflow", () => {
     const page = readFileSync("app/(workspace)/reviews/page.tsx", "utf8");
     const workspace = readFileSync(
-      "app/(workspace)/reviews/review-node-workspace.tsx",
+      "components/review/ReviewWorkspace.tsx",
+      "utf8",
+    );
+    const domainNav = readFileSync(
+      "components/review/ReviewDomainNav.tsx",
+      "utf8",
+    );
+    const reviewClient = readFileSync(
+      "lib/review/reviewClient.mjs",
       "utf8",
     );
 
-    assert.match(page, /reviewSessions/);
-    assert.match(workspace, /ReviewNodeWorkspace/);
-    assert.match(workspace, /canvasWorkspace/);
-    assert.match(workspace, /panelResizeHandle/);
-    assert.match(workspace, /detailWorkspace/);
-    assert.match(workspace, /decisionLabels/);
-    assert.match(workspace, /setDecisions/);
+    assert.match(page, /ReviewWorkspace/);
+    assert.match(workspace, /createReviewClient/);
+    assert.match(workspace, /requestAnalysis/);
+    assert.match(workspace, /saveNodeDecision/);
+    assert.match(workspace, /toggleChecklistItem/);
+    assert.match(workspace, /filteredChangedFiles/);
+    assert.match(domainNav, /ReviewDomainNav/);
+    assert.match(domainNav, /onViewChange/);
+    assert.match(reviewClient, /github_provider_deferred/);
+  });
+
+  it("loads Review data through explicit API and fixture boundaries", async () => {
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/pull-requests/${reviewMockPullRequestId}/review-room`)) {
+        return Response.json(reviewMockRoom);
+      }
+
+      if (url.endsWith(`/pull-requests/${reviewMockPullRequestId}/analysis`)) {
+        return Response.json(reviewMockAnalysisSummary);
+      }
+
+      if (
+        url.endsWith(
+          `/pull-requests/${reviewMockPullRequestId}/analysis-summary`,
+        )
+      ) {
+        return Response.json(reviewMockAnalysisSummary);
+      }
+
+      if (url.endsWith(`/pull-request-analyses/${reviewMockAnalysisSummary.id}/graph`)) {
+        return Response.json(reviewMockGraph);
+      }
+
+      if (url.includes("/review-nodes/")) {
+        return Response.json({
+          id: "node-state-1",
+          nodeId: reviewMockGraph.nodes[0].id,
+          reviewerMemberId: reviewMockMemberId,
+          status: "discuss",
+          comment: null,
+          createdAt: "2026-06-30T00:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z",
+        });
+      }
+
+      if (url.endsWith(`/code-review-rooms/${reviewMockRoom.id}/comments`)) {
+        return Response.json({
+          id: "comment-1",
+          roomId: reviewMockRoom.id,
+          authorMemberId: reviewMockMemberId,
+          nodeId: null,
+          changedFileId: null,
+          changedFunctionId: null,
+          body: "Check callback state.",
+          createdAt: "2026-06-30T00:00:00.000Z",
+        });
+      }
+
+      if (
+        url.endsWith(
+          `/pull-request-analyses/${reviewMockAnalysisSummary.id}/checklist-items`,
+        )
+      ) {
+        return Response.json({
+          id: "checklist-1",
+          analysisId: reviewMockAnalysisSummary.id,
+          checklistType: "review",
+          title: "Check callback state.",
+          status: "todo",
+          checkedByMemberId: null,
+          checkedAt: null,
+          sortOrder: 0,
+          createdAt: "2026-06-30T00:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z",
+        });
+      }
+
+      return new Response(null, { status: 404 });
+    };
+
+    assert.equal(
+      buildReviewApiUrl("/pull-requests/pr-1/analysis", ""),
+      "/api/pull-requests/pr-1/analysis",
+    );
+    assert.equal(resolveReviewClientMode("api"), "api");
+    assert.equal(resolveReviewClientMode("fixture"), "mock");
+
+    const mockClient = createMockReviewClient();
+    const mockPrs = await mockClient.listPullRequests();
+    assert.equal(mockPrs.source, "github_fixture");
+    assert.equal(
+      (await mockClient.getGraph(reviewMockAnalysisSummary.id)).nodes.length,
+      reviewMockGraph.nodes.length,
+    );
+    assert.equal(
+      (
+        await createReviewClient({ mode: "mock" }).openRoom(
+          reviewMockPullRequestId,
+        )
+      ).pullRequestId,
+      reviewMockPullRequestId,
+    );
+
+    const apiClient = createReviewApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    await apiClient.openRoom(reviewMockPullRequestId, {
+      workspaceId: reviewMockWorkspaceId,
+      memberId: reviewMockMemberId,
+    });
+    await apiClient.requestAnalysis(reviewMockPullRequestId);
+    await apiClient.getAnalysis(reviewMockPullRequestId);
+    await apiClient.getAnalysisSummary(reviewMockPullRequestId);
+    await apiClient.getGraph(reviewMockAnalysisSummary.id);
+    await apiClient.updateNodeState(reviewMockGraph.nodes[0].id, {
+      reviewerMemberId: reviewMockMemberId,
+      status: "discuss",
+    });
+    await apiClient.createComment(reviewMockRoom.id, {
+      authorMemberId: reviewMockMemberId,
+      body: "Check callback state.",
+    });
+    await apiClient.createChecklistItem(reviewMockAnalysisSummary.id, {
+      checklistType: "review",
+      title: "Check callback state.",
+    });
+    const changedFiles = await apiClient.listChangedFiles(
+      reviewMockAnalysisSummary.id,
+    );
+
+    assert.equal(changedFiles.source, "github_changed_files_fixture");
+    assert.equal(
+      requests[0].url,
+      `https://api.pilo.dev/api/pull-requests/${reviewMockPullRequestId}/review-room`,
+    );
+    assert.equal(requests[0].init.method, "POST");
+    assert.equal(requests[0].init.headers["x-workspace-id"], reviewMockWorkspaceId);
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["POST", "POST", "GET", "GET", "GET", "PATCH", "POST", "POST"],
+    );
   });
 
   it("keeps auth provider hrefs relative when no app server URL is configured", () => {
@@ -437,11 +600,13 @@ describe("frontend package", () => {
         "currentMember",
         "generatedAt",
         "githubIssues",
+        "meetingActionItems",
         "meetingReports",
         "members",
         "preferences",
         "progress",
         "prAnalyses",
+        "pullRequestChangedFiles",
         "pullRequests",
         "source",
         "tasks",
@@ -664,6 +829,38 @@ describe("frontend package", () => {
     );
     assert.equal(safeNextPath("https://evil.example"), "/");
     assert.equal(safeNextPath("//evil.example"), "/");
+  });
+
+  it("allows API auth fallback only for local MVP verification", () => {
+    assert.equal(
+      isLocalMvpAuthFallbackAllowed({
+        authMode: "api",
+        hostname: "localhost",
+      }),
+      true,
+    );
+    assert.equal(
+      isLocalMvpAuthFallbackAllowed({
+        authMode: "api",
+        hostname: "app.pilo.dev",
+      }),
+      false,
+    );
+    assert.equal(
+      isLocalMvpAuthFallbackAllowed({
+        authMode: "api",
+        disabled: "true",
+        hostname: "localhost",
+      }),
+      false,
+    );
+    assert.equal(
+      isLocalMvpAuthFallbackAllowed({
+        authMode: "mock",
+        hostname: "localhost",
+      }),
+      false,
+    );
   });
 
   it("builds auth API URLs from a configured app server base URL", () => {

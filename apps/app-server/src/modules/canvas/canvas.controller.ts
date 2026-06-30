@@ -71,6 +71,19 @@ export class CanvasController {
     );
   }
 
+  @Delete("canvas-boards/:boardId")
+  deleteCanvasBoard(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Param("boardId") boardId: string,
+  ) {
+    return this.handleCanvasRequest(() =>
+      this.canvasService.deleteCanvasBoard({
+        currentUser: this.requireCurrentUser(cookieHeader),
+        boardId,
+      }),
+    );
+  }
+
   @Post("canvas-boards/:boardId/shapes")
   createCanvasShape(
     @Headers("cookie") cookieHeader: string | undefined,

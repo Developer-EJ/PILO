@@ -492,10 +492,18 @@ describe("meeting module scaffold", () => {
     });
 
     const report = controller.requestReportGeneration(meeting.id);
+    const actionItem = controller.createActionItem(report.id, {
+      title: "Publish dashboard meeting data",
+      description: "Expose Meeting-owned action items for Workspace dashboard.",
+    });
     const [summary] = controller.listRecentReports("workspace-1");
+    const workspaceActionItems =
+      controller.listWorkspaceActionItems("workspace-1");
+    const [workspaceActionItem] = workspaceActionItems;
     const [canvasEntityRef] =
       controller.listRecentReportCanvasEntityRefs("workspace-1");
     const fixtureSummary = workspaceDashboardFixture.meetingReports[0];
+    const fixtureActionItem = workspaceDashboardFixture.meetingActionItems[0];
     const fixtureCanvasEntityRef =
       workspaceDashboardFixture.canvasEntities.find(
         (entity) => entity.entityType === "meeting_report",
@@ -508,6 +516,16 @@ describe("meeting module scaffold", () => {
     );
     assert.equal("decisions" in summary, false);
     assert.equal("risks" in summary, false);
+    assert.equal(summary.actionItemCount, workspaceActionItems.length);
+    assert.deepEqual(
+      Object.keys(workspaceActionItem).sort(),
+      Object.keys(fixtureActionItem).sort(),
+    );
+    assert.equal(
+      workspaceActionItems.some((item) => item.id === actionItem.id),
+      true,
+    );
+    assert.deepEqual(controller.listWorkspaceActionItems("workspace-2"), []);
     assert.deepEqual(
       Object.keys(canvasEntityRef).sort(),
       Object.keys(fixtureCanvasEntityRef).sort(),

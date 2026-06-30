@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { markMockAuthSignedIn } from "../../lib/auth/mockAuthClient.mjs";
-import { safeNextPath } from "../../lib/auth/protectedRoutes.mjs";
+import { resolveWorkspaceLoginNextPath } from "./loginRedirects.mjs";
 
 export function WorkspaceEntryTransition() {
   const router = useRouter();
@@ -11,7 +11,7 @@ export function WorkspaceEntryTransition() {
   const active =
     searchParams.get("auth") === "success" ||
     searchParams.get("status") === "success";
-  const redirectTo = safeNextPath(searchParams.get("next"));
+  const redirectTo = resolveWorkspaceLoginNextPath(searchParams.get("next"));
 
   useEffect(() => {
     if (!active) return;

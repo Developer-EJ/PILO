@@ -1,6 +1,7 @@
 import {
   buildWorkspaceApiUrl,
   defaultWorkspaceApiBaseUrl,
+  listMockStoredWorkspaces,
   mockWorkspaces,
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
@@ -60,7 +61,9 @@ function remapWorkspaceId(value, workspaceId) {
 
 function createFallbackWorkspace(workspaceId) {
   return (
-    mockWorkspaces.find((workspace) => workspace.id === workspaceId) ?? {
+    [...listMockStoredWorkspaces(), ...mockWorkspaces].find(
+      (workspace) => workspace.id === workspaceId,
+    ) ?? {
       ...workspaceDashboardFixture.workspace,
       id: workspaceId,
     }
@@ -167,7 +170,7 @@ export function createWorkspaceDashboardFixture(workspaceId) {
     currentMember: {
       workspaceId,
       memberId: firstMember.memberId,
-      userId: workspaceDashboardFixture.currentUser.id,
+      userId: workspaceDashboardFixture.currentMember.userId,
       role: firstMember.role,
       displayName: firstMember.displayName,
     },

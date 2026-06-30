@@ -1,4 +1,7 @@
 export const CURRENT_WORKSPACE_STORAGE_KEY = "pilo.currentWorkspaceId";
+export const DEFAULT_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
+export const WORKSPACE_ENTRY_PATH = "/workspace";
+export const WORKSPACE_ONBOARDING_PATH = "/workspace/new";
 
 /**
  * @typedef {object} WorkspaceSummary
@@ -138,10 +141,69 @@ export function workspaceDashboardHref(workspaceId) {
   return `/workspaces/${encodeURIComponent(workspaceId)}`;
 }
 
+export function defaultWorkspaceDashboardHref(workspaceId = DEFAULT_WORKSPACE_ID) {
+  return workspaceDashboardHref(workspaceId || DEFAULT_WORKSPACE_ID);
+}
+
+export function workspaceEntryHref() {
+  return WORKSPACE_ENTRY_PATH;
+}
+
+export function workspaceOnboardingHref() {
+  return WORKSPACE_ONBOARDING_PATH;
+}
+
+/**
+ * @param {object} input
+ * @param {WorkspaceSummary[]} [input.workspaces]
+ * @param {string | null} [input.storedWorkspaceId]
+ */
+export function resolveWorkspaceEntryDestination({
+  workspaces,
+  storedWorkspaceId = null,
+} = {}) {
+  const safeWorkspaces = Array.isArray(workspaces) ? workspaces : [];
+
+  if (!safeWorkspaces.length) {
+    return {
+      kind: "onboarding",
+      source: "empty",
+      workspace: null,
+      href: workspaceOnboardingHref(),
+    };
+  }
+
+  const selection = resolveCurrentWorkspaceSelection({
+    workspaces: safeWorkspaces,
+    storedWorkspaceId,
+  });
+  const workspace =
+    selection.workspace ?? selection.fallbackWorkspace ?? safeWorkspaces[0];
+
+  if (!workspace?.id) {
+    return {
+      kind: "onboarding",
+      source: "invalid",
+      workspace: null,
+      href: workspaceOnboardingHref(),
+    };
+  }
+
+  return {
+    kind: "workspace",
+    source: selection.source,
+    workspace,
+    href: workspaceDashboardHref(workspace.id),
+    shouldPersist: selection.shouldPersist,
+  };
+}
+
 export function workspaceCanvasHref(workspaceId) {
   return `${workspaceDashboardHref(workspaceId)}/canvas`;
 }
 
 export function workspaceCanvasBoardHref(workspaceId, boardId) {
-  return `${workspaceCanvasHref(workspaceId)}/${encodeURIComponent(boardId)}`;
+  const params = new URLSearchParams({ boardId });
+
+  return `${workspaceCanvasHref(workspaceId)}?${params.toString()}`;
 }

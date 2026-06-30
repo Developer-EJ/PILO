@@ -7,6 +7,7 @@ import {
   type LoginProviderButton,
 } from "./LoginProviderButtons";
 import { authProviderHref } from "./authProviderHref.mjs";
+import { resolveWorkspaceLoginNextPath } from "./loginRedirects.mjs";
 
 export type LoginProviderEntry = Omit<LoginProviderButton, "href"> & {
   path: string;
@@ -18,7 +19,11 @@ type LoginProviderListProps = {
 
 export function LoginProviderList({ providers }: LoginProviderListProps) {
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next");
+  const rawNextPath = searchParams.get("next");
+  const nextPath = useMemo(
+    () => resolveWorkspaceLoginNextPath(rawNextPath),
+    [rawNextPath],
+  );
   const providerButtons = useMemo(
     () =>
       providers.map((provider) => ({

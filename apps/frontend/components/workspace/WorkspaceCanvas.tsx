@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
+  clearCanvasBoardLocalStorage,
   createCanvasClient,
   createMockCanvasBoardDetail,
   resolveCanvasClientMode,
@@ -23,9 +23,8 @@ import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
   workspaceCanvasHref,
-  workspaceDashboardHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
-import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
+import { WorkspaceSidebar } from "./WorkspaceShell";
 import {
   PiloTldrawCanvas,
   type PiloCanvasActions,
@@ -95,27 +94,7 @@ type CanvasBoardState = {
   status: "loading" | "ready" | "fallback";
 };
 
-type CanvasNavItem = {
-  label: string;
-  active?: boolean;
-  badge?: string;
-  href?: string;
-};
-
 const LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE = "freeform-shapes";
-
-const canvasNavLabels = [
-  "홈 / 대시보드",
-  "프로젝트 시작",
-  "기능 목록",
-  "작업 보드",
-  "회의 / Report",
-  "음성채팅",
-  "Canvas",
-  "GitHub PR",
-  "코드 리뷰",
-  "설정",
-];
 
 const canvasFilterLabels: Record<string, string> = {
   task: "작업",
@@ -409,46 +388,6 @@ function isCanvasViewSetting(value: unknown): value is CanvasViewSetting {
   );
 }
 
-function buildCanvasNavItems({
-  workspaceId,
-  taskCount,
-  pullRequestCount,
-}: {
-  workspaceId: string;
-  taskCount: number;
-  pullRequestCount: number;
-}): CanvasNavItem[] {
-  return canvasNavLabels.map((label, index) => {
-    if (index === 0) {
-      return {
-        label,
-        href: workspaceDashboardHref(workspaceId),
-      };
-    }
-    if (index === 3) {
-      return {
-        label,
-        badge: String(taskCount),
-      };
-    }
-    if (index === 6) {
-      return {
-        label,
-        active: true,
-        href: workspaceCanvasHref(workspaceId),
-      };
-    }
-    if (index === 7) {
-      return {
-        label,
-        badge: String(pullRequestCount),
-      };
-    }
-
-    return { label };
-  });
-}
-
 function formatPosition(selection: PiloCanvasSelection) {
   if (!selection) return "-";
 
@@ -520,6 +459,9 @@ function buildFreeformShapesKey(shapes: PiloCanvasFreeformShape[]) {
 
 export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const pathname = usePathname() ?? "/";
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedBoardId = boardId ?? searchParams.get("boardId") ?? undefined;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [boardState, setBoardState] = useState<CanvasBoardState>({
     board: null,
@@ -548,6 +490,8 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const [selectedCard, setSelectedCard] = useState<PiloCanvasSelection>(null);
   const [filterSetting, setFilterSetting] =
     useState<CanvasFilterSetting | null>(null);
+  const [isDeleteConfirming, setIsDeleteConfirming] = useState(false);
+  const [isDeletingBoard, setIsDeletingBoard] = useState(false);
   const [viewSetting, setViewSetting] = useState<CanvasViewSetting>({
     zoom: 1,
     viewportX: 0,
@@ -567,12 +511,17 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     () => createMockCanvasBoardDetail(workspaceId) as CanvasBoardDetail,
     [workspaceId],
   );
-  const navItems = buildCanvasNavItems({
-    workspaceId,
-    taskCount: dashboard.tasks.length,
-    pullRequestCount: dashboard.pullRequests.length,
-  });
+  const shapePositionSyncTimers = useRef<Map<string, number>>(new Map());
+  const viewSettingSyncTimer = useRef<number | null>(null);
+  const filterSettingSyncTimer = useRef<number | null>(null);
+  const [canvasSyncMessage, setCanvasSyncMessage] = useState("");
   const board = boardState.board ?? fallbackBoard;
+  const shouldSyncCanvasApi =
+    boardState.source === "api" && resolveCanvasClientMode() === "api";
+  const runtimeShapeIds = useMemo(
+    () => new Set(board.shapes.map((shape) => shape.id)),
+    [board.shapes],
+  );
   const activeFilterSetting = filterSetting ?? board.filterSetting;
   const persistedBoard = useMemo(
     () => ({
@@ -589,6 +538,111 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     drawingColorOptions.find((color) => color.value === activeDrawingPreset) ??
     drawingColorOptions[4];
 
+  useEffect(
+    () => () => {
+      for (const timer of Array.from(shapePositionSyncTimers.current.values())) {
+        window.clearTimeout(timer);
+      }
+
+      if (viewSettingSyncTimer.current) {
+        window.clearTimeout(viewSettingSyncTimer.current);
+      }
+
+      if (filterSettingSyncTimer.current) {
+        window.clearTimeout(filterSettingSyncTimer.current);
+      }
+    },
+    [],
+  );
+
+  const queueShapeRuntimeSync = useCallback(
+    (shapeId: string, shapeState: PiloCanvasShapeState) => {
+      if (!shouldSyncCanvasApi || !runtimeShapeIds.has(shapeId)) return;
+
+      const existingTimer = shapePositionSyncTimers.current.get(shapeId);
+
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+      }
+
+      const timer = window.setTimeout(() => {
+        const canvasClient = createCanvasClient({ mode: "api" });
+        const sizePatch: Record<string, number> = {};
+
+        if (
+          typeof shapeState.width === "number" &&
+          Number.isFinite(shapeState.width)
+        ) {
+          sizePatch.width = shapeState.width;
+        }
+        if (
+          typeof shapeState.height === "number" &&
+          Number.isFinite(shapeState.height)
+        ) {
+          sizePatch.height = shapeState.height;
+        }
+
+        Promise.all([
+          canvasClient.updateShapePosition(shapeId, {
+            x: shapeState.x,
+            y: shapeState.y,
+          }),
+          Object.keys(sizePatch).length
+            ? canvasClient.updateShape(shapeId, sizePatch)
+            : Promise.resolve(null),
+        ])
+          .then(() => {
+            setCanvasSyncMessage("서버 저장됨");
+          })
+          .catch(() => {
+            setCanvasSyncMessage("Canvas 위치 저장 실패");
+          })
+          .finally(() => {
+            shapePositionSyncTimers.current.delete(shapeId);
+          });
+      }, 220);
+
+      shapePositionSyncTimers.current.set(shapeId, timer);
+    },
+    [runtimeShapeIds, shouldSyncCanvasApi],
+  );
+
+  const queueViewSettingSync = useCallback(
+    (nextViewSetting: CanvasViewSetting) => {
+      if (!shouldSyncCanvasApi) return;
+
+      if (viewSettingSyncTimer.current) {
+        window.clearTimeout(viewSettingSyncTimer.current);
+      }
+
+      viewSettingSyncTimer.current = window.setTimeout(() => {
+        createCanvasClient({ mode: "api" })
+          .updateViewSetting(board.id, nextViewSetting)
+          .then(() => setCanvasSyncMessage("서버 저장됨"))
+          .catch(() => setCanvasSyncMessage("Canvas 보기 저장 실패"));
+      }, 260);
+    },
+    [board.id, shouldSyncCanvasApi],
+  );
+
+  const queueFilterSettingSync = useCallback(
+    (nextFilterSetting: CanvasFilterSetting) => {
+      if (!shouldSyncCanvasApi) return;
+
+      if (filterSettingSyncTimer.current) {
+        window.clearTimeout(filterSettingSyncTimer.current);
+      }
+
+      filterSettingSyncTimer.current = window.setTimeout(() => {
+        createCanvasClient({ mode: "api" })
+          .updateFilterSetting(board.id, nextFilterSetting)
+          .then(() => setCanvasSyncMessage("서버 저장됨"))
+          .catch(() => setCanvasSyncMessage("Canvas 필터 저장 실패"));
+      }, 180);
+    },
+    [board.id, shouldSyncCanvasApi],
+  );
+
   useEffect(() => {
     let cancelled = false;
     const canvasClient = createCanvasClient();
@@ -600,6 +654,8 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         source: "fixture",
         status: "loading",
       });
+      setIsDeleteConfirming(false);
+      setIsDeletingBoard(false);
 
       try {
         const boards = await canvasClient.listBoards(workspaceId);
@@ -608,7 +664,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           throw new Error("Canvas board list is empty.");
         }
 
-        const targetBoardId = boardId ?? boards[0].id;
+        const targetBoardId = requestedBoardId ?? boards[0].id;
         const detail = (await canvasClient.getBoardDetail(targetBoardId, {
           workspaceId,
         })) as CanvasBoardDetail;
@@ -622,6 +678,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         });
       } catch (error) {
         if (cancelled) return;
+
+        if (requestedBoardId) {
+          router.replace(workspaceCanvasHref(workspaceId));
+          return;
+        }
 
         const fallback = createMockCanvasBoardDetail(
           workspaceId,
@@ -640,7 +701,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [boardId, workspaceId]);
+  }, [requestedBoardId, router, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -687,11 +748,26 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         }
 
         writeCanvasStorage("shape-state", board.id, nextShapeStateById);
+        for (const [shapeId, shapeState] of Object.entries(
+          nextShapeStateById,
+        )) {
+          const currentShapeState = currentShapeStateById[shapeId];
+
+          if (
+            !currentShapeState ||
+            currentShapeState.x !== shapeState.x ||
+            currentShapeState.y !== shapeState.y ||
+            currentShapeState.width !== shapeState.width ||
+            currentShapeState.height !== shapeState.height
+          ) {
+            queueShapeRuntimeSync(shapeId, shapeState);
+          }
+        }
 
         return nextShapeStateById;
       });
     },
-    [board.id],
+    [board.id, queueShapeRuntimeSync],
   );
 
   const persistFreeformShapes = useCallback(
@@ -732,17 +808,86 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
       );
       setHasStoredViewSetting(true);
       writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
+      queueViewSettingSync(normalizedViewSetting);
     },
-    [board.id],
+    [board.id, queueViewSettingSync],
   );
 
   const persistFilterSetting = useCallback(
     (nextFilterSetting: CanvasFilterSetting) => {
       setFilterSetting(nextFilterSetting);
       writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
+      queueFilterSettingSync(nextFilterSetting);
     },
-    [board.id],
+    [board.id, queueFilterSettingSync],
   );
+
+  async function createRuntimeReferenceCard(entityType: string) {
+    const sourceEntity = dashboard.canvasEntities.find(
+      (entity) =>
+        entity.entityType === entityType &&
+        !board.shapes.some((shape) => shape.entityId === entity.entityId),
+    );
+
+    if (!sourceEntity) {
+      setCanvasSyncMessage("추가할 참조 데이터가 없어요");
+      return;
+    }
+
+    const position = {
+      x: 160 + (board.shapes.length % 4) * 72,
+      y: 180 + (board.shapes.length % 5) * 54,
+    };
+    const canvasClient = createCanvasClient();
+
+    try {
+      const createdShape = (await canvasClient.createShape(board.id, {
+        shapeType: sourceEntity.shapeType,
+        entityType: sourceEntity.entityType,
+        entityId: sourceEntity.entityId,
+        displayTitle: sourceEntity.displayTitle,
+        width: sourceEntity.entityType === "pull_request" ? 300 : 280,
+        height: sourceEntity.entityType === "pull_request" ? 172 : 160,
+        color:
+          sourceEntity.entityType === "pull_request" ? "#2e9e5b" : "#6d5bd6",
+      })) as CanvasEntity;
+      if (!createdShape.id) {
+        throw new Error("Canvas shape id missing.");
+      }
+      const positionedShape = (await canvasClient.updateShapePosition(
+        createdShape.id,
+        position,
+      )) as CanvasEntity;
+      const nextShape = {
+        ...createdShape,
+        ...positionedShape,
+        position: positionedShape.position ?? position,
+      };
+
+      setBoardState((currentBoardState) => {
+        if (!currentBoardState.board || currentBoardState.board.id !== board.id) {
+          return currentBoardState;
+        }
+
+        const shapes = [...currentBoardState.board.shapes, nextShape];
+
+        return {
+          ...currentBoardState,
+          board: {
+            ...currentBoardState.board,
+            shapes,
+            shapeCount: shapes.length,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      });
+      setCanvasSyncMessage(
+        shouldSyncCanvasApi ? "참조 카드 저장됨" : "로컬 참조 카드 추가됨",
+      );
+    } catch (error) {
+      setCanvasSyncMessage("참조 카드 추가 실패");
+    }
+  }
 
   function selectCanvasTool(tool: PiloCanvasTool) {
     setIsDrawMenuOpen(false);
@@ -836,6 +981,28 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     });
   }
 
+  async function deleteCurrentBoard() {
+    if (isDeletingBoard || boardState.status === "loading") return;
+
+    if (!isDeleteConfirming) {
+      setIsDeleteConfirming(true);
+      setCanvasSyncMessage("삭제하려면 한 번 더 눌러 주세요");
+      return;
+    }
+
+    setIsDeletingBoard(true);
+    setCanvasSyncMessage("캔버스를 삭제하는 중");
+
+    try {
+      await createCanvasClient().deleteBoard(board.id, { workspaceId });
+      clearCanvasBoardLocalStorage(board.id);
+      router.push(workspaceCanvasHref(workspaceId));
+    } catch (error) {
+      setCanvasSyncMessage("캔버스를 삭제하지 못했어요");
+      setIsDeleteConfirming(false);
+      setIsDeletingBoard(false);
+    }
+  }
   return (
     <main
       className={
@@ -865,77 +1032,83 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         )}
       </button>
 
-      <aside
+      <WorkspaceSidebar
         id="canvas-sidebar"
-        className="sidebar"
-        aria-label="PILO navigation"
-      >
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
-        </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          {navItems.map((item) => {
-            const className = item.active ? "nav-item active" : "nav-item";
-            const content = (
-              <>
-                <span>{item.label}</span>
-                {item.badge ? <b>{item.badge}</b> : null}
-              </>
-            );
+        workspaceId={workspaceId}
+        active="canvas"
+        counts={{
+          tasks: dashboard.tasks.length,
+          pullRequests: dashboard.pullRequests.length,
+        }}
+        label="PILO 탐색"
+      />
 
-            return item.href ? (
-              <Link
-                key={item.label}
-                href={item.href}
-                className={className}
-                aria-current={item.active ? "page" : undefined}
-              >
-                {content}
-              </Link>
-            ) : (
-              <div key={item.label} className={className} aria-disabled="true">
-                {content}
-              </div>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <section
-        className="workspace canvas-workspace"
-        aria-label="Project canvas"
-      >
+      <section className="workspace canvas-workspace" aria-label="프로젝트 캔버스">
         <header className="canvas-floating-bar canvas-floating-bar-left">
           <strong className="canvas-wordmark">PILO</strong>
-          <button type="button" className="canvas-board-title">
+          <button
+            type="button"
+            className="canvas-board-title"
+            onClick={() => canvasActions?.fit()}
+          >
             <span>{board.title}</span>
             <small>{dashboard.workspace.name}</small>
           </button>
-          <button type="button" className="canvas-bar-button">
-            저장됨
+          <button type="button" className="canvas-bar-button" disabled>
+            {canvasSyncMessage ||
+              (shouldSyncCanvasApi ? "서버 저장" : "로컬 저장")}
           </button>
-          <button type="button" className="canvas-bar-button">
-            보기
+          <button
+            type="button"
+            className="canvas-bar-button"
+            onClick={() => canvasActions?.fit()}
+          >
+            화면 맞춤
           </button>
         </header>
 
         <header className="canvas-floating-bar canvas-floating-bar-right">
           <button type="button" className="canvas-status-pill">
-            {boardState.source === "api" ? "API canvas" : "fixture canvas"}
+            {boardState.source === "api"
+              ? "런타임 데이터"
+              : "테스트 데이터"}
+          </button>
+          <button
+            type="button"
+            className={
+              isDeleteConfirming
+                ? "canvas-delete-button is-confirming"
+                : "canvas-delete-button"
+            }
+            disabled={isDeletingBoard || boardState.status === "loading"}
+            onClick={() => void deleteCurrentBoard()}
+          >
+            {isDeletingBoard
+              ? "삭제 중"
+              : isDeleteConfirming
+                ? "삭제 확인"
+                : "삭제"}
           </button>
           <div className="avatar">민</div>
-          <button type="button" className="canvas-share-button">
+          <button
+            type="button"
+            className="canvas-share-button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(window.location.href);
+              setCanvasSyncMessage("링크 복사됨");
+            }}
+          >
             공유
           </button>
         </header>
 
-        <nav className="canvas-tool-rail" aria-label="캔버스 도구와 필터">
+        <nav className="canvas-tool-rail" aria-label="캔버스 도구">
           <button
             type="button"
             className="canvas-ai-tool"
             aria-label="AI 제안 카드 추가"
             data-tooltip="AI 제안"
-            onClick={() => canvasActions?.createEntityCard("decision")}
+            onClick={() => void createRuntimeReferenceCard("decision")}
           >
             <CanvasToolIcon type="sparkles" />
           </button>
@@ -954,7 +1127,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               type="button"
               aria-label="작업 카드 추가"
               data-tooltip="작업"
-              onClick={() => canvasActions?.createEntityCard("task")}
+              onClick={() => void createRuntimeReferenceCard("task")}
             >
               <CanvasToolIcon type="task" />
             </button>
@@ -1036,7 +1209,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               type="button"
               aria-label="회의 카드 추가"
               data-tooltip="회의"
-              onClick={() => canvasActions?.createEntityCard("meeting_report")}
+              onClick={() => void createRuntimeReferenceCard("meeting_report")}
             >
               <CanvasToolIcon type="comment" />
             </button>
@@ -1044,7 +1217,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               type="button"
               aria-label="카드 추가"
               data-tooltip="추가"
-              onClick={() => canvasActions?.createEntityCard("task")}
+              onClick={() => void createRuntimeReferenceCard("task")}
             >
               <CanvasToolIcon type="plus" />
             </button>
@@ -1262,7 +1435,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           </section>
         </nav>
 
-        <section className="canvas-content" aria-label="Canvas board">
+        <section className="canvas-content" aria-label="캔버스 보드">
           <PiloTldrawCanvas
             board={visibleBoard}
             dashboard={dashboard}
@@ -1280,7 +1453,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         </section>
 
         {selectedCard ? (
-          <aside className="canvas-detail-panel" aria-label="Canvas detail">
+          <aside className="canvas-detail-panel" aria-label="캔버스 상세">
             <header>
               <span>{selectedCard.kind.replace(/_/g, " ")}</span>
               <button
@@ -1295,19 +1468,19 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             <p>{selectedCard.body}</p>
             <dl>
               <div>
-                <dt>Status</dt>
+                <dt>상태</dt>
                 <dd>{selectedCard.status}</dd>
               </div>
               <div>
-                <dt>Entity</dt>
+                <dt>항목</dt>
                 <dd>{selectedCard.entityType}</dd>
               </div>
               <div>
-                <dt>Position</dt>
+                <dt>위치</dt>
                 <dd>{formatPosition(selectedCard)}</dd>
               </div>
               <div>
-                <dt>Size</dt>
+                <dt>크기</dt>
                 <dd>{formatSize(selectedCard)}</dd>
               </div>
             </dl>
@@ -1315,7 +1488,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           </aside>
         ) : null}
 
-        <div className="canvas-zoom-controls" aria-label="Canvas zoom controls">
+        <div className="canvas-zoom-controls" aria-label="캔버스 확대/축소">
           <button
             type="button"
             aria-label="화면 맞춤"

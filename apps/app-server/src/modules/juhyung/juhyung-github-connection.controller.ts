@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Post,
   Query,
@@ -43,11 +44,13 @@ export class JuhyungGithubConnectionController {
     @Param("workspaceId") workspaceId: string,
     @Body() body: StartGithubConnectionInput = {},
     @Req() request: AuthenticatedRequestContext = {},
+    @Headers("x-user-id") userId?: HeaderValue,
+    @Headers("x-member-id") memberId?: HeaderValue,
   ) {
     return this.githubConnectionService.startConnection(
       workspaceId,
       body,
-      this.actorFromRequest(request),
+      this.actorFromRequest(request, userId, memberId),
     );
   }
 
@@ -55,10 +58,12 @@ export class JuhyungGithubConnectionController {
   listConnections(
     @Param("workspaceId") workspaceId: string,
     @Req() request: AuthenticatedRequestContext = {},
+    @Headers("x-user-id") userId?: HeaderValue,
+    @Headers("x-member-id") memberId?: HeaderValue,
   ) {
     return this.githubConnectionService.listConnections(
       workspaceId,
-      this.actorFromRequest(request),
+      this.actorFromRequest(request, userId, memberId),
     );
   }
 
@@ -67,18 +72,42 @@ export class JuhyungGithubConnectionController {
     @Param("workspaceId") workspaceId: string,
     @Param("connectionId") connectionId: string,
     @Req() request: AuthenticatedRequestContext = {},
+    @Headers("x-user-id") userId?: HeaderValue,
+    @Headers("x-member-id") memberId?: HeaderValue,
   ) {
     return this.githubConnectionService.revokeConnection(
       workspaceId,
       connectionId,
-      this.actorFromRequest(request),
+      this.actorFromRequest(request, userId, memberId),
     );
   }
 
   private actorFromRequest(
     request: AuthenticatedRequestContext,
+    userId?: HeaderValue,
+    memberId?: HeaderValue,
   ): WorkspaceActor | undefined {
-    return request.auth?.actor;
+    const requestActor = request.auth?.actor;
+
+    if (requestActor?.userId || requestActor?.memberId) {
+      return requestActor;
+    }
+
+    const resolvedUserId = this.firstValue(userId);
+    const resolvedMemberId = this.firstValue(memberId);
+
+    if (!resolvedUserId && !resolvedMemberId) {
+      return undefined;
+    }
+
+    return {
+      ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+      ...(resolvedMemberId ? { memberId: resolvedMemberId } : {}),
+    };
+  }
+
+  private firstValue(value: HeaderValue) {
+    return Array.isArray(value) ? value[0] : value;
   }
 }
 

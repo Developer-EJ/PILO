@@ -1,4 +1,9 @@
+import type { ReactNode } from "react";
 import { mockWorkspaces } from "../../../lib/workspace/workspaceClient.mjs";
+
+type WorkspaceLayoutProps = {
+  children: ReactNode;
+};
 
 export function generateStaticParams() {
   return mockWorkspaces.map((workspace) => ({
@@ -6,4 +11,6 @@ export function generateStaticParams() {
   }));
 }
 
-export { default } from "../../page";
+export default function WorkspaceLayout({ children }: WorkspaceLayoutProps) {
+  return children;
+}

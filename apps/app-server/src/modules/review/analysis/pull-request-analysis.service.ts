@@ -61,6 +61,12 @@ export class PullRequestAnalysisService {
     return analysis;
   }
 
+  findAnalysisByPullRequestId(
+    pullRequestId: string,
+  ): PullRequestAnalysisRecord | null {
+    return this.analysisRepository.findByPullRequestId(pullRequestId);
+  }
+
   transitionAnalysis(
     analysisId: string,
     nextStatus: ReviewAnalysisStatus,

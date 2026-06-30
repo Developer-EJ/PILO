@@ -181,6 +181,13 @@ export class MeetingController {
     return this.meetingService.listRecentReports(workspaceId);
   }
 
+  @Get("workspaces/:workspaceId/meeting-action-items")
+  listWorkspaceActionItems(
+    @Param("workspaceId") workspaceId: string,
+  ): MeetingActionItemResponseDto[] {
+    return this.meetingService.listWorkspaceActionItems(workspaceId);
+  }
+
   @Get("workspaces/:workspaceId/meeting-reports/canvas-entity-refs")
   listRecentReportCanvasEntityRefs(
     @Param("workspaceId") workspaceId: string,

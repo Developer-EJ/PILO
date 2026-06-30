@@ -59,6 +59,7 @@ import {
   TaskDraftSummary,
   TaskPriority,
   MilestoneSummary,
+  ProgressSummary,
   TaskStatus,
   TaskSummary,
   WorkspaceMemberRecord,
@@ -86,6 +87,10 @@ export type { CreateTaskCommentBody } from "./juhyung-comment-input";
 export type { CreateTaskDependencyBody } from "./juhyung-dependency-input";
 export type { CreateTaskDraftBody } from "./juhyung-task-draft-input";
 export type { ListTasksQuery } from "./juhyung-task-list-query";
+
+export type ProgressSummaryQuery = {
+  milestoneId?: string | string[];
+};
 
 @Injectable()
 export class JuhyungTaskService {
@@ -153,6 +158,19 @@ export class JuhyungTaskService {
       options,
     );
     return this.toTaskSummaries(workspaceId, tasks);
+  }
+
+  async getProgressSummary(
+    workspaceId: string,
+    query: ProgressSummaryQuery = {},
+    actor?: WorkspaceActor,
+  ): Promise<ProgressSummary> {
+    await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
+    const milestoneId = normalizeProgressMilestoneId(query.milestoneId);
+    await this.requireMilestoneInWorkspace(milestoneId, workspaceId);
+    const tasks = await this.repository.listTasksForWorkspace(workspaceId);
+
+    return calculateProgressSummaryFromTasks(workspaceId, tasks, milestoneId);
   }
 
   async createTask(
@@ -717,4 +735,65 @@ function assertDraftIsOpen(draft: TaskDraftRecord): void {
   if (draft.status !== "draft") {
     throw new BadRequestException("Task draft is already closed");
   }
+}
+
+function normalizeProgressMilestoneId(
+  value: ProgressSummaryQuery["milestoneId"],
+): string | null {
+  const firstValue = Array.isArray(value) ? value[0] : value;
+  const normalizedValue = firstValue?.trim();
+
+  return normalizedValue ? normalizedValue : null;
+}
+
+function calculateProgressSummaryFromTasks(
+  workspaceId: string,
+  tasks: TaskRecord[],
+  milestoneId: string | null,
+): ProgressSummary {
+  const capturedAt = new Date();
+  const today = toDateOnly(capturedAt);
+  const includedTasks = tasks.filter(
+    (task) => !milestoneId || task.milestoneId === milestoneId,
+  );
+  const totalTasks = includedTasks.length;
+  const doneTasks = includedTasks.filter(
+    (task) => task.status === "done",
+  ).length;
+  const blockedTasks = includedTasks.filter(
+    (task) => task.status === "blocked",
+  ).length;
+  const reviewTasks = includedTasks.filter(
+    (task) => task.status === "in_review",
+  ).length;
+  const delayedTasks = includedTasks.filter(
+    (task) =>
+      task.dueDate &&
+      task.status !== "done" &&
+      toDateOnly(task.dueDate) < today,
+  ).length;
+  const progressRate =
+    totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 10000) / 100;
+
+  return {
+    workspaceId,
+    milestoneId,
+    totalTasks,
+    doneTasks,
+    blockedTasks,
+    reviewTasks,
+    delayedTasks,
+    progressRate,
+    capturedAt: capturedAt.toISOString(),
+  };
+}
+
+function toDateOnly(value: Date | string): string {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  return (value instanceof Date ? value : new Date(value))
+    .toISOString()
+    .slice(0, 10);
 }

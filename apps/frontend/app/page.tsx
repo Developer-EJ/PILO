@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import { AuthGuard } from "../components/auth/AuthGuard";
-import { WorkspaceDashboard } from "../components/workspace/WorkspaceDashboard";
+import { WorkspaceEntryRedirect } from "../components/workspace/WorkspaceEntryRedirect";
 
 export default function Home() {
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <WorkspaceDashboard />
+        <WorkspaceEntryRedirect />
       </AuthGuard>
     </Suspense>
   );

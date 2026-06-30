@@ -61,6 +61,30 @@ export class ReviewRoomService {
     return this.toSummary(room, pullRequest);
   }
 
+  findRoomForPullRequest(
+    pullRequestId: string,
+  ): CodeReviewRoomSummary | null {
+    const room = this.roomRepository.findByPullRequestId(pullRequestId);
+
+    if (!room) {
+      return null;
+    }
+
+    return this.toSummary(room, this.findPullRequestOrThrow(pullRequestId));
+  }
+
+  listPullRequestsForWorkspace(workspaceId: string): PullRequestSummaryRef[] {
+    return [...this.pullRequestSummaries.values()].filter((pullRequest) => {
+      const room = this.roomRepository.findByPullRequestId(pullRequest.id);
+
+      if (room) {
+        return room.workspaceId === workspaceId;
+      }
+
+      return workspaceId === this.defaultContext.workspaceId;
+    });
+  }
+
   toRoomCreatedEvent(room: CodeReviewRoomSummary): ReviewRoomCreatedEvent {
     return {
       eventType: "review.room_created",

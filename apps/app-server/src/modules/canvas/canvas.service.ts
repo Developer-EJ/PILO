@@ -3,6 +3,7 @@ import { WorkspaceCurrentMemberAdapter } from "../workspace/workspace-current-me
 import type {
   CanvasAuthUserRef,
   CanvasBoardCreateRequest,
+  CanvasBoardDeleteResult,
   CanvasBoardDetail,
   CanvasBoardSummary,
   CanvasBoardType,
@@ -183,6 +184,33 @@ export class CanvasService {
     }
 
     return board;
+  }
+
+  async deleteCanvasBoard(
+    input: CanvasBoardResourceInput,
+  ): Promise<CanvasBoardDeleteResult> {
+    const workspaceId = await this.canvasRepository.findBoardWorkspaceId(
+      input.boardId,
+    );
+
+    if (!workspaceId) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    await this.requireWorkspaceWriteAccess({
+      workspaceId,
+      currentUser: input.currentUser,
+    });
+
+    const result = await this.canvasRepository.deleteBoard({
+      boardId: input.boardId,
+    });
+
+    if (!result) {
+      throw new CanvasAccessError("canvas_board_not_found", input.boardId);
+    }
+
+    return result;
   }
 
   async createCanvasShape(

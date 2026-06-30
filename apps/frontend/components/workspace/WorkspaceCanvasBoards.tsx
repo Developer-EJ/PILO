@@ -2,19 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
-import { LogoutButton } from "../auth/LogoutButton";
-import { createCanvasClient } from "../../lib/workspace/canvasClient.mjs";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  clearCanvasBoardLocalStorage,
+  createCanvasClient,
+} from "../../lib/workspace/canvasClient.mjs";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
   workspaceCanvasBoardHref,
-  workspaceCanvasHref,
-  workspaceDashboardHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
-import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
 
 type CanvasBoardSummary = {
   id: string;
@@ -54,6 +52,14 @@ function formatUpdatedAt(value: string) {
   }).format(date);
 }
 
+function canvasBoardTypeLabel(boardType: string) {
+  if (boardType === "project_map") return "프로젝트 맵";
+  if (boardType === "meeting") return "회의";
+  if (boardType === "review") return "리뷰";
+
+  return "사용자 캔버스";
+}
+
 export function WorkspaceCanvasBoards() {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
@@ -65,8 +71,12 @@ export function WorkspaceCanvasBoards() {
   const [state, setState] = useState<CanvasBoardListState>(
     initialBoardListState,
   );
-  const [title, setTitle] = useState("Project Map");
+  const [title, setTitle] = useState("프로젝트 맵");
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [pendingDeleteBoardId, setPendingDeleteBoardId] = useState("");
+  const [confirmDeleteBoardId, setConfirmDeleteBoardId] = useState("");
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -111,9 +121,11 @@ export function WorkspaceCanvasBoards() {
     if (isCreating) return;
 
     const canvasClient = createCanvasClient();
-    const nextTitle = title.trim() || "Untitled canvas";
+    const nextTitle = title.trim() || "제목 없는 캔버스";
 
     setIsCreating(true);
+    setCreateError("");
+    setDeleteError("");
 
     try {
       const board = (await canvasClient.createBoard(workspaceId, {
@@ -122,108 +134,103 @@ export function WorkspaceCanvasBoards() {
       })) as CanvasBoardSummary;
 
       router.push(workspaceCanvasBoardHref(workspaceId, board.id));
+    } catch (error) {
+      setCreateError(
+        "캔버스를 생성하지 못했어요. 서버 연결과 권한을 확인해 주세요.",
+      );
     } finally {
       setIsCreating(false);
     }
   }
 
+  async function deleteBoard(board: CanvasBoardSummary) {
+    if (pendingDeleteBoardId) return;
+
+    if (confirmDeleteBoardId !== board.id) {
+      setConfirmDeleteBoardId(board.id);
+      setDeleteError("");
+      return;
+    }
+
+    const canvasClient = createCanvasClient();
+
+    setPendingDeleteBoardId(board.id);
+    setDeleteError("");
+
+    try {
+      await canvasClient.deleteBoard(board.id, { workspaceId });
+      clearCanvasBoardLocalStorage(board.id);
+      setState((current) => ({
+        ...current,
+        boards: current.boards.filter((candidate) => candidate.id !== board.id),
+      }));
+      setConfirmDeleteBoardId("");
+    } catch (error) {
+      setDeleteError(
+        "캔버스를 삭제하지 못했어요. 권한과 서버 연결을 확인해 주세요.",
+      );
+    } finally {
+      setPendingDeleteBoardId("");
+    }
+  }
+
   return (
-    <main className="dashboard-shell canvas-board-index-shell">
-      <aside className="sidebar" aria-label="PILO navigation">
-        <div className="brand">
-          <CurrentWorkspaceSwitcher />
+    <section className="canvas-board-index-content">
+      <div className="canvas-board-index-heading">
+        <div>
+          <span>{dashboard.workspace.name}</span>
+          <h2>작업할 캔버스를 선택하세요</h2>
         </div>
-        <nav className="nav-list" aria-label="Workspace navigation">
-          <Link href={workspaceDashboardHref(workspaceId)} className="nav-item">
-            <span>홈 / 대시보드</span>
-          </Link>
-          <div className="nav-item" aria-disabled="true">
-            <span>프로젝트 시작</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>기능 목록</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Task 보드</span>
-            <b>{dashboard.tasks.length}</b>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>회의 / Report</span>
-          </div>
-          <Link
-            href={workspaceCanvasHref(workspaceId)}
-            className="nav-item active"
-            aria-current="page"
-          >
-            <span>Canvas</span>
-          </Link>
-          <div className="nav-item" aria-disabled="true">
-            <span>GitHub PR</span>
-            <b>{dashboard.pullRequests.length}</b>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>Code Review</span>
-          </div>
-          <div className="nav-item" aria-disabled="true">
-            <span>설정</span>
-          </div>
-        </nav>
-      </aside>
+        {state.warning ? <p>{state.warning}</p> : null}
+      </div>
 
-      <section className="workspace canvas-board-index-workspace">
-        <header className="topbar">
-          <div>
-            <small>CANVAS</small>
-            <h1>캔버스 보드</h1>
-          </div>
-          <div className="topbar-actions">
-            <LogoutButton />
-            <CurrentUserAvatar />
-          </div>
-        </header>
+      <form className="canvas-board-create-panel" onSubmit={createBoard}>
+        <label htmlFor="canvas-board-title">새 캔버스</label>
+        <div>
+          <input
+            id="canvas-board-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="캔버스 이름"
+          />
+          <button type="submit" disabled={isCreating}>
+            {isCreating ? "생성 중" : "생성"}
+          </button>
+        </div>
+        {createError ? (
+          <p className="dashboard-notice" role="alert">
+            {createError}
+          </p>
+        ) : null}
+        {deleteError ? (
+          <p className="dashboard-notice" role="alert">
+            {deleteError}
+          </p>
+        ) : null}
+      </form>
 
-        <section className="canvas-board-index-content">
-          <div className="canvas-board-index-heading">
-            <div>
-              <span>{dashboard.workspace.name}</span>
-              <h2>작업할 캔버스를 선택하세요</h2>
-            </div>
-            {state.warning ? <p>{state.warning}</p> : null}
-          </div>
+      <section className="canvas-board-list" aria-label="캔버스 보드 목록">
+        {state.status === "loading" ? (
+          <p className="canvas-board-empty">캔버스 목록을 불러오는 중...</p>
+        ) : null}
 
-          <form className="canvas-board-create-panel" onSubmit={createBoard}>
-            <label htmlFor="canvas-board-title">새 캔버스</label>
-            <div>
-              <input
-                id="canvas-board-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="캔버스 이름"
-              />
-              <button type="submit" disabled={isCreating}>
-                {isCreating ? "생성 중" : "생성"}
-              </button>
-            </div>
-          </form>
+        {state.status !== "loading" && !state.boards.length ? (
+          <p className="canvas-board-empty">
+            아직 캔버스가 없어요. 새 캔버스를 만들어 시작하세요.
+          </p>
+        ) : null}
 
-          <section className="canvas-board-list" aria-label="Canvas boards">
-            {state.status === "loading" ? (
-              <p className="canvas-board-empty">캔버스 목록을 불러오는 중...</p>
-            ) : null}
+        {state.boards.map((board) => {
+          const isConfirmingDelete = confirmDeleteBoardId === board.id;
+          const isDeleting = pendingDeleteBoardId === board.id;
 
-            {state.status !== "loading" && !state.boards.length ? (
-              <p className="canvas-board-empty">
-                아직 캔버스가 없어요. 새 캔버스를 만들어 시작하세요.
-              </p>
-            ) : null}
-
-            {state.boards.map((board) => (
+          return (
+            <article className="canvas-board-card" key={board.id}>
               <Link
-                key={board.id}
                 href={workspaceCanvasBoardHref(workspaceId, board.id)}
-                className="canvas-board-card"
+                className="canvas-board-card-link"
               >
-                <span>{board.boardType.replace(/_/g, " ")}</span>
+                <span>{canvasBoardTypeLabel(board.boardType)}</span>
                 <strong>{board.title}</strong>
                 <small>
                   노드 {board.shapeCount}개 · 연결 {board.connectionCount}개
@@ -232,10 +239,26 @@ export function WorkspaceCanvasBoards() {
                   {formatUpdatedAt(board.updatedAt)}
                 </time>
               </Link>
-            ))}
-          </section>
-        </section>
+              <button
+                type="button"
+                className={
+                  isConfirmingDelete
+                    ? "canvas-board-delete-button is-confirming"
+                    : "canvas-board-delete-button"
+                }
+                disabled={Boolean(pendingDeleteBoardId)}
+                onClick={() => void deleteBoard(board)}
+              >
+                {isDeleting
+                  ? "삭제 중"
+                  : isConfirmingDelete
+                    ? "삭제 확인"
+                    : "삭제"}
+              </button>
+            </article>
+          );
+        })}
       </section>
-    </main>
+    </section>
   );
 }

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   CanvasBoardDetail,
   CanvasBoardCreateRequest,
+  CanvasBoardDeleteResult,
   CanvasBoardRecord,
   CanvasBoardSummary,
   CanvasConnectionCreateResult,
@@ -95,6 +96,40 @@ export class CanvasRepository implements CanvasRepositoryPort {
     this.boardsById.set(board.id, board);
 
     return this.toBoardSummary(board);
+  }
+
+  async deleteBoard(input: {
+    boardId: string;
+    now?: Date;
+  }): Promise<CanvasBoardDeleteResult | null> {
+    const board = this.findVisibleBoard(input.boardId);
+
+    if (!board) {
+      return null;
+    }
+
+    const now = (input.now ?? new Date()).toISOString();
+    board.deletedAt = now;
+    board.updatedAt = now;
+
+    for (const shape of this.shapesById.values()) {
+      if (shape.boardId === board.id && !shape.deletedAt) {
+        shape.deletedAt = now;
+        shape.updatedAt = now;
+      }
+    }
+
+    for (const connection of this.connectionsById.values()) {
+      if (connection.boardId === board.id && !connection.deletedAt) {
+        connection.deletedAt = now;
+        connection.updatedAt = now;
+      }
+    }
+
+    return {
+      id: board.id,
+      deleted: true,
+    };
   }
 
   async findConnectionWorkspaceId(

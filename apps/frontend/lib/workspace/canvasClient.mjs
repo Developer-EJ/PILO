@@ -3,12 +3,23 @@ import {
   defaultWorkspaceApiBaseUrl,
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
-import { readCanvasStorage, writeCanvasStorage } from "./canvasStorage.mjs";
+import {
+  deleteCanvasStorage,
+  readCanvasStorage,
+  writeCanvasStorage,
+} from "./canvasStorage.mjs";
 import { workspaceDashboardFixture } from "./workspaceDashboardFixture.mjs";
 
 const DEFAULT_CANVAS_MODE = "mock";
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const mockBoardListStorageScope = "mock-board-list";
+const mockDeletedBoardIdsStorageScope = "mock-deleted-board-ids";
+const canvasBoardLocalStorageScopes = [
+  "shape-state",
+  "filter-setting",
+  "view-setting",
+  "freeform-shapes",
+];
 
 const fallbackPositions = [
   { x: 120, y: 140 },
@@ -116,7 +127,7 @@ export function createMockCanvasBoardDetail(
   return {
     id: defaultCanvasBoardId,
     workspaceId,
-    title: "Project Map",
+    title: "프로젝트 맵",
     boardType: "project_map",
     shapeCount: shapes.length,
     connectionCount: Math.max(0, shapes.length - 1),
@@ -184,13 +195,31 @@ function writeMockBoards(workspaceId, boards) {
   writeCanvasStorage(mockBoardListStorageScope, workspaceId, boards);
 }
 
+function readMockDeletedBoardIds(workspaceId) {
+  const boardIds = readCanvasStorage(mockDeletedBoardIdsStorageScope, workspaceId);
+
+  return Array.isArray(boardIds)
+    ? boardIds.filter((boardId) => typeof boardId === "string")
+    : [];
+}
+
+function writeMockDeletedBoardIds(workspaceId, boardIds) {
+  writeCanvasStorage(mockDeletedBoardIdsStorageScope, workspaceId, boardIds);
+}
+
+export function clearCanvasBoardLocalStorage(boardId) {
+  for (const scope of canvasBoardLocalStorageScopes) {
+    deleteCanvasStorage(scope, boardId);
+  }
+}
+
 function createMockBlankBoard(workspaceId, title) {
   const now = new Date().toISOString();
 
   return {
     id: `local-canvas-board-${Date.now()}`,
     workspaceId,
-    title: title?.trim() || "Untitled canvas",
+    title: title?.trim() || "제목 없는 캔버스",
     boardType: "custom",
     shapeCount: 0,
     connectionCount: 0,
@@ -246,6 +275,14 @@ export function createCanvasApiClient({
       return requestCanvasJson(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/canvas-boards`,
         withJsonBody(body, { method: "POST" }),
+        requestOptions,
+      );
+    },
+
+    async deleteBoard(boardId) {
+      return requestCanvasJson(
+        `/api/canvas-boards/${encodeURIComponent(boardId)}`,
+        { method: "DELETE" },
         requestOptions,
       );
     },
@@ -326,9 +363,17 @@ export function createCanvasApiClient({
 export function createMockCanvasClient() {
   return {
     async listBoards(workspaceId) {
+      const deletedBoardIds = new Set(readMockDeletedBoardIds(workspaceId));
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const defaultBoards = deletedBoardIds.has(defaultBoard.id)
+        ? []
+        : [toBoardSummary(defaultBoard)];
+
       return [
-        toBoardSummary(createMockCanvasBoardDetail(workspaceId)),
-        ...readMockBoards(workspaceId).map(toBoardSummary),
+        ...defaultBoards,
+        ...readMockBoards(workspaceId)
+          .filter((board) => !deletedBoardIds.has(board.id))
+          .map(toBoardSummary),
       ];
     },
 
@@ -341,8 +386,42 @@ export function createMockCanvasClient() {
       return toBoardSummary(board);
     },
 
+    async deleteBoard(boardId, { workspaceId } = {}) {
+      const deletedBoardIds = new Set(readMockDeletedBoardIds(workspaceId));
+      const boards = readMockBoards(workspaceId);
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const nextBoards = boards.filter((board) => board.id !== boardId);
+      const boardExists =
+        boardId === defaultBoard.id || nextBoards.length !== boards.length;
+
+      if (!boardExists) {
+        throw new CanvasApiError("Canvas board not found", {
+          status: 404,
+          path: `/api/canvas-boards/${boardId}`,
+        });
+      }
+
+      deletedBoardIds.add(boardId);
+      writeMockBoards(workspaceId, nextBoards);
+      writeMockDeletedBoardIds(workspaceId, Array.from(deletedBoardIds));
+      clearCanvasBoardLocalStorage(boardId);
+
+      return {
+        id: boardId,
+        deleted: true,
+      };
+    },
+
     async getBoardDetail(boardId, { workspaceId } = {}) {
       const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const deletedBoardIds = new Set(readMockDeletedBoardIds(workspaceId));
+
+      if (boardId && deletedBoardIds.has(boardId)) {
+        throw new CanvasApiError("Canvas board not found", {
+          status: 404,
+          path: `/api/canvas-boards/${boardId}`,
+        });
+      }
 
       if (!boardId || boardId === defaultBoard.id) {
         return defaultBoard;
@@ -357,7 +436,7 @@ export function createMockCanvasClient() {
       }
 
       return {
-        ...createMockBlankBoard(workspaceId, "Untitled canvas"),
+        ...createMockBlankBoard(workspaceId, "제목 없는 캔버스"),
         id: boardId,
       };
     },

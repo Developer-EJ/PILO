@@ -29,3 +29,19 @@ export function createLoginRedirectHref(nextPath = "/") {
 
   return `/login?${params.toString()}`;
 }
+
+export function isLocalMvpAuthFallbackAllowed({
+  authMode = process.env.NEXT_PUBLIC_PILO_AUTH_MODE,
+  disabled = process.env.NEXT_PUBLIC_PILO_DISABLE_LOCAL_AUTH_FALLBACK,
+  hostname = "",
+} = {}) {
+  if (authMode !== "api" || disabled === "true") {
+    return false;
+  }
+
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  );
+}

@@ -12,7 +12,7 @@ export const REVIEW_ROOM_PULL_REQUEST_FIXTURE: PullRequestSummaryRef = {
   id: "66666666-6666-4666-8666-666666666661",
   repositoryId: "55555555-5555-4555-8555-555555555501",
   number: 7,
-  title: "Add OAuth callback shell",
+  title: "OAuth callback 화면 골격 추가",
   authorLogin: "Developer-EJ",
   state: "review_requested",
   branch: "feature/donghyun/auth-login",

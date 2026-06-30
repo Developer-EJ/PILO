@@ -36,9 +36,19 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryPullRequestAnalysisRepository,
     ReviewArtifactsService,
     InMemoryReviewArtifactsRepository,
-    ChangedFilesService,
+    {
+      provide: ChangedFilesService,
+      useFactory: (repository: InMemoryChangedFilesRepository) =>
+        new ChangedFilesService(repository, { seedFixture: true }),
+      inject: [InMemoryChangedFilesRepository],
+    },
     InMemoryChangedFilesRepository,
-    ReviewGraphService,
+    {
+      provide: ReviewGraphService,
+      useFactory: (repository: InMemoryReviewGraphRepository) =>
+        new ReviewGraphService(repository, { seedFixture: true }),
+      inject: [InMemoryReviewGraphRepository],
+    },
     InMemoryReviewGraphRepository,
     AgentGraphResultService,
     AgentReviewArtifactsResultService,

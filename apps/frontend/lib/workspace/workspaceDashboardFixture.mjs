@@ -1,12 +1,4 @@
 export const workspaceDashboardFixture = {
-  currentUser: {
-    id: "11111111-1111-4111-8111-111111111111",
-    email: "donghyun@example.com",
-    name: "Donghyun",
-    avatarUrl: null,
-    providers: ["google", "github"],
-    lastLoginAt: "2026-06-27T09:00:00.000Z",
-  },
   workspace: {
     id: "22222222-2222-4222-8222-222222222222",
     name: "PILO MVP",
@@ -16,6 +8,23 @@ export const workspaceDashboardFixture = {
     myRole: "owner",
     memberCount: 5,
     createdAt: "2026-06-20T00:00:00.000Z",
+  },
+  currentMember: {
+    workspaceId: "22222222-2222-4222-8222-222222222222",
+    memberId: "33333333-3333-4333-8333-333333333331",
+    userId: "11111111-1111-4111-8111-111111111111",
+    role: "owner",
+    displayName: "Workspace / Canvas",
+  },
+  preferences: {
+    workspaceId: "22222222-2222-4222-8222-222222222222",
+    memberId: "33333333-3333-4333-8333-333333333331",
+    layout: {
+      sections: ["today", "pullRequests", "agentSuggestions", "meetingDecisions"],
+      density: "comfortable",
+    },
+    hiddenSections: [],
+    updatedAt: null,
   },
   members: [
     {
@@ -246,4 +255,6 @@ export const workspaceDashboardFixture = {
       shapeType: "meeting_report",
     },
   ],
+  source: "fixture",
+  generatedAt: "2026-06-27T10:00:00.000Z",
 };

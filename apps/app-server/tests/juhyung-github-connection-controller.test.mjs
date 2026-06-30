@@ -66,6 +66,61 @@ describe("JuhyungGithubConnectionController", () => {
     ]);
   });
 
+  it("falls back to explicit actor headers when request auth context is absent", async () => {
+    const calls = [];
+    const service = {
+      startConnection: async (workspaceId, body, actor) => {
+        calls.push(["startConnection", workspaceId, body, actor]);
+        return { state: "nonce-1", installationUrl: "https://github.test" };
+      },
+      listConnections: async (workspaceId, actor) => {
+        calls.push(["listConnections", workspaceId, actor]);
+        return [];
+      },
+      revokeConnection: async (workspaceId, connectionId, actor) => {
+        calls.push(["revokeConnection", workspaceId, connectionId, actor]);
+        return { id: connectionId, workspaceId, revokedAt: "now" };
+      },
+    };
+    const controller = new JuhyungGithubConnectionController(service);
+
+    await controller.startConnection(
+      "workspace-1",
+      {},
+      {},
+      "user-1",
+      "member-1",
+    );
+    await controller.listConnections("workspace-1", {}, "user-1", "member-1");
+    await controller.revokeConnection(
+      "workspace-1",
+      "connection-1",
+      {},
+      "user-1",
+      "member-1",
+    );
+
+    assert.deepEqual(calls, [
+      [
+        "startConnection",
+        "workspace-1",
+        {},
+        { userId: "user-1", memberId: "member-1" },
+      ],
+      [
+        "listConnections",
+        "workspace-1",
+        { userId: "user-1", memberId: "member-1" },
+      ],
+      [
+        "revokeConnection",
+        "workspace-1",
+        "connection-1",
+        { userId: "user-1", memberId: "member-1" },
+      ],
+    ]);
+  });
+
   it("exposes the GitHub App callback method", async () => {
     const calls = [];
     const service = {

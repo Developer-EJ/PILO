@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createAuthClient } from "../../lib/auth/authClient.mjs";
 import {
   createLoginRedirectHref,
+  isLocalMvpAuthFallbackAllowed,
   isProtectedPath,
 } from "../../lib/auth/protectedRoutes.mjs";
 
@@ -69,6 +70,15 @@ export function AuthGuard({ children }: AuthGuardProps) {
       if (cancelled) return;
 
       if (!session.authenticated) {
+        if (
+          isLocalMvpAuthFallbackAllowed({
+            hostname: window.location.hostname,
+          })
+        ) {
+          setAllowed(true);
+          return;
+        }
+
         router.replace(loginHref);
         return;
       }

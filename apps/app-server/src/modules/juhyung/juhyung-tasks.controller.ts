@@ -20,6 +20,7 @@ import {
   CreateTaskBody,
   JuhyungTaskService,
   ListTasksQuery,
+  ProgressSummaryQuery,
   UpdateChecklistItemBody,
   UpdateMilestoneBody,
   UpdateTaskBody,
@@ -78,6 +79,20 @@ export class JuhyungTasksController {
     @Headers("x-member-id") memberId?: string | string[],
   ) {
     return this.taskService.listTasks(
+      workspaceId,
+      query,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Get("workspaces/:workspaceId/progress/summary")
+  getProgressSummary(
+    @Param("workspaceId") workspaceId: string,
+    @Query() query: ProgressSummaryQuery,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.getProgressSummary(
       workspaceId,
       query,
       toCurrentActor(userId, memberId),
