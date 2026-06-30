@@ -38,7 +38,7 @@ export class MeetingRouteGuard implements CanActivate {
       .switchToHttp()
       .getRequest<MeetingRouteGuardRequest>();
     const params = request.params ?? {};
-    const workspaceId = this.meetingService.resolveRouteWorkspaceId({
+    const workspaceId = await this.meetingService.resolveRouteWorkspaceId({
       workspaceId: params.workspaceId,
       meetingId: params.meetingId,
       reportId: params.reportId,

@@ -48,7 +48,7 @@ export type MeetingReportRiskSeverity =
 export type MeetingActionItemStatus =
   (typeof MEETING_ACTION_ITEM_STATUS_VALUES)[number];
 
-export type MeetingRepositoryMode = "mock";
+export type MeetingRepositoryMode = "mock" | "database";
 
 export interface WorkspaceMemberRef {
   id: string;
@@ -65,7 +65,7 @@ export interface MeetingRecord {
   status: MeetingStatus;
   startedAt: string | null;
   endedAt: string | null;
-  createdByMemberId: string;
+  createdByMemberId: string | null;
   createdAt: string;
   updatedAt: string;
 }

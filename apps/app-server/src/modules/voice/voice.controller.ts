@@ -33,7 +33,7 @@ export class VoiceController {
   createVoiceRoom(
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string,
-  ): VoiceRoomResponseDto {
+  ): Promise<VoiceRoomResponseDto> {
     return this.voiceService.createVoiceRoom(workspaceId, meetingId);
   }
 
@@ -50,7 +50,7 @@ export class VoiceController {
   getVoiceRoomForMeeting(
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string,
-  ): VoiceRoomResponseDto {
+  ): Promise<VoiceRoomResponseDto> {
     return this.voiceService.getVoiceRoomForMeeting(workspaceId, meetingId);
   }
 
@@ -104,7 +104,7 @@ export class VoiceController {
   submitAudioChunk(
     @Param("voiceSessionId") voiceSessionId: string,
     @Body() requestBody: SubmitVoiceAudioChunkRequestDto,
-  ): VoiceAudioTranscriptResponseDto {
+  ): Promise<VoiceAudioTranscriptResponseDto> {
     return this.voiceService.submitAudioChunk(voiceSessionId, requestBody);
   }
 }

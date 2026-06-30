@@ -98,10 +98,10 @@ export class MeetingService {
     };
   }
 
-  createMeeting(
+  async createMeeting(
     workspaceId: string,
     requestBody: CreateMeetingRequestDto,
-  ): MeetingResponseDto {
+  ): Promise<MeetingResponseDto> {
     const currentMember = this.currentMemberAdapter.getCurrentMember(
       this.requireNonEmptyString(workspaceId, "workspaceId"),
     );
@@ -118,21 +118,21 @@ export class MeetingService {
     });
   }
 
-  listMeetings(workspaceId: string): MeetingResponseDto[] {
+  async listMeetings(workspaceId: string): Promise<MeetingResponseDto[]> {
     return this.meetingRepository.listMeetingsByWorkspace(
       this.requireNonEmptyString(workspaceId, "workspaceId"),
     );
   }
 
-  getMeeting(meetingId: string): MeetingResponseDto {
+  async getMeeting(meetingId: string): Promise<MeetingResponseDto> {
     return this.requireMeeting(meetingId);
   }
 
-  getMeetingForWorkspace(
+  async getMeetingForWorkspace(
     workspaceId: string,
     meetingId: string,
-  ): MeetingResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  ): Promise<MeetingResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
     const expectedWorkspaceId = this.requireNonEmptyString(
       workspaceId,
       "workspaceId",
@@ -145,16 +145,16 @@ export class MeetingService {
     return meeting;
   }
 
-  resolveRouteWorkspaceId(input: {
+  async resolveRouteWorkspaceId(input: {
     workspaceId?: string;
     meetingId?: string;
     reportId?: string;
     actionItemId?: string;
-  }): string {
+  }): Promise<string> {
     if (input.actionItemId) {
-      const actionItem = this.requireActionItem(input.actionItemId);
-      const report = this.requireReport(actionItem.reportId);
-      const meeting = this.requireMeeting(report.meetingId);
+      const actionItem = await this.requireActionItem(input.actionItemId);
+      const report = await this.requireReport(actionItem.reportId);
+      const meeting = await this.requireMeeting(report.meetingId);
 
       return this.requireMatchingRouteWorkspace(
         input.workspaceId,
@@ -164,8 +164,8 @@ export class MeetingService {
     }
 
     if (input.reportId) {
-      const report = this.requireReport(input.reportId);
-      const meeting = this.requireMeeting(report.meetingId);
+      const report = await this.requireReport(input.reportId);
+      const meeting = await this.requireMeeting(report.meetingId);
 
       return this.requireMatchingRouteWorkspace(
         input.workspaceId,
@@ -175,7 +175,7 @@ export class MeetingService {
     }
 
     if (input.meetingId) {
-      const meeting = this.requireMeeting(input.meetingId);
+      const meeting = await this.requireMeeting(input.meetingId);
 
       return this.requireMatchingRouteWorkspace(
         input.workspaceId,
@@ -193,11 +193,11 @@ export class MeetingService {
     );
   }
 
-  updateMeetingStatus(
+  async updateMeetingStatus(
     meetingId: string,
     requestBody: UpdateMeetingStatusRequestDto,
-  ): MeetingResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  ): Promise<MeetingResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
     const nextStatus = this.parseMeetingStatus(requestBody.status);
     const now = new Date().toISOString();
 
@@ -212,11 +212,11 @@ export class MeetingService {
     });
   }
 
-  addParticipant(
+  async addParticipant(
     meetingId: string,
     requestBody: CreateMeetingParticipantRequestDto,
-  ): MeetingParticipantResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  ): Promise<MeetingParticipantResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
     const memberId = this.requireNonEmptyString(
       requestBody.memberId,
       "memberId",
@@ -232,8 +232,9 @@ export class MeetingService {
       );
     }
 
-    const existingParticipant = this.meetingRepository
-      .listParticipantsByMeeting(meeting.id)
+    const existingParticipant = (
+      await this.meetingRepository.listParticipantsByMeeting(meeting.id)
+    )
       .find((participant) => participant.memberId === workspaceMember.id);
 
     if (existingParticipant) {
@@ -247,18 +248,20 @@ export class MeetingService {
     });
   }
 
-  listParticipants(meetingId: string): MeetingParticipantResponseDto[] {
-    const meeting = this.requireMeeting(meetingId);
+  async listParticipants(
+    meetingId: string,
+  ): Promise<MeetingParticipantResponseDto[]> {
+    const meeting = await this.requireMeeting(meetingId);
 
     return this.meetingRepository.listParticipantsByMeeting(meeting.id);
   }
 
-  leaveParticipant(
+  async leaveParticipant(
     meetingId: string,
     participantId: string,
-  ): MeetingParticipantResponseDto {
-    const meeting = this.requireMeeting(meetingId);
-    const participant = this.requireParticipant(participantId);
+  ): Promise<MeetingParticipantResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
+    const participant = await this.requireParticipant(participantId);
 
     if (participant.meetingId !== meeting.id) {
       throw new NotFoundException("Meeting participant not found");
@@ -270,11 +273,11 @@ export class MeetingService {
     );
   }
 
-  createAgenda(
+  async createAgenda(
     meetingId: string,
     requestBody: CreateMeetingAgendaRequestDto,
-  ): MeetingAgendaResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  ): Promise<MeetingAgendaResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
 
     return this.meetingRepository.createAgenda({
       meetingId: meeting.id,
@@ -286,18 +289,18 @@ export class MeetingService {
     });
   }
 
-  listAgendas(meetingId: string): MeetingAgendaResponseDto[] {
-    const meeting = this.requireMeeting(meetingId);
+  async listAgendas(meetingId: string): Promise<MeetingAgendaResponseDto[]> {
+    const meeting = await this.requireMeeting(meetingId);
 
     return this.meetingRepository.listAgendasByMeeting(meeting.id);
   }
 
-  updateAgendaStatus(
+  async updateAgendaStatus(
     meetingId: string,
     agendaId: string,
     requestBody: UpdateMeetingAgendaStatusRequestDto,
-  ): MeetingAgendaResponseDto {
-    const agenda = this.requireAgendaInMeeting(meetingId, agendaId);
+  ): Promise<MeetingAgendaResponseDto> {
+    const agenda = await this.requireAgendaInMeeting(meetingId, agendaId);
 
     return this.meetingRepository.updateAgenda(agenda.id, {
       status: this.parseAgendaStatus(requestBody.status),
@@ -305,12 +308,12 @@ export class MeetingService {
     });
   }
 
-  reorderAgenda(
+  async reorderAgenda(
     meetingId: string,
     agendaId: string,
     requestBody: ReorderMeetingAgendaRequestDto,
-  ): MeetingAgendaResponseDto {
-    const agenda = this.requireAgendaInMeeting(meetingId, agendaId);
+  ): Promise<MeetingAgendaResponseDto> {
+    const agenda = await this.requireAgendaInMeeting(meetingId, agendaId);
 
     return this.meetingRepository.updateAgenda(agenda.id, {
       sortOrder: this.requireNonNegativeInteger(
@@ -321,11 +324,11 @@ export class MeetingService {
     });
   }
 
-  createMemo(
+  async createMemo(
     meetingId: string,
     requestBody: CreateMeetingMemoRequestDto,
-  ): MeetingMemoResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  ): Promise<MeetingMemoResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
 
     return this.meetingRepository.createMemo({
       meetingId: meeting.id,
@@ -337,17 +340,17 @@ export class MeetingService {
     });
   }
 
-  listMemos(meetingId: string): MeetingMemoResponseDto[] {
-    const meeting = this.requireMeeting(meetingId);
+  async listMemos(meetingId: string): Promise<MeetingMemoResponseDto[]> {
+    const meeting = await this.requireMeeting(meetingId);
 
     return this.meetingRepository.listMemosByMeeting(meeting.id);
   }
 
-  createTranscriptSegment(
+  async createTranscriptSegment(
     meetingId: string,
     requestBody: CreateTranscriptSegmentRequestDto,
-  ): TranscriptSegmentResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  ): Promise<TranscriptSegmentResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
     const startedAt = this.optionalIsoDateTime(
       requestBody.startedAt,
       "startedAt",
@@ -369,22 +372,24 @@ export class MeetingService {
     });
   }
 
-  listTranscriptSegments(meetingId: string): TranscriptSegmentResponseDto[] {
-    const meeting = this.requireMeeting(meetingId);
+  async listTranscriptSegments(
+    meetingId: string,
+  ): Promise<TranscriptSegmentResponseDto[]> {
+    const meeting = await this.requireMeeting(meetingId);
 
     return this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id);
   }
 
-  requestReportGeneration(meetingId: string): MeetingReportResponseDto {
+  requestReportGeneration(meetingId: string): Promise<MeetingReportResponseDto> {
     return this.createReport(meetingId);
   }
 
-  createReport(meetingId: string): MeetingReportResponseDto {
-    const meeting = this.requireMeeting(meetingId);
+  async createReport(meetingId: string): Promise<MeetingReportResponseDto> {
+    const meeting = await this.requireMeeting(meetingId);
     const currentMember = this.currentMemberAdapter.getCurrentMember(
       meeting.workspaceId,
     );
-    const existingReport = this.meetingRepository.findReportByMeetingId(
+    const existingReport = await this.meetingRepository.findReportByMeetingId(
       meeting.id,
     );
 
@@ -394,26 +399,26 @@ export class MeetingService {
 
     const workflowOutput = this.meetingReportWorkflowClient.generateReport({
       meetingTitle: meeting.title,
-      memoBodies: this.meetingRepository
-        .listMemosByMeeting(meeting.id)
-        .map((memo) => memo.body),
-      transcriptBodies: this.meetingRepository
-        .listTranscriptSegmentsByMeeting(meeting.id)
-        .map((segment) => segment.body),
+      memoBodies: (await this.meetingRepository.listMemosByMeeting(meeting.id)).map(
+        (memo) => memo.body,
+      ),
+      transcriptBodies: (
+        await this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id)
+      ).map((segment) => segment.body),
     });
 
     if (workflowOutput.error) {
       throw new BadRequestException(workflowOutput.error.message);
     }
 
-    const report = this.meetingRepository.createReport({
+    const report = await this.meetingRepository.createReport({
       meetingId: meeting.id,
       summary: this.requireNonEmptyString(workflowOutput.summary, "summary"),
       createdByMemberId: currentMember.id,
     });
 
-    this.persistWorkflowOutput(report, meeting, workflowOutput);
-    this.meetingRepository.updateMeeting(meeting.id, {
+    await this.persistWorkflowOutput(report, meeting, workflowOutput);
+    await this.meetingRepository.updateMeeting(meeting.id, {
       status: "report_generated",
       updatedAt: new Date().toISOString(),
     });
@@ -424,18 +429,18 @@ export class MeetingService {
     });
   }
 
-  getReport(reportId: string): MeetingReportResponseDto {
-    const report = this.requireReport(reportId);
-    const meeting = this.requireMeeting(report.meetingId);
+  async getReport(reportId: string): Promise<MeetingReportResponseDto> {
+    const report = await this.requireReport(reportId);
+    const meeting = await this.requireMeeting(report.meetingId);
 
     return this.toReportDetail(report, meeting);
   }
 
-  getReportForWorkspace(
+  async getReportForWorkspace(
     workspaceId: string,
     reportId: string,
-  ): MeetingReportResponseDto {
-    const report = this.getReport(reportId);
+  ): Promise<MeetingReportResponseDto> {
+    const report = await this.getReport(reportId);
     const expectedWorkspaceId = this.requireNonEmptyString(
       workspaceId,
       "workspaceId",
@@ -448,21 +453,25 @@ export class MeetingService {
     return report;
   }
 
-  listRecentReports(workspaceId: string): MeetingReportSummaryDto[] {
+  async listRecentReports(
+    workspaceId: string,
+  ): Promise<MeetingReportSummaryDto[]> {
     const expectedWorkspaceId = this.requireNonEmptyString(
       workspaceId,
       "workspaceId",
     );
-
-    return this.meetingRepository
-      .listReports()
-      .map((report) => {
-        const meeting = this.meetingRepository.findMeetingById(
+    const reports = await this.meetingRepository.listReports();
+    const reportSummaries = await Promise.all(
+      reports.map(async (report) => {
+        const meeting = await this.meetingRepository.findMeetingById(
           report.meetingId,
         );
 
         return meeting ? this.toReportSummary(report, meeting) : null;
-      })
+      }),
+    );
+
+    return reportSummaries
       .filter(
         (report): report is MeetingReportSummaryDto =>
           report !== null && report.workspaceId === expectedWorkspaceId,
@@ -474,22 +483,22 @@ export class MeetingService {
       );
   }
 
-  listRecentReportCanvasEntityRefs(
+  async listRecentReportCanvasEntityRefs(
     workspaceId: string,
-  ): MeetingReportCanvasEntityRefDto[] {
-    return this.listRecentReports(workspaceId).map((report) =>
+  ): Promise<MeetingReportCanvasEntityRefDto[]> {
+    return (await this.listRecentReports(workspaceId)).map((report) =>
       this.toCanvasEntityRef(report),
     );
   }
 
-  createDecision(
+  async createDecision(
     reportId: string,
     requestBody: CreateMeetingDecisionRequestDto,
-  ): MeetingDecisionResponseDto {
-    const report = this.requireReport(reportId);
+  ): Promise<MeetingDecisionResponseDto> {
+    const report = await this.requireReport(reportId);
 
     return this.toDecisionReadModel(
-      this.meetingRepository.createDecision({
+      await this.meetingRepository.createDecision({
         reportId: report.id,
         content: this.requireNonEmptyString(requestBody.content, "content"),
         status: this.parseDecisionStatus(requestBody.status),
@@ -501,30 +510,32 @@ export class MeetingService {
     );
   }
 
-  listDecisions(reportId: string): MeetingDecisionResponseDto[] {
-    const report = this.requireReport(reportId);
+  async listDecisions(
+    reportId: string,
+  ): Promise<MeetingDecisionResponseDto[]> {
+    const report = await this.requireReport(reportId);
 
-    return this.meetingRepository
-      .listDecisionsByReport(report.id)
-      .map((decision) => this.toDecisionReadModel(decision));
+    return (await this.meetingRepository.listDecisionsByReport(report.id)).map(
+      (decision) => this.toDecisionReadModel(decision),
+    );
   }
 
-  createRisk(
+  async createRisk(
     reportId: string,
     requestBody: CreateMeetingReportRiskRequestDto,
-  ): MeetingReportRiskResponseDto {
-    const report = this.requireReport(reportId);
+  ): Promise<MeetingReportRiskResponseDto> {
+    const report = await this.requireReport(reportId);
     const sortOrder = this.optionalNonNegativeInteger(
       requestBody.sortOrder,
       "sortOrder",
     );
 
     if (sortOrder !== undefined) {
-      this.assertRiskSortOrderAvailable(report.id, sortOrder);
+      await this.assertRiskSortOrderAvailable(report.id, sortOrder);
     }
 
     return this.toRiskReadModel(
-      this.meetingRepository.createRisk({
+      await this.meetingRepository.createRisk({
         reportId: report.id,
         content: this.requireNonEmptyString(requestBody.content, "content"),
         severity: this.parseRiskSeverity(requestBody.severity),
@@ -533,30 +544,30 @@ export class MeetingService {
     );
   }
 
-  listRisks(reportId: string): MeetingReportRiskResponseDto[] {
-    const report = this.requireReport(reportId);
+  async listRisks(reportId: string): Promise<MeetingReportRiskResponseDto[]> {
+    const report = await this.requireReport(reportId);
 
-    return this.meetingRepository
-      .listRisksByReport(report.id)
-      .map((risk) => this.toRiskReadModel(risk));
+    return (await this.meetingRepository.listRisksByReport(report.id)).map(
+      (risk) => this.toRiskReadModel(risk),
+    );
   }
 
-  createNextAgenda(
+  async createNextAgenda(
     reportId: string,
     requestBody: CreateMeetingReportNextAgendaRequestDto,
-  ): MeetingReportNextAgendaResponseDto {
-    const report = this.requireReport(reportId);
+  ): Promise<MeetingReportNextAgendaResponseDto> {
+    const report = await this.requireReport(reportId);
     const sortOrder = this.optionalNonNegativeInteger(
       requestBody.sortOrder,
       "sortOrder",
     );
 
     if (sortOrder !== undefined) {
-      this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
+      await this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
     }
 
     return this.toNextAgendaReadModel(
-      this.meetingRepository.createNextAgenda({
+      await this.meetingRepository.createNextAgenda({
         reportId: report.id,
         title: this.requireNonEmptyString(requestBody.title, "title"),
         sortOrder,
@@ -564,23 +575,25 @@ export class MeetingService {
     );
   }
 
-  listNextAgendas(reportId: string): MeetingReportNextAgendaResponseDto[] {
-    const report = this.requireReport(reportId);
+  async listNextAgendas(
+    reportId: string,
+  ): Promise<MeetingReportNextAgendaResponseDto[]> {
+    const report = await this.requireReport(reportId);
 
-    return this.meetingRepository
-      .listNextAgendasByReport(report.id)
-      .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda));
+    return (
+      await this.meetingRepository.listNextAgendasByReport(report.id)
+    ).map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda));
   }
 
-  createActionItem(
+  async createActionItem(
     reportId: string,
     requestBody: CreateMeetingActionItemRequestDto,
-  ): MeetingActionItemResponseDto {
-    const report = this.requireReport(reportId);
-    const meeting = this.requireMeeting(report.meetingId);
+  ): Promise<MeetingActionItemResponseDto> {
+    const report = await this.requireReport(reportId);
+    const meeting = await this.requireMeeting(report.meetingId);
 
     return this.toActionItemReadModel(
-      this.meetingRepository.createActionItem({
+      await this.meetingRepository.createActionItem({
         reportId: report.id,
         title: this.requireNonEmptyString(requestBody.title, "title"),
         description: this.optionalString(
@@ -600,21 +613,25 @@ export class MeetingService {
     );
   }
 
-  listActionItems(reportId: string): MeetingActionItemResponseDto[] {
-    const report = this.requireReport(reportId);
+  async listActionItems(
+    reportId: string,
+  ): Promise<MeetingActionItemResponseDto[]> {
+    const report = await this.requireReport(reportId);
 
-    return this.meetingRepository
-      .listActionItemsByReport(report.id)
-      .map((actionItem) => this.toActionItemReadModel(actionItem));
+    return (
+      await this.meetingRepository.listActionItemsByReport(report.id)
+    ).map((actionItem) => this.toActionItemReadModel(actionItem));
   }
 
-  approveActionItem(actionItemId: string): MeetingActionItemResponseDto {
-    const actionItem = this.requireActionItem(actionItemId);
+  async approveActionItem(
+    actionItemId: string,
+  ): Promise<MeetingActionItemResponseDto> {
+    const actionItem = await this.requireActionItem(actionItemId);
 
     this.assertActionItemStatus(actionItem, "draft", "approve");
 
     return this.toActionItemReadModel(
-      this.meetingRepository.updateActionItem(actionItem.id, {
+      await this.meetingRepository.updateActionItem(actionItem.id, {
         status: "approved",
         convertedTaskId: null,
         updatedAt: new Date().toISOString(),
@@ -622,13 +639,15 @@ export class MeetingService {
     );
   }
 
-  rejectActionItem(actionItemId: string): MeetingActionItemResponseDto {
-    const actionItem = this.requireActionItem(actionItemId);
+  async rejectActionItem(
+    actionItemId: string,
+  ): Promise<MeetingActionItemResponseDto> {
+    const actionItem = await this.requireActionItem(actionItemId);
 
     this.assertActionItemStatus(actionItem, "draft", "reject");
 
     return this.toActionItemReadModel(
-      this.meetingRepository.updateActionItem(actionItem.id, {
+      await this.meetingRepository.updateActionItem(actionItem.id, {
         status: "rejected",
         convertedTaskId: null,
         updatedAt: new Date().toISOString(),
@@ -636,16 +655,16 @@ export class MeetingService {
     );
   }
 
-  markActionItemConverted(
+  async markActionItemConverted(
     actionItemId: string,
     requestBody: ConvertMeetingActionItemRequestDto,
-  ): MeetingActionItemResponseDto {
-    const actionItem = this.requireActionItem(actionItemId);
+  ): Promise<MeetingActionItemResponseDto> {
+    const actionItem = await this.requireActionItem(actionItemId);
 
     this.assertActionItemStatus(actionItem, "approved", "convert");
 
     return this.toActionItemReadModel(
-      this.meetingRepository.updateActionItem(actionItem.id, {
+      await this.meetingRepository.updateActionItem(actionItem.id, {
         status: "converted",
         convertedTaskId: this.requireNonEmptyString(
           requestBody.convertedTaskId,
@@ -660,12 +679,12 @@ export class MeetingService {
     actionItemId: string,
     actor?: WorkspaceActor,
   ): Promise<MeetingActionItemTaskDraftResponseDto> {
-    const actionItem = this.requireActionItem(actionItemId);
+    const actionItem = await this.requireActionItem(actionItemId);
 
     this.assertActionItemStatus(actionItem, "approved", "request task draft");
 
-    const report = this.requireReport(actionItem.reportId);
-    const meeting = this.requireMeeting(report.meetingId);
+    const report = await this.requireReport(actionItem.reportId);
+    const meeting = await this.requireMeeting(report.meetingId);
     const payload = this.toTaskCreateDraftPayload(
       meeting.workspaceId,
       actionItem,
@@ -678,8 +697,8 @@ export class MeetingService {
     };
   }
 
-  private requireMeeting(meetingId: string): MeetingRecord {
-    const meeting = this.meetingRepository.findMeetingById(
+  private async requireMeeting(meetingId: string): Promise<MeetingRecord> {
+    const meeting = await this.meetingRepository.findMeetingById(
       this.requireNonEmptyString(meetingId, "meetingId"),
     );
 
@@ -690,8 +709,10 @@ export class MeetingService {
     return meeting;
   }
 
-  private requireParticipant(participantId: string): MeetingParticipantRecord {
-    const participant = this.meetingRepository.findParticipantById(
+  private async requireParticipant(
+    participantId: string,
+  ): Promise<MeetingParticipantRecord> {
+    const participant = await this.meetingRepository.findParticipantById(
       this.requireNonEmptyString(participantId, "participantId"),
     );
 
@@ -702,12 +723,12 @@ export class MeetingService {
     return participant;
   }
 
-  private requireAgendaInMeeting(
+  private async requireAgendaInMeeting(
     meetingId: string,
     agendaId: string,
-  ): MeetingAgendaRecord {
-    const meeting = this.requireMeeting(meetingId);
-    const agenda = this.meetingRepository.findAgendaById(
+  ): Promise<MeetingAgendaRecord> {
+    const meeting = await this.requireMeeting(meetingId);
+    const agenda = await this.meetingRepository.findAgendaById(
       this.requireNonEmptyString(agendaId, "agendaId"),
     );
 
@@ -718,8 +739,8 @@ export class MeetingService {
     return agenda;
   }
 
-  private requireReport(reportId: string): MeetingReportRecord {
-    const report = this.meetingRepository.findReportById(
+  private async requireReport(reportId: string): Promise<MeetingReportRecord> {
+    const report = await this.meetingRepository.findReportById(
       this.requireNonEmptyString(reportId, "reportId"),
     );
 
@@ -730,8 +751,10 @@ export class MeetingService {
     return report;
   }
 
-  private requireActionItem(actionItemId: string): MeetingActionItemRecord {
-    const actionItem = this.meetingRepository.findActionItemById(
+  private async requireActionItem(
+    actionItemId: string,
+  ): Promise<MeetingActionItemRecord> {
+    const actionItem = await this.meetingRepository.findActionItemById(
       this.requireNonEmptyString(actionItemId, "actionItemId"),
     );
 
@@ -758,31 +781,31 @@ export class MeetingService {
     return actualWorkspaceId;
   }
 
-  private toReportDetail(
+  private async toReportDetail(
     report: MeetingReportRecord,
     meeting: MeetingRecord,
-  ): MeetingReportResponseDto {
+  ): Promise<MeetingReportResponseDto> {
     return {
-      ...this.toReportSummary(report, meeting),
-      decisions: this.meetingRepository
-        .listDecisionsByReport(report.id)
-        .map((decision) => this.toDecisionReadModel(decision)),
-      risks: this.meetingRepository
-        .listRisksByReport(report.id)
-        .map((risk) => this.toRiskReadModel(risk)),
-      nextAgendas: this.meetingRepository
-        .listNextAgendasByReport(report.id)
-        .map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda)),
+      ...(await this.toReportSummary(report, meeting)),
+      decisions: (await this.meetingRepository.listDecisionsByReport(report.id)).map(
+        (decision) => this.toDecisionReadModel(decision),
+      ),
+      risks: (await this.meetingRepository.listRisksByReport(report.id)).map(
+        (risk) => this.toRiskReadModel(risk),
+      ),
+      nextAgendas: (
+        await this.meetingRepository.listNextAgendasByReport(report.id)
+      ).map((nextAgenda) => this.toNextAgendaReadModel(nextAgenda)),
     };
   }
 
-  private persistWorkflowOutput(
+  private async persistWorkflowOutput(
     report: MeetingReportRecord,
     meeting: MeetingRecord,
     workflowOutput: MeetingReportWorkflowOutput,
-  ): void {
+  ): Promise<void> {
     for (const decision of workflowOutput.decisions) {
-      this.meetingRepository.createDecision({
+      await this.meetingRepository.createDecision({
         reportId: report.id,
         content: this.requireNonEmptyString(decision.content, "content"),
         status: this.parseDecisionStatus(decision.status),
@@ -796,8 +819,8 @@ export class MeetingService {
     for (const [index, risk] of workflowOutput.risks.entries()) {
       const sortOrder = this.workflowSortOrder(risk.sortOrder, index);
 
-      this.assertRiskSortOrderAvailable(report.id, sortOrder);
-      this.meetingRepository.createRisk({
+      await this.assertRiskSortOrderAvailable(report.id, sortOrder);
+      await this.meetingRepository.createRisk({
         reportId: report.id,
         content: this.requireNonEmptyString(risk.content, "content"),
         severity: this.parseRiskSeverity(risk.severity),
@@ -808,8 +831,8 @@ export class MeetingService {
     for (const [index, nextAgenda] of workflowOutput.nextAgendas.entries()) {
       const sortOrder = this.workflowSortOrder(nextAgenda.sortOrder, index);
 
-      this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
-      this.meetingRepository.createNextAgenda({
+      await this.assertNextAgendaSortOrderAvailable(report.id, sortOrder);
+      await this.meetingRepository.createNextAgenda({
         reportId: report.id,
         title: this.requireNonEmptyString(nextAgenda.title, "title"),
         sortOrder,
@@ -817,7 +840,7 @@ export class MeetingService {
     }
 
     for (const actionItem of workflowOutput.actionItems) {
-      this.meetingRepository.createActionItem({
+      await this.meetingRepository.createActionItem({
         reportId: report.id,
         title: this.requireNonEmptyString(actionItem.title, "title"),
         description: this.optionalString(actionItem.description, "description"),
@@ -834,21 +857,23 @@ export class MeetingService {
     }
   }
 
-  private toReportSummary(
+  private async toReportSummary(
     report: MeetingReportRecord,
     meeting: MeetingRecord,
-  ): MeetingReportSummaryDto {
+  ): Promise<MeetingReportSummaryDto> {
     return {
       id: report.id,
       meetingId: report.meetingId,
       workspaceId: meeting.workspaceId,
       title: meeting.title,
       summary: report.summary,
-      decisionCount: this.meetingRepository.listDecisionsByReport(report.id)
+      decisionCount: (await this.meetingRepository.listDecisionsByReport(report.id))
         .length,
-      actionItemCount: this.meetingRepository.listActionItemsByReport(report.id)
+      actionItemCount: (
+        await this.meetingRepository.listActionItemsByReport(report.id)
+      ).length,
+      riskCount: (await this.meetingRepository.listRisksByReport(report.id))
         .length,
-      riskCount: this.meetingRepository.listRisksByReport(report.id).length,
       createdAt: report.createdAt,
     };
   }
@@ -1085,13 +1110,13 @@ export class MeetingService {
     return this.requireNonNegativeInteger(value, "sortOrder");
   }
 
-  private assertRiskSortOrderAvailable(
+  private async assertRiskSortOrderAvailable(
     reportId: string,
     sortOrder: number,
-  ): void {
-    const duplicate = this.meetingRepository
-      .listRisksByReport(reportId)
-      .some((risk) => risk.sortOrder === sortOrder);
+  ): Promise<void> {
+    const duplicate = (
+      await this.meetingRepository.listRisksByReport(reportId)
+    ).some((risk) => risk.sortOrder === sortOrder);
 
     if (duplicate) {
       throw new BadRequestException(
@@ -1100,13 +1125,13 @@ export class MeetingService {
     }
   }
 
-  private assertNextAgendaSortOrderAvailable(
+  private async assertNextAgendaSortOrderAvailable(
     reportId: string,
     sortOrder: number,
-  ): void {
-    const duplicate = this.meetingRepository
-      .listNextAgendasByReport(reportId)
-      .some((nextAgenda) => nextAgenda.sortOrder === sortOrder);
+  ): Promise<void> {
+    const duplicate = (
+      await this.meetingRepository.listNextAgendasByReport(reportId)
+    ).some((nextAgenda) => nextAgenda.sortOrder === sortOrder);
 
     if (duplicate) {
       throw new BadRequestException(

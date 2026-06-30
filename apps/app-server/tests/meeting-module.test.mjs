@@ -51,11 +51,11 @@ function createMeetingService(
 }
 
 describe("meeting module scaffold", () => {
-  it("keeps the repository behind an injectable token", () => {
+  it("keeps the repository behind an injectable token", async () => {
     assert.equal(typeof MEETING_REPOSITORY, "symbol");
   });
 
-  it("exposes scaffold status through the service and controller", () => {
+  it("exposes scaffold status through the service and controller", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
@@ -72,7 +72,7 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("protects workspace meeting routes with the route guard", () => {
+  it("protects workspace meeting routes with the route guard", async () => {
     assert.deepEqual(
       Reflect.getMetadata(
         GUARDS_METADATA,
@@ -103,13 +103,13 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("creates, lists, and reads meetings by workspace", () => {
+  it("creates, lists, and reads meetings by workspace", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
 
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Sprint planning",
       purpose: "Plan the next implementation slice",
     });
@@ -121,21 +121,21 @@ describe("meeting module scaffold", () => {
     assert.equal(meeting.startedAt, null);
     assert.equal(meeting.endedAt, null);
     assert.equal(meeting.createdByMemberId.length > 0, true);
-    assert.deepEqual(controller.listMeetings("workspace-1"), [meeting]);
-    assert.deepEqual(controller.listMeetings("workspace-2"), []);
-    assert.deepEqual(controller.getMeeting(meeting.id), meeting);
+    assert.deepEqual(await controller.listMeetings("workspace-1"), [meeting]);
+    assert.deepEqual(await controller.listMeetings("workspace-2"), []);
+    assert.deepEqual(await controller.getMeeting(meeting.id), meeting);
   });
 
-  it("validates meeting status transitions and timestamps", () => {
+  it("validates meeting status transitions and timestamps", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
 
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Status meeting",
     });
 
-    const inProgressMeeting = service.updateMeetingStatus(meeting.id, {
+    const inProgressMeeting = await service.updateMeetingStatus(meeting.id, {
       status: "in_progress",
     });
 
@@ -143,7 +143,7 @@ describe("meeting module scaffold", () => {
     assert.notEqual(inProgressMeeting.startedAt, null);
     assert.equal(inProgressMeeting.endedAt, null);
 
-    const endedMeeting = service.updateMeetingStatus(meeting.id, {
+    const endedMeeting = await service.updateMeetingStatus(meeting.id, {
       status: "ended",
     });
 
@@ -157,50 +157,50 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("rejects invalid status values and workspace mismatches", () => {
+  it("rejects invalid status values and workspace mismatches", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
 
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Workspace guard meeting",
     });
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.updateMeetingStatus(meeting.id, {
         status: "invalid",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.getMeetingForWorkspace("workspace-2", meeting.id),
     );
   });
 
-  it("resolves route workspace ids from meeting reports and action items", () => {
+  it("resolves route workspace ids from meeting reports and action items", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Route guard meeting",
     });
-    const report = service.createReport(meeting.id);
-    const actionItem = service.createActionItem(report.id, {
+    const report = await service.createReport(meeting.id);
+    const actionItem = await service.createActionItem(report.id, {
       title: "Guard action item",
     });
 
     assert.equal(
-      service.resolveRouteWorkspaceId({ meetingId: meeting.id }),
+      await service.resolveRouteWorkspaceId({ meetingId: meeting.id }),
       "workspace-1",
     );
     assert.equal(
-      service.resolveRouteWorkspaceId({ reportId: report.id }),
+      await service.resolveRouteWorkspaceId({ reportId: report.id }),
       "workspace-1",
     );
     assert.equal(
-      service.resolveRouteWorkspaceId({ actionItemId: actionItem.id }),
+      await service.resolveRouteWorkspaceId({ actionItemId: actionItem.id }),
       "workspace-1",
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.resolveRouteWorkspaceId({
         workspaceId: "workspace-2",
         reportId: report.id,
@@ -208,7 +208,7 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("adds, lists, and leaves meeting participants by workspace member id", () => {
+  it("adds, lists, and leaves meeting participants by workspace member id", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -218,11 +218,11 @@ describe("meeting module scaffold", () => {
     });
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Participant meeting",
     });
 
-    const participant = controller.addParticipant(meeting.id, {
+    const participant = await controller.addParticipant(meeting.id, {
       memberId: "member-1",
       role: "facilitator",
     });
@@ -231,9 +231,9 @@ describe("meeting module scaffold", () => {
     assert.equal(participant.memberId, "member-1");
     assert.equal(participant.role, "facilitator");
     assert.equal(participant.leftAt, null);
-    assert.deepEqual(controller.listParticipants(meeting.id), [participant]);
+    assert.deepEqual(await controller.listParticipants(meeting.id), [participant]);
 
-    const leftParticipant = controller.leaveParticipant(
+    const leftParticipant = await controller.leaveParticipant(
       meeting.id,
       participant.id,
     );
@@ -246,7 +246,7 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("rejects participants from a different workspace", () => {
+  it("rejects participants from a different workspace", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -254,42 +254,42 @@ describe("meeting module scaffold", () => {
       workspaceId: "workspace-2",
     });
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Workspace member validation meeting",
     });
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.addParticipant(meeting.id, {
         memberId: "member-2",
       }),
     );
   });
 
-  it("creates, lists, updates, and reorders meeting agendas", () => {
+  it("creates, lists, updates, and reorders meeting agendas", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Agenda meeting",
     });
 
-    const firstAgenda = controller.createAgenda(meeting.id, {
+    const firstAgenda = await controller.createAgenda(meeting.id, {
       title: "Scope API",
     });
-    const secondAgenda = controller.createAgenda(meeting.id, {
+    const secondAgenda = await controller.createAgenda(meeting.id, {
       title: "Review risks",
     });
 
     assert.equal(firstAgenda.status, "open");
     assert.equal(firstAgenda.sortOrder, 0);
     assert.equal(secondAgenda.sortOrder, 1);
-    assert.deepEqual(controller.listAgendas(meeting.id), [
+    assert.deepEqual(await controller.listAgendas(meeting.id), [
       firstAgenda,
       secondAgenda,
     ]);
 
-    const doneAgenda = controller.updateAgendaStatus(
+    const doneAgenda = await controller.updateAgendaStatus(
       meeting.id,
       firstAgenda.id,
       {
@@ -299,7 +299,7 @@ describe("meeting module scaffold", () => {
 
     assert.equal(doneAgenda.status, "done");
 
-    const reorderedAgenda = controller.reorderAgenda(
+    const reorderedAgenda = await controller.reorderAgenda(
       meeting.id,
       secondAgenda.id,
       {
@@ -309,9 +309,10 @@ describe("meeting module scaffold", () => {
 
     assert.equal(reorderedAgenda.sortOrder, 0);
     assert.deepEqual(
-      controller
-        .listAgendas(meeting.id)
-        .map((agenda) => [agenda.id, agenda.sortOrder]),
+      (await controller.listAgendas(meeting.id)).map((agenda) => [
+        agenda.id,
+        agenda.sortOrder,
+      ]),
       [
         [secondAgenda.id, 0],
         [firstAgenda.id, 1],
@@ -319,30 +320,30 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("rejects invalid meeting agenda status and sort order", () => {
+  it("rejects invalid meeting agenda status and sort order", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Agenda validation meeting",
     });
-    const agenda = service.createAgenda(meeting.id, {
+    const agenda = await service.createAgenda(meeting.id, {
       title: "Validate agenda",
     });
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.updateAgendaStatus(meeting.id, agenda.id, {
         status: "invalid",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.reorderAgenda(meeting.id, agenda.id, {
         sortOrder: -1,
       }),
     );
   });
 
-  it("creates and lists meeting memos with workspace member authors", () => {
+  it("creates and lists meeting memos with workspace member authors", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -351,11 +352,11 @@ describe("meeting module scaffold", () => {
     });
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Memo meeting",
     });
 
-    const memo = controller.createMemo(meeting.id, {
+    const memo = await controller.createMemo(meeting.id, {
       authorMemberId: "memo-author",
       body: "Discussed API shape.",
     });
@@ -363,25 +364,25 @@ describe("meeting module scaffold", () => {
     assert.equal(memo.meetingId, meeting.id);
     assert.equal(memo.authorMemberId, "memo-author");
     assert.equal(memo.body, "Discussed API shape.");
-    assert.deepEqual(controller.listMemos(meeting.id), [memo]);
+    assert.deepEqual(await controller.listMemos(meeting.id), [memo]);
   });
 
-  it("defaults memo author to the mock current member", () => {
+  it("defaults memo author to the mock current member", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Current member memo meeting",
     });
 
-    const memo = service.createMemo(meeting.id, {
+    const memo = await service.createMemo(meeting.id, {
       body: "Current member wrote this.",
     });
 
     assert.equal(memo.authorMemberId, "00000000-0000-4000-8000-000000000001");
   });
 
-  it("creates and lists transcript segments in append order", () => {
+  it("creates and lists transcript segments in append order", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -390,15 +391,15 @@ describe("meeting module scaffold", () => {
     });
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Transcript meeting",
     });
 
-    const textSegment = controller.createTranscriptSegment(meeting.id, {
+    const textSegment = await controller.createTranscriptSegment(meeting.id, {
       speakerMemberId: "speaker-1",
       body: "Manual transcript input.",
     });
-    const sttSegment = controller.createTranscriptSegment(meeting.id, {
+    const sttSegment = await controller.createTranscriptSegment(meeting.id, {
       speakerMemberId: "speaker-1",
       source: "stt",
       body: "STT transcript input.",
@@ -409,13 +410,13 @@ describe("meeting module scaffold", () => {
     assert.equal(textSegment.source, "text");
     assert.equal(textSegment.speakerMemberId, "speaker-1");
     assert.equal(sttSegment.source, "stt");
-    assert.deepEqual(controller.listTranscriptSegments(meeting.id), [
+    assert.deepEqual(await controller.listTranscriptSegments(meeting.id), [
       textSegment,
       sttSegment,
     ]);
   });
 
-  it("rejects invalid transcript source, time range, and speaker workspace", () => {
+  it("rejects invalid transcript source, time range, and speaker workspace", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -423,24 +424,24 @@ describe("meeting module scaffold", () => {
       workspaceId: "workspace-2",
     });
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Transcript validation meeting",
     });
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createTranscriptSegment(meeting.id, {
         source: "voice",
         body: "Invalid source.",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createTranscriptSegment(meeting.id, {
         body: "Invalid time range.",
         startedAt: "2026-06-28T09:00:05.000Z",
         endedAt: "2026-06-28T09:00:00.000Z",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createTranscriptSegment(meeting.id, {
         speakerMemberId: "speaker-2",
         body: "Wrong workspace.",
@@ -448,12 +449,12 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("generates, reads, and lists recent meeting reports", () => {
+  it("generates, reads, and lists recent meeting reports", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Report meeting",
     });
     controller.createMemo(meeting.id, {
@@ -463,7 +464,7 @@ describe("meeting module scaffold", () => {
       body: "Transcript source.",
     });
 
-    const report = controller.requestReportGeneration(meeting.id);
+    const report = await controller.requestReportGeneration(meeting.id);
 
     assert.equal(report.meetingId, meeting.id);
     assert.equal(report.workspaceId, "workspace-1");
@@ -492,9 +493,9 @@ describe("meeting module scaffold", () => {
       report.nextAgendas[0].title,
       "Report meeting 후속 진행 상황 확인",
     );
-    assert.equal(controller.listActionItems(report.id)[0].status, "draft");
-    assert.deepEqual(controller.getReport(report.id), report);
-    const recentReports = controller.listRecentReports("workspace-1");
+    assert.equal((await controller.listActionItems(report.id))[0].status, "draft");
+    assert.deepEqual(await controller.getReport(report.id), report);
+    const recentReports = await controller.listRecentReports("workspace-1");
 
     assert.deepEqual(recentReports, [
       {
@@ -512,10 +513,10 @@ describe("meeting module scaffold", () => {
     assert.equal("decisions" in recentReports[0], false);
     assert.equal("risks" in recentReports[0], false);
     assert.equal("nextAgendas" in recentReports[0], false);
-    assert.equal(controller.getMeeting(meeting.id).status, "report_generated");
+    assert.equal((await controller.getMeeting(meeting.id)).status, "report_generated");
   });
 
-  it("builds deterministic report workflow output with trace and no LLM call", () => {
+  it("builds deterministic report workflow output with trace and no LLM call", async () => {
     const workflowClient = new MockMeetingReportWorkflowClient();
 
     const output = workflowClient.generateReport({
@@ -549,22 +550,22 @@ describe("meeting module scaffold", () => {
     assert.deepEqual(emptyOutput.actionItems, []);
   });
 
-  it("adapts recent meeting reports to Dashboard and Canvas fixture shapes", () => {
+  it("adapts recent meeting reports to Dashboard and Canvas fixture shapes", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Dashboard report meeting",
     });
     controller.createMemo(meeting.id, {
       body: "Dashboard needs report summary counts.",
     });
 
-    const report = controller.requestReportGeneration(meeting.id);
-    const [summary] = controller.listRecentReports("workspace-1");
+    const report = await controller.requestReportGeneration(meeting.id);
+    const [summary] = await controller.listRecentReports("workspace-1");
     const [canvasEntityRef] =
-      controller.listRecentReportCanvasEntityRefs("workspace-1");
+      await controller.listRecentReportCanvasEntityRefs("workspace-1");
     const fixtureSummary = workspaceDashboardFixture.meetingReports[0];
     const fixtureCanvasEntityRef =
       workspaceDashboardFixture.canvasEntities.find(
@@ -590,36 +591,36 @@ describe("meeting module scaffold", () => {
     });
   });
 
-  it("creates and lists meeting report read models", () => {
+  it("creates and lists meeting report read models", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Report read model meeting",
     });
-    const report = controller.createReport(meeting.id);
+    const report = await controller.createReport(meeting.id);
 
-    const defaultDecision = controller.createDecision(report.id, {
+    const defaultDecision = await controller.createDecision(report.id, {
       content: "Use the existing meeting contract.",
     });
-    const pendingDecision = controller.createDecision(report.id, {
+    const pendingDecision = await controller.createDecision(report.id, {
       content: "Confirm production repository migration timing.",
       status: "pending",
       linkedTaskId: "task-draft-1",
     });
-    const defaultRisk = controller.createRisk(report.id, {
+    const defaultRisk = await controller.createRisk(report.id, {
       content: "Task API may not be merged before conversion work.",
     });
-    const highRisk = controller.createRisk(report.id, {
+    const highRisk = await controller.createRisk(report.id, {
       content: "Contract drift can break Dashboard adapters.",
       severity: "high",
       sortOrder: 2,
     });
-    const firstNextAgenda = controller.createNextAgenda(report.id, {
+    const firstNextAgenda = await controller.createNextAgenda(report.id, {
       title: "Review report generation output.",
     });
-    const secondNextAgenda = controller.createNextAgenda(report.id, {
+    const secondNextAgenda = await controller.createNextAgenda(report.id, {
       title: "Confirm Dashboard summary fields.",
       sortOrder: 2,
     });
@@ -628,7 +629,7 @@ describe("meeting module scaffold", () => {
     assert.equal(defaultDecision.linkedTaskId, null);
     assert.equal(pendingDecision.status, "pending");
     assert.equal(pendingDecision.linkedTaskId, "task-draft-1");
-    assert.deepEqual(controller.listDecisions(report.id), [
+    assert.deepEqual(await controller.listDecisions(report.id), [
       defaultDecision,
       pendingDecision,
     ]);
@@ -636,15 +637,15 @@ describe("meeting module scaffold", () => {
     assert.equal(defaultRisk.severity, "medium");
     assert.equal(defaultRisk.sortOrder, 0);
     assert.equal(highRisk.severity, "high");
-    assert.deepEqual(controller.listRisks(report.id), [defaultRisk, highRisk]);
+    assert.deepEqual(await controller.listRisks(report.id), [defaultRisk, highRisk]);
 
     assert.equal(firstNextAgenda.sortOrder, 0);
-    assert.deepEqual(controller.listNextAgendas(report.id), [
+    assert.deepEqual(await controller.listNextAgendas(report.id), [
       firstNextAgenda,
       secondNextAgenda,
     ]);
 
-    const reportDetail = controller.getReport(report.id);
+    const reportDetail = await controller.getReport(report.id);
 
     assert.deepEqual(reportDetail.decisions, [
       defaultDecision,
@@ -659,7 +660,7 @@ describe("meeting module scaffold", () => {
     assert.equal(reportDetail.actionItemCount, 0);
     assert.equal(reportDetail.riskCount, 2);
 
-    const [summary] = controller.listRecentReports("workspace-1");
+    const [summary] = await controller.listRecentReports("workspace-1");
 
     assert.equal(summary.decisionCount, 2);
     assert.equal(summary.actionItemCount, 0);
@@ -669,14 +670,14 @@ describe("meeting module scaffold", () => {
     assert.equal("nextAgendas" in summary, false);
   });
 
-  it("rejects invalid report read model enum values and sort orders", () => {
+  it("rejects invalid report read model enum values and sort orders", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Report read model validation meeting",
     });
-    const report = service.createReport(meeting.id);
+    const report = await service.createReport(meeting.id);
 
     service.createRisk(report.id, {
       content: "Known risk.",
@@ -687,31 +688,31 @@ describe("meeting module scaffold", () => {
       sortOrder: 0,
     });
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createDecision(report.id, {
         content: "Invalid decision status.",
         status: "done",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createRisk(report.id, {
         content: "Invalid risk severity.",
         severity: "urgent",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createRisk(report.id, {
         content: "Duplicate risk order.",
         sortOrder: 0,
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createRisk(report.id, {
         content: "Negative risk order.",
         sortOrder: -1,
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createNextAgenda(report.id, {
         title: "Duplicate next agenda order.",
         sortOrder: 0,
@@ -719,7 +720,7 @@ describe("meeting module scaffold", () => {
     );
   });
 
-  it("creates and lists meeting action items with workspace assignee suggestions", () => {
+  it("creates and lists meeting action items with workspace assignee suggestions", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -729,12 +730,12 @@ describe("meeting module scaffold", () => {
     });
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Action item meeting",
     });
-    const report = controller.createReport(meeting.id);
+    const report = await controller.createReport(meeting.id);
 
-    const actionItem = controller.createActionItem(report.id, {
+    const actionItem = await controller.createActionItem(report.id, {
       title: "Write Task API contract",
       description: "Align TaskCreateDraft fields before adapter work.",
       assigneeSuggestionMemberId: "assignee-1",
@@ -752,53 +753,53 @@ describe("meeting module scaffold", () => {
     assert.equal(actionItem.status, "draft");
     assert.equal(actionItem.convertedTaskId, null);
     assert.equal("createdAt" in actionItem, false);
-    assert.deepEqual(controller.listActionItems(report.id), [actionItem]);
+    assert.deepEqual(await controller.listActionItems(report.id), [actionItem]);
 
-    const reportDetail = controller.getReport(report.id);
-    const [summary] = controller.listRecentReports("workspace-1");
+    const reportDetail = await controller.getReport(report.id);
+    const [summary] = await controller.listRecentReports("workspace-1");
 
     assert.equal(reportDetail.actionItemCount, 1);
     assert.equal(summary.actionItemCount, 1);
   });
 
-  it("transitions meeting action items through approved, converted, and rejected states", () => {
+  it("transitions meeting action items through approved, converted, and rejected states", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Action item lifecycle meeting",
     });
-    const report = controller.createReport(meeting.id);
-    const convertTarget = controller.createActionItem(report.id, {
+    const report = await controller.createReport(meeting.id);
+    const convertTarget = await controller.createActionItem(report.id, {
       title: "Convert this item",
     });
-    const rejectTarget = controller.createActionItem(report.id, {
+    const rejectTarget = await controller.createActionItem(report.id, {
       title: "Reject this item",
     });
 
-    const approved = controller.approveActionItem(convertTarget.id);
+    const approved = await controller.approveActionItem(convertTarget.id);
 
     assert.equal(approved.status, "approved");
     assert.equal(approved.convertedTaskId, null);
-    assert.throws(() => controller.approveActionItem(convertTarget.id));
+    await assert.rejects(async () => controller.approveActionItem(convertTarget.id));
 
-    const converted = controller.markActionItemConverted(convertTarget.id, {
+    const converted = await controller.markActionItemConverted(convertTarget.id, {
       convertedTaskId: "task-1",
     });
 
     assert.equal(converted.status, "converted");
     assert.equal(converted.convertedTaskId, "task-1");
-    assert.throws(() => controller.rejectActionItem(convertTarget.id));
+    await assert.rejects(async () => controller.rejectActionItem(convertTarget.id));
 
-    const rejected = controller.rejectActionItem(rejectTarget.id);
+    const rejected = await controller.rejectActionItem(rejectTarget.id);
 
     assert.equal(rejected.status, "rejected");
     assert.equal(rejected.convertedTaskId, null);
-    assert.throws(() => controller.rejectActionItem(rejectTarget.id));
+    await assert.rejects(async () => controller.rejectActionItem(rejectTarget.id));
   });
 
-  it("rejects invalid meeting action item assignees, dates, and conversions", () => {
+  it("rejects invalid meeting action item assignees, dates, and conversions", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -806,35 +807,35 @@ describe("meeting module scaffold", () => {
       workspaceId: "workspace-2",
     });
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Action item validation meeting",
     });
-    const report = service.createReport(meeting.id);
-    const actionItem = service.createActionItem(report.id, {
+    const report = await service.createReport(meeting.id);
+    const actionItem = await service.createActionItem(report.id, {
       title: "Needs approval before conversion",
     });
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createActionItem(report.id, {
         title: "Wrong assignee",
         assigneeSuggestionMemberId: "external-assignee",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.createActionItem(report.id, {
         title: "Invalid due date",
         dueDateSuggestion: "2026-02-31",
       }),
     );
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.markActionItemConverted(actionItem.id, {
         convertedTaskId: "task-1",
       }),
     );
-    assert.throws(() => {
-      const approved = service.approveActionItem(actionItem.id);
+    await assert.rejects(async () => {
+      const approved = await service.approveActionItem(actionItem.id);
 
-      service.markActionItemConverted(approved.id, {});
+      await service.markActionItemConverted(approved.id, {});
     });
   });
 
@@ -847,17 +848,17 @@ describe("meeting module scaffold", () => {
     });
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Task draft meeting",
     });
-    const report = controller.createReport(meeting.id);
-    const actionItem = controller.createActionItem(report.id, {
+    const report = await controller.createReport(meeting.id);
+    const actionItem = await controller.createActionItem(report.id, {
       title: "Create TaskCreateDraft adapter",
       description: "Map MeetingActionItem to the Task draft contract.",
       assigneeSuggestionMemberId: "task-assignee",
       dueDateSuggestion: "2026-07-03",
     });
-    const approvedActionItem = controller.approveActionItem(actionItem.id);
+    const approvedActionItem = await controller.approveActionItem(actionItem.id);
 
     const result = await controller.requestActionItemTaskDraft(
       approvedActionItem.id,
@@ -881,7 +882,7 @@ describe("meeting module scaffold", () => {
     });
     assert.equal(result.actionItem.status, "approved");
     assert.equal(result.actionItem.convertedTaskId, null);
-    assert.deepEqual(controller.listActionItems(report.id)[0], {
+    assert.deepEqual((await controller.listActionItems(report.id))[0], {
       ...approvedActionItem,
       status: "approved",
       convertedTaskId: null,
@@ -943,11 +944,11 @@ describe("meeting module scaffold", () => {
       currentMemberAdapter,
       failingTaskDraftClient,
     );
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Task draft failure meeting",
     });
-    const report = service.createReport(meeting.id);
-    const actionItem = service.createActionItem(report.id, {
+    const report = await service.createReport(meeting.id);
+    const actionItem = await service.createActionItem(report.id, {
       title: "Keep this approved on failure",
     });
 
@@ -955,45 +956,45 @@ describe("meeting module scaffold", () => {
       service.requestActionItemTaskDraft(actionItem.id),
     );
 
-    const approvedActionItem = service.approveActionItem(actionItem.id);
+    const approvedActionItem = await service.approveActionItem(actionItem.id);
 
     await assert.rejects(() =>
       service.requestActionItemTaskDraft(approvedActionItem.id),
     );
-    assert.deepEqual(service.listActionItems(report.id), [approvedActionItem]);
+    assert.deepEqual(await service.listActionItems(report.id), [approvedActionItem]);
   });
 
-  it("returns the existing report when report creation is requested twice", () => {
+  it("returns the existing report when report creation is requested twice", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
     const controller = new MeetingController(service);
-    const meeting = controller.createMeeting("workspace-1", {
+    const meeting = await controller.createMeeting("workspace-1", {
       title: "Duplicate report meeting",
     });
 
-    const firstReport = controller.createReport(meeting.id);
-    const secondReport = controller.createReport(meeting.id);
+    const firstReport = await controller.createReport(meeting.id);
+    const secondReport = await controller.createReport(meeting.id);
 
     assert.equal(firstReport.id, secondReport.id);
-    const [summary] = controller.listRecentReports("workspace-1");
+    const [summary] = await controller.listRecentReports("workspace-1");
 
     assert.equal(summary.id, firstReport.id);
     assert.equal("decisions" in summary, false);
   });
 
-  it("keeps meeting report lookup scoped to workspace", () => {
+  it("keeps meeting report lookup scoped to workspace", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const service = createMeetingService(repository, currentMemberAdapter);
-    const meeting = service.createMeeting("workspace-1", {
+    const meeting = await service.createMeeting("workspace-1", {
       title: "Report workspace guard meeting",
     });
-    const report = service.createReport(meeting.id);
+    const report = await service.createReport(meeting.id);
 
-    assert.throws(() =>
+    await assert.rejects(async () =>
       service.getReportForWorkspace("workspace-2", report.id),
     );
-    assert.deepEqual(service.listRecentReports("workspace-2"), []);
+    assert.deepEqual(await service.listRecentReports("workspace-2"), []);
   });
 });

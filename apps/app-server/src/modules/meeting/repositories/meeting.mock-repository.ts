@@ -32,7 +32,9 @@ import { MeetingRepository } from "./meeting.repository";
 
 @Injectable()
 export class MockMeetingRepository implements MeetingRepository {
-  readonly mode: MeetingRepositoryMode = "mock";
+  get mode(): MeetingRepositoryMode {
+    return "mock";
+  }
 
   private readonly meetings = new Map<string, MeetingRecord>();
   private readonly participants = new Map<string, MeetingParticipantRecord>();

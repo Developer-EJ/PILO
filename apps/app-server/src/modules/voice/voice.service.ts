@@ -55,11 +55,11 @@ export class VoiceService {
     };
   }
 
-  createVoiceRoom(
+  async createVoiceRoom(
     workspaceId: string,
     meetingId: string,
-  ): VoiceRoomResponseDto {
-    const meeting = this.meetingService.getMeetingForWorkspace(
+  ): Promise<VoiceRoomResponseDto> {
+    const meeting = await this.meetingService.getMeetingForWorkspace(
       this.requireNonEmptyString(workspaceId, "workspaceId"),
       this.requireNonEmptyString(meetingId, "meetingId"),
     );
@@ -85,11 +85,11 @@ export class VoiceService {
     return this.requireVoiceRoom(voiceRoomId);
   }
 
-  getVoiceRoomForMeeting(
+  async getVoiceRoomForMeeting(
     workspaceId: string,
     meetingId: string,
-  ): VoiceRoomResponseDto {
-    const meeting = this.meetingService.getMeetingForWorkspace(
+  ): Promise<VoiceRoomResponseDto> {
+    const meeting = await this.meetingService.getMeetingForWorkspace(
       this.requireNonEmptyString(workspaceId, "workspaceId"),
       this.requireNonEmptyString(meetingId, "meetingId"),
     );
@@ -102,12 +102,12 @@ export class VoiceService {
     return voiceRoom;
   }
 
-  resolveRouteWorkspaceId(input: {
+  async resolveRouteWorkspaceId(input: {
     workspaceId?: string;
     meetingId?: string;
     voiceRoomId?: string;
     voiceSessionId?: string;
-  }): string {
+  }): Promise<string> {
     if (input.voiceSessionId) {
       const voiceSession = this.requireVoiceSession(input.voiceSessionId);
       const voiceRoom = this.requireVoiceRoom(voiceSession.voiceRoomId);
@@ -131,11 +131,11 @@ export class VoiceService {
 
     if (input.meetingId) {
       const meeting = input.workspaceId
-        ? this.meetingService.getMeetingForWorkspace(
+        ? await this.meetingService.getMeetingForWorkspace(
             input.workspaceId,
             input.meetingId,
           )
-        : this.meetingService.getMeeting(input.meetingId);
+        : await this.meetingService.getMeeting(input.meetingId);
 
       return meeting.workspaceId;
     }
@@ -220,10 +220,10 @@ export class VoiceService {
     });
   }
 
-  submitAudioChunk(
+  async submitAudioChunk(
     voiceSessionId: string,
     requestBody: SubmitVoiceAudioChunkRequestDto,
-  ): VoiceAudioTranscriptResponseDto {
+  ): Promise<VoiceAudioTranscriptResponseDto> {
     const voiceSession = this.requireVoiceSession(voiceSessionId);
 
     this.assertVoiceSessionActive(voiceSession, "submit audio chunks for");
@@ -254,7 +254,7 @@ export class VoiceService {
 
     this.validateTimeRange(startedAt, endedAt);
 
-    const transcriptSegment = this.meetingService.createTranscriptSegment(
+    const transcriptSegment = await this.meetingService.createTranscriptSegment(
       voiceSession.meetingId,
       {
         speakerMemberId: voiceSession.memberId,

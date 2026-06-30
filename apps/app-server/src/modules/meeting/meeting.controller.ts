@@ -55,7 +55,7 @@ export class MeetingController {
   createMeeting(
     @Param("workspaceId") workspaceId: string,
     @Body() requestBody: CreateMeetingRequestDto,
-  ): MeetingResponseDto {
+  ): Promise<MeetingResponseDto> {
     return this.meetingService.createMeeting(workspaceId, requestBody);
   }
 
@@ -63,13 +63,15 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listMeetings(
     @Param("workspaceId") workspaceId: string,
-  ): MeetingResponseDto[] {
+  ): Promise<MeetingResponseDto[]> {
     return this.meetingService.listMeetings(workspaceId);
   }
 
   @Get("meetings/:meetingId")
   @UseGuards(MeetingRouteGuard)
-  getMeeting(@Param("meetingId") meetingId: string): MeetingResponseDto {
+  getMeeting(
+    @Param("meetingId") meetingId: string,
+  ): Promise<MeetingResponseDto> {
     return this.meetingService.getMeeting(meetingId);
   }
 
@@ -78,7 +80,7 @@ export class MeetingController {
   updateMeetingStatus(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: UpdateMeetingStatusRequestDto,
-  ): MeetingResponseDto {
+  ): Promise<MeetingResponseDto> {
     return this.meetingService.updateMeetingStatus(meetingId, requestBody);
   }
 
@@ -87,7 +89,7 @@ export class MeetingController {
   addParticipant(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateMeetingParticipantRequestDto,
-  ): MeetingParticipantResponseDto {
+  ): Promise<MeetingParticipantResponseDto> {
     return this.meetingService.addParticipant(meetingId, requestBody);
   }
 
@@ -95,7 +97,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listParticipants(
     @Param("meetingId") meetingId: string,
-  ): MeetingParticipantResponseDto[] {
+  ): Promise<MeetingParticipantResponseDto[]> {
     return this.meetingService.listParticipants(meetingId);
   }
 
@@ -104,7 +106,7 @@ export class MeetingController {
   leaveParticipant(
     @Param("meetingId") meetingId: string,
     @Param("participantId") participantId: string,
-  ): MeetingParticipantResponseDto {
+  ): Promise<MeetingParticipantResponseDto> {
     return this.meetingService.leaveParticipant(meetingId, participantId);
   }
 
@@ -113,7 +115,7 @@ export class MeetingController {
   createAgenda(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateMeetingAgendaRequestDto,
-  ): MeetingAgendaResponseDto {
+  ): Promise<MeetingAgendaResponseDto> {
     return this.meetingService.createAgenda(meetingId, requestBody);
   }
 
@@ -121,7 +123,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listAgendas(
     @Param("meetingId") meetingId: string,
-  ): MeetingAgendaResponseDto[] {
+  ): Promise<MeetingAgendaResponseDto[]> {
     return this.meetingService.listAgendas(meetingId);
   }
 
@@ -131,7 +133,7 @@ export class MeetingController {
     @Param("meetingId") meetingId: string,
     @Param("agendaId") agendaId: string,
     @Body() requestBody: UpdateMeetingAgendaStatusRequestDto,
-  ): MeetingAgendaResponseDto {
+  ): Promise<MeetingAgendaResponseDto> {
     return this.meetingService.updateAgendaStatus(
       meetingId,
       agendaId,
@@ -145,7 +147,7 @@ export class MeetingController {
     @Param("meetingId") meetingId: string,
     @Param("agendaId") agendaId: string,
     @Body() requestBody: ReorderMeetingAgendaRequestDto,
-  ): MeetingAgendaResponseDto {
+  ): Promise<MeetingAgendaResponseDto> {
     return this.meetingService.reorderAgenda(meetingId, agendaId, requestBody);
   }
 
@@ -154,13 +156,15 @@ export class MeetingController {
   createMemo(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateMeetingMemoRequestDto,
-  ): MeetingMemoResponseDto {
+  ): Promise<MeetingMemoResponseDto> {
     return this.meetingService.createMemo(meetingId, requestBody);
   }
 
   @Get("meetings/:meetingId/memos")
   @UseGuards(MeetingRouteGuard)
-  listMemos(@Param("meetingId") meetingId: string): MeetingMemoResponseDto[] {
+  listMemos(
+    @Param("meetingId") meetingId: string,
+  ): Promise<MeetingMemoResponseDto[]> {
     return this.meetingService.listMemos(meetingId);
   }
 
@@ -169,7 +173,7 @@ export class MeetingController {
   createTranscriptSegment(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateTranscriptSegmentRequestDto,
-  ): TranscriptSegmentResponseDto {
+  ): Promise<TranscriptSegmentResponseDto> {
     return this.meetingService.createTranscriptSegment(meetingId, requestBody);
   }
 
@@ -177,7 +181,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listTranscriptSegments(
     @Param("meetingId") meetingId: string,
-  ): TranscriptSegmentResponseDto[] {
+  ): Promise<TranscriptSegmentResponseDto[]> {
     return this.meetingService.listTranscriptSegments(meetingId);
   }
 
@@ -185,7 +189,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   requestReportGeneration(
     @Param("meetingId") meetingId: string,
-  ): MeetingReportResponseDto {
+  ): Promise<MeetingReportResponseDto> {
     return this.meetingService.requestReportGeneration(meetingId);
   }
 
@@ -193,13 +197,15 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   createReport(
     @Param("meetingId") meetingId: string,
-  ): MeetingReportResponseDto {
+  ): Promise<MeetingReportResponseDto> {
     return this.meetingService.createReport(meetingId);
   }
 
   @Get("meeting-reports/:reportId")
   @UseGuards(MeetingRouteGuard)
-  getReport(@Param("reportId") reportId: string): MeetingReportResponseDto {
+  getReport(
+    @Param("reportId") reportId: string,
+  ): Promise<MeetingReportResponseDto> {
     return this.meetingService.getReport(reportId);
   }
 
@@ -207,7 +213,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listRecentReports(
     @Param("workspaceId") workspaceId: string,
-  ): MeetingReportSummaryDto[] {
+  ): Promise<MeetingReportSummaryDto[]> {
     return this.meetingService.listRecentReports(workspaceId);
   }
 
@@ -215,7 +221,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listRecentReportCanvasEntityRefs(
     @Param("workspaceId") workspaceId: string,
-  ): MeetingReportCanvasEntityRefDto[] {
+  ): Promise<MeetingReportCanvasEntityRefDto[]> {
     return this.meetingService.listRecentReportCanvasEntityRefs(workspaceId);
   }
 
@@ -224,7 +230,7 @@ export class MeetingController {
   createDecision(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingDecisionRequestDto,
-  ): MeetingDecisionResponseDto {
+  ): Promise<MeetingDecisionResponseDto> {
     return this.meetingService.createDecision(reportId, requestBody);
   }
 
@@ -232,7 +238,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listDecisions(
     @Param("reportId") reportId: string,
-  ): MeetingDecisionResponseDto[] {
+  ): Promise<MeetingDecisionResponseDto[]> {
     return this.meetingService.listDecisions(reportId);
   }
 
@@ -241,7 +247,7 @@ export class MeetingController {
   createRisk(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingReportRiskRequestDto,
-  ): MeetingReportRiskResponseDto {
+  ): Promise<MeetingReportRiskResponseDto> {
     return this.meetingService.createRisk(reportId, requestBody);
   }
 
@@ -249,7 +255,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listRisks(
     @Param("reportId") reportId: string,
-  ): MeetingReportRiskResponseDto[] {
+  ): Promise<MeetingReportRiskResponseDto[]> {
     return this.meetingService.listRisks(reportId);
   }
 
@@ -258,7 +264,7 @@ export class MeetingController {
   createNextAgenda(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingReportNextAgendaRequestDto,
-  ): MeetingReportNextAgendaResponseDto {
+  ): Promise<MeetingReportNextAgendaResponseDto> {
     return this.meetingService.createNextAgenda(reportId, requestBody);
   }
 
@@ -266,7 +272,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listNextAgendas(
     @Param("reportId") reportId: string,
-  ): MeetingReportNextAgendaResponseDto[] {
+  ): Promise<MeetingReportNextAgendaResponseDto[]> {
     return this.meetingService.listNextAgendas(reportId);
   }
 
@@ -275,7 +281,7 @@ export class MeetingController {
   createActionItem(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingActionItemRequestDto,
-  ): MeetingActionItemResponseDto {
+  ): Promise<MeetingActionItemResponseDto> {
     return this.meetingService.createActionItem(reportId, requestBody);
   }
 
@@ -283,7 +289,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   listActionItems(
     @Param("reportId") reportId: string,
-  ): MeetingActionItemResponseDto[] {
+  ): Promise<MeetingActionItemResponseDto[]> {
     return this.meetingService.listActionItems(reportId);
   }
 
@@ -291,7 +297,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   approveActionItem(
     @Param("actionItemId") actionItemId: string,
-  ): MeetingActionItemResponseDto {
+  ): Promise<MeetingActionItemResponseDto> {
     return this.meetingService.approveActionItem(actionItemId);
   }
 
@@ -299,7 +305,7 @@ export class MeetingController {
   @UseGuards(MeetingRouteGuard)
   rejectActionItem(
     @Param("actionItemId") actionItemId: string,
-  ): MeetingActionItemResponseDto {
+  ): Promise<MeetingActionItemResponseDto> {
     return this.meetingService.rejectActionItem(actionItemId);
   }
 
@@ -308,7 +314,7 @@ export class MeetingController {
   markActionItemConverted(
     @Param("actionItemId") actionItemId: string,
     @Body() requestBody: ConvertMeetingActionItemRequestDto,
-  ): MeetingActionItemResponseDto {
+  ): Promise<MeetingActionItemResponseDto> {
     return this.meetingService.markActionItemConverted(
       actionItemId,
       requestBody,

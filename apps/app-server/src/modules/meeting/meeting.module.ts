@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { DatabaseModule } from "../database/database.module";
 import { JuhyungModule } from "../juhyung/juhyung.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { CURRENT_MEMBER_ADAPTER } from "./adapters/current-member.adapter";
@@ -11,18 +12,18 @@ import { TASK_DRAFT_CLIENT } from "./adapters/task-draft.adapter";
 import { MeetingController } from "./meeting.controller";
 import { MeetingRouteGuard } from "./meeting-route.guard";
 import { MEETING_REPOSITORY } from "./repositories/meeting.repository";
-import { MockMeetingRepository } from "./repositories/meeting.mock-repository";
+import { RuntimeMeetingRepository } from "./repositories/meeting.runtime-repository";
 import { MeetingService } from "./meeting.service";
 
 @Module({
-  imports: [AuthModule, JuhyungModule, WorkspaceModule],
+  imports: [AuthModule, DatabaseModule, JuhyungModule, WorkspaceModule],
   controllers: [MeetingController],
   providers: [
     MeetingService,
     MeetingRouteGuard,
     {
       provide: MEETING_REPOSITORY,
-      useClass: MockMeetingRepository,
+      useClass: RuntimeMeetingRepository,
     },
     {
       provide: CURRENT_MEMBER_ADAPTER,

@@ -28,85 +28,122 @@ import {
 
 export const MEETING_REPOSITORY = Symbol("MEETING_REPOSITORY");
 
+type MaybePromise<T> = T | Promise<T>;
+
 export interface MeetingRepository {
   readonly mode: MeetingRepositoryMode;
 
   listMeetingStatusValues(): readonly MeetingStatus[];
 
-  createMeeting(input: CreateMeetingInput): MeetingRecord;
+  createMeeting(input: CreateMeetingInput): MaybePromise<MeetingRecord>;
 
-  listMeetingsByWorkspace(workspaceId: string): MeetingRecord[];
+  listMeetingsByWorkspace(
+    workspaceId: string,
+  ): MaybePromise<MeetingRecord[]>;
 
-  findMeetingById(meetingId: string): MeetingRecord | null;
+  findMeetingById(meetingId: string): MaybePromise<MeetingRecord | null>;
 
-  updateMeeting(meetingId: string, input: UpdateMeetingInput): MeetingRecord;
+  updateMeeting(
+    meetingId: string,
+    input: UpdateMeetingInput,
+  ): MaybePromise<MeetingRecord>;
 
   addParticipant(
     input: CreateMeetingParticipantInput,
-  ): MeetingParticipantRecord;
+  ): MaybePromise<MeetingParticipantRecord>;
 
-  listParticipantsByMeeting(meetingId: string): MeetingParticipantRecord[];
+  listParticipantsByMeeting(
+    meetingId: string,
+  ): MaybePromise<MeetingParticipantRecord[]>;
 
-  findParticipantById(participantId: string): MeetingParticipantRecord | null;
+  findParticipantById(
+    participantId: string,
+  ): MaybePromise<MeetingParticipantRecord | null>;
 
   leaveParticipant(
     participantId: string,
     leftAt: string,
-  ): MeetingParticipantRecord;
+  ): MaybePromise<MeetingParticipantRecord>;
 
-  createAgenda(input: CreateMeetingAgendaInput): MeetingAgendaRecord;
+  createAgenda(
+    input: CreateMeetingAgendaInput,
+  ): MaybePromise<MeetingAgendaRecord>;
 
-  listAgendasByMeeting(meetingId: string): MeetingAgendaRecord[];
+  listAgendasByMeeting(
+    meetingId: string,
+  ): MaybePromise<MeetingAgendaRecord[]>;
 
-  findAgendaById(agendaId: string): MeetingAgendaRecord | null;
+  findAgendaById(
+    agendaId: string,
+  ): MaybePromise<MeetingAgendaRecord | null>;
 
   updateAgenda(
     agendaId: string,
     input: UpdateMeetingAgendaInput,
-  ): MeetingAgendaRecord;
+  ): MaybePromise<MeetingAgendaRecord>;
 
-  createMemo(input: CreateMeetingMemoInput): MeetingMemoRecord;
+  createMemo(input: CreateMeetingMemoInput): MaybePromise<MeetingMemoRecord>;
 
-  listMemosByMeeting(meetingId: string): MeetingMemoRecord[];
+  listMemosByMeeting(meetingId: string): MaybePromise<MeetingMemoRecord[]>;
 
   createTranscriptSegment(
     input: CreateTranscriptSegmentInput,
-  ): TranscriptSegmentRecord;
+  ): MaybePromise<TranscriptSegmentRecord>;
 
-  listTranscriptSegmentsByMeeting(meetingId: string): TranscriptSegmentRecord[];
+  listTranscriptSegmentsByMeeting(
+    meetingId: string,
+  ): MaybePromise<TranscriptSegmentRecord[]>;
 
-  createReport(input: CreateMeetingReportInput): MeetingReportRecord;
+  createReport(
+    input: CreateMeetingReportInput,
+  ): MaybePromise<MeetingReportRecord>;
 
-  findReportById(reportId: string): MeetingReportRecord | null;
+  findReportById(reportId: string): MaybePromise<MeetingReportRecord | null>;
 
-  findReportByMeetingId(meetingId: string): MeetingReportRecord | null;
+  findReportByMeetingId(
+    meetingId: string,
+  ): MaybePromise<MeetingReportRecord | null>;
 
-  listReports(): MeetingReportRecord[];
+  listReports(): MaybePromise<MeetingReportRecord[]>;
 
-  createDecision(input: CreateMeetingDecisionInput): MeetingDecisionRecord;
+  createDecision(
+    input: CreateMeetingDecisionInput,
+  ): MaybePromise<MeetingDecisionRecord>;
 
-  listDecisionsByReport(reportId: string): MeetingDecisionRecord[];
+  listDecisionsByReport(
+    reportId: string,
+  ): MaybePromise<MeetingDecisionRecord[]>;
 
-  createRisk(input: CreateMeetingReportRiskInput): MeetingReportRiskRecord;
+  createRisk(
+    input: CreateMeetingReportRiskInput,
+  ): MaybePromise<MeetingReportRiskRecord>;
 
-  listRisksByReport(reportId: string): MeetingReportRiskRecord[];
+  listRisksByReport(
+    reportId: string,
+  ): MaybePromise<MeetingReportRiskRecord[]>;
 
   createNextAgenda(
     input: CreateMeetingReportNextAgendaInput,
-  ): MeetingReportNextAgendaRecord;
+  ): MaybePromise<MeetingReportNextAgendaRecord>;
 
-  listNextAgendasByReport(reportId: string): MeetingReportNextAgendaRecord[];
+  listNextAgendasByReport(
+    reportId: string,
+  ): MaybePromise<MeetingReportNextAgendaRecord[]>;
 
   createActionItem(
     input: CreateMeetingActionItemInput,
-  ): MeetingActionItemRecord;
+  ): MaybePromise<MeetingActionItemRecord>;
 
-  listActionItemsByReport(reportId: string): MeetingActionItemRecord[];
+  listActionItemsByReport(
+    reportId: string,
+  ): MaybePromise<MeetingActionItemRecord[]>;
 
-  findActionItemById(actionItemId: string): MeetingActionItemRecord | null;
+  findActionItemById(
+    actionItemId: string,
+  ): MaybePromise<MeetingActionItemRecord | null>;
 
   updateActionItem(
     actionItemId: string,
     input: UpdateMeetingActionItemInput,
-  ): MeetingActionItemRecord;
+  ): MaybePromise<MeetingActionItemRecord>;
 }

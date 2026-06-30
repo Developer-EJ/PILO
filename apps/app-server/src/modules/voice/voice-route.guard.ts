@@ -36,7 +36,7 @@ export class VoiceRouteGuard implements CanActivate {
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<VoiceRouteGuardRequest>();
     const params = request.params ?? {};
-    const workspaceId = this.voiceService.resolveRouteWorkspaceId({
+    const workspaceId = await this.voiceService.resolveRouteWorkspaceId({
       workspaceId: params.workspaceId,
       meetingId: params.meetingId,
       voiceRoomId: params.voiceRoomId,
