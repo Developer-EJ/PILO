@@ -42,15 +42,18 @@ import { ReviewRoomService } from "./room/review-room.service";
       useFactory: (
         repository: InMemoryPullRequestAnalysisRepository,
         pullRequestRegistry: PullRequestSummaryRegistry,
+        graphService: ReviewGraphService,
       ) =>
         new PullRequestAnalysisService(
           repository,
           { seedFixture: true },
           pullRequestRegistry,
+          graphService,
         ),
       inject: [
         InMemoryPullRequestAnalysisRepository,
         PullRequestSummaryRegistry,
+        ReviewGraphService,
       ],
     },
     ReviewArtifactsService,

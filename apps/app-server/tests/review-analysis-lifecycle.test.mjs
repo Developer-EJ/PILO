@@ -18,11 +18,17 @@ const {
   InMemoryCodeReviewRoomRepository,
 } = require("../src/modules/review/room/in-memory-code-review-room.repository.ts");
 const {
+  InMemoryReviewGraphRepository,
+} = require("../src/modules/review/graph/in-memory-review-graph.repository.ts");
+const {
   PullRequestSummaryRegistry,
 } = require("../src/modules/review/room/pull-request-summary.registry.ts");
 const {
   ReviewRoomService,
 } = require("../src/modules/review/room/review-room.service.ts");
+const {
+  ReviewGraphService,
+} = require("../src/modules/review/graph/review-graph.service.ts");
 
 function createService(options = {}) {
   return new PullRequestAnalysisService(
@@ -93,6 +99,9 @@ describe("PR analysis lifecycle API boundary", () => {
 
   it("requests analysis for runtime PR summaries registered by review rooms", () => {
     const pullRequestRegistry = new PullRequestSummaryRegistry();
+    const graphService = new ReviewGraphService(
+      new InMemoryReviewGraphRepository(),
+    );
     const roomService = new ReviewRoomService(
       new InMemoryCodeReviewRoomRepository(),
       pullRequestRegistry,
@@ -101,6 +110,7 @@ describe("PR analysis lifecycle API boundary", () => {
       new InMemoryPullRequestAnalysisRepository(),
       {},
       pullRequestRegistry,
+      graphService,
     );
     const pullRequest = {
       id: "77777777-7777-4777-8777-777777777771",
@@ -132,6 +142,17 @@ describe("PR analysis lifecycle API boundary", () => {
 
     assert.equal(analysis.pullRequestId, pullRequest.id);
     assert.equal(analysis.analysisStatus, "pending");
+    assert.deepEqual(graphService.getGraph(analysis.id), {
+      id: `pending-review-graph-${analysis.id}`,
+      analysisId: analysis.id,
+      summary: null,
+      intentSummary:
+        "Analysis is pending. The review graph will be populated after analyzer output arrives.",
+      reviewStrategy:
+        "Keep the review canvas available with no nodes until analysis results are written.",
+      reviewOrder: [],
+      nodes: [],
+    });
   });
 });
 

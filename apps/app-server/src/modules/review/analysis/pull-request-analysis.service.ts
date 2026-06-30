@@ -6,6 +6,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import type { ReviewAnalysisStatus } from "../public";
+import { ReviewGraphService } from "../graph/review-graph.service";
 import { PullRequestSummaryRegistry } from "../room/pull-request-summary.registry";
 import { InMemoryPullRequestAnalysisRepository } from "./in-memory-pull-request-analysis.repository";
 import {
@@ -38,6 +39,8 @@ export class PullRequestAnalysisService {
     @Optional()
     options: PullRequestAnalysisServiceOptions = {},
     private readonly pullRequestRegistry: PullRequestSummaryRegistry = new PullRequestSummaryRegistry(),
+    @Optional()
+    private readonly graphService?: ReviewGraphService,
   ) {
     if (options.seedFixture) {
       this.seedFixture();
@@ -50,14 +53,18 @@ export class PullRequestAnalysisService {
     const existing = this.analysisRepository.findByPullRequestId(pullRequestId);
 
     if (existing) {
+      this.ensurePendingGraph(existing);
       return existing;
     }
 
-    return this.analysisRepository.create({
+    const created = this.analysisRepository.create({
       id: randomUUID(),
       pullRequestId,
       createdAt: new Date().toISOString(),
     });
+
+    this.ensurePendingGraph(created);
+    return created;
   }
 
   getAnalysis(pullRequestId: string): PullRequestAnalysisRecord {
@@ -140,6 +147,14 @@ export class PullRequestAnalysisService {
         `PullRequestSummary was not found: ${pullRequestId}`,
       );
     }
+  }
+
+  private ensurePendingGraph(analysis: PullRequestAnalysisRecord): void {
+    if (analysis.analysisStatus !== "pending") {
+      return;
+    }
+
+    this.graphService?.ensurePendingGraph(analysis.id);
   }
 
   private toResultPatch(

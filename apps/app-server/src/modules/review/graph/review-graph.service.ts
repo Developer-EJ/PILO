@@ -33,6 +33,27 @@ export class ReviewGraphService {
     }
   }
 
+  ensurePendingGraph(analysisId: string): ReviewGraphSummary {
+    const existing = this.graphRepository.findGraphByAnalysis(analysisId);
+
+    if (existing) {
+      return this.toSummary(existing);
+    }
+
+    return this.toSummary(
+      this.graphRepository.saveGraph({
+        id: `pending-review-graph-${analysisId}`,
+        analysisId,
+        summary: null,
+        intentSummary:
+          "Analysis is pending. The review graph will be populated after analyzer output arrives.",
+        reviewStrategy:
+          "Keep the review canvas available with no nodes until analysis results are written.",
+        reviewOrder: [],
+      }),
+    );
+  }
+
   getGraph(analysisId: string): ReviewGraphSummary {
     const graph = this.graphRepository.findGraphByAnalysis(analysisId);
 
@@ -40,6 +61,17 @@ export class ReviewGraphService {
       throw new NotFoundException(`Review graph was not found: ${analysisId}`);
     }
 
+    return this.toSummary(graph);
+  }
+
+  private toSummary(graph: {
+    id: string;
+    analysisId: string;
+    summary: string | null;
+    intentSummary: string;
+    reviewStrategy: string;
+    reviewOrder: string[];
+  }): ReviewGraphSummary {
     return {
       id: graph.id,
       analysisId: graph.analysisId,
