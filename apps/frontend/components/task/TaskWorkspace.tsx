@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createTaskGithubProgressClient,
@@ -141,6 +141,61 @@ type ProgressSummary = {
   capturedAt: string;
 };
 
+type DashboardTaskTab = "all" | "mine" | "upcoming" | "completed";
+
+type CalendarDay = {
+  date: Date;
+  isToday: boolean;
+  key: string;
+  label: string;
+  weekday: string;
+};
+
+const dashboardTaskTabs: Array<{ id: DashboardTaskTab; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "mine", label: "My Tasks" },
+  { id: "upcoming", label: "Upcoming" },
+  { id: "completed", label: "Completed" },
+];
+
+const calendarHours = [
+  "8 AM",
+  "9 AM",
+  "10 AM",
+  "11 AM",
+  "12 PM",
+  "1 PM",
+  "2 PM",
+  "3 PM",
+  "4 PM",
+  "5 PM",
+  "6 PM",
+];
+
+const calendarWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const monthLabels = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+const dashboardStatusLabels: Record<string, string> = {
+  todo: "Pending",
+  in_progress: "In Progress",
+  in_review: "Scheduled",
+  done: "Completed",
+  blocked: "Blocked",
+};
+
 const statusLabels: Record<string, string> = {
   todo: "할 일",
   in_progress: "진행 중",
@@ -201,9 +256,7 @@ function cx(...classNames: Array<string | false | null | undefined>) {
 }
 
 function memberLabel(member?: MemberSummary | null) {
-  return (
-    member?.name ?? member?.displayName ?? member?.memberId ?? "미배정"
-  );
+  return member?.name ?? member?.displayName ?? member?.memberId ?? "미배정";
 }
 
 function taskAssigneeLabel(task: TaskSummary) {
@@ -236,6 +289,175 @@ function activityLabel(action: string) {
 
 function formatDate(value?: string | null) {
   return value ? value.slice(0, 10) : "-";
+}
+
+function parseDateOnly(value?: string | null) {
+  if (!value) return null;
+
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  return new Date(year, month - 1, day);
+}
+
+function todayDateOnly() {
+  const now = new Date();
+
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function dateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function taskDateKey(task: TaskSummary) {
+  const date = parseDateOnly(task.dueDate);
+
+  return date ? dateKey(date) : "unscheduled";
+}
+
+function formatCalendarDate(date: Date) {
+  return `${monthLabels[date.getMonth()]} ${date.getDate()}`;
+}
+
+function formatTaskDate(value?: string | null) {
+  const date = parseDateOnly(value);
+
+  return date ? formatCalendarDate(date) : "No date";
+}
+
+function startOfWeek(date: Date) {
+  const start = new Date(date);
+  const day = start.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+
+  start.setDate(start.getDate() + diff);
+
+  return start;
+}
+
+function buildCalendarWeek(weekOffset: number): CalendarDay[] {
+  const today = todayDateOnly();
+  const start = startOfWeek(today);
+  start.setDate(start.getDate() + weekOffset * 7);
+
+  return calendarWeekdays.map((weekday, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+
+    return {
+      date,
+      isToday: dateKey(date) === dateKey(today),
+      key: dateKey(date),
+      label: formatCalendarDate(date),
+      weekday,
+    };
+  });
+}
+
+function formatWeekRange(days: CalendarDay[]) {
+  const first = days[0]?.date;
+  const last = days[days.length - 1]?.date;
+
+  if (!first || !last) return "";
+
+  return `${formatCalendarDate(first)} - ${formatCalendarDate(last)}, ${last.getFullYear()}`;
+}
+
+function dashboardStatusLabel(status: string) {
+  return dashboardStatusLabels[status] ?? status;
+}
+
+function dashboardStatusClass(status: string) {
+  if (status === "todo") return styles.dashboardStatusPending;
+  if (status === "in_progress") return styles.dashboardStatusProgress;
+  if (status === "in_review") return styles.dashboardStatusScheduled;
+  if (status === "done") return styles.dashboardStatusCompleted;
+  if (status === "blocked") return styles.dashboardStatusBlocked;
+
+  return "";
+}
+
+function dashboardEventClass(status: string) {
+  if (status === "todo") return styles.calendarEventPending;
+  if (status === "in_progress") return styles.calendarEventProgress;
+  if (status === "in_review") return styles.calendarEventScheduled;
+  if (status === "done") return styles.calendarEventCompleted;
+  if (status === "blocked") return styles.calendarEventBlocked;
+
+  return "";
+}
+
+function isCompletedTask(task: TaskSummary) {
+  return task.status === "done";
+}
+
+function filterDashboardTasks(
+  tasks: TaskSummary[],
+  tab: DashboardTaskTab,
+  currentMemberId?: string,
+) {
+  if (tab === "mine") {
+    return currentMemberId
+      ? tasks.filter((task) => task.assignee?.memberId === currentMemberId)
+      : [];
+  }
+
+  if (tab === "upcoming") {
+    const today = todayDateOnly();
+
+    return tasks.filter((task) => {
+      const dueDate = parseDateOnly(task.dueDate);
+
+      return Boolean(dueDate && dueDate >= today && !isCompletedTask(task));
+    });
+  }
+
+  if (tab === "completed") {
+    return tasks.filter(isCompletedTask);
+  }
+
+  return tasks;
+}
+
+function groupTasksByDate(tasks: TaskSummary[]) {
+  return tasks.reduce<Record<string, TaskSummary[]>>((groups, task) => {
+    const key = taskDateKey(task);
+
+    return {
+      ...groups,
+      [key]: [...(groups[key] ?? []), task],
+    };
+  }, {});
+}
+
+function calendarEventStyle(
+  dayIndex: number,
+  task: TaskSummary,
+  taskIndex: number,
+): CSSProperties {
+  const statusOffset =
+    task.status === "done"
+      ? 4
+      : task.status === "in_review"
+        ? 3
+        : task.status === "blocked"
+          ? 2
+          : task.status === "todo"
+            ? 1
+            : 0;
+  const rowCount = Math.max(1, calendarHours.length - 2);
+  const startRow = 1 + ((taskIndex * 2 + dayIndex + statusOffset) % rowCount);
+  const rowSpan = task.status === "todo" ? 2 : 3;
+
+  return {
+    gridRow: `${startRow} / span ${rowSpan}`,
+  };
 }
 
 function statusClass(status: string) {
@@ -314,6 +536,9 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
   const [priorityFilter, setPriorityFilter] = useState("");
   const [milestoneFilter, setMilestoneFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [taskTab, setTaskTab] = useState<DashboardTaskTab>("all");
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -321,6 +546,29 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
   const [installUrl, setInstallUrl] = useState<string | null>(null);
 
   const filteredTasks = visibleTasks(sortByUpdatedAt(tasks), search);
+  const currentMemberId =
+    fixture.currentMember?.memberId ?? members[0]?.memberId;
+  const dashboardTasks = useMemo(
+    () => filterDashboardTasks(filteredTasks, taskTab, currentMemberId),
+    [currentMemberId, filteredTasks, taskTab],
+  );
+  const calendarDays = useMemo(
+    () => buildCalendarWeek(calendarWeekOffset),
+    [calendarWeekOffset],
+  );
+  const calendarTasksByDate = useMemo(
+    () => groupTasksByDate(filteredTasks),
+    [filteredTasks],
+  );
+  const weekRangeLabel = useMemo(
+    () => formatWeekRange(calendarDays),
+    [calendarDays],
+  );
+  const completedTaskCount = useMemo(
+    () => tasks.filter(isCompletedTask).length,
+    [tasks],
+  );
+  const activeTaskCount = Math.max(0, tasks.length - completedTaskCount);
 
   const refreshDomainData = useCallback(async () => {
     setLoading(true);
@@ -468,6 +716,17 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
     });
   }
 
+  async function handleCreateQuickTask(event: FormEvent<HTMLFormElement>) {
+    const form = event.currentTarget;
+    const title = String(new FormData(form).get("title") ?? "").trim();
+
+    await handleCreateTask(event);
+
+    if (title) {
+      setIsQuickAddOpen(false);
+    }
+  }
+
   async function handleCreateMilestone(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -559,233 +818,527 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
   }
 
   const renderTaskBoard = () => (
-    <div className={styles.workGrid}>
-      <section className={styles.stack}>
-        <div className={styles.toolbar}>
-          <input
-            aria-label="작업 검색"
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="작업 제목 검색"
-            value={search}
-          />
-          <select
-            aria-label="상태 필터"
-            onChange={(event) => setStatusFilter(event.target.value)}
-            value={statusFilter}
-          >
-            <option value="">모든 상태</option>
-            {taskStatuses.map((status) => (
-              <option key={status} value={status}>
-                {statusLabel(status)}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="우선순위 필터"
-            onChange={(event) => setPriorityFilter(event.target.value)}
-            value={priorityFilter}
-          >
-            <option value="">모든 우선순위</option>
-            {taskPriorities.map((priority) => (
-              <option key={priority} value={priority}>
-                {priorityLabel(priority)}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="마일스톤 필터"
-            onChange={(event) => setMilestoneFilter(event.target.value)}
-            value={milestoneFilter}
-          >
-            <option value="">모든 마일스톤</option>
-            {milestones.map((milestone) => (
-              <option key={milestone.id} value={milestone.id}>
-                {milestone.title}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <h2>작업 목록</h2>
-            <span>{filteredTasks.length}개 표시</span>
+    <div className={styles.taskDashboardShell}>
+      <div className={styles.taskDashboard}>
+        <section className={cx(styles.panel, styles.calendarPanel)}>
+          <div className={styles.calendarPanelHeader}>
+            <div>
+              <h2>Weekly Calendar</h2>
+              <p>
+                {activeTaskCount} active tasks, {completedTaskCount} completed
+              </p>
+            </div>
+            <div className={styles.calendarControls}>
+              <button
+                aria-label="Previous week"
+                className={styles.iconButton}
+                onClick={() => setCalendarWeekOffset((offset) => offset - 1)}
+                type="button"
+              >
+                &lt;
+              </button>
+              <button
+                className={styles.controlButton}
+                onClick={() => setCalendarWeekOffset(0)}
+                type="button"
+              >
+                Today
+              </button>
+              <strong className={styles.weekRangeLabel}>
+                {weekRangeLabel}
+              </strong>
+              <button
+                aria-label="Next week"
+                className={styles.iconButton}
+                onClick={() => setCalendarWeekOffset((offset) => offset + 1)}
+                type="button"
+              >
+                &gt;
+              </button>
+              <button className={styles.controlButton} type="button">
+                Weekly
+              </button>
+              <button
+                className={styles.primaryButton}
+                onClick={() => setIsQuickAddOpen(true)}
+                type="button"
+              >
+                + New Task
+              </button>
+            </div>
           </div>
-          <div className={styles.taskList}>
-            {filteredTasks.length ? (
-              filteredTasks.map((task) => (
-                <article className={styles.taskItem} key={task.id}>
-                  <button
-                    className={styles.taskButton}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    type="button"
-                  >
-                    <strong>{task.title}</strong>
-                    <div className={styles.metaRow}>
-                      <span
-                        className={cx(
-                          styles.statusPill,
-                          statusClass(task.status),
-                        )}
-                      >
-                        {statusLabel(task.status)}
-                      </span>
-                      <span
-                        className={cx(
-                          styles.priorityPill,
-                          priorityClass(task.priority),
-                        )}
-                      >
-                        {priorityLabel(task.priority)}
-                      </span>
-                      <span>{taskAssigneeLabel(task)}</span>
-                      <span>마감 {formatDate(task.dueDate)}</span>
-                      {task.isDelayed ? <span>지연</span> : null}
+
+          <div className={styles.calendarSurface}>
+            <div className={styles.calendarHeaderGrid}>
+              <span className={styles.calendarCorner} aria-hidden="true" />
+              {calendarDays.map((day) => (
+                <div
+                  className={cx(
+                    styles.calendarDayHeader,
+                    day.isToday && styles.calendarDayToday,
+                  )}
+                  key={day.key}
+                >
+                  <strong>{day.weekday}</strong>
+                  <span>{day.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className={styles.calendarBodyGrid}>
+              <div className={styles.timeScale}>
+                {calendarHours.map((hour) => (
+                  <span key={hour}>{hour}</span>
+                ))}
+              </div>
+              <div className={styles.currentTimeLine} aria-hidden="true" />
+              <div className={styles.calendarColumns}>
+                {calendarDays.map((day, dayIndex) => {
+                  const dayTasks = calendarTasksByDate[day.key] ?? [];
+
+                  return (
+                    <div className={styles.calendarColumn} key={day.key}>
+                      {calendarHours.map((hour) => (
+                        <span className={styles.calendarHourTrack} key={hour} />
+                      ))}
+                      {dayTasks.slice(0, 4).map((task, taskIndex) => (
+                        <button
+                          className={cx(
+                            styles.calendarEvent,
+                            dashboardEventClass(task.status),
+                          )}
+                          key={task.id}
+                          onClick={() => setSelectedTaskId(task.id)}
+                          style={calendarEventStyle(dayIndex, task, taskIndex)}
+                          type="button"
+                        >
+                          <strong>{task.title}</strong>
+                          <span>
+                            {taskAssigneeLabel(task)} -{" "}
+                            {dashboardStatusLabel(task.status)}
+                          </span>
+                        </button>
+                      ))}
+                      {dayTasks.length > 4 ? (
+                        <span className={styles.moreEvents}>
+                          +{dayTasks.length - 4} more
+                        </span>
+                      ) : null}
                     </div>
-                  </button>
-                  <div className={styles.buttonRow}>
-                    {taskStatuses.map((status) => (
-                      <button
-                        className={
-                          task.status === status
-                            ? styles.statusButtonActive
-                            : styles.statusButton
-                        }
-                        disabled={busyAction !== null || task.status === status}
-                        key={status}
-                        onClick={() =>
-                          runMutation(`status-${task.id}`, () =>
-                            client.updateTaskStatus(task.id, status),
-                          )
-                        }
-                        type="button"
-                      >
-                        {statusLabel(status)}
-                      </button>
-                    ))}
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className={styles.emptyState}>조건에 맞는 작업이 없습니다.</p>
-            )}
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.calendarLegend}>
+            <span>
+              <i className={styles.legendProgress} /> In Progress
+            </span>
+            <span>
+              <i className={styles.legendPending} /> Pending
+            </span>
+            <span>
+              <i className={styles.legendScheduled} /> Scheduled
+            </span>
+            <span>
+              <i className={styles.legendCompleted} /> Completed
+            </span>
           </div>
         </section>
 
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <h2>새 작업</h2>
-            <span>실제 런타임 API</span>
+        <section className={cx(styles.panel, styles.tasksPanel)}>
+          <div className={styles.tasksPanelHeader}>
+            <div>
+              <h2>Tasks</h2>
+              <p>{dashboardTasks.length} shown</p>
+            </div>
+            <button
+              aria-label="Task options"
+              className={styles.moreButton}
+              type="button"
+            >
+              ...
+            </button>
           </div>
-          <form className={styles.formGrid} onSubmit={handleCreateTask}>
-            <label className={styles.wideField}>
-              제목
+
+          <div
+            aria-label="Task filters"
+            className={styles.taskTabs}
+            role="tablist"
+          >
+            {dashboardTaskTabs.map((tab) => (
+              <button
+                aria-selected={taskTab === tab.id}
+                className={
+                  taskTab === tab.id ? styles.taskTabActive : styles.taskTab
+                }
+                key={tab.id}
+                onClick={() => setTaskTab(tab.id)}
+                role="tab"
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <label className={styles.taskSearchField}>
+            <span>Search</span>
+            <input
+              aria-label="Search tasks"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search tasks..."
+              value={search}
+            />
+          </label>
+
+          <div className={styles.taskFilterRow}>
+            <select
+              aria-label="Status filter"
+              onChange={(event) => setStatusFilter(event.target.value)}
+              value={statusFilter}
+            >
+              <option value="">All statuses</option>
+              {taskStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status)}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Priority filter"
+              onChange={(event) => setPriorityFilter(event.target.value)}
+              value={priorityFilter}
+            >
+              <option value="">All priorities</option>
+              {taskPriorities.map((priority) => (
+                <option key={priority} value={priority}>
+                  {priorityLabel(priority)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.dashboardTaskList}>
+            {dashboardTasks.length ? (
+              dashboardTasks.map((task) => {
+                const nextStatus = isCompletedTask(task) ? "todo" : "done";
+
+                return (
+                  <article className={styles.dashboardTaskRow} key={task.id}>
+                    <input
+                      aria-label={`Toggle ${task.title}`}
+                      checked={isCompletedTask(task)}
+                      className={styles.dashboardCheckbox}
+                      disabled={busyAction !== null}
+                      onChange={() =>
+                        runMutation(`complete-${task.id}`, () =>
+                          client.updateTaskStatus(task.id, nextStatus),
+                        )
+                      }
+                      type="checkbox"
+                    />
+                    <button
+                      className={styles.dashboardTaskTitle}
+                      onClick={() => setSelectedTaskId(task.id)}
+                      type="button"
+                    >
+                      <strong>{task.title}</strong>
+                      <span>{taskAssigneeLabel(task)}</span>
+                    </button>
+                    <span
+                      className={cx(
+                        styles.dashboardStatusPill,
+                        dashboardStatusClass(task.status),
+                      )}
+                    >
+                      {dashboardStatusLabel(task.status)}
+                    </span>
+                    <time dateTime={task.dueDate ?? undefined}>
+                      {formatTaskDate(task.dueDate)}
+                    </time>
+                  </article>
+                );
+              })
+            ) : (
+              <p className={styles.emptyState}>No tasks match this view.</p>
+            )}
+          </div>
+
+          {isQuickAddOpen ? (
+            <form
+              className={styles.quickAddTaskForm}
+              onSubmit={handleCreateQuickTask}
+            >
+              <input name="title" placeholder="Task title" required />
+              <input name="dueDate" type="date" />
+              <input name="description" type="hidden" value="" />
+              <input name="status" type="hidden" value="todo" />
+              <input name="priority" type="hidden" value="medium" />
+              <input name="assigneeMemberId" type="hidden" value="" />
+              <input name="milestoneId" type="hidden" value="" />
+              <button
+                className={styles.primaryButton}
+                disabled={busyAction !== null}
+                type="submit"
+              >
+                Create
+              </button>
+              <button
+                className={styles.controlButton}
+                onClick={() => setIsQuickAddOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <button
+              className={styles.addTaskInlineButton}
+              onClick={() => setIsQuickAddOpen(true)}
+              type="button"
+            >
+              + Add new task
+            </button>
+          )}
+        </section>
+      </div>
+
+      <details className={styles.advancedTaskTools}>
+        <summary>Advanced task management</summary>
+        <div className={styles.advancedTaskToolsGrid}>
+          <section className={styles.stack}>
+            <div className={styles.toolbar}>
               <input
-                name="title"
-                placeholder="예: GitHub 이슈 연결"
-                required
+                aria-label="작업 검색"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="작업 제목 검색"
+                value={search}
               />
-            </label>
-            <label className={styles.wideField}>
-              설명
-              <textarea
-                name="description"
-                placeholder="작업 범위와 확인 조건"
-              />
-            </label>
-            <label>
-              상태
-              <select defaultValue="todo" name="status">
+              <select
+                aria-label="상태 필터"
+                onChange={(event) => setStatusFilter(event.target.value)}
+                value={statusFilter}
+              >
+                <option value="">모든 상태</option>
                 {taskStatuses.map((status) => (
                   <option key={status} value={status}>
                     {statusLabel(status)}
                   </option>
                 ))}
               </select>
-            </label>
-            <label>
-              우선순위
-              <select defaultValue="medium" name="priority">
+              <select
+                aria-label="우선순위 필터"
+                onChange={(event) => setPriorityFilter(event.target.value)}
+                value={priorityFilter}
+              >
+                <option value="">모든 우선순위</option>
                 {taskPriorities.map((priority) => (
                   <option key={priority} value={priority}>
                     {priorityLabel(priority)}
                   </option>
                 ))}
               </select>
-            </label>
-            <label>
-              담당자
-              <select defaultValue="" name="assigneeMemberId">
-                <option value="">미배정</option>
-                {members.map((member) => (
-                  <option key={member.memberId} value={member.memberId}>
-                    {memberLabel(member)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              마감일
-              <input name="dueDate" type="date" />
-            </label>
-            <label className={styles.wideField}>
-              마일스톤
-              <select defaultValue="" name="milestoneId">
-                <option value="">마일스톤 없음</option>
+              <select
+                aria-label="마일스톤 필터"
+                onChange={(event) => setMilestoneFilter(event.target.value)}
+                value={milestoneFilter}
+              >
+                <option value="">모든 마일스톤</option>
                 {milestones.map((milestone) => (
                   <option key={milestone.id} value={milestone.id}>
                     {milestone.title}
                   </option>
                 ))}
               </select>
-            </label>
-            <div className={cx(styles.buttonRow, styles.wideField)}>
-              <button
-                className={styles.primaryButton}
-                disabled={busyAction !== null}
-                type="submit"
-              >
-                작업 만들기
-              </button>
             </div>
-          </form>
-        </section>
-      </section>
 
-      <section className={styles.stack}>
-        <TaskDetailPanel
-          activityLogs={activityLogs}
-          busyAction={busyAction}
-          client={client}
-          comments={comments}
-          onAddChecklist={handleAddChecklist}
-          onAddComment={handleAddComment}
-          onRefresh={async () => {
-            await refreshDomainData();
-            await refreshSelectedTask();
-          }}
-          runMutation={runMutation}
-          selectedTask={selectedTask}
-          selectedTaskId={selectedTaskId}
-        />
+            <section className={styles.panel}>
+              <div className={styles.panelHeader}>
+                <h2>작업 목록</h2>
+                <span>{filteredTasks.length}개 표시</span>
+              </div>
+              <div className={styles.taskList}>
+                {filteredTasks.length ? (
+                  filteredTasks.map((task) => (
+                    <article className={styles.taskItem} key={task.id}>
+                      <button
+                        className={styles.taskButton}
+                        onClick={() => setSelectedTaskId(task.id)}
+                        type="button"
+                      >
+                        <strong>{task.title}</strong>
+                        <div className={styles.metaRow}>
+                          <span
+                            className={cx(
+                              styles.statusPill,
+                              statusClass(task.status),
+                            )}
+                          >
+                            {statusLabel(task.status)}
+                          </span>
+                          <span
+                            className={cx(
+                              styles.priorityPill,
+                              priorityClass(task.priority),
+                            )}
+                          >
+                            {priorityLabel(task.priority)}
+                          </span>
+                          <span>{taskAssigneeLabel(task)}</span>
+                          <span>마감 {formatDate(task.dueDate)}</span>
+                          {task.isDelayed ? <span>지연</span> : null}
+                        </div>
+                      </button>
+                      <div className={styles.buttonRow}>
+                        {taskStatuses.map((status) => (
+                          <button
+                            className={
+                              task.status === status
+                                ? styles.statusButtonActive
+                                : styles.statusButton
+                            }
+                            disabled={
+                              busyAction !== null || task.status === status
+                            }
+                            key={status}
+                            onClick={() =>
+                              runMutation(`status-${task.id}`, () =>
+                                client.updateTaskStatus(task.id, status),
+                              )
+                            }
+                            type="button"
+                          >
+                            {statusLabel(status)}
+                          </button>
+                        ))}
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className={styles.emptyState}>
+                    조건에 맞는 작업이 없습니다.
+                  </p>
+                )}
+              </div>
+            </section>
 
-        <MilestonePanel
-          busyAction={busyAction}
-          milestones={milestones}
-          onCreateMilestone={handleCreateMilestone}
-          runMutation={runMutation}
-          client={client}
-        />
+            <section className={styles.panel}>
+              <div className={styles.panelHeader}>
+                <h2>새 작업</h2>
+                <span>실제 런타임 API</span>
+              </div>
+              <form className={styles.formGrid} onSubmit={handleCreateTask}>
+                <label className={styles.wideField}>
+                  제목
+                  <input
+                    name="title"
+                    placeholder="예: GitHub 이슈 연결"
+                    required
+                  />
+                </label>
+                <label className={styles.wideField}>
+                  설명
+                  <textarea
+                    name="description"
+                    placeholder="작업 범위와 확인 조건"
+                  />
+                </label>
+                <label>
+                  상태
+                  <select defaultValue="todo" name="status">
+                    {taskStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {statusLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  우선순위
+                  <select defaultValue="medium" name="priority">
+                    {taskPriorities.map((priority) => (
+                      <option key={priority} value={priority}>
+                        {priorityLabel(priority)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  담당자
+                  <select defaultValue="" name="assigneeMemberId">
+                    <option value="">미배정</option>
+                    {members.map((member) => (
+                      <option key={member.memberId} value={member.memberId}>
+                        {memberLabel(member)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  마감일
+                  <input name="dueDate" type="date" />
+                </label>
+                <label className={styles.wideField}>
+                  마일스톤
+                  <select defaultValue="" name="milestoneId">
+                    <option value="">마일스톤 없음</option>
+                    {milestones.map((milestone) => (
+                      <option key={milestone.id} value={milestone.id}>
+                        {milestone.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className={cx(styles.buttonRow, styles.wideField)}>
+                  <button
+                    className={styles.primaryButton}
+                    disabled={busyAction !== null}
+                    type="submit"
+                  >
+                    작업 만들기
+                  </button>
+                </div>
+              </form>
+            </section>
+          </section>
 
-        <TaskDraftPanel
-          busyAction={busyAction}
-          client={client}
-          drafts={taskDrafts}
-          members={members}
-          onCreateDraft={handleCreateDraft}
-          runMutation={runMutation}
-        />
-      </section>
+          <section className={styles.stack}>
+            <TaskDetailPanel
+              activityLogs={activityLogs}
+              busyAction={busyAction}
+              client={client}
+              comments={comments}
+              onAddChecklist={handleAddChecklist}
+              onAddComment={handleAddComment}
+              onRefresh={async () => {
+                await refreshDomainData();
+                await refreshSelectedTask();
+              }}
+              runMutation={runMutation}
+              selectedTask={selectedTask}
+              selectedTaskId={selectedTaskId}
+            />
+
+            <MilestonePanel
+              busyAction={busyAction}
+              milestones={milestones}
+              onCreateMilestone={handleCreateMilestone}
+              runMutation={runMutation}
+              client={client}
+            />
+
+            <TaskDraftPanel
+              busyAction={busyAction}
+              client={client}
+              drafts={taskDrafts}
+              members={members}
+              onCreateDraft={handleCreateDraft}
+              runMutation={runMutation}
+            />
+          </section>
+        </div>
+      </details>
     </div>
   );
 
@@ -869,10 +1422,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
           />
           <GithubList items={githubReadModel?.issues ?? []} title="이슈" />
         </div>
-        <GithubList
-          items={githubReadModel?.pullRequests ?? []}
-          title="PR"
-        />
+        <GithubList items={githubReadModel?.pullRequests ?? []} title="PR" />
         <GithubList
           items={githubReadModel?.pullRequestChangedFiles ?? []}
           title="변경 파일 원본"
@@ -1325,9 +1875,8 @@ function TaskDraftPanel({
               <span>{draftStatusLabel(draft.status)}</span>
             </div>
             <p className={styles.taskMeta}>
-              {priorityLabel(draft.priority)} · 마감{" "}
-              {formatDate(draft.dueDate)} · 작업{" "}
-              {draft.taskId ?? "-"}
+              {priorityLabel(draft.priority)} · 마감 {formatDate(draft.dueDate)}{" "}
+              · 작업 {draft.taskId ?? "-"}
             </p>
             {draft.description ? (
               <p className={styles.taskMeta}>{draft.description}</p>

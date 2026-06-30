@@ -570,9 +570,544 @@
   text-decoration: underline;
 }
 
+.taskDashboardShell {
+  display: grid;
+  gap: 16px;
+}
+
+.advancedTaskTools {
+  border: 1px solid #e2e7ef;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.advancedTaskTools summary {
+  cursor: pointer;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 14px 16px;
+}
+
+.advancedTaskToolsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);
+  gap: 16px;
+  border-top: 1px solid #e7ebf2;
+  padding: 16px;
+}
+
+.taskDashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.calendarPanel,
+.tasksPanel {
+  overflow: hidden;
+  padding: 0;
+}
+
+.calendarPanelHeader,
+.tasksPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+.calendarPanelHeader {
+  border-bottom: 1px solid #e7ebf2;
+}
+
+.calendarPanelHeader h2,
+.tasksPanelHeader h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.calendarPanelHeader p,
+.tasksPanelHeader p {
+  margin: 5px 0 0;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendarControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.iconButton,
+.controlButton,
+.moreButton {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #344054;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.iconButton {
+  width: 36px;
+  padding: 0;
+}
+
+.controlButton {
+  padding: 0 12px;
+}
+
+.moreButton {
+  width: 34px;
+}
+
+.iconButton:hover,
+.controlButton:hover,
+.moreButton:hover {
+  border-color: rgba(109, 91, 214, 0.42);
+  color: #4f46c7;
+}
+
+.weekRangeLabel {
+  min-width: 168px;
+  color: #111827;
+  font-size: 13px;
+  text-align: center;
+}
+
+.calendarSurface {
+  overflow-x: auto;
+}
+
+.calendarHeaderGrid {
+  display: grid;
+  min-width: 880px;
+  grid-template-columns: 64px repeat(7, minmax(116px, 1fr));
+  border-bottom: 1px solid #e7ebf2;
+  background: #fbfcfe;
+}
+
+.calendarCorner {
+  border-right: 1px solid #e7ebf2;
+}
+
+.calendarDayHeader {
+  display: grid;
+  gap: 4px;
+  min-height: 68px;
+  align-content: center;
+  justify-items: center;
+  border-right: 1px solid #e7ebf2;
+  color: #667085;
+}
+
+.calendarDayHeader strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.calendarDayHeader span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendarDayToday strong,
+.calendarDayToday span {
+  color: #6d5bd6;
+}
+
+.calendarBodyGrid {
+  position: relative;
+  display: grid;
+  min-width: 880px;
+  grid-template-columns: 64px minmax(812px, 1fr);
+}
+
+.timeScale {
+  display: grid;
+  grid-template-rows: repeat(11, 56px);
+  border-right: 1px solid #e7ebf2;
+  background: #fbfcfe;
+}
+
+.timeScale span {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  border-bottom: 1px solid #eef1f5;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+  padding-top: 10px;
+}
+
+.calendarColumns {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(116px, 1fr));
+}
+
+.calendarColumn {
+  position: relative;
+  display: grid;
+  min-height: 616px;
+  grid-template-rows: repeat(11, 56px);
+  border-right: 1px solid #e7ebf2;
+  background: #ffffff;
+}
+
+.calendarHourTrack {
+  grid-column: 1;
+  border-bottom: 1px solid #eef1f5;
+  pointer-events: none;
+}
+
+.currentTimeLine {
+  position: absolute;
+  z-index: 3;
+  top: 31%;
+  right: 0;
+  left: 64px;
+  border-top: 2px solid #7c3aed;
+  pointer-events: none;
+}
+
+.currentTimeLine::before {
+  position: absolute;
+  top: -6px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #7c3aed;
+  content: "";
+}
+
+.calendarEvent {
+  z-index: 2;
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 5px;
+  margin: 4px 6px;
+  border: 1px solid #dbe5f6;
+  border-left: 3px solid #3b82f6;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #1f2937;
+  cursor: pointer;
+  font: inherit;
+  overflow: hidden;
+  padding: 8px;
+  text-align: left;
+}
+
+.calendarEvent:hover {
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+
+.calendarEvent strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.calendarEvent span {
+  color: #475467;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.3;
+}
+
+.calendarEventPending {
+  border-color: #f7d79c;
+  border-left-color: #f59e0b;
+  background: #fff7e8;
+}
+
+.calendarEventProgress {
+  border-color: #bfdbfe;
+  border-left-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.calendarEventScheduled {
+  border-color: #ddd6fe;
+  border-left-color: #7c3aed;
+  background: #f4f0ff;
+}
+
+.calendarEventCompleted {
+  border-color: #bbf7d0;
+  border-left-color: #22a35a;
+  background: #eefbf1;
+}
+
+.calendarEventBlocked {
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+  background: #fff1f2;
+}
+
+.moreEvents {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 4px 8px;
+}
+
+.calendarLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  border-top: 1px solid #e7ebf2;
+  padding: 14px 20px 16px;
+}
+
+.calendarLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendarLegend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.legendProgress {
+  background: #3b82f6;
+}
+
+.legendPending {
+  background: #f59e0b;
+}
+
+.legendScheduled {
+  background: #7c3aed;
+}
+
+.legendCompleted {
+  background: #22a35a;
+}
+
+.tasksPanelHeader {
+  padding-bottom: 12px;
+}
+
+.taskTabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  margin: 0 16px 12px;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.taskTab,
+.taskTabActive {
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #475467;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.taskTabActive {
+  background: #f1ecff;
+  color: #6d5bd6;
+}
+
+.taskSearchField {
+  display: grid;
+  gap: 6px;
+  margin: 0 16px 10px;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.taskSearchField input,
+.taskFilterRow select,
+.quickAddTaskForm input {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #131824;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  outline: 0;
+  padding: 0 11px;
+}
+
+.taskSearchField input:focus,
+.taskFilterRow select:focus,
+.quickAddTaskForm input:focus {
+  border-color: rgba(109, 91, 214, 0.55);
+  box-shadow: 0 0 0 3px rgba(109, 91, 214, 0.12);
+}
+
+.taskFilterRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 16px 10px;
+}
+
+.dashboardTaskList {
+  display: grid;
+}
+
+.dashboardTaskRow {
+  display: grid;
+  min-height: 64px;
+  grid-template-columns: 28px minmax(0, 1fr) max-content 66px;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid #e7ebf2;
+  padding: 0 16px;
+}
+
+.dashboardCheckbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #6d5bd6;
+}
+
+.dashboardTaskTitle {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.dashboardTaskTitle strong {
+  overflow-wrap: anywhere;
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.dashboardTaskTitle span,
+.dashboardTaskRow time {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dashboardTaskRow time {
+  text-align: right;
+}
+
+.dashboardStatusPill {
+  display: inline-flex;
+  min-height: 28px;
+  min-width: 96px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.dashboardStatusPending {
+  background: #fff6e7;
+  color: #d97706;
+}
+
+.dashboardStatusProgress {
+  background: #eaf4ff;
+  color: #2563eb;
+}
+
+.dashboardStatusScheduled {
+  background: #f1ecff;
+  color: #6d5bd6;
+}
+
+.dashboardStatusCompleted {
+  background: #e9f8ed;
+  color: #23834b;
+}
+
+.dashboardStatusBlocked {
+  background: #fff1f2;
+  color: #b4232a;
+}
+
+.quickAddTaskForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px auto auto;
+  gap: 8px;
+  border-top: 1px solid #e7ebf2;
+  margin: 0;
+  padding: 14px 16px 16px;
+}
+
+.addTaskInlineButton {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 42px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #6d5bd6;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  margin: 8px 16px 16px;
+  padding: 0;
+}
+
 @media (max-width: 1080px) {
   .domainLayout,
   .workGrid,
+  .taskDashboard,
+  .advancedTaskToolsGrid,
   .twoColumn,
   .progressGrid {
     grid-template-columns: 1fr;
@@ -589,7 +1124,8 @@
   }
 
   .toolbar,
-  .formGrid {
+  .formGrid,
+  .quickAddTaskForm {
     grid-template-columns: 1fr;
   }
 }
@@ -607,7 +1143,31 @@
 
   .domainNav,
   .utilityNav,
-  .inlineFormCompact {
+  .inlineFormCompact,
+  .taskTabs,
+  .taskFilterRow {
     grid-template-columns: 1fr;
+  }
+
+  .calendarPanelHeader,
+  .tasksPanelHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .calendarControls {
+    justify-content: flex-start;
+  }
+
+  .dashboardTaskRow {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px 12px;
+    padding: 12px 16px;
+  }
+
+  .dashboardStatusPill,
+  .dashboardTaskRow time {
+    grid-column: 2;
+    justify-self: start;
   }
 }
