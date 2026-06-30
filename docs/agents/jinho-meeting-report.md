@@ -45,15 +45,24 @@
 6. Action item extraction and Task draft request.
 7. Meeting node summary for Canvas.
 
-## Public APIs To Provide
+## Current Runtime APIs
 
-- `GET /workspaces/:workspaceId/meetings` lists meetings.
-- `POST /workspaces/:workspaceId/meetings` creates meeting.
-- `POST /meetings/:meetingId/memos` appends memo.
-- `POST /meetings/:meetingId/transcript-segments` appends transcript.
-- `POST /meetings/:meetingId/report-generation` requests report workflow.
-- `GET /workspaces/:workspaceId/meeting-reports/recent` returns `MeetingReportSummary[]`.
-- `POST /meeting-action-items/:actionItemId/task-draft` calls 주형 contract or creates pending request.
+- `GET /api/meetings` lists all accessible meetings for the actor context.
+- `GET /api/workspaces/:workspaceId/meetings` lists workspace meetings.
+- `POST /api/workspaces/:workspaceId/meetings` creates meeting.
+- `GET /api/meetings/:meetingId` returns meeting detail.
+- `POST /api/meetings/:meetingId/memos` appends memo.
+- `POST /api/meetings/:meetingId/transcript-segments` appends transcript.
+- `POST /api/meetings/:meetingId/report-generation` requests report workflow.
+- `POST /api/meetings/:meetingId/report` creates or updates report.
+- `GET /api/workspaces/:workspaceId/meeting-reports/recent` returns `MeetingReportSummary[]`.
+- `GET /api/workspaces/:workspaceId/meeting-reports/canvas-entity-refs` returns Canvas refs.
+- `POST /api/meeting-action-items/:actionItemId/task-draft` calls 주형 Task draft contract.
+- Voice APIs are defined in `docs/contracts/voice.md` and use `/api/...` public paths.
+
+## Deferred APIs
+
+- None for the listed Meeting/Voice runtime surface. Any direct Agent run API for report generation remains under 세인 Agent deferred contract until its controller lands.
 
 ## Provides To Others
 

@@ -188,11 +188,12 @@ Rules:
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/project-brief` | yes | member | Current ProjectBrief |
-| PUT | `/api/workspaces/:workspaceId/project-brief` | yes | member | Save edited ProjectBrief |
-| POST | `/api/workspaces/:workspaceId/project-start/runs` | yes | member | Run project start Agent step |
-| POST | `/api/project-start/task-candidates/:candidateId/approve` | yes | member | Approve candidate into Task |
-| POST | `/api/project-start/task-candidates/:candidateId/reject` | yes | member | Reject candidate |
+| POST | `/api/workspaces/:workspaceId/project-plan-drafts` | yes | member | Create ProjectPlanDraft |
+| GET | `/api/project-plan-drafts/:draftId` | yes | member | ProjectPlanDraft detail |
+| POST | `/api/project-plan-drafts/:draftId/recommend-tech-stack` | yes | member | Recommend tech stack |
+| POST | `/api/project-plan-drafts/:draftId/breakdown-features` | yes | member | Create ProjectPlanFeatureDraft list |
+| POST | `/api/project-plan-drafts/:draftId/assign-roles` | yes | member | Create role drafts |
+| POST | `/api/project-plan-drafts/:draftId/approve` | yes | member | Approve plan and call owner APIs |
 
 ### Project Start Run Request
 
@@ -240,15 +241,16 @@ Rules:
       "reason": "string"
     }
   ],
-  "taskCandidates": [
+  "taskDrafts": [
     {
-      "id": "candidate-id",
+      "id": "draft-id",
+      "sourceType": "planning_feature",
+      "sourceId": "feature-draft-id",
       "title": "string",
       "description": "string",
-      "taskType": "development",
-      "assigneeId": "user-id|null",
-      "dueDate": "2026-07-03",
-      "acceptanceCriteria": ["string"]
+      "assigneeMemberId": "member-id|null",
+      "priority": "medium",
+      "dueDate": "2026-07-03"
     }
   ]
 }
@@ -256,8 +258,9 @@ Rules:
 
 Rules:
 
-- Candidate approval calls Task API internally or delegates to Task owner service.
-- Rejected candidates must not create Task.
+- Legacy candidate naming is retired. Use `TaskCreateDraft` request payloads and persisted `TaskDraft` records.
+- Planning feature drafts map to `TaskCreateDraft.sourceType = "planning_feature"` and `sourceId = ProjectPlanFeatureDraft.id`.
+- Rejected drafts must not create Task.
 
 ## Task API
 
@@ -271,9 +274,9 @@ Rules:
 | PATCH | `/api/tasks/:taskId` | yes | member | Update Task fields |
 | PATCH | `/api/tasks/:taskId/status` | yes | member | Change Task status |
 | DELETE | `/api/tasks/:taskId` | yes | member | Soft-delete Task |
-| POST | `/api/workspaces/:workspaceId/task-candidates` | yes | member | Create Task candidates |
-| POST | `/api/task-candidates/:candidateId/approve` | yes | member | Approve candidate |
-| POST | `/api/task-candidates/:candidateId/reject` | yes | member | Reject candidate |
+| POST | `/api/workspaces/:workspaceId/task-drafts` | yes | member | Create TaskDraft |
+| POST | `/api/task-drafts/:draftId/approve` | yes | member | Approve TaskDraft |
+| POST | `/api/task-drafts/:draftId/reject` | yes | member | Reject TaskDraft |
 
 ### Task DTO
 
@@ -318,8 +321,8 @@ Rules:
 Enums:
 
 ```ts
-type TaskStatus = "todo" | "in_progress" | "review" | "done" | "blocked";
-type TaskPriority = "low" | "medium" | "high";
+type TaskStatus = "todo" | "in_progress" | "in_review" | "done" | "blocked";
+type TaskPriority = "low" | "medium" | "high" | "urgent";
 type TaskType = "development" | "planning" | "meeting" | "review" | "document" | "bug" | "etc";
 type TaskSourceType = "manual" | "agent" | "meeting" | "github";
 ```
@@ -336,9 +339,9 @@ Rules:
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/github/connection` | yes | member | Connection status |
-| POST | `/api/workspaces/:workspaceId/github/connection` | yes | owner | Start/connect GitHub integration |
-| DELETE | `/api/workspaces/:workspaceId/github/connection` | yes | owner | Disconnect integration |
+| GET | `/api/workspaces/:workspaceId/github/connections` | yes | member | Connection status |
+| POST | `/api/workspaces/:workspaceId/github/connections` | yes | member | Start/connect GitHub App integration |
+| DELETE | `/api/workspaces/:workspaceId/github/connections/:connectionId` | yes | member | Disconnect integration |
 | GET | `/api/workspaces/:workspaceId/github/repositories` | yes | owner | List accessible repos |
 | PUT | `/api/workspaces/:workspaceId/github/repository` | yes | owner | Select single repo |
 | POST | `/api/workspaces/:workspaceId/github/sync` | yes | member | Manual Issue/PR sync |
@@ -568,12 +571,16 @@ Rules:
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| POST | `/api/github/pull-requests/:pullRequestId/review-room` | yes | member | Create or open Review Room |
-| GET | `/api/review-rooms/:reviewRoomId` | yes | member | Review Room detail |
-| POST | `/api/review-rooms/:reviewRoomId/analyze` | yes | member | Generate PR analysis |
-| GET | `/api/review-rooms/:reviewRoomId/changed-files` | yes | member | Changed files and diff metadata |
-| PATCH | `/api/review-nodes/:reviewNodeId/decision` | yes | member | Save internal review decision |
-| POST | `/api/review-rooms/:reviewRoomId/checklist` | yes | member | Generate merge checklist |
+| POST | `/api/pull-requests/:pullRequestId/review-room` | yes | member | Create or open Review Room |
+| GET | `/api/code-review-rooms/:roomId` | yes | member | Review Room detail |
+| POST | `/api/pull-requests/:pullRequestId/analysis` | yes | member | Generate PR analysis |
+| GET | `/api/pull-requests/:pullRequestId/analysis` | yes | member | PR analysis result |
+| GET | `/api/pull-requests/:pullRequestId/analysis-summary` | yes | member | PR analysis summary |
+| GET | `/api/pull-request-analyses/:analysisId/graph` | yes | member | Review graph |
+| GET | `/api/pull-request-analyses/:analysisId/canvas` | yes | member | Review internal canvas |
+| PATCH | `/api/review-nodes/:nodeId/state` | yes | member | Save internal review node state |
+| POST | `/api/code-review-rooms/:roomId/comments` | yes | member | Create review comment |
+| POST | `/api/pull-request-analyses/:analysisId/checklist-items` | yes | member | Create checklist item |
 
 ### Review Room DTO
 
@@ -759,48 +766,43 @@ Canvas is `Should`, not MVP release blocker.
 | GET | `/api/workspaces/:workspaceId/canvas-boards` | yes | member | List boards |
 | POST | `/api/workspaces/:workspaceId/canvas-boards` | yes | member | Create board |
 | GET | `/api/canvas-boards/:boardId` | yes | member | Board detail |
-| POST | `/api/canvas-boards/:boardId/nodes` | yes | member | Create memo/reference node |
-| PATCH | `/api/canvas-nodes/:nodeId` | yes | member | Update node position/content |
-| DELETE | `/api/canvas-nodes/:nodeId` | yes | member | Delete Canvas node only |
-| POST | `/api/canvas-boards/:boardId/edges` | yes | member | Create edge |
-| DELETE | `/api/canvas-edges/:edgeId` | yes | member | Delete edge |
+| POST | `/api/canvas-boards/:boardId/shapes` | yes | member | Create reference shape |
+| PATCH | `/api/canvas-shapes/:shapeId` | yes | member | Update shape display attributes |
+| PUT | `/api/canvas-shapes/:shapeId/position` | yes | member | Save shape position |
+| DELETE | `/api/canvas-shapes/:shapeId` | yes | member | Delete Canvas shape only |
+| POST | `/api/canvas-boards/:boardId/connections` | yes | member | Create connection |
+| DELETE | `/api/canvas-connections/:connectionId` | yes | member | Delete connection |
+| PUT | `/api/canvas-boards/:boardId/view-settings` | yes | member | Save board viewport |
+| PUT | `/api/canvas-boards/:boardId/filter-settings` | yes | member | Save board filters |
 
-### Canvas Node DTO
+### Canvas Shape DTO
 
 ```json
 {
-  "id": "canvas-node-id",
+  "id": "canvas-shape-id",
   "boardId": "board-id",
-  "type": "task_ref",
-  "position": {
-    "x": 120,
-    "y": 80
-  },
-  "size": {
-    "width": 240,
-    "height": 120
-  },
-  "content": {
-    "text": "Memo text"
-  },
-  "reference": {
-    "objectType": "task",
-    "objectId": "task-id"
-  }
+  "shapeType": "task",
+  "entityType": "task",
+  "entityId": "task-id",
+  "displayTitle": "Login API implementation",
+  "width": 240,
+  "height": 120,
+  "position": { "x": 120, "y": 80 }
 }
 ```
 
 Enums:
 
 ```ts
-type CanvasNodeType = "memo" | "task_ref" | "report_ref" | "github_issue_ref" | "github_pr_ref";
-type CanvasEdgeType = "related_to" | "depends_on" | "blocks" | "implements" | "references";
+type CanvasEntityType = "task" | "meeting_report" | "pull_request" | "github_issue" | "document" | "file" | "code" | "decision" | "risk";
+type CanvasConnectionType = "related_to" | "created_from" | "blocks" | "references" | "implements" | "reviews";
 ```
 
 Rules:
 
-- Deleting a Canvas node does not delete the original object.
-- File/code reference nodes are excluded.
+- Deleting a Canvas shape does not delete the original object.
+- The current runtime and public schema use `shapes`/`connections`; `nodes`/`edges` are old target wording and must not be used for workspace Canvas APIs.
+- Canvas `connectionType` enum vs freeform persistence is still unresolved; this PR does not implement runtime changes. See `docs/contracts/canvas.md` for the follow-up policy decision.
 - Agent auto layout is excluded.
 
 ## Dashboard API
@@ -823,7 +825,7 @@ Rules:
   "taskSummary": {
     "todo": 3,
     "inProgress": 4,
-    "review": 2,
+    "inReview": 2,
     "done": 10,
     "blocked": 1
   },

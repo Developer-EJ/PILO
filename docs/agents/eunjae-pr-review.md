@@ -44,17 +44,23 @@
 7. Review comments, questions, risks, checklist.
 8. PR analysis summary for PR list, Dashboard, Canvas.
 
-## Public APIs To Provide
+## Current Runtime APIs
 
-- `POST /pull-requests/:pullRequestId/review-room` creates or returns room.
-- `GET /code-review-rooms/:roomId` returns room detail.
-- `POST /pull-requests/:pullRequestId/analysis` requests analysis workflow.
-- `GET /pull-requests/:pullRequestId/analysis` returns analysis workflow result.
-- `GET /pull-requests/:pullRequestId/analysis-summary` returns `PRAnalysisSummary`.
-- `GET /pull-request-analyses/:analysisId/canvas` returns AI review order and canvas nodes.
-- `GET /review-nodes/:nodeId/detail` returns side-by-side diff and node explanation.
-- `PATCH /review-nodes/:nodeId/state` updates reviewer state.
-- `POST /code-review-rooms/:roomId/comments` creates review comment.
+- `POST /api/pull-requests/:pullRequestId/review-room` creates or returns room.
+- `GET /api/code-review-rooms/:roomId` returns room detail.
+- `POST /api/pull-requests/:pullRequestId/analysis` requests analysis workflow.
+- `GET /api/pull-requests/:pullRequestId/analysis` returns analysis workflow result.
+- `GET /api/pull-requests/:pullRequestId/analysis-summary` returns `PRAnalysisSummary`.
+- `GET /api/pull-request-analyses/:analysisId/graph` returns review graph.
+- `GET /api/pull-request-analyses/:analysisId/canvas` returns 은재 Review internal canvas nodes/edges.
+- `PATCH /api/review-nodes/:nodeId/state` updates reviewer state.
+- `POST /api/code-review-rooms/:roomId/comments` creates review comment.
+- `POST /api/pull-request-analyses/:analysisId/checklist-items` creates checklist item.
+
+## Deferred APIs
+
+- `GET /api/review-nodes/:nodeId/detail` returns side-by-side diff and node explanation.
+- `GET /api/pull-requests/:pullRequestId/changed-files` is 주형 GitHub's deferred changed-file source API consumed by Review.
 
 ## Provides To Others
 

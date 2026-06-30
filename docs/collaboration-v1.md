@@ -298,13 +298,13 @@ spec / contract / domain / integration / infra / docs
 ## Goal
 
 ## Allowed Files
-- 
+-
 
 ## Forbidden Files
-- 
+-
 
 ## Contract Used
-- 
+-
 
 ## DB Policy
 - DB change: Yes/No
@@ -322,7 +322,7 @@ spec / contract / domain / integration / infra / docs
 - API/read model/action:
 
 ## Done Criteria
-- 
+-
 
 ## Do Not
 - Do not edit other domain repositories/services.

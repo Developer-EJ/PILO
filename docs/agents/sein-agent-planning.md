@@ -50,15 +50,25 @@
 6. Project plan draft and approval workflow.
 7. Domain workflow adapter interfaces for meeting, task, review, planning.
 
-## Public APIs To Provide
+## Current Runtime APIs
 
-- `POST /agent-runs` starts workflow run.
-- `GET /agent-runs/:runId` returns run detail.
-- `GET /workspaces/:workspaceId/agent-actions` lists pending actions.
-- `POST /agent-actions/:actionId/confirm` confirms action.
-- `POST /agent-actions/:actionId/reject` rejects action.
-- `POST /workspaces/:workspaceId/project-plan-drafts` creates planning draft.
-- `POST /project-plan-drafts/:draftId/approve` approves draft and calls owner APIs.
+- None. `agents` and `agent_workflows` have a registry service/repository, but there is no Agent Run or Planning HTTP controller in current `dev`.
+
+## Deferred APIs
+
+- `POST /api/workspaces/:workspaceId/agent-runs` starts workflow run.
+- `GET /api/agent-runs/:runId` returns run detail.
+- `POST /api/agent-actions/:actionId/approve` approves action.
+- `POST /api/agent-actions/:actionId/reject` rejects action.
+- `GET /api/workspaces/:workspaceId/agent-chat/messages` lists agent chat messages.
+- `POST /api/workspaces/:workspaceId/agent-chat/messages` sends agent command.
+- `GET /api/workspaces/:workspaceId/agent-recommendations` returns `AgentRecommendation` read models for Dashboard/Canvas.
+- `POST /api/workspaces/:workspaceId/project-plan-drafts` creates planning draft.
+- `GET /api/project-plan-drafts/:draftId` returns planning detail.
+- `POST /api/project-plan-drafts/:draftId/recommend-tech-stack` creates tech stack recommendation.
+- `POST /api/project-plan-drafts/:draftId/breakdown-features` creates feature drafts.
+- `POST /api/project-plan-drafts/:draftId/assign-roles` creates role drafts.
+- `POST /api/project-plan-drafts/:draftId/approve` approves draft and calls owner APIs.
 
 ## Provides To Others
 

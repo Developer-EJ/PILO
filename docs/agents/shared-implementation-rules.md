@@ -8,6 +8,8 @@
 - PR 제목은 `[담당자][domain] 작업 요약` 형식으로 쓴다.
 - PR 본문에는 contract 영향, DB 영향, mock 사용 여부, 검증 결과를 적는다.
 - public contract 변경은 기능 구현 PR과 분리한다.
+- shared/common 파일 변경은 기능 구현 PR에 섞지 않는다. contract, spec, infra, hygiene PR 중 하나로 분리하고 영향을 받는 owner를 명시한다.
+- mock, fixture, in-memory adapter, Deferred API를 쓰는 PR/Issue는 해당 상태와 실제 연동 후속 Issue를 본문에 적는다.
 
 ## API Ownership
 
@@ -22,6 +24,7 @@
 - fixture는 public contract schema의 필드명을 따른다.
 - mock adapter는 실제 API client와 같은 함수 시그니처를 가져야 한다.
 - mock 제거는 별도 Issue로 남기고 PR 본문에 연결한다.
+- fixture field는 public schema 밖으로 새지 않는다. UI-only field가 필요하면 contract/schema PR을 먼저 만든다.
 
 ## DB and Migration
 

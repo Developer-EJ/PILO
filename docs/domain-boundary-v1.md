@@ -28,7 +28,7 @@
 | Owner | Domain | Primary responsibility |
 | --- | --- | --- |
 | 동현 | Auth / Workspace / Canvas | 로그인, 세션, Workspace, 멤버십, 초대, Basic Canvas |
-| 주형 | Task / GitHub / Progress | Task, Task candidate approval, GitHub repo/issue/PR metadata, progress summary |
+| 주형 | Task / GitHub / Progress | Task, Task draft approval, GitHub repo/issue/PR metadata, progress summary |
 | 진호 | Meeting / Voice / Report | Meeting session, voice session, transcript, text note, ReportDraft, Action Item |
 | 은재 | Code Review Room | ReviewSession, PR analysis, review graph, checklist |
 | 세인 | Agent Runtime / Planning | Agent run, approval action, project start guide, structured AI output |
@@ -45,7 +45,7 @@
 | WorkspaceInvite | Workspace | Workspace DB/API | Invite accept API |
 | ProjectBrief | Agent/Planning | Planning DB/API | Project start API |
 | Task | Task | Task DB/API | Task API/read model |
-| TaskCandidate | Task + Agent | Candidate API until approval | Approval API |
+| TaskDraft | Task | `task_drafts` DB/API until approved | Task draft API |
 | GitHubConnection | GitHub | GitHub integration DB/API | Connection status API |
 | GitHubRepository | GitHub | GitHub integration DB/API | Repository API |
 | GitHubIssue | GitHub | GitHub metadata DB/API | Issue API/read model |
@@ -63,8 +63,8 @@
 | AgentAction | Agent Runtime | Agent DB/API | Approval API |
 | Notification | Notification/Common | Notification DB/API | Notification API |
 | CanvasBoard | Canvas | Canvas DB/API | Canvas API |
-| CanvasNode | Canvas | Canvas DB/API for position/reference only | Canvas API |
-| CanvasEdge | Canvas | Canvas DB/API | Canvas API |
+| CanvasShape | Canvas | Canvas DB/API for display/reference only | Canvas API |
+| CanvasConnection | Canvas | Canvas DB/API | Canvas API |
 
 ## Domain Boundaries
 
@@ -131,7 +131,7 @@ Owns:
 - Task due date.
 - Task type.
 - Acceptance criteria.
-- TaskCandidate approval result.
+- TaskDraft approval result.
 - Links from Task to GitHub Issue/PR by ID.
 
 Does not own:
@@ -144,11 +144,11 @@ Does not own:
 Allowed consumers:
 
 - Meeting may request Action Item to Task conversion.
-- Agent may create TaskCandidate.
+- Agent may create TaskDraft through `task.create.draft`.
 - GitHub may display linked Task summary.
 - Review may display linked Task summary.
 - Dashboard may read Task summary.
-- Canvas may create reference nodes to Task.
+- Canvas may create reference shapes to Task.
 
 Boundary rule:
 
@@ -197,6 +197,15 @@ Token rule:
 GitHub access tokens must be encrypted if stored.
 Tokens must not be logged, sent to Agent prompts, or returned to frontend.
 Tokens are not hashed because GitHub API calls require reusable credentials.
+
+Access guard:
+
+```md
+Current GitHub connection runtime APIs require Workspace membership through `workspace_members`.
+Repository sync/list/issue/PR APIs are Deferred. When they land, provider access must require both
+Workspace membership and an active non-revoked GitHub App connection for that Workspace.
+GitHub login OAuth is not sufficient for repository access.
+```
 ```
 
 ### Meeting / Voice / Report
@@ -225,7 +234,7 @@ Allowed consumers:
 - Task may receive approved Action Item conversion requests.
 - Agent may generate ReportDraft from explicit transcript, note, and meeting context.
 - Dashboard may read recent Report summary.
-- Canvas may reference Report nodes.
+- Canvas may reference Report shapes.
 
 Boundary rule:
 
@@ -320,8 +329,8 @@ MVP Agent forbidden context sources:
 Owns:
 
 - CanvasBoard.
-- CanvasNode position/size/reference metadata.
-- CanvasEdge.
+- CanvasShape position/size/reference metadata.
+- CanvasConnection.
 - Canvas view settings.
 
 Does not own:
@@ -339,7 +348,14 @@ Allowed consumers:
 Boundary rule:
 
 ```md
-Deleting a Canvas node never deletes the original Task, Report, Issue, or PR.
+Deleting a Canvas shape never deletes the original Task, Report, Issue, or PR.
+```
+
+Terminology rule:
+
+```md
+Current workspace Canvas runtime uses shapes/connections.
+nodes/edges are deprecated for workspace Canvas and may only appear in target-only legacy text or 은재 Review's internal review graph.
 ```
 
 ### Dashboard
@@ -389,15 +405,16 @@ Notification does not execute the action by itself.
 
 ### Project Start To Task
 
-1. Agent Runtime creates ProjectBrief and TaskCandidate list.
-2. User reviews candidates.
-3. User approves selected candidates.
-4. Task API creates real Tasks.
+1. Agent Runtime or Planning creates ProjectBrief/ProjectPlan drafts and `TaskCreateDraft` payloads.
+2. User reviews draft candidates.
+3. User approves selected drafts.
+4. Task draft API creates or approves `TaskDraft`, then Task API creates real Tasks.
 5. AgentRun stores approval result.
 
 Ownership:
 
-- Agent owns draft/candidate reasoning.
+- Agent/Planning owns draft reasoning.
+- Task owns `TaskDraft` storage and approval result.
 - Task owns created Task.
 
 ### Task To GitHub Issue
@@ -440,12 +457,12 @@ Ownership:
 - Meeting owns ActionItem source.
 - Task owns created Task.
 
-### Canvas Reference Node
+### Canvas Reference Shape
 
 1. User selects original object from Task/Report/GitHub/Review.
-2. Canvas creates reference node with object type and object ID.
+2. Canvas creates reference shape with object type and object ID.
 3. Canvas displays summary by owner read API.
-4. Deleting the Canvas node removes only the reference.
+4. Deleting the Canvas shape removes only the reference.
 
 Ownership:
 
@@ -495,6 +512,20 @@ Ownership:
 | Basic Canvas edit | yes | yes |
 | Notification read | own only | own only |
 
+### Identity And Access Sources
+
+- Auth source is `auth_sessions` plus OAuth account mapping owned by 동현 Auth.
+- Workspace membership and role source is `workspace_members` owned by 동현 Workspace.
+- Workspace-scoped APIs must authorize against `workspace_members`, not provider email, GitHub login, or raw `users` rows alone.
+- Task access requires requester membership in the Task's workspace. Assignee, creator, approver, and rejecter ids are `workspace_members.id`.
+- GitHub repository/issue/PR access requires requester membership in the Workspace and, for provider data once Deferred APIs land, an active non-revoked GitHub App connection bound to that Workspace.
+
+### SQL Baseline And Runtime Subset
+
+- `docs/db/pilo_erd_schema.sql` is the broad SQL baseline and local bootstrap inventory.
+- `apps/app-server/prisma/schema.prisma` is the current Prisma-backed runtime subset.
+- A SQL table or enum in the baseline does not make an API Current Runtime. Current Runtime status comes from app-server controllers with the global `/api` prefix.
+
 ### Error Rules
 
 | Case | Response |
@@ -515,7 +546,7 @@ Agent must request user approval before these actions:
 - GitHub Issue create/link/unlink.
 - Report confirm.
 - Action Item to Task conversion.
-- Canvas node/edge creation if Canvas is enabled.
+- Canvas shape/connection creation if Canvas is enabled.
 - Notification sent to another user.
 - Any external API call that changes data.
 

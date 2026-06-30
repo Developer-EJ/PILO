@@ -173,6 +173,31 @@ Dashboard, Canvas, onboarding result 목록이 쓰는 요약 read model이다.
 - `firstAgendaDraft`는 세인이 소유하는 planning draft 후보이며, 승인 전에는 진호 Meeting 원본 DB에 직접 저장하지 않는다.
 - 승인 실행 시 실제 회의 아젠다를 만들려면 진호 Meeting contract의 `POST /api/meetings/:meetingId/agendas`를 호출하고, 성공 결과는 `MeetingAgenda` read model로 받는다.
 
+### Planning Draft Mapping
+
+| Planning draft | Owner API target | Public DTO/request | Mapping |
+|---|---|---|---|
+| `ProjectPlanFeatureDraft` | 주형 Task | `TaskCreateDraft` | `sourceType = "planning_feature"`, `sourceId = ProjectPlanFeatureDraft.id`, `title`, `description`, `priority`/`dueDate` 후보를 Task draft field로 매핑한다. |
+| `ProjectPlanMilestoneDraft` | 주형 Milestone | `CreateMilestoneRequest` | `title`, `startDate`, `endDate`를 Milestone request로 매핑한다. Task draft로 변환하지 않는다. |
+
+The shorter legacy milestone draft name is not used. Public schema와 문서는
+`ProjectPlanMilestoneDraft`를 canonical name으로 사용한다.
+
+### ProjectPlanApprovalState Rules
+
+| status | actionId | requestedAt | confirmedAt | executedAt | ownerApiResults |
+|---|---|---|---|---|---|
+| `not_requested` | `null` | `null` | `null` | `null` | empty or all `not_requested` |
+| `waiting_confirmation` | required | required | `null` | `null` | `pending`/`not_requested` only |
+| `confirmed` | required | required | required | `null` | `pending`/`not_requested` only |
+| `executed` | required | required | required | required | every attempted owner API is `succeeded` or intentionally `skipped` |
+| `failed` | required | required | required | `null` or failed-at timestamp | at least one owner API result is `failed` with `errorMessage` |
+| `rejected` | required | required | `null` | `null` | no owner API side effect |
+
+`ProjectPlanApprovalState.status` is the approval workflow state only. It must
+not be mixed into `ProjectPlanDraftDetail.status`, which remains the draft
+review state.
+
 ## Events
 
 - `planning.draft_created`

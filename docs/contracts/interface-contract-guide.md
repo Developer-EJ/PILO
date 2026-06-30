@@ -45,7 +45,7 @@
 | Task -> PR -> Review | 주형 GitHub / 은재 Review | 동현/주형/은재 | `PullRequestSummary`, `PullRequestChangedFileSummary`, `PRAnalysisSummary` | PR sync/changed file API는 deferred다. 은재는 fixture나 mock PR summary로 리뷰룸을 연다 |
 | PR 분석 Agent | 은재 Review / 세인 Agent | 은재/세인 | `review.analysis.generate` | 은재가 분석 workflow 요구사항을 정의하고 세인 runtime으로 실행한다 |
 | 회의록 Agent | 진호 Meeting / 세인 Agent | 진호/세인/주형 | `meeting.report.generate`, `task.create.draft` | 진호가 회의록 결과를 만들고 Task 전환은 주형 contract를 탄다 |
-| 프로젝트 계획 -> Task/Milestone | 세인 Planning / 주형 Task | 세인/주형/동현 | `ProjectPlanDraft`, `TaskCreateDraft`, `MilestoneDraft` | 세인은 초안만 소유하고 승인 후 주형 API로 실제 저장한다 |
+| 프로젝트 계획 -> Task/Milestone | 세인 Planning / 주형 Task | 세인/주형/동현 | `ProjectPlanDraft`, `TaskCreateDraft`, `ProjectPlanMilestoneDraft` | 세인은 초안만 소유하고 승인 후 주형 API로 실제 저장한다 |
 | 파일/문서 노드 | Common/동현 협의 | 동현/진호/은재/세인 | `SharedFileRef` | 파일 메타데이터는 `shared_files`, Canvas 표시는 동현 shape로 처리한다 |
 | 알림 | Common/System | 동현/주형/진호/은재/세인 | `NotificationCreateRequest` | 각 도메인은 알림 생성을 요청하고 알림 저장은 공통 owner가 담당한다 |
 
@@ -66,7 +66,8 @@ Canvas는 실제 업무 데이터를 소유하지 않는다.
 - 동현은 `canvas_shapes`, `canvas_connections`, `canvas_node_positions`, `canvas_view_settings`, `canvas_filter_settings`만 직접 수정한다.
 - 주형/진호/은재/세인은 Canvas DB를 직접 수정하지 않는다.
 - Canvas에 표시할 데이터가 필요하면 각 owner가 `*Summary` read model을 제공한다.
-- 상대 도메인이 미구현이면 동현은 mock node로 UI를 구현하고, mock임을 PR에 표시한다.
+- 동현 Canvas의 현재 runtime 용어는 shape/connection이다. node/edge는 전체 Canvas contract에서 쓰지 않는다.
+- 상대 도메인이 미구현이면 동현은 mock shape로 UI를 구현하고, mock임을 PR에 표시한다.
 
 ## Agent Action 구현 규약
 

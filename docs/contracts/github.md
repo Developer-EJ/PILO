@@ -265,6 +265,7 @@ Deferred action payload.
 - GitHub repository/issue/PR source data는 주형 GitHub domain이 소유한다.
 - Review는 PR 분석 결과를 소유하지만 GitHub provider sync를 소유하지 않는다.
 - Task는 Task 원본을 소유하지만 GitHub provider connection을 소유하지 않는다.
+- GitHub login OAuth is not sufficient for repository access. Runtime provider access must be based on Workspace membership plus an active non-revoked GitHub App connection.
 
 ## Breaking Change Policy
 

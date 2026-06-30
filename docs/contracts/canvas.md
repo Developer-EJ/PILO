@@ -2,7 +2,7 @@
 
 ## Owner
 
-Donghyun
+동현
 
 ## Scope
 
@@ -24,10 +24,10 @@ GitHub, Review, Agent, or Common domains.
 
 | Source owner | Read model                                                                   |
 | ------------ | ---------------------------------------------------------------------------- |
-| Joohyung     | `TaskSummary`, `GithubIssueSummary`, `PullRequestSummary`, `ProgressSummary` |
-| Jinho        | `MeetingReportSummary`, `MeetingReportCanvasEntityRef`                       |
-| Daeun        | `PRAnalysisSummary`, `ReviewRiskSummary`                                     |
-| Yejin        | `AgentRecommendation`, `ProjectPlanDraftSummary`                             |
+| 주형         | `TaskSummary`, `GithubIssueSummary`, `PullRequestSummary`, `ProgressSummary` |
+| 진호         | `MeetingReportSummary`, `MeetingReportCanvasEntityRef`                       |
+| 은재         | `PRAnalysisSummary`, `ReviewRiskSummary`                                     |
+| 세인         | `AgentRecommendation`, `ProjectPlanDraftSummary`                             |
 | Common       | `SharedFileRef`                                                              |
 
 ## Current Runtime APIs
@@ -61,6 +61,20 @@ The Canvas controller is exposed through the app-server global prefix as `/api/.
 - `code`
 - `decision`
 - `risk`
+
+## Terminology Policy
+
+Current runtime and public schema use `shapes` and `connections`:
+
+- DB tables: `canvas_shapes`, `canvas_connections`
+- HTTP paths: `/api/canvas-boards/:boardId/shapes`,
+  `/api/canvas-boards/:boardId/connections`, `/api/canvas-shapes/:shapeId`,
+  `/api/canvas-connections/:connectionId`
+- Read model fields: `CanvasBoardDetail.shapes`, `CanvasBoardDetail.connections`
+
+`nodes` and `edges` are deprecated for the workspace Canvas contract. They may
+appear in old target docs or in 은재 Review's internal review graph/canvas, but
+they must not be used for 동현 Canvas runtime routes, fixtures, or schema fields.
 
 ## Write DTOs
 
@@ -104,6 +118,21 @@ Creates a relationship between two shapes in the same board.
 - Duplicate connections are rejected by `boardId + sourceShapeId + targetShapeId + connectionType`.
 - Deleting a connection soft-deletes it. A second delete for the same connection returns not found.
 - The create API returns `CanvasConnectionSummary`; the delete API returns `{ "id": "uuid", "deleted": true }`.
+
+### Enum / Freeform Storage Policy
+
+Current app-server parsing treats `connectionType` as a non-empty string and
+`filterSetting.filters` as a freeform extension object. The SQL baseline still
+contains a candidate enum check for `canvas_connections.connection_type`.
+This PR does not change runtime validation or DB constraints. A follow-up
+contract/spec PR must decide one policy before new connection types are added:
+
+- strict enum in schema, app-server validation, and SQL; or
+- freeform string in schema/runtime with SQL relaxed accordingly.
+
+Until that follow-up lands, producers should use the documented examples
+(`related_to`, `created_from`, `blocks`, `references`, `implements`, `reviews`)
+and must not rely on new freeform values being portable.
 
 ### CanvasPositionRequest
 
@@ -272,7 +301,7 @@ adapter with DB/app-server lookup without changing the event payload.
       "memberId": "uuid",
       "userId": "uuid",
       "role": "member",
-      "displayName": "Donghyun"
+      "displayName": "동현"
     },
     "canvasBoards": [
       {
@@ -346,7 +375,7 @@ Presence event payload:
 
 ## Boundaries
 
-- Only Donghyun's Canvas domain writes Canvas DB tables.
+- 동현 Canvas domain만 Canvas DB tables를 write한다.
 - Other domains provide only entity ids and summary read models for Canvas display.
 - `entityType/entityId` points to the actual owner domain data.
 - Canvas must not change Task status, run PR analysis, create meeting reports, execute Agent workflows, or write to another owner domain.
