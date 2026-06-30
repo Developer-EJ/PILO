@@ -43,3 +43,11 @@ export interface CreateReviewChecklistItemInput {
   sortOrder?: number;
   changedAt?: string;
 }
+
+export interface UpdateReviewChecklistItemInput {
+  title?: string | null;
+  status?: ReviewChecklistStatus;
+  checkedByMemberId?: string | null;
+  checkedAt?: string | null;
+  changedAt?: string;
+}

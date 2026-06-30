@@ -107,6 +107,41 @@ describe("review comment/checklist API boundary", () => {
     assert.equal(next.sortOrder, 3);
   });
 
+  it("updates checklist item completion state by item id", () => {
+    const controller = createController();
+    const analysisId = "88888888-8888-4888-8888-888888888881";
+    const item = controller.createChecklistItem(analysisId, {
+      checklistType: "review",
+      title: "Confirm runtime review result",
+      sortOrder: 0,
+      changedAt: "2026-06-27T10:00:00.000Z",
+    });
+
+    const done = controller.updateChecklistItem(item.id, {
+      status: "done",
+      checkedByMemberId: "33333333-3333-4333-8333-333333333331",
+      changedAt: "2026-06-27T10:10:00.000Z",
+    });
+
+    assert.equal(done.status, "done");
+    assert.equal(
+      done.checkedByMemberId,
+      "33333333-3333-4333-8333-333333333331",
+    );
+    assert.equal(done.checkedAt, "2026-06-27T10:10:00.000Z");
+    assert.equal(done.updatedAt, "2026-06-27T10:10:00.000Z");
+
+    const todo = controller.updateChecklistItem(item.id, {
+      status: "todo",
+      changedAt: "2026-06-27T10:15:00.000Z",
+    });
+
+    assert.equal(todo.status, "todo");
+    assert.equal(todo.checkedByMemberId, null);
+    assert.equal(todo.checkedAt, null);
+    assert.deepEqual(controller.listChecklistItems(analysisId), [todo]);
+  });
+
   it("rejects invalid checklist fields", () => {
     const controller = createController();
 
@@ -133,6 +168,10 @@ describe("review comment/checklist API boundary", () => {
           sortOrder: -1,
         }),
       /sortOrder must be a non-negative integer/,
+    );
+    assert.throws(
+      () => controller.updateChecklistItem("missing-item", { status: "todo" }),
+      /Review checklist item was not found/,
     );
   });
 });

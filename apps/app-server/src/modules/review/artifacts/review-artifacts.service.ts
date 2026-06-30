@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InMemoryReviewArtifactsRepository } from "./in-memory-review-artifacts.repository";
 import {
   CreateReviewChecklistItemInput,
@@ -8,6 +12,7 @@ import {
   ReviewChecklistStatus,
   ReviewChecklistType,
   ReviewCommentRecord,
+  UpdateReviewChecklistItemInput,
 } from "./review-artifact.types";
 
 const CHECKLIST_TYPES = ["review", "merge"];
@@ -83,6 +88,42 @@ export class ReviewArtifactsService {
     return this.artifactsRepository.listChecklistItems(analysisId);
   }
 
+  updateChecklistItem(
+    itemId: string,
+    input: UpdateReviewChecklistItemInput,
+  ): ReviewChecklistItemRecord {
+    const existing = this.artifactsRepository.findChecklistItemById(itemId);
+
+    if (!existing) {
+      throw new NotFoundException(
+        `Review checklist item was not found: ${itemId}`,
+      );
+    }
+
+    const changedAt = this.timestampOrNow(input.changedAt);
+    const status = input.status
+      ? this.toChecklistStatus(input.status)
+      : existing.status;
+    const checked = this.toUpdatedCheckedFields(
+      status,
+      input,
+      existing,
+      changedAt,
+    );
+
+    return this.artifactsRepository.saveChecklistItem({
+      ...existing,
+      title:
+        input.title === undefined
+          ? existing.title
+          : this.requiredString(input.title, "title"),
+      status,
+      checkedByMemberId: checked.checkedByMemberId,
+      checkedAt: checked.checkedAt,
+      updatedAt: changedAt,
+    });
+  }
+
   private toChecklistType(value: string): ReviewChecklistType {
     if (CHECKLIST_TYPES.includes(value)) {
       return value as ReviewChecklistType;
@@ -114,6 +155,30 @@ export class ReviewArtifactsService {
         "checkedByMemberId",
       ),
       checkedAt: this.timestampOrNow(input.checkedAt ?? checkedAt),
+    };
+  }
+
+  private toUpdatedCheckedFields(
+    status: ReviewChecklistStatus,
+    input: UpdateReviewChecklistItemInput,
+    existing: ReviewChecklistItemRecord,
+    checkedAt: string,
+  ): Pick<ReviewChecklistItemRecord, "checkedByMemberId" | "checkedAt"> {
+    if (status === "todo") {
+      return { checkedByMemberId: null, checkedAt: null };
+    }
+
+    const checkedByMemberId =
+      input.checkedByMemberId ?? existing.checkedByMemberId;
+
+    return {
+      checkedByMemberId: this.requiredString(
+        checkedByMemberId,
+        "checkedByMemberId",
+      ),
+      checkedAt: input.checkedAt
+        ? this.timestampOrNow(input.checkedAt)
+        : (existing.checkedAt ?? checkedAt),
     };
   }
 

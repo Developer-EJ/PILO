@@ -8,9 +8,7 @@ import {
   resolveReviewClientMode,
   reviewFixture,
 } from "../../lib/review/reviewClient.mjs";
-import {
-  buildWorkspaceFeatureTabs,
-} from "../../lib/workspace/currentWorkspace.mjs";
+import { buildWorkspaceFeatureTabs } from "../../lib/workspace/currentWorkspace.mjs";
 import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
 import styles from "./ReviewRoomWorkspace.module.css";
 
@@ -169,7 +167,9 @@ const nodeStatusLabels: Record<ReviewNodeStatus, string> = {
 };
 
 function toRiskTone(riskLevel: string | null | undefined): string {
-  return riskToneClass[(riskLevel as ReviewRiskLevel) ?? "low"] ?? styles.riskLow;
+  return (
+    riskToneClass[(riskLevel as ReviewRiskLevel) ?? "low"] ?? styles.riskLow
+  );
 }
 
 function sortNodes(nodes: ReviewCanvasNode[]) {
@@ -251,8 +251,7 @@ export function ReviewRoomWorkspace({
           throw error;
         }
 
-        const fallbackPullRequests =
-          await fallbackClient.listPullRequests();
+        const fallbackPullRequests = await fallbackClient.listPullRequests();
 
         if (!cancelled) {
           setPullRequests(fallbackPullRequests);
@@ -322,7 +321,9 @@ export function ReviewRoomWorkspace({
       } catch (error) {
         try {
           analysis = await client.requestAnalysis(pullRequest.id);
-          nextWarnings.push("Analysis was requested; runtime result is pending.");
+          nextWarnings.push(
+            "Analysis was requested; runtime result is pending.",
+          );
         } catch (requestError) {
           if (!allowFixtureFallback) {
             throw requestError;
@@ -341,7 +342,9 @@ export function ReviewRoomWorkspace({
         }
 
         canvas = normalizeReviewCanvas(reviewFixture.canvas, analysis.id);
-        nextWarnings.push("Canvas graph uses the fixture while graph data catches up.");
+        nextWarnings.push(
+          "Canvas graph uses the fixture while graph data catches up.",
+        );
       }
 
       try {
@@ -515,6 +518,64 @@ export function ReviewRoomWorkspace({
     }
   }
 
+  async function toggleChecklistItem(item: ReviewChecklistItem) {
+    if (!session) return;
+
+    setBusyAction("checklist");
+
+    const nextStatus = item.status === "done" ? "todo" : "done";
+    const body = {
+      status: nextStatus,
+      checkedByMemberId: nextStatus === "done" ? memberId : null,
+    };
+
+    try {
+      const updatedItem = await client.updateChecklistItem(item.id, body);
+
+      setSession((current) =>
+        current
+          ? {
+              ...current,
+              checklistItems: current.checklistItems.map((entry) =>
+                entry.id === updatedItem.id ? updatedItem : entry,
+              ),
+            }
+          : current,
+      );
+    } catch (error) {
+      if (!allowFixtureFallback) {
+        setWarnings((current) => [
+          ...current,
+          "Checklist item was not updated because the Review API was unavailable.",
+        ]);
+        setBusyAction(null);
+        return;
+      }
+
+      const updatedItem = await fallbackClient.updateChecklistItem(
+        item.id,
+        body,
+      );
+
+      setSession((current) =>
+        current
+          ? {
+              ...current,
+              checklistItems: current.checklistItems.map((entry) =>
+                entry.id === updatedItem.id ? updatedItem : entry,
+              ),
+            }
+          : current,
+      );
+      setWarnings((current) => [
+        ...current,
+        "Checklist item was updated locally because the Review API was unavailable.",
+      ]);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function addComment() {
     if (!session) return;
 
@@ -668,7 +729,10 @@ export function ReviewRoomWorkspace({
   const sortedNodes = sortNodes(canvas.nodes);
 
   return (
-    <ReviewWorkspaceFrame navItems={navItems} className={styles.reviewWorkspace}>
+    <ReviewWorkspaceFrame
+      navItems={navItems}
+      className={styles.reviewWorkspace}
+    >
       <header className={styles.roomTopbar}>
         <button
           className={styles.backButton}
@@ -799,7 +863,9 @@ export function ReviewRoomWorkspace({
                 </b>
                 <p>{selectedNode.roleSummary}</p>
                 <p>{selectedNode.reviewReason}</p>
-                {selectedNode.filePath ? <code>{selectedNode.filePath}</code> : null}
+                {selectedNode.filePath ? (
+                  <code>{selectedNode.filePath}</code>
+                ) : null}
                 <div className={styles.nodeActions}>
                   <button
                     disabled={busyAction === "node"}
@@ -816,7 +882,11 @@ export function ReviewRoomWorkspace({
                     Discuss
                   </button>
                 </div>
-                <button className={styles.disabledButton} disabled type="button">
+                <button
+                  className={styles.disabledButton}
+                  disabled
+                  type="button"
+                >
                   Node detail deferred
                 </button>
               </div>
@@ -839,7 +909,12 @@ export function ReviewRoomWorkspace({
             <div className={styles.checklist}>
               {checklistItems.map((item) => (
                 <label key={item.id}>
-                  <input checked={item.status === "done"} readOnly type="checkbox" />
+                  <input
+                    checked={item.status === "done"}
+                    disabled={busyAction === "checklist"}
+                    onChange={() => void toggleChecklistItem(item)}
+                    type="checkbox"
+                  />
                   <span>{item.title}</span>
                 </label>
               ))}

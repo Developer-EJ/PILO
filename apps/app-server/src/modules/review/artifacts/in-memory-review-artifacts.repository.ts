@@ -50,6 +50,10 @@ export class InMemoryReviewArtifactsRepository {
       .sort((a, b) => a.sortOrder - b.sortOrder);
   }
 
+  findChecklistItemById(itemId: string): ReviewChecklistItemRecord | null {
+    return this.checklistItemsById.get(itemId) ?? null;
+  }
+
   nextChecklistSortOrder(
     analysisId: string,
     checklistType: ReviewChecklistType,

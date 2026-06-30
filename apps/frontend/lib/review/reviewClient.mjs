@@ -9,8 +9,7 @@ const DEFAULT_REVIEW_MODE = "mock";
 
 export const REVIEW_FIXTURE_WORKSPACE_ID =
   "22222222-2222-4222-8222-222222222222";
-export const REVIEW_FIXTURE_MEMBER_ID =
-  "33333333-3333-4333-8333-333333333331";
+export const REVIEW_FIXTURE_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
 export const REVIEW_FIXTURE_PULL_REQUEST_ID =
   "66666666-6666-4666-8666-666666666661";
 export const REVIEW_FIXTURE_ANALYSIS_ID =
@@ -51,6 +50,8 @@ export const reviewApiPaths = {
     `/api/pull-request-analyses/${encodeURIComponent(
       analysisId,
     )}/checklist-items`,
+  updateChecklistItem: (itemId) =>
+    `/api/review-checklist-items/${encodeURIComponent(itemId)}`,
 };
 
 export const reviewFixture = {
@@ -92,7 +93,8 @@ export const reviewFixture = {
     id: REVIEW_FIXTURE_ANALYSIS_ID,
     pullRequestId: REVIEW_FIXTURE_PULL_REQUEST_ID,
     purposeSummary: "Adds an OAuth callback route and visible result state.",
-    impactSummary: "Touches auth routing, login redirects, and session recovery.",
+    impactSummary:
+      "Touches auth routing, login redirects, and session recovery.",
     testRecommendation:
       "Smoke test provider success, provider error, and expired session redirects.",
     riskLevel: "medium",
@@ -295,7 +297,10 @@ function withJsonBody(body, init = {}) {
   };
 }
 
-function normalizePullRequest(pullRequest, fallback = reviewFixture.pullRequests[0]) {
+function normalizePullRequest(
+  pullRequest,
+  fallback = reviewFixture.pullRequests[0],
+) {
   return {
     ...fallback,
     ...(isRecord(pullRequest) ? pullRequest : {}),
@@ -306,7 +311,9 @@ function normalizePullRequest(pullRequest, fallback = reviewFixture.pullRequests
 }
 
 export function normalizeReviewRoom(rawRoom, { workspaceId } = {}) {
-  const fallbackPullRequest = normalizePullRequest(reviewFixture.pullRequests[0]);
+  const fallbackPullRequest = normalizePullRequest(
+    reviewFixture.pullRequests[0],
+  );
   const fallback = {
     ...reviewFixture.room,
     workspaceId: workspaceId ?? reviewFixture.room.workspaceId,
@@ -398,7 +405,8 @@ export function normalizeChangedFiles(rawFiles, analysisId) {
     return {
       ...fallback,
       ...normalizedFile,
-      analysisId: normalizedFile.analysisId ?? analysisId ?? fallback.analysisId,
+      analysisId:
+        normalizedFile.analysisId ?? analysisId ?? fallback.analysisId,
       additions: Number.isInteger(normalizedFile.additions)
         ? normalizedFile.additions
         : 0,
@@ -520,7 +528,8 @@ export function createMockReviewClient({
       );
       const changedAt = body.changedAt ?? now();
       const item = {
-        id: existing?.id ?? `mock-review-checklist-${checklistItems.length + 1}`,
+        id:
+          existing?.id ?? `mock-review-checklist-${checklistItems.length + 1}`,
         analysisId,
         checklistType: body.checklistType ?? "review",
         title: body.title,
@@ -535,6 +544,40 @@ export function createMockReviewClient({
       checklistItems = existing
         ? checklistItems.map((entry) => (entry.id === item.id ? item : entry))
         : [...checklistItems, item];
+
+      return clone(item);
+    },
+
+    async updateChecklistItem(itemId, body) {
+      const existing = checklistItems.find((item) => item.id === itemId);
+
+      if (!existing) {
+        throw new ReviewApiError("Review checklist item not found", {
+          status: 404,
+          path: reviewApiPaths.updateChecklistItem(itemId),
+        });
+      }
+
+      const changedAt = body.changedAt ?? now();
+      const status = body.status ?? existing.status;
+      const item = {
+        ...existing,
+        title: body.title ?? existing.title,
+        status,
+        checkedByMemberId:
+          status === "todo"
+            ? null
+            : (body.checkedByMemberId ?? existing.checkedByMemberId),
+        checkedAt:
+          status === "todo"
+            ? null
+            : (body.checkedAt ?? existing.checkedAt ?? changedAt),
+        updatedAt: changedAt,
+      };
+
+      checklistItems = checklistItems.map((entry) =>
+        entry.id === item.id ? item : entry,
+      );
 
       return clone(item);
     },
@@ -722,6 +765,14 @@ export function createReviewApiClient({
       return requestReviewJson(
         reviewApiPaths.createChecklistItem(analysisId),
         withJsonBody(body, { method: "POST" }),
+        requestOptions,
+      );
+    },
+
+    async updateChecklistItem(itemId, body) {
+      return requestReviewJson(
+        reviewApiPaths.updateChecklistItem(itemId),
+        withJsonBody(body, { method: "PATCH" }),
         requestOptions,
       );
     },

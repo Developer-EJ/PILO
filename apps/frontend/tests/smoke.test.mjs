@@ -1411,6 +1411,13 @@ describe("frontend package", () => {
           : Response.json([checklistItem]);
       }
 
+      if (url.endsWith(`/review-checklist-items/${checklistItem.id}`)) {
+        return Response.json({
+          ...checklistItem,
+          ...JSON.parse(init.body),
+        });
+      }
+
       if (url.endsWith(`/code-review-rooms/${reviewComment.roomId}/comments`)) {
         return init.method === "POST"
           ? Response.json({
@@ -1458,6 +1465,13 @@ describe("frontend package", () => {
         sortOrder: 1,
       },
     );
+    const updatedChecklistItem = await apiClient.updateChecklistItem(
+      checklistItem.id,
+      {
+        status: "done",
+        checkedByMemberId: "member-1",
+      },
+    );
     const createdComment = await apiClient.createComment(room.id, {
       authorMemberId: "member-1",
       body: "Check the review room API path.",
@@ -1470,6 +1484,7 @@ describe("frontend package", () => {
     assert.equal(checklist[0].id, checklistItem.id);
     assert.equal(comments[0].id, reviewComment.id);
     assert.equal(createdChecklistItem.sortOrder, 1);
+    assert.equal(updatedChecklistItem.status, "done");
     assert.equal(createdComment.body, reviewComment.body);
     assert.deepEqual(
       requests.map((request) => request.url),
@@ -1481,12 +1496,13 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/checklist-items`,
         `https://api.pilo.dev/api/code-review-rooms/${room.id}/comments`,
         `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/checklist-items`,
+        `https://api.pilo.dev/api/review-checklist-items/${checklistItem.id}`,
         `https://api.pilo.dev/api/code-review-rooms/${room.id}/comments`,
       ],
     );
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
-      ["GET", "GET", "POST", "GET", "GET", "GET", "POST", "POST"],
+      ["GET", "GET", "POST", "GET", "GET", "GET", "POST", "PATCH", "POST"],
     );
     assert.deepEqual(
       JSON.parse(requests[2].init.body).pullRequest,
@@ -1502,6 +1518,7 @@ describe("frontend package", () => {
     assertLocalActorHeaders(requests[5]);
     assertLocalActorHeaders(requests[6]);
     assertLocalActorHeaders(requests[7]);
+    assertLocalActorHeaders(requests[8]);
   });
 
   it("calls Notification API client with MVP route contracts", async () => {

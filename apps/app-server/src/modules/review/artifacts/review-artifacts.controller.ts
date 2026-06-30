@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
   CreateReviewChecklistItemInput,
   CreateReviewCommentInput,
   ReviewChecklistItemRecord,
   ReviewCommentRecord,
+  UpdateReviewChecklistItemInput,
 } from "./review-artifact.types";
 import { ReviewArtifactsService } from "./review-artifacts.service";
 
@@ -37,5 +38,13 @@ export class ReviewArtifactsController {
     @Body() body: CreateReviewChecklistItemInput,
   ): ReviewChecklistItemRecord {
     return this.artifactsService.createChecklistItem(analysisId, body);
+  }
+
+  @Patch("review-checklist-items/:itemId")
+  updateChecklistItem(
+    @Param("itemId") itemId: string,
+    @Body() body: UpdateReviewChecklistItemInput,
+  ): ReviewChecklistItemRecord {
+    return this.artifactsService.updateChecklistItem(itemId, body);
   }
 }
