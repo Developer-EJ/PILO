@@ -52,7 +52,7 @@
 
 ## Current Runtime APIs
 
-- None. `agents` and `agent_workflows` have a registry service/repository, but there is no Agent Run or Planning HTTP controller in current `dev`.
+- None. `agents` and `agent_workflows` have a registry service/repository, but there is no Agent Run or Planning HTTP controller in current `temp-dev`.
 
 ## Deferred APIs
 

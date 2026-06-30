@@ -12,7 +12,7 @@ const reviewSessions: ReviewSession[] = [
       authorLogin: "Developer-EJ",
       state: "review_requested",
       branch: "feature/donghyun/auth-login",
-      baseBranch: "dev",
+      baseBranch: "temp-dev",
       changedFilesCount: 4,
       additions: 180,
       deletions: 12,

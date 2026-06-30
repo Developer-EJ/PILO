@@ -90,7 +90,7 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
     "authorLogin": "Developer-EJ",
     "state": "review_requested",
     "branch": "feature/donghyun/auth-login",
-    "baseBranch": "dev",
+    "baseBranch": "temp-dev",
     "url": "https://github.com/example/pilo/pull/7",
     "changedFilesCount": 4,
     "additions": 180,

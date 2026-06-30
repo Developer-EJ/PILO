@@ -18,7 +18,7 @@
 - `docs/api-contract-v1.md` - MVP API 계약.
 - `docs/db/mvp-db-schema-v1.md` - MVP 목표 DB 구조.
 - `docs/agents/README.md` - 각 agent가 시작 전에 읽어야 하는 brief index.
-- `docs/mvp-contract-v0.md` - 현재 dev 구현 상태표.
+- `docs/mvp-contract-v0.md` - 현재 `temp-dev` 구현 상태표.
 - `docs/contracts/*` - 도메인별 API/DTO/read model 계약.
 - `docs/db/*` - DB schema 후보와 migration.
 
@@ -26,7 +26,7 @@
 
 각 agent는 기능 구현 전에 아래를 지킨다.
 
-1. 최신 `dev`에서 자기 도메인 브랜치를 만든다.
+1. 최신 `temp-dev`에서 자기 도메인 브랜치를 만든다.
 2. `agent.md`, `docs/README.md`, 이 문서, `docs/agents/README.md`, 본인 도메인 brief를 읽는다.
 3. 작업 지시에 수정 가능 파일과 금지 파일을 명시한다.
 4. 본인 도메인 밖 데이터는 owner API, public read model, Agent action, fixture/mock 중 하나로만 접근한다.
@@ -64,7 +64,7 @@
 6. provider가 아직 없으면 fixture/mock으로 멈추고 integration issue를 남긴다.
 7. shared 파일 변경은 기능 구현 PR과 분리한다.
 8. AI agent 작업 지시에는 수정 가능 파일과 금지 파일을 반드시 포함한다.
-9. `dev`는 매일 통합 가능한 상태를 유지한다.
+9. `temp-dev`는 매일 통합 가능한 상태를 유지한다.
 10. 문서에 없는 API, DB field, DTO field를 agent가 임의로 만들지 않는다.
 
 ## PR Type
@@ -155,7 +155,7 @@ Stacked PR은 기본적으로 제한한다.
 허용:
 
 - 같은 owner, 같은 domain 안에서 최대 2단 stack.
-- 하위 PR이 `dev`에 merge되어도 상위 PR이 독립적으로 rebase 가능한 경우.
+- 하위 PR이 `temp-dev`에 merge되어도 상위 PR이 독립적으로 rebase 가능한 경우.
 
 금지:
 
@@ -168,7 +168,7 @@ Stacked PR은 기본적으로 제한한다.
 권장 흐름:
 
 1. `spec` 또는 `contract` PR을 먼저 단독 merge한다.
-2. 각 domain PR은 최신 `dev`에서 시작한다.
+2. 각 domain PR은 최신 `temp-dev`에서 시작한다.
 3. domain PR들이 merge된 뒤 별도 `integration` PR을 만든다.
 
 ## Contract Change Flow
@@ -179,7 +179,7 @@ Contract 변경은 반드시 구현보다 먼저 한다.
 2. `contract` PR을 만든다.
 3. 영향을 받는 owner를 reviewer로 지정한다.
 4. `Implemented`, `Mock/In-memory`, `Deferred`, `Breaking` 상태를 명시한다.
-5. contract PR이 `dev`에 merge된 뒤 구현 PR을 시작한다.
+5. contract PR이 `temp-dev`에 merge된 뒤 구현 PR을 시작한다.
 
 Contract PR에는 아래 항목이 있어야 한다.
 
@@ -362,7 +362,7 @@ Reviewer는 아래 순서로 본다.
 
 - PR은 작게 만든다. `docs/convention.md`의 약 400줄 기준을 목표로 하고, 600줄을 넘으면 분리를 검토한다.
 - 하루 이상 오래 열린 PR은 rebase보다 쪼개기를 먼저 검토한다.
-- `dev` merge 전에는 해당 앱 test를 최소 1개 이상 실행한다.
+- `temp-dev` merge 전에는 해당 앱 test를 최소 1개 이상 실행한다.
 - conflict 해결만 하는 PR은 만들지 않는다. conflict가 잦으면 PR scope가 잘못된 것이다.
 - integration PR은 관련 domain PR이 모두 merge된 뒤 만든다.
 

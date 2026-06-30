@@ -20,7 +20,7 @@
 
 본인 agent에게 작업을 맡기기 전에 아래 조건을 먼저 맞춘다.
 
-1. 작업 브랜치는 최신 `dev`에서 만든다.
+1. 작업 브랜치는 최신 `temp-dev`에서 만든다.
 2. 작업 지시 첫머리에 owner, domain, 수정 가능 파일, 금지 파일을 적는다.
 3. DB/API/DTO/Agent action 변경이 있으면 구현 전에 contract 변경 필요 여부를 판단한다.
 4. provider가 없으면 `docs/contracts/fixtures` 또는 domain mock으로 멈추고 follow-up issue를 남긴다.

@@ -8,7 +8,7 @@
 
 | Label | 의미 |
 | --- | --- |
-| Current Runtime APIs | 현재 `dev` app-server controller에 존재해 호출 가능한 path |
+| Current Runtime APIs | 현재 `temp-dev` app-server controller에 존재해 호출 가능한 path |
 | Deferred APIs | DTO/schema/fixture 후보는 있지만 현재 runtime controller가 없는 path |
 | MVP Target APIs | `docs/api-contract-v1.md`에 정의된 목표 path. 현재 runtime과 다를 수 있음 |
 | Excluded | MVP에서 만들지 않는 API/field/CTA. runtime에 이미 있더라도 MVP 성공 기준에는 포함하지 않음 |
@@ -72,5 +72,5 @@
 1. `docs/contracts/*.md`와 `docs/contracts/schemas/*.json`을 먼저 수정한다.
 2. 영향을 받는 담당자를 reviewer로 지정한다.
 3. breaking change라면 deprecated 필드와 migration plan을 적는다.
-4. Contract PRs are merged into `dev` before implementation branches depend on them.
-5. 구현 브랜치는 최신 `dev`를 반영한 뒤 작업한다.
+4. Contract PRs are merged into `temp-dev` before implementation branches depend on them.
+5. 구현 브랜치는 최신 `temp-dev`를 반영한 뒤 작업한다.

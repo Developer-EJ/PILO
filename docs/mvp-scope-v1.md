@@ -1,13 +1,13 @@
 # PILO MVP Scope v1
 
 이 문서는 PILO MVP에서 만들 기능과 만들지 않을 기능을 고정하는 기준 문서다.
-기능 명세 초안, 기존 계약 문서, 현재 `dev` 구현 상태가 충돌할 때 MVP 범위 판단은 이 문서를 우선한다.
+기능 명세 초안, 기존 계약 문서, 현재 `temp-dev` 구현 상태가 충돌할 때 MVP 범위 판단은 이 문서를 우선한다.
 
 함께 읽을 문서:
 
 - `docs/domain-boundary-v1.md` - 도메인 소유권과 cross-domain 규칙.
 - `docs/api-contract-v1.md` - MVP API 계약.
-- `docs/mvp-contract-v0.md` - 현재 `dev` 구현 상태표.
+- `docs/mvp-contract-v0.md` - 현재 `temp-dev` 구현 상태표.
 - `docs/collaboration-v1.md` - 5인 + AI agent 협업 규칙.
 
 ## Scope Status

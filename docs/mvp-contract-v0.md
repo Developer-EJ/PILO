@@ -1,12 +1,12 @@
 # PILO MVP Contract v0
 
-이 문서는 현재 `dev`를 살리기 위한 임시 단일 기준선이다.
+이 문서는 현재 `temp-dev`를 살리기 위한 임시 단일 기준선이다.
 기존 상세 문서를 대체하지 않는다. 다만 기능 PR을 이어가기 전에는 이 문서의
 `Implemented`, `Mock/In-memory`, `Deferred`, `Rebaseline Required` 상태를 먼저 따른다.
 
 ## 목적
 
-- 현재 `dev`에서 실제로 호출해도 되는 API를 고정한다.
+- 현재 `temp-dev`에서 실제로 호출해도 되는 API를 고정한다.
 - mock, fixture, in-memory 구현을 실제 구현과 구분한다.
 - DB 기준선이 갈라진 부분을 숨기지 않고 재정렬 대상으로 표시한다.
 - 새 기능 PR 전에 API prefix, DB schema, public contract의 기준을 하나로 만든다.

@@ -8,7 +8,7 @@
 - `docs/mvp-scope-v1.md` - MVP 포함/제외 범위.
 - `docs/api-contract-v1.md` - 도메인별 public API.
 - `docs/collaboration-v1.md` - PR, contract, DB 변경 규칙.
-- `docs/mvp-contract-v0.md` - 현재 `dev` 구현 상태표.
+- `docs/mvp-contract-v0.md` - 현재 `temp-dev` 구현 상태표.
 
 ## Absolute Rules
 

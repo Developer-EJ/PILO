@@ -30,7 +30,7 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 
 ## Current Runtime APIs
 
-현재 `dev` app-server controller에 구현된 API만 여기에 둔다.
+현재 `temp-dev` app-server controller에 구현된 API만 여기에 둔다.
 
 ### Milestone
 
@@ -87,7 +87,7 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 
 ## Deferred APIs
 
-아래 API는 contract 후보이지만 현재 `dev` controller에는 없다. 다른 팀은
+아래 API는 contract 후보이지만 현재 `temp-dev` controller에는 없다. 다른 팀은
 이 API를 runtime에서 호출하면 안 된다.
 
 | Method | Path | Status | Notes |
@@ -436,7 +436,7 @@ Required fields:
 ```
 
 `TaskCreateDraft`는 Agent action payload와 외부 후보 입력에 쓰는 request DTO다.
-현재 dev에서는 `POST /api/workspaces/:workspaceId/task-drafts`로 저장할 수 있다.
+현재 `temp-dev`에서는 `POST /api/workspaces/:workspaceId/task-drafts`로 저장할 수 있다.
 
 `sourceType` vocabulary:
 

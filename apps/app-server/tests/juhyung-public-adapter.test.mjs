@@ -322,7 +322,7 @@ describe("JuhyungPublicAdapter", () => {
         authorLogin: "github-user",
         state: "review_requested",
         branch: "feat/task-api",
-        baseBranch: "dev",
+        baseBranch: "temp-dev",
         url: "https://github.com/org/repo/pull/33",
         changedFilesCount: 8,
         additions: 200,

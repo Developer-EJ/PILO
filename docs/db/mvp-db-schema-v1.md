@@ -1,6 +1,6 @@
 # PILO MVP DB Schema v1
 
-이 문서는 현재 `dev`를 다시 시작하기 위한 MVP DB 목표 기준선이다.
+이 문서는 현재 `temp-dev`를 다시 시작하기 위한 MVP DB 목표 기준선이다.
 `docs/db/pilo_erd_schema.sql`은 target SQL baseline이자 local bootstrap inventory이며,
 현재 기준선은 70개 table이다. Current runtime DB-backed subset은
 `apps/app-server/prisma/schema.prisma`가 모델링한 table로 제한된다.

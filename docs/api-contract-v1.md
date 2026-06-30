@@ -1,7 +1,7 @@
 # PILO API Contract v1
 
 이 문서는 PILO MVP의 public API 목표 계약을 정의하는 **Target 문서**다.
-현재 `dev`에 이미 구현된 runtime path와 다를 수 있다.
+현재 `temp-dev`에 이미 구현된 runtime path와 다를 수 있다.
 지금 당장 호출 가능한 API는 `docs/mvp-contract-v0.md`와
 `docs/contracts/*`의 `Current Runtime APIs`를 우선한다.
 새 API 추가와 rebaseline은 이 문서의 `/api` prefix 목표 계약에 맞춘다.
@@ -436,7 +436,7 @@ Status rules:
   "isDraft": false,
   "url": "https://github.com/org/repo/pull/5",
   "author": "octocat",
-  "baseBranch": "dev",
+  "baseBranch": "temp-dev",
   "headBranch": "feat/login-api",
   "changedFilesCount": 8,
   "additions": 120,

@@ -6,7 +6,7 @@
       "owner": "example",
       "repoName": "pilo",
       "url": "https://github.com/example/pilo",
-      "defaultBranch": "dev",
+      "defaultBranch": "temp-dev",
       "syncedAt": "2026-06-27T10:00:00.000Z"
     }
   ]

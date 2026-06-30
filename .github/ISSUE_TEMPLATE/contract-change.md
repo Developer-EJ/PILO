@@ -31,7 +31,7 @@ assignees: ""
 ## Implementation Plan
 
 1. Contract PR merge
-2. Consumer dev 최신화
+2. Consumer temp-dev 최신화
 3. 구현 PR 진행
 
 ## Validation
