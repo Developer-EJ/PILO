@@ -199,6 +199,7 @@ export interface AgentOwnerActionExecution {
   status: "succeeded" | "failed" | "deferred";
   targetEntityId: string | null;
   errorMessage: string | null;
+  detail?: Record<string, unknown> | null;
 }
 
 export interface AgentOwnerActionExecutor {

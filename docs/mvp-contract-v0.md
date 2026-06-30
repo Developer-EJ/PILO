@@ -313,37 +313,46 @@ Implemented:
 
 - Agent registry service/repository
 - `agents`, `agent_workflows` Prisma models
-- Agent Run/Action HTTP controller:
-  - `POST /api/workspaces/:workspaceId/agent-runs`
-  - `GET /api/agent-runs/:runId`
-  - `POST /api/agent-actions/:actionId/approve`
-  - `POST /api/agent-actions/:actionId/reject`
-- Internal deterministic `AgentRuntimeService` skeleton:
-  - creates `AgentJobMessage` shape
-  - runs deterministic local workflow logic without external LLM/OpenAI/SQS
+  - Agent Run/Action HTTP controller:
+    - `POST /api/workspaces/:workspaceId/agent-runs`
+    - `GET /api/agent-runs/:runId`
+    - `POST /api/agent-actions/:actionId/approve`
+    - `POST /api/agent-actions/:actionId/reject`
+    - `POST /api/agent-actions/:actionId/execute`
+  - Internal deterministic `AgentRuntimeService` skeleton:
+    - creates `AgentJobMessage` shape
+    - runs deterministic local workflow logic without external LLM/OpenAI/SQS
   - applies `AgentResultMessage` shape to in-memory run/action/trace state
   - supports `task.draft.generate` -> `task.create.draft`
-  - moves confirmable actions from `draft` to `waiting_confirmation`
-  - records confirmation as `confirmed`
-  - records rejection as `rejected`
-  - leaves owner-domain execution behind an explicit adapter/mock boundary
+    - moves confirmable actions from `draft` to `waiting_confirmation`
+    - records confirmation as `confirmed`
+    - records rejection as `rejected`
+    - executes only confirmed actions through an explicit adapter/mock boundary
+    - supports `task.create.draft` execution through a Mock/In-memory TaskDraft
+      owner executor that validates the `TaskCreateDraft` payload and records a
+      `TaskDraftSummary`-shaped result in trace metadata
 
-Deferred:
+  Deferred:
 
-- Agent chat message APIs
-- `GET /api/workspaces/:workspaceId/agent-recommendations`
-- DB-backed `agent_runs`, `agent_actions`, `agent_traces`
-- SQS result persistence into `agent_runs`, `agent_actions`, `agent_traces`
+  - Agent chat message APIs
+  - `GET /api/workspaces/:workspaceId/agent-recommendations`
+  - real 주형 TaskDraft public write adapter integration from Agent Runtime
+  - Task/Meeting/Review/GitHub general owner execution
+  - DB-backed `agent_runs`, `agent_actions`, `agent_traces`
+  - SQS result persistence into `agent_runs`, `agent_actions`, `agent_traces`
 
 주의:
 
 - SQL에는 Agent run/action/trace table이 있지만 Prisma 모델에는 없다.
 - Agent Run/Action HTTP routes are callable Current Runtime APIs, but state is
   process memory only and must not be treated as DB-backed persistence.
-- Current Agent Runtime controller uses `x-member-id` as the temporary
-  mock/current member boundary until Auth/Workspace guard wiring lands.
-- Approval before owner execution is already modeled internally, but actual
-  Task/Meeting/Review/GitHub source data changes remain owner-domain API work.
+  - Current Agent Runtime controller uses `x-member-id` as the temporary
+    mock/current member boundary until Auth/Workspace guard wiring lands.
+    Temporary mock member boundary. Not production auth.
+  - `approve` stops at `confirmed`. It does not execute owner-domain work.
+  - `execute` is the explicit owner execution boundary. Current execution is
+    Mock/In-memory for `task.create.draft`; actual Task/Meeting/Review/GitHub
+    source data changes remain owner-domain API work.
 
 ### Planning
 

@@ -8,6 +8,7 @@ import {
   Param,
   Post,
 } from "@nestjs/common";
+import { MockAgentOwnerActionExecutor } from "./agent-owner-action.executor";
 import { AgentRuntimeService } from "./agent-runtime.service";
 import {
   type AgentAction,
@@ -24,7 +25,10 @@ interface AgentRunCreateRequest {
 
 @Controller()
 export class AgentRuntimeController {
-  constructor(private readonly agentRuntimeService: AgentRuntimeService) {}
+  constructor(
+    private readonly agentRuntimeService: AgentRuntimeService,
+    private readonly ownerActionExecutor: MockAgentOwnerActionExecutor = new MockAgentOwnerActionExecutor(),
+  ) {}
 
   @Post("workspaces/:workspaceId/agent-runs")
   createRun(
@@ -76,6 +80,21 @@ export class AgentRuntimeController {
   ) {
     this.requiredMemberId(memberId);
     return this.toPublicAction(this.agentRuntimeService.rejectAction(actionId));
+  }
+
+  @Post("agent-actions/:actionId/execute")
+  @HttpCode(200)
+  async executeAction(
+    @Param("actionId") actionId: string,
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    this.requiredMemberId(memberId);
+    return this.toPublicAction(
+      await this.agentRuntimeService.executeConfirmedAction(
+        actionId,
+        this.ownerActionExecutor,
+      ),
+    );
   }
 
   private requiredMemberId(value?: string | string[]) {

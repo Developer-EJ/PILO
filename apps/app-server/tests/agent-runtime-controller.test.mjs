@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 require("ts-node/register");
@@ -23,9 +26,12 @@ const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service");
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const UUIDS = {
   workspace: "11111111-1111-4111-8111-111111111111",
   member: "22222222-2222-4222-8222-222222222222",
+  taskDraft: "33333333-3333-4333-8333-333333333333",
 };
 
 describe("AgentRuntimeController", () => {
@@ -46,6 +52,11 @@ describe("AgentRuntimeController", () => {
       RequestMethod.POST,
       "agent-actions/:actionId/reject",
     );
+    assertRoute(
+      "executeAction",
+      RequestMethod.POST,
+      "agent-actions/:actionId/execute",
+    );
   });
 
   it("creates and reads task draft runs without owner domain writes", () => {
@@ -59,6 +70,11 @@ describe("AgentRuntimeController", () => {
         input: {
           message: "Implement OAuth callback",
           githubToken: "should-not-leak",
+          nested: {
+            secret: "should-not-leak",
+            password: "should-not-leak",
+            privateKey: "should-not-leak",
+          },
         },
         contextRefs: [],
       },
@@ -76,6 +92,9 @@ describe("AgentRuntimeController", () => {
     assert.equal(run.actions[0].status, "waiting_confirmation");
     assert.equal(run.actions[0].executedAt, null);
     assert.equal(run.input.githubToken, "[redacted]");
+    assert.equal(run.input.nested.secret, "[redacted]");
+    assert.equal(run.input.nested.password, "[redacted]");
+    assert.equal(run.input.nested.privateKey, "[redacted]");
 
     const fetched = controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.id, run.id);
@@ -108,6 +127,56 @@ describe("AgentRuntimeController", () => {
     assert.equal(fetched.actions[0].status, "confirmed");
   });
 
+  it("executes a confirmed task.create.draft through the owner boundary", async () => {
+    const ownerExecutor = createTaskDraftExecutor();
+    const controller = new AgentRuntimeController(
+      new AgentRuntimeService(),
+      ownerExecutor,
+    );
+    const run = controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Create API task",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+
+    assert.equal(run.actions[0].status, "waiting_confirmation");
+    const approvedAction = controller.approveAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
+    assert.equal(approvedAction.status, "confirmed");
+    assert.equal(ownerExecutor.calls.length, 0);
+
+    const executedAction = await controller.executeAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
+
+    assert.equal(ownerExecutor.calls.length, 1);
+    assert.equal(ownerExecutor.calls[0].type, "task.create.draft");
+    assert.equal(executedAction.status, "executed");
+    assert.equal(typeof executedAction.executedAt, "string");
+
+    const fetched = controller.getRun(run.id, UUIDS.member);
+    assert.equal(fetched.status, "succeeded");
+    assert.equal(fetched.pendingActionCount, 0);
+    assert.equal(
+      fetched.trace.some(
+        (entry) =>
+          entry.message === "agent action executed by owner boundary" &&
+          entry.metadata.result.targetEntityId === UUIDS.taskDraft &&
+          entry.metadata.result.detail.taskDraft.status === "draft",
+      ),
+      true,
+    );
+  });
+
   it("rejects a waiting action as a terminal state", () => {
     const controller = new AgentRuntimeController(new AgentRuntimeService());
     const run = controller.createRun(
@@ -134,7 +203,90 @@ describe("AgentRuntimeController", () => {
     assert.equal(fetched.actions[0].status, "rejected");
   });
 
-  it("requires the current mock member boundary for HTTP routes", () => {
+  it("does not execute rejected or already executed actions", async () => {
+    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const rejectedRun = controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Reject this task draft",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+    controller.rejectAction(rejectedRun.actions[0].id, UUIDS.member);
+
+    await assert.rejects(
+      () => controller.executeAction(rejectedRun.actions[0].id, UUIDS.member),
+      BadRequestException,
+    );
+    assert.equal(
+      controller.getRun(rejectedRun.id, UUIDS.member).actions[0].status,
+      "rejected",
+    );
+
+    const executedRun = controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Execute once",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+    controller.approveAction(executedRun.actions[0].id, UUIDS.member);
+    await controller.executeAction(executedRun.actions[0].id, UUIDS.member);
+
+    await assert.rejects(
+      () => controller.executeAction(executedRun.actions[0].id, UUIDS.member),
+      BadRequestException,
+    );
+    assert.equal(
+      controller.getRun(executedRun.id, UUIDS.member).actions[0].status,
+      "executed",
+    );
+  });
+
+  it("marks unsupported confirmed actions as failed at the execute boundary", async () => {
+    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const run = controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "review.analysis.generate",
+        input: {
+          pullRequestId: "44444444-4444-4444-8444-444444444444",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+    controller.approveAction(run.actions[0].id, UUIDS.member);
+
+    const action = await controller.executeAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
+
+    assert.equal(action.status, "failed");
+    const fetched = controller.getRun(run.id, UUIDS.member);
+    assert.equal(fetched.status, "failed");
+    assert.equal(
+      fetched.error.message,
+      "Only task.create.draft execution is supported",
+    );
+    assert.equal(
+      fetched.trace.some(
+        (entry) => entry.message === "agent action execution failed",
+      ),
+      true,
+    );
+  });
+
+  it("requires the current mock member boundary for HTTP routes", async () => {
     const controller = new AgentRuntimeController(new AgentRuntimeService());
 
     assert.throws(
@@ -154,9 +306,13 @@ describe("AgentRuntimeController", () => {
       () => controller.getRun(UUIDS.workspace, undefined),
       BadRequestException,
     );
+    await assert.rejects(
+      () => controller.executeAction(UUIDS.workspace, undefined),
+      BadRequestException,
+    );
   });
 
-  it("surfaces missing run and action errors", () => {
+  it("surfaces missing run and action errors", async () => {
     const controller = new AgentRuntimeController(new AgentRuntimeService());
 
     assert.throws(
@@ -171,6 +327,31 @@ describe("AgentRuntimeController", () => {
       () => controller.rejectAction(UUIDS.workspace, UUIDS.member),
       NotFoundException,
     );
+    await assert.rejects(
+      () => controller.executeAction(UUIDS.workspace, UUIDS.member),
+      NotFoundException,
+    );
+  });
+
+  it("keeps Agent runtime free of owner service and repository imports", () => {
+    const checkedFiles = [
+      "../src/modules/agent/agent-runtime.controller.ts",
+      "../src/modules/agent/agent-runtime.service.ts",
+      "../src/modules/agent/agent-owner-action.executor.ts",
+      "../src/modules/agent/agent.module.ts",
+    ];
+
+    for (const file of checkedFiles) {
+      const source = readFileSync(resolve(__dirname, file), "utf8");
+      assert.doesNotMatch(
+        source,
+        /from\s+["']\.\.\/(?:juhyung|meeting|review)(?:\/|["'])/,
+      );
+      assert.doesNotMatch(
+        source,
+        /JuhyungTaskService|JuhyungRepository|MeetingService|MeetingRepository|Review\w*Service|Review\w*Repository/,
+      );
+    }
   });
 
   it("is callable through the app-server /api prefix", async () => {
@@ -229,6 +410,18 @@ describe("AgentRuntimeController", () => {
       assert.equal(approvedAction.status, "confirmed");
       assert.equal(approvedAction.executedAt, null);
 
+      const executeResponse = await server.inject({
+        method: "POST",
+        url: `/api/agent-actions/${run.actions[0].id}/execute`,
+        headers: {
+          "x-member-id": UUIDS.member,
+        },
+      });
+      assert.equal(executeResponse.statusCode, 200);
+      const executedAction = JSON.parse(executeResponse.payload);
+      assert.equal(executedAction.status, "executed");
+      assert.equal(typeof executedAction.executedAt, "string");
+
       const rejectedRunResponse = await server.inject({
         method: "POST",
         url: `/api/workspaces/${UUIDS.workspace}/agent-runs`,
@@ -270,4 +463,38 @@ function assertRoute(methodName, method, path) {
   const handler = AgentRuntimeController.prototype[methodName];
   assert.equal(Reflect.getMetadata(METHOD_METADATA, handler), method);
   assert.equal(Reflect.getMetadata(PATH_METADATA, handler), path);
+}
+
+function createTaskDraftExecutor() {
+  const calls = [];
+  return {
+    calls,
+    execute: async (action) => {
+      calls.push(action);
+      return {
+        owner: "task",
+        operation: "task.create.draft",
+        status: "succeeded",
+        targetEntityId: UUIDS.taskDraft,
+        errorMessage: null,
+        detail: {
+          taskDraft: {
+            id: UUIDS.taskDraft,
+            workspaceId: action.payload.workspaceId,
+            sourceType: action.payload.sourceType,
+            sourceId: action.payload.sourceId,
+            title: action.payload.title,
+            description: action.payload.description,
+            assigneeMemberId: action.payload.assigneeMemberId,
+            priority: action.payload.priority,
+            dueDate: action.payload.dueDate,
+            status: "draft",
+            taskId: null,
+            createdAt: action.confirmedAt,
+            updatedAt: action.confirmedAt,
+          },
+        },
+      };
+    },
+  };
 }
