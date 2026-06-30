@@ -496,7 +496,7 @@ describe("agent frontend client", () => {
     }
   });
 
-  it("keeps onboarding step one chat-only and moves review UI to a separate component", () => {
+  it("keeps onboarding step one wizard-only and moves review UI to a separate component", () => {
     const flowSource = readFileSync(
       new URL("../components/agent/AgentOnboardingFlow.tsx", import.meta.url),
       "utf8",
@@ -506,7 +506,8 @@ describe("agent frontend client", () => {
       "utf8",
     );
 
-    assert.equal(flowSource.includes("onboardingChatPanel"), true);
+    assert.equal(flowSource.includes("onboardingWizardModal"), true);
+    assert.equal(flowSource.includes("onboardingChatPanel"), false);
     assert.equal(flowSource.includes("summaryGrid"), false);
     assert.equal(flowSource.includes("taskCandidates.map"), false);
     assert.equal(flowSource.includes("milestoneCandidates.map"), false);

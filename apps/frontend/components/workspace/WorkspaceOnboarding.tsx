@@ -64,6 +64,9 @@ export function WorkspaceOnboarding() {
   const router = useRouter();
   const [reviewPayload, setReviewPayload] =
     useState<AgentOnboardingWorkspacePayload | null>(null);
+  const [onboardingDraft, setOnboardingDraft] = useState<
+    AgentOnboardingWorkspacePayload["onboarding"] | null
+  >(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -113,9 +116,11 @@ export function WorkspaceOnboarding() {
         <AgentOnboardingFlow
           className="workspace-agent-onboarding-flow"
           disabled={submitting}
+          initialDraft={onboardingDraft ?? undefined}
           onCancel={() => router.replace(workspaceEntryHref())}
           onComplete={(payload) => {
             setReviewPayload(payload);
+            setOnboardingDraft(payload.onboarding);
             setErrorMessage(null);
           }}
         />
@@ -137,6 +142,7 @@ export function WorkspaceOnboarding() {
         }}
         onChange={(payload) => {
           setReviewPayload(payload);
+          setOnboardingDraft(payload.onboarding);
           setErrorMessage(null);
         }}
         onConfirm={createWorkspace}

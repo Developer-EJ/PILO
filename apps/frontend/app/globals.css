@@ -3957,6 +3957,12 @@ h1 {
     var(--pilo-bg);
 }
 
+.workspace-onboarding-agent-shell {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+}
+
 .workspace-onboarding-card {
   width: min(1040px, 100%);
   margin: 0 auto;
