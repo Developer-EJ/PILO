@@ -1113,6 +1113,124 @@ describe("app-server package", () => {
     );
   });
 
+  it("reads workspace summaries and preferences from the database-backed repository", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    const workspaceId = "22222222-2222-4222-8222-222222222222";
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const memberId = "33333333-3333-4333-8333-333333333331";
+    const queries = [];
+    const database = {
+      async $queryRaw(strings, ...values) {
+        const sql = strings.join("?");
+
+        queries.push({ sql, values });
+
+        if (sql.includes("COUNT(all_members.id)")) {
+          return [
+            {
+              id: workspaceId,
+              name: "PILO MVP",
+              description: "Runtime workspace",
+              type: "side_project",
+              status: "active",
+              myRole: "owner",
+              memberCount: 1,
+              createdAt: new Date("2026-06-28T00:00:00.000Z"),
+            },
+          ];
+        }
+
+        if (sql.includes("JOIN users u")) {
+          return [
+            {
+              id: memberId,
+              workspaceId,
+              userId,
+              name: "Donghyun Local",
+              email: "donghyun.local@pilo.dev",
+              avatarUrl: null,
+              role: "owner",
+              displayName: "Workspace / Canvas",
+              joinedAt: new Date("2026-06-28T00:00:00.000Z"),
+              createdAt: new Date("2026-06-28T00:00:00.000Z"),
+              updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+            },
+          ];
+        }
+
+        if (sql.includes("FROM dashboard_preferences")) {
+          return [
+            {
+              workspaceId,
+              memberId,
+              layout: { density: "comfortable" },
+              hiddenSections: ["agent"],
+              updatedAt: new Date("2026-06-28T00:00:00.000Z"),
+            },
+          ];
+        }
+
+        throw new Error(`Unexpected workspace repository query: ${sql}`);
+      },
+    };
+
+    delete process.env.PILO_SKIP_DATABASE_CONNECT;
+
+    try {
+      const repository = new WorkspaceRepository(database);
+
+      assert.equal(repository.storageMode, "database");
+      assert.deepEqual(await repository.listWorkspaceSummariesForUser(userId), [
+        {
+          id: workspaceId,
+          name: "PILO MVP",
+          description: "Runtime workspace",
+          type: "side_project",
+          status: "active",
+          myRole: "owner",
+          memberCount: 1,
+          createdAt: "2026-06-28T00:00:00.000Z",
+        },
+      ]);
+      assert.deepEqual(
+        await repository.findCurrentMember({ workspaceId, userId }),
+        {
+          id: memberId,
+          workspaceId,
+          userId,
+          name: "Donghyun Local",
+          email: "donghyun.local@pilo.dev",
+          avatarUrl: null,
+          role: "owner",
+          displayName: "Workspace / Canvas",
+          joinedAt: "2026-06-28T00:00:00.000Z",
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z",
+        },
+      );
+      assert.deepEqual(
+        await repository.getDashboardPreferencesForUser({
+          workspaceId,
+          userId,
+        }),
+        {
+          workspaceId,
+          memberId,
+          layout: { density: "comfortable" },
+          hiddenSections: ["agent"],
+          updatedAt: "2026-06-28T00:00:00.000Z",
+        },
+      );
+      assert.equal(queries.length, 4);
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
   it("lists workspace members using the WorkspaceMemberSummary contract", async () => {
     const service = new WorkspaceService(new WorkspaceRepository());
     const currentUser = {
