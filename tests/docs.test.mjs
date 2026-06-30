@@ -431,9 +431,44 @@ describe("contract document set", () => {
     assert.match(api, /`\/api\/workspaces\/:workspaceId\/agent-runs`/);
     assert.match(api, /`\/api\/workspaces\/:workspaceId\/task-drafts`/);
 
-    const notificationSection = api.slice(api.indexOf("## Notification Target API"));
-    assert.match(notificationSection, /not\s+current runtime endpoints yet/);
-    assert.match(notificationSection, /### Deferred Endpoints/);
+    const notificationSection = api.slice(
+      api.indexOf("## Notification API"),
+      api.indexOf("## Basic Canvas API"),
+    );
+    assert.match(notificationSection, /### Endpoints/);
+    assert.match(
+      notificationSection,
+      /`\/api\/workspaces\/:workspaceId\/notifications`/,
+    );
+    assert.match(
+      notificationSection,
+      /`\/api\/notifications\/:notificationId\/read`/,
+    );
+    assert.match(
+      notificationSection,
+      /`\/api\/workspaces\/:workspaceId\/notifications\/read-all`/,
+    );
+    assert.doesNotMatch(
+      notificationSection,
+      /not\s+current runtime endpoints yet/,
+    );
+    assert.doesNotMatch(notificationSection, /### Deferred Endpoints/);
+
+    const common = read("docs/contracts/common-system.md");
+    const commonCurrent = common.slice(
+      common.indexOf("## Current Runtime APIs"),
+      common.indexOf("## Deferred APIs"),
+    );
+    const commonDeferred = common.slice(
+      common.indexOf("## Deferred APIs"),
+      common.indexOf("## DTOs"),
+    );
+    assert.match(
+      commonCurrent,
+      /\/api\/workspaces\/:workspaceId\/notifications/,
+    );
+    assert.match(commonCurrent, /\/api\/notifications\/:notificationId\/read/);
+    assert.doesNotMatch(commonDeferred, /notifications/);
   });
 });
 
@@ -557,6 +592,7 @@ describe("machine-readable public contract schema", () => {
       "AgentJobMessage",
       "AgentResultMessage",
       "NotificationCreateRequest",
+      "NotificationResponse",
       "SharedFileRef",
     ]) {
       assert.ok(defs[name], `schema must define ${name}`);

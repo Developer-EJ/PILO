@@ -3824,6 +3824,9 @@
         "title": {
           "type": "string"
         },
+        "body": {
+          "type": "string"
+        },
         "linkedEntityType": {
           "type": ["string", "null"]
         },
@@ -3836,6 +3839,77 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "NotificationRelatedObject": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "NotificationResponse": {
+      "type": "object",
+      "required": [
+        "id",
+        "workspaceId",
+        "recipientUserId",
+        "type",
+        "title",
+        "body",
+        "readAt",
+        "relatedObject",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "recipientUserId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "type": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "readAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dateTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relatedObject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NotificationRelatedObject"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/dateTime"
         }
       }
     },

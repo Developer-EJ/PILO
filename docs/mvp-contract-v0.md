@@ -339,15 +339,17 @@ Deferred:
 
 ### Common System
 
-상태: `Implemented` for health only, `Deferred` for common data APIs
+상태: `Implemented` for health and minimal notification read APIs, `Deferred` for shared files and audit logs
 
 현재 API:
 
 - `GET /api/health`
+- `GET /api/workspaces/:workspaceId/notifications`
+- `PATCH /api/notifications/:notificationId/read`
+- `PATCH /api/workspaces/:workspaceId/notifications/read-all`
 
 Deferred:
 
-- notifications
 - shared files
 - audit logs
 

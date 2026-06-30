@@ -719,16 +719,17 @@ Rules:
 - `approve` only accepts `waiting_confirmation` actions. `reject` only accepts `draft` or `waiting_confirmation` actions.
 - `confirmed`, `executed`, `rejected`, and `failed` actions cannot be changed by user approval/rejection endpoints.
 
-## Notification Target API
+## Notification API
 
-Notification storage and read APIs are common-system target APIs. They are not
-current runtime endpoints yet; do not call them from MVP screens until
-`docs/contracts/common-system.md` moves them from Deferred APIs to Current
-Runtime APIs. The current MVP notification surface is derived UI only:
-dashboard badges, Agent approval counts, review request counts, and task draft
-counts.
+Notification storage and read-state APIs are Common/System runtime APIs in the
+MVP. The current implementation uses an in-memory repository, so it is suitable
+for local MVP flow validation but not durable production delivery yet.
 
-### Deferred Endpoints
+Notification is read-model support only. It may navigate the user to an owner
+domain screen, but it must not execute Task, Review, Agent, GitHub, Meeting, or
+Canvas business actions by itself.
+
+### Endpoints
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
@@ -765,8 +766,10 @@ Rules:
 
 - Notification executes no business action.
 - Notification links to owner screen.
-- Current runtime callers must use owner-domain lists or dashboard read models
-  instead of these endpoints.
+- Notification read state belongs to the current authenticated user only.
+- Workspace membership is required before listing or mutating read state.
+- MVP runtime stores notification read state in memory until the DB-backed
+  Common/System repository is promoted.
 
 ## Basic Canvas API
 
