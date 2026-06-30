@@ -143,7 +143,7 @@ export function CurrentWorkspaceSwitcher() {
         <div className="brand-mark">P</div>
         <div className="workspace-brand-copy">
           <p>PILO</p>
-          <span>Workspace 확인 중</span>
+          <span>Loading workspace</span>
         </div>
       </div>
     );
@@ -157,8 +157,8 @@ export function CurrentWorkspaceSwitcher() {
           <p>PILO</p>
           <span>
             {state.status === "empty"
-              ? "Workspace 생성 필요"
-              : "Workspace 목록 로드 실패"}
+              ? "Workspace setup needed"
+              : "Workspace list failed"}
           </span>
         </div>
       </div>
@@ -179,7 +179,7 @@ export function CurrentWorkspaceSwitcher() {
         className="workspace-brand-button"
         aria-expanded={isOpen}
         aria-haspopup="listbox"
-        aria-label="현재 workspace 선택"
+        aria-label="Select current workspace"
         onClick={() => setIsOpen((open) => !open)}
       >
         <div className="brand-mark" aria-hidden="true">
@@ -188,7 +188,7 @@ export function CurrentWorkspaceSwitcher() {
         <div className="workspace-brand-copy">
           <p>
             {state.status === "url_not_found"
-              ? "접근 불가 Workspace"
+              ? "Unknown workspace"
               : selectedName}
           </p>
           <span>
@@ -198,7 +198,7 @@ export function CurrentWorkspaceSwitcher() {
           </span>
         </div>
         <span className="workspace-brand-caret" aria-hidden="true">
-          ▾
+          v
         </span>
       </button>
 
@@ -206,7 +206,7 @@ export function CurrentWorkspaceSwitcher() {
         <div className="workspace-brand-menu" role="listbox">
           {state.status === "url_not_found" ? (
             <div className="workspace-brand-menu-note">
-              현재 URL의 workspace를 찾을 수 없어요.
+              This URL workspace is not available.
             </div>
           ) : null}
           {state.workspaces.map((workspace) => (

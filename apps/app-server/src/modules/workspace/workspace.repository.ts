@@ -2,6 +2,13 @@ import { Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../database/database.service";
+import {
+  createLocalMvpMemberRecord,
+  createLocalMvpWorkspaceRecord,
+  LOCAL_MVP_MEMBER_ID,
+  LOCAL_MVP_WORKSPACE_ID,
+  shouldExposeLocalMvpWorkspace,
+} from "./local-mvp-workspace";
 import type {
   AcceptWorkspaceInviteInput,
   AcceptWorkspaceInviteResult,
@@ -101,6 +108,8 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     if (this.shouldUseDatabase) {
       return this.listDbWorkspaceSummariesForUser(userId);
     }
+
+    this.ensureLocalMvpWorkspace();
 
     return Array.from(this.membersById.values())
       .filter((member) => member.userId === userId)
@@ -375,6 +384,8 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
     if (this.shouldUseDatabase) {
       return this.createDbWorkspace(input);
     }
+
+    this.ensureLocalMvpWorkspace();
 
     const now = new Date().toISOString();
     const workspace: WorkspaceRecord = {
@@ -1029,6 +1040,8 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   private findVisibleWorkspace(workspaceId: string) {
+    this.ensureLocalMvpWorkspace();
+
     const workspace = this.workspacesById.get(workspaceId);
 
     if (!workspace || workspace.deletedAt) {
@@ -1039,6 +1052,8 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   private findMemberRecord(input: FindWorkspaceForUserInput) {
+    this.ensureLocalMvpWorkspace();
+
     return (
       Array.from(this.membersById.values()).find(
         (member) =>
@@ -1064,9 +1079,28 @@ export class WorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   private countMembers(workspaceId: string) {
+    this.ensureLocalMvpWorkspace();
+
     return Array.from(this.membersById.values()).filter(
       (member) => member.workspaceId === workspaceId,
     ).length;
+  }
+
+  private ensureLocalMvpWorkspace() {
+    if (!shouldExposeLocalMvpWorkspace()) {
+      return;
+    }
+
+    if (!this.workspacesById.has(LOCAL_MVP_WORKSPACE_ID)) {
+      this.workspacesById.set(
+        LOCAL_MVP_WORKSPACE_ID,
+        createLocalMvpWorkspaceRecord(),
+      );
+    }
+
+    if (!this.membersById.has(LOCAL_MVP_MEMBER_ID)) {
+      this.membersById.set(LOCAL_MVP_MEMBER_ID, createLocalMvpMemberRecord());
+    }
   }
 
   private toWorkspaceSummary(

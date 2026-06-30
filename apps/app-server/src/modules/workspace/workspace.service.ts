@@ -309,7 +309,7 @@ export class WorkspaceService {
     currentMember: CurrentWorkspaceMember,
     readModels: FixtureDashboardReadModels,
   ): Promise<FixtureDashboardReadModels> {
-    if (!this.moduleRef || process.env.PILO_SKIP_DATABASE_CONNECT === "true") {
+    if (!this.moduleRef) {
       return readModels;
     }
 

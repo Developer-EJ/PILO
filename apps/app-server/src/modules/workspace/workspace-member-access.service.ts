@@ -4,9 +4,11 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { DatabaseService } from "../database/database.service";
-
-const LOCAL_MVP_USER_ID = "11111111-1111-4111-8111-111111111111";
-const LOCAL_MVP_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
+import {
+  LOCAL_MVP_MEMBER_ID,
+  LOCAL_MVP_USER_ID,
+  shouldExposeLocalMvpWorkspace,
+} from "./local-mvp-workspace";
 
 export interface CurrentActor {
   userId?: string;
@@ -22,7 +24,7 @@ export class WorkspaceMemberAccessService {
       throw new UnauthorizedException("Authentication is required");
     }
 
-    if (process.env.PILO_SKIP_DATABASE_CONNECT === "true") {
+    if (shouldExposeLocalMvpWorkspace()) {
       return {
         id: actor.memberId ?? LOCAL_MVP_MEMBER_ID,
         workspaceId,

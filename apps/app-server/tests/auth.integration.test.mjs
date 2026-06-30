@@ -381,8 +381,8 @@ describe("auth HTTP integration", () => {
       assert.equal(dashboard.currentMember.userId, currentUser.id);
       assert.deepEqual(dashboard.preferences, ownerPreferences);
       assert.equal(dashboard.members.length, 1);
-      assert.equal(dashboard.source, "fixture");
-      assert.equal(dashboard.tasks.length > 0, true);
+      assert.equal(dashboard.source, "mixed");
+      assert.deepEqual(dashboard.tasks, []);
       assert.equal(dashboard.progress.workspaceId, created.id);
 
       const inviteResponse = await server.inject({

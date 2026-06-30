@@ -38,6 +38,11 @@ const {
 const {
   WorkspaceRepository,
 } = require("../src/modules/workspace/workspace.repository");
+const {
+  LOCAL_MVP_MEMBER_ID,
+  LOCAL_MVP_USER_ID,
+  LOCAL_MVP_WORKSPACE_ID,
+} = require("../src/modules/workspace/local-mvp-workspace");
 const { CanvasRepository } = require("../src/modules/canvas/canvas.repository");
 const {
   CanvasAccessError,
@@ -1225,6 +1230,70 @@ describe("app-server package", () => {
         },
       );
       assert.equal(queries.length, 4);
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
+  it("exposes the local MVP workspace when database connect is skipped", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+
+    try {
+      const repository = new WorkspaceRepository();
+
+      assert.equal(repository.storageMode, "memory");
+      assert.deepEqual(
+        await repository.listWorkspaceSummariesForUser(LOCAL_MVP_USER_ID),
+        [
+          {
+            id: LOCAL_MVP_WORKSPACE_ID,
+            name: "PILO MVP",
+            description: "Runtime workspace",
+            type: "side_project",
+            status: "active",
+            myRole: "owner",
+            memberCount: 1,
+            createdAt: "2026-06-28T00:00:00.000Z",
+          },
+        ],
+      );
+      assert.deepEqual(
+        await repository.findCurrentMember({
+          workspaceId: LOCAL_MVP_WORKSPACE_ID,
+          userId: LOCAL_MVP_USER_ID,
+        }),
+        {
+          id: LOCAL_MVP_MEMBER_ID,
+          workspaceId: LOCAL_MVP_WORKSPACE_ID,
+          userId: LOCAL_MVP_USER_ID,
+          name: "PILO MVP User",
+          email: "local.mvp@pilo.dev",
+          avatarUrl: null,
+          role: "owner",
+          displayName: "Local MVP Owner",
+          joinedAt: "2026-06-28T00:00:00.000Z",
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z",
+        },
+      );
+      assert.deepEqual(
+        await repository.getDashboardPreferencesForUser({
+          workspaceId: LOCAL_MVP_WORKSPACE_ID,
+          userId: LOCAL_MVP_USER_ID,
+        }),
+        {
+          workspaceId: LOCAL_MVP_WORKSPACE_ID,
+          memberId: LOCAL_MVP_MEMBER_ID,
+          layout: {},
+          hiddenSections: [],
+          updatedAt: null,
+        },
+      );
     } finally {
       if (previousSkipDatabaseConnect === undefined) {
         delete process.env.PILO_SKIP_DATABASE_CONNECT;
@@ -3531,6 +3600,22 @@ describe("app-server package", () => {
       assert.deepEqual(app.get(CanvasService).getRepositoryStatus(), {
         storageMode: "memory",
       });
+      const localDashboard = await app
+        .get(WorkspaceService)
+        .getWorkspaceDashboard({
+          workspaceId: LOCAL_MVP_WORKSPACE_ID,
+          currentUser: {
+            id: LOCAL_MVP_USER_ID,
+            name: "PILO MVP User",
+            email: "local.mvp@pilo.dev",
+            avatarUrl: null,
+          },
+        });
+
+      assert.equal(localDashboard.workspace.id, LOCAL_MVP_WORKSPACE_ID);
+      assert.equal(localDashboard.currentMember.memberId, LOCAL_MVP_MEMBER_ID);
+      assert.equal(localDashboard.source, "mixed");
+      assert.deepEqual(localDashboard.tasks, []);
       const pullRequest = {
         id: "66666666-6666-4666-8666-666666666661",
         repositoryId: "55555555-5555-4555-8555-555555555501",
