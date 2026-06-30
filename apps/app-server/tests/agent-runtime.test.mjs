@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 require("ts-node/register");
@@ -9,6 +11,8 @@ require("ts-node/register");
 const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service");
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const UUIDS = {
   workspace: "11111111-1111-4111-8111-111111111111",
@@ -200,6 +204,28 @@ describe("AgentRuntimeService local skeleton", () => {
     );
   });
 
+  it("does not reject confirmed actions outside the documented state machine", () => {
+    const service = new AgentRuntimeService();
+    const run = service.createLocalRun(
+      {
+        workspaceId: UUIDS.workspace,
+        actorMemberId: UUIDS.member,
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Create API task",
+        },
+        contextRefs: [],
+      },
+      createClock(),
+    );
+    service.confirmAction(run.actions[0].id, UUIDS.member, createClock());
+
+    assert.throws(
+      () => service.rejectAction(run.actions[0].id, createClock()),
+      /not waiting rejection/,
+    );
+  });
+
   it("records failed local results as run error and trace", () => {
     const service = new AgentRuntimeService();
     const job = service.createAgentJob(
@@ -244,16 +270,10 @@ describe("AgentRuntimeService local skeleton", () => {
 
   it("keeps repository fixtures compatible with job/result shape", () => {
     const jobFixture = JSON.parse(
-      readFileSync(
-        "../../docs/contracts/fixtures/agent-job.fixture.json",
-        "utf8",
-      ),
+      readFileSync(fixturePath("agent-job.fixture.json"), "utf8"),
     );
     const resultFixture = JSON.parse(
-      readFileSync(
-        "../../docs/contracts/fixtures/agent-result.fixture.json",
-        "utf8",
-      ),
+      readFileSync(fixturePath("agent-result.fixture.json"), "utf8"),
     );
 
     assertAgentJobShape(jobFixture);
@@ -271,6 +291,10 @@ function createClock() {
     uuid: () => `00000000-0000-4000-8000-${String(id++).padStart(12, "0")}`,
     now: () => `2026-06-30T00:00:${String(tick++).padStart(2, "0")}.000Z`,
   };
+}
+
+function fixturePath(fileName) {
+  return resolve(__dirname, "../../../docs/contracts/fixtures", fileName);
 }
 
 function assertAgentJobShape(job) {

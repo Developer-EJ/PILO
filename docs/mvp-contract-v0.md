@@ -13,12 +13,12 @@
 
 ## 상태 정의
 
-| 상태 | 의미 |
-|---|---|
-| `Implemented` | 현재 app-server/realtime/frontend 코드에 실제 runtime 경로 또는 기능이 있다. |
-| `Mock/In-memory` | 기능은 동작하지만 프로세스 메모리, fixture, local mock에 의존한다. 데이터 영속성을 기대하면 안 된다. |
-| `Deferred` | 문서/schema/fixture 후보는 있으나 현재 runtime에서 호출하면 안 된다. |
-| `Rebaseline Required` | 문서, DB, Prisma, controller 중 둘 이상이 충돌한다. 기능 PR 전에 정리해야 한다. |
+| 상태                  | 의미                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `Implemented`         | 현재 app-server/realtime/frontend 코드에 실제 runtime 경로 또는 기능이 있다.                         |
+| `Mock/In-memory`      | 기능은 동작하지만 프로세스 메모리, fixture, local mock에 의존한다. 데이터 영속성을 기대하면 안 된다. |
+| `Deferred`            | 문서/schema/fixture 후보는 있으나 현재 runtime에서 호출하면 안 된다.                                 |
+| `Rebaseline Required` | 문서, DB, Prisma, controller 중 둘 이상이 충돌한다. 기능 PR 전에 정리해야 한다.                      |
 
 ## 임시 원칙
 
@@ -32,16 +32,17 @@
 
 app-server uses the global `api` prefix. Every public HTTP route exposed by current runtime controllers is `/api/...`.
 
-| 도메인 | 현재 prefix 상태 |
-|---|---|
-| Auth | `/api/auth/...` |
-| Workspace | `/api/workspaces/...`, `/api/workspace-invites/...` |
-| Canvas | `/api/workspaces/:workspaceId/canvas-boards`, `/api/canvas-boards/...`, `/api/canvas-shapes/...` |
-| Task / Milestone | `/api/workspaces/:workspaceId/...`, `/api/tasks/...`, `/api/milestones/...` |
-| GitHub Connection | `/api/workspaces/:workspaceId/github/connections`, `/api/github/app/callback` |
-| Meeting / Voice | `/api/...` |
-| Review | `/api/pull-requests/...`, `/api/code-review-rooms/...`, `/api/pull-request-analyses/...`, `/api/review-nodes/...` |
-| Agent Run / Planning / Common | 대부분 controller 없음. health만 `/api/health` |
+| 도메인            | 현재 prefix 상태                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Auth              | `/api/auth/...`                                                                                                   |
+| Workspace         | `/api/workspaces/...`, `/api/workspace-invites/...`                                                               |
+| Canvas            | `/api/workspaces/:workspaceId/canvas-boards`, `/api/canvas-boards/...`, `/api/canvas-shapes/...`                  |
+| Task / Milestone  | `/api/workspaces/:workspaceId/...`, `/api/tasks/...`, `/api/milestones/...`                                       |
+| GitHub Connection | `/api/workspaces/:workspaceId/github/connections`, `/api/github/app/callback`                                     |
+| Meeting / Voice   | `/api/...`                                                                                                        |
+| Review            | `/api/pull-requests/...`, `/api/code-review-rooms/...`, `/api/pull-request-analyses/...`, `/api/review-nodes/...` |
+| Agent Run         | `/api/workspaces/:workspaceId/agent-runs`, `/api/agent-runs/...`, `/api/agent-actions/...`                        |
+| Planning / Common | 대부분 controller 없음. health만 `/api/health`                                                                    |
 
 `/api` prefix unification is complete in this rebaseline.
 
@@ -49,12 +50,12 @@ app-server uses the global `api` prefix. Every public HTTP route exposed by curr
 
 현재 DB 기준은 target SQL baseline과 current runtime DB-backed subset을 분리해서 읽는다.
 
-| 기준 | 상태 |
-|---|---|
-| `docs/db/pilo_erd_schema.sql` | 70개 table을 정의하는 target SQL baseline/local bootstrap |
-| `apps/app-server/prisma/schema.prisma` | 19개 table만 모델링 |
-| Prisma에만 있음 | 없음. Prisma `@@map` table은 SQL baseline에 존재해야 함 |
-| SQL에만 있음 | Auth session/OAuth, Workspace invite/preferences, Canvas, Meeting, Voice, Review, Agent run/action/trace, Planning, Common 다수 |
+| 기준                                   | 상태                                                                                                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/db/pilo_erd_schema.sql`          | 70개 table을 정의하는 target SQL baseline/local bootstrap                                                                       |
+| `apps/app-server/prisma/schema.prisma` | 19개 table만 모델링                                                                                                             |
+| Prisma에만 있음                        | 없음. Prisma `@@map` table은 SQL baseline에 존재해야 함                                                                         |
+| SQL에만 있음                           | Auth session/OAuth, Workspace invite/preferences, Canvas, Meeting, Voice, Review, Agent run/action/trace, Planning, Common 다수 |
 
 판정:
 
@@ -306,40 +307,41 @@ Deferred:
 
 ### Agent Runtime
 
-상태: `Implemented` for registry and internal deterministic service skeleton,
-`Mock/In-memory` for local run/action state, `Deferred` for HTTP runtime
+상태: `Implemented`, `Mock/In-memory` for Agent Run/Action HTTP runtime
 
 Implemented:
 
 - Agent registry service/repository
 - `agents`, `agent_workflows` Prisma models
-- Internal `AgentRuntimeService` skeleton:
+- Agent Run/Action HTTP controller:
+  - `POST /api/workspaces/:workspaceId/agent-runs`
+  - `GET /api/agent-runs/:runId`
+  - `POST /api/agent-actions/:actionId/approve`
+  - `POST /api/agent-actions/:actionId/reject`
+- Internal deterministic `AgentRuntimeService` skeleton:
   - creates `AgentJobMessage` shape
   - runs deterministic local workflow logic without external LLM/OpenAI/SQS
   - applies `AgentResultMessage` shape to in-memory run/action/trace state
   - supports `task.draft.generate` -> `task.create.draft`
   - moves confirmable actions from `draft` to `waiting_confirmation`
   - records confirmation as `confirmed`
+  - records rejection as `rejected`
   - leaves owner-domain execution behind an explicit adapter/mock boundary
 
 Deferred:
 
-- `POST /api/workspaces/:workspaceId/agent-runs`
-- `GET /api/agent-runs/:runId`
-- `POST /api/agent-actions/:actionId/approve`
-- `POST /api/agent-actions/:actionId/reject`
-- Agent Run/Action HTTP controller
+- Agent chat message APIs
+- `GET /api/workspaces/:workspaceId/agent-recommendations`
 - DB-backed `agent_runs`, `agent_actions`, `agent_traces`
 - SQS result persistence into `agent_runs`, `agent_actions`, `agent_traces`
 
 주의:
 
 - SQL에는 Agent run/action/trace table이 있지만 Prisma 모델에는 없다.
-- Internal `AgentRuntimeService` state is process memory only. It is useful for
-  contract-shaped local execution and tests, but it is not a callable Current
-  Runtime API.
-- Agent contract still leads the public HTTP runtime. Consumers must not call
-  Agent Run/Action routes until the controller PR lands.
+- Agent Run/Action HTTP routes are callable Current Runtime APIs, but state is
+  process memory only and must not be treated as DB-backed persistence.
+- Current Agent Runtime controller uses `x-member-id` as the temporary
+  mock/current member boundary until Auth/Workspace guard wiring lands.
 - Approval before owner execution is already modeled internally, but actual
   Task/Meeting/Review/GitHub source data changes remain owner-domain API work.
 
@@ -431,7 +433,7 @@ Deferred:
 
 - `docs/contracts/task.md`: Task draft API를 Current Runtime APIs로 이동
 - `docs/contracts/review.md`: 실제 구현된 graph/comment/checklist API를 Current Runtime APIs로 이동
-- `docs/contracts/agent-actions.md`: Agent Run API를 Deferred APIs로 명확히 표시
+- `docs/contracts/agent-actions.md`: Agent Run/Action API를 Current Mock/In-memory runtime으로 표시
 - `docs/contracts/planning.md`: HTTP API 전체를 Deferred APIs로 표시
 - `docs/contracts/README.md`: Current Runtime / Deferred / MVP Target 용어 정의
 

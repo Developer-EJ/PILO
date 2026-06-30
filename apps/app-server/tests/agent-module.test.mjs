@@ -15,14 +15,20 @@ const {
   AgentRegistryService,
 } = require("../src/modules/agent/agent-registry.service");
 const {
+  AgentRuntimeController,
+} = require("../src/modules/agent/agent-runtime.controller");
+const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service");
 
 describe("AgentModule", () => {
-  it("exports the Agent registry and runtime boundaries", () => {
+  it("registers the Agent runtime controller and exports runtime boundaries", () => {
+    const controllersMetadata =
+      Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, AgentModule) ?? [];
     const exportsMetadata =
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, AgentModule) ?? [];
 
+    assert.ok(controllersMetadata.includes(AgentRuntimeController));
     assert.ok(exportsMetadata.includes(AgentRegistryRepository));
     assert.ok(exportsMetadata.includes(AgentRegistryService));
     assert.ok(exportsMetadata.includes(AgentRuntimeService));
