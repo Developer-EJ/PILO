@@ -258,6 +258,9 @@ Deferred:
 
 - Meeting repository는 현재 mock/in-memory다.
 - Meeting의 Task draft adapter는 mock이다.
+- `MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE`는 internal public source boundary로
+  Meeting ActionItem을 `TaskCreateDraft` payload로만 변환한다. 이 boundary는
+  TaskDraft를 생성하거나 ActionItem 상태를 변경하지 않는다.
 - SQL에는 Meeting/Report table이 있지만 Prisma 모델에는 없다.
 
 ### Voice
@@ -325,6 +328,8 @@ Implemented:
     - runs deterministic local workflow logic without external LLM/OpenAI/SQS
   - applies `AgentResultMessage` shape to in-memory run/action/trace state
   - supports `task.draft.generate` -> `task.create.draft`
+  - supports `meeting.action-item.to-task-draft` -> `task.create.draft`
+    using 진호 Meeting public source boundary
     - moves confirmable actions from `draft` to `waiting_confirmation`
     - records confirmation as `confirmed`
     - records rejection as `rejected`

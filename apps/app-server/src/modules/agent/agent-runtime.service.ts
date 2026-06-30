@@ -1,9 +1,15 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import {
+  MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE,
+  type MeetingActionItemTaskDraftSource,
+} from "../meeting/public/meeting-action-item-taskdraft-source.adapter";
 import {
   AGENT_WORKFLOW_TYPES,
   DEFAULT_AGENT_WORKFLOW_VERSION,
@@ -50,6 +56,12 @@ const systemClock: RuntimeClock = {
 @Injectable()
 export class AgentRuntimeService {
   private readonly runs = new Map<string, AgentRunDetail>();
+
+  constructor(
+    @Optional()
+    @Inject(MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE)
+    private readonly meetingActionItemTaskDraftSource?: MeetingActionItemTaskDraftSource,
+  ) {}
 
   createAgentJob(
     body: CreateLocalAgentRunInput,
@@ -112,7 +124,11 @@ export class AgentRuntimeService {
   ): AgentResultMessage {
     try {
       assertAgentJobMessage(job);
-      const localResult = buildLocalWorkflowResult(job, clock);
+      const localResult = buildLocalWorkflowResult(
+        job,
+        clock,
+        this.meetingActionItemTaskDraftSource,
+      );
       return clone({
         jobId: job.jobId,
         runId: job.runId,
@@ -498,10 +514,17 @@ export class AgentRuntimeService {
 function buildLocalWorkflowResult(
   job: AgentJobMessage,
   clock: RuntimeClock,
+  meetingActionItemTaskDraftSource?: MeetingActionItemTaskDraftSource,
 ): Pick<AgentResultMessage, "output" | "actions" | "trace"> {
   switch (job.workflowType) {
     case "task.draft.generate":
       return buildTaskDraftGenerateResult(job, clock);
+    case "meeting.action-item.to-task-draft":
+      return buildMeetingActionItemToTaskDraftResult(
+        job,
+        clock,
+        meetingActionItemTaskDraftSource,
+      );
     case "meeting.report.generate":
       return buildMeetingReportGenerateResult(job, clock);
     case "planning.generate":
@@ -515,6 +538,55 @@ function buildLocalWorkflowResult(
     default:
       throw new BadRequestException("workflowType is invalid");
   }
+}
+
+function buildMeetingActionItemToTaskDraftResult(
+  job: AgentJobMessage,
+  clock: RuntimeClock,
+  meetingActionItemTaskDraftSource?: MeetingActionItemTaskDraftSource,
+): Pick<AgentResultMessage, "output" | "actions" | "trace"> {
+  if (!meetingActionItemTaskDraftSource) {
+    throw new BadRequestException(
+      "Meeting ActionItem TaskDraft source adapter is unavailable",
+    );
+  }
+
+  const meetingId = parseRequiredString(job.input.meetingId, "meetingId");
+  const actionItemId = parseRequiredString(
+    job.input.actionItemId,
+    "actionItemId",
+  );
+  const sourceResult = meetingActionItemTaskDraftSource.createTaskDraftPayload({
+    workspaceId: job.workspaceId,
+    meetingId,
+    actionItemId,
+  });
+  const payload = { ...sourceResult.payload };
+
+  return {
+    output: {
+      summary:
+        "One Meeting ActionItem TaskCreateDraft action was prepared by local runner.",
+      meetingId: sourceResult.meetingId,
+      reportId: sourceResult.reportId,
+      actionItemId: sourceResult.actionItemId,
+      taskCreateDraft: payload,
+    },
+    actions: [
+      createDraftAction(job, clock, "task.create.draft", "meeting", payload),
+    ],
+    trace: [
+      {
+        stepName: "local_runner",
+        message:
+          "meeting action item local runner prepared TaskCreateDraft payload",
+        metadata: {
+          meetingId: sourceResult.meetingId,
+          actionItemId: sourceResult.actionItemId,
+        },
+      },
+    ],
+  };
 }
 
 function buildTaskDraftGenerateResult(

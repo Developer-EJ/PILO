@@ -17,6 +17,7 @@ export type AgentDomain = (typeof AGENT_DOMAINS)[number];
 
 export const AGENT_WORKFLOW_TYPES = [
   "meeting.report.generate",
+  "meeting.action-item.to-task-draft",
   "review.analysis.generate",
   "planning.generate",
   "task.draft.generate",

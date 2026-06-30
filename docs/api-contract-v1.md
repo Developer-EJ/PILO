@@ -751,6 +751,10 @@ Run/Action approval and execute surface is now exposed through an app-server
 HTTP controller as Mock/In-memory Current Runtime for Agent state. The current
 `task.create.draft` execute path delegates to the 주형 TaskDraft public write
 adapter and creates a TaskDraft.
+The current `meeting.action-item.to-task-draft` workflow reads a Meeting
+ActionItem through the Meeting public source boundary and proposes a
+`task.create.draft` action; it does not create TaskDraft rows until approve plus
+explicit execute completes.
 
 Current Agent Run/Action runtime covers create run, read run, approve action,
 reject action, and explicit execute for confirmed actions. Agent chat and
@@ -821,6 +825,7 @@ Enums:
 ```ts
 type AgentWorkflowType =
   | "meeting.report.generate"
+  | "meeting.action-item.to-task-draft"
   | "review.analysis.generate"
   | "planning.generate"
   | "task.draft.generate"
@@ -854,6 +859,10 @@ Rules:
 - AgentAction execution delegates to owner domain API/public adapter. In current
   runtime, Agent run/action state remains Mock/In-memory, while
   `task.create.draft` execute calls the 주형 TaskDraft public write adapter.
+- `meeting.action-item.to-task-draft` is a current workflow on the existing
+  Agent Run API, not a separate HTTP route. It consumes only the Meeting public
+  source boundary and preserves `meeting_action_item` source data through
+  `task.create.draft`.
 - Approval does not bypass permission checks.
 - `workflowType`, action `type`, and action `status` must match
   `docs/contracts/agent-actions.md` and

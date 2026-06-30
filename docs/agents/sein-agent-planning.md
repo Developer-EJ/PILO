@@ -59,8 +59,9 @@
 - `POST /api/agent-actions/:actionId/execute` executes confirmed actions through the explicit owner boundary.
 - `agents` and `agent_workflows` have a registry service/repository.
 - Current Agent Runtime HTTP APIs are backed by the internal deterministic
-  `AgentRuntimeService` skeleton. They are not DB-backed persistence and do not
-  execute real owner-domain side effects.
+  `AgentRuntimeService` skeleton. They are not DB-backed persistence. The only
+  current owner-domain side effect is explicit `task.create.draft` execute
+  through the 주형 TaskDraft public write adapter.
 - Current controller uses `x-member-id` as the temporary mock/current member
   boundary until Auth/Workspace guard wiring lands.
 - Temporary mock member boundary. Not production auth.
@@ -68,6 +69,9 @@
 ## Current Internal Skeleton
 
 - `task.draft.generate` local workflow returns `task.create.draft` payloads that match `TaskCreateDraft`.
+- `meeting.action-item.to-task-draft` reads the 진호 Meeting public source
+  boundary and returns a `task.create.draft` candidate with
+  `sourceType = "meeting_action_item"`.
 - `meeting.report.generate`, `planning.generate`, review, GitHub, and orchestrator paths are local/mock workflow shells only.
 - Approval is modeled as AgentAction state. `approve` stops at `confirmed`.
 - `execute` is the explicit owner execution boundary. Current execution supports

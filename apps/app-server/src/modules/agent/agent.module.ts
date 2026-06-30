@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../database/database.module";
 import { JuhyungModule } from "../juhyung/juhyung.module";
+import { MeetingModule } from "../meeting/meeting.module";
 import {
   AGENT_OWNER_ACTION_EXECUTOR,
   AgentOwnerActionExecutorService,
@@ -11,7 +12,7 @@ import { AgentRuntimeController } from "./agent-runtime.controller";
 import { AgentRuntimeService } from "./agent-runtime.service";
 
 @Module({
-  imports: [DatabaseModule, JuhyungModule],
+  imports: [DatabaseModule, JuhyungModule, MeetingModule],
   controllers: [AgentRuntimeController],
   providers: [
     AgentRegistryRepository,

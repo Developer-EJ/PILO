@@ -6,6 +6,10 @@ import { MockMeetingReportWorkflowClient } from "./adapters/mock-meeting-report-
 import { MockTaskDraftClient } from "./adapters/mock-task-draft.adapter";
 import { TASK_DRAFT_CLIENT } from "./adapters/task-draft.adapter";
 import { MeetingController } from "./meeting.controller";
+import {
+  MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE,
+  MeetingActionItemTaskDraftSourceAdapter,
+} from "./public/meeting-action-item-taskdraft-source.adapter";
 import { MEETING_REPOSITORY } from "./repositories/meeting.repository";
 import { MockMeetingRepository } from "./repositories/meeting.mock-repository";
 import { MeetingService } from "./meeting.service";
@@ -30,7 +34,16 @@ import { MeetingService } from "./meeting.service";
       provide: TASK_DRAFT_CLIENT,
       useClass: MockTaskDraftClient,
     },
+    MeetingActionItemTaskDraftSourceAdapter,
+    {
+      provide: MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE,
+      useExisting: MeetingActionItemTaskDraftSourceAdapter,
+    },
   ],
-  exports: [MeetingService, CURRENT_MEMBER_ADAPTER],
+  exports: [
+    MeetingService,
+    CURRENT_MEMBER_ADAPTER,
+    MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE,
+  ],
 })
 export class MeetingModule {}

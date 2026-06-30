@@ -461,6 +461,12 @@ Required fields:
 | `agent_recommendation` | `AgentRecommendation.id` | 세인 Agent Runtime | 추천을 Task 후보로 바꿀 때만 사용한다. |
 | `manual` | user-entered draft id 또는 null 불가 | 주형 Task UI | 사용자가 명시적으로 초안을 만들 때 사용한다. |
 
+`meeting_action_item` sources can arrive through the Meeting public source
+boundary and Agent `meeting.action-item.to-task-draft` workflow. The Agent run
+and approve steps do not create a TaskDraft; explicit AgentAction execute calls
+the 주형 `TASK_DRAFT_PUBLIC_WRITE_ADAPTER` and preserves the same `sourceType`
+and `sourceId` in the returned `TaskDraftSummary`.
+
 `sourceType`과 `sourceId`는 함께 보내거나 둘 다 생략한다. 둘 중 하나만 있으면
 현재 runtime은 `400`으로 거절한다.
 `ProjectPlanMilestoneDraft`는 `TaskCreateDraft`가 아니다. 마일스톤 후보는 승인 시
