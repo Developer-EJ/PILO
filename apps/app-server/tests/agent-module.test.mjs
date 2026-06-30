@@ -14,13 +14,17 @@ const {
 const {
   AgentRegistryService,
 } = require("../src/modules/agent/agent-registry.service");
+const {
+  AgentRuntimeService,
+} = require("../src/modules/agent/agent-runtime.service");
 
 describe("AgentModule", () => {
-  it("exports the Agent registry boundary for later run creation", () => {
+  it("exports the Agent registry and runtime boundaries", () => {
     const exportsMetadata =
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, AgentModule) ?? [];
 
     assert.ok(exportsMetadata.includes(AgentRegistryRepository));
     assert.ok(exportsMetadata.includes(AgentRegistryService));
+    assert.ok(exportsMetadata.includes(AgentRuntimeService));
   });
 });
