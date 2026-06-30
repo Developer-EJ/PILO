@@ -1,5 +1,6 @@
 import {
   defaultWorkspaceApiBaseUrl,
+  localMvpActorHeaders,
   WorkspaceApiError,
 } from "../workspace/workspaceClient.mjs";
 import { workspaceDashboardFixture } from "../workspace/workspaceDashboardFixture.mjs";
@@ -82,12 +83,13 @@ async function readVoiceJson(response, path) {
 async function requestVoiceJson(path, init, { baseUrl, fetcher }) {
   const response = await fetcher(buildVoiceApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {

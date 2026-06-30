@@ -1,9 +1,13 @@
-import { defaultWorkspaceApiBaseUrl } from "../workspace/workspaceClient.mjs";
+import {
+  defaultWorkspaceApiBaseUrl,
+  LOCAL_MVP_MEMBER_ID,
+  localMvpActorHeaders,
+} from "../workspace/workspaceClient.mjs";
 
 const DEFAULT_AGENT_MODE = "mock";
 const LOCAL_NOW = "2026-06-30T00:00:00.000Z";
 const LOCAL_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
-const LOCAL_ACTOR_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
+const LOCAL_ACTOR_MEMBER_ID = LOCAL_MVP_MEMBER_ID;
 
 const mockRuns = new Map();
 
@@ -486,13 +490,13 @@ async function readAgentJson(response, path) {
 async function requestAgentJson(path, init, { baseUrl, fetcher }) {
   const response = await fetcher(buildAgentApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
-      "x-member-id": LOCAL_ACTOR_MEMBER_ID,
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {

@@ -27,6 +27,8 @@ import {
   createMockWorkspaceClient,
   createWorkspaceApiClient,
   createWorkspaceClient,
+  LOCAL_MVP_MEMBER_ID,
+  LOCAL_MVP_USER_ID,
   mockWorkspaces,
   WorkspaceApiError,
 } from "../lib/workspace/workspaceClient.mjs";
@@ -130,6 +132,15 @@ import contractWorkspaceDashboardFixture from "../../../docs/contracts/fixtures/
 
 const sortContractKeys = (values) =>
   [...values].sort((left, right) => left.localeCompare(right));
+
+function assertLocalActorHeaders(request, { memberId = LOCAL_MVP_MEMBER_ID } = {}) {
+  assert.equal(request.init.headers["x-user-id"], LOCAL_MVP_USER_ID);
+  assert.equal(request.init.headers["x-member-id"], memberId);
+}
+
+function assertEveryRequestUsesLocalActor(requests) {
+  requests.forEach((request) => assertLocalActorHeaders(request));
+}
 
 describe("frontend package", () => {
   it("keeps the PILO frontend package name", () => {
@@ -1066,6 +1077,7 @@ describe("frontend package", () => {
       requests.map((request) => request.init.method ?? "GET"),
       ["GET", "POST", "PATCH", "GET", "POST", "POST", "GET", "GET"],
     );
+    assertEveryRequestUsesLocalActor(requests);
   });
 
   it("calls GitHub API client with MVP route contracts", async () => {
@@ -1176,6 +1188,7 @@ describe("frontend package", () => {
       requests.map((request) => request.init.method ?? "GET"),
       ["GET", "POST", "GET", "GET", "GET", "POST", "POST", "POST"],
     );
+    assertEveryRequestUsesLocalActor(requests);
   });
 
   it("calls Review API client with GitHub PR selector contracts", async () => {
@@ -1299,8 +1312,12 @@ describe("frontend package", () => {
       ["GET", "GET", "POST", "GET"],
     );
     assert.deepEqual(JSON.parse(requests[2].init.body).pullRequest, pullRequest);
+    assertLocalActorHeaders(requests[0]);
+    assertLocalActorHeaders(requests[1]);
+    assert.equal(requests[2].init.headers["x-user-id"], LOCAL_MVP_USER_ID);
     assert.equal(requests[2].init.headers["x-workspace-id"], workspaceId);
     assert.equal(requests[2].init.headers["x-member-id"], "member-1");
+    assertLocalActorHeaders(requests[3]);
   });
 
   it("calls Notification API client with MVP route contracts", async () => {
@@ -1395,6 +1412,7 @@ describe("frontend package", () => {
       requests.every((request) => request.init.credentials === "include"),
       true,
     );
+    assertEveryRequestUsesLocalActor(requests);
   });
 
   it("calls Meeting, Voice, and Agent API clients with MVP route contracts", async () => {
@@ -1617,6 +1635,7 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/agent-actions/${actionId}/reject`,
       ],
     );
+    assertEveryRequestUsesLocalActor(requests);
   });
 
   it("loads Canvas board data and mutations in mock and api modes", async () => {

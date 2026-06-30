@@ -1,6 +1,7 @@
 import {
   buildWorkspaceApiUrl,
   defaultWorkspaceApiBaseUrl,
+  localMvpActorHeaders,
   WorkspaceApiError,
 } from "../workspace/workspaceClient.mjs";
 import { createWorkspaceDashboardFixture } from "../workspace/dashboardClient.mjs";
@@ -54,12 +55,13 @@ async function readTaskJson(response, path) {
 async function requestTaskJson(path, init, { baseUrl, fetcher }) {
   const response = await fetcher(buildTaskApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {

@@ -1,5 +1,8 @@
 const DEFAULT_WORKSPACE_MODE = "mock";
 
+export const LOCAL_MVP_USER_ID = "11111111-1111-4111-8111-111111111111";
+export const LOCAL_MVP_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
+
 export const mockWorkspaces = [
   {
     id: "22222222-2222-4222-8222-222222222222",
@@ -29,6 +32,16 @@ function defaultWorkspaceMode() {
 
 export function defaultWorkspaceApiBaseUrl() {
   return process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ?? "";
+}
+
+export function localMvpActorHeaders({
+  userId = process.env.NEXT_PUBLIC_PILO_USER_ID ?? LOCAL_MVP_USER_ID,
+  memberId = process.env.NEXT_PUBLIC_PILO_MEMBER_ID ?? LOCAL_MVP_MEMBER_ID,
+} = {}) {
+  return {
+    ...(userId ? { "x-user-id": userId } : {}),
+    ...(memberId ? { "x-member-id": memberId } : {}),
+  };
 }
 
 export function resolveWorkspaceClientMode(mode = defaultWorkspaceMode()) {
@@ -75,11 +88,11 @@ async function readWorkspaceJson(response, path) {
 async function requestWorkspaceJson(path, init, { baseUrl, fetcher }) {
   return fetcher(buildWorkspaceApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 }
 

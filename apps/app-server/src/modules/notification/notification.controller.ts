@@ -34,11 +34,12 @@ export class NotificationController {
   listWorkspaceNotifications(
     @Headers("cookie") cookieHeader: string | undefined,
     @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userIdHeader?: string | string[],
   ): Promise<NotificationResponseDto[]> {
     return this.handleNotificationRequest(() =>
       this.notificationService.listWorkspaceNotifications({
         workspaceId,
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
       }),
     );
   }
@@ -47,11 +48,12 @@ export class NotificationController {
   markNotificationRead(
     @Headers("cookie") cookieHeader: string | undefined,
     @Param("notificationId") notificationId: string,
+    @Headers("x-user-id") userIdHeader?: string | string[],
   ): Promise<NotificationResponseDto> {
     return this.handleNotificationRequest(() =>
       this.notificationService.markNotificationRead({
         notificationId,
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
       }),
     );
   }
@@ -60,20 +62,23 @@ export class NotificationController {
   markWorkspaceNotificationsRead(
     @Headers("cookie") cookieHeader: string | undefined,
     @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userIdHeader?: string | string[],
   ): Promise<MarkWorkspaceNotificationsReadResponseDto> {
     return this.handleNotificationRequest(() =>
       this.notificationService.markWorkspaceNotificationsRead({
         workspaceId,
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
       }),
     );
   }
 
   private requireCurrentUser(
     cookieHeader: string | undefined,
+    userIdHeader: string | string[] | undefined,
   ): CurrentUserResponse {
     const currentUser =
-      this.authService.getCurrentUserFromCookieHeader(cookieHeader);
+      this.authService.getCurrentUserFromCookieHeader(cookieHeader) ??
+      createLocalMvpCurrentUser(userIdHeader);
 
     if (!currentUser) {
       throw new UnauthorizedException();
@@ -97,4 +102,30 @@ export class NotificationController {
       throw error;
     }
   }
+}
+
+function createLocalMvpCurrentUser(
+  userIdHeader: string | string[] | undefined,
+): CurrentUserResponse | null {
+  const userId = readHeaderValue(userIdHeader);
+
+  if (!userId) {
+    return null;
+  }
+
+  return {
+    id: userId,
+    name: "PILO MVP User",
+    email: "local.mvp@pilo.dev",
+    avatarUrl: null,
+    providers: [],
+    lastLoginAt: null,
+  };
+}
+
+function readHeaderValue(value: string | string[] | undefined) {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  const trimmedValue = rawValue?.trim();
+
+  return trimmedValue || null;
 }

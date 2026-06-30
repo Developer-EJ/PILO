@@ -1,5 +1,6 @@
 import {
   defaultWorkspaceApiBaseUrl,
+  localMvpActorHeaders,
   WorkspaceApiError,
 } from "../workspace/workspaceClient.mjs";
 import { workspaceDashboardFixture } from "../workspace/workspaceDashboardFixture.mjs";
@@ -81,12 +82,13 @@ async function readMeetingJson(response, path) {
 async function requestMeetingJson(path, init, { baseUrl, fetcher }) {
   const response = await fetcher(buildMeetingApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {

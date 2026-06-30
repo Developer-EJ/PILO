@@ -1,5 +1,6 @@
 import {
   defaultWorkspaceApiBaseUrl,
+  localMvpActorHeaders,
   mockWorkspaces,
   WorkspaceApiError,
 } from "../workspace/workspaceClient.mjs";
@@ -262,12 +263,13 @@ async function readReviewJson(response, path) {
 async function requestReviewJson(path, init, { baseUrl, fetcher }) {
   const response = await fetcher(buildReviewApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {

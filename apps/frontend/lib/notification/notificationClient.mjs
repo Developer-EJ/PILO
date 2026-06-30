@@ -1,11 +1,13 @@
 import {
   buildWorkspaceApiUrl,
   defaultWorkspaceApiBaseUrl,
+  LOCAL_MVP_USER_ID,
+  localMvpActorHeaders,
   WorkspaceApiError,
 } from "../workspace/workspaceClient.mjs";
 
 const DEFAULT_NOTIFICATION_MODE = "mock";
-const DEFAULT_USER_ID = "11111111-1111-4111-8111-111111111111";
+const DEFAULT_USER_ID = LOCAL_MVP_USER_ID;
 const DEFAULT_NOW = "2026-06-30T00:00:00.000Z";
 
 const mockNotificationsByWorkspaceId = new Map();
@@ -59,12 +61,13 @@ async function readNotificationJson(response, path) {
 async function requestNotificationJson(path, init, { baseUrl, fetcher }) {
   const response = await fetcher(buildNotificationApiUrl(path, baseUrl), {
     credentials: "include",
+    ...init,
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (!response.ok) {

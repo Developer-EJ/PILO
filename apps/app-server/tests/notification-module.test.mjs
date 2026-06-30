@@ -272,4 +272,41 @@ describe("notification module", () => {
       UnauthorizedException,
     );
   });
+
+  it("accepts the local MVP user header for notification reads", async () => {
+    const { currentMemberAdapter, service } = createNotificationService();
+    const controller = new NotificationController(
+      {
+        getCurrentUserFromCookieHeader: () => null,
+      },
+      service,
+    );
+
+    const notifications = await controller.listWorkspaceNotifications(
+      undefined,
+      "workspace-1",
+      currentUser.id,
+    );
+
+    assert.equal(notifications.length, 3);
+    assert.equal(
+      notifications.every(
+        (notification) => notification.recipientUserId === currentUser.id,
+      ),
+      true,
+    );
+    assert.deepEqual(currentMemberAdapter.calls, [
+      {
+        workspaceId: "workspace-1",
+        currentUser: {
+          id: currentUser.id,
+          name: "PILO MVP User",
+          email: "local.mvp@pilo.dev",
+          avatarUrl: null,
+          providers: [],
+          lastLoginAt: null,
+        },
+      },
+    ]);
+  });
 });
