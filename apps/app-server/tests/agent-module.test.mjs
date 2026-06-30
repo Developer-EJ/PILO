@@ -9,6 +9,9 @@ require("reflect-metadata");
 const { MODULE_METADATA } = require("@nestjs/common/constants");
 const { AgentModule } = require("../src/modules/agent/agent.module");
 const {
+  MockAgentOwnerActionExecutor,
+} = require("../src/modules/agent/agent-owner-action.executor");
+const {
   AgentRegistryRepository,
 } = require("../src/modules/agent/agent-registry.repository");
 const {
@@ -25,10 +28,13 @@ describe("AgentModule", () => {
   it("registers the Agent runtime controller and exports runtime boundaries", () => {
     const controllersMetadata =
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, AgentModule) ?? [];
+    const providersMetadata =
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, AgentModule) ?? [];
     const exportsMetadata =
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, AgentModule) ?? [];
 
     assert.ok(controllersMetadata.includes(AgentRuntimeController));
+    assert.ok(providersMetadata.includes(MockAgentOwnerActionExecutor));
     assert.ok(exportsMetadata.includes(AgentRegistryRepository));
     assert.ok(exportsMetadata.includes(AgentRegistryService));
     assert.ok(exportsMetadata.includes(AgentRuntimeService));

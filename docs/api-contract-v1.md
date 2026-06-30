@@ -747,23 +747,25 @@ Rules:
 
 This section is the MVP Target surface. In current runtime, the Agent registry
 and an internal deterministic service skeleton exist. The smaller Agent
-Run/Action approval surface is now exposed through an app-server HTTP controller
-as Mock/In-memory Current Runtime.
+Run/Action approval and execute surface is now exposed through an app-server
+HTTP controller as Mock/In-memory Current Runtime.
 
 Current Agent Run/Action runtime covers create run, read run, approve action,
-and reject action. Agent chat and recommendation list routes stay Deferred
-follow-up targets unless a separate contract PR changes that sequence.
+reject action, and explicit execute for confirmed actions. Agent chat and
+recommendation list routes stay Deferred follow-up targets unless a separate
+contract PR changes that sequence.
 
 ### Endpoints
 
 | Method | Path                                               | Auth | Role   | Description              |
 | ------ | -------------------------------------------------- | ---- | ------ | ------------------------ |
 | POST   | `/api/workspaces/:workspaceId/agent-runs`          | yes  | member | Create Agent run         |
-| GET    | `/api/agent-runs/:agentRunId`                      | yes  | member | Agent run detail         |
-| POST   | `/api/agent-actions/:actionId/approve`             | yes  | member | Approve Agent action     |
-| POST   | `/api/agent-actions/:actionId/reject`              | yes  | member | Reject Agent action      |
-| GET    | `/api/workspaces/:workspaceId/agent-chat/messages` | yes  | member | List Agent chat messages |
-| POST   | `/api/workspaces/:workspaceId/agent-chat/messages` | yes  | member | Send Agent command       |
+  | GET    | `/api/agent-runs/:agentRunId`                      | yes  | member | Agent run detail         |
+  | POST   | `/api/agent-actions/:actionId/approve`             | yes  | member | Approve Agent action     |
+  | POST   | `/api/agent-actions/:actionId/reject`              | yes  | member | Reject Agent action      |
+  | POST   | `/api/agent-actions/:actionId/execute`             | yes  | member | Execute confirmed action |
+  | GET    | `/api/workspaces/:workspaceId/agent-chat/messages` | yes  | member | List Agent chat messages |
+  | POST   | `/api/workspaces/:workspaceId/agent-chat/messages` | yes  | member | Send Agent command       |
 
 ### Agent Run Request
 
@@ -847,15 +849,21 @@ type AgentActionStatus =
 Rules:
 
 - Agent context is explicit. No RAG retrieval in MVP.
-- AgentAction execution delegates to owner domain API.
-- Approval does not bypass permission checks.
+  - AgentAction execution delegates to owner domain API or, in current runtime,
+    a clearly marked Mock/In-memory owner executor.
+  - Approval does not bypass permission checks.
 - `workflowType`, action `type`, and action `status` must match
   `docs/contracts/agent-actions.md` and
   `docs/contracts/schemas/pilo-public-contracts.schema.json`.
 - Legacy names such as task suggestion workflows, generic create-task actions,
   or requires-approval statuses are not part of the current public contract.
-- Agent Run/Action HTTP APIs are Current Mock/In-memory runtime for the four
-  approval-flow routes. Agent chat and recommendation routes remain Deferred.
+  - Agent Run/Action HTTP APIs are Current Mock/In-memory runtime for create,
+    read, approve, reject, and execute. Execute currently supports
+    `task.create.draft` through a mock TaskDraft owner executor only.
+  - Temporary mock member boundary. Not production auth.
+  - `approve` stops at `confirmed`; `execute` is the explicit owner execution
+    boundary.
+  - Agent chat and recommendation routes remain Deferred.
 - The registry service alone does not make a route Current Runtime; only the
   app-server controller plus global `/api` prefix does.
 
