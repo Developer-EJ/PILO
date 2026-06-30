@@ -8,7 +8,11 @@ const require = createRequire(import.meta.url);
 require("ts-node/register");
 
 const { RequestMethod } = require("@nestjs/common");
-const { METHOD_METADATA, PATH_METADATA } = require("@nestjs/common/constants");
+const {
+  GUARDS_METADATA,
+  METHOD_METADATA,
+  PATH_METADATA,
+} = require("@nestjs/common/constants");
 const { MeetingService } = require("../src/modules/meeting/meeting.service");
 const {
   MockCurrentMemberAdapter,
@@ -23,6 +27,7 @@ const {
   MockMeetingRepository,
 } = require("../src/modules/meeting/repositories/meeting.mock-repository");
 const { VoiceController } = require("../src/modules/voice/voice.controller");
+const { VoiceRouteGuard } = require("../src/modules/voice/voice-route.guard");
 const { VoiceService } = require("../src/modules/voice/voice.service");
 const {
   MockVoiceRoomProvider,
@@ -91,6 +96,27 @@ describe("voice module", () => {
       Reflect.getMetadata(METHOD_METADATA, controller.submitAudioChunk),
       RequestMethod.POST,
     );
+    assert.deepEqual(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        VoiceController.prototype.createVoiceRoom,
+      ),
+      [VoiceRouteGuard],
+    );
+    assert.deepEqual(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        VoiceController.prototype.submitAudioChunk,
+      ),
+      [VoiceRouteGuard],
+    );
+    assert.equal(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        VoiceController.prototype.getScaffoldStatus,
+      ),
+      undefined,
+    );
   });
 
   it("creates and reads one placeholder voice room per meeting", () => {
@@ -152,6 +178,35 @@ describe("voice module", () => {
 
     assert.equal(inactiveVoiceRoom.status, "inactive");
     assert.equal(archivedVoiceRoom.status, "archived");
+  });
+
+  it("resolves route workspace ids from voice rooms and sessions", () => {
+    const context = createMeetingContext();
+    const service = createVoiceService(context);
+    const meeting = context.meetingService.createMeeting("workspace-1", {
+      title: "Voice route guard meeting",
+    });
+    const voiceRoom = service.createVoiceRoom("workspace-1", meeting.id);
+    const voiceSession = service.joinVoiceSession(voiceRoom.id);
+
+    assert.equal(
+      service.resolveRouteWorkspaceId({ meetingId: meeting.id }),
+      "workspace-1",
+    );
+    assert.equal(
+      service.resolveRouteWorkspaceId({ voiceRoomId: voiceRoom.id }),
+      "workspace-1",
+    );
+    assert.equal(
+      service.resolveRouteWorkspaceId({ voiceSessionId: voiceSession.id }),
+      "workspace-1",
+    );
+    assert.throws(() =>
+      service.resolveRouteWorkspaceId({
+        workspaceId: "workspace-2",
+        voiceRoomId: voiceRoom.id,
+      }),
+    );
   });
 
   it("joins, lists, updates recording status, and leaves voice sessions", () => {

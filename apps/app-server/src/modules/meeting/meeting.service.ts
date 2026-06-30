@@ -145,6 +145,54 @@ export class MeetingService {
     return meeting;
   }
 
+  resolveRouteWorkspaceId(input: {
+    workspaceId?: string;
+    meetingId?: string;
+    reportId?: string;
+    actionItemId?: string;
+  }): string {
+    if (input.actionItemId) {
+      const actionItem = this.requireActionItem(input.actionItemId);
+      const report = this.requireReport(actionItem.reportId);
+      const meeting = this.requireMeeting(report.meetingId);
+
+      return this.requireMatchingRouteWorkspace(
+        input.workspaceId,
+        meeting.workspaceId,
+        "Meeting action item not found in workspace",
+      );
+    }
+
+    if (input.reportId) {
+      const report = this.requireReport(input.reportId);
+      const meeting = this.requireMeeting(report.meetingId);
+
+      return this.requireMatchingRouteWorkspace(
+        input.workspaceId,
+        meeting.workspaceId,
+        "Meeting report not found in workspace",
+      );
+    }
+
+    if (input.meetingId) {
+      const meeting = this.requireMeeting(input.meetingId);
+
+      return this.requireMatchingRouteWorkspace(
+        input.workspaceId,
+        meeting.workspaceId,
+        "Meeting not found in workspace",
+      );
+    }
+
+    if (input.workspaceId) {
+      return this.requireNonEmptyString(input.workspaceId, "workspaceId");
+    }
+
+    throw new BadRequestException(
+      "workspaceId, meetingId, reportId, or actionItemId is required",
+    );
+  }
+
   updateMeetingStatus(
     meetingId: string,
     requestBody: UpdateMeetingStatusRequestDto,
@@ -692,6 +740,22 @@ export class MeetingService {
     }
 
     return actionItem;
+  }
+
+  private requireMatchingRouteWorkspace(
+    routeWorkspaceId: string | undefined,
+    actualWorkspaceId: string,
+    mismatchMessage: string,
+  ): string {
+    if (
+      routeWorkspaceId &&
+      this.requireNonEmptyString(routeWorkspaceId, "workspaceId") !==
+        actualWorkspaceId
+    ) {
+      throw new NotFoundException(mismatchMessage);
+    }
+
+    return actualWorkspaceId;
   }
 
   private toReportDetail(

@@ -34,10 +34,28 @@ export function defaultWorkspaceApiBaseUrl() {
   return process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ?? "";
 }
 
+export function isLocalMvpActorEnabled(
+  mode = process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE,
+) {
+  if (mode === "enabled" || mode === "true") {
+    return true;
+  }
+
+  if (mode === "disabled" || mode === "false") {
+    return false;
+  }
+
+  return process.env.NODE_ENV !== "production";
+}
+
 export function localMvpActorHeaders({
   userId = process.env.NEXT_PUBLIC_PILO_USER_ID ?? LOCAL_MVP_USER_ID,
   memberId = process.env.NEXT_PUBLIC_PILO_MEMBER_ID ?? LOCAL_MVP_MEMBER_ID,
 } = {}) {
+  if (!isLocalMvpActorEnabled()) {
+    return {};
+  }
+
   return {
     ...(userId ? { "x-user-id": userId } : {}),
     ...(memberId ? { "x-member-id": memberId } : {}),

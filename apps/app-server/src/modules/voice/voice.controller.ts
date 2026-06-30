@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import {
   SubmitVoiceAudioChunkRequestDto,
   UpdateVoiceSessionRecordingStatusRequestDto,
@@ -8,6 +16,7 @@ import {
   VoiceSessionResponseDto,
   VoiceScaffoldResponseDto,
 } from "./dto/voice-room-response.dto";
+import { VoiceRouteGuard } from "./voice-route.guard";
 import { VoiceService } from "./voice.service";
 
 @Controller()
@@ -20,6 +29,7 @@ export class VoiceController {
   }
 
   @Post("workspaces/:workspaceId/meetings/:meetingId/voice-room")
+  @UseGuards(VoiceRouteGuard)
   createVoiceRoom(
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string,
@@ -28,6 +38,7 @@ export class VoiceController {
   }
 
   @Get("voice-rooms/:voiceRoomId")
+  @UseGuards(VoiceRouteGuard)
   getVoiceRoom(
     @Param("voiceRoomId") voiceRoomId: string,
   ): VoiceRoomResponseDto {
@@ -35,6 +46,7 @@ export class VoiceController {
   }
 
   @Get("workspaces/:workspaceId/meetings/:meetingId/voice-room")
+  @UseGuards(VoiceRouteGuard)
   getVoiceRoomForMeeting(
     @Param("workspaceId") workspaceId: string,
     @Param("meetingId") meetingId: string,
@@ -43,6 +55,7 @@ export class VoiceController {
   }
 
   @Patch("voice-rooms/:voiceRoomId/status")
+  @UseGuards(VoiceRouteGuard)
   updateVoiceRoomStatus(
     @Param("voiceRoomId") voiceRoomId: string,
     @Body() requestBody: UpdateVoiceRoomStatusRequestDto,
@@ -51,6 +64,7 @@ export class VoiceController {
   }
 
   @Post("voice-rooms/:voiceRoomId/sessions")
+  @UseGuards(VoiceRouteGuard)
   joinVoiceSession(
     @Param("voiceRoomId") voiceRoomId: string,
   ): VoiceSessionResponseDto {
@@ -58,6 +72,7 @@ export class VoiceController {
   }
 
   @Get("voice-rooms/:voiceRoomId/sessions")
+  @UseGuards(VoiceRouteGuard)
   listVoiceSessions(
     @Param("voiceRoomId") voiceRoomId: string,
   ): VoiceSessionResponseDto[] {
@@ -65,6 +80,7 @@ export class VoiceController {
   }
 
   @Patch("voice-sessions/:voiceSessionId/leave")
+  @UseGuards(VoiceRouteGuard)
   leaveVoiceSession(
     @Param("voiceSessionId") voiceSessionId: string,
   ): VoiceSessionResponseDto {
@@ -72,6 +88,7 @@ export class VoiceController {
   }
 
   @Patch("voice-sessions/:voiceSessionId/recording-status")
+  @UseGuards(VoiceRouteGuard)
   updateVoiceSessionRecordingStatus(
     @Param("voiceSessionId") voiceSessionId: string,
     @Body() requestBody: UpdateVoiceSessionRecordingStatusRequestDto,
@@ -83,6 +100,7 @@ export class VoiceController {
   }
 
   @Post("voice-sessions/:voiceSessionId/audio-chunks")
+  @UseGuards(VoiceRouteGuard)
   submitAudioChunk(
     @Param("voiceSessionId") voiceSessionId: string,
     @Body() requestBody: SubmitVoiceAudioChunkRequestDto,

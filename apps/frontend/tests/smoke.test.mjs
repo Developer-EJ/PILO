@@ -27,8 +27,10 @@ import {
   createMockWorkspaceClient,
   createWorkspaceApiClient,
   createWorkspaceClient,
+  isLocalMvpActorEnabled,
   LOCAL_MVP_MEMBER_ID,
   LOCAL_MVP_USER_ID,
+  localMvpActorHeaders,
   mockWorkspaces,
   WorkspaceApiError,
 } from "../lib/workspace/workspaceClient.mjs";
@@ -241,6 +243,48 @@ describe("frontend package", () => {
         error.status === 401 &&
         error.path === "/api/workspaces",
     );
+  });
+
+  it("gates local MVP actor headers outside explicit local mode", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousMode = process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE;
+
+    try {
+      process.env.NODE_ENV = "test";
+      delete process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE;
+      assert.equal(isLocalMvpActorEnabled(), true);
+      assert.deepEqual(localMvpActorHeaders(), {
+        "x-user-id": LOCAL_MVP_USER_ID,
+        "x-member-id": LOCAL_MVP_MEMBER_ID,
+      });
+
+      process.env.NODE_ENV = "production";
+      assert.equal(isLocalMvpActorEnabled(), false);
+      assert.deepEqual(localMvpActorHeaders(), {});
+
+      process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE = "enabled";
+      assert.equal(isLocalMvpActorEnabled(), true);
+      assert.deepEqual(localMvpActorHeaders(), {
+        "x-user-id": LOCAL_MVP_USER_ID,
+        "x-member-id": LOCAL_MVP_MEMBER_ID,
+      });
+
+      process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE = "disabled";
+      assert.equal(isLocalMvpActorEnabled(), false);
+      assert.deepEqual(localMvpActorHeaders(), {});
+    } finally {
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_LOCAL_ACTOR_MODE = previousMode;
+      }
+    }
   });
 
   it("loads workspace dashboard data in mock and api modes", async () => {
@@ -576,6 +620,16 @@ describe("frontend package", () => {
     ]) {
       assert.match(readFileSync(file, "utf8"), /<WorkspaceSidebar/);
     }
+
+    const meetings = readFileSync(
+      "components/meeting/WorkspaceMeetings.tsx",
+      "utf8",
+    );
+    assert.match(meetings, /navigator\.mediaDevices\?\.getUserMedia/);
+    assert.match(meetings, /new MediaRecorder/);
+    assert.match(meetings, /Start browser recording/);
+    assert.match(meetings, /Stop and submit recording/);
+    assert.match(meetings, /submitAudioChunk/);
   });
 
   it("keeps API-mode workspace routes and Canvas failures from falling back to fixtures silently", () => {

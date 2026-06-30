@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  UseGuards,
 } from "@nestjs/common";
 import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
@@ -37,6 +38,7 @@ import {
   UpdateMeetingAgendaStatusRequestDto,
   UpdateMeetingStatusRequestDto,
 } from "./dto/meeting-scaffold-response.dto";
+import { MeetingRouteGuard } from "./meeting-route.guard";
 import { MeetingService } from "./meeting.service";
 
 @Controller()
@@ -49,6 +51,7 @@ export class MeetingController {
   }
 
   @Post("workspaces/:workspaceId/meetings")
+  @UseGuards(MeetingRouteGuard)
   createMeeting(
     @Param("workspaceId") workspaceId: string,
     @Body() requestBody: CreateMeetingRequestDto,
@@ -57,6 +60,7 @@ export class MeetingController {
   }
 
   @Get("workspaces/:workspaceId/meetings")
+  @UseGuards(MeetingRouteGuard)
   listMeetings(
     @Param("workspaceId") workspaceId: string,
   ): MeetingResponseDto[] {
@@ -64,11 +68,13 @@ export class MeetingController {
   }
 
   @Get("meetings/:meetingId")
+  @UseGuards(MeetingRouteGuard)
   getMeeting(@Param("meetingId") meetingId: string): MeetingResponseDto {
     return this.meetingService.getMeeting(meetingId);
   }
 
   @Patch("meetings/:meetingId/status")
+  @UseGuards(MeetingRouteGuard)
   updateMeetingStatus(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: UpdateMeetingStatusRequestDto,
@@ -77,6 +83,7 @@ export class MeetingController {
   }
 
   @Post("meetings/:meetingId/participants")
+  @UseGuards(MeetingRouteGuard)
   addParticipant(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateMeetingParticipantRequestDto,
@@ -85,6 +92,7 @@ export class MeetingController {
   }
 
   @Get("meetings/:meetingId/participants")
+  @UseGuards(MeetingRouteGuard)
   listParticipants(
     @Param("meetingId") meetingId: string,
   ): MeetingParticipantResponseDto[] {
@@ -92,6 +100,7 @@ export class MeetingController {
   }
 
   @Patch("meetings/:meetingId/participants/:participantId/leave")
+  @UseGuards(MeetingRouteGuard)
   leaveParticipant(
     @Param("meetingId") meetingId: string,
     @Param("participantId") participantId: string,
@@ -100,6 +109,7 @@ export class MeetingController {
   }
 
   @Post("meetings/:meetingId/agendas")
+  @UseGuards(MeetingRouteGuard)
   createAgenda(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateMeetingAgendaRequestDto,
@@ -108,6 +118,7 @@ export class MeetingController {
   }
 
   @Get("meetings/:meetingId/agendas")
+  @UseGuards(MeetingRouteGuard)
   listAgendas(
     @Param("meetingId") meetingId: string,
   ): MeetingAgendaResponseDto[] {
@@ -115,6 +126,7 @@ export class MeetingController {
   }
 
   @Patch("meetings/:meetingId/agendas/:agendaId/status")
+  @UseGuards(MeetingRouteGuard)
   updateAgendaStatus(
     @Param("meetingId") meetingId: string,
     @Param("agendaId") agendaId: string,
@@ -128,6 +140,7 @@ export class MeetingController {
   }
 
   @Patch("meetings/:meetingId/agendas/:agendaId/sort-order")
+  @UseGuards(MeetingRouteGuard)
   reorderAgenda(
     @Param("meetingId") meetingId: string,
     @Param("agendaId") agendaId: string,
@@ -137,6 +150,7 @@ export class MeetingController {
   }
 
   @Post("meetings/:meetingId/memos")
+  @UseGuards(MeetingRouteGuard)
   createMemo(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateMeetingMemoRequestDto,
@@ -145,11 +159,13 @@ export class MeetingController {
   }
 
   @Get("meetings/:meetingId/memos")
+  @UseGuards(MeetingRouteGuard)
   listMemos(@Param("meetingId") meetingId: string): MeetingMemoResponseDto[] {
     return this.meetingService.listMemos(meetingId);
   }
 
   @Post("meetings/:meetingId/transcript-segments")
+  @UseGuards(MeetingRouteGuard)
   createTranscriptSegment(
     @Param("meetingId") meetingId: string,
     @Body() requestBody: CreateTranscriptSegmentRequestDto,
@@ -158,6 +174,7 @@ export class MeetingController {
   }
 
   @Get("meetings/:meetingId/transcript-segments")
+  @UseGuards(MeetingRouteGuard)
   listTranscriptSegments(
     @Param("meetingId") meetingId: string,
   ): TranscriptSegmentResponseDto[] {
@@ -165,6 +182,7 @@ export class MeetingController {
   }
 
   @Post("meetings/:meetingId/report-generation")
+  @UseGuards(MeetingRouteGuard)
   requestReportGeneration(
     @Param("meetingId") meetingId: string,
   ): MeetingReportResponseDto {
@@ -172,6 +190,7 @@ export class MeetingController {
   }
 
   @Post("meetings/:meetingId/report")
+  @UseGuards(MeetingRouteGuard)
   createReport(
     @Param("meetingId") meetingId: string,
   ): MeetingReportResponseDto {
@@ -179,11 +198,13 @@ export class MeetingController {
   }
 
   @Get("meeting-reports/:reportId")
+  @UseGuards(MeetingRouteGuard)
   getReport(@Param("reportId") reportId: string): MeetingReportResponseDto {
     return this.meetingService.getReport(reportId);
   }
 
   @Get("workspaces/:workspaceId/meeting-reports/recent")
+  @UseGuards(MeetingRouteGuard)
   listRecentReports(
     @Param("workspaceId") workspaceId: string,
   ): MeetingReportSummaryDto[] {
@@ -191,6 +212,7 @@ export class MeetingController {
   }
 
   @Get("workspaces/:workspaceId/meeting-reports/canvas-entity-refs")
+  @UseGuards(MeetingRouteGuard)
   listRecentReportCanvasEntityRefs(
     @Param("workspaceId") workspaceId: string,
   ): MeetingReportCanvasEntityRefDto[] {
@@ -198,6 +220,7 @@ export class MeetingController {
   }
 
   @Post("meeting-reports/:reportId/decisions")
+  @UseGuards(MeetingRouteGuard)
   createDecision(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingDecisionRequestDto,
@@ -206,6 +229,7 @@ export class MeetingController {
   }
 
   @Get("meeting-reports/:reportId/decisions")
+  @UseGuards(MeetingRouteGuard)
   listDecisions(
     @Param("reportId") reportId: string,
   ): MeetingDecisionResponseDto[] {
@@ -213,6 +237,7 @@ export class MeetingController {
   }
 
   @Post("meeting-reports/:reportId/risks")
+  @UseGuards(MeetingRouteGuard)
   createRisk(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingReportRiskRequestDto,
@@ -221,6 +246,7 @@ export class MeetingController {
   }
 
   @Get("meeting-reports/:reportId/risks")
+  @UseGuards(MeetingRouteGuard)
   listRisks(
     @Param("reportId") reportId: string,
   ): MeetingReportRiskResponseDto[] {
@@ -228,6 +254,7 @@ export class MeetingController {
   }
 
   @Post("meeting-reports/:reportId/next-agendas")
+  @UseGuards(MeetingRouteGuard)
   createNextAgenda(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingReportNextAgendaRequestDto,
@@ -236,6 +263,7 @@ export class MeetingController {
   }
 
   @Get("meeting-reports/:reportId/next-agendas")
+  @UseGuards(MeetingRouteGuard)
   listNextAgendas(
     @Param("reportId") reportId: string,
   ): MeetingReportNextAgendaResponseDto[] {
@@ -243,6 +271,7 @@ export class MeetingController {
   }
 
   @Post("meeting-reports/:reportId/action-items")
+  @UseGuards(MeetingRouteGuard)
   createActionItem(
     @Param("reportId") reportId: string,
     @Body() requestBody: CreateMeetingActionItemRequestDto,
@@ -251,6 +280,7 @@ export class MeetingController {
   }
 
   @Get("meeting-reports/:reportId/action-items")
+  @UseGuards(MeetingRouteGuard)
   listActionItems(
     @Param("reportId") reportId: string,
   ): MeetingActionItemResponseDto[] {
@@ -258,6 +288,7 @@ export class MeetingController {
   }
 
   @Patch("meeting-action-items/:actionItemId/approve")
+  @UseGuards(MeetingRouteGuard)
   approveActionItem(
     @Param("actionItemId") actionItemId: string,
   ): MeetingActionItemResponseDto {
@@ -265,6 +296,7 @@ export class MeetingController {
   }
 
   @Patch("meeting-action-items/:actionItemId/reject")
+  @UseGuards(MeetingRouteGuard)
   rejectActionItem(
     @Param("actionItemId") actionItemId: string,
   ): MeetingActionItemResponseDto {
@@ -272,6 +304,7 @@ export class MeetingController {
   }
 
   @Patch("meeting-action-items/:actionItemId/convert")
+  @UseGuards(MeetingRouteGuard)
   markActionItemConverted(
     @Param("actionItemId") actionItemId: string,
     @Body() requestBody: ConvertMeetingActionItemRequestDto,
@@ -283,6 +316,7 @@ export class MeetingController {
   }
 
   @Post("meeting-action-items/:actionItemId/task-draft")
+  @UseGuards(MeetingRouteGuard)
   requestActionItemTaskDraft(
     @Param("actionItemId") actionItemId: string,
     @Headers("x-user-id") userId?: string | string[],

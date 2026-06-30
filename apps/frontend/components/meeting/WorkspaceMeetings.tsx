@@ -1,7 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
@@ -14,11 +21,7 @@ import {
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 
-type MeetingStatus =
-  | "scheduled"
-  | "in_progress"
-  | "ended"
-  | "report_generated";
+type MeetingStatus = "scheduled" | "in_progress" | "ended" | "report_generated";
 type AgendaStatus = "open" | "done" | "skipped";
 type TranscriptSource = "text" | "stt";
 type ActionItemStatus = "draft" | "approved" | "converted" | "rejected";
@@ -212,6 +215,18 @@ function createLocalAudioBase64(sequence: number) {
   return "cGlsby1sb2NhbC1zdHQtYXVkaW8=";
 }
 
+async function blobToBase64(blob: Blob) {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return globalThis.btoa(binary);
+}
+
 function activeSessionFrom(sessions: VoiceSession[]) {
   return sessions.find((session) => session.endedAt === null) ?? null;
 }
@@ -240,8 +255,10 @@ export function WorkspaceMeetings() {
     () =>
       createVoiceClient({
         mock: {
-          transcriptWriter: (meetingId: string, input: Record<string, unknown>) =>
-            meetingClient.createTranscriptSegment(meetingId, input),
+          transcriptWriter: (
+            meetingId: string,
+            input: Record<string, unknown>,
+          ) => meetingClient.createTranscriptSegment(meetingId, input),
         },
       }),
     [meetingClient],
@@ -282,9 +299,15 @@ export function WorkspaceMeetings() {
   const [lastTaskDraft, setLastTaskDraft] = useState<TaskDraftResult | null>(
     null,
   );
+  const browserRecorderRef = useRef<MediaRecorder | null>(null);
+  const browserStreamRef = useRef<MediaStream | null>(null);
+  const browserAudioChunksRef = useRef<Blob[]>([]);
   const [sttSequence, setSttSequence] = useState(1);
+  const [isCapturingAudio, setIsCapturingAudio] = useState(false);
   const [title, setTitle] = useState("MVP meeting follow-up");
-  const [purpose, setPurpose] = useState("Turn notes into decisions and tasks.");
+  const [purpose, setPurpose] = useState(
+    "Turn notes into decisions and tasks.",
+  );
   const [agendaTitle, setAgendaTitle] = useState("Confirm next owner handoff");
   const [memoBody, setMemoBody] = useState(
     "Capture the decision and keep downstream writes behind public contracts.",
@@ -383,6 +406,15 @@ export function WorkspaceMeetings() {
     if (!selectedMeetingId) return;
 
     const timeoutId = window.setTimeout(() => {
+      if (
+        browserRecorderRef.current &&
+        browserRecorderRef.current.state !== "inactive"
+      ) {
+        void stopBrowserRecorder().catch(() => undefined);
+      } else {
+        stopBrowserMediaTracks();
+      }
+
       setVoiceRoom(null);
       setVoiceSessions([]);
       setLastTaskDraft(null);
@@ -390,6 +422,7 @@ export function WorkspaceMeetings() {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeetingId]);
 
   async function runAction(action: () => Promise<void>, success: string) {
@@ -406,6 +439,40 @@ export function WorkspaceMeetings() {
     } finally {
       setIsWorking(false);
     }
+  }
+
+  function stopBrowserMediaTracks() {
+    browserStreamRef.current?.getTracks().forEach((track) => track.stop());
+    browserStreamRef.current = null;
+  }
+
+  function stopBrowserRecorder() {
+    const recorder = browserRecorderRef.current;
+
+    if (!recorder || recorder.state === "inactive") {
+      const chunks = [...browserAudioChunksRef.current];
+      browserAudioChunksRef.current = [];
+      setIsCapturingAudio(false);
+      stopBrowserMediaTracks();
+      return Promise.resolve(chunks);
+    }
+
+    return new Promise<Blob[]>((resolve, reject) => {
+      recorder.onstop = () => {
+        const chunks = [...browserAudioChunksRef.current];
+        browserAudioChunksRef.current = [];
+        browserRecorderRef.current = null;
+        setIsCapturingAudio(false);
+        stopBrowserMediaTracks();
+        resolve(chunks);
+      };
+      recorder.onerror = () => {
+        setIsCapturingAudio(false);
+        stopBrowserMediaTracks();
+        reject(new Error("Browser recording failed."));
+      };
+      recorder.stop();
+    });
   }
 
   async function createMeeting(event: FormEvent<HTMLFormElement>) {
@@ -440,10 +507,13 @@ export function WorkspaceMeetings() {
   async function updateMeetingStatus(status: MeetingStatus) {
     if (!selectedMeeting) return;
 
-    await runAction(async () => {
-      await meetingClient.updateMeetingStatus(selectedMeeting.id, status);
-      await loadWorkspace(selectedMeeting.id);
-    }, `Meeting marked ${formatStatus(status)}.`);
+    await runAction(
+      async () => {
+        await meetingClient.updateMeetingStatus(selectedMeeting.id, status);
+        await loadWorkspace(selectedMeeting.id);
+      },
+      `Meeting marked ${formatStatus(status)}.`,
+    );
   }
 
   async function addAgenda(event: FormEvent<HTMLFormElement>) {
@@ -560,14 +630,101 @@ export function WorkspaceMeetings() {
 
     if (!activeSession || !voiceRoom) return;
 
+    await runAction(
+      async () => {
+        await voiceClient.updateRecordingStatus(
+          activeSession.id,
+          recordingStatus,
+        );
+        const sessions = (await voiceClient.listVoiceSessions(
+          voiceRoom.id,
+        )) as VoiceSession[];
+
+        setVoiceSessions(sessions);
+      },
+      `Recording marked ${formatStatus(recordingStatus)}.`,
+    );
+  }
+
+  async function startBrowserRecording() {
+    const activeSession = activeSessionFrom(voiceSessions);
+
+    if (!activeSession || !voiceRoom) return;
+
     await runAction(async () => {
-      await voiceClient.updateRecordingStatus(activeSession.id, recordingStatus);
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices?.getUserMedia ||
+        typeof MediaRecorder === "undefined"
+      ) {
+        throw new Error("Browser audio recording is not supported.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+
+      browserAudioChunksRef.current = [];
+      browserStreamRef.current = stream;
+      browserRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          browserAudioChunksRef.current.push(event.data);
+        }
+      };
+
+      try {
+        recorder.start();
+        setIsCapturingAudio(true);
+
+        await voiceClient.updateRecordingStatus(activeSession.id, "recording");
+        const sessions = (await voiceClient.listVoiceSessions(
+          voiceRoom.id,
+        )) as VoiceSession[];
+
+        setVoiceSessions(sessions);
+      } catch (recordingError) {
+        await stopBrowserRecorder();
+        throw recordingError;
+      }
+    }, "Browser recording started.");
+  }
+
+  async function stopBrowserRecordingAndSubmit() {
+    const activeSession = activeSessionFrom(voiceSessions);
+
+    if (!selectedMeeting || !voiceRoom || !activeSession) return;
+
+    await runAction(async () => {
+      const endedAt = new Date();
+      const chunks = await stopBrowserRecorder();
+
+      if (!chunks.length) {
+        throw new Error("No browser audio was captured.");
+      }
+
+      await voiceClient.updateRecordingStatus(activeSession.id, "processing");
+
+      const audioBlob = new Blob(chunks, {
+        type: chunks[0]?.type || "audio/webm",
+      });
+      const audioBase64 = await blobToBase64(audioBlob);
+      const startedAt = new Date(Math.max(0, endedAt.getTime() - 7000));
+
+      await voiceClient.submitAudioChunk(activeSession.id, {
+        sequence: sttSequence,
+        mimeType: audioBlob.type || "audio/webm",
+        audioBase64,
+        capturedStartedAt: startedAt.toISOString(),
+        capturedEndedAt: endedAt.toISOString(),
+      });
       const sessions = (await voiceClient.listVoiceSessions(
         voiceRoom.id,
       )) as VoiceSession[];
 
       setVoiceSessions(sessions);
-    }, `Recording marked ${formatStatus(recordingStatus)}.`);
+      setSttSequence((sequence) => sequence + 1);
+      await loadMeetingDetail(selectedMeeting.id);
+    }, "Browser recording submitted to STT.");
   }
 
   async function leaveVoiceSession() {
@@ -576,6 +733,10 @@ export function WorkspaceMeetings() {
     if (!activeSession || !voiceRoom) return;
 
     await runAction(async () => {
+      if (isCapturingAudio) {
+        await stopBrowserRecorder();
+      }
+
       await voiceClient.leaveVoiceSession(activeSession.id);
       const sessions = (await voiceClient.listVoiceSessions(
         voiceRoom.id,
@@ -711,8 +872,10 @@ export function WorkspaceMeetings() {
               <div>
                 <span>Open actions</span>
                 <strong>
-                  {actionItems.filter((item) => item.status !== "converted")
-                    .length}
+                  {
+                    actionItems.filter((item) => item.status !== "converted")
+                      .length
+                  }
                 </strong>
               </div>
             </div>
@@ -793,7 +956,9 @@ export function WorkspaceMeetings() {
                             selectedMeeting.status === action.status ||
                             selectedMeeting.status === "report_generated"
                           }
-                          onClick={() => void updateMeetingStatus(action.status)}
+                          onClick={() =>
+                            void updateMeetingStatus(action.status)
+                          }
                         >
                           {action.label}
                         </button>
@@ -815,7 +980,10 @@ export function WorkspaceMeetings() {
                         <h3>Agenda</h3>
                         {panelCount("items", agendas.length)}
                       </header>
-                      <form onSubmit={addAgenda} className="meetings-inline-form">
+                      <form
+                        onSubmit={addAgenda}
+                        className="meetings-inline-form"
+                      >
                         <input
                           value={agendaTitle}
                           onChange={(event) =>
@@ -887,7 +1055,9 @@ export function WorkspaceMeetings() {
                       <header>
                         <h3>Voice session</h3>
                         <span className="meetings-panel-count">
-                          {voiceRoom ? formatStatus(voiceRoom.status) : "closed"}
+                          {voiceRoom
+                            ? formatStatus(voiceRoom.status)
+                            : "closed"}
                         </span>
                       </header>
                       <div className="meetings-voice-actions">
@@ -901,7 +1071,9 @@ export function WorkspaceMeetings() {
                         <button
                           type="button"
                           onClick={() => void joinVoiceSession()}
-                          disabled={isWorking || !voiceRoom || Boolean(activeSession)}
+                          disabled={
+                            isWorking || !voiceRoom || Boolean(activeSession)
+                          }
                         >
                           Join
                         </button>
@@ -946,6 +1118,26 @@ export function WorkspaceMeetings() {
                       >
                         Submit local STT chunk
                       </button>
+                      <div className="meetings-voice-actions">
+                        <button
+                          type="button"
+                          onClick={() => void startBrowserRecording()}
+                          disabled={
+                            isWorking || !activeSession || isCapturingAudio
+                          }
+                        >
+                          Start browser recording
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void stopBrowserRecordingAndSubmit()}
+                          disabled={
+                            isWorking || !activeSession || !isCapturingAudio
+                          }
+                        >
+                          Stop and submit recording
+                        </button>
+                      </div>
                     </section>
 
                     <section className="meetings-panel">
@@ -1075,7 +1267,8 @@ export function WorkspaceMeetings() {
                                     "No description provided."}
                                 </p>
                                 <small>
-                                  Due {actionItem.dueDateSuggestion ?? "not set"}
+                                  Due{" "}
+                                  {actionItem.dueDateSuggestion ?? "not set"}
                                 </small>
                               </div>
                               <div className="meetings-action-buttons">

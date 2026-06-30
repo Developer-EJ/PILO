@@ -102,6 +102,53 @@ export class VoiceService {
     return voiceRoom;
   }
 
+  resolveRouteWorkspaceId(input: {
+    workspaceId?: string;
+    meetingId?: string;
+    voiceRoomId?: string;
+    voiceSessionId?: string;
+  }): string {
+    if (input.voiceSessionId) {
+      const voiceSession = this.requireVoiceSession(input.voiceSessionId);
+      const voiceRoom = this.requireVoiceRoom(voiceSession.voiceRoomId);
+
+      return this.requireMatchingRouteWorkspace(
+        input.workspaceId,
+        voiceRoom.workspaceId,
+        "Voice session not found in workspace",
+      );
+    }
+
+    if (input.voiceRoomId) {
+      const voiceRoom = this.requireVoiceRoom(input.voiceRoomId);
+
+      return this.requireMatchingRouteWorkspace(
+        input.workspaceId,
+        voiceRoom.workspaceId,
+        "Voice room not found in workspace",
+      );
+    }
+
+    if (input.meetingId) {
+      const meeting = input.workspaceId
+        ? this.meetingService.getMeetingForWorkspace(
+            input.workspaceId,
+            input.meetingId,
+          )
+        : this.meetingService.getMeeting(input.meetingId);
+
+      return meeting.workspaceId;
+    }
+
+    if (input.workspaceId) {
+      return this.requireNonEmptyString(input.workspaceId, "workspaceId");
+    }
+
+    throw new BadRequestException(
+      "workspaceId, meetingId, voiceRoomId, or voiceSessionId is required",
+    );
+  }
+
   updateVoiceRoomStatus(
     voiceRoomId: string,
     requestBody: UpdateVoiceRoomStatusRequestDto,
@@ -259,6 +306,22 @@ export class VoiceService {
     return voiceSession;
   }
 
+  private requireMatchingRouteWorkspace(
+    routeWorkspaceId: string | undefined,
+    actualWorkspaceId: string,
+    mismatchMessage: string,
+  ): string {
+    if (
+      routeWorkspaceId &&
+      this.requireNonEmptyString(routeWorkspaceId, "workspaceId") !==
+        actualWorkspaceId
+    ) {
+      throw new NotFoundException(mismatchMessage);
+    }
+
+    return actualWorkspaceId;
+  }
+
   private parseVoiceRoomStatus(value: unknown): VoiceRoomStatus {
     if (
       typeof value === "string" &&
@@ -333,7 +396,9 @@ export class VoiceService {
       return Number(value);
     }
 
-    throw new BadRequestException(`${fieldName} must be a non-negative integer`);
+    throw new BadRequestException(
+      `${fieldName} must be a non-negative integer`,
+    );
   }
 
   private optionalIsoDateTime(

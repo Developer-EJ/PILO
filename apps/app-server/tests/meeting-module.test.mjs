@@ -6,9 +6,13 @@ import "reflect-metadata";
 const require = createRequire(import.meta.url);
 require("ts-node/register");
 
+const { GUARDS_METADATA } = require("@nestjs/common/constants");
 const {
   MeetingController,
 } = require("../src/modules/meeting/meeting.controller");
+const {
+  MeetingRouteGuard,
+} = require("../src/modules/meeting/meeting-route.guard");
 const { MeetingService } = require("../src/modules/meeting/meeting.service");
 const {
   MockMeetingRepository,
@@ -65,6 +69,37 @@ describe("meeting module scaffold", () => {
     assert.deepEqual(
       controller.getScaffoldStatus(),
       service.getScaffoldStatus(),
+    );
+  });
+
+  it("protects workspace meeting routes with the route guard", () => {
+    assert.deepEqual(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        MeetingController.prototype.createMeeting,
+      ),
+      [MeetingRouteGuard],
+    );
+    assert.deepEqual(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        MeetingController.prototype.getReport,
+      ),
+      [MeetingRouteGuard],
+    );
+    assert.deepEqual(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        MeetingController.prototype.approveActionItem,
+      ),
+      [MeetingRouteGuard],
+    );
+    assert.equal(
+      Reflect.getMetadata(
+        GUARDS_METADATA,
+        MeetingController.prototype.getScaffoldStatus,
+      ),
+      undefined,
     );
   });
 
@@ -138,6 +173,38 @@ describe("meeting module scaffold", () => {
     );
     assert.throws(() =>
       service.getMeetingForWorkspace("workspace-2", meeting.id),
+    );
+  });
+
+  it("resolves route workspace ids from meeting reports and action items", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const meeting = service.createMeeting("workspace-1", {
+      title: "Route guard meeting",
+    });
+    const report = service.createReport(meeting.id);
+    const actionItem = service.createActionItem(report.id, {
+      title: "Guard action item",
+    });
+
+    assert.equal(
+      service.resolveRouteWorkspaceId({ meetingId: meeting.id }),
+      "workspace-1",
+    );
+    assert.equal(
+      service.resolveRouteWorkspaceId({ reportId: report.id }),
+      "workspace-1",
+    );
+    assert.equal(
+      service.resolveRouteWorkspaceId({ actionItemId: actionItem.id }),
+      "workspace-1",
+    );
+    assert.throws(() =>
+      service.resolveRouteWorkspaceId({
+        workspaceId: "workspace-2",
+        reportId: report.id,
+      }),
     );
   });
 
