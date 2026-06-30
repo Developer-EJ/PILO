@@ -8,7 +8,7 @@ import {
   ReviewRoomActorContext,
   ReviewRoomCreatedEvent,
 } from "./code-review-room.types";
-import { InMemoryCodeReviewRoomRepository } from "./in-memory-code-review-room.repository";
+import { CodeReviewRoomRepository } from "./code-review-room.repository";
 import { DEFAULT_REVIEW_ROOM_CONTEXT } from "./review-room.fixtures";
 import { PullRequestSummaryRegistry } from "./pull-request-summary.registry";
 
@@ -18,24 +18,25 @@ export class ReviewRoomService {
     DEFAULT_REVIEW_ROOM_CONTEXT;
 
   constructor(
-    private readonly roomRepository: InMemoryCodeReviewRoomRepository,
+    private readonly roomRepository: CodeReviewRoomRepository,
     private readonly pullRequestRegistry: PullRequestSummaryRegistry = new PullRequestSummaryRegistry(),
   ) {}
 
-  openRoomForPullRequest(
+  async openRoomForPullRequest(
     pullRequestId: string,
     context: ReviewRoomActorContext = this.defaultContext,
     body: OpenReviewRoomBody = {},
-  ): CodeReviewRoomSummary {
+  ): Promise<CodeReviewRoomSummary> {
     const pullRequest = this.resolvePullRequest(pullRequestId, body);
-    const existingRoom = this.roomRepository.findByPullRequestId(pullRequestId);
+    const existingRoom =
+      await this.roomRepository.findByPullRequestId(pullRequestId);
 
     if (existingRoom) {
       return this.toSummary(existingRoom, pullRequest);
     }
 
     const createdAt = new Date().toISOString();
-    const room = this.roomRepository.create({
+    const room = await this.roomRepository.create({
       id: randomUUID(),
       workspaceId: context.workspaceId,
       pullRequestId,
@@ -46,8 +47,8 @@ export class ReviewRoomService {
     return this.toSummary(room, pullRequest);
   }
 
-  getRoom(roomId: string): CodeReviewRoomSummary {
-    const room = this.roomRepository.findById(roomId);
+  async getRoom(roomId: string): Promise<CodeReviewRoomSummary> {
+    const room = await this.roomRepository.findById(roomId);
 
     if (!room) {
       throw new NotFoundException(`Code review room was not found: ${roomId}`);

@@ -290,7 +290,9 @@ describe("agent result root analysis consumer", () => {
     const changedFiles = await changedFilesService.listChangedFiles(
       analysis.id,
     );
-    const checklistItems = artifactsService.listChecklistItems(analysis.id);
+    const checklistItems = await artifactsService.listChecklistItems(
+      analysis.id,
+    );
 
     assert.equal(updated.analysisStatus, "succeeded");
     assert.equal(updated.riskLevel, "high");

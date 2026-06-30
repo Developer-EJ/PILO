@@ -266,6 +266,19 @@ model PullRequest {
   @@map("pull_requests")
 }
 
+model CodeReviewRoom {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  pullRequestId     String   @unique @map("pull_request_id") @db.Uuid
+  status            String   @default("open") @db.VarChar(20)
+  createdByMemberId String?  @map("created_by_member_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId])
+  @@map("code_review_rooms")
+}
+
 model PullRequestAnalysis {
   id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   pullRequestId      String   @unique @map("pull_request_id") @db.Uuid
@@ -364,6 +377,38 @@ model NodeReviewState {
   @@unique([nodeId, reviewerMemberId])
   @@index([nodeId])
   @@map("node_review_states")
+}
+
+model ReviewComment {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId            String   @map("room_id") @db.Uuid
+  authorMemberId    String?  @map("author_member_id") @db.Uuid
+  nodeId            String?  @map("node_id")
+  changedFileId     String?  @map("changed_file_id") @db.Uuid
+  changedFunctionId String?  @map("changed_function_id") @db.Uuid
+  body              String
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([roomId])
+  @@map("review_comments")
+}
+
+model ReviewChecklistItem {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  analysisId        String    @map("analysis_id") @db.Uuid
+  checklistType     String    @default("review") @map("checklist_type") @db.VarChar(20)
+  title             String    @db.VarChar(240)
+  status            String    @default("todo") @db.VarChar(20)
+  checkedByMemberId String?   @map("checked_by_member_id") @db.Uuid
+  checkedAt         DateTime? @map("checked_at") @db.Timestamptz(6)
+  sortOrder         Int       @default(0) @map("sort_order")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([analysisId, checklistType, sortOrder])
+  @@index([analysisId])
+  @@map("review_checklist_items")
 }
 
 model TaskPullRequest {

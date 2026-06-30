@@ -67,10 +67,10 @@ export class AgentReviewArtifactsResultService {
 
   constructor(private readonly artifactsService: ReviewArtifactsService) {}
 
-  applyArtifacts(
+  async applyArtifacts(
     analysisId: string,
     result: AgentReviewArtifactsResult,
-  ): AppliedReviewArtifacts {
+  ): Promise<AppliedReviewArtifacts> {
     for (const question of result.questions ?? []) {
       const key = this.questionKey(analysisId, question.question);
       const existing = this.questionsByKey.get(key);
@@ -105,7 +105,7 @@ export class AgentReviewArtifactsResultService {
     }
 
     for (const [index, item] of (result.checklist ?? []).entries()) {
-      this.artifactsService.createChecklistItem(analysisId, {
+      await this.artifactsService.createChecklistItem(analysisId, {
         checklistType: item.checklistType ?? item.type ?? "review",
         title: item.title,
         status: item.status ?? "todo",
@@ -116,7 +116,7 @@ export class AgentReviewArtifactsResultService {
     return {
       questions: this.listQuestions(analysisId),
       risks: this.listRisks(analysisId),
-      checklist: this.artifactsService.listChecklistItems(analysisId),
+      checklist: await this.artifactsService.listChecklistItems(analysisId),
     };
   }
 

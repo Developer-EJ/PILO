@@ -13,7 +13,9 @@ export class ReviewArtifactsController {
   constructor(private readonly artifactsService: ReviewArtifactsService) {}
 
   @Get("code-review-rooms/:roomId/comments")
-  listComments(@Param("roomId") roomId: string): ReviewCommentRecord[] {
+  listComments(
+    @Param("roomId") roomId: string,
+  ): Promise<ReviewCommentRecord[]> {
     return this.artifactsService.listCommentsByRoom(roomId);
   }
 
@@ -21,14 +23,14 @@ export class ReviewArtifactsController {
   createComment(
     @Param("roomId") roomId: string,
     @Body() body: CreateReviewCommentInput,
-  ): ReviewCommentRecord {
+  ): Promise<ReviewCommentRecord> {
     return this.artifactsService.createComment(roomId, body);
   }
 
   @Get("pull-request-analyses/:analysisId/checklist-items")
   listChecklistItems(
     @Param("analysisId") analysisId: string,
-  ): ReviewChecklistItemRecord[] {
+  ): Promise<ReviewChecklistItemRecord[]> {
     return this.artifactsService.listChecklistItems(analysisId);
   }
 
@@ -36,7 +38,7 @@ export class ReviewArtifactsController {
   createChecklistItem(
     @Param("analysisId") analysisId: string,
     @Body() body: CreateReviewChecklistItemInput,
-  ): ReviewChecklistItemRecord {
+  ): Promise<ReviewChecklistItemRecord> {
     return this.artifactsService.createChecklistItem(analysisId, body);
   }
 
@@ -44,7 +46,7 @@ export class ReviewArtifactsController {
   updateChecklistItem(
     @Param("itemId") itemId: string,
     @Body() body: UpdateReviewChecklistItemInput,
-  ): ReviewChecklistItemRecord {
+  ): Promise<ReviewChecklistItemRecord> {
     return this.artifactsService.updateChecklistItem(itemId, body);
   }
 }

@@ -64,10 +64,10 @@ function createController(options = {}) {
 }
 
 describe("review room API boundary", () => {
-  it("opens a code review room from an explicitly seeded PullRequestSummary fixture", () => {
+  it("opens a code review room from an explicitly seeded PullRequestSummary fixture", async () => {
     const controller = createController({ seedFixture: true });
 
-    const room = controller.openRoomForPullRequest(
+    const room = await controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
     );
 
@@ -77,7 +77,7 @@ describe("review room API boundary", () => {
     assert.equal(room.pullRequest.number, 7);
   });
 
-  it("does not open rooms for unknown pull requests by default", () => {
+  it("does not open rooms for unknown pull requests by default", async () => {
     const controller = new ReviewRoomController(
       new ReviewRoomService(
         new InMemoryCodeReviewRoomRepository(),
@@ -85,16 +85,16 @@ describe("review room API boundary", () => {
       ),
     );
 
-    assert.throws(
+    await assert.rejects(
       () => controller.openRoomForPullRequest(DEFAULT_PULL_REQUEST_ID),
       /PullRequestSummary was not found/,
     );
   });
 
-  it("stores the caller context instead of a hard-coded room owner", () => {
+  it("stores the caller context instead of a hard-coded room owner", async () => {
     const service = createService();
 
-    const room = service.openRoomForPullRequest(
+    const room = await service.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
       {
         workspaceId: "22222222-2222-4222-8222-222222222229",
@@ -109,10 +109,10 @@ describe("review room API boundary", () => {
     );
   });
 
-  it("passes caller context from the controller boundary", () => {
+  it("passes caller context from the controller boundary", async () => {
     const controller = createController();
 
-    const room = controller.openRoomForPullRequest(
+    const room = await controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
       {},
       "22222222-2222-4222-8222-222222222229",
@@ -126,13 +126,13 @@ describe("review room API boundary", () => {
     );
   });
 
-  it("returns the existing room for the same pull request", () => {
+  it("returns the existing room for the same pull request", async () => {
     const controller = createController();
 
-    const first = controller.openRoomForPullRequest(
+    const first = await controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
     );
-    const second = controller.openRoomForPullRequest(
+    const second = await controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
     );
 
@@ -140,7 +140,7 @@ describe("review room API boundary", () => {
     assert.equal(second.createdAt, first.createdAt);
   });
 
-  it("opens a code review room from a runtime PullRequestSummary body", () => {
+  it("opens a code review room from a runtime PullRequestSummary body", async () => {
     const controller = createController();
     const pullRequest = {
       id: "77777777-7777-4777-8777-777777777771",
@@ -159,13 +159,13 @@ describe("review room API boundary", () => {
       syncedAt: "2026-06-30T00:00:00.000Z",
     };
 
-    const room = controller.openRoomForPullRequest(
+    const room = await controller.openRoomForPullRequest(
       pullRequest.id,
       { pullRequest },
       "22222222-2222-4222-8222-222222222222",
       "33333333-3333-4333-8333-333333333331",
     );
-    const loaded = controller.getRoom(room.id);
+    const loaded = await controller.getRoom(room.id);
 
     assert.equal(room.pullRequestId, pullRequest.id);
     assert.equal(room.pullRequest.title, pullRequest.title);
@@ -173,13 +173,13 @@ describe("review room API boundary", () => {
     assert.deepEqual(loaded.pullRequest, room.pullRequest);
   });
 
-  it("loads a review room by room id", () => {
+  it("loads a review room by room id", async () => {
     const controller = createController();
-    const opened = controller.openRoomForPullRequest(
+    const opened = await controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
     );
 
-    const loaded = controller.getRoom(opened.id);
+    const loaded = await controller.getRoom(opened.id);
 
     assert.deepEqual(loaded, opened);
   });

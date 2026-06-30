@@ -3401,7 +3401,7 @@ describe("app-server package", () => {
         () => analysisService.getAnalysis(pullRequest.id),
         /Pull request analysis was not found/,
       );
-      app.get(ReviewRoomService).openRoomForPullRequest(
+      await app.get(ReviewRoomService).openRoomForPullRequest(
         pullRequest.id,
         {
           workspaceId: "22222222-2222-4222-8222-222222222222",

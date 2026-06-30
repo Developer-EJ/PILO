@@ -4,7 +4,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { InMemoryReviewArtifactsRepository } from "./in-memory-review-artifacts.repository";
 import {
   CreateReviewChecklistItemInput,
   CreateReviewCommentInput,
@@ -14,6 +13,7 @@ import {
   ReviewCommentRecord,
   UpdateReviewChecklistItemInput,
 } from "./review-artifact.types";
+import { ReviewArtifactsRepository } from "./review-artifacts.repository";
 
 const CHECKLIST_TYPES = ["review", "merge"];
 const CHECKLIST_STATUSES = ["todo", "done", "skipped"];
@@ -21,13 +21,13 @@ const CHECKLIST_STATUSES = ["todo", "done", "skipped"];
 @Injectable()
 export class ReviewArtifactsService {
   constructor(
-    private readonly artifactsRepository: InMemoryReviewArtifactsRepository,
+    private readonly artifactsRepository: ReviewArtifactsRepository,
   ) {}
 
-  createComment(
+  async createComment(
     roomId: string,
     input: CreateReviewCommentInput,
-  ): ReviewCommentRecord {
+  ): Promise<ReviewCommentRecord> {
     const createdAt = this.timestampOrNow(input.createdAt);
 
     return this.artifactsRepository.saveComment({
@@ -45,21 +45,21 @@ export class ReviewArtifactsService {
     });
   }
 
-  createChecklistItem(
+  async createChecklistItem(
     analysisId: string,
     input: CreateReviewChecklistItemInput,
-  ): ReviewChecklistItemRecord {
+  ): Promise<ReviewChecklistItemRecord> {
     const checklistType = this.toChecklistType(input.checklistType ?? "review");
     const status = this.toChecklistStatus(input.status ?? "todo");
     const changedAt = this.timestampOrNow(input.changedAt);
     const sortOrder =
       input.sortOrder ??
-      this.artifactsRepository.nextChecklistSortOrder(
+      (await this.artifactsRepository.nextChecklistSortOrder(
         analysisId,
         checklistType,
-      );
+      ));
     const normalizedSortOrder = this.nonNegativeInteger("sortOrder", sortOrder);
-    const existing = this.artifactsRepository.findChecklistItemBySlot(
+    const existing = await this.artifactsRepository.findChecklistItemBySlot(
       analysisId,
       checklistType,
       normalizedSortOrder,
@@ -80,19 +80,23 @@ export class ReviewArtifactsService {
     });
   }
 
-  listCommentsByRoom(roomId: string): ReviewCommentRecord[] {
+  async listCommentsByRoom(roomId: string): Promise<ReviewCommentRecord[]> {
     return this.artifactsRepository.listCommentsByRoom(roomId);
   }
 
-  listChecklistItems(analysisId: string): ReviewChecklistItemRecord[] {
+  async listChecklistItems(
+    analysisId: string,
+  ): Promise<ReviewChecklistItemRecord[]> {
     return this.artifactsRepository.listChecklistItems(analysisId);
   }
 
-  updateChecklistItem(
+  async updateChecklistItem(
     itemId: string,
     input: UpdateReviewChecklistItemInput,
-  ): ReviewChecklistItemRecord {
-    const existing = this.artifactsRepository.findChecklistItemById(itemId);
+  ): Promise<ReviewChecklistItemRecord> {
+    const existing = await this.artifactsRepository.findChecklistItemById(
+      itemId,
+    );
 
     if (!existing) {
       throw new NotFoundException(

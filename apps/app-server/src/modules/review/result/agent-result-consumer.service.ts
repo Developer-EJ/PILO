@@ -180,7 +180,7 @@ export class AgentResultConsumerService {
     }
 
     if (this.hasArtifacts(output) && this.artifactsResultService) {
-      this.artifactsResultService.applyArtifacts(analysisId, {
+      await this.artifactsResultService.applyArtifacts(analysisId, {
         questions: output.questions,
         risks: output.risks,
         checklist: output.checklist,

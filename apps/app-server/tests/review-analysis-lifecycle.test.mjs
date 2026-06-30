@@ -180,7 +180,7 @@ describe("PR analysis lifecycle API boundary", () => {
       syncedAt: "2026-06-30T00:00:00.000Z",
     };
 
-    roomService.openRoomForPullRequest(
+    await roomService.openRoomForPullRequest(
       pullRequest.id,
       {
         workspaceId: "22222222-2222-4222-8222-222222222222",

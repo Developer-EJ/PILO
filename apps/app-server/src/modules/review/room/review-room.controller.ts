@@ -25,7 +25,7 @@ export class ReviewRoomController {
     @Body() body: OpenReviewRoomBody = {},
     @Headers("x-workspace-id") workspaceId?: string,
     @Headers("x-member-id") memberId?: string,
-  ): CodeReviewRoomSummary {
+  ): Promise<CodeReviewRoomSummary> {
     return this.reviewRoomService.openRoomForPullRequest(
       pullRequestId,
       this.actorContextFromHeaders(workspaceId, memberId),
@@ -36,7 +36,7 @@ export class ReviewRoomController {
   @Get("code-review-rooms/:roomId")
   getRoom(
     @Param("roomId", ParseUUIDPipe) roomId: string,
-  ): CodeReviewRoomSummary {
+  ): Promise<CodeReviewRoomSummary> {
     return this.reviewRoomService.getRoom(roomId);
   }
 

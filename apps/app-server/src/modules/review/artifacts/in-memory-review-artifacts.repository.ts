@@ -4,9 +4,12 @@ import {
   ReviewChecklistType,
   ReviewCommentRecord,
 } from "./review-artifact.types";
+import { ReviewArtifactsRepository } from "./review-artifacts.repository";
 
 @Injectable()
-export class InMemoryReviewArtifactsRepository {
+export class InMemoryReviewArtifactsRepository
+  implements ReviewArtifactsRepository
+{
   private readonly commentsById = new Map<string, ReviewCommentRecord>();
   private readonly commentIdsByRoom = new Map<string, string[]>();
   private readonly checklistItemsById = new Map<

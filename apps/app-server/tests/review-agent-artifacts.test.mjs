@@ -22,11 +22,11 @@ function createService() {
 }
 
 describe("agent result review artifacts adapter", () => {
-  it("stores questions, risks, and checklist result payloads", () => {
+  it("stores questions, risks, and checklist result payloads", async () => {
     const service = createService();
     const analysisId = "88888888-8888-4888-8888-888888888885";
 
-    const applied = service.applyArtifacts(analysisId, {
+    const applied = await service.applyArtifacts(analysisId, {
       questions: [
         {
           question: "실패 redirect smoke test를 확인했나요?",
@@ -54,17 +54,17 @@ describe("agent result review artifacts adapter", () => {
     assert.equal(applied.checklist[1].checklistType, "merge");
   });
 
-  it("upserts questions and risks by text/title", () => {
+  it("upserts questions and risks by text/title", async () => {
     const service = createService();
     const analysisId = "88888888-8888-4888-8888-888888888885";
 
-    const first = service.applyArtifacts(analysisId, {
+    const first = await service.applyArtifacts(analysisId, {
       questions: [{ question: "테스트가 충분한가요?", priority: "medium" }],
       risks: [
         { title: "테스트 누락", description: "회귀 위험", level: "high" },
       ],
     });
-    const second = service.applyArtifacts(analysisId, {
+    const second = await service.applyArtifacts(analysisId, {
       questions: [{ question: "테스트가 충분한가요?", priority: "high" }],
       risks: [
         { title: "테스트 누락", description: "회귀 위험 낮음", level: "low" },
@@ -78,17 +78,17 @@ describe("agent result review artifacts adapter", () => {
     assert.equal(second.risks[0].riskLevel, "low");
   });
 
-  it("rejects invalid artifact enum values", () => {
+  it("rejects invalid artifact enum values", async () => {
     const service = createService();
 
-    assert.throws(
+    await assert.rejects(
       () =>
         service.applyArtifacts("analysis-1", {
           questions: [{ question: "bad", priority: "later" }],
         }),
       /Invalid review question priority/,
     );
-    assert.throws(
+    await assert.rejects(
       () =>
         service.applyArtifacts("analysis-1", {
           risks: [{ title: "bad", description: "bad", level: "warning" }],

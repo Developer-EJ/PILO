@@ -1032,6 +1032,7 @@ CREATE INDEX IF NOT EXISTS idx_review_nodes_graph_id ON review_nodes(graph_id);
 CREATE INDEX IF NOT EXISTS idx_changed_files_analysis_id ON changed_files(analysis_id);
 CREATE INDEX IF NOT EXISTS idx_changed_functions_file_id ON changed_functions(changed_file_id);
 CREATE INDEX IF NOT EXISTS idx_review_comments_room_id ON review_comments(room_id);
+CREATE INDEX IF NOT EXISTS idx_review_checklist_items_analysis_id ON review_checklist_items(analysis_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_workspace_status ON agent_runs(workspace_id, status);
 CREATE INDEX IF NOT EXISTS idx_agent_actions_run_status ON agent_actions(run_id, status);
 CREATE INDEX IF NOT EXISTS idx_project_plan_drafts_workspace_id ON project_plan_drafts(workspace_id);

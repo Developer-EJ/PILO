@@ -3,9 +3,12 @@ import {
   CodeReviewRoomRecord,
   CreateCodeReviewRoomInput,
 } from "./code-review-room.types";
+import { CodeReviewRoomRepository } from "./code-review-room.repository";
 
 @Injectable()
-export class InMemoryCodeReviewRoomRepository {
+export class InMemoryCodeReviewRoomRepository
+  implements CodeReviewRoomRepository
+{
   private readonly roomsById = new Map<string, CodeReviewRoomRecord>();
   private readonly roomIdsByPullRequestId = new Map<string, string>();
 

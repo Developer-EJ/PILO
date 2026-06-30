@@ -36,6 +36,15 @@ const changedFilesMigration = readFileSync(
     encoding: "utf8",
   },
 );
+const reviewRoomArtifactsMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/202606301530_review_room_artifacts_persistence/migration.sql",
+    import.meta.url,
+  ),
+  {
+    encoding: "utf8",
+  },
+);
 const logicalSchema = readFileSync(
   new URL("../../../docs/db/pilo_erd_schema.sql", import.meta.url),
   {
@@ -153,6 +162,37 @@ describe("Prisma workspace member task relations", () => {
     assert.match(
       logicalSchema,
       /CREATE INDEX IF NOT EXISTS idx_changed_functions_file_id ON changed_functions\(changed_file_id\);/,
+    );
+  });
+
+  it("maps Review room artifacts persistence to current runtime APIs", () => {
+    assert.match(
+      schema,
+      /model CodeReviewRoom\s+{[\s\S]*pullRequestId\s+String\s+@unique\s+@map\("pull_request_id"\)\s+@db\.Uuid[\s\S]*@@map\("code_review_rooms"\)/,
+    );
+    assert.match(
+      schema,
+      /model ReviewComment\s+{[\s\S]*roomId\s+String\s+@map\("room_id"\)\s+@db\.Uuid[\s\S]*body\s+String[\s\S]*@@map\("review_comments"\)/,
+    );
+    assert.match(
+      schema,
+      /model ReviewChecklistItem\s+{[\s\S]*analysisId\s+String\s+@map\("analysis_id"\)\s+@db\.Uuid[\s\S]*@@unique\(\[analysisId, checklistType, sortOrder\]\)[\s\S]*@@map\("review_checklist_items"\)/,
+    );
+    assert.match(
+      reviewRoomArtifactsMigration,
+      /CREATE TABLE IF NOT EXISTS code_review_rooms/,
+    );
+    assert.match(
+      reviewRoomArtifactsMigration,
+      /CREATE TABLE IF NOT EXISTS review_comments/,
+    );
+    assert.match(
+      reviewRoomArtifactsMigration,
+      /CONSTRAINT review_checklist_items_analysis_slot_key UNIQUE \(analysis_id, checklist_type, sort_order\)/,
+    );
+    assert.match(
+      logicalSchema,
+      /CREATE INDEX IF NOT EXISTS idx_review_checklist_items_analysis_id ON review_checklist_items\(analysis_id\);/,
     );
   });
 });
