@@ -85,6 +85,20 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 | `POST` | `/api/task-drafts/:draftId/approve` | draft 승인 후 실제 Task 생성 | 주형, 세인 |
 | `POST` | `/api/task-drafts/:draftId/reject` | draft 거절 | 주형, 세인 |
 
+Internal owner public write boundary:
+
+- `TASK_DRAFT_PUBLIC_WRITE_ADAPTER` is an app-server internal owner boundary,
+  not a public HTTP endpoint.
+- It accepts `TaskCreateDraft` payload shape plus an actor workspace member id,
+  reuses the same validation and creation rules as
+  `POST /api/workspaces/:workspaceId/task-drafts`, and returns
+  `TaskDraftSummary`.
+- It creates only a TaskDraft in `draft` status. It does not approve the draft
+  or create a Task.
+- Consumers such as Agent Runtime must depend on this public adapter
+  token/interface only. They must not import 주형 Task service, repository, or
+  Prisma directly.
+
 ## Deferred APIs
 
 아래 API는 contract 후보이지만 현재 `temp-dev` controller에는 없다. 다른 팀은

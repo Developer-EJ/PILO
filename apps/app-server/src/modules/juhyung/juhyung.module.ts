@@ -11,6 +11,10 @@ import { JuhyungPublicAdapter } from "./juhyung-public.adapter";
 import { JuhyungTaskService } from "./juhyung-task.service";
 import { JuhyungTasksController } from "./juhyung-tasks.controller";
 import { JuhyungRepository } from "./juhyung.repository";
+import {
+  JuhyungTaskDraftPublicWriteAdapter,
+  TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
+} from "./public/task-draft-public-write.adapter";
 
 @Module({
   imports: [DatabaseModule, WorkspaceModule],
@@ -23,6 +27,11 @@ import { JuhyungRepository } from "./juhyung.repository";
     JuhyungRepository,
     JuhyungPublicAdapter,
     JuhyungTaskService,
+    JuhyungTaskDraftPublicWriteAdapter,
+    {
+      provide: TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
+      useExisting: JuhyungTaskDraftPublicWriteAdapter,
+    },
     JuhyungGithubConnectionRepository,
     JuhyungGithubConnectionService,
   ],
@@ -30,6 +39,7 @@ import { JuhyungRepository } from "./juhyung.repository";
     JuhyungRepository,
     JuhyungPublicAdapter,
     JuhyungTaskService,
+    TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
     JuhyungGithubConnectionRepository,
     JuhyungGithubConnectionService,
   ],

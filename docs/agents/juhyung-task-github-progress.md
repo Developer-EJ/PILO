@@ -64,6 +64,10 @@ need a separate contract/spec/infra hygiene PR before use.
 - `POST /api/workspaces/:workspaceId/task-drafts` creates `TaskDraft`.
 - `POST /api/task-drafts/:draftId/approve` creates task from approved draft.
 - `POST /api/task-drafts/:draftId/reject` rejects task draft.
+- Internal TaskDraft public write adapter creates `TaskDraftSummary` for Agent
+  `task.create.draft` execution by reusing the current TaskDraft service
+  validation and creation path. This is not a public HTTP route and does not
+  approve drafts or create Tasks.
 - `GET /api/workspaces/:workspaceId/milestones` returns `MilestoneSummary[]`.
 - `POST /api/workspaces/:workspaceId/milestones` creates milestone.
 - `PATCH /api/milestones/:milestoneId` updates milestone.
@@ -83,7 +87,7 @@ need a separate contract/spec/infra hygiene PR before use.
 - `GET /api/pull-requests/:pullRequestId/changed-files` returns `PullRequestChangedFileSummary[]`.
 - `GET /api/workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
 - `GET /api/workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
-- Agent action executor for `task.create.draft`, `task.update.status`, `github.issue.create`.
+- Agent action executor for `task.update.status`, `github.issue.create`.
 
 Progress is an MVP Target read model, not Current Runtime. Do not wire
 Dashboard/Agent to these Progress endpoints until the 주형 runtime controller,

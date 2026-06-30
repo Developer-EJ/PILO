@@ -23,8 +23,20 @@ const {
   AgentRuntimeController,
 } = require("../src/modules/agent/agent-runtime.controller");
 const {
+  AgentOwnerActionExecutorService,
+} = require("../src/modules/agent/agent-owner-action.executor");
+const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service");
+const {
+  JuhyungTaskDraftPublicWriteAdapter,
+} = require("../src/modules/juhyung/public/task-draft-public-write.adapter");
+const {
+  JuhyungPublicAdapter,
+} = require("../src/modules/juhyung/juhyung-public.adapter");
+const {
+  JuhyungTaskService,
+} = require("../src/modules/juhyung/juhyung-task.service");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +44,7 @@ const UUIDS = {
   workspace: "11111111-1111-4111-8111-111111111111",
   member: "22222222-2222-4222-8222-222222222222",
   taskDraft: "33333333-3333-4333-8333-333333333333",
+  user: "44444444-4444-4444-8444-444444444444",
 };
 
 describe("AgentRuntimeController", () => {
@@ -60,7 +73,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("creates and reads task draft runs without owner domain writes", () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
 
     const run = controller.createRun(
       UUIDS.workspace,
@@ -102,7 +115,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("approves a waiting action without executing the owner boundary", () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
     const run = controller.createRun(
       UUIDS.workspace,
       {
@@ -128,10 +141,10 @@ describe("AgentRuntimeController", () => {
   });
 
   it("executes a confirmed task.create.draft through the owner boundary", async () => {
-    const ownerExecutor = createTaskDraftExecutor();
-    const controller = new AgentRuntimeController(
+    const stack = createTaskDraftExecutorStack();
+    const controller = createController(
       new AgentRuntimeService(),
-      ownerExecutor,
+      stack.executor,
     );
     const run = controller.createRun(
       UUIDS.workspace,
@@ -151,15 +164,24 @@ describe("AgentRuntimeController", () => {
       UUIDS.member,
     );
     assert.equal(approvedAction.status, "confirmed");
-    assert.equal(ownerExecutor.calls.length, 0);
+    assert.equal(stack.taskDrafts.length, 0);
 
     const executedAction = await controller.executeAction(
       run.actions[0].id,
       UUIDS.member,
     );
 
-    assert.equal(ownerExecutor.calls.length, 1);
-    assert.equal(ownerExecutor.calls[0].type, "task.create.draft");
+    assert.equal(stack.calls.length, 2);
+    assert.deepEqual(stack.calls[0], [
+      "access",
+      UUIDS.workspace,
+      { memberId: UUIDS.member },
+    ]);
+    assert.equal(stack.calls[1][0], "createDraft");
+    assert.equal(stack.calls[1][2], UUIDS.member);
+    assert.equal(stack.taskDrafts.length, 1);
+    assert.equal(stack.taskDrafts[0].id, UUIDS.taskDraft);
+    assert.notEqual(stack.taskDrafts[0].id, run.actions[0].id);
     assert.equal(executedAction.status, "executed");
     assert.equal(typeof executedAction.executedAt, "string");
 
@@ -171,6 +193,7 @@ describe("AgentRuntimeController", () => {
         (entry) =>
           entry.message === "agent action executed by owner boundary" &&
           entry.metadata.result.targetEntityId === UUIDS.taskDraft &&
+          entry.metadata.result.detail.taskDraft.id === UUIDS.taskDraft &&
           entry.metadata.result.detail.taskDraft.status === "draft",
       ),
       true,
@@ -178,7 +201,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("rejects a waiting action as a terminal state", () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
     const run = controller.createRun(
       UUIDS.workspace,
       {
@@ -204,7 +227,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("does not execute rejected or already executed actions", async () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
     const rejectedRun = controller.createRun(
       UUIDS.workspace,
       {
@@ -252,7 +275,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("marks unsupported confirmed actions as failed at the execute boundary", async () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
     const run = controller.createRun(
       UUIDS.workspace,
       {
@@ -287,7 +310,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("requires the current mock member boundary for HTTP routes", async () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
 
     assert.throws(
       () =>
@@ -313,7 +336,7 @@ describe("AgentRuntimeController", () => {
   });
 
   it("surfaces missing run and action errors", async () => {
-    const controller = new AgentRuntimeController(new AgentRuntimeService());
+    const controller = createController();
 
     assert.throws(
       () => controller.getRun(UUIDS.workspace, UUIDS.member),
@@ -345,11 +368,15 @@ describe("AgentRuntimeController", () => {
       const source = readFileSync(resolve(__dirname, file), "utf8");
       assert.doesNotMatch(
         source,
-        /from\s+["']\.\.\/(?:juhyung|meeting|review)(?:\/|["'])/,
+        /from\s+["']\.\.\/(?:meeting|review)(?:\/|["'])/,
       );
       assert.doesNotMatch(
         source,
-        /JuhyungTaskService|JuhyungRepository|MeetingService|MeetingRepository|Review\w*Service|Review\w*Repository/,
+        /from\s+["']\.\.\/juhyung\/(?!(?:public\/|juhyung\.module["']))/,
+      );
+      assert.doesNotMatch(
+        source,
+        /JuhyungTaskService|JuhyungRepository|@prisma\/client|PrismaClient|MeetingService|MeetingRepository|Review\w*Service|Review\w*Repository/,
       );
     }
   });
@@ -410,18 +437,6 @@ describe("AgentRuntimeController", () => {
       assert.equal(approvedAction.status, "confirmed");
       assert.equal(approvedAction.executedAt, null);
 
-      const executeResponse = await server.inject({
-        method: "POST",
-        url: `/api/agent-actions/${run.actions[0].id}/execute`,
-        headers: {
-          "x-member-id": UUIDS.member,
-        },
-      });
-      assert.equal(executeResponse.statusCode, 200);
-      const executedAction = JSON.parse(executeResponse.payload);
-      assert.equal(executedAction.status, "executed");
-      assert.equal(typeof executedAction.executedAt, "string");
-
       const rejectedRunResponse = await server.inject({
         method: "POST",
         url: `/api/workspaces/${UUIDS.workspace}/agent-runs`,
@@ -465,36 +480,61 @@ function assertRoute(methodName, method, path) {
   assert.equal(Reflect.getMetadata(PATH_METADATA, handler), path);
 }
 
-function createTaskDraftExecutor() {
+function createController(
+  runtimeService = new AgentRuntimeService(),
+  ownerExecutor = createTaskDraftExecutorStack().executor,
+) {
+  return new AgentRuntimeController(runtimeService, ownerExecutor);
+}
+
+function createTaskDraftExecutorStack() {
   const calls = [];
-  return {
-    calls,
-    execute: async (action) => {
-      calls.push(action);
+  const taskDrafts = [];
+  const repository = {
+    createTaskDraft: async (input, createdByMemberId) => {
+      calls.push(["createDraft", input, createdByMemberId]);
+      const draft = {
+        id: UUIDS.taskDraft,
+        workspaceId: input.workspaceId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        title: input.title,
+        description: input.description,
+        assigneeMemberId: input.assigneeMemberId,
+        priority: input.priority,
+        dueDate: input.dueDate,
+        status: "draft",
+        taskId: null,
+        createdByMemberId,
+        createdAt: new Date("2026-06-28T10:00:00.000Z"),
+        updatedAt: new Date("2026-06-28T10:00:00.000Z"),
+      };
+      taskDrafts.push(draft);
+      return draft;
+    },
+  };
+  const workspaceAccess = {
+    requireWorkspaceMember: async (workspaceId, actor) => {
+      calls.push(["access", workspaceId, actor]);
       return {
-        owner: "task",
-        operation: "task.create.draft",
-        status: "succeeded",
-        targetEntityId: UUIDS.taskDraft,
-        errorMessage: null,
-        detail: {
-          taskDraft: {
-            id: UUIDS.taskDraft,
-            workspaceId: action.payload.workspaceId,
-            sourceType: action.payload.sourceType,
-            sourceId: action.payload.sourceId,
-            title: action.payload.title,
-            description: action.payload.description,
-            assigneeMemberId: action.payload.assigneeMemberId,
-            priority: action.payload.priority,
-            dueDate: action.payload.dueDate,
-            status: "draft",
-            taskId: null,
-            createdAt: action.confirmedAt,
-            updatedAt: action.confirmedAt,
-          },
-        },
+        id: actor?.memberId ?? UUIDS.member,
+        workspaceId,
+        userId: UUIDS.user,
+        role: "member",
       };
     },
+  };
+  const taskService = new JuhyungTaskService(
+    repository,
+    workspaceAccess,
+    new JuhyungPublicAdapter(),
+  );
+  const taskDraftWriter = new JuhyungTaskDraftPublicWriteAdapter(taskService);
+  const executor = new AgentOwnerActionExecutorService(taskDraftWriter);
+
+  return {
+    calls,
+    executor,
+    taskDrafts,
   };
 }

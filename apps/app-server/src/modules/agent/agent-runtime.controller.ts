@@ -5,13 +5,15 @@ import {
   Get,
   Headers,
   HttpCode,
+  Inject,
   Param,
   Post,
 } from "@nestjs/common";
-import { MockAgentOwnerActionExecutor } from "./agent-owner-action.executor";
+import { AGENT_OWNER_ACTION_EXECUTOR } from "./agent-owner-action.executor";
 import { AgentRuntimeService } from "./agent-runtime.service";
 import {
   type AgentAction,
+  type AgentOwnerActionExecutor,
   type AgentRunDetail,
   type CreateLocalAgentRunInput,
 } from "./agent-runtime.types";
@@ -27,7 +29,8 @@ interface AgentRunCreateRequest {
 export class AgentRuntimeController {
   constructor(
     private readonly agentRuntimeService: AgentRuntimeService,
-    private readonly ownerActionExecutor: MockAgentOwnerActionExecutor = new MockAgentOwnerActionExecutor(),
+    @Inject(AGENT_OWNER_ACTION_EXECUTOR)
+    private readonly ownerActionExecutor: AgentOwnerActionExecutor,
   ) {}
 
   @Post("workspaces/:workspaceId/agent-runs")
