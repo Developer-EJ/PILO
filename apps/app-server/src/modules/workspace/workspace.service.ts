@@ -4,6 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { AgentRuntimeService } from "../agent/agent-runtime.service";
+import { JuhyungGithubReadService } from "../juhyung/juhyung-github-read.service";
 import { JuhyungProgressService } from "../juhyung/juhyung-progress.service";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
 import { MeetingService } from "../meeting/meeting.service";
@@ -320,6 +321,7 @@ export class WorkspaceService {
     let hasRuntimeSection = false;
     const taskService = this.getRuntimeProvider(JuhyungTaskService);
     const progressService = this.getRuntimeProvider(JuhyungProgressService);
+    const githubReadService = this.getRuntimeProvider(JuhyungGithubReadService);
     const meetingService = this.getRuntimeProvider(MeetingService);
     const agentRuntimeService = this.getRuntimeProvider(AgentRuntimeService);
 
@@ -343,6 +345,33 @@ export class WorkspaceService {
           actor,
         );
         nextReadModels.progress = { ...progress };
+        hasRuntimeSection = true;
+      } catch {
+        // Dashboard stays available while owner services catch up or are down.
+      }
+    }
+
+    if (githubReadService) {
+      try {
+        const repositories = await githubReadService.listRepositories(
+          input.workspaceId,
+          actor,
+        );
+        const [issueLists, pullRequestLists] = await Promise.all([
+          Promise.all(
+            repositories.map((repository) =>
+              githubReadService.listIssues(repository.id, actor),
+            ),
+          ),
+          Promise.all(
+            repositories.map((repository) =>
+              githubReadService.listPullRequests(repository.id, actor),
+            ),
+          ),
+        ]);
+
+        nextReadModels.githubIssues = issueLists.flat();
+        nextReadModels.pullRequests = pullRequestLists.flat();
         hasRuntimeSection = true;
       } catch {
         // Dashboard stays available while owner services catch up or are down.

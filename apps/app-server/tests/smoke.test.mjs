@@ -1552,6 +1552,83 @@ describe("app-server package", () => {
     }
   });
 
+  it("overlays workspace dashboard GitHub sections from the runtime service", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    const repository = new WorkspaceRepository();
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await new WorkspaceService(repository).createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const runtimeRepository = {
+      id: "55555555-5555-4555-8555-555555555599",
+      workspaceId: workspace.id,
+      owner: "example",
+      repoName: "pilo",
+      url: "https://github.com/example/pilo",
+      defaultBranch: "dev",
+      syncedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const calls = [];
+    const moduleRef = {
+      get(token) {
+        if (token.name === "JuhyungGithubReadService") {
+          return {
+            async listRepositories(workspaceId, actor) {
+              calls.push({ service: "repositories", workspaceId, actor });
+              return [runtimeRepository];
+            },
+            async listIssues(repositoryId, actor) {
+              calls.push({ service: "issues", repositoryId, actor });
+              return [];
+            },
+            async listPullRequests(repositoryId, actor) {
+              calls.push({ service: "pullRequests", repositoryId, actor });
+              return [];
+            },
+          };
+        }
+
+        throw new Error(`Unexpected provider token: ${token.name}`);
+      },
+    };
+
+    delete process.env.PILO_SKIP_DATABASE_CONNECT;
+
+    try {
+      const service = new WorkspaceService(repository, moduleRef);
+      const dashboard = await service.getWorkspaceDashboard({
+        workspaceId: workspace.id,
+        currentUser: owner,
+      });
+      const actor = {
+        userId: owner.id,
+        memberId: dashboard.currentMember.memberId,
+      };
+
+      assert.equal(dashboard.source, "mixed");
+      assert.deepEqual(dashboard.githubIssues, []);
+      assert.deepEqual(dashboard.pullRequests, []);
+      assert.deepEqual(calls, [
+        { service: "repositories", workspaceId: workspace.id, actor },
+        { service: "issues", repositoryId: runtimeRepository.id, actor },
+        { service: "pullRequests", repositoryId: runtimeRepository.id, actor },
+      ]);
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
   it("overlays workspace dashboard meeting reports from the runtime service", async () => {
     const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
     const repository = new WorkspaceRepository();
