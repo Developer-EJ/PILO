@@ -66,14 +66,6 @@ function workspacePath(workspaceId: string, segment: string) {
   return `${workspaceDashboardHref(workspaceId)}/${segment}`;
 }
 
-function workspaceReviewRoomHref(workspaceId: string) {
-  const reviewRoomBaseUrl =
-    process.env.NEXT_PUBLIC_PILO_REVIEW_ROOM_URL?.replace(/\/$/, "");
-  const reviewPath = workspacePath(workspaceId, "reviews");
-
-  return reviewRoomBaseUrl ? `${reviewRoomBaseUrl}${reviewPath}` : reviewPath;
-}
-
 function workspaceQueryPath(workspaceId: string, segment: string, view: string) {
   const params = new URLSearchParams({ view });
 
@@ -213,7 +205,7 @@ export function WorkspaceSidebar({
                 active: active === "canvas",
               }),
               navLink({
-                href: workspaceReviewRoomHref(workspaceId),
+                href: workspacePath(workspaceId, "reviews"),
                 label: "코드 리뷰",
                 active: active === "reviews",
                 badge: counts.pullRequests,

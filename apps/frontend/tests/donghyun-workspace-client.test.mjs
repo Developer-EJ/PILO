@@ -410,25 +410,26 @@ describe("donghyun workspace client", () => {
     assert.equal(workspaceShellSource.includes('"reports"'), false);
     assert.equal(workspaceShellSource.includes('"report"'), true);
     assert.equal(
-      workspaceShellSource.includes("workspaceReviewRoomHref(workspaceId)"),
+      workspaceShellSource.includes('workspacePath(workspaceId, "reviews")'),
       true,
     );
     assert.equal(
       workspaceShellSource.includes("NEXT_PUBLIC_PILO_REVIEW_ROOM_URL"),
-      true,
+      false,
     );
   });
 
-  it("documents the optional Review Room URL for workspace navigation", () => {
-    const envExample = readFileSync(
-      new URL("../../../.env.example", import.meta.url),
+  it("keeps workspace Code Review navigation inside the 3000 shell route", () => {
+    const workspaceShellSource = readFileSync(
+      new URL("../components/workspace/WorkspaceShell.tsx", import.meta.url),
       "utf8",
     );
 
     assert.equal(
-      envExample.includes("NEXT_PUBLIC_PILO_REVIEW_ROOM_URL=http://localhost:3001"),
+      workspaceShellSource.includes('href: workspacePath(workspaceId, "reviews")'),
       true,
     );
+    assert.equal(workspaceShellSource.includes("localhost:3001"), false);
   });
 
   it("opens runtime-created Canvas boards through the static canvas route", () => {

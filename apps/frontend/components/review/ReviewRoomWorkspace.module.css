@@ -1,0 +1,17 @@
+.reviewRoomWorkspace {
+  --review-room-height: calc(100vh - 132px);
+
+  min-width: 0;
+  min-height: var(--review-room-height);
+  overflow: hidden;
+  border-top: 1px solid #dfe5ee;
+  background: #f4f6f8;
+}
+
+@media (max-width: 980px) {
+  .reviewRoomWorkspace {
+    --review-room-height: auto;
+
+    overflow: visible;
+  }
+}

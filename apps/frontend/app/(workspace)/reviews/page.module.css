@@ -1,6 +1,6 @@
 .selectorPage,
 .reviewApp {
-  min-height: 100vh;
+  min-height: var(--review-room-height, 100vh);
   background: #f4f6f8;
   color: #151923;
 }
@@ -148,7 +148,7 @@
 .canvasWorkspace,
 .detailWorkspace {
   display: grid;
-  height: calc(100vh - 58px);
+  height: calc(var(--review-room-height, 100vh) - 58px);
   min-height: 0;
   overflow: hidden;
 }

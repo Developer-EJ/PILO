@@ -1,4 +1,4 @@
-import { ReviewWorkspace } from "../../../../../components/review/ReviewWorkspace";
+import { ReviewRoomWorkspace } from "../../../../../components/review/ReviewRoomWorkspace";
 
 type WorkspaceReviewsPageProps = {
   params: Promise<{
@@ -11,5 +11,5 @@ export default async function WorkspaceReviewsPage({
 }: WorkspaceReviewsPageProps) {
   const { workspaceId } = await params;
 
-  return <ReviewWorkspace workspaceId={workspaceId} embedded />;
+  return <ReviewRoomWorkspace workspaceId={workspaceId} />;
 }
