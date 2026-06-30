@@ -1947,6 +1947,10 @@ describe("local development baseline", () => {
     );
     assert.match(
       compose,
+      /docs\/db\/migrations\/202606300800_voice_session_member_rebaseline\.sql/,
+    );
+    assert.match(
+      compose,
       /docs\/db\/seeds\/001_donghyun_auth_workspace_canvas_seed\.sql/,
     );
     assert.match(
@@ -1964,6 +1968,7 @@ describe("local development baseline", () => {
     );
     assert.match(script, /202606300500_mvp_task_drafts_rebaseline\.sql/);
     assert.match(script, /202606300700_canvas_connection_type_rebaseline\.sql/);
+    assert.match(script, /202606300800_voice_session_member_rebaseline\.sql/);
     assert.match(script, /001_donghyun_auth_workspace_canvas_seed\.sql/);
     assert.match(script, /002_juhyung_github_review_seed\.sql/);
     assert.match(script, /psql -v ON_ERROR_STOP=1/);
@@ -2060,6 +2065,29 @@ describe("db schema contract alignment", () => {
     assert.match(ownerDoc, /token_type/);
     assert.match(ownerDoc, /token_hash_algorithm/);
     assert.match(ownerDoc, /secret_version/);
+  });
+
+  it("voice session DB fields are aligned with the implemented member-scoped runtime", () => {
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    const migration = read(
+      "docs/db/migrations/202606300800_voice_session_member_rebaseline.sql",
+    );
+    const ownerDoc = read("docs/db/db-schema-by-owner.md");
+
+    assert.match(
+      sql,
+      /CREATE TABLE voice_sessions[\s\S]*member_id UUID REFERENCES workspace_members\(id\) ON DELETE SET NULL/,
+    );
+    assert.match(
+      sql,
+      /idx_voice_sessions_room_member_active ON voice_sessions\(voice_room_id, member_id\) WHERE ended_at IS NULL/,
+    );
+    assert.match(migration, /ADD COLUMN IF NOT EXISTS member_id UUID/);
+    assert.match(migration, /voice_sessions_member_fk/);
+    assert.match(
+      ownerDoc,
+      /\| `voice_sessions`\s+\|\s+`voice_room_id`, `meeting_id`, `member_id`/,
+    );
   });
 
   it("db indexes can be replayed during local migration bootstrap", () => {

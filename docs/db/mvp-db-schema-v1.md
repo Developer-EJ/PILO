@@ -17,13 +17,13 @@ Task draft, Milestone, Canvas shape/view/filter, VoiceRoom, Review graph 세부 
 
 ## 결론
 
-| 항목 | 기준 |
-| --- | --- |
-| SQL bootstrap | `docs/db/pilo_erd_schema.sql` |
-| Local idempotent migrations | `docs/db/migrations/*.sql` |
-| Local seed | `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql`, `docs/db/seeds/002_juhyung_github_review_seed.sql` |
-| Prisma schema | `apps/app-server/prisma/schema.prisma` |
-| 현재 table 수 | 70 |
+| 항목                        | 기준                                                                                                            |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| SQL bootstrap               | `docs/db/pilo_erd_schema.sql`                                                                                   |
+| Local idempotent migrations | `docs/db/migrations/*.sql`                                                                                      |
+| Local seed                  | `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql`, `docs/db/seeds/002_juhyung_github_review_seed.sql` |
+| Prisma schema               | `apps/app-server/prisma/schema.prisma`                                                                          |
+| 현재 table 수               | 70                                                                                                              |
 
 Prisma는 현재 DB-backed로 구현된 app-server 영역의 subset만 모델링한다.
 Prisma에 없는 table이 곧 제외 table이라는 뜻은 아니다.
@@ -33,103 +33,103 @@ Prisma에 없는 table이 곧 제외 table이라는 뜻은 아니다.
 
 ### 동현 - Auth / Workspace / Canvas
 
-| Table | 상태 | Notes |
-| --- | --- | --- |
-| `users` | included | 사용자 root |
-| `oauth_accounts` | included | Google/GitHub OAuth 계정 |
-| `auth_sessions` | included | refresh token hash 기반 server session |
-| `workspaces` | included | 프로젝트 workspace |
-| `workspace_members` | included | workspace 권한과 담당자 기준 |
-| `workspace_invites` | included | 초대 |
-| `dashboard_preferences` | support | Dashboard 개인화 table. MVP API surface는 최소로 제한 |
-| `canvas_boards` | included | Canvas board |
-| `canvas_shapes` | included | Task/Report/Issue/PR reference card |
-| `canvas_connections` | included | Canvas card 연결 |
-| `canvas_node_positions` | included | Canvas 위치 |
-| `canvas_view_settings` | support | 멤버별 viewport |
-| `canvas_filter_settings` | support | 멤버별 filter |
+| Table                    | 상태     | Notes                                                 |
+| ------------------------ | -------- | ----------------------------------------------------- |
+| `users`                  | included | 사용자 root                                           |
+| `oauth_accounts`         | included | Google/GitHub OAuth 계정                              |
+| `auth_sessions`          | included | refresh token hash 기반 server session                |
+| `workspaces`             | included | 프로젝트 workspace                                    |
+| `workspace_members`      | included | workspace 권한과 담당자 기준                          |
+| `workspace_invites`      | included | 초대                                                  |
+| `dashboard_preferences`  | support  | Dashboard 개인화 table. MVP API surface는 최소로 제한 |
+| `canvas_boards`          | included | Canvas board                                          |
+| `canvas_shapes`          | included | Task/Report/Issue/PR reference card                   |
+| `canvas_connections`     | included | Canvas card 연결                                      |
+| `canvas_node_positions`  | included | Canvas 위치                                           |
+| `canvas_view_settings`   | support  | 멤버별 viewport                                       |
+| `canvas_filter_settings` | support  | 멤버별 filter                                         |
 
 ### 주형 - Task / GitHub / Progress
 
-| Table | 상태 | Notes |
-| --- | --- | --- |
-| `milestones` | included | Task grouping |
-| `tasks` | included | Task source of truth |
-| `task_drafts` | included | Agent/Meeting이 만든 Task 후보. Prisma `TaskDraft`와 일치 |
-| `task_checklist_items` | included | Task checklist |
-| `task_comments` | included | Task comment |
-| `task_activity_logs` | included | Task 변경 이력 |
-| `task_dependencies` | included | Task dependency |
-| `github_connections` | included | Workspace GitHub App 연결 |
-| `github_repositories` | included | Repository metadata |
-| `github_issues` | included | Issue metadata |
-| `github_issue_labels` | included | Issue label |
-| `task_github_issues` | included | Task-Issue link |
-| `pull_requests` | included | PR metadata |
-| `task_pull_requests` | included | Task-PR link |
-| `progress_snapshots` | included | Dashboard/Progress snapshot |
+| Table                  | 상태     | Notes                                                     |
+| ---------------------- | -------- | --------------------------------------------------------- |
+| `milestones`           | included | Task grouping                                             |
+| `tasks`                | included | Task source of truth                                      |
+| `task_drafts`          | included | Agent/Meeting이 만든 Task 후보. Prisma `TaskDraft`와 일치 |
+| `task_checklist_items` | included | Task checklist                                            |
+| `task_comments`        | included | Task comment                                              |
+| `task_activity_logs`   | included | Task 변경 이력                                            |
+| `task_dependencies`    | included | Task dependency                                           |
+| `github_connections`   | included | Workspace GitHub App 연결                                 |
+| `github_repositories`  | included | Repository metadata                                       |
+| `github_issues`        | included | Issue metadata                                            |
+| `github_issue_labels`  | included | Issue label                                               |
+| `task_github_issues`   | included | Task-Issue link                                           |
+| `pull_requests`        | included | PR metadata                                               |
+| `task_pull_requests`   | included | Task-PR link                                              |
+| `progress_snapshots`   | included | Dashboard/Progress snapshot                               |
 
 ### 진호 - Meeting / Voice / Report
 
-| Table | 상태 | Notes |
-| --- | --- | --- |
-| `meetings` | included | Meeting source of truth |
-| `meeting_participants` | included | 참석자 |
-| `meeting_agendas` | included | agenda |
-| `meeting_memos` | included | manual memo |
-| `voice_rooms` | included | 현재 Voice contract가 사용하는 room |
-| `voice_sessions` | included | voice/STT session |
-| `transcript_segments` | included | STT/manual transcript segment |
-| `meeting_reports` | included | Report draft/confirmed |
-| `meeting_report_open_questions` | included | report open question |
-| `meeting_report_risks` | included | report risk |
-| `meeting_report_next_agendas` | included | next agenda |
-| `meeting_decisions` | included | decision |
-| `meeting_action_items` | included | action item -> Task draft |
+| Table                           | 상태     | Notes                               |
+| ------------------------------- | -------- | ----------------------------------- |
+| `meetings`                      | included | Meeting source of truth             |
+| `meeting_participants`          | included | 참석자                              |
+| `meeting_agendas`               | included | agenda                              |
+| `meeting_memos`                 | included | manual memo                         |
+| `voice_rooms`                   | included | 현재 Voice contract가 사용하는 room |
+| `voice_sessions`                | included | voice/STT session                   |
+| `transcript_segments`           | included | STT/manual transcript segment       |
+| `meeting_reports`               | included | Report draft/confirmed              |
+| `meeting_report_open_questions` | included | report open question                |
+| `meeting_report_risks`          | included | report risk                         |
+| `meeting_report_next_agendas`   | included | next agenda                         |
+| `meeting_decisions`             | included | decision                            |
+| `meeting_action_items`          | included | action item -> Task draft           |
 
 ### 은재 - Code Review / PR Analysis
 
-| Table | 상태 | Notes |
-| --- | --- | --- |
-| `code_review_rooms` | included | review room |
-| `pull_request_analyses` | included | PR analysis run/result |
-| `review_graphs` | included | review graph root |
-| `changed_files` | included | PR changed file |
-| `changed_functions` | included | changed function |
-| `review_nodes` | included | graph node |
-| `node_review_states` | included | node review state |
-| `review_comments` | included | review comment |
-| `review_questions` | included | review question |
-| `review_risks` | included | review risk |
-| `review_checklist_items` | included | review checklist |
+| Table                    | 상태     | Notes                  |
+| ------------------------ | -------- | ---------------------- |
+| `code_review_rooms`      | included | review room            |
+| `pull_request_analyses`  | included | PR analysis run/result |
+| `review_graphs`          | included | review graph root      |
+| `changed_files`          | included | PR changed file        |
+| `changed_functions`      | included | changed function       |
+| `review_nodes`           | included | graph node             |
+| `node_review_states`     | included | node review state      |
+| `review_comments`        | included | review comment         |
+| `review_questions`       | included | review question        |
+| `review_risks`           | included | review risk            |
+| `review_checklist_items` | included | review checklist       |
 
 ### 세인 - Agent Runtime / Planning
 
-| Table | 상태 | Notes |
-| --- | --- | --- |
-| `agents` | included | agent registry |
-| `agent_workflows` | included | workflow registry |
-| `agent_runs` | included | agent execution |
-| `agent_run_steps` | included | execution step |
-| `agent_contexts` | included | run context |
-| `agent_actions` | included | user approval/action |
-| `agent_traces` | included | debug trace |
-| `project_plan_drafts` | included | project planning draft |
-| `team_profiles` | included | team profile |
-| `plan_tech_stack_recommendations` | included | tech stack candidate |
-| `plan_feature_drafts` | included | feature candidate |
-| `role_assignments` | included | confirmed role assignment |
-| `plan_role_assignment_drafts` | included | role assignment candidate |
-| `plan_milestone_drafts` | included | milestone candidate |
-| `plan_risk_notes` | included | risk note |
+| Table                             | 상태     | Notes                     |
+| --------------------------------- | -------- | ------------------------- |
+| `agents`                          | included | agent registry            |
+| `agent_workflows`                 | included | workflow registry         |
+| `agent_runs`                      | included | agent execution           |
+| `agent_run_steps`                 | included | execution step            |
+| `agent_contexts`                  | included | run context               |
+| `agent_actions`                   | included | user approval/action      |
+| `agent_traces`                    | included | debug trace               |
+| `project_plan_drafts`             | included | project planning draft    |
+| `team_profiles`                   | included | team profile              |
+| `plan_tech_stack_recommendations` | included | tech stack candidate      |
+| `plan_feature_drafts`             | included | feature candidate         |
+| `role_assignments`                | included | confirmed role assignment |
+| `plan_role_assignment_drafts`     | included | role assignment candidate |
+| `plan_milestone_drafts`           | included | milestone candidate       |
+| `plan_risk_notes`                 | included | risk note                 |
 
 ### Common / Support
 
-| Table | 상태 | Notes |
-| --- | --- | --- |
-| `notifications` | included | 최소 in-app notification |
-| `shared_files` | support/deferred | MVP 파일 업로드 API는 만들지 않는다. table은 기존 SQL 호환용 |
-| `audit_logs` | support/deferred | 전체 audit log 기능은 MVP API surface가 아니다 |
+| Table           | 상태             | Notes                                                        |
+| --------------- | ---------------- | ------------------------------------------------------------ |
+| `notifications` | included         | 최소 in-app notification                                     |
+| `shared_files`  | support/deferred | MVP 파일 업로드 API는 만들지 않는다. table은 기존 SQL 호환용 |
+| `audit_logs`    | support/deferred | 전체 audit log 기능은 MVP API surface가 아니다               |
 
 ## 제외 영역
 
@@ -152,9 +152,10 @@ Prisma에 없는 table이 곧 제외 table이라는 뜻은 아니다.
 1. `task_drafts`는 MVP에 포함한다.
 2. `task_drafts`는 `docs/db/pilo_erd_schema.sql`과 `docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql`에 존재한다.
 3. Canvas connection type `implemented_by`는 public fixture/API 값이므로 `docs/db/pilo_erd_schema.sql`, owner migration, `docs/db/migrations/202606300700_canvas_connection_type_rebaseline.sql`에 존재한다.
-4. Docker local bootstrap은 schema, owner migration, task draft rebaseline migration, Canvas connection type rebaseline migration, seed 순서로 실행한다.
-5. Prisma model은 현재 DB-backed table subset만 유지한다.
-6. 모든 Prisma `@@map` table은 SQL baseline에 있어야 한다.
+4. `voice_sessions.member_id`는 Voice runtime의 active session 판별 필드이므로 `docs/db/pilo_erd_schema.sql`과 `docs/db/migrations/202606300800_voice_session_member_rebaseline.sql`에 존재한다.
+5. Docker local bootstrap은 schema, owner migration, task draft rebaseline migration, Canvas connection type rebaseline migration, Voice session member rebaseline migration, seed 순서로 실행한다.
+6. Prisma model은 현재 DB-backed table subset만 유지한다.
+7. 모든 Prisma `@@map` table은 SQL baseline에 있어야 한다.
 
 ## DB 변경 규칙
 

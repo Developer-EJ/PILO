@@ -14,8 +14,9 @@ services:
       - ./docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql:/docker-entrypoint-initdb.d/002_donghyun_auth_workspace_canvas_init.sql:ro
       - ./docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql:/docker-entrypoint-initdb.d/003_mvp_task_drafts_rebaseline.sql:ro
       - ./docs/db/migrations/202606300700_canvas_connection_type_rebaseline.sql:/docker-entrypoint-initdb.d/004_canvas_connection_type_rebaseline.sql:ro
-      - ./docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql:/docker-entrypoint-initdb.d/005_donghyun_auth_workspace_canvas_seed.sql:ro
-      - ./docs/db/seeds/002_juhyung_github_review_seed.sql:/docker-entrypoint-initdb.d/006_juhyung_github_review_seed.sql:ro
+      - ./docs/db/migrations/202606300800_voice_session_member_rebaseline.sql:/docker-entrypoint-initdb.d/005_voice_session_member_rebaseline.sql:ro
+      - ./docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql:/docker-entrypoint-initdb.d/006_donghyun_auth_workspace_canvas_seed.sql:ro
+      - ./docs/db/seeds/002_juhyung_github_review_seed.sql:/docker-entrypoint-initdb.d/007_juhyung_github_review_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pilo -d pilo"]
       interval: 5s

@@ -511,6 +511,7 @@ CREATE TABLE voice_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   voice_room_id UUID NOT NULL REFERENCES voice_rooms(id) ON DELETE CASCADE,
   meeting_id UUID REFERENCES meetings(id) ON DELETE SET NULL,
+  member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
   recording_status VARCHAR(30) NOT NULL DEFAULT 'not_recording',
   started_at TIMESTAMPTZ,
   ended_at TIMESTAMPTZ,
@@ -1016,6 +1017,7 @@ CREATE INDEX IF NOT EXISTS idx_canvas_node_positions_shape_id ON canvas_node_pos
 CREATE INDEX IF NOT EXISTS idx_canvas_view_settings_board_member ON canvas_view_settings(canvas_board_id, member_id);
 CREATE INDEX IF NOT EXISTS idx_canvas_filter_settings_board_member ON canvas_filter_settings(canvas_board_id, member_id);
 CREATE INDEX IF NOT EXISTS idx_meetings_workspace_status ON meetings(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_room_member_active ON voice_sessions(voice_room_id, member_id) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_meeting_id ON transcript_segments(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_meeting_reports_meeting_id ON meeting_reports(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_code_review_rooms_workspace_id ON code_review_rooms(workspace_id);
