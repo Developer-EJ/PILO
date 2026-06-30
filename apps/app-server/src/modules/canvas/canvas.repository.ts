@@ -10,6 +10,7 @@ import type {
   CanvasConnectionRequest,
   CanvasConnectionRecord,
   CanvasConnectionSummary,
+  CanvasConnectionType,
   CanvasFilterSetting,
   CanvasFilterSettingRequest,
   CanvasFilterSettingRecord,
@@ -451,7 +452,7 @@ export class CanvasRepository implements CanvasRepositoryPort {
     boardId: string;
     sourceShapeId: string;
     targetShapeId: string;
-    connectionType: string;
+    connectionType: CanvasConnectionType;
   }) {
     return Array.from(this.connectionsById.values()).find(
       (connection) =>

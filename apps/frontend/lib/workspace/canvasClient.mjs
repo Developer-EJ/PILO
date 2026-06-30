@@ -191,7 +191,7 @@ function createMockBlankBoard(workspaceId, title) {
     id: `local-canvas-board-${Date.now()}`,
     workspaceId,
     title: title?.trim() || "Untitled canvas",
-    boardType: "freeform",
+    boardType: "custom",
     shapeCount: 0,
     connectionCount: 0,
     updatedAt: now,
@@ -236,7 +236,7 @@ export function createCanvasApiClient({
 
   return {
     async listBoards(workspaceId) {
-      const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvas-boards`;
+      const path = `/api/workspaces/${encodeURIComponent(workspaceId)}/canvas-boards`;
       const boards = await requestCanvasJson(path, undefined, requestOptions);
 
       return Array.isArray(boards) ? boards : [];
@@ -244,14 +244,14 @@ export function createCanvasApiClient({
 
     async createBoard(workspaceId, body) {
       return requestCanvasJson(
-        `/workspaces/${encodeURIComponent(workspaceId)}/canvas-boards`,
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/canvas-boards`,
         withJsonBody(body, { method: "POST" }),
         requestOptions,
       );
     },
 
     async getBoardDetail(boardId, { workspaceId } = {}) {
-      const path = `/canvas-boards/${encodeURIComponent(boardId)}`;
+      const path = `/api/canvas-boards/${encodeURIComponent(boardId)}`;
       const board = await requestCanvasJson(path, undefined, requestOptions);
 
       return normalizeCanvasBoardDetail(board, { workspaceId });
@@ -259,7 +259,7 @@ export function createCanvasApiClient({
 
     async createShape(boardId, body) {
       return requestCanvasJson(
-        `/canvas-boards/${encodeURIComponent(boardId)}/shapes`,
+        `/api/canvas-boards/${encodeURIComponent(boardId)}/shapes`,
         withJsonBody(body, { method: "POST" }),
         requestOptions,
       );
@@ -267,7 +267,7 @@ export function createCanvasApiClient({
 
     async updateShape(shapeId, body) {
       return requestCanvasJson(
-        `/canvas-shapes/${encodeURIComponent(shapeId)}`,
+        `/api/canvas-shapes/${encodeURIComponent(shapeId)}`,
         withJsonBody(body, { method: "PATCH" }),
         requestOptions,
       );
@@ -275,7 +275,7 @@ export function createCanvasApiClient({
 
     async deleteShape(shapeId) {
       return requestCanvasJson(
-        `/canvas-shapes/${encodeURIComponent(shapeId)}`,
+        `/api/canvas-shapes/${encodeURIComponent(shapeId)}`,
         { method: "DELETE" },
         requestOptions,
       );
@@ -283,7 +283,7 @@ export function createCanvasApiClient({
 
     async updateShapePosition(shapeId, body) {
       return requestCanvasJson(
-        `/canvas-shapes/${encodeURIComponent(shapeId)}/position`,
+        `/api/canvas-shapes/${encodeURIComponent(shapeId)}/position`,
         withJsonBody(body, { method: "PUT" }),
         requestOptions,
       );
@@ -291,7 +291,7 @@ export function createCanvasApiClient({
 
     async createConnection(boardId, body) {
       return requestCanvasJson(
-        `/canvas-boards/${encodeURIComponent(boardId)}/connections`,
+        `/api/canvas-boards/${encodeURIComponent(boardId)}/connections`,
         withJsonBody(body, { method: "POST" }),
         requestOptions,
       );
@@ -299,7 +299,7 @@ export function createCanvasApiClient({
 
     async deleteConnection(connectionId) {
       return requestCanvasJson(
-        `/canvas-connections/${encodeURIComponent(connectionId)}`,
+        `/api/canvas-connections/${encodeURIComponent(connectionId)}`,
         { method: "DELETE" },
         requestOptions,
       );
@@ -307,7 +307,7 @@ export function createCanvasApiClient({
 
     async updateViewSetting(boardId, body) {
       return requestCanvasJson(
-        `/canvas-boards/${encodeURIComponent(boardId)}/view-settings`,
+        `/api/canvas-boards/${encodeURIComponent(boardId)}/view-settings`,
         withJsonBody(body, { method: "PUT" }),
         requestOptions,
       );
@@ -315,7 +315,7 @@ export function createCanvasApiClient({
 
     async updateFilterSetting(boardId, body) {
       return requestCanvasJson(
-        `/canvas-boards/${encodeURIComponent(boardId)}/filter-settings`,
+        `/api/canvas-boards/${encodeURIComponent(boardId)}/filter-settings`,
         withJsonBody(body, { method: "PUT" }),
         requestOptions,
       );

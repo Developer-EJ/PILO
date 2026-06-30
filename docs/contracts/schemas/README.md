@@ -8,6 +8,7 @@
   - 주형 Task/GitHub/Progress 기준: `TaskSummary`, `TaskDetail`, `TaskChecklistItemSummary`, `TaskCommentSummary`, `TaskActivityLogSummary`, `TaskDependencySummary`, `TaskDraftSourceType`, `TaskDraft`, `MilestoneSummary`, `TaskStatusUpdateAction`, `GithubConnectionSummary`, `GithubRepositorySummary`, `GithubIssueSummary`, `GithubIssueCreateAction`, `PullRequestSummary`, `PullRequestChangedFileSummary`, `ProgressSummary`, `ProgressSnapshotSummary`
   - 진호 Meeting/Voice 기준: `MeetingAgenda`, `MeetingReportSummary`, `MeetingDecisionSummary`, `MeetingReportRiskSummary`, `MeetingReportNextAgenda`, `MeetingReportCanvasEntityRef`, `MeetingActionItem`, `VoiceRoom`, `VoiceSession`
   - 세인 Agent/Planning 기준: `AgentRecommendation`, `ProjectPlanDraftSummary`, `ProjectPlanDraftDetail`, `ProjectPlanTechStackRecommendation`, `ProjectPlanFeatureDraft`, `ProjectPlanRoleDraft`, `ProjectPlanMilestoneDraft`, `ProjectPlanRiskNote`, `ProjectPlanFirstAgendaDraft`, `ProjectPlanApprovalState`, `PlanningOwnerApiResult`
+  - 동현 Canvas 기준: `CanvasBoardType`, `CanvasConnectionType`, `CanvasBoardSummary`, `CanvasBoardDetail`, `CanvasShapeSummary`, `CanvasConnectionSummary`, `CanvasEntityRef`
   - Auth: `CurrentUser`, `AuthSessionState`, `AuthProvidersResponse`, `AuthErrorResponse`
 
 ## 사용 규칙

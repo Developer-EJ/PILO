@@ -19,4 +19,11 @@
 
 도메인별 상세 지시서는 `docs/agents/README.md`에서 확인한다.
 
+## Runtime Status Note
+
+`Auth`, `Workspace`, `Canvas`, `Meeting`, `Voice`, and `Review` expose current
+runtime APIs, but parts of those implementations are still mock or in-memory as
+documented in `docs/mvp-contract-v0.md`. Smoke tests for those paths prove route
+and DTO alignment only; they do not mean the domain is fully DB-backed.
+
 ECS 서비스는 Terraform에서 `desired_count = 0`으로 시작한다. 각 이미지가 ECR에 올라간 뒤 dev 환경에서 필요한 서비스만 `1` 이상으로 올린다.

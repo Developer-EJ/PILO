@@ -627,6 +627,7 @@ describe("machine-readable public contract schema", () => {
       "ReviewRiskSummary",
       "CanvasEntityRef",
       "AgentRecommendation",
+      "CanvasConnectionType",
       "AgentRunCreateRequest",
       "AgentRunStatusResponse",
       "AgentRunDetail",
@@ -1367,8 +1368,12 @@ describe("local development baseline", () => {
 
   it("local SQS bootstrap creates the expected queues", () => {
     const script = read("localstack/init/ready.d/01-create-sqs.sh");
+    const localSetup = read("docs/dev-local-setup.md");
+
+    assert.match(script, /^#!\/bin\/sh/);
     assert.match(script, /pilo-agent-jobs/);
     assert.match(script, /pilo-agent-results/);
+    assert.match(localSetup, /100755/);
     const psScript = read("infra/scripts/create-local-sqs-queues.ps1");
     assert.match(psScript, /pilo-agent-jobs/);
     assert.match(psScript, /pilo-agent-results/);
@@ -1379,6 +1384,23 @@ describe("local development baseline", () => {
     assert.match(env, /AWS_ACCESS_KEY_ID=test/);
     assert.match(env, /SQS_AGENT_JOBS_QUEUE_URL/);
     assert.match(env, /SQS_AGENT_RESULTS_QUEUE_URL/);
+  });
+
+  it("local setup documents existing volume and AI Worker dev dependency hygiene", () => {
+    const localSetup = read("docs/dev-local-setup.md");
+    const appsReadme = read("apps/README.md");
+
+    assert.match(localSetup, /task_drafts/);
+    assert.match(localSetup, /apply-local-db-sql\.ps1/);
+    assert.match(localSetup, /down -v/);
+    assert.match(localSetup, /requirements-dev\.txt/);
+    assert.match(localSetup, /black --check/);
+    assert.match(localSetup, /ruff check/);
+    assert.match(localSetup, /pytest/);
+    assert.match(localSetup, /Mock\/In-memory/);
+    assert.match(localSetup, /local-only UI storage/);
+    assert.match(appsReadme, /mock or in-memory/);
+    assert.match(appsReadme, /fully DB-backed/);
   });
 });
 
@@ -1405,6 +1427,45 @@ describe("db schema contract alignment", () => {
     assert.ok(mappedTables.length > 0, "Prisma schema must map DB-backed models to tables");
     for (const table of mappedTables) {
       assert.ok(tables.has(table), `Prisma mapped table must exist in SQL baseline: ${table}`);
+    }
+  });
+
+  it("Canvas enum vocabulary is aligned across schema and SQL baseline", () => {
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const sql = read("docs/db/pilo_erd_schema.sql");
+    const migration = read(
+      "docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql",
+    );
+    const expectedBoardTypes = ["project_map", "meeting", "review", "custom"];
+    const expectedConnectionTypes = [
+      "related_to",
+      "created_from",
+      "blocks",
+      "references",
+      "implements",
+      "reviews",
+    ];
+
+    assert.deepEqual(schema.$defs.CanvasBoardType.enum, expectedBoardTypes);
+    assert.deepEqual(
+      schema.$defs.CanvasConnectionType.enum,
+      expectedConnectionTypes,
+    );
+    assert.equal(
+      schema.$defs.CanvasConnectionRequest.properties.connectionType.$ref,
+      "#/$defs/CanvasConnectionType",
+    );
+    for (const content of [sql, migration]) {
+      assert.match(content, /board_type VARCHAR\(80\) NOT NULL DEFAULT 'project_map'/);
+      assert.match(
+        content,
+        /canvas_boards_type_check CHECK \(board_type IN \('project_map', 'meeting', 'review', 'custom'\)\)/,
+      );
+      assert.match(
+        content,
+        /canvas_connections_type_check CHECK \(connection_type IN \('related_to', 'created_from', 'blocks', 'references', 'implements', 'reviews'\)\)/,
+      );
+      assert.doesNotMatch(content, /implemented_by|DEFAULT 'workspace'/);
     }
   });
 

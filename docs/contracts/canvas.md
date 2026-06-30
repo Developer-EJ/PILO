@@ -239,7 +239,7 @@ Saves the current member's board filter state.
       "id": "uuid",
       "sourceShapeId": "uuid",
       "targetShapeId": "uuid",
-      "connectionType": "implemented_by",
+      "connectionType": "implements",
       "label": "Task to PR"
     }
   ],
@@ -259,6 +259,8 @@ Saves the current member's board filter state.
 ```
 
 - `CanvasBoardDetail` extends `CanvasBoardSummary` with `shapes`, `connections`, `viewSetting`, and `filterSetting`.
+- `boardType` uses `project_map`, `meeting`, `review`, or `custom`.
+- `connectionType` uses `related_to`, `created_from`, `blocks`, `references`, `implements`, or `reviews`.
 - `shapeCount` and `connectionCount` count non-deleted rows only.
 - `viewSetting` and `filterSetting` are member-scoped. If no row exists, the defaults above are returned.
 

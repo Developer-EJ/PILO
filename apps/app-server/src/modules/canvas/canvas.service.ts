@@ -9,6 +9,7 @@ import type {
   CanvasConnectionDeleteResult,
   CanvasConnectionRequest,
   CanvasConnectionSummary,
+  CanvasConnectionType,
   CanvasCurrentMemberContext,
   CanvasEntityType,
   CanvasFilterSetting,
@@ -532,7 +533,7 @@ function parseCanvasConnectionBody(body: unknown): CanvasConnectionRequest {
   return {
     sourceShapeId: parseRequiredString(record.sourceShapeId, "sourceShapeId"),
     targetShapeId: parseRequiredString(record.targetShapeId, "targetShapeId"),
-    connectionType: parseRequiredString(
+    connectionType: parseCanvasConnectionType(
       record.connectionType,
       "connectionType",
     ),
@@ -603,6 +604,24 @@ function parseBoardType(value: unknown): CanvasBoardType {
   }
 
   throw new CanvasValidationError("Canvas boardType is not supported.");
+}
+
+function parseCanvasConnectionType(
+  value: unknown,
+  field: string,
+): CanvasConnectionType {
+  if (
+    value === "related_to" ||
+    value === "created_from" ||
+    value === "blocks" ||
+    value === "references" ||
+    value === "implements" ||
+    value === "reviews"
+  ) {
+    return value;
+  }
+
+  throw new CanvasValidationError(`Canvas ${field} is not supported.`);
 }
 
 function parseCanvasEntityType(

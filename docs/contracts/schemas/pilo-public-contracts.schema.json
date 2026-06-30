@@ -4399,6 +4399,16 @@
     "CanvasBoardType": {
       "enum": ["project_map", "meeting", "review", "custom"]
     },
+    "CanvasConnectionType": {
+      "enum": [
+        "related_to",
+        "created_from",
+        "blocks",
+        "references",
+        "implements",
+        "reviews"
+      ]
+    },
     "CanvasPosition": {
       "type": "object",
       "required": ["x", "y"],
@@ -4543,8 +4553,7 @@
           "$ref": "#/$defs/uuid"
         },
         "connectionType": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/CanvasConnectionType"
         },
         "label": {
           "type": ["string", "null"]
@@ -4702,8 +4711,7 @@
           "$ref": "#/$defs/uuid"
         },
         "connectionType": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/CanvasConnectionType"
         },
         "label": {
           "type": ["string", "null"]

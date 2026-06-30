@@ -1,14 +1,11 @@
 import { createMockAuthClient } from "./mockAuthClient.mjs";
+import {
+  buildPiloApiUrl,
+  defaultAppServerUrl,
+} from "../api/apiUrl.mjs";
 
 const DEFAULT_AUTH_MODE = "mock";
-
-export function defaultAppServerUrl() {
-  return (
-    process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ??
-    process.env.NEXT_PUBLIC_APP_SERVER_URL ??
-    ""
-  );
-}
+export { defaultAppServerUrl };
 
 function defaultAuthMode() {
   return process.env.NEXT_PUBLIC_PILO_AUTH_MODE ?? DEFAULT_AUTH_MODE;
@@ -32,13 +29,7 @@ export function buildAuthApiUrl(path, baseUrl = defaultAppServerUrl()) {
     throw new AuthApiError("Auth API path must start with /", { path });
   }
 
-  if (!baseUrl) {
-    throw new AuthApiError("Auth API base URL is required in api mode", {
-      path,
-    });
-  }
-
-  return `${baseUrl.replace(/\/$/, "")}${path}`;
+  return buildPiloApiUrl(path, baseUrl);
 }
 
 async function readJson(response, path) {
@@ -75,7 +66,7 @@ export function createAuthApiClient({
 } = {}) {
   return {
     async getCurrentUser() {
-      const path = "/auth/me";
+      const path = "/api/auth/me";
       const response = await requestAuthJson(path, undefined, {
         baseUrl,
         fetcher,
@@ -105,7 +96,7 @@ export function createAuthApiClient({
     },
 
     async logout() {
-      const path = "/auth/logout";
+      const path = "/api/auth/logout";
       const response = await requestAuthJson(
         path,
         { method: "POST" },
