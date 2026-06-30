@@ -143,7 +143,7 @@ describe("voice module", () => {
     assert.equal("livekitApiKey" in voiceRoom, false);
     assert.equal("livekitApiSecret" in voiceRoom, false);
     assert.equal(duplicateVoiceRoom.id, voiceRoom.id);
-    assert.deepEqual(controller.getVoiceRoom(voiceRoom.id), voiceRoom);
+    assert.deepEqual(await controller.getVoiceRoom(voiceRoom.id), voiceRoom);
     assert.deepEqual(
       await controller.getVoiceRoomForMeeting("workspace-1", meeting.id),
       voiceRoom,

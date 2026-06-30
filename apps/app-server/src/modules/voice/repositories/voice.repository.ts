@@ -10,33 +10,45 @@ import {
 
 export const VOICE_REPOSITORY = Symbol("VOICE_REPOSITORY");
 
+type MaybePromise<T> = T | Promise<T>;
+
 export interface VoiceRepository {
   readonly mode: VoiceRepositoryMode;
 
-  createVoiceRoom(input: CreateVoiceRoomInput): VoiceRoomRecord;
+  createVoiceRoom(input: CreateVoiceRoomInput): MaybePromise<VoiceRoomRecord>;
 
-  findVoiceRoomById(voiceRoomId: string): VoiceRoomRecord | null;
+  findVoiceRoomById(
+    voiceRoomId: string,
+  ): MaybePromise<VoiceRoomRecord | null>;
 
-  findVoiceRoomByMeetingId(meetingId: string): VoiceRoomRecord | null;
+  findVoiceRoomByMeetingId(
+    meetingId: string,
+  ): MaybePromise<VoiceRoomRecord | null>;
 
   updateVoiceRoom(
     voiceRoomId: string,
     input: UpdateVoiceRoomInput,
-  ): VoiceRoomRecord;
+  ): MaybePromise<VoiceRoomRecord>;
 
-  createVoiceSession(input: CreateVoiceSessionInput): VoiceSessionRecord;
+  createVoiceSession(
+    input: CreateVoiceSessionInput,
+  ): MaybePromise<VoiceSessionRecord>;
 
-  listVoiceSessionsByVoiceRoom(voiceRoomId: string): VoiceSessionRecord[];
+  listVoiceSessionsByVoiceRoom(
+    voiceRoomId: string,
+  ): MaybePromise<VoiceSessionRecord[]>;
 
-  findVoiceSessionById(voiceSessionId: string): VoiceSessionRecord | null;
+  findVoiceSessionById(
+    voiceSessionId: string,
+  ): MaybePromise<VoiceSessionRecord | null>;
 
   findActiveVoiceSessionByMember(
     voiceRoomId: string,
     memberId: string | null,
-  ): VoiceSessionRecord | null;
+  ): MaybePromise<VoiceSessionRecord | null>;
 
   updateVoiceSession(
     voiceSessionId: string,
     input: UpdateVoiceSessionInput,
-  ): VoiceSessionRecord;
+  ): MaybePromise<VoiceSessionRecord>;
 }

@@ -17,7 +17,7 @@ export type VoiceRoomStatus = (typeof VOICE_ROOM_STATUS_VALUES)[number];
 export type VoiceSessionRecordingStatus =
   (typeof VOICE_SESSION_RECORDING_STATUS_VALUES)[number];
 
-export type VoiceRepositoryMode = "mock";
+export type VoiceRepositoryMode = "mock" | "database";
 
 export interface VoiceRoomRecord {
   id: string;

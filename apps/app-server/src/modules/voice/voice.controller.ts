@@ -41,7 +41,7 @@ export class VoiceController {
   @UseGuards(VoiceRouteGuard)
   getVoiceRoom(
     @Param("voiceRoomId") voiceRoomId: string,
-  ): VoiceRoomResponseDto {
+  ): Promise<VoiceRoomResponseDto> {
     return this.voiceService.getVoiceRoom(voiceRoomId);
   }
 
@@ -59,7 +59,7 @@ export class VoiceController {
   updateVoiceRoomStatus(
     @Param("voiceRoomId") voiceRoomId: string,
     @Body() requestBody: UpdateVoiceRoomStatusRequestDto,
-  ): VoiceRoomResponseDto {
+  ): Promise<VoiceRoomResponseDto> {
     return this.voiceService.updateVoiceRoomStatus(voiceRoomId, requestBody);
   }
 
@@ -67,7 +67,7 @@ export class VoiceController {
   @UseGuards(VoiceRouteGuard)
   joinVoiceSession(
     @Param("voiceRoomId") voiceRoomId: string,
-  ): VoiceSessionResponseDto {
+  ): Promise<VoiceSessionResponseDto> {
     return this.voiceService.joinVoiceSession(voiceRoomId);
   }
 
@@ -75,7 +75,7 @@ export class VoiceController {
   @UseGuards(VoiceRouteGuard)
   listVoiceSessions(
     @Param("voiceRoomId") voiceRoomId: string,
-  ): VoiceSessionResponseDto[] {
+  ): Promise<VoiceSessionResponseDto[]> {
     return this.voiceService.listVoiceSessions(voiceRoomId);
   }
 
@@ -83,7 +83,7 @@ export class VoiceController {
   @UseGuards(VoiceRouteGuard)
   leaveVoiceSession(
     @Param("voiceSessionId") voiceSessionId: string,
-  ): VoiceSessionResponseDto {
+  ): Promise<VoiceSessionResponseDto> {
     return this.voiceService.leaveVoiceSession(voiceSessionId);
   }
 
@@ -92,7 +92,7 @@ export class VoiceController {
   updateVoiceSessionRecordingStatus(
     @Param("voiceSessionId") voiceSessionId: string,
     @Body() requestBody: UpdateVoiceSessionRecordingStatusRequestDto,
-  ): VoiceSessionResponseDto {
+  ): Promise<VoiceSessionResponseDto> {
     return this.voiceService.updateVoiceSessionRecordingStatus(
       voiceSessionId,
       requestBody,

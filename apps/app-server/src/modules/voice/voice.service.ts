@@ -63,7 +63,7 @@ export class VoiceService {
       this.requireNonEmptyString(workspaceId, "workspaceId"),
       this.requireNonEmptyString(meetingId, "meetingId"),
     );
-    const existingVoiceRoom = this.voiceRepository.findVoiceRoomByMeetingId(
+    const existingVoiceRoom = await this.voiceRepository.findVoiceRoomByMeetingId(
       meeting.id,
     );
 
@@ -81,7 +81,7 @@ export class VoiceService {
     });
   }
 
-  getVoiceRoom(voiceRoomId: string): VoiceRoomResponseDto {
+  async getVoiceRoom(voiceRoomId: string): Promise<VoiceRoomResponseDto> {
     return this.requireVoiceRoom(voiceRoomId);
   }
 
@@ -93,7 +93,9 @@ export class VoiceService {
       this.requireNonEmptyString(workspaceId, "workspaceId"),
       this.requireNonEmptyString(meetingId, "meetingId"),
     );
-    const voiceRoom = this.voiceRepository.findVoiceRoomByMeetingId(meeting.id);
+    const voiceRoom = await this.voiceRepository.findVoiceRoomByMeetingId(
+      meeting.id,
+    );
 
     if (!voiceRoom) {
       throw new NotFoundException("Voice room not found for meeting");
@@ -109,8 +111,8 @@ export class VoiceService {
     voiceSessionId?: string;
   }): Promise<string> {
     if (input.voiceSessionId) {
-      const voiceSession = this.requireVoiceSession(input.voiceSessionId);
-      const voiceRoom = this.requireVoiceRoom(voiceSession.voiceRoomId);
+      const voiceSession = await this.requireVoiceSession(input.voiceSessionId);
+      const voiceRoom = await this.requireVoiceRoom(voiceSession.voiceRoomId);
 
       return this.requireMatchingRouteWorkspace(
         input.workspaceId,
@@ -120,7 +122,7 @@ export class VoiceService {
     }
 
     if (input.voiceRoomId) {
-      const voiceRoom = this.requireVoiceRoom(input.voiceRoomId);
+      const voiceRoom = await this.requireVoiceRoom(input.voiceRoomId);
 
       return this.requireMatchingRouteWorkspace(
         input.workspaceId,
@@ -149,11 +151,11 @@ export class VoiceService {
     );
   }
 
-  updateVoiceRoomStatus(
+  async updateVoiceRoomStatus(
     voiceRoomId: string,
     requestBody: UpdateVoiceRoomStatusRequestDto,
-  ): VoiceRoomResponseDto {
-    const voiceRoom = this.requireVoiceRoom(voiceRoomId);
+  ): Promise<VoiceRoomResponseDto> {
+    const voiceRoom = await this.requireVoiceRoom(voiceRoomId);
 
     return this.voiceRepository.updateVoiceRoom(voiceRoom.id, {
       status: this.parseVoiceRoomStatus(requestBody.status),
@@ -161,14 +163,16 @@ export class VoiceService {
     });
   }
 
-  joinVoiceSession(voiceRoomId: string): VoiceSessionResponseDto {
-    const voiceRoom = this.requireVoiceRoom(voiceRoomId);
+  async joinVoiceSession(
+    voiceRoomId: string,
+  ): Promise<VoiceSessionResponseDto> {
+    const voiceRoom = await this.requireVoiceRoom(voiceRoomId);
 
     this.assertVoiceRoomActive(voiceRoom);
 
     const memberId = this.resolveWorkspaceMemberId(voiceRoom.workspaceId);
     const existingActiveSession =
-      this.voiceRepository.findActiveVoiceSessionByMember(
+      await this.voiceRepository.findActiveVoiceSessionByMember(
         voiceRoom.id,
         memberId,
       );
@@ -186,14 +190,18 @@ export class VoiceService {
     });
   }
 
-  listVoiceSessions(voiceRoomId: string): VoiceSessionResponseDto[] {
-    const voiceRoom = this.requireVoiceRoom(voiceRoomId);
+  async listVoiceSessions(
+    voiceRoomId: string,
+  ): Promise<VoiceSessionResponseDto[]> {
+    const voiceRoom = await this.requireVoiceRoom(voiceRoomId);
 
     return this.voiceRepository.listVoiceSessionsByVoiceRoom(voiceRoom.id);
   }
 
-  leaveVoiceSession(voiceSessionId: string): VoiceSessionResponseDto {
-    const voiceSession = this.requireVoiceSession(voiceSessionId);
+  async leaveVoiceSession(
+    voiceSessionId: string,
+  ): Promise<VoiceSessionResponseDto> {
+    const voiceSession = await this.requireVoiceSession(voiceSessionId);
     const now = new Date().toISOString();
 
     this.assertVoiceSessionActive(voiceSession, "leave");
@@ -204,11 +212,11 @@ export class VoiceService {
     });
   }
 
-  updateVoiceSessionRecordingStatus(
+  async updateVoiceSessionRecordingStatus(
     voiceSessionId: string,
     requestBody: UpdateVoiceSessionRecordingStatusRequestDto,
-  ): VoiceSessionResponseDto {
-    const voiceSession = this.requireVoiceSession(voiceSessionId);
+  ): Promise<VoiceSessionResponseDto> {
+    const voiceSession = await this.requireVoiceSession(voiceSessionId);
 
     this.assertVoiceSessionActive(voiceSession, "update recording status");
 
@@ -224,7 +232,7 @@ export class VoiceService {
     voiceSessionId: string,
     requestBody: SubmitVoiceAudioChunkRequestDto,
   ): Promise<VoiceAudioTranscriptResponseDto> {
-    const voiceSession = this.requireVoiceSession(voiceSessionId);
+    const voiceSession = await this.requireVoiceSession(voiceSessionId);
 
     this.assertVoiceSessionActive(voiceSession, "submit audio chunks for");
 
@@ -268,7 +276,7 @@ export class VoiceService {
         endedAt,
       },
     );
-    const updatedVoiceSession = this.voiceRepository.updateVoiceSession(
+    const updatedVoiceSession = await this.voiceRepository.updateVoiceSession(
       voiceSession.id,
       {
         recordingStatus: "completed",
@@ -282,8 +290,10 @@ export class VoiceService {
     };
   }
 
-  private requireVoiceRoom(voiceRoomId: string): VoiceRoomRecord {
-    const voiceRoom = this.voiceRepository.findVoiceRoomById(
+  private async requireVoiceRoom(
+    voiceRoomId: string,
+  ): Promise<VoiceRoomRecord> {
+    const voiceRoom = await this.voiceRepository.findVoiceRoomById(
       this.requireNonEmptyString(voiceRoomId, "voiceRoomId"),
     );
 
@@ -294,8 +304,10 @@ export class VoiceService {
     return voiceRoom;
   }
 
-  private requireVoiceSession(voiceSessionId: string): VoiceSessionRecord {
-    const voiceSession = this.voiceRepository.findVoiceSessionById(
+  private async requireVoiceSession(
+    voiceSessionId: string,
+  ): Promise<VoiceSessionRecord> {
+    const voiceSession = await this.voiceRepository.findVoiceSessionById(
       this.requireNonEmptyString(voiceSessionId, "voiceSessionId"),
     );
 
