@@ -178,15 +178,15 @@ Contract test 기준:
   `docs/contracts/schemas/pilo-public-contracts.schema.json`과 일치해야 한다.
 - `docs/contracts/fixtures/workspace-dashboard.fixture.json`의 dashboard section
   field name은 `WorkspaceDashboardReadModel`에서 사용하는 이름과 일치해야 한다.
-- `source`는 server-side read model provenance이며 현재 값은 `fixture` 또는
-  `empty`다.
+- `source`는 server-side read model provenance이며 현재 값은 `fixture`,
+  `empty`, `mixed`다.
 - Consumer는 dashboard 렌더링만을 위해 다른 owner domain의 임시 DB table이나
   임시 API field를 만들지 않는다.
 
 Dashboard `source` values are `fixture`, `empty`, or `mixed`.
-`mixed` means at least one owner-domain section, such as Tasks or Progress, was
-overlaid from runtime APIs while the remaining sections may still use the
-fixture/empty fallback.
+`mixed` means at least one owner-domain section, such as Tasks, Progress, or
+Meeting Reports, was overlaid from runtime APIs while the remaining sections may
+still use the fixture/empty fallback.
 
 ## Events
 

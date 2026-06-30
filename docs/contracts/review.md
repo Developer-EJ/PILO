@@ -48,7 +48,7 @@ The Review controllers are exposed through the app-server global prefix as `/api
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/pull-requests/:pullRequestId/review-room` | Current app-server API for creating a review room from fixture or provided `PullRequestSummary` |
+| `POST` | `/api/pull-requests/:pullRequestId/review-room` | Current app-server API for creating a review room from a registered or provided `PullRequestSummary` |
 | `GET` | `/api/code-review-rooms/:roomId` | Current app-server API for review room details |
 | `POST` | `/api/pull-requests/:pullRequestId/analysis` | Current app-server API for requesting PR analysis |
 | `GET` | `/api/pull-requests/:pullRequestId/analysis` | Current app-server API for PR analysis lifecycle result |
@@ -80,7 +80,9 @@ These routes are schema/fixture or follow-up PR scope until their app-server imp
 `{ "pullRequest": PullRequestSummary }` body. When provided, Review stores that
 summary as the room reference so the review selector can open PRs returned by
 the 주형 GitHub read API. If the body is omitted, Review falls back to its known
-fixture summaries.
+runtime-registered PR summaries. Missing summaries fail with 404 instead of
+silently falling back to fixtures. Local fixture seeding is available only when
+`PILO_SEED_REVIEW_FIXTURES=true`.
 
 ```json
 {
@@ -326,4 +328,7 @@ stored as `ReviewCanvasSummary` until it contains complete node identity fields.
 
 ## Mock Rule
 
-주형의 PR sync가 없으면 `PullRequestSummary`와 `PullRequestChangedFileSummary` fixture로 리뷰 화면, changed file 저장 흐름, non-null `patch` 기반 changed function 저장 흐름, 분석 결과 UI를 구현한다. 실제 PR 원본 table을 은재 도메인에 만들지 않는다.
+주형의 PR sync가 없으면 API 요청 body 또는 명시적으로 seed된 local fixture로
+`PullRequestSummary`와 `PullRequestChangedFileSummary`를 제공한다. 기본
+runtime은 누락된 PR summary를 fixture로 조용히 대체하지 않는다. 실제 PR 원본
+table을 은재 도메인에 만들지 않는다.
