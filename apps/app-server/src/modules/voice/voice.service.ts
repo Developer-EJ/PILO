@@ -11,6 +11,10 @@ import {
 } from "../meeting/adapters/current-member.adapter";
 import { MeetingService } from "../meeting/meeting.service";
 import {
+  STT_PROVIDER,
+  SttProvider,
+} from "./adapters/stt-provider.adapter";
+import {
   VOICE_ROOM_PROVIDER,
   VoiceRoomProvider,
 } from "./adapters/voice-room-provider.adapter";
@@ -46,6 +50,8 @@ export class VoiceService {
     private readonly meetingService: MeetingService,
     @Inject(CURRENT_MEMBER_ADAPTER)
     private readonly currentMemberAdapter: CurrentMemberAdapter,
+    @Inject(STT_PROVIDER)
+    private readonly sttProvider: SttProvider,
   ) {}
 
   getScaffoldStatus(): VoiceScaffoldResponseDto {
@@ -250,7 +256,11 @@ export class VoiceService {
       requestBody.mimeType,
       "mimeType",
     );
-    const audioByteLength = this.parseAudioBase64(requestBody.audioBase64);
+    const audioBase64 = this.requireNonEmptyString(
+      requestBody.audioBase64,
+      "audioBase64",
+    );
+    const audioByteLength = this.parseAudioBase64(audioBase64);
     const startedAt = this.optionalIsoDateTime(
       requestBody.capturedStartedAt,
       "capturedStartedAt",
@@ -262,16 +272,23 @@ export class VoiceService {
 
     this.validateTimeRange(startedAt, endedAt);
 
+    const transcription = await this.sttProvider.transcribeAudioChunk({
+      voiceSessionId: voiceSession.id,
+      meetingId: voiceSession.meetingId,
+      speakerMemberId: voiceSession.memberId,
+      sequence,
+      mimeType,
+      audioBase64,
+      audioByteLength,
+      capturedStartedAt: startedAt,
+      capturedEndedAt: endedAt,
+    });
     const transcriptSegment = await this.meetingService.createTranscriptSegment(
       voiceSession.meetingId,
       {
         speakerMemberId: voiceSession.memberId,
         source: "stt",
-        body: this.createLocalSttTranscript({
-          audioByteLength,
-          mimeType,
-          sequence,
-        }),
+        body: this.requireNonEmptyString(transcription.text, "transcriptText"),
         startedAt,
         endedAt,
       },
@@ -465,13 +482,5 @@ export class VoiceService {
     }
 
     return audioBytes.length;
-  }
-
-  private createLocalSttTranscript(input: {
-    audioByteLength: number;
-    mimeType: string;
-    sequence: number;
-  }) {
-    return `Local STT chunk ${input.sequence} captured ${input.audioByteLength} bytes of ${input.mimeType} audio.`;
   }
 }

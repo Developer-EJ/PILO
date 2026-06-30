@@ -7,6 +7,7 @@ import {
 import { workspaceDashboardFixture } from "../workspace/workspaceDashboardFixture.mjs";
 
 const DEFAULT_GITHUB_MODE = "mock";
+const MOCK_GITHUB_SYNCED_AT = "2026-06-30T00:00:00.000Z";
 
 export function defaultGithubMode() {
   return (
@@ -126,6 +127,28 @@ export function createMockGithubClient() {
     async listRepositories(workspaceId) {
       return [...fixtureForWorkspace(workspaceId).repositories];
     },
+    async syncRepositories(workspaceId) {
+      const workspaceFixture = fixtureForWorkspace(workspaceId);
+
+      workspaceFixture.repositories = workspaceFixture.repositories.map(
+        (repository) => ({
+          ...repository,
+          syncedAt: MOCK_GITHUB_SYNCED_AT,
+        }),
+      );
+      workspaceFixture.pullRequests = workspaceFixture.pullRequests.map(
+        (pullRequest) => ({
+          ...pullRequest,
+          syncedAt: MOCK_GITHUB_SYNCED_AT,
+        }),
+      );
+
+      return {
+        syncedAt: MOCK_GITHUB_SYNCED_AT,
+        repositories: [...workspaceFixture.repositories],
+        pullRequests: [...workspaceFixture.pullRequests],
+      };
+    },
     async listIssues(repositoryId, { workspaceId } = {}) {
       const workspaceFixture = fixtureForWorkspace(
         workspaceId ?? workspaceDashboardFixture.workspace.id,
@@ -239,6 +262,15 @@ export function createGithubApiClient({
       return requestGithubJson(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/github/repositories`,
         undefined,
+        { baseUrl, fetcher },
+      );
+    },
+    async syncRepositories(workspaceId) {
+      return requestGithubJson(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/github/repositories/sync`,
+        {
+          method: "POST",
+        },
         { baseUrl, fetcher },
       );
     },

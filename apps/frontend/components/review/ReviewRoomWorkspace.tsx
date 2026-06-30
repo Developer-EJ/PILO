@@ -360,7 +360,12 @@ export function ReviewRoomWorkspace({
           );
         } catch {
           if (!allowFixtureFallback) {
-            throw new Error("Review analysis API failed in api mode");
+            setWarnings([
+              ...nextWarnings,
+              "Review analysis could not be requested from the Review API. API mode did not use fixture analysis.",
+            ]);
+            setStatus("selecting");
+            return;
           }
 
           analysis = await fallbackClient.requestAnalysis(pullRequest.id);

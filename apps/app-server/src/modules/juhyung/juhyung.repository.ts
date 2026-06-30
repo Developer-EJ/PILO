@@ -75,6 +75,41 @@ export interface CreateGithubIssueInput {
   syncedAt: Date | string | null;
 }
 
+export interface ActiveGithubConnectionRecord {
+  id: string;
+  workspaceId: string;
+  installationId: string;
+}
+
+export interface UpsertGithubRepositoryInput {
+  workspaceId: string;
+  githubConnectionId: string;
+  installationId: string;
+  owner: string;
+  repoName: string;
+  url: string;
+  defaultBranch: string | null;
+  syncedAt: Date | string;
+}
+
+export interface UpsertPullRequestInput {
+  repositoryId: string;
+  number: number;
+  title: string;
+  authorLogin: string | null;
+  state: string;
+  branch: string | null;
+  baseBranch: string | null;
+  url: string;
+  changedFilesCount: number;
+  additions: number;
+  deletions: number;
+  openedAt: Date | string | null;
+  mergedAt: Date | string | null;
+  closedAt: Date | string | null;
+  syncedAt: Date | string;
+}
+
 export interface CreateMilestoneInput {
   workspaceId: string;
   title: string;
@@ -897,6 +932,68 @@ export class JuhyungRepository {
     });
   }
 
+  async listActiveGithubConnectionsForWorkspace(
+    workspaceId: string,
+  ): Promise<ActiveGithubConnectionRecord[]> {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
+    const connections = await this.database.githubConnection.findMany({
+      where: {
+        workspaceId,
+        provider: "github_app",
+        installationId: { not: null },
+        revokedAt: null,
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        installationId: true,
+      },
+      orderBy: [{ connectedAt: "desc" }, { createdAt: "desc" }, { id: "asc" }],
+    });
+
+    return connections.flatMap((connection) =>
+      connection.installationId
+        ? [
+            {
+              id: connection.id,
+              workspaceId: connection.workspaceId,
+              installationId: connection.installationId,
+            },
+          ]
+        : [],
+    );
+  }
+
+  upsertGithubRepository(input: UpsertGithubRepositoryInput) {
+    const data = {
+      githubConnectionId: input.githubConnectionId,
+      installationId: input.installationId,
+      owner: input.owner,
+      repoName: input.repoName,
+      url: input.url,
+      defaultBranch: input.defaultBranch,
+      updatedAt: input.syncedAt,
+    } satisfies Prisma.GithubRepositoryUncheckedUpdateInput;
+
+    return this.database.githubRepository.upsert({
+      where: {
+        workspaceId_owner_repoName: {
+          workspaceId: input.workspaceId,
+          owner: input.owner,
+          repoName: input.repoName,
+        },
+      },
+      update: data,
+      create: {
+        workspaceId: input.workspaceId,
+        ...data,
+      } satisfies Prisma.GithubRepositoryUncheckedCreateInput,
+    });
+  }
+
   getGithubRepositoryById(repositoryId: string) {
     if (!this.shouldUseDatabase) {
       return null;
@@ -1068,6 +1165,40 @@ export class JuhyungRepository {
         repositoryId,
       },
       orderBy: [{ number: "desc" }, { id: "asc" }],
+    });
+  }
+
+  upsertPullRequest(input: UpsertPullRequestInput) {
+    const data = {
+      title: input.title,
+      authorLogin: input.authorLogin,
+      state: input.state,
+      branch: input.branch,
+      baseBranch: input.baseBranch,
+      url: input.url,
+      changedFilesCount: input.changedFilesCount,
+      additions: input.additions,
+      deletions: input.deletions,
+      openedAt: input.openedAt,
+      mergedAt: input.mergedAt,
+      closedAt: input.closedAt,
+      syncedAt: input.syncedAt,
+      updatedAt: input.syncedAt,
+    } satisfies Prisma.PullRequestUncheckedUpdateInput;
+
+    return this.database.pullRequest.upsert({
+      where: {
+        repositoryId_number: {
+          repositoryId: input.repositoryId,
+          number: input.number,
+        },
+      },
+      update: data,
+      create: {
+        repositoryId: input.repositoryId,
+        number: input.number,
+        ...data,
+      } satisfies Prisma.PullRequestUncheckedCreateInput,
     });
   }
 

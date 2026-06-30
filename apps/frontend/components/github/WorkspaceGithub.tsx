@@ -6,7 +6,10 @@ import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { WorkspaceSidebar } from "../workspace/WorkspaceSidebar";
-import { createGithubClient } from "../../lib/github/githubClient.mjs";
+import {
+  createGithubClient,
+  resolveGithubClientMode,
+} from "../../lib/github/githubClient.mjs";
 import { createTaskClient } from "../../lib/task/taskClient.mjs";
 import {
   buildWorkspaceFeatureRoutes,
@@ -45,6 +48,7 @@ type GithubIssue = {
 
 type GithubPullRequest = {
   id: string;
+  repositoryId?: string;
   number: number;
   title: string;
   state: string;
@@ -96,6 +100,7 @@ export function WorkspaceGithub() {
     [workspaceId],
   );
   const githubClient = useMemo(() => createGithubClient(), []);
+  const githubMode = useMemo(() => resolveGithubClientMode(), []);
   const taskClient = useMemo(() => createTaskClient(), []);
   const [connections, setConnections] = useState<GithubConnection[]>([]);
   const [repositories, setRepositories] = useState<GithubRepository[]>([]);
@@ -117,6 +122,8 @@ export function WorkspaceGithub() {
     null;
   const selectedTask =
     tasks.find((task) => task.id === selectedTaskId) ?? tasks[0] ?? null;
+  const isMockGithubMode = githubMode === "mock";
+  const canSyncRepositories = isMockGithubMode || connections.length > 0;
 
   const loadRepositoryData = useCallback(
     async (repository: GithubRepository | null) => {
@@ -204,6 +211,61 @@ export function WorkspaceGithub() {
       );
     } catch (connectionError) {
       setError("GitHub connection could not be started.");
+    } finally {
+      setIsWorking(false);
+    }
+  }
+
+  async function syncRepositories() {
+    if (isWorking || !canSyncRepositories) return;
+
+    setIsWorking(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const result = await githubClient.syncRepositories(workspaceId);
+
+      if (
+        !result ||
+        !Array.isArray(result.repositories) ||
+        !Array.isArray(result.pullRequests)
+      ) {
+        throw new Error("Invalid GitHub sync response.");
+      }
+
+      const repositoryList = result.repositories as GithubRepository[];
+      const pullRequestList = result.pullRequests as GithubPullRequest[];
+      const repository =
+        repositoryList.find(
+          (candidate) => candidate.id === selectedRepositoryId,
+        ) ??
+        repositoryList[0] ??
+        null;
+
+      setRepositories(repositoryList);
+      setSelectedRepositoryId(repository?.id ?? null);
+      setPullRequests(
+        repository
+          ? pullRequestList.filter((pullRequest) =>
+              pullRequest.repositoryId
+                ? pullRequest.repositoryId === repository.id
+                : true,
+            )
+          : [],
+      );
+
+      if (!repository) {
+        setIssues([]);
+      }
+
+      setNotice(
+        isMockGithubMode
+          ? `Mock GitHub sync completed with ${repositoryList.length} repositories.`
+          : `GitHub sync completed with ${repositoryList.length} repositories.`,
+      );
+    } catch (syncError) {
+      setError("GitHub repository sync failed.");
     } finally {
       setIsWorking(false);
     }
@@ -319,6 +381,19 @@ export function WorkspaceGithub() {
             >
               Connect repo
             </button>
+            <button
+              className="github-connect-button"
+              type="button"
+              disabled={isWorking || !canSyncRepositories}
+              title={
+                canSyncRepositories
+                  ? undefined
+                  : "Connect a GitHub repository before syncing."
+              }
+              onClick={() => void syncRepositories()}
+            >
+              {isMockGithubMode ? "Mock sync" : "Sync repos"}
+            </button>
             <LogoutButton />
             <CurrentUserAvatar />
           </div>
@@ -326,6 +401,11 @@ export function WorkspaceGithub() {
 
         <section className="github-content" aria-label="GitHub workspace">
           {error ? <div className="github-alert">{error}</div> : null}
+          {isMockGithubMode ? (
+            <div className="github-notice">
+              Mock GitHub mode: sync uses deterministic fixture data.
+            </div>
+          ) : null}
           {notice ? <div className="github-notice">{notice}</div> : null}
 
           <section className="github-summary-grid" aria-label="GitHub summary">
@@ -351,7 +431,13 @@ export function WorkspaceGithub() {
             <aside className="github-repo-panel" aria-label="Repositories">
               <header>
                 <h2>Repositories</h2>
-                <span>{connections.length ? "Connected" : "Mock ready"}</span>
+                <span>
+                  {isMockGithubMode
+                    ? "Mock mode"
+                    : connections.length
+                      ? "Connected"
+                      : "Not connected"}
+                </span>
               </header>
               <div className="github-repo-list">
                 {repositories.length ? (

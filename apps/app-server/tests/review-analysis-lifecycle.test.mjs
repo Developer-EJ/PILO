@@ -148,6 +148,37 @@ describe("PR analysis lifecycle API boundary", () => {
     );
   });
 
+  it("returns existing analysis roots even when the PR registry is cold", async () => {
+    const repository = new InMemoryPullRequestAnalysisRepository();
+    const pullRequestId = "77777777-7777-4777-8777-777777777772";
+    await repository.save({
+      id: "88888888-8888-4888-8888-888888888882",
+      pullRequestId,
+      purposeSummary: null,
+      impactSummary: null,
+      testRecommendation: null,
+      riskLevel: "low",
+      analysisStatus: "pending",
+      okCount: 0,
+      discussCount: 0,
+      riskCount: 0,
+      conclusion: null,
+      errorTrace: [],
+      createdAt: "2026-06-30T00:00:00.000Z",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    });
+    const service = new PullRequestAnalysisService(
+      repository,
+      {},
+      new PullRequestSummaryRegistry(),
+    );
+
+    const analysis = await service.requestAnalysis(pullRequestId);
+
+    assert.equal(analysis.pullRequestId, pullRequestId);
+    assert.equal(analysis.id, "88888888-8888-4888-8888-888888888882");
+  });
+
   it("requests analysis for runtime PR summaries registered by review rooms", async () => {
     const pullRequestRegistry = new PullRequestSummaryRegistry();
     const graphService = new ReviewGraphService(

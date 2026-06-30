@@ -665,6 +665,10 @@ describe("frontend package", () => {
       "components/workspace/WorkspaceCanvasBoards.tsx",
       "utf8",
     );
+    const reviewRoom = readFileSync(
+      "components/review/ReviewRoomWorkspace.tsx",
+      "utf8",
+    );
 
     assert.match(
       dashboardPage,
@@ -697,6 +701,14 @@ describe("frontend package", () => {
     assert.doesNotMatch(
       canvas,
       /\.catch\(\(\) => \{\s*writeCanvasStorage\("filter-setting"/,
+    );
+    assert.match(
+      reviewRoom,
+      /Review analysis could not be requested from the Review API\.[\s\S]*API mode did not use fixture analysis\.[\s\S]*setStatus\("selecting"\)/,
+    );
+    assert.doesNotMatch(
+      reviewRoom,
+      /if \(!allowFixtureFallback\) \{\s*throw new Error\("Review analysis API failed in api mode"\)/,
     );
   });
 
@@ -1291,6 +1303,23 @@ describe("frontend package", () => {
         ]);
       }
 
+      if (url.endsWith("/repositories/sync") && init.method === "POST") {
+        return Response.json({
+          syncedAt: "2026-06-30T00:00:00.000Z",
+          repositories: [
+            {
+              id: repositoryId,
+              workspaceId,
+              owner: "example",
+              repoName: "pilo",
+              url: "https://github.com/example/pilo",
+              syncedAt: "2026-06-30T00:00:00.000Z",
+            },
+          ],
+          pullRequests: [],
+        });
+      }
+
       if (url.endsWith("/issues")) {
         return Response.json([]);
       }
@@ -1310,9 +1339,13 @@ describe("frontend package", () => {
     assert.equal(resolveGithubClientMode("fixture"), "mock");
 
     const mockGithubClient = createMockGithubClient();
+    assert.equal(typeof mockGithubClient.syncRepositories, "function");
     const mockRepositories =
       await mockGithubClient.listRepositories(workspaceId);
     assert.equal(mockRepositories[0].workspaceId, workspaceId);
+    const mockSync = await mockGithubClient.syncRepositories(workspaceId);
+    assert.equal(mockSync.syncedAt, "2026-06-30T00:00:00.000Z");
+    assert.equal(mockSync.repositories[0].syncedAt, mockSync.syncedAt);
     const mockIssue = await mockGithubClient.createIssueFromTask("task-1", {
       repositoryId: mockRepositories[0].id,
       title: "Create GitHub issue from Task",
@@ -1340,9 +1373,11 @@ describe("frontend package", () => {
       fetcher,
     });
 
+    assert.equal(typeof apiClient.syncRepositories, "function");
     await apiClient.listConnections(workspaceId);
     await apiClient.startConnection(workspaceId);
     await apiClient.listRepositories(workspaceId);
+    await apiClient.syncRepositories(workspaceId);
     await apiClient.listIssues(repositoryId);
     await apiClient.listPullRequests(repositoryId);
     await apiClient.createIssueFromTask("task-1", {
@@ -1358,6 +1393,7 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/workspaces/${workspaceId}/github/connections`,
         `https://api.pilo.dev/api/workspaces/${workspaceId}/github/connections`,
         `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories/sync`,
         `https://api.pilo.dev/api/repositories/${repositoryId}/issues`,
         `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
         "https://api.pilo.dev/api/tasks/task-1/github-issues",
@@ -1367,7 +1403,7 @@ describe("frontend package", () => {
     );
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
-      ["GET", "POST", "GET", "GET", "GET", "POST", "POST", "POST"],
+      ["GET", "POST", "GET", "POST", "GET", "GET", "POST", "POST", "POST"],
     );
     assertEveryRequestUsesLocalActor(requests);
   });

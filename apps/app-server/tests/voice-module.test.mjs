@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createRequire } from "node:module";
+import process from "node:process";
 import { describe, it } from "node:test";
 import "reflect-metadata";
 
@@ -30,6 +31,15 @@ const { VoiceController } = require("../src/modules/voice/voice.controller");
 const { VoiceRouteGuard } = require("../src/modules/voice/voice-route.guard");
 const { VoiceService } = require("../src/modules/voice/voice.service");
 const {
+  LocalSttProvider,
+} = require("../src/modules/voice/adapters/local-stt-provider.adapter");
+const {
+  OpenAISttProvider,
+} = require("../src/modules/voice/adapters/openai-stt-provider.adapter");
+const {
+  STT_PROVIDER,
+} = require("../src/modules/voice/adapters/stt-provider.adapter");
+const {
   MockVoiceRoomProvider,
 } = require("../src/modules/voice/adapters/mock-voice-room-provider.adapter");
 const {
@@ -54,18 +64,23 @@ function createMeetingContext() {
   };
 }
 
-function createVoiceService(context = createMeetingContext()) {
+function createVoiceService(
+  context = createMeetingContext(),
+  sttProvider = new LocalSttProvider(),
+) {
   return new VoiceService(
     new MockVoiceRepository(),
     new MockVoiceRoomProvider(),
     context.meetingService,
     context.currentMemberAdapter,
+    sttProvider,
   );
 }
 
 describe("voice module", () => {
   it("keeps the voice repository behind an injectable token", async () => {
     assert.equal(typeof VOICE_REPOSITORY, "symbol");
+    assert.equal(typeof STT_PROVIDER, "symbol");
   });
 
   it("exposes scaffold status through the service and controller", async () => {
@@ -295,6 +310,93 @@ describe("voice module", () => {
         audioBase64: "not-base64",
       }),
     );
+  });
+
+  it("passes submitted audio chunks through the injected STT provider", async () => {
+    const context = createMeetingContext();
+    const currentMember =
+      context.currentMemberAdapter.getCurrentMember("workspace-1");
+    const audioBase64 = Buffer.from("provider-audio").toString("base64");
+    const calls = [];
+    const sttProvider = {
+      async transcribeAudioChunk(input) {
+        calls.push(input);
+
+        return {
+          text: "Provider transcript text.",
+          provider: "stub",
+          isLocalTranscript: false,
+        };
+      },
+    };
+    const service = createVoiceService(context, sttProvider);
+    const controller = new VoiceController(service);
+    const meeting = await context.meetingService.createMeeting("workspace-1", {
+      title: "Injected STT meeting",
+    });
+    const voiceRoom = await controller.createVoiceRoom("workspace-1", meeting.id);
+    const voiceSession = await controller.joinVoiceSession(voiceRoom.id);
+
+    await controller.updateVoiceSessionRecordingStatus(voiceSession.id, {
+      recordingStatus: "recording",
+    });
+
+    const result = await controller.submitAudioChunk(voiceSession.id, {
+      sequence: 7,
+      mimeType: "audio/webm",
+      audioBase64,
+      capturedStartedAt: "2026-06-30T00:00:00.000Z",
+      capturedEndedAt: "2026-06-30T00:00:02.000Z",
+    });
+
+    assert.equal(result.transcriptSegment.body, "Provider transcript text.");
+    assert.deepEqual(calls, [
+      {
+        voiceSessionId: voiceSession.id,
+        meetingId: meeting.id,
+        speakerMemberId: currentMember.id,
+        sequence: 7,
+        mimeType: "audio/webm",
+        audioBase64,
+        audioByteLength: Buffer.from("provider-audio").length,
+        capturedStartedAt: "2026-06-30T00:00:00.000Z",
+        capturedEndedAt: "2026-06-30T00:00:02.000Z",
+      },
+    ]);
+    assert.deepEqual(
+      await context.meetingService.listTranscriptSegments(meeting.id),
+      [result.transcriptSegment],
+    );
+  });
+
+  it("fails OpenAI STT explicitly when the API key is missing", async () => {
+    const previousApiKey = process.env.OPENAI_API_KEY;
+
+    delete process.env.OPENAI_API_KEY;
+
+    try {
+      await assert.rejects(
+        () =>
+          new OpenAISttProvider().transcribeAudioChunk({
+            voiceSessionId: "voice-session-1",
+            meetingId: "meeting-1",
+            speakerMemberId: "member-1",
+            sequence: 1,
+            mimeType: "audio/webm",
+            audioBase64: Buffer.from("hello").toString("base64"),
+            audioByteLength: 5,
+            capturedStartedAt: null,
+            capturedEndedAt: null,
+          }),
+        /OPENAI_API_KEY is required when PILO_STT_PROVIDER=openai/,
+      );
+    } finally {
+      if (previousApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = previousApiKey;
+      }
+    }
   });
 
   it("rejects duplicate joins, duplicate leaves, invalid recording status, and ended session updates", async () => {

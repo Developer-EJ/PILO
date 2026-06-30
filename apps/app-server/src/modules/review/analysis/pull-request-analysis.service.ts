@@ -48,8 +48,6 @@ export class PullRequestAnalysisService {
   }
 
   async requestAnalysis(pullRequestId: string): Promise<PullRequestAnalysisRecord> {
-    this.assertKnownPullRequest(pullRequestId);
-
     const existing =
       await this.analysisRepository.findByPullRequestId(pullRequestId);
 
@@ -57,6 +55,8 @@ export class PullRequestAnalysisService {
       await this.ensurePendingGraph(existing);
       return existing;
     }
+
+    this.assertKnownPullRequest(pullRequestId);
 
     const created = await this.analysisRepository.create({
       id: randomUUID(),
