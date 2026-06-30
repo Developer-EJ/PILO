@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { createRequire } from "node:module";
 import { describe, it } from "node:test";
 import "reflect-metadata";
@@ -81,6 +82,14 @@ describe("voice module", () => {
     assert.equal(
       Reflect.getMetadata(METHOD_METADATA, controller.getScaffoldStatus),
       RequestMethod.GET,
+    );
+    assert.equal(
+      Reflect.getMetadata(PATH_METADATA, controller.submitAudioChunk),
+      "voice-sessions/:voiceSessionId/audio-chunks",
+    );
+    assert.equal(
+      Reflect.getMetadata(METHOD_METADATA, controller.submitAudioChunk),
+      RequestMethod.POST,
     );
   });
 
@@ -184,6 +193,52 @@ describe("voice module", () => {
       new Date(endedSession.endedAt).getTime() >=
         new Date(endedSession.startedAt).getTime(),
       true,
+    );
+  });
+
+  it("turns submitted audio chunks into meeting STT transcript segments", () => {
+    const context = createMeetingContext();
+    const currentMember =
+      context.currentMemberAdapter.getCurrentMember("workspace-1");
+    const service = createVoiceService(context);
+    const controller = new VoiceController(service);
+    const meeting = context.meetingService.createMeeting("workspace-1", {
+      title: "Voice STT meeting",
+    });
+    const voiceRoom = controller.createVoiceRoom("workspace-1", meeting.id);
+    const voiceSession = controller.joinVoiceSession(voiceRoom.id);
+
+    controller.updateVoiceSessionRecordingStatus(voiceSession.id, {
+      recordingStatus: "recording",
+    });
+
+    const result = controller.submitAudioChunk(voiceSession.id, {
+      sequence: 1,
+      mimeType: "audio/webm",
+      audioBase64: Buffer.from("hello").toString("base64"),
+      capturedStartedAt: "2026-06-30T00:00:00.000Z",
+      capturedEndedAt: "2026-06-30T00:00:02.000Z",
+    });
+
+    assert.equal(result.voiceSession.recordingStatus, "completed");
+    assert.equal(result.voiceSession.id, voiceSession.id);
+    assert.equal(result.transcriptSegment.meetingId, meeting.id);
+    assert.equal(result.transcriptSegment.source, "stt");
+    assert.equal(result.transcriptSegment.speakerMemberId, currentMember.id);
+    assert.equal(
+      result.transcriptSegment.body,
+      "Local STT chunk 1 captured 5 bytes of audio/webm audio.",
+    );
+    assert.deepEqual(
+      context.meetingService.listTranscriptSegments(meeting.id),
+      [result.transcriptSegment],
+    );
+    assert.throws(() =>
+      controller.submitAudioChunk(voiceSession.id, {
+        sequence: 2,
+        mimeType: "audio/webm",
+        audioBase64: "not-base64",
+      }),
     );
   });
 

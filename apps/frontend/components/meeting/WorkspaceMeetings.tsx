@@ -202,6 +202,16 @@ function formatStatus(value: string) {
   return value.replace(/_/g, " ");
 }
 
+function createLocalAudioBase64(sequence: number) {
+  const audioText = `pilo-local-stt-audio-${sequence}`;
+
+  if (typeof globalThis.btoa === "function") {
+    return globalThis.btoa(audioText);
+  }
+
+  return "cGlsby1sb2NhbC1zdHQtYXVkaW8=";
+}
+
 function activeSessionFrom(sessions: VoiceSession[]) {
   return sessions.find((session) => session.endedAt === null) ?? null;
 }
@@ -226,7 +236,16 @@ export function WorkspaceMeetings() {
     [workspaceId],
   );
   const meetingClient = useMemo(() => createMeetingClient(), []);
-  const voiceClient = useMemo(() => createVoiceClient(), []);
+  const voiceClient = useMemo(
+    () =>
+      createVoiceClient({
+        mock: {
+          transcriptWriter: (meetingId: string, input: Record<string, unknown>) =>
+            meetingClient.createTranscriptSegment(meetingId, input),
+        },
+      }),
+    [meetingClient],
+  );
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(
     null,
@@ -263,6 +282,7 @@ export function WorkspaceMeetings() {
   const [lastTaskDraft, setLastTaskDraft] = useState<TaskDraftResult | null>(
     null,
   );
+  const [sttSequence, setSttSequence] = useState(1);
   const [title, setTitle] = useState("MVP meeting follow-up");
   const [purpose, setPurpose] = useState("Turn notes into decisions and tasks.");
   const [agendaTitle, setAgendaTitle] = useState("Confirm next owner handoff");
@@ -366,6 +386,7 @@ export function WorkspaceMeetings() {
       setVoiceRoom(null);
       setVoiceSessions([]);
       setLastTaskDraft(null);
+      setSttSequence(1);
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
@@ -564,18 +585,30 @@ export function WorkspaceMeetings() {
     }, "Voice session ended.");
   }
 
-  async function appendMockSttTranscript() {
-    if (!selectedMeeting) return;
+  async function submitLocalSttChunk() {
+    const activeSession = activeSessionFrom(voiceSessions);
+
+    if (!selectedMeeting || !voiceRoom || !activeSession) return;
 
     await runAction(async () => {
-      await meetingClient.createTranscriptSegment(selectedMeeting.id, {
-        source: "stt",
-        body: "Mock STT completed and produced a transcript segment.",
-        startedAt: new Date(Date.now() - 7000).toISOString(),
-        endedAt: new Date().toISOString(),
+      const endedAt = new Date();
+      const startedAt = new Date(endedAt.getTime() - 7000);
+
+      await voiceClient.submitAudioChunk(activeSession.id, {
+        sequence: sttSequence,
+        mimeType: "audio/webm",
+        audioBase64: createLocalAudioBase64(sttSequence),
+        capturedStartedAt: startedAt.toISOString(),
+        capturedEndedAt: endedAt.toISOString(),
       });
+      const sessions = (await voiceClient.listVoiceSessions(
+        voiceRoom.id,
+      )) as VoiceSession[];
+
+      setVoiceSessions(sessions);
+      setSttSequence((sequence) => sequence + 1);
       await loadMeetingDetail(selectedMeeting.id);
-    }, "Mock STT transcript appended.");
+    }, "Local STT transcript submitted.");
   }
 
   async function approveActionItem(actionItemId: string) {
@@ -908,10 +941,10 @@ export function WorkspaceMeetings() {
                       <button
                         type="button"
                         className="meetings-wide-button"
-                        onClick={() => void appendMockSttTranscript()}
-                        disabled={isWorking}
+                        onClick={() => void submitLocalSttChunk()}
+                        disabled={isWorking || !activeSession}
                       >
-                        Append mock STT segment
+                        Submit local STT chunk
                       </button>
                     </section>
 

@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import {
+  SubmitVoiceAudioChunkRequestDto,
   UpdateVoiceSessionRecordingStatusRequestDto,
   UpdateVoiceRoomStatusRequestDto,
+  VoiceAudioTranscriptResponseDto,
   VoiceRoomResponseDto,
   VoiceSessionResponseDto,
   VoiceScaffoldResponseDto,
@@ -78,5 +80,13 @@ export class VoiceController {
       voiceSessionId,
       requestBody,
     );
+  }
+
+  @Post("voice-sessions/:voiceSessionId/audio-chunks")
+  submitAudioChunk(
+    @Param("voiceSessionId") voiceSessionId: string,
+    @Body() requestBody: SubmitVoiceAudioChunkRequestDto,
+  ): VoiceAudioTranscriptResponseDto {
+    return this.voiceService.submitAudioChunk(voiceSessionId, requestBody);
   }
 }

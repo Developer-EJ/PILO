@@ -1556,8 +1556,15 @@ describe("frontend package", () => {
     await voiceClient.updateVoiceRoomStatus(voiceRoomId, "active");
     await voiceClient.joinVoiceSession(voiceRoomId);
     await voiceClient.listVoiceSessions(voiceRoomId);
-    await voiceClient.leaveVoiceSession(voiceSessionId);
     await voiceClient.updateRecordingStatus(voiceSessionId, "recording");
+    await voiceClient.submitAudioChunk(voiceSessionId, {
+      sequence: 1,
+      mimeType: "audio/webm",
+      audioBase64: "cGlsbw==",
+      capturedStartedAt: "2026-06-30T00:00:00.000Z",
+      capturedEndedAt: "2026-06-30T00:00:02.000Z",
+    });
+    await voiceClient.leaveVoiceSession(voiceSessionId);
 
     await agentClient.startPlanningRun(workspaceId, defaultProjectStartInput);
     await agentClient.getRun(runId);
@@ -1592,6 +1599,7 @@ describe("frontend package", () => {
         "POST",
         "GET",
         "PATCH",
+        "POST",
         "PATCH",
         "POST",
         "GET",
@@ -1626,14 +1634,31 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/voice-rooms/${voiceRoomId}/status`,
         `https://api.pilo.dev/api/voice-rooms/${voiceRoomId}/sessions`,
         `https://api.pilo.dev/api/voice-rooms/${voiceRoomId}/sessions`,
-        `https://api.pilo.dev/api/voice-sessions/${voiceSessionId}/leave`,
         `https://api.pilo.dev/api/voice-sessions/${voiceSessionId}/recording-status`,
+        `https://api.pilo.dev/api/voice-sessions/${voiceSessionId}/audio-chunks`,
+        `https://api.pilo.dev/api/voice-sessions/${voiceSessionId}/leave`,
         `https://api.pilo.dev/api/workspaces/${workspaceId}/agent-runs`,
         `https://api.pilo.dev/api/agent-runs/${runId}`,
         `https://api.pilo.dev/api/workspaces/${workspaceId}/agent-actions`,
         `https://api.pilo.dev/api/agent-actions/${actionId}/approve`,
         `https://api.pilo.dev/api/agent-actions/${actionId}/reject`,
       ],
+    );
+    assert.deepEqual(
+      JSON.parse(
+        requests.find((request) =>
+          request.url.endsWith(
+            `/voice-sessions/${voiceSessionId}/audio-chunks`,
+          ),
+        ).init.body,
+      ),
+      {
+        sequence: 1,
+        mimeType: "audio/webm",
+        audioBase64: "cGlsbw==",
+        capturedStartedAt: "2026-06-30T00:00:00.000Z",
+        capturedEndedAt: "2026-06-30T00:00:02.000Z",
+      },
     );
     assertEveryRequestUsesLocalActor(requests);
   });

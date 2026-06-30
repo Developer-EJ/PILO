@@ -56,6 +56,14 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 | `PATCH` | `/api/voice-sessions/:voiceSessionId/leave` | 음성 세션 종료 |
 | `PATCH` | `/api/voice-sessions/:voiceSessionId/recording-status` | 녹음/STT 처리 상태 변경 |
 
+### Runtime API Addendum
+
+The current MVP runtime also exposes:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/voice-sessions/:voiceSessionId/audio-chunks` | Accept a local MVP audio chunk and create a Meeting transcript segment with `source = "stt"`. |
+
 ## Request DTOs
 
 ### UpdateVoiceRoomStatusRequest
@@ -90,6 +98,22 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 ```
 
 - `recordingStatus`: `not_recording`, `recording`, `processing`, `completed`, `failed`
+
+### SubmitVoiceAudioChunkRequest
+
+```json
+{
+  "sequence": 1,
+  "mimeType": "audio/webm",
+  "audioBase64": "cGlsbw==",
+  "capturedStartedAt": "2026-06-30T00:00:00.000Z",
+  "capturedEndedAt": "2026-06-30T00:00:02.000Z"
+}
+```
+
+- Local MVP runtime validates the chunk and creates a Meeting transcript segment with `source = "stt"`.
+- The response includes the updated `VoiceSession` and created `TranscriptSegment`.
+- External provider transcription may replace this deterministic local adapter later without changing the route.
 
 ## Response / Read Models
 

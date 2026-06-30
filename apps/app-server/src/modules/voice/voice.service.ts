@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { Buffer } from "node:buffer";
 import {
   CURRENT_MEMBER_ADAPTER,
   CurrentMemberAdapter,
@@ -14,8 +15,10 @@ import {
   VoiceRoomProvider,
 } from "./adapters/voice-room-provider.adapter";
 import {
+  SubmitVoiceAudioChunkRequestDto,
   UpdateVoiceSessionRecordingStatusRequestDto,
   UpdateVoiceRoomStatusRequestDto,
+  VoiceAudioTranscriptResponseDto,
   VoiceRoomResponseDto,
   VoiceSessionResponseDto,
   VoiceScaffoldResponseDto,
@@ -170,6 +173,68 @@ export class VoiceService {
     });
   }
 
+  submitAudioChunk(
+    voiceSessionId: string,
+    requestBody: SubmitVoiceAudioChunkRequestDto,
+  ): VoiceAudioTranscriptResponseDto {
+    const voiceSession = this.requireVoiceSession(voiceSessionId);
+
+    this.assertVoiceSessionActive(voiceSession, "submit audio chunks for");
+
+    if (!voiceSession.meetingId) {
+      throw new BadRequestException(
+        "Voice session must belong to a meeting for STT transcript creation",
+      );
+    }
+
+    const sequence = this.requireNonNegativeInteger(
+      requestBody.sequence,
+      "sequence",
+    );
+    const mimeType = this.requireNonEmptyString(
+      requestBody.mimeType,
+      "mimeType",
+    );
+    const audioByteLength = this.parseAudioBase64(requestBody.audioBase64);
+    const startedAt = this.optionalIsoDateTime(
+      requestBody.capturedStartedAt,
+      "capturedStartedAt",
+    );
+    const endedAt = this.optionalIsoDateTime(
+      requestBody.capturedEndedAt,
+      "capturedEndedAt",
+    );
+
+    this.validateTimeRange(startedAt, endedAt);
+
+    const transcriptSegment = this.meetingService.createTranscriptSegment(
+      voiceSession.meetingId,
+      {
+        speakerMemberId: voiceSession.memberId,
+        source: "stt",
+        body: this.createLocalSttTranscript({
+          audioByteLength,
+          mimeType,
+          sequence,
+        }),
+        startedAt,
+        endedAt,
+      },
+    );
+    const updatedVoiceSession = this.voiceRepository.updateVoiceSession(
+      voiceSession.id,
+      {
+        recordingStatus: "completed",
+        updatedAt: new Date().toISOString(),
+      },
+    );
+
+    return {
+      voiceSession: updatedVoiceSession,
+      transcriptSegment,
+    };
+  }
+
   private requireVoiceRoom(voiceRoomId: string): VoiceRoomRecord {
     const voiceRoom = this.voiceRepository.findVoiceRoomById(
       this.requireNonEmptyString(voiceRoomId, "voiceRoomId"),
@@ -261,5 +326,75 @@ export class VoiceService {
     }
 
     throw new BadRequestException(`${fieldName} must be a non-empty string`);
+  }
+
+  private requireNonNegativeInteger(value: unknown, fieldName: string): number {
+    if (Number.isInteger(value) && Number(value) >= 0) {
+      return Number(value);
+    }
+
+    throw new BadRequestException(`${fieldName} must be a non-negative integer`);
+  }
+
+  private optionalIsoDateTime(
+    value: unknown,
+    fieldName: string,
+  ): string | null {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+
+    if (typeof value !== "string") {
+      throw new BadRequestException(`${fieldName} must be an ISO datetime`);
+    }
+
+    const parsedDate = new Date(value);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      throw new BadRequestException(`${fieldName} must be an ISO datetime`);
+    }
+
+    return parsedDate.toISOString();
+  }
+
+  private validateTimeRange(startedAt: string | null, endedAt: string | null) {
+    if (
+      startedAt &&
+      endedAt &&
+      new Date(startedAt).getTime() > new Date(endedAt).getTime()
+    ) {
+      throw new BadRequestException(
+        "capturedStartedAt must be before capturedEndedAt",
+      );
+    }
+  }
+
+  private parseAudioBase64(value: unknown): number {
+    const audioBase64 = this.requireNonEmptyString(value, "audioBase64");
+
+    if (
+      audioBase64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(audioBase64)
+    ) {
+      throw new BadRequestException("audioBase64 must be valid base64 audio");
+    }
+
+    const audioBytes = Buffer.from(audioBase64, "base64");
+    const normalizedInput = audioBase64.replace(/=+$/, "");
+    const normalizedOutput = audioBytes.toString("base64").replace(/=+$/, "");
+
+    if (audioBytes.length === 0 || normalizedInput !== normalizedOutput) {
+      throw new BadRequestException("audioBase64 must be valid base64 audio");
+    }
+
+    return audioBytes.length;
+  }
+
+  private createLocalSttTranscript(input: {
+    audioByteLength: number;
+    mimeType: string;
+    sequence: number;
+  }) {
+    return `Local STT chunk ${input.sequence} captured ${input.audioByteLength} bytes of ${input.mimeType} audio.`;
   }
 }

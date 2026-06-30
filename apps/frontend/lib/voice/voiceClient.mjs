@@ -65,6 +65,48 @@ function createMockVoiceId(prefix) {
   return `mock-${prefix}-${mockVoiceIdCounter}`;
 }
 
+function decodeBase64ByteLength(audioBase64) {
+  if (typeof audioBase64 !== "string" || audioBase64.trim().length === 0) {
+    throw new VoiceApiError("audioBase64 is required", {
+      status: 400,
+      path: "/api/voice-sessions/mock/audio-chunks",
+    });
+  }
+
+  const normalizedAudio = audioBase64.trim();
+
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalizedAudio)) {
+    throw new VoiceApiError("audioBase64 must be valid base64 audio", {
+      status: 400,
+      path: "/api/voice-sessions/mock/audio-chunks",
+    });
+  }
+
+  if (normalizedAudio.length % 4 !== 0) {
+    throw new VoiceApiError("audioBase64 must be valid base64 audio", {
+      status: 400,
+      path: "/api/voice-sessions/mock/audio-chunks",
+    });
+  }
+
+  if (typeof globalThis.atob === "function") {
+    try {
+      return globalThis.atob(normalizedAudio).length;
+    } catch (error) {
+      throw new VoiceApiError("audioBase64 must be valid base64 audio", {
+        status: 400,
+        path: "/api/voice-sessions/mock/audio-chunks",
+      });
+    }
+  }
+
+  return Math.floor((normalizedAudio.replace(/=+$/, "").length * 3) / 4);
+}
+
+function buildLocalSttTranscript({ audioByteLength, mimeType, sequence }) {
+  return `Local STT chunk ${sequence} captured ${audioByteLength} bytes of ${mimeType} audio.`;
+}
+
 async function readVoiceJson(response, path) {
   if (response.status === 204) {
     return null;
@@ -205,10 +247,18 @@ export function createVoiceApiClient({
         requestOptions,
       );
     },
+
+    async submitAudioChunk(voiceSessionId, input) {
+      return requestVoiceJson(
+        `/api/voice-sessions/${encodeId(voiceSessionId)}/audio-chunks`,
+        withJsonBody(input, { method: "POST" }),
+        requestOptions,
+      );
+    },
   };
 }
 
-export function createMockVoiceClient() {
+export function createMockVoiceClient({ transcriptWriter } = {}) {
   return {
     async createVoiceRoom(workspaceId, meetingId) {
       const existingRoomId = mockVoiceState.roomByMeeting.get(meetingId);
@@ -333,6 +383,59 @@ export function createMockVoiceClient() {
 
       return clone(session);
     },
+
+    async submitAudioChunk(voiceSessionId, input = {}) {
+      const session = getSession(voiceSessionId);
+
+      if (session.endedAt !== null) {
+        throw new VoiceApiError("Cannot transcribe an ended voice session", {
+          status: 400,
+          path: `/api/voice-sessions/${voiceSessionId}/audio-chunks`,
+        });
+      }
+
+      if (!session.meetingId) {
+        throw new VoiceApiError("Voice session is not linked to a meeting", {
+          status: 400,
+          path: `/api/voice-sessions/${voiceSessionId}/audio-chunks`,
+        });
+      }
+
+      const sequence = Number.isInteger(input.sequence) ? input.sequence : 0;
+      const mimeType =
+        typeof input.mimeType === "string" && input.mimeType.trim()
+          ? input.mimeType.trim()
+          : "audio/webm";
+      const audioByteLength = decodeBase64ByteLength(input.audioBase64);
+      const timestamp = nowIso();
+      const transcriptInput = {
+        source: "stt",
+        body: buildLocalSttTranscript({
+          audioByteLength,
+          mimeType,
+          sequence,
+        }),
+        startedAt: input.capturedStartedAt ?? null,
+        endedAt: input.capturedEndedAt ?? timestamp,
+      };
+      const transcriptSegment = transcriptWriter
+        ? await transcriptWriter(session.meetingId, transcriptInput)
+        : {
+            id: createMockVoiceId("transcript"),
+            meetingId: session.meetingId,
+            speakerMemberId: session.memberId,
+            ...transcriptInput,
+            createdAt: timestamp,
+          };
+
+      session.recordingStatus = "completed";
+      session.updatedAt = timestamp;
+
+      return {
+        voiceSession: clone(session),
+        transcriptSegment: clone(transcriptSegment),
+      };
+    },
   };
 }
 
@@ -343,5 +446,5 @@ export function createVoiceClient(options = {}) {
     return createVoiceApiClient(options);
   }
 
-  return createMockVoiceClient();
+  return createMockVoiceClient(options.mock);
 }

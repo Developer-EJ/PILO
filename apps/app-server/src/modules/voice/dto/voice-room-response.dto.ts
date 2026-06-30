@@ -1,3 +1,4 @@
+import { TranscriptSegmentResponseDto } from "../../meeting/dto/meeting-scaffold-response.dto";
 import {
   VoiceRepositoryMode,
   VoiceRoomRecord,
@@ -15,6 +16,19 @@ export interface UpdateVoiceRoomStatusRequestDto {
 
 export interface UpdateVoiceSessionRecordingStatusRequestDto {
   recordingStatus?: unknown;
+}
+
+export interface SubmitVoiceAudioChunkRequestDto {
+  sequence?: unknown;
+  mimeType?: unknown;
+  audioBase64?: unknown;
+  capturedStartedAt?: unknown;
+  capturedEndedAt?: unknown;
+}
+
+export interface VoiceAudioTranscriptResponseDto {
+  voiceSession: VoiceSessionResponseDto;
+  transcriptSegment: TranscriptSegmentResponseDto;
 }
 
 export type VoiceRoomResponseDto = VoiceRoomRecord;
