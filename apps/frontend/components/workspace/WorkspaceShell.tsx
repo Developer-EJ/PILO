@@ -143,7 +143,6 @@ export function WorkspaceSidebar({
   const taskGroupActive =
     active === "tasks" || active === "github" || active === "progress";
   const meetingGroupActive = active === "meetings";
-  const reviewGroupActive = active === "reviews";
 
   return (
     <aside id={id} className="sidebar" aria-label={label}>
@@ -204,41 +203,11 @@ export function WorkspaceSidebar({
                 label: "캔버스",
                 active: active === "canvas",
               }),
-              navGroup({
+              navLink({
+                href: workspacePath(workspaceId, "reviews"),
                 label: "코드 리뷰",
-                active: reviewGroupActive,
+                active: active === "reviews",
                 badge: counts.pullRequests,
-                children: [
-                  navSubLink({
-                    href: workspacePath(workspaceId, "reviews"),
-                    label: "PR 선택",
-                    active: active === "reviews",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(workspaceId, "reviews", "analysis"),
-                    label: "분석",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(
-                      workspaceId,
-                      "reviews",
-                      "changed-files",
-                    ),
-                    label: "변경 파일",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(workspaceId, "reviews", "graph"),
-                    label: "리뷰 그래프",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(
-                      workspaceId,
-                      "reviews",
-                      "artifacts",
-                    ),
-                    label: "아티팩트",
-                  }),
-                ],
               }),
             ]
           : [
