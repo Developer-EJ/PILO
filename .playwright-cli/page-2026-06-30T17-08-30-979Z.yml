@@ -1,0 +1,88 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - img [ref=e8]
+  - alert [ref=e11]
+  - main [ref=e12]:
+    - complementary "워크스페이스 탐색" [ref=e13]:
+      - button "현재 workspace 선택" [ref=e16] [cursor=pointer]:
+        - generic [ref=e17]: P
+        - generic [ref=e18]:
+          - paragraph [ref=e19]: PILO MVP
+          - generic [ref=e20]: AI-powered project collaboration workspace
+        - generic [ref=e21]: ▾
+      - navigation "워크스페이스 탐색" [ref=e22]:
+        - link "대시보드" [ref=e23] [cursor=pointer]:
+          - /url: /workspaces/22222222-2222-4222-8222-222222222222
+          - generic [ref=e24]: 대시보드
+        - group [ref=e25]:
+          - generic "작업" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]: 작업
+            - generic [ref=e29]: ⌄
+        - group [ref=e30]:
+          - generic "회의 / 리포트" [ref=e31] [cursor=pointer]:
+            - generic [ref=e32]: 회의 / 리포트
+            - generic [ref=e34]: ⌄
+        - link "캔버스" [ref=e35] [cursor=pointer]:
+          - /url: /workspaces/22222222-2222-4222-8222-222222222222/canvas
+          - generic [ref=e36]: 캔버스
+        - link "코드 리뷰" [ref=e37] [cursor=pointer]:
+          - /url: /workspaces/22222222-2222-4222-8222-222222222222/reviews
+          - generic [ref=e38]: 코드 리뷰
+        - generic [ref=e40]: 설정
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - paragraph [ref=e44]: 코드 리뷰
+          - heading "리뷰 작업 공간" [level=1] [ref=e45]
+        - generic [ref=e46]:
+          - button "로그아웃" [ref=e48] [cursor=pointer]
+          - generic "Guest" [ref=e49]: P
+      - main [ref=e51]:
+        - button "← 워크플로우로 돌아가기" [ref=e284]
+        - generic [ref=e285]:
+          - generic "변경 코드" [ref=e286]:
+            - generic [ref=e287]:
+              - generic [ref=e288]: 선택한 리뷰 노드
+              - strong [ref=e289]: apps/frontend/tests/smoke.test.mjs
+            - generic [ref=e291]:
+              - generic [ref=e292]:
+                - generic [ref=e293]:
+                  - generic [ref=e294]: 변경 전
+                  - generic [ref=e295]: L980
+                - code [ref=e297]: "assert.equal(resolveOAuthCallbackState({}), null);"
+              - generic [ref=e298]:
+                - generic [ref=e299]:
+                  - generic [ref=e300]: 변경 후
+                  - generic [ref=e301]: L980
+                - code [ref=e303]: "assert.equal(resolveOAuthCallbackState({ provider: 'google' }).status, 'success'); assert.equal(resolveOAuthCallbackState({ error: 'access_denied' }).status, 'error'); assert.equal(safeNextPath('https://evil.example'), `/workspaces/${workspaceId}`);"
+          - complementary "노드 리뷰" [ref=e304]:
+            - generic [ref=e305]:
+              - generic [ref=e306]: 리뷰 노드
+              - heading "OAuth 회귀 테스트" [level=2] [ref=e307]
+              - generic [ref=e308]: 위험도 중간
+            - generic [ref=e309]:
+              - heading "리뷰에서 보는 역할" [level=3] [ref=e310]
+              - paragraph [ref=e311]: 성공 콜백, provider error, 외부 next 차단 케이스가 깨지지 않는지 smoke test로 고정합니다.
+            - generic [ref=e312]:
+              - heading "확인해야 하는 이유" [level=3] [ref=e313]
+              - paragraph [ref=e314]: auth flow는 수동 확인만으로 놓치기 쉬워 병합 전에 최소 회귀 테스트가 있어야 합니다.
+            - generic [ref=e315]:
+              - heading "확인할 코드 영역" [level=3] [ref=e316]
+              - article [ref=e318]:
+                - strong [ref=e319]: 콜백 상태 회귀 테스트
+                - paragraph [ref=e320]: 성공 redirect, 실패 메시지, 외부 next fallback을 각각 독립 assertion으로 확인합니다.
+                - generic [ref=e321]:
+                  - button "코드 보기" [ref=e322]
+                  - generic [ref=e323]: L980-L1018
+            - generic [ref=e324]:
+              - heading "리뷰 코멘트" [level=3] [ref=e325]
+              - paragraph [ref=e327]: 아직 코멘트가 없습니다.
+              - generic [ref=e328]:
+                - textbox "이 노드에 대한 리뷰 메모를 남기세요" [ref=e329]
+                - button "코멘트 남기기" [disabled] [ref=e330]
+            - generic [ref=e331]:
+              - button "승인" [ref=e332]
+              - button "논의 필요" [ref=e333]
+              - button "미검토" [ref=e334]
+    - complementary "워크스페이스 AI 채팅":
+      - button "AI 채팅 열기" [ref=e65] [cursor=pointer]: AI

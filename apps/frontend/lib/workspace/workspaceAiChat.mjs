@@ -2,6 +2,8 @@ import { defaultAppServerUrl } from "../api/apiUrl.mjs";
 
 export const WORKSPACE_AI_CHAT_WORKFLOW_TYPE = "orchestrator.run";
 export const CANVAS_MEMO_ACTION_TYPE = "canvas.memo.create";
+export const TASK_CREATE_DRAFT_ACTION_TYPE = "task.create.draft";
+export const TASK_UPDATE_STATUS_ACTION_TYPE = "task.update.status";
 
 const DEFAULT_WORKSPACE_AI_CHAT_MODE = "mock";
 
@@ -54,6 +56,20 @@ function fallbackMemoTitle(text) {
   return firstLine.length > 42 ? `${firstLine.slice(0, 39)}...` : firstLine;
 }
 
+function extractQuotedMemoText(message) {
+  const text = nonEmptyText(message);
+  if (!text) return null;
+
+  const quoted =
+    text.match(/'([^']{2,})'/) ??
+    text.match(/"([^"]{2,})"/) ??
+    text.match(/“([^”]{2,})”/) ??
+    text.match(/‘([^’]{2,})’/) ??
+    text.match(/`([^`]{2,})`/);
+
+  return nonEmptyText(quoted?.[1]);
+}
+
 function defaultCreatedAt() {
   return new Date().toISOString();
 }
@@ -63,6 +79,42 @@ function normalizeIntentText(message) {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function toTextArray(value, limit = 3) {
+  if (!Array.isArray(value)) return [];
+
+  return value.map((item) => nonEmptyText(item)).filter(Boolean).slice(0, limit);
+}
+
+function listRuntimeActions(result) {
+  const candidates = [
+    result?.run?.actions,
+    result?.actions,
+    result?.response?.actionProposals,
+    result?.run?.output?.actionProposals,
+  ];
+  const actions = [];
+  const seen = new Set();
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+
+    for (const action of candidate) {
+      if (!isRecord(action)) continue;
+      const fingerprint = [
+        nonEmptyText(action.id) ?? "",
+        nonEmptyText(action.type) ?? "",
+        JSON.stringify(action.payload ?? {}),
+      ].join("|");
+
+      if (seen.has(fingerprint)) continue;
+      seen.add(fingerprint);
+      actions.push(action);
+    }
+  }
+
+  return actions;
 }
 
 export function defaultWorkspaceAiChatAgentMode() {
@@ -100,6 +152,104 @@ export function hasCanvasMemoMutationIntent(message = "") {
     );
 
   return hasCanvasTarget && hasMemoTarget && hasMutationVerb;
+}
+
+export function hasTaskDraftMutationIntent(message = "") {
+  const text = normalizeIntentText(message);
+
+  if (!text) return false;
+
+  const hasTaskTarget = /(task|할\s*일|작업|업무|todo|티켓|이슈)/i.test(text);
+  const hasDraftTarget = /(초안|draft|후보)/i.test(text);
+  const hasCreateVerb =
+    /(추가|만들|만들어|생성|등록|작성|써줘|써 줘|잡아|올려|create|add|make|write)/i.test(
+      text,
+    );
+
+  return (hasTaskTarget || hasDraftTarget) && hasCreateVerb;
+}
+
+function stripTaskSentence(value) {
+  return nonEmptyText(
+    String(value ?? "")
+      .replace(/[.。]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+function extractTaskDescription(message = "") {
+  const text = String(message ?? "");
+  const match = text.match(
+    /설명(?:은|:)?\s*([\s\S]*?)(?:이고\s*담당|이며\s*담당|,\s*담당|\.|$)/i,
+  );
+
+  return stripTaskSentence(match?.[1]) ?? null;
+}
+
+function extractTaskAssigneeName(message = "") {
+  const text = String(message ?? "");
+  const match = text.match(
+    /담당(?:자)?(?:는|은|:)?\s*([A-Za-z가-힣0-9 _-]+?)(?:으로|로|에게|한테|가|이|\.|,|$)/i,
+  );
+
+  return stripTaskSentence(match?.[1]) ?? null;
+}
+
+function extractTaskTitle(message = "") {
+  const text = String(message ?? "")
+    .replace(/설명(?:은|:)?[\s\S]*$/i, "")
+    .trim();
+  const match = text.match(
+    /(.+?)\s*(?:작업\s*(?:하나|한\s*개|1개)?\s*)?(?:만들어|만들|생성|추가|등록|작성|create|add|make|write)/i,
+  );
+  const candidate = stripTaskSentence(match?.[1]) ?? stripTaskSentence(text);
+  const title = stripTaskSentence(
+    candidate?.replace(/\s*(?:작업\s*(?:하나|한\s*개|1개)?)$/i, ""),
+  );
+
+  return title ?? "새 작업";
+}
+
+function extractTaskPriority(message = "") {
+  const text = normalizeIntentText(message);
+
+  if (/긴급|urgent/.test(text)) return "urgent";
+  if (/높|high/.test(text)) return "high";
+  if (/낮|low/.test(text)) return "low";
+
+  return "medium";
+}
+
+function normalizeMemberLookupText(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function findMemberByName(members = [], name = "") {
+  const target = normalizeMemberLookupText(name);
+  if (!target || !Array.isArray(members)) return null;
+
+  return (
+    members.find((member) => {
+      if (!isRecord(member)) return false;
+      const candidates = [
+        member.memberId,
+        member.userId,
+        member.name,
+        member.displayName,
+        member.email,
+      ].map(normalizeMemberLookupText);
+
+      return candidates.some(
+        (candidate) =>
+          candidate === target ||
+          (candidate.length > 0 && candidate.includes(target)) ||
+          (candidate.length > 0 && target.length > 0 && target.includes(candidate)),
+      );
+    }) ?? null
+  );
 }
 
 export function buildWorkspaceAiChatFallbackAnswer({
@@ -150,6 +300,74 @@ export function buildWorkspaceAiChatRequest({
       month: "2-digit",
       day: "2-digit",
     }).format(new Date()),
+  };
+}
+
+export function buildWorkspaceAiChatAssistantText(result) {
+  const response = isRecord(result?.response)
+    ? result.response
+    : isRecord(result?.run?.output)
+      ? result.run.output
+      : null;
+  const conclusion = firstText(response?.shortConclusion);
+
+  if (conclusion) {
+    const priorityTasks = toTextArray(response?.priorityTasks, 3);
+    const nextActions = toTextArray(response?.recommendedNextActions, 3);
+    const actionCount = listRuntimeActions(result).length;
+    const lines = [conclusion];
+
+    if (priorityTasks.length > 0) {
+      lines.push("", "우선 처리할 일");
+      lines.push(...priorityTasks.map((item) => `- ${item}`));
+    }
+
+    if (nextActions.length > 0) {
+      lines.push("", "다음 행동");
+      lines.push(...nextActions.map((item) => `- ${item}`));
+    }
+
+    if (actionCount > 0) {
+      lines.push("", `승인 대기 제안 ${actionCount}개가 준비됐습니다.`);
+    }
+
+    return lines.join("\n");
+  }
+
+  return (
+    firstText(result?.assistantMessage?.body) ??
+    (result?.message?.role === "assistant"
+      ? firstText(result.message.body)
+      : null) ??
+    firstText(result?.run?.output?.summary) ??
+    ""
+  );
+}
+
+export function extractWorkspaceAiChatRuntimeInfo(result, { mode = "mock" } = {}) {
+  const response = isRecord(result?.response)
+    ? result.response
+    : isRecord(result?.run?.output)
+      ? result.run.output
+      : null;
+  const fallback =
+    typeof response?.fallback === "boolean"
+      ? response.fallback
+      : mode !== "api";
+  const usedModel =
+    firstText(response?.usedModel, result?.run?.tokenUsage?.model) ?? null;
+  const generatedAt =
+    firstText(response?.runtime?.generatedAt, result?.run?.updatedAt) ?? null;
+  const sourceStatus = isRecord(response?.runtime?.sourceStatus)
+    ? response.runtime.sourceStatus
+    : null;
+
+  return {
+    mode: mode === "api" ? "api" : "mock",
+    fallback,
+    usedModel,
+    generatedAt,
+    sourceStatus,
   };
 }
 
@@ -234,10 +452,7 @@ export function findCanvasMemoProposal(
     currentMember = null,
   } = {},
 ) {
-  const run = result?.run;
-  const actions = Array.isArray(run?.actions) ? run.actions : [];
-
-  for (const action of actions) {
+  for (const action of listRuntimeActions(result)) {
     const proposal = normalizeCanvasMemoProposal(action, {
       workspaceId,
       boardId,
@@ -251,6 +466,120 @@ export function findCanvasMemoProposal(
   }
 
   return null;
+}
+
+export function normalizeTaskActionProposal(
+  action,
+  { workspaceId, message = "", source = "api", members = [] } = {},
+) {
+  if (
+    !isRecord(action) ||
+    (action.type !== TASK_CREATE_DRAFT_ACTION_TYPE &&
+      action.type !== TASK_UPDATE_STATUS_ACTION_TYPE)
+  ) {
+    return null;
+  }
+
+  const payload = isRecord(action.payload) ? action.payload : {};
+  const assigneeName =
+    firstText(payload.assigneeName, payload.assignee, payload.ownerName) ??
+    extractTaskAssigneeName(message);
+  const assigneeMember = findMemberByName(members, assigneeName);
+  const title =
+    firstText(payload.title, payload.taskHint, payload.displayTitle) ??
+    extractTaskTitle(message) ??
+    "Task 실행 제안";
+  const description =
+    firstText(payload.description, payload.summary, action.summary) ??
+    extractTaskDescription(message) ??
+    "AI 채팅에서 요청한 작업입니다.";
+  const isDraftCreate = action.type === TASK_CREATE_DRAFT_ACTION_TYPE;
+
+  return {
+    id: action.id ?? `task-action-${Date.now()}`,
+    actionId: action.id ?? null,
+    type: action.type,
+    source,
+    status: action.status ?? "waiting_confirmation",
+    summary:
+      firstText(action.summary) ??
+      "확인하면 작업 초안을 만들고 승인해 작업 보드에 추가합니다.",
+    executable: isDraftCreate,
+    contractNote:
+      isDraftCreate
+        ? "확인하면 Task 담당 client로 작업 초안을 생성한 뒤 승인합니다."
+        : "상태 변경 action은 추가 Task 계약이 필요합니다.",
+    payload: {
+      workspaceId: firstText(payload.workspaceId) ?? workspaceId,
+      title,
+      description,
+      priority: firstText(payload.priority) ?? extractTaskPriority(message),
+      dueDate: firstText(payload.dueDate) ?? null,
+      status: firstText(payload.status) ?? null,
+      assigneeMemberId:
+        firstText(payload.assigneeMemberId) ??
+        firstText(assigneeMember?.memberId) ??
+        (source === "local_fallback" ? assigneeName : null),
+      assigneeName,
+      sourceType: firstText(payload.sourceType) ?? "ai_chat",
+      sourceId:
+        firstText(payload.sourceId) ??
+        action.id ??
+        `workspace-ai-chat-${Date.now()}`,
+    },
+  };
+}
+
+export function findWorkspaceTaskActionProposal(
+  result,
+  { workspaceId, message = "", members = [] } = {},
+) {
+  if (!hasTaskDraftMutationIntent(message)) return null;
+
+  for (const action of listRuntimeActions(result)) {
+    const proposal = normalizeTaskActionProposal(action, {
+      workspaceId,
+      message,
+      source: "api",
+      members,
+    });
+
+    if (proposal) return proposal;
+  }
+
+  return buildLocalTaskDraftProposal({ workspaceId, message, members });
+}
+
+export function buildLocalTaskDraftProposal({
+  workspaceId,
+  message = "",
+  members = [],
+  reason = "현재 런타임 응답에 task.create.draft가 없어 로컬 확인 제안으로 준비했습니다.",
+} = {}) {
+  if (!hasTaskDraftMutationIntent(message)) return null;
+
+  return normalizeTaskActionProposal(
+    {
+      id: `local-task-draft-action-${Date.now()}`,
+      type: TASK_CREATE_DRAFT_ACTION_TYPE,
+      status: "waiting_confirmation",
+      summary: reason,
+      payload: {
+        workspaceId,
+        title: extractTaskTitle(message),
+        description: extractTaskDescription(message) ?? "AI 채팅에서 요청한 작업입니다.",
+        assigneeName: extractTaskAssigneeName(message),
+        priority: extractTaskPriority(message),
+        sourceType: "ai_chat",
+      },
+    },
+    {
+      workspaceId,
+      message,
+      source: "local_fallback",
+      members,
+    },
+  );
 }
 
 /**
@@ -270,7 +599,10 @@ export function buildLocalCanvasMemoProposal({
   currentMember = null,
   reason = "현재 런타임 응답에 canvas.memo.create가 없어 로컬 확인 제안으로 준비했습니다.",
 } = {}) {
-  const text = nonEmptyText(message) ?? "AI가 만든 캔버스 메모";
+  const text =
+    extractQuotedMemoText(message) ??
+    nonEmptyText(message) ??
+    "AI가 만든 캔버스 메모";
   const authorId =
     firstText(currentMember?.memberId, currentUser?.id) ?? "guest";
   const authorName =

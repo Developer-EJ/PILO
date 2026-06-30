@@ -6,6 +6,7 @@ import {
   Param,
   Post,
 } from "@nestjs/common";
+import { AuthService } from "../auth/auth.service";
 import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
   firstHeader,
@@ -18,7 +19,10 @@ import { AgentRuntimeService } from "./agent-runtime.service";
 
 @Controller()
 export class AgentRuntimeController {
-  constructor(private readonly agentRuntimeService: AgentRuntimeService) {}
+  constructor(
+    private readonly agentRuntimeService: AgentRuntimeService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Post("agent-onboarding/turn")
   runOnboardingTurn(@Body() body: unknown) {
@@ -33,11 +37,12 @@ export class AgentRuntimeController {
     @Body() body: unknown,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.createAgentRun(
       workspaceId,
       parseAgentRunCreateBody(body),
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -46,10 +51,11 @@ export class AgentRuntimeController {
     @Param("runId") runId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.getAgentRun(
       runId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -58,10 +64,11 @@ export class AgentRuntimeController {
     @Param("actionId") actionId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.approveAction(
       actionId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -70,10 +77,11 @@ export class AgentRuntimeController {
     @Param("actionId") actionId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.rejectAction(
       actionId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -82,10 +90,11 @@ export class AgentRuntimeController {
     @Param("workspaceId") workspaceId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.listChatMessages(
       workspaceId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -95,11 +104,12 @@ export class AgentRuntimeController {
     @Body() body: unknown,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.sendChatMessage(
       workspaceId,
       parseAgentChatMessageBody(body),
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -108,10 +118,11 @@ export class AgentRuntimeController {
     @Param("workspaceId") workspaceId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.listRecommendations(
       workspaceId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -121,11 +132,12 @@ export class AgentRuntimeController {
     @Body() body: unknown,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.createProjectPlanDraft(
       workspaceId,
       parseProjectPlanCreateBody(body),
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -134,10 +146,11 @@ export class AgentRuntimeController {
     @Param("draftId") draftId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.getProjectPlanDraft(
       draftId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -146,10 +159,11 @@ export class AgentRuntimeController {
     @Param("draftId") draftId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.recommendTechStack(
       draftId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -158,10 +172,11 @@ export class AgentRuntimeController {
     @Param("draftId") draftId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.breakdownFeatures(
       draftId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -170,10 +185,11 @@ export class AgentRuntimeController {
     @Param("draftId") draftId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.assignRoles(
       draftId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
   }
 
@@ -182,11 +198,29 @@ export class AgentRuntimeController {
     @Param("draftId") draftId: string,
     @Headers("x-user-id") userId?: string | string[],
     @Headers("x-member-id") memberId?: string | string[],
+    @Headers("cookie") cookieHeader?: string | string[],
   ) {
     return this.agentRuntimeService.approveProjectPlanDraft(
       draftId,
-      toCurrentActor(userId, memberId),
+      this.toCurrentActor(userId, memberId, cookieHeader),
     );
+  }
+
+  private toCurrentActor(
+    userId?: string | string[],
+    memberId?: string | string[],
+    cookieHeader?: string | string[],
+  ): WorkspaceActor {
+    const headerActor = toCurrentActor(userId, memberId);
+    if (headerActor.userId || headerActor.memberId) {
+      return headerActor;
+    }
+
+    const currentUser = this.authService.getCurrentUserFromCookieHeader(
+      normalizeCookieHeader(cookieHeader),
+    );
+
+    return currentUser ? { userId: currentUser.id } : {};
   }
 }
 
@@ -201,4 +235,8 @@ function toCurrentActor(
     ...(resolvedUserId ? { userId: resolvedUserId } : {}),
     ...(resolvedMemberId ? { memberId: resolvedMemberId } : {}),
   };
+}
+
+function normalizeCookieHeader(cookieHeader: string | string[] | undefined) {
+  return Array.isArray(cookieHeader) ? cookieHeader.join("; ") : cookieHeader;
 }

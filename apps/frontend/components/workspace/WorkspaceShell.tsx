@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type React from "react";
+import { useEffect, useState } from "react";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import {
@@ -66,10 +68,14 @@ function workspacePath(workspaceId: string, segment: string) {
   return `${workspaceDashboardHref(workspaceId)}/${segment}`;
 }
 
-function workspaceQueryPath(workspaceId: string, segment: string, view: string) {
-  const params = new URLSearchParams({ view });
+function formatRecordingElapsed(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
 
-  return `${workspacePath(workspaceId, segment)}?${params.toString()}`;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
 }
 
 function disabledNavItem(label: string, badge?: number) {
@@ -134,6 +140,63 @@ function navGroup({
   );
 }
 
+function isPathActive(pathname: string, targetPath: string) {
+  return pathname === targetPath || pathname.startsWith(`${targetPath}/`);
+}
+
+function TopbarRecordingControl() {
+  const [recording, setRecording] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!recording) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      setElapsedSeconds((current) => current + 1);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [recording]);
+
+  function startRecording() {
+    setElapsedSeconds(0);
+    setRecording(true);
+  }
+
+  function endRecording() {
+    setRecording(false);
+  }
+
+  return (
+    <div className="topbar-recording-control">
+      {recording ? (
+        <>
+          <span className="topbar-recording-status" aria-live="polite">
+            <span aria-hidden="true" />
+            <b>REC</b>
+            <code>{formatRecordingElapsed(elapsedSeconds)}</code>
+          </span>
+          <button
+            className="topbar-recording-end"
+            onClick={endRecording}
+            type="button"
+          >
+            녹화 종료
+          </button>
+        </>
+      ) : (
+        <button
+          className="topbar-recording-start"
+          onClick={startRecording}
+          type="button"
+        >
+          녹화 시작
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function WorkspaceSidebar({
   workspaceId,
   active,
@@ -141,9 +204,16 @@ export function WorkspaceSidebar({
   id,
   label = "워크스페이스 탐색",
 }: WorkspaceSidebarProps) {
+  const pathname = usePathname() ?? "";
   const taskGroupActive =
     active === "tasks" || active === "github" || active === "progress";
   const meetingGroupActive = active === "meetings";
+  const meetingVoicePath = workspaceId
+    ? workspacePath(workspaceId, "meetings/voice")
+    : "";
+  const meetingReportsPath = workspaceId
+    ? workspacePath(workspaceId, "meetings/reports")
+    : "";
 
   return (
     <aside id={id} className="sidebar" aria-label={label}>
@@ -185,17 +255,14 @@ export function WorkspaceSidebar({
                 active: meetingGroupActive,
                 children: [
                   navSubLink({
-                    href: workspacePath(workspaceId, "meetings"),
-                    label: "회의",
-                    active: active === "meetings",
+                    href: meetingVoicePath,
+                    label: "음성 회의",
+                    active: isPathActive(pathname, meetingVoicePath),
                   }),
                   navSubLink({
-                    href: workspaceQueryPath(workspaceId, "meetings", "voice"),
-                    label: "음성",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(workspaceId, "meetings", "report"),
+                    href: meetingReportsPath,
                     label: "리포트",
+                    active: isPathActive(pathname, meetingReportsPath),
                   }),
                 ],
               }),
@@ -237,6 +304,7 @@ export function WorkspaceTopbar({
       </div>
       <div className="topbar-actions">
         {children}
+        <TopbarRecordingControl />
         <LogoutButton />
         <CurrentUserAvatar />
       </div>

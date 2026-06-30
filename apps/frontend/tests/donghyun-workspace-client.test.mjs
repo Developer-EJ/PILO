@@ -12,7 +12,15 @@ import {
   createMockCanvasBoardDetail,
   createMockCanvasClient,
 } from "../lib/workspace/canvasClient.mjs";
-import { canvasStorageKey } from "../lib/workspace/canvasStorage.mjs";
+import {
+  CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
+  canvasStorageKey,
+  normalizeCanvasFreeformShapes,
+} from "../lib/workspace/canvasStorage.mjs";
+import {
+  applyTaskAction,
+  createTaskGithubProgressClient,
+} from "../lib/task/taskGithubProgressClient.mjs";
 import {
   resolveWorkspaceEntryDestination,
   workspaceCanvasBoardHref,
@@ -45,11 +53,16 @@ import {
 } from "../lib/workspace/workspaceOnboardingSeed.mjs";
 import {
   buildLocalCanvasMemoProposal,
+  buildLocalTaskDraftProposal,
+  buildWorkspaceAiChatAssistantText,
   buildWorkspaceAiChatFallbackAnswer,
   buildWorkspaceAiChatRequest,
   defaultWorkspaceAiChatAgentMode,
+  extractWorkspaceAiChatRuntimeInfo,
   findCanvasMemoProposal,
+  findWorkspaceTaskActionProposal,
   hasCanvasMemoMutationIntent,
+  hasTaskDraftMutationIntent,
   resolveWorkspaceAiChatAgentMode,
   workspaceAiChatUserMessageFromError,
 } from "../lib/workspace/workspaceAiChat.mjs";
@@ -407,8 +420,16 @@ describe("donghyun workspace client", () => {
 
     assert.equal(workspaceShellSource.includes('label: "기획"'), false);
     assert.equal(workspaceShellSource.includes("Agent 실행"), false);
-    assert.equal(workspaceShellSource.includes('"reports"'), false);
-    assert.equal(workspaceShellSource.includes('"report"'), true);
+    assert.equal(
+      workspaceShellSource.includes('workspacePath(workspaceId, "meetings/voice")'),
+      true,
+    );
+    assert.equal(
+      workspaceShellSource.includes('workspacePath(workspaceId, "meetings/reports")'),
+      true,
+    );
+    assert.equal(workspaceShellSource.includes('new URLSearchParams({ view'), false);
+    assert.equal(workspaceShellSource.includes("TopbarRecordingControl"), true);
     assert.equal(
       workspaceShellSource.includes('workspacePath(workspaceId, "reviews")'),
       true,
@@ -537,6 +558,70 @@ describe("donghyun workspace client", () => {
     assert.equal(localProposal.payload.authorName, "동현");
   });
 
+  it("normalizes Workspace AI chat API metadata and root Canvas actions", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const result = {
+      assistantMessage: {
+        role: "assistant",
+        body: "서버가 만든 AI 답변입니다.",
+      },
+      response: {
+        shortConclusion: "오늘은 캔버스에 리스크를 남기는 것이 좋습니다.",
+        priorityTasks: ["리스크 확인", "담당자 공유"],
+        recommendedNextActions: ["메모 승인 여부를 결정하세요."],
+        fallback: false,
+        usedModel: "gpt-4.1-mini",
+        runtime: {
+          generatedAt: "2026-07-01T09:00:00.000Z",
+          sourceStatus: {
+            meetings: "provided",
+            tasks: "provided",
+          },
+        },
+      },
+      actions: [
+        {
+          id: "action-root-canvas-memo",
+          type: "canvas.memo.create",
+          status: "waiting_confirmation",
+          summary: "캔버스에 리스크 메모를 추가합니다.",
+          payload: {
+            workspaceId,
+            boardId: "board-root-action",
+            title: "오늘 리스크",
+            text: "오늘 리스크를 먼저 확인",
+            position: { x: 180, y: 220 },
+          },
+        },
+      ],
+      run: {
+        tokenUsage: {
+          model: "fallback-model",
+        },
+      },
+    };
+
+    const proposal = findCanvasMemoProposal(result, {
+      workspaceId,
+      boardId: "board-root-action",
+      message: "캔버스에 오늘 리스크를 메모로 남겨줘",
+    });
+    const assistantText = buildWorkspaceAiChatAssistantText(result);
+    const runtimeInfo = extractWorkspaceAiChatRuntimeInfo(result, {
+      mode: "api",
+    });
+
+    assert.equal(proposal.actionId, "action-root-canvas-memo");
+    assert.equal(proposal.source, "api");
+    assert.equal(proposal.payload.text, "오늘 리스크를 먼저 확인");
+    assert.equal(assistantText.includes("우선 처리할 일"), true);
+    assert.equal(assistantText.includes("승인 대기 제안 1개"), true);
+    assert.equal(runtimeInfo.fallback, false);
+    assert.equal(runtimeInfo.usedModel, "gpt-4.1-mini");
+    assert.equal(runtimeInfo.generatedAt, "2026-07-01T09:00:00.000Z");
+    assert.equal(runtimeInfo.sourceStatus.meetings, "provided");
+  });
+
   it("does not treat read-only Workspace AI chat questions as Canvas memo mutations", () => {
     const readOnlyQuestions = [
       "어제 회의록 내용 기준으로 무엇을 먼저 처리하면 좋을까?",
@@ -578,6 +663,90 @@ describe("donghyun workspace client", () => {
     assert.equal(fallbackAnswer.includes("canvas.memo.create"), false);
   });
 
+  it("surfaces Task proposals only for explicit task creation intent", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const result = {
+      run: {
+        actions: [
+          {
+            id: "action-task-draft",
+            type: "task.create.draft",
+            status: "waiting_confirmation",
+            summary: "요청을 Task 초안으로 제안합니다.",
+            payload: {
+              workspaceId,
+              title: "회의 결정사항 follow-up 만들기",
+              description: "회의 결정사항을 작업으로 정리합니다.",
+              priority: "medium",
+            },
+          },
+        ],
+      },
+    };
+
+    assert.equal(
+      findWorkspaceTaskActionProposal(result, {
+        workspaceId,
+        message: "어제 회의록 내용 기준으로 무엇을 먼저 처리하면 좋을까?",
+      }),
+      null,
+    );
+    assert.equal(hasTaskDraftMutationIntent("작업 하나 만들어줘"), true);
+
+    const proposal = findWorkspaceTaskActionProposal(result, {
+      workspaceId,
+      message: "회의 결정사항으로 작업 하나 만들어줘",
+    });
+
+    assert.equal(proposal.type, "task.create.draft");
+    assert.equal(proposal.executable, true);
+    assert.equal(proposal.payload.title, "회의 결정사항 follow-up 만들기");
+    assert.equal(proposal.contractNote.includes("작업 초안"), true);
+  });
+
+  it("builds local Task proposals and applies them through the Task client", async () => {
+    const workspaceId = "workspace-ai-task-proposal";
+    const message =
+      "AI 검수 작업 1782842175757 작업 하나 만들어줘. 설명은 AI 액션 검수용이고 담당자는 Juhyung으로 해줘.";
+    const members = [
+      {
+        memberId: "member-juhyung",
+        name: "Juhyung",
+      },
+    ];
+    const proposal = buildLocalTaskDraftProposal({
+      workspaceId,
+      message,
+      members,
+    });
+
+    assert.equal(hasTaskDraftMutationIntent(message), true);
+    assert.equal(proposal.type, "task.create.draft");
+    assert.equal(proposal.source, "local_fallback");
+    assert.equal(proposal.executable, true);
+    assert.equal(proposal.payload.title, "AI 검수 작업 1782842175757");
+    assert.equal(proposal.payload.description, "AI 액션 검수용");
+    assert.equal(proposal.payload.assigneeMemberId, "member-juhyung");
+
+    const client = createTaskGithubProgressClient({ workspaceId, mode: "mock" });
+    const draft = await applyTaskAction(
+      client,
+      {
+        type: proposal.type,
+        payload: proposal.payload,
+      },
+      { workspaceId },
+    );
+    const approved = await client.approveTaskDraft(draft.id);
+    const tasks = await client.listTasks(workspaceId);
+    const createdTask = tasks.find((task) => task.id === approved.taskId);
+
+    assert.equal(draft.description, "AI 액션 검수용");
+    assert.equal(approved.status, "approved");
+    assert.equal(createdTask.title, "AI 검수 작업 1782842175757");
+    assert.equal(createdTask.assignee.memberId, "member-juhyung");
+  });
+
   it("builds local Canvas memo proposals only for explicit memo mutation intent", () => {
     const workspaceId = mockWorkspaces[0].id;
     const readOnlyQuestion = "캔버스에서 오늘 우선순위를 알려줘";
@@ -600,6 +769,22 @@ describe("donghyun workspace client", () => {
     assert.equal(proposal.source, "local_fallback");
     assert.equal(proposal.payload.text, mutationRequest);
     assert.equal(proposal.payload.authorName, "동현");
+
+    const quotedProposal = buildLocalCanvasMemoProposal({
+      workspaceId,
+      boardId: "board-ai-chat",
+      message:
+        "프로젝트 맵 캔버스에 메모 컴포넌트로 '동현: 오늘 회의 늦을 것 같습니다'라고 남겨줘",
+    });
+
+    assert.equal(
+      quotedProposal.payload.text,
+      "동현: 오늘 회의 늦을 것 같습니다",
+    );
+    assert.equal(
+      quotedProposal.payload.title,
+      "동현: 오늘 회의 늦을 것 같습니다",
+    );
   });
 
   it("keeps read-only Workspace AI chat API failures as fallback answers without action proposals", () => {
@@ -698,6 +883,27 @@ describe("donghyun workspace client", () => {
     try {
       const workspaceId = "workspace-ai-canvas-memo";
       const client = createMockCanvasClient();
+      const defaultBoardId = createMockCanvasBoardDetail(workspaceId).id;
+
+      globalThis.localStorage.setItem(
+        canvasStorageKey(defaultBoardId, "filter-setting"),
+        JSON.stringify({
+          enabledEntityTypes: ["task"],
+          assigneeMemberId: null,
+          showDelayedOnly: true,
+          showRiskOnly: true,
+          filters: {},
+        }),
+      );
+      globalThis.localStorage.setItem(
+        canvasStorageKey(defaultBoardId, "view-setting"),
+        JSON.stringify({
+          zoom: 2,
+          viewportX: 2000,
+          viewportY: 2000,
+        }),
+      );
+
       const result = await createCanvasMemo(
         {
           workspaceId,
@@ -727,6 +933,39 @@ describe("donghyun workspace client", () => {
         board.filterSetting.enabledEntityTypes.includes("memo"),
         true,
       );
+      const storedFilterSetting = JSON.parse(
+        storage.get(canvasStorageKey(result.boardId, "filter-setting")),
+      );
+
+      assert.equal(
+        storedFilterSetting.enabledEntityTypes.includes("memo"),
+        true,
+      );
+      assert.equal(storedFilterSetting.showDelayedOnly, false);
+      assert.equal(storedFilterSetting.showRiskOnly, false);
+      assert.equal(
+        storage.has(canvasStorageKey(result.boardId, "view-setting")),
+        false,
+      );
+
+      storage.set(
+        canvasStorageKey(workspaceId, "mock-board-list"),
+        JSON.stringify([createMockCanvasBoardDetail(workspaceId)]),
+      );
+
+      const reloadedBoard = await createMockCanvasClient().getBoardDetail(
+        result.boardId,
+        { workspaceId },
+      );
+      const reloadedMemoShape = reloadedBoard.shapes.find(
+        (shape) => shape.id === result.shape.id,
+      );
+
+      assert.equal(
+        reloadedMemoShape.body,
+        "AI가 승인 후 만든 캔버스 메모",
+      );
+      assert.equal(reloadedMemoShape.entityType, "memo");
     } finally {
       if (previousLocalStorage === undefined) {
         delete globalThis.localStorage;

@@ -11,6 +11,8 @@ export const CANVAS_FILTER_ENTITY_TYPES = [
   "risk",
 ];
 
+export const CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE = "freeform-shapes";
+
 export function canvasStorageKey(boardId, scope) {
   return `pilo:canvas:${boardId}:${scope}`;
 }
@@ -148,6 +150,19 @@ export function normalizeCanvasFilterSetting(value, fallback) {
     showDelayedOnly: source.showDelayedOnly === true,
     showRiskOnly: source.showRiskOnly === true,
     filters: isRecord(source.filters) ? source.filters : {},
+  };
+}
+
+export function ensureCanvasMemoVisibleFilterSetting(value, fallback) {
+  const source = normalizeCanvasFilterSetting(value, fallback);
+
+  return {
+    ...source,
+    enabledEntityTypes: Array.from(
+      new Set([...source.enabledEntityTypes, "memo"]),
+    ),
+    showDelayedOnly: false,
+    showRiskOnly: false,
   };
 }
 

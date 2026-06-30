@@ -4,7 +4,10 @@ import {
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
 import {
+  CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
   deleteCanvasStorage,
+  ensureCanvasMemoVisibleFilterSetting,
+  normalizeCanvasFreeformShapes,
   readCanvasStorage,
   writeCanvasStorage,
 } from "./canvasStorage.mjs";
@@ -14,14 +17,33 @@ import { workspaceDashboardFixture } from "./workspaceDashboardFixture.mjs";
 const DEFAULT_CANVAS_MODE = "mock";
 const defaultCanvasBoardId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const mockBoardListStorageScope = "mock-board-list";
+const mockAiMemoShapesStorageScope = "mock-ai-memo-shapes";
 const mockDeletedBoardIdsStorageScope = "mock-deleted-board-ids";
 const canvasBoardLocalStorageScopes = [
   "shape-state",
   "filter-setting",
   "view-setting",
-  "freeform-shapes",
+  CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
 ];
 const memoShapeColor = "#f4c950";
+const stickyNoteColors = new Set([
+  "butter",
+  "lemon",
+  "peach",
+  "coral",
+  "pink",
+  "magenta",
+  "sky",
+  "violet",
+  "cyan",
+  "blue",
+  "mint",
+  "green",
+  "lime",
+  "grass",
+  "white",
+  "black",
+]);
 
 const fallbackPositions = [
   { x: 120, y: 140 },
@@ -205,6 +227,60 @@ function upsertMockBoard(workspaceId, board) {
   writeMockBoards(workspaceId, nextBoards);
 }
 
+function readMockAiMemoShapes(boardId) {
+  const shapes = readCanvasStorage(mockAiMemoShapesStorageScope, boardId);
+
+  return Array.isArray(shapes) ? shapes.filter(isRecord) : [];
+}
+
+function writeMockAiMemoShapes(boardId, shapes) {
+  return writeCanvasStorage(mockAiMemoShapesStorageScope, boardId, shapes);
+}
+
+function upsertMockAiMemoShape(boardId, shape) {
+  const shapes = readMockAiMemoShapes(boardId);
+  const nextShapes = [shape, ...shapes.filter((item) => item.id !== shape.id)];
+
+  return writeMockAiMemoShapes(boardId, nextShapes);
+}
+
+function mergeMockAiMemoShapes(board) {
+  if (!board?.id || !Array.isArray(board.shapes)) return board;
+
+  const memoShapes = readMockAiMemoShapes(board.id);
+  if (!memoShapes.length) return board;
+
+  const existingShapeIds = new Set(board.shapes.map((shape) => shape.id));
+  const nextMemoShapes = memoShapes.filter(
+    (shape) => shape.id && !existingShapeIds.has(shape.id),
+  );
+
+  if (!nextMemoShapes.length) return board;
+
+  return {
+    ...board,
+    shapes: [...board.shapes, ...nextMemoShapes],
+    shapeCount: board.shapes.length + nextMemoShapes.length,
+    filterSetting: ensureCanvasMemoVisibleFilterSetting(
+      board.filterSetting,
+      board.filterSetting,
+    ),
+  };
+}
+
+function persistMemoVisibleFilterSetting(board) {
+  if (!board?.id || !board?.filterSetting) return;
+
+  const storedFilterSetting = readCanvasStorage("filter-setting", board.id);
+  const nextFilterSetting = ensureCanvasMemoVisibleFilterSetting(
+    storedFilterSetting,
+    board.filterSetting,
+  );
+
+  writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
+  deleteCanvasStorage("view-setting", board.id);
+}
+
 function readMockDeletedBoardIds(workspaceId) {
   const boardIds = readCanvasStorage(mockDeletedBoardIdsStorageScope, workspaceId);
 
@@ -221,6 +297,7 @@ export function clearCanvasBoardLocalStorage(boardId) {
   for (const scope of canvasBoardLocalStorageScopes) {
     deleteCanvasStorage(scope, boardId);
   }
+  deleteCanvasStorage(mockAiMemoShapesStorageScope, boardId);
 }
 
 function createMockBlankBoard(workspaceId, title) {
@@ -297,6 +374,57 @@ function normalizeMemoPosition(value, fallback) {
     Number.isFinite(value.y)
     ? { x: value.x, y: value.y }
     : fallback;
+}
+
+function normalizeStickyNoteColor(value) {
+  return typeof value === "string" && stickyNoteColors.has(value)
+    ? value
+    : "butter";
+}
+
+function createCanvasFreeformShapeId(seed) {
+  const safeSeed = String(seed ?? createMemoId())
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 72);
+
+  return `shape:pilo-sticky-ai-${safeSeed || Date.now()}`;
+}
+
+function buildCanvasMemoFreeformShape(memoShapeBody, shape) {
+  const width = 156;
+  const height = 148;
+
+  return {
+    id: createCanvasFreeformShapeId(shape?.id ?? memoShapeBody.entityId),
+    type: "pilo-sticky-note",
+    x: memoShapeBody.position.x - width / 2,
+    y: memoShapeBody.position.y - height / 2,
+    props: {
+      w: width,
+      h: height,
+      color: normalizeStickyNoteColor(memoShapeBody.color),
+      text: memoShapeBody.body,
+    },
+  };
+}
+
+function upsertCanvasMemoFreeformShape(boardId, freeformShape) {
+  const currentShapes = normalizeCanvasFreeformShapes(
+    readCanvasStorage(CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE, boardId),
+  );
+  const nextShapes = [
+    ...currentShapes.filter((shape) => shape.id !== freeformShape.id),
+    freeformShape,
+  ];
+
+  writeCanvasStorage(
+    CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
+    boardId,
+    nextShapes,
+  );
+
+  return freeformShape;
 }
 
 function buildCanvasMemoShapeBody(input, board) {
@@ -532,12 +660,17 @@ export async function createCanvasMemo(
     id: positionedShape?.id ?? createdShape.id,
     position: positionedShape?.position ?? memoShapeBody.position,
   };
+  const freeformShape = upsertCanvasMemoFreeformShape(
+    board.id,
+    buildCanvasMemoFreeformShape(memoShapeBody, shape),
+  );
 
   return {
     workspaceId,
     boardId: board.id,
     boardTitle: board.title,
     shape,
+    freeformShape,
     href: workspaceCanvasBoardHref(workspaceId, board.id),
   };
 }
@@ -551,7 +684,9 @@ export function createMockCanvasClient() {
       const storedDefaultBoard = storedBoards.find(
         (board) => board.id === generatedDefaultBoard.id,
       );
-      const defaultBoard = storedDefaultBoard ?? generatedDefaultBoard;
+      const defaultBoard = mergeMockAiMemoShapes(
+        storedDefaultBoard ?? generatedDefaultBoard,
+      );
       const defaultBoards = deletedBoardIds.has(defaultBoard.id)
         ? []
         : [toBoardSummary(defaultBoard)];
@@ -561,6 +696,7 @@ export function createMockCanvasClient() {
         ...storedBoards
           .filter((board) => board.id !== defaultBoard.id)
           .filter((board) => !deletedBoardIds.has(board.id))
+          .map(mergeMockAiMemoShapes)
           .map(toBoardSummary),
       ];
     },
@@ -616,11 +752,13 @@ export function createMockCanvasClient() {
       );
 
       if (storedBoard) {
-        return normalizeCanvasBoardDetail(storedBoard, { workspaceId });
+        return mergeMockAiMemoShapes(
+          normalizeCanvasBoardDetail(storedBoard, { workspaceId }),
+        );
       }
 
       if (!boardId || boardId === defaultBoard.id) {
-        return defaultBoard;
+        return mergeMockAiMemoShapes(defaultBoard);
       }
 
       return {
@@ -654,15 +792,28 @@ export function createMockCanvasClient() {
         shapes: [...board.shapes, shape],
         shapeCount: board.shapes.length + 1,
         updatedAt: now,
-        filterSetting: {
-          ...board.filterSetting,
-          enabledEntityTypes: Array.from(
-            new Set([...board.filterSetting.enabledEntityTypes, shape.entityType]),
-          ),
-        },
+        filterSetting:
+          shape.entityType === "memo"
+            ? ensureCanvasMemoVisibleFilterSetting(
+                board.filterSetting,
+                board.filterSetting,
+              )
+            : {
+                ...board.filterSetting,
+                enabledEntityTypes: Array.from(
+                  new Set([
+                    ...board.filterSetting.enabledEntityTypes,
+                    shape.entityType,
+                  ]),
+                ),
+              },
       };
 
       upsertMockBoard(nextBoard.workspaceId, nextBoard);
+      if (shape.entityType === "memo") {
+        upsertMockAiMemoShape(nextBoard.id, shape);
+        persistMemoVisibleFilterSetting(nextBoard);
+      }
 
       return shape;
     },
@@ -708,6 +859,15 @@ export function createMockCanvasClient() {
         };
 
         upsertMockBoard(workspaceId, nextBoard);
+        const memoShapes = readMockAiMemoShapes(board.id);
+        if (memoShapes.some((shape) => shape.id === shapeId)) {
+          writeMockAiMemoShapes(
+            board.id,
+            memoShapes.map((shape) =>
+              shape.id === shapeId ? { ...shape, position: body } : shape,
+            ),
+          );
+        }
         break;
       }
 

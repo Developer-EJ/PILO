@@ -991,7 +991,7 @@ async function tryBuildAgentChatWithOpenAI(input: {
           {
             role: "system",
             content:
-              "You are PILO's workspace AI agent. Return one raw compact JSON object only. Do not use Markdown or code fences. Interpret relative dates in Asia/Seoul. Never execute user changes directly; represent changes only as actionProposals requiring confirmation. For read-only lookup questions, return actionProposals as an empty array. Only create a canvas.memo.create proposal when the user clearly asks to add/create/write/record a memo on the canvas or project map.",
+              "You are PILO's workspace AI agent. Return one raw compact JSON object only. Do not use Markdown or code fences. Interpret relative dates in Asia/Seoul. Never execute user changes directly; represent changes only as actionProposals requiring confirmation. For read-only lookup questions, return actionProposals as an empty array. Only create canvas.memo.create when the user clearly asks to add/create/write/record a memo on the canvas or project map. For task creation, use task.create.draft. For task completion/status changes, use task.update.status. Do not invent task field update actions; report them as recommendedNextActions until the Task owner contract exists.",
           },
           {
             role: "user",
@@ -1010,7 +1010,7 @@ async function tryBuildAgentChatWithOpenAI(input: {
                 recommendedNextActions: ["string"],
                 actionProposals: [
                   {
-                    type: "canvas.memo.create|task.create.draft",
+                    type: "canvas.memo.create|task.create.draft|task.update.status",
                     summary: "string",
                     payload: "object",
                   },
@@ -1139,6 +1139,7 @@ function buildAgentChatFallbackResponse(input: {
   const actionProposals = inferAgentChatActionProposals(
     input.workspaceId,
     input.message,
+    input.contextRefs,
   );
   const evidenceFromRefs = input.contextRefs.slice(0, 3).map((ref) => ({
     source: normalizeEvidenceSource(ref.type),
@@ -1287,6 +1288,7 @@ function sanitizeAgentActionProposals(
 function inferAgentChatActionProposals(
   workspaceId: string,
   message: string,
+  contextRefs: AgentContextRef[] = [],
 ): AgentActionProposal[] {
   const proposals: AgentActionProposal[] = [];
   if (hasCanvasMemoMutationIntent(message)) {
@@ -1296,6 +1298,7 @@ function inferAgentChatActionProposals(
       "프로젝트 맵 캔버스에 메모를 추가합니다.",
       {
         workspaceId,
+        boardId: findContextRefId(contextRefs, /canvas.*board|board/i),
         boardHint: "project-map",
         text: extractQuotedMemoText(message) ?? message,
         shapeType: "memo",
@@ -1305,18 +1308,38 @@ function inferAgentChatActionProposals(
     if (proposal) proposals.push(proposal);
   }
 
+  if (hasTaskStatusMutationIntent(message)) {
+    const status = readRequestedTaskStatus(message);
+    const proposal = buildActionProposal(
+      "task.update.status",
+      workspaceId,
+      `Task 상태를 ${status} 상태로 변경하도록 제안합니다.`,
+      {
+        workspaceId,
+        taskId: findContextRefId(contextRefs, /^task$/i),
+        taskHint: extractQuotedMemoText(message) ?? summarizeActionTitle(message),
+        status,
+      },
+    );
+    if (proposal) proposals.push(proposal);
+    return proposals;
+  }
+
   if (hasTaskDraftMutationIntent(message)) {
+    const taskDraft = extractTaskDraftFields(message);
     const proposal = buildActionProposal(
       "task.create.draft",
       workspaceId,
-      "요청 내용을 Task 초안으로 제안합니다.",
+      "새 작업을 생성합니다.",
       {
         workspaceId,
-        sourceType: "agent_recommendation",
+        sourceType: "planning_feature",
         sourceId: randomUUID(),
-        title: summarizeActionTitle(message),
-        description: message,
+        title: taskDraft.title,
+        description: taskDraft.description ?? message,
+        assigneeName: taskDraft.assigneeName,
         assigneeMemberId: null,
+        status: "todo",
         priority: "medium",
         dueDate: null,
       },
@@ -1335,9 +1358,24 @@ function hasCanvasMemoMutationIntent(message: string) {
 }
 
 function hasTaskDraftMutationIntent(message: string) {
-  const hasTaskTarget = /(task|할\s*일|작업)/i.test(message);
+  const hasTaskTarget = /(task|할\s*일|작업|업무)/i.test(message);
   const hasDraftTarget = /(초안|draft)/i.test(message);
-  return (hasTaskTarget || hasDraftTarget) && hasMutationVerb(message);
+  const hasCreateVerb =
+    /(추가|생성|만들|만들어|등록|작성|create|add|make|write)/i.test(message);
+  return (hasTaskTarget || hasDraftTarget) && hasCreateVerb;
+}
+
+function hasTaskStatusMutationIntent(message: string) {
+  const hasTaskTarget = /(task|할\s*일|작업)/i.test(message);
+  const hasStatusTarget =
+    /(완료|끝났|끝내|done|complete|막힘|막힌|blocked|진행\s*중|in[-\s]?progress|검토|review)/i.test(
+      message,
+    );
+  const hasStatusVerb =
+    /(처리|표시|변경|바꿔|업데이트|전환|완료|끝내|mark|update|change|complete)/i.test(
+      message,
+    );
+  return hasTaskTarget && hasStatusTarget && hasStatusVerb;
 }
 
 function hasMutationVerb(message: string) {
@@ -1354,6 +1392,101 @@ function extractQuotedMemoText(message: string) {
     message.match(/‘([^’]{1,500})’/)?.[1]?.trim() ??
     null
   );
+}
+
+function extractTaskDraftFields(message: string) {
+  const description = extractKoreanClause(message, /설명(?:은|:)?\s*/i, [
+    /담당자는?/i,
+    /마감(?:은|일은|:)?/i,
+    /우선순위(?:는|:)?/i,
+  ]);
+  const assigneeName = extractKoreanClause(message, /담당자는?\s*/i, [
+    /설명(?:은|:)?/i,
+    /마감(?:은|일은|:)?/i,
+    /우선순위(?:는|:)?/i,
+  ])?.replace(/(?:으로|로)?\s*(?:해줘|해주세요|배정해줘|맡겨줘)\.?$/i, "")
+    .trim();
+  const title =
+    extractTaskTitle(message) ??
+    summarizeActionTitle(
+      message
+        .replace(/설명(?:은|:)?\s*.+$/i, "")
+        .replace(/담당자는?\s*.+$/i, ""),
+    );
+
+  return {
+    title,
+    description,
+    assigneeName: assigneeName || null,
+  };
+}
+
+function extractTaskTitle(message: string) {
+  const patterns = [
+    /(.+?)\s*(?:작업|업무|할\s*일)\s*(?:하나|1개|한\s*개)?\s*(?:만들어줘|만들어\s*줘|생성해줘|생성|추가해줘|추가|등록해줘|등록)/i,
+    /(.+?)\s*(?:task)\s*(?:하나|1개|한\s*개)?\s*(?:만들어줘|만들어\s*줘|생성해줘|생성|추가해줘|추가|등록해줘|등록|create|add|make)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    const title = cleanTaskTitle(match?.[1]);
+    if (title) return title;
+  }
+
+  return null;
+}
+
+function extractKoreanClause(
+  message: string,
+  prefix: RegExp,
+  nextPrefixes: RegExp[],
+) {
+  const startMatch = prefix.exec(message);
+  if (!startMatch || startMatch.index === undefined) return null;
+
+  const startIndex = startMatch.index + startMatch[0].length;
+  let endIndex = message.length;
+  for (const nextPrefix of nextPrefixes) {
+    const searchArea = message.slice(startIndex);
+    const nextMatch = nextPrefix.exec(searchArea);
+    if (nextMatch?.index !== undefined) {
+      endIndex = Math.min(endIndex, startIndex + nextMatch.index);
+    }
+  }
+
+  return cleanTaskClause(message.slice(startIndex, endIndex));
+}
+
+function cleanTaskTitle(value: unknown) {
+  return cleanTaskClause(value)
+    ?.replace(/^(그리고|그럼|그리고\s+)?/i, "")
+    .replace(/(?:새|신규)\s*$/i, "")
+    .trim() ?? null;
+}
+
+function cleanTaskClause(value: unknown) {
+  const text = cleanText(value);
+  if (!text) return null;
+  const trimmed = text
+    .replace(/[.。]+$/g, "")
+    .replace(/(?:이고|이며|그리고|,)\s*$/g, "")
+    .trim();
+  return trimmed || null;
+}
+
+function findContextRefId(contextRefs: AgentContextRef[], pattern: RegExp) {
+  return (
+    contextRefs.find((ref) => pattern.test(ref.type))?.id ??
+    null
+  );
+}
+
+function readRequestedTaskStatus(message: string) {
+  if (/(완료|끝났|끝내|done|complete)/i.test(message)) return "done";
+  if (/(막힘|막힌|blocked)/i.test(message)) return "blocked";
+  if (/(검토|review)/i.test(message)) return "in_review";
+  if (/(진행\s*중|in[-\s]?progress)/i.test(message)) return "in_progress";
+  return "in_progress";
 }
 
 function buildActionProposal(
@@ -1391,13 +1524,33 @@ function buildActionProposal(
       summary,
       payload: {
         workspaceId,
-        sourceType: "agent_recommendation",
+        sourceType: "planning_feature",
         sourceId: cleanText(payload.sourceId) ?? randomUUID(),
         title: cleanText(payload.title) ?? summary,
         description: cleanText(payload.description) ?? "",
+        assigneeName: cleanText(payload.assigneeName),
         assigneeMemberId: cleanText(payload.assigneeMemberId),
+        status: parseTaskStatus(payload.status) ?? "todo",
         priority: parsePriority(payload.priority),
         dueDate: cleanText(payload.dueDate),
+      },
+    };
+  }
+
+  if (type === "task.update.status") {
+    return {
+      type,
+      source: "task",
+      requiresConfirmation: true,
+      summary,
+      payload: {
+        workspaceId,
+        taskId: cleanText(payload.taskId),
+        taskHint:
+          cleanText(payload.taskHint) ??
+          cleanText(payload.title) ??
+          cleanText(payload.description),
+        status: parseTaskStatus(payload.status) ?? "in_progress",
       },
     };
   }
@@ -1498,7 +1651,9 @@ function normalizeEvidenceSource(value: unknown): AgentChatEvidenceSource {
 }
 
 function parseAgentActionType(value: unknown): AgentActionType | null {
-  return value === "canvas.memo.create" || value === "task.create.draft"
+  return value === "canvas.memo.create" ||
+    value === "task.create.draft" ||
+    value === "task.update.status"
     ? value
     : null;
 }
@@ -1509,6 +1664,9 @@ function defaultActionSummary(type: AgentActionType) {
   }
   if (type === "task.create.draft") {
     return "요청 내용을 Task 초안으로 제안합니다.";
+  }
+  if (type === "task.update.status") {
+    return "Task 상태 변경을 제안합니다.";
   }
   return "사용자 승인이 필요한 action proposal입니다.";
 }
@@ -1748,6 +1906,19 @@ function parsePriority(value: unknown): AgentOnboardingTaskCandidate["priority"]
     : "medium";
 }
 
+function parseTaskStatus(value: unknown) {
+  if (
+    value === "todo" ||
+    value === "in_progress" ||
+    value === "in_review" ||
+    value === "done" ||
+    value === "blocked"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function cleanText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -1812,7 +1983,7 @@ function generateActions(input: {
         source: input.source,
         payload: {
           workspaceId: input.workspaceId,
-          sourceType: "agent_recommendation",
+          sourceType: "planning_feature",
           sourceId: randomUUID(),
           title,
           description: `${message} 목표를 위해 ${index + 1}번째로 처리할 작업입니다.`,
@@ -1879,6 +2050,9 @@ function recommendationTitle(action: AgentAction): string {
   if (action.type === "canvas.memo.create") {
     return "프로젝트 맵 메모 추가";
   }
+  if (action.type === "task.update.status") {
+    return "Task 상태 변경";
+  }
   if (action.type === "planning.approve") {
     return "프로젝트 계획 승인";
   }
@@ -1894,6 +2068,9 @@ function recommendationSummary(action: AgentAction): string {
   }
   if (action.type === "task.create.draft") {
     return "승인하면 Task owner API로 넘길 수 있는 TaskCreateDraft payload입니다.";
+  }
+  if (action.type === "task.update.status") {
+    return "승인하면 Task owner API로 넘길 수 있는 TaskStatusUpdateAction payload입니다.";
   }
   if (action.type === "planning.approve") {
     return "계획 초안을 확정하고 Task/Milestone owner 실행을 대기 상태로 둡니다.";

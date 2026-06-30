@@ -12,6 +12,9 @@ import {
 import {
   applyCanvasShapeState,
   CANVAS_FILTER_ENTITY_TYPES,
+  CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
+  deleteCanvasStorage,
+  ensureCanvasMemoVisibleFilterSetting,
   filterCanvasBoard,
   normalizeCanvasFreeformShapes,
   normalizeCanvasFilterSetting,
@@ -100,8 +103,6 @@ type CanvasBoardState = {
   source: "api" | "fixture";
   status: "loading" | "ready" | "fallback";
 };
-
-const LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE = "freeform-shapes";
 
 const canvasFilterLabels: Record<string, string> = {
   task: "작업",
@@ -722,7 +723,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     );
     const storedViewSetting = readCanvasStorage("view-setting", board.id);
     const storedFreeformShapes = normalizeCanvasFreeformShapes(
-      readCanvasStorage(LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE, board.id),
+      readCanvasStorage(CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE, board.id),
     ) as PiloCanvasFreeformShape[];
 
     queueMicrotask(() => {
@@ -790,7 +791,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         // Freeform tldraw shapes are MVP local-only UI state, not Canvas API shapes.
         writeCanvasStorage(
-          LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE,
+          CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
           board.id,
           nextFreeformShapes,
         );
@@ -954,6 +955,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   function handleAiMemoCreated(result: {
     boardId: string;
     shape: CanvasEntity;
+    freeformShape?: {
+      id: string;
+      type: string;
+      x: number;
+      y: number;
+      props: Record<string, unknown>;
+    } | null;
   }) {
     if (!result?.shape || result.boardId !== board.id) return;
 
@@ -977,18 +985,59 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           shapes: [...currentBoardState.board.shapes, result.shape],
           shapeCount: currentBoardState.board.shapes.length + 1,
           updatedAt: new Date().toISOString(),
-          filterSetting: {
-            ...currentBoardState.board.filterSetting,
-            enabledEntityTypes: Array.from(
-              new Set([
-                ...currentBoardState.board.filterSetting.enabledEntityTypes,
-                result.shape.entityType,
-              ]),
-            ),
-          },
+          filterSetting:
+            result.shape.entityType === "memo"
+              ? ensureCanvasMemoVisibleFilterSetting(
+                  currentBoardState.board.filterSetting,
+                  currentBoardState.board.filterSetting,
+                )
+              : {
+                  ...currentBoardState.board.filterSetting,
+                  enabledEntityTypes: Array.from(
+                    new Set([
+                      ...currentBoardState.board.filterSetting.enabledEntityTypes,
+                      result.shape.entityType,
+                    ]),
+                  ),
+                },
         },
       };
     });
+    if (result.shape.entityType === "memo") {
+      const nextFilterSetting = ensureCanvasMemoVisibleFilterSetting(
+        activeFilterSetting,
+        board.filterSetting,
+      );
+      setFilterSetting(nextFilterSetting);
+      writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
+      deleteCanvasStorage("view-setting", board.id);
+      setHasStoredViewSetting(false);
+    }
+    if (result.freeformShape) {
+      setFreeformShapes((currentFreeformShapes) => {
+        if (
+          currentFreeformShapes.some(
+            (shape) => shape.id === result.freeformShape?.id,
+          )
+        ) {
+          return currentFreeformShapes;
+        }
+
+        const nextFreeformShapes = [
+          ...currentFreeformShapes,
+          result.freeformShape as PiloCanvasFreeformShape,
+        ];
+
+        writeCanvasStorage(
+          CANVAS_FREEFORM_SHAPES_STORAGE_SCOPE,
+          board.id,
+          nextFreeformShapes,
+        );
+
+        return nextFreeformShapes;
+      });
+      setCanvasHydrationVersion((version) => version + 1);
+    }
     setCanvasSyncMessage(
       shouldSyncCanvasApi ? "AI 메모 저장됨" : "로컬 AI 메모 추가됨",
     );

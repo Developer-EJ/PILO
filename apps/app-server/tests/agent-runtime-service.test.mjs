@@ -286,6 +286,87 @@ describe("AgentRuntimeService", () => {
     }
   });
 
+  it("creates Task owner proposals for task creation and status changes", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    const { service } = createService();
+
+    try {
+      const createResult = await service.sendChatMessage(
+        "workspace-agent-runtime",
+        {
+          message: "로그인 QA 확인 작업을 만들어줘",
+          workflowType: "orchestrator.run",
+          contextRefs: [{ type: "workspace", id: "workspace-agent-runtime" }],
+          currentDateKst: "2026-07-01",
+        },
+        { memberId: "member-saein" },
+      );
+      const createAction = createResult.run.actions[0];
+
+      assert.equal(createAction.type, "task.create.draft");
+      assert.equal(createAction.source, "task");
+      assert.equal(createAction.requiresConfirmation, true);
+      assert.equal(createAction.status, "waiting_confirmation");
+      assert.equal(createAction.executedAt, null);
+      assert.equal(createAction.payload.workspaceId, "workspace-agent-runtime");
+      assert.equal(createAction.payload.sourceType, "planning_feature");
+      assert.equal(typeof createAction.payload.sourceId, "string");
+      assert.equal(createAction.payload.priority, "medium");
+      assert.equal(createAction.payload.status, "todo");
+
+      const reproducedResult = await service.sendChatMessage(
+        "workspace-agent-runtime",
+        {
+          message:
+            "AI 검수 작업 1782842175757 작업 하나 만들어줘. 설명은 AI 액션 검수용이고 담당자는 Juhyung으로 해줘.",
+          workflowType: "orchestrator.run",
+          contextRefs: [{ type: "workspace", id: "workspace-agent-runtime" }],
+          currentDateKst: "2026-07-01",
+        },
+        { memberId: "member-saein" },
+      );
+      const reproducedAction = reproducedResult.run.actions[0];
+
+      assert.equal(reproducedAction.type, "task.create.draft");
+      assert.equal(reproducedAction.requiresConfirmation, true);
+      assert.equal(reproducedAction.status, "waiting_confirmation");
+      assert.equal(reproducedAction.payload.title, "AI 검수 작업 1782842175757");
+      assert.equal(reproducedAction.payload.description, "AI 액션 검수용");
+      assert.equal(reproducedAction.payload.assigneeName, "Juhyung");
+      assert.equal(reproducedAction.payload.status, "todo");
+      assert.equal(reproducedResult.run.pendingActionCount, 1);
+
+      const statusResult = await service.sendChatMessage(
+        "workspace-agent-runtime",
+        {
+          message: "로그인 QA 확인 작업을 완료 처리해줘",
+          workflowType: "orchestrator.run",
+          contextRefs: [{ type: "task", id: "task-login-qa" }],
+          currentDateKst: "2026-07-01",
+        },
+        { memberId: "member-saein" },
+      );
+      const statusAction = statusResult.run.actions[0];
+
+      assert.equal(statusAction.type, "task.update.status");
+      assert.equal(statusAction.source, "task");
+      assert.equal(statusAction.requiresConfirmation, true);
+      assert.equal(statusAction.status, "waiting_confirmation");
+      assert.equal(statusAction.executedAt, null);
+      assert.equal(statusAction.payload.workspaceId, "workspace-agent-runtime");
+      assert.equal(statusAction.payload.taskId, "task-login-qa");
+      assert.equal(statusAction.payload.status, "done");
+      assert.equal(statusResult.run.actions.length, 1);
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
+
   it("uses raw JSON OpenAI workspace chat responses without executing actions", async () => {
     const originalApiKey = process.env.OPENAI_API_KEY;
     const originalModel = process.env.PILO_AGENT_CHAT_MODEL;
@@ -321,6 +402,15 @@ describe("AgentRuntimeService", () => {
                 position: { x: 240, y: 180 },
               },
             },
+            {
+              type: "task.update.status",
+              summary: "회의 후속 작업을 완료 처리합니다.",
+              payload: {
+                workspaceId: "workspace-agent-runtime",
+                taskId: "task-follow-up",
+                status: "done",
+              },
+            },
           ],
         }),
       });
@@ -345,6 +435,9 @@ describe("AgentRuntimeService", () => {
       assert.equal(result.run.actions[0].type, "canvas.memo.create");
       assert.equal(result.run.actions[0].status, "waiting_confirmation");
       assert.equal(result.run.actions[0].executedAt, null);
+      assert.equal(result.run.actions[1].type, "task.update.status");
+      assert.equal(result.run.actions[1].payload.taskId, "task-follow-up");
+      assert.equal(result.run.actions[1].payload.status, "done");
       const requestBody = JSON.parse(requests[0].init.body);
       assert.equal(
         requestBody.input[0].content.includes("raw compact JSON object only"),

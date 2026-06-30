@@ -431,8 +431,8 @@ export function ReviewNodeWorkspace({
 
           {warnings.length ? (
             <div className={styles.noticeList} aria-label="리뷰 안내">
-              {warnings.slice(-3).map((warning) => (
-                <p key={warning}>{warning}</p>
+              {warnings.slice(-3).map((warning, index) => (
+                <p key={`${warning}-${index}`}>{warning}</p>
               ))}
             </div>
           ) : null}
@@ -816,8 +816,8 @@ export function ReviewNodeWorkspace({
                 aria-label="리뷰 안내"
               >
                 <span className={styles.eyebrow}>안내</span>
-                {warnings.slice(-3).map((warning) => (
-                  <p key={warning}>{warning}</p>
+                {warnings.slice(-3).map((warning, index) => (
+                  <p key={`${warning}-${index}`}>{warning}</p>
                 ))}
               </section>
             ) : null}

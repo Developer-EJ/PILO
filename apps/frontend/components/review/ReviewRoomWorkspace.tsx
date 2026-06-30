@@ -164,6 +164,28 @@ function unwrapItems<T>(response: T[] | ReviewSourceResponse<T>): {
   };
 }
 
+function dedupeWarnings(messages: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const message of messages) {
+    const normalized = message.trim();
+
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    result.push(message);
+  }
+
+  return result;
+}
+
+function appendWarning(current: string[], warning: string) {
+  return dedupeWarnings([...current, warning]);
+}
+
 function normalizePullRequest(
   pullRequest: ReviewPullRequestSummary,
 ): ReviewSession["pullRequest"] {
@@ -354,15 +376,17 @@ export function ReviewRoomWorkspace({
 
         if (!cancelled) {
           setPullRequests(nextPullRequests.items);
-          setWarnings([
-            ...(reviewMode === "api"
-              ? []
-              : ["Mock Review client로 PR 리뷰 흐름을 체험합니다."]),
-            ...nextPullRequests.warnings,
-            ...(nextPullRequests.items.length
-              ? []
-              : ["불러온 PR이 없어 fallback PR fixture를 표시합니다."]),
-          ]);
+          setWarnings(
+            dedupeWarnings([
+              ...(reviewMode === "api"
+                ? []
+                : ["Mock Review client로 PR 리뷰 흐름을 체험합니다."]),
+              ...nextPullRequests.warnings,
+              ...(nextPullRequests.items.length
+                ? []
+                : ["불러온 PR이 없어 fallback PR fixture를 표시합니다."]),
+            ]),
+          );
           setStatus("selecting");
         }
       } catch (error) {
@@ -372,10 +396,12 @@ export function ReviewRoomWorkspace({
 
         if (!cancelled) {
           setPullRequests(fallbackPullRequests.items);
-          setWarnings([
-            "Review/GitHub PR 목록 API가 없어 PullRequestSummary fixture로 대체했습니다.",
-            ...fallbackPullRequests.warnings,
-          ]);
+          setWarnings(
+            dedupeWarnings([
+              "Review/GitHub PR 목록 API가 없어 PullRequestSummary fixture로 대체했습니다.",
+              ...fallbackPullRequests.warnings,
+            ]),
+          );
           setStatus("selecting");
         }
       }
@@ -542,12 +568,14 @@ export function ReviewRoomWorkspace({
         checklistItems: checklistItems.items,
         comments: comments.items,
       });
-      setWarnings([
-        ...nextWarnings,
-        ...changedFiles.warnings,
-        ...checklistItems.warnings,
-        ...comments.warnings,
-      ]);
+      setWarnings(
+        dedupeWarnings([
+          ...nextWarnings,
+          ...changedFiles.warnings,
+          ...checklistItems.warnings,
+          ...comments.warnings,
+        ]),
+      );
       setStatus("ready");
     } catch (error) {
       setWarnings([
@@ -557,25 +585,45 @@ export function ReviewRoomWorkspace({
     }
   }
 
+  function updateSessionNodeStatus(nodeId: string, nextStatus: ReviewDecision) {
+    setSession((current) =>
+      current
+        ? {
+            ...current,
+            canvas: {
+              ...current.canvas,
+              nodes: current.canvas.nodes.map((node) =>
+                node.id === nodeId ? { ...node, status: nextStatus } : node,
+              ),
+            },
+          }
+        : current,
+    );
+  }
+
   async function updateNodeStatus(nextStatus: ReviewDecision) {
     if (!session || !selectedNode) {
       return;
     }
 
+    const targetNodeId = selectedNode.id;
+    const previousStatus = selectedNode.status ?? "unknown";
+
     setBusyAction("node");
+    updateSessionNodeStatus(targetNodeId, nextStatus);
 
     try {
       const savedState = await withFallback<{
         status: ReviewDecision;
       }>({
         primary: () =>
-          client.updateNodeState(selectedNode.id, {
+          client.updateNodeState(targetNodeId, {
             reviewerMemberId: memberId,
             status: nextStatus,
             changedAt: new Date().toISOString(),
           }),
         fallback: () =>
-          fallbackClient.updateNodeState(selectedNode.id, {
+          fallbackClient.updateNodeState(targetNodeId, {
             reviewerMemberId: memberId,
             status: nextStatus,
             changedAt: new Date().toISOString(),
@@ -583,25 +631,17 @@ export function ReviewRoomWorkspace({
         warning:
           "Review API가 없어 노드 판정을 mock/fallback 상태로 반영했습니다.",
         addWarning: (warning) =>
-          setWarnings((current) =>
-            current.includes(warning) ? current : [...current, warning],
-          ),
+          setWarnings((current) => appendWarning(current, warning)),
       });
 
-      setSession((current) =>
-        current
-          ? {
-              ...current,
-              canvas: {
-                ...current.canvas,
-                nodes: current.canvas.nodes.map((node) =>
-                  node.id === selectedNode.id
-                    ? { ...node, status: savedState.status }
-                    : node,
-                ),
-              },
-            }
-          : current,
+      updateSessionNodeStatus(targetNodeId, savedState.status);
+    } catch (error) {
+      updateSessionNodeStatus(targetNodeId, previousStatus);
+      setWarnings((current) =>
+        appendWarning(
+          current,
+          "Review API가 없어 노드 판정 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+        ),
       );
     } finally {
       setBusyAction(null);
@@ -633,9 +673,7 @@ export function ReviewRoomWorkspace({
         warning:
           "Review API가 없어 체크리스트를 mock/fallback으로 추가했습니다.",
         addWarning: (warning) =>
-          setWarnings((current) =>
-            current.includes(warning) ? current : [...current, warning],
-          ),
+          setWarnings((current) => appendWarning(current, warning)),
       });
 
       setSession((current) =>
@@ -676,9 +714,7 @@ export function ReviewRoomWorkspace({
         warning:
           "Review API가 없어 체크리스트 상태를 mock/fallback으로 반영했습니다.",
         addWarning: (warning) =>
-          setWarnings((current) =>
-            current.includes(warning) ? current : [...current, warning],
-          ),
+          setWarnings((current) => appendWarning(current, warning)),
       });
 
       setSession((current) =>
@@ -723,9 +759,7 @@ export function ReviewRoomWorkspace({
         fallback: () => fallbackClient.createComment(session.room.id, body),
         warning: "Review API가 없어 코멘트를 mock/fallback으로 추가했습니다.",
         addWarning: (warning) =>
-          setWarnings((current) =>
-            current.includes(warning) ? current : [...current, warning],
-          ),
+          setWarnings((current) => appendWarning(current, warning)),
       });
 
       setSession((current) =>

@@ -19,6 +19,13 @@ export const taskStatuses = [
 
 export const taskPriorities = ["low", "medium", "high", "urgent"];
 export const milestoneStatuses = ["planned", "in_progress", "done"];
+export const taskActionTypes = [
+  "task.create",
+  "task.create.draft",
+  "task.update",
+  "task.update.status",
+  "task.complete",
+];
 
 function defaultTaskDomainMode() {
   return (
@@ -173,6 +180,7 @@ function normalizeTask(task, workspaceId) {
     workspaceId: task.workspaceId ?? workspaceId,
     milestoneId: task.milestoneId ?? null,
     title: task.title,
+    description: task.description ?? null,
     status: task.status ?? "todo",
     priority: task.priority ?? "medium",
     assignee: task.assignee ?? null,
@@ -288,6 +296,132 @@ export function calculateProgressSummary(
     progressRate,
     capturedAt,
   };
+}
+
+function definedTaskFields(payload, fields) {
+  return fields.reduce((body, field) => {
+    if (payload[field] !== undefined) {
+      body[field] = payload[field];
+    }
+
+    return body;
+  }, {});
+}
+
+function taskActionPayload(action) {
+  if (!isRecord(action)) {
+    throw new TaskGithubProgressApiError("Task action must be an object");
+  }
+
+  return isRecord(action.payload) ? action.payload : action;
+}
+
+function taskActionWorkspaceId(payload, fallbackWorkspaceId) {
+  const workspaceId = payload.workspaceId ?? fallbackWorkspaceId;
+
+  if (!workspaceId) {
+    throw new TaskGithubProgressApiError("Task action requires workspaceId");
+  }
+
+  return workspaceId;
+}
+
+function taskActionTaskId(payload) {
+  if (!payload.taskId) {
+    throw new TaskGithubProgressApiError("Task action requires taskId");
+  }
+
+  return payload.taskId;
+}
+
+function taskActionStatus(payload) {
+  if (!payload.status) {
+    throw new TaskGithubProgressApiError("Task status action requires status");
+  }
+
+  return payload.status;
+}
+
+export async function applyTaskAction(client, action, options = {}) {
+  const type = action?.type;
+  const payload = taskActionPayload(action);
+
+  if (type === "task.create") {
+    const workspaceId = taskActionWorkspaceId(payload, options.workspaceId);
+
+    return client.createTask(
+      workspaceId,
+      definedTaskFields(payload, [
+        "title",
+        "description",
+        "status",
+        "priority",
+        "assigneeMemberId",
+        "dueDate",
+        "milestoneId",
+      ]),
+    );
+  }
+
+  if (type === "task.create.draft") {
+    const workspaceId = taskActionWorkspaceId(payload, options.workspaceId);
+
+    const draft = await client.createTaskDraft(
+      workspaceId,
+      definedTaskFields(payload, [
+        "workspaceId",
+        "sourceType",
+        "sourceId",
+        "title",
+        "description",
+        "assigneeMemberId",
+        "priority",
+        "dueDate",
+      ]),
+    );
+
+    if (options.approveTaskDraft === false) {
+      return draft;
+    }
+
+    return client.approveTaskDraft(draft.id);
+  }
+
+  if (type === "task.update") {
+    const taskId = taskActionTaskId(payload);
+    const updatedTask = await client.updateTask(
+      taskId,
+      definedTaskFields(payload, [
+        "title",
+        "description",
+        "assigneeMemberId",
+        "dueDate",
+        "milestoneId",
+      ]),
+    );
+
+    if (payload.status !== undefined) {
+      return client.updateTaskStatus(taskId, payload.status);
+    }
+
+    return updatedTask;
+  }
+
+  if (type === "task.update.status") {
+    const taskId = taskActionTaskId(payload);
+
+    return client.updateTaskStatus(taskId, taskActionStatus(payload));
+  }
+
+  if (type === "task.complete") {
+    const taskId = taskActionTaskId(payload);
+
+    return client.updateTaskStatus(taskId, "done");
+  }
+
+  throw new TaskGithubProgressApiError(
+    `Unsupported Task action type: ${String(type)}`,
+  );
 }
 
 function getMockStore(workspaceId) {

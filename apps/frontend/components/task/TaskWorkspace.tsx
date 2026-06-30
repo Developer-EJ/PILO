@@ -30,6 +30,7 @@ type TaskSummary = {
   workspaceId: string;
   milestoneId?: string | null;
   title: string;
+  description?: string | null;
   status: string;
   priority: string;
   assignee?: { memberId?: string; name?: string | null } | null;
@@ -538,6 +539,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
   const [search, setSearch] = useState("");
   const [taskTab, setTaskTab] = useState<DashboardTaskTab>("all");
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [isBoardDetailOpen, setIsBoardDetailOpen] = useState(false);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -569,6 +571,15 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
     [tasks],
   );
   const activeTaskCount = Math.max(0, tasks.length - completedTaskCount);
+  const openCreateTaskModal = useCallback(() => {
+    setIsBoardDetailOpen(false);
+    setIsQuickAddOpen(true);
+  }, []);
+  const openTaskDetail = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+    setIsQuickAddOpen(false);
+    setIsBoardDetailOpen(true);
+  }, []);
 
   const refreshDomainData = useCallback(async () => {
     setLoading(true);
@@ -858,7 +869,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
               <span className={styles.modeChip}>주간</span>
               <button
                 className={styles.primaryButton}
-                onClick={() => setIsQuickAddOpen(true)}
+                onClick={openCreateTaskModal}
                 type="button"
               >
                 + 새 작업
@@ -905,7 +916,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
                             dashboardEventClass(task.status),
                           )}
                           key={task.id}
-                          onClick={() => setSelectedTaskId(task.id)}
+                          onClick={() => openTaskDetail(task.id)}
                           style={calendarEventStyle(dayIndex, task, taskIndex)}
                           type="button"
                         >
@@ -1045,7 +1056,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
                     />
                     <button
                       className={styles.dashboardTaskTitle}
-                      onClick={() => setSelectedTaskId(task.id)}
+                      onClick={() => openTaskDetail(task.id)}
                       type="button"
                     >
                       <strong>{task.title}</strong>
@@ -1072,44 +1083,139 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
             )}
           </div>
 
-          {isQuickAddOpen ? (
-            <form
-              className={styles.quickAddTaskForm}
-              onSubmit={handleCreateQuickTask}
-            >
-              <input name="title" placeholder="작업 제목" required />
-              <input name="dueDate" type="date" />
-              <input name="description" type="hidden" defaultValue="" />
-              <input name="status" type="hidden" defaultValue="todo" />
-              <input name="priority" type="hidden" defaultValue="medium" />
-              <input name="assigneeMemberId" type="hidden" defaultValue="" />
-              <input name="milestoneId" type="hidden" defaultValue="" />
+          <button
+            className={styles.addTaskInlineButton}
+            onClick={openCreateTaskModal}
+            type="button"
+          >
+            + 새 작업 추가
+          </button>
+        </section>
+      </div>
+
+      {isQuickAddOpen ? (
+        <div
+          aria-modal="true"
+          className={styles.modalOverlay}
+          onClick={() => setIsQuickAddOpen(false)}
+          role="dialog"
+        >
+          <div
+            className={cx(styles.modalDialog, styles.createTaskDialog)}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p>작업 보드</p>
+                <h2>새 작업</h2>
+              </div>
               <button
-                className={styles.primaryButton}
-                disabled={busyAction !== null}
-                type="submit"
-              >
-                만들기
-              </button>
-              <button
-                className={styles.controlButton}
+                aria-label="새 작업 모달 닫기"
+                className={styles.ghostButton}
                 onClick={() => setIsQuickAddOpen(false)}
                 type="button"
               >
-                취소
+                닫기
               </button>
-            </form>
-          ) : (
-            <button
-              className={styles.addTaskInlineButton}
-              onClick={() => setIsQuickAddOpen(true)}
-              type="button"
+            </div>
+            <form
+              className={styles.modalForm}
+              onSubmit={handleCreateQuickTask}
             >
-              + 새 작업 추가
-            </button>
-          )}
-        </section>
-      </div>
+              <label className={styles.wideField}>
+                제목
+                <input name="title" placeholder="작업 제목" required />
+              </label>
+              <label className={styles.wideField}>
+                설명
+                <textarea name="description" placeholder="작업 설명" />
+              </label>
+              <label>
+                상태
+                <select defaultValue="todo" name="status">
+                  {taskStatuses.map((status) => (
+                    <option key={status} value={status}>
+                      {statusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                우선순위
+                <select defaultValue="medium" name="priority">
+                  {taskPriorities.map((priority) => (
+                    <option key={priority} value={priority}>
+                      {priorityLabel(priority)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                담당자
+                <select defaultValue="" name="assigneeMemberId">
+                  <option value="">미배정</option>
+                  {members.map((member) => (
+                    <option key={member.memberId} value={member.memberId}>
+                      {memberLabel(member)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                마감일
+                <input name="dueDate" type="date" />
+              </label>
+              <div className={styles.modalFooter}>
+                <button
+                  className={styles.controlButton}
+                  onClick={() => setIsQuickAddOpen(false)}
+                  type="button"
+                >
+                  취소
+                </button>
+                <button
+                  className={styles.primaryButton}
+                  disabled={busyAction !== null}
+                  type="submit"
+                >
+                  만들기
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isBoardDetailOpen ? (
+        <div
+          aria-modal="true"
+          className={styles.modalOverlay}
+          onClick={() => setIsBoardDetailOpen(false)}
+          role="dialog"
+        >
+          <div
+            className={cx(styles.modalDialog, styles.detailTaskDialog)}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <TaskDetailPanel
+              activityLogs={activityLogs}
+              busyAction={busyAction}
+              client={client}
+              comments={comments}
+              onAddChecklist={handleAddChecklist}
+              onAddComment={handleAddComment}
+              onClose={() => setIsBoardDetailOpen(false)}
+              onRefresh={async () => {
+                await refreshDomainData();
+                await refreshSelectedTask();
+              }}
+              runMutation={runMutation}
+              selectedTask={selectedTask}
+              selectedTaskId={selectedTaskId}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <details className={styles.advancedTaskTools}>
         <summary>고급 작업 관리</summary>
@@ -1171,7 +1277,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
                     <article className={styles.taskItem} key={task.id}>
                       <button
                         className={styles.taskButton}
-                        onClick={() => setSelectedTaskId(task.id)}
+                        onClick={() => openTaskDetail(task.id)}
                         type="button"
                       >
                         <strong>{task.title}</strong>
@@ -1288,7 +1394,7 @@ export function TaskWorkspace({ workspaceId, view }: TaskWorkspaceProps) {
                 </label>
                 <label className={styles.wideField}>
                   마일스톤
-                  <select defaultValue="" name="milestoneId">
+                  <select defaultValue="" name="removedMilestoneId">
                     <option value="">마일스톤 없음</option>
                     {milestones.map((milestone) => (
                       <option key={milestone.id} value={milestone.id}>
@@ -1541,6 +1647,7 @@ function TaskDetailPanel({
   comments,
   onAddChecklist,
   onAddComment,
+  onClose,
   onRefresh,
   runMutation,
   selectedTask,
@@ -1552,12 +1659,13 @@ function TaskDetailPanel({
   comments: TaskComment[];
   onAddChecklist: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onAddComment: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onClose?: () => void;
   onRefresh: () => Promise<void>;
   runMutation: (label: string, action: () => Promise<unknown>) => Promise<void>;
   selectedTask: TaskDetail | null;
   selectedTaskId: string | null;
 }) {
-  if (!selectedTask || !selectedTaskId) {
+  if (!selectedTask || !selectedTaskId || selectedTask.id !== selectedTaskId) {
     return (
       <section className={styles.panel}>
         <p className={styles.emptyState}>작업을 선택하면 상세가 표시됩니다.</p>
@@ -1568,26 +1676,63 @@ function TaskDetailPanel({
   return (
     <section className={styles.panel}>
       <div className={styles.detailTitle}>
-        <div className={styles.metaRow}>
-          <span
-            className={cx(styles.statusPill, statusClass(selectedTask.status))}
-          >
-            {statusLabel(selectedTask.status)}
-          </span>
-          <span
-            className={cx(
-              styles.priorityPill,
-              priorityClass(selectedTask.priority),
-            )}
-          >
-            {priorityLabel(selectedTask.priority)}
-          </span>
+        <div className={styles.detailHeaderRow}>
+          <div className={styles.metaRow}>
+            <span
+              className={cx(
+                styles.statusPill,
+                statusClass(selectedTask.status),
+              )}
+            >
+              {statusLabel(selectedTask.status)}
+            </span>
+            <span
+              className={cx(
+                styles.priorityPill,
+                priorityClass(selectedTask.priority),
+              )}
+            >
+              {priorityLabel(selectedTask.priority)}
+            </span>
+          </div>
+          {onClose ? (
+            <button
+              aria-label="작업 상세 닫기"
+              className={styles.ghostButton}
+              onClick={onClose}
+              type="button"
+            >
+              닫기
+            </button>
+          ) : null}
         </div>
         <h2>{selectedTask.title}</h2>
         <p className={styles.taskMeta}>
           {taskAssigneeLabel(selectedTask)} · 마감{" "}
           {formatDate(selectedTask.dueDate)}
         </p>
+        <dl className={styles.detailMetaGrid}>
+          <div>
+            <dt>상태</dt>
+            <dd>{statusLabel(selectedTask.status)}</dd>
+          </div>
+          <div>
+            <dt>담당</dt>
+            <dd>{taskAssigneeLabel(selectedTask)}</dd>
+          </div>
+          <div>
+            <dt>마감일</dt>
+            <dd>{formatDate(selectedTask.dueDate)}</dd>
+          </div>
+          <div>
+            <dt>막힘 여부</dt>
+            <dd>{selectedTask.status === "blocked" ? "막힘" : "해당 없음"}</dd>
+          </div>
+        </dl>
+        <div className={styles.detailDescription}>
+          <strong>설명</strong>
+          <p>{selectedTask.description || "설명이 없습니다."}</p>
+        </div>
       </div>
       <div className={styles.buttonRow}>
         {taskStatuses.map((status) => (

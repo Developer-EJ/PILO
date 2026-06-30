@@ -576,6 +576,119 @@
   padding-bottom: 72px;
 }
 
+.modalOverlay {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 24px;
+}
+
+.modalDialog {
+  overflow: auto;
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.createTaskDialog {
+  padding: 18px;
+}
+
+.detailTaskDialog {
+  width: min(920px, 100%);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e7ebf2;
+  padding-bottom: 14px;
+}
+
+.modalHeader p {
+  margin: 0 0 4px;
+  color: #6d5bd6;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.modalHeader h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.modalForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.modalForm label {
+  display: grid;
+  gap: 6px;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.modalForm input,
+.modalForm select,
+.modalForm textarea {
+  min-width: 0;
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #131824;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  outline: 0;
+}
+
+.modalForm input,
+.modalForm select {
+  height: 40px;
+  padding: 0 11px;
+}
+
+.modalForm textarea {
+  min-height: 108px;
+  resize: vertical;
+  padding: 10px 11px;
+}
+
+.modalForm input:focus,
+.modalForm select:focus,
+.modalForm textarea:focus {
+  border-color: rgba(109, 91, 214, 0.55);
+  box-shadow: 0 0 0 3px rgba(109, 91, 214, 0.12);
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  grid-column: 1 / -1;
+  border-top: 1px solid #e7ebf2;
+  margin-top: 4px;
+  padding-top: 14px;
+}
+
 .advancedTaskTools {
   border: 1px solid #e2e7ef;
   border-radius: 8px;
@@ -604,6 +717,65 @@
   grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.85fr);
   gap: 16px;
   align-items: start;
+}
+
+.detailHeaderRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detailMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0 0;
+}
+
+.detailMetaGrid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px;
+}
+
+.detailMetaGrid dt {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.detailMetaGrid dd {
+  margin: 0;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.detailDescription {
+  display: grid;
+  gap: 6px;
+  border-radius: 8px;
+  background: #f7f8fb;
+  padding: 10px;
+}
+
+.detailDescription strong {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.detailDescription p {
+  margin: 0;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .calendarPanel,
@@ -968,8 +1140,7 @@
 }
 
 .taskSearchField input,
-.taskFilterRow select,
-.quickAddTaskForm input {
+.taskFilterRow select {
   min-width: 0;
   height: 38px;
   border: 1px solid #d7dde8;
@@ -984,8 +1155,7 @@
 }
 
 .taskSearchField input:focus,
-.taskFilterRow select:focus,
-.quickAddTaskForm input:focus {
+.taskFilterRow select:focus {
   border-color: rgba(109, 91, 214, 0.55);
   box-shadow: 0 0 0 3px rgba(109, 91, 214, 0.12);
 }
@@ -1086,13 +1256,8 @@
   color: #b4232a;
 }
 
-.quickAddTaskForm {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 132px auto auto;
-  gap: 8px;
-  border-top: 1px solid #e7ebf2;
-  margin: 0;
-  padding: 14px 16px 16px;
+.formGrid label:has(select[name="removedMilestoneId"]) {
+  display: none;
 }
 
 .addTaskInlineButton {
@@ -1133,7 +1298,8 @@
 
   .toolbar,
   .formGrid,
-  .quickAddTaskForm {
+  .detailMetaGrid,
+  .modalForm {
     grid-template-columns: 1fr;
   }
 }
@@ -1177,5 +1343,18 @@
   .dashboardTaskRow time {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .modalOverlay {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .modalDialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .modalFooter {
+    flex-direction: column-reverse;
   }
 }

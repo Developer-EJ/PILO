@@ -434,6 +434,87 @@ h1 {
   gap: 10px;
 }
 
+.topbar-recording-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-recording-start,
+.topbar-recording-end {
+  min-height: 36px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.topbar-recording-start {
+  border: 1px solid rgba(109, 91, 214, 0.22);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--pilo-text);
+  padding: 0 14px;
+}
+
+.topbar-recording-start:hover {
+  border-color: rgba(109, 91, 214, 0.38);
+  box-shadow: var(--pilo-shadow-soft);
+  color: var(--pilo-primary);
+  transform: translateY(-1px);
+}
+
+.topbar-recording-status {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(229, 72, 77, 0.18);
+  border-radius: 999px;
+  background: #fff4f3;
+  color: #c53128;
+  padding: 0 12px;
+  box-shadow: 0 2px 8px rgba(229, 72, 77, 0.12);
+}
+
+.topbar-recording-status > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #e5484d;
+  box-shadow: 0 0 0 4px rgba(229, 72, 77, 0.1);
+}
+
+.topbar-recording-status b {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.topbar-recording-status code {
+  color: #9f1f17;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas,
+    monospace;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.topbar-recording-end {
+  border: 1px solid #111827;
+  background: #050505;
+  color: #ffffff;
+  padding: 0 16px;
+}
+
+.topbar-recording-end:hover {
+  background: #171a21;
+  box-shadow: var(--pilo-shadow-soft);
+  transform: translateY(-1px);
+}
+
 .meeting-chip {
   border: 1px solid rgba(229, 72, 77, 0.16);
   border-radius: 999px;
@@ -3002,6 +3083,22 @@ h1 {
   white-space: nowrap;
 }
 
+.workspace-ai-runtime-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.workspace-ai-runtime-meta small {
+  max-width: 130px;
+  border: 1px solid var(--pilo-line);
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 3px 7px;
+}
+
 .workspace-ai-chat-messages {
   display: grid;
   max-height: 220px;
@@ -3222,6 +3319,16 @@ h1 {
     flex-direction: column;
     gap: 12px;
     padding: 18px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .topbar-recording-control {
+    flex-wrap: wrap;
   }
 
   .dashboard-content {

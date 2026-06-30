@@ -254,7 +254,8 @@
 .contentPanel,
 .contentPanelWide,
 .errorBanner,
-.noticeBanner {
+.noticeBanner,
+.fallbackBanner {
   border: 1px solid #e4e7ee;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.94);
@@ -346,7 +347,8 @@
 }
 
 .errorBanner,
-.noticeBanner {
+.noticeBanner,
+.fallbackBanner {
   margin-bottom: 14px;
   padding: 12px 14px;
   font-size: 13px;
@@ -363,6 +365,12 @@
   border-color: rgba(46, 158, 91, 0.22);
   background: rgba(46, 158, 91, 0.065);
   color: #16703c;
+}
+
+.fallbackBanner {
+  border-color: rgba(91, 100, 120, 0.18);
+  background: #f8f9fb;
+  color: #5b6478;
 }
 
 .compactForm,
@@ -741,6 +749,609 @@
   color: #e5484d;
 }
 
+.experiencePage {
+  display: grid;
+  gap: 22px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 30px 32px 72px;
+}
+
+.experienceHeader,
+.reportBoardHeader,
+.experienceHeaderActions,
+.panelHeaderLine,
+.reportToolbar,
+.reportTableFooter,
+.reportFilterGroup,
+.tableActionGroup {
+  display: flex;
+  align-items: center;
+}
+
+.experienceHeader,
+.reportBoardHeader,
+.panelHeaderLine,
+.reportToolbar,
+.reportTableFooter {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.experienceHeader h2,
+.reportBoardHeader h2 {
+  margin: 6px 0 0;
+  color: #171a21;
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+
+.experienceHeaderActions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.voiceDashboardGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.voiceMainColumn,
+.previousReportsPanel,
+.participantList {
+  display: grid;
+  gap: 16px;
+}
+
+.voiceRoomCard,
+.audioAnalyticsCard,
+.reportGenerationPanel,
+.selectedReportBanner,
+.reportTableCard,
+.reportDetailPanel,
+.experienceEmptyState {
+  border: 1px solid #dfe3eb;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.voiceRoomCard {
+  overflow: hidden;
+}
+
+.voiceRoomHeader {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #dfe3eb;
+  padding: 0 22px;
+}
+
+.voiceRoomHeader div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.voiceRoomHeader strong {
+  overflow: hidden;
+  color: #171a21;
+  font-size: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voiceRoomHeader code {
+  border-radius: 6px;
+  background: #eef0f4;
+  color: #5b6478;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 4px 8px;
+}
+
+.liveDot {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 999px;
+  background: #c43c35;
+}
+
+.voiceRoomBody {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.experienceSelectLabel {
+  display: grid;
+  gap: 6px;
+}
+
+.experienceSelectLabel span,
+.reportSearchField span,
+.voiceStatGrid span {
+  color: #8a93a6;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.experienceSelectLabel input,
+.experienceSelectLabel select,
+.reportGenerationPanel select {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  border: 1px solid #dfe3eb;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  outline: 0;
+  padding: 0 12px;
+}
+
+.voiceActionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.voiceFlowSummary {
+  margin: 0;
+  border: 1px solid #edf0f5;
+  border-radius: 10px;
+  background: #f8f9fb;
+  color: #5b6478;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.5;
+  padding: 12px;
+}
+
+.primaryWideButton,
+.secondaryWideButton {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #111827;
+  border-radius: 10px;
+  background: #111827;
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.secondaryWideButton {
+  border-color: #dfe3eb;
+  background: #ffffff;
+  color: #171a21;
+}
+
+.primaryWideButton:disabled,
+.secondaryWideButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.recordingButtonActive {
+  border-color: rgba(196, 60, 53, 0.28);
+  background: #fff4f3;
+  color: #c43c35;
+}
+
+.audioAnalyticsCard {
+  display: grid;
+  min-height: 224px;
+  align-content: center;
+  gap: 24px;
+  padding: 24px;
+}
+
+.audioBars {
+  display: flex;
+  height: 88px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.audioBars span {
+  width: 5px;
+  border-radius: 999px;
+  background: #111827;
+}
+
+.audioBars span:nth-child(1),
+.audioBars span:nth-child(11) {
+  height: 36px;
+}
+
+.audioBars span:nth-child(2),
+.audioBars span:nth-child(10) {
+  height: 54px;
+}
+
+.audioBars span:nth-child(3),
+.audioBars span:nth-child(9) {
+  height: 82px;
+}
+
+.audioBars span:nth-child(4),
+.audioBars span:nth-child(8) {
+  height: 46px;
+}
+
+.audioBars span:nth-child(5),
+.audioBars span:nth-child(7) {
+  height: 68px;
+}
+
+.audioBars span:nth-child(6) {
+  height: 88px;
+}
+
+.voiceStatGrid,
+.reportCountGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.voiceStatGrid article,
+.reportCountGrid {
+  border-radius: 10px;
+  background: #f7f8fb;
+  padding: 12px;
+}
+
+.voiceStatGrid strong,
+.reportCountGrid b {
+  display: block;
+  margin-top: 4px;
+  color: #171a21;
+  font-size: 18px;
+}
+
+.panelHeaderLine {
+  margin-bottom: 4px;
+}
+
+.panelHeaderLine h3 {
+  margin: 0;
+  color: #171a21;
+  font-size: 18px;
+}
+
+.panelHeaderLine button {
+  min-height: 34px;
+  border: 1px solid #dfe3eb;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #5b6478;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 0 11px;
+}
+
+.participantRow {
+  display: grid;
+  min-height: 68px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid #dfe3eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px 14px;
+}
+
+.fixtureAvatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  border-radius: 12px;
+  background: #dbe8ff;
+  color: #4f65a1;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.participantRow strong {
+  display: block;
+  overflow: hidden;
+  color: #171a21;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.participantRow small {
+  display: block;
+  margin-top: 2px;
+  color: #5b6478;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.participantStatus,
+.participantStatusActive {
+  color: #8a93a6;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.participantStatusActive {
+  color: #111827;
+}
+
+.reportToolbar {
+  align-items: stretch;
+}
+
+.reportSearchField {
+  display: grid;
+  width: min(430px, 100%);
+  gap: 4px;
+  border: 1px solid #dfe3eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px 12px;
+}
+
+.reportSearchField input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #171a21;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  outline: 0;
+}
+
+.reportFilterGroup {
+  gap: 10px;
+}
+
+.reportFilterGroup button,
+.reportGenerationPanel button,
+.reportTableFooter button,
+.tableActionGroup button,
+.tableActionGroup a {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  border: 1px solid #dfe3eb;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #171a21;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.reportFilterActive {
+  border-color: rgba(109, 91, 214, 0.34) !important;
+  background: #f3f1ff !important;
+  color: #6d5bd6 !important;
+}
+
+.reportGenerationPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.55fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+}
+
+.reportGenerationPanel strong {
+  display: block;
+  margin-top: 4px;
+  color: #171a21;
+  font-size: 15px;
+}
+
+.selectedReportBanner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  border-color: rgba(109, 91, 214, 0.28);
+  background: #f6f4ff;
+  padding: 16px 18px;
+}
+
+.selectedReportBanner span {
+  color: #6d5bd6;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.selectedReportBanner strong {
+  display: block;
+  margin-top: 4px;
+  color: #171a21;
+  font-size: 17px;
+}
+
+.selectedReportBanner p {
+  margin: 6px 0 0;
+  color: #5b6478;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reportCountGrid {
+  grid-template-columns: repeat(3, auto);
+  align-items: center;
+}
+
+.reportCountGrid small {
+  color: #5b6478;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.reportTableCard {
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.reportTableScroll {
+  overflow-x: auto;
+}
+
+.reportTable {
+  width: 100%;
+  min-width: 940px;
+  border-collapse: collapse;
+}
+
+.reportTable th,
+.reportTable td {
+  border-bottom: 1px solid #dfe3eb;
+  padding: 16px 18px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.reportTable th {
+  background: #f8f9fb;
+  color: #5b6478;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.reportTable td {
+  color: #404756;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.reportTable td:nth-child(3) {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reportTable td a {
+  color: #171a21;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.selectedReportRow {
+  background: #f6f4ff;
+}
+
+.tableActionGroup {
+  gap: 8px;
+}
+
+.reportTableFooter {
+  padding: 16px 18px;
+}
+
+.reportTableFooter span {
+  color: #5b6478;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.reportDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reportDetailPanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 15px;
+}
+
+.reportDetailPanel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reportDetailPanel h3 {
+  margin: 0;
+  color: #171a21;
+  font-size: 15px;
+}
+
+.reportDetailPanel header span {
+  border-radius: 999px;
+  background: #f1f3f7;
+  padding: 4px 8px;
+  color: #8a93a6;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.reportDetailPanel p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border: 1px solid #edf0f5;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #222733;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px;
+}
+
+.reportDetailPanel p small {
+  color: #8a93a6;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.experienceEmptyState {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.experienceEmptyState p {
+  margin: 0;
+  color: #5b6478;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 @media (max-width: 1100px) {
   .domainSidebar {
     position: relative;
@@ -754,6 +1365,10 @@
   .meetingList,
   .reportMiniList {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .voiceDashboardGrid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -781,5 +1396,51 @@
 
   .domainNav {
     grid-template-columns: 1fr;
+  }
+
+  .experiencePage {
+    padding: 20px 18px 56px;
+  }
+
+  .experienceHeader,
+  .reportBoardHeader,
+  .reportToolbar,
+  .reportTableFooter,
+  .selectedReportBanner {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .experienceHeader h2,
+  .reportBoardHeader h2 {
+    font-size: 26px;
+  }
+
+  .experienceHeaderActions,
+  .reportFilterGroup {
+    justify-content: stretch;
+  }
+
+  .experienceHeaderActions > *,
+  .reportFilterGroup button,
+  .reportSearchField {
+    width: 100%;
+  }
+
+  .voiceActionGrid,
+  .voiceStatGrid,
+  .reportGenerationPanel,
+  .reportDetailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .participantRow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .participantStatus,
+  .participantStatusActive {
+    grid-column: 2;
   }
 }

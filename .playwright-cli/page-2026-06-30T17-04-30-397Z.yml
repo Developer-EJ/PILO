@@ -1,0 +1,130 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - img [ref=e8]
+  - alert [ref=e11]
+  - main [ref=e12]:
+    - complementary "워크스페이스 탐색" [ref=e13]:
+      - button "현재 workspace 선택" [ref=e16] [cursor=pointer]:
+        - generic [ref=e17]: P
+        - generic [ref=e18]:
+          - paragraph [ref=e19]: PILO MVP
+          - generic [ref=e20]: AI-powered project collaboration workspace
+        - generic [ref=e21]: ▾
+      - navigation "워크스페이스 탐색" [ref=e22]:
+        - link "대시보드" [ref=e23] [cursor=pointer]:
+          - /url: /workspaces/22222222-2222-4222-8222-222222222222
+          - generic [ref=e24]: 대시보드
+        - group [ref=e25]:
+          - generic "작업" [ref=e26] [cursor=pointer]:
+            - generic [ref=e27]: 작업
+            - generic [ref=e29]: ⌄
+        - group [ref=e30]:
+          - generic "회의 / 리포트" [ref=e31] [cursor=pointer]:
+            - generic [ref=e32]: 회의 / 리포트
+            - generic [ref=e34]: ⌄
+        - link "캔버스" [ref=e35] [cursor=pointer]:
+          - /url: /workspaces/22222222-2222-4222-8222-222222222222/canvas
+          - generic [ref=e36]: 캔버스
+        - link "코드 리뷰" [ref=e37] [cursor=pointer]:
+          - /url: /workspaces/22222222-2222-4222-8222-222222222222/reviews
+          - generic [ref=e38]: 코드 리뷰
+        - generic [ref=e40]: 설정
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - paragraph [ref=e44]: 코드 리뷰
+          - heading "리뷰 작업 공간" [level=1] [ref=e45]
+        - generic [ref=e46]:
+          - button "로그아웃" [ref=e48] [cursor=pointer]
+          - generic "Guest" [ref=e49]: P
+      - main [ref=e51]:
+        - button "← PR 선택으로 돌아가기" [ref=e67]
+        - region "리뷰 워크플로우" [ref=e68]:
+          - generic [ref=e69]:
+            - img
+            - button "1 콜백 페이지 진입점 파일 / 논의 필요" [ref=e70]:
+              - generic [ref=e71]: "1"
+              - strong [ref=e72]: 콜백 페이지 진입점
+              - generic [ref=e73]: 파일 / 논의 필요
+            - button "2 안전한 redirect 결정 영향 / 논의 필요" [ref=e74]:
+              - generic [ref=e75]: "2"
+              - strong [ref=e76]: 안전한 redirect 결정
+              - generic [ref=e77]: 영향 / 논의 필요
+            - button "3 로그인 결과 안내 UI 컴포넌트 / 승인" [ref=e78]:
+              - generic [ref=e79]: "3"
+              - strong [ref=e80]: 로그인 결과 안내 UI
+              - generic [ref=e81]: 컴포넌트 / 승인
+            - button "4 OAuth 회귀 테스트 테스트 / 미검토" [ref=e82]:
+              - generic [ref=e83]: "4"
+              - strong [ref=e84]: OAuth 회귀 테스트
+              - generic [ref=e85]: 테스트 / 미검토
+            - button "5 세션 만료 복구 경로 영향 / 논의 필요" [ref=e86]:
+              - generic [ref=e87]: "5"
+              - strong [ref=e88]: 세션 만료 복구 경로
+              - generic [ref=e89]: 영향 / 논의 필요
+          - separator "PR 리뷰 패널 크기 조절" [ref=e90]
+          - complementary [ref=e91]:
+            - region "리뷰 안내" [ref=e92]:
+              - generic [ref=e93]: 안내
+              - paragraph [ref=e94]: 노드 diff 상세는 Review node detail fixture/fallback을 함께 사용합니다.
+              - paragraph [ref=e95]: GitHub changed files API가 Deferred 상태라 변경 파일 fixture를 표시합니다.
+              - paragraph [ref=e96]: 리뷰 아티팩트 조회 API가 없어 fixture/fallback으로 표시합니다.
+            - generic [ref=e97]:
+              - generic [ref=e98]: PR 의도
+              - heading "로그인 콜백을 사용자가 이해 가능한 성공/실패 흐름으로 만들고, 위험한 redirect 입력을 차단합니다." [level=2] [ref=e99]
+              - paragraph [ref=e100]: 화면 진입점, 상태 정규화, 사용자 안내, 테스트, 세션 복구 순서로 보면 PR의 위험 지점을 빠르게 확인할 수 있습니다.
+            - generic [ref=e101]:
+              - generic [ref=e102]: AI 분석
+              - generic [ref=e103]:
+                - heading "분석 완료" [level=3] [ref=e104]
+                - generic [ref=e105]: 위험도 중간
+              - paragraph [ref=e106]: OAuth provider가 돌아온 뒤 사용자가 성공, 실패, 재시도 상태를 명확히 이해하도록 콜백 화면과 상태 정규화 로직을 정리합니다.
+              - paragraph [ref=e107]: 인증 callback route, safe redirect 계산, 로그인 안내 UI, 회귀 테스트에 영향을 주며 잘못 처리되면 사용자가 빈 화면이나 외부 URL로 이동할 수 있습니다.
+              - paragraph [ref=e108]: Google 성공 콜백, provider error, next 외부 URL 차단, 세션 만료 후 재시도 경로를 smoke test로 확인해야 합니다.
+              - paragraph [ref=e109]: 리다이렉트 차단과 실패 안내 copy만 확인되면 MVP 시연 기준에서는 병합 가능한 변경입니다.
+            - generic [ref=e110]:
+              - generic [ref=e111]: 리뷰 순서
+              - list [ref=e112]:
+                - listitem [ref=e113]: provider, error, next query를 읽어 사용자가 보는 콜백 결과 화면으로 연결합니다.
+                - listitem [ref=e114]: next 파라미터가 내부 경로인지 검증하고, 외부 URL이나 빈 값이면 안전한 workspace 경로로 되돌립니다.
+                - listitem [ref=e115]: 사용자에게 OAuth 성공, 실패, 재시도 가능 여부를 카드 상단에서 즉시 안내합니다.
+                - listitem [ref=e116]: 성공 콜백, provider error, 외부 next 차단 케이스가 깨지지 않는지 smoke test로 고정합니다.
+                - listitem [ref=e117]: 보호된 workspace route에서 세션이 만료됐을 때 로그인 후 원래 위치로 돌아오는 경로를 확인합니다.
+            - generic [ref=e118]:
+              - generic [ref=e119]: 변경 파일
+              - generic [ref=e120]:
+                - article [ref=e121]:
+                  - strong [ref=e122]: apps/frontend/app/auth/callback/page.tsx
+                  - generic [ref=e123]: 수정 +42 -8
+                  - text: AuthCallbackPage
+                - article [ref=e124]:
+                  - strong [ref=e125]: apps/frontend/app/login/callback/oauthCallbackState.mjs
+                  - generic [ref=e126]: 수정 +54 -2
+                  - text: resolveOAuthCallbackState
+                - article [ref=e127]:
+                  - strong [ref=e128]: apps/frontend/app/login/LoginAuthNotice.tsx
+                  - generic [ref=e129]: 추가 +36 -0
+                  - text: LoginAuthNotice
+                - article [ref=e130]:
+                  - strong [ref=e131]: apps/frontend/tests/smoke.test.mjs
+                  - generic [ref=e132]: 수정 +48 -2
+            - generic [ref=e133]:
+              - generic [ref=e134]:
+                - generic [ref=e135]: 체크리스트
+                - button "추가" [ref=e136]
+              - generic [ref=e137]:
+                - generic [ref=e138]:
+                  - checkbox "콜백 페이지에서 성공/실패 상태가 모두 보이는지 확인" [ref=e139]
+                  - text: 콜백 페이지에서 성공/실패 상태가 모두 보이는지 확인
+                - generic [ref=e140]:
+                  - checkbox "세션 만료 후 원래 workspace로 복귀하는지 확인" [ref=e141]
+                  - text: 세션 만료 후 원래 workspace로 복귀하는지 확인
+            - generic [ref=e142]:
+              - generic [ref=e143]: 연결된 Task
+              - paragraph [ref=e144]: 연결된 Task가 없습니다.
+            - generic [ref=e145]:
+              - generic [ref=e146]: 리뷰 메모
+              - list [ref=e147]:
+                - listitem [ref=e148]: "현재 판정: 승인 2개, 논의 필요 2개, 위험 신호 1개"
+    - complementary "워크스페이스 AI 채팅":
+      - button "AI 채팅 열기" [ref=e65] [cursor=pointer]: AI

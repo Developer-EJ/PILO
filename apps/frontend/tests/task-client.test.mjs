@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applyTaskAction,
   buildTaskGithubProgressApiUrl,
   calculateProgressSummary,
   createMockTaskGithubProgressClient,
@@ -93,6 +94,67 @@ describe("task/github/progress frontend client", () => {
     assert.equal(progress.progressRate, 50);
   });
 
+  it("executes approved Task draft actions through create and approve APIs", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/task-drafts`)) {
+        return Response.json({
+          id: "draft-1",
+          workspaceId,
+          status: "draft",
+          ...JSON.parse(init.body),
+        });
+      }
+
+      if (url.endsWith("/task-drafts/draft-1/approve")) {
+        return Response.json({
+          id: "draft-1",
+          workspaceId,
+          status: "approved",
+          taskId: "task-from-draft-1",
+        });
+      }
+
+      return Response.json({});
+    };
+    const client = createTaskGithubProgressApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+      actor: {
+        userId: "user-1",
+        memberId: "member-1",
+      },
+    });
+
+    const result = await applyTaskAction(client, {
+      type: "task.create.draft",
+      payload: {
+        workspaceId,
+        title: "AI 검수 작업",
+        description: "AI 액션 검수용",
+        priority: "medium",
+      },
+    });
+
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["POST", "POST"],
+    );
+    assert.equal(
+      requests[0].url,
+      `https://api.pilo.dev/api/workspaces/${workspaceId}/task-drafts`,
+    );
+    assert.equal(
+      requests[1].url,
+      "https://api.pilo.dev/api/task-drafts/draft-1/approve",
+    );
+    assert.equal(result.status, "approved");
+    assert.equal(result.taskId, "task-from-draft-1");
+  });
+
   it("keeps mock Task mutations and progress deterministic", async () => {
     const workspaceId = "mock-task-workspace";
     const client = createMockTaskGithubProgressClient();
@@ -121,5 +183,69 @@ describe("task/github/progress frontend client", () => {
     assert.equal(progress.workspaceId, workspaceId);
     assert.equal(progress.totalTasks, tasks.length);
     assert.equal(progress.doneTasks >= 1, true);
+  });
+
+  it("applies approved AI Task actions through the Task client boundary", async () => {
+    const workspaceId = "mock-task-action-workspace";
+    const client = createMockTaskGithubProgressClient();
+    const created = await applyTaskAction(client, {
+      type: "task.create",
+      payload: {
+        workspaceId,
+        title: "AI가 제안한 작업",
+        description: "승인된 AI action이 실제 작업으로 반영되는지 확인",
+        priority: "high",
+        dueDate: "2026-07-04",
+      },
+    });
+
+    const statusUpdated = await applyTaskAction(client, {
+      type: "task.update.status",
+      payload: {
+        taskId: created.id,
+        status: "in_progress",
+      },
+    });
+    const updated = await applyTaskAction(client, {
+      type: "task.update",
+      payload: {
+        taskId: created.id,
+        title: "AI가 수정한 작업",
+      },
+    });
+    const completed = await applyTaskAction(client, {
+      type: "task.complete",
+      payload: {
+        taskId: created.id,
+      },
+    });
+    const approvedDraft = await applyTaskAction(
+      client,
+      {
+        type: "task.create.draft",
+        payload: {
+          title: "AI 초안 작업",
+          sourceType: "agent_recommendation",
+          sourceId: "agent-action-1",
+        },
+      },
+      { workspaceId },
+    );
+    const tasks = await client.listTasks(workspaceId);
+
+    assert.equal(created.title, "AI가 제안한 작업");
+    assert.equal(statusUpdated.status, "in_progress");
+    assert.equal(updated.title, "AI가 수정한 작업");
+    assert.equal(completed.status, "done");
+    assert.equal(approvedDraft.status, "approved");
+    assert.ok(approvedDraft.taskId);
+    assert.equal(
+      tasks.some((task) => task.id === created.id && task.status === "done"),
+      true,
+    );
+    assert.equal(
+      tasks.some((task) => task.id === approvedDraft.taskId),
+      true,
+    );
   });
 });
