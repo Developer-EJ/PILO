@@ -553,7 +553,7 @@ describe("donghyun workspace client", () => {
         recommendedActions: ["작업 보드를 확인하세요"],
       },
       personalBriefing: {
-        headline: "나의 브리핑",
+        headline: "개인 브리핑",
         summary: "개인 작업 요약",
         myTasks: ["오늘 할 일 확인"],
         needsAttention: ["막힌 작업 확인"],
@@ -618,7 +618,7 @@ describe("donghyun workspace client", () => {
     assert.ok(briefing.generatedAt);
     assert.ok(briefing.projectBriefing.headline);
     assert.ok(briefing.personalBriefing.headline);
-    assert.ok(briefing.warnings.includes("daily_briefing_fixture_fallback"));
+    assert.deepEqual(briefing.warnings, []);
   });
 
   it("keeps Daily Briefing in mock mode when the dashboard is mock", async () => {
@@ -760,7 +760,7 @@ describe("donghyun workspace client", () => {
           recommendedActions: [],
         },
         personalBriefing: {
-          headline: "나의 브리핑",
+          headline: "개인 브리핑",
           summary: "현재 멤버 기준 요약",
           myTasks: [],
           needsAttention: [],
@@ -801,7 +801,7 @@ describe("donghyun workspace client", () => {
     );
     assert.equal(
       briefing.sourceDetails.find((detail) => detail.source === "github")?.label,
-      "워크스페이스 기준 참고 신호",
+      "",
     );
     assert.equal(
       briefing.sourceDetails.find(
@@ -831,7 +831,7 @@ describe("donghyun workspace client", () => {
           {
             source: "dashboard",
             status: "fixture",
-            label: "워크스페이스 기준 참고 신호",
+            label: "",
           },
         ],
       },
@@ -842,7 +842,7 @@ describe("donghyun workspace client", () => {
     assert.deepEqual(briefing.sourceDetails[0], {
       source: "dashboard",
       status: "fixture",
-      label: "워크스페이스 기준 참고 신호",
+      label: "",
     });
   });
 });
