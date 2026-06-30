@@ -349,8 +349,8 @@ export class AgentRuntimeService {
     clock: RuntimeClock = systemClock,
   ): AgentAction {
     const { run, action } = this.requireAction(actionId);
-    if (isTerminalActionStatus(action.status)) {
-      throw new BadRequestException("Agent action is already closed");
+    if (action.status !== "draft" && action.status !== "waiting_confirmation") {
+      throw new BadRequestException("Agent action is not waiting rejection");
     }
 
     const rejectedAt = clock.now();
@@ -1102,10 +1102,6 @@ function assertObject(
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new BadRequestException(`${field} must be an object`);
   }
-}
-
-function isTerminalActionStatus(status: AgentActionStatus) {
-  return status === "executed" || status === "rejected" || status === "failed";
 }
 
 function toRunStatusResponse(run: AgentRunDetail): AgentRunStatusResponse {

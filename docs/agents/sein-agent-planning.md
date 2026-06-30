@@ -52,9 +52,16 @@
 
 ## Current Runtime APIs
 
-- None. `agents` and `agent_workflows` have a registry service/repository, but there is no Agent Run or Planning HTTP controller in current `temp-dev`.
-- `codex/01-agent-runtime-skeleton` added an internal app-server `AgentRuntimeService` skeleton. It is in-memory and deterministic, can create/apply `AgentJobMessage` and `AgentResultMessage` shapes, and can surface `task.create.draft` actions as `waiting_confirmation`.
-- This internal service skeleton is not a public HTTP API. Do not document or consume it as Current Runtime API until the Agent Run/Action controller lands.
+- `POST /api/workspaces/:workspaceId/agent-runs` starts a Mock/In-memory workflow run.
+- `GET /api/agent-runs/:runId` returns Mock/In-memory run detail.
+- `POST /api/agent-actions/:actionId/approve` records `waiting_confirmation -> confirmed`.
+- `POST /api/agent-actions/:actionId/reject` records `waiting_confirmation -> rejected`.
+- `agents` and `agent_workflows` have a registry service/repository.
+- Current Agent Runtime HTTP APIs are backed by the internal deterministic
+  `AgentRuntimeService` skeleton. They are not DB-backed persistence and do not
+  execute owner-domain side effects.
+- Current controller uses `x-member-id` as the temporary mock/current member
+  boundary until Auth/Workspace guard wiring lands.
 
 ## Current Internal Skeleton
 
@@ -65,10 +72,6 @@
 
 ## Deferred APIs
 
-- `POST /api/workspaces/:workspaceId/agent-runs` starts workflow run.
-- `GET /api/agent-runs/:runId` returns run detail.
-- `POST /api/agent-actions/:actionId/approve` approves action.
-- `POST /api/agent-actions/:actionId/reject` rejects action.
 - `GET /api/workspaces/:workspaceId/agent-chat/messages` lists agent chat messages.
 - `POST /api/workspaces/:workspaceId/agent-chat/messages` sends agent command.
 - `GET /api/workspaces/:workspaceId/agent-recommendations` returns `AgentRecommendation` read models for Dashboard/Canvas.

@@ -10,12 +10,12 @@
 
 이 문서의 endpoint와 enum은 아래처럼 분류한다.
 
-| Label | 의미 |
-| --- | --- |
-| `Current` | 현재 app-server controller와 global `/api` prefix로 호출 가능한 API다. 상세 source는 `docs/contracts/*`의 `Current Runtime APIs`다. |
-| `Deferred` | MVP 목표에는 남지만 현재 controller가 없어서 runtime에서 호출하면 안 된다. fixture/mock 또는 후속 contract/runtime PR 전용이다. |
-| `Target` | 구현자가 따라야 할 장기 v1 방향이다. Current와 다르면 Current contract를 먼저 따른다. |
-| `Excluded` | MVP에서 만들지 않는다. 화면 CTA와 public API를 추가하지 않는다. |
+| Label      | 의미                                                                                                                                |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `Current`  | 현재 app-server controller와 global `/api` prefix로 호출 가능한 API다. 상세 source는 `docs/contracts/*`의 `Current Runtime APIs`다. |
+| `Deferred` | MVP 목표에는 남지만 현재 controller가 없어서 runtime에서 호출하면 안 된다. fixture/mock 또는 후속 contract/runtime PR 전용이다.     |
+| `Target`   | 구현자가 따라야 할 장기 v1 방향이다. Current와 다르면 Current contract를 먼저 따른다.                                               |
+| `Excluded` | MVP에서 만들지 않는다. 화면 CTA와 public API를 추가하지 않는다.                                                                     |
 
 이 문서가 상세 contract와 다르게 읽히는 경우, 구현자는 `docs/contracts/*`의
 Current/Deferred 분류와 `docs/mvp-contract-v0.md`를 먼저 따른다.
@@ -73,15 +73,15 @@ type AgentRunId = string;
 
 Common status codes:
 
-| Status | Meaning |
-| --- | --- |
-| 400 | Invalid request |
-| 401 | Not authenticated |
-| 403 | Not allowed or not Workspace member |
-| 404 | Resource not found |
-| 409 | State conflict or external integration needs recovery |
-| 422 | Request is valid JSON but cannot be applied |
-| 500 | Server error |
+| Status | Meaning                                               |
+| ------ | ----------------------------------------------------- |
+| 400    | Invalid request                                       |
+| 401    | Not authenticated                                     |
+| 403    | Not allowed or not Workspace member                   |
+| 404    | Resource not found                                    |
+| 409    | State conflict or external integration needs recovery |
+| 422    | Request is valid JSON but cannot be applied           |
+| 500    | Server error                                          |
 
 ### Pagination
 
@@ -115,13 +115,13 @@ Common status codes:
 
 ### Endpoints
 
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| GET | `/api/auth/providers` | no | Supported OAuth providers |
-| GET | `/api/auth/:provider/start` | no | Start OAuth login |
-| GET | `/api/auth/:provider/callback` | no | OAuth callback |
-| GET | `/api/auth/me` | yes | Current user |
-| POST | `/api/auth/logout` | yes | Revoke current session |
+| Method | Path                           | Auth | Description               |
+| ------ | ------------------------------ | ---- | ------------------------- |
+| GET    | `/api/auth/providers`          | no   | Supported OAuth providers |
+| GET    | `/api/auth/:provider/start`    | no   | Start OAuth login         |
+| GET    | `/api/auth/:provider/callback` | no   | OAuth callback            |
+| GET    | `/api/auth/me`                 | yes  | Current user              |
+| POST   | `/api/auth/logout`             | yes  | Revoke current session    |
 
 ### Current User Response
 
@@ -146,18 +146,18 @@ Rules:
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/workspaces` | yes | user | List my Workspaces |
-| POST | `/api/workspaces` | yes | user | Create Workspace |
-| GET | `/api/workspaces/:workspaceId` | yes | member | Workspace Summary |
-| GET | `/api/workspaces/:workspaceId/members` | yes | member | Member list |
-| POST | `/api/workspaces/:workspaceId/invites` | yes | owner | Create invite link |
-| POST | `/api/workspace-invites/:inviteId/accept` | yes | user | Accept invite |
-| GET | `/api/workspaces/:workspaceId/dashboard` | yes | member | Read-only dashboard summary |
-| PATCH | `/api/workspaces/:workspaceId` | yes | member | Current runtime metadata update; Excluded from MVP success criteria and primary CTA |
-| GET | `/api/workspaces/:workspaceId/dashboard-preferences` | yes | member | Current runtime preferences read; Excluded from MVP success criteria |
-| PUT | `/api/workspaces/:workspaceId/dashboard-preferences` | yes | member | Current runtime preferences write; Excluded from MVP success criteria |
+| Method | Path                                                 | Auth | Role   | Description                                                                         |
+| ------ | ---------------------------------------------------- | ---- | ------ | ----------------------------------------------------------------------------------- |
+| GET    | `/api/workspaces`                                    | yes  | user   | List my Workspaces                                                                  |
+| POST   | `/api/workspaces`                                    | yes  | user   | Create Workspace                                                                    |
+| GET    | `/api/workspaces/:workspaceId`                       | yes  | member | Workspace Summary                                                                   |
+| GET    | `/api/workspaces/:workspaceId/members`               | yes  | member | Member list                                                                         |
+| POST   | `/api/workspaces/:workspaceId/invites`               | yes  | owner  | Create invite link                                                                  |
+| POST   | `/api/workspace-invites/:inviteId/accept`            | yes  | user   | Accept invite                                                                       |
+| GET    | `/api/workspaces/:workspaceId/dashboard`             | yes  | member | Read-only dashboard summary                                                         |
+| PATCH  | `/api/workspaces/:workspaceId`                       | yes  | member | Current runtime metadata update; Excluded from MVP success criteria and primary CTA |
+| GET    | `/api/workspaces/:workspaceId/dashboard-preferences` | yes  | member | Current runtime preferences read; Excluded from MVP success criteria                |
+| PUT    | `/api/workspaces/:workspaceId/dashboard-preferences` | yes  | member | Current runtime preferences write; Excluded from MVP success criteria               |
 
 ### Create Workspace Request
 
@@ -210,14 +210,14 @@ Rules:
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| POST | `/api/workspaces/:workspaceId/project-plan-drafts` | yes | member | Create ProjectPlanDraft |
-| GET | `/api/project-plan-drafts/:draftId` | yes | member | ProjectPlanDraft detail |
-| POST | `/api/project-plan-drafts/:draftId/recommend-tech-stack` | yes | member | Recommend tech stack |
-| POST | `/api/project-plan-drafts/:draftId/breakdown-features` | yes | member | Create ProjectPlanFeatureDraft list |
-| POST | `/api/project-plan-drafts/:draftId/assign-roles` | yes | member | Create role drafts |
-| POST | `/api/project-plan-drafts/:draftId/approve` | yes | member | Approve plan and call owner APIs |
+| Method | Path                                                     | Auth | Role   | Description                         |
+| ------ | -------------------------------------------------------- | ---- | ------ | ----------------------------------- |
+| POST   | `/api/workspaces/:workspaceId/project-plan-drafts`       | yes  | member | Create ProjectPlanDraft             |
+| GET    | `/api/project-plan-drafts/:draftId`                      | yes  | member | ProjectPlanDraft detail             |
+| POST   | `/api/project-plan-drafts/:draftId/recommend-tech-stack` | yes  | member | Recommend tech stack                |
+| POST   | `/api/project-plan-drafts/:draftId/breakdown-features`   | yes  | member | Create ProjectPlanFeatureDraft list |
+| POST   | `/api/project-plan-drafts/:draftId/assign-roles`         | yes  | member | Create role drafts                  |
+| POST   | `/api/project-plan-drafts/:draftId/approve`              | yes  | member | Approve plan and call owner APIs    |
 
 ### Project Start Run Request
 
@@ -290,17 +290,17 @@ Rules:
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/tasks` | yes | member | List Tasks |
-| POST | `/api/workspaces/:workspaceId/tasks` | yes | member | Create Task |
-| GET | `/api/tasks/:taskId` | yes | member | Task detail |
-| PATCH | `/api/tasks/:taskId` | yes | member | Update Task fields |
-| PATCH | `/api/tasks/:taskId/status` | yes | member | Change Task status |
-| DELETE | `/api/tasks/:taskId` | yes | member | Soft-delete Task |
-| POST | `/api/workspaces/:workspaceId/task-drafts` | yes | member | Create TaskDraft |
-| POST | `/api/task-drafts/:draftId/approve` | yes | member | Approve TaskDraft |
-| POST | `/api/task-drafts/:draftId/reject` | yes | member | Reject TaskDraft |
+| Method | Path                                       | Auth | Role   | Description        |
+| ------ | ------------------------------------------ | ---- | ------ | ------------------ |
+| GET    | `/api/workspaces/:workspaceId/tasks`       | yes  | member | List Tasks         |
+| POST   | `/api/workspaces/:workspaceId/tasks`       | yes  | member | Create Task        |
+| GET    | `/api/tasks/:taskId`                       | yes  | member | Task detail        |
+| PATCH  | `/api/tasks/:taskId`                       | yes  | member | Update Task fields |
+| PATCH  | `/api/tasks/:taskId/status`                | yes  | member | Change Task status |
+| DELETE | `/api/tasks/:taskId`                       | yes  | member | Soft-delete Task   |
+| POST   | `/api/workspaces/:workspaceId/task-drafts` | yes  | member | Create TaskDraft   |
+| POST   | `/api/task-drafts/:draftId/approve`        | yes  | member | Approve TaskDraft  |
+| POST   | `/api/task-drafts/:draftId/reject`         | yes  | member | Reject TaskDraft   |
 
 ### Task DTO
 
@@ -347,7 +347,14 @@ Enums:
 ```ts
 type TaskStatus = "todo" | "in_progress" | "in_review" | "done" | "blocked";
 type TaskPriority = "low" | "medium" | "high" | "urgent";
-type TaskType = "development" | "planning" | "meeting" | "review" | "document" | "bug" | "etc";
+type TaskType =
+  | "development"
+  | "planning"
+  | "meeting"
+  | "review"
+  | "document"
+  | "bug"
+  | "etc";
 type TaskSourceType = "manual" | "agent" | "meeting" | "github";
 ```
 
@@ -368,19 +375,19 @@ Rules:
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/github/connections` | yes | member | Connection status |
-| POST | `/api/workspaces/:workspaceId/github/connections` | yes | member current / owner target | Start GitHub App installation flow |
-| DELETE | `/api/workspaces/:workspaceId/github/connections/:connectionId` | yes | member current / owner target | Disconnect or revoke integration |
-| GET | `/api/github/app/callback` | no session | GitHub App redirect | Complete installation callback |
-| GET | `/api/workspaces/:workspaceId/github/repositories` | yes | owner target | Deferred repository list |
-| POST | `/api/workspaces/:workspaceId/github/repositories/sync` | yes | owner target | Deferred provider sync |
-| GET | `/api/repositories/:repositoryId/issues` | yes | member target | Deferred Issue list |
-| POST | `/api/tasks/:taskId/github-issues` | yes | member target | Deferred create/link Issue from Task |
-| GET | `/api/repositories/:repositoryId/pull-requests` | yes | member target | Deferred PR list |
-| GET | `/api/pull-requests/:pullRequestId/changed-files` | yes | member target | Deferred changed-file source for Review |
-| POST | `/api/tasks/:taskId/pull-requests/:pullRequestId` | yes | member target | Deferred Task-PR link |
+| Method | Path                                                            | Auth       | Role                          | Description                             |
+| ------ | --------------------------------------------------------------- | ---------- | ----------------------------- | --------------------------------------- |
+| GET    | `/api/workspaces/:workspaceId/github/connections`               | yes        | member                        | Connection status                       |
+| POST   | `/api/workspaces/:workspaceId/github/connections`               | yes        | member current / owner target | Start GitHub App installation flow      |
+| DELETE | `/api/workspaces/:workspaceId/github/connections/:connectionId` | yes        | member current / owner target | Disconnect or revoke integration        |
+| GET    | `/api/github/app/callback`                                      | no session | GitHub App redirect           | Complete installation callback          |
+| GET    | `/api/workspaces/:workspaceId/github/repositories`              | yes        | owner target                  | Deferred repository list                |
+| POST   | `/api/workspaces/:workspaceId/github/repositories/sync`         | yes        | owner target                  | Deferred provider sync                  |
+| GET    | `/api/repositories/:repositoryId/issues`                        | yes        | member target                 | Deferred Issue list                     |
+| POST   | `/api/tasks/:taskId/github-issues`                              | yes        | member target                 | Deferred create/link Issue from Task    |
+| GET    | `/api/repositories/:repositoryId/pull-requests`                 | yes        | member target                 | Deferred PR list                        |
+| GET    | `/api/pull-requests/:pullRequestId/changed-files`               | yes        | member target                 | Deferred changed-file source for Review |
+| POST   | `/api/tasks/:taskId/pull-requests/:pullRequestId`               | yes        | member target                 | Deferred Task-PR link                   |
 
 Status rules:
 
@@ -453,8 +460,21 @@ Enums:
 
 ```ts
 type GitHubIssueState = "open" | "closed";
-type GitHubPullRequestState = "open" | "draft" | "review_requested" | "changes_requested" | "approved" | "merged" | "closed";
-type GitHubSyncStatus = "synced" | "syncing" | "partial_failure" | "failed" | "auth_required" | "broken_reference";
+type GitHubPullRequestState =
+  | "open"
+  | "draft"
+  | "review_requested"
+  | "changes_requested"
+  | "approved"
+  | "merged"
+  | "closed";
+type GitHubSyncStatus =
+  | "synced"
+  | "syncing"
+  | "partial_failure"
+  | "failed"
+  | "auth_required"
+  | "broken_reference";
 ```
 
 Rules:
@@ -468,43 +488,43 @@ Rules:
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/meetings` | yes | member | Current scaffold/list for accessible meetings |
-| GET | `/api/workspaces/:workspaceId/meetings` | yes | member | List meetings |
-| POST | `/api/workspaces/:workspaceId/meetings` | yes | member | Start meeting |
-| GET | `/api/meetings/:meetingId` | yes | member | Meeting detail |
-| PATCH | `/api/meetings/:meetingId/status` | yes | member | Change meeting status |
-| POST | `/api/meetings/:meetingId/participants` | yes | member | Add participant |
-| GET | `/api/meetings/:meetingId/participants` | yes | member | List participants |
-| PATCH | `/api/meetings/:meetingId/participants/:participantId/leave` | yes | member | Leave participant |
-| POST | `/api/meetings/:meetingId/agendas` | yes | member | Add agenda |
-| GET | `/api/meetings/:meetingId/agendas` | yes | member | List agendas |
-| PATCH | `/api/meetings/:meetingId/agendas/:agendaId/status` | yes | member | Change agenda status |
-| PATCH | `/api/meetings/:meetingId/agendas/:agendaId/sort-order` | yes | member | Reorder agenda |
-| POST | `/api/meetings/:meetingId/memos` | yes | member | Add text memo |
-| GET | `/api/meetings/:meetingId/memos` | yes | member | List memos |
-| POST | `/api/meetings/:meetingId/transcript-segments` | yes | member | Store transcript segment |
-| GET | `/api/meetings/:meetingId/transcript-segments` | yes | member | List transcript segments |
-| POST | `/api/meetings/:meetingId/report-generation` | yes | member | Request report workflow |
-| POST | `/api/meetings/:meetingId/report` | yes | member | Create/mock report |
-| GET | `/api/meeting-reports/:reportId` | yes | member | Report detail |
-| GET | `/api/workspaces/:workspaceId/meeting-reports/recent` | yes | member | Recent report summaries |
-| GET | `/api/workspaces/:workspaceId/meeting-reports/canvas-entity-refs` | yes | member | Canvas entity refs |
-| POST | `/api/meeting-reports/:reportId/action-items` | yes | member | Create Action Item |
-| GET | `/api/meeting-reports/:reportId/action-items` | yes | member | List Action Items |
-| PATCH | `/api/meeting-action-items/:actionItemId/approve` | yes | member | Approve Action Item |
-| PATCH | `/api/meeting-action-items/:actionItemId/reject` | yes | member | Reject Action Item |
-| PATCH | `/api/meeting-action-items/:actionItemId/convert` | yes | member | Mark converted after Task success |
-| POST | `/api/meeting-action-items/:actionItemId/task-draft` | yes | member | Request TaskDraft |
-| POST | `/api/workspaces/:workspaceId/meetings/:meetingId/voice-room` | yes | member | Create Voice room |
-| GET | `/api/workspaces/:workspaceId/meetings/:meetingId/voice-room` | yes | member | Read Voice room |
-| GET | `/api/voice-rooms/:voiceRoomId` | yes | member | Voice room detail |
-| PATCH | `/api/voice-rooms/:voiceRoomId/status` | yes | member | Change Voice room status |
-| POST | `/api/voice-rooms/:voiceRoomId/sessions` | yes | member | Join Voice session |
-| GET | `/api/voice-rooms/:voiceRoomId/sessions` | yes | member | List Voice sessions |
-| PATCH | `/api/voice-sessions/:voiceSessionId/leave` | yes | member | Leave Voice session |
-| PATCH | `/api/voice-sessions/:voiceSessionId/recording-status` | yes | member | Change recording/STT status |
+| Method | Path                                                              | Auth | Role   | Description                                   |
+| ------ | ----------------------------------------------------------------- | ---- | ------ | --------------------------------------------- |
+| GET    | `/api/meetings`                                                   | yes  | member | Current scaffold/list for accessible meetings |
+| GET    | `/api/workspaces/:workspaceId/meetings`                           | yes  | member | List meetings                                 |
+| POST   | `/api/workspaces/:workspaceId/meetings`                           | yes  | member | Start meeting                                 |
+| GET    | `/api/meetings/:meetingId`                                        | yes  | member | Meeting detail                                |
+| PATCH  | `/api/meetings/:meetingId/status`                                 | yes  | member | Change meeting status                         |
+| POST   | `/api/meetings/:meetingId/participants`                           | yes  | member | Add participant                               |
+| GET    | `/api/meetings/:meetingId/participants`                           | yes  | member | List participants                             |
+| PATCH  | `/api/meetings/:meetingId/participants/:participantId/leave`      | yes  | member | Leave participant                             |
+| POST   | `/api/meetings/:meetingId/agendas`                                | yes  | member | Add agenda                                    |
+| GET    | `/api/meetings/:meetingId/agendas`                                | yes  | member | List agendas                                  |
+| PATCH  | `/api/meetings/:meetingId/agendas/:agendaId/status`               | yes  | member | Change agenda status                          |
+| PATCH  | `/api/meetings/:meetingId/agendas/:agendaId/sort-order`           | yes  | member | Reorder agenda                                |
+| POST   | `/api/meetings/:meetingId/memos`                                  | yes  | member | Add text memo                                 |
+| GET    | `/api/meetings/:meetingId/memos`                                  | yes  | member | List memos                                    |
+| POST   | `/api/meetings/:meetingId/transcript-segments`                    | yes  | member | Store transcript segment                      |
+| GET    | `/api/meetings/:meetingId/transcript-segments`                    | yes  | member | List transcript segments                      |
+| POST   | `/api/meetings/:meetingId/report-generation`                      | yes  | member | Request report workflow                       |
+| POST   | `/api/meetings/:meetingId/report`                                 | yes  | member | Create/mock report                            |
+| GET    | `/api/meeting-reports/:reportId`                                  | yes  | member | Report detail                                 |
+| GET    | `/api/workspaces/:workspaceId/meeting-reports/recent`             | yes  | member | Recent report summaries                       |
+| GET    | `/api/workspaces/:workspaceId/meeting-reports/canvas-entity-refs` | yes  | member | Canvas entity refs                            |
+| POST   | `/api/meeting-reports/:reportId/action-items`                     | yes  | member | Create Action Item                            |
+| GET    | `/api/meeting-reports/:reportId/action-items`                     | yes  | member | List Action Items                             |
+| PATCH  | `/api/meeting-action-items/:actionItemId/approve`                 | yes  | member | Approve Action Item                           |
+| PATCH  | `/api/meeting-action-items/:actionItemId/reject`                  | yes  | member | Reject Action Item                            |
+| PATCH  | `/api/meeting-action-items/:actionItemId/convert`                 | yes  | member | Mark converted after Task success             |
+| POST   | `/api/meeting-action-items/:actionItemId/task-draft`              | yes  | member | Request TaskDraft                             |
+| POST   | `/api/workspaces/:workspaceId/meetings/:meetingId/voice-room`     | yes  | member | Create Voice room                             |
+| GET    | `/api/workspaces/:workspaceId/meetings/:meetingId/voice-room`     | yes  | member | Read Voice room                               |
+| GET    | `/api/voice-rooms/:voiceRoomId`                                   | yes  | member | Voice room detail                             |
+| PATCH  | `/api/voice-rooms/:voiceRoomId/status`                            | yes  | member | Change Voice room status                      |
+| POST   | `/api/voice-rooms/:voiceRoomId/sessions`                          | yes  | member | Join Voice session                            |
+| GET    | `/api/voice-rooms/:voiceRoomId/sessions`                          | yes  | member | List Voice sessions                           |
+| PATCH  | `/api/voice-sessions/:voiceSessionId/leave`                       | yes  | member | Leave Voice session                           |
+| PATCH  | `/api/voice-sessions/:voiceSessionId/recording-status`            | yes  | member | Change recording/STT status                   |
 
 Status rules:
 
@@ -619,7 +639,12 @@ Enums:
 ```ts
 type MeetingStatus = "scheduled" | "in_progress" | "ended" | "report_generated";
 type VoiceRoomStatus = "active" | "inactive" | "archived";
-type VoiceSessionRecordingStatus = "not_recording" | "recording" | "processing" | "completed" | "failed";
+type VoiceSessionRecordingStatus =
+  | "not_recording"
+  | "recording"
+  | "processing"
+  | "completed"
+  | "failed";
 type TranscriptSource = "text" | "stt";
 type ReportStatus = "draft" | "confirmed";
 type ActionItemStatus = "draft" | "approved" | "converted" | "rejected";
@@ -638,18 +663,18 @@ Rules:
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| POST | `/api/pull-requests/:pullRequestId/review-room` | yes | member | Create or open Review Room |
-| GET | `/api/code-review-rooms/:roomId` | yes | member | Review Room detail |
-| POST | `/api/pull-requests/:pullRequestId/analysis` | yes | member | Generate PR analysis |
-| GET | `/api/pull-requests/:pullRequestId/analysis` | yes | member | PR analysis result |
-| GET | `/api/pull-requests/:pullRequestId/analysis-summary` | yes | member | PR analysis summary |
-| GET | `/api/pull-request-analyses/:analysisId/graph` | yes | member | Review graph |
-| GET | `/api/pull-request-analyses/:analysisId/canvas` | yes | member | Review internal canvas |
-| PATCH | `/api/review-nodes/:nodeId/state` | yes | member | Save internal review node state |
-| POST | `/api/code-review-rooms/:roomId/comments` | yes | member | Create review comment |
-| POST | `/api/pull-request-analyses/:analysisId/checklist-items` | yes | member | Create checklist item |
+| Method | Path                                                     | Auth | Role   | Description                     |
+| ------ | -------------------------------------------------------- | ---- | ------ | ------------------------------- |
+| POST   | `/api/pull-requests/:pullRequestId/review-room`          | yes  | member | Create or open Review Room      |
+| GET    | `/api/code-review-rooms/:roomId`                         | yes  | member | Review Room detail              |
+| POST   | `/api/pull-requests/:pullRequestId/analysis`             | yes  | member | Generate PR analysis            |
+| GET    | `/api/pull-requests/:pullRequestId/analysis`             | yes  | member | PR analysis result              |
+| GET    | `/api/pull-requests/:pullRequestId/analysis-summary`     | yes  | member | PR analysis summary             |
+| GET    | `/api/pull-request-analyses/:analysisId/graph`           | yes  | member | Review graph                    |
+| GET    | `/api/pull-request-analyses/:analysisId/canvas`          | yes  | member | Review internal canvas          |
+| PATCH  | `/api/review-nodes/:nodeId/state`                        | yes  | member | Save internal review node state |
+| POST   | `/api/code-review-rooms/:roomId/comments`                | yes  | member | Create review comment           |
+| POST   | `/api/pull-request-analyses/:analysisId/checklist-items` | yes  | member | Create checklist item           |
 
 ### Review Room DTO
 
@@ -694,7 +719,12 @@ Rules:
 Enums:
 
 ```ts
-type ReviewAnalysisStatus = "not_started" | "running" | "completed" | "failed" | "limit_exceeded";
+type ReviewAnalysisStatus =
+  | "not_started"
+  | "running"
+  | "completed"
+  | "failed"
+  | "limit_exceeded";
 type ReviewDecision = "no_issue" | "needs_discussion" | "unknown";
 ```
 
@@ -716,26 +746,24 @@ Rules:
 ## Agent Runtime / Command Chat API
 
 This section is the MVP Target surface. In current runtime, the Agent registry
-and an internal deterministic service skeleton exist, but no Agent Run/Action
-HTTP controller exists yet. Therefore the Agent Run/Action HTTP routes below
-remain Deferred until the controller PR lands. Do not treat the internal service
-skeleton as a callable Current Runtime API.
+and an internal deterministic service skeleton exist. The smaller Agent
+Run/Action approval surface is now exposed through an app-server HTTP controller
+as Mock/In-memory Current Runtime.
 
-The next Agent Runtime implementation PR should start with the smaller approval
-surface: create run, read run, approve action, and reject action. Agent chat and
-recommendation list routes stay follow-up targets unless a separate contract PR
-changes that sequence.
+Current Agent Run/Action runtime covers create run, read run, approve action,
+and reject action. Agent chat and recommendation list routes stay Deferred
+follow-up targets unless a separate contract PR changes that sequence.
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| POST | `/api/workspaces/:workspaceId/agent-runs` | yes | member | Create Agent run |
-| GET | `/api/agent-runs/:agentRunId` | yes | member | Agent run detail |
-| POST | `/api/agent-actions/:actionId/approve` | yes | member | Approve Agent action |
-| POST | `/api/agent-actions/:actionId/reject` | yes | member | Reject Agent action |
-| GET | `/api/workspaces/:workspaceId/agent-chat/messages` | yes | member | List Agent chat messages |
-| POST | `/api/workspaces/:workspaceId/agent-chat/messages` | yes | member | Send Agent command |
+| Method | Path                                               | Auth | Role   | Description              |
+| ------ | -------------------------------------------------- | ---- | ------ | ------------------------ |
+| POST   | `/api/workspaces/:workspaceId/agent-runs`          | yes  | member | Create Agent run         |
+| GET    | `/api/agent-runs/:agentRunId`                      | yes  | member | Agent run detail         |
+| POST   | `/api/agent-actions/:actionId/approve`             | yes  | member | Approve Agent action     |
+| POST   | `/api/agent-actions/:actionId/reject`              | yes  | member | Reject Agent action      |
+| GET    | `/api/workspaces/:workspaceId/agent-chat/messages` | yes  | member | List Agent chat messages |
+| POST   | `/api/workspaces/:workspaceId/agent-chat/messages` | yes  | member | Send Agent command       |
 
 ### Agent Run Request
 
@@ -787,10 +815,33 @@ changes that sequence.
 Enums:
 
 ```ts
-type AgentWorkflowType = "meeting.report.generate" | "review.analysis.generate" | "planning.generate" | "task.draft.generate" | "github.issue.draft.generate" | "orchestrator.run";
-type AgentRunStatus = "pending" | "running" | "succeeded" | "failed" | "requires_confirmation";
-type AgentActionType = "task.create.draft" | "task.update.status" | "github.issue.create" | "meeting.report.generate" | "review.analysis.generate" | "planning.approve";
-type AgentActionStatus = "draft" | "waiting_confirmation" | "confirmed" | "executed" | "rejected" | "failed";
+type AgentWorkflowType =
+  | "meeting.report.generate"
+  | "review.analysis.generate"
+  | "planning.generate"
+  | "task.draft.generate"
+  | "github.issue.draft.generate"
+  | "orchestrator.run";
+type AgentRunStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "requires_confirmation";
+type AgentActionType =
+  | "task.create.draft"
+  | "task.update.status"
+  | "github.issue.create"
+  | "meeting.report.generate"
+  | "review.analysis.generate"
+  | "planning.approve";
+type AgentActionStatus =
+  | "draft"
+  | "waiting_confirmation"
+  | "confirmed"
+  | "executed"
+  | "rejected"
+  | "failed";
 ```
 
 Rules:
@@ -803,8 +854,10 @@ Rules:
   `docs/contracts/schemas/pilo-public-contracts.schema.json`.
 - Legacy names such as task suggestion workflows, generic create-task actions,
   or requires-approval statuses are not part of the current public contract.
-- Agent Run/Action HTTP APIs are Deferred until the controller lands. The
-  registry service alone does not make these routes Current Runtime.
+- Agent Run/Action HTTP APIs are Current Mock/In-memory runtime for the four
+  approval-flow routes. Agent chat and recommendation routes remain Deferred.
+- The registry service alone does not make a route Current Runtime; only the
+  app-server controller plus global `/api` prefix does.
 
 ## Notification API
 
@@ -815,11 +868,11 @@ a release-blocking Current API before that owner/runtime PR lands.
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/notifications` | yes | member | My notifications in Workspace |
-| PATCH | `/api/notifications/:notificationId/read` | yes | owner of notification | Mark as read |
-| PATCH | `/api/workspaces/:workspaceId/notifications/read-all` | yes | member | Mark all my notifications read |
+| Method | Path                                                  | Auth | Role                  | Description                    |
+| ------ | ----------------------------------------------------- | ---- | --------------------- | ------------------------------ |
+| GET    | `/api/workspaces/:workspaceId/notifications`          | yes  | member                | My notifications in Workspace  |
+| PATCH  | `/api/notifications/:notificationId/read`             | yes  | owner of notification | Mark as read                   |
+| PATCH  | `/api/workspaces/:workspaceId/notifications/read-all` | yes  | member                | Mark all my notifications read |
 
 ### Notification DTO
 
@@ -843,7 +896,12 @@ a release-blocking Current API before that owner/runtime PR lands.
 Enums:
 
 ```ts
-type NotificationType = "task_assigned" | "review_requested" | "agent_approval_required" | "report_created" | "github_sync_failed";
+type NotificationType =
+  | "task_assigned"
+  | "review_requested"
+  | "agent_approval_required"
+  | "report_created"
+  | "github_sync_failed";
 ```
 
 Rules:
@@ -861,19 +919,19 @@ layout/reference storage only, not source-domain data ownership.
 
 ### Endpoints
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/canvas-boards` | yes | member | List boards |
-| POST | `/api/workspaces/:workspaceId/canvas-boards` | yes | member | Create board |
-| GET | `/api/canvas-boards/:boardId` | yes | member | Board detail |
-| POST | `/api/canvas-boards/:boardId/shapes` | yes | member | Create reference shape |
-| PATCH | `/api/canvas-shapes/:shapeId` | yes | member | Update shape display attributes |
-| PUT | `/api/canvas-shapes/:shapeId/position` | yes | member | Save shape position |
-| DELETE | `/api/canvas-shapes/:shapeId` | yes | member | Delete Canvas shape only |
-| POST | `/api/canvas-boards/:boardId/connections` | yes | member | Create connection |
-| DELETE | `/api/canvas-connections/:connectionId` | yes | member | Delete connection |
-| PUT | `/api/canvas-boards/:boardId/view-settings` | yes | member | Save board viewport |
-| PUT | `/api/canvas-boards/:boardId/filter-settings` | yes | member | Save board filters |
+| Method | Path                                          | Auth | Role   | Description                     |
+| ------ | --------------------------------------------- | ---- | ------ | ------------------------------- |
+| GET    | `/api/workspaces/:workspaceId/canvas-boards`  | yes  | member | List boards                     |
+| POST   | `/api/workspaces/:workspaceId/canvas-boards`  | yes  | member | Create board                    |
+| GET    | `/api/canvas-boards/:boardId`                 | yes  | member | Board detail                    |
+| POST   | `/api/canvas-boards/:boardId/shapes`          | yes  | member | Create reference shape          |
+| PATCH  | `/api/canvas-shapes/:shapeId`                 | yes  | member | Update shape display attributes |
+| PUT    | `/api/canvas-shapes/:shapeId/position`        | yes  | member | Save shape position             |
+| DELETE | `/api/canvas-shapes/:shapeId`                 | yes  | member | Delete Canvas shape only        |
+| POST   | `/api/canvas-boards/:boardId/connections`     | yes  | member | Create connection               |
+| DELETE | `/api/canvas-connections/:connectionId`       | yes  | member | Delete connection               |
+| PUT    | `/api/canvas-boards/:boardId/view-settings`   | yes  | member | Save board viewport             |
+| PUT    | `/api/canvas-boards/:boardId/filter-settings` | yes  | member | Save board filters              |
 
 ### Canvas Shape DTO
 
@@ -894,8 +952,23 @@ layout/reference storage only, not source-domain data ownership.
 Enums:
 
 ```ts
-type CanvasEntityType = "task" | "meeting_report" | "pull_request" | "github_issue" | "document" | "file" | "code" | "decision" | "risk";
-type CanvasConnectionType = "related_to" | "created_from" | "blocks" | "references" | "implements" | "reviews";
+type CanvasEntityType =
+  | "task"
+  | "meeting_report"
+  | "pull_request"
+  | "github_issue"
+  | "document"
+  | "file"
+  | "code"
+  | "decision"
+  | "risk";
+type CanvasConnectionType =
+  | "related_to"
+  | "created_from"
+  | "blocks"
+  | "references"
+  | "implements"
+  | "reviews";
 ```
 
 Rules:
@@ -912,9 +985,9 @@ Rules:
 
 ### Endpoint
 
-| Method | Path | Auth | Role | Description |
-| --- | --- | --- | --- | --- |
-| GET | `/api/workspaces/:workspaceId/dashboard` | yes | member | Read-only Workspace dashboard |
+| Method | Path                                     | Auth | Role   | Description                   |
+| ------ | ---------------------------------------- | ---- | ------ | ----------------------------- |
+| GET    | `/api/workspaces/:workspaceId/dashboard` | yes  | member | Read-only Workspace dashboard |
 
 ### Dashboard Response
 
