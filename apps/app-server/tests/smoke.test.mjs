@@ -1631,6 +1631,81 @@ describe("app-server package", () => {
     }
   });
 
+  it("overlays workspace dashboard agent actions from the runtime service", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    const repository = new WorkspaceRepository();
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await new WorkspaceService(repository).createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const runtimeAgentAction = {
+      id: "99999999-9999-4999-8996-999999999991",
+      runId: "99999999-9999-4999-8999-999999999991",
+      type: "task.create.draft",
+      source: "planning",
+      requiresConfirmation: true,
+      payload: {
+        workspaceId: workspace.id,
+        title: "Runtime task draft",
+      },
+      status: "waiting_confirmation",
+      confirmedByMemberId: null,
+      confirmedAt: null,
+      executedAt: null,
+    };
+    const calls = [];
+    const moduleRef = {
+      get(token) {
+        if (token.name === "AgentRuntimeService") {
+          return {
+            async listWorkspaceActions(workspaceId, actor) {
+              calls.push({ service: "agentActions", workspaceId, actor });
+              return [runtimeAgentAction];
+            },
+          };
+        }
+
+        throw new Error(`Unexpected provider token: ${token.name}`);
+      },
+    };
+
+    delete process.env.PILO_SKIP_DATABASE_CONNECT;
+
+    try {
+      const service = new WorkspaceService(repository, moduleRef);
+      const dashboard = await service.getWorkspaceDashboard({
+        workspaceId: workspace.id,
+        currentUser: owner,
+      });
+
+      assert.equal(dashboard.source, "mixed");
+      assert.deepEqual(dashboard.agentActions, [runtimeAgentAction]);
+      assert.deepEqual(calls, [
+        {
+          service: "agentActions",
+          workspaceId: workspace.id,
+          actor: {
+            userId: owner.id,
+            memberId: dashboard.currentMember.memberId,
+          },
+        },
+      ]);
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
   it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {
     const defs = contractSchema.$defs;
 

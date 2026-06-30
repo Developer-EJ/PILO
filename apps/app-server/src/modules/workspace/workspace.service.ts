@@ -3,6 +3,7 @@ import { ModuleRef } from "@nestjs/core";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { AgentRuntimeService } from "../agent/agent-runtime.service";
 import { JuhyungProgressService } from "../juhyung/juhyung-progress.service";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
 import { MeetingService } from "../meeting/meeting.service";
@@ -320,6 +321,7 @@ export class WorkspaceService {
     const taskService = this.getRuntimeProvider(JuhyungTaskService);
     const progressService = this.getRuntimeProvider(JuhyungProgressService);
     const meetingService = this.getRuntimeProvider(MeetingService);
+    const agentRuntimeService = this.getRuntimeProvider(AgentRuntimeService);
 
     if (taskService) {
       try {
@@ -362,6 +364,19 @@ export class WorkspaceService {
           "meeting_report",
           meetingReportCanvasEntities,
         );
+        hasRuntimeSection = true;
+      } catch {
+        // Dashboard stays available while owner services catch up or are down.
+      }
+    }
+
+    if (agentRuntimeService) {
+      try {
+        nextReadModels.agentActions =
+          await agentRuntimeService.listWorkspaceActions(
+            input.workspaceId,
+            actor,
+          );
         hasRuntimeSection = true;
       } catch {
         // Dashboard stays available while owner services catch up or are down.
