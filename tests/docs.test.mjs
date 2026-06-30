@@ -838,6 +838,29 @@ describe("machine-readable public contract schema", () => {
     }
   });
 
+  it("schema keeps Review node type enums aligned with runtime graph adapters", () => {
+    const schema = JSON.parse(read(schemaPath));
+    const expectedNodeTypes = [
+      "file",
+      "function",
+      "api",
+      "route",
+      "schema",
+      "config",
+      "risk",
+      "impact",
+    ];
+
+    assert.deepEqual(
+      schema.$defs.ReviewCanvasNode.properties.nodeType.enum,
+      expectedNodeTypes,
+    );
+    assert.deepEqual(
+      schema.$defs.ReviewNodeSummary.properties.nodeType.enum,
+      expectedNodeTypes,
+    );
+  });
+
   it("schema defines planning detail sections and approval result boundaries", () => {
     const schema = JSON.parse(read(schemaPath));
     const detail = schema.$defs.ProjectPlanDraftDetail;
