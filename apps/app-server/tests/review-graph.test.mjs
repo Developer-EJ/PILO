@@ -24,10 +24,12 @@ function createController() {
 }
 
 describe("review graph API boundary", () => {
-  it("returns a review graph with review node summaries", () => {
+  it("returns a review graph with review node summaries", async () => {
     const controller = createController();
 
-    const graph = controller.getGraph("88888888-8888-4888-8888-888888888881");
+    const graph = await controller.getGraph(
+      "88888888-8888-4888-8888-888888888881",
+    );
 
     assert.equal(graph.pullRequestId, "66666666-6666-4666-8666-666666666661");
     assert.deepEqual(graph.edges, []);
@@ -39,26 +41,28 @@ describe("review graph API boundary", () => {
     assert.equal(graph.reviewOrder[0], graph.nodes[0].id);
   });
 
-  it("keeps a canvas alias for the AI review workflow screen", () => {
+  it("keeps a canvas alias for the AI review workflow screen", async () => {
     const controller = createController();
 
-    const canvas = controller.getCanvas("88888888-8888-4888-8888-888888888881");
+    const canvas = await controller.getCanvas(
+      "88888888-8888-4888-8888-888888888881",
+    );
 
     assert.equal(canvas.nodes.length, 2);
     assert.match(canvas.reviewStrategy, /callback/);
   });
 
-  it("upserts reviewer node state by node and reviewer", () => {
+  it("upserts reviewer node state by node and reviewer", async () => {
     const controller = createController();
     const nodeId = "88888888-8888-4888-8888-888888888891";
 
-    const first = controller.upsertNodeState(nodeId, {
+    const first = await controller.upsertNodeState(nodeId, {
       reviewerMemberId: "33333333-3333-4333-8333-333333333331",
       status: "discuss",
       comment: "Check error redirect handling",
       changedAt: "2026-06-27T10:00:00.000Z",
     });
-    const second = controller.upsertNodeState(nodeId, {
+    const second = await controller.upsertNodeState(nodeId, {
       reviewerMemberId: first.reviewerMemberId,
       status: "ok",
       comment: "Handled",
@@ -68,17 +72,17 @@ describe("review graph API boundary", () => {
     assert.equal(second.id, first.id);
     assert.equal(second.status, "ok");
     assert.equal(second.createdAt, first.createdAt);
-    assert.equal(
-      controller.getGraph("88888888-8888-4888-8888-888888888881").nodes[0]
-        .status,
-      "ok",
+    const graph = await controller.getGraph(
+      "88888888-8888-4888-8888-888888888881",
     );
+
+    assert.equal(graph.nodes[0].status, "ok");
   });
 
-  it("rejects invalid node state", () => {
+  it("rejects invalid node state", async () => {
     const controller = createController();
 
-    assert.throws(
+    await assert.rejects(
       () =>
         controller.upsertNodeState("88888888-8888-4888-8888-888888888891", {
           reviewerMemberId: "33333333-3333-4333-8333-333333333331",
@@ -88,10 +92,10 @@ describe("review graph API boundary", () => {
     );
   });
 
-  it("rejects invalid state timestamps", () => {
+  it("rejects invalid state timestamps", async () => {
     const controller = createController();
 
-    assert.throws(
+    await assert.rejects(
       () =>
         controller.upsertNodeState("88888888-8888-4888-8888-888888888891", {
           reviewerMemberId: "33333333-3333-4333-8333-333333333331",

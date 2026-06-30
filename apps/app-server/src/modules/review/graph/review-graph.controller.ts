@@ -11,12 +11,16 @@ export class ReviewGraphController {
   constructor(private readonly graphService: ReviewGraphService) {}
 
   @Get("pull-request-analyses/:analysisId/graph")
-  getGraph(@Param("analysisId") analysisId: string): ReviewGraphSummary {
+  getGraph(
+    @Param("analysisId") analysisId: string,
+  ): Promise<ReviewGraphSummary> {
     return this.graphService.getGraph(analysisId);
   }
 
   @Get("pull-request-analyses/:analysisId/canvas")
-  getCanvas(@Param("analysisId") analysisId: string): ReviewGraphSummary {
+  getCanvas(
+    @Param("analysisId") analysisId: string,
+  ): Promise<ReviewGraphSummary> {
     return this.graphService.getGraph(analysisId);
   }
 
@@ -24,7 +28,7 @@ export class ReviewGraphController {
   upsertNodeState(
     @Param("nodeId") nodeId: string,
     @Body() body: UpsertNodeReviewStateInput,
-  ): NodeReviewStateRecord {
+  ): Promise<NodeReviewStateRecord> {
     return this.graphService.upsertNodeState(nodeId, body);
   }
 }

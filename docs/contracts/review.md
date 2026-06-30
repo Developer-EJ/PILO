@@ -135,6 +135,10 @@ silently falling back to fixtures. Local fixture seeding is available only when
 Runtime `nodeType` values are `file`, `function`, `api`, `route`, `schema`,
 `config`, `risk`, and `impact`. The public schema intentionally includes
 `route` and `config` because the app-server review graph adapter accepts them.
+Runtime review node ids are opaque strings, not guaranteed UUIDs, because agent
+graph outputs may preserve stable semantic node ids such as
+`review-node-runtime-file`. Consumers must treat them as identifiers only and
+send them back unchanged to `/api/review-nodes/:nodeId/state`.
 
 Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 판단하고, 변경 파일을 캔버스 노드로 배치한다. 왼쪽은 사용자가 메모나 추가 코드를 붙일 수 있는 캔버스이고, 오른쪽은 PR의 전체 의도를 간략히 설명한다.
 
@@ -147,7 +151,7 @@ Code review 탭에서 PR을 선택하면 AI가 PR의 의도와 리뷰 순서를 
   "reviewStrategy": "라우트 진입점, callback 상태 해석, redirect 영향 순서로 확인한다.",
   "nodes": [
     {
-      "id": "uuid",
+      "id": "review-node-runtime-file",
       "analysisId": "uuid",
       "nodeType": "file",
       "label": "apps/frontend/app/auth/callback/page.tsx",

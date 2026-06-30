@@ -638,7 +638,10 @@ CREATE TABLE pull_request_analyses (
 CREATE TABLE review_graphs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   analysis_id UUID NOT NULL REFERENCES pull_request_analyses(id) ON DELETE CASCADE,
+  pull_request_id UUID REFERENCES pull_requests(id) ON DELETE CASCADE,
   summary TEXT,
+  intent_summary TEXT NOT NULL DEFAULT '',
+  review_strategy TEXT NOT NULL DEFAULT '',
   review_order JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -672,27 +675,27 @@ CREATE TABLE changed_functions (
 );
 
 CREATE TABLE review_nodes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id TEXT PRIMARY KEY,
   graph_id UUID NOT NULL REFERENCES review_graphs(id) ON DELETE CASCADE,
-  changed_file_id UUID REFERENCES changed_files(id) ON DELETE SET NULL,
-  changed_function_id UUID REFERENCES changed_functions(id) ON DELETE SET NULL,
   node_type VARCHAR(30) NOT NULL,
   label VARCHAR(255) NOT NULL,
   file_path TEXT,
-  symbol VARCHAR(255),
-  role TEXT,
-  reason TEXT,
+  function_name VARCHAR(255),
+  role_summary TEXT NOT NULL DEFAULT '',
+  review_reason TEXT NOT NULL DEFAULT '',
   risk_level VARCHAR(20) NOT NULL DEFAULT 'low',
+  review_order INTEGER NOT NULL DEFAULT 1,
   position JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT review_nodes_type_check CHECK (node_type IN ('file', 'function', 'api', 'route', 'schema', 'config', 'risk', 'impact')),
-  CONSTRAINT review_nodes_risk_level_check CHECK (risk_level IN ('low', 'medium', 'high', 'critical'))
+  CONSTRAINT review_nodes_risk_level_check CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
+  CONSTRAINT review_nodes_review_order_check CHECK (review_order >= 1)
 );
 
 CREATE TABLE node_review_states (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  node_id UUID NOT NULL REFERENCES review_nodes(id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL REFERENCES review_nodes(id) ON DELETE CASCADE,
   reviewer_member_id UUID NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
   status VARCHAR(20) NOT NULL DEFAULT 'unknown',
   comment TEXT,
@@ -706,7 +709,7 @@ CREATE TABLE review_comments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   room_id UUID NOT NULL REFERENCES code_review_rooms(id) ON DELETE CASCADE,
   author_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
-  node_id UUID REFERENCES review_nodes(id) ON DELETE SET NULL,
+  node_id TEXT REFERENCES review_nodes(id) ON DELETE SET NULL,
   changed_file_id UUID REFERENCES changed_files(id) ON DELETE SET NULL,
   changed_function_id UUID REFERENCES changed_functions(id) ON DELETE SET NULL,
   body TEXT NOT NULL,
@@ -717,7 +720,7 @@ CREATE TABLE review_comments (
 CREATE TABLE review_questions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   analysis_id UUID NOT NULL REFERENCES pull_request_analyses(id) ON DELETE CASCADE,
-  node_id UUID REFERENCES review_nodes(id) ON DELETE SET NULL,
+  node_id TEXT REFERENCES review_nodes(id) ON DELETE SET NULL,
   question TEXT NOT NULL,
   priority VARCHAR(20) NOT NULL DEFAULT 'medium',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -727,7 +730,7 @@ CREATE TABLE review_questions (
 CREATE TABLE review_risks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   analysis_id UUID NOT NULL REFERENCES pull_request_analyses(id) ON DELETE CASCADE,
-  node_id UUID REFERENCES review_nodes(id) ON DELETE SET NULL,
+  node_id TEXT REFERENCES review_nodes(id) ON DELETE SET NULL,
   type VARCHAR(100) NOT NULL,
   level VARCHAR(20) NOT NULL DEFAULT 'medium',
   reason TEXT NOT NULL,

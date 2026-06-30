@@ -3414,9 +3414,8 @@ describe("app-server package", () => {
       assert.equal(analysis.pullRequestId, pullRequest.id);
       assert.equal(analysis.analysisStatus, "pending");
       assert.equal(
-        app
-          .get(ReviewGraphService)
-          .getGraph(analysis.id).pullRequestId,
+        (await app.get(ReviewGraphService).getGraph(analysis.id))
+          .pullRequestId,
         pullRequest.id,
       );
       assert.deepEqual(

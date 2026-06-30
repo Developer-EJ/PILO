@@ -193,19 +193,22 @@ describe("PR analysis lifecycle API boundary", () => {
 
     assert.equal(analysis.pullRequestId, pullRequest.id);
     assert.equal(analysis.analysisStatus, "pending");
-    assert.deepEqual(graphService.getGraph(analysis.id), {
-      id: `pending-review-graph-${analysis.id}`,
-      analysisId: analysis.id,
-      pullRequestId: pullRequest.id,
-      summary: null,
-      intentSummary:
-        "Analysis is pending. The review graph will be populated after analyzer output arrives.",
-      reviewStrategy:
-        "Keep the review canvas available with no nodes until analysis results are written.",
-      reviewOrder: [],
-      nodes: [],
-      edges: [],
-    });
+    const graph = await graphService.getGraph(analysis.id);
+
+    assert.equal(graph.analysisId, analysis.id);
+    assert.equal(graph.pullRequestId, pullRequest.id);
+    assert.equal(graph.summary, null);
+    assert.equal(
+      graph.intentSummary,
+      "Analysis is pending. The review graph will be populated after analyzer output arrives.",
+    );
+    assert.equal(
+      graph.reviewStrategy,
+      "Keep the review canvas available with no nodes until analysis results are written.",
+    );
+    assert.deepEqual(graph.reviewOrder, []);
+    assert.deepEqual(graph.nodes, []);
+    assert.deepEqual(graph.edges, []);
   });
 });
 

@@ -285,6 +285,54 @@ model PullRequestAnalysis {
   @@map("pull_request_analyses")
 }
 
+model ReviewGraph {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  analysisId     String   @unique @map("analysis_id") @db.Uuid
+  pullRequestId  String?  @map("pull_request_id") @db.Uuid
+  summary        String?
+  intentSummary  String   @map("intent_summary")
+  reviewStrategy String   @map("review_strategy")
+  reviewOrder    Json     @default("[]") @map("review_order") @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([analysisId])
+  @@map("review_graphs")
+}
+
+model ReviewNode {
+  id           String   @id
+  graphId      String   @map("graph_id") @db.Uuid
+  nodeType     String   @map("node_type") @db.VarChar(30)
+  label        String   @db.VarChar(255)
+  filePath     String?  @map("file_path")
+  functionName String?  @map("function_name") @db.VarChar(255)
+  riskLevel    String   @default("low") @map("risk_level") @db.VarChar(20)
+  reviewOrder  Int      @default(1) @map("review_order")
+  roleSummary  String   @map("role_summary")
+  reviewReason String   @map("review_reason")
+  position     Json     @default("{}") @db.JsonB
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([graphId])
+  @@map("review_nodes")
+}
+
+model NodeReviewState {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nodeId           String   @map("node_id")
+  reviewerMemberId String   @map("reviewer_member_id") @db.Uuid
+  status           String   @default("unknown") @db.VarChar(20)
+  comment          String?
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([nodeId, reviewerMemberId])
+  @@index([nodeId])
+  @@map("node_review_states")
+}
+
 model TaskPullRequest {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   taskId        String   @map("task_id") @db.Uuid

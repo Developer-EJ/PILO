@@ -59,7 +59,7 @@ export class AgentResultConsumerService {
         : this.toSucceededAnalysis(analysis, message.output ?? {}, appliedAt);
 
     if (message.status === "succeeded") {
-      this.applySecondaryOutputs(updated.id, message.output ?? {});
+      await this.applySecondaryOutputs(updated.id, message.output ?? {});
     }
 
     const saved = await this.analysisRepository.save(updated);
@@ -158,14 +158,14 @@ export class AgentResultConsumerService {
     };
   }
 
-  private applySecondaryOutputs(
+  private async applySecondaryOutputs(
     analysisId: string,
     output: ReviewAnalysisGenerateOutput,
-  ): void {
+  ): Promise<void> {
     const graph = this.toPersistableGraph(output.graph);
 
     if (graph && this.graphResultService) {
-      this.graphResultService.applyGraph(
+      await this.graphResultService.applyGraph(
         analysisId,
         graph,
         output.pullRequestId ?? null,

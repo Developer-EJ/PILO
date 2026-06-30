@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { InMemoryReviewGraphRepository } from "../graph/in-memory-review-graph.repository";
+import { ReviewGraphRepository } from "../graph/review-graph.repository";
 import {
   ReviewGraphSummary,
   ReviewNodeRecord,
@@ -42,50 +43,51 @@ export interface AgentReviewNodeResult {
 
 @Injectable()
 export class AgentGraphResultService {
-  constructor(
-    private readonly graphRepository: InMemoryReviewGraphRepository,
-  ) {}
+  constructor(private readonly graphRepository: ReviewGraphRepository) {}
 
-  applyGraph(
+  async applyGraph(
     analysisId: string,
     graphResult: AgentReviewGraphResult,
     pullRequestId: string | null = null,
-  ): ReviewGraphSummary {
+  ): Promise<ReviewGraphSummary> {
     const nodes = graphResult.nodes ?? [];
-    const existingGraph = this.graphRepository.findGraphByAnalysis(analysisId);
-    const graphId = existingGraph?.id ?? `review-graph-${analysisId}`;
+    const existingGraph =
+      await this.graphRepository.findGraphByAnalysis(analysisId);
+    const graphId = existingGraph?.id ?? randomUUID();
     const reviewOrder = graphResult.reviewOrder ?? nodes.map((node) => node.id);
+    const summary = graphResult.summary ?? null;
+    const intentSummary =
+      graphResult.intentSummary ?? graphResult.summary ?? "PR change intent";
+    const reviewStrategy =
+      graphResult.reviewStrategy ??
+      "Review the generated changed-file nodes in the suggested order.";
 
-    this.graphRepository.saveGraph({
+    await this.graphRepository.saveGraph({
       id: graphId,
       analysisId,
       pullRequestId: pullRequestId ?? existingGraph?.pullRequestId ?? null,
-      summary: graphResult.summary ?? null,
-      intentSummary:
-        graphResult.intentSummary ?? graphResult.summary ?? "PR 변경 의도",
-      reviewStrategy:
-        graphResult.reviewStrategy ??
-        "AI가 제안한 순서대로 변경 파일을 확인한다.",
+      summary,
+      intentSummary,
+      reviewStrategy,
       reviewOrder,
     });
 
     for (const node of nodes) {
-      this.graphRepository.saveNode(this.toNodeRecord(graphId, node));
+      await this.graphRepository.saveNode(this.toNodeRecord(graphId, node));
     }
+
+    const savedNodes = await this.graphRepository.listNodesByGraph(graphId);
 
     return {
       id: graphId,
       analysisId,
       pullRequestId: pullRequestId ?? existingGraph?.pullRequestId ?? null,
-      summary: graphResult.summary ?? null,
-      intentSummary:
-        graphResult.intentSummary ?? graphResult.summary ?? "PR 변경 의도",
-      reviewStrategy:
-        graphResult.reviewStrategy ??
-        "AI가 제안한 순서대로 변경 파일을 확인한다.",
+      summary,
+      intentSummary,
+      reviewStrategy,
       reviewOrder,
       edges: [],
-      nodes: this.graphRepository.listNodesByGraph(graphId).map((node) => ({
+      nodes: savedNodes.map((node) => ({
         id: node.id,
         analysisId,
         nodeType: node.nodeType,

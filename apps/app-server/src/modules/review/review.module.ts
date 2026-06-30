@@ -10,9 +10,10 @@ import { ReviewArtifactsService } from "./artifacts/review-artifacts.service";
 import { ChangedFilesController } from "./changes/changed-files.controller";
 import { ChangedFilesService } from "./changes/changed-files.service";
 import { InMemoryChangedFilesRepository } from "./changes/in-memory-changed-files.repository";
-import { InMemoryReviewGraphRepository } from "./graph/in-memory-review-graph.repository";
+import { ReviewGraphRepository } from "./graph/review-graph.repository";
 import { ReviewGraphController } from "./graph/review-graph.controller";
 import { ReviewGraphService } from "./graph/review-graph.service";
+import { RuntimeReviewGraphRepository } from "./graph/runtime-review-graph.repository";
 import { ReviewPublicController } from "./public/review-public.controller";
 import { ReviewPublicService } from "./public/review-public.service";
 import { AgentChangedFilesResultService } from "./result/agent-changed-files-result.service";
@@ -71,7 +72,10 @@ import { ReviewRoomService } from "./room/review-room.service";
     ReviewArtifactsService,
     InMemoryReviewArtifactsRepository,
     InMemoryChangedFilesRepository,
-    InMemoryReviewGraphRepository,
+    {
+      provide: ReviewGraphRepository,
+      useClass: RuntimeReviewGraphRepository,
+    },
     {
       provide: ChangedFilesService,
       useFactory: (repository: InMemoryChangedFilesRepository) =>
@@ -83,7 +87,7 @@ import { ReviewRoomService } from "./room/review-room.service";
     {
       provide: ReviewGraphService,
       useFactory: (
-        repository: InMemoryReviewGraphRepository,
+        repository: ReviewGraphRepository,
         analysisRepository: PullRequestAnalysisRepository,
       ) =>
         new ReviewGraphService(
@@ -92,7 +96,7 @@ import { ReviewRoomService } from "./room/review-room.service";
           analysisRepository,
         ),
       inject: [
-        InMemoryReviewGraphRepository,
+        ReviewGraphRepository,
         PullRequestAnalysisRepository,
       ],
     },

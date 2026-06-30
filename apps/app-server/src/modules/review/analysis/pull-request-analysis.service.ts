@@ -54,7 +54,7 @@ export class PullRequestAnalysisService {
       await this.analysisRepository.findByPullRequestId(pullRequestId);
 
     if (existing) {
-      this.ensurePendingGraph(existing);
+      await this.ensurePendingGraph(existing);
       return existing;
     }
 
@@ -64,7 +64,7 @@ export class PullRequestAnalysisService {
       createdAt: new Date().toISOString(),
     });
 
-    this.ensurePendingGraph(created);
+    await this.ensurePendingGraph(created);
     return created;
   }
 
@@ -159,12 +159,17 @@ export class PullRequestAnalysisService {
     }
   }
 
-  private ensurePendingGraph(analysis: PullRequestAnalysisRecord): void {
+  private async ensurePendingGraph(
+    analysis: PullRequestAnalysisRecord,
+  ): Promise<void> {
     if (analysis.analysisStatus !== "pending") {
       return;
     }
 
-    this.graphService?.ensurePendingGraph(analysis.id, analysis.pullRequestId);
+    await this.graphService?.ensurePendingGraph(
+      analysis.id,
+      analysis.pullRequestId,
+    );
   }
 
   private toResultPatch(

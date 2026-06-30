@@ -18,6 +18,15 @@ const agentRegistryMigration = readFileSync(
     encoding: "utf8",
   },
 );
+const reviewGraphMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/202606301420_review_graph_persistence/migration.sql",
+    import.meta.url,
+  ),
+  {
+    encoding: "utf8",
+  },
+);
 const logicalSchema = readFileSync(
   new URL("../../../docs/db/pilo_erd_schema.sql", import.meta.url),
   {
@@ -87,6 +96,27 @@ describe("Prisma workspace member task relations", () => {
     assert.doesNotMatch(
       agentRegistryMigration,
       /UNIQUE \(agent_id, type, version\)/,
+    );
+  });
+
+  it("maps Review graph persistence to runtime graph identifiers", () => {
+    assert.match(
+      schema,
+      /model ReviewGraph\s+{[\s\S]*analysisId\s+String\s+@unique\s+@map\("analysis_id"\)\s+@db\.Uuid[\s\S]*intentSummary\s+String\s+@map\("intent_summary"\)[\s\S]*@@map\("review_graphs"\)/,
+    );
+    assert.match(
+      schema,
+      /model ReviewNode\s+{[\s\S]*id\s+String\s+@id[\s\S]*functionName\s+String\?\s+@map\("function_name"\)[\s\S]*reviewOrder\s+Int\s+@default\(1\)\s+@map\("review_order"\)[\s\S]*@@map\("review_nodes"\)/,
+    );
+    assert.match(
+      schema,
+      /model NodeReviewState\s+{[\s\S]*nodeId\s+String\s+@map\("node_id"\)[\s\S]*@@unique\(\[nodeId, reviewerMemberId\]\)[\s\S]*@@map\("node_review_states"\)/,
+    );
+    assert.match(reviewGraphMigration, /CREATE TABLE IF NOT EXISTS review_nodes/);
+    assert.match(reviewGraphMigration, /id TEXT PRIMARY KEY/);
+    assert.doesNotMatch(
+      reviewGraphMigration,
+      /CREATE TABLE IF NOT EXISTS review_nodes \(\s*id UUID PRIMARY KEY/,
     );
   });
 });

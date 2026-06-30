@@ -17,11 +17,11 @@ function createService() {
 }
 
 describe("agent result graph adapter", () => {
-  it("upserts graph and review nodes from result payload", () => {
+  it("upserts graph and review nodes from result payload", async () => {
     const service = createService();
     const analysisId = "88888888-8888-4888-8888-888888888884";
 
-    const first = service.applyGraph(analysisId, {
+    const first = await service.applyGraph(analysisId, {
       summary: "callback review graph",
       intentSummary: "callback route intent",
       reviewStrategy: "file first",
@@ -39,7 +39,7 @@ describe("agent result graph adapter", () => {
         },
       ],
     });
-    const second = service.applyGraph(analysisId, {
+    const second = await service.applyGraph(analysisId, {
       summary: "updated callback review graph",
       nodes: [
         {
@@ -65,17 +65,17 @@ describe("agent result graph adapter", () => {
     assert.deepEqual(second.nodes[0].position, { x: 84, y: 72 });
   });
 
-  it("rejects invalid node enum values", () => {
+  it("rejects invalid node enum values", async () => {
     const service = createService();
 
-    assert.throws(
+    await assert.rejects(
       () =>
         service.applyGraph("analysis-1", {
           nodes: [{ id: "node-1", nodeType: "unknown", label: "bad" }],
         }),
       /Invalid review node type/,
     );
-    assert.throws(
+    await assert.rejects(
       () =>
         service.applyGraph("analysis-1", {
           nodes: [
@@ -89,7 +89,7 @@ describe("agent result graph adapter", () => {
         }),
       /Invalid review node risk level/,
     );
-    assert.throws(
+    await assert.rejects(
       () =>
         service.applyGraph("analysis-1", {
           nodes: [

@@ -6,7 +6,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import { PullRequestAnalysisRepository } from "../analysis/pull-request-analysis.repository";
-import { InMemoryReviewGraphRepository } from "./in-memory-review-graph.repository";
+import { ReviewGraphRepository } from "./review-graph.repository";
 import {
   NodeReviewStateRecord,
   ReviewGraphSummary,
@@ -26,7 +26,7 @@ export interface ReviewGraphServiceOptions {
 @Injectable()
 export class ReviewGraphService {
   constructor(
-    private readonly graphRepository: InMemoryReviewGraphRepository,
+    private readonly graphRepository: ReviewGraphRepository,
     @Optional()
     options: ReviewGraphServiceOptions = {},
     @Optional()
@@ -37,21 +37,22 @@ export class ReviewGraphService {
     }
   }
 
-  ensurePendingGraph(
+  async ensurePendingGraph(
     analysisId: string,
     pullRequestId: string | null = null,
-  ): ReviewGraphSummary {
-    const existing = this.graphRepository.findGraphByAnalysis(analysisId);
+  ): Promise<ReviewGraphSummary> {
+    const existing = await this.graphRepository.findGraphByAnalysis(analysisId);
 
     if (existing) {
       return this.toSummary(existing);
     }
 
     return this.toSummary(
-      this.graphRepository.saveGraph({
-        id: `pending-review-graph-${analysisId}`,
+      await this.graphRepository.saveGraph({
+        id: randomUUID(),
         analysisId,
-        pullRequestId: pullRequestId ?? this.resolvePullRequestId(analysisId),
+        pullRequestId:
+          pullRequestId ?? (await this.resolvePullRequestId(analysisId)),
         summary: null,
         intentSummary:
           "Analysis is pending. The review graph will be populated after analyzer output arrives.",
@@ -62,8 +63,8 @@ export class ReviewGraphService {
     );
   }
 
-  getGraph(analysisId: string): ReviewGraphSummary {
-    const graph = this.graphRepository.findGraphByAnalysis(analysisId);
+  async getGraph(analysisId: string): Promise<ReviewGraphSummary> {
+    const graph = await this.graphRepository.findGraphByAnalysis(analysisId);
 
     if (!graph) {
       throw new NotFoundException(`Review graph was not found: ${analysisId}`);
@@ -72,7 +73,7 @@ export class ReviewGraphService {
     return this.toSummary(graph);
   }
 
-  private toSummary(graph: {
+  private async toSummary(graph: {
     id: string;
     analysisId: string;
     pullRequestId: string | null;
@@ -80,56 +81,57 @@ export class ReviewGraphService {
     intentSummary: string;
     reviewStrategy: string;
     reviewOrder: string[];
-  }): ReviewGraphSummary {
+  }): Promise<ReviewGraphSummary> {
+    const nodes = await this.graphRepository.listNodesByGraph(graph.id);
+
     return {
       id: graph.id,
       analysisId: graph.analysisId,
       pullRequestId:
-        graph.pullRequestId ?? this.resolvePullRequestId(graph.analysisId),
+        graph.pullRequestId ??
+        (await this.resolvePullRequestId(graph.analysisId)),
       summary: graph.summary,
       intentSummary: graph.intentSummary,
       reviewStrategy: graph.reviewStrategy,
       reviewOrder: graph.reviewOrder,
-      nodes: this.graphRepository.listNodesByGraph(graph.id).map((node) => ({
-        id: node.id,
-        analysisId: graph.analysisId,
-        nodeType: node.nodeType,
-        label: node.label,
-        filePath: node.filePath,
-        functionName: node.functionName,
-        riskLevel: node.riskLevel,
-        status: this.toNodeStatus(node.id),
-        reviewOrder: node.reviewOrder,
-        roleSummary: node.roleSummary,
-        reviewReason: node.reviewReason,
-        position: node.position,
-      })),
+      nodes: await Promise.all(
+        nodes.map(async (node) => ({
+          id: node.id,
+          analysisId: graph.analysisId,
+          nodeType: node.nodeType,
+          label: node.label,
+          filePath: node.filePath,
+          functionName: node.functionName,
+          riskLevel: node.riskLevel,
+          status: await this.toNodeStatus(node.id),
+          reviewOrder: node.reviewOrder,
+          roleSummary: node.roleSummary,
+          reviewReason: node.reviewReason,
+          position: node.position,
+        })),
+      ),
       edges: [],
     };
   }
 
-  private resolvePullRequestId(analysisId: string): string | null {
-    const analysis = this.analysisRepository?.findById(analysisId);
-
-    if (isPromiseLike(analysis)) {
-      return null;
-    }
+  private async resolvePullRequestId(analysisId: string): Promise<string | null> {
+    const analysis = await this.analysisRepository?.findById(analysisId);
 
     return analysis?.pullRequestId ?? null;
   }
 
-  upsertNodeState(
+  async upsertNodeState(
     nodeId: string,
     input: UpsertNodeReviewStateInput,
-  ): NodeReviewStateRecord {
-    const node = this.graphRepository.findNodeById(nodeId);
+  ): Promise<NodeReviewStateRecord> {
+    const node = await this.graphRepository.findNodeById(nodeId);
 
     if (!node) {
       throw new NotFoundException(`Review node was not found: ${nodeId}`);
     }
 
     const status = this.toStatus(input.status);
-    const existing = this.graphRepository.findStateByNodeReviewer(
+    const existing = await this.graphRepository.findStateByNodeReviewer(
       nodeId,
       input.reviewerMemberId,
     );
@@ -149,8 +151,8 @@ export class ReviewGraphService {
     });
   }
 
-  private toNodeStatus(nodeId: string): ReviewNodeStatus {
-    const states = this.graphRepository.listStatesByNode(nodeId);
+  private async toNodeStatus(nodeId: string): Promise<ReviewNodeStatus> {
+    const states = await this.graphRepository.listStatesByNode(nodeId);
 
     if (states.some((state) => state.status === "discuss")) {
       return "discuss";
@@ -221,7 +223,7 @@ export class ReviewGraphService {
       },
     ];
 
-    this.graphRepository.saveGraph({
+    void this.graphRepository.saveGraph({
       id: graphId,
       analysisId: FIXTURE_ANALYSIS_ID,
       pullRequestId: FIXTURE_PULL_REQUEST_ID,
@@ -233,17 +235,8 @@ export class ReviewGraphService {
       reviewOrder: nodes.map((node) => node.id),
     });
 
-    nodes.forEach((node) => this.graphRepository.saveNode(node));
+    nodes.forEach((node) => {
+      void this.graphRepository.saveNode(node);
+    });
   }
-}
-
-function isPromiseLike<T>(
-  value: T | Promise<T> | null | undefined,
-): value is Promise<T> {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "then" in value &&
-      typeof value.then === "function",
-  );
 }

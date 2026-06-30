@@ -4,9 +4,10 @@ import {
   ReviewGraphRecord,
   ReviewNodeRecord,
 } from "./review-graph.types";
+import { ReviewGraphRepository } from "./review-graph.repository";
 
 @Injectable()
-export class InMemoryReviewGraphRepository {
+export class InMemoryReviewGraphRepository implements ReviewGraphRepository {
   private readonly graphsById = new Map<string, ReviewGraphRecord>();
   private readonly graphIdsByAnalysis = new Map<string, string>();
   private readonly nodesById = new Map<string, ReviewNodeRecord>();
