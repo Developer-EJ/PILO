@@ -713,6 +713,52 @@ describe("app-server package", () => {
     );
   });
 
+  it("resolves local MVP actor headers only when no valid session cookie exists", async () => {
+    const config = createAuthConfig({
+      APP_ENV: "local",
+      NODE_ENV: "development",
+      SESSION_SECRET: "test-session-secret",
+      GOOGLE_OAUTH_CLIENT_ID: "google-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+    });
+    const fetcher = async (url) => {
+      if (String(url).includes("oauth2.googleapis.com/token")) {
+        return globalThis.Response.json({
+          access_token: "google-access-token",
+        });
+      }
+
+      return globalThis.Response.json({
+        sub: "google-user-123",
+        email: "session@example.com",
+        name: "Session User",
+      });
+    };
+    const repository = new AuthRepository();
+    const service = new AuthService(repository, { config, fetcher });
+    const authorization = service.createOAuthAuthorizationRedirect(
+      "google",
+      "/",
+    );
+    const result = await service.handleOAuthCallback("google", {
+      code: "google-code",
+      state: authorization.state,
+    });
+    const localUser = service.getCurrentUserFromCookieOrLocalHeader(
+      undefined,
+      "11111111-1111-4111-8111-111111111111",
+    );
+    const sessionUser = service.getCurrentUserFromCookieOrLocalHeader(
+      result.session.cookieHeader,
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    assert.equal(localUser.id, "11111111-1111-4111-8111-111111111111");
+    assert.equal(localUser.email, "local.mvp@pilo.dev");
+    assert.equal(sessionUser.id, result.identity.user.id);
+    assert.equal(sessionUser.email, "session@example.com");
+  });
+
   it("revokes the current session and expires the cookie on logout", async () => {
     const config = createAuthConfig({
       APP_ENV: "local",

@@ -25,6 +25,8 @@ const AUTH_TEST_ENV = {
   GITHUB_LOGIN_CLIENT_SECRET: "github-secret",
 };
 
+const LOCAL_MVP_USER_ID = "11111111-1111-4111-8111-111111111111";
+
 function applyTestEnv(env = AUTH_TEST_ENV) {
   const previous = new Map();
 
@@ -860,6 +862,70 @@ describe("auth HTTP integration", () => {
         id: taskShape.id,
         deleted: true,
       });
+    } finally {
+      await close();
+    }
+  });
+
+  it("accepts the local MVP actor header for workspace dashboard and Canvas APIs", async () => {
+    const { server, close } = await createAuthIntegrationApp();
+    const localActorHeaders = {
+      "x-user-id": LOCAL_MVP_USER_ID,
+      "content-type": "application/json",
+    };
+
+    try {
+      const createWorkspaceResponse = await server.inject({
+        method: "POST",
+        url: "/api/workspaces",
+        headers: localActorHeaders,
+        payload: JSON.stringify({
+          name: "Header Workspace",
+          type: "side_project",
+        }),
+      });
+      const workspace = createWorkspaceResponse.json();
+
+      assert.equal(createWorkspaceResponse.statusCode, 201);
+      assert.equal(workspace.myRole, "owner");
+
+      const dashboardResponse = await server.inject({
+        method: "GET",
+        url: `/api/workspaces/${workspace.id}/dashboard`,
+        headers: {
+          "x-user-id": LOCAL_MVP_USER_ID,
+        },
+      });
+      const dashboard = dashboardResponse.json();
+
+      assert.equal(dashboardResponse.statusCode, 200);
+      assert.equal(dashboard.workspace.id, workspace.id);
+      assert.equal(dashboard.currentMember.userId, LOCAL_MVP_USER_ID);
+
+      const createBoardResponse = await server.inject({
+        method: "POST",
+        url: `/api/workspaces/${workspace.id}/canvas-boards`,
+        headers: localActorHeaders,
+        payload: JSON.stringify({
+          title: "Header Canvas",
+          boardType: "project_map",
+        }),
+      });
+      const board = createBoardResponse.json();
+
+      assert.equal(createBoardResponse.statusCode, 201);
+      assert.equal(board.workspaceId, workspace.id);
+
+      const boardDetailResponse = await server.inject({
+        method: "GET",
+        url: `/api/canvas-boards/${board.id}`,
+        headers: {
+          "x-user-id": LOCAL_MVP_USER_ID,
+        },
+      });
+
+      assert.equal(boardDetailResponse.statusCode, 200);
+      assert.equal(boardDetailResponse.json().id, board.id);
     } finally {
       await close();
     }

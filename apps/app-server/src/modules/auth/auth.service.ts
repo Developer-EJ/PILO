@@ -327,6 +327,17 @@ export class AuthService {
     };
   }
 
+  getCurrentUserFromCookieOrLocalHeader(
+    cookieHeader: string | undefined,
+    userIdHeader: string | string[] | undefined,
+    now = new Date(),
+  ): CurrentUserResponse | null {
+    return (
+      this.getCurrentUserFromCookieHeader(cookieHeader, now) ??
+      createLocalMvpCurrentUser(userIdHeader)
+    );
+  }
+
   logoutFromCookieHeader(cookieHeader?: string): LogoutSessionResult {
     const rawToken = this.readSessionTokenFromCookieHeader(cookieHeader);
     const revokedSession = rawToken
@@ -607,6 +618,32 @@ export class AuthService {
       clearTimeout(timeout);
     }
   }
+}
+
+function createLocalMvpCurrentUser(
+  userIdHeader: string | string[] | undefined,
+): CurrentUserResponse | null {
+  const userId = readHeaderValue(userIdHeader);
+
+  if (!userId) {
+    return null;
+  }
+
+  return {
+    id: userId,
+    name: "PILO MVP User",
+    email: "local.mvp@pilo.dev",
+    avatarUrl: null,
+    providers: [],
+    lastLoginAt: null,
+  };
+}
+
+function readHeaderValue(value: string | string[] | undefined) {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  const trimmedValue = rawValue?.trim();
+
+  return trimmedValue || null;
 }
 
 function getProviderAccountId(

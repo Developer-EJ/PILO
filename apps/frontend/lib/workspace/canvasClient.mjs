@@ -1,6 +1,7 @@
 import {
   buildWorkspaceApiUrl,
   defaultWorkspaceApiBaseUrl,
+  localMvpActorHeaders,
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
 import { readCanvasStorage, writeCanvasStorage } from "./canvasStorage.mjs";
@@ -68,6 +69,7 @@ async function requestCanvasJson(path, init, { baseUrl, fetcher }) {
     credentials: "include",
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },

@@ -28,12 +28,13 @@ export class WorkspaceInviteController {
   @Post(":inviteId/accept")
   acceptWorkspaceInvite(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("inviteId") inviteId: string,
     @Body() body: unknown,
   ) {
     return this.handleInviteRequest(() =>
       this.workspaceService.acceptWorkspaceInvite({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         inviteId,
         body,
       }),
@@ -42,9 +43,13 @@ export class WorkspaceInviteController {
 
   private requireCurrentUser(
     cookieHeader: string | undefined,
+    userIdHeader: string | string[] | undefined,
   ): CurrentUserResponse {
     const currentUser =
-      this.authService.getCurrentUserFromCookieHeader(cookieHeader);
+      this.authService.getCurrentUserFromCookieOrLocalHeader(
+        cookieHeader,
+        userIdHeader,
+      );
 
     if (!currentUser) {
       throw new UnauthorizedException();

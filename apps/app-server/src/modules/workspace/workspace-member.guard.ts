@@ -17,6 +17,7 @@ import {
 export type WorkspaceMemberGuardRequest = {
   headers: {
     cookie?: string | string[];
+    "x-user-id"?: string | string[];
   };
   params?: {
     workspaceId?: string;
@@ -43,8 +44,9 @@ export class WorkspaceMemberGuard implements CanActivate {
       throw new BadRequestException("workspaceId is required.");
     }
 
-    const currentUser = this.authService.getCurrentUserFromCookieHeader(
+    const currentUser = this.authService.getCurrentUserFromCookieOrLocalHeader(
       normalizeCookieHeader(request.headers.cookie),
+      request.headers["x-user-id"],
     );
 
     if (!currentUser) {

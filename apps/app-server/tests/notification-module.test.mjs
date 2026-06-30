@@ -88,7 +88,7 @@ describe("notification module", () => {
     const { service } = createNotificationService();
     const controller = new NotificationController(
       {
-        getCurrentUserFromCookieHeader: () => currentUser,
+        getCurrentUserFromCookieOrLocalHeader: () => currentUser,
       },
       service,
     );
@@ -261,7 +261,7 @@ describe("notification module", () => {
     const { service } = createNotificationService();
     const controller = new NotificationController(
       {
-        getCurrentUserFromCookieHeader: () => null,
+        getCurrentUserFromCookieOrLocalHeader: () => null,
       },
       service,
     );
@@ -277,7 +277,19 @@ describe("notification module", () => {
     const { currentMemberAdapter, service } = createNotificationService();
     const controller = new NotificationController(
       {
-        getCurrentUserFromCookieHeader: () => null,
+        getCurrentUserFromCookieOrLocalHeader: (_cookieHeader, userIdHeader) =>
+          userIdHeader
+            ? {
+                id: Array.isArray(userIdHeader)
+                  ? userIdHeader[0]
+                  : userIdHeader,
+                name: "PILO MVP User",
+                email: "local.mvp@pilo.dev",
+                avatarUrl: null,
+                providers: [],
+                lastLoginAt: null,
+              }
+            : null,
       },
       service,
     );

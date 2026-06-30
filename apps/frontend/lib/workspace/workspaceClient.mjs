@@ -91,6 +91,7 @@ async function requestWorkspaceJson(path, init, { baseUrl, fetcher }) {
     ...init,
     headers: {
       Accept: "application/json",
+      ...localMvpActorHeaders(),
       ...(init?.headers ?? {}),
     },
   });

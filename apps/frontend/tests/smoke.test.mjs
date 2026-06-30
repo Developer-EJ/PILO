@@ -215,6 +215,7 @@ describe("frontend package", () => {
     assert.deepEqual(await apiClient.listWorkspaces(), mockWorkspaces);
     assert.equal(requests[0].url, "https://api.pilo.dev/api/workspaces");
     assert.equal(requests[0].init.credentials, "include");
+    assertLocalActorHeaders(requests[0]);
 
     assert.deepEqual(
       await createWorkspaceClient({
@@ -262,6 +263,7 @@ describe("frontend package", () => {
       `https://api.pilo.dev/api/workspaces/${workspaceId}/dashboard`,
     );
     assert.equal(requests[0].init.credentials, "include");
+    assertLocalActorHeaders(requests[0]);
     assert.equal(apiResult.dashboard.workspace.id, workspaceId);
     assert.equal(
       apiResult.dashboard.tasks.length,
@@ -1867,6 +1869,7 @@ describe("frontend package", () => {
       `https://api.pilo.dev/api/workspaces/${workspaceId}/canvas-boards`,
     );
     assert.equal(requests[0].init.credentials, "include");
+    assertEveryRequestUsesLocalActor(requests);
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
       [

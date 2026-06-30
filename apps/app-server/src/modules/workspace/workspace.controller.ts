@@ -36,20 +36,24 @@ export class WorkspaceController {
   ) {}
 
   @Get()
-  listWorkspaces(@Headers("cookie") cookieHeader: string | undefined) {
+  listWorkspaces(
+    @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader?: string | string[],
+  ) {
     return this.workspaceService.listWorkspaces({
-      currentUser: this.requireCurrentUser(cookieHeader),
+      currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
     });
   }
 
   @Post()
   createWorkspace(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Body() body: unknown,
   ) {
     return this.handleWorkspaceRequest(() =>
       this.workspaceService.createWorkspace({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         body,
       }),
     );
@@ -132,11 +136,12 @@ export class WorkspaceController {
   @Get(":workspaceId")
   getWorkspace(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("workspaceId") workspaceId: string,
   ) {
     return this.handleWorkspaceRequest(() =>
       this.workspaceService.getWorkspace({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         workspaceId,
       }),
     );
@@ -145,12 +150,13 @@ export class WorkspaceController {
   @Patch(":workspaceId")
   updateWorkspace(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("workspaceId") workspaceId: string,
     @Body() body: unknown,
   ) {
     return this.handleWorkspaceRequest(() =>
       this.workspaceService.updateWorkspace({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         workspaceId,
         body,
       }),
@@ -159,9 +165,13 @@ export class WorkspaceController {
 
   private requireCurrentUser(
     cookieHeader: string | undefined,
+    userIdHeader: string | string[] | undefined,
   ): CurrentUserResponse {
     const currentUser =
-      this.authService.getCurrentUserFromCookieHeader(cookieHeader);
+      this.authService.getCurrentUserFromCookieOrLocalHeader(
+        cookieHeader,
+        userIdHeader,
+      );
 
     if (!currentUser) {
       throw new UnauthorizedException();

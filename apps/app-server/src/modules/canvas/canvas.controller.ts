@@ -33,11 +33,12 @@ export class CanvasController {
   @Get("workspaces/:workspaceId/canvas-boards")
   listCanvasBoards(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("workspaceId") workspaceId: string,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.listCanvasBoards({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         workspaceId,
       }),
     );
@@ -46,12 +47,13 @@ export class CanvasController {
   @Post("workspaces/:workspaceId/canvas-boards")
   createCanvasBoard(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("workspaceId") workspaceId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.createCanvasBoard({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         workspaceId,
         body,
       }),
@@ -61,11 +63,12 @@ export class CanvasController {
   @Get("canvas-boards/:boardId")
   getCanvasBoardDetail(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("boardId") boardId: string,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.getCanvasBoardDetail({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         boardId,
       }),
     );
@@ -74,12 +77,13 @@ export class CanvasController {
   @Post("canvas-boards/:boardId/shapes")
   createCanvasShape(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("boardId") boardId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.createCanvasShape({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         boardId,
         body,
       }),
@@ -89,12 +93,13 @@ export class CanvasController {
   @Patch("canvas-shapes/:shapeId")
   updateCanvasShape(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("shapeId") shapeId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.updateCanvasShape({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         shapeId,
         body,
       }),
@@ -104,11 +109,12 @@ export class CanvasController {
   @Delete("canvas-shapes/:shapeId")
   deleteCanvasShape(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("shapeId") shapeId: string,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.deleteCanvasShape({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         shapeId,
       }),
     );
@@ -117,12 +123,13 @@ export class CanvasController {
   @Post("canvas-boards/:boardId/connections")
   createCanvasConnection(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("boardId") boardId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.createCanvasConnection({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         boardId,
         body,
       }),
@@ -132,11 +139,12 @@ export class CanvasController {
   @Delete("canvas-connections/:connectionId")
   deleteCanvasConnection(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("connectionId") connectionId: string,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.deleteCanvasConnection({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         connectionId,
       }),
     );
@@ -145,12 +153,13 @@ export class CanvasController {
   @Put("canvas-boards/:boardId/view-settings")
   updateCanvasViewSetting(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("boardId") boardId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.updateCanvasViewSetting({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         boardId,
         body,
       }),
@@ -160,12 +169,13 @@ export class CanvasController {
   @Put("canvas-boards/:boardId/filter-settings")
   updateCanvasFilterSetting(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("boardId") boardId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.updateCanvasFilterSetting({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         boardId,
         body,
       }),
@@ -175,12 +185,13 @@ export class CanvasController {
   @Put("canvas-shapes/:shapeId/position")
   updateCanvasShapePosition(
     @Headers("cookie") cookieHeader: string | undefined,
+    @Headers("x-user-id") userIdHeader: string | string[] | undefined,
     @Param("shapeId") shapeId: string,
     @Body() body: unknown,
   ) {
     return this.handleCanvasRequest(() =>
       this.canvasService.updateCanvasShapePosition({
-        currentUser: this.requireCurrentUser(cookieHeader),
+        currentUser: this.requireCurrentUser(cookieHeader, userIdHeader),
         shapeId,
         body,
       }),
@@ -189,9 +200,13 @@ export class CanvasController {
 
   private requireCurrentUser(
     cookieHeader: string | undefined,
+    userIdHeader: string | string[] | undefined,
   ): CurrentUserResponse {
     const currentUser =
-      this.authService.getCurrentUserFromCookieHeader(cookieHeader);
+      this.authService.getCurrentUserFromCookieOrLocalHeader(
+        cookieHeader,
+        userIdHeader,
+      );
 
     if (!currentUser) {
       throw new UnauthorizedException();

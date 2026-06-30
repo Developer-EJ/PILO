@@ -1,6 +1,7 @@
 import {
   buildWorkspaceApiUrl,
   defaultWorkspaceApiBaseUrl,
+  localMvpActorHeaders,
   mockWorkspaces,
   WorkspaceApiError,
 } from "./workspaceClient.mjs";
@@ -232,6 +233,7 @@ export function createWorkspaceDashboardApiClient({
         credentials: "include",
         headers: {
           Accept: "application/json",
+          ...localMvpActorHeaders(),
         },
       });
 
