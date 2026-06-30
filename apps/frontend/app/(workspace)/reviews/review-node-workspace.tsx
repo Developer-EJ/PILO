@@ -165,23 +165,45 @@ const riskClassNames: Record<string, string> = {
 };
 
 const decisionLabels: Record<ReviewDecision, string> = {
-  ok: "OK",
-  discuss: "Discuss",
-  unknown: "Unreviewed",
+  ok: "승인",
+  discuss: "논의 필요",
+  unknown: "미검토",
 };
 
 const stateLabels: Record<string, string> = {
-  review_requested: "Review requested",
-  open: "Open",
-  merged: "Merged",
-  closed: "Closed",
+  review_requested: "리뷰 요청",
+  open: "열림",
+  merged: "병합됨",
+  closed: "닫힘",
 };
 
 const analysisStatusLabels: Record<string, string> = {
-  pending: "Analysis pending",
-  running: "Analysis running",
-  succeeded: "Analysis complete",
-  failed: "Analysis failed",
+  pending: "분석 대기",
+  running: "분석 중",
+  succeeded: "분석 완료",
+  failed: "분석 실패",
+};
+
+const riskLabels: Record<string, string> = {
+  low: "낮음",
+  medium: "중간",
+  high: "높음",
+  critical: "치명",
+};
+
+const nodeTypeLabels: Record<string, string> = {
+  file: "파일",
+  function: "함수",
+  impact: "영향",
+  test: "테스트",
+  component: "컴포넌트",
+};
+
+const changeTypeLabels: Record<string, string> = {
+  added: "추가",
+  modified: "수정",
+  deleted: "삭제",
+  renamed: "이름 변경",
 };
 
 function riskClassName(riskLevel: string) {
@@ -220,8 +242,8 @@ function defaultEmptyAnalysis(pullRequest: PullRequestSummary): ReviewAnalysis {
 
 function defaultEmptyCanvas(): ReviewCanvas {
   return {
-    intentSummary: "Open a review room to load the review graph.",
-    reviewStrategy: "The runtime Review API will provide the node order.",
+    intentSummary: "리뷰룸을 열면 PR 워크플로우가 표시됩니다.",
+    reviewStrategy: "Review API가 분석 결과를 쓰면 노드 순서와 diff가 채워집니다.",
     nodes: [],
     edges: [],
   };
@@ -378,8 +400,8 @@ export function ReviewNodeWorkspace({
     return (
       <main className={styles.selectorPage}>
         <section className={styles.statusPanel} aria-live="polite">
-          <strong>Loading review workspace</strong>
-          <p>Preparing pull requests and the Review API client.</p>
+          <strong>리뷰 화면을 불러오는 중</strong>
+          <p>PR 목록과 Review API 클라이언트를 준비하고 있습니다.</p>
         </section>
       </main>
     );
@@ -389,8 +411,8 @@ export function ReviewNodeWorkspace({
     return (
       <main className={styles.selectorPage}>
         <section className={styles.statusPanel} role="alert">
-          <strong>Review workspace could not load</strong>
-          <p>Refresh after the app server is available.</p>
+          <strong>리뷰 화면을 열 수 없습니다</strong>
+          <p>app-server가 준비된 뒤 새로고침해 주세요.</p>
         </section>
       </main>
     );
@@ -399,14 +421,14 @@ export function ReviewNodeWorkspace({
   if (!selectedSession) {
     return (
       <main className={styles.selectorPage}>
-        <section className={styles.selectorPanel} aria-label="PR selector">
+        <section className={styles.selectorPanel} aria-label="PR 선택">
           <div className={styles.selectorHeader}>
-            <span className={styles.eyebrow}>CODE REVIEW</span>
-            <h1>Select a pull request</h1>
+            <span className={styles.eyebrow}>코드 리뷰</span>
+            <h1>리뷰할 PR 선택</h1>
           </div>
 
           {warnings.length ? (
-            <div className={styles.noticeList} aria-label="Review notices">
+            <div className={styles.noticeList} aria-label="리뷰 안내">
               {warnings.slice(-3).map((warning) => (
                 <p key={warning}>{warning}</p>
               ))}
@@ -416,11 +438,8 @@ export function ReviewNodeWorkspace({
           <div className={styles.selectorList}>
             {sessions.length === 0 ? (
               <article className={styles.emptyState}>
-                <strong>No pull requests found</strong>
-                <p>
-                  Connect or sync GitHub pull requests before opening a review
-                  room.
-                </p>
+                <strong>불러온 PR이 없습니다</strong>
+                <p>GitHub PR을 연결하거나 동기화한 뒤 리뷰룸을 열 수 있습니다.</p>
               </article>
             ) : null}
 
@@ -437,13 +456,13 @@ export function ReviewNodeWorkspace({
                 </span>
                 <strong>{session.pullRequest.title}</strong>
                 <small>
-                  {session.pullRequest.authorLogin ?? "unknown"} /{" "}
+                  {session.pullRequest.authorLogin ?? "알 수 없음"} /{" "}
                   {stateLabels[session.pullRequest.state] ??
                     session.pullRequest.state}{" "}
-                  / {session.pullRequest.changedFilesCount} files
+                  / 변경 파일 {session.pullRequest.changedFilesCount}개
                 </small>
                 <small className={styles.branchLine}>
-                  {session.pullRequest.branch} into{" "}
+                  {session.pullRequest.branch} →{" "}
                   {session.pullRequest.baseBranch}
                 </small>
               </button>
@@ -464,37 +483,15 @@ export function ReviewNodeWorkspace({
           onClick={handleTopbarBack}
           type="button"
         >
-          {selectedNode ? "Canvas" : "Pull requests"}
-        </button>
-        <div className={styles.topbarGroup}>
-          <span>BRANCH</span>
-          <strong>
-            {pullRequest.branch} into {pullRequest.baseBranch}
-          </strong>
-        </div>
-        <div className={styles.topbarGroup}>
-          <span>PR</span>
-          <strong>
-            #{pullRequest.number} {pullRequest.title}
-          </strong>
-        </div>
-        {warnings.length ? (
-          <div className={styles.topbarNotice} aria-label="Review notices">
-            {warnings.slice(-1).map((warning) => (
-              <p key={warning}>{warning}</p>
-            ))}
-          </div>
-        ) : null}
-        <button className={styles.mergeButton} disabled type="button">
-          Merge
+          {selectedNode ? "← 워크플로우로 돌아가기" : "← PR 선택으로 돌아가기"}
         </button>
       </header>
 
       {selectedNode ? (
         <section className={styles.detailWorkspace}>
-          <div className={styles.diffPane} aria-label="Changed files">
+          <div className={styles.diffPane} aria-label="변경 코드">
             <div className={styles.diffTitle}>
-              <span className={styles.eyebrow}>SELECTED NODE</span>
+              <span className={styles.eyebrow}>선택한 리뷰 노드</span>
               <strong>{selectedNode.filePath ?? selectedNode.label}</strong>
             </div>
 
@@ -511,7 +508,7 @@ export function ReviewNodeWorkspace({
                 >
                   <div className={styles.diffColumn}>
                     <div className={styles.diffColumnHead}>
-                      <span>Before</span>
+                      <span>변경 전</span>
                       <small>L{hunk.oldStartLine}</small>
                     </div>
                     <pre>
@@ -520,7 +517,7 @@ export function ReviewNodeWorkspace({
                   </div>
                   <div className={styles.diffColumn}>
                     <div className={styles.diffColumnHead}>
-                      <span>After</span>
+                      <span>변경 후</span>
                       <small>L{hunk.newStartLine}</small>
                     </div>
                     <pre>
@@ -538,7 +535,9 @@ export function ReviewNodeWorkspace({
                         <div>
                           <strong>{file.filePath}</strong>
                           <span>
-                            {file.changeType} +{file.additions} -{file.deletions}
+                            {changeTypeLabels[file.changeType] ??
+                              file.changeType}{" "}
+                            +{file.additions} -{file.deletions}
                           </span>
                         </div>
                         {file.summary ? <p>{file.summary}</p> : null}
@@ -556,11 +555,8 @@ export function ReviewNodeWorkspace({
                     ))
                   ) : (
                     <article className={styles.emptyState}>
-                      <strong>No changed files for this node</strong>
-                      <p>
-                        The Review API returned a graph node without matching
-                        changed-file detail.
-                      </p>
+                      <strong>이 노드에 연결된 변경 파일이 없습니다</strong>
+                      <p>Review API가 노드와 매칭되는 변경 파일 정보를 아직 주지 않았습니다.</p>
                     </article>
                   )}
                 </>
@@ -568,36 +564,36 @@ export function ReviewNodeWorkspace({
             </div>
           </div>
 
-          <aside className={styles.detailSidePanel} aria-label="Node review">
+          <aside className={styles.detailSidePanel} aria-label="노드 리뷰">
             <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>NODE</span>
+              <span className={styles.eyebrow}>리뷰 노드</span>
               <h2>{selectedNode.label}</h2>
               <span
                 className={`${styles.riskPill} ${riskClassName(
                   selectedNode.riskLevel,
                 )}`}
               >
-                {selectedNode.riskLevel}
+                위험도 {riskLabels[selectedNode.riskLevel] ?? selectedNode.riskLevel}
               </span>
             </section>
 
             <section className={styles.sideSection}>
-              <h3>Role in this review</h3>
+              <h3>리뷰에서 보는 역할</h3>
               <p>{selectedNode.roleSummary}</p>
             </section>
 
             <section className={styles.sideSection}>
-              <h3>Reason to inspect</h3>
+              <h3>확인해야 하는 이유</h3>
               <p>
                 {selectedNode.detail?.modificationReason ??
                   selectedNode.reviewReason ??
-                  "The runtime graph marked this node as part of the review order."}
+                  "이 노드는 Review API가 리뷰 순서에 포함한 항목입니다."}
               </p>
             </section>
 
             {selectedNode.detail?.changeGroups.length ? (
               <section className={styles.sideSection}>
-                <h3>Code areas</h3>
+                <h3>확인할 코드 영역</h3>
                 <div className={styles.changeGroups}>
                   {selectedNode.detail.changeGroups.map((group) => (
                     <article className={styles.changeGroup} key={group.id}>
@@ -608,7 +604,7 @@ export function ReviewNodeWorkspace({
                           onClick={() => setHighlightedHunkId(group.diffHunkId)}
                           type="button"
                         >
-                          Show code
+                          코드 보기
                         </button>
                         <span>
                           L{group.newStartLine}-L{group.newEndLine}
@@ -621,7 +617,7 @@ export function ReviewNodeWorkspace({
             ) : null}
 
             <section className={styles.sideSection}>
-              <h3>Comments</h3>
+              <h3>리뷰 코멘트</h3>
               <div className={styles.commentList}>
                 {relevantComments.length ? (
                   relevantComments.map((comment) => (
@@ -633,13 +629,13 @@ export function ReviewNodeWorkspace({
                     </article>
                   ))
                 ) : (
-                  <p>No comments yet.</p>
+                  <p>아직 코멘트가 없습니다.</p>
                 )}
               </div>
               <div className={styles.commentComposer}>
                 <textarea
                   onChange={(event) => setDraft(event.target.value)}
-                  placeholder="Leave a review note"
+                  placeholder="이 노드에 대한 리뷰 메모를 남기세요"
                   rows={3}
                   value={activeCommentDraft}
                 />
@@ -648,7 +644,7 @@ export function ReviewNodeWorkspace({
                   onClick={handleAddComment}
                   type="button"
                 >
-                  Comment
+                  코멘트 남기기
                 </button>
               </div>
             </section>
@@ -676,7 +672,7 @@ export function ReviewNodeWorkspace({
         </section>
       ) : (
         <section
-          aria-label="Review canvas"
+          aria-label="리뷰 워크플로우"
           className={styles.canvasWorkspace}
           style={
             {
@@ -741,7 +737,7 @@ export function ReviewNodeWorkspace({
                   <span>{node.reviewOrder}</span>
                   <strong>{node.label}</strong>
                   <small>
-                    {node.nodeType}
+                    {nodeTypeLabels[node.nodeType] ?? node.nodeType}
                     {nodeDecision(node)
                       ? ` / ${
                           decisionLabels[nodeDecision(node) ?? "unknown"]
@@ -752,17 +748,14 @@ export function ReviewNodeWorkspace({
               ))
             ) : (
               <article className={styles.canvasEmptyState}>
-                <strong>No graph nodes yet</strong>
-                <p>
-                  Analysis exists, but the Review API has not returned a
-                  populated canvas graph.
-                </p>
+                <strong>아직 워크플로우 노드가 없습니다</strong>
+                <p>분석은 생성됐지만 Review API가 그래프 노드를 아직 반환하지 않았습니다.</p>
               </article>
             )}
           </div>
 
           <button
-            aria-label="Resize PR context panel"
+            aria-label="PR 리뷰 패널 크기 조절"
             aria-valuemax={620}
             aria-valuemin={360}
             aria-valuenow={contextPanelWidth}
@@ -801,7 +794,7 @@ export function ReviewNodeWorkspace({
               });
             }}
             role="separator"
-            title="Drag to resize the PR context panel"
+            title="드래그해서 PR 리뷰 패널 너비 조절"
             type="button"
           />
 
@@ -809,9 +802,9 @@ export function ReviewNodeWorkspace({
             {warnings.length ? (
               <section
                 className={`${styles.sideSection} ${styles.noticeList}`}
-                aria-label="Review notices"
+                aria-label="리뷰 안내"
               >
-                <span className={styles.eyebrow}>NOTICES</span>
+                <span className={styles.eyebrow}>안내</span>
                 {warnings.slice(-3).map((warning) => (
                   <p key={warning}>{warning}</p>
                 ))}
@@ -819,13 +812,13 @@ export function ReviewNodeWorkspace({
             ) : null}
 
             <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>PR INTENT</span>
+              <span className={styles.eyebrow}>PR 의도</span>
               <h2>{canvas.intentSummary}</h2>
               <p>{canvas.reviewStrategy}</p>
             </section>
 
             <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>AI ANALYSIS</span>
+              <span className={styles.eyebrow}>AI 분석</span>
               <div className={styles.sectionTitleRow}>
                 <h3>
                   {analysisStatusLabels[analysis.analysisStatus] ??
@@ -836,7 +829,7 @@ export function ReviewNodeWorkspace({
                     analysis.riskLevel,
                   )}`}
                 >
-                  {analysis.riskLevel}
+                  위험도 {riskLabels[analysis.riskLevel] ?? analysis.riskLevel}
                 </span>
               </div>
               {analysis.purposeSummary ? <p>{analysis.purposeSummary}</p> : null}
@@ -848,7 +841,7 @@ export function ReviewNodeWorkspace({
             </section>
 
             <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>REVIEW ORDER</span>
+              <span className={styles.eyebrow}>리뷰 순서</span>
               {sortedNodes.length ? (
                 <ol className={styles.reviewOrder}>
                   {sortedNodes.map((node) => (
@@ -856,19 +849,20 @@ export function ReviewNodeWorkspace({
                   ))}
                 </ol>
               ) : (
-                <p>No review nodes are available yet.</p>
+                <p>아직 리뷰 노드가 없습니다.</p>
               )}
             </section>
 
             <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>CHANGED FILES</span>
+              <span className={styles.eyebrow}>변경 파일</span>
               <div className={styles.fileList}>
                 {changedFiles.length ? (
                   changedFiles.map((file) => (
                     <article className={styles.fileItem} key={file.id}>
                       <strong>{file.filePath}</strong>
                       <span>
-                        {file.changeType} +{file.additions} -{file.deletions}
+                        {changeTypeLabels[file.changeType] ?? file.changeType}{" "}
+                        +{file.additions} -{file.deletions}
                       </span>
                       {file.functions.map((fn) => (
                         <small key={fn.id}>{fn.name}</small>
@@ -876,21 +870,21 @@ export function ReviewNodeWorkspace({
                     </article>
                   ))
                 ) : (
-                  <p>No changed files were returned.</p>
+                  <p>반환된 변경 파일이 없습니다.</p>
                 )}
               </div>
             </section>
 
             <section className={styles.sideSection}>
               <div className={styles.sectionTitleRow}>
-                <span className={styles.eyebrow}>CHECKLIST</span>
+                <span className={styles.eyebrow}>체크리스트</span>
                 <button
                   className={styles.inlineActionButton}
                   disabled={busyAction === "checklist"}
                   onClick={onAddChecklistItem}
                   type="button"
                 >
-                  Add
+                  추가
                 </button>
               </div>
               <div className={styles.checklist}>
@@ -907,13 +901,13 @@ export function ReviewNodeWorkspace({
                     </label>
                   ))
                 ) : (
-                  <p>No checklist items yet.</p>
+                  <p>아직 체크리스트가 없습니다.</p>
                 )}
               </div>
             </section>
 
             <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>LINKED TASKS</span>
+              <span className={styles.eyebrow}>연결된 Task</span>
               {linkedTasks.length > 0 ? (
                 <div className={styles.linkedTasks}>
                   {linkedTasks.map((task) => (
@@ -925,13 +919,13 @@ export function ReviewNodeWorkspace({
                   ))}
                 </div>
               ) : (
-                <p>No linked tasks were returned.</p>
+                <p>연결된 Task가 없습니다.</p>
               )}
             </section>
 
             {notes.length ? (
               <section className={styles.sideSection}>
-                <span className={styles.eyebrow}>NOTES</span>
+                <span className={styles.eyebrow}>리뷰 메모</span>
                 <ul className={styles.noteList}>
                   {notes.map((note) => (
                     <li key={note}>{note}</li>

@@ -155,12 +155,22 @@ type LoadStatus = "loading" | "selecting" | "opening" | "ready" | "error";
 function ReviewWorkspaceFrame({
   navItems,
   className = styles.reviewShell,
+  hideSidebar = false,
   children,
 }: {
   navItems: ReviewNavItem[];
   className?: string;
+  hideSidebar?: boolean;
   children: ReactNode;
 }) {
+  if (hideSidebar) {
+    return (
+      <main className={styles.reviewFullscreen}>
+        <section className={className}>{children}</section>
+      </main>
+    );
+  }
+
   return (
     <main className="dashboard-shell">
       <WorkspaceSidebar items={navItems} />
@@ -184,7 +194,7 @@ function toPresentationalSession(
       testRecommendation: session.analysis.testRecommendation,
       conclusion: session.analysis.conclusion,
       reviewNotes: [
-        `${session.analysis.okCount} OK / ${session.analysis.discussCount} discuss / ${session.analysis.riskCount} risk`,
+        `현재 판정: 승인 ${session.analysis.okCount}개, 논의 필요 ${session.analysis.discussCount}개, 위험 신호 ${session.analysis.riskCount}개`,
       ],
     },
     canvas: {
@@ -275,13 +285,13 @@ export function ReviewRoomWorkspace({
           const fixtureWarnings =
             reviewMode === "api"
               ? []
-              : ["Using the Review demo fixture for PR, analysis, and diff data."];
+              : ["데모 PR 리뷰 데이터로 워크플로우와 diff를 표시합니다."];
           setPullRequests(nextPullRequests);
           setWarnings([
             ...fixtureWarnings,
             ...(nextPullRequests.length
               ? []
-              : ["No pull requests are available from the Review API yet."]),
+              : ["Review API에서 불러온 PR이 아직 없습니다."]),
           ]);
           setStatus("selecting");
         }
@@ -295,7 +305,7 @@ export function ReviewRoomWorkspace({
         if (!cancelled) {
           setPullRequests(fallbackPullRequests);
           setWarnings([
-            "Using the PR fixture while the GitHub PR list is unavailable.",
+            "GitHub PR 목록을 불러오지 못해 데모 PR 데이터를 표시합니다.",
           ]);
           setStatus("selecting");
         }
@@ -325,7 +335,7 @@ export function ReviewRoomWorkspace({
     const fixtureWarnings =
       reviewMode === "api"
         ? []
-        : ["Using the Review demo fixture for PR, analysis, and diff data."];
+        : ["데모 PR 리뷰 데이터로 워크플로우와 diff를 표시합니다."];
     const nextWarnings: string[] = [];
 
     setStatus("opening");
@@ -356,7 +366,7 @@ export function ReviewRoomWorkspace({
           memberId,
           pullRequest,
         });
-        nextWarnings.push("Review room is backed by the PR fixture.");
+        nextWarnings.push("리뷰룸은 데모 PR 데이터로 열렸습니다.");
       }
 
       try {
@@ -364,22 +374,20 @@ export function ReviewRoomWorkspace({
       } catch {
         try {
           analysis = await client.requestAnalysis(pullRequest.id);
-          nextWarnings.push(
-            "Analysis was requested; runtime result is pending.",
-          );
+          nextWarnings.push("AI 분석 요청을 보냈고 결과 반영을 기다리는 중입니다.");
         } catch {
           if (!allowFixtureFallback) {
             setWarnings([
               ...fixtureWarnings,
               ...nextWarnings,
-              "Review analysis could not be requested from the Review API. API mode did not use fixture analysis.",
+              "Review API에 분석 요청을 보내지 못했습니다. API 모드에서는 데모 분석으로 대체하지 않습니다.",
             ]);
             setStatus("selecting");
             return;
           }
 
           analysis = await fallbackClient.requestAnalysis(pullRequest.id);
-          nextWarnings.push("Analysis result is backed by the review fixture.");
+          nextWarnings.push("AI 분석 결과는 데모 리뷰 데이터로 표시됩니다.");
         }
       }
 
@@ -391,9 +399,7 @@ export function ReviewRoomWorkspace({
         }
 
         canvas = normalizeReviewCanvas(reviewFixture.canvas, analysis.id);
-        nextWarnings.push(
-          "Canvas graph uses the fixture while graph data catches up.",
-        );
+        nextWarnings.push("워크플로우 그래프는 데모 리뷰 데이터로 표시됩니다.");
       }
 
       try {
@@ -404,7 +410,7 @@ export function ReviewRoomWorkspace({
         }
 
         changedFiles = await fallbackClient.listChangedFiles(analysis.id);
-        nextWarnings.push("Changed files are backed by the review fixture.");
+        nextWarnings.push("변경 파일과 diff는 데모 리뷰 데이터로 표시됩니다.");
       }
 
       try {
@@ -415,7 +421,7 @@ export function ReviewRoomWorkspace({
         } else {
           checklistItems = [];
           nextWarnings.push(
-            "Checklist items could not be loaded from the Review API.",
+            "Review API에서 체크리스트를 불러오지 못했습니다.",
           );
         }
       }
@@ -427,9 +433,7 @@ export function ReviewRoomWorkspace({
           comments = await fallbackClient.listComments(room.id);
         } else {
           comments = [];
-          nextWarnings.push(
-            "Comments could not be loaded from the Review API.",
-          );
+          nextWarnings.push("Review API에서 코멘트를 불러오지 못했습니다.");
         }
       }
 
@@ -479,7 +483,7 @@ export function ReviewRoomWorkspace({
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
-          "Node state was not saved because the Review API was unavailable.",
+          "Review API가 없어 노드 판정을 저장하지 못했습니다.",
         ]);
         setBusyAction(null);
         return;
@@ -502,7 +506,7 @@ export function ReviewRoomWorkspace({
       );
       setWarnings((current) => [
         ...current,
-        "Node state was applied locally because the Review API was unavailable.",
+        "Review API가 없어 노드 판정을 화면에서만 반영했습니다.",
       ]);
     } finally {
       setBusyAction(null);
@@ -515,8 +519,8 @@ export function ReviewRoomWorkspace({
     setBusyAction("checklist");
 
     const title = selectedNode
-      ? `Review ${selectedNode.label}`
-      : "Review remaining high-signal nodes";
+      ? `${selectedNode.label} 리뷰 확인`
+      : "남은 핵심 리뷰 노드 확인";
     const body = {
       checklistType: "review",
       title,
@@ -539,7 +543,7 @@ export function ReviewRoomWorkspace({
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
-          "Checklist item was not added because the Review API was unavailable.",
+          "Review API가 없어 체크리스트를 추가하지 못했습니다.",
         ]);
         setBusyAction(null);
         return;
@@ -560,7 +564,7 @@ export function ReviewRoomWorkspace({
       );
       setWarnings((current) => [
         ...current,
-        "Checklist item was added locally because the Review API was unavailable.",
+        "Review API가 없어 체크리스트를 화면에서만 추가했습니다.",
       ]);
     } finally {
       setBusyAction(null);
@@ -595,7 +599,7 @@ export function ReviewRoomWorkspace({
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
-          "Checklist item was not updated because the Review API was unavailable.",
+          "Review API가 없어 체크리스트 상태를 저장하지 못했습니다.",
         ]);
         setBusyAction(null);
         return;
@@ -618,7 +622,7 @@ export function ReviewRoomWorkspace({
       );
       setWarnings((current) => [
         ...current,
-        "Checklist item was updated locally because the Review API was unavailable.",
+        "Review API가 없어 체크리스트 상태를 화면에서만 반영했습니다.",
       ]);
     } finally {
       setBusyAction(null);
@@ -656,7 +660,7 @@ export function ReviewRoomWorkspace({
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
-          "Comment was not added because the Review API was unavailable.",
+          "Review API가 없어 코멘트를 추가하지 못했습니다.",
         ]);
         setCommentDraft("");
         setBusyAction(null);
@@ -675,7 +679,7 @@ export function ReviewRoomWorkspace({
       );
       setWarnings((current) => [
         ...current,
-        "Comment was added locally because the Review API was unavailable.",
+        "Review API가 없어 코멘트를 화면에서만 추가했습니다.",
       ]);
     } finally {
       setCommentDraft("");
@@ -687,6 +691,7 @@ export function ReviewRoomWorkspace({
     <ReviewWorkspaceFrame
       navItems={navItems}
       className={session ? styles.reviewWorkspace : styles.reviewShell}
+      hideSidebar={Boolean(session)}
     >
       <ReviewNodeWorkspace
         busyAction={busyAction}

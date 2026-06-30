@@ -67,7 +67,7 @@ export const reviewFixture = {
       id: REVIEW_FIXTURE_PULL_REQUEST_ID,
       repositoryId: "55555555-5555-4555-8555-555555555501",
       number: 7,
-      title: "Add OAuth callback shell",
+      title: "OAuth 콜백 로그인 흐름 정리",
       authorLogin: "Developer-EJ",
       state: "review_requested",
       branch: "feature/donghyun/auth-login",
@@ -92,57 +92,62 @@ export const reviewFixture = {
   analysis: {
     id: REVIEW_FIXTURE_ANALYSIS_ID,
     pullRequestId: REVIEW_FIXTURE_PULL_REQUEST_ID,
-    purposeSummary: "Adds an OAuth callback route and visible result state.",
+    purposeSummary:
+      "OAuth provider가 돌아온 뒤 사용자가 성공, 실패, 재시도 상태를 명확히 이해하도록 콜백 화면과 상태 정규화 로직을 정리합니다.",
     impactSummary:
-      "Touches auth routing, login redirects, and session recovery.",
+      "인증 callback route, safe redirect 계산, 로그인 안내 UI, 회귀 테스트에 영향을 주며 잘못 처리되면 사용자가 빈 화면이나 외부 URL로 이동할 수 있습니다.",
     testRecommendation:
-      "Smoke test provider success, provider error, and expired session redirects.",
+      "Google 성공 콜백, provider error, next 외부 URL 차단, 세션 만료 후 재시도 경로를 smoke test로 확인해야 합니다.",
     riskLevel: "medium",
     analysisStatus: "succeeded",
-    okCount: 3,
-    discussCount: 1,
+    okCount: 2,
+    discussCount: 2,
     riskCount: 1,
-    conclusion: "Ready after the failure redirect behavior is confirmed.",
+    conclusion:
+      "리다이렉트 차단과 실패 안내 copy만 확인되면 MVP 시연 기준에서는 병합 가능한 변경입니다.",
   },
   canvas: {
     id: "88888888-8888-4888-8888-8888888888c1",
     analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
     pullRequestId: REVIEW_FIXTURE_PULL_REQUEST_ID,
-    summary: "OAuth callback review graph",
+    summary: "OAuth callback review workflow",
     intentSummary:
-      "Create the login callback entry point and make provider errors visible.",
+      "로그인 콜백을 사용자가 이해 가능한 성공/실패 흐름으로 만들고, 위험한 redirect 입력을 차단합니다.",
     reviewStrategy:
-      "Review the route entry first, then verify session redirect impact.",
+      "화면 진입점, 상태 정규화, 사용자 안내, 테스트, 세션 복구 순서로 보면 PR의 위험 지점을 빠르게 확인할 수 있습니다.",
     reviewOrder: [
       "88888888-8888-4888-8888-888888888891",
       "88888888-8888-4888-8888-888888888892",
+      "88888888-8888-4888-8888-888888888893",
+      "88888888-8888-4888-8888-888888888894",
+      "88888888-8888-4888-8888-888888888895",
     ],
     nodes: [
       {
         id: "88888888-8888-4888-8888-888888888891",
         analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
         nodeType: "file",
-        label: "apps/frontend/app/auth/callback/page.tsx",
+        label: "콜백 페이지 진입점",
         filePath: "apps/frontend/app/auth/callback/page.tsx",
         functionName: null,
         riskLevel: "medium",
         status: "discuss",
         reviewOrder: 1,
         roleSummary:
-          "Reads provider callback query values and renders success or failure states.",
+          "provider, error, next query를 읽어 사용자가 보는 콜백 결과 화면으로 연결합니다.",
         reviewReason:
-          "Login failure handling and redirect behavior directly affect user recovery.",
-        position: { x: 96, y: 112 },
+          "로그인 성공/실패를 처음 보여주는 화면이라 빈 상태나 잘못된 안내가 있으면 온보딩이 바로 끊깁니다.",
+        position: { x: 92, y: 92 },
         detail: {
           filePath: "apps/frontend/app/auth/callback/page.tsx",
           modificationReason:
-            "The previous placeholder did not explain login success or failure outcomes.",
+            "기존 placeholder는 provider 인증이 끝난 뒤 성공인지 실패인지 설명하지 못했고, 사용자가 다음 행동을 알기 어려웠습니다.",
           changeGroups: [
             {
               id: "mock-review-change-group-callback-query",
-              title: "Callback query parsing",
+              title: "콜백 query 해석",
               summary:
-                "Reads provider and error query parameters before rendering the callback result.",
+                "provider, error, next 값을 분리해서 결과 컴포넌트에 넘기고, 실패 상태를 화면에 노출합니다.",
               newStartLine: 12,
               newEndLine: 18,
               diffHunkId: "mock-review-diff-callback-query",
@@ -155,7 +160,7 @@ export const reviewFixture = {
               newStartLine: 12,
               oldCode: "return <div>Loading...</div>;",
               newCode:
-                "const provider = searchParams.get('provider');\nconst error = searchParams.get('error');\nreturn <CallbackResult provider={provider} error={error} />;",
+                "const provider = searchParams.get('provider');\nconst error = searchParams.get('error');\nconst next = searchParams.get('next');\nreturn <CallbackResult provider={provider} error={error} next={next} />;",
             },
           ],
         },
@@ -164,27 +169,27 @@ export const reviewFixture = {
         id: "88888888-8888-4888-8888-888888888892",
         analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
         nodeType: "impact",
-        label: "session redirect flow",
+        label: "안전한 redirect 결정",
         filePath: "apps/frontend/app/login/callback/oauthCallbackState.mjs",
         functionName: null,
-        riskLevel: "low",
-        status: "ok",
+        riskLevel: "high",
+        status: "discuss",
         reviewOrder: 2,
         roleSummary:
-          "Checks that callback results do not fight the existing session redirect flow.",
+          "next 파라미터가 내부 경로인지 검증하고, 외부 URL이나 빈 값이면 안전한 workspace 경로로 되돌립니다.",
         reviewReason:
-          "A clear success or failure branch keeps the blast radius small.",
-        position: { x: 420, y: 250 },
+          "redirect allowlist가 느슨하면 로그인 직후 외부 URL 이동이나 잘못된 workspace 진입으로 이어질 수 있습니다.",
+        position: { x: 380, y: 92 },
         detail: {
           filePath: "apps/frontend/app/login/callback/oauthCallbackState.mjs",
           modificationReason:
-            "Provider errors and next redirects need separate handling so login recovery does not land on an unsafe or confusing route.",
+            "provider error와 next redirect를 섞어서 처리하면 실패 케이스에서도 잘못된 화면으로 이동할 수 있어 분리 검증이 필요합니다.",
           changeGroups: [
             {
               id: "mock-review-change-group-safe-next",
-              title: "Safe next path branch",
+              title: "safe next path 분기",
               summary:
-                "Rejects external redirect targets and falls back to the workspace dashboard.",
+                "외부 URL과 protocol-relative URL을 버리고 workspace dashboard로 fallback합니다.",
               newStartLine: 31,
               newEndLine: 44,
               diffHunkId: "mock-review-diff-safe-next",
@@ -202,13 +207,157 @@ export const reviewFixture = {
           ],
         },
       },
+      {
+        id: "88888888-8888-4888-8888-888888888893",
+        analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
+        nodeType: "component",
+        label: "로그인 결과 안내 UI",
+        filePath: "apps/frontend/app/login/LoginAuthNotice.tsx",
+        functionName: "LoginAuthNotice",
+        riskLevel: "low",
+        status: "ok",
+        reviewOrder: 3,
+        roleSummary:
+          "사용자에게 OAuth 성공, 실패, 재시도 가능 여부를 카드 상단에서 즉시 안내합니다.",
+        reviewReason:
+          "실패 copy가 모호하면 사용자가 다시 로그인해야 하는지, 관리자에게 문의해야 하는지 판단하기 어렵습니다.",
+        position: { x: 660, y: 230 },
+        detail: {
+          filePath: "apps/frontend/app/login/LoginAuthNotice.tsx",
+          modificationReason:
+            "콜백 결과를 login 화면에서 다시 설명해 사용자가 실패 원인과 다음 행동을 이해하도록 합니다.",
+          changeGroups: [
+            {
+              id: "mock-review-change-group-auth-notice",
+              title: "성공/실패 안내 카드",
+              summary:
+                "provider와 error 상태에 따라 성공 안내, 실패 안내, 재시도 안내를 분기합니다.",
+              newStartLine: 8,
+              newEndLine: 34,
+              diffHunkId: "mock-review-diff-auth-notice",
+            },
+          ],
+          diffHunks: [
+            {
+              id: "mock-review-diff-auth-notice",
+              oldStartLine: 1,
+              newStartLine: 8,
+              oldCode: "return null;",
+              newCode:
+                "if (error) {\n  return <p role=\"alert\">로그인에 실패했습니다. 다시 시도해 주세요.</p>;\n}\nreturn <p>인증이 완료되었습니다. 워크스페이스로 이동합니다.</p>;",
+            },
+          ],
+        },
+      },
+      {
+        id: "88888888-8888-4888-8888-888888888894",
+        analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
+        nodeType: "test",
+        label: "OAuth 회귀 테스트",
+        filePath: "apps/frontend/tests/smoke.test.mjs",
+        functionName: "OAuth callback smoke",
+        riskLevel: "medium",
+        status: "unknown",
+        reviewOrder: 4,
+        roleSummary:
+          "성공 콜백, provider error, 외부 next 차단 케이스가 깨지지 않는지 smoke test로 고정합니다.",
+        reviewReason:
+          "auth flow는 수동 확인만으로 놓치기 쉬워 PR 병합 전에 최소 회귀 테스트가 있어야 합니다.",
+        position: { x: 390, y: 408 },
+        detail: {
+          filePath: "apps/frontend/tests/smoke.test.mjs",
+          modificationReason:
+            "콜백 성공/실패/외부 redirect 방어 조건을 테스트로 남겨 이후 refactor 때 회귀를 잡습니다.",
+          changeGroups: [
+            {
+              id: "mock-review-change-group-oauth-tests",
+              title: "콜백 상태 회귀 테스트",
+              summary:
+                "성공 redirect, 실패 메시지, 외부 next fallback을 각각 독립 assertion으로 확인합니다.",
+              newStartLine: 980,
+              newEndLine: 1018,
+              diffHunkId: "mock-review-diff-oauth-tests",
+            },
+          ],
+          diffHunks: [
+            {
+              id: "mock-review-diff-oauth-tests",
+              oldStartLine: 980,
+              newStartLine: 980,
+              oldCode: "assert.equal(resolveOAuthCallbackState({}), null);",
+              newCode:
+                "assert.equal(resolveOAuthCallbackState({ provider: 'google' }).status, 'success');\nassert.equal(resolveOAuthCallbackState({ error: 'access_denied' }).status, 'error');\nassert.equal(safeNextPath('https://evil.example'), `/workspaces/${workspaceId}`);",
+            },
+          ],
+        },
+      },
+      {
+        id: "88888888-8888-4888-8888-888888888895",
+        analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
+        nodeType: "impact",
+        label: "세션 만료 복구 경로",
+        filePath: "apps/frontend/lib/auth/protectedRoutes.mjs",
+        functionName: "createLoginRedirectHref",
+        riskLevel: "medium",
+        status: "discuss",
+        reviewOrder: 5,
+        roleSummary:
+          "보호된 workspace route에서 세션이 만료됐을 때 로그인 후 원래 위치로 돌아오는 경로를 확인합니다.",
+        reviewReason:
+          "Scene1 시연에서는 workspace 생성 후 dashboard 진입이 핵심이라, 인증 복구가 끊기면 전체 플로우가 흔들립니다.",
+        position: { x: 105, y: 408 },
+        detail: {
+          filePath: "apps/frontend/lib/auth/protectedRoutes.mjs",
+          modificationReason:
+            "로그인 콜백이 next 경로를 더 엄격히 다루면서 기존 보호 route 복귀 흐름과 충돌하지 않는지 확인해야 합니다.",
+          changeGroups: [
+            {
+              id: "mock-review-change-group-session-recovery",
+              title: "보호 route 복귀 경로",
+              summary:
+                "로그인 필요 상태에서 현재 workspace URL을 next로 보존하고 callback 후 안전하게 복귀합니다.",
+              newStartLine: 42,
+              newEndLine: 58,
+              diffHunkId: "mock-review-diff-session-recovery",
+            },
+          ],
+          diffHunks: [
+            {
+              id: "mock-review-diff-session-recovery",
+              oldStartLine: 42,
+              newStartLine: 42,
+              oldCode: "return `/login?next=${pathname}`;",
+              newCode:
+                "const next = safeNextPath(pathname);\nreturn `/login?next=${encodeURIComponent(next)}`;",
+            },
+          ],
+        },
+      },
     ],
     edges: [
       {
         id: "88888888-8888-4888-8888-8888888888e1",
         sourceNodeId: "88888888-8888-4888-8888-888888888891",
         targetNodeId: "88888888-8888-4888-8888-888888888892",
-        label: "callback result",
+        label: "query state",
+      },
+      {
+        id: "88888888-8888-4888-8888-8888888888e2",
+        sourceNodeId: "88888888-8888-4888-8888-888888888892",
+        targetNodeId: "88888888-8888-4888-8888-888888888893",
+        label: "safe result",
+      },
+      {
+        id: "88888888-8888-4888-8888-8888888888e3",
+        sourceNodeId: "88888888-8888-4888-8888-888888888893",
+        targetNodeId: "88888888-8888-4888-8888-888888888894",
+        label: "coverage",
+      },
+      {
+        id: "88888888-8888-4888-8888-8888888888e4",
+        sourceNodeId: "88888888-8888-4888-8888-888888888894",
+        targetNodeId: "88888888-8888-4888-8888-888888888895",
+        label: "session recovery",
       },
     ],
   },
@@ -220,7 +369,8 @@ export const reviewFixture = {
       changeType: "modified",
       additions: 42,
       deletions: 8,
-      summary: "Adds the OAuth callback route shell and result handling.",
+      summary:
+        "OAuth 콜백 route에서 provider/error/next query를 읽고 결과 화면으로 전달합니다.",
       functions: [
         {
           id: "88888888-8888-4888-8888-8888888888c1",
@@ -228,7 +378,7 @@ export const reviewFixture = {
           name: "AuthCallbackPage",
           changeType: "modified",
           summary:
-            "Reads provider callback query parameters and displays redirect state.",
+            "provider 콜백 query를 읽고 성공/실패 상태를 표시합니다.",
         },
       ],
     },
@@ -240,7 +390,7 @@ export const reviewFixture = {
       additions: 54,
       deletions: 2,
       summary:
-        "Normalizes OAuth callback outcomes into safe redirects and visible provider states.",
+        "OAuth callback 결과를 safe redirect와 provider 상태로 정규화합니다.",
       functions: [
         {
           id: "88888888-8888-4888-8888-8888888888c2",
@@ -248,9 +398,40 @@ export const reviewFixture = {
           name: "resolveOAuthCallbackState",
           changeType: "modified",
           summary:
-            "Separates provider error handling from the next path redirect decision.",
+            "provider error 처리와 next path redirect 결정을 분리합니다.",
         },
       ],
+    },
+    {
+      id: "88888888-8888-4888-8888-8888888888b3",
+      analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
+      filePath: "apps/frontend/app/login/LoginAuthNotice.tsx",
+      changeType: "added",
+      additions: 36,
+      deletions: 0,
+      summary:
+        "로그인 성공/실패 안내 상태를 login 화면 카드 상단에 표시합니다.",
+      functions: [
+        {
+          id: "88888888-8888-4888-8888-8888888888c3",
+          changedFileId: "88888888-8888-4888-8888-8888888888b3",
+          name: "LoginAuthNotice",
+          changeType: "added",
+          summary:
+            "callback 상태에 따라 성공 안내, 실패 안내, 재시도 안내를 분기합니다.",
+        },
+      ],
+    },
+    {
+      id: "88888888-8888-4888-8888-8888888888b4",
+      analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
+      filePath: "apps/frontend/tests/smoke.test.mjs",
+      changeType: "modified",
+      additions: 48,
+      deletions: 2,
+      summary:
+        "OAuth callback 성공/실패/외부 redirect 방어 smoke test를 추가합니다.",
+      functions: [],
     },
   ],
   checklistItems: [
@@ -258,7 +439,7 @@ export const reviewFixture = {
       id: "mock-review-checklist-1",
       analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
       checklistType: "review",
-      title: "Review the medium-risk callback route first",
+      title: "콜백 페이지에서 성공/실패 상태가 모두 보이는지 확인",
       status: "todo",
       checkedByMemberId: null,
       checkedAt: null,
@@ -275,7 +456,7 @@ export const reviewFixture = {
       nodeId: "88888888-8888-4888-8888-888888888891",
       changedFileId: null,
       changedFunctionId: null,
-      body: "Please confirm the failure redirect copy before merge.",
+      body: "실패 copy가 provider error와 외부 redirect 차단 케이스를 구분해서 설명하는지 확인이 필요합니다.",
       createdAt: "2026-06-27T10:04:00.000Z",
     },
   ],
@@ -373,8 +554,8 @@ const NEUTRAL_CANVAS = {
   analysisId: "",
   pullRequestId: null,
   summary: null,
-  intentSummary: "Analysis is pending.",
-  reviewStrategy: "Review graph data is not available yet.",
+  intentSummary: "분석이 대기 중입니다.",
+  reviewStrategy: "리뷰 그래프 데이터가 아직 준비되지 않았습니다.",
   reviewOrder: [],
   nodes: [],
   edges: [],
@@ -384,21 +565,21 @@ const NEUTRAL_REVIEW_NODE = {
   id: "",
   analysisId: "",
   nodeType: "file",
-  label: "Review node",
+  label: "리뷰 노드",
   filePath: null,
   functionName: null,
   riskLevel: "low",
   status: "unknown",
   reviewOrder: 1,
-  roleSummary: "Runtime node summary is not available yet.",
-  reviewReason: "Runtime node reason is not available yet.",
+  roleSummary: "런타임 노드 요약이 아직 준비되지 않았습니다.",
+  reviewReason: "런타임 노드 리뷰 이유가 아직 준비되지 않았습니다.",
   position: { x: 0, y: 0 },
 };
 
 const NEUTRAL_CHANGED_FILE = {
   id: "",
   analysisId: "",
-  filePath: "Unknown file",
+  filePath: "알 수 없는 파일",
   changeType: "modified",
   additions: 0,
   deletions: 0,

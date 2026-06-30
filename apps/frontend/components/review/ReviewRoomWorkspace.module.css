@@ -4,3 +4,9 @@
   background: transparent;
   color: inherit;
 }
+
+.reviewFullscreen {
+  min-height: 100vh;
+  background: #f4f6f8;
+  color: #151923;
+}

@@ -174,12 +174,13 @@ describe("frontend package", () => {
     assert.match(workspace, /canvasWorkspace/);
     assert.match(workspace, /panelResizeHandle/);
     assert.match(workspace, /detailWorkspace/);
-    assert.match(workspace, /topbarNotice/);
+    assert.match(workspace, /PR 선택으로 돌아가기/);
     assert.match(workspace, /decisionLabels/);
     assert.match(workspace, /setDecisions/);
     assert.match(runtimeContainer, /ReviewNodeWorkspace/);
     assert.match(runtimeContainer, /createReviewSelectorSession/);
-    assert.match(runtimeContainer, /Review demo fixture/);
+    assert.match(runtimeContainer, /데모 PR 리뷰 데이터/);
+    assert.match(runtimeStyles, /reviewFullscreen/);
     assert.match(reviewClient, /mock-review-diff-callback-query/);
     assert.match(reviewClient, /diffHunkId/);
     assert.doesNotMatch(runtimeStyles, /roomLayout|prCard|reviewNode/);
@@ -730,7 +731,7 @@ describe("frontend package", () => {
     );
     assert.match(
       reviewRoom,
-      /Review analysis could not be requested from the Review API\.[\s\S]*API mode did not use fixture analysis\.[\s\S]*setStatus\("selecting"\)/,
+      /Review API에 분석 요청을 보내지 못했습니다\.[\s\S]*API 모드에서는 데모 분석으로 대체하지 않습니다\.[\s\S]*setStatus\("selecting"\)/,
     );
     assert.doesNotMatch(
       reviewRoom,
@@ -1801,8 +1802,8 @@ describe("frontend package", () => {
       analysis.purposeSummary,
       reviewFixture.analysis.purposeSummary,
     );
-    assert.equal(canvas.intentSummary, "Analysis is pending.");
-    assert.equal(canvas.nodes[0].label, "Review node");
+    assert.equal(canvas.intentSummary, "분석이 대기 중입니다.");
+    assert.equal(canvas.nodes[0].label, "리뷰 노드");
     assert.notEqual(canvas.nodes[0].label, reviewFixture.canvas.nodes[0].label);
     assert.deepEqual(changedFiles, []);
     assert.deepEqual(

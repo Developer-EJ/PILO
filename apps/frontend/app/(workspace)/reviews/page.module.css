@@ -159,13 +159,11 @@
 }
 
 .topbar {
-  display: grid;
-  grid-template-columns:
-    auto minmax(190px, 0.4fr) minmax(260px, 0.8fr)
-    minmax(220px, 0.58fr) auto;
-  align-items: stretch;
+  display: flex;
+  align-items: center;
   border-bottom: 1px solid #cfd7e3;
   background: #ffffff;
+  padding: 0 14px;
 }
 
 .topbarBack,
@@ -179,8 +177,11 @@
 }
 
 .topbarBack {
-  min-width: 132px;
-  text-align: left;
+  min-height: 38px;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  padding: 0 14px;
+  text-align: center;
 }
 
 .mergeButton {
@@ -741,7 +742,7 @@
   }
 
   .topbar {
-    grid-template-rows: repeat(4, 54px);
+    min-height: 58px;
   }
 
   .topbarGroup,
