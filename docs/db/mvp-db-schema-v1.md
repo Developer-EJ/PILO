@@ -1,7 +1,9 @@
 # PILO MVP DB Schema v1
 
-이 문서는 현재 `dev`를 다시 시작하기 위한 MVP DB 구현 기준선이다.
-DB source of truth는 `docs/db/pilo_erd_schema.sql`이며, 현재 기준선은 70개 table이다.
+이 문서는 현재 `dev`를 다시 시작하기 위한 MVP DB 목표 기준선이다.
+`docs/db/pilo_erd_schema.sql`은 target SQL baseline이자 local bootstrap inventory이며,
+현재 기준선은 70개 table이다. Current runtime DB-backed subset은
+`apps/app-server/prisma/schema.prisma`가 모델링한 table로 제한된다.
 
 이전 41개 축소안은 기능 명세만 보고 정리한 target 후보였지만, 현재 active contract와 app-server 구현이 이미
 Task draft, Milestone, Canvas shape/view/filter, VoiceRoom, Review graph 세부 table을 사용하므로 그대로 적용하면
@@ -19,14 +21,15 @@ Task draft, Milestone, Canvas shape/view/filter, VoiceRoom, Review graph 세부 
 
 | 항목 | 기준 |
 | --- | --- |
-| SQL bootstrap | `docs/db/pilo_erd_schema.sql` |
+| Target SQL baseline / SQL bootstrap | `docs/db/pilo_erd_schema.sql` |
 | Local idempotent migrations | `docs/db/migrations/*.sql` |
 | Local seed | `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql` |
 | Prisma schema | `apps/app-server/prisma/schema.prisma` |
 | 현재 table 수 | 70 |
 
 Prisma는 현재 DB-backed로 구현된 app-server 영역의 subset만 모델링한다.
-Prisma에 없는 table이 곧 제외 table이라는 뜻은 아니다.
+Prisma에 없는 table이 곧 제외 table이라는 뜻은 아니지만, 해당 table을 사용하는
+HTTP API가 Current Runtime이라는 뜻도 아니다.
 반대로 Prisma의 `@@map(...)` table은 반드시 `pilo_erd_schema.sql`에 존재해야 하며, 이 조건은 `tests/docs.test.mjs`가 검증한다.
 
 ## 포함 Table

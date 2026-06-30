@@ -32,8 +32,13 @@
 ## Suggested Paths
 
 - Frontend: `apps/frontend/app/(workspace)/tasks`, `apps/frontend/components/task`, `apps/frontend/components/github`
-- App Server: `apps/app-server/src/modules/task`, `apps/app-server/src/modules/github`, `apps/app-server/src/modules/progress`
-- Public adapters: `apps/app-server/src/modules/task/public`, `apps/app-server/src/modules/github/public`, `apps/app-server/src/modules/progress/public`
+- App Server: `apps/app-server/src/modules/juhyung`
+- Public adapters: `apps/app-server/src/modules/juhyung/juhyung-public.adapter.ts`, `apps/app-server/src/modules/juhyung/juhyung-public.types.ts`
+
+Do not create sibling `apps/app-server/src/modules/task`,
+`apps/app-server/src/modules/github`, or `apps/app-server/src/modules/progress`
+modules in implementation PRs. Those names are future refactor targets only and
+need a separate contract/spec/infra hygiene PR before use.
 
 ## Implement First
 
@@ -44,7 +49,9 @@
 5. GitHub App repository connection model and repository list.
 6. GitHub issue and PR sync stubs.
 7. Task to issue and task to PR mapping.
-8. Progress summary calculation and snapshot.
+8. Progress summary calculation and snapshot as a Deferred API. Dashboard and
+   Agent consumers may use only explicitly marked fixture/mock progress until a
+   runtime controller lands.
 
 ## Current Runtime APIs
 
@@ -77,6 +84,10 @@
 - `GET /api/workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
 - `GET /api/workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
 - Agent action executor for `task.create.draft`, `task.update.status`, `github.issue.create`.
+
+Progress is an MVP Target read model, not Current Runtime. Do not wire
+Dashboard/Agent to these Progress endpoints until the 주형 runtime controller,
+repository, and tests exist.
 
 ## External Callbacks
 

@@ -70,6 +70,13 @@
 - `POST /api/project-plan-drafts/:draftId/assign-roles` creates role drafts.
 - `POST /api/project-plan-drafts/:draftId/approve` approves draft and calls owner APIs.
 
+Current action vocabulary follows `docs/contracts/agent-actions.md` and the
+public schema: use action types such as `task.create.draft` and
+`meeting.report.generate`. Action confirmation waits in `waiting_confirmation`;
+Agent Run status uses `requires_confirmation` when one or more actions need
+user approval. Do not revive the older task-suggestion workflow, snake_case
+create-task action name, or approval-required status wording.
+
 ## Provides To Others
 
 - 동현: recommended next actions and project plan summary.

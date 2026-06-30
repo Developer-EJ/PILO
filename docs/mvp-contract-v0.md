@@ -47,19 +47,20 @@ app-server uses the global `api` prefix. Every public HTTP route exposed by curr
 
 ## DB 기준선 상태
 
-현재 DB 기준은 `docs/db/mvp-db-schema-v1.md`와 `docs/db/pilo_erd_schema.sql`을 우선한다.
+현재 DB 기준은 target SQL baseline과 current runtime DB-backed subset을 분리해서 읽는다.
 
 | 기준 | 상태 |
 |---|---|
-| `docs/db/pilo_erd_schema.sql` | 70개 table을 정의하는 MVP 구현 baseline SQL |
+| `docs/db/pilo_erd_schema.sql` | 70개 table을 정의하는 target SQL baseline/local bootstrap |
 | `apps/app-server/prisma/schema.prisma` | 19개 table만 모델링 |
 | Prisma에만 있음 | 없음. Prisma `@@map` table은 SQL baseline에 존재해야 함 |
 | SQL에만 있음 | Auth session/OAuth, Workspace invite/preferences, Canvas, Meeting, Voice, Review, Agent run/action/trace, Planning, Common 다수 |
 
 판정:
 
-- `pilo_erd_schema.sql`은 현재 MVP 구현 baseline으로 취급한다.
-- Prisma가 사용하는 DB-backed 기능은 `schema.prisma`와 실제 SQL을 맞춘 뒤에만 완료로 본다.
+- `pilo_erd_schema.sql`은 broad target SQL baseline과 local bootstrap inventory로 취급한다.
+- Current runtime DB-backed 기능은 `schema.prisma`와 실제 SQL을 맞춘 뒤에만 완료로 본다.
+- SQL에 table이 있어도 Prisma/repository/controller가 없으면 Current Runtime API나 DB-backed 완료로 보지 않는다.
 - `task_drafts`는 SQL bootstrap과 rebaseline migration에 추가되어 `Resolved`다.
 
 ## 도메인별 상태
@@ -107,6 +108,9 @@ app-server uses the global `api` prefix. Every public HTTP route exposed by curr
 - Task/GitHub 쪽 workspace member access는 Prisma DB를 본다.
 - Dashboard aggregate는 다른 도메인의 실제 DB join이 아니라 fixture/read model fallback을 사용한다.
 - Workspace와 Task가 보는 membership source를 통일해야 한다.
+- `PATCH /api/workspaces/:workspaceId`와 dashboard preferences는 Current Runtime
+  API지만 `docs/mvp-scope-v1.md` 기준 MVP success criteria와 primary CTA에서는
+  제외된다.
 
 ### Canvas
 
@@ -166,7 +170,7 @@ app-server uses the global `api` prefix. Every public HTTP route exposed by curr
 
 ### GitHub Connection / Repository / Issue / PR
 
-상태: `Implemented` for connection, `Deferred` for sync/read models
+상태: `Implemented` for connection, `Deferred` for sync/read models, `Rebaseline Required` for Owner-only mutation enforcement
 
 현재 API:
 
@@ -188,6 +192,9 @@ Deferred:
 
 - GitHub login OAuth는 Auth 소유다.
 - GitHub App repository integration은 주형 GitHub 소유다.
+- Current connection runtime은 Workspace membership guard를 사용한다. MVP Target은
+  repository connect/change/revoke를 Owner-only로 둔다. freeze 전 주형 runtime
+  authorization PR이 필요하다.
 
 ### Progress
 
@@ -350,6 +357,13 @@ Deferred:
 - notifications
 - shared files
 - audit logs
+
+주의:
+
+- Minimal Notification은 `docs/mvp-scope-v1.md`의 제품 Target이지만 current
+  runtime에는 controller가 없다. owner가 DevOps/공통 Backend gatekeeper인 상태라
+  release blocker로 보지 않으며, MVP Must로 다시 올리려면 owner 지정과 Common
+  runtime PR이 먼저 필요하다.
 
 ## Rebaseline 작업 목록
 

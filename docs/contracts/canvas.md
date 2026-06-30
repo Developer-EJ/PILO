@@ -121,18 +121,22 @@ Creates a relationship between two shapes in the same board.
 
 ### Enum / Freeform Storage Policy
 
-Current app-server parsing treats `connectionType` as a non-empty string and
-`filterSetting.filters` as a freeform extension object. The SQL baseline still
-contains a candidate enum check for `canvas_connections.connection_type`.
-This PR does not change runtime validation or DB constraints. A follow-up
-contract/spec PR must decide one policy before new connection types are added:
+Current app-server validation, public schema, and SQL baseline use a strict
+`CanvasConnectionType` enum:
 
-- strict enum in schema, app-server validation, and SQL; or
-- freeform string in schema/runtime with SQL relaxed accordingly.
+- `related_to`
+- `created_from`
+- `blocks`
+- `references`
+- `implements`
+- `reviews`
 
-Until that follow-up lands, producers should use the documented examples
-(`related_to`, `created_from`, `blocks`, `references`, `implements`, `reviews`)
-and must not rely on new freeform values being portable.
+`filterSetting.filters` remains a freeform extension object for non-breaking
+filter additions. That freeform policy does not apply to `connectionType`.
+
+Freeform drawing/sticky/code/frame tldraw state is MVP local-only UI state. It
+must not be sent to server Canvas `shapes`/`connections` APIs until a follow-up
+contract/runtime PR defines persistence, schema, and owner boundary rules.
 
 ### CanvasPositionRequest
 

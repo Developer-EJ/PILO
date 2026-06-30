@@ -212,9 +212,12 @@ DB 변경은 가장 위험한 shared 변경이다.
 규칙:
 
 1. DB 변경은 `contract` PR에서 먼저 합의한다.
-2. `schema.prisma`, SQL, migration 중 무엇이 source of truth인지 PR에 명시한다.
-3. MVP v0 기간에는 Prisma-backed table만 실제 영속 table로 간주한다.
-4. mock/in-memory 도메인의 SQL table은 target schema 후보이며 구현 완료로 보지 않는다.
+2. `docs/db/pilo_erd_schema.sql`은 target SQL baseline/local bootstrap인지,
+   `schema.prisma`는 current runtime DB-backed subset인지 PR에 명시한다.
+3. MVP v0 기간에는 Prisma-backed table만 현재 app-server DB-backed runtime
+   table로 간주한다.
+4. mock/in-memory 도메인의 SQL table은 target SQL baseline 후보이며 구현
+   완료로 보지 않는다.
 5. 다른 owner table에 FK를 추가하려면 양쪽 owner approval이 필요하다.
 6. 다형 참조는 DB FK 대신 service validation과 contract test로 보호한다.
 

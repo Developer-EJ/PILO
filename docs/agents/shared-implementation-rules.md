@@ -28,8 +28,11 @@
 
 ## DB and Migration
 
-- MVP 목표 스키마는 `docs/db/mvp-db-schema-v1.md`이다.
-- `docs/db/pilo_erd_schema.sql`은 현재 local bootstrap과 장기 후보 용도로 남아 있으며, MVP source of truth가 아니다.
+- MVP target SQL baseline은 `docs/db/mvp-db-schema-v1.md`와
+  `docs/db/pilo_erd_schema.sql`이다.
+- Current runtime DB-backed subset은 `apps/app-server/prisma/schema.prisma`가
+  모델링한 table이다. SQL baseline에만 있는 table은 target/local bootstrap
+  inventory이며, 그 자체로 Current Runtime API나 DB-backed 구현 완료를 뜻하지 않는다.
 - 실제 migration 이름은 `YYYYMMDDHHMM_owner-slug_domain_action` 형식을 따른다.
 - 다른 owner의 table에는 migration을 추가하지 않는다.
 - 다형 참조(`entity_type`, `entity_id`)는 DB FK 대신 service 검증과 contract test로 보호한다.

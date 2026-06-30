@@ -32,6 +32,17 @@ The Workspace controller is exposed through the app-server global prefix as `/ap
 | `PUT` | `/api/workspaces/:workspaceId/dashboard-preferences` | 내 dashboard 설정 저장 | 동현 |
 | `GET` | `/api/workspaces/:workspaceId/dashboard` | Dashboard aggregate read model 조회 | 동현 |
 
+### MVP Scope Notes
+
+- `PATCH /api/workspaces/:workspaceId` is a Current Runtime API because the
+  controller exists. It is excluded from MVP success criteria and primary CTA by
+  `docs/mvp-scope-v1.md`; implementation PRs must not expand workspace edit,
+  archive, delete, role change, or member removal UX from this route.
+- Dashboard preferences are Current Runtime member UI state only. They do not
+  make Dashboard personalization part of MVP success criteria, and they must
+  not store or cache source data owned by Task, GitHub, Meeting, Review, Agent,
+  Canvas, or Common.
+
 ## Read Models
 
 ### WorkspaceSummary

@@ -204,6 +204,9 @@ Access guard:
 Current GitHub connection runtime APIs require Workspace membership through `workspace_members`.
 Repository sync/list/issue/PR APIs are Deferred. When they land, provider access must require both
 Workspace membership and an active non-revoked GitHub App connection for that Workspace.
+Current connection mutation routes are implemented with membership guard only; MVP Target policy
+is Owner-only for repository connect/change/revoke and needs a follow-up runtime authorization PR
+before freeze.
 GitHub login OAuth is not sufficient for repository access.
 ```
 ```
@@ -502,6 +505,7 @@ Ownership:
 | Invite accept | yes | yes |
 | Member list read | yes | yes |
 | Workspace edit/delete | excluded | excluded |
+| GitHub App connection start/status/revoke | yes | current runtime yes / target no for mutation |
 | Repository connect/change | yes | no |
 | Repository/Issue/PR read | yes | yes |
 | GitHub manual sync | yes | yes |
@@ -522,9 +526,34 @@ Ownership:
 
 ### SQL Baseline And Runtime Subset
 
-- `docs/db/pilo_erd_schema.sql` is the broad SQL baseline and local bootstrap inventory.
+- `docs/db/pilo_erd_schema.sql` is the broad target SQL baseline and local
+  bootstrap inventory for MVP table shape.
 - `apps/app-server/prisma/schema.prisma` is the current Prisma-backed runtime subset.
-- A SQL table or enum in the baseline does not make an API Current Runtime. Current Runtime status comes from app-server controllers with the global `/api` prefix.
+- A SQL table or enum in the baseline does not make an API Current Runtime.
+  Current Runtime status comes from app-server controllers with the global
+  `/api` prefix.
+- Mock/in-memory domains may have target SQL tables. They are not DB-backed
+  runtime until Prisma models, repositories, migrations/local bootstrap, and
+  contract tests are aligned.
+
+## Owner Boundary Risk Register
+
+- Dashboard is a read-only aggregate. It may render owner read models and member
+  UI preferences, but it must not become a hidden owner of Task, GitHub,
+  Meeting, Review, Agent, Canvas, or Notification state.
+- Workspace Canvas uses 동현-owned `shapes`/`connections` for project object
+  references. 은재 Review internal canvas/graph uses `nodes`/`edges` for PR
+  analysis. These terms and APIs are not interchangeable.
+- GitHub PR original metadata, changed-file source, issue state, and provider
+  sync belong to 주형. 은재 owns PR analysis, review graph, changed functions,
+  review node state, comments, risks, and checklist.
+- Meeting ActionItem -> TaskDraft -> AgentAction is a three-owner flow:
+  진호 owns ActionItem source state, 주형 owns TaskDraft/Task creation state, and
+  세인 owns AgentAction approval/execution state. Do not copy one owner's status
+  enum into another owner's table.
+- Notification is Common/DevOps-gated and Deferred. Domain owners may request or
+  link notifications after the common contract/runtime lands, but they must not
+  create private notification tables or hidden notification ownership.
 
 ### Error Rules
 

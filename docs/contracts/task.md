@@ -148,6 +148,13 @@ GET /api/workspaces/:workspaceId/tasks?status=todo,in_progress&priority=high&due
 - `dueDate`: nullable `YYYY-MM-DD`
 - `milestoneId`: nullable Milestone id in the same workspace
 
+MVP Target fields `taskType` and `acceptanceCriteria` are intentionally not in
+the Current Runtime request, public schema, or Prisma-backed Task model yet.
+They remain Deferred contract/runtime work. Producers must not send them until
+주형 Task updates `docs/contracts/task.md`,
+`docs/contracts/schemas/pilo-public-contracts.schema.json`, DB/Prisma, and
+app-server validation together.
+
 ### UpdateTaskRequest
 
 `PATCH /api/tasks/:taskId`

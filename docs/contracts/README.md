@@ -11,16 +11,19 @@
 | Current Runtime APIs | 현재 `dev` app-server controller에 존재해 호출 가능한 path |
 | Deferred APIs | DTO/schema/fixture 후보는 있지만 현재 runtime controller가 없는 path |
 | MVP Target APIs | `docs/api-contract-v1.md`에 정의된 목표 path. 현재 runtime과 다를 수 있음 |
+| Excluded | MVP에서 만들지 않는 API/field/CTA. runtime에 이미 있더라도 MVP 성공 기준에는 포함하지 않음 |
 
 규칙:
 
 1. 구현 중 호출해야 하는 API는 각 도메인 문서의 `Current Runtime APIs`만 사용한다.
 2. `Deferred APIs`는 mock/fixture 또는 후속 contract PR 전용이다.
-3. 새 API를 추가할 때는 `docs/api-contract-v1.md`의 `/api` prefix 원칙을 따른다.
-4. app-server uses the global `api` prefix. New public HTTP APIs must be exposed as `/api/...`.
-5. `Current Runtime APIs`는 app-server controller route와 global `/api` prefix로 확인한다. SQL baseline에 table이 있다는 사실만으로 Current Runtime API가 되지 않는다.
-6. PR/Issue가 mock, fixture, in-memory adapter, 또는 Deferred API에 의존하면 그 상태와 후속 실제 연동 Issue를 본문에 명시한다.
-7. Official agent bootstrap file is `agent.md`; do not create a separate `AGENTS.md` contract source unless a future contract PR changes this rule.
+3. `docs/api-contract-v1.md`는 MVP Target 문서다. 현재 구현자가 호출해야 하는
+   API는 이 폴더의 `Current Runtime APIs`를 먼저 따른다.
+4. 새 API를 추가할 때는 `docs/api-contract-v1.md`의 `/api` prefix 원칙을 따른다.
+5. app-server uses the global `api` prefix. New public HTTP APIs must be exposed as `/api/...`.
+6. `Current Runtime APIs`는 app-server controller route와 global `/api` prefix로 확인한다. SQL baseline에 table이 있다는 사실만으로 Current Runtime API가 되지 않는다.
+7. PR/Issue가 mock, fixture, in-memory adapter, 또는 Deferred API에 의존하면 그 상태와 후속 실제 연동 Issue를 본문에 명시한다.
+8. Official agent bootstrap file is `agent.md`; do not create a separate `AGENTS.md` contract source unless a future contract PR changes this rule.
 
 ## Runtime / DB Baseline
 

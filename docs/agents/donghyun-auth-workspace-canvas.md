@@ -63,7 +63,13 @@
 
 ## Deferred APIs
 
-- None for the listed Auth/Workspace/Canvas runtime surface. Any new Dashboard or Canvas source aggregation route must land through a contract PR first.
+- None for the listed Auth/Workspace/Canvas runtime surface.
+- Workspace metadata update and dashboard preferences are Current Runtime APIs,
+  but they are Excluded from MVP success criteria and primary CTA scope.
+- Freeform drawing/sticky/code/frame tldraw state is local-only UI state until a
+  follow-up Canvas contract/runtime PR defines server persistence.
+- Any new Dashboard source aggregation route or Canvas source-writing route must
+  land through a contract PR first.
 
 ## Consumes From Others
 

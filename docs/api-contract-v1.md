@@ -1,9 +1,24 @@
 # PILO API Contract v1
 
-이 문서는 PILO MVP의 public API 목표 계약을 정의한다.
+이 문서는 PILO MVP의 public API 목표 계약을 정의하는 **Target 문서**다.
 현재 `dev`에 이미 구현된 runtime path와 다를 수 있다.
-지금 당장 호출 가능한 API는 `docs/contracts/*`의 `Current Runtime APIs`를 우선한다.
+지금 당장 호출 가능한 API는 `docs/mvp-contract-v0.md`와
+`docs/contracts/*`의 `Current Runtime APIs`를 우선한다.
 새 API 추가와 rebaseline은 이 문서의 `/api` prefix 목표 계약에 맞춘다.
+
+## Status Classification
+
+이 문서의 endpoint와 enum은 아래처럼 분류한다.
+
+| Label | 의미 |
+| --- | --- |
+| `Current` | 현재 app-server controller와 global `/api` prefix로 호출 가능한 API다. 상세 source는 `docs/contracts/*`의 `Current Runtime APIs`다. |
+| `Deferred` | MVP 목표에는 남지만 현재 controller가 없어서 runtime에서 호출하면 안 된다. fixture/mock 또는 후속 contract/runtime PR 전용이다. |
+| `Target` | 구현자가 따라야 할 장기 v1 방향이다. Current와 다르면 Current contract를 먼저 따른다. |
+| `Excluded` | MVP에서 만들지 않는다. 화면 CTA와 public API를 추가하지 않는다. |
+
+이 문서가 상세 contract와 다르게 읽히는 경우, 구현자는 `docs/contracts/*`의
+Current/Deferred 분류와 `docs/mvp-contract-v0.md`를 먼저 따른다.
 
 함께 읽을 문서:
 
@@ -135,11 +150,14 @@ Rules:
 | --- | --- | --- | --- | --- |
 | GET | `/api/workspaces` | yes | user | List my Workspaces |
 | POST | `/api/workspaces` | yes | user | Create Workspace |
-| GET | `/api/workspaces/:workspaceId/summary` | yes | member | Workspace Summary |
+| GET | `/api/workspaces/:workspaceId` | yes | member | Workspace Summary |
 | GET | `/api/workspaces/:workspaceId/members` | yes | member | Member list |
 | POST | `/api/workspaces/:workspaceId/invites` | yes | owner | Create invite link |
-| POST | `/api/workspace-invites/:inviteToken/accept` | yes | user | Accept invite |
+| POST | `/api/workspace-invites/:inviteId/accept` | yes | user | Accept invite |
 | GET | `/api/workspaces/:workspaceId/dashboard` | yes | member | Read-only dashboard summary |
+| PATCH | `/api/workspaces/:workspaceId` | yes | member | Current runtime metadata update; Excluded from MVP success criteria and primary CTA |
+| GET | `/api/workspaces/:workspaceId/dashboard-preferences` | yes | member | Current runtime preferences read; Excluded from MVP success criteria |
+| PUT | `/api/workspaces/:workspaceId/dashboard-preferences` | yes | member | Current runtime preferences write; Excluded from MVP success criteria |
 
 ### Create Workspace Request
 
@@ -180,7 +198,13 @@ Rules:
 
 - MVP invite does not send email.
 - Invite link creates Member role only.
-- Workspace edit/archive/delete endpoints are excluded.
+- Workspace archive/delete endpoints are Excluded.
+- Workspace metadata edit and dashboard preferences are Current Runtime APIs
+  because the controller exists, but they remain Excluded from MVP success
+  criteria and primary user CTA until `docs/mvp-scope-v1.md` is changed.
+- Dashboard is a read-only aggregate. Preferences may store member UI state, but
+  Dashboard must not become the owner of Task, GitHub, Meeting, Review, Agent,
+  Canvas, or Notification source data.
 
 ## Project Start / Planning API
 
@@ -332,6 +356,13 @@ Rules:
 - `blocked` is a status, not a separate boolean.
 - `blockedReason` may be added later, but is not required for MVP.
 - Development Task may be linked to GitHub Issue, but it is not required.
+- Current runtime, SQL baseline, public schema, and `docs/contracts/task.md`
+  use `in_review` and `urgent`. The old MVP-scope wording `review` and
+  `low/medium/high` only is deprecated.
+- `taskType` and `acceptanceCriteria` are MVP Target fields shown in this DTO,
+  but they are not part of the Current `CreateTaskRequest`, `UpdateTaskRequest`,
+  public schema, or Prisma-backed runtime subset. Do not send or require them
+  until a follow-up Task contract/schema/runtime PR adds them.
 
 ## GitHub Integration API
 
@@ -340,18 +371,27 @@ Rules:
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
 | GET | `/api/workspaces/:workspaceId/github/connections` | yes | member | Connection status |
-| POST | `/api/workspaces/:workspaceId/github/connections` | yes | member | Start/connect GitHub App integration |
-| DELETE | `/api/workspaces/:workspaceId/github/connections/:connectionId` | yes | member | Disconnect integration |
-| GET | `/api/workspaces/:workspaceId/github/repositories` | yes | owner | List accessible repos |
-| PUT | `/api/workspaces/:workspaceId/github/repository` | yes | owner | Select single repo |
-| POST | `/api/workspaces/:workspaceId/github/sync` | yes | member | Manual Issue/PR sync |
-| GET | `/api/workspaces/:workspaceId/github/issues` | yes | member | List Issues |
-| POST | `/api/tasks/:taskId/github-issue` | yes | member | Create Issue from Task |
-| POST | `/api/github/issues/:issueId/link-task` | yes | member | Link existing Issue to Task |
-| GET | `/api/workspaces/:workspaceId/github/pull-requests` | yes | member | List PRs |
-| GET | `/api/github/pull-requests/:pullRequestId` | yes | member | PR detail |
-| POST | `/api/github/pull-requests/:pullRequestId/link-task` | yes | member | Link PR to Task |
-| POST | `/api/github/pull-requests/:pullRequestId/link-issue` | yes | member | Link PR to Issue |
+| POST | `/api/workspaces/:workspaceId/github/connections` | yes | member current / owner target | Start GitHub App installation flow |
+| DELETE | `/api/workspaces/:workspaceId/github/connections/:connectionId` | yes | member current / owner target | Disconnect or revoke integration |
+| GET | `/api/github/app/callback` | no session | GitHub App redirect | Complete installation callback |
+| GET | `/api/workspaces/:workspaceId/github/repositories` | yes | owner target | Deferred repository list |
+| POST | `/api/workspaces/:workspaceId/github/repositories/sync` | yes | owner target | Deferred provider sync |
+| GET | `/api/repositories/:repositoryId/issues` | yes | member target | Deferred Issue list |
+| POST | `/api/tasks/:taskId/github-issues` | yes | member target | Deferred create/link Issue from Task |
+| GET | `/api/repositories/:repositoryId/pull-requests` | yes | member target | Deferred PR list |
+| GET | `/api/pull-requests/:pullRequestId/changed-files` | yes | member target | Deferred changed-file source for Review |
+| POST | `/api/tasks/:taskId/pull-requests/:pullRequestId` | yes | member target | Deferred Task-PR link |
+
+Status rules:
+
+- Current Runtime APIs are only the GitHub App connection flow:
+  `POST/GET/DELETE /api/workspaces/:workspaceId/github/connections` and
+  `GET /api/github/app/callback`.
+- Current connection runtime checks Workspace membership. MVP Target policy is
+  Owner-only for connect/change/revoke; that stricter role enforcement requires
+  a follow-up runtime authorization PR before freeze.
+- Repository list/sync, Issue, PR, changed-file, webhook, and Task-GitHub link
+  APIs are Deferred and must not be called by current runtime consumers.
 
 ### Create Issue From Task Request
 
@@ -430,20 +470,49 @@ Rules:
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
+| GET | `/api/meetings` | yes | member | Current scaffold/list for accessible meetings |
 | GET | `/api/workspaces/:workspaceId/meetings` | yes | member | List meetings |
 | POST | `/api/workspaces/:workspaceId/meetings` | yes | member | Start meeting |
 | GET | `/api/meetings/:meetingId` | yes | member | Meeting detail |
-| POST | `/api/meetings/:meetingId/notes` | yes | member | Add text note |
-| POST | `/api/meetings/:meetingId/voice-sessions/start` | yes | member | Start Voice/STT session |
-| POST | `/api/voice-sessions/:voiceSessionId/audio-chunks` | yes | member | Submit audio chunk for STT |
-| POST | `/api/voice-sessions/:voiceSessionId/end` | yes | member | End Voice/STT session |
+| PATCH | `/api/meetings/:meetingId/status` | yes | member | Change meeting status |
+| POST | `/api/meetings/:meetingId/participants` | yes | member | Add participant |
+| GET | `/api/meetings/:meetingId/participants` | yes | member | List participants |
+| PATCH | `/api/meetings/:meetingId/participants/:participantId/leave` | yes | member | Leave participant |
+| POST | `/api/meetings/:meetingId/agendas` | yes | member | Add agenda |
+| GET | `/api/meetings/:meetingId/agendas` | yes | member | List agendas |
+| PATCH | `/api/meetings/:meetingId/agendas/:agendaId/status` | yes | member | Change agenda status |
+| PATCH | `/api/meetings/:meetingId/agendas/:agendaId/sort-order` | yes | member | Reorder agenda |
+| POST | `/api/meetings/:meetingId/memos` | yes | member | Add text memo |
+| GET | `/api/meetings/:meetingId/memos` | yes | member | List memos |
+| POST | `/api/meetings/:meetingId/transcript-segments` | yes | member | Store transcript segment |
 | GET | `/api/meetings/:meetingId/transcript-segments` | yes | member | List transcript segments |
-| PATCH | `/api/transcript-segments/:segmentId` | yes | member | Correct transcript text |
-| POST | `/api/meetings/:meetingId/end` | yes | member | End meeting |
-| POST | `/api/meetings/:meetingId/report-draft` | yes | member | Generate ReportDraft |
-| PATCH | `/api/reports/:reportId` | yes | member | Edit ReportDraft |
-| POST | `/api/reports/:reportId/confirm` | yes | member | Confirm Report |
-| POST | `/api/action-items/:actionItemId/convert-to-task` | yes | member | Create Task from ActionItem |
+| POST | `/api/meetings/:meetingId/report-generation` | yes | member | Request report workflow |
+| POST | `/api/meetings/:meetingId/report` | yes | member | Create/mock report |
+| GET | `/api/meeting-reports/:reportId` | yes | member | Report detail |
+| GET | `/api/workspaces/:workspaceId/meeting-reports/recent` | yes | member | Recent report summaries |
+| GET | `/api/workspaces/:workspaceId/meeting-reports/canvas-entity-refs` | yes | member | Canvas entity refs |
+| POST | `/api/meeting-reports/:reportId/action-items` | yes | member | Create Action Item |
+| GET | `/api/meeting-reports/:reportId/action-items` | yes | member | List Action Items |
+| PATCH | `/api/meeting-action-items/:actionItemId/approve` | yes | member | Approve Action Item |
+| PATCH | `/api/meeting-action-items/:actionItemId/reject` | yes | member | Reject Action Item |
+| PATCH | `/api/meeting-action-items/:actionItemId/convert` | yes | member | Mark converted after Task success |
+| POST | `/api/meeting-action-items/:actionItemId/task-draft` | yes | member | Request TaskDraft |
+| POST | `/api/workspaces/:workspaceId/meetings/:meetingId/voice-room` | yes | member | Create Voice room |
+| GET | `/api/workspaces/:workspaceId/meetings/:meetingId/voice-room` | yes | member | Read Voice room |
+| GET | `/api/voice-rooms/:voiceRoomId` | yes | member | Voice room detail |
+| PATCH | `/api/voice-rooms/:voiceRoomId/status` | yes | member | Change Voice room status |
+| POST | `/api/voice-rooms/:voiceRoomId/sessions` | yes | member | Join Voice session |
+| GET | `/api/voice-rooms/:voiceRoomId/sessions` | yes | member | List Voice sessions |
+| PATCH | `/api/voice-sessions/:voiceSessionId/leave` | yes | member | Leave Voice session |
+| PATCH | `/api/voice-sessions/:voiceSessionId/recording-status` | yes | member | Change recording/STT status |
+
+Status rules:
+
+- Current Meeting text input is `memos`, not the legacy `notes` name.
+- Current report workflow request is `/api/meetings/:meetingId/report-generation`.
+- Direct audio chunk upload, transcript correction, standalone report confirm,
+  and one-step ActionItem-to-Task routes are Target/Deferred and need a follow-up
+  contract/runtime PR before consumers call them.
 
 ### Meeting DTO
 
@@ -452,7 +521,7 @@ Rules:
   "id": "meeting-id",
   "workspaceId": "workspace-id",
   "title": "Sprint planning",
-  "status": "active",
+  "status": "in_progress",
   "voiceStatus": "idle",
   "startedAt": "2026-06-30T00:00:00.000Z",
   "endedAt": null,
@@ -472,7 +541,7 @@ Rules:
   "id": "voice-session-id",
   "meetingId": "meeting-id",
   "workspaceId": "workspace-id",
-  "status": "recording",
+  "recordingStatus": "recording",
   "sttProvider": "openai",
   "startedByMemberId": "member-id",
   "startedAt": "2026-06-30T00:00:00.000Z",
@@ -548,12 +617,12 @@ Rules:
 Enums:
 
 ```ts
-type MeetingStatus = "active" | "ended" | "report_created";
-type VoiceSessionStatus = "recording" | "processing" | "completed" | "failed" | "cancelled";
-type TranscriptSource = "stt" | "manual";
-type TranscriptStatus = "draft" | "confirmed" | "corrected";
+type MeetingStatus = "scheduled" | "in_progress" | "ended" | "report_generated";
+type VoiceRoomStatus = "active" | "inactive" | "archived";
+type VoiceSessionRecordingStatus = "not_recording" | "recording" | "processing" | "completed" | "failed";
+type TranscriptSource = "text" | "stt";
 type ReportStatus = "draft" | "confirmed";
-type ActionItemStatus = "draft" | "approved" | "converted_to_task" | "rejected";
+type ActionItemStatus = "draft" | "approved" | "converted" | "rejected";
 ```
 
 Rules:
@@ -661,15 +730,17 @@ Rules:
 
 ```json
 {
-  "workflow": "task_suggestion",
-  "message": "Break login feature into tasks",
-  "context": {
-    "screen": "task_board",
-    "selectedObject": {
+  "workflowType": "task.draft.generate",
+  "workflowVersion": "v1",
+  "input": {
+    "message": "Break login feature into tasks"
+  },
+  "contextRefs": [
+    {
       "type": "task",
       "id": "task-id"
     }
-  }
+  ]
 }
 ```
 
@@ -679,22 +750,23 @@ Rules:
 {
   "id": "agent-run-id",
   "workspaceId": "workspace-id",
-  "workflow": "task_suggestion",
-  "status": "requires_approval",
-  "messages": [
-    {
-      "role": "assistant",
-      "content": "I found 3 task candidates."
-    }
-  ],
+  "workflowType": "task.draft.generate",
+  "workflowVersion": "v1",
+  "status": "requires_confirmation",
+  "actionRequired": true,
+  "pendingActionCount": 1,
+  "output": {
+    "summary": "I found 3 task drafts."
+  },
   "actions": [
     {
       "id": "agent-action-id",
-      "type": "create_task",
-      "status": "pending",
-      "preview": {
+      "type": "task.create.draft",
+      "status": "waiting_confirmation",
+      "payload": {
+        "workspaceId": "workspace-id",
         "title": "Implement OAuth callback",
-        "taskType": "development"
+        "priority": "medium"
       }
     }
   ]
@@ -704,9 +776,10 @@ Rules:
 Enums:
 
 ```ts
-type AgentWorkflow = "project_start" | "task_suggestion" | "meeting_report" | "pr_review" | "github_link_suggestion" | "general_question";
-type AgentRunStatus = "queued" | "running" | "completed" | "requires_approval" | "failed";
-type AgentActionStatus = "pending" | "approved" | "rejected" | "executed" | "failed";
+type AgentWorkflowType = "meeting.report.generate" | "review.analysis.generate" | "planning.generate" | "task.draft.generate" | "github.issue.draft.generate" | "orchestrator.run";
+type AgentRunStatus = "pending" | "running" | "succeeded" | "failed" | "requires_confirmation";
+type AgentActionType = "task.create.draft" | "task.update.status" | "github.issue.create" | "meeting.report.generate" | "review.analysis.generate" | "planning.approve";
+type AgentActionStatus = "draft" | "waiting_confirmation" | "confirmed" | "executed" | "rejected" | "failed";
 ```
 
 Rules:
@@ -714,8 +787,20 @@ Rules:
 - Agent context is explicit. No RAG retrieval in MVP.
 - AgentAction execution delegates to owner domain API.
 - Approval does not bypass permission checks.
+- `workflowType`, action `type`, and action `status` must match
+  `docs/contracts/agent-actions.md` and
+  `docs/contracts/schemas/pilo-public-contracts.schema.json`.
+- Legacy names such as task suggestion workflows, generic create-task actions,
+  or requires-approval statuses are not part of the current public contract.
+- Agent Run/Action HTTP APIs are Deferred until the controller lands. The
+  registry service alone does not make these routes Current Runtime.
 
 ## Notification API
+
+Notification is an MVP Target capability, but all Notification HTTP APIs are
+Deferred in current runtime. The owner is DevOps/Common gatekeeper until a
+specific implementation owner is assigned. Do not treat Minimal Notification as
+a release-blocking Current API before that owner/runtime PR lands.
 
 ### Endpoints
 
@@ -754,10 +839,14 @@ Rules:
 
 - Notification executes no business action.
 - Notification links to owner screen.
+- Current runtime has no Notification controller. Consumers must use local UI
+  badges, fixtures, or AgentAction state directly until the Deferred API lands.
 
 ## Basic Canvas API
 
-Canvas is `Should`, not MVP release blocker.
+Canvas is `Should`, not MVP release blocker. Unlike most Should items, a
+workspace Canvas runtime currently exists; consumers must still treat it as
+layout/reference storage only, not source-domain data ownership.
 
 ### Endpoints
 
@@ -802,7 +891,10 @@ Rules:
 
 - Deleting a Canvas shape does not delete the original object.
 - The current runtime and public schema use `shapes`/`connections`; `nodes`/`edges` are old target wording and must not be used for workspace Canvas APIs.
-- Canvas `connectionType` enum vs freeform persistence is still unresolved; this PR does not implement runtime changes. See `docs/contracts/canvas.md` for the follow-up policy decision.
+- `connectionType` is a strict public enum for current runtime/schema/SQL:
+  `related_to`, `created_from`, `blocks`, `references`, `implements`, `reviews`.
+- Freeform drawing/sticky/code/frame tldraw state is local-only MVP UI state
+  unless a follow-up contract/runtime PR defines server persistence.
 - Agent auto layout is excluded.
 
 ## Dashboard API

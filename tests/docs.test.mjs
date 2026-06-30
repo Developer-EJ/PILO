@@ -490,6 +490,149 @@ describe("contract document set", () => {
     }
     assert.match(progress, /doneTasks \/ totalTasks/);
   });
+
+  it("api contract is target-only where it differs from current runtime contracts", () => {
+    const apiContract = read("docs/api-contract-v1.md");
+
+    for (const label of ["Current", "Deferred", "Target", "Excluded"]) {
+      assert.match(apiContract, new RegExp(`\\\`${label}\\\``));
+    }
+
+    assert.match(apiContract, /Target/);
+    assert.match(apiContract, /docs\/contracts\/\*/);
+    assert.match(apiContract, /Current Runtime APIs/);
+  });
+
+  it("agent docs use the current AgentAction workflow and status vocabulary", () => {
+    const checkedDocs = [
+      "docs/api-contract-v1.md",
+      "docs/contracts/agent-actions.md",
+      "docs/agents/sein-agent-planning.md",
+    ];
+
+    for (const file of checkedDocs) {
+      const content = read(file);
+      assert.doesNotMatch(content, /task_suggestion/, `${file} must not expose the legacy task_suggestion workflow`);
+      assert.doesNotMatch(content, /create_task/, `${file} must not expose the legacy create_task action type`);
+      assert.doesNotMatch(content, /requires_approval/, `${file} must not expose the legacy requires_approval status`);
+      assert.match(content, /task\.create\.draft/, `${file} must use task.create.draft`);
+      assert.match(content, /meeting\.report\.generate/, `${file} must use meeting.report.generate`);
+      assert.match(content, /waiting_confirmation|requires_confirmation/, `${file} must use the current confirmation vocabulary`);
+    }
+  });
+
+  it("github current and deferred API paths use the canonical contract split", () => {
+    const apiContract = read("docs/api-contract-v1.md");
+    const githubContract = read("docs/contracts/github.md");
+    const boundary = read("docs/domain-boundary-v1.md");
+
+    for (const oldPathPattern of [
+      /\/api\/workspaces\/:workspaceId\/github\/sync(?:`|\s|\||$)/,
+      /\/api\/workspaces\/:workspaceId\/github\/issues(?:`|\s|\||$)/,
+      /\/api\/github\/pull-requests\/:pullRequestId(?:`|\s|\||$)/,
+      /\/api\/tasks\/:taskId\/github-issue(?:`|\s|\||$)/,
+    ]) {
+      assert.doesNotMatch(apiContract, oldPathPattern, `api contract must not expose old GitHub path ${oldPathPattern}`);
+    }
+
+    for (const canonicalPath of [
+      "/api/workspaces/:workspaceId/github/connections",
+      "/api/workspaces/:workspaceId/github/repositories",
+      "/api/workspaces/:workspaceId/github/repositories/sync",
+      "/api/repositories/:repositoryId/issues",
+      "/api/repositories/:repositoryId/pull-requests",
+      "/api/pull-requests/:pullRequestId/changed-files",
+      "/api/tasks/:taskId/github-issues",
+    ]) {
+      assert.ok(apiContract.includes(canonicalPath), `api contract must include ${canonicalPath}`);
+    }
+
+    assert.match(githubContract, /Current runtime connection APIs require Workspace membership/);
+    assert.match(githubContract, /Owner-only/);
+    assert.match(boundary, /Current GitHub connection runtime APIs require Workspace membership/);
+    assert.match(boundary, /Owner-only/);
+  });
+
+  it("meeting and voice docs do not present legacy paths as current APIs", () => {
+    const docs = [
+      "docs/api-contract-v1.md",
+      "docs/contracts/meeting.md",
+      "docs/contracts/voice.md",
+      "docs/agents/jinho-meeting-report.md",
+    ];
+
+    for (const file of docs) {
+      const content = read(file);
+      for (const oldPath of [
+        "/api/meetings/:meetingId/notes",
+        "/api/meetings/:meetingId/voice-sessions/start",
+        "/api/meetings/:meetingId/report-draft",
+        "/api/reports/:reportId/confirm",
+        "/api/action-items/:actionItemId/convert-to-task",
+      ]) {
+        assert.equal(content.includes(oldPath), false, `${file} must not expose old Meeting/Voice path ${oldPath}`);
+      }
+    }
+
+    const apiContract = read("docs/api-contract-v1.md");
+    assert.ok(apiContract.includes("/api/meetings/:meetingId/memos"));
+    assert.ok(apiContract.includes("/api/meetings/:meetingId/report-generation"));
+    assert.ok(apiContract.includes("/api/workspaces/:workspaceId/meetings/:meetingId/voice-room"));
+    assert.match(apiContract, /MeetingStatus = "scheduled" \| "in_progress" \| "ended" \| "report_generated"/);
+    assert.match(apiContract, /recordingStatus/);
+  });
+
+  it("task enum and MVP target-only fields stay aligned across scope, API, schema, and SQL", () => {
+    const mvpScope = read("docs/mvp-scope-v1.md");
+    const apiContract = read("docs/api-contract-v1.md");
+    const taskContract = read("docs/contracts/task.md");
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const sql = read("docs/db/pilo_erd_schema.sql");
+
+    assert.match(mvpScope, /`todo`, `in_progress`, `in_review`, `done`, `blocked`/);
+    assert.match(mvpScope, /`low`, `medium`, `high`, `urgent`/);
+    assert.doesNotMatch(mvpScope, /`todo`, `in_progress`, `review`, `done`, `blocked`/);
+
+    assert.match(apiContract, /type TaskStatus = "todo" \| "in_progress" \| "in_review" \| "done" \| "blocked"/);
+    assert.match(apiContract, /type TaskPriority = "low" \| "medium" \| "high" \| "urgent"/);
+    assert.deepEqual(schema.$defs.TaskSummary.properties.status.enum, ["todo", "in_progress", "in_review", "done", "blocked"]);
+    assert.deepEqual(schema.$defs.TaskSummary.properties.priority.enum, ["low", "medium", "high", "urgent"]);
+    assert.match(sql, /status IN \('todo', 'in_progress', 'in_review', 'done', 'blocked'\)/);
+    assert.match(sql, /priority IN \('low', 'medium', 'high', 'urgent'\)/);
+
+    assert.ok(mvpScope.includes("`taskType`"));
+    assert.ok(mvpScope.includes("`acceptanceCriteria`"));
+    assert.ok(taskContract.includes("MVP Target fields `taskType` and `acceptanceCriteria`"));
+    assert.ok(apiContract.includes("`taskType` and `acceptanceCriteria` are MVP Target fields"));
+  });
+
+  it("workspace Canvas current APIs use shapes/connections, not nodes/edges", () => {
+    const canvas = read("docs/contracts/canvas.md");
+    const currentApis = canvas.slice(
+      canvas.indexOf("## Current Runtime APIs"),
+      canvas.indexOf("## Terminology"),
+    );
+    const mvpScope = read("docs/mvp-scope-v1.md");
+
+    assert.match(currentApis, /\/api\/canvas-boards\/:boardId\/shapes/);
+    assert.match(currentApis, /\/api\/canvas-boards\/:boardId\/connections/);
+    assert.doesNotMatch(currentApis, /\/(?:nodes|edges)\b/);
+    assert.match(canvas, /nodes` and `edges` are deprecated for the workspace Canvas contract/);
+    assert.match(mvpScope, /Workspace Canvas current runtime.*`shapes`\/`connections`/);
+  });
+
+  it("juhyung owner brief points to the actual current module path", () => {
+    const brief = read("docs/agents/juhyung-task-github-progress.md");
+    const suggestedPathLines = brief
+      .split(/\r?\n/)
+      .filter((line) => /^- (App Server|Public adapters):/.test(line))
+      .join("\n");
+
+    assert.match(suggestedPathLines, /apps\/app-server\/src\/modules\/juhyung/);
+    assert.doesNotMatch(suggestedPathLines, /apps\/app-server\/src\/modules\/(?:task|github|progress)/);
+    assert.match(brief, /future refactor targets only/);
+    assert.match(brief, /Progress is an MVP Target read model, not Current Runtime/);
+  });
 });
 
 describe("independent agent briefs", () => {
