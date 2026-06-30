@@ -132,7 +132,7 @@ export type WorkspaceDashboardReadModel = {
   prAnalyses: unknown[];
   agentActions: unknown[];
   canvasEntities: unknown[];
-  source: "fixture" | "empty";
+  source: "fixture" | "empty" | "mixed";
   generatedAt: string;
 };
 

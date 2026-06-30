@@ -801,7 +801,11 @@ describe("frontend package", () => {
       dashboard.properties.pullRequests.items.$ref,
       "#/$defs/PullRequestSummary",
     );
-    assert.deepEqual(dashboard.properties.source.enum, ["fixture", "empty"]);
+    assert.deepEqual(dashboard.properties.source.enum, [
+      "fixture",
+      "empty",
+      "mixed",
+    ]);
   });
 
   it("keeps Canvas board detail fixture aligned with the public schema", () => {

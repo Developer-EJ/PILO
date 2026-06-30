@@ -4237,7 +4237,7 @@
           }
         },
         "source": {
-          "enum": ["fixture", "empty"]
+          "enum": ["fixture", "empty", "mixed"]
         },
         "generatedAt": {
           "$ref": "#/$defs/dateTime"

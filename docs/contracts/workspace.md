@@ -183,6 +183,11 @@ Contract test 기준:
 - Consumer는 dashboard 렌더링만을 위해 다른 owner domain의 임시 DB table이나
   임시 API field를 만들지 않는다.
 
+Dashboard `source` values are `fixture`, `empty`, or `mixed`.
+`mixed` means at least one owner-domain section, such as Tasks or Progress, was
+overlaid from runtime APIs while the remaining sections may still use the
+fixture/empty fallback.
+
 ## Events
 
 - `workspace.created`

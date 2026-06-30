@@ -1455,6 +1455,100 @@ describe("app-server package", () => {
     assert.equal("providers" in dashboard.currentMember, false);
   });
 
+  it("overlays workspace dashboard task and progress sections from runtime services", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    const repository = new WorkspaceRepository();
+    const owner = {
+      id: "owner-1",
+      name: "Workspace Owner",
+      email: "owner@example.com",
+    };
+    const workspace = await new WorkspaceService(repository).createWorkspace({
+      currentUser: owner,
+      body: {
+        name: "PILO",
+      },
+    });
+    const runtimeTask = {
+      id: "44444444-4444-4444-8444-444444444499",
+      workspaceId: workspace.id,
+      milestoneId: null,
+      title: "Runtime task",
+      status: "todo",
+      priority: "high",
+      assignee: null,
+      dueDate: null,
+      isDelayed: false,
+      linkedIssueCount: 0,
+      linkedPrCount: 0,
+      updatedAt: "2026-06-28T00:00:00.000Z",
+    };
+    const runtimeProgress = {
+      workspaceId: workspace.id,
+      milestoneId: null,
+      totalTasks: 1,
+      doneTasks: 0,
+      blockedTasks: 0,
+      reviewTasks: 0,
+      delayedTasks: 0,
+      progressRate: 0,
+      capturedAt: "2026-06-28T00:00:00.000Z",
+    };
+    const calls = [];
+    const moduleRef = {
+      get(token) {
+        if (token.name === "JuhyungTaskService") {
+          return {
+            async listTasks(workspaceId, query, actor) {
+              calls.push({ service: "tasks", workspaceId, query, actor });
+              return [runtimeTask];
+            },
+          };
+        }
+
+        if (token.name === "JuhyungProgressService") {
+          return {
+            async getProgressSummary(workspaceId, actor) {
+              calls.push({ service: "progress", workspaceId, actor });
+              return runtimeProgress;
+            },
+          };
+        }
+
+        throw new Error(`Unexpected provider token: ${token.name}`);
+      },
+    };
+
+    delete process.env.PILO_SKIP_DATABASE_CONNECT;
+
+    try {
+      const service = new WorkspaceService(repository, moduleRef);
+      const dashboard = await service.getWorkspaceDashboard({
+        workspaceId: workspace.id,
+        currentUser: owner,
+      });
+
+      assert.equal(dashboard.source, "mixed");
+      assert.deepEqual(dashboard.tasks, [runtimeTask]);
+      assert.deepEqual(dashboard.progress, runtimeProgress);
+      assert.equal(dashboard.meetingReports[0].workspaceId, workspace.id);
+      assert.deepEqual(
+        calls.map((call) => call.service),
+        ["tasks", "progress"],
+      );
+      assert.deepEqual(calls[0].actor, {
+        userId: owner.id,
+        memberId: dashboard.currentMember.memberId,
+      });
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
   it("keeps Canvas board detail and write DTO schemas aligned with fixtures", () => {
     const defs = contractSchema.$defs;
 

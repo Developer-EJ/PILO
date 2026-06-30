@@ -1,7 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional, type Type } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { JuhyungProgressService } from "../juhyung/juhyung-progress.service";
+import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
 import { WorkspaceRepository } from "./workspace.repository";
 import type {
   CurrentWorkspaceMember,
@@ -115,7 +118,10 @@ export class WorkspaceInviteError extends Error {
 
 @Injectable()
 export class WorkspaceService {
-  constructor(private readonly workspaceRepository: WorkspaceRepository) {}
+  constructor(
+    private readonly workspaceRepository: WorkspaceRepository,
+    @Optional() private readonly moduleRef?: ModuleRef,
+  ) {}
 
   getRepositoryStatus() {
     return {
@@ -279,7 +285,11 @@ export class WorkspaceService {
       this.listWorkspaceMembers(input),
       this.getDashboardPreferences(input),
     ]);
-    const readModels = loadFixtureDashboardReadModels(input.workspaceId);
+    const readModels = await this.overlayRuntimeDashboardReadModels(
+      input,
+      currentMember,
+      loadFixtureDashboardReadModels(input.workspaceId),
+    );
 
     return {
       workspace,
@@ -289,6 +299,70 @@ export class WorkspaceService {
       ...readModels,
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  private async overlayRuntimeDashboardReadModels(
+    input: WorkspaceResourceInput,
+    currentMember: CurrentWorkspaceMember,
+    readModels: FixtureDashboardReadModels,
+  ): Promise<FixtureDashboardReadModels> {
+    if (!this.moduleRef || process.env.PILO_SKIP_DATABASE_CONNECT === "true") {
+      return readModels;
+    }
+
+    const actor = {
+      userId: input.currentUser.id,
+      memberId: currentMember.memberId,
+    };
+    const nextReadModels = { ...readModels };
+    let hasRuntimeSection = false;
+    const taskService = this.getRuntimeProvider(JuhyungTaskService);
+    const progressService = this.getRuntimeProvider(JuhyungProgressService);
+
+    if (taskService) {
+      try {
+        nextReadModels.tasks = await taskService.listTasks(
+          input.workspaceId,
+          {},
+          actor,
+        );
+        hasRuntimeSection = true;
+      } catch {
+        // Dashboard stays available while owner services catch up or are down.
+      }
+    }
+
+    if (progressService) {
+      try {
+        const progress = await progressService.getProgressSummary(
+          input.workspaceId,
+          actor,
+        );
+        nextReadModels.progress = { ...progress };
+        hasRuntimeSection = true;
+      } catch {
+        // Dashboard stays available while owner services catch up or are down.
+      }
+    }
+
+    return hasRuntimeSection
+      ? {
+          ...nextReadModels,
+          source: "mixed",
+        }
+      : readModels;
+  }
+
+  private getRuntimeProvider<T>(token: Type<T>): T | null {
+    if (!this.moduleRef) {
+      return null;
+    }
+
+    try {
+      return this.moduleRef.get(token, { strict: false });
+    } catch {
+      return null;
+    }
   }
 
   async updateDashboardPreferences(
