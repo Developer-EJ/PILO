@@ -184,9 +184,9 @@ Contract test 기준:
   임시 API field를 만들지 않는다.
 
 Dashboard `source` values are `fixture`, `empty`, or `mixed`.
-`mixed` means at least one owner-domain section, such as Tasks, Progress, or
-Meeting Reports, was overlaid from runtime APIs while the remaining sections may
-still use the fixture/empty fallback.
+`mixed` means at least one owner-domain section, such as Tasks, Progress,
+Meeting Reports, or Agent Actions, was overlaid from runtime APIs while the
+remaining sections may still use the fixture/empty fallback.
 
 ## Events
 
