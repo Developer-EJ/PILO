@@ -671,7 +671,8 @@ CREATE TABLE changed_functions (
   summary TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT changed_functions_change_type_check CHECK (change_type IN ('added', 'modified', 'deleted'))
+  CONSTRAINT changed_functions_change_type_check CHECK (change_type IN ('added', 'modified', 'deleted')),
+  UNIQUE (changed_file_id, name)
 );
 
 CREATE TABLE review_nodes (
@@ -1029,6 +1030,7 @@ CREATE INDEX IF NOT EXISTS idx_pull_request_analyses_pr_id ON pull_request_analy
 CREATE INDEX IF NOT EXISTS idx_review_graphs_analysis_id ON review_graphs(analysis_id);
 CREATE INDEX IF NOT EXISTS idx_review_nodes_graph_id ON review_nodes(graph_id);
 CREATE INDEX IF NOT EXISTS idx_changed_files_analysis_id ON changed_files(analysis_id);
+CREATE INDEX IF NOT EXISTS idx_changed_functions_file_id ON changed_functions(changed_file_id);
 CREATE INDEX IF NOT EXISTS idx_review_comments_room_id ON review_comments(room_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_workspace_status ON agent_runs(workspace_id, status);
 CREATE INDEX IF NOT EXISTS idx_agent_actions_run_status ON agent_actions(run_id, status);

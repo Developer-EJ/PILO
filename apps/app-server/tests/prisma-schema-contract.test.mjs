@@ -27,6 +27,15 @@ const reviewGraphMigration = readFileSync(
     encoding: "utf8",
   },
 );
+const changedFilesMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/202606301500_review_changed_files_persistence/migration.sql",
+    import.meta.url,
+  ),
+  {
+    encoding: "utf8",
+  },
+);
 const logicalSchema = readFileSync(
   new URL("../../../docs/db/pilo_erd_schema.sql", import.meta.url),
   {
@@ -117,6 +126,33 @@ describe("Prisma workspace member task relations", () => {
     assert.doesNotMatch(
       reviewGraphMigration,
       /CREATE TABLE IF NOT EXISTS review_nodes \(\s*id UUID PRIMARY KEY/,
+    );
+  });
+
+  it("maps Review changed files persistence to runtime read models", () => {
+    assert.match(
+      schema,
+      /model ChangedFile\s+{[\s\S]*analysisId\s+String\s+@map\("analysis_id"\)\s+@db\.Uuid[\s\S]*filePath\s+String\s+@map\("file_path"\)[\s\S]*@@unique\(\[analysisId, filePath\]\)[\s\S]*@@map\("changed_files"\)/,
+    );
+    assert.match(
+      schema,
+      /model ChangedFunction\s+{[\s\S]*changedFileId\s+String\s+@map\("changed_file_id"\)\s+@db\.Uuid[\s\S]*name\s+String\s+@db\.VarChar\(255\)[\s\S]*@@unique\(\[changedFileId, name\]\)[\s\S]*@@map\("changed_functions"\)/,
+    );
+    assert.match(
+      changedFilesMigration,
+      /CREATE TABLE IF NOT EXISTS changed_files/,
+    );
+    assert.match(
+      changedFilesMigration,
+      /CONSTRAINT changed_files_analysis_file_path_key UNIQUE \(analysis_id, file_path\)/,
+    );
+    assert.match(
+      changedFilesMigration,
+      /CONSTRAINT changed_functions_file_name_key UNIQUE \(changed_file_id, name\)/,
+    );
+    assert.match(
+      logicalSchema,
+      /CREATE INDEX IF NOT EXISTS idx_changed_functions_file_id ON changed_functions\(changed_file_id\);/,
     );
   });
 });

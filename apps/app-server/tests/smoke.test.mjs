@@ -3419,7 +3419,7 @@ describe("app-server package", () => {
         pullRequest.id,
       );
       assert.deepEqual(
-        app
+        await app
           .get(ChangedFilesService)
           .listChangedFiles(analysis.id),
         [],

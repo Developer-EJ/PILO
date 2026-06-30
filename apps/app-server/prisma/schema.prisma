@@ -285,6 +285,39 @@ model PullRequestAnalysis {
   @@map("pull_request_analyses")
 }
 
+model ChangedFile {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  analysisId  String   @map("analysis_id") @db.Uuid
+  filePath    String   @map("file_path")
+  changeType  String   @map("change_type") @db.VarChar(20)
+  additions   Int      @default(0)
+  deletions   Int      @default(0)
+  summary     String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  functions   ChangedFunction[]
+
+  @@unique([analysisId, filePath])
+  @@index([analysisId])
+  @@map("changed_files")
+}
+
+model ChangedFunction {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  changedFileId String   @map("changed_file_id") @db.Uuid
+  name          String   @db.VarChar(255)
+  changeType    String   @map("change_type") @db.VarChar(20)
+  summary       String?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  changedFile ChangedFile @relation(fields: [changedFileId], references: [id], onDelete: Cascade)
+
+  @@unique([changedFileId, name])
+  @@index([changedFileId])
+  @@map("changed_functions")
+}
+
 model ReviewGraph {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   analysisId     String   @unique @map("analysis_id") @db.Uuid

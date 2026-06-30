@@ -173,7 +173,7 @@ export class AgentResultConsumerService {
     }
 
     if (output.changedFiles && this.changedFilesResultService) {
-      this.changedFilesResultService.applyChangedFiles(
+      await this.changedFilesResultService.applyChangedFiles(
         analysisId,
         output.changedFiles,
       );

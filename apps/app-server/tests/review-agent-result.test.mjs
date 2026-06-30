@@ -287,7 +287,9 @@ describe("agent result root analysis consumer", () => {
     const updated = await resultConsumer.applyResult(message);
     const replay = await resultConsumer.applyResult(message);
     const graph = await graphService.getGraph(analysis.id);
-    const changedFiles = changedFilesService.listChangedFiles(analysis.id);
+    const changedFiles = await changedFilesService.listChangedFiles(
+      analysis.id,
+    );
     const checklistItems = artifactsService.listChecklistItems(analysis.id);
 
     assert.equal(updated.analysisStatus, "succeeded");

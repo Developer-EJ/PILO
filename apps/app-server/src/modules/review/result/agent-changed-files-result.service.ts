@@ -27,12 +27,12 @@ export interface AgentChangedFunctionResult {
 export class AgentChangedFilesResultService {
   constructor(private readonly changedFilesService: ChangedFilesService) {}
 
-  applyChangedFiles(
+  async applyChangedFiles(
     analysisId: string,
     changedFiles: AgentChangedFileResult[] = [],
-  ): ChangedFileWithFunctions[] {
+  ): Promise<ChangedFileWithFunctions[]> {
     for (const file of changedFiles) {
-      const savedFile = this.changedFilesService.upsertChangedFile({
+      const savedFile = await this.changedFilesService.upsertChangedFile({
         id: file.id,
         analysisId,
         filePath: file.filePath,
@@ -43,7 +43,7 @@ export class AgentChangedFilesResultService {
       });
 
       for (const changedFunction of file.functions ?? []) {
-        this.changedFilesService.upsertChangedFunction({
+        await this.changedFilesService.upsertChangedFunction({
           id: changedFunction.id,
           changedFileId: savedFile.id,
           name: changedFunction.name,

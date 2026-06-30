@@ -1,8 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { ChangedFileRecord, ChangedFunctionRecord } from "./changed-file.types";
+import { ChangedFilesRepository } from "./changed-files.repository";
 
 @Injectable()
-export class InMemoryChangedFilesRepository {
+export class InMemoryChangedFilesRepository implements ChangedFilesRepository {
   private readonly filesById = new Map<string, ChangedFileRecord>();
   private readonly fileIdsByAnalysisAndPath = new Map<string, string>();
   private readonly functionsById = new Map<string, ChangedFunctionRecord>();

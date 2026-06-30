@@ -8,8 +8,10 @@ import { InMemoryReviewArtifactsRepository } from "./artifacts/in-memory-review-
 import { ReviewArtifactsController } from "./artifacts/review-artifacts.controller";
 import { ReviewArtifactsService } from "./artifacts/review-artifacts.service";
 import { ChangedFilesController } from "./changes/changed-files.controller";
+import { ChangedFilesRepository } from "./changes/changed-files.repository";
 import { ChangedFilesService } from "./changes/changed-files.service";
 import { InMemoryChangedFilesRepository } from "./changes/in-memory-changed-files.repository";
+import { RuntimeChangedFilesRepository } from "./changes/runtime-changed-files.repository";
 import { ReviewGraphRepository } from "./graph/review-graph.repository";
 import { ReviewGraphController } from "./graph/review-graph.controller";
 import { ReviewGraphService } from "./graph/review-graph.service";
@@ -73,16 +75,20 @@ import { ReviewRoomService } from "./room/review-room.service";
     InMemoryReviewArtifactsRepository,
     InMemoryChangedFilesRepository,
     {
+      provide: ChangedFilesRepository,
+      useClass: RuntimeChangedFilesRepository,
+    },
+    {
       provide: ReviewGraphRepository,
       useClass: RuntimeReviewGraphRepository,
     },
     {
       provide: ChangedFilesService,
-      useFactory: (repository: InMemoryChangedFilesRepository) =>
+      useFactory: (repository: ChangedFilesRepository) =>
         new ChangedFilesService(repository, {
           seedFixture: shouldSeedReviewFixtures(),
         }),
-      inject: [InMemoryChangedFilesRepository],
+      inject: [ChangedFilesRepository],
     },
     {
       provide: ReviewGraphService,

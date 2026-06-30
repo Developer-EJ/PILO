@@ -9,7 +9,7 @@ export class ChangedFilesController {
   @Get(":analysisId/changed-files")
   listChangedFiles(
     @Param("analysisId") analysisId: string,
-  ): ChangedFileWithFunctions[] {
+  ): Promise<ChangedFileWithFunctions[]> {
     return this.changedFilesService.listChangedFiles(analysisId);
   }
 }

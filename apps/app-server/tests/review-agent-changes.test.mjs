@@ -22,11 +22,11 @@ function createService() {
 }
 
 describe("agent result changed files adapter", () => {
-  it("upserts changed files and functions from result payload", () => {
+  it("upserts changed files and functions from result payload", async () => {
     const service = createService();
     const analysisId = "88888888-8888-4888-8888-888888888883";
 
-    const first = service.applyChangedFiles(analysisId, [
+    const first = await service.applyChangedFiles(analysisId, [
       {
         filePath: "apps/frontend/app/auth/callback/page.tsx",
         changeType: "modified",
@@ -42,7 +42,7 @@ describe("agent result changed files adapter", () => {
         ],
       },
     ]);
-    const second = service.applyChangedFiles(analysisId, [
+    const second = await service.applyChangedFiles(analysisId, [
       {
         filePath: first[0].filePath,
         changeType: "modified",
