@@ -46,32 +46,41 @@
 7. Task to issue and task to PR mapping.
 8. Progress summary calculation and snapshot.
 
-## Public APIs To Provide
+## Current Runtime APIs
 
-- `GET /workspaces/:workspaceId/tasks` returns `TaskSummary[]`.
-- `POST /workspaces/:workspaceId/tasks` creates task.
-- `PATCH /tasks/:taskId` updates task.
-- `DELETE /tasks/:taskId` soft-deletes task.
-- `GET /workspaces/:workspaceId/task-drafts` returns `TaskDraft[]`.
-- `POST /workspaces/:workspaceId/task-drafts` creates task draft.
-- `POST /task-drafts/:draftId/approve` creates task from approved draft.
-- `POST /task-drafts/:draftId/reject` rejects task draft.
-- `GET /workspaces/:workspaceId/milestones` returns `MilestoneSummary[]`.
-- `POST /workspaces/:workspaceId/milestones` creates milestone.
-- `PATCH /milestones/:milestoneId` updates milestone.
-- `POST /workspaces/:workspaceId/github/connections` starts GitHub App install flow.
-- `GET /workspaces/:workspaceId/github/repositories` returns `GithubRepositorySummary[]`.
-- `POST /tasks/:taskId/github-issues` creates or links issue.
-- `GET /repositories/:repositoryId/issues` returns `GithubIssueSummary[]`.
-- `GET /repositories/:repositoryId/pull-requests` returns `PullRequestSummary[]`.
-- `GET /pull-requests/:pullRequestId/changed-files` returns `PullRequestChangedFileSummary[]`.
-- `GET /workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
-- `GET /workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
+- `GET /api/workspaces/:workspaceId/tasks` returns `TaskSummary[]`.
+- `POST /api/workspaces/:workspaceId/tasks` creates task.
+- `GET /api/tasks/:taskId` returns task detail.
+- `PATCH /api/tasks/:taskId` updates task fields, including `assigneeMemberId`.
+- `PATCH /api/tasks/:taskId/status` updates task status.
+- `DELETE /api/tasks/:taskId` soft-deletes task.
+- `POST /api/workspaces/:workspaceId/task-drafts` creates `TaskDraft`.
+- `POST /api/task-drafts/:draftId/approve` creates task from approved draft.
+- `POST /api/task-drafts/:draftId/reject` rejects task draft.
+- `GET /api/workspaces/:workspaceId/milestones` returns `MilestoneSummary[]`.
+- `POST /api/workspaces/:workspaceId/milestones` creates milestone.
+- `PATCH /api/milestones/:milestoneId` updates milestone.
+- `POST /api/workspaces/:workspaceId/github/connections` starts GitHub App install flow.
+- `GET /api/workspaces/:workspaceId/github/connections` returns GitHub App connection status.
+- `DELETE /api/workspaces/:workspaceId/github/connections/:connectionId` revokes a connection.
+- `GET /api/github/app/callback` completes GitHub App install callback.
+
+## Deferred APIs
+
+- `GET /api/workspaces/:workspaceId/task-drafts` returns Task draft list.
+- `GET /api/workspaces/:workspaceId/github/repositories` returns `GithubRepositorySummary[]`.
+- `POST /api/workspaces/:workspaceId/github/repositories/sync` syncs repositories.
+- `POST /api/tasks/:taskId/github-issues` creates or links issue.
+- `GET /api/repositories/:repositoryId/issues` returns `GithubIssueSummary[]`.
+- `GET /api/repositories/:repositoryId/pull-requests` returns `PullRequestSummary[]`.
+- `GET /api/pull-requests/:pullRequestId/changed-files` returns `PullRequestChangedFileSummary[]`.
+- `GET /api/workspaces/:workspaceId/progress/summary` returns `ProgressSummary`.
+- `GET /api/workspaces/:workspaceId/progress/history` returns `ProgressSnapshotSummary[]`.
 - Agent action executor for `task.create.draft`, `task.update.status`, `github.issue.create`.
 
 ## External Callbacks
 
-- `GET /github/app/callback` completes GitHub App install flow.
+- `GET /api/github/app/callback` completes GitHub App install flow.
 
 ## Provides To Others
 

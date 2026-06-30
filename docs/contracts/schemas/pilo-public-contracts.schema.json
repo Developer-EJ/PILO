@@ -464,16 +464,42 @@
         }
       }
     },
+    "TaskDraftSourceType": {
+      "enum": [
+        "meeting_action_item",
+        "planning_feature",
+        "agent_recommendation",
+        "manual"
+      ]
+    },
     "TaskCreateDraft": {
       "type": "object",
       "required": ["workspaceId", "title"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["sourceType"]
+          },
+          "then": {
+            "required": ["sourceId"]
+          }
+        },
+        {
+          "if": {
+            "required": ["sourceId"]
+          },
+          "then": {
+            "required": ["sourceType"]
+          }
+        }
+      ],
       "properties": {
         "workspaceId": {
           "$ref": "#/$defs/uuid"
         },
         "sourceType": {
-          "type": "string"
+          "$ref": "#/$defs/TaskDraftSourceType"
         },
         "sourceId": {
           "$ref": "#/$defs/uuid"
@@ -529,7 +555,14 @@
           "$ref": "#/$defs/uuid"
         },
         "sourceType": {
-          "type": ["string", "null"]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDraftSourceType"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "sourceId": {
           "anyOf": [
@@ -572,7 +605,7 @@
           ]
         },
         "status": {
-          "enum": ["draft", "waiting_confirmation", "approved", "rejected"]
+          "enum": ["draft", "approved", "rejected"]
         },
         "createdAt": {
           "$ref": "#/$defs/dateTime"
@@ -605,7 +638,14 @@
           "$ref": "#/$defs/uuid"
         },
         "sourceType": {
-          "type": ["string", "null"]
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDraftSourceType"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "sourceId": {
           "anyOf": [
@@ -1300,6 +1340,161 @@
         "ownerApiResults"
       ],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "not_requested"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionId": {
+                "type": "null"
+              },
+              "requestedAt": {
+                "type": "null"
+              },
+              "confirmedAt": {
+                "type": "null"
+              },
+              "executedAt": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "waiting_confirmation"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/uuid"
+              },
+              "requestedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "confirmedAt": {
+                "type": "null"
+              },
+              "executedAt": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "confirmed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/uuid"
+              },
+              "requestedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "confirmedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "executedAt": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "executed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/uuid"
+              },
+              "requestedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "confirmedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "executedAt": {
+                "$ref": "#/$defs/dateTime"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/uuid"
+              },
+              "requestedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "confirmedAt": {
+                "$ref": "#/$defs/dateTime"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "const": "rejected"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/uuid"
+              },
+              "requestedAt": {
+                "$ref": "#/$defs/dateTime"
+              },
+              "confirmedAt": {
+                "type": "null"
+              },
+              "executedAt": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "status": {
           "$ref": "#/$defs/PlanningApprovalStatus"
@@ -2609,6 +2804,7 @@
       "required": [
         "id",
         "workspaceId",
+        "owner",
         "source",
         "title",
         "status",
@@ -2621,6 +2817,9 @@
         },
         "workspaceId": {
           "$ref": "#/$defs/uuid"
+        },
+        "owner": {
+          "enum": ["agent_runtime"]
         },
         "source": {
           "enum": [
@@ -4086,7 +4285,9 @@
         "progress",
         "githubIssues",
         "pullRequests",
+        "pullRequestChangedFiles",
         "meetingReports",
+        "meetingActionItems",
         "prAnalyses",
         "agentActions",
         "canvasEntities",
@@ -4138,10 +4339,22 @@
             "$ref": "#/$defs/PullRequestSummary"
           }
         },
+        "pullRequestChangedFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PullRequestChangedFileSummary"
+          }
+        },
         "meetingReports": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/MeetingReportSummary"
+          }
+        },
+        "meetingActionItems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MeetingActionItem"
           }
         },
         "prAnalyses": {

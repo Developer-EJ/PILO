@@ -18,6 +18,15 @@
 2. `Deferred APIs`는 mock/fixture 또는 후속 contract PR 전용이다.
 3. 새 API를 추가할 때는 `docs/api-contract-v1.md`의 `/api` prefix 원칙을 따른다.
 4. app-server uses the global `api` prefix. New public HTTP APIs must be exposed as `/api/...`.
+5. `Current Runtime APIs`는 app-server controller route와 global `/api` prefix로 확인한다. SQL baseline에 table이 있다는 사실만으로 Current Runtime API가 되지 않는다.
+6. PR/Issue가 mock, fixture, in-memory adapter, 또는 Deferred API에 의존하면 그 상태와 후속 실제 연동 Issue를 본문에 명시한다.
+7. Official agent bootstrap file is `agent.md`; do not create a separate `AGENTS.md` contract source unless a future contract PR changes this rule.
+
+## Runtime / DB Baseline
+
+- `docs/db/pilo_erd_schema.sql` is the broad SQL baseline for local bootstrap and MVP table inventory.
+- `apps/app-server/prisma/schema.prisma` is the current Prisma-backed subset used by runtime code.
+- `docs/contracts/schemas/pilo-public-contracts.schema.json` is the public DTO/action schema; fixtures must not add fields outside it.
 
 ## 읽는 순서
 
@@ -43,7 +52,7 @@
 | 주형 | `task.md`, `github.md`, `progress.md` | TaskSummary, TaskDetail, TaskChecklistItemSummary, TaskCommentSummary, TaskActivityLogSummary, TaskDependencySummary, TaskDraft, TaskDraftSummary, MilestoneSummary, GithubConnectionSummary, GithubRepositorySummary, GithubIssueSummary, PullRequestSummary, PullRequestChangedFileSummary, ProgressSummary |
 | 진호 | `meeting.md`, `voice.md` | MeetingAgenda, MeetingReportSummary, MeetingDecisionSummary, MeetingReportRiskSummary, MeetingReportNextAgenda, MeetingReportCanvasEntityRef, MeetingActionItem, VoiceRoom, VoiceSession |
 | 은재 | `review.md` | CodeReviewRoomSummary, PRAnalysisSummary, ReviewNodeSummary, ReviewRiskSummary |
-| 세인 | `agent-actions.md`, `planning.md` | AgentAction, ProjectPlanDraftSummary, ProjectPlanDraftDetail, ProjectPlanTechStackRecommendation, ProjectPlanFeatureDraft, ProjectPlanRoleDraft, ProjectPlanMilestoneDraft, ProjectPlanRiskNote, ProjectPlanFirstAgendaDraft, ProjectPlanApprovalState, PlanningOwnerApiResult |
+| 세인 | `agent-actions.md`, `planning.md` | AgentAction, AgentRecommendation, ProjectPlanDraftSummary, ProjectPlanDraftDetail, ProjectPlanTechStackRecommendation, ProjectPlanFeatureDraft, ProjectPlanRoleDraft, ProjectPlanMilestoneDraft, ProjectPlanRiskNote, ProjectPlanFirstAgendaDraft, ProjectPlanApprovalState, PlanningOwnerApiResult |
 | DevOps/공통 Backend | `common-system.md` | NotificationCreateRequest, SharedFileRef |
 
 ## 구현 전 필수 확인

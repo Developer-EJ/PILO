@@ -324,6 +324,16 @@ describe("agent bootstrap docs", () => {
       assert.match(content, new RegExp(`${name}:`));
     }
   });
+
+  it("uses agent.md as the single bootstrap filename", () => {
+    assert.ok(exists("agent.md"));
+    assert.equal(exists("AGENTS.md"), false, "AGENTS.md must not become a second bootstrap source");
+    for (const file of ["agent.md", "docs/README.md", "docs/agents/README.md", "docs/contracts/README.md"]) {
+      const content = read(file);
+      assert.match(content, /agent\.md/);
+      assert.match(content, /AGENTS\.md/);
+    }
+  });
 });
 
 describe("contract document set", () => {
@@ -420,6 +430,66 @@ describe("contract document set", () => {
     assert.match(planning, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/project-plan-drafts`/);
     assert.doesNotMatch(planning, /`GET \/project-plan-drafts/);
   });
+
+  it("rebaseline docs use TaskDraft and Canvas shapes/connections as canonical terms", () => {
+    const checkedDocs = [
+      "docs/api-contract-v1.md",
+      "docs/domain-boundary-v1.md",
+      "docs/contracts/task.md",
+      "docs/contracts/canvas.md",
+      "docs/contracts/interface-contract-guide.md",
+    ];
+
+    for (const file of checkedDocs) {
+      const content = read(file);
+      assert.doesNotMatch(content, /task-candidates/, `${file} must not expose task-candidates`);
+      assert.doesNotMatch(content, /\/api\/canvas-(?:nodes|edges)\b/, `${file} must not expose canvas nodes/edges routes`);
+      assert.doesNotMatch(content, /\/api\/canvas-boards\/:boardId\/(?:nodes|edges)\b/, `${file} must not expose canvas board nodes/edges routes`);
+    }
+
+    assert.match(read("docs/contracts/task.md"), /TaskDraft/);
+    assert.match(read("docs/contracts/task.md"), /TaskDraftSourceType|sourceType/);
+    assert.match(read("docs/contracts/canvas.md"), /CanvasBoardDetail\.shapes/);
+    assert.match(read("docs/contracts/canvas.md"), /CanvasBoardDetail\.connections/);
+  });
+
+  it("contract rules require explicit mock, in-memory, deferred, and shared-file handling", () => {
+    for (const file of [
+      "docs/contracts/README.md",
+      "docs/contracts/contract-change-rules.md",
+      "docs/contracts/fixtures/README.md",
+      "docs/agents/shared-implementation-rules.md",
+    ]) {
+      const content = read(file);
+      assert.match(content, /mock/i, `${file} must mention mock handling`);
+      assert.match(content, /Deferred API|Deferred APIs|Deferred/i, `${file} must mention deferred handling`);
+    }
+
+    assert.match(read("docs/agents/shared-implementation-rules.md"), /shared\/common 파일 변경은 기능 구현 PR에 섞지 않는다/);
+    assert.match(read("docs/contracts/fixtures/README.md"), /additionalProperties: false/);
+  });
+
+  it("boundary docs define access guards, progress math, and SQL versus Prisma runtime scope", () => {
+    const boundary = read("docs/domain-boundary-v1.md");
+    const progress = read("docs/contracts/progress.md");
+    const task = read("docs/contracts/task.md");
+    const github = read("docs/contracts/github.md");
+    const docsIndex = read("docs/README.md");
+
+    for (const token of ["auth_sessions", "workspace_members", "Task access", "GitHub repository/issue/PR access"]) {
+      assert.match(boundary, new RegExp(token));
+    }
+    assert.match(boundary, /SQL baseline/);
+    assert.match(boundary, /Prisma-backed runtime subset/);
+    assert.match(docsIndex, /SQL baseline/);
+    assert.match(docsIndex, /Prisma-backed runtime subset/);
+    assert.match(task, /workspace_members\.id/);
+    assert.match(github, /GitHub login OAuth is not sufficient for repository access/);
+    for (const token of ["totalTasks", "doneTasks", "blockedTasks", "reviewTasks", "delayedTasks", "progressRate"]) {
+      assert.match(progress, new RegExp(token));
+    }
+    assert.match(progress, /doneTasks \/ totalTasks/);
+  });
 });
 
 describe("independent agent briefs", () => {
@@ -441,6 +511,21 @@ describe("independent agent briefs", () => {
     });
   }
 
+  it("domain agent briefs separate Current Runtime APIs and Deferred APIs with /api public paths", () => {
+    const domainBriefs = requiredBriefs.filter((file) => !file.endsWith("README.md") && !file.endsWith("shared-implementation-rules.md"));
+
+    for (const file of domainBriefs) {
+      const content = read(file);
+      assert.match(content, /## Current Runtime APIs/, `${file} must list Current Runtime APIs`);
+      assert.match(content, /## Deferred APIs/, `${file} must list Deferred APIs`);
+      assert.doesNotMatch(
+        content,
+        /`(?:GET|POST|PATCH|PUT|DELETE) \/(?!api\/)(auth|workspaces|workspace-invites|canvas-boards|canvas-shapes|canvas-connections|pull-requests|code-review-rooms|pull-request-analyses|review-nodes|github\/app|repositories|tasks|milestones|agent-runs|agent-actions|project-plan-drafts|meetings|voice)\b/,
+        `${file} must use public /api paths`,
+      );
+    }
+  });
+
   it("agent docs are linked from the bootstrap and collaboration docs", () => {
     assert.match(read("agent.md"), /docs\/agents\/README\.md/);
     assert.match(read("docs/collaboration-v1.md"), /docs\/agents\/README\.md/);
@@ -453,6 +538,13 @@ describe("independent agent briefs", () => {
     assert.doesNotMatch(content, /apps\/frontend\/src\/domains/);
     assert.doesNotMatch(content, /apps\/app-server\/src\/domains/);
     assert.doesNotMatch(content, /apps\/ai-worker\/app\/domains/);
+  });
+
+  it("collaboration guide has no trailing whitespace", () => {
+    const lines = read("docs/collaboration-v1.md").split(/\r?\n/);
+    lines.forEach((line, index) => {
+      assert.doesNotMatch(line, /[ \t]+$/, `docs/collaboration-v1.md:${index + 1} has trailing whitespace`);
+    });
   });
 
   it("current bootstrap docs do not point agents at archived legacy planning docs", () => {
@@ -495,6 +587,7 @@ describe("machine-readable public contract schema", () => {
       "WorkspaceSummary",
       "WorkspaceMemberSummary",
       "TaskSummary",
+      "TaskDraftSourceType",
       "TaskDraft",
       "TaskCreateDraft",
       "TaskStatusUpdateAction",
@@ -533,6 +626,7 @@ describe("machine-readable public contract schema", () => {
       "ReviewNodeSummary",
       "ReviewRiskSummary",
       "CanvasEntityRef",
+      "AgentRecommendation",
       "AgentRunCreateRequest",
       "AgentRunStatusResponse",
       "AgentRunDetail",
@@ -567,6 +661,91 @@ describe("machine-readable public contract schema", () => {
     assert.deepEqual(ownerResult.properties.operation.enum, ["task.create", "milestone.create"]);
     assert.deepEqual(ownerResult.properties.sourceDraftType.enum, ["feature", "milestone"]);
     assert.deepEqual(ownerResult.properties.status.enum, ["not_requested", "pending", "succeeded", "failed", "skipped"]);
+  });
+
+  it("schema aligns TaskDraft vocabulary and task enums with runtime and DB", () => {
+    const schema = readJson(schemaPath);
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const taskCreateDraft = schema.$defs.TaskCreateDraft;
+
+    assert.deepEqual(schema.$defs.TaskDraftSourceType.enum, [
+      "meeting_action_item",
+      "planning_feature",
+      "agent_recommendation",
+      "manual",
+    ]);
+    assert.deepEqual(schema.$defs.TaskDraft.properties.status.enum, ["draft", "approved", "rejected"]);
+    assert.deepEqual(schema.$defs.TaskDraftSummary.properties.status.enum, ["draft", "approved", "rejected"]);
+    assert.deepEqual(schema.$defs.TaskSummary.properties.status.enum, ["todo", "in_progress", "in_review", "done", "blocked"]);
+    assert.deepEqual(schema.$defs.TaskSummary.properties.priority.enum, ["low", "medium", "high", "urgent"]);
+    assert.equal(validateJsonSchema(taskCreateDraft, { workspaceId: uuid, title: "OAuth callback" }, schema).valid, true);
+    assert.equal(
+      validateJsonSchema(taskCreateDraft, { workspaceId: uuid, title: "OAuth callback", sourceType: "planning_feature", sourceId: uuid }, schema).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(taskCreateDraft, { workspaceId: uuid, title: "OAuth callback", sourceType: "planning_feature" }, schema).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(taskCreateDraft, { workspaceId: uuid, title: "OAuth callback", sourceType: "legacy_candidate", sourceId: uuid }, schema).valid,
+      false,
+    );
+  });
+
+  it("schema and docs define AgentRecommendation as a deferred read model", () => {
+    const schema = readJson(schemaPath);
+    const recommendation = schema.$defs.AgentRecommendation;
+    const contract = read("docs/contracts/agent-actions.md");
+
+    assert.ok(recommendation.required.includes("owner"));
+    assert.deepEqual(recommendation.properties.owner.enum, ["agent_runtime"]);
+    assert.deepEqual(recommendation.properties.status.enum, ["draft", "waiting_confirmation", "confirmed", "executed", "rejected", "failed"]);
+    assert.match(contract, /AgentRecommendation Read Model/);
+    assert.match(contract, /Current Runtime APIs: none/);
+    assert.match(contract, /Deferred APIs: `GET \/api\/workspaces\/:workspaceId\/agent-recommendations`/);
+    assert.match(contract, /Dashboard/);
+    assert.match(contract, /Canvas/);
+  });
+
+  it("validates ProjectPlanApprovalState state timestamp constraints", () => {
+    const schema = readJson(schemaPath);
+    const approval = schema.$defs.ProjectPlanApprovalState;
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const dateTime = "2026-06-27T10:00:00.000Z";
+    const base = {
+      status: "not_requested",
+      actionId: null,
+      requestedAt: null,
+      confirmedAt: null,
+      executedAt: null,
+      ownerApiResults: [],
+    };
+
+    assert.equal(validateJsonSchema(approval, base, schema).valid, true);
+    assert.equal(validateJsonSchema(approval, { ...base, status: "not_requested", actionId: uuid }, schema).valid, false);
+    assert.equal(validateJsonSchema(approval, { ...base, status: "waiting_confirmation", actionId: uuid, requestedAt: dateTime }, schema).valid, true);
+    assert.equal(
+      validateJsonSchema(approval, { ...base, status: "waiting_confirmation", actionId: uuid, requestedAt: dateTime, confirmedAt: dateTime }, schema).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(approval, { ...base, status: "confirmed", actionId: uuid, requestedAt: dateTime, confirmedAt: dateTime }, schema).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(approval, { ...base, status: "executed", actionId: uuid, requestedAt: dateTime, confirmedAt: dateTime, executedAt: dateTime }, schema).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(approval, { ...base, status: "executed", actionId: uuid, requestedAt: dateTime, confirmedAt: dateTime, executedAt: null }, schema).valid,
+      false,
+    );
+    assert.equal(validateJsonSchema(approval, { ...base, status: "rejected", actionId: uuid, requestedAt: dateTime }, schema).valid, true);
+    assert.equal(
+      validateJsonSchema(approval, { ...base, status: "rejected", actionId: uuid, requestedAt: dateTime, executedAt: dateTime }, schema).valid,
+      false,
+    );
   });
 
   it("validates PlanningOwnerApiResult state and source coupling", () => {
@@ -1040,8 +1219,11 @@ describe("machine-readable public contract schema", () => {
 
 describe("contract fixtures", () => {
   it("workspace dashboard fixture exists and parses as JSON", () => {
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
     const fixture = JSON.parse(read("docs/contracts/fixtures/workspace-dashboard.fixture.json"));
-    assert.ok(fixture.currentUser);
+    const result = validateJsonSchema(schema.$defs.WorkspaceDashboardReadModel, fixture, schema);
+
+    assert.equal(result.valid, true, result.errors.join(", "));
     assert.ok(fixture.workspace);
     assert.ok(Array.isArray(fixture.tasks));
     assert.ok(Array.isArray(fixture.canvasEntities));

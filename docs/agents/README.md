@@ -14,6 +14,7 @@
 8. `docs/contracts/schemas/pilo-public-contracts.schema.json`와 fixture를 확인한다.
 
 `docs/archive/**` 문서는 구현 기준이 아니다.
+공식 bootstrap 파일명은 `agent.md`다. 이 저장소는 별도 `AGENTS.md`를 contract source로 사용하지 않는다.
 
 ## Agent Start Checklist
 
@@ -24,6 +25,8 @@
 3. DB/API/DTO/Agent action 변경이 있으면 구현 전에 contract 변경 필요 여부를 판단한다.
 4. provider가 없으면 `docs/contracts/fixtures` 또는 domain mock으로 멈추고 follow-up issue를 남긴다.
 5. `docs/archive/**`는 근거로 쓰지 않는다.
+6. API를 적을 때는 public path 기준으로 `/api` prefix를 포함한다.
+7. agent brief의 API 목록은 `Current Runtime APIs`와 `Deferred APIs`를 분리한다.
 
 ## 담당자별 구현 지시서
 

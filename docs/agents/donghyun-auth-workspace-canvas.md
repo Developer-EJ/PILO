@@ -44,15 +44,26 @@
 5. Canvas board list and board detail with shapes/connections.
 6. Canvas pan, zoom, drag, resize, filter state save.
 
-## Public APIs To Provide
+## Current Runtime APIs
 
-- `GET /auth/me` returns `CurrentUser`.
-- `POST /auth/logout` revokes current session.
-- `GET /workspaces` returns `WorkspaceSummary[]`.
-- `POST /workspaces` creates workspace.
-- `GET /workspaces/:workspaceId/members` returns `WorkspaceMemberSummary[]`.
-- `GET /workspaces/:workspaceId/dashboard` aggregates read models.
-- Canvas APIs are defined in `docs/contracts/canvas.md`.
+- `GET /api/auth/providers` returns configured auth providers.
+- `GET /api/auth/me` returns `CurrentUser`.
+- `POST /api/auth/logout` revokes current session.
+- `GET /api/workspaces` returns `WorkspaceSummary[]`.
+- `POST /api/workspaces` creates workspace.
+- `GET /api/workspaces/:workspaceId` returns workspace detail.
+- `PATCH /api/workspaces/:workspaceId` updates workspace metadata.
+- `GET /api/workspaces/:workspaceId/members` returns `WorkspaceMemberSummary[]`.
+- `POST /api/workspaces/:workspaceId/invites` creates invite.
+- `POST /api/workspace-invites/:inviteId/accept` accepts invite.
+- `GET /api/workspaces/:workspaceId/dashboard-preferences` returns dashboard preferences.
+- `PUT /api/workspaces/:workspaceId/dashboard-preferences` saves dashboard preferences.
+- `GET /api/workspaces/:workspaceId/dashboard` aggregates read models.
+- Canvas shape/connection APIs are defined in `docs/contracts/canvas.md`.
+
+## Deferred APIs
+
+- None for the listed Auth/Workspace/Canvas runtime surface. Any new Dashboard or Canvas source aggregation route must land through a contract PR first.
 
 ## Consumes From Others
 

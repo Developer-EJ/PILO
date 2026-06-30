@@ -5,8 +5,10 @@
 ## 사용 규칙
 
 - fixture 필드명은 `docs/contracts/schemas/pilo-public-contracts.schema.json`의 public DTO와 맞춘다.
+- public schema에서 `additionalProperties: false`인 DTO의 fixture는 schema 밖 field를 추가하지 않는다.
+- 화면 편의를 위한 mock-only field가 필요하면 fixture에 직접 넣지 말고 owner contract/schema PR을 먼저 연다.
 - fixture는 실제 DB schema를 대체하지 않는다.
-- fixture를 사용하는 PR은 실제 연동 제거 Issue를 연결한다.
+- fixture, mock, in-memory adapter, Deferred API를 사용하는 PR/Issue는 해당 상태를 제목이나 본문에 명시하고 실제 연동 제거 Issue를 연결한다.
 - fixture에 없는 필드가 필요하면 먼저 contract를 수정한다.
 - secret, token, 실제 사용자 개인정보는 fixture에 넣지 않는다.
 

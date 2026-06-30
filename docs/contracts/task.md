@@ -11,6 +11,8 @@ Task는 실제 작업 단위, 담당자, 상태, 우선순위, 마감일, 체크
 
 `TaskCreateDraft`와 `TaskDraft`는 현재 app-server runtime API와 SQL baseline에 포함되어 있다.
 진호 Meeting이나 세인 Agent가 Task 후보를 만들 때는 주형의 Task draft API를 사용한다.
+이 rebaseline 이후 public contract에서는 legacy candidate naming을 쓰지 않는다.
+옛 candidate 개념은 `TaskCreateDraft` request 또는 저장된 `TaskDraft`로 읽는다.
 
 ## Owned Tables
 
@@ -99,6 +101,11 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 
 `GET /api/workspaces/:workspaceId/tasks`는 기본적으로 삭제되지 않은 Task를
 `updatedAt desc`로 최대 50개 반환한다.
+
+Task status와 priority는 현재 runtime, SQL baseline, public schema가 같은 값을 쓴다.
+
+- `TaskStatus`: `todo`, `in_progress`, `in_review`, `done`, `blocked`
+- `TaskPriority`: `low`, `medium`, `high`, `urgent`
 
 | Query | Type | Rule |
 |---|---|---|
@@ -424,6 +431,20 @@ Required fields:
 `TaskCreateDraft`는 Agent action payload와 외부 후보 입력에 쓰는 request DTO다.
 현재 dev에서는 `POST /api/workspaces/:workspaceId/task-drafts`로 저장할 수 있다.
 
+`sourceType` vocabulary:
+
+| sourceType | sourceId points to | Producer | Mapping rule |
+|---|---|---|---|
+| `meeting_action_item` | `MeetingActionItem.id` | 진호 Meeting | Meeting action item의 title/description/assignee/due date를 Task draft로 복사한다. |
+| `planning_feature` | `ProjectPlanFeatureDraft.id` | 세인 Planning | Planning feature draft는 `TaskCreateDraft`가 되고, 승인 실행 시 주형 Task API가 실제 Task를 만든다. |
+| `agent_recommendation` | `AgentRecommendation.id` | 세인 Agent Runtime | 추천을 Task 후보로 바꿀 때만 사용한다. |
+| `manual` | user-entered draft id 또는 null 불가 | 주형 Task UI | 사용자가 명시적으로 초안을 만들 때 사용한다. |
+
+`sourceType`과 `sourceId`는 함께 보내거나 둘 다 생략한다. 둘 중 하나만 있으면
+현재 runtime은 `400`으로 거절한다.
+`ProjectPlanMilestoneDraft`는 `TaskCreateDraft`가 아니다. 마일스톤 후보는 승인 시
+`POST /api/workspaces/:workspaceId/milestones` request로 매핑한다.
+
 ### TaskDraft
 
 ```json
@@ -437,10 +458,13 @@ Required fields:
   "assigneeMemberId": "uuid",
   "priority": "high",
   "dueDate": "2026-07-03",
-  "status": "waiting_confirmation",
+  "status": "draft",
   "createdAt": "2026-06-27T12:00:00.000Z"
 }
 ```
+
+`TaskDraft.status`는 현재 runtime/SQL/schema 기준으로 `draft`, `approved`, `rejected`만 사용한다.
+`waiting_confirmation`은 AgentAction 상태이며 TaskDraft 상태가 아니다.
 
 ### TaskDraftSummary
 
@@ -494,7 +518,11 @@ Required fields:
 
 - `task.create.draft`
 - `task.update.status`
-- `task.assign`
+
+`task.assign` Agent action은 현재 public schema에 없다. 담당자 변경은 current runtime에서
+`PATCH /api/tasks/:taskId`의 `assigneeMemberId`로 처리한다. Agent가 담당자 변경을
+제안해야 하면 후속 contract PR에서 `task.assign` 또는 `task.update.assignee` action을
+별도로 정의한다.
 
 ## Boundaries
 
@@ -503,6 +531,8 @@ Required fields:
 - 동현 Dashboard/Canvas는 `TaskSummary`, `MilestoneSummary`, `ProgressSummary`만 직접 표시한다.
 - 은재 Review는 PR과 연결된 `TaskSummary`만 소비한다.
 - 세인 Planning은 승인 실행 시 `POST /api/workspaces/:workspaceId/tasks`와 `POST /api/workspaces/:workspaceId/milestones`를 호출한다.
+- Task/GitHub/Meeting/Review에서 넘어온 모든 Task 접근은 `workspace_members` membership guard를 먼저 통과해야 한다.
+- `assigneeMemberId`, `createdByMemberId`, draft 승인/거절 actor는 같은 workspace의 `workspace_members.id`여야 한다.
 
 ## Mock Rule
 
