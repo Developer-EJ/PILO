@@ -1606,6 +1606,98 @@ describe("frontend package", () => {
     assertLocalActorHeaders(requests[10]);
   });
 
+  it("keeps Review API partial responses from inheriting fixture content", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const repositoryId = "repo-review-partial";
+    const pullRequestId = "pull-request-partial";
+    const analysisId = "analysis-partial";
+    const roomId = "room-partial";
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/github/repositories`)) {
+        return Response.json([{ id: repositoryId, workspaceId }]);
+      }
+
+      if (url.endsWith(`/repositories/${repositoryId}/pull-requests`)) {
+        return Response.json([
+          {
+            id: pullRequestId,
+            repositoryId,
+            number: 21,
+            state: "open",
+            url: "https://github.com/example/pilo/pull/21",
+          },
+        ]);
+      }
+
+      if (url.endsWith(`/pull-requests/${pullRequestId}/review-room`)) {
+        return Response.json({
+          id: roomId,
+          workspaceId,
+          pullRequestId,
+          status: "open",
+          createdByMemberId: null,
+          createdAt: "2026-06-30T00:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z",
+        });
+      }
+
+      if (url.endsWith(`/pull-requests/${pullRequestId}/analysis`)) {
+        return Response.json({
+          id: analysisId,
+          pullRequestId,
+        });
+      }
+
+      if (url.endsWith(`/pull-request-analyses/${analysisId}/canvas`)) {
+        return Response.json({
+          id: "canvas-partial",
+          analysisId,
+          nodes: [{ id: "node-partial" }],
+        });
+      }
+
+      if (url.endsWith(`/pull-request-analyses/${analysisId}/changed-files`)) {
+        return Response.json({});
+      }
+
+      return Response.json([]);
+    };
+
+    const apiClient = createReviewApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+    const pullRequests = await apiClient.listPullRequests(workspaceId);
+    const room = await apiClient.openReviewRoom(pullRequests[0].id, {
+      workspaceId,
+      memberId: "member-1",
+      pullRequest: pullRequests[0],
+    });
+    const analysis = await apiClient.requestAnalysis(pullRequests[0].id);
+    const canvas = await apiClient.getCanvas(analysis.id);
+    const changedFiles = await apiClient.listChangedFiles(analysis.id);
+
+    assert.equal(pullRequests[0].title, "Untitled pull request");
+    assert.notEqual(pullRequests[0].title, reviewFixture.pullRequests[0].title);
+    assert.equal(room.pullRequest.title, "Untitled pull request");
+    assert.equal(analysis.purposeSummary, null);
+    assert.notEqual(
+      analysis.purposeSummary,
+      reviewFixture.analysis.purposeSummary,
+    );
+    assert.equal(canvas.intentSummary, "Analysis is pending.");
+    assert.equal(canvas.nodes[0].label, "Review node");
+    assert.notEqual(canvas.nodes[0].label, reviewFixture.canvas.nodes[0].label);
+    assert.deepEqual(changedFiles, []);
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["GET", "GET", "POST", "POST", "GET", "GET"],
+    );
+  });
+
   it("calls Notification API client with MVP route contracts", async () => {
     const workspaceId = mockWorkspaces[0].id;
     const notificationId = "notification-1";

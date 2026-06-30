@@ -253,6 +253,99 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const NEUTRAL_REVIEW_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+
+const NEUTRAL_PULL_REQUEST = {
+  id: "",
+  repositoryId: "",
+  number: 0,
+  title: "Untitled pull request",
+  authorLogin: null,
+  state: "open",
+  branch: null,
+  baseBranch: null,
+  url: "",
+  changedFilesCount: 0,
+  additions: 0,
+  deletions: 0,
+  linkedTaskIds: [],
+  syncedAt: null,
+};
+
+const NEUTRAL_REVIEW_ROOM = {
+  id: "",
+  workspaceId: "",
+  pullRequestId: "",
+  status: "open",
+  createdByMemberId: null,
+  createdAt: NEUTRAL_REVIEW_TIMESTAMP,
+  updatedAt: NEUTRAL_REVIEW_TIMESTAMP,
+};
+
+const NEUTRAL_ANALYSIS = {
+  id: "",
+  pullRequestId: "",
+  purposeSummary: null,
+  impactSummary: null,
+  testRecommendation: null,
+  riskLevel: "low",
+  analysisStatus: "pending",
+  okCount: 0,
+  discussCount: 0,
+  riskCount: 0,
+  conclusion: null,
+};
+
+const NEUTRAL_CANVAS = {
+  id: "",
+  analysisId: "",
+  pullRequestId: null,
+  summary: null,
+  intentSummary: "Analysis is pending.",
+  reviewStrategy: "Review graph data is not available yet.",
+  reviewOrder: [],
+  nodes: [],
+  edges: [],
+};
+
+const NEUTRAL_REVIEW_NODE = {
+  id: "",
+  analysisId: "",
+  nodeType: "file",
+  label: "Review node",
+  filePath: null,
+  functionName: null,
+  riskLevel: "low",
+  status: "unknown",
+  reviewOrder: 1,
+  roleSummary: "Runtime node summary is not available yet.",
+  reviewReason: "Runtime node reason is not available yet.",
+  position: { x: 0, y: 0 },
+};
+
+const NEUTRAL_CHANGED_FILE = {
+  id: "",
+  analysisId: "",
+  filePath: "Unknown file",
+  changeType: "modified",
+  additions: 0,
+  deletions: 0,
+  summary: null,
+  functions: [],
+};
+
+function stringOrFallback(value, fallback) {
+  return typeof value === "string" ? value : fallback;
+}
+
+function nullableStringOrFallback(value, fallback) {
+  return value === null || typeof value === "string" ? value : fallback;
+}
+
+function integerOrFallback(value, fallback) {
+  return Number.isInteger(value) ? value : fallback;
+}
+
 async function readReviewJson(response, path) {
   if (response.status === 204) {
     return null;
@@ -299,24 +392,54 @@ function withJsonBody(body, init = {}) {
 
 function normalizePullRequest(
   pullRequest,
-  fallback = reviewFixture.pullRequests[0],
+  fallback = NEUTRAL_PULL_REQUEST,
 ) {
+  const source = isRecord(pullRequest) ? pullRequest : {};
+
   return {
     ...fallback,
-    ...(isRecord(pullRequest) ? pullRequest : {}),
-    linkedTaskIds: Array.isArray(pullRequest?.linkedTaskIds)
-      ? pullRequest.linkedTaskIds
+    ...source,
+    id: stringOrFallback(source.id, fallback.id),
+    repositoryId: stringOrFallback(source.repositoryId, fallback.repositoryId),
+    number: integerOrFallback(source.number, fallback.number),
+    title: stringOrFallback(source.title, fallback.title),
+    authorLogin: nullableStringOrFallback(
+      source.authorLogin,
+      fallback.authorLogin,
+    ),
+    state: stringOrFallback(source.state, fallback.state),
+    branch: nullableStringOrFallback(source.branch, fallback.branch),
+    baseBranch: nullableStringOrFallback(
+      source.baseBranch,
+      fallback.baseBranch,
+    ),
+    url: stringOrFallback(source.url, fallback.url),
+    changedFilesCount: integerOrFallback(
+      source.changedFilesCount,
+      fallback.changedFilesCount,
+    ),
+    additions: integerOrFallback(source.additions, fallback.additions),
+    deletions: integerOrFallback(source.deletions, fallback.deletions),
+    linkedTaskIds: Array.isArray(source.linkedTaskIds)
+      ? source.linkedTaskIds
       : fallback.linkedTaskIds,
+    syncedAt: nullableStringOrFallback(source.syncedAt, fallback.syncedAt),
   };
 }
 
-export function normalizeReviewRoom(rawRoom, { workspaceId } = {}) {
-  const fallbackPullRequest = normalizePullRequest(
-    reviewFixture.pullRequests[0],
-  );
+export function normalizeReviewRoom(
+  rawRoom,
+  {
+    workspaceId,
+    fallbackRoom = NEUTRAL_REVIEW_ROOM,
+    pullRequestFallback = NEUTRAL_PULL_REQUEST,
+  } = {},
+) {
+  const fallbackPullRequest = normalizePullRequest(pullRequestFallback);
   const fallback = {
-    ...reviewFixture.room,
-    workspaceId: workspaceId ?? reviewFixture.room.workspaceId,
+    ...fallbackRoom,
+    workspaceId: workspaceId ?? fallbackRoom.workspaceId,
+    pullRequestId: fallbackRoom.pullRequestId || fallbackPullRequest.id,
     pullRequest: fallbackPullRequest,
   };
   const room = isRecord(rawRoom) ? rawRoom : fallback;
@@ -324,14 +447,28 @@ export function normalizeReviewRoom(rawRoom, { workspaceId } = {}) {
   return {
     ...fallback,
     ...room,
+    id: stringOrFallback(room.id, fallback.id),
+    workspaceId: stringOrFallback(room.workspaceId, fallback.workspaceId),
+    pullRequestId: stringOrFallback(room.pullRequestId, fallback.pullRequestId),
+    status: stringOrFallback(room.status, fallback.status),
+    createdByMemberId: nullableStringOrFallback(
+      room.createdByMemberId,
+      fallback.createdByMemberId,
+    ),
+    createdAt: stringOrFallback(room.createdAt, fallback.createdAt),
+    updatedAt: stringOrFallback(room.updatedAt, fallback.updatedAt),
     pullRequest: normalizePullRequest(room.pullRequest, fallbackPullRequest),
   };
 }
 
-export function normalizeReviewAnalysis(rawAnalysis, pullRequestId) {
+export function normalizeReviewAnalysis(
+  rawAnalysis,
+  pullRequestId,
+  fallbackAnalysis = NEUTRAL_ANALYSIS,
+) {
   const fallback = {
-    ...reviewFixture.analysis,
-    pullRequestId: pullRequestId ?? reviewFixture.analysis.pullRequestId,
+    ...fallbackAnalysis,
+    pullRequestId: pullRequestId ?? fallbackAnalysis.pullRequestId,
   };
   const analysis = isRecord(rawAnalysis) ? rawAnalysis : fallback;
   const valueOrFallback = (value, fallbackValue) =>
@@ -340,6 +477,11 @@ export function normalizeReviewAnalysis(rawAnalysis, pullRequestId) {
   return {
     ...fallback,
     ...analysis,
+    id: stringOrFallback(analysis.id, fallback.id),
+    pullRequestId: stringOrFallback(
+      analysis.pullRequestId,
+      fallback.pullRequestId,
+    ),
     purposeSummary: valueOrFallback(
       analysis.purposeSummary,
       fallback.purposeSummary,
@@ -370,12 +512,19 @@ function fallbackEdgesFromNodes(nodes) {
   }));
 }
 
-export function normalizeReviewCanvas(rawCanvas, analysisId) {
+export function normalizeReviewCanvas(
+  rawCanvas,
+  analysisId,
+  fallbackCanvas = NEUTRAL_CANVAS,
+) {
   const canvasIsRecord = isRecord(rawCanvas);
   const fallback = {
-    ...reviewFixture.canvas,
-    analysisId: analysisId ?? reviewFixture.canvas.analysisId,
-    nodes: reviewFixture.canvas.nodes.map((node) => ({
+    ...fallbackCanvas,
+    analysisId: analysisId ?? fallbackCanvas.analysisId,
+    nodes: (Array.isArray(fallbackCanvas.nodes)
+      ? fallbackCanvas.nodes
+      : []
+    ).map((node) => ({
       ...node,
       analysisId: analysisId ?? node.analysisId,
     })),
@@ -386,21 +535,30 @@ export function normalizeReviewCanvas(rawCanvas, analysisId) {
     : canvasIsRecord
       ? []
       : fallback.nodes;
-  const normalizedNodes = nodes.map((node, index) => ({
-    ...fallback.nodes[index % fallback.nodes.length],
-    ...node,
-    analysisId: canvas.analysisId ?? fallback.analysisId,
-    status: node.status ?? "unknown",
-    position: isRecord(node.position)
-      ? node.position
-      : fallback.nodes[index % fallback.nodes.length].position,
-  }));
+  const normalizedNodes = nodes.map((node, index) => {
+    const nodeRecord = isRecord(node) ? node : {};
+    const nodeFallback = fallback.nodes.length
+      ? fallback.nodes[index % fallback.nodes.length]
+      : NEUTRAL_REVIEW_NODE;
+
+    return {
+      ...nodeFallback,
+      ...nodeRecord,
+      analysisId: canvas.analysisId ?? fallback.analysisId,
+      reviewOrder: integerOrFallback(nodeRecord.reviewOrder, index + 1),
+      status: nodeRecord.status ?? "unknown",
+      position: isRecord(nodeRecord.position)
+        ? nodeRecord.position
+        : nodeFallback.position,
+    };
+  });
   const edges = Array.isArray(canvas.edges) ? canvas.edges : [];
   const fallbackPullRequestId = canvasIsRecord ? null : fallback.pullRequestId;
 
   return {
     ...fallback,
     ...canvas,
+    id: stringOrFallback(canvas.id, fallback.id),
     analysisId: canvas.analysisId ?? fallback.analysisId,
     pullRequestId:
       canvas.pullRequestId === undefined
@@ -418,12 +576,18 @@ export function normalizeReviewCanvas(rawCanvas, analysisId) {
   };
 }
 
-export function normalizeChangedFiles(rawFiles, analysisId) {
-  const files = Array.isArray(rawFiles) ? rawFiles : reviewFixture.changedFiles;
+export function normalizeChangedFiles(
+  rawFiles,
+  analysisId,
+  fallbackFiles = [],
+) {
+  const files = Array.isArray(rawFiles) ? rawFiles : fallbackFiles;
 
   return files.map((file, index) => {
     const fallback =
-      reviewFixture.changedFiles[index % reviewFixture.changedFiles.length];
+      fallbackFiles.length
+        ? fallbackFiles[index % fallbackFiles.length]
+        : NEUTRAL_CHANGED_FILE;
     const normalizedFile = isRecord(file) ? file : fallback;
 
     return {
@@ -450,6 +614,8 @@ export function createMockReviewClient({
 } = {}) {
   let room = normalizeReviewRoom(fixture.room, {
     workspaceId: fixture.workspace.id,
+    fallbackRoom: fixture.room,
+    pullRequestFallback: fixture.pullRequests[0],
   });
   let analysis = normalizeReviewAnalysis(
     fixture.analysis,
@@ -707,7 +873,10 @@ export function createReviewApiClient({
         requestOptions,
       );
 
-      return normalizeReviewRoom(room, { workspaceId });
+      return normalizeReviewRoom(room, {
+        workspaceId,
+        pullRequestFallback: pullRequest ?? NEUTRAL_PULL_REQUEST,
+      });
     },
 
     async getReviewRoom(roomId) {
