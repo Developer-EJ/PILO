@@ -133,13 +133,39 @@ export const reviewFixture = {
         reviewReason:
           "Login failure handling and redirect behavior directly affect user recovery.",
         position: { x: 96, y: 112 },
+        detail: {
+          filePath: "apps/frontend/app/auth/callback/page.tsx",
+          modificationReason:
+            "The previous placeholder did not explain login success or failure outcomes.",
+          changeGroups: [
+            {
+              id: "mock-review-change-group-callback-query",
+              title: "Callback query parsing",
+              summary:
+                "Reads provider and error query parameters before rendering the callback result.",
+              newStartLine: 12,
+              newEndLine: 18,
+              diffHunkId: "mock-review-diff-callback-query",
+            },
+          ],
+          diffHunks: [
+            {
+              id: "mock-review-diff-callback-query",
+              oldStartLine: 10,
+              newStartLine: 12,
+              oldCode: "return <div>Loading...</div>;",
+              newCode:
+                "const provider = searchParams.get('provider');\nconst error = searchParams.get('error');\nreturn <CallbackResult provider={provider} error={error} />;",
+            },
+          ],
+        },
       },
       {
         id: "88888888-8888-4888-8888-888888888892",
         analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
         nodeType: "impact",
         label: "session redirect flow",
-        filePath: null,
+        filePath: "apps/frontend/app/login/callback/oauthCallbackState.mjs",
         functionName: null,
         riskLevel: "low",
         status: "ok",
@@ -149,6 +175,32 @@ export const reviewFixture = {
         reviewReason:
           "A clear success or failure branch keeps the blast radius small.",
         position: { x: 420, y: 250 },
+        detail: {
+          filePath: "apps/frontend/app/login/callback/oauthCallbackState.mjs",
+          modificationReason:
+            "Provider errors and next redirects need separate handling so login recovery does not land on an unsafe or confusing route.",
+          changeGroups: [
+            {
+              id: "mock-review-change-group-safe-next",
+              title: "Safe next path branch",
+              summary:
+                "Rejects external redirect targets and falls back to the workspace dashboard.",
+              newStartLine: 31,
+              newEndLine: 44,
+              diffHunkId: "mock-review-diff-safe-next",
+            },
+          ],
+          diffHunks: [
+            {
+              id: "mock-review-diff-safe-next",
+              oldStartLine: 28,
+              newStartLine: 31,
+              oldCode: "return next || '/';",
+              newCode:
+                "if (!next || next.startsWith('http') || next.startsWith('//')) {\n  return `/workspaces/${workspaceId}`;\n}\nreturn next;",
+            },
+          ],
+        },
       },
     ],
     edges: [
@@ -177,6 +229,26 @@ export const reviewFixture = {
           changeType: "modified",
           summary:
             "Reads provider callback query parameters and displays redirect state.",
+        },
+      ],
+    },
+    {
+      id: "88888888-8888-4888-8888-8888888888b2",
+      analysisId: REVIEW_FIXTURE_ANALYSIS_ID,
+      filePath: "apps/frontend/app/login/callback/oauthCallbackState.mjs",
+      changeType: "modified",
+      additions: 54,
+      deletions: 2,
+      summary:
+        "Normalizes OAuth callback outcomes into safe redirects and visible provider states.",
+      functions: [
+        {
+          id: "88888888-8888-4888-8888-8888888888c2",
+          changedFileId: "88888888-8888-4888-8888-8888888888b2",
+          name: "resolveOAuthCallbackState",
+          changeType: "modified",
+          summary:
+            "Separates provider error handling from the next path redirect decision.",
         },
       ],
     },

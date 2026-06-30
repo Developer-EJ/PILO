@@ -478,6 +478,13 @@ export function ReviewNodeWorkspace({
             #{pullRequest.number} {pullRequest.title}
           </strong>
         </div>
+        {warnings.length ? (
+          <div className={styles.topbarNotice} aria-label="Review notices">
+            {warnings.slice(-1).map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        ) : null}
         <button className={styles.mergeButton} disabled type="button">
           Merge
         </button>

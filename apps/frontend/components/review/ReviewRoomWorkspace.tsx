@@ -272,12 +272,17 @@ export function ReviewRoomWorkspace({
         const nextPullRequests = await client.listPullRequests(workspaceId);
 
         if (!cancelled) {
-          setPullRequests(nextPullRequests);
-          setWarnings(
-            nextPullRequests.length
+          const fixtureWarnings =
+            reviewMode === "api"
               ? []
-              : ["No pull requests are available from the Review API yet."],
-          );
+              : ["Using the Review demo fixture for PR, analysis, and diff data."];
+          setPullRequests(nextPullRequests);
+          setWarnings([
+            ...fixtureWarnings,
+            ...(nextPullRequests.length
+              ? []
+              : ["No pull requests are available from the Review API yet."]),
+          ]);
           setStatus("selecting");
         }
       } catch {
@@ -306,7 +311,7 @@ export function ReviewRoomWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [allowFixtureFallback, client, fallbackClient, workspaceId]);
+  }, [allowFixtureFallback, client, fallbackClient, reviewMode, workspaceId]);
 
   const selectedNode = useMemo(() => {
     if (!session || !selectedNodeId) return null;
@@ -317,6 +322,10 @@ export function ReviewRoomWorkspace({
   }, [selectedNodeId, session]);
 
   async function openPullRequest(pullRequest: ReviewPullRequestSummary) {
+    const fixtureWarnings =
+      reviewMode === "api"
+        ? []
+        : ["Using the Review demo fixture for PR, analysis, and diff data."];
     const nextWarnings: string[] = [];
 
     setStatus("opening");
@@ -361,6 +370,7 @@ export function ReviewRoomWorkspace({
         } catch {
           if (!allowFixtureFallback) {
             setWarnings([
+              ...fixtureWarnings,
               ...nextWarnings,
               "Review analysis could not be requested from the Review API. API mode did not use fixture analysis.",
             ]);
@@ -431,7 +441,7 @@ export function ReviewRoomWorkspace({
         checklistItems,
         comments,
       });
-      setWarnings(nextWarnings);
+      setWarnings([...fixtureWarnings, ...nextWarnings]);
       setStatus("ready");
     } catch {
       setStatus("error");

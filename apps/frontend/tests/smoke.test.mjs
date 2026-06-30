@@ -163,6 +163,7 @@ describe("frontend package", () => {
       "components/review/ReviewRoomWorkspace.tsx",
       "utf8",
     );
+    const reviewClient = readFileSync("lib/review/reviewClient.mjs", "utf8");
     const runtimeStyles = readFileSync(
       "components/review/ReviewRoomWorkspace.module.css",
       "utf8",
@@ -173,10 +174,14 @@ describe("frontend package", () => {
     assert.match(workspace, /canvasWorkspace/);
     assert.match(workspace, /panelResizeHandle/);
     assert.match(workspace, /detailWorkspace/);
+    assert.match(workspace, /topbarNotice/);
     assert.match(workspace, /decisionLabels/);
     assert.match(workspace, /setDecisions/);
     assert.match(runtimeContainer, /ReviewNodeWorkspace/);
     assert.match(runtimeContainer, /createReviewSelectorSession/);
+    assert.match(runtimeContainer, /Review demo fixture/);
+    assert.match(reviewClient, /mock-review-diff-callback-query/);
+    assert.match(reviewClient, /diffHunkId/);
     assert.doesNotMatch(runtimeStyles, /roomLayout|prCard|reviewNode/);
   });
 
@@ -1602,6 +1607,13 @@ describe("frontend package", () => {
       { workspaceId },
     );
     assert.equal(mockReviewRoom.workspaceId, workspaceId);
+    const mockReviewCanvas = await createMockReviewClient().getCanvas();
+    assert.equal(
+      mockReviewCanvas.nodes[0].detail.diffHunks[0].newCode.includes(
+        "CallbackResult",
+      ),
+      true,
+    );
 
     const apiClient = createReviewApiClient({
       baseUrl: "https://api.pilo.dev",

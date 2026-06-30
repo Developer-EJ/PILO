@@ -118,6 +118,7 @@
 .emptyState p,
 .canvasEmptyState p,
 .noticeList p,
+.topbarNotice p,
 .fileItem span,
 .fileItem small,
 .changedFileCard p,
@@ -159,7 +160,9 @@
 
 .topbar {
   display: grid;
-  grid-template-columns: auto minmax(220px, 0.48fr) minmax(320px, 1fr) auto;
+  grid-template-columns:
+    auto minmax(190px, 0.4fr) minmax(260px, 0.8fr)
+    minmax(220px, 0.58fr) auto;
   align-items: stretch;
   border-bottom: 1px solid #cfd7e3;
   background: #ffffff;
@@ -194,6 +197,24 @@
   min-width: 0;
   border-right: 1px solid #cfd7e3;
   padding: 0 16px;
+}
+
+.topbarNotice {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  border-right: 1px solid #cfd7e3;
+  background: #fff8e7;
+  padding: 0 14px;
+}
+
+.topbarNotice p {
+  overflow: hidden;
+  color: #8a5a06;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbarGroup span {
