@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import {
   CreateReviewChecklistItemInput,
   CreateReviewCommentInput,
@@ -11,12 +11,24 @@ import { ReviewArtifactsService } from "./review-artifacts.service";
 export class ReviewArtifactsController {
   constructor(private readonly artifactsService: ReviewArtifactsService) {}
 
+  @Get("code-review-rooms/:roomId/comments")
+  listComments(@Param("roomId") roomId: string): ReviewCommentRecord[] {
+    return this.artifactsService.listCommentsByRoom(roomId);
+  }
+
   @Post("code-review-rooms/:roomId/comments")
   createComment(
     @Param("roomId") roomId: string,
     @Body() body: CreateReviewCommentInput,
   ): ReviewCommentRecord {
     return this.artifactsService.createComment(roomId, body);
+  }
+
+  @Get("pull-request-analyses/:analysisId/checklist-items")
+  listChecklistItems(
+    @Param("analysisId") analysisId: string,
+  ): ReviewChecklistItemRecord[] {
+    return this.artifactsService.listChecklistItems(analysisId);
   }
 
   @Post("pull-request-analyses/:analysisId/checklist-items")

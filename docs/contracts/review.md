@@ -57,7 +57,9 @@ The Review controllers are exposed through the app-server global prefix as `/api
 | `GET` | `/api/pull-request-analyses/:analysisId/canvas` | Current app-server API alias for review graph canvas |
 | `GET` | `/api/pull-request-analyses/:analysisId/changed-files` | Current app-server API for Review-owned changed files and functions |
 | `PATCH` | `/api/review-nodes/:nodeId/state` | Current app-server API for reviewer node state |
+| `GET` | `/api/code-review-rooms/:roomId/comments` | Current app-server API for review comments |
 | `POST` | `/api/code-review-rooms/:roomId/comments` | Current app-server API for review comments |
+| `GET` | `/api/pull-request-analyses/:analysisId/checklist-items` | Current app-server API for checklist items |
 | `POST` | `/api/pull-request-analyses/:analysisId/checklist-items` | Current app-server API for checklist items |
 
 ## Deferred APIs

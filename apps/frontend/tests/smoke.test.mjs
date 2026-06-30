@@ -1230,6 +1230,28 @@ describe("frontend package", () => {
         },
       ],
     };
+    const checklistItem = {
+      id: "review-checklist-1",
+      analysisId,
+      checklistType: "review",
+      title: "Review risky nodes",
+      status: "todo",
+      checkedByMemberId: null,
+      checkedAt: null,
+      sortOrder: 0,
+      createdAt: "2026-06-30T00:00:00.000Z",
+      updatedAt: "2026-06-30T00:00:00.000Z",
+    };
+    const reviewComment = {
+      id: "review-comment-1",
+      roomId: "88888888-8888-4888-8888-888888888811",
+      authorMemberId: "member-1",
+      nodeId: null,
+      changedFileId: null,
+      changedFunctionId: null,
+      body: "Check the review room API path.",
+      createdAt: "2026-06-30T00:00:00.000Z",
+    };
     const requests = [];
     const fetcher = async (url, init = {}) => {
       requests.push({ url, init });
@@ -1267,6 +1289,30 @@ describe("frontend package", () => {
         return Response.json([changedFile]);
       }
 
+      if (
+        url.endsWith(`/pull-request-analyses/${analysisId}/checklist-items`)
+      ) {
+        return init.method === "POST"
+          ? Response.json({
+              ...checklistItem,
+              ...JSON.parse(init.body),
+            })
+          : Response.json([checklistItem]);
+      }
+
+      if (
+        url.endsWith(
+          `/code-review-rooms/${reviewComment.roomId}/comments`,
+        )
+      ) {
+        return init.method === "POST"
+          ? Response.json({
+              ...reviewComment,
+              ...JSON.parse(init.body),
+            })
+          : Response.json([reviewComment]);
+      }
+
       return Response.json({});
     };
 
@@ -1294,11 +1340,30 @@ describe("frontend package", () => {
       pullRequest: pullRequests[0],
     });
     const changedFiles = await apiClient.listChangedFiles(analysisId);
+    const checklist = await apiClient.listChecklistItems(analysisId);
+    const comments = await apiClient.listComments(room.id);
+    const createdChecklistItem = await apiClient.createChecklistItem(
+      analysisId,
+      {
+        checklistType: "review",
+        title: "Review risky nodes",
+        status: "todo",
+        sortOrder: 1,
+      },
+    );
+    const createdComment = await apiClient.createComment(room.id, {
+      authorMemberId: "member-1",
+      body: "Check the review room API path.",
+    });
 
     assert.equal(pullRequests[0].id, pullRequest.id);
     assert.equal(room.pullRequest.title, pullRequest.title);
     assert.equal(changedFiles[0].filePath, changedFile.filePath);
     assert.equal(changedFiles[0].functions[0].name, "openPullRequest");
+    assert.equal(checklist[0].id, checklistItem.id);
+    assert.equal(comments[0].id, reviewComment.id);
+    assert.equal(createdChecklistItem.sortOrder, 1);
+    assert.equal(createdComment.body, reviewComment.body);
     assert.deepEqual(
       requests.map((request) => request.url),
       [
@@ -1306,11 +1371,15 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
         `https://api.pilo.dev/api/pull-requests/${pullRequest.id}/review-room`,
         `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/changed-files`,
+        `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/checklist-items`,
+        `https://api.pilo.dev/api/code-review-rooms/${room.id}/comments`,
+        `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/checklist-items`,
+        `https://api.pilo.dev/api/code-review-rooms/${room.id}/comments`,
       ],
     );
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
-      ["GET", "GET", "POST", "GET"],
+      ["GET", "GET", "POST", "GET", "GET", "GET", "POST", "POST"],
     );
     assert.deepEqual(JSON.parse(requests[2].init.body).pullRequest, pullRequest);
     assertLocalActorHeaders(requests[0]);
@@ -1319,6 +1388,10 @@ describe("frontend package", () => {
     assert.equal(requests[2].init.headers["x-workspace-id"], workspaceId);
     assert.equal(requests[2].init.headers["x-member-id"], "member-1");
     assertLocalActorHeaders(requests[3]);
+    assertLocalActorHeaders(requests[4]);
+    assertLocalActorHeaders(requests[5]);
+    assertLocalActorHeaders(requests[6]);
+    assertLocalActorHeaders(requests[7]);
   });
 
   it("calls Notification API client with MVP route contracts", async () => {

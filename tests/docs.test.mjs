@@ -408,7 +408,9 @@ describe("contract document set", () => {
     const review = read("docs/contracts/review.md");
     assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/graph`/);
     assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/canvas`/);
+    assert.match(review, /`GET`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/);
     assert.match(review, /`POST`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/);
+    assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/checklist-items`/);
 
     const agent = read("docs/contracts/agent-actions.md");
     assert.match(agent, /Current Runtime APIs/);

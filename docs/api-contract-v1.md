@@ -556,7 +556,9 @@ Rules:
 | GET | `/api/pull-request-analyses/:analysisId/canvas` | yes | member | Review graph canvas |
 | GET | `/api/pull-request-analyses/:analysisId/changed-files` | yes | member | Review-owned changed files and changed functions |
 | PATCH | `/api/review-nodes/:reviewNodeId/state` | yes | member | Save internal review node state |
+| GET | `/api/code-review-rooms/:reviewRoomId/comments` | yes | member | List review comments |
 | POST | `/api/code-review-rooms/:reviewRoomId/comments` | yes | member | Save review comment |
+| GET | `/api/pull-request-analyses/:analysisId/checklist-items` | yes | member | List merge/review checklist items |
 | POST | `/api/pull-request-analyses/:analysisId/checklist-items` | yes | member | Upsert merge/review checklist item |
 
 ### Review Room DTO

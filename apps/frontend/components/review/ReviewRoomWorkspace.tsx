@@ -5,6 +5,7 @@ import {
   createReviewClient,
   normalizeReviewCanvas,
   REVIEW_FIXTURE_MEMBER_ID,
+  resolveReviewClientMode,
   reviewFixture,
 } from "../../lib/review/reviewClient.mjs";
 import {
@@ -175,13 +176,6 @@ function sortNodes(nodes: ReviewCanvasNode[]) {
   return [...nodes].sort((left, right) => left.reviewOrder - right.reviewOrder);
 }
 
-function firstFallbackPullRequest(workspaceId: string): ReviewPullRequestSummary {
-  return {
-    ...reviewFixture.pullRequests[0],
-    workspaceId,
-  } as ReviewPullRequestSummary;
-}
-
 function ReviewWorkspaceFrame({
   navItems,
   className = styles.reviewShell,
@@ -203,7 +197,12 @@ export function ReviewRoomWorkspace({
   workspaceId,
   memberId = REVIEW_FIXTURE_MEMBER_ID,
 }: ReviewRoomWorkspaceProps) {
-  const client = useMemo(() => createReviewClient(), []);
+  const reviewMode = useMemo(() => resolveReviewClientMode(), []);
+  const allowFixtureFallback = reviewMode !== "api";
+  const client = useMemo(
+    () => createReviewClient({ mode: reviewMode }),
+    [reviewMode],
+  );
   const fallbackClient = useMemo(
     () => createReviewClient({ mode: "mock" }),
     [],
@@ -239,20 +238,27 @@ export function ReviewRoomWorkspace({
         const nextPullRequests = await client.listPullRequests(workspaceId);
 
         if (!cancelled) {
-          setPullRequests(
+          setPullRequests(nextPullRequests);
+          setWarnings(
             nextPullRequests.length
-              ? nextPullRequests
-              : [firstFallbackPullRequest(workspaceId)],
+              ? []
+              : ["No pull requests are available from the Review API yet."],
           );
           setStatus("selecting");
         }
       } catch (error) {
+        if (!allowFixtureFallback) {
+          throw error;
+        }
+
         const fallbackPullRequests =
           await fallbackClient.listPullRequests();
 
         if (!cancelled) {
           setPullRequests(fallbackPullRequests);
-          setWarnings(["Using the PR fixture while the GitHub PR list is unavailable."]);
+          setWarnings([
+            "Using the PR fixture while the GitHub PR list is unavailable.",
+          ]);
           setStatus("selecting");
         }
       }
@@ -267,7 +273,7 @@ export function ReviewRoomWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [client, fallbackClient, workspaceId]);
+  }, [allowFixtureFallback, client, fallbackClient, workspaceId]);
 
   const selectedNode = useMemo(() => {
     if (!session || !selectedNodeId) return null;
@@ -299,6 +305,10 @@ export function ReviewRoomWorkspace({
           pullRequest,
         });
       } catch (error) {
+        if (!allowFixtureFallback) {
+          throw error;
+        }
+
         room = await fallbackClient.openReviewRoom(pullRequest.id, {
           workspaceId,
           memberId,
@@ -314,6 +324,10 @@ export function ReviewRoomWorkspace({
           analysis = await client.requestAnalysis(pullRequest.id);
           nextWarnings.push("Analysis was requested; runtime result is pending.");
         } catch (requestError) {
+          if (!allowFixtureFallback) {
+            throw requestError;
+          }
+
           analysis = await fallbackClient.requestAnalysis(pullRequest.id);
           nextWarnings.push("Analysis result is backed by the review fixture.");
         }
@@ -322,6 +336,10 @@ export function ReviewRoomWorkspace({
       try {
         canvas = await client.getCanvas(analysis.id);
       } catch (error) {
+        if (!allowFixtureFallback) {
+          throw error;
+        }
+
         canvas = normalizeReviewCanvas(reviewFixture.canvas, analysis.id);
         nextWarnings.push("Canvas graph uses the fixture while graph data catches up.");
       }
@@ -329,20 +347,38 @@ export function ReviewRoomWorkspace({
       try {
         changedFiles = await client.listChangedFiles(analysis.id);
       } catch (error) {
+        if (!allowFixtureFallback) {
+          throw error;
+        }
+
         changedFiles = await fallbackClient.listChangedFiles(analysis.id);
         nextWarnings.push("Changed files are backed by the review fixture.");
       }
 
       try {
-        checklistItems = await client.listChecklistItems();
+        checklistItems = await client.listChecklistItems(analysis.id);
       } catch (error) {
-        checklistItems = await fallbackClient.listChecklistItems();
+        if (allowFixtureFallback) {
+          checklistItems = await fallbackClient.listChecklistItems(analysis.id);
+        } else {
+          checklistItems = [];
+          nextWarnings.push(
+            "Checklist items could not be loaded from the Review API.",
+          );
+        }
       }
 
       try {
-        comments = await client.listComments();
+        comments = await client.listComments(room.id);
       } catch (error) {
-        comments = await fallbackClient.listComments();
+        if (allowFixtureFallback) {
+          comments = await fallbackClient.listComments(room.id);
+        } else {
+          comments = [];
+          nextWarnings.push(
+            "Comments could not be loaded from the Review API.",
+          );
+        }
       }
 
       setSession({
@@ -388,6 +424,15 @@ export function ReviewRoomWorkspace({
           : current,
       );
     } catch (error) {
+      if (!allowFixtureFallback) {
+        setWarnings((current) => [
+          ...current,
+          "Node state was not saved because the Review API was unavailable.",
+        ]);
+        setBusyAction(null);
+        return;
+      }
+
       setSession((current) =>
         current
           ? {
@@ -439,6 +484,15 @@ export function ReviewRoomWorkspace({
           : current,
       );
     } catch (error) {
+      if (!allowFixtureFallback) {
+        setWarnings((current) => [
+          ...current,
+          "Checklist item was not added because the Review API was unavailable.",
+        ]);
+        setBusyAction(null);
+        return;
+      }
+
       const item = await fallbackClient.createChecklistItem(
         session.analysis.id,
         body,
@@ -489,6 +543,16 @@ export function ReviewRoomWorkspace({
           : current,
       );
     } catch (error) {
+      if (!allowFixtureFallback) {
+        setWarnings((current) => [
+          ...current,
+          "Comment was not added because the Review API was unavailable.",
+        ]);
+        setCommentDraft("");
+        setBusyAction(null);
+        return;
+      }
+
       const comment = await fallbackClient.createComment(session.room.id, body);
 
       setSession((current) =>
@@ -514,7 +578,7 @@ export function ReviewRoomWorkspace({
       <ReviewWorkspaceFrame navItems={navItems}>
         <section className={styles.statusPanel} aria-live="polite">
           <strong>Loading review workspace</strong>
-          <p>Preparing the PR fixture and Review API client.</p>
+          <p>Preparing pull requests and the Review API client.</p>
         </section>
       </ReviewWorkspaceFrame>
     );
@@ -541,7 +605,25 @@ export function ReviewRoomWorkspace({
           </div>
         </header>
 
+        {warnings.length ? (
+          <section className={styles.noticeList} aria-label="Review notices">
+            {warnings.slice(-3).map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </section>
+        ) : null}
+
         <section className={styles.selectorGrid} aria-label="Pull requests">
+          {pullRequests.length === 0 ? (
+            <article className={styles.statusPanel}>
+              <strong>No pull requests found</strong>
+              <p>
+                Connect or sync GitHub pull requests before opening a review
+                room.
+              </p>
+            </article>
+          ) : null}
+
           {pullRequests.map((pullRequest) => (
             <article className={styles.prCard} key={pullRequest.id}>
               <div className={styles.prCardHeader}>

@@ -24,19 +24,18 @@ function createController() {
 describe("review comment/checklist API boundary", () => {
   it("creates human review comments for a review room", () => {
     const controller = createController();
+    const roomId = "88888888-8888-4888-8888-888888888811";
 
-    const comment = controller.createComment(
-      "88888888-8888-4888-8888-888888888811",
-      {
-        authorMemberId: "33333333-3333-4333-8333-333333333331",
-        nodeId: "88888888-8888-4888-8888-888888888891",
-        body: "Please check the failure redirect path.",
-        createdAt: "2026-06-27T10:00:00.000Z",
-      },
-    );
+    const comment = controller.createComment(roomId, {
+      authorMemberId: "33333333-3333-4333-8333-333333333331",
+      nodeId: "88888888-8888-4888-8888-888888888891",
+      body: "Please check the failure redirect path.",
+      createdAt: "2026-06-27T10:00:00.000Z",
+    });
 
-    assert.equal(comment.roomId, "88888888-8888-4888-8888-888888888811");
+    assert.equal(comment.roomId, roomId);
     assert.equal(comment.body, "Please check the failure redirect path.");
+    assert.deepEqual(controller.listComments(roomId), [comment]);
   });
 
   it("rejects empty review comments", () => {
@@ -83,6 +82,7 @@ describe("review comment/checklist API boundary", () => {
     assert.equal(second.id, first.id);
     assert.equal(second.status, "done");
     assert.equal(second.checkedAt, "2026-06-27T10:05:00.000Z");
+    assert.deepEqual(controller.listChecklistItems(analysisId), [second]);
   });
 
   it("chooses the next checklist sort order from the current maximum", () => {

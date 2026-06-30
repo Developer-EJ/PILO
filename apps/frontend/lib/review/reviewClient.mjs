@@ -39,8 +39,14 @@ export const reviewApiPaths = {
     )}/changed-files`,
   setNodeState: (nodeId) =>
     `/api/review-nodes/${encodeURIComponent(nodeId)}/state`,
+  listComments: (roomId) =>
+    `/api/code-review-rooms/${encodeURIComponent(roomId)}/comments`,
   createComment: (roomId) =>
     `/api/code-review-rooms/${encodeURIComponent(roomId)}/comments`,
+  listChecklistItems: (analysisId) =>
+    `/api/pull-request-analyses/${encodeURIComponent(
+      analysisId,
+    )}/checklist-items`,
   createChecklistItem: (analysisId) =>
     `/api/pull-request-analyses/${encodeURIComponent(
       analysisId,
@@ -497,8 +503,12 @@ export function createMockReviewClient({
       return normalizeChangedFiles(fixture.changedFiles, analysisId);
     },
 
-    async listChecklistItems() {
-      return clone(checklistItems);
+    async listChecklistItems(analysisId) {
+      return clone(
+        analysisId
+          ? checklistItems.filter((item) => item.analysisId === analysisId)
+          : checklistItems,
+      );
     },
 
     async createChecklistItem(analysisId, body) {
@@ -529,8 +539,12 @@ export function createMockReviewClient({
       return clone(item);
     },
 
-    async listComments() {
-      return clone(comments);
+    async listComments(roomId) {
+      return clone(
+        roomId
+          ? comments.filter((comment) => comment.roomId === roomId)
+          : comments,
+      );
     },
 
     async createComment(roomId, body) {
@@ -575,14 +589,13 @@ export function createMockReviewClient({
 export function createReviewApiClient({
   baseUrl = defaultWorkspaceApiBaseUrl(),
   fetcher = fetch,
-  fixture = reviewFixture,
 } = {}) {
   const requestOptions = { baseUrl, fetcher };
 
   return {
     async listPullRequests(workspaceId) {
       if (!workspaceId) {
-        return clone(fixture.pullRequests);
+        return [];
       }
 
       const repositories = await requestReviewJson(
@@ -604,9 +617,9 @@ export function createReviewApiClient({
         Array.isArray(list) ? list : [],
       );
 
-      return pullRequests.length
-        ? pullRequests.map((pullRequest) => normalizePullRequest(pullRequest))
-        : clone(fixture.pullRequests);
+      return pullRequests.map((pullRequest) =>
+        normalizePullRequest(pullRequest),
+      );
     },
 
     async openReviewRoom(
@@ -695,8 +708,14 @@ export function createReviewApiClient({
       );
     },
 
-    async listChecklistItems() {
-      return clone(fixture.checklistItems);
+    async listChecklistItems(analysisId) {
+      const checklistItems = await requestReviewJson(
+        reviewApiPaths.listChecklistItems(analysisId),
+        undefined,
+        requestOptions,
+      );
+
+      return Array.isArray(checklistItems) ? checklistItems : [];
     },
 
     async createChecklistItem(analysisId, body) {
@@ -707,8 +726,14 @@ export function createReviewApiClient({
       );
     },
 
-    async listComments() {
-      return clone(fixture.comments);
+    async listComments(roomId) {
+      const comments = await requestReviewJson(
+        reviewApiPaths.listComments(roomId),
+        undefined,
+        requestOptions,
+      );
+
+      return Array.isArray(comments) ? comments : [];
     },
 
     async createComment(roomId, body) {
