@@ -123,7 +123,11 @@ export function WorkspaceTasks() {
   }, [taskClient, workspaceId]);
 
   useEffect(() => {
-    void loadWorkspace();
+    const timeoutId = window.setTimeout(() => {
+      void loadWorkspace();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [loadWorkspace]);
 
   async function runAction(action: () => Promise<void>, success: string) {

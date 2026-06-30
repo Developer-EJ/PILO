@@ -3,10 +3,12 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   NotFoundException,
   Param,
   Post,
 } from "@nestjs/common";
+import { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import { AgentRuntimeService } from "./agent-runtime.service";
 import {
   AgentRuntimeNotFoundError,
@@ -41,18 +43,36 @@ export class AgentRuntimeController {
   }
 
   @Post("agent-actions/:actionId/approve")
-  approveAgentAction(@Param("actionId") actionId: string) {
-    return this.handleRequest(() => this.service.approveAction({ actionId }));
+  approveAgentAction(
+    @Param("actionId") actionId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.handleRequest(() =>
+      this.service.approveAction({
+        actionId,
+        actor: toCurrentActor(userId, memberId),
+      }),
+    );
   }
 
   @Post("agent-actions/:actionId/reject")
-  rejectAgentAction(@Param("actionId") actionId: string) {
-    return this.handleRequest(() => this.service.rejectAction({ actionId }));
+  rejectAgentAction(
+    @Param("actionId") actionId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.handleRequest(() =>
+      this.service.rejectAction({
+        actionId,
+        actor: toCurrentActor(userId, memberId),
+      }),
+    );
   }
 
-  private handleRequest<T>(handler: () => T) {
+  private async handleRequest<T>(handler: () => T | Promise<T>): Promise<T> {
     try {
-      return handler();
+      return await handler();
     } catch (error) {
       if (error instanceof AgentRuntimeValidationError) {
         throw new BadRequestException(error.message);
@@ -65,4 +85,21 @@ export class AgentRuntimeController {
       throw error;
     }
   }
+}
+
+function toCurrentActor(
+  userId?: string | string[],
+  memberId?: string | string[],
+): WorkspaceActor {
+  const resolvedUserId = firstHeader(userId);
+  const resolvedMemberId = firstHeader(memberId);
+
+  return {
+    ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+    ...(resolvedMemberId ? { memberId: resolvedMemberId } : {}),
+  };
+}
+
+function firstHeader(value?: string | string[]): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

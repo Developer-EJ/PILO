@@ -616,7 +616,7 @@ export function WorkspaceDashboard() {
                 <div className="left-column">
                   <section className="panel">
                     <div className="panel-head">
-                      <h2>Today's work</h2>
+                      <h2>Today&apos;s work</h2>
                       <Link className="panel-action" href={viewModel.routes.tasks}>
                         Open Tasks
                       </Link>

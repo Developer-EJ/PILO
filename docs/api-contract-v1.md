@@ -716,6 +716,9 @@ Rules:
 - AgentAction execution delegates to owner domain API.
 - Approval does not bypass permission checks.
 - Local MVP runtime currently executes `planning.generate` deterministically.
+- `planning.approve` approval only updates the planning approval state.
+- `task.create.draft` approval calls the Task draft owner API and stores the created Task Draft id in `output.planDraft.detail.approval.ownerApiResults`.
+- If the approver is not an authorized workspace member, the owner API error is returned and the Agent action remains `waiting_confirmation`.
 - `approve` only accepts `waiting_confirmation` actions. `reject` only accepts `draft` or `waiting_confirmation` actions.
 - `confirmed`, `executed`, `rejected`, and `failed` actions cannot be changed by user approval/rejection endpoints.
 

@@ -431,30 +431,45 @@ function refreshRunActionState(run) {
   run.updatedAt = new Date().toISOString();
 }
 
+function taskDraftIdForAction(action) {
+  return `44444444-4444-4444-8444-${String(action.id).slice(-12)}`;
+}
+
+function taskOwnerResult(action, status, targetEntityId, errorMessage = null) {
+  return {
+    owner: "task",
+    operation: "task.create",
+    sourceDraftType: "feature",
+    sourceDraftId:
+      typeof action.payload.sourceId === "string"
+        ? action.payload.sourceId
+        : action.id,
+    status,
+    targetEntityId,
+    errorMessage,
+  };
+}
+
 function updatePlanApproval(run, action) {
   const approval = run.output?.planDraft?.detail?.approval;
 
-  if (!approval || action.type !== "planning.approve") {
+  if (!approval) {
     return;
   }
 
-  approval.status = action.status === "confirmed" ? "confirmed" : action.status;
-  approval.confirmedAt = action.confirmedAt;
-  approval.executedAt = null;
-  approval.ownerApiResults =
-    action.status === "confirmed"
-      ? [
-          {
-            owner: "task",
-            operation: "task.create",
-            sourceDraftType: "feature",
-            sourceDraftId: "aaaaaaaa-aaaa-4aaa-8aaa-100000000001",
-            status: "pending",
-            targetEntityId: null,
-            errorMessage: "Owner API execution is deferred in the local runner.",
-          },
-        ]
-      : [];
+  if (action.type === "planning.approve") {
+    approval.status = action.status;
+    approval.confirmedAt = action.confirmedAt;
+    approval.executedAt = action.executedAt;
+    return;
+  }
+
+  if (action.type === "task.create.draft" && action.status === "executed") {
+    approval.ownerApiResults = [
+      ...approval.ownerApiResults,
+      taskOwnerResult(action, "succeeded", taskDraftIdForAction(action)),
+    ];
+  }
 }
 
 async function readAgentJson(response, path) {
@@ -585,10 +600,16 @@ export function createMockAgentPlanningClient() {
 
         if (!action) continue;
 
-        action.status = "confirmed";
+        const decidedAt = new Date().toISOString();
+
+        action.status =
+          action.type === "planning.approve" ||
+          action.type === "task.create.draft"
+            ? "executed"
+            : "confirmed";
         action.confirmedByMemberId = LOCAL_ACTOR_MEMBER_ID;
-        action.confirmedAt = new Date().toISOString();
-        action.executedAt = null;
+        action.confirmedAt = decidedAt;
+        action.executedAt = action.status === "executed" ? decidedAt : null;
         updatePlanApproval(run, action);
         refreshRunActionState(run);
 

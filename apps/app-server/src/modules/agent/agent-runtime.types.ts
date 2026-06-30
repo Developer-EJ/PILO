@@ -1,3 +1,5 @@
+import type { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
+
 export const AGENT_ACTION_STATUSES = [
   "draft",
   "waiting_confirmation",
@@ -104,6 +106,7 @@ export interface AgentRuntimeCreateInput {
 
 export interface AgentActionDecisionInput {
   actionId: string;
+  actor?: WorkspaceActor;
 }
 
 export class AgentRuntimeValidationError extends Error {

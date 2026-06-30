@@ -180,7 +180,11 @@ export function WorkspaceGithub() {
   ]);
 
   useEffect(() => {
-    void loadWorkspace();
+    const timeoutId = window.setTimeout(() => {
+      void loadWorkspace();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 

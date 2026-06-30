@@ -198,7 +198,11 @@ export function AgentPlanningWorkspace() {
   }
 
   useEffect(() => {
-    createDraft(defaultProjectStartInput);
+    const timeoutId = window.setTimeout(() => {
+      void createDraft(defaultProjectStartInput);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
@@ -432,7 +436,9 @@ export function AgentPlanningWorkspace() {
               <div className="agent-owner-results">
                 <h3>Owner API handoff</h3>
                 {planDraft.approval.ownerApiResults.map((result) => (
-                  <p key={`${result.owner}-${result.operation}`}>
+                  <p
+                    key={`${result.owner}-${result.operation}-${result.targetEntityId ?? result.status}`}
+                  >
                     <strong>{result.owner}</strong>
                     <span>
                       {result.operation}: {result.status}

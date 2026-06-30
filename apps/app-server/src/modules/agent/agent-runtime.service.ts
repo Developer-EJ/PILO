@@ -1,4 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, Optional } from "@nestjs/common";
+import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
+import type { CreateTaskDraftBody } from "../juhyung/juhyung-task.service";
+import type { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
   AGENT_WORKFLOW_TYPES,
   DEFAULT_AGENT_WORKFLOW_VERSION,
@@ -15,6 +18,21 @@ import {
 import { createPlanningGenerateRun } from "./planning-local-runner";
 
 const LOCAL_ACTOR_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
+
+interface PlanningOwnerApiResult {
+  owner: "task";
+  operation: "task.create";
+  sourceDraftType: "feature";
+  sourceDraftId: string;
+  status: "succeeded" | "failed";
+  targetEntityId: string | null;
+  errorMessage: string | null;
+}
+
+interface OwnerActionExecution {
+  action: AgentActionDetail;
+  ownerApiResults: PlanningOwnerApiResult[];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -39,11 +57,40 @@ function currentIsoTimestamp() {
   return new Date().toISOString();
 }
 
+function firstString(value: unknown) {
+  return typeof value === "string" && value.trim().length
+    ? value.trim()
+    : null;
+}
+
+function isAuthorizationError(error: unknown) {
+  if (!(error instanceof HttpException)) {
+    return false;
+  }
+
+  const status = error.getStatus();
+
+  return status === HttpStatus.UNAUTHORIZED || status === HttpStatus.FORBIDDEN;
+}
+
+function errorMessageFrom(error: unknown) {
+  return error instanceof Error && error.message
+    ? error.message
+    : "Owner API execution failed";
+}
+
+function confirmingMemberId(actor?: WorkspaceActor) {
+  return actor?.memberId ?? LOCAL_ACTOR_MEMBER_ID;
+}
+
 @Injectable()
 export class AgentRuntimeService {
   private sequence = 1;
 
-  constructor(private readonly repository: AgentRuntimeRepository) {}
+  constructor(
+    private readonly repository: AgentRuntimeRepository,
+    @Optional() private readonly taskService?: JuhyungTaskService,
+  ) {}
 
   createRun(input: AgentRuntimeCreateInput) {
     if (!input.workspaceId.trim()) {
@@ -96,15 +143,19 @@ export class AgentRuntimeService {
     return this.repository.listWorkspaceActions(workspaceId);
   }
 
-  approveAction(input: AgentActionDecisionInput) {
-    return this.decideAction(input.actionId, "approve");
+  async approveAction(input: AgentActionDecisionInput) {
+    return this.decideAction(input.actionId, "approve", input.actor);
   }
 
-  rejectAction(input: AgentActionDecisionInput) {
-    return this.decideAction(input.actionId, "reject");
+  async rejectAction(input: AgentActionDecisionInput) {
+    return this.decideAction(input.actionId, "reject", input.actor);
   }
 
-  private decideAction(actionId: string, decision: "approve" | "reject") {
+  private async decideAction(
+    actionId: string,
+    decision: "approve" | "reject",
+    actor?: WorkspaceActor,
+  ) {
     const run = this.repository.findRunByActionId(actionId);
 
     if (!run) {
@@ -136,34 +187,158 @@ export class AgentRuntimeService {
     }
 
     const decidedAt = currentIsoTimestamp();
-    const nextAction: AgentActionDetail =
+    const execution: OwnerActionExecution =
       decision === "approve"
-        ? {
-            ...action,
-            status: "confirmed",
-            confirmedByMemberId: LOCAL_ACTOR_MEMBER_ID,
-            confirmedAt: decidedAt,
-            executedAt: null,
-          }
+        ? await this.executeApprovedAction(
+            run,
+            {
+              ...action,
+              status: "confirmed",
+              confirmedByMemberId: confirmingMemberId(actor),
+              confirmedAt: decidedAt,
+              executedAt: null,
+            },
+            actor,
+            decidedAt,
+          )
         : {
-            ...action,
-            status: "rejected",
-            confirmedByMemberId: null,
-            confirmedAt: null,
-            executedAt: null,
+            action: {
+              ...action,
+              status: "rejected",
+              confirmedByMemberId: null,
+              confirmedAt: null,
+              executedAt: null,
+            },
+            ownerApiResults: [],
           };
 
-    const nextRun = this.applyActionDecision(run, nextAction, decidedAt);
+    const nextRun = this.applyActionDecision(
+      run,
+      execution.action,
+      decidedAt,
+      execution.ownerApiResults,
+    );
 
     return this.repository.saveRun(nextRun).actions.find(
       (candidate) => candidate.id === actionId,
     );
   }
 
+  private async executeApprovedAction(
+    run: AgentRunDetail,
+    action: AgentActionDetail,
+    actor: WorkspaceActor | undefined,
+    decidedAt: string,
+  ): Promise<OwnerActionExecution> {
+    if (action.type === "planning.approve") {
+      return {
+        action: {
+          ...action,
+          status: "executed",
+          executedAt: decidedAt,
+        },
+        ownerApiResults: [],
+      };
+    }
+
+    if (action.type === "task.create.draft") {
+      return this.executeTaskDraftAction(run, action, actor, decidedAt);
+    }
+
+    return {
+      action,
+      ownerApiResults: [],
+    };
+  }
+
+  private async executeTaskDraftAction(
+    run: AgentRunDetail,
+    action: AgentActionDetail,
+    actor: WorkspaceActor | undefined,
+    decidedAt: string,
+  ): Promise<OwnerActionExecution> {
+    const payloadWorkspaceId =
+      firstString(action.payload.workspaceId) ?? run.workspaceId;
+
+    if (payloadWorkspaceId !== run.workspaceId) {
+      return this.failedOwnerAction(
+        action,
+        "Agent action workspaceId must match its Agent run workspaceId",
+      );
+    }
+
+    if (!this.taskService) {
+      return this.failedOwnerAction(action, "Task owner API is not available");
+    }
+
+    try {
+      const body: CreateTaskDraftBody = {
+        ...action.payload,
+        workspaceId: payloadWorkspaceId,
+      };
+      const draft = await this.taskService.createTaskDraft(
+        payloadWorkspaceId,
+        body,
+        actor,
+      );
+
+      return {
+        action: {
+          ...action,
+          status: "executed",
+          executedAt: decidedAt,
+        },
+        ownerApiResults: [
+          this.taskOwnerResult(action, "succeeded", draft.id, null),
+        ],
+      };
+    } catch (error) {
+      if (isAuthorizationError(error)) {
+        throw error;
+      }
+
+      return this.failedOwnerAction(action, errorMessageFrom(error));
+    }
+  }
+
+  private failedOwnerAction(
+    action: AgentActionDetail,
+    errorMessage: string,
+  ): OwnerActionExecution {
+    return {
+      action: {
+        ...action,
+        status: "failed",
+        executedAt: null,
+      },
+      ownerApiResults: [
+        this.taskOwnerResult(action, "failed", null, errorMessage),
+      ],
+    };
+  }
+
+  private taskOwnerResult(
+    action: AgentActionDetail,
+    status: PlanningOwnerApiResult["status"],
+    targetEntityId: string | null,
+    errorMessage: string | null,
+  ): PlanningOwnerApiResult {
+    return {
+      owner: "task",
+      operation: "task.create",
+      sourceDraftType: "feature",
+      sourceDraftId: firstString(action.payload.sourceId) ?? action.id,
+      status,
+      targetEntityId,
+      errorMessage,
+    };
+  }
+
   private applyActionDecision(
     run: AgentRunDetail,
     nextAction: AgentActionDetail,
     decidedAt: string,
+    ownerApiResults: PlanningOwnerApiResult[] = [],
   ) {
     const nextRun: AgentRunDetail = {
       ...run,
@@ -173,41 +348,42 @@ export class AgentRuntimeService {
       updatedAt: decidedAt,
     };
 
-    if (
-      nextAction.type === "planning.approve" &&
-      isRecord(nextRun.output) &&
-      isRecord(nextRun.output.planDraft)
-    ) {
+    if (isRecord(nextRun.output) && isRecord(nextRun.output.planDraft)) {
       const planDraft = nextRun.output.planDraft;
 
       if (isRecord(planDraft.detail) && isRecord(planDraft.detail.approval)) {
         const approval = planDraft.detail.approval;
+        const existingOwnerApiResults = Array.isArray(
+          approval.ownerApiResults,
+        )
+          ? approval.ownerApiResults
+          : [];
 
-        planDraft.detail.approval = {
-          ...approval,
-          status:
-            nextAction.status === "confirmed"
-              ? "confirmed"
-              : nextAction.status,
-          confirmedAt:
-            nextAction.status === "confirmed" ? nextAction.confirmedAt : null,
-          executedAt: null,
-          ownerApiResults:
-            nextAction.status === "confirmed"
-              ? [
-                  {
-                    owner: "task",
-                    operation: "task.create",
-                    sourceDraftType: "feature",
-                    sourceDraftId: "aaaaaaaa-aaaa-4aaa-8aaa-100000000001",
-                    status: "pending",
-                    targetEntityId: null,
-                    errorMessage:
-                      "Owner API execution is deferred in the local runner.",
-                  },
-                ]
-              : [],
-        };
+        if (nextAction.type === "planning.approve") {
+          planDraft.detail.approval = {
+            ...approval,
+            status: nextAction.status,
+            confirmedAt: nextAction.confirmedAt,
+            executedAt: nextAction.executedAt,
+            ownerApiResults: [
+              ...existingOwnerApiResults,
+              ...ownerApiResults,
+            ],
+          };
+        }
+
+        if (
+          nextAction.type === "task.create.draft" &&
+          ownerApiResults.length
+        ) {
+          planDraft.detail.approval = {
+            ...approval,
+            ownerApiResults: [
+              ...existingOwnerApiResults,
+              ...ownerApiResults,
+            ],
+          };
+        }
       }
     }
 

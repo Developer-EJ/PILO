@@ -351,16 +351,24 @@ export function WorkspaceMeetings() {
   );
 
   useEffect(() => {
-    void loadWorkspace(selectedMeetingId);
+    const timeoutId = window.setTimeout(() => {
+      void loadWorkspace(selectedMeetingId);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
   useEffect(() => {
     if (!selectedMeetingId) return;
 
-    setVoiceRoom(null);
-    setVoiceSessions([]);
-    setLastTaskDraft(null);
+    const timeoutId = window.setTimeout(() => {
+      setVoiceRoom(null);
+      setVoiceSessions([]);
+      setLastTaskDraft(null);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [selectedMeetingId]);
 
   async function runAction(action: () => Promise<void>, success: string) {
