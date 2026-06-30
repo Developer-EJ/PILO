@@ -396,8 +396,9 @@ describe("donghyun workspace client", () => {
 
     assert.equal(workspaceShellSource.includes('label: "기획"'), false);
     assert.equal(workspaceShellSource.includes("Agent 실행"), false);
-    assert.equal(workspaceShellSource.includes('"reports"'), false);
-    assert.equal(workspaceShellSource.includes('"report"'), true);
+    assert.equal(workspaceShellSource.includes('label: "회의 관리"'), false);
+    assert.equal(workspaceShellSource.includes('"meetings/voice"'), true);
+    assert.equal(workspaceShellSource.includes('"meetings/reports"'), true);
     assert.equal(
       workspaceShellSource.includes('workspacePath(workspaceId, "reviews")'),
       true,

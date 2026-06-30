@@ -118,6 +118,35 @@ describe("frontend package", () => {
     assert.match(reviewClient, /github_provider_deferred/);
   });
 
+  it("exposes the Voice Meeting and Meeting Reports frontend pages", () => {
+    const shell = readFileSync(
+      "components/workspace/WorkspaceShell.tsx",
+      "utf8",
+    );
+    const pages = readFileSync(
+      "components/meeting/MeetingExperiencePages.tsx",
+      "utf8",
+    );
+    const voiceRoute = readFileSync(
+      "app/workspaces/[workspaceId]/(shell)/meetings/voice/page.tsx",
+      "utf8",
+    );
+    const reportsRoute = readFileSync(
+      "app/workspaces/[workspaceId]/(shell)/meetings/reports/page.tsx",
+      "utf8",
+    );
+
+    assert.match(shell, /meetings\/voice/);
+    assert.match(shell, /meetings\/reports/);
+    assert.match(shell, /TopbarRecordingControl/);
+    assert.match(shell, /회의 녹화 종료/);
+    assert.match(pages, /VoiceMeetingsPage/);
+    assert.match(pages, /MeetingReportsBoardPage/);
+    assert.match(pages, /reportId/);
+    assert.match(voiceRoute, /VoiceMeetingsPage/);
+    assert.match(reportsRoute, /MeetingReportsBoardPage/);
+  });
+
   it("loads Review data through explicit API and fixture boundaries", async () => {
     const requests = [];
     const fetcher = async (url, init = {}) => {
