@@ -159,6 +159,14 @@ describe("frontend package", () => {
       "app/(workspace)/reviews/review-node-workspace.tsx",
       "utf8",
     );
+    const runtimeContainer = readFileSync(
+      "components/review/ReviewRoomWorkspace.tsx",
+      "utf8",
+    );
+    const runtimeStyles = readFileSync(
+      "components/review/ReviewRoomWorkspace.module.css",
+      "utf8",
+    );
 
     assert.match(page, /reviewSessions/);
     assert.match(workspace, /ReviewNodeWorkspace/);
@@ -167,6 +175,9 @@ describe("frontend package", () => {
     assert.match(workspace, /detailWorkspace/);
     assert.match(workspace, /decisionLabels/);
     assert.match(workspace, /setDecisions/);
+    assert.match(runtimeContainer, /ReviewNodeWorkspace/);
+    assert.match(runtimeContainer, /createReviewSelectorSession/);
+    assert.doesNotMatch(runtimeStyles, /roomLayout|prCard|reviewNode/);
   });
 
   it("keeps auth provider hrefs relative when no app server URL is configured", () => {
