@@ -45,6 +45,15 @@ const {
   CanvasService,
   CanvasValidationError,
 } = require("../src/modules/canvas/canvas.service");
+const {
+  ReviewGraphService,
+} = require("../src/modules/review/graph/review-graph.service");
+const {
+  ChangedFilesService,
+} = require("../src/modules/review/changes/changed-files.service");
+const {
+  PullRequestAnalysisService,
+} = require("../src/modules/review/analysis/pull-request-analysis.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { configureApp } = require("../src/app.config");
@@ -890,8 +899,14 @@ describe("app-server package", () => {
     const response = service.getProviders();
 
     assert.equal(response.providers.length, 2);
-    assert.equal(response.providers[0].startPath.startsWith("/api/auth/"), true);
-    assert.equal(response.providers[0].callbackUrl.includes("/api/auth/"), true);
+    assert.equal(
+      response.providers[0].startPath.startsWith("/api/auth/"),
+      true,
+    );
+    assert.equal(
+      response.providers[0].callbackUrl.includes("/api/auth/"),
+      true,
+    );
     assert.equal(JSON.stringify(response).includes("clientSecret"), false);
     assert.equal(JSON.stringify(response).includes("secret"), false);
   });
@@ -3068,6 +3083,24 @@ describe("app-server package", () => {
       assert.deepEqual(app.get(CanvasService).getRepositoryStatus(), {
         storageMode: "memory",
       });
+      assert.equal(
+        app
+          .get(PullRequestAnalysisService)
+          .getAnalysis("66666666-6666-4666-8666-666666666661").id,
+        "88888888-8888-4888-8888-888888888881",
+      );
+      assert.equal(
+        app
+          .get(ReviewGraphService)
+          .getGraph("88888888-8888-4888-8888-888888888881").nodes.length,
+        2,
+      );
+      assert.equal(
+        app
+          .get(ChangedFilesService)
+          .listChangedFiles("88888888-8888-4888-8888-888888888881").length,
+        1,
+      );
     } finally {
       try {
         await app?.close();

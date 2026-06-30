@@ -15,9 +15,10 @@ const {
   PullRequestAnalysisService,
 } = require("../src/modules/review/analysis/pull-request-analysis.service.ts");
 
-function createService() {
+function createService(options = {}) {
   return new PullRequestAnalysisService(
     new InMemoryPullRequestAnalysisRepository(),
+    options,
   );
 }
 
@@ -67,6 +68,18 @@ describe("PR analysis lifecycle API boundary", () => {
 
     assert.equal(loaded.analysisStatus, "pending");
     assert.deepEqual(loaded.errorTrace, []);
+  });
+
+  it("can seed the local MVP analysis fixture when the app module opts in", () => {
+    const service = createService({ seedFixture: true });
+
+    const analysis = service.getAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
+
+    assert.equal(analysis.id, "88888888-8888-4888-8888-888888888881");
+    assert.equal(analysis.analysisStatus, "succeeded");
+    assert.equal(analysis.riskLevel, "medium");
   });
 });
 

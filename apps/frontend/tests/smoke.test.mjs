@@ -134,7 +134,10 @@ import contractWorkspaceDashboardFixture from "../../../docs/contracts/fixtures/
 const sortContractKeys = (values) =>
   [...values].sort((left, right) => left.localeCompare(right));
 
-function assertLocalActorHeaders(request, { memberId = LOCAL_MVP_MEMBER_ID } = {}) {
+function assertLocalActorHeaders(
+  request,
+  { memberId = LOCAL_MVP_MEMBER_ID } = {},
+) {
   assert.equal(request.init.headers["x-user-id"], LOCAL_MVP_USER_ID);
   assert.equal(request.init.headers["x-member-id"], memberId);
 }
@@ -187,7 +190,10 @@ describe("frontend package", () => {
   });
 
   it("builds workspace API URLs from the configured app server base URL", () => {
-    assert.equal(buildWorkspaceApiUrl("/api/workspaces", ""), "/api/workspaces");
+    assert.equal(
+      buildWorkspaceApiUrl("/api/workspaces", ""),
+      "/api/workspaces",
+    );
     assert.equal(
       buildWorkspaceApiUrl("/api/workspaces", "https://api.pilo.dev/"),
       "https://api.pilo.dev/api/workspaces",
@@ -515,7 +521,7 @@ describe("frontend package", () => {
     const workspacePages = {
       dashboard: {
         file: "app/workspaces/[workspaceId]/page.tsx",
-        component: /export \{ default \} from "\.\.\/\.\.\/page"/,
+        component: /<WorkspaceDashboard workspaceId={params\.workspaceId} \/>/,
       },
       canvas: {
         file: "app/workspaces/[workspaceId]/canvas/page.tsx",
@@ -539,11 +545,13 @@ describe("frontend package", () => {
       },
       agent: {
         file: "app/workspaces/[workspaceId]/agent/page.tsx",
-        component: /<AgentPlanningWorkspace \/>/,
+        component:
+          /<AgentPlanningWorkspace workspaceId={params\.workspaceId} \/>/,
       },
       planning: {
         file: "app/workspaces/[workspaceId]/planning/page.tsx",
-        component: /<AgentPlanningWorkspace \/>/,
+        component:
+          /<AgentPlanningWorkspace workspaceId={params\.workspaceId} \/>/,
       },
     };
 
@@ -567,6 +575,52 @@ describe("frontend package", () => {
     ]) {
       assert.match(readFileSync(file, "utf8"), /<WorkspaceSidebar/);
     }
+  });
+
+  it("keeps API-mode workspace routes and Canvas failures from falling back to fixtures silently", () => {
+    const dashboardPage = readFileSync(
+      "app/workspaces/[workspaceId]/page.tsx",
+      "utf8",
+    );
+    const dashboard = readFileSync(
+      "components/workspace/WorkspaceDashboard.tsx",
+      "utf8",
+    );
+    const planning = readFileSync(
+      "components/agent/AgentPlanningWorkspace.tsx",
+      "utf8",
+    );
+    const canvas = readFileSync(
+      "components/workspace/WorkspaceCanvas.tsx",
+      "utf8",
+    );
+
+    assert.match(
+      dashboardPage,
+      /<WorkspaceDashboard workspaceId={params\.workspaceId} \/>/,
+    );
+    assert.match(
+      dashboard,
+      /routeWorkspaceId \?\? extractWorkspaceIdFromPathname/,
+    );
+    assert.match(
+      planning,
+      /routeWorkspaceId \?\? extractWorkspaceIdFromPathname/,
+    );
+    assert.match(canvas, /canvasMode === "api"[\s\S]*status: "error"/);
+    assert.match(canvas, /Canvas could not be loaded/);
+    assert.doesNotMatch(
+      canvas,
+      /\.catch\(\(\) => \{\s*writeCanvasStorage\("shape-state"/,
+    );
+    assert.doesNotMatch(
+      canvas,
+      /\.catch\(\(\) => \{\s*writeCanvasStorage\("view-setting"/,
+    );
+    assert.doesNotMatch(
+      canvas,
+      /\.catch\(\(\) => \{\s*writeCanvasStorage\("filter-setting"/,
+    );
   });
 
   it("does not silently use stored workspace when URL workspace is invalid", () => {
@@ -1302,11 +1356,7 @@ describe("frontend package", () => {
           : Response.json([checklistItem]);
       }
 
-      if (
-        url.endsWith(
-          `/code-review-rooms/${reviewComment.roomId}/comments`,
-        )
-      ) {
+      if (url.endsWith(`/code-review-rooms/${reviewComment.roomId}/comments`)) {
         return init.method === "POST"
           ? Response.json({
               ...reviewComment,
@@ -1383,7 +1433,10 @@ describe("frontend package", () => {
       requests.map((request) => request.init.method ?? "GET"),
       ["GET", "GET", "POST", "GET", "GET", "GET", "POST", "POST"],
     );
-    assert.deepEqual(JSON.parse(requests[2].init.body).pullRequest, pullRequest);
+    assert.deepEqual(
+      JSON.parse(requests[2].init.body).pullRequest,
+      pullRequest,
+    );
     assertLocalActorHeaders(requests[0]);
     assertLocalActorHeaders(requests[1]);
     assert.equal(requests[2].init.headers["x-user-id"], LOCAL_MVP_USER_ID);
@@ -1452,10 +1505,9 @@ describe("frontend package", () => {
     );
     assert.notEqual(mockRead.readAt, null);
 
-    const mockReadAll =
-      await createNotificationClient({
-        mode: "mock",
-      }).markWorkspaceNotificationsRead(workspaceId);
+    const mockReadAll = await createNotificationClient({
+      mode: "mock",
+    }).markWorkspaceNotificationsRead(workspaceId);
     assert.equal(
       mockReadAll.notifications.every(
         (notification) => notification.readAt !== null,
@@ -1531,7 +1583,10 @@ describe("frontend package", () => {
         return Response.json([]);
       }
 
-      if (url.endsWith(`/voice-rooms/${voiceRoomId}/sessions`) && !init.method) {
+      if (
+        url.endsWith(`/voice-rooms/${voiceRoomId}/sessions`) &&
+        !init.method
+      ) {
         return Response.json([]);
       }
 
@@ -1579,19 +1634,23 @@ describe("frontend package", () => {
       true,
     );
     assert.equal(
-      (await createVoiceClient({ mode: "mock" }).createVoiceRoom(
-        workspaceId,
-        meetingId,
-      )).workspaceId,
+      (
+        await createVoiceClient({ mode: "mock" }).createVoiceRoom(
+          workspaceId,
+          meetingId,
+        )
+      ).workspaceId,
       workspaceId,
     );
     const mockRun =
       await createMockAgentPlanningClient().startPlanningRun(workspaceId);
     assert.equal(mockRun.workspaceId, workspaceId);
     assert.equal(
-      (await createAgentPlanningClient({ mode: "mock" }).startPlanningRun(
-        workspaceId,
-      )).workflowType,
+      (
+        await createAgentPlanningClient({ mode: "mock" }).startPlanningRun(
+          workspaceId,
+        )
+      ).workflowType,
       "planning.generate",
     );
 
@@ -1933,14 +1992,18 @@ describe("frontend package", () => {
     assert.equal(persistedBoard.shapes[0].position.x, 320);
     assert.equal(persistedBoard.shapes[0].width, 340);
     assert.deepEqual(
-      buildCanvasShapeStateMutations(board.shapes, {}, {
-        [board.shapes[0].id]: {
-          x: board.shapes[0].position.x,
-          y: board.shapes[0].position.y,
-          width: board.shapes[0].width,
-          height: board.shapes[0].height,
+      buildCanvasShapeStateMutations(
+        board.shapes,
+        {},
+        {
+          [board.shapes[0].id]: {
+            x: board.shapes[0].position.x,
+            y: board.shapes[0].position.y,
+            width: board.shapes[0].width,
+            height: board.shapes[0].height,
+          },
         },
-      }),
+      ),
       [],
     );
     assert.deepEqual(

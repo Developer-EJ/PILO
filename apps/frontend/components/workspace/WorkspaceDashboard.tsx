@@ -119,9 +119,9 @@ function buildDashboardNavItems(
 ): DashboardNavItem[] {
   const reviewCount = dashboard
     ? (dashboard.prAnalyses?.length ??
-        dashboard.pullRequests.filter((pr) =>
-          ["review_requested", "changes_requested"].includes(pr.state),
-        ).length)
+      dashboard.pullRequests.filter((pr) =>
+        ["review_requested", "changes_requested"].includes(pr.state),
+      ).length)
     : 0;
   const githubCount = dashboard
     ? (dashboard.githubIssues?.length ?? 0) + dashboard.pullRequests.length
@@ -359,10 +359,19 @@ function buildDashboardViewModel(
   };
 }
 
-function resolveDashboardWorkspaceId(pathname: string) {
+function resolveDashboardWorkspaceId(
+  pathname: string,
+  routeWorkspaceId?: string,
+) {
+  const urlWorkspaceId =
+    routeWorkspaceId ?? extractWorkspaceIdFromPathname(pathname);
+
+  if (urlWorkspaceId) {
+    return urlWorkspaceId;
+  }
+
   const selection = resolveCurrentWorkspaceSelection({
     workspaces: mockWorkspaces,
-    urlWorkspaceId: extractWorkspaceIdFromPathname(pathname),
     storedWorkspaceId: readStoredWorkspaceId(),
   });
 
@@ -392,18 +401,26 @@ function EmptyRow({ text }: { text: string }) {
   return <p className="empty-row">{text}</p>;
 }
 
-export function WorkspaceDashboard() {
+export function WorkspaceDashboard({
+  workspaceId: routeWorkspaceId,
+}: {
+  workspaceId?: string;
+}) {
   const pathname = usePathname() ?? "/";
   const workspaceId = useMemo(
-    () => resolveDashboardWorkspaceId(pathname),
-    [pathname],
+    () => resolveDashboardWorkspaceId(pathname, routeWorkspaceId),
+    [pathname, routeWorkspaceId],
   );
   const [state, setState] = useState<DashboardState>(initialState);
-  const [notificationState, setNotificationState] =
-    useState<NotificationState>(initialNotificationState);
+  const [notificationState, setNotificationState] = useState<NotificationState>(
+    initialNotificationState,
+  );
   const [notificationActionIdInFlight, setNotificationActionIdInFlight] =
     useState<string | null>(null);
-  const routes = useMemo(() => buildWorkspaceRoutes(workspaceId), [workspaceId]);
+  const routes = useMemo(
+    () => buildWorkspaceRoutes(workspaceId),
+    [workspaceId],
+  );
   const notificationClient = useMemo(() => createNotificationClient(), []);
 
   useEffect(() => {
@@ -541,7 +558,8 @@ export function WorkspaceDashboard() {
             </Link>
             <Link className="meeting-chip" href={routes.meetings}>
               <span className="live-dot" />
-              Meetings <code>{state.dashboard?.meetingReports.length ?? 0}</code>
+              Meetings{" "}
+              <code>{state.dashboard?.meetingReports.length ?? 0}</code>
             </Link>
             <LogoutButton />
             <CurrentUserAvatar />
@@ -576,11 +594,7 @@ export function WorkspaceDashboard() {
 
               <div className="stats-grid">
                 {viewModel.stats.map((stat) => (
-                  <Link
-                    className="stat-card"
-                    href={stat.href}
-                    key={stat.label}
-                  >
+                  <Link className="stat-card" href={stat.href} key={stat.label}>
                     <div>
                       <span>{stat.label}</span>
                       <i className={`tone-${stat.tone}`}>{stat.icon}</i>
@@ -602,9 +616,7 @@ export function WorkspaceDashboard() {
                   >
                     <div>
                       <span>{feature.label}</span>
-                      <i className={`tone-${feature.tone}`}>
-                        {feature.icon}
-                      </i>
+                      <i className={`tone-${feature.tone}`}>{feature.icon}</i>
                     </div>
                     <strong>{feature.value}</strong>
                     <small>{feature.meta}</small>
@@ -617,7 +629,10 @@ export function WorkspaceDashboard() {
                   <section className="panel">
                     <div className="panel-head">
                       <h2>Today&apos;s work</h2>
-                      <Link className="panel-action" href={viewModel.routes.tasks}>
+                      <Link
+                        className="panel-action"
+                        href={viewModel.routes.tasks}
+                      >
                         Open Tasks
                       </Link>
                     </div>
@@ -650,7 +665,10 @@ export function WorkspaceDashboard() {
                   <section className="panel">
                     <div className="panel-head">
                       <h2>PRs waiting for review</h2>
-                      <Link className="panel-action" href={viewModel.routes.github}>
+                      <Link
+                        className="panel-action"
+                        href={viewModel.routes.github}
+                      >
                         Open GitHub
                       </Link>
                     </div>
@@ -712,53 +730,57 @@ export function WorkspaceDashboard() {
                       ) : null}
 
                       {notificationState.status === "ready" &&
-                      notificationState.notifications.length ? (
-                        notificationState.notifications.map((notification) => {
-                          const tone = toneForNotification(notification);
+                      notificationState.notifications.length
+                        ? notificationState.notifications.map(
+                            (notification) => {
+                              const tone = toneForNotification(notification);
 
-                          return (
-                            <article
-                              className={
-                                notification.readAt
-                                  ? "notification-row is-read"
-                                  : "notification-row"
-                              }
-                              key={notification.id}
-                            >
-                              <Link
-                                className="notification-copy"
-                                href={notificationHref(
-                                  notification,
-                                  viewModel.routes,
-                                )}
-                              >
-                                <i className={`status-dot tone-${tone}`} />
-                                <span>
-                                  <small>
-                                    {formatNotificationType(notification.type)}
-                                  </small>
-                                  <strong>{notification.title}</strong>
-                                  <p>{notification.body}</p>
-                                </span>
-                              </Link>
-                              <button
-                                aria-label={`Mark ${notification.title} as read`}
-                                disabled={
-                                  Boolean(notification.readAt) ||
-                                  notificationActionIdInFlight ===
-                                    notification.id
-                                }
-                                onClick={() =>
-                                  void markNotificationRead(notification)
-                                }
-                                type="button"
-                              >
-                                {notification.readAt ? "Read" : "Mark read"}
-                              </button>
-                            </article>
-                          );
-                        })
-                      ) : null}
+                              return (
+                                <article
+                                  className={
+                                    notification.readAt
+                                      ? "notification-row is-read"
+                                      : "notification-row"
+                                  }
+                                  key={notification.id}
+                                >
+                                  <Link
+                                    className="notification-copy"
+                                    href={notificationHref(
+                                      notification,
+                                      viewModel.routes,
+                                    )}
+                                  >
+                                    <i className={`status-dot tone-${tone}`} />
+                                    <span>
+                                      <small>
+                                        {formatNotificationType(
+                                          notification.type,
+                                        )}
+                                      </small>
+                                      <strong>{notification.title}</strong>
+                                      <p>{notification.body}</p>
+                                    </span>
+                                  </Link>
+                                  <button
+                                    aria-label={`Mark ${notification.title} as read`}
+                                    disabled={
+                                      Boolean(notification.readAt) ||
+                                      notificationActionIdInFlight ===
+                                        notification.id
+                                    }
+                                    onClick={() =>
+                                      void markNotificationRead(notification)
+                                    }
+                                    type="button"
+                                  >
+                                    {notification.readAt ? "Read" : "Mark read"}
+                                  </button>
+                                </article>
+                              );
+                            },
+                          )
+                        : null}
 
                       {notificationState.status === "ready" &&
                       !notificationState.notifications.length ? (
@@ -791,7 +813,10 @@ export function WorkspaceDashboard() {
                   <section className="panel decision-panel">
                     <div className="panel-head">
                       <h2>Recent meeting decisions</h2>
-                      <Link className="panel-action" href={viewModel.routes.meetings}>
+                      <Link
+                        className="panel-action"
+                        href={viewModel.routes.meetings}
+                      >
                         Open Meetings
                       </Link>
                     </div>

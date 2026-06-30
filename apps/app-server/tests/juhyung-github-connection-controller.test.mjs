@@ -40,10 +40,23 @@ describe("JuhyungGithubConnectionController", () => {
     await controller.startConnection(
       "workspace-1",
       { scopes: ["metadata"] },
+      undefined,
+      undefined,
       request,
     );
-    await controller.listConnections("workspace-1", request);
-    await controller.revokeConnection("workspace-1", "connection-1", request);
+    await controller.listConnections(
+      "workspace-1",
+      undefined,
+      undefined,
+      request,
+    );
+    await controller.revokeConnection(
+      "workspace-1",
+      "connection-1",
+      undefined,
+      undefined,
+      request,
+    );
 
     assert.deepEqual(calls, [
       [
@@ -62,6 +75,63 @@ describe("JuhyungGithubConnectionController", () => {
         "workspace-1",
         "connection-1",
         { userId: "user-1", memberId: "member-1" },
+      ],
+    ]);
+  });
+
+  it("uses local MVP actor headers when no authenticated request actor exists", async () => {
+    const calls = [];
+    const service = {
+      startConnection: async (workspaceId, body, actor) => {
+        calls.push(["startConnection", workspaceId, body, actor]);
+        return { state: "nonce-1", installationUrl: "https://github.test" };
+      },
+      listConnections: async (workspaceId, actor) => {
+        calls.push(["listConnections", workspaceId, actor]);
+        return [];
+      },
+      revokeConnection: async (workspaceId, connectionId, actor) => {
+        calls.push(["revokeConnection", workspaceId, connectionId, actor]);
+        return { id: connectionId, workspaceId, revokedAt: "now" };
+      },
+    };
+    const controller = new JuhyungGithubConnectionController(service);
+
+    await controller.startConnection(
+      "workspace-1",
+      { scopes: ["metadata"] },
+      "user-header",
+      "member-header",
+    );
+    await controller.listConnections(
+      "workspace-1",
+      ["user-header"],
+      ["member-header"],
+    );
+    await controller.revokeConnection(
+      "workspace-1",
+      "connection-1",
+      "user-header",
+      "member-header",
+    );
+
+    assert.deepEqual(calls, [
+      [
+        "startConnection",
+        "workspace-1",
+        { scopes: ["metadata"] },
+        { userId: "user-header", memberId: "member-header" },
+      ],
+      [
+        "listConnections",
+        "workspace-1",
+        { userId: "user-header", memberId: "member-header" },
+      ],
+      [
+        "revokeConnection",
+        "workspace-1",
+        "connection-1",
+        { userId: "user-header", memberId: "member-header" },
       ],
     ]);
   });

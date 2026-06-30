@@ -34,14 +34,29 @@ import { ReviewRoomService } from "./room/review-room.service";
     ReviewPublicService,
     ReviewRoomService,
     InMemoryCodeReviewRoomRepository,
-    PullRequestAnalysisService,
     InMemoryPullRequestAnalysisRepository,
+    {
+      provide: PullRequestAnalysisService,
+      useFactory: (repository: InMemoryPullRequestAnalysisRepository) =>
+        new PullRequestAnalysisService(repository, { seedFixture: true }),
+      inject: [InMemoryPullRequestAnalysisRepository],
+    },
     ReviewArtifactsService,
     InMemoryReviewArtifactsRepository,
-    ChangedFilesService,
     InMemoryChangedFilesRepository,
-    ReviewGraphService,
     InMemoryReviewGraphRepository,
+    {
+      provide: ChangedFilesService,
+      useFactory: (repository: InMemoryChangedFilesRepository) =>
+        new ChangedFilesService(repository, { seedFixture: true }),
+      inject: [InMemoryChangedFilesRepository],
+    },
+    {
+      provide: ReviewGraphService,
+      useFactory: (repository: InMemoryReviewGraphRepository) =>
+        new ReviewGraphService(repository, { seedFixture: true }),
+      inject: [InMemoryReviewGraphRepository],
+    },
     AgentGraphResultService,
     AgentReviewArtifactsResultService,
     AgentResultConsumerService,

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Post,
   Query,
@@ -42,23 +43,27 @@ export class JuhyungGithubConnectionController {
   startConnection(
     @Param("workspaceId") workspaceId: string,
     @Body() body: StartGithubConnectionInput = {},
+    @Headers("x-user-id") userId?: HeaderValue,
+    @Headers("x-member-id") memberId?: HeaderValue,
     @Req() request: AuthenticatedRequestContext = {},
   ) {
     return this.githubConnectionService.startConnection(
       workspaceId,
       body,
-      this.actorFromRequest(request),
+      this.actorFromRequest(request, userId, memberId),
     );
   }
 
   @Get()
   listConnections(
     @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userId?: HeaderValue,
+    @Headers("x-member-id") memberId?: HeaderValue,
     @Req() request: AuthenticatedRequestContext = {},
   ) {
     return this.githubConnectionService.listConnections(
       workspaceId,
-      this.actorFromRequest(request),
+      this.actorFromRequest(request, userId, memberId),
     );
   }
 
@@ -66,19 +71,43 @@ export class JuhyungGithubConnectionController {
   revokeConnection(
     @Param("workspaceId") workspaceId: string,
     @Param("connectionId") connectionId: string,
+    @Headers("x-user-id") userId?: HeaderValue,
+    @Headers("x-member-id") memberId?: HeaderValue,
     @Req() request: AuthenticatedRequestContext = {},
   ) {
     return this.githubConnectionService.revokeConnection(
       workspaceId,
       connectionId,
-      this.actorFromRequest(request),
+      this.actorFromRequest(request, userId, memberId),
     );
   }
 
   private actorFromRequest(
     request: AuthenticatedRequestContext,
+    userId?: HeaderValue,
+    memberId?: HeaderValue,
   ): WorkspaceActor | undefined {
-    return request.auth?.actor;
+    const authActor = request.auth?.actor;
+
+    if (authActor) {
+      return authActor;
+    }
+
+    const resolvedUserId = this.firstValue(userId);
+    const resolvedMemberId = this.firstValue(memberId);
+
+    if (!resolvedUserId && !resolvedMemberId) {
+      return undefined;
+    }
+
+    return {
+      ...(resolvedUserId ? { userId: resolvedUserId } : {}),
+      ...(resolvedMemberId ? { memberId: resolvedMemberId } : {}),
+    };
+  }
+
+  private firstValue(value?: HeaderValue) {
+    return Array.isArray(value) ? value[0] : value;
   }
 }
 

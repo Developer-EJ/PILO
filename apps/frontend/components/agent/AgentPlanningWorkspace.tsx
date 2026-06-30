@@ -118,10 +118,16 @@ type AgentRunDetail = {
 
 type ProjectStartInput = typeof defaultProjectStartInput;
 
-function resolveWorkspaceId(pathname: string) {
+function resolveWorkspaceId(pathname: string, routeWorkspaceId?: string) {
+  const urlWorkspaceId =
+    routeWorkspaceId ?? extractWorkspaceIdFromPathname(pathname);
+
+  if (urlWorkspaceId) {
+    return urlWorkspaceId;
+  }
+
   const selection = resolveCurrentWorkspaceSelection({
     workspaces: mockWorkspaces,
-    urlWorkspaceId: extractWorkspaceIdFromPathname(pathname),
     storedWorkspaceId: readStoredWorkspaceId(),
   });
 
@@ -156,9 +162,16 @@ function statusTone(status: string) {
   return "primary";
 }
 
-export function AgentPlanningWorkspace() {
+export function AgentPlanningWorkspace({
+  workspaceId: routeWorkspaceId,
+}: {
+  workspaceId?: string;
+}) {
   const pathname = usePathname() ?? "/";
-  const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
+  const workspaceId = useMemo(
+    () => resolveWorkspaceId(pathname, routeWorkspaceId),
+    [pathname, routeWorkspaceId],
+  );
   const routes = useMemo(
     () => buildWorkspaceFeatureRoutes(workspaceId),
     [workspaceId],
@@ -218,7 +231,10 @@ export function AgentPlanningWorkspace() {
     await createDraft();
   }
 
-  async function decideAction(action: AgentAction, decision: "approve" | "reject") {
+  async function decideAction(
+    action: AgentAction,
+    decision: "approve" | "reject",
+  ) {
     if (!run) return;
 
     setActionIdInFlight(action.id);
@@ -257,7 +273,9 @@ export function AgentPlanningWorkspace() {
             <h1>Project start runner</h1>
           </div>
           <div className="agent-run-status">
-            <span className={`agent-status-dot tone-${statusTone(run?.status ?? "pending")}`} />
+            <span
+              className={`agent-status-dot tone-${statusTone(run?.status ?? "pending")}`}
+            />
             <strong>{run ? statusLabel(run.status) : "starting"}</strong>
             <code>{run?.workflowType ?? "planning.generate"}</code>
           </div>
@@ -293,7 +311,11 @@ export function AgentPlanningWorkspace() {
               </label>
             ))}
 
-            <button className="agent-primary-button" disabled={loading} type="submit">
+            <button
+              className="agent-primary-button"
+              disabled={loading}
+              type="submit"
+            >
               Draft plan
             </button>
             {error ? <p className="agent-error">{error}</p> : null}
@@ -330,7 +352,8 @@ export function AgentPlanningWorkspace() {
                   <article className="agent-preview-block">
                     <h3>Tech stack</h3>
                     <p>
-                      {planDraft.techStack.frontend} / {planDraft.techStack.backend} /{" "}
+                      {planDraft.techStack.frontend} /{" "}
+                      {planDraft.techStack.backend} /{" "}
                       {planDraft.techStack.databaseName}
                     </p>
                     <small>{planDraft.techStack.reason}</small>
@@ -398,7 +421,9 @@ export function AgentPlanningWorkspace() {
                         {action.type} from {action.source}
                       </span>
                     </div>
-                    <b className={`agent-pill tone-${statusTone(action.status)}`}>
+                    <b
+                      className={`agent-pill tone-${statusTone(action.status)}`}
+                    >
                       {statusLabel(action.status)}
                     </b>
                     {action.status === "waiting_confirmation" ? (

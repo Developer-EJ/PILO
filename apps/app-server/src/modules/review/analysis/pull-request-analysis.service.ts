@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import type { ReviewAnalysisStatus } from "../public";
 import { REVIEW_ROOM_PULL_REQUEST_FIXTURES } from "../room/review-room.fixtures";
@@ -23,6 +24,12 @@ const ALLOWED_TRANSITIONS: Record<
   succeeded: [],
   failed: [],
 };
+const FIXTURE_PULL_REQUEST_ID = "66666666-6666-4666-8666-666666666661";
+const FIXTURE_ANALYSIS_ID = "88888888-8888-4888-8888-888888888881";
+
+export interface PullRequestAnalysisServiceOptions {
+  seedFixture?: boolean;
+}
 
 @Injectable()
 export class PullRequestAnalysisService {
@@ -31,7 +38,13 @@ export class PullRequestAnalysisService {
 
   constructor(
     private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
-  ) {}
+    @Optional()
+    options: PullRequestAnalysisServiceOptions = {},
+  ) {
+    if (options.seedFixture) {
+      this.seedFixture();
+    }
+  }
 
   requestAnalysis(pullRequestId: string): PullRequestAnalysisRecord {
     this.assertKnownPullRequest(pullRequestId);
@@ -164,5 +177,26 @@ export class PullRequestAnalysisService {
     }
 
     return value;
+  }
+
+  private seedFixture(): void {
+    this.analysisRepository.save({
+      id: FIXTURE_ANALYSIS_ID,
+      pullRequestId: FIXTURE_PULL_REQUEST_ID,
+      purposeSummary: "Adds an OAuth callback route and visible result state.",
+      impactSummary:
+        "Touches auth routing, login redirects, and session recovery.",
+      testRecommendation:
+        "Smoke test provider success, provider error, and expired session redirects.",
+      riskLevel: "medium",
+      analysisStatus: "succeeded",
+      okCount: 3,
+      discussCount: 1,
+      riskCount: 1,
+      conclusion: "Ready after the failure redirect behavior is confirmed.",
+      errorTrace: [],
+      createdAt: "2026-06-27T10:00:00.000Z",
+      updatedAt: "2026-06-27T10:00:00.000Z",
+    });
   }
 }

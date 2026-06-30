@@ -107,9 +107,9 @@ seed_workspace AS (
     created_by_user_id
   )
   SELECT
-    '22222222-2222-4222-8222-222222222221',
-    'PILO Local Workspace',
-    'Local fixture workspace for Auth, Workspace, Dashboard, and Canvas development.',
+    '22222222-2222-4222-8222-222222222222',
+    'PILO MVP',
+    'AI-powered project collaboration workspace',
     'side_project',
     'active',
     '2026-06-28',
@@ -136,11 +136,11 @@ seed_member AS (
     display_name
   )
   SELECT
-    '22222222-2222-4222-8222-222222222222',
+    '33333333-3333-4333-8333-333333333331',
     seed_workspace.id,
     seed_user.id,
     'owner',
-    'Product / Canvas'
+    'Workspace / Canvas'
   FROM seed_workspace
   CROSS JOIN seed_user
   ON CONFLICT (workspace_id, user_id) DO UPDATE SET
@@ -179,10 +179,10 @@ seed_canvas_board AS (
     created_by_member_id
   )
   SELECT
-    '33333333-3333-4333-8333-333333333331',
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
     seed_member.workspace_id,
-    'PILO Project Map',
-    'workspace',
+    'Project Map',
+    'project_map',
     seed_member.id
   FROM seed_member
   ON CONFLICT (id) DO UPDATE SET
@@ -224,70 +224,26 @@ seed_canvas_shapes AS (
   CROSS JOIN (
     VALUES
       (
-        '33333333-3333-4333-8333-333333333341'::uuid,
-        'meeting_report',
-        'meeting_report',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'::uuid,
+        'task',
+        'task',
         '44444444-4444-4444-8444-444444444441'::uuid,
-        'Kickoff meeting report',
-        320,
-        180,
-        '#7c6ee6',
+        'Google/GitHub login flow',
+        280,
+        160,
+        '#6d5bd6',
         1
       ),
       (
-        '33333333-3333-4333-8333-333333333342'::uuid,
-        'task',
-        'task',
-        '44444444-4444-4444-8444-444444444442'::uuid,
-        'Implement workspace entry',
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3'::uuid,
+        'pull_request',
+        'pull_request',
+        '66666666-6666-4666-8666-666666666661'::uuid,
+        'PR #42 Code Review',
         300,
-        160,
-        '#38bdf8',
+        172,
+        '#2e9e5b',
         2
-      ),
-      (
-        '33333333-3333-4333-8333-333333333343'::uuid,
-        'github_issue',
-        'github_issue',
-        '44444444-4444-4444-8444-444444444443'::uuid,
-        'GitHub issue #47',
-        280,
-        150,
-        '#22c55e',
-        3
-      ),
-      (
-        '33333333-3333-4333-8333-333333333344'::uuid,
-        'pull_request',
-        'pull_request',
-        '44444444-4444-4444-8444-444444444444'::uuid,
-        'PR #47 Login shell',
-        300,
-        160,
-        '#f59e0b',
-        4
-      ),
-      (
-        '33333333-3333-4333-8333-333333333345'::uuid,
-        'decision',
-        'decision',
-        '44444444-4444-4444-8444-444444444445'::uuid,
-        'Use workspace_members for permissions',
-        340,
-        150,
-        '#ef4444',
-        5
-      ),
-      (
-        '33333333-3333-4333-8333-333333333346'::uuid,
-        'document',
-        'document',
-        '44444444-4444-4444-8444-444444444446'::uuid,
-        'Auth / Workspace contract',
-        300,
-        150,
-        '#64748b',
-        6
       )
   ) AS shape(id, shape_type, entity_type, entity_id, display_title, width, height, color, z_index)
   ON CONFLICT (canvas_board_id, entity_type, entity_id) DO UPDATE SET
@@ -314,12 +270,8 @@ seed_canvas_node_positions AS (
   FROM seed_canvas_shapes
   JOIN (
     VALUES
-      ('meeting_report', -420, -120),
-      ('task', 0, -60),
-      ('github_issue', 400, -120),
-      ('pull_request', 400, 160),
-      ('decision', -20, 220),
-      ('document', -440, 180)
+      ('task', 120, 140),
+      ('pull_request', 520, 220)
   ) AS position(entity_type, x, y)
     ON position.entity_type = seed_canvas_shapes.entity_type
   ON CONFLICT (canvas_shape_id) DO UPDATE SET
@@ -348,32 +300,11 @@ seed_canvas_connections AS (
   JOIN (
     VALUES
       (
-        '33333333-3333-4333-8333-333333333351'::uuid,
-        'meeting_report',
-        'task',
-        'created_from',
-        'action item'
-      ),
-      (
-        '33333333-3333-4333-8333-333333333352'::uuid,
-        'task',
-        'github_issue',
-        'implements',
-        'tracked by'
-      ),
-      (
-        '33333333-3333-4333-8333-333333333353'::uuid,
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4'::uuid,
         'task',
         'pull_request',
-        'implements',
-        'delivered by'
-      ),
-      (
-        '33333333-3333-4333-8333-333333333354'::uuid,
-        'document',
-        'decision',
-        'references',
-        'contract basis'
+        'implemented_by',
+        'Task to PR'
       )
   ) AS connection(id, source_entity_type, target_entity_type, connection_type, label)
     ON true
@@ -398,9 +329,9 @@ seed_canvas_view_settings AS (
     seed_canvas_board.id,
     seed_canvas_board.workspace_id,
     seed_member.id,
-    0.9,
-    -80,
-    -40
+    1,
+    0,
+    0
   FROM seed_canvas_board
   JOIN seed_member ON seed_member.workspace_id = seed_canvas_board.workspace_id
   ON CONFLICT (workspace_id, canvas_board_id, member_id) DO UPDATE SET
@@ -425,11 +356,11 @@ seed_canvas_filter_settings AS (
     seed_canvas_board.id,
     seed_canvas_board.workspace_id,
     seed_member.id,
-    ARRAY['task', 'meeting_report', 'pull_request', 'github_issue', 'document', 'decision'],
+    ARRAY['task', 'meeting_report', 'pull_request'],
     NULL,
     false,
     false,
-    '{"source":"local-seed","mode":"workspace-map"}'::jsonb
+    '{}'::jsonb
   FROM seed_canvas_board
   JOIN seed_member ON seed_member.workspace_id = seed_canvas_board.workspace_id
   ON CONFLICT (workspace_id, canvas_board_id, member_id) DO UPDATE SET

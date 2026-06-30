@@ -19,12 +19,22 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
   if (schema.$ref) {
     const refName = schema.$ref.replace("#/$defs/", "");
     if (refName === "uuid") {
-      assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
-      assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      assert.equal(
+        typeof value,
+        "string",
+        `${fieldPath} must be a uuid string`,
+      );
+      assert.match(
+        value,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
       return;
     }
 
-    assert.ok(defs[refName], `${fieldPath} references missing schema ${refName}`);
+    assert.ok(
+      defs[refName],
+      `${fieldPath} references missing schema ${refName}`,
+    );
     assertMatchesSchema(defs, defs[refName], value, fieldPath);
     return;
   }
@@ -40,23 +50,34 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
       }
     }
 
-    assert.fail(`${fieldPath} must match one anyOf schema: ${errors.join("; ")}`);
+    assert.fail(
+      `${fieldPath} must match one anyOf schema: ${errors.join("; ")}`,
+    );
   }
 
   if (schema.format === "uuid") {
     assert.equal(typeof value, "string", `${fieldPath} must be a uuid string`);
-    assert.match(value, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.match(
+      value,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     return;
   }
 
   if (schema.enum) {
-    assert.ok(schema.enum.includes(value), `${fieldPath} must be one of ${schema.enum.join(", ")}`);
+    assert.ok(
+      schema.enum.includes(value),
+      `${fieldPath} must be one of ${schema.enum.join(", ")}`,
+    );
     return;
   }
 
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-  const actualType = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
-  const typeMatches = types.includes(actualType) || (types.includes("integer") && Number.isInteger(value));
+  const actualType =
+    value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+  const typeMatches =
+    types.includes(actualType) ||
+    (types.includes("integer") && Number.isInteger(value));
   assert.ok(typeMatches, `${fieldPath} must be ${types.join(" or ")}`);
 
   if (types.includes("integer") && actualType !== "null") {
@@ -64,11 +85,17 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
   }
 
   if (typeof schema.minimum === "number") {
-    assert.ok(value >= schema.minimum, `${fieldPath} must be >= ${schema.minimum}`);
+    assert.ok(
+      value >= schema.minimum,
+      `${fieldPath} must be >= ${schema.minimum}`,
+    );
   }
 
   if (typeof schema.maximum === "number") {
-    assert.ok(value <= schema.maximum, `${fieldPath} must be <= ${schema.maximum}`);
+    assert.ok(
+      value <= schema.maximum,
+      `${fieldPath} must be <= ${schema.maximum}`,
+    );
   }
 
   if (typeof schema.minLength === "number" && actualType !== "null") {
@@ -81,7 +108,11 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
 
   if (schema.format === "date") {
     assert.equal(typeof value, "string", `${fieldPath} must be a date string`);
-    assert.match(value, /^\d{4}-\d{2}-\d{2}$/, `${fieldPath} must be an ISO date`);
+    assert.match(
+      value,
+      /^\d{4}-\d{2}-\d{2}$/,
+      `${fieldPath} must be an ISO date`,
+    );
   }
 
   if (schema.format === "date-time") {
@@ -98,7 +129,9 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
   }
 
   if (actualType === "array" && schema.items) {
-    value.forEach((item, index) => assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`));
+    value.forEach((item, index) =>
+      assertMatchesSchema(defs, schema.items, item, `${fieldPath}[${index}]`),
+    );
   }
 
   if (actualType === "object" && schema.properties) {
@@ -108,13 +141,21 @@ function assertMatchesSchema(defs, schema, value, fieldPath) {
 
     if (schema.additionalProperties === false) {
       for (const key of Object.keys(value)) {
-        assert.ok(schema.properties[key], `${fieldPath}.${key} is not in the public schema`);
+        assert.ok(
+          schema.properties[key],
+          `${fieldPath}.${key} is not in the public schema`,
+        );
       }
     }
 
     for (const [key, childSchema] of Object.entries(schema.properties)) {
       if (Object.hasOwn(value, key)) {
-        assertMatchesSchema(defs, childSchema, value[key], `${fieldPath}.${key}`);
+        assertMatchesSchema(
+          defs,
+          childSchema,
+          value[key],
+          `${fieldPath}.${key}`,
+        );
       }
     }
   }
@@ -130,7 +171,10 @@ function assertMatchesDefinition(defs, defName, value) {
 
   if (def.additionalProperties === false) {
     for (const key of Object.keys(value)) {
-      assert.ok(def.properties[key], `${defName}.${key} is not in the public schema`);
+      assert.ok(
+        def.properties[key],
+        `${defName}.${key} is not in the public schema`,
+      );
     }
   }
 
@@ -145,18 +189,30 @@ function readJson(relPath) {
   return JSON.parse(read(relPath));
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertSeedContains(seed, value) {
+  assert.match(seed, new RegExp(escapeRegExp(String(value))));
+}
+
 function validateJsonSchema(schema, value, root = schema) {
   const errors = [];
 
   function resolveRef(ref) {
-    const parts = ref.replace(/^#\//, "").split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+    const parts = ref
+      .replace(/^#\//, "")
+      .split("/")
+      .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
     return parts.reduce((current, part) => current?.[part], root);
   }
 
   function typeMatches(type, data) {
     if (type === "null") return data === null;
     if (type === "array") return Array.isArray(data);
-    if (type === "object") return data !== null && typeof data === "object" && !Array.isArray(data);
+    if (type === "object")
+      return data !== null && typeof data === "object" && !Array.isArray(data);
     if (type === "integer") return Number.isInteger(data);
     return typeof data === type;
   }
@@ -164,16 +220,25 @@ function validateJsonSchema(schema, value, root = schema) {
   function datePartsMatch(year, month, day) {
     const parsed = new Date(Date.UTC(year, month - 1, day));
     parsed.setUTCFullYear(year);
-    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
   }
 
   function formatMatches(format, data) {
     if (format === "uuid") {
-      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data);
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        data,
+      );
     }
 
     if (format === "date-time") {
-      const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/.exec(data);
+      const match =
+        /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/.exec(
+          data,
+        );
       if (!match) return false;
 
       const year = Number(match[1]);
@@ -219,18 +284,27 @@ function validateJsonSchema(schema, value, root = schema) {
       }
     }
 
-    if (node.if && check(node.if, data, currentPath).length === 0 && node.then) {
+    if (
+      node.if &&
+      check(node.if, data, currentPath).length === 0 &&
+      node.then
+    ) {
       localErrors.push(...check(node.then, data, currentPath));
     }
 
     if (node.anyOf) {
-      const validCount = node.anyOf.filter((child) => check(child, data, currentPath).length === 0).length;
+      const validCount = node.anyOf.filter(
+        (child) => check(child, data, currentPath).length === 0,
+      ).length;
       if (validCount === 0) fail("must match at least one anyOf schema");
     }
 
     if (node.oneOf) {
-      const validCount = node.oneOf.filter((child) => check(child, data, currentPath).length === 0).length;
-      if (validCount !== 1) fail(`must match exactly one oneOf schema, matched ${validCount}`);
+      const validCount = node.oneOf.filter(
+        (child) => check(child, data, currentPath).length === 0,
+      ).length;
+      if (validCount !== 1)
+        fail(`must match exactly one oneOf schema, matched ${validCount}`);
     }
 
     if (node.const !== undefined && data !== node.const) {
@@ -268,7 +342,9 @@ function validateJsonSchema(schema, value, root = schema) {
       if (node.properties) {
         for (const [key, child] of Object.entries(node.properties)) {
           if (Object.hasOwn(data, key)) {
-            localErrors.push(...check(child, data[key], `${currentPath}.${key}`));
+            localErrors.push(
+              ...check(child, data[key], `${currentPath}.${key}`),
+            );
           }
         }
       }
@@ -276,27 +352,49 @@ function validateJsonSchema(schema, value, root = schema) {
 
     if (Array.isArray(data) && node.items) {
       data.forEach((item, index) => {
-        localErrors.push(...check(node.items, item, `${currentPath}[${index}]`));
+        localErrors.push(
+          ...check(node.items, item, `${currentPath}[${index}]`),
+        );
       });
     }
 
-    if (typeof data === "string" && node.minLength !== undefined && data.length < node.minLength) {
+    if (
+      typeof data === "string" &&
+      node.minLength !== undefined &&
+      data.length < node.minLength
+    ) {
       fail(`must have length >= ${node.minLength}`);
     }
 
-    if (typeof data === "string" && node.format && !formatMatches(node.format, data)) {
+    if (
+      typeof data === "string" &&
+      node.format &&
+      !formatMatches(node.format, data)
+    ) {
       fail(`must match format ${node.format}`);
     }
 
-    if (typeof data === "string" && node.pattern && !new RegExp(node.pattern).test(data)) {
+    if (
+      typeof data === "string" &&
+      node.pattern &&
+      !new RegExp(node.pattern).test(data)
+    ) {
       fail(`must match pattern ${node.pattern}`);
     }
 
-    if (typeof data === "number" && node.minimum !== undefined && data < node.minimum) {
+    if (
+      typeof data === "number" &&
+      node.minimum !== undefined &&
+      data < node.minimum
+    ) {
       fail(`must be >= ${node.minimum}`);
     }
 
-    if (typeof data === "number" && node.maximum !== undefined && data > node.maximum) {
+    if (
+      typeof data === "number" &&
+      node.maximum !== undefined &&
+      data > node.maximum
+    ) {
       fail(`must be <= ${node.maximum}`);
     }
 
@@ -315,7 +413,10 @@ describe("agent bootstrap docs", () => {
     const content = read("agent.md");
     assert.match(content, /docs\/contracts\/README\.md/);
     assert.match(content, /docs\/contracts\/interface-contract-guide\.md/);
-    assert.match(content, /docs\/contracts\/schemas\/pilo-public-contracts\.schema\.json/);
+    assert.match(
+      content,
+      /docs\/contracts\/schemas\/pilo-public-contracts\.schema\.json/,
+    );
   });
 
   it("agent.md uses real owner names", () => {
@@ -353,20 +454,42 @@ describe("contract document set", () => {
 
   it("contract index maps every owner to their contract files", () => {
     const content = read("docs/contracts/README.md");
-    for (const token of ["동현", "주형", "진호", "은재", "세인", "workspace.md", "canvas.md", "task.md", "review.md", "agent-actions.md"]) {
+    for (const token of [
+      "동현",
+      "주형",
+      "진호",
+      "은재",
+      "세인",
+      "workspace.md",
+      "canvas.md",
+      "task.md",
+      "review.md",
+      "agent-actions.md",
+    ]) {
       assert.match(content, new RegExp(token.replace(".", "\\.")));
     }
   });
 
   it("interface guide defines owner/consumer handling for overlapping features", () => {
     const content = read("docs/contracts/interface-contract-guide.md");
-    for (const token of ["원본 owner", "Canvas 카드", "Meeting Action Item", "Task -> PR -> Review", "mock", "Agent Action"]) {
+    for (const token of [
+      "원본 owner",
+      "Canvas 카드",
+      "Meeting Action Item",
+      "Task -> PR -> Review",
+      "mock",
+      "Agent Action",
+    ]) {
       assert.match(content, new RegExp(token.replace("->", "->")));
     }
   });
   it("contract index defines the active status vocabulary", () => {
     const content = read("docs/contracts/README.md");
-    for (const token of ["Current Runtime APIs", "Deferred APIs", "MVP Target APIs"]) {
+    for (const token of [
+      "Current Runtime APIs",
+      "Deferred APIs",
+      "MVP Target APIs",
+    ]) {
       assert.match(content, new RegExp(token));
     }
   });
@@ -380,11 +503,31 @@ describe("contract document set", () => {
 
     for (const file of checkedDocs) {
       const content = read(file);
-      assert.doesNotMatch(content, /origin\/dev/, `${file} must not point agents at origin/dev`);
-      assert.doesNotMatch(content, /## Provided APIs/, `${file} must use Current Runtime APIs or Deferred APIs`);
-      assert.doesNotMatch(content, /## Planned APIs/, `${file} must use Deferred APIs`);
-      assert.doesNotMatch(content, /Planned \/ Deferred APIs/, `${file} must use Deferred APIs`);
-      assert.doesNotMatch(content, /Task draft HTTP API/, `${file} must not describe implemented task drafts as missing`);
+      assert.doesNotMatch(
+        content,
+        /origin\/dev/,
+        `${file} must not point agents at origin/dev`,
+      );
+      assert.doesNotMatch(
+        content,
+        /## Provided APIs/,
+        `${file} must use Current Runtime APIs or Deferred APIs`,
+      );
+      assert.doesNotMatch(
+        content,
+        /## Planned APIs/,
+        `${file} must use Deferred APIs`,
+      );
+      assert.doesNotMatch(
+        content,
+        /Planned \/ Deferred APIs/,
+        `${file} must use Deferred APIs`,
+      );
+      assert.doesNotMatch(
+        content,
+        /Task draft HTTP API/,
+        `${file} must not describe implemented task drafts as missing`,
+      );
       assert.doesNotMatch(
         content,
         /`(?:GET|POST|PATCH|PUT|DELETE) \/(?!api\/)(auth|workspaces|workspace-invites|canvas-boards|canvas-shapes|canvas-connections|pull-requests|code-review-rooms|pull-request-analyses|review-nodes|github\/app|repositories|tasks|milestones)\b/,
@@ -395,33 +538,69 @@ describe("contract document set", () => {
 
   it("contract docs keep current runtime APIs separate from deferred MVP targets", () => {
     const task = read("docs/contracts/task.md");
-    assert.match(task, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
-    assert.match(task, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
+    assert.match(
+      task,
+      /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/,
+    );
+    assert.match(
+      task,
+      /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/,
+    );
     assert.match(task, /`POST`\s*\|\s*`\/api\/task-drafts\/:draftId\/approve`/);
     assert.match(task, /## Deferred APIs/);
 
     const taskDeferred = task.slice(task.indexOf("## Deferred APIs"));
-    assert.doesNotMatch(taskDeferred, /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
-    assert.doesNotMatch(taskDeferred, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/);
-    assert.match(taskDeferred, /`GET`\s*\|\s*`\/api\/milestones\/:milestoneId`/);
+    assert.doesNotMatch(
+      taskDeferred,
+      /`GET`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/,
+    );
+    assert.doesNotMatch(
+      taskDeferred,
+      /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/task-drafts`/,
+    );
+    assert.match(
+      taskDeferred,
+      /`GET`\s*\|\s*`\/api\/milestones\/:milestoneId`/,
+    );
 
     const review = read("docs/contracts/review.md");
-    assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/graph`/);
-    assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/canvas`/);
-    assert.match(review, /`GET`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/);
-    assert.match(review, /`POST`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/);
-    assert.match(review, /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/checklist-items`/);
+    assert.match(
+      review,
+      /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/graph`/,
+    );
+    assert.match(
+      review,
+      /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/canvas`/,
+    );
+    assert.match(
+      review,
+      /`GET`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/,
+    );
+    assert.match(
+      review,
+      /`POST`\s*\|\s*`\/api\/code-review-rooms\/:roomId\/comments`/,
+    );
+    assert.match(
+      review,
+      /`GET`\s*\|\s*`\/api\/pull-request-analyses\/:analysisId\/checklist-items`/,
+    );
 
     const agent = read("docs/contracts/agent-actions.md");
     assert.match(agent, /Current Runtime APIs/);
     assert.match(agent, /Agent run\/action HTTP controller/);
-    assert.match(agent, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/agent-runs`/);
+    assert.match(
+      agent,
+      /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/agent-runs`/,
+    );
     assert.doesNotMatch(agent, /`POST \/agent-runs`/);
 
     const planning = read("docs/contracts/planning.md");
     assert.match(planning, /Current Runtime APIs/);
     assert.match(planning, /Planning HTTP controller/);
-    assert.match(planning, /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/project-plan-drafts`/);
+    assert.match(
+      planning,
+      /`POST`\s*\|\s*`\/api\/workspaces\/:workspaceId\/project-plan-drafts`/,
+    );
     assert.doesNotMatch(planning, /`GET \/project-plan-drafts/);
   });
 
@@ -429,14 +608,35 @@ describe("contract document set", () => {
     const api = read("docs/api-contract-v1.md");
     assert.doesNotMatch(api, /\/api\/project-start\//);
     assert.doesNotMatch(api, /\/api\/task-candidates/);
-    assert.match(api, /type TaskStatus = "todo" \| "in_progress" \| "in_review" \| "done" \| "blocked";/);
-    assert.match(api, /type MeetingStatus = "scheduled" \| "in_progress" \| "ended" \| "report_generated";/);
-    assert.match(api, /type VoiceRecordingStatus = "not_recording" \| "recording" \| "processing" \| "completed" \| "failed";/);
+    assert.match(
+      api,
+      /type TaskStatus = "todo" \| "in_progress" \| "in_review" \| "done" \| "blocked";/,
+    );
+    assert.match(
+      api,
+      /type MeetingStatus = "scheduled" \| "in_progress" \| "ended" \| "report_generated";/,
+    );
+    assert.match(
+      api,
+      /type VoiceRecordingStatus = "not_recording" \| "recording" \| "processing" \| "completed" \| "failed";/,
+    );
     assert.match(api, /type TranscriptSource = "text" \| "stt";/);
-    assert.match(api, /type ActionItemStatus = "draft" \| "approved" \| "converted" \| "rejected";/);
-    assert.match(api, /type ReviewAnalysisStatus = "pending" \| "running" \| "succeeded" \| "failed";/);
-    assert.doesNotMatch(api, /type TaskStatus = "todo" \| "in_progress" \| "review"/);
-    assert.doesNotMatch(api, /converted_to_task|createdTaskId|limit_exceeded|not_started/);
+    assert.match(
+      api,
+      /type ActionItemStatus = "draft" \| "approved" \| "converted" \| "rejected";/,
+    );
+    assert.match(
+      api,
+      /type ReviewAnalysisStatus = "pending" \| "running" \| "succeeded" \| "failed";/,
+    );
+    assert.doesNotMatch(
+      api,
+      /type TaskStatus = "todo" \| "in_progress" \| "review"/,
+    );
+    assert.doesNotMatch(
+      api,
+      /converted_to_task|createdTaskId|limit_exceeded|not_started/,
+    );
     assert.match(api, /workflowType": "planning\.generate"/);
     assert.match(api, /`\/api\/workspaces\/:workspaceId\/agent-runs`/);
     assert.match(api, /`\/api\/workspaces\/:workspaceId\/task-drafts`/);
@@ -485,14 +685,26 @@ describe("contract document set", () => {
     const scope = read("docs/mvp-scope-v1.md");
     const boundary = read("docs/domain-boundary-v1.md");
     const task = read("docs/contracts/task.md");
-    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+    const schema = readJson(
+      "docs/contracts/schemas/pilo-public-contracts.schema.json",
+    );
 
-    assert.match(scope, /`todo`, `in_progress`, `in_review`, `done`, `blocked`/);
-    assert.doesNotMatch(scope, /`todo`, `in_progress`, `review`, `done`, `blocked`/);
+    assert.match(
+      scope,
+      /`todo`, `in_progress`, `in_review`, `done`, `blocked`/,
+    );
+    assert.doesNotMatch(
+      scope,
+      /`todo`, `in_progress`, `review`, `done`, `blocked`/,
+    );
     assert.match(boundary, /TaskDraft/);
     assert.doesNotMatch(boundary, /TaskCandidate/);
     assert.doesNotMatch(task, /"status": "waiting_confirmation"/);
-    assert.deepEqual(schema.$defs.TaskDraft.properties.status.enum, ["draft", "approved", "rejected"]);
+    assert.deepEqual(schema.$defs.TaskDraft.properties.status.enum, [
+      "draft",
+      "approved",
+      "rejected",
+    ]);
   });
 });
 
@@ -511,7 +723,10 @@ describe("independent agent briefs", () => {
     it(`${file} exists and defines implementation boundaries`, () => {
       const content = read(file);
       assert.ok(content.length > 0, `${file} must not be empty`);
-      assert.match(content, /docs\/contracts|Mission|Shared Implementation Rules|Independent Agent Briefs/);
+      assert.match(
+        content,
+        /docs\/contracts|Mission|Shared Implementation Rules|Independent Agent Briefs/,
+      );
     });
   }
 
@@ -629,19 +844,62 @@ describe("machine-readable public contract schema", () => {
     const approval = schema.$defs.ProjectPlanApprovalState;
     const ownerResult = schema.$defs.PlanningOwnerApiResult;
 
-    for (const key of ["techStack", "featureDrafts", "roleDrafts", "milestoneDrafts", "riskNotes", "firstAgendaDraft", "approval"]) {
-      assert.ok(detail.required.includes(key), `ProjectPlanDraftDetail must require ${key}`);
+    for (const key of [
+      "techStack",
+      "featureDrafts",
+      "roleDrafts",
+      "milestoneDrafts",
+      "riskNotes",
+      "firstAgendaDraft",
+      "approval",
+    ]) {
+      assert.ok(
+        detail.required.includes(key),
+        `ProjectPlanDraftDetail must require ${key}`,
+      );
     }
 
-    assert.equal(detail.properties.approval.$ref, "#/$defs/ProjectPlanApprovalState");
-    assert.equal(detail.properties.featureDrafts.items.$ref, "#/$defs/ProjectPlanFeatureDraft");
-    assert.equal(detail.properties.milestoneDrafts.items.$ref, "#/$defs/ProjectPlanMilestoneDraft");
-    assert.deepEqual(schema.$defs.ProjectPlanDraftStatus.enum, ["draft", "reviewing", "approved", "rejected"]);
-    assert.deepEqual(approval.properties.status.$ref, "#/$defs/PlanningApprovalStatus");
-    assert.equal(approval.properties.ownerApiResults.items.$ref, "#/$defs/PlanningOwnerApiResult");
-    assert.deepEqual(ownerResult.properties.operation.enum, ["task.create", "milestone.create"]);
-    assert.deepEqual(ownerResult.properties.sourceDraftType.enum, ["feature", "milestone"]);
-    assert.deepEqual(ownerResult.properties.status.enum, ["not_requested", "pending", "succeeded", "failed", "skipped"]);
+    assert.equal(
+      detail.properties.approval.$ref,
+      "#/$defs/ProjectPlanApprovalState",
+    );
+    assert.equal(
+      detail.properties.featureDrafts.items.$ref,
+      "#/$defs/ProjectPlanFeatureDraft",
+    );
+    assert.equal(
+      detail.properties.milestoneDrafts.items.$ref,
+      "#/$defs/ProjectPlanMilestoneDraft",
+    );
+    assert.deepEqual(schema.$defs.ProjectPlanDraftStatus.enum, [
+      "draft",
+      "reviewing",
+      "approved",
+      "rejected",
+    ]);
+    assert.deepEqual(
+      approval.properties.status.$ref,
+      "#/$defs/PlanningApprovalStatus",
+    );
+    assert.equal(
+      approval.properties.ownerApiResults.items.$ref,
+      "#/$defs/PlanningOwnerApiResult",
+    );
+    assert.deepEqual(ownerResult.properties.operation.enum, [
+      "task.create",
+      "milestone.create",
+    ]);
+    assert.deepEqual(ownerResult.properties.sourceDraftType.enum, [
+      "feature",
+      "milestone",
+    ]);
+    assert.deepEqual(ownerResult.properties.status.enum, [
+      "not_requested",
+      "pending",
+      "succeeded",
+      "failed",
+      "skipped",
+    ]);
   });
 
   it("validates PlanningOwnerApiResult state and source coupling", () => {
@@ -659,26 +917,127 @@ describe("machine-readable public contract schema", () => {
       errorMessage: null,
     };
 
-    assert.equal(validateJsonSchema(ownerResult, baseResult, schema).valid, true);
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, targetEntityId: null }, schema).valid, false);
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, errorMessage: "unexpected" }, schema).valid, false);
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "Task API failed" }, schema).valid, true);
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", errorMessage: "Task API failed" }, schema).valid, false);
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: null }, schema).valid, false);
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status: "failed", targetEntityId: null, errorMessage: "" }, schema).valid, false);
-
-    for (const status of ["not_requested", "pending", "skipped"]) {
-      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: null }, schema).valid, true);
-      assert.equal(validateJsonSchema(ownerResult, { ...baseResult, status, targetEntityId: targetId }, schema).valid, false);
-    }
-
-    assert.equal(validateJsonSchema(ownerResult, { ...baseResult, operation: "task.create", sourceDraftType: "milestone" }, schema).valid, false);
     assert.equal(
-      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "feature" }, schema).valid,
+      validateJsonSchema(ownerResult, baseResult, schema).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        { ...baseResult, targetEntityId: null },
+        schema,
+      ).valid,
       false,
     );
     assert.equal(
-      validateJsonSchema(ownerResult, { ...baseResult, operation: "milestone.create", sourceDraftType: "milestone" }, schema).valid,
+      validateJsonSchema(
+        ownerResult,
+        { ...baseResult, errorMessage: "unexpected" },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        {
+          ...baseResult,
+          status: "failed",
+          targetEntityId: null,
+          errorMessage: "Task API failed",
+        },
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        { ...baseResult, status: "failed", errorMessage: "Task API failed" },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        {
+          ...baseResult,
+          status: "failed",
+          targetEntityId: null,
+          errorMessage: null,
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        {
+          ...baseResult,
+          status: "failed",
+          targetEntityId: null,
+          errorMessage: "",
+        },
+        schema,
+      ).valid,
+      false,
+    );
+
+    for (const status of ["not_requested", "pending", "skipped"]) {
+      assert.equal(
+        validateJsonSchema(
+          ownerResult,
+          { ...baseResult, status, targetEntityId: null },
+          schema,
+        ).valid,
+        true,
+      );
+      assert.equal(
+        validateJsonSchema(
+          ownerResult,
+          { ...baseResult, status, targetEntityId: targetId },
+          schema,
+        ).valid,
+        false,
+      );
+    }
+
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        {
+          ...baseResult,
+          operation: "task.create",
+          sourceDraftType: "milestone",
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        {
+          ...baseResult,
+          operation: "milestone.create",
+          sourceDraftType: "feature",
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        ownerResult,
+        {
+          ...baseResult,
+          operation: "milestone.create",
+          sourceDraftType: "milestone",
+        },
+        schema,
+      ).valid,
       true,
     );
   });
@@ -689,9 +1048,13 @@ describe("machine-readable public contract schema", () => {
 
     function payloadRefFor(actionType) {
       const actionVariant = agentAction.oneOf.find((entry) => {
-        return entry.allOf?.some((child) => child.properties?.type?.const === actionType);
+        return entry.allOf?.some(
+          (child) => child.properties?.type?.const === actionType,
+        );
       });
-      const typedSchema = actionVariant?.allOf.find((child) => child.properties?.payload?.$ref);
+      const typedSchema = actionVariant?.allOf.find(
+        (child) => child.properties?.payload?.$ref,
+      );
 
       return typedSchema?.properties?.payload?.$ref;
     }
@@ -705,7 +1068,10 @@ describe("machine-readable public contract schema", () => {
       ["planning.approve", "#/$defs/PlanningApproveAction"],
     ]);
 
-    assert.deepEqual(schema.$defs.AgentActionCommon.properties.type.enum.toSorted(), [...expectedPayloadRefs.keys()].sort());
+    assert.deepEqual(
+      schema.$defs.AgentActionCommon.properties.type.enum.toSorted(),
+      [...expectedPayloadRefs.keys()].sort(),
+    );
     for (const [actionType, expectedRef] of expectedPayloadRefs) {
       assert.equal(payloadRefFor(actionType), expectedRef);
     }
@@ -731,7 +1097,9 @@ describe("machine-readable public contract schema", () => {
     const reviewContract = read("docs/contracts/review.md");
     const juhyungBrief = read("docs/agents/juhyung-task-github-progress.md");
     const changedFileSummary = schema.$defs.PullRequestChangedFileSummary;
-    const breakingChangePolicy = githubContract.slice(githubContract.indexOf("## Breaking Change Policy"));
+    const breakingChangePolicy = githubContract.slice(
+      githubContract.indexOf("## Breaking Change Policy"),
+    );
 
     assert.ok(changedFileSummary);
     for (const field of [
@@ -753,7 +1121,10 @@ describe("machine-readable public contract schema", () => {
     assert.equal(changedFileSummary.properties.sha.type, "string");
     assert.equal(changedFileSummary.properties.sha.minLength, 1);
     assert.match(githubContract, /PullRequestChangedFileSummary/);
-    assert.match(githubContract, /\/pull-requests\/:pullRequestId\/changed-files/);
+    assert.match(
+      githubContract,
+      /\/pull-requests\/:pullRequestId\/changed-files/,
+    );
     assert.match(githubContract, /patch/);
     assert.match(githubContract, /state\/nonce/);
     assert.match(githubContract, /installationId -> workspaceId/);
@@ -767,7 +1138,10 @@ describe("machine-readable public contract schema", () => {
     assert.match(githubContract, /## Consumed By/);
     assert.match(githubContract, /## Breaking Change Policy/);
     assert.match(githubContract, /additive optional rollout fields/);
-    assert.match(githubContract, /Making them required requires a separate breaking contract PR/);
+    assert.match(
+      githubContract,
+      /Making them required requires a separate breaking contract PR/,
+    );
     const mockRuleStart = githubContract.indexOf("## Mock Rule");
     assert.notEqual(
       mockRuleStart,
@@ -794,7 +1168,12 @@ describe("machine-readable public contract schema", () => {
   it("schema defines MeetingActionItem task draft conversion fields", () => {
     const schema = readJson(schemaPath);
     const meetingActionItem = schema.$defs.MeetingActionItem;
-    assert.deepEqual(meetingActionItem.properties.status.enum, ["draft", "approved", "converted", "rejected"]);
+    assert.deepEqual(meetingActionItem.properties.status.enum, [
+      "draft",
+      "approved",
+      "converted",
+      "rejected",
+    ]);
     assert.ok(meetingActionItem.properties.assigneeSuggestionMemberId);
     assert.ok(meetingActionItem.properties.dueDateSuggestion);
     assert.ok(meetingActionItem.properties.convertedTaskId);
@@ -879,20 +1258,138 @@ describe("machine-readable public contract schema", () => {
       updatedAt: dateTime,
     };
 
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, createRequest, schema).valid, true);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, statusResponse, schema).valid, true);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: { message: "workflow failed" } }, schema).valid, true);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: true, pendingActionCount: 1 }, schema).valid, true);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunDetail, detail, schema).valid, true);
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunCreateRequest,
+        createRequest,
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        statusResponse,
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "failed",
+          error: { message: "workflow failed" },
+        },
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "requires_confirmation",
+          actionRequired: true,
+          pendingActionCount: 1,
+        },
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(schema.$defs.AgentRunDetail, detail, schema).valid,
+      true,
+    );
 
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, { ...createRequest, workflowType: "unknown.workflow" }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "running", startedAt: "2026-13-27T10:00:00.000Z" }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "running", startedAt: "2026-06-27T25:00:00.000Z" }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: null }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "succeeded", error: { message: "unexpected" } }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: false, pendingActionCount: 1 }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: true, pendingActionCount: 0 }, schema).valid, false);
-    assert.equal(validateJsonSchema(schema.$defs.AgentRunDetail, { ...detail, status: "failed", error: null }, schema).valid, false);
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunCreateRequest,
+        { ...createRequest, workflowType: "unknown.workflow" },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "running",
+          startedAt: "2026-13-27T10:00:00.000Z",
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "running",
+          startedAt: "2026-06-27T25:00:00.000Z",
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        { ...statusResponse, status: "failed", error: null },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "succeeded",
+          error: { message: "unexpected" },
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "requires_confirmation",
+          actionRequired: false,
+          pendingActionCount: 1,
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunStatusResponse,
+        {
+          ...statusResponse,
+          status: "requires_confirmation",
+          actionRequired: true,
+          pendingActionCount: 0,
+        },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunDetail,
+        { ...detail, status: "failed", error: null },
+        schema,
+      ).valid,
+      false,
+    );
   });
 
   it("validates AgentAction type-specific payloads", () => {
@@ -912,17 +1409,39 @@ describe("machine-readable public contract schema", () => {
       executedAt: null,
     });
     const cases = [
-      ["task.create.draft", { workspaceId: uuid, title: "OAuth callback 처리" }],
-      ["task.update.status", { workspaceId: uuid, taskId: uuid, status: "in_progress" }],
-      ["github.issue.create", { workspaceId: uuid, taskId: uuid, repositoryId: uuid, title: "OAuth callback 처리" }],
+      [
+        "task.create.draft",
+        { workspaceId: uuid, title: "OAuth callback 처리" },
+      ],
+      [
+        "task.update.status",
+        { workspaceId: uuid, taskId: uuid, status: "in_progress" },
+      ],
+      [
+        "github.issue.create",
+        {
+          workspaceId: uuid,
+          taskId: uuid,
+          repositoryId: uuid,
+          title: "OAuth callback 처리",
+        },
+      ],
       ["meeting.report.generate", { workspaceId: uuid, meetingId: uuid }],
       ["review.analysis.generate", { workspaceId: uuid, pullRequestId: uuid }],
       ["planning.approve", { workspaceId: uuid, draftId: uuid }],
     ];
 
     for (const [type, payload] of cases) {
-      const result = validateJsonSchema(agentAction, baseAction(type, payload), schema);
-      assert.equal(result.valid, true, `${type} should validate: ${result.errors.join(", ")}`);
+      const result = validateJsonSchema(
+        agentAction,
+        baseAction(type, payload),
+        schema,
+      );
+      assert.equal(
+        result.valid,
+        true,
+        `${type} should validate: ${result.errors.join(", ")}`,
+      );
     }
   });
 
@@ -1025,7 +1544,11 @@ describe("machine-readable public contract schema", () => {
 
     for (const { name, value } of cases) {
       const result = validateJsonSchema(agentAction, value, schema);
-      assert.equal(result.valid, true, `${name} should validate: ${result.errors.join(", ")}`);
+      assert.equal(
+        result.valid,
+        true,
+        `${name} should validate: ${result.errors.join(", ")}`,
+      );
     }
   });
 
@@ -1086,7 +1609,11 @@ describe("machine-readable public contract schema", () => {
 
     for (const { name, value } of invalidCases) {
       const result = validateJsonSchema(agentAction, value, schema);
-      assert.equal(result.valid, false, `${name} should fail schema validation`);
+      assert.equal(
+        result.valid,
+        false,
+        `${name} should fail schema validation`,
+      );
     }
   });
 
@@ -1104,18 +1631,66 @@ describe("machine-readable public contract schema", () => {
       finishedAt: "2026-06-27T10:01:00.000Z",
     };
 
-    assert.equal(validateJsonSchema(agentResult, baseResult, schema).valid, true);
-    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: { message: "workflow failed" } }, schema).valid, true);
-    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: { code: null, message: "workflow failed" } }, schema).valid, true);
-    assert.equal(validateJsonSchema(agentResult, { ...baseResult, error: { message: "unexpected error" } }, schema).valid, false);
-    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: null }, schema).valid, false);
-    assert.equal(validateJsonSchema(agentResult, { ...baseResult, status: "failed", error: { code: "WORKFLOW_FAILED" } }, schema).valid, false);
+    assert.equal(
+      validateJsonSchema(agentResult, baseResult, schema).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        agentResult,
+        {
+          ...baseResult,
+          status: "failed",
+          error: { message: "workflow failed" },
+        },
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        agentResult,
+        {
+          ...baseResult,
+          status: "failed",
+          error: { code: null, message: "workflow failed" },
+        },
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        agentResult,
+        { ...baseResult, error: { message: "unexpected error" } },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        agentResult,
+        { ...baseResult, status: "failed", error: null },
+        schema,
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateJsonSchema(
+        agentResult,
+        { ...baseResult, status: "failed", error: { code: "WORKFLOW_FAILED" } },
+        schema,
+      ).valid,
+      false,
+    );
   });
 });
 
 describe("contract fixtures", () => {
   it("workspace dashboard fixture exists and parses as JSON", () => {
-    const fixture = JSON.parse(read("docs/contracts/fixtures/workspace-dashboard.fixture.json"));
+    const fixture = JSON.parse(
+      read("docs/contracts/fixtures/workspace-dashboard.fixture.json"),
+    );
     assert.ok(fixture.currentUser);
     assert.ok(fixture.workspace);
     assert.ok(Array.isArray(fixture.tasks));
@@ -1124,48 +1699,102 @@ describe("contract fixtures", () => {
     assert.ok(Array.isArray(fixture.meetingReports));
     assert.ok(Array.isArray(fixture.meetingActionItems));
     assert.ok(Array.isArray(fixture.pullRequestChangedFiles));
-    assert.equal(fixture.pullRequestChangedFiles.length, fixture.pullRequests[0].changedFilesCount);
-    assert.ok(fixture.pullRequestChangedFiles.every((file) => file.pullRequestId === fixture.pullRequests[0].id));
-    assert.ok(fixture.pullRequestChangedFiles.every((file) => typeof file.sha === "string" && file.sha.length > 0));
+    assert.equal(
+      fixture.pullRequestChangedFiles.length,
+      fixture.pullRequests[0].changedFilesCount,
+    );
+    assert.ok(
+      fixture.pullRequestChangedFiles.every(
+        (file) => file.pullRequestId === fixture.pullRequests[0].id,
+      ),
+    );
+    assert.ok(
+      fixture.pullRequestChangedFiles.every(
+        (file) => typeof file.sha === "string" && file.sha.length > 0,
+      ),
+    );
     assert.ok(fixture.meetingReports.length > 0);
     assert.ok(fixture.meetingActionItems.length > 0);
-    assert.equal(fixture.meetingActionItems[0].reportId, fixture.meetingReports[0].id);
+    assert.equal(
+      fixture.meetingActionItems[0].reportId,
+      fixture.meetingReports[0].id,
+    );
     assert.equal(fixture.meetingActionItems[0].status, "draft");
   });
 
   it("agent SQS fixtures exist and parse as JSON", () => {
-    const job = JSON.parse(read("docs/contracts/fixtures/agent-job.fixture.json"));
-    const result = JSON.parse(read("docs/contracts/fixtures/agent-result.fixture.json"));
+    const job = JSON.parse(
+      read("docs/contracts/fixtures/agent-job.fixture.json"),
+    );
+    const result = JSON.parse(
+      read("docs/contracts/fixtures/agent-result.fixture.json"),
+    );
     assert.equal(job.runId, result.runId);
     assert.equal(job.jobId, result.jobId);
     assert.ok(Array.isArray(result.actions));
   });
 
   it("review room fixture matches review room public schema", () => {
-    const schema = JSON.parse(read("docs/contracts/schemas/pilo-public-contracts.schema.json"));
-    const fixture = JSON.parse(read("docs/contracts/fixtures/review-room.fixture.json"));
+    const schema = JSON.parse(
+      read("docs/contracts/schemas/pilo-public-contracts.schema.json"),
+    );
+    const fixture = JSON.parse(
+      read("docs/contracts/fixtures/review-room.fixture.json"),
+    );
 
-    assertMatchesDefinition(schema.$defs, "CodeReviewRoomSummary", fixture.codeReviewRoom);
+    assertMatchesDefinition(
+      schema.$defs,
+      "CodeReviewRoomSummary",
+      fixture.codeReviewRoom,
+    );
   });
 
   it("review analysis fixture matches review public schemas", () => {
-    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
-    const fixture = readJson("docs/contracts/fixtures/review-analysis.fixture.json");
+    const schema = readJson(
+      "docs/contracts/schemas/pilo-public-contracts.schema.json",
+    );
+    const fixture = readJson(
+      "docs/contracts/fixtures/review-analysis.fixture.json",
+    );
 
-    assert.equal(validateJsonSchema(schema.$defs.PRAnalysisSummary, fixture.prAnalysis, schema).valid, true);
-    assert.equal(validateJsonSchema(schema.$defs.ReviewCanvasSummary, fixture.reviewCanvas, schema).valid, true);
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.PRAnalysisSummary,
+        fixture.prAnalysis,
+        schema,
+      ).valid,
+      true,
+    );
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.ReviewCanvasSummary,
+        fixture.reviewCanvas,
+        schema,
+      ).valid,
+      true,
+    );
     for (const detail of fixture.nodeDetails) {
-      const result = validateJsonSchema(schema.$defs.ReviewNodeDetail, detail, schema);
+      const result = validateJsonSchema(
+        schema.$defs.ReviewNodeDetail,
+        detail,
+        schema,
+      );
       assert.equal(result.valid, true, result.errors.join(", "));
     }
     for (const risk of fixture.reviewRisks) {
-      const result = validateJsonSchema(schema.$defs.ReviewRiskSummary, risk, schema);
+      const result = validateJsonSchema(
+        schema.$defs.ReviewRiskSummary,
+        risk,
+        schema,
+      );
       assert.equal(result.valid, true, result.errors.join(", "));
     }
   });
 
   it("review changes fixture exists and parses as JSON", () => {
-    const fixture = JSON.parse(read("docs/contracts/fixtures/review-changes.fixture.json"));
+    const fixture = JSON.parse(
+      read("docs/contracts/fixtures/review-changes.fixture.json"),
+    );
 
     assert.ok(fixture.analysisId);
     assert.ok(Array.isArray(fixture.changedFiles));
@@ -1173,10 +1802,22 @@ describe("contract fixtures", () => {
   });
 
   it("planning detail fixture matches planning public schemas", () => {
-    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
-    const fixture = readJson("docs/contracts/fixtures/planning-detail.fixture.json");
-    const summaryResult = validateJsonSchema(schema.$defs.ProjectPlanDraftSummary, fixture.summary, schema);
-    const detailResult = validateJsonSchema(schema.$defs.ProjectPlanDraftDetail, fixture.detail, schema);
+    const schema = readJson(
+      "docs/contracts/schemas/pilo-public-contracts.schema.json",
+    );
+    const fixture = readJson(
+      "docs/contracts/fixtures/planning-detail.fixture.json",
+    );
+    const summaryResult = validateJsonSchema(
+      schema.$defs.ProjectPlanDraftSummary,
+      fixture.summary,
+      schema,
+    );
+    const detailResult = validateJsonSchema(
+      schema.$defs.ProjectPlanDraftDetail,
+      fixture.detail,
+      schema,
+    );
     const ownerApiResults = fixture.detail.approval.ownerApiResults;
 
     assert.equal(summaryResult.valid, true, summaryResult.errors.join(", "));
@@ -1186,15 +1827,39 @@ describe("contract fixtures", () => {
     assert.ok(fixture.detail.featureDrafts.length > 0);
     assert.ok(fixture.detail.milestoneDrafts.length > 0);
     assert.ok(fixture.detail.firstAgendaDraft);
-    assert.ok(ownerApiResults.some((result) => result.operation === "task.create" && result.status === "succeeded" && result.targetEntityId));
-    assert.ok(ownerApiResults.some((result) => result.operation === "milestone.create" && result.status === "succeeded" && result.targetEntityId));
+    assert.ok(
+      ownerApiResults.some(
+        (result) =>
+          result.operation === "task.create" &&
+          result.status === "succeeded" &&
+          result.targetEntityId,
+      ),
+    );
+    assert.ok(
+      ownerApiResults.some(
+        (result) =>
+          result.operation === "milestone.create" &&
+          result.status === "succeeded" &&
+          result.targetEntityId,
+      ),
+    );
   });
 
   it("agent run detail fixture validates against the public schema", () => {
-    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
-    const fixture = readJson("docs/contracts/fixtures/agent-run-detail.fixture.json");
-    const result = validateJsonSchema(schema.$defs.AgentRunDetail, fixture, schema);
-    const waitingAction = fixture.actions.find((action) => action.status === "waiting_confirmation");
+    const schema = readJson(
+      "docs/contracts/schemas/pilo-public-contracts.schema.json",
+    );
+    const fixture = readJson(
+      "docs/contracts/fixtures/agent-run-detail.fixture.json",
+    );
+    const result = validateJsonSchema(
+      schema.$defs.AgentRunDetail,
+      fixture,
+      schema,
+    );
+    const waitingAction = fixture.actions.find(
+      (action) => action.status === "waiting_confirmation",
+    );
 
     assert.equal(result.valid, true, result.errors.join(", "));
     assert.equal(fixture.status, "requires_confirmation");
@@ -1214,10 +1879,23 @@ describe("contract fixtures", () => {
 describe("github collaboration templates", () => {
   it("pull request template requires contract, mock, and DB sections", () => {
     const content = read(".github/PULL_REQUEST_TEMPLATE.md");
-    for (const heading of ["Contract Impact", "Cross-Domain Access", "Mock / Stub", "DB / Migration", "Validation"]) {
+    for (const heading of [
+      "Contract Impact",
+      "Cross-Domain Access",
+      "Mock / Stub",
+      "DB / Migration",
+      "Validation",
+    ]) {
       assert.match(content, new RegExp(`## ${heading.replace("/", "\\/")}`));
     }
-    for (const guideField of ["Contract Used", "Owner", "Internal-only change", "No external consumer", "Consumers", "Mock/Real"]) {
+    for (const guideField of [
+      "Contract Used",
+      "Owner",
+      "Internal-only change",
+      "No external consumer",
+      "Consumers",
+      "Mock/Real",
+    ]) {
       assert.match(content, new RegExp(guideField));
     }
   });
@@ -1269,21 +1947,40 @@ describe("local development baseline", () => {
 
   it("local env example contains LocalStack credentials and queue URLs", () => {
     const env = read(".env.example");
+    const appServerMain = read("apps/app-server/src/main.ts");
     assert.match(env, /AWS_ACCESS_KEY_ID=test/);
     assert.match(env, /SQS_AGENT_JOBS_QUEUE_URL/);
     assert.match(env, /SQS_AGENT_RESULTS_QUEUE_URL/);
+    assert.match(
+      env,
+      /NEXT_PUBLIC_PILO_APP_SERVER_URL=http:\/\/localhost:4000/,
+    );
+    assert.match(env, /NEXT_PUBLIC_PILO_WORKSPACE_MODE=api/);
+    assert.match(appServerMain, /process\.env\.PORT \|\| 4000/);
   });
 });
 
 describe("db schema contract alignment", () => {
   it("final SQL schema has unique table names and no broken referenced tables", () => {
     const sql = read("docs/db/pilo_erd_schema.sql");
-    const tables = [...sql.matchAll(/CREATE TABLE\s+([a-z_]+)/g)].map((m) => m[1]);
+    const tables = [...sql.matchAll(/CREATE TABLE\s+([a-z_]+)/g)].map(
+      (m) => m[1],
+    );
     const uniqueTables = new Set(tables);
-    assert.equal(tables.length, uniqueTables.size, "table names must be unique");
-    assert.equal(tables.length, 70, "MVP implementation baseline schema should have 70 tables");
+    assert.equal(
+      tables.length,
+      uniqueTables.size,
+      "table names must be unique",
+    );
+    assert.equal(
+      tables.length,
+      70,
+      "MVP implementation baseline schema should have 70 tables",
+    );
 
-    const refs = [...sql.matchAll(/REFERENCES\s+([a-z_]+)\(/g)].map((m) => m[1]);
+    const refs = [...sql.matchAll(/REFERENCES\s+([a-z_]+)\(/g)].map(
+      (m) => m[1],
+    );
     for (const ref of refs) {
       assert.ok(uniqueTables.has(ref), `referenced table must exist: ${ref}`);
     }
@@ -1292,12 +1989,22 @@ describe("db schema contract alignment", () => {
   it("Prisma mapped tables exist in the SQL baseline", () => {
     const prisma = read("apps/app-server/prisma/schema.prisma");
     const sql = read("docs/db/pilo_erd_schema.sql");
-    const tables = new Set([...sql.matchAll(/CREATE TABLE\s+([a-z_]+)/g)].map((m) => m[1]));
-    const mappedTables = [...prisma.matchAll(/@@map\("([a-z_]+)"\)/g)].map((m) => m[1]);
+    const tables = new Set(
+      [...sql.matchAll(/CREATE TABLE\s+([a-z_]+)/g)].map((m) => m[1]),
+    );
+    const mappedTables = [...prisma.matchAll(/@@map\("([a-z_]+)"\)/g)].map(
+      (m) => m[1],
+    );
 
-    assert.ok(mappedTables.length > 0, "Prisma schema must map DB-backed models to tables");
+    assert.ok(
+      mappedTables.length > 0,
+      "Prisma schema must map DB-backed models to tables",
+    );
     for (const table of mappedTables) {
-      assert.ok(tables.has(table), `Prisma mapped table must exist in SQL baseline: ${table}`);
+      assert.ok(
+        tables.has(table),
+        `Prisma mapped table must exist in SQL baseline: ${table}`,
+      );
     }
   });
 
@@ -1324,9 +2031,9 @@ describe("db schema contract alignment", () => {
 
   it("db indexes can be replayed during local migration bootstrap", () => {
     const sql = read("docs/db/pilo_erd_schema.sql");
-    const indexStatements = [...sql.matchAll(/^CREATE (?:UNIQUE )?INDEX .+$/gm)].map(
-      (match) => match[0],
-    );
+    const indexStatements = [
+      ...sql.matchAll(/^CREATE (?:UNIQUE )?INDEX .+$/gm),
+    ].map((match) => match[0]);
 
     assert.ok(indexStatements.length > 0, "schema should define indexes");
 
@@ -1375,6 +2082,82 @@ describe("db schema contract alignment", () => {
     );
   });
 
+  it("local Auth/Workspace/Canvas seed uses the public contract fixture identity baseline", () => {
+    const dashboard = readJson(
+      "docs/contracts/fixtures/workspace-dashboard.fixture.json",
+    );
+    const canvas = readJson(
+      "docs/contracts/fixtures/canvas-board-detail.fixture.json",
+    );
+    const seed = read(
+      "docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql",
+    );
+    const primaryMember = dashboard.members[0];
+
+    for (const value of [
+      dashboard.currentUser.id,
+      dashboard.workspace.id,
+      dashboard.workspace.name,
+      dashboard.workspace.description,
+      dashboard.workspace.type,
+      dashboard.workspace.status,
+      primaryMember.memberId,
+      primaryMember.role,
+      primaryMember.displayName,
+      canvas.id,
+      canvas.workspaceId,
+      canvas.title,
+      canvas.boardType,
+    ]) {
+      assertSeedContains(seed, value);
+    }
+
+    for (const shape of canvas.shapes) {
+      for (const value of [
+        shape.id,
+        shape.shapeType,
+        shape.entityType,
+        shape.entityId,
+        shape.displayTitle,
+        shape.width,
+        shape.height,
+        shape.color,
+        shape.zIndex,
+        shape.position.x,
+        shape.position.y,
+      ]) {
+        assertSeedContains(seed, value);
+      }
+    }
+
+    for (const connection of canvas.connections) {
+      for (const value of [
+        connection.id,
+        connection.connectionType,
+        connection.label,
+      ]) {
+        assertSeedContains(seed, value);
+      }
+    }
+
+    for (const value of [
+      canvas.viewSetting.zoom,
+      canvas.viewSetting.viewportX,
+      canvas.viewSetting.viewportY,
+      ...canvas.filterSetting.enabledEntityTypes,
+      canvas.filterSetting.showDelayedOnly,
+      canvas.filterSetting.showRiskOnly,
+    ]) {
+      assertSeedContains(seed, value);
+    }
+
+    assert.doesNotMatch(
+      seed,
+      /22222222-2222-4222-8222-222222222221/,
+      "seed must not retain the old workspace id that conflicts with contract fixtures",
+    );
+  });
+
   it("MVP task draft rebaseline migration aligns SQL with Prisma", () => {
     const migrationPath =
       "docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql";
@@ -1383,16 +2166,31 @@ describe("db schema contract alignment", () => {
 
     const migration = read(migrationPath);
     assert.match(migration, /CREATE TABLE IF NOT EXISTS task_drafts/);
-    assert.match(migration, /workspace_id UUID NOT NULL REFERENCES workspaces\(id\)/);
-    assert.match(migration, /task_id UUID REFERENCES tasks\(id\) ON DELETE SET NULL/);
+    assert.match(
+      migration,
+      /workspace_id UUID NOT NULL REFERENCES workspaces\(id\)/,
+    );
+    assert.match(
+      migration,
+      /task_id UUID REFERENCES tasks\(id\) ON DELETE SET NULL/,
+    );
     assert.match(migration, /idx_task_drafts_workspace_status/);
-    assert.match(read("apps/app-server/prisma/schema.prisma"), /@@map\("task_drafts"\)/);
+    assert.match(
+      read("apps/app-server/prisma/schema.prisma"),
+      /@@map\("task_drafts"\)/,
+    );
     assert.match(read("docs/db/db-schema-by-owner.md"), /`task_drafts`/);
   });
 
   it("db owner document uses real owner names", () => {
     const content = read("docs/db/db-schema-by-owner.md");
-    for (const heading of ["## 동현", "## 주형", "## 진호", "## 은재", "## 세인"]) {
+    for (const heading of [
+      "## 동현",
+      "## 주형",
+      "## 진호",
+      "## 은재",
+      "## 세인",
+    ]) {
       assert.match(content, new RegExp(heading));
     }
   });
@@ -1404,7 +2202,10 @@ describe("review bot context", () => {
     assert.match(content, /docs\/agents\/README\.md/);
     assert.match(content, /docs\/contracts\/README\.md/);
     assert.match(content, /docs\/contracts\/interface-contract-guide\.md/);
-    assert.match(content, /docs\/contracts\/schemas\/pilo-public-contracts\.schema\.json/);
+    assert.match(
+      content,
+      /docs\/contracts\/schemas\/pilo-public-contracts\.schema\.json/,
+    );
     assert.match(content, /docs\/contracts\/fixtures\/README\.md/);
   });
 });

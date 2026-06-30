@@ -91,7 +91,8 @@ type CanvasBoardDetail = {
 type CanvasBoardState = {
   board: CanvasBoardDetail | null;
   source: "api" | "fixture";
-  status: "loading" | "ready" | "fallback";
+  status: "loading" | "ready" | "fallback" | "error";
+  error?: string;
 };
 
 type CanvasNavItem = {
@@ -521,6 +522,9 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   });
   const [hasStoredViewSetting, setHasStoredViewSetting] = useState(false);
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
+  const [canvasPersistenceError, setCanvasPersistenceError] = useState<
+    string | null
+  >(null);
   const workspaceId = useMemo(
     () => resolveCanvasWorkspaceId(pathname),
     [pathname],
@@ -539,6 +543,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     pullRequestCount: dashboard.pullRequests.length,
   });
   const board = boardState.board ?? fallbackBoard;
+  const isCanvasApiLoadError = boardState.status === "error";
   const shouldPersistCanvasApi = boardState.source === "api";
   const activeFilterSetting = filterSetting ?? board.filterSetting;
   const persistedBoard = useMemo(
@@ -565,6 +570,9 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         source: "fixture",
         status: "loading",
       });
+      setCanvasActions(null);
+      setSelectedCard(null);
+      setCanvasPersistenceError(null);
 
       try {
         const boards = await canvasClient.listBoards(workspaceId);
@@ -587,6 +595,18 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         });
       } catch (error) {
         if (cancelled) return;
+
+        if (canvasMode === "api") {
+          setCanvasActions(null);
+          setSelectedCard(null);
+          setBoardState({
+            board: null,
+            source: "api",
+            status: "error",
+            error: "canvas_api_load_failed",
+          });
+          return;
+        }
 
         const fallback = createMockCanvasBoardDetail(
           workspaceId,
@@ -655,7 +675,12 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [board.id, board.filterSetting, board.viewSetting, shouldPersistCanvasApi]);
+  }, [
+    board.id,
+    board.filterSetting,
+    board.viewSetting,
+    shouldPersistCanvasApi,
+  ]);
 
   const persistShapeState = useCallback(
     (nextShapeStateById: Record<string, PiloCanvasShapeState>) => {
@@ -688,9 +713,13 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             ? canvasClient.updateShape(mutation.shapeId, mutation.shape)
             : Promise.resolve(null),
         ]),
-      ).catch(() => {
-        writeCanvasStorage("shape-state", board.id, nextShapeStateById);
-      });
+      )
+        .then(() => setCanvasPersistenceError(null))
+        .catch(() => {
+          setCanvasPersistenceError(
+            "Canvas shape changes were not saved to the API.",
+          );
+        });
     },
     [board.id, board.shapes, canvasClient, shouldPersistCanvasApi],
   );
@@ -735,8 +764,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
       void canvasClient
         .updateViewSetting(board.id, normalizedViewSetting)
+        .then(() => setCanvasPersistenceError(null))
         .catch(() => {
-          writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
+          setCanvasPersistenceError(
+            "Canvas view changes were not saved to the API.",
+          );
         });
     },
     [board.id, canvasClient, shouldPersistCanvasApi],
@@ -751,11 +783,14 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         return;
       }
 
-      void canvasClient.updateFilterSetting(board.id, nextFilterSetting).catch(
-        () => {
-          writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
-        },
-      );
+      void canvasClient
+        .updateFilterSetting(board.id, nextFilterSetting)
+        .then(() => setCanvasPersistenceError(null))
+        .catch(() => {
+          setCanvasPersistenceError(
+            "Canvas filter changes were not saved to the API.",
+          );
+        });
     },
     [board.id, canvasClient, shouldPersistCanvasApi],
   );
@@ -890,7 +925,9 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         <header className="canvas-floating-bar canvas-floating-bar-left">
           <strong className="canvas-wordmark">PILO</strong>
           <button type="button" className="canvas-board-title">
-            <span>{board.title}</span>
+            <span>
+              {isCanvasApiLoadError ? "Canvas API unavailable" : board.title}
+            </span>
             <small>{dashboard.workspace.name}</small>
           </button>
           <button type="button" className="canvas-bar-button">
@@ -903,7 +940,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         <header className="canvas-floating-bar canvas-floating-bar-right">
           <button type="button" className="canvas-status-pill">
-            {boardState.source === "api" ? "API canvas" : "fixture canvas"}
+            {isCanvasApiLoadError
+              ? "API error"
+              : boardState.source === "api"
+                ? "API canvas"
+                : "fixture canvas"}
           </button>
           <div className="avatar">민</div>
           <button type="button" className="canvas-share-button">
@@ -1245,21 +1286,35 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
         </nav>
 
         <section className="canvas-content" aria-label="Canvas board">
-          <PiloTldrawCanvas
-            board={visibleBoard}
-            dashboard={dashboard}
-            freeformShapes={freeformShapes}
-            hasStoredViewSetting={hasStoredViewSetting}
-            hydrationVersion={canvasHydrationVersion}
-            shapeStateById={shapeStateById}
-            viewSetting={viewSetting}
-            onReady={setCanvasActions}
-            onFreeformShapesChange={persistFreeformShapes}
-            onSelectionChange={handleSelectionChange}
-            onShapesChange={persistShapeState}
-            onViewChange={persistViewSetting}
-          />
+          {isCanvasApiLoadError ? (
+            <section className="dashboard-status-panel" aria-live="polite">
+              <strong>Canvas could not be loaded</strong>
+              <p>
+                The app-server Canvas API must respond before API-mode canvas
+                data is shown.
+              </p>
+            </section>
+          ) : (
+            <PiloTldrawCanvas
+              board={visibleBoard}
+              dashboard={dashboard}
+              freeformShapes={freeformShapes}
+              hasStoredViewSetting={hasStoredViewSetting}
+              hydrationVersion={canvasHydrationVersion}
+              shapeStateById={shapeStateById}
+              viewSetting={viewSetting}
+              onReady={setCanvasActions}
+              onFreeformShapesChange={persistFreeformShapes}
+              onSelectionChange={handleSelectionChange}
+              onShapesChange={persistShapeState}
+              onViewChange={persistViewSetting}
+            />
+          )}
         </section>
+
+        {canvasPersistenceError ? (
+          <div className="dashboard-notice">{canvasPersistenceError}</div>
+        ) : null}
 
         {selectedCard ? (
           <aside className="canvas-detail-panel" aria-label="Canvas detail">

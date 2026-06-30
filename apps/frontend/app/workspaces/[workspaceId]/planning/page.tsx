@@ -9,11 +9,19 @@ export function generateStaticParams() {
   }));
 }
 
-export default function WorkspacePlanningPage() {
+type WorkspacePlanningPageProps = {
+  params: {
+    workspaceId: string;
+  };
+};
+
+export default function WorkspacePlanningPage({
+  params,
+}: WorkspacePlanningPageProps) {
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <AgentPlanningWorkspace />
+        <AgentPlanningWorkspace workspaceId={params.workspaceId} />
       </AuthGuard>
     </Suspense>
   );
