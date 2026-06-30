@@ -6,7 +6,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import type { ReviewAnalysisStatus } from "../public";
-import { REVIEW_ROOM_PULL_REQUEST_FIXTURES } from "../room/review-room.fixtures";
+import { PullRequestSummaryRegistry } from "../room/pull-request-summary.registry";
 import { InMemoryPullRequestAnalysisRepository } from "./in-memory-pull-request-analysis.repository";
 import {
   CompletePullRequestAnalysisInput,
@@ -33,13 +33,11 @@ export interface PullRequestAnalysisServiceOptions {
 
 @Injectable()
 export class PullRequestAnalysisService {
-  private readonly pullRequestSummaries: ReadonlyMap<string, unknown> =
-    REVIEW_ROOM_PULL_REQUEST_FIXTURES;
-
   constructor(
     private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
     @Optional()
     options: PullRequestAnalysisServiceOptions = {},
+    private readonly pullRequestRegistry: PullRequestSummaryRegistry = new PullRequestSummaryRegistry(),
   ) {
     if (options.seedFixture) {
       this.seedFixture();
@@ -137,9 +135,9 @@ export class PullRequestAnalysisService {
   }
 
   private assertKnownPullRequest(pullRequestId: string): void {
-    if (!this.pullRequestSummaries.has(pullRequestId)) {
+    if (!this.pullRequestRegistry.has(pullRequestId)) {
       throw new NotFoundException(
-        `PullRequestSummary fixture was not found: ${pullRequestId}`,
+        `PullRequestSummary was not found: ${pullRequestId}`,
       );
     }
   }

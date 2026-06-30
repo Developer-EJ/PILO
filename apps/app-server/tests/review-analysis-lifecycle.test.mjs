@@ -14,6 +14,15 @@ const {
 const {
   PullRequestAnalysisService,
 } = require("../src/modules/review/analysis/pull-request-analysis.service.ts");
+const {
+  InMemoryCodeReviewRoomRepository,
+} = require("../src/modules/review/room/in-memory-code-review-room.repository.ts");
+const {
+  PullRequestSummaryRegistry,
+} = require("../src/modules/review/room/pull-request-summary.registry.ts");
+const {
+  ReviewRoomService,
+} = require("../src/modules/review/room/review-room.service.ts");
 
 function createService(options = {}) {
   return new PullRequestAnalysisService(
@@ -80,6 +89,49 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.equal(analysis.id, "88888888-8888-4888-8888-888888888881");
     assert.equal(analysis.analysisStatus, "succeeded");
     assert.equal(analysis.riskLevel, "medium");
+  });
+
+  it("requests analysis for runtime PR summaries registered by review rooms", () => {
+    const pullRequestRegistry = new PullRequestSummaryRegistry();
+    const roomService = new ReviewRoomService(
+      new InMemoryCodeReviewRoomRepository(),
+      pullRequestRegistry,
+    );
+    const analysisService = new PullRequestAnalysisService(
+      new InMemoryPullRequestAnalysisRepository(),
+      {},
+      pullRequestRegistry,
+    );
+    const pullRequest = {
+      id: "77777777-7777-4777-8777-777777777771",
+      repositoryId: "55555555-5555-4555-8555-555555555501",
+      number: 9,
+      title: "Wire runtime review flow",
+      authorLogin: "reviewer",
+      state: "open",
+      branch: "feature/review",
+      baseBranch: "dev",
+      url: "https://github.com/example/pilo/pull/9",
+      changedFilesCount: 3,
+      additions: 80,
+      deletions: 12,
+      linkedTaskIds: [],
+      syncedAt: "2026-06-30T00:00:00.000Z",
+    };
+
+    roomService.openRoomForPullRequest(
+      pullRequest.id,
+      {
+        workspaceId: "22222222-2222-4222-8222-222222222222",
+        memberId: "33333333-3333-4333-8333-333333333331",
+      },
+      { pullRequest },
+    );
+
+    const analysis = analysisService.requestAnalysis(pullRequest.id);
+
+    assert.equal(analysis.pullRequestId, pullRequest.id);
+    assert.equal(analysis.analysisStatus, "pending");
   });
 });
 

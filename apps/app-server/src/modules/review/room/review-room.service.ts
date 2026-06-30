@@ -9,22 +9,17 @@ import {
   ReviewRoomCreatedEvent,
 } from "./code-review-room.types";
 import { InMemoryCodeReviewRoomRepository } from "./in-memory-code-review-room.repository";
-import {
-  DEFAULT_REVIEW_ROOM_CONTEXT,
-  REVIEW_ROOM_PULL_REQUEST_FIXTURES,
-} from "./review-room.fixtures";
+import { DEFAULT_REVIEW_ROOM_CONTEXT } from "./review-room.fixtures";
+import { PullRequestSummaryRegistry } from "./pull-request-summary.registry";
 
 @Injectable()
 export class ReviewRoomService {
   private readonly defaultContext: ReviewRoomActorContext =
     DEFAULT_REVIEW_ROOM_CONTEXT;
 
-  private readonly pullRequestSummaries = new Map<string, PullRequestSummaryRef>(
-    REVIEW_ROOM_PULL_REQUEST_FIXTURES,
-  );
-
   constructor(
     private readonly roomRepository: InMemoryCodeReviewRoomRepository,
+    private readonly pullRequestRegistry: PullRequestSummaryRegistry = new PullRequestSummaryRegistry(),
   ) {}
 
   openRoomForPullRequest(
@@ -77,18 +72,20 @@ export class ReviewRoomService {
     pullRequestId: string,
     body: OpenReviewRoomBody,
   ): PullRequestSummaryRef {
-    const fromBody = normalizePullRequestSummary(pullRequestId, body.pullRequest);
+    const fromBody = normalizePullRequestSummary(
+      pullRequestId,
+      body.pullRequest,
+    );
 
     if (fromBody) {
-      this.pullRequestSummaries.set(pullRequestId, fromBody);
-      return fromBody;
+      return this.pullRequestRegistry.save(fromBody);
     }
 
     return this.findPullRequestOrThrow(pullRequestId);
   }
 
   private findPullRequestOrThrow(pullRequestId: string): PullRequestSummaryRef {
-    const pullRequest = this.pullRequestSummaries.get(pullRequestId);
+    const pullRequest = this.pullRequestRegistry.find(pullRequestId);
 
     if (!pullRequest) {
       throw new NotFoundException(
@@ -138,8 +135,7 @@ function normalizePullRequestSummary(
       typeof value.authorLogin === "string" ? value.authorLogin : null,
     state: normalizePullRequestState(value.state),
     branch: typeof value.branch === "string" ? value.branch : null,
-    baseBranch:
-      typeof value.baseBranch === "string" ? value.baseBranch : null,
+    baseBranch: typeof value.baseBranch === "string" ? value.baseBranch : null,
     url: value.url,
     changedFilesCount: toInteger(value.changedFilesCount),
     additions: toInteger(value.additions),

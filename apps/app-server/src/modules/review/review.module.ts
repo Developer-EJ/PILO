@@ -18,6 +18,7 @@ import { AgentGraphResultService } from "./result/agent-graph-result.service";
 import { AgentReviewArtifactsResultService } from "./result/agent-review-artifacts-result.service";
 import { AgentResultConsumerService } from "./result/agent-result-consumer.service";
 import { InMemoryCodeReviewRoomRepository } from "./room/in-memory-code-review-room.repository";
+import { PullRequestSummaryRegistry } from "./room/pull-request-summary.registry";
 import { ReviewRoomController } from "./room/review-room.controller";
 import { ReviewRoomService } from "./room/review-room.service";
 
@@ -32,14 +33,25 @@ import { ReviewRoomService } from "./room/review-room.service";
   ],
   providers: [
     ReviewPublicService,
+    PullRequestSummaryRegistry,
     ReviewRoomService,
     InMemoryCodeReviewRoomRepository,
     InMemoryPullRequestAnalysisRepository,
     {
       provide: PullRequestAnalysisService,
-      useFactory: (repository: InMemoryPullRequestAnalysisRepository) =>
-        new PullRequestAnalysisService(repository, { seedFixture: true }),
-      inject: [InMemoryPullRequestAnalysisRepository],
+      useFactory: (
+        repository: InMemoryPullRequestAnalysisRepository,
+        pullRequestRegistry: PullRequestSummaryRegistry,
+      ) =>
+        new PullRequestAnalysisService(
+          repository,
+          { seedFixture: true },
+          pullRequestRegistry,
+        ),
+      inject: [
+        InMemoryPullRequestAnalysisRepository,
+        PullRequestSummaryRegistry,
+      ],
     },
     ReviewArtifactsService,
     InMemoryReviewArtifactsRepository,
