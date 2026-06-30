@@ -9,7 +9,9 @@ import {
 export class ReviewPublicService {
   constructor(private readonly analysisService: PullRequestAnalysisService) {}
 
-  getAnalysisSummary(pullRequestId: string): PRAnalysisSummary {
-    return toPRAnalysisSummary(this.analysisService.getAnalysis(pullRequestId));
+  async getAnalysisSummary(pullRequestId: string): Promise<PRAnalysisSummary> {
+    return toPRAnalysisSummary(
+      await this.analysisService.getAnalysis(pullRequestId),
+    );
   }
 }

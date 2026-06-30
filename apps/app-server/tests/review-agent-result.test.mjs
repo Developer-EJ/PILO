@@ -98,9 +98,11 @@ function createServices() {
 }
 
 describe("agent result root analysis consumer", () => {
-  it("applies succeeded result summary fields idempotently", () => {
+  it("applies succeeded result summary fields idempotently", async () => {
     const { analysisService, resultConsumer } = createServices();
-    analysisService.requestAnalysis("66666666-6666-4666-8666-666666666661");
+    await analysisService.requestAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
 
     const message = {
       jobId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -123,8 +125,8 @@ describe("agent result root analysis consumer", () => {
       },
     };
 
-    const first = resultConsumer.applyResult(message);
-    const second = resultConsumer.applyResult(message);
+    const first = await resultConsumer.applyResult(message);
+    const second = await resultConsumer.applyResult(message);
 
     assert.equal(first.analysisStatus, "succeeded");
     assert.equal(first.riskLevel, "medium");
@@ -134,9 +136,11 @@ describe("agent result root analysis consumer", () => {
     assert.equal(second.updatedAt, first.updatedAt);
   });
 
-  it("treats repeated jobId or runId as the same applied result", () => {
+  it("treats repeated jobId or runId as the same applied result", async () => {
     const { analysisService, resultConsumer } = createServices();
-    analysisService.requestAnalysis("66666666-6666-4666-8666-666666666661");
+    await analysisService.requestAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
 
     const baseMessage = {
       jobId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -149,8 +153,8 @@ describe("agent result root analysis consumer", () => {
       },
     };
 
-    const first = resultConsumer.applyResult(baseMessage);
-    const sameRun = resultConsumer.applyResult({
+    const first = await resultConsumer.applyResult(baseMessage);
+    const sameRun = await resultConsumer.applyResult({
       ...baseMessage,
       jobId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       finishedAt: "2026-06-27T10:04:00.000Z",
@@ -159,7 +163,7 @@ describe("agent result root analysis consumer", () => {
         purposeSummary: "Different run replay",
       },
     });
-    const sameJob = resultConsumer.applyResult({
+    const sameJob = await resultConsumer.applyResult({
       ...baseMessage,
       runId: "99999999-9999-4999-8999-999999999904",
       finishedAt: "2026-06-27T10:05:00.000Z",
@@ -175,11 +179,13 @@ describe("agent result root analysis consumer", () => {
     assert.equal(sameJob.purposeSummary, "First result");
   });
 
-  it("applies failed result with error trace", () => {
+  it("applies failed result with error trace", async () => {
     const { analysisService, resultConsumer } = createServices();
-    analysisService.requestAnalysis("66666666-6666-4666-8666-666666666661");
+    await analysisService.requestAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
 
-    const failed = resultConsumer.applyResult({
+    const failed = await resultConsumer.applyResult({
       jobId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       runId: "99999999-9999-4999-8999-999999999902",
       status: "failed",
@@ -196,7 +202,7 @@ describe("agent result root analysis consumer", () => {
     ]);
   });
 
-  it("applies graph, changed files, and review artifacts from one succeeded result", () => {
+  it("applies graph, changed files, and review artifacts from one succeeded result", async () => {
     const {
       analysisService,
       artifactsService,
@@ -205,7 +211,7 @@ describe("agent result root analysis consumer", () => {
       resultConsumer,
     } = createServices();
     const pullRequestId = "66666666-6666-4666-8666-666666666661";
-    const analysis = analysisService.requestAnalysis(pullRequestId);
+    const analysis = await analysisService.requestAnalysis(pullRequestId);
     const message = {
       jobId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       runId: "99999999-9999-4999-8999-999999999905",
@@ -278,8 +284,8 @@ describe("agent result root analysis consumer", () => {
       },
     };
 
-    const updated = resultConsumer.applyResult(message);
-    const replay = resultConsumer.applyResult(message);
+    const updated = await resultConsumer.applyResult(message);
+    const replay = await resultConsumer.applyResult(message);
     const graph = graphService.getGraph(analysis.id);
     const changedFiles = changedFilesService.listChangedFiles(analysis.id);
     const checklistItems = artifactsService.listChecklistItems(analysis.id);

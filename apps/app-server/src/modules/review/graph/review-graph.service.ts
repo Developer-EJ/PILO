@@ -5,7 +5,7 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import { InMemoryPullRequestAnalysisRepository } from "../analysis/in-memory-pull-request-analysis.repository";
+import { PullRequestAnalysisRepository } from "../analysis/pull-request-analysis.repository";
 import { InMemoryReviewGraphRepository } from "./in-memory-review-graph.repository";
 import {
   NodeReviewStateRecord,
@@ -30,7 +30,7 @@ export class ReviewGraphService {
     @Optional()
     options: ReviewGraphServiceOptions = {},
     @Optional()
-    private readonly analysisRepository?: InMemoryPullRequestAnalysisRepository,
+    private readonly analysisRepository?: PullRequestAnalysisRepository,
   ) {
     if (options.seedFixture) {
       this.seedFixture();
@@ -109,7 +109,13 @@ export class ReviewGraphService {
   }
 
   private resolvePullRequestId(analysisId: string): string | null {
-    return this.analysisRepository?.findById(analysisId)?.pullRequestId ?? null;
+    const analysis = this.analysisRepository?.findById(analysisId);
+
+    if (isPromiseLike(analysis)) {
+      return null;
+    }
+
+    return analysis?.pullRequestId ?? null;
   }
 
   upsertNodeState(
@@ -229,4 +235,15 @@ export class ReviewGraphService {
 
     nodes.forEach((node) => this.graphRepository.saveNode(node));
   }
+}
+
+function isPromiseLike<T>(
+  value: T | Promise<T> | null | undefined,
+): value is Promise<T> {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "then" in value &&
+      typeof value.then === "function",
+  );
 }

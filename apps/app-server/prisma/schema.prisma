@@ -266,6 +266,25 @@ model PullRequest {
   @@map("pull_requests")
 }
 
+model PullRequestAnalysis {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pullRequestId      String   @unique @map("pull_request_id") @db.Uuid
+  purposeSummary     String?  @map("purpose_summary")
+  impactSummary      String?  @map("impact_summary")
+  testRecommendation String?  @map("test_recommendation")
+  riskLevel          String   @default("low") @map("risk_level") @db.VarChar(20)
+  analysisStatus     String   @default("pending") @map("analysis_status") @db.VarChar(20)
+  okCount            Int      @default(0) @map("ok_count")
+  discussCount       Int      @default(0) @map("discuss_count")
+  riskCount          Int      @default(0) @map("risk_count")
+  conclusion         String?
+  errorTrace         Json     @default("[]") @map("error_trace")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("pull_request_analyses")
+}
+
 model TaskPullRequest {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   taskId        String   @map("task_id") @db.Uuid

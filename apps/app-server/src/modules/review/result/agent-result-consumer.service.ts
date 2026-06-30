@@ -4,7 +4,7 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import { InMemoryPullRequestAnalysisRepository } from "../analysis/in-memory-pull-request-analysis.repository";
+import { PullRequestAnalysisRepository } from "../analysis/pull-request-analysis.repository";
 import { PullRequestAnalysisRecord } from "../analysis/pull-request-analysis.types";
 import { AgentChangedFilesResultService } from "./agent-changed-files-result.service";
 import { AgentGraphResultService } from "./agent-graph-result.service";
@@ -26,7 +26,7 @@ export class AgentResultConsumerService {
   private readonly applicationKeysByRunId = new Map<string, string>();
 
   constructor(
-    private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
+    private readonly analysisRepository: PullRequestAnalysisRepository,
     @Optional()
     private readonly graphResultService?: AgentGraphResultService,
     @Optional()
@@ -35,12 +35,14 @@ export class AgentResultConsumerService {
     private readonly artifactsResultService?: AgentReviewArtifactsResultService,
   ) {}
 
-  applyResult(message: AgentResultMessage): PullRequestAnalysisRecord {
+  async applyResult(
+    message: AgentResultMessage,
+  ): Promise<PullRequestAnalysisRecord> {
     const resultKey = this.resultKey(message);
     const existingApplication = this.findExistingApplication(message);
 
     if (existingApplication) {
-      const existingAnalysis = this.analysisRepository.findById(
+      const existingAnalysis = await this.analysisRepository.findById(
         existingApplication.analysisId,
       );
 
@@ -49,7 +51,7 @@ export class AgentResultConsumerService {
       }
     }
 
-    const analysis = this.findAnalysis(message);
+    const analysis = await this.findAnalysis(message);
     const appliedAt = message.finishedAt ?? new Date().toISOString();
     const updated =
       message.status === "failed"
@@ -60,7 +62,7 @@ export class AgentResultConsumerService {
       this.applySecondaryOutputs(updated.id, message.output ?? {});
     }
 
-    const saved = this.analysisRepository.save(updated);
+    const saved = await this.analysisRepository.save(updated);
 
     this.applicationsByResultKey.set(resultKey, {
       jobId: message.jobId,
@@ -75,7 +77,9 @@ export class AgentResultConsumerService {
     return saved;
   }
 
-  private findAnalysis(message: AgentResultMessage): PullRequestAnalysisRecord {
+  private async findAnalysis(
+    message: AgentResultMessage,
+  ): Promise<PullRequestAnalysisRecord> {
     const pullRequestId = message.output?.pullRequestId;
 
     if (!pullRequestId) {
@@ -84,7 +88,8 @@ export class AgentResultConsumerService {
       );
     }
 
-    const analysis = this.analysisRepository.findByPullRequestId(pullRequestId);
+    const analysis =
+      await this.analysisRepository.findByPullRequestId(pullRequestId);
 
     if (!analysis) {
       throw new NotFoundException(

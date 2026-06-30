@@ -8,7 +8,7 @@ import {
 import type { ReviewAnalysisStatus } from "../public";
 import { ReviewGraphService } from "../graph/review-graph.service";
 import { PullRequestSummaryRegistry } from "../room/pull-request-summary.registry";
-import { InMemoryPullRequestAnalysisRepository } from "./in-memory-pull-request-analysis.repository";
+import { PullRequestAnalysisRepository } from "./pull-request-analysis.repository";
 import {
   CompletePullRequestAnalysisInput,
   PullRequestAnalysisRecord,
@@ -35,7 +35,7 @@ export interface PullRequestAnalysisServiceOptions {
 @Injectable()
 export class PullRequestAnalysisService {
   constructor(
-    private readonly analysisRepository: InMemoryPullRequestAnalysisRepository,
+    private readonly analysisRepository: PullRequestAnalysisRepository,
     @Optional()
     options: PullRequestAnalysisServiceOptions = {},
     private readonly pullRequestRegistry: PullRequestSummaryRegistry = new PullRequestSummaryRegistry(),
@@ -47,17 +47,18 @@ export class PullRequestAnalysisService {
     }
   }
 
-  requestAnalysis(pullRequestId: string): PullRequestAnalysisRecord {
+  async requestAnalysis(pullRequestId: string): Promise<PullRequestAnalysisRecord> {
     this.assertKnownPullRequest(pullRequestId);
 
-    const existing = this.analysisRepository.findByPullRequestId(pullRequestId);
+    const existing =
+      await this.analysisRepository.findByPullRequestId(pullRequestId);
 
     if (existing) {
       this.ensurePendingGraph(existing);
       return existing;
     }
 
-    const created = this.analysisRepository.create({
+    const created = await this.analysisRepository.create({
       id: randomUUID(),
       pullRequestId,
       createdAt: new Date().toISOString(),
@@ -67,8 +68,9 @@ export class PullRequestAnalysisService {
     return created;
   }
 
-  getAnalysis(pullRequestId: string): PullRequestAnalysisRecord {
-    const analysis = this.analysisRepository.findByPullRequestId(pullRequestId);
+  async getAnalysis(pullRequestId: string): Promise<PullRequestAnalysisRecord> {
+    const analysis =
+      await this.analysisRepository.findByPullRequestId(pullRequestId);
 
     if (!analysis) {
       throw new NotFoundException(
@@ -83,8 +85,16 @@ export class PullRequestAnalysisService {
     analysisId: string,
     nextStatus: ReviewAnalysisStatus,
     result: CompletePullRequestAnalysisInput = {},
-  ): PullRequestAnalysisRecord {
-    const analysis = this.analysisRepository.findById(analysisId);
+  ): Promise<PullRequestAnalysisRecord> {
+    return this.transitionAnalysisAsync(analysisId, nextStatus, result);
+  }
+
+  private async transitionAnalysisAsync(
+    analysisId: string,
+    nextStatus: ReviewAnalysisStatus,
+    result: CompletePullRequestAnalysisInput,
+  ): Promise<PullRequestAnalysisRecord> {
+    const analysis = await this.analysisRepository.findById(analysisId);
 
     if (!analysis) {
       throw new NotFoundException(
@@ -193,7 +203,7 @@ export class PullRequestAnalysisService {
   }
 
   private seedFixture(): void {
-    this.analysisRepository.save({
+    void this.analysisRepository.save({
       id: FIXTURE_ANALYSIS_ID,
       pullRequestId: FIXTURE_PULL_REQUEST_ID,
       purposeSummary: "Adds an OAuth callback route and visible result state.",

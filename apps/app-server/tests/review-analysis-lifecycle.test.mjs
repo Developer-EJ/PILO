@@ -78,13 +78,13 @@ function createController() {
 }
 
 describe("PR analysis lifecycle API boundary", () => {
-  it("requests and reads a pending PR analysis", () => {
+  it("requests and reads a pending PR analysis", async () => {
     const controller = createController();
 
-    const requested = controller.requestAnalysis(
+    const requested = await controller.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
-    const loaded = controller.getAnalysis(
+    const loaded = await controller.getAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
@@ -92,13 +92,13 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.deepEqual(loaded, requested);
   });
 
-  it("does not create duplicate analysis roots for the same PR", () => {
+  it("does not create duplicate analysis roots for the same PR", async () => {
     const controller = createController();
 
-    const first = controller.requestAnalysis(
+    const first = await controller.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
-    const second = controller.requestAnalysis(
+    const second = await controller.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
@@ -106,25 +106,27 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.equal(second.createdAt, first.createdAt);
   });
 
-  it("does not expose mutable repository records", () => {
+  it("does not expose mutable repository records", async () => {
     const service = createService();
-    const analysis = service.requestAnalysis(
+    const analysis = await service.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
     analysis.analysisStatus = "succeeded";
     analysis.errorTrace.push("mutated outside the state machine");
 
-    const loaded = service.getAnalysis("66666666-6666-4666-8666-666666666661");
+    const loaded = await service.getAnalysis(
+      "66666666-6666-4666-8666-666666666661",
+    );
 
     assert.equal(loaded.analysisStatus, "pending");
     assert.deepEqual(loaded.errorTrace, []);
   });
 
-  it("can seed the local MVP analysis fixture when the app module opts in", () => {
+  it("can seed the local MVP analysis fixture when the app module opts in", async () => {
     const service = createService({ seedFixture: true });
 
-    const analysis = service.getAnalysis(
+    const analysis = await service.getAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
@@ -133,20 +135,20 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.equal(analysis.riskLevel, "medium");
   });
 
-  it("rejects analysis requests for pull requests that were not registered", () => {
+  it("rejects analysis requests for pull requests that were not registered", async () => {
     const service = new PullRequestAnalysisService(
       new InMemoryPullRequestAnalysisRepository(),
       {},
       new PullRequestSummaryRegistry(),
     );
 
-    assert.throws(
+    await assert.rejects(
       () => service.requestAnalysis(DEFAULT_PULL_REQUEST_ID),
       /PullRequestSummary was not found/,
     );
   });
 
-  it("requests analysis for runtime PR summaries registered by review rooms", () => {
+  it("requests analysis for runtime PR summaries registered by review rooms", async () => {
     const pullRequestRegistry = new PullRequestSummaryRegistry();
     const graphService = new ReviewGraphService(
       new InMemoryReviewGraphRepository(),
@@ -187,7 +189,7 @@ describe("PR analysis lifecycle API boundary", () => {
       { pullRequest },
     );
 
-    const analysis = analysisService.requestAnalysis(pullRequest.id);
+    const analysis = await analysisService.requestAnalysis(pullRequest.id);
 
     assert.equal(analysis.pullRequestId, pullRequest.id);
     assert.equal(analysis.analysisStatus, "pending");
@@ -208,14 +210,14 @@ describe("PR analysis lifecycle API boundary", () => {
 });
 
 describe("PR analysis state machine", () => {
-  it("allows pending -> running -> succeeded", () => {
+  it("allows pending -> running -> succeeded", async () => {
     const service = createService();
-    const analysis = service.requestAnalysis(
+    const analysis = await service.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
-    const running = service.transitionAnalysis(analysis.id, "running");
-    const succeeded = service.transitionAnalysis(running.id, "succeeded", {
+    const running = await service.transitionAnalysis(analysis.id, "running");
+    const succeeded = await service.transitionAnalysis(running.id, "succeeded", {
       purposeSummary: "OAuth callback 화면 골격을 추가했다.",
       impactSummary: "Auth route와 session redirect flow에 영향이 있다.",
       testRecommendation: "성공/실패 redirect smoke test",
@@ -239,26 +241,26 @@ describe("PR analysis state machine", () => {
     });
   });
 
-  it("rejects invalid status transitions", () => {
+  it("rejects invalid status transitions", async () => {
     const service = createService();
-    const analysis = service.requestAnalysis(
+    const analysis = await service.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
-    assert.throws(
+    await assert.rejects(
       () => service.transitionAnalysis(analysis.id, "succeeded"),
       /Invalid review analysis transition/,
     );
   });
 
-  it("preserves failure error traces in completed events", () => {
+  it("preserves failure error traces in completed events", async () => {
     const service = createService();
-    const analysis = service.requestAnalysis(
+    const analysis = await service.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
-    const running = service.transitionAnalysis(analysis.id, "running");
-    const failed = service.transitionAnalysis(running.id, "failed", {
+    const running = await service.transitionAnalysis(analysis.id, "running");
+    const failed = await service.transitionAnalysis(running.id, "failed", {
       errorTrace: ["AI worker timed out"],
     });
 
@@ -272,15 +274,15 @@ describe("PR analysis state machine", () => {
     });
   });
 
-  it("rejects invalid result counts instead of hiding upstream errors", () => {
+  it("rejects invalid result counts instead of hiding upstream errors", async () => {
     const service = createService();
-    const analysis = service.requestAnalysis(
+    const analysis = await service.requestAnalysis(
       "66666666-6666-4666-8666-666666666661",
     );
 
-    const running = service.transitionAnalysis(analysis.id, "running");
+    const running = await service.transitionAnalysis(analysis.id, "running");
 
-    assert.throws(
+    await assert.rejects(
       () =>
         service.transitionAnalysis(running.id, "succeeded", { okCount: -1 }),
       /okCount must be a non-negative integer/,

@@ -47,7 +47,7 @@ function createPullRequestSummary(overrides = {}) {
   };
 }
 
-function createAnalysisService() {
+async function createAnalysisService() {
   const pullRequestRegistry = new PullRequestSummaryRegistry();
   pullRequestRegistry.save(createPullRequestSummary());
   const service = new PullRequestAnalysisService(
@@ -56,9 +56,9 @@ function createAnalysisService() {
     pullRequestRegistry,
   );
 
-  const pending = service.requestAnalysis(DEFAULT_PULL_REQUEST_ID);
-  const running = service.transitionAnalysis(pending.id, "running");
-  service.transitionAnalysis(running.id, "succeeded", {
+  const pending = await service.requestAnalysis(DEFAULT_PULL_REQUEST_ID);
+  const running = await service.transitionAnalysis(pending.id, "running");
+  await service.transitionAnalysis(running.id, "succeeded", {
     purposeSummary: "Adds an OAuth callback route and visible result state.",
     impactSummary: "Touches auth routing, login redirects, and session recovery.",
     testRecommendation:
@@ -135,12 +135,12 @@ describe("review public adapter", () => {
 });
 
 describe("review public API boundary", () => {
-  it("returns PRAnalysisSummary for Dashboard and Canvas consumers", () => {
+  it("returns PRAnalysisSummary for Dashboard and Canvas consumers", async () => {
     const controller = new ReviewPublicController(
-      new ReviewPublicService(createAnalysisService()),
+      new ReviewPublicService(await createAnalysisService()),
     );
 
-    const summary = controller.getAnalysisSummary(
+    const summary = await controller.getAnalysisSummary(
       "66666666-6666-4666-8666-666666666661",
     );
 

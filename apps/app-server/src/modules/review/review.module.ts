@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
-import { InMemoryPullRequestAnalysisRepository } from "./analysis/in-memory-pull-request-analysis.repository";
+import { DatabaseModule } from "../database/database.module";
+import { PullRequestAnalysisRepository } from "./analysis/pull-request-analysis.repository";
 import { PullRequestAnalysisController } from "./analysis/pull-request-analysis.controller";
 import { PullRequestAnalysisService } from "./analysis/pull-request-analysis.service";
+import { RuntimePullRequestAnalysisRepository } from "./analysis/runtime-pull-request-analysis.repository";
 import { InMemoryReviewArtifactsRepository } from "./artifacts/in-memory-review-artifacts.repository";
 import { ReviewArtifactsController } from "./artifacts/review-artifacts.controller";
 import { ReviewArtifactsService } from "./artifacts/review-artifacts.service";
@@ -23,6 +25,7 @@ import { ReviewRoomController } from "./room/review-room.controller";
 import { ReviewRoomService } from "./room/review-room.service";
 
 @Module({
+  imports: [DatabaseModule],
   controllers: [
     ReviewPublicController,
     ReviewRoomController,
@@ -42,11 +45,14 @@ import { ReviewRoomService } from "./room/review-room.service";
     },
     ReviewRoomService,
     InMemoryCodeReviewRoomRepository,
-    InMemoryPullRequestAnalysisRepository,
+    {
+      provide: PullRequestAnalysisRepository,
+      useClass: RuntimePullRequestAnalysisRepository,
+    },
     {
       provide: PullRequestAnalysisService,
       useFactory: (
-        repository: InMemoryPullRequestAnalysisRepository,
+        repository: PullRequestAnalysisRepository,
         pullRequestRegistry: PullRequestSummaryRegistry,
         graphService: ReviewGraphService,
       ) =>
@@ -57,7 +63,7 @@ import { ReviewRoomService } from "./room/review-room.service";
           graphService,
         ),
       inject: [
-        InMemoryPullRequestAnalysisRepository,
+        PullRequestAnalysisRepository,
         PullRequestSummaryRegistry,
         ReviewGraphService,
       ],
@@ -78,7 +84,7 @@ import { ReviewRoomService } from "./room/review-room.service";
       provide: ReviewGraphService,
       useFactory: (
         repository: InMemoryReviewGraphRepository,
-        analysisRepository: InMemoryPullRequestAnalysisRepository,
+        analysisRepository: PullRequestAnalysisRepository,
       ) =>
         new ReviewGraphService(
           repository,
@@ -87,7 +93,7 @@ import { ReviewRoomService } from "./room/review-room.service";
         ),
       inject: [
         InMemoryReviewGraphRepository,
-        InMemoryPullRequestAnalysisRepository,
+        PullRequestAnalysisRepository,
       ],
     },
     AgentGraphResultService,

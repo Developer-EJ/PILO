@@ -9,7 +9,7 @@ export class ReviewPublicController {
   @Get(":pullRequestId/analysis-summary")
   getAnalysisSummary(
     @Param("pullRequestId", ParseUUIDPipe) pullRequestId: string,
-  ): PRAnalysisSummary {
+  ): Promise<PRAnalysisSummary> {
     return this.reviewPublicService.getAnalysisSummary(pullRequestId);
   }
 }

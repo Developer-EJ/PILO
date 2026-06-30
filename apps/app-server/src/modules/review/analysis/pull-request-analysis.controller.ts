@@ -10,14 +10,14 @@ export class PullRequestAnalysisController {
   @HttpCode(202)
   requestAnalysis(
     @Param("pullRequestId") pullRequestId: string,
-  ): PullRequestAnalysisRecord {
+  ): Promise<PullRequestAnalysisRecord> {
     return this.analysisService.requestAnalysis(pullRequestId);
   }
 
   @Get(":pullRequestId/analysis")
   getAnalysis(
     @Param("pullRequestId") pullRequestId: string,
-  ): PullRequestAnalysisRecord {
+  ): Promise<PullRequestAnalysisRecord> {
     return this.analysisService.getAnalysis(pullRequestId);
   }
 }

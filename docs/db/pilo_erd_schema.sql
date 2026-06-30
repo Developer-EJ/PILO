@@ -626,6 +626,7 @@ CREATE TABLE pull_request_analyses (
   discuss_count INTEGER NOT NULL DEFAULT 0,
   risk_count INTEGER NOT NULL DEFAULT 0,
   conclusion TEXT,
+  error_trace JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT pull_request_analyses_risk_level_check CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),

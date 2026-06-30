@@ -3,9 +3,12 @@ import {
   CreatePullRequestAnalysisInput,
   PullRequestAnalysisRecord,
 } from "./pull-request-analysis.types";
+import { PullRequestAnalysisRepository } from "./pull-request-analysis.repository";
 
 @Injectable()
-export class InMemoryPullRequestAnalysisRepository {
+export class InMemoryPullRequestAnalysisRepository
+  implements PullRequestAnalysisRepository
+{
   private readonly analysesById = new Map<string, PullRequestAnalysisRecord>();
   private readonly analysisIdsByPullRequestId = new Map<string, string>();
 

@@ -3397,7 +3397,7 @@ describe("app-server package", () => {
       };
       const analysisService = app.get(PullRequestAnalysisService);
 
-      assert.throws(
+      await assert.rejects(
         () => analysisService.getAnalysis(pullRequest.id),
         /Pull request analysis was not found/,
       );
@@ -3409,7 +3409,7 @@ describe("app-server package", () => {
         },
         { pullRequest },
       );
-      const analysis = analysisService.requestAnalysis(pullRequest.id);
+      const analysis = await analysisService.requestAnalysis(pullRequest.id);
 
       assert.equal(analysis.pullRequestId, pullRequest.id);
       assert.equal(analysis.analysisStatus, "pending");
