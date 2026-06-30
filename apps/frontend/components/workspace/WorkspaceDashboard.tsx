@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { createNotificationClient } from "../../lib/notification/notificationClient.mjs";
@@ -16,8 +16,12 @@ import {
   extractWorkspaceIdFromPathname,
   readStoredWorkspaceId,
   resolveCurrentWorkspaceSelection,
+  workspaceDashboardHref,
+  writeStoredWorkspaceId,
 } from "../../lib/workspace/currentWorkspace.mjs";
-import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
+import {
+  createWorkspaceClient,
+} from "../../lib/workspace/workspaceClient.mjs";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 type DashboardTask = {
@@ -102,6 +106,17 @@ type NotificationState =
   | { status: "ready"; notifications: WorkspaceNotification[] }
   | { status: "error"; notifications: WorkspaceNotification[] };
 
+type WorkspaceSelectionState =
+  | { status: "loading"; workspaceId: null; error: null }
+  | { status: "ready"; workspaceId: string; error: null }
+  | { status: "empty"; workspaceId: null; error: null }
+  | { status: "error"; workspaceId: null; error: string };
+
+type WorkspaceCreateState =
+  | { status: "idle"; error: null }
+  | { status: "creating"; error: null }
+  | { status: "error"; error: string };
+
 const initialState: DashboardState = {
   status: "loading",
   dashboard: null,
@@ -111,6 +126,17 @@ const initialState: DashboardState = {
 const initialNotificationState: NotificationState = {
   status: "loading",
   notifications: [],
+};
+
+const initialWorkspaceSelectionState: WorkspaceSelectionState = {
+  status: "loading",
+  workspaceId: null,
+  error: null,
+};
+
+const initialWorkspaceCreateState: WorkspaceCreateState = {
+  status: "idle",
+  error: null,
 };
 
 function buildWorkspaceRoutes(workspaceId: string) {
@@ -363,26 +389,29 @@ function buildDashboardViewModel(
   };
 }
 
-function resolveDashboardWorkspaceId(
+function resolveRouteWorkspaceId(
   pathname: string,
   routeWorkspaceId?: string,
 ) {
-  const urlWorkspaceId =
-    routeWorkspaceId ?? extractWorkspaceIdFromPathname(pathname);
+  return routeWorkspaceId ?? extractWorkspaceIdFromPathname(pathname);
+}
 
-  if (urlWorkspaceId) {
-    return urlWorkspaceId;
+function isFirstRunRuntimeDashboard(
+  dashboard: DashboardRecord,
+  dashboardMode: string,
+) {
+  if (dashboardMode !== "api" || dashboard.source === "fixture") {
+    return false;
   }
 
-  const selection = resolveCurrentWorkspaceSelection({
-    workspaces: mockWorkspaces,
-    storedWorkspaceId: readStoredWorkspaceId(),
-  });
-
   return (
-    selection.workspace?.id ??
-    selection.fallbackWorkspace?.id ??
-    mockWorkspaces[0].id
+    dashboard.tasks.length === 0 &&
+    dashboard.pullRequests.length === 0 &&
+    dashboard.agentActions.length === 0 &&
+    dashboard.meetingReports.length === 0 &&
+    (dashboard.githubIssues?.length ?? 0) === 0 &&
+    (dashboard.prAnalyses?.length ?? 0) === 0 &&
+    (dashboard.canvasEntities?.length ?? 0) === 0
   );
 }
 
@@ -405,15 +434,82 @@ function EmptyRow({ text }: { text: string }) {
   return <p className="empty-row">{text}</p>;
 }
 
+function WorkspaceCreatePanel({
+  createState,
+  onSubmit,
+}: {
+  createState: WorkspaceCreateState;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <section className="workspace-create-panel">
+      <form className="workspace-create-form" onSubmit={onSubmit}>
+        <label>
+          <span>Workspace name</span>
+          <input
+            name="name"
+            placeholder="PILO MVP"
+            required
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          <span>Project description</span>
+          <textarea
+            name="description"
+            placeholder="What are you trying to build?"
+          />
+        </label>
+        <button
+          disabled={createState.status === "creating"}
+          type="submit"
+        >
+          Create workspace
+        </button>
+        {createState.status === "error" ? (
+          <p>{createState.error}</p>
+        ) : null}
+      </form>
+    </section>
+  );
+}
+
+function ProjectSetupLaunch({ href }: { href: string }) {
+  return (
+    <section className="project-setup-launch">
+      <Link href={href}>프로젝트 설정 시작</Link>
+    </section>
+  );
+}
+
 export function WorkspaceDashboard({
   workspaceId: routeWorkspaceId,
 }: {
   workspaceId?: string;
 }) {
+  const router = useRouter();
   const pathname = usePathname() ?? "/";
-  const workspaceId = useMemo(
-    () => resolveDashboardWorkspaceId(pathname, routeWorkspaceId),
+  const routeSelectedWorkspaceId = useMemo(
+    () => resolveRouteWorkspaceId(pathname, routeWorkspaceId),
     [pathname, routeWorkspaceId],
+  );
+  const [workspaceState, setWorkspaceState] =
+    useState<WorkspaceSelectionState>(
+      routeSelectedWorkspaceId
+        ? {
+            status: "ready",
+            workspaceId: routeSelectedWorkspaceId,
+            error: null,
+          }
+        : initialWorkspaceSelectionState,
+    );
+  const workspaceId = routeSelectedWorkspaceId ?? workspaceState.workspaceId;
+  const workspaceStatus = routeSelectedWorkspaceId
+    ? "ready"
+    : workspaceState.status;
+  const workspaceError = routeSelectedWorkspaceId ? null : workspaceState.error;
+  const [createState, setCreateState] = useState<WorkspaceCreateState>(
+    initialWorkspaceCreateState,
   );
   const [state, setState] = useState<DashboardState>(initialState);
   const [notificationState, setNotificationState] = useState<NotificationState>(
@@ -422,7 +518,7 @@ export function WorkspaceDashboard({
   const [notificationActionIdInFlight, setNotificationActionIdInFlight] =
     useState<string | null>(null);
   const routes = useMemo(
-    () => buildWorkspaceRoutes(workspaceId),
+    () => (workspaceId ? buildWorkspaceRoutes(workspaceId) : null),
     [workspaceId],
   );
   const dashboardMode = useMemo(
@@ -433,6 +529,75 @@ export function WorkspaceDashboard({
 
   useEffect(() => {
     let cancelled = false;
+
+    if (routeSelectedWorkspaceId) {
+      writeStoredWorkspaceId(routeSelectedWorkspaceId);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function selectWorkspace() {
+      setWorkspaceState(initialWorkspaceSelectionState);
+
+      const workspaceClient = createWorkspaceClient();
+      const workspaces = await workspaceClient.listWorkspaces();
+      const selection = resolveCurrentWorkspaceSelection({
+        workspaces,
+        storedWorkspaceId: readStoredWorkspaceId(),
+      });
+
+      if (cancelled) {
+        return;
+      }
+
+      if (selection.status === "empty" || !selection.workspace) {
+        setWorkspaceState({
+          status: "empty",
+          workspaceId: null,
+          error: null,
+        });
+        return;
+      }
+
+      if (selection.shouldPersist) {
+        writeStoredWorkspaceId(selection.workspace.id);
+      }
+
+      setWorkspaceState({
+        status: "ready",
+        workspaceId: selection.workspace.id,
+        error: null,
+      });
+
+      if (selection.shouldReplaceRoute) {
+        router.replace(workspaceDashboardHref(selection.workspace.id));
+      }
+    }
+
+    selectWorkspace().catch(() => {
+      if (!cancelled) {
+        setWorkspaceState({
+          status: "error",
+          workspaceId: null,
+          error: "Workspace list could not be loaded.",
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeSelectedWorkspaceId, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!workspaceId) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     async function loadDashboard() {
       setState(initialState);
@@ -473,6 +638,12 @@ export function WorkspaceDashboard({
   useEffect(() => {
     let cancelled = false;
 
+    if (!workspaceId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     async function loadNotifications() {
       setNotificationState(initialNotificationState);
 
@@ -502,17 +673,60 @@ export function WorkspaceDashboard({
     };
   }, [notificationClient, workspaceId]);
 
-  const viewModel = state.dashboard
+  const viewModel = state.dashboard && workspaceId
     ? buildDashboardViewModel(state.dashboard, workspaceId)
     : null;
   const navItems: DashboardNavItem[] =
-    viewModel?.navItems ?? buildDashboardNavItems(null, workspaceId);
+    viewModel?.navItems ??
+    (workspaceId ? buildDashboardNavItems(null, workspaceId) : []);
   const unreadNotificationCount = notificationState.notifications.filter(
     (notification) => !notification.readAt,
   ).length;
+  const shouldShowProjectSetup =
+    state.status === "ready" &&
+    state.dashboard &&
+    viewModel &&
+    isFirstRunRuntimeDashboard(state.dashboard, dashboardMode);
+
+  async function createWorkspace(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const name = String(formData.get("name") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim();
+
+    if (!name) {
+      return;
+    }
+
+    setCreateState({ status: "creating", error: null });
+
+    try {
+      const workspaceClient = createWorkspaceClient();
+      const workspace = await workspaceClient.createWorkspace({
+        name,
+        description,
+        type: "side_project",
+      });
+
+      writeStoredWorkspaceId(workspace.id);
+      setWorkspaceState({
+        status: "ready",
+        workspaceId: workspace.id,
+        error: null,
+      });
+      setCreateState(initialWorkspaceCreateState);
+      router.replace(workspaceDashboardHref(workspace.id));
+    } catch (error) {
+      setCreateState({
+        status: "error",
+        error: "Workspace could not be created.",
+      });
+    }
+  }
 
   async function markNotificationRead(notification: WorkspaceNotification) {
-    if (notification.readAt || notificationActionIdInFlight) {
+    if (!workspaceId || notification.readAt || notificationActionIdInFlight) {
       return;
     }
 
@@ -536,7 +750,7 @@ export function WorkspaceDashboard({
   }
 
   async function markAllNotificationsRead() {
-    if (!unreadNotificationCount || notificationActionIdInFlight) {
+    if (!workspaceId || !unreadNotificationCount || notificationActionIdInFlight) {
       return;
     }
 
@@ -570,7 +784,7 @@ export function WorkspaceDashboard({
             <Link className="meeting-chip" href="#workspace-notifications">
               Notifications <code>{unreadNotificationCount}</code>
             </Link>
-            <Link className="meeting-chip" href={routes.meetings}>
+            <Link className="meeting-chip" href={routes?.meetings ?? "#"}>
               <span className="live-dot" />
               Meetings{" "}
               <code>{state.dashboard?.meetingReports.length ?? 0}</code>
@@ -584,21 +798,46 @@ export function WorkspaceDashboard({
           className="dashboard-content"
           aria-label="PILO dashboard layout"
         >
-          {state.status === "loading" ? (
+          {workspaceStatus === "loading" ? (
+            <DashboardStatusPanel
+              title="Loading workspace"
+              description="Workspace list is being prepared."
+            />
+          ) : null}
+
+          {workspaceStatus === "empty" ? (
+            <WorkspaceCreatePanel
+              createState={createState}
+              onSubmit={createWorkspace}
+            />
+          ) : null}
+
+          {workspaceStatus === "error" ? (
+            <DashboardStatusPanel
+              title="Workspace could not be loaded"
+              description={workspaceError ?? "Workspace list could not be loaded."}
+            />
+          ) : null}
+
+          {workspaceStatus === "ready" && state.status === "loading" ? (
             <DashboardStatusPanel
               title="Loading dashboard"
               description="Workspace summary data is being prepared."
             />
           ) : null}
 
-          {state.status === "error" ? (
+          {workspaceStatus === "ready" && state.status === "error" ? (
             <DashboardStatusPanel
               title="Dashboard could not be loaded"
               description="Check the app-server connection or retry the workspace view."
             />
           ) : null}
 
-          {state.status === "ready" && viewModel ? (
+          {shouldShowProjectSetup && viewModel ? (
+            <ProjectSetupLaunch href={viewModel.routes.planning} />
+          ) : null}
+
+          {state.status === "ready" && viewModel && !shouldShowProjectSetup ? (
             <>
               {state.warnings.length ? (
                 <div className="dashboard-notice">

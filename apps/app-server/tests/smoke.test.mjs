@@ -1800,12 +1800,12 @@ describe("app-server package", () => {
     const runtimeAgentAction = {
       id: "99999999-9999-4999-8996-999999999991",
       runId: "99999999-9999-4999-8999-999999999991",
-      type: "task.create.draft",
+      type: "task.create",
       source: "planning",
       requiresConfirmation: true,
       payload: {
         workspaceId: workspace.id,
-        title: "Runtime task draft",
+        title: "Runtime task",
       },
       status: "waiting_confirmation",
       confirmedByMemberId: null,
@@ -3638,23 +3638,23 @@ describe("app-server package", () => {
           },
         },
       });
-      const taskDraftAction = agentRun.actions.find(
-        (action) => action.type === "task.create.draft",
+      const taskAction = agentRun.actions.find(
+        (action) => action.type === "task.create",
       );
 
-      assert.ok(taskDraftAction);
+      assert.ok(taskAction);
 
       const executedAction = await app.get(AgentRuntimeService).approveAction({
-        actionId: taskDraftAction.id,
+        actionId: taskAction.id,
         actor: localActor,
       });
-      const taskDrafts = await app
+      const tasks = await app
         .get(JuhyungTaskService)
-        .listTaskDrafts(LOCAL_MVP_WORKSPACE_ID, localActor);
+        .listTasks(LOCAL_MVP_WORKSPACE_ID, {}, localActor);
 
       assert.equal(executedAction.status, "executed");
-      assert.equal(taskDrafts.length, 1);
-      assert.equal(taskDrafts[0].status, "draft");
+      assert.equal(tasks.length, 1);
+      assert.equal(tasks[0].status, "todo");
       const pullRequest = {
         id: "66666666-6666-4666-8666-666666666661",
         repositoryId: "55555555-5555-4555-8555-555555555501",

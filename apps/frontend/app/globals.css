@@ -466,6 +466,82 @@ h1 {
   font-weight: 750;
 }
 
+.workspace-create-panel,
+.project-setup-launch {
+  display: grid;
+  min-height: calc(100vh - 160px);
+  place-items: center;
+}
+
+.workspace-create-form {
+  display: grid;
+  width: min(100%, 440px);
+  gap: 12px;
+  border: 1px solid #e4e7ee;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: var(--pilo-shadow-soft);
+  padding: 18px;
+}
+
+.workspace-create-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.workspace-create-form span {
+  color: var(--pilo-muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.workspace-create-form input,
+.workspace-create-form textarea {
+  width: 100%;
+  border: 1px solid #dfe3eb;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--pilo-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  outline: 0;
+  padding: 11px 12px;
+}
+
+.workspace-create-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.workspace-create-form button,
+.project-setup-launch a {
+  display: inline-grid;
+  min-height: 46px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--pilo-primary);
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  padding: 0 18px;
+  text-decoration: none;
+}
+
+.workspace-create-form button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.workspace-create-form p {
+  color: var(--pilo-danger);
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1238,6 +1314,10 @@ h1 {
   padding: 13px;
 }
 
+.agent-project-brief {
+  margin-top: 12px;
+}
+
 .agent-preview-block h3,
 .agent-draft-list h3,
 .agent-plan-bands h3,
@@ -1261,6 +1341,18 @@ h1 {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.agent-feature-bucket {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-feature-bucket h4 {
+  color: var(--pilo-primary);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .agent-draft-list article {

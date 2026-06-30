@@ -6,7 +6,10 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
-import type { CreateTaskDraftBody } from "../juhyung/juhyung-task.service";
+import type {
+  CreateTaskBody,
+  CreateTaskDraftBody,
+} from "../juhyung/juhyung-task.service";
 import {
   WorkspaceAccessPublicService,
   type WorkspaceActor,
@@ -25,9 +28,6 @@ import {
   AgentRuntimeValidationError,
 } from "./agent-runtime.types";
 import { createPlanningGenerateRun } from "./planning-local-runner";
-
-const PLANNING_APPROVAL_OWNER_API_MESSAGE =
-  "Planning approval owner API execution is not available in the local MVP runner. Approve owner-specific actions instead.";
 
 interface PlanningOwnerApiResult {
   owner: "task";
@@ -252,15 +252,15 @@ export class AgentRuntimeService {
       return {
         action: {
           ...action,
-          payload: {
-            ...action.payload,
-            errorMessage: PLANNING_APPROVAL_OWNER_API_MESSAGE,
-          },
-          status: "failed",
-          executedAt: null,
+          status: "executed",
+          executedAt: decidedAt,
         },
         ownerApiResults: [],
       };
+    }
+
+    if (action.type === "task.create") {
+      return this.executeTaskCreateAction(run, action, actor, decidedAt);
     }
 
     if (action.type === "task.create.draft") {
@@ -271,6 +271,61 @@ export class AgentRuntimeService {
       action,
       ownerApiResults: [],
     };
+  }
+
+  private async executeTaskCreateAction(
+    run: AgentRunDetail,
+    action: AgentActionDetail,
+    actor: WorkspaceActor | undefined,
+    decidedAt: string,
+  ): Promise<OwnerActionExecution> {
+    const payloadWorkspaceId =
+      firstString(action.payload.workspaceId) ?? run.workspaceId;
+
+    if (payloadWorkspaceId !== run.workspaceId) {
+      return this.failedOwnerAction(
+        action,
+        "Agent action workspaceId must match its Agent run workspaceId",
+      );
+    }
+
+    if (!this.taskService) {
+      return this.failedOwnerAction(action, "Task owner API is not available");
+    }
+
+    try {
+      const body: CreateTaskBody = {
+        title: action.payload.title,
+        description: action.payload.description,
+        assigneeMemberId: action.payload.assigneeMemberId,
+        priority: action.payload.priority,
+        dueDate: action.payload.dueDate,
+        status: action.payload.status ?? "todo",
+        milestoneId: action.payload.milestoneId,
+      };
+      const task = await this.taskService.createTask(
+        payloadWorkspaceId,
+        body,
+        actor,
+      );
+
+      return {
+        action: {
+          ...action,
+          status: "executed",
+          executedAt: decidedAt,
+        },
+        ownerApiResults: [
+          this.taskOwnerResult(action, "succeeded", task.id, null),
+        ],
+      };
+    } catch (error) {
+      if (isAuthorizationError(error)) {
+        throw error;
+      }
+
+      return this.failedOwnerAction(action, errorMessageFrom(error));
+    }
   }
 
   private async executeTaskDraftAction(
@@ -389,7 +444,11 @@ export class AgentRuntimeService {
           };
         }
 
-        if (nextAction.type === "task.create.draft" && ownerApiResults.length) {
+        if (
+          (nextAction.type === "task.create" ||
+            nextAction.type === "task.create.draft") &&
+          ownerApiResults.length
+        ) {
           planDraft.detail.approval = {
             ...approval,
             ownerApiResults: [...existingOwnerApiResults, ...ownerApiResults],

@@ -235,6 +235,20 @@ describe("frontend package", () => {
     assert.equal(requests[0].url, "https://api.pilo.dev/api/workspaces");
     assert.equal(requests[0].init.credentials, "include");
     assertLocalActorHeaders(requests[0]);
+    const createdWorkspace = await apiClient.createWorkspace({
+      name: "Scene1 MVP",
+      description: "First project setup",
+    });
+
+    assert.deepEqual(createdWorkspace, mockWorkspaces);
+    assert.equal(requests[1].url, "https://api.pilo.dev/api/workspaces");
+    assert.equal(requests[1].init.method, "POST");
+    assert.equal(requests[1].init.headers["Content-Type"], "application/json");
+    assert.equal(
+      JSON.parse(requests[1].init.body).description,
+      "First project setup",
+    );
+    assertLocalActorHeaders(requests[1]);
 
     assert.deepEqual(
       await createWorkspaceClient({
@@ -243,6 +257,13 @@ describe("frontend package", () => {
       }).listWorkspaces(),
       [],
     );
+    const mockClient = createMockWorkspaceClient({ workspaces: [] });
+    const mockCreatedWorkspace = await mockClient.createWorkspace({
+      name: "Local Scene1",
+    });
+
+    assert.equal(mockCreatedWorkspace.name, "Local Scene1");
+    assert.deepEqual(await mockClient.listWorkspaces(), [mockCreatedWorkspace]);
 
     await assert.rejects(
       createWorkspaceApiClient({
@@ -1976,14 +1997,19 @@ describe("frontend package", () => {
     const mockPlanAction = mockRun.actions.find(
       (action) => action.type === "planning.approve",
     );
-    const failedMockPlanApproval = await mockAgentClient.approveAction(
+    const executedMockPlanApproval = await mockAgentClient.approveAction(
       mockPlanAction.id,
     );
     const nextMockRun = await mockAgentClient.getRun(mockRun.id);
 
     assert.equal(mockRun.workspaceId, workspaceId);
-    assert.equal(failedMockPlanApproval.status, "failed");
-    assert.equal(failedMockPlanApproval.executedAt, null);
+    assert.equal(mockRun.output.planDraft.detail.projectBrief.goal, "Launch a focused PILO MVP");
+    assert.equal(
+      mockRun.actions.filter((action) => action.type === "task.create").length,
+      2,
+    );
+    assert.equal(executedMockPlanApproval.status, "executed");
+    assert.ok(executedMockPlanApproval.executedAt);
     assert.equal(nextMockRun.status, "requires_confirmation");
     assert.equal(
       (

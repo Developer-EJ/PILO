@@ -109,10 +109,35 @@ async function requestWorkspaceJson(path, init, { baseUrl, fetcher }) {
     ...init,
     headers: {
       Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...localMvpActorHeaders(),
       ...(init?.headers ?? {}),
     },
   });
+}
+
+function withWorkspaceJsonBody(body, init = {}) {
+  return {
+    ...init,
+    body: JSON.stringify(body),
+  };
+}
+
+function normalizeWorkspaceCreateInput(input = {}) {
+  return {
+    name:
+      typeof input.name === "string" && input.name.trim()
+        ? input.name.trim()
+        : "Untitled project",
+    description:
+      typeof input.description === "string" && input.description.trim()
+        ? input.description.trim()
+        : null,
+    type:
+      typeof input.type === "string" && input.type.trim()
+        ? input.type.trim()
+        : "side_project",
+  };
 }
 
 export function createWorkspaceApiClient({
@@ -136,15 +161,59 @@ export function createWorkspaceApiClient({
 
       return readWorkspaceJson(response, path);
     },
+
+    async createWorkspace(input = {}) {
+      const path = "/api/workspaces";
+      const response = await requestWorkspaceJson(
+        path,
+        withWorkspaceJsonBody(normalizeWorkspaceCreateInput(input), {
+          method: "POST",
+        }),
+        {
+          baseUrl,
+          fetcher,
+        },
+      );
+
+      if (!response.ok) {
+        throw new WorkspaceApiError("Failed to create workspace", {
+          status: response.status,
+          path,
+        });
+      }
+
+      return readWorkspaceJson(response, path);
+    },
   };
 }
 
 export function createMockWorkspaceClient({
   workspaces = mockWorkspaces,
 } = {}) {
+  const localWorkspaces = [...workspaces];
+
   return {
     async listWorkspaces() {
-      return workspaces;
+      return localWorkspaces;
+    },
+
+    async createWorkspace(input = {}) {
+      const body = normalizeWorkspaceCreateInput(input);
+      const now = new Date().toISOString();
+      const workspace = {
+        id: `local-workspace-${String(localWorkspaces.length + 1).padStart(4, "0")}`,
+        name: body.name,
+        description: body.description,
+        type: body.type,
+        status: "active",
+        myRole: "owner",
+        memberCount: 1,
+        createdAt: now,
+      };
+
+      localWorkspaces.unshift(workspace);
+
+      return workspace;
     },
   };
 }

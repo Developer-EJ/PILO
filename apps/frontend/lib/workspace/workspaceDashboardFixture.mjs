@@ -212,7 +212,7 @@ export const workspaceDashboardFixture = {
     {
       id: "99999999-9999-4999-8999-999999999991",
       runId: "99999999-9999-4999-8999-999999999901",
-      type: "task.create.draft",
+      type: "task.create",
       source: "meeting",
       requiresConfirmation: true,
       payload: {

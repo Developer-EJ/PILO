@@ -28,24 +28,43 @@ type AgentAction = {
   executedAt: string | null;
 };
 
+type TechStackCandidate = {
+  name?: string;
+  frontend: string;
+  backend: string;
+  databaseName: string;
+  ai: string;
+  deploy: string;
+  reason: string;
+  difficulty: string;
+  alternatives: string[];
+  recommended?: boolean;
+};
+
 type PlanDraftDetail = {
   id: string;
   goal: string;
   targetUser: string;
   problem: string;
   duration: string;
+  teamSize: string;
+  experienceLevel: string;
   outputGoal: string;
   status: string;
-  techStack: {
-    frontend: string;
-    backend: string;
-    databaseName: string;
-    ai: string;
-    deploy: string;
-    reason: string;
-    difficulty: string;
-    alternatives: string[];
+  projectBrief?: {
+    title: string;
+    goal: string;
+    targetUser: string;
+    problem: string;
+    duration: string;
+    teamSize: string;
+    experienceLevel: string;
+    outputGoal: string;
+    successCriteria: string[];
+    constraints: string[];
   };
+  techStack: TechStackCandidate;
+  techStackCandidates?: TechStackCandidate[];
   featureDrafts: Array<{
     id: string;
     title: string;
@@ -120,6 +139,12 @@ type AgentRunDetail = {
 
 type ProjectStartInput = typeof defaultProjectStartInput;
 
+const featureBucketLabels = {
+  must: "Must",
+  should: "Should",
+  excluded: "Excluded",
+};
+
 function resolveWorkspaceId(pathname: string, routeWorkspaceId?: string) {
   const urlWorkspaceId =
     routeWorkspaceId ?? extractWorkspaceIdFromPathname(pathname);
@@ -181,7 +206,7 @@ function ownerResultForAction(
   action: AgentAction,
   ownerApiResults: PlanDraftDetail["approval"]["ownerApiResults"],
 ) {
-  if (action.type !== "task.create.draft") {
+  if (action.type !== "task.create" && action.type !== "task.create.draft") {
     return null;
   }
 
@@ -205,7 +230,7 @@ function ownerOperationLabel(
   result: PlanDraftDetail["approval"]["ownerApiResults"][number],
 ) {
   if (result.owner === "task" && result.operation === "task.create") {
-    return "task draft create";
+    return "task create";
   }
 
   return result.operation;
@@ -222,7 +247,7 @@ function ownerResultSummary(
     result.status === "succeeded" &&
     result.targetEntityId
   ) {
-    return `${operation}: TaskDraft ${result.targetEntityId}`;
+    return `${operation}: Task ${result.targetEntityId}`;
   }
 
   if (result.status === "succeeded" && result.targetEntityId) {
@@ -231,7 +256,7 @@ function ownerResultSummary(
 
   if (result.status === "succeeded") {
     return result.owner === "task" && result.operation === "task.create"
-      ? `${operation}: succeeded without a returned TaskDraft id`
+      ? `${operation}: succeeded without a returned Task id`
       : `${operation}: succeeded without a returned entity id`;
   }
 
@@ -266,23 +291,23 @@ function actionOutcomeMessage(
   }
 
   if (action.type === "planning.approve") {
-    return "Plan approval is local only; no owner API write was executed.";
+    return "ProjectBrief approved. Approve task actions to create real Tasks.";
   }
 
-  if (action.type === "task.create.draft") {
+  if (action.type === "task.create" || action.type === "task.create.draft") {
     if (ownerResult?.status === "succeeded" && ownerResult.targetEntityId) {
-      return `TaskDraft created: ${ownerResult.targetEntityId}`;
+      return `Task created: ${ownerResult.targetEntityId}`;
     }
 
     if (ownerResult?.status === "failed") {
-      return ownerErrorMessage ?? "TaskDraft creation failed.";
+      return ownerErrorMessage ?? "Task creation failed.";
     }
 
     if (action.executedAt) {
-      return "Owner API reported execution, but no TaskDraft id was returned.";
+      return "Owner API reported execution, but no Task id was returned.";
     }
 
-    return "TaskDraft was not created.";
+    return "Task was not created.";
   }
 
   return action.executedAt
@@ -313,6 +338,19 @@ export function AgentPlanningWorkspace({
   const [error, setError] = useState<string | null>(null);
 
   const planDraft = run?.output?.planDraft?.detail ?? null;
+  const featureBuckets = useMemo(
+    () =>
+      planDraft
+        ? Object.entries(featureBucketLabels).map(([scope, label]) => ({
+            scope,
+            label,
+            features: planDraft.featureDrafts.filter(
+              (feature) => feature.scope === scope,
+            ),
+          }))
+        : [],
+    [planDraft],
+  );
   const navItems = buildWorkspaceFeatureTabs(workspaceId, {
     active: isPlanningRoute ? "planning" : "agent",
     badges: {
@@ -470,22 +508,51 @@ export function AgentPlanningWorkspace({
                       <dd>{planDraft.duration}</dd>
                     </div>
                     <div>
+                      <dt>Team</dt>
+                      <dd>{planDraft.teamSize}</dd>
+                    </div>
+                    <div>
+                      <dt>Experience</dt>
+                      <dd>{planDraft.experienceLevel}</dd>
+                    </div>
+                    <div>
                       <dt>Output</dt>
                       <dd>{planDraft.outputGoal}</dd>
                     </div>
                   </dl>
                 </div>
 
-                <div className="agent-preview-columns">
-                  <article className="agent-preview-block">
-                    <h3>Tech stack</h3>
-                    <p>
-                      {planDraft.techStack.frontend} /{" "}
-                      {planDraft.techStack.backend} /{" "}
-                      {planDraft.techStack.databaseName}
-                    </p>
-                    <small>{planDraft.techStack.reason}</small>
+                {planDraft.projectBrief ? (
+                  <article className="agent-preview-block agent-project-brief">
+                    <h3>ProjectBrief</h3>
+                    <p>{planDraft.projectBrief.title}</p>
+                    <small>
+                      {planDraft.projectBrief.successCriteria.join(" ")}
+                    </small>
+                    <small>{planDraft.projectBrief.constraints.join(" ")}</small>
                   </article>
+                ) : null}
+
+                <div className="agent-preview-columns">
+                  {(planDraft.techStackCandidates?.length
+                    ? planDraft.techStackCandidates
+                    : [planDraft.techStack]
+                  ).map((stack) => (
+                    <article
+                      className="agent-preview-block"
+                      key={`${stack.frontend}-${stack.backend}-${stack.databaseName}`}
+                    >
+                      <h3>
+                        {stack.name ?? "Tech stack"}
+                        {stack.recommended ? " recommended" : ""}
+                      </h3>
+                      <p>
+                        {stack.frontend} / {stack.backend} /{" "}
+                        {stack.databaseName}
+                      </p>
+                      <small>{stack.reason}</small>
+                    </article>
+                  ))}
 
                   <article className="agent-preview-block">
                     <h3>First agenda</h3>
@@ -495,13 +562,18 @@ export function AgentPlanningWorkspace({
                 </div>
 
                 <div className="agent-draft-list">
-                  <h3>Feature drafts</h3>
-                  {planDraft.featureDrafts.map((feature) => (
-                    <article key={feature.id}>
-                      <strong>{feature.title}</strong>
-                      <span>{feature.scope}</span>
-                      <p>{feature.description}</p>
-                    </article>
+                  <h3>Must / Should / Excluded</h3>
+                  {featureBuckets.map((bucket) => (
+                    <section className="agent-feature-bucket" key={bucket.scope}>
+                      <h4>{bucket.label}</h4>
+                      {bucket.features.map((feature) => (
+                        <article key={feature.id}>
+                          <strong>{feature.title}</strong>
+                          <span>{feature.scope}</span>
+                          <p>{feature.description}</p>
+                        </article>
+                      ))}
+                    </section>
                   ))}
                 </div>
 
