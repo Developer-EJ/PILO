@@ -660,6 +660,10 @@ describe("frontend package", () => {
       "components/workspace/WorkspaceCanvas.tsx",
       "utf8",
     );
+    const canvasBoardIndex = readFileSync(
+      "components/workspace/WorkspaceCanvasBoards.tsx",
+      "utf8",
+    );
 
     assert.match(
       dashboardPage,
@@ -675,6 +679,12 @@ describe("frontend package", () => {
     );
     assert.match(canvas, /canvasMode === "api"[\s\S]*status: "error"/);
     assert.match(canvas, /Canvas could not be loaded/);
+    assert.match(
+      canvasBoardIndex,
+      /status: "error"[\s\S]*Canvas board list could not be loaded from the API/,
+    );
+    assert.doesNotMatch(canvasBoardIndex, /status: "fallback"/);
+    assert.doesNotMatch(canvasBoardIndex, /[諛罹蹂묒앹꾩놁몃곌媛]/);
     assert.doesNotMatch(
       canvas,
       /\.catch\(\(\) => \{\s*writeCanvasStorage\("shape-state"/,

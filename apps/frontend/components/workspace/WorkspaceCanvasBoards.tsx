@@ -25,10 +25,11 @@ type CanvasBoardSummary = {
   updatedAt: string;
 };
 
-type CanvasBoardListState =
-  | { status: "loading"; boards: CanvasBoardSummary[]; warning: null }
-  | { status: "ready"; boards: CanvasBoardSummary[]; warning: null }
-  | { status: "fallback"; boards: CanvasBoardSummary[]; warning: string };
+type CanvasBoardListState = {
+  status: "loading" | "ready" | "error";
+  boards: CanvasBoardSummary[];
+  warning: string | null;
+};
 
 const initialBoardListState: CanvasBoardListState = {
   status: "loading",
@@ -43,9 +44,9 @@ function resolveWorkspaceId(pathname: string) {
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "방금 전";
+  if (Number.isNaN(date.getTime())) return "Just now";
 
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -84,6 +85,7 @@ export function WorkspaceCanvasBoards() {
   );
   const [title, setTitle] = useState("Project Map");
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +93,7 @@ export function WorkspaceCanvasBoards() {
 
     async function loadBoards() {
       setState(initialBoardListState);
+      setCreateError(null);
 
       try {
         const boards = (await canvasClient.listBoards(
@@ -108,9 +111,9 @@ export function WorkspaceCanvasBoards() {
         if (cancelled) return;
 
         setState({
-          status: "fallback",
+          status: "error",
           boards: [],
-          warning: "캔버스 목록을 불러오지 못했어요.",
+          warning: "Canvas board list could not be loaded from the API.",
         });
       }
     }
@@ -131,6 +134,7 @@ export function WorkspaceCanvasBoards() {
     const nextTitle = title.trim() || "Untitled canvas";
 
     setIsCreating(true);
+    setCreateError(null);
 
     try {
       const board = (await canvasClient.createBoard(workspaceId, {
@@ -139,6 +143,8 @@ export function WorkspaceCanvasBoards() {
       })) as CanvasBoardSummary;
 
       router.push(workspaceCanvasBoardHref(workspaceId, board.id));
+    } catch (error) {
+      setCreateError("Canvas board could not be created.");
     } finally {
       setIsCreating(false);
     }
@@ -152,7 +158,7 @@ export function WorkspaceCanvasBoards() {
         <header className="topbar">
           <div>
             <small>CANVAS</small>
-            <h1>캔버스 보드</h1>
+            <h1>Canvas boards</h1>
           </div>
           <div className="topbar-actions">
             <LogoutButton />
@@ -164,34 +170,35 @@ export function WorkspaceCanvasBoards() {
           <div className="canvas-board-index-heading">
             <div>
               <span>{dashboard.workspace.name}</span>
-              <h2>작업할 캔버스를 선택하세요</h2>
+              <h2>Select a workspace canvas</h2>
             </div>
             {state.warning ? <p>{state.warning}</p> : null}
+            {createError ? <p>{createError}</p> : null}
           </div>
 
           <form className="canvas-board-create-panel" onSubmit={createBoard}>
-            <label htmlFor="canvas-board-title">새 캔버스</label>
+            <label htmlFor="canvas-board-title">New canvas</label>
             <div>
               <input
                 id="canvas-board-title"
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="캔버스 이름"
+                placeholder="Canvas name"
               />
               <button type="submit" disabled={isCreating}>
-                {isCreating ? "생성 중" : "생성"}
+                {isCreating ? "Creating" : "Create"}
               </button>
             </div>
           </form>
 
           <section className="canvas-board-list" aria-label="Canvas boards">
             {state.status === "loading" ? (
-              <p className="canvas-board-empty">캔버스 목록을 불러오는 중...</p>
+              <p className="canvas-board-empty">Loading canvas boards.</p>
             ) : null}
 
             {state.status !== "loading" && !state.boards.length ? (
               <p className="canvas-board-empty">
-                아직 캔버스가 없어요. 새 캔버스를 만들어 시작하세요.
+                No canvas boards yet. Create a canvas to begin.
               </p>
             ) : null}
 
@@ -204,7 +211,8 @@ export function WorkspaceCanvasBoards() {
                 <span>{board.boardType.replace(/_/g, " ")}</span>
                 <strong>{board.title}</strong>
                 <small>
-                  노드 {board.shapeCount}개 · 연결 {board.connectionCount}개
+                  Nodes {board.shapeCount} / Connections{" "}
+                  {board.connectionCount}
                 </small>
                 <time dateTime={board.updatedAt}>
                   {formatUpdatedAt(board.updatedAt)}
