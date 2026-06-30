@@ -3,13 +3,20 @@
 import { type CSSProperties, useMemo, useState } from "react";
 import styles from "./page.module.css";
 
-type ReviewDecision = "ok" | "discuss" | "unknown";
+export type ReviewDecision = "ok" | "discuss" | "unknown";
+export type ReviewLoadStatus =
+  | "loading"
+  | "selecting"
+  | "opening"
+  | "ready"
+  | "error";
+export type ReviewBusyAction = "node" | "checklist" | "comment" | null;
 
 export type PullRequestSummary = {
   id: string;
   number: number;
   title: string;
-  authorLogin: string;
+  authorLogin?: string | null;
   state: string;
   branch: string;
   baseBranch: string;
@@ -30,22 +37,64 @@ export type ReviewAnalysis = {
   id: string;
   analysisStatus: string;
   riskLevel: string;
-  purposeSummary: string;
-  impactSummary: string;
-  testRecommendation: string;
-  conclusion: string;
-  reviewNotes: string[];
+  purposeSummary: string | null;
+  impactSummary: string | null;
+  testRecommendation: string | null;
+  conclusion: string | null;
+  reviewNotes?: string[];
 };
 
-type ReviewCanvasNode = {
+export type ReviewChangedFunction = {
   id: string;
+  name: string;
+  changeType: string;
+  summary: string | null;
+};
+
+export type ReviewChangedFile = {
+  id: string;
+  filePath: string;
+  changeType: string;
+  additions: number;
+  deletions: number;
+  summary: string | null;
+  functions: ReviewChangedFunction[];
+};
+
+export type ReviewChecklistItem = {
+  id: string;
+  analysisId: string;
+  checklistType: "review" | "merge";
+  title: string;
+  status: "todo" | "done" | "skipped";
+  checkedByMemberId: string | null;
+  checkedAt: string | null;
+  sortOrder: number;
+};
+
+export type ReviewComment = {
+  id: string;
+  roomId: string;
+  authorMemberId: string;
+  nodeId: string | null;
+  body: string;
+  createdAt: string;
+};
+
+export type ReviewCanvasNode = {
+  id: string;
+  analysisId?: string;
   label: string;
   nodeType: string;
+  filePath?: string | null;
+  functionName?: string | null;
   riskLevel: string;
+  status?: ReviewDecision;
   reviewOrder: number;
   roleSummary: string;
+  reviewReason?: string | null;
   position: { x: number; y: number };
-  detail: {
+  detail?: {
     filePath: string;
     modificationReason: string;
     changeGroups: Array<{
@@ -70,7 +119,14 @@ export type ReviewCanvas = {
   intentSummary: string;
   reviewStrategy: string;
   nodes: ReviewCanvasNode[];
-  edges: Array<{ from: string; to: string }>;
+  edges: Array<{
+    id?: string;
+    from?: string;
+    to?: string;
+    sourceNodeId?: string;
+    targetNodeId?: string;
+    label?: string | null;
+  }>;
 };
 
 export type ReviewSession = {
@@ -78,6 +134,27 @@ export type ReviewSession = {
   linkedTasks: ReviewTask[];
   analysis: ReviewAnalysis;
   canvas: ReviewCanvas;
+  changedFiles?: ReviewChangedFile[];
+  checklistItems?: ReviewChecklistItem[];
+  comments?: ReviewComment[];
+};
+
+type ReviewNodeWorkspaceProps = {
+  sessions: ReviewSession[];
+  status?: ReviewLoadStatus;
+  warnings?: string[];
+  selectedSessionId?: string | null;
+  selectedNodeId?: string | null;
+  busyAction?: ReviewBusyAction;
+  commentDraft?: string;
+  onCommentDraftChange?: (value: string) => void;
+  onSelectSession?: (session: ReviewSession) => void;
+  onBackToSelector?: () => void;
+  onSelectNode?: (nodeId: string | null) => void;
+  onNodeDecision?: (decision: ReviewDecision) => void;
+  onAddChecklistItem?: () => void;
+  onToggleChecklistItem?: (item: ReviewChecklistItem) => void;
+  onAddComment?: () => void;
 };
 
 const riskClassNames: Record<string, string> = {
@@ -88,45 +165,131 @@ const riskClassNames: Record<string, string> = {
 };
 
 const decisionLabels: Record<ReviewDecision, string> = {
-  ok: "문제 없음",
-  discuss: "논의 필요",
-  unknown: "판단 불가",
+  ok: "OK",
+  discuss: "Discuss",
+  unknown: "Unreviewed",
 };
 
 const stateLabels: Record<string, string> = {
-  review_requested: "리뷰 요청",
+  review_requested: "Review requested",
   open: "Open",
   merged: "Merged",
   closed: "Closed",
 };
 
 const analysisStatusLabels: Record<string, string> = {
-  pending: "분석 대기",
-  running: "분석 중",
-  succeeded: "분석 완료",
-  failed: "분석 실패",
+  pending: "Analysis pending",
+  running: "Analysis running",
+  succeeded: "Analysis complete",
+  failed: "Analysis failed",
 };
+
+function riskClassName(riskLevel: string) {
+  return riskClassNames[riskLevel] ?? styles.nodeLow;
+}
+
+function sortNodes(nodes: ReviewCanvasNode[]) {
+  return [...nodes].sort((left, right) => left.reviewOrder - right.reviewOrder);
+}
+
+function edgeEndpoints(edge: ReviewCanvas["edges"][number]) {
+  return {
+    from: edge.from ?? edge.sourceNodeId ?? "",
+    to: edge.to ?? edge.targetNodeId ?? "",
+  };
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function defaultEmptyAnalysis(pullRequest: PullRequestSummary): ReviewAnalysis {
+  return {
+    id: `pending-${pullRequest.id}`,
+    analysisStatus: "pending",
+    riskLevel: "low",
+    purposeSummary: null,
+    impactSummary: null,
+    testRecommendation: null,
+    conclusion: null,
+    reviewNotes: [],
+  };
+}
+
+function defaultEmptyCanvas(): ReviewCanvas {
+  return {
+    intentSummary: "Open a review room to load the review graph.",
+    reviewStrategy: "The runtime Review API will provide the node order.",
+    nodes: [],
+    edges: [],
+  };
+}
+
+export function createReviewSelectorSession(
+  pullRequest: PullRequestSummary,
+): ReviewSession {
+  return {
+    pullRequest,
+    linkedTasks: [],
+    analysis: defaultEmptyAnalysis(pullRequest),
+    canvas: defaultEmptyCanvas(),
+    changedFiles: [],
+    checklistItems: [],
+    comments: [],
+  };
+}
 
 export function ReviewNodeWorkspace({
   sessions,
-}: {
-  sessions: ReviewSession[];
-}) {
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    null,
-  );
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  status = "selecting",
+  warnings = [],
+  selectedSessionId,
+  selectedNodeId,
+  busyAction = null,
+  commentDraft,
+  onCommentDraftChange,
+  onSelectSession,
+  onBackToSelector,
+  onSelectNode,
+  onNodeDecision,
+  onAddChecklistItem,
+  onToggleChecklistItem,
+  onAddComment,
+}: ReviewNodeWorkspaceProps) {
+  const [internalSelectedSessionId, setInternalSelectedSessionId] = useState<
+    string | null
+  >(null);
+  const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<
+    string | null
+  >(null);
   const [highlightedHunkId, setHighlightedHunkId] = useState<string | null>(
     null,
   );
   const [decisions, setDecisions] = useState<Record<string, ReviewDecision>>(
     {},
   );
+  const [internalCommentDraft, setInternalCommentDraft] = useState("");
   const [contextPanelWidth, setContextPanelWidth] = useState(460);
 
+  const activeSessionId =
+    selectedSessionId === undefined
+      ? internalSelectedSessionId
+      : selectedSessionId;
+  const activeNodeId =
+    selectedNodeId === undefined ? internalSelectedNodeId : selectedNodeId;
+  const activeCommentDraft =
+    commentDraft === undefined ? internalCommentDraft : commentDraft;
+
   const selectedSession =
-    sessions.find((session) => session.pullRequest.id === selectedSessionId) ??
+    sessions.find((session) => session.pullRequest.id === activeSessionId) ??
     null;
+
+  const sortedNodes = useMemo(
+    () => sortNodes(selectedSession?.canvas.nodes ?? []),
+    [selectedSession],
+  );
 
   const selectedNode = useMemo(() => {
     if (!selectedSession) {
@@ -134,10 +297,95 @@ export function ReviewNodeWorkspace({
     }
 
     return (
-      selectedSession.canvas.nodes.find((node) => node.id === selectedNodeId) ??
+      selectedSession.canvas.nodes.find((node) => node.id === activeNodeId) ??
       null
     );
-  }, [selectedNodeId, selectedSession]);
+  }, [activeNodeId, selectedSession]);
+
+  const changedFiles = selectedSession?.changedFiles ?? [];
+  const checklistItems = selectedSession?.checklistItems ?? [];
+  const comments = selectedSession?.comments ?? [];
+  const notes = selectedSession?.analysis.reviewNotes ?? [];
+  const relevantChangedFiles = selectedNode?.filePath
+    ? changedFiles.filter((file) => file.filePath === selectedNode.filePath)
+    : changedFiles;
+  const relevantComments = selectedNode
+    ? comments.filter(
+        (comment) => comment.nodeId === null || comment.nodeId === selectedNode.id,
+      )
+    : comments;
+
+  const selectSession = (session: ReviewSession) => {
+    setInternalSelectedSessionId(session.pullRequest.id);
+    setInternalSelectedNodeId(null);
+    setHighlightedHunkId(null);
+    onSelectSession?.(session);
+  };
+
+  const selectNode = (nodeId: string | null) => {
+    setInternalSelectedNodeId(nodeId);
+    setHighlightedHunkId(null);
+    onSelectNode?.(nodeId);
+  };
+
+  const setDraft = (value: string) => {
+    setInternalCommentDraft(value);
+    onCommentDraftChange?.(value);
+  };
+
+  const handleTopbarBack = () => {
+    if (selectedNode) {
+      selectNode(null);
+      return;
+    }
+
+    setInternalSelectedSessionId(null);
+    setInternalSelectedNodeId(null);
+    setHighlightedHunkId(null);
+    onBackToSelector?.();
+  };
+
+  const handleDecision = (decision: ReviewDecision) => {
+    if (!selectedNode) {
+      return;
+    }
+
+    setDecisions((current) => ({
+      ...current,
+      [selectedNode.id]: decision,
+    }));
+    onNodeDecision?.(decision);
+  };
+
+  const handleAddComment = () => {
+    onAddComment?.();
+
+    if (!onCommentDraftChange) {
+      setInternalCommentDraft("");
+    }
+  };
+
+  if (status === "loading") {
+    return (
+      <main className={styles.selectorPage}>
+        <section className={styles.statusPanel} aria-live="polite">
+          <strong>Loading review workspace</strong>
+          <p>Preparing pull requests and the Review API client.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <main className={styles.selectorPage}>
+        <section className={styles.statusPanel} role="alert">
+          <strong>Review workspace could not load</strong>
+          <p>Refresh after the app server is available.</p>
+        </section>
+      </main>
+    );
+  }
 
   if (!selectedSession) {
     return (
@@ -145,19 +393,34 @@ export function ReviewNodeWorkspace({
         <section className={styles.selectorPanel} aria-label="PR selector">
           <div className={styles.selectorHeader}>
             <span className={styles.eyebrow}>CODE REVIEW</span>
-            <h1>리뷰할 PR을 선택</h1>
+            <h1>Select a pull request</h1>
           </div>
 
+          {warnings.length ? (
+            <div className={styles.noticeList} aria-label="Review notices">
+              {warnings.slice(-3).map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          ) : null}
+
           <div className={styles.selectorList}>
+            {sessions.length === 0 ? (
+              <article className={styles.emptyState}>
+                <strong>No pull requests found</strong>
+                <p>
+                  Connect or sync GitHub pull requests before opening a review
+                  room.
+                </p>
+              </article>
+            ) : null}
+
             {sessions.map((session) => (
               <button
                 className={styles.selectorItem}
+                disabled={status === "opening"}
                 key={session.pullRequest.id}
-                onClick={() => {
-                  setSelectedSessionId(session.pullRequest.id);
-                  setSelectedNodeId(null);
-                  setHighlightedHunkId(null);
-                }}
+                onClick={() => selectSession(session)}
                 type="button"
               >
                 <span className={styles.number}>
@@ -165,9 +428,14 @@ export function ReviewNodeWorkspace({
                 </span>
                 <strong>{session.pullRequest.title}</strong>
                 <small>
-                  {session.pullRequest.authorLogin} ·{" "}
-                  {stateLabels[session.pullRequest.state]} ·{" "}
-                  {session.pullRequest.changedFilesCount} files
+                  {session.pullRequest.authorLogin ?? "unknown"} /{" "}
+                  {stateLabels[session.pullRequest.state] ??
+                    session.pullRequest.state}{" "}
+                  / {session.pullRequest.changedFilesCount} files
+                </small>
+                <small className={styles.branchLine}>
+                  {session.pullRequest.branch} into{" "}
+                  {session.pullRequest.baseBranch}
                 </small>
               </button>
             ))}
@@ -179,16 +447,6 @@ export function ReviewNodeWorkspace({
 
   const { analysis, canvas, linkedTasks, pullRequest } = selectedSession;
 
-  const handleTopbarBack = () => {
-    if (selectedNode) {
-      setSelectedNodeId(null);
-      setHighlightedHunkId(null);
-      return;
-    }
-
-    setSelectedSessionId(null);
-  };
-
   return (
     <main className={styles.reviewApp}>
       <header className={styles.topbar}>
@@ -197,12 +455,12 @@ export function ReviewNodeWorkspace({
           onClick={handleTopbarBack}
           type="button"
         >
-          {selectedNode ? "← 워크플로우" : "← PR 선택"}
+          {selectedNode ? "Canvas" : "Pull requests"}
         </button>
         <div className={styles.topbarGroup}>
           <span>BRANCH</span>
           <strong>
-            {pullRequest.branch} → {pullRequest.baseBranch}
+            {pullRequest.branch} into {pullRequest.baseBranch}
           </strong>
         </div>
         <div className={styles.topbarGroup}>
@@ -218,14 +476,14 @@ export function ReviewNodeWorkspace({
 
       {selectedNode ? (
         <section className={styles.detailWorkspace}>
-          <div className={styles.diffPane} aria-label="Code diff">
+          <div className={styles.diffPane} aria-label="Changed files">
             <div className={styles.diffTitle}>
-              <span className={styles.eyebrow}>SELECTED FILE</span>
-              <strong>{selectedNode.detail.filePath}</strong>
+              <span className={styles.eyebrow}>SELECTED NODE</span>
+              <strong>{selectedNode.filePath ?? selectedNode.label}</strong>
             </div>
 
-            <div className={styles.diffHunks}>
-              {selectedNode.detail.diffHunks.map((hunk) => (
+            <div className={styles.changedFileStack}>
+              {selectedNode.detail?.diffHunks.map((hunk) => (
                 <section
                   className={
                     highlightedHunkId === hunk.id
@@ -237,7 +495,7 @@ export function ReviewNodeWorkspace({
                 >
                   <div className={styles.diffColumn}>
                     <div className={styles.diffColumnHead}>
-                      <span>이전 코드</span>
+                      <span>Before</span>
                       <small>L{hunk.oldStartLine}</small>
                     </div>
                     <pre>
@@ -246,7 +504,7 @@ export function ReviewNodeWorkspace({
                   </div>
                   <div className={styles.diffColumn}>
                     <div className={styles.diffColumnHead}>
-                      <span>변경 코드</span>
+                      <span>After</span>
                       <small>L{hunk.newStartLine}</small>
                     </div>
                     <pre>
@@ -255,6 +513,42 @@ export function ReviewNodeWorkspace({
                   </div>
                 </section>
               ))}
+
+              {selectedNode.detail?.diffHunks.length ? null : (
+                <>
+                  {relevantChangedFiles.length ? (
+                    relevantChangedFiles.map((file) => (
+                      <article className={styles.changedFileCard} key={file.id}>
+                        <div>
+                          <strong>{file.filePath}</strong>
+                          <span>
+                            {file.changeType} +{file.additions} -{file.deletions}
+                          </span>
+                        </div>
+                        {file.summary ? <p>{file.summary}</p> : null}
+                        {file.functions.length ? (
+                          <ul>
+                            {file.functions.map((fn) => (
+                              <li key={fn.id}>
+                                <b>{fn.name}</b>
+                                {fn.summary ? <span>{fn.summary}</span> : null}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </article>
+                    ))
+                  ) : (
+                    <article className={styles.emptyState}>
+                      <strong>No changed files for this node</strong>
+                      <p>
+                        The Review API returned a graph node without matching
+                        changed-file detail.
+                      </p>
+                    </article>
+                  )}
+                </>
+              )}
             </div>
           </div>
 
@@ -263,42 +557,83 @@ export function ReviewNodeWorkspace({
               <span className={styles.eyebrow}>NODE</span>
               <h2>{selectedNode.label}</h2>
               <span
-                className={`${styles.riskPill} ${riskClassNames[selectedNode.riskLevel]}`}
+                className={`${styles.riskPill} ${riskClassName(
+                  selectedNode.riskLevel,
+                )}`}
               >
                 {selectedNode.riskLevel}
               </span>
             </section>
 
             <section className={styles.sideSection}>
-              <h3>이 노드의 역할</h3>
+              <h3>Role in this review</h3>
               <p>{selectedNode.roleSummary}</p>
             </section>
 
             <section className={styles.sideSection}>
-              <h3>이 PR에서 수정한 이유</h3>
-              <p>{selectedNode.detail.modificationReason}</p>
+              <h3>Reason to inspect</h3>
+              <p>
+                {selectedNode.detail?.modificationReason ??
+                  selectedNode.reviewReason ??
+                  "The runtime graph marked this node as part of the review order."}
+              </p>
             </section>
 
+            {selectedNode.detail?.changeGroups.length ? (
+              <section className={styles.sideSection}>
+                <h3>Code areas</h3>
+                <div className={styles.changeGroups}>
+                  {selectedNode.detail.changeGroups.map((group) => (
+                    <article className={styles.changeGroup} key={group.id}>
+                      <strong>{group.title}</strong>
+                      <p>{group.summary}</p>
+                      <div className={styles.changeGroupActions}>
+                        <button
+                          onClick={() => setHighlightedHunkId(group.diffHunkId)}
+                          type="button"
+                        >
+                          Show code
+                        </button>
+                        <span>
+                          L{group.newStartLine}-L{group.newEndLine}
+                        </span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             <section className={styles.sideSection}>
-              <h3>실제 수정된 부분</h3>
-              <div className={styles.changeGroups}>
-                {selectedNode.detail.changeGroups.map((group) => (
-                  <article className={styles.changeGroup} key={group.id}>
-                    <strong>{group.title}</strong>
-                    <p>{group.summary}</p>
-                    <div className={styles.changeGroupActions}>
-                      <button
-                        onClick={() => setHighlightedHunkId(group.diffHunkId)}
-                        type="button"
-                      >
-                        코드 보기
-                      </button>
-                      <span>
-                        L{group.newStartLine}-L{group.newEndLine}
-                      </span>
-                    </div>
-                  </article>
-                ))}
+              <h3>Comments</h3>
+              <div className={styles.commentList}>
+                {relevantComments.length ? (
+                  relevantComments.map((comment) => (
+                    <article key={comment.id}>
+                      <p>{comment.body}</p>
+                      <time dateTime={comment.createdAt}>
+                        {formatDateTime(comment.createdAt)}
+                      </time>
+                    </article>
+                  ))
+                ) : (
+                  <p>No comments yet.</p>
+                )}
+              </div>
+              <div className={styles.commentComposer}>
+                <textarea
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder="Leave a review note"
+                  rows={3}
+                  value={activeCommentDraft}
+                />
+                <button
+                  disabled={busyAction === "comment" || !activeCommentDraft.trim()}
+                  onClick={handleAddComment}
+                  type="button"
+                >
+                  Comment
+                </button>
               </div>
             </section>
 
@@ -307,19 +642,14 @@ export function ReviewNodeWorkspace({
                 (decision) => (
                   <button
                     className={
-                      decisions[selectedNode.id] === decision
+                      (decisions[selectedNode.id] ?? selectedNode.status) ===
+                      decision
                         ? `${styles.decisionButton} ${styles.decisionButtonActive}`
                         : styles.decisionButton
                     }
+                    disabled={busyAction === "node"}
                     key={decision}
-                    onClick={() => {
-                      setDecisions((current) => ({
-                        ...current,
-                        [selectedNode.id]: decision,
-                      }));
-                      setSelectedNodeId(null);
-                      setHighlightedHunkId(null);
-                    }}
+                    onClick={() => handleDecision(decision)}
                     type="button"
                   >
                     {decisionLabels[decision]}
@@ -357,11 +687,10 @@ export function ReviewNodeWorkspace({
                   <path d="M0,0 L8,4 L0,8 Z" />
                 </marker>
               </defs>
-              {canvas.edges.map((edge) => {
-                const fromNode = canvas.nodes.find(
-                  (node) => node.id === edge.from,
-                );
-                const toNode = canvas.nodes.find((node) => node.id === edge.to);
+              {canvas.edges.map((edge, index) => {
+                const { from, to } = edgeEndpoints(edge);
+                const fromNode = canvas.nodes.find((node) => node.id === from);
+                const toNode = canvas.nodes.find((node) => node.id === to);
 
                 if (!fromNode || !toNode) {
                   return null;
@@ -369,7 +698,7 @@ export function ReviewNodeWorkspace({
 
                 return (
                   <line
-                    key={`${edge.from}-${edge.to}`}
+                    key={edge.id ?? `${from}-${to}-${index}`}
                     markerEnd="url(#review-arrow)"
                     x1={fromNode.position.x + 125}
                     x2={toNode.position.x + 125}
@@ -380,34 +709,47 @@ export function ReviewNodeWorkspace({
               })}
             </svg>
 
-            {canvas.nodes.map((node) => (
-              <button
-                className={`${styles.canvasNode} ${riskClassNames[node.riskLevel]}`}
-                key={node.id}
-                onClick={() => {
-                  setSelectedNodeId(node.id);
-                  setHighlightedHunkId(null);
-                }}
-                style={{
-                  left: node.position.x,
-                  top: node.position.y,
-                }}
-                type="button"
-              >
-                <span>{node.reviewOrder}</span>
-                <strong>{node.label}</strong>
-                <small>
-                  {node.nodeType}
-                  {decisions[node.id]
-                    ? ` · ${decisionLabels[decisions[node.id]]}`
-                    : ""}
-                </small>
-              </button>
-            ))}
+            {sortedNodes.length ? (
+              sortedNodes.map((node) => (
+                <button
+                  className={`${styles.canvasNode} ${riskClassName(
+                    node.riskLevel,
+                  )}`}
+                  key={node.id}
+                  onClick={() => selectNode(node.id)}
+                  style={{
+                    left: node.position.x,
+                    top: node.position.y,
+                  }}
+                  type="button"
+                >
+                  <span>{node.reviewOrder}</span>
+                  <strong>{node.label}</strong>
+                  <small>
+                    {node.nodeType}
+                    {decisions[node.id] ?? node.status
+                      ? ` / ${
+                          decisionLabels[
+                            decisions[node.id] ?? node.status ?? "unknown"
+                          ]
+                        }`
+                      : ""}
+                  </small>
+                </button>
+              ))
+            ) : (
+              <article className={styles.canvasEmptyState}>
+                <strong>No graph nodes yet</strong>
+                <p>
+                  Analysis exists, but the Review API has not returned a
+                  populated canvas graph.
+                </p>
+              </article>
+            )}
           </div>
 
           <button
-            aria-label="PR 설명 패널 크기 조절"
+            aria-label="Resize PR context panel"
             aria-valuemax={620}
             aria-valuemin={360}
             aria-valuenow={contextPanelWidth}
@@ -446,11 +788,23 @@ export function ReviewNodeWorkspace({
               });
             }}
             role="separator"
-            title="드래그해서 PR 설명 패널 크기 조절"
+            title="Drag to resize the PR context panel"
             type="button"
           />
 
           <aside className={styles.sidePanel}>
+            {warnings.length ? (
+              <section
+                className={`${styles.sideSection} ${styles.noticeList}`}
+                aria-label="Review notices"
+              >
+                <span className={styles.eyebrow}>NOTICES</span>
+                {warnings.slice(-3).map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </section>
+            ) : null}
+
             <section className={styles.sideSection}>
               <span className={styles.eyebrow}>PR INTENT</span>
               <h2>{canvas.intentSummary}</h2>
@@ -460,26 +814,89 @@ export function ReviewNodeWorkspace({
             <section className={styles.sideSection}>
               <span className={styles.eyebrow}>AI ANALYSIS</span>
               <div className={styles.sectionTitleRow}>
-                <h3>{analysisStatusLabels[analysis.analysisStatus]}</h3>
+                <h3>
+                  {analysisStatusLabels[analysis.analysisStatus] ??
+                    analysis.analysisStatus}
+                </h3>
                 <span
-                  className={`${styles.riskPill} ${riskClassNames[analysis.riskLevel]}`}
+                  className={`${styles.riskPill} ${riskClassName(
+                    analysis.riskLevel,
+                  )}`}
                 >
                   {analysis.riskLevel}
                 </span>
               </div>
-              <p>{analysis.purposeSummary}</p>
-              <p>{analysis.impactSummary}</p>
-              <p>{analysis.testRecommendation}</p>
-              <p>{analysis.conclusion}</p>
+              {analysis.purposeSummary ? <p>{analysis.purposeSummary}</p> : null}
+              {analysis.impactSummary ? <p>{analysis.impactSummary}</p> : null}
+              {analysis.testRecommendation ? (
+                <p>{analysis.testRecommendation}</p>
+              ) : null}
+              {analysis.conclusion ? <p>{analysis.conclusion}</p> : null}
             </section>
 
             <section className={styles.sideSection}>
               <span className={styles.eyebrow}>REVIEW ORDER</span>
-              <ol className={styles.reviewOrder}>
-                {canvas.nodes.map((node) => (
-                  <li key={node.id}>{node.roleSummary}</li>
-                ))}
-              </ol>
+              {sortedNodes.length ? (
+                <ol className={styles.reviewOrder}>
+                  {sortedNodes.map((node) => (
+                    <li key={node.id}>{node.roleSummary}</li>
+                  ))}
+                </ol>
+              ) : (
+                <p>No review nodes are available yet.</p>
+              )}
+            </section>
+
+            <section className={styles.sideSection}>
+              <span className={styles.eyebrow}>CHANGED FILES</span>
+              <div className={styles.fileList}>
+                {changedFiles.length ? (
+                  changedFiles.map((file) => (
+                    <article className={styles.fileItem} key={file.id}>
+                      <strong>{file.filePath}</strong>
+                      <span>
+                        {file.changeType} +{file.additions} -{file.deletions}
+                      </span>
+                      {file.functions.map((fn) => (
+                        <small key={fn.id}>{fn.name}</small>
+                      ))}
+                    </article>
+                  ))
+                ) : (
+                  <p>No changed files were returned.</p>
+                )}
+              </div>
+            </section>
+
+            <section className={styles.sideSection}>
+              <div className={styles.sectionTitleRow}>
+                <span className={styles.eyebrow}>CHECKLIST</span>
+                <button
+                  className={styles.inlineActionButton}
+                  disabled={busyAction === "checklist"}
+                  onClick={onAddChecklistItem}
+                  type="button"
+                >
+                  Add
+                </button>
+              </div>
+              <div className={styles.checklist}>
+                {checklistItems.length ? (
+                  checklistItems.map((item) => (
+                    <label key={item.id}>
+                      <input
+                        checked={item.status === "done"}
+                        disabled={busyAction === "checklist"}
+                        onChange={() => onToggleChecklistItem?.(item)}
+                        type="checkbox"
+                      />
+                      <span>{item.title}</span>
+                    </label>
+                  ))
+                ) : (
+                  <p>No checklist items yet.</p>
+                )}
+              </div>
             </section>
 
             <section className={styles.sideSection}>
@@ -495,18 +912,20 @@ export function ReviewNodeWorkspace({
                   ))}
                 </div>
               ) : (
-                <p>연결된 task가 없습니다.</p>
+                <p>No linked tasks were returned.</p>
               )}
             </section>
 
-            <section className={styles.sideSection}>
-              <span className={styles.eyebrow}>NOTES</span>
-              <ul className={styles.noteList}>
-                {analysis.reviewNotes.map((note) => (
-                  <li key={note}>{note}</li>
-                ))}
-              </ul>
-            </section>
+            {notes.length ? (
+              <section className={styles.sideSection}>
+                <span className={styles.eyebrow}>NOTES</span>
+                <ul className={styles.noteList}>
+                  {notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
           </aside>
         </section>
       )}

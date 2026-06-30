@@ -74,11 +74,75 @@
   background: #f6f9ff;
 }
 
+.selectorItem:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .selectorItem small {
   grid-column: 2;
   color: #687386;
   font-size: 12px;
   font-weight: 700;
+}
+
+.branchLine {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusPanel,
+.emptyState,
+.canvasEmptyState {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.statusPanel {
+  width: min(520px, 100%);
+}
+
+.statusPanel strong,
+.emptyState strong,
+.canvasEmptyState strong {
+  color: #151923;
+  font-size: 15px;
+}
+
+.statusPanel p,
+.emptyState p,
+.canvasEmptyState p,
+.noticeList p,
+.fileItem span,
+.fileItem small,
+.changedFileCard p,
+.changedFileCard span,
+.commentList p,
+.commentList time,
+.checklist label {
+  margin: 0;
+  color: #394150;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.noticeList {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #f2d290;
+  border-radius: 8px;
+  background: #fff8e7;
+  padding: 12px;
+}
+
+.noticeList p {
+  color: #8a5a06;
+  font-weight: 750;
 }
 
 .number {
@@ -174,6 +238,13 @@
   min-width: 920px;
   min-height: 660px;
   content: "";
+}
+
+.canvasEmptyState {
+  position: absolute;
+  top: 96px;
+  left: 96px;
+  width: min(360px, calc(100% - 48px));
 }
 
 .edgeLayer {
@@ -446,6 +517,51 @@
   gap: 10px;
 }
 
+.changedFileStack {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.changedFileCard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.changedFileCard > div {
+  display: grid;
+  gap: 4px;
+}
+
+.changedFileCard strong,
+.fileItem strong {
+  overflow-wrap: anywhere;
+  color: #151923;
+}
+
+.changedFileCard ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.changedFileCard li {
+  color: #394150;
+  font-size: 13px;
+}
+
+.changedFileCard li b {
+  display: block;
+  color: #151923;
+}
+
 .changeGroup {
   display: grid;
   gap: 8px;
@@ -499,6 +615,96 @@
   border-color: #2563eb;
   background: #2563eb;
   color: #ffffff;
+}
+
+.fileList,
+.commentList,
+.checklist {
+  display: grid;
+  gap: 10px;
+}
+
+.fileItem {
+  display: grid;
+  gap: 5px;
+  border-left: 3px solid #2563eb;
+  padding-left: 10px;
+}
+
+.commentList article {
+  display: grid;
+  gap: 5px;
+  border-left: 3px solid #dfe5ee;
+  padding-left: 10px;
+}
+
+.commentList time {
+  color: #687386;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.commentComposer {
+  display: grid;
+  gap: 8px;
+}
+
+.commentComposer textarea {
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #151923;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px;
+}
+
+.commentComposer textarea:focus {
+  border-color: #7aa2f7;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 14%);
+  outline: none;
+}
+
+.commentComposer button,
+.inlineActionButton {
+  border: 1px solid #cfd7e3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #202635;
+  font-weight: 900;
+}
+
+.commentComposer button {
+  min-height: 38px;
+}
+
+.commentComposer button:disabled,
+.inlineActionButton:disabled,
+.checklist input:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.inlineActionButton {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.checklist label {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  color: #151923;
+  font-weight: 750;
+}
+
+.checklist input {
+  margin-top: 2px;
+  accent-color: #2563eb;
 }
 
 @media (max-width: 980px) {

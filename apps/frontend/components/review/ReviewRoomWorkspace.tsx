@@ -2,6 +2,13 @@
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
+  ReviewNodeWorkspace,
+  createReviewSelectorSession,
+  type ReviewBusyAction,
+  type ReviewDecision,
+  type ReviewSession,
+} from "../../app/(workspace)/reviews/review-node-workspace";
+import {
   createReviewClient,
   normalizeReviewCanvas,
   REVIEW_FIXTURE_MEMBER_ID,
@@ -128,7 +135,7 @@ type ReviewComment = {
   createdAt: string;
 };
 
-export type ReviewRoomSession = {
+type RuntimeReviewRoomSession = {
   room: ReviewRoomSummary;
   analysis: ReviewAnalysis;
   canvas: ReviewCanvas;
@@ -144,37 +151,6 @@ type ReviewRoomWorkspaceProps = {
 
 type ReviewNavItem = ReturnType<typeof buildWorkspaceFeatureTabs>[number];
 type LoadStatus = "loading" | "selecting" | "opening" | "ready" | "error";
-type BusyAction = "node" | "checklist" | "comment" | null;
-
-const riskToneClass: Record<ReviewRiskLevel, string> = {
-  low: styles.riskLow,
-  medium: styles.riskMedium,
-  high: styles.riskHigh,
-  critical: styles.riskCritical,
-};
-
-const analysisLabels: Record<ReviewAnalysisStatus, string> = {
-  pending: "Pending",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-};
-
-const nodeStatusLabels: Record<ReviewNodeStatus, string> = {
-  ok: "OK",
-  discuss: "Discuss",
-  unknown: "Unreviewed",
-};
-
-function toRiskTone(riskLevel: string | null | undefined): string {
-  return (
-    riskToneClass[(riskLevel as ReviewRiskLevel) ?? "low"] ?? styles.riskLow
-  );
-}
-
-function sortNodes(nodes: ReviewCanvasNode[]) {
-  return [...nodes].sort((left, right) => left.reviewOrder - right.reviewOrder);
-}
 
 function ReviewWorkspaceFrame({
   navItems,
@@ -191,6 +167,60 @@ function ReviewWorkspaceFrame({
       <section className={`workspace ${className}`}>{children}</section>
     </main>
   );
+}
+
+function toPresentationalSession(
+  session: RuntimeReviewRoomSession,
+): ReviewSession {
+  return {
+    pullRequest: session.room.pullRequest,
+    linkedTasks: [],
+    analysis: {
+      id: session.analysis.id,
+      analysisStatus: session.analysis.analysisStatus,
+      riskLevel: session.analysis.riskLevel,
+      purposeSummary: session.analysis.purposeSummary,
+      impactSummary: session.analysis.impactSummary,
+      testRecommendation: session.analysis.testRecommendation,
+      conclusion: session.analysis.conclusion,
+      reviewNotes: [
+        `${session.analysis.okCount} OK / ${session.analysis.discussCount} discuss / ${session.analysis.riskCount} risk`,
+      ],
+    },
+    canvas: {
+      intentSummary: session.canvas.intentSummary,
+      reviewStrategy: session.canvas.reviewStrategy,
+      nodes: session.canvas.nodes,
+      edges: session.canvas.edges,
+    },
+    changedFiles: session.changedFiles,
+    checklistItems: session.checklistItems,
+    comments: session.comments,
+  };
+}
+
+function mergeRuntimeSession(
+  pullRequests: ReviewPullRequestSummary[],
+  session: RuntimeReviewRoomSession | null,
+) {
+  const selectorSessions = pullRequests.map(createReviewSelectorSession);
+
+  if (!session) {
+    return selectorSessions;
+  }
+
+  const runtimeSession = toPresentationalSession(session);
+  const nextSessions = selectorSessions.map((entry) =>
+    entry.pullRequest.id === runtimeSession.pullRequest.id
+      ? runtimeSession
+      : entry,
+  );
+
+  return nextSessions.some(
+    (entry) => entry.pullRequest.id === runtimeSession.pullRequest.id,
+  )
+    ? nextSessions
+    : [runtimeSession, ...nextSessions];
 }
 
 export function ReviewRoomWorkspace({
@@ -211,10 +241,10 @@ export function ReviewRoomWorkspace({
   const [pullRequests, setPullRequests] = useState<ReviewPullRequestSummary[]>(
     [],
   );
-  const [session, setSession] = useState<ReviewRoomSession | null>(null);
+  const [session, setSession] = useState<RuntimeReviewRoomSession | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [busyAction, setBusyAction] = useState<ReviewBusyAction>(null);
   const [commentDraft, setCommentDraft] = useState("");
   const navItems = useMemo(
     () =>
@@ -225,6 +255,10 @@ export function ReviewRoomWorkspace({
         },
       }),
     [pullRequests.length, workspaceId],
+  );
+  const reviewSessions = useMemo(
+    () => mergeRuntimeSession(pullRequests, session),
+    [pullRequests, session],
   );
 
   useEffect(() => {
@@ -246,9 +280,9 @@ export function ReviewRoomWorkspace({
           );
           setStatus("selecting");
         }
-      } catch (error) {
+      } catch {
         if (!allowFixtureFallback) {
-          throw error;
+          throw new Error("Review API PR list failed in api mode");
         }
 
         const fallbackPullRequests = await fallbackClient.listPullRequests();
@@ -303,9 +337,9 @@ export function ReviewRoomWorkspace({
           memberId,
           pullRequest,
         });
-      } catch (error) {
+      } catch {
         if (!allowFixtureFallback) {
-          throw error;
+          throw new Error("Review room API failed in api mode");
         }
 
         room = await fallbackClient.openReviewRoom(pullRequest.id, {
@@ -318,15 +352,15 @@ export function ReviewRoomWorkspace({
 
       try {
         analysis = await client.getAnalysis(pullRequest.id);
-      } catch (error) {
+      } catch {
         try {
           analysis = await client.requestAnalysis(pullRequest.id);
           nextWarnings.push(
             "Analysis was requested; runtime result is pending.",
           );
-        } catch (requestError) {
+        } catch {
           if (!allowFixtureFallback) {
-            throw requestError;
+            throw new Error("Review analysis API failed in api mode");
           }
 
           analysis = await fallbackClient.requestAnalysis(pullRequest.id);
@@ -336,9 +370,9 @@ export function ReviewRoomWorkspace({
 
       try {
         canvas = await client.getCanvas(analysis.id);
-      } catch (error) {
+      } catch {
         if (!allowFixtureFallback) {
-          throw error;
+          throw new Error("Review canvas API failed in api mode");
         }
 
         canvas = normalizeReviewCanvas(reviewFixture.canvas, analysis.id);
@@ -349,9 +383,9 @@ export function ReviewRoomWorkspace({
 
       try {
         changedFiles = await client.listChangedFiles(analysis.id);
-      } catch (error) {
+      } catch {
         if (!allowFixtureFallback) {
-          throw error;
+          throw new Error("Changed files API failed in api mode");
         }
 
         changedFiles = await fallbackClient.listChangedFiles(analysis.id);
@@ -360,7 +394,7 @@ export function ReviewRoomWorkspace({
 
       try {
         checklistItems = await client.listChecklistItems(analysis.id);
-      } catch (error) {
+      } catch {
         if (allowFixtureFallback) {
           checklistItems = await fallbackClient.listChecklistItems(analysis.id);
         } else {
@@ -373,7 +407,7 @@ export function ReviewRoomWorkspace({
 
       try {
         comments = await client.listComments(room.id);
-      } catch (error) {
+      } catch {
         if (allowFixtureFallback) {
           comments = await fallbackClient.listComments(room.id);
         } else {
@@ -394,12 +428,12 @@ export function ReviewRoomWorkspace({
       });
       setWarnings(nextWarnings);
       setStatus("ready");
-    } catch (error) {
+    } catch {
       setStatus("error");
     }
   }
 
-  async function updateNodeStatus(nextStatus: ReviewNodeStatus) {
+  async function updateNodeStatus(nextStatus: ReviewDecision) {
     if (!session || !selectedNode) return;
 
     setBusyAction("node");
@@ -426,7 +460,7 @@ export function ReviewRoomWorkspace({
             }
           : current,
       );
-    } catch (error) {
+    } catch {
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
@@ -486,7 +520,7 @@ export function ReviewRoomWorkspace({
             }
           : current,
       );
-    } catch (error) {
+    } catch {
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
@@ -542,7 +576,7 @@ export function ReviewRoomWorkspace({
             }
           : current,
       );
-    } catch (error) {
+    } catch {
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
@@ -603,7 +637,7 @@ export function ReviewRoomWorkspace({
             }
           : current,
       );
-    } catch (error) {
+    } catch {
       if (!allowFixtureFallback) {
         setWarnings((current) => [
           ...current,
@@ -634,323 +668,35 @@ export function ReviewRoomWorkspace({
     }
   }
 
-  if (status === "loading") {
-    return (
-      <ReviewWorkspaceFrame navItems={navItems}>
-        <section className={styles.statusPanel} aria-live="polite">
-          <strong>Loading review workspace</strong>
-          <p>Preparing pull requests and the Review API client.</p>
-        </section>
-      </ReviewWorkspaceFrame>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <ReviewWorkspaceFrame navItems={navItems}>
-        <section className={styles.statusPanel} role="alert">
-          <strong>Review workspace could not load</strong>
-          <p>Refresh after the app server is available.</p>
-        </section>
-      </ReviewWorkspaceFrame>
-    );
-  }
-
-  if (status === "selecting" || status === "opening" || !session) {
-    return (
-      <ReviewWorkspaceFrame navItems={navItems}>
-        <header className={styles.reviewHeader}>
-          <div>
-            <span>Code Review</span>
-            <h1>PR Review Room</h1>
-          </div>
-        </header>
-
-        {warnings.length ? (
-          <section className={styles.noticeList} aria-label="Review notices">
-            {warnings.slice(-3).map((warning) => (
-              <p key={warning}>{warning}</p>
-            ))}
-          </section>
-        ) : null}
-
-        <section className={styles.selectorGrid} aria-label="Pull requests">
-          {pullRequests.length === 0 ? (
-            <article className={styles.statusPanel}>
-              <strong>No pull requests found</strong>
-              <p>
-                Connect or sync GitHub pull requests before opening a review
-                room.
-              </p>
-            </article>
-          ) : null}
-
-          {pullRequests.map((pullRequest) => (
-            <article className={styles.prCard} key={pullRequest.id}>
-              <div className={styles.prCardHeader}>
-                <span>#{pullRequest.number}</span>
-                <b className={styles.statePill}>{pullRequest.state}</b>
-              </div>
-              <h2>{pullRequest.title}</h2>
-              <p>
-                {pullRequest.branch} into {pullRequest.baseBranch}
-              </p>
-              <dl className={styles.prStats}>
-                <div>
-                  <dt>Files</dt>
-                  <dd>{pullRequest.changedFilesCount}</dd>
-                </div>
-                <div>
-                  <dt>Add</dt>
-                  <dd>+{pullRequest.additions}</dd>
-                </div>
-                <div>
-                  <dt>Del</dt>
-                  <dd>-{pullRequest.deletions}</dd>
-                </div>
-              </dl>
-              <button
-                disabled={status === "opening"}
-                onClick={() => openPullRequest(pullRequest)}
-                type="button"
-              >
-                {status === "opening" ? "Opening" : "Open review room"}
-              </button>
-            </article>
-          ))}
-        </section>
-      </ReviewWorkspaceFrame>
-    );
-  }
-
-  const { analysis, canvas, changedFiles, checklistItems, comments, room } =
-    session;
-  const pullRequest = room.pullRequest;
-  const sortedNodes = sortNodes(canvas.nodes);
-
   return (
     <ReviewWorkspaceFrame
       navItems={navItems}
-      className={styles.reviewWorkspace}
+      className={session ? styles.reviewWorkspace : styles.reviewShell}
     >
-      <header className={styles.roomTopbar}>
-        <button
-          className={styles.backButton}
-          onClick={() => {
-            setSession(null);
-            setSelectedNodeId(null);
-            setStatus("selecting");
-          }}
-          type="button"
-        >
-          PRs
-        </button>
-        <div className={styles.roomTitle}>
-          <span>
-            #{pullRequest.number} by {pullRequest.authorLogin ?? "unknown"}
-          </span>
-          <h1>{pullRequest.title}</h1>
-        </div>
-        <div className={styles.topbarMeta}>
-          <span>{pullRequest.branch}</span>
-          <b>{pullRequest.baseBranch}</b>
-        </div>
-      </header>
-
-      <section className={styles.roomLayout}>
-        <aside className={styles.leftRail} aria-label="Review summary">
-          <section>
-            <span className={styles.sectionEyebrow}>Analysis</span>
-            <div className={styles.analysisStatus}>
-              <b className={toRiskTone(analysis.riskLevel)}>
-                {analysis.riskLevel}
-              </b>
-              <strong>{analysisLabels[analysis.analysisStatus]}</strong>
-            </div>
-            <p>{analysis.purposeSummary}</p>
-            <p>{analysis.impactSummary}</p>
-            <p>{analysis.testRecommendation}</p>
-          </section>
-
-          {warnings.length ? (
-            <section className={styles.noticeList} aria-label="Review notices">
-              {warnings.slice(-3).map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </section>
-          ) : null}
-
-          <section>
-            <span className={styles.sectionEyebrow}>Changed files</span>
-            <div className={styles.fileList}>
-              {changedFiles.map((file) => (
-                <article className={styles.fileItem} key={file.id}>
-                  <strong>{file.filePath}</strong>
-                  <span>
-                    {file.changeType} +{file.additions} -{file.deletions}
-                  </span>
-                  {file.functions.map((fn) => (
-                    <small key={fn.id}>{fn.name}</small>
-                  ))}
-                </article>
-              ))}
-            </div>
-          </section>
-        </aside>
-
-        <section className={styles.canvasArea} aria-label="Review graph">
-          <div className={styles.canvasIntro}>
-            <span className={styles.sectionEyebrow}>Review order</span>
-            <h2>{canvas.intentSummary}</h2>
-            <p>{canvas.reviewStrategy}</p>
-          </div>
-
-          <div className={styles.canvasStage}>
-            <svg aria-hidden="true" className={styles.edgeLayer}>
-              {canvas.edges.map((edge) => {
-                const source = canvas.nodes.find(
-                  (node) => node.id === edge.sourceNodeId,
-                );
-                const target = canvas.nodes.find(
-                  (node) => node.id === edge.targetNodeId,
-                );
-
-                if (!source || !target) return null;
-
-                return (
-                  <line
-                    key={edge.id}
-                    x1={source.position.x + 120}
-                    x2={target.position.x + 120}
-                    y1={source.position.y + 44}
-                    y2={target.position.y + 44}
-                  />
-                );
-              })}
-            </svg>
-
-            {sortedNodes.map((node) => (
-              <button
-                className={`${styles.reviewNode} ${toRiskTone(node.riskLevel)} ${
-                  selectedNodeId === node.id ? styles.reviewNodeActive : ""
-                }`}
-                key={node.id}
-                onClick={() => setSelectedNodeId(node.id)}
-                style={{
-                  left: node.position.x,
-                  top: node.position.y,
-                }}
-                type="button"
-              >
-                <span>{node.reviewOrder}</span>
-                <strong>{node.label}</strong>
-                <small>
-                  {node.nodeType} / {nodeStatusLabels[node.status]}
-                </small>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <aside className={styles.rightPanel} aria-label="Review actions">
-          <section>
-            <span className={styles.sectionEyebrow}>Selected node</span>
-            {selectedNode ? (
-              <div className={styles.nodeDetail}>
-                <h2>{selectedNode.label}</h2>
-                <b className={toRiskTone(selectedNode.riskLevel)}>
-                  {selectedNode.riskLevel}
-                </b>
-                <p>{selectedNode.roleSummary}</p>
-                <p>{selectedNode.reviewReason}</p>
-                {selectedNode.filePath ? (
-                  <code>{selectedNode.filePath}</code>
-                ) : null}
-                <div className={styles.nodeActions}>
-                  <button
-                    disabled={busyAction === "node"}
-                    onClick={() => updateNodeStatus("ok")}
-                    type="button"
-                  >
-                    Mark OK
-                  </button>
-                  <button
-                    disabled={busyAction === "node"}
-                    onClick={() => updateNodeStatus("discuss")}
-                    type="button"
-                  >
-                    Discuss
-                  </button>
-                </div>
-                <button
-                  className={styles.disabledButton}
-                  disabled
-                  type="button"
-                >
-                  Node detail deferred
-                </button>
-              </div>
-            ) : (
-              <p className={styles.emptyState}>Select a node to review it.</p>
-            )}
-          </section>
-
-          <section>
-            <div className={styles.sectionTitleRow}>
-              <span className={styles.sectionEyebrow}>Checklist</span>
-              <button
-                disabled={busyAction === "checklist"}
-                onClick={addChecklistItem}
-                type="button"
-              >
-                Add
-              </button>
-            </div>
-            <div className={styles.checklist}>
-              {checklistItems.map((item) => (
-                <label key={item.id}>
-                  <input
-                    checked={item.status === "done"}
-                    disabled={busyAction === "checklist"}
-                    onChange={() => void toggleChecklistItem(item)}
-                    type="checkbox"
-                  />
-                  <span>{item.title}</span>
-                </label>
-              ))}
-            </div>
-          </section>
-
-          <section>
-            <span className={styles.sectionEyebrow}>Comments</span>
-            <div className={styles.commentList}>
-              {comments.map((comment) => (
-                <article key={comment.id}>
-                  <p>{comment.body}</p>
-                  <time dateTime={comment.createdAt}>
-                    {new Date(comment.createdAt).toLocaleString()}
-                  </time>
-                </article>
-              ))}
-            </div>
-            <div className={styles.commentComposer}>
-              <textarea
-                onChange={(event) => setCommentDraft(event.target.value)}
-                placeholder="Leave a review note"
-                rows={3}
-                value={commentDraft}
-              />
-              <button
-                disabled={busyAction === "comment" || !commentDraft.trim()}
-                onClick={addComment}
-                type="button"
-              >
-                Comment
-              </button>
-            </div>
-          </section>
-        </aside>
-      </section>
+      <ReviewNodeWorkspace
+        busyAction={busyAction}
+        commentDraft={commentDraft}
+        onAddChecklistItem={() => void addChecklistItem()}
+        onAddComment={() => void addComment()}
+        onBackToSelector={() => {
+          setSession(null);
+          setSelectedNodeId(null);
+          setCommentDraft("");
+          setStatus("selecting");
+        }}
+        onCommentDraftChange={setCommentDraft}
+        onNodeDecision={(decision) => void updateNodeStatus(decision)}
+        onSelectNode={setSelectedNodeId}
+        onSelectSession={(nextSession) =>
+          void openPullRequest(nextSession.pullRequest)
+        }
+        onToggleChecklistItem={(item) => void toggleChecklistItem(item)}
+        selectedNodeId={selectedNodeId}
+        selectedSessionId={session?.room.pullRequestId ?? null}
+        sessions={reviewSessions}
+        status={status}
+        warnings={warnings}
+      />
     </ReviewWorkspaceFrame>
   );
 }
