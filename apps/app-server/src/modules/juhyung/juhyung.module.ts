@@ -39,7 +39,6 @@ import {
     JuhyungRepository,
     JuhyungPublicAdapter,
     JuhyungTaskService,
-    JuhyungTaskDraftPublicWriteAdapter,
     TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
     JuhyungGithubConnectionRepository,
     JuhyungGithubConnectionService,

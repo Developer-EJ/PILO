@@ -25,6 +25,10 @@ const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service");
 const { JuhyungModule } = require("../src/modules/juhyung/juhyung.module");
+const {
+  JuhyungTaskDraftPublicWriteAdapter,
+  TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
+} = require("../src/modules/juhyung/public/task-draft-public-write.adapter");
 
 describe("AgentModule", () => {
   it("registers the Agent runtime controller and exports runtime boundaries", () => {
@@ -50,5 +54,19 @@ describe("AgentModule", () => {
     assert.ok(exportsMetadata.includes(AgentRegistryRepository));
     assert.ok(exportsMetadata.includes(AgentRegistryService));
     assert.ok(exportsMetadata.includes(AgentRuntimeService));
+  });
+
+  it("exports only the TaskDraft public write token from JuhyungModule", () => {
+    const providersMetadata =
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, JuhyungModule) ?? [];
+    const exportsMetadata =
+      Reflect.getMetadata(MODULE_METADATA.EXPORTS, JuhyungModule) ?? [];
+
+    assert.ok(providersMetadata.includes(JuhyungTaskDraftPublicWriteAdapter));
+    assert.ok(exportsMetadata.includes(TASK_DRAFT_PUBLIC_WRITE_ADAPTER));
+    assert.equal(
+      exportsMetadata.includes(JuhyungTaskDraftPublicWriteAdapter),
+      false,
+    );
   });
 });
