@@ -88,13 +88,65 @@ describe("Agent runtime local runner", () => {
       run.actions.map((action) => action.status),
       ["waiting_confirmation", "waiting_confirmation"],
     );
-    assert.equal(run.output.planDraft.detail.approval.status, "waiting_confirmation");
+    assert.equal(
+      run.output.planDraft.detail.approval.status,
+      "waiting_confirmation",
+    );
+  });
+
+  it("does not mark the plan-level approval executed without owner API writes", async () => {
+    const { service } = createRuntime();
+    const run = await createPlanningRun(service);
+    const action = run.actions.find(
+      (candidate) => candidate.type === "planning.approve",
+    );
+
+    const failed = await service.approveAction({
+      actionId: action.id,
+      actor: ACTOR,
+    });
+    const nextRun = await service.getRun(run.id, ACTOR);
+
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.executedAt, null);
+    assert.match(
+      failed.payload.errorMessage,
+      /Planning approval owner API execution is not available/,
+    );
+    assert.equal(nextRun.status, "requires_confirmation");
+    assert.equal(nextRun.pendingActionCount, 1);
+    assert.equal(nextRun.output.planDraft.detail.approval.status, "failed");
+    assert.deepEqual(
+      nextRun.output.planDraft.detail.approval.ownerApiResults,
+      [],
+    );
   });
 
   it("keeps executed actions from being approved or rejected again", async () => {
-    const { service } = createRuntime();
+    const taskService = {
+      async createTaskDraft(workspaceId, body) {
+        return {
+          id: "44444444-4444-4444-8444-444444444445",
+          workspaceId,
+          sourceType: body.sourceType ?? null,
+          sourceId: body.sourceId ?? null,
+          title: body.title,
+          description: body.description ?? null,
+          assigneeMemberId: body.assigneeMemberId ?? null,
+          priority: body.priority ?? "medium",
+          dueDate: body.dueDate ?? null,
+          status: "draft",
+          taskId: null,
+          createdAt: "2026-06-30T00:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z",
+        };
+      },
+    };
+    const { service } = createRuntime(taskService);
     const run = await createPlanningRun(service);
-    const actionId = run.actions[0].id;
+    const actionId = run.actions.find(
+      (candidate) => candidate.type === "task.create.draft",
+    ).id;
 
     const executed = await service.approveAction({ actionId, actor: ACTOR });
 
@@ -149,10 +201,7 @@ describe("Agent runtime local runner", () => {
 
     assert.equal(executed.status, "executed");
     assert.equal(calls.length, 1);
-    assert.equal(
-      calls[0].workspaceId,
-      WORKSPACE_ID,
-    );
+    assert.equal(calls[0].workspaceId, WORKSPACE_ID);
     assert.equal(calls[0].body.title, "Project kickoff intake");
     assert.deepEqual(calls[0].actor, ACTOR);
     assert.equal(ownerResult.status, "succeeded");

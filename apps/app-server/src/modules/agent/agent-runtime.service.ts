@@ -1,4 +1,9 @@
-import { HttpException, HttpStatus, Injectable, Optional } from "@nestjs/common";
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Optional,
+} from "@nestjs/common";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
 import type { CreateTaskDraftBody } from "../juhyung/juhyung-task.service";
 import {
@@ -19,6 +24,9 @@ import {
   AgentRuntimeValidationError,
 } from "./agent-runtime.types";
 import { createPlanningGenerateRun } from "./planning-local-runner";
+
+const PLANNING_APPROVAL_OWNER_API_MESSAGE =
+  "Planning approval owner API execution is not available in the local MVP runner. Approve owner-specific actions instead.";
 
 interface PlanningOwnerApiResult {
   owner: "task";
@@ -44,7 +52,9 @@ function isTerminalAction(action: AgentActionDetail) {
 }
 
 function canApproveAction(action: AgentActionDetail) {
-  return action.requiresConfirmation && action.status === "waiting_confirmation";
+  return (
+    action.requiresConfirmation && action.status === "waiting_confirmation"
+  );
 }
 
 function canRejectAction(action: AgentActionDetail) {
@@ -59,9 +69,7 @@ function currentIsoTimestamp() {
 }
 
 function firstString(value: unknown) {
-  return typeof value === "string" && value.trim().length
-    ? value.trim()
-    : null;
+  return typeof value === "string" && value.trim().length ? value.trim() : null;
 }
 
 function isAuthorizationError(error: unknown) {
@@ -232,9 +240,9 @@ export class AgentRuntimeService {
       execution.ownerApiResults,
     );
 
-    return this.repository.saveRun(nextRun).actions.find(
-      (candidate) => candidate.id === actionId,
-    );
+    return this.repository
+      .saveRun(nextRun)
+      .actions.find((candidate) => candidate.id === actionId);
   }
 
   private async executeApprovedAction(
@@ -247,8 +255,12 @@ export class AgentRuntimeService {
       return {
         action: {
           ...action,
-          status: "executed",
-          executedAt: decidedAt,
+          payload: {
+            ...action.payload,
+            errorMessage: PLANNING_APPROVAL_OWNER_API_MESSAGE,
+          },
+          status: "failed",
+          executedAt: null,
         },
         ownerApiResults: [],
       };
@@ -366,9 +378,7 @@ export class AgentRuntimeService {
 
       if (isRecord(planDraft.detail) && isRecord(planDraft.detail.approval)) {
         const approval = planDraft.detail.approval;
-        const existingOwnerApiResults = Array.isArray(
-          approval.ownerApiResults,
-        )
+        const existingOwnerApiResults = Array.isArray(approval.ownerApiResults)
           ? approval.ownerApiResults
           : [];
 
@@ -378,23 +388,14 @@ export class AgentRuntimeService {
             status: nextAction.status,
             confirmedAt: nextAction.confirmedAt,
             executedAt: nextAction.executedAt,
-            ownerApiResults: [
-              ...existingOwnerApiResults,
-              ...ownerApiResults,
-            ],
+            ownerApiResults: [...existingOwnerApiResults, ...ownerApiResults],
           };
         }
 
-        if (
-          nextAction.type === "task.create.draft" &&
-          ownerApiResults.length
-        ) {
+        if (nextAction.type === "task.create.draft" && ownerApiResults.length) {
           planDraft.detail.approval = {
             ...approval,
-            ownerApiResults: [
-              ...existingOwnerApiResults,
-              ...ownerApiResults,
-            ],
+            ownerApiResults: [...existingOwnerApiResults, ...ownerApiResults],
           };
         }
       }
@@ -412,6 +413,9 @@ export class AgentRuntimeService {
     const pendingActionCount = run.actions.filter(
       (action) => !isTerminalAction(action),
     ).length;
+    const failedActionCount = run.actions.filter(
+      (action) => action.status === "failed",
+    ).length;
 
     run.actionRequired = waitingActionCount > 0;
     run.pendingActionCount = pendingActionCount;
@@ -419,6 +423,8 @@ export class AgentRuntimeService {
       ? "failed"
       : waitingActionCount > 0
         ? "requires_confirmation"
-        : "succeeded";
+        : failedActionCount > 0
+          ? "failed"
+          : "succeeded";
   }
 }

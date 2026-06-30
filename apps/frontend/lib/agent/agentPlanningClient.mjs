@@ -8,6 +8,8 @@ const DEFAULT_AGENT_MODE = "mock";
 const LOCAL_NOW = "2026-06-30T00:00:00.000Z";
 const LOCAL_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const LOCAL_ACTOR_MEMBER_ID = LOCAL_MVP_MEMBER_ID;
+const PLANNING_APPROVAL_OWNER_API_MESSAGE =
+  "Planning approval owner API execution is not available in the local MVP runner. Approve owner-specific actions instead.";
 
 const mockRuns = new Map();
 
@@ -94,10 +96,7 @@ export class AgentPlanningApiError extends Error {
   }
 }
 
-export function buildAgentApiUrl(
-  path,
-  baseUrl = defaultWorkspaceApiBaseUrl(),
-) {
+export function buildAgentApiUrl(path, baseUrl = defaultWorkspaceApiBaseUrl()) {
   if (!path.startsWith("/api/")) {
     throw new AgentPlanningApiError("Agent API path must start with /api/", {
       path,
@@ -125,7 +124,11 @@ function buildPlanDraft(workspaceId, draftId, actionId, input) {
     defaultProjectStartInput.targetUser,
   );
   const problem = textValue(input, "problem", defaultProjectStartInput.problem);
-  const duration = textValue(input, "duration", defaultProjectStartInput.duration);
+  const duration = textValue(
+    input,
+    "duration",
+    defaultProjectStartInput.duration,
+  );
   const outputGoal = textValue(
     input,
     "outputGoal",
@@ -150,7 +153,8 @@ function buildPlanDraft(workspaceId, draftId, actionId, input) {
       description:
         "Show generated task and planning actions as drafts until a workspace member confirms them.",
       scope: "mvp",
-      reason: "Agent output must remain reviewable before Task or Meeting APIs execute.",
+      reason:
+        "Agent output must remain reviewable before Task or Meeting APIs execute.",
       sortOrder: 1,
       createdAt: LOCAL_NOW,
     },
@@ -295,7 +299,12 @@ function createLocalPlanningRun(workspaceId, input, sequence) {
   const draftId = sequenceId("aaaaaaaa-aaaa-4aaa-8aaa-", sequence);
   const planningActionId = sequenceId("99999999-9999-4999-8997-", sequence);
   const taskActionId = sequenceId("99999999-9999-4999-8996-", sequence);
-  const planDraft = buildPlanDraft(workspaceId, draftId, planningActionId, input);
+  const planDraft = buildPlanDraft(
+    workspaceId,
+    draftId,
+    planningActionId,
+    input,
+  );
   const actions = [
     {
       id: planningActionId,
@@ -378,7 +387,10 @@ function createLocalPlanningRun(workspaceId, input, sequence) {
         runId,
         stepName: "draft_project_plan",
         status: "succeeded",
-        input: { goal: planDraft.detail.goal, duration: planDraft.detail.duration },
+        input: {
+          goal: planDraft.detail.goal,
+          duration: planDraft.detail.duration,
+        },
         output: {
           featureDraftCount: planDraft.detail.featureDrafts.length,
           milestoneDraftCount: planDraft.detail.milestoneDrafts.length,
@@ -426,12 +438,20 @@ function refreshRunActionState(run) {
     (action) => action.status === "waiting_confirmation",
   ).length;
   const terminalStatuses = new Set(["executed", "rejected", "failed"]);
+  const failedActionCount = run.actions.filter(
+    (action) => action.status === "failed",
+  ).length;
 
   run.actionRequired = waitingActionCount > 0;
   run.pendingActionCount = run.actions.filter(
     (action) => !terminalStatuses.has(action.status),
   ).length;
-  run.status = waitingActionCount > 0 ? "requires_confirmation" : "succeeded";
+  run.status =
+    waitingActionCount > 0
+      ? "requires_confirmation"
+      : failedActionCount > 0
+        ? "failed"
+        : "succeeded";
   run.updatedAt = new Date().toISOString();
 }
 
@@ -589,7 +609,10 @@ export function createMockAgentPlanningClient() {
     },
 
     async getRun(runId) {
-      return clone(mockRuns.get(runId) ?? createLocalPlanningRun(LOCAL_WORKSPACE_ID, {}, 1));
+      return clone(
+        mockRuns.get(runId) ??
+          createLocalPlanningRun(LOCAL_WORKSPACE_ID, {}, 1),
+      );
     },
 
     async listWorkspaceActions(workspaceId = LOCAL_WORKSPACE_ID) {
@@ -601,17 +624,26 @@ export function createMockAgentPlanningClient() {
 
     async approveAction(actionId) {
       for (const run of mockRuns.values()) {
-        const action = run.actions.find((candidate) => candidate.id === actionId);
+        const action = run.actions.find(
+          (candidate) => candidate.id === actionId,
+        );
 
         if (!action) continue;
 
         const decidedAt = new Date().toISOString();
 
         action.status =
-          action.type === "planning.approve" ||
-          action.type === "task.create.draft"
-            ? "executed"
-            : "confirmed";
+          action.type === "planning.approve"
+            ? "failed"
+            : action.type === "task.create.draft"
+              ? "executed"
+              : "confirmed";
+        if (action.type === "planning.approve") {
+          action.payload = {
+            ...action.payload,
+            errorMessage: PLANNING_APPROVAL_OWNER_API_MESSAGE,
+          };
+        }
         action.confirmedByMemberId = LOCAL_ACTOR_MEMBER_ID;
         action.confirmedAt = decidedAt;
         action.executedAt = action.status === "executed" ? decidedAt : null;
@@ -629,7 +661,9 @@ export function createMockAgentPlanningClient() {
 
     async rejectAction(actionId) {
       for (const run of mockRuns.values()) {
-        const action = run.actions.find((candidate) => candidate.id === actionId);
+        const action = run.actions.find(
+          (candidate) => candidate.id === actionId,
+        );
 
         if (!action) continue;
 

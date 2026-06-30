@@ -1718,9 +1718,20 @@ describe("frontend package", () => {
       ).workspaceId,
       workspaceId,
     );
-    const mockRun =
-      await createMockAgentPlanningClient().startPlanningRun(workspaceId);
+    const mockAgentClient = createMockAgentPlanningClient();
+    const mockRun = await mockAgentClient.startPlanningRun(workspaceId);
+    const mockPlanAction = mockRun.actions.find(
+      (action) => action.type === "planning.approve",
+    );
+    const failedMockPlanApproval = await mockAgentClient.approveAction(
+      mockPlanAction.id,
+    );
+    const nextMockRun = await mockAgentClient.getRun(mockRun.id);
+
     assert.equal(mockRun.workspaceId, workspaceId);
+    assert.equal(failedMockPlanApproval.status, "failed");
+    assert.equal(failedMockPlanApproval.executedAt, null);
+    assert.equal(nextMockRun.status, "requires_confirmation");
     assert.equal(
       (
         await createAgentPlanningClient({ mode: "mock" }).startPlanningRun(
