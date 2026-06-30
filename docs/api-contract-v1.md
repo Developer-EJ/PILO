@@ -539,6 +539,8 @@ Rules:
 - Raw audio is used for STT processing and is not a long-term MVP document object.
 - Voice command, call-word control, and automatic Task/Issue creation from speech are excluded.
 - Action Item conversion creates Task through Task API.
+- `POST /api/meeting-action-items/:actionItemId/task-draft` creates a Task Draft through the Task owner API and leaves the Meeting Action Item `approved`.
+- `convertedTaskId` is set only after an actual Task exists, through `PATCH /api/meeting-action-items/:actionItemId/convert`.
 
 ## Code Review Room API
 

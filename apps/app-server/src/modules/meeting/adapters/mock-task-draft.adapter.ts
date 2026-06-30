@@ -10,7 +10,8 @@ import {
 export class MockTaskDraftClient implements TaskDraftClient {
   createTaskDraft(payload: TaskCreateDraftPayload): TaskDraftResponse {
     return {
-      taskId: randomUUID(),
+      id: randomUUID(),
+      taskId: null,
       payload,
       mode: "mock",
     };

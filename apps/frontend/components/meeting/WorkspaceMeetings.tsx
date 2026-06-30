@@ -614,6 +614,10 @@ export function WorkspaceMeetings() {
     selectedMeeting && report
       ? recentReports.find((candidate) => candidate.id === report.id)
       : null;
+  const requestedTaskDraftSourceId =
+    typeof lastTaskDraft?.taskDraft.payload?.sourceId === "string"
+      ? lastTaskDraft.taskDraft.payload.sourceId
+      : null;
 
   return (
     <main className="dashboard-shell meetings-shell">
@@ -1058,13 +1062,16 @@ export function WorkspaceMeetings() {
                                   className="primary"
                                   disabled={
                                     isWorking ||
-                                    actionItem.status !== "approved"
+                                    actionItem.status !== "approved" ||
+                                    requestedTaskDraftSourceId === actionItem.id
                                   }
                                   onClick={() =>
                                     void requestTaskDraft(actionItem.id)
                                   }
                                 >
-                                  Task draft
+                                  {requestedTaskDraftSourceId === actionItem.id
+                                    ? "Draft requested"
+                                    : "Task draft"}
                                 </button>
                               </div>
                             </article>

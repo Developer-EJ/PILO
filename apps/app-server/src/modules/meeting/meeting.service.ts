@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  HttpException,
   Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
+import type { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
 import {
   CURRENT_MEMBER_ADAPTER,
   CurrentMemberAdapter,
@@ -606,9 +608,10 @@ export class MeetingService {
     );
   }
 
-  requestActionItemTaskDraft(
+  async requestActionItemTaskDraft(
     actionItemId: string,
-  ): MeetingActionItemTaskDraftResponseDto {
+    actor?: WorkspaceActor,
+  ): Promise<MeetingActionItemTaskDraftResponseDto> {
     const actionItem = this.requireActionItem(actionItemId);
 
     this.assertActionItemStatus(actionItem, "approved", "request task draft");
@@ -619,18 +622,10 @@ export class MeetingService {
       meeting.workspaceId,
       actionItem,
     );
-    const taskDraft = this.createTaskDraft(payload);
-    const convertedActionItem = this.meetingRepository.updateActionItem(
-      actionItem.id,
-      {
-        status: "converted",
-        convertedTaskId: taskDraft.taskId,
-        updatedAt: new Date().toISOString(),
-      },
-    );
+    const taskDraft = await this.createTaskDraft(payload, actor);
 
     return {
-      actionItem: this.toActionItemReadModel(convertedActionItem),
+      actionItem: this.toActionItemReadModel(actionItem),
       taskDraft,
     };
   }
@@ -1132,18 +1127,36 @@ export class MeetingService {
     }
   }
 
-  private createTaskDraft(payload: TaskCreateDraftPayload): TaskDraftResponse {
+  private async createTaskDraft(
+    payload: TaskCreateDraftPayload,
+    actor?: WorkspaceActor,
+  ): Promise<TaskDraftResponse> {
     let taskDraft: TaskDraftResponse;
 
     try {
-      taskDraft = this.taskDraftClient.createTaskDraft(payload);
-    } catch {
+      taskDraft = await this.taskDraftClient.createTaskDraft(payload, {
+        actor,
+      });
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       throw new InternalServerErrorException("Task draft request failed");
     }
 
-    if (typeof taskDraft.taskId !== "string" || taskDraft.taskId.length === 0) {
+    if (typeof taskDraft.id !== "string" || taskDraft.id.length === 0) {
       throw new InternalServerErrorException(
-        "Task draft response must include taskId",
+        "Task draft response must include id",
+      );
+    }
+
+    if (
+      taskDraft.taskId !== null &&
+      (typeof taskDraft.taskId !== "string" || taskDraft.taskId.length === 0)
+    ) {
+      throw new InternalServerErrorException(
+        "Task draft response taskId must be null or non-empty",
       );
     }
 

@@ -20,6 +20,9 @@ const {
   MockMeetingReportWorkflowClient,
 } = require("../src/modules/meeting/adapters/mock-meeting-report-workflow.adapter");
 const {
+  JuhyungTaskDraftClient,
+} = require("../src/modules/meeting/adapters/juhyung-task-draft.adapter");
+const {
   MockTaskDraftClient,
 } = require("../src/modules/meeting/adapters/mock-task-draft.adapter");
 const {
@@ -768,7 +771,7 @@ describe("meeting module scaffold", () => {
     });
   });
 
-  it("maps approved meeting action items to TaskCreateDraft and converts on mock success", () => {
+  it("maps approved meeting action items to TaskCreateDraft and keeps conversion separate", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     currentMemberAdapter.registerWorkspaceMember({
@@ -789,13 +792,16 @@ describe("meeting module scaffold", () => {
     });
     const approvedActionItem = controller.approveActionItem(actionItem.id);
 
-    const result = controller.requestActionItemTaskDraft(approvedActionItem.id);
+    const result = await controller.requestActionItemTaskDraft(
+      approvedActionItem.id,
+    );
 
     assert.equal(result.taskDraft.mode, "mock");
     assert.match(
-      result.taskDraft.taskId,
+      result.taskDraft.id,
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
+    assert.equal(result.taskDraft.taskId, null);
     assert.deepEqual(result.taskDraft.payload, {
       workspaceId: "workspace-1",
       sourceType: "meeting_action_item",
@@ -806,15 +812,58 @@ describe("meeting module scaffold", () => {
       priority: "medium",
       dueDate: "2026-07-03",
     });
-    assert.equal(result.actionItem.status, "converted");
-    assert.equal(result.actionItem.convertedTaskId, result.taskDraft.taskId);
-    assert.equal(
-      controller.listActionItems(report.id)[0].convertedTaskId,
-      result.taskDraft.taskId,
-    );
+    assert.equal(result.actionItem.status, "approved");
+    assert.equal(result.actionItem.convertedTaskId, null);
+    assert.deepEqual(controller.listActionItems(report.id)[0], {
+      ...approvedActionItem,
+      status: "approved",
+      convertedTaskId: null,
+    });
   });
 
-  it("keeps approved action items unchanged when TaskDraftClient fails", () => {
+  it("calls the Task owner API adapter with the approval actor", async () => {
+    const calls = [];
+    const adapter = new JuhyungTaskDraftClient({
+      async createTaskDraft(workspaceId, body, actor) {
+        calls.push({ workspaceId, body, actor });
+
+        return {
+          id: "55555555-5555-4555-8555-555555555555",
+          taskId: null,
+        };
+      },
+    });
+    const payload = {
+      workspaceId: "workspace-1",
+      sourceType: "meeting_action_item",
+      sourceId: "action-item-1",
+      title: "Draft the Task",
+      description: null,
+      assigneeMemberId: null,
+      priority: "medium",
+      dueDate: null,
+    };
+
+    const response = await adapter.createTaskDraft(payload, {
+      actor: { memberId: "member-1" },
+    });
+
+    assert.deepEqual(calls, [
+      {
+        workspaceId: "workspace-1",
+        body: payload,
+        actor: { memberId: "member-1" },
+      },
+    ]);
+    assert.deepEqual(response, {
+      id: "55555555-5555-4555-8555-555555555555",
+      taskId: null,
+      payload,
+      mode: "owner-api",
+    });
+  });
+
+  it("keeps approved action items unchanged when TaskDraftClient fails", async () => {
     const repository = new MockMeetingRepository();
     const currentMemberAdapter = new MockCurrentMemberAdapter();
     const failingTaskDraftClient = {
@@ -835,11 +884,13 @@ describe("meeting module scaffold", () => {
       title: "Keep this approved on failure",
     });
 
-    assert.throws(() => service.requestActionItemTaskDraft(actionItem.id));
+    await assert.rejects(() =>
+      service.requestActionItemTaskDraft(actionItem.id),
+    );
 
     const approvedActionItem = service.approveActionItem(actionItem.id);
 
-    assert.throws(() =>
+    await assert.rejects(() =>
       service.requestActionItemTaskDraft(approvedActionItem.id),
     );
     assert.deepEqual(service.listActionItems(report.id), [approvedActionItem]);

@@ -1,3 +1,5 @@
+import type { WorkspaceActor } from "../../workspace/public/workspace-access-public.service";
+
 export const TASK_DRAFT_CLIENT = Symbol("TASK_DRAFT_CLIENT");
 
 export type TaskDraftPriority = "low" | "medium" | "high" | "urgent";
@@ -14,11 +16,19 @@ export interface TaskCreateDraftPayload {
 }
 
 export interface TaskDraftResponse {
-  taskId: string;
+  id: string;
+  taskId: string | null;
   payload: TaskCreateDraftPayload;
-  mode: "mock";
+  mode: "mock" | "owner-api";
+}
+
+export interface TaskDraftRequestContext {
+  actor?: WorkspaceActor;
 }
 
 export interface TaskDraftClient {
-  createTaskDraft(payload: TaskCreateDraftPayload): TaskDraftResponse;
+  createTaskDraft(
+    payload: TaskCreateDraftPayload,
+    context?: TaskDraftRequestContext,
+  ): TaskDraftResponse | Promise<TaskDraftResponse>;
 }

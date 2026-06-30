@@ -904,7 +904,8 @@ export function createMockMeetingClient() {
 
       const report = state.reports[actionItem.reportId];
       const taskDraft = {
-        taskId: createMockId("task-draft"),
+        id: createMockId("task-draft"),
+        taskId: null,
         mode: "mock",
         payload: {
           workspaceId: report.workspaceId,
@@ -917,9 +918,6 @@ export function createMockMeetingClient() {
           dueDate: actionItem.dueDateSuggestion,
         },
       };
-
-      actionItem.status = "converted";
-      actionItem.convertedTaskId = taskDraft.taskId;
 
       return {
         actionItem: clone(actionItem),
