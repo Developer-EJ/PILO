@@ -306,24 +306,42 @@ Deferred:
 
 ### Agent Runtime
 
-상태: `Implemented` for registry only, `Deferred` for run/action runtime
+상태: `Implemented` for registry and internal deterministic service skeleton,
+`Mock/In-memory` for local run/action state, `Deferred` for HTTP runtime
 
 Implemented:
 
 - Agent registry service/repository
 - `agents`, `agent_workflows` Prisma models
+- Internal `AgentRuntimeService` skeleton:
+  - creates `AgentJobMessage` shape
+  - runs deterministic local workflow logic without external LLM/OpenAI/SQS
+  - applies `AgentResultMessage` shape to in-memory run/action/trace state
+  - supports `task.draft.generate` -> `task.create.draft`
+  - moves confirmable actions from `draft` to `waiting_confirmation`
+  - records confirmation as `confirmed`
+  - leaves owner-domain execution behind an explicit adapter/mock boundary
 
 Deferred:
 
 - `POST /api/workspaces/:workspaceId/agent-runs`
 - `GET /api/agent-runs/:runId`
-- agent run/action confirmation runtime
+- `POST /api/agent-actions/:actionId/approve`
+- `POST /api/agent-actions/:actionId/reject`
+- Agent Run/Action HTTP controller
+- DB-backed `agent_runs`, `agent_actions`, `agent_traces`
 - SQS result persistence into `agent_runs`, `agent_actions`, `agent_traces`
 
 주의:
 
 - SQL에는 Agent run/action/trace table이 있지만 Prisma 모델에는 없다.
-- Agent contract는 현재 실제 runtime보다 앞서 있다.
+- Internal `AgentRuntimeService` state is process memory only. It is useful for
+  contract-shaped local execution and tests, but it is not a callable Current
+  Runtime API.
+- Agent contract still leads the public HTTP runtime. Consumers must not call
+  Agent Run/Action routes until the controller PR lands.
+- Approval before owner execution is already modeled internally, but actual
+  Task/Meeting/Review/GitHub source data changes remain owner-domain API work.
 
 ### Planning
 

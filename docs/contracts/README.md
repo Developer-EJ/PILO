@@ -9,6 +9,7 @@
 | Label | 의미 |
 | --- | --- |
 | Current Runtime APIs | 현재 `temp-dev` app-server controller에 존재해 호출 가능한 path |
+| Current Internal Skeleton | app-server 내부 service/module로만 존재하는 mock 또는 in-memory surface. controller route가 없으므로 public API로 호출하면 안 됨 |
 | Deferred APIs | DTO/schema/fixture 후보는 있지만 현재 runtime controller가 없는 path |
 | MVP Target APIs | `docs/api-contract-v1.md`에 정의된 목표 path. 현재 runtime과 다를 수 있음 |
 | Excluded | MVP에서 만들지 않는 API/field/CTA. runtime에 이미 있더라도 MVP 성공 기준에는 포함하지 않음 |
@@ -24,6 +25,7 @@
 6. `Current Runtime APIs`는 app-server controller route와 global `/api` prefix로 확인한다. SQL baseline에 table이 있다는 사실만으로 Current Runtime API가 되지 않는다.
 7. PR/Issue가 mock, fixture, in-memory adapter, 또는 Deferred API에 의존하면 그 상태와 후속 실제 연동 Issue를 본문에 명시한다.
 8. Official agent bootstrap file is `agent.md`; do not create a separate `AGENTS.md` contract source unless a future contract PR changes this rule.
+9. `Current Internal Skeleton`은 후속 구현을 검증하기 위한 내부 경계다. 외부 도메인 소비자는 이것을 직접 호출 가능한 API로 간주하지 않고, 필요한 경우 owner가 제공하는 public controller가 Current로 승격될 때까지 fixture/mock을 사용한다.
 
 ## Runtime / DB Baseline
 
