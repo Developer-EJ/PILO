@@ -4,9 +4,9 @@ import { ReviewRoomWorkspace } from "../../../../components/review/ReviewRoomWor
 import { mockWorkspaces } from "../../../../lib/workspace/workspaceClient.mjs";
 
 type WorkspaceReviewsPageProps = {
-  params: {
+  params: Promise<{
     workspaceId: string;
-  };
+  }>;
 };
 
 export function generateStaticParams() {
@@ -15,13 +15,15 @@ export function generateStaticParams() {
   }));
 }
 
-export default function WorkspaceReviewsPage({
+export default async function WorkspaceReviewsPage({
   params,
 }: WorkspaceReviewsPageProps) {
+  const { workspaceId } = await params;
+
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <ReviewRoomWorkspace workspaceId={params.workspaceId} />
+        <ReviewRoomWorkspace workspaceId={workspaceId} />
       </AuthGuard>
     </Suspense>
   );

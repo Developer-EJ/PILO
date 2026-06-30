@@ -5,9 +5,10 @@ import { createMockCanvasBoardDetail } from "../../../../../lib/workspace/canvas
 import { mockWorkspaces } from "../../../../../lib/workspace/workspaceClient.mjs";
 
 type WorkspaceCanvasBoardPageProps = {
-  params: {
+  params: Promise<{
+    workspaceId: string;
     boardId: string;
-  };
+  }>;
 };
 
 export function generateStaticParams() {
@@ -17,13 +18,15 @@ export function generateStaticParams() {
   }));
 }
 
-export default function WorkspaceCanvasBoardPage({
+export default async function WorkspaceCanvasBoardPage({
   params,
 }: WorkspaceCanvasBoardPageProps) {
+  const { boardId } = await params;
+
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <WorkspaceCanvas boardId={params.boardId} />
+        <WorkspaceCanvas boardId={boardId} />
       </AuthGuard>
     </Suspense>
   );

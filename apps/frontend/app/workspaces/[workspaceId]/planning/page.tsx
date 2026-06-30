@@ -10,18 +10,20 @@ export function generateStaticParams() {
 }
 
 type WorkspacePlanningPageProps = {
-  params: {
+  params: Promise<{
     workspaceId: string;
-  };
+  }>;
 };
 
-export default function WorkspacePlanningPage({
+export default async function WorkspacePlanningPage({
   params,
 }: WorkspacePlanningPageProps) {
+  const { workspaceId } = await params;
+
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <AgentPlanningWorkspace workspaceId={params.workspaceId} />
+        <AgentPlanningWorkspace workspaceId={workspaceId} />
       </AuthGuard>
     </Suspense>
   );

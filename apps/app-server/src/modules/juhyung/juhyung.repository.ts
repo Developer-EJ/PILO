@@ -127,6 +127,10 @@ export class JuhyungRepository {
   constructor(private readonly database: DatabaseService) {}
 
   listTasksForWorkspace(workspaceId: string, options?: ListTasksOptions) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.task.findMany({
       where: buildTaskListWhere(workspaceId, options),
       orderBy: options
@@ -142,6 +146,10 @@ export class JuhyungRepository {
   }
 
   getTaskById(taskId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.task.findFirst({
       where: {
         id: taskId,
@@ -160,6 +168,10 @@ export class JuhyungRepository {
   }
 
   getTaskDependency(taskId: string, dependsOnTaskId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.taskDependency.findFirst({
       where: {
         taskId,
@@ -169,6 +181,10 @@ export class JuhyungRepository {
   }
 
   async listTaskDependenciesForWorkspace(workspaceId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     const tasks = await this.database.task.findMany({
       where: {
         workspaceId,
@@ -206,6 +222,10 @@ export class JuhyungRepository {
   }
 
   listWorkspaceMembersByIds(workspaceId: string, memberIds: string[]) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.workspaceMember.findMany({
       where: {
         workspaceId,
@@ -217,6 +237,10 @@ export class JuhyungRepository {
   }
 
   listMilestonesForWorkspace(workspaceId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.milestone.findMany({
       where: {
         workspaceId,
@@ -234,6 +258,10 @@ export class JuhyungRepository {
   }
 
   getMilestoneById(milestoneId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.milestone.findUnique({
       where: {
         id: milestoneId,
@@ -290,6 +318,10 @@ export class JuhyungRepository {
   }
 
   listTaskDraftsForWorkspace(workspaceId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.taskDraft.findMany({
       where: {
         workspaceId,
@@ -300,6 +332,10 @@ export class JuhyungRepository {
   }
 
   getTaskDraftById(draftId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.taskDraft.findUnique({
       where: {
         id: draftId,
@@ -491,6 +527,10 @@ export class JuhyungRepository {
   }
 
   listTaskComments(taskId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.taskComment.findMany({
       where: {
         taskId,
@@ -500,6 +540,10 @@ export class JuhyungRepository {
   }
 
   listTaskActivityLogs(taskId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.taskActivityLog.findMany({
       where: {
         taskId,
@@ -509,6 +553,10 @@ export class JuhyungRepository {
   }
 
   listChecklistItemsForTask(taskId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.taskChecklistItem.findMany({
       where: {
         taskId,
@@ -606,6 +654,10 @@ export class JuhyungRepository {
   }
 
   listGithubRepositoriesForWorkspace(workspaceId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.githubRepository.findMany({
       where: {
         workspaceId,
@@ -615,6 +667,10 @@ export class JuhyungRepository {
   }
 
   getGithubRepositoryById(repositoryId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.githubRepository.findUnique({
       where: {
         id: repositoryId,
@@ -623,6 +679,10 @@ export class JuhyungRepository {
   }
 
   getGithubIssueById(issueId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.githubIssue.findUnique({
       where: {
         id: issueId,
@@ -631,6 +691,10 @@ export class JuhyungRepository {
   }
 
   getPullRequestById(pullRequestId: string) {
+    if (!this.shouldUseDatabase) {
+      return null;
+    }
+
     return this.database.pullRequest.findUnique({
       where: {
         id: pullRequestId,
@@ -639,6 +703,10 @@ export class JuhyungRepository {
   }
 
   async getNextGithubIssueNumber(repositoryId: string) {
+    if (!this.shouldUseDatabase) {
+      return 1;
+    }
+
     const result = await this.database.githubIssue.aggregate({
       where: {
         repositoryId,
@@ -690,6 +758,10 @@ export class JuhyungRepository {
   }
 
   listGithubIssuesForRepository(repositoryId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.githubIssue.findMany({
       where: {
         repositoryId,
@@ -699,6 +771,10 @@ export class JuhyungRepository {
   }
 
   listGithubIssueLabelsForIssueIds(issueIds: string[]) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     if (issueIds.length === 0) {
       return [];
     }
@@ -714,6 +790,10 @@ export class JuhyungRepository {
   }
 
   listTaskGithubIssueLinksForIssueIds(issueIds: string[]) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     if (issueIds.length === 0) {
       return [];
     }
@@ -729,6 +809,10 @@ export class JuhyungRepository {
   }
 
   listTaskGithubIssueLinksForTaskIds(taskIds: string[]) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     if (taskIds.length === 0) {
       return [];
     }
@@ -744,6 +828,10 @@ export class JuhyungRepository {
   }
 
   listPullRequestsForRepository(repositoryId: string) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.pullRequest.findMany({
       where: {
         repositoryId,
@@ -753,6 +841,10 @@ export class JuhyungRepository {
   }
 
   listTaskPullRequestLinksForPullRequestIds(pullRequestIds: string[]) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     if (pullRequestIds.length === 0) {
       return [];
     }
@@ -768,6 +860,10 @@ export class JuhyungRepository {
   }
 
   listTaskPullRequestLinksForTaskIds(taskIds: string[]) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     if (taskIds.length === 0) {
       return [];
     }
@@ -783,6 +879,10 @@ export class JuhyungRepository {
   }
 
   listProgressSnapshotsForWorkspace(workspaceId: string, limit = 12) {
+    if (!this.shouldUseDatabase) {
+      return [];
+    }
+
     return this.database.progressSnapshot.findMany({
       where: {
         workspaceId,
@@ -802,6 +902,10 @@ export class JuhyungRepository {
       },
     });
     return (aggregate._max.sortOrder ?? -1) + 1;
+  }
+
+  private get shouldUseDatabase() {
+    return process.env.PILO_SKIP_DATABASE_CONNECT !== "true";
   }
 }
 

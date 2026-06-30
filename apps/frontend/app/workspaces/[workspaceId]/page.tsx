@@ -4,9 +4,9 @@ import { AuthGuard } from "../../../components/auth/AuthGuard";
 import { WorkspaceDashboard } from "../../../components/workspace/WorkspaceDashboard";
 
 type WorkspaceDashboardPageProps = {
-  params: {
+  params: Promise<{
     workspaceId: string;
-  };
+  }>;
 };
 
 export function generateStaticParams() {
@@ -15,13 +15,15 @@ export function generateStaticParams() {
   }));
 }
 
-export default function WorkspaceDashboardPage({
+export default async function WorkspaceDashboardPage({
   params,
 }: WorkspaceDashboardPageProps) {
+  const { workspaceId } = await params;
+
   return (
     <Suspense fallback={null}>
       <AuthGuard>
-        <WorkspaceDashboard workspaceId={params.workspaceId} />
+        <WorkspaceDashboard workspaceId={workspaceId} />
       </AuthGuard>
     </Suspense>
   );

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import process from "node:process";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 
@@ -107,6 +108,38 @@ describe("WorkspaceMemberAccessService", () => {
         },
       },
     ]);
+  });
+
+  it("uses a local actor member without querying Prisma when database connect is skipped", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+    const service = new WorkspaceMemberAccessService({
+      workspaceMember: {
+        findFirst: async () => {
+          throw new Error("should not query Prisma in local memory mode");
+        },
+      },
+    });
+
+    try {
+      const member = await service.requireWorkspaceMember("workspace-1", {
+        userId: "user-1",
+        memberId: "member-1",
+      });
+
+      assert.deepEqual(member, {
+        id: "member-1",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        role: "owner",
+      });
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
   });
 
   it("rejects mismatched user and member ids with ForbiddenException", async () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import process from "node:process";
 import { describe, it } from "node:test";
 import { createRequire } from "node:module";
 
@@ -30,6 +31,44 @@ describe("JuhyungRepository", () => {
       "task_pull_requests",
       "progress_snapshots",
     ]);
+  });
+
+  it("returns empty runtime read models without touching Prisma when database connect is skipped", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+    const database = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("should not query Prisma in local memory mode");
+        },
+      },
+    );
+    const repository = new JuhyungRepository(database);
+
+    try {
+      assert.deepEqual(await repository.listTasksForWorkspace("workspace-1"), []);
+      assert.equal(await repository.getTaskById("task-1"), null);
+      assert.deepEqual(
+        await repository.listGithubRepositoriesForWorkspace("workspace-1"),
+        [],
+      );
+      assert.equal(await repository.getGithubRepositoryById("repository-1"), null);
+      assert.deepEqual(
+        await repository.listPullRequestsForRepository("repository-1"),
+        [],
+      );
+      assert.deepEqual(
+        await repository.listProgressSnapshotsForWorkspace("workspace-1"),
+        [],
+      );
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
   });
 
   it("reads non-deleted tasks within one workspace", async () => {

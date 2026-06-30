@@ -577,7 +577,7 @@ describe("frontend package", () => {
     const workspacePages = {
       dashboard: {
         file: "app/workspaces/[workspaceId]/page.tsx",
-        component: /<WorkspaceDashboard workspaceId={params\.workspaceId} \/>/,
+        component: /<WorkspaceDashboard workspaceId={workspaceId} \/>/,
       },
       canvas: {
         file: "app/workspaces/[workspaceId]/canvas/page.tsx",
@@ -597,17 +597,17 @@ describe("frontend package", () => {
       },
       reviews: {
         file: "app/workspaces/[workspaceId]/reviews/page.tsx",
-        component: /<ReviewRoomWorkspace workspaceId={params\.workspaceId} \/>/,
+        component: /<ReviewRoomWorkspace workspaceId={workspaceId} \/>/,
       },
       agent: {
         file: "app/workspaces/[workspaceId]/agent/page.tsx",
         component:
-          /<AgentPlanningWorkspace workspaceId={params\.workspaceId} \/>/,
+          /<AgentPlanningWorkspace workspaceId={workspaceId} \/>/,
       },
       planning: {
         file: "app/workspaces/[workspaceId]/planning/page.tsx",
         component:
-          /<AgentPlanningWorkspace workspaceId={params\.workspaceId} \/>/,
+          /<AgentPlanningWorkspace workspaceId={workspaceId} \/>/,
       },
     };
 
@@ -663,7 +663,7 @@ describe("frontend package", () => {
 
     assert.match(
       dashboardPage,
-      /<WorkspaceDashboard workspaceId={params\.workspaceId} \/>/,
+      /const \{ workspaceId \} = await params;[\s\S]*<WorkspaceDashboard workspaceId={workspaceId} \/>/,
     );
     assert.match(
       dashboard,
@@ -708,6 +708,28 @@ describe("frontend package", () => {
 
       assert.doesNotMatch(route, /dynamicParams\s*=\s*false/);
     }
+
+    for (const routeFile of [
+      "app/workspaces/[workspaceId]/page.tsx",
+      "app/workspaces/[workspaceId]/reviews/page.tsx",
+      "app/workspaces/[workspaceId]/agent/page.tsx",
+      "app/workspaces/[workspaceId]/planning/page.tsx",
+    ]) {
+      const route = readFileSync(routeFile, "utf8");
+
+      assert.match(route, /params: Promise<\{/);
+      assert.match(route, /const \{ workspaceId \} = await params;/);
+      assert.doesNotMatch(route, /params\.workspaceId/);
+    }
+
+    const boardRoute = readFileSync(
+      "app/workspaces/[workspaceId]/canvas/[boardId]/page.tsx",
+      "utf8",
+    );
+
+    assert.match(boardRoute, /params: Promise<\{/);
+    assert.match(boardRoute, /const \{ boardId \} = await params;/);
+    assert.doesNotMatch(boardRoute, /params\.boardId/);
   });
 
   it("does not silently use stored workspace when URL workspace is invalid", () => {
