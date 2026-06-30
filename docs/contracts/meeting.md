@@ -103,6 +103,7 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 | `POST` | `/api/meetings/:meetingId/report` | 회의록 직접 생성/mock 생성 |
 | `GET` | `/api/meeting-reports/:reportId` | 회의록 상세 |
 | `GET` | `/api/workspaces/:workspaceId/meeting-reports/recent` | Dashboard용 최근 회의록 요약 |
+| `GET` | `/api/workspaces/:workspaceId/meeting-report-ai-context?date=YYYY-MM-DD` | AI chat용 KST 날짜별 회의록 context |
 | `GET` | `/api/workspaces/:workspaceId/meeting-reports/canvas-entity-refs` | Canvas용 회의록 entity ref |
 
 ### Report Items
@@ -396,6 +397,48 @@ Dashboard가 소비하는 최소 read model이다. 상세 회의록이 아니라
   "nextAgendas": []
 }
 ```
+
+### MeetingReportAiContext
+
+`GET /api/workspaces/:workspaceId/meeting-report-ai-context?date=YYYY-MM-DD`
+응답이다. `date`는 KST 기준 날짜이며, 필터 기준은 `report.createdAt`이다. `date`를
+생략하면 서버 현재 시각 기준 KST 어제로 계산한다.
+
+```json
+{
+  "workspaceId": "uuid",
+  "date": "2026-06-29",
+  "timezone": "Asia/Seoul",
+  "dateBasis": "report.createdAt",
+  "currentMemberId": "uuid",
+  "generatedAt": "2026-06-30T00:10:00.000Z",
+  "reports": [
+    {
+      "reportId": "uuid",
+      "meetingId": "uuid",
+      "workspaceId": "uuid",
+      "meetingTitle": "MVP scope sync",
+      "meetingStatus": "report_generated",
+      "meetingStartedAt": null,
+      "meetingEndedAt": null,
+      "summary": "전날 회의록 요약",
+      "decisionCount": 2,
+      "actionItemCount": 3,
+      "riskCount": 1,
+      "reportCreatedAt": "2026-06-29T08:30:00.000Z"
+    }
+  ],
+  "decisions": [],
+  "actionItems": [],
+  "risks": [],
+  "nextAgendas": []
+}
+```
+
+- `actionItems[].isCurrentMemberAssigneeSuggestion` is true when
+  `assigneeSuggestionMemberId` matches `currentMemberId`.
+- This is a read-only context payload for Seain AI chat. It does not mutate
+  Meeting, Task, Review, or Canvas state.
 
 ### MeetingDecision
 

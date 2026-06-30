@@ -49,6 +49,7 @@ import {
   TaskRecord,
   TaskActivityLogRecord,
   TaskActivityLogSummary,
+  TaskGithubProgressContext,
   TaskDetail,
   TaskChecklistItemSummary,
   TaskCommentRecord,
@@ -90,6 +91,11 @@ export type { ListTasksQuery } from "./juhyung-task-list-query";
 
 export type ProgressSummaryQuery = {
   milestoneId?: string | string[];
+};
+
+export type TaskContextQuery = {
+  memberId?: string | string[];
+  date?: string | string[];
 };
 
 @Injectable()
@@ -171,6 +177,75 @@ export class JuhyungTaskService {
     const tasks = await this.repository.listTasksForWorkspace(workspaceId);
 
     return calculateProgressSummaryFromTasks(workspaceId, tasks, milestoneId);
+  }
+
+  async getTaskGithubProgressContext(
+    workspaceId: string,
+    query: TaskContextQuery = {},
+    actor?: WorkspaceActor,
+  ): Promise<TaskGithubProgressContext> {
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      workspaceId,
+      actor,
+    );
+    const memberId =
+      normalizeTaskContextMemberId(query.memberId) ?? currentMember.id ?? null;
+    if (memberId && memberId !== currentMember.id) {
+      await this.requireWorkspaceMemberById(workspaceId, memberId);
+    }
+
+    const date = normalizeTaskContextDate(query.date) ?? toDateOnly(new Date());
+    const tasks = await this.repository.listTasksForWorkspace(workspaceId);
+    const summaries = await this.toTaskSummaries(workspaceId, tasks);
+    const openTasks = summaries.filter((task) => task.status !== "done");
+
+    return {
+      workspaceId,
+      memberId,
+      date,
+      generatedAt: new Date().toISOString(),
+      progress: calculateProgressSummaryFromTasks(workspaceId, tasks, null),
+      focus: {
+        myTasks: limitContextTasks(
+          memberId
+            ? openTasks.filter((task) => task.assignee?.memberId === memberId)
+            : [],
+        ),
+        blockedTasks: limitContextTasks(
+          openTasks.filter((task) => task.status === "blocked"),
+        ),
+        delayedTasks: limitContextTasks(
+          openTasks.filter((task) => isTaskDelayedForDate(task, date)),
+        ),
+        dueTodayTasks: limitContextTasks(
+          openTasks.filter((task) => task.dueDate === date),
+        ),
+        recommendedTasks: limitContextTasks(
+          rankRecommendedTasks(openTasks, memberId, date),
+        ),
+        recentOpenTasks: limitContextTasks(openTasks),
+      },
+      github: {
+        source: "deferred_contract",
+        hasRuntimePrReadModel: false,
+        issues: [],
+        pullRequests: [],
+        risks: [
+          {
+            type: "github_pr_read_model_deferred",
+            severity: "warning",
+            message:
+              "Runtime GitHub Issue/PR read models are deferred; use contract fixtures only at mock boundaries.",
+          },
+          {
+            type: "meeting_decision_link_deferred",
+            severity: "info",
+            message:
+              "Meeting decision to Task linkage requires Meeting/Task source mapping outside the current Task runtime.",
+          },
+        ],
+      },
+    };
   }
 
   async createTask(
@@ -744,6 +819,138 @@ function normalizeProgressMilestoneId(
   const normalizedValue = firstValue?.trim();
 
   return normalizedValue ? normalizedValue : null;
+}
+
+function normalizeTaskContextMemberId(
+  value: TaskContextQuery["memberId"],
+): string | null {
+  return normalizeOptionalQueryString(value, "memberId");
+}
+
+function normalizeTaskContextDate(
+  value: TaskContextQuery["date"],
+): string | null {
+  const date = normalizeOptionalQueryString(value, "date");
+  if (!date) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new BadRequestException("date must be YYYY-MM-DD");
+  }
+
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== date
+  ) {
+    throw new BadRequestException("date must be a valid date");
+  }
+  return date;
+}
+
+function normalizeOptionalQueryString(
+  value: string | string[] | undefined,
+  field: string,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const first = Array.isArray(value) ? value[0] : value;
+  if (first === undefined || first === null) {
+    return null;
+  }
+  if (typeof first !== "string") {
+    throw new BadRequestException(`${field} must be a string`);
+  }
+  const normalized = first.trim();
+  return normalized ? normalized : null;
+}
+
+function limitContextTasks(tasks: TaskSummary[], limit = 10): TaskSummary[] {
+  return tasks.slice(0, limit);
+}
+
+function rankRecommendedTasks(
+  tasks: TaskSummary[],
+  memberId: string | null,
+  date: string,
+): TaskSummary[] {
+  return [...tasks].sort((left, right) => {
+    const scoreDelta =
+      getTaskRecommendationScore(right, memberId, date) -
+      getTaskRecommendationScore(left, memberId, date);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+
+    const dueDateDelta = compareNullableDate(left.dueDate, right.dueDate);
+    if (dueDateDelta !== 0) {
+      return dueDateDelta;
+    }
+
+    const updatedAtDelta = right.updatedAt.localeCompare(left.updatedAt);
+    return updatedAtDelta !== 0
+      ? updatedAtDelta
+      : left.id.localeCompare(right.id);
+  });
+}
+
+function getTaskRecommendationScore(
+  task: TaskSummary,
+  memberId: string | null,
+  date: string,
+): number {
+  let score = 0;
+  if (memberId && task.assignee?.memberId === memberId) {
+    score += 100;
+  }
+  if (task.status === "blocked") {
+    score += 90;
+  }
+  if (isTaskDelayedForDate(task, date)) {
+    score += 80;
+  }
+  if (task.dueDate === date) {
+    score += 70;
+  }
+  if (task.status === "in_review") {
+    score += 30;
+  }
+  if (task.status === "in_progress") {
+    score += 20;
+  }
+  return score + getPriorityScore(task.priority);
+}
+
+function getPriorityScore(priority: TaskPriority): number {
+  switch (priority) {
+    case "urgent":
+      return 60;
+    case "high":
+      return 40;
+    case "medium":
+      return 20;
+    case "low":
+    default:
+      return 0;
+  }
+}
+
+function isTaskDelayedForDate(task: TaskSummary, date: string): boolean {
+  return Boolean(task.dueDate && task.status !== "done" && task.dueDate < date);
+}
+
+function compareNullableDate(left: string | null, right: string | null): number {
+  if (left === right) {
+    return 0;
+  }
+  if (!left) {
+    return 1;
+  }
+  if (!right) {
+    return -1;
+  }
+  return left.localeCompare(right);
 }
 
 function calculateProgressSummaryFromTasks(

@@ -24,6 +24,7 @@ import {
   extractWorkspaceIdFromPathname,
   workspaceCanvasHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
+import { WorkspaceAiChat } from "./WorkspaceAiChat";
 import { WorkspaceSidebar } from "./WorkspaceShell";
 import {
   PiloTldrawCanvas,
@@ -48,6 +49,12 @@ type CanvasEntity = {
   width?: number;
   height?: number;
   color?: string;
+  body?: string;
+  authorId?: string | null;
+  authorName?: string | null;
+  createdByMemberId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   position?: {
     x: number;
     y: number;
@@ -105,6 +112,7 @@ const canvasFilterLabels: Record<string, string> = {
   file: "파일",
   code: "코드",
   decision: "결정",
+  memo: "메모",
   risk: "위험",
 };
 
@@ -841,16 +849,20 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     const canvasClient = createCanvasClient();
 
     try {
-      const createdShape = (await canvasClient.createShape(board.id, {
-        shapeType: sourceEntity.shapeType,
-        entityType: sourceEntity.entityType,
-        entityId: sourceEntity.entityId,
-        displayTitle: sourceEntity.displayTitle,
-        width: sourceEntity.entityType === "pull_request" ? 300 : 280,
-        height: sourceEntity.entityType === "pull_request" ? 172 : 160,
-        color:
-          sourceEntity.entityType === "pull_request" ? "#2e9e5b" : "#6d5bd6",
-      })) as CanvasEntity;
+      const createdShape = (await canvasClient.createShape(
+        board.id,
+        {
+          shapeType: sourceEntity.shapeType,
+          entityType: sourceEntity.entityType,
+          entityId: sourceEntity.entityId,
+          displayTitle: sourceEntity.displayTitle,
+          width: sourceEntity.entityType === "pull_request" ? 300 : 280,
+          height: sourceEntity.entityType === "pull_request" ? 172 : 160,
+          color:
+            sourceEntity.entityType === "pull_request" ? "#2e9e5b" : "#6d5bd6",
+        },
+        { workspaceId },
+      )) as CanvasEntity;
       if (!createdShape.id) {
         throw new Error("Canvas shape id missing.");
       }
@@ -937,6 +949,49 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     setIsMemoMenuOpen(false);
     setActiveCanvasTool("code");
     canvasActions?.createCodeBlock();
+  }
+
+  function handleAiMemoCreated(result: {
+    boardId: string;
+    shape: CanvasEntity;
+  }) {
+    if (!result?.shape || result.boardId !== board.id) return;
+
+    setBoardState((currentBoardState) => {
+      if (!currentBoardState.board || currentBoardState.board.id !== board.id) {
+        return currentBoardState;
+      }
+
+      if (
+        currentBoardState.board.shapes.some(
+          (shape) => shape.id && shape.id === result.shape.id,
+        )
+      ) {
+        return currentBoardState;
+      }
+
+      return {
+        ...currentBoardState,
+        board: {
+          ...currentBoardState.board,
+          shapes: [...currentBoardState.board.shapes, result.shape],
+          shapeCount: currentBoardState.board.shapes.length + 1,
+          updatedAt: new Date().toISOString(),
+          filterSetting: {
+            ...currentBoardState.board.filterSetting,
+            enabledEntityTypes: Array.from(
+              new Set([
+                ...currentBoardState.board.filterSetting.enabledEntityTypes,
+                result.shape.entityType,
+              ]),
+            ),
+          },
+        },
+      };
+    });
+    setCanvasSyncMessage(
+      shouldSyncCanvasApi ? "AI 메모 저장됨" : "로컬 AI 메모 추가됨",
+    );
   }
 
   const handleSelectionChange = useCallback(
@@ -1525,6 +1580,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           </button>
         </div>
       </section>
+      <WorkspaceAiChat
+        workspaceId={workspaceId}
+        initialBoardId={board.id}
+        onCanvasMemoCreated={handleAiMemoCreated}
+      />
     </main>
   );
 }

@@ -169,34 +169,261 @@ describe("AgentRuntimeService", () => {
     );
   });
 
-  it("supports chat-driven agent runs and action rejection", async () => {
+  it("answers lookup-style workspace chat questions without action proposals", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
     const { service } = createService();
 
-    const result = await service.sendChatMessage(
-      "workspace-agent-runtime",
-      {
-        message: "Break the next slice into task drafts.",
-        workflowType: "task.draft.generate",
-        contextRefs: [],
-      },
-      { memberId: "member-saein" },
-    );
-    const firstAction = result.run.actions[0];
+    try {
+      const scenarios = [
+        {
+          message: "어제 회의록 내용 기준으로 무엇을 먼저 처리하면 좋을까?",
+          expectedLabel: "어제",
+          expectedFrom: "2026-06-29",
+          expectedTo: "2026-06-29",
+          contextRefs: [{ type: "meeting_report", id: "meeting-2026-06-29" }],
+        },
+        {
+          message: "오늘 내가 먼저 봐야 할 작업 알려줘",
+          expectedLabel: "오늘",
+          expectedFrom: "2026-06-30",
+          expectedTo: "2026-06-30",
+          contextRefs: [{ type: "task", id: "task-priority" }],
+        },
+        {
+          message: "회의 결정사항 기준으로 막힌 일 정리해줘",
+          expectedLabel: "최근 7일",
+          expectedFrom: "2026-06-24",
+          expectedTo: "2026-06-30",
+          contextRefs: [{ type: "meeting_report", id: "meeting-blockers" }],
+        },
+      ];
 
-    assert.equal(result.run.status, "requires_confirmation");
-    assert.equal(firstAction.type, "task.create.draft");
-    assert.equal(firstAction.executedAt, null);
+      for (const scenario of scenarios) {
+        const result = await service.sendChatMessage(
+          "workspace-agent-runtime",
+          {
+            message: scenario.message,
+            workflowType: "task.draft.generate",
+            contextRefs: scenario.contextRefs,
+            currentDateKst: "2026-06-30",
+          },
+          { memberId: "member-saein" },
+        );
 
-    const rejectedRun = await service.rejectAction(firstAction.id, {
-      memberId: "member-saein",
-    });
-    const rejectedAction = rejectedRun.actions.find(
-      (action) => action.id === firstAction.id,
-    );
+        assert.equal(result.response.fallback, true);
+        assert.equal(result.response.dateRange.label, scenario.expectedLabel);
+        assert.equal(result.response.dateRange.from, scenario.expectedFrom);
+        assert.equal(result.response.dateRange.to, scenario.expectedTo);
+        assert.equal(result.response.priorityTasks.length > 0, true);
+        assert.equal(result.response.priorityTasks.length <= 3, true);
+        assert.equal(result.response.evidence.length > 0, true);
+        assert.equal(result.response.recommendedNextActions.length > 0, true);
+        assert.deepEqual(result.response.actionProposals, []);
+        assert.equal(result.run.actions.length, 0);
+        assert.equal(result.run.pendingActionCount, 0);
+        assert.equal(result.run.status, "succeeded");
+        assert.ok(result.assistantMessage.body.includes("우선 처리할 일"));
+      }
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
 
-    assert.equal(rejectedAction.status, "rejected");
-    assert.equal(rejectedAction.executedAt, null);
-    assert.ok(rejectedRun.pendingActionCount < result.run.pendingActionCount);
+  it("supports chat-driven agent runs and action rejection", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    const { service } = createService();
+
+    try {
+      const result = await service.sendChatMessage(
+        "workspace-agent-runtime",
+        {
+          message:
+            "프로젝트 맵 캔버스에 메모 컴포넌트로 '동현: 오늘 회의 늦을 것 같습니다'라고 남겨줘",
+          workflowType: "task.draft.generate",
+          contextRefs: [{ type: "canvas", id: "project-map" }],
+          currentDateKst: "2026-06-30",
+        },
+        { memberId: "member-saein" },
+      );
+      const firstAction = result.run.actions[0];
+
+      assert.equal(result.run.status, "requires_confirmation");
+      assert.equal(result.response.fallback, true);
+      assert.equal(result.response.dateRange.label, "오늘");
+      assert.equal(result.response.dateRange.from, "2026-06-30");
+      assert.equal(result.response.dateRange.to, "2026-06-30");
+      assert.equal(firstAction.type, "canvas.memo.create");
+      assert.equal(firstAction.summary, "프로젝트 맵 캔버스에 메모를 추가합니다.");
+      assert.equal(firstAction.payload.boardHint, "project-map");
+      assert.equal(firstAction.payload.text, "동현: 오늘 회의 늦을 것 같습니다");
+      assert.equal(firstAction.payload.shapeType, "memo");
+      assert.equal(firstAction.status, "waiting_confirmation");
+      assert.equal(firstAction.executedAt, null);
+      assert.ok(result.assistantMessage.body.includes("우선 처리할 일"));
+
+      const rejectedRun = await service.rejectAction(firstAction.id, {
+        memberId: "member-saein",
+      });
+      const rejectedAction = rejectedRun.actions.find(
+        (action) => action.id === firstAction.id,
+      );
+
+      assert.equal(rejectedAction.status, "rejected");
+      assert.equal(rejectedAction.executedAt, null);
+      assert.ok(rejectedRun.pendingActionCount < result.run.pendingActionCount);
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
+
+  it("uses raw JSON OpenAI workspace chat responses without executing actions", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalModel = process.env.PILO_AGENT_CHAT_MODEL;
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.PILO_AGENT_CHAT_MODEL = "gpt-chat-test";
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        output_text: JSON.stringify({
+          shortConclusion: "어제 회의 결정은 캔버스 메모로 남기면 됩니다.",
+          priorityTasks: ["회의 결정 3개를 요약", "프로젝트 맵 위치 확인"],
+          evidence: [
+            {
+              source: "meeting",
+              title: "어제 회의록",
+              detail: "회의록 contextRef를 근거로 사용했습니다.",
+              referenceId: "meeting-2026-06-29",
+            },
+          ],
+          recommendedNextActions: ["메모 action을 승인하거나 거절하세요."],
+          actionProposals: [
+            {
+              type: "canvas.memo.create",
+              summary: "프로젝트 맵 캔버스에 메모를 추가합니다.",
+              payload: {
+                workspaceId: "workspace-agent-runtime",
+                boardHint: "project-map",
+                text: "어제 회의 결정 요약",
+                shapeType: "memo",
+                position: { x: 240, y: 180 },
+              },
+            },
+          ],
+        }),
+      });
+    };
+
+    try {
+      const { service } = createService();
+      const result = await service.sendChatMessage(
+        "workspace-agent-runtime",
+        {
+          message: "어제 회의 결정 프로젝트 맵에 메모로 남겨줘",
+          workflowType: "task.draft.generate",
+          contextRefs: [{ type: "meeting_report", id: "meeting-2026-06-29" }],
+          currentDateKst: "2026-06-30",
+        },
+        { memberId: "member-saein" },
+      );
+
+      assert.equal(result.response.fallback, false);
+      assert.equal(result.response.usedModel, "gpt-chat-test");
+      assert.equal(result.response.dateRange.from, "2026-06-29");
+      assert.equal(result.run.actions[0].type, "canvas.memo.create");
+      assert.equal(result.run.actions[0].status, "waiting_confirmation");
+      assert.equal(result.run.actions[0].executedAt, null);
+      const requestBody = JSON.parse(requests[0].init.body);
+      assert.equal(
+        requestBody.input[0].content.includes("raw compact JSON object only"),
+        true,
+      );
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+      if (originalModel === undefined) {
+        delete process.env.PILO_AGENT_CHAT_MODEL;
+      } else {
+        process.env.PILO_AGENT_CHAT_MODEL = originalModel;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("keeps empty OpenAI action proposals empty for lookup questions", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalModel = process.env.PILO_AGENT_CHAT_MODEL;
+    const originalFetch = globalThis.fetch;
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.PILO_AGENT_CHAT_MODEL = "gpt-chat-test";
+    globalThis.fetch = async () =>
+      Response.json({
+        output_text: JSON.stringify({
+          shortConclusion: "어제 회의록 기준으로 지연 위험을 먼저 확인하세요.",
+          priorityTasks: ["막힌 일 확인", "오늘 처리할 작업 정리"],
+          evidence: [
+            {
+              source: "meeting",
+              title: "어제 회의록",
+              detail: "회의록 contextRef를 기준으로 한 조회형 답변입니다.",
+              referenceId: "meeting-2026-06-29",
+            },
+          ],
+          recommendedNextActions: ["담당자와 막힌 사유를 확인하세요."],
+          actionProposals: [],
+        }),
+      });
+
+    try {
+      const { service } = createService();
+      const result = await service.sendChatMessage(
+        "workspace-agent-runtime",
+        {
+          message: "어제 회의록 내용 기준으로 무엇을 먼저 처리하면 좋을까?",
+          workflowType: "task.draft.generate",
+          contextRefs: [{ type: "meeting_report", id: "meeting-2026-06-29" }],
+          currentDateKst: "2026-06-30",
+        },
+        { memberId: "member-saein" },
+      );
+
+      assert.equal(result.response.fallback, false);
+      assert.equal(result.response.usedModel, "gpt-chat-test");
+      assert.equal(result.response.dateRange.label, "어제");
+      assert.equal(result.response.dateRange.from, "2026-06-29");
+      assert.deepEqual(result.response.actionProposals, []);
+      assert.equal(result.run.actions.length, 0);
+      assert.equal(result.run.pendingActionCount, 0);
+      assert.equal(result.run.status, "succeeded");
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+      if (originalModel === undefined) {
+        delete process.env.PILO_AGENT_CHAT_MODEL;
+      } else {
+        process.env.PILO_AGENT_CHAT_MODEL = originalModel;
+      }
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("builds onboarding context and candidate payloads without owner execution", async () => {

@@ -43,6 +43,36 @@ function createMeetingService(
   );
 }
 
+function withFixedNow(isoDateTime, callback) {
+  const RealDate = globalThis.Date;
+
+  class FixedDate extends RealDate {
+    constructor(...args) {
+      super(...(args.length > 0 ? args : [isoDateTime]));
+    }
+
+    static now() {
+      return new RealDate(isoDateTime).getTime();
+    }
+
+    static parse(value) {
+      return RealDate.parse(value);
+    }
+
+    static UTC(...args) {
+      return RealDate.UTC(...args);
+    }
+  }
+
+  globalThis.Date = FixedDate;
+
+  try {
+    return callback();
+  } finally {
+    globalThis.Date = RealDate;
+  }
+}
+
 describe("meeting module scaffold", () => {
   it("keeps the repository behind an injectable token", () => {
     assert.equal(typeof MEETING_REPOSITORY, "symbol");
@@ -443,6 +473,115 @@ describe("meeting module scaffold", () => {
     assert.equal("risks" in recentReports[0], false);
     assert.equal("nextAgendas" in recentReports[0], false);
     assert.equal(controller.getMeeting(meeting.id).status, "report_generated");
+  });
+
+  it("builds KST-dated meeting report AI context for chat consumers", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const currentMember = currentMemberAdapter.getCurrentMember("workspace-1");
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    let yesterdayMeeting;
+    let yesterdayReport;
+    let todayReport;
+
+    withFixedNow("2026-06-29T14:30:00.000Z", () => {
+      yesterdayMeeting = controller.createMeeting("workspace-1", {
+        title: "KST yesterday report meeting",
+      });
+      yesterdayReport = controller.createReport(yesterdayMeeting.id);
+      controller.createDecision(yesterdayReport.id, {
+        content: "Ship the workspace scoped meeting route first.",
+        status: "decided",
+      });
+      controller.createRisk(yesterdayReport.id, {
+        content: "Report links may use the wrong query value.",
+        severity: "high",
+      });
+      controller.createNextAgenda(yesterdayReport.id, {
+        title: "Verify AI chat consumes meeting context.",
+      });
+      controller.createActionItem(yesterdayReport.id, {
+        title: "Fix meeting report query contract",
+        description: "Use view=report for the report tab.",
+        assigneeSuggestionMemberId: currentMember.id,
+        dueDateSuggestion: "2026-06-30",
+      });
+    });
+    withFixedNow("2026-06-29T15:30:00.000Z", () => {
+      const todayMeeting = controller.createMeeting("workspace-1", {
+        title: "KST today report meeting",
+      });
+      todayReport = controller.createReport(todayMeeting.id);
+      controller.createDecision(todayReport.id, {
+        content: "This decision belongs to 2026-06-30 KST.",
+      });
+    });
+
+    const context = controller.getMeetingReportAiContext(
+      "workspace-1",
+      "2026-06-29",
+    );
+
+    assert.equal(context.workspaceId, "workspace-1");
+    assert.equal(context.date, "2026-06-29");
+    assert.equal(context.timezone, "Asia/Seoul");
+    assert.equal(context.dateBasis, "report.createdAt");
+    assert.equal(context.currentMemberId, currentMember.id);
+    assert.deepEqual(
+      context.reports.map((report) => report.reportId),
+      [yesterdayReport.id],
+    );
+    assert.deepEqual(
+      context.decisions.map((decision) => decision.content),
+      ["Ship the workspace scoped meeting route first."],
+    );
+    assert.deepEqual(
+      context.actionItems.map((actionItem) => ({
+        title: actionItem.title,
+        meetingId: actionItem.meetingId,
+        isMine: actionItem.isCurrentMemberAssigneeSuggestion,
+        createdAt: actionItem.createdAt,
+      })),
+      [
+        {
+          title: "Fix meeting report query contract",
+          meetingId: yesterdayMeeting.id,
+          isMine: true,
+          createdAt: context.actionItems[0].createdAt,
+        },
+      ],
+    );
+    assert.deepEqual(
+      context.risks.map((risk) => ({
+        content: risk.content,
+        severity: risk.severity,
+      })),
+      [
+        {
+          content: "Report links may use the wrong query value.",
+          severity: "high",
+        },
+      ],
+    );
+    assert.deepEqual(
+      context.nextAgendas.map((agenda) => agenda.title),
+      ["Verify AI chat consumes meeting context."],
+    );
+    assert.deepEqual(
+      controller
+        .getMeetingReportAiContext("workspace-1", "2026-06-30")
+        .reports.map((report) => report.reportId),
+      [todayReport.id],
+    );
+    assert.deepEqual(
+      controller.getMeetingReportAiContext("workspace-2", "2026-06-29")
+        .reports,
+      [],
+    );
+    assert.throws(() =>
+      controller.getMeetingReportAiContext("workspace-1", "2026-6-29"),
+    );
   });
 
   it("builds deterministic report workflow output with trace and no LLM call", () => {

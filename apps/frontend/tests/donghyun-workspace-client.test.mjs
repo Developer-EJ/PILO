@@ -8,6 +8,7 @@ import {
 } from "../lib/workspace/workspaceClient.mjs";
 import {
   createCanvasApiClient,
+  createCanvasMemo,
   createMockCanvasBoardDetail,
   createMockCanvasClient,
 } from "../lib/workspace/canvasClient.mjs";
@@ -42,6 +43,16 @@ import {
   writeWorkspaceOnboardingPayload,
   writeWorkspacePlanningOnboardingSeed,
 } from "../lib/workspace/workspaceOnboardingSeed.mjs";
+import {
+  buildLocalCanvasMemoProposal,
+  buildWorkspaceAiChatFallbackAnswer,
+  buildWorkspaceAiChatRequest,
+  defaultWorkspaceAiChatAgentMode,
+  findCanvasMemoProposal,
+  hasCanvasMemoMutationIntent,
+  resolveWorkspaceAiChatAgentMode,
+  workspaceAiChatUserMessageFromError,
+} from "../lib/workspace/workspaceAiChat.mjs";
 import { resolveWorkspaceLoginNextPath } from "../app/login/loginRedirects.mjs";
 
 describe("donghyun workspace client", () => {
@@ -399,7 +410,23 @@ describe("donghyun workspace client", () => {
     assert.equal(workspaceShellSource.includes('"reports"'), false);
     assert.equal(workspaceShellSource.includes('"report"'), true);
     assert.equal(
-      workspaceShellSource.includes('workspacePath(workspaceId, "reviews")'),
+      workspaceShellSource.includes("workspaceReviewRoomHref(workspaceId)"),
+      true,
+    );
+    assert.equal(
+      workspaceShellSource.includes("NEXT_PUBLIC_PILO_REVIEW_ROOM_URL"),
+      true,
+    );
+  });
+
+  it("documents the optional Review Room URL for workspace navigation", () => {
+    const envExample = readFileSync(
+      new URL("../../../.env.example", import.meta.url),
+      "utf8",
+    );
+
+    assert.equal(
+      envExample.includes("NEXT_PUBLIC_PILO_REVIEW_ROOM_URL=http://localhost:3001"),
       true,
     );
   });
@@ -441,6 +468,271 @@ describe("donghyun workspace client", () => {
     );
     assert.equal(requests[0].init.method, "DELETE");
     assert.equal(requests[0].init.credentials, "include");
+  });
+
+  it("builds Workspace AI chat requests with user and member context", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const request = buildWorkspaceAiChatRequest({
+      workspaceId,
+      boardId: "board-ai-chat",
+      message: "캔버스에 오늘 리스크를 메모로 남겨줘",
+      currentUser: {
+        id: "user-1",
+        name: "동현",
+        email: "donghyun@example.com",
+      },
+      currentMember: {
+        memberId: "member-1",
+        userId: "user-1",
+        name: "동현",
+        role: "owner",
+      },
+    });
+    const proposal = findCanvasMemoProposal(
+      {
+        run: {
+          actions: [
+            {
+              id: "action-canvas-memo",
+              type: "canvas.memo.create",
+              status: "waiting_confirmation",
+              payload: {
+                workspaceId,
+                boardId: "board-ai-chat",
+                text: "오늘 리스크를 회의 전에 확인",
+                position: { x: 120, y: 180 },
+              },
+            },
+          ],
+        },
+      },
+      {
+        workspaceId,
+        boardId: "board-ai-chat",
+        message: "캔버스에 오늘 리스크를 메모로 남겨줘",
+      },
+    );
+    const localProposal = buildLocalCanvasMemoProposal({
+      workspaceId,
+      boardId: "board-ai-chat",
+      message: "캔버스에 오늘 리스크를 메모로 남겨줘",
+      currentMember: {
+        memberId: "member-1",
+        name: "동현",
+      },
+    });
+
+    assert.equal(request.workflowType, "orchestrator.run");
+    assert.deepEqual(request.contextRefs, [
+      { type: "workspace", id: workspaceId },
+      { type: "canvas_board", id: "board-ai-chat" },
+    ]);
+    assert.equal(request.currentUserContext.id, "user-1");
+    assert.equal(request.currentMemberContext.memberId, "member-1");
+    assert.equal(proposal.type, "canvas.memo.create");
+    assert.equal(proposal.source, "api");
+    assert.equal(proposal.payload.text, "오늘 리스크를 회의 전에 확인");
+    assert.equal(localProposal.source, "local_fallback");
+    assert.equal(localProposal.payload.authorName, "동현");
+  });
+
+  it("does not treat read-only Workspace AI chat questions as Canvas memo mutations", () => {
+    const readOnlyQuestions = [
+      "어제 회의록 내용 기준으로 무엇을 먼저 처리하면 좋을까?",
+      "오늘 내가 먼저 봐야 할 작업 알려줘",
+      "회의 결정사항 기준으로 막힌 일 정리해줘",
+    ];
+
+    for (const question of readOnlyQuestions) {
+      assert.equal(hasCanvasMemoMutationIntent(question), false);
+    }
+
+    const proposal = findCanvasMemoProposal(
+      {
+        run: {
+          actions: [
+            {
+              id: "action-task-draft",
+              type: "task.create.draft",
+              status: "waiting_confirmation",
+              payload: {
+                title: "Prioritize meeting follow-up",
+              },
+            },
+          ],
+        },
+      },
+      {
+        workspaceId: mockWorkspaces[0].id,
+        message: readOnlyQuestions[0],
+      },
+    );
+    const fallbackAnswer = buildWorkspaceAiChatFallbackAnswer({
+      message: readOnlyQuestions[0],
+      reason: "현재 워크스페이스 AI 채팅은 로컬 모드로 동작 중입니다.",
+    });
+
+    assert.equal(proposal, null);
+    assert.equal(fallbackAnswer.includes("우선순위 제안"), true);
+    assert.equal(fallbackAnswer.includes("canvas.memo.create"), false);
+  });
+
+  it("builds local Canvas memo proposals only for explicit memo mutation intent", () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const readOnlyQuestion = "캔버스에서 오늘 우선순위를 알려줘";
+    const mutationRequest = "캔버스에 오늘 리스크를 메모로 남겨줘";
+
+    assert.equal(hasCanvasMemoMutationIntent(readOnlyQuestion), false);
+    assert.equal(hasCanvasMemoMutationIntent(mutationRequest), true);
+
+    const proposal = buildLocalCanvasMemoProposal({
+      workspaceId,
+      boardId: "board-ai-chat",
+      message: mutationRequest,
+      currentMember: {
+        memberId: "member-1",
+        name: "동현",
+      },
+    });
+
+    assert.equal(proposal.type, "canvas.memo.create");
+    assert.equal(proposal.source, "local_fallback");
+    assert.equal(proposal.payload.text, mutationRequest);
+    assert.equal(proposal.payload.authorName, "동현");
+  });
+
+  it("keeps read-only Workspace AI chat API failures as fallback answers without action proposals", () => {
+    const question = "회의 결정사항 기준으로 막힌 일 정리해줘";
+    const userMessage = workspaceAiChatUserMessageFromError({ status: 401 });
+    const fallbackAnswer = buildWorkspaceAiChatFallbackAnswer({
+      message: question,
+      reason: userMessage,
+    });
+
+    assert.equal(hasCanvasMemoMutationIntent(question), false);
+    assert.equal(
+      userMessage,
+      "AI 채팅을 사용하려면 로그인/세션이 필요합니다.",
+    );
+    assert.equal(fallbackAnswer.includes("우선순위 제안"), true);
+    assert.equal(fallbackAnswer.includes("메모 만들기"), false);
+    assert.equal(fallbackAnswer.includes("canvas.memo.create"), false);
+  });
+
+  it("defaults Workspace AI chat to API mode when an app-server URL is configured", () => {
+    const previousAppServerUrl = process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL;
+    const previousLegacyAppServerUrl = process.env.NEXT_PUBLIC_APP_SERVER_URL;
+    const previousWorkspaceAiChatMode =
+      process.env.NEXT_PUBLIC_PILO_WORKSPACE_AI_CHAT_MODE;
+    const previousAgentMode = process.env.NEXT_PUBLIC_PILO_AGENT_MODE;
+    const previousWorkspaceMode = process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE;
+
+    try {
+      process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL = "http://localhost:4000";
+      delete process.env.NEXT_PUBLIC_APP_SERVER_URL;
+      delete process.env.NEXT_PUBLIC_PILO_WORKSPACE_AI_CHAT_MODE;
+      delete process.env.NEXT_PUBLIC_PILO_AGENT_MODE;
+      delete process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE;
+
+      assert.equal(defaultWorkspaceAiChatAgentMode(), "api");
+      assert.equal(resolveWorkspaceAiChatAgentMode(), "api");
+
+      process.env.NEXT_PUBLIC_PILO_AGENT_MODE = "mock";
+      assert.equal(defaultWorkspaceAiChatAgentMode(), "mock");
+      assert.equal(resolveWorkspaceAiChatAgentMode(), "mock");
+
+      process.env.NEXT_PUBLIC_PILO_WORKSPACE_AI_CHAT_MODE = "api";
+      assert.equal(defaultWorkspaceAiChatAgentMode(), "api");
+      assert.equal(resolveWorkspaceAiChatAgentMode(), "api");
+    } finally {
+      if (previousAppServerUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL = previousAppServerUrl;
+      }
+
+      if (previousLegacyAppServerUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_APP_SERVER_URL;
+      } else {
+        process.env.NEXT_PUBLIC_APP_SERVER_URL = previousLegacyAppServerUrl;
+      }
+
+      if (previousWorkspaceAiChatMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_WORKSPACE_AI_CHAT_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_WORKSPACE_AI_CHAT_MODE =
+          previousWorkspaceAiChatMode;
+      }
+
+      if (previousAgentMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_AGENT_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_AGENT_MODE = previousAgentMode;
+      }
+
+      if (previousWorkspaceMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE = previousWorkspaceMode;
+      }
+    }
+  });
+
+  it("creates and persists Canvas memo shapes after AI action confirmation", async () => {
+    const storage = new Map();
+    const previousLocalStorage = globalThis.localStorage;
+
+    globalThis.localStorage = {
+      getItem(key) {
+        return storage.get(key) ?? null;
+      },
+      setItem(key, value) {
+        storage.set(key, value);
+      },
+      removeItem(key) {
+        storage.delete(key);
+      },
+    };
+
+    try {
+      const workspaceId = "workspace-ai-canvas-memo";
+      const client = createMockCanvasClient();
+      const result = await createCanvasMemo(
+        {
+          workspaceId,
+          text: "AI가 승인 후 만든 캔버스 메모",
+          authorId: "member-ai",
+          authorName: "동현",
+          createdAt: "2026-06-30T09:00:00.000Z",
+          position: { x: 240, y: 320 },
+        },
+        { client },
+      );
+      const board = await client.getBoardDetail(result.boardId, {
+        workspaceId,
+      });
+      const memoShape = board.shapes.find(
+        (shape) => shape.id === result.shape.id,
+      );
+
+      assert.equal(result.href, workspaceCanvasBoardHref(workspaceId, result.boardId));
+      assert.equal(memoShape.entityType, "memo");
+      assert.equal(memoShape.shapeType, "memo");
+      assert.equal(memoShape.body, "AI가 승인 후 만든 캔버스 메모");
+      assert.equal(memoShape.authorName, "동현");
+      assert.equal(memoShape.createdAt, "2026-06-30T09:00:00.000Z");
+      assert.deepEqual(memoShape.position, { x: 240, y: 320 });
+      assert.equal(
+        board.filterSetting.enabledEntityTypes.includes("memo"),
+        true,
+      );
+    } finally {
+      if (previousLocalStorage === undefined) {
+        delete globalThis.localStorage;
+      } else {
+        globalThis.localStorage = previousLocalStorage;
+      }
+    }
   });
 
   it("hides deleted mock Canvas boards and clears local board state", async () => {
@@ -618,6 +910,13 @@ describe("donghyun workspace client", () => {
     assert.ok(briefing.generatedAt);
     assert.ok(briefing.projectBriefing.headline);
     assert.ok(briefing.personalBriefing.headline);
+    assert.deepEqual(briefing.sources, {
+      dashboard: true,
+      tasks: true,
+      progress: true,
+      meetings: true,
+      reviews: true,
+    });
     assert.ok(briefing.warnings.includes("daily_briefing_fixture_fallback"));
   });
 

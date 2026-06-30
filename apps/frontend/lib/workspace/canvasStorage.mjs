@@ -7,6 +7,7 @@ export const CANVAS_FILTER_ENTITY_TYPES = [
   "file",
   "code",
   "decision",
+  "memo",
   "risk",
 ];
 

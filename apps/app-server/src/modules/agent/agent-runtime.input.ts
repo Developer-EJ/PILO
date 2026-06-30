@@ -21,6 +21,17 @@ export interface AgentChatMessageBody {
   message: string;
   workflowType: AgentWorkflowType;
   contextRefs: AgentContextRef[];
+  dateRange: AgentChatDateRangeInput | null;
+  currentUserContext: Record<string, unknown> | null;
+  currentMemberContext: Record<string, unknown> | null;
+  currentDateKst: string | null;
+}
+
+export interface AgentChatDateRangeInput {
+  label?: string;
+  from?: string;
+  to?: string;
+  timezone?: string;
 }
 
 export interface ProjectPlanCreateBody {
@@ -72,6 +83,21 @@ export function parseAgentChatMessageBody(
       record.workflowType ?? "task.draft.generate",
     ),
     contextRefs: parseContextRefs(record.contextRefs),
+    dateRange: parseDateRange(record.dateRange),
+    currentUserContext: isRecord(record.currentUser)
+      ? { ...record.currentUser }
+      : isRecord(record.currentUserContext)
+        ? { ...record.currentUserContext }
+        : null,
+    currentMemberContext: isRecord(record.currentMember)
+      ? { ...record.currentMember }
+      : isRecord(record.currentMemberContext)
+        ? { ...record.currentMemberContext }
+        : null,
+    currentDateKst:
+      nonEmptyText(record.currentDateKst) ??
+      nonEmptyText(record.todayKst) ??
+      nonEmptyText(record.nowKst),
   };
 }
 
@@ -144,6 +170,29 @@ function parseContextRefs(value: unknown): AgentContextRef[] {
     }
     return { type, id };
   });
+}
+
+function parseDateRange(value: unknown): AgentChatDateRangeInput | null {
+  if (!isRecord(value)) return null;
+
+  const label = nonEmptyText(value.label);
+  const from = parseIsoDate(value.from);
+  const to = parseIsoDate(value.to);
+  const timezone = nonEmptyText(value.timezone);
+  if (!label && !from && !to && !timezone) return null;
+
+  return {
+    ...(label ? { label } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(timezone ? { timezone } : {}),
+  };
+}
+
+function parseIsoDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
 }
 
 function parseTeamMembers(value: unknown): string[] {

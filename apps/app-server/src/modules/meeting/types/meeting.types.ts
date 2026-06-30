@@ -302,6 +302,69 @@ export interface MeetingReportDetail extends MeetingReportSummary {
   nextAgendas: MeetingReportNextAgendaReadModel[];
 }
 
+export interface MeetingReportAiContextReport {
+  reportId: string;
+  meetingId: string;
+  workspaceId: string;
+  meetingTitle: string;
+  meetingStatus: MeetingStatus;
+  meetingStartedAt: string | null;
+  meetingEndedAt: string | null;
+  summary: string;
+  decisionCount: number;
+  actionItemCount: number;
+  riskCount: number;
+  reportCreatedAt: string;
+}
+
+export interface MeetingReportAiContextDecision
+  extends MeetingDecisionReadModel {
+  workspaceId: string;
+  meetingId: string;
+  meetingTitle: string;
+  reportCreatedAt: string;
+}
+
+export interface MeetingReportAiContextRisk
+  extends MeetingReportRiskReadModel {
+  workspaceId: string;
+  meetingId: string;
+  meetingTitle: string;
+  reportCreatedAt: string;
+}
+
+export interface MeetingReportAiContextNextAgenda
+  extends MeetingReportNextAgendaReadModel {
+  workspaceId: string;
+  meetingId: string;
+  meetingTitle: string;
+  reportCreatedAt: string;
+}
+
+export interface MeetingReportAiContextActionItem
+  extends MeetingActionItemReadModel {
+  workspaceId: string;
+  meetingId: string;
+  meetingTitle: string;
+  reportCreatedAt: string;
+  createdAt: string;
+  isCurrentMemberAssigneeSuggestion: boolean;
+}
+
+export interface MeetingReportAiContext {
+  workspaceId: string;
+  date: string;
+  timezone: "Asia/Seoul";
+  dateBasis: "report.createdAt";
+  currentMemberId: string;
+  generatedAt: string;
+  reports: MeetingReportAiContextReport[];
+  decisions: MeetingReportAiContextDecision[];
+  actionItems: MeetingReportAiContextActionItem[];
+  risks: MeetingReportAiContextRisk[];
+  nextAgendas: MeetingReportAiContextNextAgenda[];
+}
+
 export interface MeetingReportCanvasEntityRef {
   entityType: "meeting_report";
   entityId: string;

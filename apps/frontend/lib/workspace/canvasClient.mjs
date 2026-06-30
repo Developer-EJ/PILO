@@ -8,6 +8,7 @@ import {
   readCanvasStorage,
   writeCanvasStorage,
 } from "./canvasStorage.mjs";
+import { workspaceCanvasBoardHref } from "./currentWorkspace.mjs";
 import { workspaceDashboardFixture } from "./workspaceDashboardFixture.mjs";
 
 const DEFAULT_CANVAS_MODE = "mock";
@@ -20,6 +21,7 @@ const canvasBoardLocalStorageScopes = [
   "view-setting",
   "freeform-shapes",
 ];
+const memoShapeColor = "#f4c950";
 
 const fallbackPositions = [
   { x: 120, y: 140 },
@@ -113,6 +115,7 @@ export function createMockCanvasBoardDetail(
       entityType: entity.entityType,
       entityId: entity.entityId,
       displayTitle: entity.displayTitle,
+      body: entity.body,
       width: entity.entityType === "pull_request" ? 300 : 280,
       height: entity.entityType === "pull_request" ? 172 : 160,
       color: entity.entityType === "pull_request" ? "#2e9e5b" : "#6d5bd6",
@@ -146,7 +149,7 @@ export function createMockCanvasBoardDetail(
       viewportY: 0,
     },
     filterSetting: {
-      enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+      enabledEntityTypes: ["task", "meeting_report", "pull_request", "memo"],
       assigneeMemberId: null,
       showDelayedOnly: false,
       showRiskOnly: false,
@@ -169,7 +172,7 @@ function toBoardSummary(board) {
 
 function defaultCanvasFilterSetting() {
   return {
-    enabledEntityTypes: ["task", "meeting_report", "pull_request"],
+    enabledEntityTypes: ["task", "meeting_report", "pull_request", "memo"],
     assigneeMemberId: null,
     showDelayedOnly: false,
     showRiskOnly: false,
@@ -193,6 +196,13 @@ function readMockBoards(workspaceId) {
 
 function writeMockBoards(workspaceId, boards) {
   writeCanvasStorage(mockBoardListStorageScope, workspaceId, boards);
+}
+
+function upsertMockBoard(workspaceId, board) {
+  const boards = readMockBoards(workspaceId);
+  const nextBoards = [board, ...boards.filter((item) => item.id !== board.id)];
+
+  writeMockBoards(workspaceId, nextBoards);
 }
 
 function readMockDeletedBoardIds(workspaceId) {
@@ -255,6 +265,96 @@ export function normalizeCanvasBoardDetail(rawBoard, { workspaceId } = {}) {
       ? rawBoard.filterSetting
       : fallback.filterSetting,
   };
+}
+
+function createMemoId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return `local-canvas-memo-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function normalizeMemoText(value) {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : "AI가 만든 메모";
+}
+
+function normalizeMemoTitle(value, text) {
+  const source = typeof value === "string" && value.trim() ? value.trim() : text;
+
+  return source.length > 80 ? `${source.slice(0, 77)}...` : source;
+}
+
+function normalizeMemoPosition(value, fallback) {
+  return isRecord(value) &&
+    typeof value.x === "number" &&
+    Number.isFinite(value.x) &&
+    typeof value.y === "number" &&
+    Number.isFinite(value.y)
+    ? { x: value.x, y: value.y }
+    : fallback;
+}
+
+function buildCanvasMemoShapeBody(input, board) {
+  const text = normalizeMemoText(input.text ?? input.body ?? input.content);
+  const title = normalizeMemoTitle(input.title ?? input.displayTitle, text);
+  const createdAt =
+    typeof input.createdAt === "string" && input.createdAt.trim()
+      ? input.createdAt
+      : new Date().toISOString();
+  const position = normalizeMemoPosition(input.position, {
+    x: 180 + (board.shapes.length % 4) * 84,
+    y: 180 + (board.shapes.length % 5) * 62,
+  });
+
+  return {
+    shapeType: "memo",
+    entityType: "memo",
+    entityId: input.memoId ?? input.entityId ?? createMemoId(),
+    displayTitle: title,
+    body: text,
+    width: typeof input.width === "number" ? input.width : 288,
+    height: typeof input.height === "number" ? input.height : 164,
+    color:
+      typeof input.color === "string" && input.color.trim()
+        ? input.color
+        : memoShapeColor,
+    position,
+    createdAt,
+    authorId:
+      typeof input.authorId === "string" && input.authorId.trim()
+        ? input.authorId
+        : null,
+    authorName:
+      typeof input.authorName === "string" && input.authorName.trim()
+        ? input.authorName
+        : null,
+    createdByMemberId:
+      typeof input.createdByMemberId === "string" &&
+      input.createdByMemberId.trim()
+        ? input.createdByMemberId
+        : typeof input.authorId === "string" && input.authorId.trim()
+          ? input.authorId
+          : null,
+  };
+}
+
+async function resolveTargetCanvasBoard(client, workspaceId, boardId) {
+  const boards = await client.listBoards(workspaceId);
+  const targetBoard =
+    (boardId ? boards.find((board) => board.id === boardId) : null) ??
+    boards.find((board) => board.boardType === "project_map") ??
+    boards[0] ??
+    (await client.createBoard(workspaceId, {
+      title: "프로젝트 맵",
+      boardType: "project_map",
+    }));
+
+  return client.getBoardDetail(targetBoard.id, { workspaceId });
 }
 
 export function createCanvasApiClient({
@@ -360,18 +460,106 @@ export function createCanvasApiClient({
   };
 }
 
+/**
+ * @param {object} input
+ * @param {string} input.workspaceId
+ * @param {string | null} [input.boardId]
+ * @param {string} input.text
+ * @param {string} [input.title]
+ * @param {{ x: number, y: number } | null} [input.position]
+ * @param {string} [input.authorId]
+ * @param {string} [input.authorName]
+ * @param {string} [input.createdAt]
+ * @param {string} [input.color]
+ * @param {object} [options]
+ * @param {ReturnType<typeof createCanvasClient>} [options.client]
+ */
+export async function createCanvasMemo(
+  {
+    workspaceId,
+    boardId = null,
+    text,
+    title,
+    position,
+    authorId,
+    authorName,
+    createdAt,
+    color,
+  },
+  { client = createCanvasClient() } = {},
+) {
+  const board = await resolveTargetCanvasBoard(client, workspaceId, boardId);
+  const memoShapeBody = buildCanvasMemoShapeBody(
+    {
+      text,
+      title,
+      position,
+      authorId,
+      authorName,
+      createdAt,
+      color,
+    },
+    board,
+  );
+  const createdShape = await client.createShape(
+    board.id,
+    {
+      shapeType: memoShapeBody.shapeType,
+      entityType: memoShapeBody.entityType,
+      entityId: memoShapeBody.entityId,
+      displayTitle: memoShapeBody.displayTitle,
+      width: memoShapeBody.width,
+      height: memoShapeBody.height,
+      color: memoShapeBody.color,
+      body: memoShapeBody.body,
+      position: memoShapeBody.position,
+      createdAt: memoShapeBody.createdAt,
+      authorId: memoShapeBody.authorId,
+      authorName: memoShapeBody.authorName,
+      createdByMemberId: memoShapeBody.createdByMemberId,
+    },
+    { workspaceId },
+  );
+  const positionedShape = await client.updateShapePosition(
+    createdShape.id,
+    memoShapeBody.position,
+    { workspaceId },
+  );
+  const shape = {
+    ...createdShape,
+    ...positionedShape,
+    ...memoShapeBody,
+    id: positionedShape?.id ?? createdShape.id,
+    position: positionedShape?.position ?? memoShapeBody.position,
+  };
+
+  return {
+    workspaceId,
+    boardId: board.id,
+    boardTitle: board.title,
+    shape,
+    href: workspaceCanvasBoardHref(workspaceId, board.id),
+  };
+}
+
 export function createMockCanvasClient() {
   return {
     async listBoards(workspaceId) {
       const deletedBoardIds = new Set(readMockDeletedBoardIds(workspaceId));
-      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const storedBoards = readMockBoards(workspaceId);
+      const generatedDefaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const storedDefaultBoard = storedBoards.find(
+        (board) => board.id === generatedDefaultBoard.id,
+      );
+      const defaultBoard = storedDefaultBoard ?? generatedDefaultBoard;
       const defaultBoards = deletedBoardIds.has(defaultBoard.id)
         ? []
         : [toBoardSummary(defaultBoard)];
 
       return [
         ...defaultBoards,
-        ...readMockBoards(workspaceId)
+        ...storedBoards
+          .filter((board) => board.id !== defaultBoard.id)
           .filter((board) => !deletedBoardIds.has(board.id))
           .map(toBoardSummary),
       ];
@@ -423,10 +611,6 @@ export function createMockCanvasClient() {
         });
       }
 
-      if (!boardId || boardId === defaultBoard.id) {
-        return defaultBoard;
-      }
-
       const storedBoard = readMockBoards(workspaceId).find(
         (board) => board.id === boardId,
       );
@@ -435,20 +619,52 @@ export function createMockCanvasClient() {
         return normalizeCanvasBoardDetail(storedBoard, { workspaceId });
       }
 
+      if (!boardId || boardId === defaultBoard.id) {
+        return defaultBoard;
+      }
+
       return {
         ...createMockBlankBoard(workspaceId, "제목 없는 캔버스"),
         id: boardId,
       };
     },
 
-    async createShape(_boardId, body) {
-      return {
-        id: "mock-canvas-shape-created",
+    async createShape(boardId, body, { workspaceId } = {}) {
+      const resolvedWorkspaceId = workspaceId ?? body?.workspaceId;
+      const board = await this.getBoardDetail(boardId, {
+        workspaceId: resolvedWorkspaceId,
+      });
+      const now = new Date().toISOString();
+      const shape = {
+        id: `local-canvas-shape-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
         isCollapsed: false,
-        zIndex: 1,
-        position: { x: 0, y: 0 },
+        zIndex: board.shapes.length + 1,
+        position: normalizeMemoPosition(body?.position, {
+          x: 160 + (board.shapes.length % 4) * 72,
+          y: 180 + (board.shapes.length % 5) * 54,
+        }),
+        createdAt: body?.createdAt ?? now,
+        updatedAt: now,
         ...body,
       };
+      const nextBoard = {
+        ...board,
+        shapes: [...board.shapes, shape],
+        shapeCount: board.shapes.length + 1,
+        updatedAt: now,
+        filterSetting: {
+          ...board.filterSetting,
+          enabledEntityTypes: Array.from(
+            new Set([...board.filterSetting.enabledEntityTypes, shape.entityType]),
+          ),
+        },
+      };
+
+      upsertMockBoard(nextBoard.workspaceId, nextBoard);
+
+      return shape;
     },
 
     async updateShape(shapeId, body) {
@@ -465,7 +681,36 @@ export function createMockCanvasClient() {
       };
     },
 
-    async updateShapePosition(shapeId, body) {
+    async updateShapePosition(shapeId, body, { workspaceId } = {}) {
+      const workspaceIds = workspaceId
+        ? [workspaceId]
+        : [
+            workspaceDashboardFixture.workspace.id,
+            ...readMockBoards(workspaceDashboardFixture.workspace.id).map(
+              (board) => board.workspaceId,
+            ),
+          ];
+
+      for (const workspaceId of new Set(workspaceIds)) {
+        const boards = readMockBoards(workspaceId);
+        const board = boards.find((candidate) =>
+          candidate.shapes?.some((shape) => shape.id === shapeId),
+        );
+
+        if (!board) continue;
+
+        const nextBoard = {
+          ...board,
+          shapes: board.shapes.map((shape) =>
+            shape.id === shapeId ? { ...shape, position: body } : shape,
+          ),
+          updatedAt: new Date().toISOString(),
+        };
+
+        upsertMockBoard(workspaceId, nextBoard);
+        break;
+      }
+
       return {
         id: shapeId,
         position: body,

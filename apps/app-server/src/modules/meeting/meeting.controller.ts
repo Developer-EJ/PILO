@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from "@nestjs/common";
 import {
   ConvertMeetingActionItemRequestDto,
   CreateMeetingActionItemRequestDto,
@@ -17,6 +25,7 @@ import {
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
   MeetingReportCanvasEntityRefDto,
+  MeetingReportAiContextDto,
   MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
   MeetingReportRiskResponseDto,
@@ -186,6 +195,14 @@ export class MeetingController {
     @Param("workspaceId") workspaceId: string,
   ): MeetingActionItemResponseDto[] {
     return this.meetingService.listWorkspaceActionItems(workspaceId);
+  }
+
+  @Get("workspaces/:workspaceId/meeting-report-ai-context")
+  getMeetingReportAiContext(
+    @Param("workspaceId") workspaceId: string,
+    @Query("date") date?: string,
+  ): MeetingReportAiContextDto {
+    return this.meetingService.getMeetingReportAiContext(workspaceId, date);
   }
 
   @Get("workspaces/:workspaceId/meeting-reports/canvas-entity-refs")

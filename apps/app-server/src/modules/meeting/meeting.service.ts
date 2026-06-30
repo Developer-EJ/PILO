@@ -38,6 +38,7 @@ import {
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
   MeetingReportCanvasEntityRefDto,
+  MeetingReportAiContextDto,
   MeetingReportNextAgendaResponseDto,
   MeetingReportResponseDto,
   MeetingReportRiskResponseDto,
@@ -74,6 +75,14 @@ import {
   MeetingStatus,
   TranscriptSource,
 } from "./types/meeting.types";
+
+const KST_TIME_ZONE = "Asia/Seoul" as const;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+type MeetingReportContextEntry = {
+  report: MeetingReportRecord;
+  meeting: MeetingRecord;
+};
 
 @Injectable()
 export class MeetingService {
@@ -568,6 +577,56 @@ export class MeetingService {
     );
   }
 
+  getMeetingReportAiContext(
+    workspaceId: string,
+    date?: unknown,
+  ): MeetingReportAiContextDto {
+    const expectedWorkspaceId = this.requireNonEmptyString(
+      workspaceId,
+      "workspaceId",
+    );
+    const contextDate =
+      this.optionalDate(date, "date") ?? this.previousKstDate(new Date());
+    const currentMember =
+      this.currentMemberAdapter.getCurrentMember(expectedWorkspaceId);
+    const entries = this.listReportContextEntries(
+      expectedWorkspaceId,
+      contextDate,
+    );
+
+    return {
+      workspaceId: expectedWorkspaceId,
+      date: contextDate,
+      timezone: KST_TIME_ZONE,
+      dateBasis: "report.createdAt",
+      currentMemberId: currentMember.id,
+      generatedAt: new Date().toISOString(),
+      reports: entries.map((entry) => this.toAiContextReport(entry)),
+      decisions: entries.flatMap((entry) =>
+        this.meetingRepository
+          .listDecisionsByReport(entry.report.id)
+          .map((decision) => this.toAiContextDecision(entry, decision)),
+      ),
+      actionItems: entries.flatMap((entry) =>
+        this.meetingRepository
+          .listActionItemsByReport(entry.report.id)
+          .map((actionItem) =>
+            this.toAiContextActionItem(entry, actionItem, currentMember.id),
+          ),
+      ),
+      risks: entries.flatMap((entry) =>
+        this.meetingRepository
+          .listRisksByReport(entry.report.id)
+          .map((risk) => this.toAiContextRisk(entry, risk)),
+      ),
+      nextAgendas: entries.flatMap((entry) =>
+        this.meetingRepository
+          .listNextAgendasByReport(entry.report.id)
+          .map((nextAgenda) => this.toAiContextNextAgenda(entry, nextAgenda)),
+      ),
+    };
+  }
+
   approveActionItem(actionItemId: string): MeetingActionItemResponseDto {
     const actionItem = this.requireActionItem(actionItemId);
 
@@ -783,6 +842,112 @@ export class MeetingService {
         ),
       });
     }
+  }
+
+  private listReportContextEntries(
+    workspaceId: string,
+    date: string,
+  ): MeetingReportContextEntry[] {
+    return this.meetingRepository
+      .listReports()
+      .map((report): MeetingReportContextEntry | null => {
+        const meeting = this.meetingRepository.findMeetingById(
+          report.meetingId,
+        );
+
+        if (!meeting || meeting.workspaceId !== workspaceId) {
+          return null;
+        }
+
+        if (this.kstDateKey(report.createdAt) !== date) {
+          return null;
+        }
+
+        return { report, meeting };
+      })
+      .filter(
+        (entry): entry is MeetingReportContextEntry => entry !== null,
+      )
+      .sort(
+        (left, right) =>
+          new Date(right.report.createdAt).getTime() -
+          new Date(left.report.createdAt).getTime(),
+      );
+  }
+
+  private toAiContextReport({ report, meeting }: MeetingReportContextEntry) {
+    return {
+      reportId: report.id,
+      meetingId: meeting.id,
+      workspaceId: meeting.workspaceId,
+      meetingTitle: meeting.title,
+      meetingStatus: meeting.status,
+      meetingStartedAt: meeting.startedAt,
+      meetingEndedAt: meeting.endedAt,
+      summary: report.summary,
+      decisionCount: this.meetingRepository.listDecisionsByReport(report.id)
+        .length,
+      actionItemCount: this.meetingRepository.listActionItemsByReport(report.id)
+        .length,
+      riskCount: this.meetingRepository.listRisksByReport(report.id).length,
+      reportCreatedAt: report.createdAt,
+    };
+  }
+
+  private toAiContextDecision(
+    { report, meeting }: MeetingReportContextEntry,
+    decision: MeetingDecisionRecord,
+  ) {
+    return {
+      ...this.toDecisionReadModel(decision),
+      workspaceId: meeting.workspaceId,
+      meetingId: meeting.id,
+      meetingTitle: meeting.title,
+      reportCreatedAt: report.createdAt,
+    };
+  }
+
+  private toAiContextRisk(
+    { report, meeting }: MeetingReportContextEntry,
+    risk: MeetingReportRiskRecord,
+  ) {
+    return {
+      ...this.toRiskReadModel(risk),
+      workspaceId: meeting.workspaceId,
+      meetingId: meeting.id,
+      meetingTitle: meeting.title,
+      reportCreatedAt: report.createdAt,
+    };
+  }
+
+  private toAiContextNextAgenda(
+    { report, meeting }: MeetingReportContextEntry,
+    nextAgenda: MeetingReportNextAgendaRecord,
+  ) {
+    return {
+      ...this.toNextAgendaReadModel(nextAgenda),
+      workspaceId: meeting.workspaceId,
+      meetingId: meeting.id,
+      meetingTitle: meeting.title,
+      reportCreatedAt: report.createdAt,
+    };
+  }
+
+  private toAiContextActionItem(
+    { report, meeting }: MeetingReportContextEntry,
+    actionItem: MeetingActionItemRecord,
+    currentMemberId: string,
+  ) {
+    return {
+      ...this.toActionItemReadModel(actionItem),
+      workspaceId: meeting.workspaceId,
+      meetingId: meeting.id,
+      meetingTitle: meeting.title,
+      reportCreatedAt: report.createdAt,
+      createdAt: actionItem.createdAt,
+      isCurrentMemberAssigneeSuggestion:
+        actionItem.assigneeSuggestionMemberId === currentMemberId,
+    };
   }
 
   private toReportSummary(
@@ -1003,6 +1168,26 @@ export class MeetingService {
     }
 
     return this.requireNonNegativeInteger(value, fieldName);
+  }
+
+  private previousKstDate(now: Date): string {
+    return new Date(
+      now.getTime() + KST_OFFSET_MS - 24 * 60 * 60 * 1000,
+    )
+      .toISOString()
+      .slice(0, 10);
+  }
+
+  private kstDateKey(dateTime: string): string | null {
+    const parsedDate = new Date(dateTime);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return null;
+    }
+
+    return new Date(parsedDate.getTime() + KST_OFFSET_MS)
+      .toISOString()
+      .slice(0, 10);
   }
 
   private optionalDate(value: unknown, fieldName: string): string | null {

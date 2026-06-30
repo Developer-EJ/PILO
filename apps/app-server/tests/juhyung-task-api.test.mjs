@@ -557,6 +557,124 @@ describe("JuhyungTaskService", () => {
     ]);
   });
 
+  it("builds Task, GitHub, and Progress context for AI chat", async () => {
+    const calls = [];
+    const service = createService({
+      access: {
+        requireWorkspaceMember: async (workspaceId, actor) => {
+          calls.push(["access", workspaceId, actor]);
+          return currentMember();
+        },
+        requireWorkspaceMemberById: async (workspaceId, memberId) => {
+          calls.push(["member", workspaceId, memberId]);
+          return memberId === UUIDS.assignee
+            ? assigneeMember()
+            : currentMember();
+        },
+      },
+      repository: {
+        listTasksForWorkspace: async (workspaceId) => {
+          calls.push(["listTasks", workspaceId]);
+          return [
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222221",
+              status: "done",
+              dueDate: "2000-01-01",
+              assigneeMemberId: UUIDS.assignee,
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222222",
+              status: "in_progress",
+              dueDate: "2999-01-01",
+              assigneeMemberId: UUIDS.assignee,
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222223",
+              status: "blocked",
+              dueDate: "2000-01-01",
+              assigneeMemberId: UUIDS.assignee,
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222224",
+              status: "in_review",
+              dueDate: null,
+              assigneeMemberId: UUIDS.member,
+            },
+            {
+              ...baseTask,
+              id: "22222222-2222-4222-8222-222222222225",
+              status: "todo",
+              dueDate: "2999-01-02",
+              assigneeMemberId: null,
+            },
+          ];
+        },
+        listWorkspaceMembersByIds: async (workspaceId, memberIds) => {
+          calls.push(["members", workspaceId, memberIds]);
+          return [assigneeMember(), currentMember()];
+        },
+      },
+    });
+
+    const result = await service.getTaskGithubProgressContext(
+      UUIDS.workspace,
+      {
+        memberId: UUIDS.assignee,
+        date: "2999-01-01",
+      },
+      { memberId: UUIDS.member },
+    );
+
+    assert.equal(result.workspaceId, UUIDS.workspace);
+    assert.equal(result.memberId, UUIDS.assignee);
+    assert.equal(result.date, "2999-01-01");
+    assert.equal(result.progress.totalTasks, 5);
+    assert.equal(result.progress.doneTasks, 1);
+    assert.equal(result.progress.blockedTasks, 1);
+    assert.equal(result.progress.reviewTasks, 1);
+    assert.equal(result.progress.progressRate, 20);
+    assert.deepEqual(
+      result.focus.myTasks.map((task) => task.id),
+      [
+        "22222222-2222-4222-8222-222222222222",
+        "22222222-2222-4222-8222-222222222223",
+      ],
+    );
+    assert.deepEqual(
+      result.focus.blockedTasks.map((task) => task.id),
+      ["22222222-2222-4222-8222-222222222223"],
+    );
+    assert.deepEqual(
+      result.focus.delayedTasks.map((task) => task.id),
+      ["22222222-2222-4222-8222-222222222223"],
+    );
+    assert.deepEqual(
+      result.focus.dueTodayTasks.map((task) => task.id),
+      ["22222222-2222-4222-8222-222222222222"],
+    );
+    assert.deepEqual(
+      result.focus.recommendedTasks.slice(0, 2).map((task) => task.id),
+      [
+        "22222222-2222-4222-8222-222222222223",
+        "22222222-2222-4222-8222-222222222222",
+      ],
+    );
+    assert.equal(result.github.source, "deferred_contract");
+    assert.equal(result.github.hasRuntimePrReadModel, false);
+    assert.equal(result.github.pullRequests.length, 0);
+    assert.equal(result.github.risks.length, 2);
+    assert.deepEqual(calls, [
+      ["access", UUIDS.workspace, { memberId: UUIDS.member }],
+      ["member", UUIDS.workspace, UUIDS.assignee],
+      ["listTasks", UUIDS.workspace],
+      ["members", UUIDS.workspace, [UUIDS.assignee, UUIDS.member]],
+    ]);
+  });
+
   it("rejects invalid task list query values before reading the repository", async () => {
     const service = createService({
       repository: {
@@ -1689,6 +1807,10 @@ describe("JuhyungTasksController", () => {
         calls.push(["list", workspaceId, query, actor]);
         return [];
       },
+      getTaskGithubProgressContext: async (workspaceId, query, actor) => {
+        calls.push(["context", workspaceId, query, actor]);
+        return { workspaceId };
+      },
       getProgressSummary: async (workspaceId, query, actor) => {
         calls.push(["progress", workspaceId, query, actor]);
         return { workspaceId, totalTasks: 0 };
@@ -1772,6 +1894,12 @@ describe("JuhyungTasksController", () => {
     await controller.listTasks(
       UUIDS.workspace,
       { status: "todo" },
+      UUIDS.user,
+      undefined,
+    );
+    await controller.getTaskGithubProgressContext(
+      UUIDS.workspace,
+      { memberId: UUIDS.assignee, date: "2026-07-03" },
       UUIDS.user,
       undefined,
     );
@@ -1864,6 +1992,12 @@ describe("JuhyungTasksController", () => {
         { userId: UUIDS.user, memberId: UUIDS.member },
       ],
       ["list", UUIDS.workspace, { status: "todo" }, { userId: UUIDS.user }],
+      [
+        "context",
+        UUIDS.workspace,
+        { memberId: UUIDS.assignee, date: "2026-07-03" },
+        { userId: UUIDS.user },
+      ],
       [
         "progress",
         UUIDS.workspace,

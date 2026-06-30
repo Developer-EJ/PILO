@@ -545,6 +545,9 @@ export class CanvasRepository implements CanvasRepositoryPort {
       color: shape.color,
       isCollapsed: shape.isCollapsed,
       zIndex: shape.zIndex,
+      createdByMemberId: shape.createdByMemberId,
+      createdAt: shape.createdAt,
+      updatedAt: shape.updatedAt,
       position: {
         x: position?.x ?? 0,
         y: position?.y ?? 0,
@@ -587,7 +590,7 @@ export class CanvasRepository implements CanvasRepositoryPort {
     return {
       enabledEntityTypes: setting?.enabledEntityTypes
         ? [...setting.enabledEntityTypes]
-        : ["task", "meeting_report", "pull_request"],
+        : ["task", "meeting_report", "pull_request", "memo"],
       assigneeMemberId: setting?.assigneeMemberId ?? null,
       showDelayedOnly: setting?.showDelayedOnly ?? false,
       showRiskOnly: setting?.showRiskOnly ?? false,

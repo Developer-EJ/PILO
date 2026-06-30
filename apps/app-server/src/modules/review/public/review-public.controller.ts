@@ -2,6 +2,7 @@ import { Controller, Get, Param, ParseUUIDPipe } from "@nestjs/common";
 import { PRAnalysisSummary } from "./pr-analysis-summary.adapter";
 import {
   ReviewPublicService,
+  WorkspaceReviewContext,
   WorkspaceReviewSummary,
 } from "./review-public.service";
 
@@ -21,5 +22,12 @@ export class ReviewPublicController {
     @Param("workspaceId", ParseUUIDPipe) workspaceId: string,
   ): WorkspaceReviewSummary {
     return this.reviewPublicService.getWorkspaceReviewSummary(workspaceId);
+  }
+
+  @Get("workspaces/:workspaceId/review-context")
+  getWorkspaceReviewContext(
+    @Param("workspaceId", ParseUUIDPipe) workspaceId: string,
+  ): WorkspaceReviewContext {
+    return this.reviewPublicService.getWorkspaceReviewContext(workspaceId);
   }
 }

@@ -54,6 +54,36 @@ app-server uses the global `api` prefix. Current runtime paths in this document 
 | `PATCH` | `/api/tasks/:taskId/status` | 상태 변경 | 주형, 세인 action executor |
 | `DELETE` | `/api/tasks/:taskId` | Task soft delete | 주형 |
 
+### Task / GitHub / Progress Context
+
+| Method | Path | Purpose | Consumer |
+|---|---|---|---|
+| `GET` | `/api/workspaces/:workspaceId/task-context` | AI chat용 Task 우선순위, Progress summary, 막힘/지연 작업, GitHub deferred 경계 조회 | 세인 AI chat, 주형 |
+
+`GET /api/workspaces/:workspaceId/task-context`는 읽기 전용 runtime API다.
+Workspace membership을 확인한 뒤 현재 Task rows를 읽고, live `ProgressSummary`와
+AI 답변에 바로 넣을 수 있는 focused Task 목록을 반환한다.
+
+- `focus.myTasks`: 요청/current workspace member에게 배정된 완료 전 Task.
+- `focus.blockedTasks`: `status = "blocked"`인 완료 전 Task.
+- `focus.delayedTasks`: context date보다 `dueDate`가 이전인 완료 전 Task.
+- `focus.dueTodayTasks`: context date와 `dueDate`가 같은 완료 전 Task.
+- `focus.recommendedTasks`: 담당자 일치, blocked/delayed/due-today 상태, priority,
+  진행 중 상태를 기준으로 정렬한 capped priority list.
+- `focus.recentOpenTasks`: 추가 context로 제공하는 capped open Task summary 목록.
+
+Query:
+
+| Query | Type | Rule |
+|---|---|---|
+| `memberId` | workspace member id | Optional. 없으면 current actor member를 사용한다. 값이 있으면 같은 workspace member여야 한다. |
+| `date` | `YYYY-MM-DD` | Optional. 없으면 요청일을 사용하며 due-today/delayed 그룹 계산 기준이다. |
+
+GitHub Issue/PR read model은 아직 Deferred runtime API다. 따라서 context 응답은
+`github.source = "deferred_contract"`, `github.hasRuntimePrReadModel = false`,
+빈 Issue/PR 배열, 그리고 fixture PR/Issue를 runtime truth로 취급하지 말라는
+`risks` 배열을 함께 반환한다.
+
 ### Dependency
 
 | Method | Path | Purpose | Consumer |

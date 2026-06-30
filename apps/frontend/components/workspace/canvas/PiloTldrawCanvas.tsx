@@ -66,6 +66,12 @@ type CanvasEntity = {
   width?: number;
   height?: number;
   color?: string;
+  body?: string;
+  authorId?: string | null;
+  authorName?: string | null;
+  createdByMemberId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   position?: {
     x: number;
     y: number;
@@ -264,6 +270,7 @@ function normalizeKind(entity: CanvasEntity): PiloCardKind {
   if (kind === "file") return "file";
   if (kind === "code") return "code";
   if (kind === "decision") return "decision";
+  if (kind === "memo") return "memo";
   if (kind === "risk") return "risk";
 
   return "file";
@@ -287,6 +294,15 @@ function resolveStatus(kind: PiloCardKind) {
   if (kind === "memo") return "Note";
 
   return "Open";
+}
+
+function formatMemoSubtitle(entity: CanvasEntity) {
+  const author =
+    entity.authorName ?? entity.createdByMemberId ?? entity.authorId ?? "작성자";
+
+  if (!entity.createdAt) return `memo / ${author}`;
+
+  return `memo / ${author} / ${entity.createdAt}`;
 }
 
 function resolvePosition(entity: CanvasEntity, index: number) {
@@ -326,6 +342,10 @@ function buildPiloCardShape(
   const savedState = shapeStateById[canvasShapeId];
   const position = savedState ?? resolvePosition(entity, index);
   const accent = entity.color ?? defaultAccents[kind] ?? defaultAccents.file;
+  const body =
+    kind === "memo"
+      ? entity.body ?? entity.displayTitle
+      : entity.body ?? resolveCardBody(kind);
 
   return {
     id: getCardShapeId(entity, index),
@@ -345,8 +365,11 @@ function buildPiloCardShape(
       canvasShapeId,
       entityType: entity.entityType,
       title: entity.displayTitle,
-      subtitle: `${kind.replace(/_/g, " ")} / ${entity.shapeType}`,
-      body: resolveCardBody(kind),
+      subtitle:
+        kind === "memo"
+          ? formatMemoSubtitle(entity)
+          : `${kind.replace(/_/g, " ")} / ${entity.shapeType}`,
+      body,
       status: resolveStatus(kind),
       accent,
       entityId: entity.entityId,

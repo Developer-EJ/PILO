@@ -261,7 +261,13 @@ export function createWorkspaceDailyBriefingFixture(workspaceId) {
     fallback: true,
     projectBriefing: createDefaultProjectBriefing(),
     personalBriefing: createDefaultPersonalBriefing(),
-    sources: ["workspace_dashboard_fixture"],
+    sources: {
+      dashboard: true,
+      tasks: true,
+      progress: true,
+      meetings: true,
+      reviews: true,
+    },
     sourceDetails: [
       {
         source: "workspace_dashboard_fixture",

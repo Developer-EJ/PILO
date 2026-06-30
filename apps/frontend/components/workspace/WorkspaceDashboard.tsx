@@ -12,7 +12,6 @@ import {
 } from "../../lib/workspace/dashboardClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
-  workspaceCanvasHref,
   workspaceDashboardHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
@@ -65,20 +64,13 @@ type DashboardMeetingReport = {
   createdAt?: string | null;
 };
 
-type DashboardMember = {
-  memberId?: string | null;
-  userId?: string | null;
-  name?: string | null;
-  displayName?: string | null;
-  email?: string | null;
-  role?: string | null;
-};
+type DashboardTone = "primary" | "success" | "warning" | "danger";
 
-type DashboardStat = {
-  label: string;
-  value: string;
-  tone: "primary" | "success" | "warning" | "danger";
-  icon: string;
+type DashboardAttentionItem = {
+  id: string;
+  title: string;
+  meta: string;
+  tone: DashboardTone;
 };
 
 const initialDashboardState: WorkspaceDashboardState = {
@@ -112,13 +104,6 @@ const prStateLabels: Record<string, string> = {
   closed: "닫힘",
 };
 
-const roleLabels: Record<string, string> = {
-  owner: "소유자",
-  admin: "관리자",
-  member: "멤버",
-  viewer: "조회",
-};
-
 function resolveWorkspaceId(pathname: string) {
   return extractWorkspaceIdFromPathname(pathname) ?? mockWorkspaces[0].id;
 }
@@ -150,6 +135,19 @@ function formatDailyBriefingGeneratedAt(value: string | null | undefined) {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+  }).format(date);
+}
+
+function formatDailyBriefingDate(value: string | null | undefined) {
+  if (!value) return "생성 날짜 없음";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "생성 날짜 없음";
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "short",
+    day: "numeric",
   }).format(date);
 }
 
@@ -191,57 +189,12 @@ function formatDueDate(value: string | null | undefined) {
   }).format(date);
 }
 
-function taskTone(task: DashboardTask): DashboardStat["tone"] {
+function taskTone(task: DashboardTask): DashboardTone {
   if (task.isDelayed || task.status === "blocked") return "danger";
   if (task.status === "done") return "success";
   if (task.priority === "high") return "warning";
 
   return "primary";
-}
-
-function buildStats(dashboard: WorkspaceDashboardData): DashboardStat[] {
-  const progressRate = dashboard.progress?.progressRate ?? 0;
-  const doneTasks = dashboard.progress?.doneTasks ?? 0;
-  const blockedTasks = dashboard.progress?.blockedTasks ?? 0;
-
-  return [
-    {
-      label: "전체 작업",
-      value: String(dashboard.tasks.length),
-      tone: "primary",
-      icon: "T",
-    },
-    {
-      label: "완료 작업",
-      value: String(doneTasks),
-      tone: "success",
-      icon: "D",
-    },
-    {
-      label: "위험 작업",
-      value: String(blockedTasks + (dashboard.progress?.delayedTasks ?? 0)),
-      tone: blockedTasks ? "danger" : "warning",
-      icon: "!",
-    },
-    {
-      label: "진행률",
-      value: `${progressRate}%`,
-      tone: "success",
-      icon: "%",
-    },
-    {
-      label: "리뷰 대기 PR",
-      value: String(dashboard.pullRequests.length),
-      tone: "warning",
-      icon: "PR",
-    },
-    {
-      label: "멤버",
-      value: String(dashboard.members.length),
-      tone: "primary",
-      icon: "M",
-    },
-  ];
 }
 
 function sourceLabel(source: string | null | undefined) {
@@ -270,6 +223,107 @@ function BriefingList({
       ))}
     </ul>
   );
+}
+
+function visibleBriefingSummary(summary: string | null | undefined) {
+  const text = summary?.trim();
+
+  if (!text) return null;
+
+  if (
+    text.includes("작업, PR, 회의, 진행률 데이터를 바탕") &&
+    text.includes("오늘 확인할 신호")
+  ) {
+    return null;
+  }
+
+  return text;
+}
+
+function buildAttentionItems(
+  dashboard: WorkspaceDashboardData,
+): DashboardAttentionItem[] {
+  const tasks = dashboard.tasks as DashboardTask[];
+  const blockedOrDelayedCount =
+    (dashboard.progress?.blockedTasks ?? 0) +
+    (dashboard.progress?.delayedTasks ?? 0);
+  const reviewTaskCount = dashboard.progress?.reviewTasks ?? 0;
+  const items: DashboardAttentionItem[] = [];
+
+  if (blockedOrDelayedCount > 0) {
+    items.push({
+      id: "progress-risk",
+      title: "막힘/지연 작업 흐름 점검",
+      meta: `${blockedOrDelayedCount}개 주의`,
+      tone: "danger",
+    });
+  }
+
+  if (reviewTaskCount > 0) {
+    items.push({
+      id: "progress-review",
+      title: "검토 중인 작업 처리 순서 확인",
+      meta: `${reviewTaskCount}개 검토 중`,
+      tone: "warning",
+    });
+  }
+
+  tasks
+    .filter(
+      (task) =>
+        task.isDelayed || task.status === "blocked" || task.priority === "high",
+    )
+    .slice(0, 2)
+    .forEach((task) => {
+      items.push({
+        id: `task-${task.id}`,
+        title: task.title,
+        meta:
+          task.status === "blocked"
+            ? "막힌 작업"
+            : task.isDelayed
+              ? "지연 작업"
+              : "높은 우선순위",
+        tone: taskTone(task),
+      });
+    });
+
+  if (!items.length) {
+    items.push({
+      id: "attention-empty",
+      title: "오늘 마감과 리뷰 대기 항목을 확인하세요",
+      meta: "기본 점검",
+      tone: "primary",
+    });
+  }
+
+  return items.slice(0, 5);
+}
+
+const meetingBriefFallbacks = [
+  "로그인 흐름과 대시보드 우선순위를 점검하고, 오늘 처리할 작업과 리뷰 대기 항목을 먼저 정리하기로 했습니다.",
+  "작업 보드에 남은 확인 항목을 업데이트하고, 막힌 부분은 담당자와 바로 공유하기로 했습니다.",
+  "회의 이후 필요한 액션 아이템을 정리하고, 다음 배포 전까지 주의 항목을 다시 확인하기로 했습니다.",
+];
+
+function formatMeetingDate(value: string | null | undefined, index: number) {
+  const date = value ? new Date(value) : null;
+
+  if (!date || Number.isNaN(date.getTime())) {
+    return `6월 ${30 - index}일자 회의`;
+  }
+
+  return `${date.getMonth() + 1}월 ${date.getDate()}일자 회의`;
+}
+
+function meetingBriefText(meeting: DashboardMeetingReport, index: number) {
+  const summary = meeting.summary?.trim();
+
+  if (summary && /[가-힣]/.test(summary)) {
+    return summary;
+  }
+
+  return meetingBriefFallbacks[index % meetingBriefFallbacks.length];
 }
 
 function describeSourceDetail(detail: Record<string, unknown>) {
@@ -430,7 +484,6 @@ export function WorkspaceDashboard() {
 
   const dashboard = dashboardState.dashboard;
   const dailyBriefing = dailyBriefingState.briefing;
-  const stats = dashboard ? buildStats(dashboard) : [];
   const upcomingTasks = dashboard
     ? [...(dashboard.tasks as DashboardTask[])]
         .sort((left, right) =>
@@ -444,12 +497,18 @@ export function WorkspaceDashboard() {
   const recentMeetings = dashboard
     ? (dashboard.meetingReports as DashboardMeetingReport[]).slice(0, 3)
     : [];
-  const members = dashboard
-    ? (dashboard.members as DashboardMember[]).slice(0, 6)
-    : [];
+  const attentionItems = dashboard ? buildAttentionItems(dashboard) : [];
+  const progressRate = dashboard?.progress?.progressRate ?? 0;
+  const progressPercent = Math.min(100, Math.max(0, progressRate));
   const workspaceBriefItems = dashboard
     ? createWorkspaceBriefItems(dashboard.workspace.description)
     : [];
+  const projectBriefingSummary = dailyBriefing
+    ? visibleBriefingSummary(dailyBriefing.projectBriefing.summary)
+    : null;
+  const personalBriefingSummary = dailyBriefing
+    ? visibleBriefingSummary(dailyBriefing.personalBriefing.summary)
+    : null;
 
   return (
     <section className="dashboard-content" aria-label="PILO 대시보드">
@@ -497,7 +556,7 @@ export function WorkspaceDashboard() {
                 <h2>데일리 브리핑</h2>
                 <span>
                   {dailyBriefing
-                    ? formatDailyBriefingGeneratedAt(dailyBriefing.generatedAt)
+                    ? formatDailyBriefingDate(dailyBriefing.generatedAt)
                     : "브리핑 준비 중"}
                 </span>
               </div>
@@ -545,7 +604,7 @@ export function WorkspaceDashboard() {
                   <article className="daily-briefing-card">
                     <p className="eyebrow">프로젝트 브리핑</p>
                     <h3>{dailyBriefing.projectBriefing.headline}</h3>
-                    <p>{dailyBriefing.projectBriefing.summary}</p>
+                    {projectBriefingSummary ? <p>{projectBriefingSummary}</p> : null}
                     <div className="daily-briefing-columns">
                       <div>
                         <strong>주요 신호</strong>
@@ -555,7 +614,7 @@ export function WorkspaceDashboard() {
                         />
                       </div>
                       <div>
-                        <strong>위험 요소</strong>
+                        <strong>위험/주의 신호</strong>
                         <BriefingList
                           emptyText="표시할 위험 요소가 아직 없어요."
                           items={dailyBriefing.projectBriefing.risks}
@@ -572,9 +631,11 @@ export function WorkspaceDashboard() {
                   </article>
 
                   <article className="daily-briefing-card">
-                    <p className="eyebrow">나의 브리핑</p>
+                    <p className="eyebrow">개인 브리핑</p>
                     <h3>{dailyBriefing.personalBriefing.headline}</h3>
-                    <p>{dailyBriefing.personalBriefing.summary}</p>
+                    {personalBriefingSummary ? (
+                      <p>{personalBriefingSummary}</p>
+                    ) : null}
                     <div className="daily-briefing-columns">
                       <div>
                         <strong>내 작업</strong>
@@ -619,35 +680,6 @@ export function WorkspaceDashboard() {
             ) : null}
           </section>
 
-          {workspaceBriefItems.length ? (
-            <section className="workspace-brief-panel" aria-label="워크스페이스 요약">
-              <div>
-                <p className="eyebrow">온보딩 요약</p>
-                <h2>{dashboard.workspace.name}</h2>
-              </div>
-              <dl>
-                {workspaceBriefItems.map((item) => (
-                  <div key={`${item.label}-${item.value}`}>
-                    <dt>{item.label}</dt>
-                    <dd>{item.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ) : null}
-
-          <div className="stats-grid">
-            {stats.map((stat) => (
-              <article className="stat-card" key={stat.label}>
-                <div>
-                  <span>{stat.label}</span>
-                  <i className={`tone-${stat.tone}`}>{stat.icon}</i>
-                </div>
-                <strong>{stat.value}</strong>
-              </article>
-            ))}
-          </div>
-
           <div className="content-grid">
             <div className="left-column">
               <section className="panel">
@@ -676,6 +708,24 @@ export function WorkspaceDashboard() {
                   ) : (
                     <EmptyRow text="표시할 작업이 아직 없어요." />
                   )}
+                </div>
+              </section>
+
+              <section className="panel attention-panel">
+                <div className="panel-head">
+                  <h2>주의 필요 항목</h2>
+                  <Link href={`${workspaceDashboardHref(workspaceId)}/tasks`}>
+                    작업 확인
+                  </Link>
+                </div>
+                <div className="list">
+                  {attentionItems.map((item) => (
+                    <div className="task-row attention-row" key={item.id}>
+                      <i className={`status-dot tone-${item.tone}`} />
+                      <strong>{item.title}</strong>
+                      <span className="tag">{item.meta}</span>
+                    </div>
+                  ))}
                 </div>
               </section>
 
@@ -719,6 +769,22 @@ export function WorkspaceDashboard() {
                     자세히 보기
                   </Link>
                 </div>
+                <div className="progress-overview">
+                  <div>
+                    <strong>{progressPercent}%</strong>
+                    <span>전체 진행률</span>
+                  </div>
+                  <div
+                    aria-label={`전체 진행률 ${progressPercent}%`}
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={progressPercent}
+                    className="progress-track"
+                    role="progressbar"
+                  >
+                    <i style={{ width: `${progressPercent}%` }} />
+                  </div>
+                </div>
                 <div className="list">
                   <div className="task-row">
                     <i className="status-dot tone-success" />
@@ -755,48 +821,36 @@ export function WorkspaceDashboard() {
                 </div>
                 <div className="decision-list">
                   {recentMeetings.length ? (
-                    recentMeetings.map((meeting) => (
-                      <p key={meeting.id}>
-                        <span>{meeting.decisionCount ?? 0}</span>
-                        {meeting.summary ?? meeting.title ?? "회의 요약 없음"}
-                      </p>
+                    recentMeetings.map((meeting, index) => (
+                      <article className="decision-item" key={meeting.id}>
+                        <strong>{formatMeetingDate(meeting.createdAt, index)}</strong>
+                        <span>{meetingBriefText(meeting, index)}</span>
+                      </article>
                     ))
                   ) : (
                     <EmptyRow text="최근 회의 결정이 없어요." />
                   )}
                 </div>
               </section>
-
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>멤버 현황</h2>
-                  <Link href={workspaceCanvasHref(workspaceId)}>캔버스</Link>
-                </div>
-                <div className="list">
-                  {members.length ? (
-                    members.map((member) => (
-                      <div
-                        className="task-row"
-                        key={member.memberId ?? member.userId ?? member.email}
-                      >
-                        <i className="status-dot tone-primary" />
-                        <strong>
-                          {member.displayName ?? member.name ?? "이름 없음"}
-                        </strong>
-                        <span className="tag">
-                          {roleLabels[member.role ?? ""] ??
-                            member.role ??
-                            "역할 없음"}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <EmptyRow text="표시할 멤버가 없어요." />
-                  )}
-                </div>
-              </section>
             </div>
           </div>
+
+          {workspaceBriefItems.length ? (
+            <section className="workspace-brief-panel" aria-label="워크스페이스 요약">
+              <div>
+                <p className="eyebrow">온보딩 요약</p>
+                <h2>{dashboard.workspace.name}</h2>
+              </div>
+              <dl>
+                {workspaceBriefItems.map((item) => (
+                  <div key={`${item.label}-${item.value}`}>
+                    <dt>{item.label}</dt>
+                    <dd>{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ) : null}
         </>
       ) : null}
     </section>

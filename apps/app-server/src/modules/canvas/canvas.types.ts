@@ -14,6 +14,7 @@ export type CanvasEntityType =
   | "file"
   | "code"
   | "decision"
+  | "memo"
   | "risk";
 
 export type CanvasBoardType = "project_map" | "meeting" | "review" | "custom";
@@ -105,6 +106,9 @@ export type CanvasShapeSummary = {
   color: string;
   isCollapsed: boolean;
   zIndex: number;
+  createdByMemberId?: string;
+  createdAt?: string;
+  updatedAt?: string;
   position: {
     x: number;
     y: number;

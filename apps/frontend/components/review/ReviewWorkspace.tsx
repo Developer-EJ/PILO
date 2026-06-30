@@ -463,7 +463,7 @@ export function ReviewWorkspace({
     setSelectedPullRequest(pullRequest);
     setSelectedNodeId(null);
     setNodeDetail(null);
-    changeView("analysis");
+    setActiveView("analysis");
 
     try {
       const openedRoom = await client.openRoom(pullRequest.id, {

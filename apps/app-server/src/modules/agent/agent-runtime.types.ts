@@ -1,6 +1,7 @@
 import { AgentWorkflowType } from "./agent-registry.types";
 
 export type AgentActionType =
+  | "canvas.memo.create"
   | "task.create.draft"
   | "task.update.status"
   | "github.issue.create"
@@ -9,6 +10,7 @@ export type AgentActionType =
   | "planning.approve";
 
 export type AgentActionSource =
+  | "canvas"
   | "meeting"
   | "task"
   | "github"
@@ -60,6 +62,7 @@ export interface AgentAction {
   type: AgentActionType;
   source: AgentActionSource;
   requiresConfirmation: boolean;
+  summary?: string;
   payload: Record<string, unknown>;
   status: AgentActionStatus;
   confirmedByMemberId: string | null;

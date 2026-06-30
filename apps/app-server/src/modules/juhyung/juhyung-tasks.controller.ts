@@ -19,6 +19,7 @@ import {
   CreateMilestoneBody,
   CreateTaskBody,
   JuhyungTaskService,
+  TaskContextQuery,
   ListTasksQuery,
   ProgressSummaryQuery,
   UpdateChecklistItemBody,
@@ -79,6 +80,20 @@ export class JuhyungTasksController {
     @Headers("x-member-id") memberId?: string | string[],
   ) {
     return this.taskService.listTasks(
+      workspaceId,
+      query,
+      toCurrentActor(userId, memberId),
+    );
+  }
+
+  @Get("workspaces/:workspaceId/task-context")
+  getTaskGithubProgressContext(
+    @Param("workspaceId") workspaceId: string,
+    @Query() query: TaskContextQuery,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.taskService.getTaskGithubProgressContext(
       workspaceId,
       query,
       toCurrentActor(userId, memberId),

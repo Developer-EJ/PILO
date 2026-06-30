@@ -14,7 +14,9 @@ import { AgentRuntimeRepository } from "./agent-runtime.repository";
 import {
   AgentAction,
   AgentActionSource,
+  AgentActionType,
   AgentChatMessage,
+  AgentContextRef,
   AgentOnboardingDraft,
   AgentOnboardingFieldKey,
   AgentOnboardingMilestoneCandidate,
@@ -33,7 +35,62 @@ import {
 } from "./agent-runtime.types";
 
 const LOCAL_MODEL_NAME = "local-deterministic-planner";
+const DEFAULT_AGENT_CHAT_MODEL = "gpt-4.1-mini";
 const agentRuntimeLogger = new Logger("AgentRuntimeService");
+
+type AgentChatEvidenceSource =
+  | "meeting"
+  | "task"
+  | "review"
+  | "progress"
+  | "canvas"
+  | "agent";
+
+type AgentChatEvidence = {
+  source: AgentChatEvidenceSource;
+  title: string;
+  detail: string;
+  referenceId: string | null;
+};
+
+type AgentChatDateRange = {
+  label: string;
+  from: string;
+  to: string;
+  timezone: "Asia/Seoul";
+};
+
+type AgentActionProposal = {
+  type: AgentActionType;
+  source: AgentActionSource;
+  requiresConfirmation: true;
+  summary: string;
+  payload: Record<string, unknown>;
+};
+
+type AgentWorkspaceChatResponse = {
+  shortConclusion: string;
+  priorityTasks: string[];
+  evidence: AgentChatEvidence[];
+  recommendedNextActions: string[];
+  actionProposals: AgentActionProposal[];
+  dateRange: AgentChatDateRange;
+  fallback: boolean;
+  usedModel: string | null;
+  runtime: {
+    generatedAt: string;
+    timezone: "Asia/Seoul";
+    dateBasis: string;
+    sourceStatus: {
+      meetings: "provided" | "deferred";
+      tasks: "provided" | "deferred";
+      reviews: "provided" | "deferred";
+      progress: "provided" | "deferred";
+      canvas: "proposal_only" | "deferred";
+    };
+    diagnostic: string | null;
+  };
+};
 
 @Injectable()
 export class AgentRuntimeService {
@@ -175,21 +232,76 @@ export class AgentRuntimeService {
       actionIds: [],
       createdAt: nowIso(),
     });
+    const dateRange = resolveAgentChatDateRange(
+      body.message,
+      body.dateRange,
+      body.currentDateKst,
+    );
+    const fallbackResponse = buildAgentChatFallbackResponse({
+      workspaceId,
+      message: body.message,
+      contextRefs: body.contextRefs,
+      currentMemberId: currentMember.id,
+      dateRange,
+      diagnostic: "local_fallback",
+    });
+    const chatResponse =
+      (await tryBuildAgentChatWithOpenAI({
+        workspaceId,
+        message: body.message,
+        workflowType: body.workflowType,
+        contextRefs: body.contextRefs,
+        actor,
+        currentMember,
+        currentUserContext: body.currentUserContext,
+        currentMemberContext: body.currentMemberContext,
+        dateRange,
+        fallback: fallbackResponse,
+      })) ?? fallbackResponse;
+    const actions = chatResponse.actionProposals.map((proposal) =>
+      createAction({
+        runId: "pending-run-id",
+        type: proposal.type,
+        source: proposal.source,
+        summary: proposal.summary,
+        payload: proposal.payload,
+      }),
+    );
     const run = this.buildRun({
       workspaceId,
       actorMemberId: currentMember.id,
       workflowType: body.workflowType,
       workflowVersion: "v1",
-      input: { message: body.message },
+      input: {
+        message: body.message,
+        currentMemberId: currentMember.id,
+        currentUserId: currentMember.userId,
+        currentUserContext: body.currentUserContext,
+        currentMemberContext: body.currentMemberContext,
+        dateRange,
+      },
       contextRefs: body.contextRefs,
       source: "orchestrator",
+      output: chatResponse as unknown as Record<string, unknown>,
+      actions,
     });
     this.repository.saveRun(run);
-    this.appendAssistantMessage(run);
+    const assistantMessage = this.repository.appendMessage({
+      id: randomUUID(),
+      workspaceId,
+      role: "assistant",
+      body: formatAgentChatAssistantMessage(chatResponse),
+      runId: run.id,
+      actionIds: run.actions.map((action) => action.id),
+      createdAt: run.updatedAt,
+    });
 
     return {
       message: userMessage,
+      assistantMessage,
       run,
+      response: chatResponse,
+      actions: run.actions,
     };
   }
 
@@ -644,6 +756,7 @@ function createAction(input: {
   runId: string;
   type: AgentAction["type"];
   source: AgentAction["source"];
+  summary?: string;
   payload: Record<string, unknown>;
 }): AgentAction {
   return {
@@ -652,6 +765,7 @@ function createAction(input: {
     type: input.type,
     source: input.source,
     requiresConfirmation: true,
+    ...(input.summary ? { summary: input.summary } : {}),
     payload: input.payload,
     status: "waiting_confirmation",
     confirmedByMemberId: null,
@@ -789,7 +903,7 @@ async function tryBuildOnboardingWithOpenAI(
       return null;
     }
 
-    const parsed = parseOpenAIJson(rawText);
+    const parsed = parseOpenAIJson<AgentOnboardingTurnResult>(rawText);
     if (!parsed) {
       agentRuntimeLogger.warn(
         "Agent onboarding OpenAI fallback used: parse_error",
@@ -839,6 +953,126 @@ async function tryBuildOnboardingWithOpenAI(
   }
 }
 
+async function tryBuildAgentChatWithOpenAI(input: {
+  workspaceId: string;
+  message: string;
+  workflowType: AgentRunDetail["workflowType"];
+  contextRefs: AgentContextRef[];
+  actor?: WorkspaceActor;
+  currentMember: { id: string; workspaceId: string; userId: string; role: string };
+  currentUserContext: Record<string, unknown> | null;
+  currentMemberContext: Record<string, unknown> | null;
+  dateRange: AgentChatDateRange;
+  fallback: AgentWorkspaceChatResponse;
+}): Promise<AgentWorkspaceChatResponse | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    agentRuntimeLogger.warn(
+      "Agent chat OpenAI fallback used: missing_api_key",
+    );
+    return null;
+  }
+
+  const model =
+    process.env.PILO_AGENT_CHAT_MODEL ??
+    process.env.OPENAI_MODEL ??
+    DEFAULT_AGENT_CHAT_MODEL;
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            role: "system",
+            content:
+              "You are PILO's workspace AI agent. Return one raw compact JSON object only. Do not use Markdown or code fences. Interpret relative dates in Asia/Seoul. Never execute user changes directly; represent changes only as actionProposals requiring confirmation. For read-only lookup questions, return actionProposals as an empty array. Only create a canvas.memo.create proposal when the user clearly asks to add/create/write/record a memo on the canvas or project map.",
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              requiredShape: {
+                shortConclusion: "string",
+                priorityTasks: ["string"],
+                evidence: [
+                  {
+                    source: "meeting|task|review|progress|canvas|agent",
+                    title: "string",
+                    detail: "string",
+                    referenceId: "string|null",
+                  },
+                ],
+                recommendedNextActions: ["string"],
+                actionProposals: [
+                  {
+                    type: "canvas.memo.create|task.create.draft",
+                    summary: "string",
+                    payload: "object",
+                  },
+                ],
+              },
+              workspaceId: input.workspaceId,
+              userMessage: input.message,
+              workflowType: input.workflowType,
+              currentMember: input.currentMember,
+              currentUserContext: input.currentUserContext,
+              currentMemberContext: input.currentMemberContext,
+              actor: input.actor ?? {},
+              contextRefs: input.contextRefs,
+              dateRange: input.dateRange,
+              fallback: input.fallback,
+              responseRules: [
+                "Return JSON only.",
+                "The first character must be { and the last character must be }.",
+                "Do not include markdown fences such as ```json.",
+                "Use actionProposals for requested changes instead of claiming execution.",
+              ],
+            }),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      agentRuntimeLogger.warn(
+        `Agent chat OpenAI fallback used: http_status status=${response.status}`,
+      );
+      return null;
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const rawText = extractOpenAIText(payload);
+    if (!rawText) {
+      agentRuntimeLogger.warn("Agent chat OpenAI fallback used: empty_output");
+      return null;
+    }
+
+    const parsed = parseOpenAIJson<AgentWorkspaceChatResponse>(rawText);
+    if (!parsed) {
+      agentRuntimeLogger.warn("Agent chat OpenAI fallback used: parse_error");
+      return null;
+    }
+
+    return sanitizeAgentChatResponse(parsed, input.fallback, {
+      workspaceId: input.workspaceId,
+      dateRange: input.dateRange,
+      fallback: false,
+      usedModel: model,
+      diagnostic: null,
+    });
+  } catch (error) {
+    agentRuntimeLogger.warn(
+      `Agent chat OpenAI fallback used: request_error message=${safeErrorMessage(error)}`,
+    );
+    return null;
+  }
+}
+
 function extractOpenAIText(payload: Record<string, unknown>): string | null {
   if (typeof payload.output_text === "string") {
     return payload.output_text.trim();
@@ -862,12 +1096,14 @@ function extractOpenAIText(payload: Record<string, unknown>): string | null {
   return null;
 }
 
-function parseOpenAIJson(rawText: string): Partial<AgentOnboardingTurnResult> | null {
+function parseOpenAIJson<T extends object>(
+  rawText: string,
+): Partial<T> | null {
   const jsonText = extractJsonObjectText(rawText);
   if (!jsonText) return null;
 
   try {
-    return JSON.parse(jsonText) as Partial<AgentOnboardingTurnResult>;
+    return JSON.parse(jsonText) as Partial<T>;
   } catch {
     return null;
   }
@@ -890,6 +1126,432 @@ function extractJsonObjectText(rawText: string): string | null {
   }
 
   return null;
+}
+
+function buildAgentChatFallbackResponse(input: {
+  workspaceId: string;
+  message: string;
+  contextRefs: AgentContextRef[];
+  currentMemberId: string;
+  dateRange: AgentChatDateRange;
+  diagnostic: string;
+}): AgentWorkspaceChatResponse {
+  const actionProposals = inferAgentChatActionProposals(
+    input.workspaceId,
+    input.message,
+  );
+  const evidenceFromRefs = input.contextRefs.slice(0, 3).map((ref) => ({
+    source: normalizeEvidenceSource(ref.type),
+    title: `${ref.type} ${ref.id}`,
+    detail:
+      "요청에 포함된 contextRef입니다. 세부 read model은 owner domain API 계약이 붙으면 더 풍부하게 연결할 수 있습니다.",
+    referenceId: ref.id,
+  }));
+  const evidence =
+    evidenceFromRefs.length > 0
+      ? evidenceFromRefs
+      : [
+          {
+            source: "agent" as const,
+            title: "Agent Runtime fallback",
+            detail:
+              "현재 세인 경계 안에서는 회의록/Task/리뷰/진행률 live read model을 직접 조회하지 않고, 요청 문장과 contextRef만 근거로 안전한 제안을 만듭니다.",
+            referenceId: null,
+          },
+          {
+            source: "progress" as const,
+            title: "진행률 신호",
+            detail:
+              "진행률 요약은 Workspace/Dashboard read model 계약이 연결되면 근거로 사용할 수 있습니다.",
+            referenceId: null,
+          },
+        ];
+
+  return {
+    shortConclusion: `${input.dateRange.label}(${input.dateRange.from}~${input.dateRange.to}, KST) 기준으로 확인했습니다. 직접 실행은 하지 않고 확인 가능한 다음 행동과 승인 대기 제안만 준비했습니다.`,
+    priorityTasks: [
+      "회의록/Task/리뷰/진행률 근거를 먼저 확인하세요.",
+      "변경이 필요한 항목은 action proposal로 승인 여부를 결정하세요.",
+      "캔버스나 Task 생성은 owner domain API가 연결된 뒤 실행하세요.",
+    ].slice(0, 3),
+    evidence,
+    recommendedNextActions:
+      actionProposals.length > 0
+        ? [
+            "제안된 action을 승인하거나 거절하세요.",
+            "승인 후 실제 owner domain 실행은 Canvas/Task API 경계에서 처리해야 합니다.",
+          ]
+        : [
+            "필요한 회의록, Task, 리뷰 contextRef를 함께 보내면 더 구체적으로 답할 수 있습니다.",
+            "변경 요청이 있으면 메모 추가, Task 초안 생성처럼 구체적으로 지시하세요.",
+          ],
+    actionProposals,
+    dateRange: input.dateRange,
+    fallback: true,
+    usedModel: null,
+    runtime: buildAgentChatRuntimeMetadata(
+      input.dateRange,
+      input.diagnostic,
+      input.contextRefs,
+    ),
+  };
+}
+
+function sanitizeAgentChatResponse(
+  parsed: Partial<AgentWorkspaceChatResponse>,
+  fallback: AgentWorkspaceChatResponse,
+  input: {
+    workspaceId: string;
+    dateRange: AgentChatDateRange;
+    fallback: boolean;
+    usedModel: string | null;
+    diagnostic: string | null;
+  },
+): AgentWorkspaceChatResponse {
+  const actionProposals = sanitizeAgentActionProposals(
+    parsed.actionProposals,
+    fallback.actionProposals,
+    input.workspaceId,
+  );
+
+  return {
+    shortConclusion:
+      cleanText(parsed.shortConclusion) ?? fallback.shortConclusion,
+    priorityTasks: readTextArray(parsed.priorityTasks, fallback.priorityTasks, 3),
+    evidence: sanitizeAgentChatEvidence(parsed.evidence, fallback.evidence),
+    recommendedNextActions: readTextArray(
+      parsed.recommendedNextActions,
+      fallback.recommendedNextActions,
+      5,
+    ),
+    actionProposals,
+    dateRange: input.dateRange,
+    fallback: input.fallback,
+    usedModel: input.usedModel,
+    runtime: {
+      ...buildAgentChatRuntimeMetadata(
+        input.dateRange,
+        input.diagnostic,
+        [],
+      ),
+      sourceStatus: fallback.runtime.sourceStatus,
+    },
+  };
+}
+
+function sanitizeAgentChatEvidence(
+  value: unknown,
+  fallback: AgentChatEvidence[],
+): AgentChatEvidence[] {
+  if (!Array.isArray(value)) return fallback;
+  const items = value
+    .slice(0, 6)
+    .map((item) => {
+      const record = isRecord(item) ? item : {};
+      const title = cleanText(record.title);
+      const detail = cleanText(record.detail);
+      if (!title || !detail) return null;
+      return {
+        source: normalizeEvidenceSource(record.source),
+        title,
+        detail,
+        referenceId: cleanText(record.referenceId),
+      };
+    })
+    .filter((item): item is AgentChatEvidence => Boolean(item));
+  return items.length > 0 ? items : fallback;
+}
+
+function sanitizeAgentActionProposals(
+  value: unknown,
+  fallback: AgentActionProposal[],
+  workspaceId: string,
+): AgentActionProposal[] {
+  if (!Array.isArray(value)) return fallback;
+  if (value.length === 0) return [];
+  const proposals = value
+    .slice(0, 4)
+    .map((item) => {
+      const record = isRecord(item) ? item : {};
+      const type = parseAgentActionType(record.type);
+      if (!type) return null;
+      const summary =
+        cleanText(record.summary) ?? defaultActionSummary(type);
+      const payload = isRecord(record.payload) ? record.payload : {};
+      return buildActionProposal(type, workspaceId, summary, payload);
+    })
+    .filter((item): item is AgentActionProposal => Boolean(item));
+  return proposals;
+}
+
+function inferAgentChatActionProposals(
+  workspaceId: string,
+  message: string,
+): AgentActionProposal[] {
+  const proposals: AgentActionProposal[] = [];
+  if (hasCanvasMemoMutationIntent(message)) {
+    const proposal = buildActionProposal(
+      "canvas.memo.create",
+      workspaceId,
+      "프로젝트 맵 캔버스에 메모를 추가합니다.",
+      {
+        workspaceId,
+        boardHint: "project-map",
+        text: extractQuotedMemoText(message) ?? message,
+        shapeType: "memo",
+        position: { x: 160, y: 120 },
+      },
+    );
+    if (proposal) proposals.push(proposal);
+  }
+
+  if (hasTaskDraftMutationIntent(message)) {
+    const proposal = buildActionProposal(
+      "task.create.draft",
+      workspaceId,
+      "요청 내용을 Task 초안으로 제안합니다.",
+      {
+        workspaceId,
+        sourceType: "agent_recommendation",
+        sourceId: randomUUID(),
+        title: summarizeActionTitle(message),
+        description: message,
+        assigneeMemberId: null,
+        priority: "medium",
+        dueDate: null,
+      },
+    );
+    if (proposal) proposals.push(proposal);
+  }
+
+  return proposals;
+}
+
+function hasCanvasMemoMutationIntent(message: string) {
+  const hasMemoTarget = /(메모|memo)/i.test(message);
+  const hasCanvasTarget =
+    /(캔버스|canvas|프로젝트\s*맵|project\s*map|보드|board)/i.test(message);
+  return hasMemoTarget && hasCanvasTarget && hasMutationVerb(message);
+}
+
+function hasTaskDraftMutationIntent(message: string) {
+  const hasTaskTarget = /(task|할\s*일|작업)/i.test(message);
+  const hasDraftTarget = /(초안|draft)/i.test(message);
+  return (hasTaskTarget || hasDraftTarget) && hasMutationVerb(message);
+}
+
+function hasMutationVerb(message: string) {
+  return /(추가|생성|만들|남겨|등록|작성|기록|붙여|넣어|올려|전환|create|add|make|write|record)/i.test(
+    message,
+  );
+}
+
+function extractQuotedMemoText(message: string) {
+  return (
+    message.match(/'([^']{1,500})'/)?.[1]?.trim() ??
+    message.match(/"([^"]{1,500})"/)?.[1]?.trim() ??
+    message.match(/“([^”]{1,500})”/)?.[1]?.trim() ??
+    message.match(/‘([^’]{1,500})’/)?.[1]?.trim() ??
+    null
+  );
+}
+
+function buildActionProposal(
+  type: AgentActionType,
+  workspaceId: string,
+  summary: string,
+  payload: Record<string, unknown>,
+): AgentActionProposal | null {
+  if (type === "canvas.memo.create") {
+    const position = isRecord(payload.position) ? payload.position : {};
+    return {
+      type,
+      source: "canvas",
+      requiresConfirmation: true,
+      summary,
+      payload: {
+        workspaceId,
+        boardId: cleanText(payload.boardId),
+        boardHint: cleanText(payload.boardHint) ?? "project-map",
+        text: cleanText(payload.text) ?? summary,
+        shapeType: "memo",
+        position: {
+          x: readNumberValue(position.x) ?? 160,
+          y: readNumberValue(position.y) ?? 120,
+        },
+      },
+    };
+  }
+
+  if (type === "task.create.draft") {
+    return {
+      type,
+      source: "task",
+      requiresConfirmation: true,
+      summary,
+      payload: {
+        workspaceId,
+        sourceType: "agent_recommendation",
+        sourceId: cleanText(payload.sourceId) ?? randomUUID(),
+        title: cleanText(payload.title) ?? summary,
+        description: cleanText(payload.description) ?? "",
+        assigneeMemberId: cleanText(payload.assigneeMemberId),
+        priority: parsePriority(payload.priority),
+        dueDate: cleanText(payload.dueDate),
+      },
+    };
+  }
+
+  return null;
+}
+
+function resolveAgentChatDateRange(
+  message: string,
+  input: { label?: string; from?: string; to?: string; timezone?: string } | null,
+  currentDateKst: string | null,
+): AgentChatDateRange {
+  if (input?.from && input?.to) {
+    return {
+      label: input.label ?? "사용자 지정 기간",
+      from: input.from,
+      to: input.to,
+      timezone: "Asia/Seoul",
+    };
+  }
+
+  const today = parseKstDate(currentDateKst) ?? currentKstDate();
+  if (/(어제|yesterday)/i.test(message)) {
+    const yesterday = addDays(today, -1);
+    return {
+      label: "어제",
+      from: yesterday,
+      to: yesterday,
+      timezone: "Asia/Seoul",
+    };
+  }
+
+  if (/(오늘|today)/i.test(message)) {
+    return {
+      label: "오늘",
+      from: today,
+      to: today,
+      timezone: "Asia/Seoul",
+    };
+  }
+
+  return {
+    label: "최근 7일",
+    from: addDays(today, -6),
+    to: today,
+    timezone: "Asia/Seoul",
+  };
+}
+
+function buildAgentChatRuntimeMetadata(
+  dateRange: AgentChatDateRange,
+  diagnostic: string | null,
+  contextRefs: AgentContextRef[],
+): AgentWorkspaceChatResponse["runtime"] {
+  const hasSource = (source: string) =>
+    contextRefs.some((ref) => ref.type.toLowerCase().includes(source));
+  return {
+    generatedAt: nowIso(),
+    timezone: "Asia/Seoul",
+    dateBasis: `${dateRange.label}:${dateRange.from}:${dateRange.to}`,
+    sourceStatus: {
+      meetings: hasSource("meeting") ? "provided" : "deferred",
+      tasks: hasSource("task") ? "provided" : "deferred",
+      reviews: hasSource("review") ? "provided" : "deferred",
+      progress: hasSource("progress") ? "provided" : "deferred",
+      canvas: hasSource("canvas") ? "proposal_only" : "deferred",
+    },
+    diagnostic,
+  };
+}
+
+function formatAgentChatAssistantMessage(response: AgentWorkspaceChatResponse) {
+  const lines = [
+    response.shortConclusion,
+    "",
+    "우선 처리할 일",
+    ...response.priorityTasks.slice(0, 3).map((item) => `- ${item}`),
+    "",
+    "다음 행동",
+    ...response.recommendedNextActions.slice(0, 3).map((item) => `- ${item}`),
+  ];
+  if (response.actionProposals.length > 0) {
+    lines.push(
+      "",
+      `승인 대기 제안 ${response.actionProposals.length}개가 준비됐습니다.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function normalizeEvidenceSource(value: unknown): AgentChatEvidenceSource {
+  if (value === "meeting" || value === "meeting_report") return "meeting";
+  if (value === "task" || value === "task_draft") return "task";
+  if (value === "review" || value === "pull_request") return "review";
+  if (value === "progress") return "progress";
+  if (value === "canvas") return "canvas";
+  return "agent";
+}
+
+function parseAgentActionType(value: unknown): AgentActionType | null {
+  return value === "canvas.memo.create" || value === "task.create.draft"
+    ? value
+    : null;
+}
+
+function defaultActionSummary(type: AgentActionType) {
+  if (type === "canvas.memo.create") {
+    return "프로젝트 맵 캔버스에 메모를 추가합니다.";
+  }
+  if (type === "task.create.draft") {
+    return "요청 내용을 Task 초안으로 제안합니다.";
+  }
+  return "사용자 승인이 필요한 action proposal입니다.";
+}
+
+function summarizeActionTitle(message: string) {
+  const trimmed = message.trim().replace(/\s+/g, " ");
+  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}...` : trimmed;
+}
+
+function readTextArray(
+  value: unknown,
+  fallback: string[],
+  limit: number,
+): string[] {
+  if (!Array.isArray(value)) return fallback.slice(0, limit);
+  const items = value
+    .map((item) => cleanText(item))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, limit);
+  return items.length > 0 ? items : fallback.slice(0, limit);
+}
+
+function readNumberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseKstDate(value: string | null) {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function currentKstDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function addDays(dateText: string, amount: number) {
+  const [year, month, day] = dateText.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + amount));
+  return date.toISOString().slice(0, 10);
 }
 
 function mergeOnboardingAnswer(
@@ -1214,6 +1876,9 @@ function recommendationTitle(action: AgentAction): string {
   if (payloadTitle) {
     return payloadTitle;
   }
+  if (action.type === "canvas.memo.create") {
+    return "프로젝트 맵 메모 추가";
+  }
   if (action.type === "planning.approve") {
     return "프로젝트 계획 승인";
   }
@@ -1221,6 +1886,12 @@ function recommendationTitle(action: AgentAction): string {
 }
 
 function recommendationSummary(action: AgentAction): string {
+  if (action.summary) {
+    return action.summary;
+  }
+  if (action.type === "canvas.memo.create") {
+    return "승인하면 Canvas owner API 경계에서 프로젝트 맵 메모 생성으로 넘길 수 있는 제안입니다.";
+  }
   if (action.type === "task.create.draft") {
     return "승인하면 Task owner API로 넘길 수 있는 TaskCreateDraft payload입니다.";
   }

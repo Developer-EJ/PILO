@@ -149,13 +149,40 @@ describe("review public API boundary", () => {
     assert.equal(unopenedSummary.pullRequests[0].analysisSource, "fixture");
     assert.equal(unopenedSummary.pullRequests[0].roomId, null);
 
-    const room = reviewRoomService.openRoomForPullRequest(REVIEW_PULL_REQUEST_ID);
-    const openedSummary = controller.getWorkspaceReviewSummary(
-      REVIEW_WORKSPACE_ID,
+    const room = reviewRoomService.openRoomForPullRequest(
+      REVIEW_PULL_REQUEST_ID,
     );
+    const openedSummary =
+      controller.getWorkspaceReviewSummary(REVIEW_WORKSPACE_ID);
 
     assert.equal(openedSummary.pullRequests[0].roomId, room.id);
     assert.equal(openedSummary.pullRequests[0].reviewRoomStatus, "open");
+  });
+
+  it("returns workspace-level review context for AI chat consumers", () => {
+    const { controller } = createReviewPublicHarness();
+
+    const context = controller.getWorkspaceReviewContext(REVIEW_WORKSPACE_ID);
+
+    assert.equal(context.workspaceId, REVIEW_WORKSPACE_ID);
+    assert.equal(context.highlights.pendingReviewCount, 1);
+    assert.equal(context.highlights.riskyPullRequestCount, 1);
+    assert.equal(context.highlights.changedFileSignalCount, 1);
+    assert.equal(
+      context.pendingPullRequests[0].pullRequestId,
+      REVIEW_PULL_REQUEST_ID,
+    );
+    assert.equal(context.riskyPullRequests[0].riskLevel, "medium");
+    assert.equal(context.analysisStatuses[0].analysisStatus, "succeeded");
+    assert.equal(context.changedFileSignals[0].type, "large_change_file");
+    assert.equal(
+      context.changedFileSignals[0].filePath,
+      "apps/frontend/app/auth/callback/page.tsx",
+    );
+    assert.match(context.summaryText, /review|PR|리뷰|위험/);
+    assert.ok(
+      context.warnings.some((warning) => warning.includes("workspaceId")),
+    );
   });
 
   it("lets runtime analysis state override the fixture dashboard summary", () => {

@@ -261,3 +261,36 @@ export interface ProgressSummary {
   progressRate: number;
   capturedAt: string;
 }
+
+export type TaskGithubProgressContextRiskType =
+  | "github_pr_read_model_deferred"
+  | "meeting_decision_link_deferred";
+
+export interface TaskGithubProgressContextRisk {
+  type: TaskGithubProgressContextRiskType;
+  severity: "info" | "warning";
+  message: string;
+}
+
+export interface TaskGithubProgressContext {
+  workspaceId: string;
+  memberId: string | null;
+  date: string;
+  generatedAt: string;
+  progress: ProgressSummary;
+  focus: {
+    myTasks: TaskSummary[];
+    blockedTasks: TaskSummary[];
+    delayedTasks: TaskSummary[];
+    dueTodayTasks: TaskSummary[];
+    recommendedTasks: TaskSummary[];
+    recentOpenTasks: TaskSummary[];
+  };
+  github: {
+    source: "deferred_contract";
+    hasRuntimePrReadModel: false;
+    issues: GithubIssueSummary[];
+    pullRequests: PullRequestSummary[];
+    risks: TaskGithubProgressContextRisk[];
+  };
+}

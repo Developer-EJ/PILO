@@ -9,6 +9,7 @@ import {
   workspaceDashboardHref,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { CurrentWorkspaceSwitcher } from "./CurrentWorkspaceSwitcher";
+import { WorkspaceAiChat } from "./WorkspaceAiChat";
 
 export type WorkspaceNavSection =
   | "dashboard"
@@ -63,6 +64,14 @@ function navItemClass(active: boolean) {
 
 function workspacePath(workspaceId: string, segment: string) {
   return `${workspaceDashboardHref(workspaceId)}/${segment}`;
+}
+
+function workspaceReviewRoomHref(workspaceId: string) {
+  const reviewRoomBaseUrl =
+    process.env.NEXT_PUBLIC_PILO_REVIEW_ROOM_URL?.replace(/\/$/, "");
+  const reviewPath = workspacePath(workspaceId, "reviews");
+
+  return reviewRoomBaseUrl ? `${reviewRoomBaseUrl}${reviewPath}` : reviewPath;
 }
 
 function workspaceQueryPath(workspaceId: string, segment: string, view: string) {
@@ -143,7 +152,6 @@ export function WorkspaceSidebar({
   const taskGroupActive =
     active === "tasks" || active === "github" || active === "progress";
   const meetingGroupActive = active === "meetings";
-  const reviewGroupActive = active === "reviews";
 
   return (
     <aside id={id} className="sidebar" aria-label={label}>
@@ -204,41 +212,11 @@ export function WorkspaceSidebar({
                 label: "캔버스",
                 active: active === "canvas",
               }),
-              navGroup({
+              navLink({
+                href: workspaceReviewRoomHref(workspaceId),
                 label: "코드 리뷰",
-                active: reviewGroupActive,
+                active: active === "reviews",
                 badge: counts.pullRequests,
-                children: [
-                  navSubLink({
-                    href: workspacePath(workspaceId, "reviews"),
-                    label: "PR 선택",
-                    active: active === "reviews",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(workspaceId, "reviews", "analysis"),
-                    label: "분석",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(
-                      workspaceId,
-                      "reviews",
-                      "changed-files",
-                    ),
-                    label: "변경 파일",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(workspaceId, "reviews", "graph"),
-                    label: "리뷰 그래프",
-                  }),
-                  navSubLink({
-                    href: workspaceQueryPath(
-                      workspaceId,
-                      "reviews",
-                      "artifacts",
-                    ),
-                    label: "아티팩트",
-                  }),
-                ],
               }),
             ]
           : [
@@ -298,6 +276,7 @@ export function WorkspaceShell({
         </WorkspaceTopbar>
         {children}
       </section>
+      <WorkspaceAiChat workspaceId={workspaceId} />
     </main>
   );
 }

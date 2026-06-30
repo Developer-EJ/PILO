@@ -775,6 +775,7 @@ function isCanvasEntityType(value: unknown): value is CanvasEntityType {
     value === "file" ||
     value === "code" ||
     value === "decision" ||
+    value === "memo" ||
     value === "risk"
   );
 }
