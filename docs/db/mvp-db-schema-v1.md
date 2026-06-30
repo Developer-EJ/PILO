@@ -151,9 +151,10 @@ Prisma에 없는 table이 곧 제외 table이라는 뜻은 아니다.
 
 1. `task_drafts`는 MVP에 포함한다.
 2. `task_drafts`는 `docs/db/pilo_erd_schema.sql`과 `docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql`에 존재한다.
-3. Docker local bootstrap은 schema, owner migration, task draft rebaseline migration, seed 순서로 실행한다.
-4. Prisma model은 현재 DB-backed table subset만 유지한다.
-5. 모든 Prisma `@@map` table은 SQL baseline에 있어야 한다.
+3. Canvas connection type `implemented_by`는 public fixture/API 값이므로 `docs/db/pilo_erd_schema.sql`, owner migration, `docs/db/migrations/202606300700_canvas_connection_type_rebaseline.sql`에 존재한다.
+4. Docker local bootstrap은 schema, owner migration, task draft rebaseline migration, Canvas connection type rebaseline migration, seed 순서로 실행한다.
+5. Prisma model은 현재 DB-backed table subset만 유지한다.
+6. 모든 Prisma `@@map` table은 SQL baseline에 있어야 한다.
 
 ## DB 변경 규칙
 

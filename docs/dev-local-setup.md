@@ -35,7 +35,7 @@ Windows bind mount 환경에서 LocalStack init hook이 실행되지 않으면 �
 powershell -ExecutionPolicy Bypass -File infra/scripts/create-local-sqs-queues.ps1
 ```
 
-PostgreSQL은 최초 실행 시 `docker-compose.dev.yml`에 mount된 SQL만 실행한다. 현재 자동 로드되는 파일은 `docs/db/pilo_erd_schema.sql`, `docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql`, `docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql`, `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql`, `docs/db/seeds/002_juhyung_github_review_seed.sql`이다. 스키마를 바꾼 뒤 다시 초기화하려면 volume을 삭제해야 한다.
+PostgreSQL은 최초 실행 시 `docker-compose.dev.yml`에 mount된 SQL만 실행한다. 현재 자동 로드되는 파일은 `docs/db/pilo_erd_schema.sql`, `docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql`, `docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql`, `docs/db/migrations/202606300700_canvas_connection_type_rebaseline.sql`, `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql`, `docs/db/seeds/002_juhyung_github_review_seed.sql`이다. 스키마를 바꾼 뒤 다시 초기화하려면 volume을 삭제해야 한다.
 
 ```powershell
 docker compose -f docker-compose.dev.yml down -v

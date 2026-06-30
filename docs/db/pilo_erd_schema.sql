@@ -389,7 +389,7 @@ CREATE TABLE canvas_connections (
   connection_type VARCHAR(30) NOT NULL DEFAULT 'related_to',
   label VARCHAR(120),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT canvas_connections_type_check CHECK (connection_type IN ('related_to', 'created_from', 'blocks', 'references', 'implements', 'reviews')),
+  CONSTRAINT canvas_connections_type_check CHECK (connection_type IN ('related_to', 'created_from', 'blocks', 'references', 'implements', 'implemented_by', 'reviews')),
   CONSTRAINT canvas_connections_not_self_check CHECK (source_shape_id <> target_shape_id),
   CONSTRAINT canvas_connections_source_same_board_fk FOREIGN KEY (canvas_board_id, source_shape_id) REFERENCES canvas_shapes(canvas_board_id, id) ON DELETE CASCADE,
   CONSTRAINT canvas_connections_target_same_board_fk FOREIGN KEY (canvas_board_id, target_shape_id) REFERENCES canvas_shapes(canvas_board_id, id) ON DELETE CASCADE,

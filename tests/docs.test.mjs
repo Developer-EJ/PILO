@@ -1943,6 +1943,10 @@ describe("local development baseline", () => {
     );
     assert.match(
       compose,
+      /docs\/db\/migrations\/202606300700_canvas_connection_type_rebaseline\.sql/,
+    );
+    assert.match(
+      compose,
       /docs\/db\/seeds\/001_donghyun_auth_workspace_canvas_seed\.sql/,
     );
     assert.match(
@@ -1959,6 +1963,7 @@ describe("local development baseline", () => {
       /202606281200_donghyun_auth_workspace_canvas_init\.sql/,
     );
     assert.match(script, /202606300500_mvp_task_drafts_rebaseline\.sql/);
+    assert.match(script, /202606300700_canvas_connection_type_rebaseline\.sql/);
     assert.match(script, /001_donghyun_auth_workspace_canvas_seed\.sql/);
     assert.match(script, /002_juhyung_github_review_seed\.sql/);
     assert.match(script, /psql -v ON_ERROR_STOP=1/);
@@ -2104,6 +2109,8 @@ describe("db schema contract alignment", () => {
     const seed = read(seedPath);
     assert.match(seed, /INSERT INTO users/);
     assert.match(seed, /INSERT INTO canvas_shapes/);
+    assert.match(migration, /implemented_by/);
+    assert.match(seed, /implemented_by/);
     assert.doesNotMatch(
       seed,
       /INSERT INTO (tasks|github_issues|pull_requests|meetings|meeting_reports|code_review_rooms|agent_runs)\b/,

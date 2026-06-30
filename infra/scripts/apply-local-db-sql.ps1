@@ -2,6 +2,7 @@ param(
   [string[]] $Path = @(
     "docs/db/migrations/202606281200_donghyun_auth_workspace_canvas_init.sql",
     "docs/db/migrations/202606300500_mvp_task_drafts_rebaseline.sql",
+    "docs/db/migrations/202606300700_canvas_connection_type_rebaseline.sql",
     "docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql",
     "docs/db/seeds/002_juhyung_github_review_seed.sql"
   ),
