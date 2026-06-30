@@ -58,6 +58,9 @@
 - `GET /api/workspaces/:workspaceId/meeting-reports/recent` returns `MeetingReportSummary[]`.
 - `GET /api/workspaces/:workspaceId/meeting-reports/canvas-entity-refs` returns Canvas refs.
 - `POST /api/meeting-action-items/:actionItemId/task-draft` calls 주형 Task draft contract.
+- Internal `MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE` exposes a Meeting-owned
+  source boundary for 세인 Agent Runtime. It maps Meeting ActionItem to
+  `TaskCreateDraft` payload only and does not create TaskDraft rows.
 - Voice APIs are defined in `docs/contracts/voice.md` and use `/api/...` public paths.
 
 ## Deferred APIs
@@ -68,7 +71,8 @@
 
 - 동현: Recent meeting report summary, decisions, risks, Canvas meeting node data.
 - 주형: Action item to Task draft request.
-- 세인: Meeting report generation workflow inputs and outputs.
+- 세인: Meeting report generation workflow inputs/outputs and ActionItem source
+  payloads for `meeting.action-item.to-task-draft`.
 
 ## Consumes From Others
 

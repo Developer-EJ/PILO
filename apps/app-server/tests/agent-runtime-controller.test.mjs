@@ -37,6 +37,19 @@ const {
 const {
   JuhyungTaskService,
 } = require("../src/modules/juhyung/juhyung-task.service");
+const { MeetingService } = require("../src/modules/meeting/meeting.service");
+const {
+  MockMeetingRepository,
+} = require("../src/modules/meeting/repositories/meeting.mock-repository");
+const {
+  MockCurrentMemberAdapter,
+} = require("../src/modules/meeting/adapters/mock-current-member.adapter");
+const {
+  MockMeetingReportWorkflowClient,
+} = require("../src/modules/meeting/adapters/mock-meeting-report-workflow.adapter");
+const {
+  MeetingActionItemTaskDraftSourceAdapter,
+} = require("../src/modules/meeting/public/meeting-action-item-taskdraft-source.adapter");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -200,6 +213,115 @@ describe("AgentRuntimeController", () => {
     );
   });
 
+  it("creates a Meeting ActionItem task.create.draft candidate and executes only after approval", async () => {
+    const meetingStack = createMeetingActionItemSourceStack();
+    const taskStack = createTaskDraftExecutorStack();
+    const controller = createController(
+      new AgentRuntimeService(meetingStack.source),
+      taskStack.executor,
+    );
+
+    const run = controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "meeting.action-item.to-task-draft",
+        input: {
+          meetingId: meetingStack.meeting.id,
+          actionItemId: meetingStack.actionItem.id,
+        },
+        contextRefs: [
+          {
+            type: "meeting_action_item",
+            id: meetingStack.actionItem.id,
+          },
+        ],
+      },
+      UUIDS.member,
+    );
+
+    assert.equal(run.status, "requires_confirmation");
+    assert.equal(taskStack.taskDrafts.length, 0);
+    assert.equal(run.actions.length, 1);
+    assert.equal(run.actions[0].type, "task.create.draft");
+    assert.equal(run.actions[0].source, "meeting");
+    assert.equal(run.actions[0].status, "waiting_confirmation");
+    assert.deepEqual(run.actions[0].payload, {
+      workspaceId: UUIDS.workspace,
+      sourceType: "meeting_action_item",
+      sourceId: meetingStack.actionItem.id,
+      title: "Turn meeting action item into a task draft",
+      description: "Preserve the MeetingActionItem source through Agent.",
+      assigneeMemberId: UUIDS.member,
+      priority: "medium",
+      dueDate: "2026-07-03",
+    });
+
+    const approvedAction = controller.approveAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
+
+    assert.equal(approvedAction.status, "confirmed");
+    assert.equal(approvedAction.executedAt, null);
+    assert.equal(taskStack.taskDrafts.length, 0);
+
+    const executedAction = await controller.executeAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
+
+    assert.equal(executedAction.status, "executed");
+    assert.equal(typeof executedAction.executedAt, "string");
+    assert.equal(taskStack.taskDrafts.length, 1);
+    assert.equal(taskStack.taskDrafts[0].id, UUIDS.taskDraft);
+    assert.equal(taskStack.taskDrafts[0].sourceType, "meeting_action_item");
+    assert.equal(taskStack.taskDrafts[0].sourceId, meetingStack.actionItem.id);
+
+    const fetched = controller.getRun(run.id, UUIDS.member);
+    assert.equal(fetched.status, "succeeded");
+    assert.equal(fetched.pendingActionCount, 0);
+    assert.equal(
+      fetched.trace.some(
+        (entry) =>
+          entry.message === "agent action executed by owner boundary" &&
+          entry.metadata.result.detail.taskDraft.id === UUIDS.taskDraft &&
+          entry.metadata.result.detail.taskDraft.sourceType ===
+            "meeting_action_item" &&
+          entry.metadata.result.detail.taskDraft.sourceId ===
+            meetingStack.actionItem.id,
+      ),
+      true,
+    );
+  });
+
+  it("fails the Meeting ActionItem workflow when the source item is unavailable", () => {
+    const meetingStack = createMeetingActionItemSourceStack();
+    const controller = createController(
+      new AgentRuntimeService(meetingStack.source),
+    );
+
+    const run = controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "meeting.action-item.to-task-draft",
+        input: {
+          meetingId: meetingStack.meeting.id,
+          actionItemId: "missing-action-item",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+
+    assert.equal(run.status, "failed");
+    assert.equal(run.actions.length, 0);
+    assert.equal(run.error.message, "Meeting action item not found");
+    assert.equal(
+      run.trace.some((entry) => entry.message === "local workflow failed"),
+      true,
+    );
+  });
+
   it("rejects a waiting action as a terminal state", () => {
     const controller = createController();
     const run = controller.createRun(
@@ -307,6 +429,10 @@ describe("AgentRuntimeController", () => {
       ),
       true,
     );
+    await assert.rejects(
+      () => controller.executeAction(run.actions[0].id, UUIDS.member),
+      BadRequestException,
+    );
   });
 
   it("requires the current mock member boundary for HTTP routes", async () => {
@@ -366,9 +492,10 @@ describe("AgentRuntimeController", () => {
 
     for (const file of checkedFiles) {
       const source = readFileSync(resolve(__dirname, file), "utf8");
+      assert.doesNotMatch(source, /from\s+["']\.\.\/review(?:\/|["'])/);
       assert.doesNotMatch(
         source,
-        /from\s+["']\.\.\/(?:meeting|review)(?:\/|["'])/,
+        /from\s+["']\.\.\/meeting\/(?!(?:public\/|meeting\.module["']))/,
       );
       assert.doesNotMatch(
         source,
@@ -485,6 +612,47 @@ function createController(
   ownerExecutor = createTaskDraftExecutorStack().executor,
 ) {
   return new AgentRuntimeController(runtimeService, ownerExecutor);
+}
+
+function createMeetingActionItemSourceStack() {
+  const repository = new MockMeetingRepository();
+  const currentMemberAdapter = new MockCurrentMemberAdapter();
+  currentMemberAdapter.registerWorkspaceMember({
+    id: UUIDS.member,
+    workspaceId: UUIDS.workspace,
+    displayName: "Sein",
+  });
+  const taskDraftClient = {
+    createTaskDraft() {
+      throw new Error(
+        "TaskDraft writes are not expected during source mapping",
+      );
+    },
+  };
+  const service = new MeetingService(
+    repository,
+    currentMemberAdapter,
+    new MockMeetingReportWorkflowClient(),
+    taskDraftClient,
+  );
+  const meeting = service.createMeeting(UUIDS.workspace, {
+    title: "Meeting ActionItem integration",
+  });
+  const report = service.createReport(meeting.id);
+  const actionItem = service.createActionItem(report.id, {
+    title: "Turn meeting action item into a task draft",
+    description: "Preserve the MeetingActionItem source through Agent.",
+    assigneeSuggestionMemberId: UUIDS.member,
+    dueDateSuggestion: "2026-07-03",
+  });
+  const source = new MeetingActionItemTaskDraftSourceAdapter(repository);
+
+  return {
+    actionItem,
+    meeting,
+    report,
+    source,
+  };
 }
 
 function createTaskDraftExecutorStack() {

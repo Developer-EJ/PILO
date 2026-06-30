@@ -1128,6 +1128,19 @@ describe("machine-readable public contract schema", () => {
     };
 
     assert.equal(validateJsonSchema(schema.$defs.AgentRunCreateRequest, createRequest, schema).valid, true);
+    assert.equal(
+      validateJsonSchema(
+        schema.$defs.AgentRunCreateRequest,
+        {
+          ...createRequest,
+          workflowType: "meeting.action-item.to-task-draft",
+          input: { meetingId: uuid, actionItemId: uuid },
+          contextRefs: [{ type: "meeting_action_item", id: uuid }],
+        },
+        schema,
+      ).valid,
+      true,
+    );
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, statusResponse, schema).valid, true);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "failed", error: { message: "workflow failed" } }, schema).valid, true);
     assert.equal(validateJsonSchema(schema.$defs.AgentRunStatusResponse, { ...statusResponse, status: "requires_confirmation", actionRequired: true, pendingActionCount: 1 }, schema).valid, true);

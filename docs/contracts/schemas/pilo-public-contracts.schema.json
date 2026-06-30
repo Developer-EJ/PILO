@@ -2875,6 +2875,7 @@
     "AgentWorkflowType": {
       "enum": [
         "meeting.report.generate",
+        "meeting.action-item.to-task-draft",
         "review.analysis.generate",
         "planning.generate",
         "task.draft.generate",

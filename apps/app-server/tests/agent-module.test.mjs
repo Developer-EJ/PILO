@@ -29,6 +29,11 @@ const {
   JuhyungTaskDraftPublicWriteAdapter,
   TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
 } = require("../src/modules/juhyung/public/task-draft-public-write.adapter");
+const { MeetingModule } = require("../src/modules/meeting/meeting.module");
+const {
+  MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE,
+  MeetingActionItemTaskDraftSourceAdapter,
+} = require("../src/modules/meeting/public/meeting-action-item-taskdraft-source.adapter");
 
 describe("AgentModule", () => {
   it("registers the Agent runtime controller and exports runtime boundaries", () => {
@@ -43,6 +48,7 @@ describe("AgentModule", () => {
 
     assert.ok(controllersMetadata.includes(AgentRuntimeController));
     assert.ok(importsMetadata.includes(JuhyungModule));
+    assert.ok(importsMetadata.includes(MeetingModule));
     assert.ok(providersMetadata.includes(AgentOwnerActionExecutorService));
     assert.ok(
       providersMetadata.some(
@@ -66,6 +72,22 @@ describe("AgentModule", () => {
     assert.ok(exportsMetadata.includes(TASK_DRAFT_PUBLIC_WRITE_ADAPTER));
     assert.equal(
       exportsMetadata.includes(JuhyungTaskDraftPublicWriteAdapter),
+      false,
+    );
+  });
+
+  it("exports only the Meeting ActionItem TaskDraft source token from MeetingModule", () => {
+    const providersMetadata =
+      Reflect.getMetadata(MODULE_METADATA.PROVIDERS, MeetingModule) ?? [];
+    const exportsMetadata =
+      Reflect.getMetadata(MODULE_METADATA.EXPORTS, MeetingModule) ?? [];
+
+    assert.ok(
+      providersMetadata.includes(MeetingActionItemTaskDraftSourceAdapter),
+    );
+    assert.ok(exportsMetadata.includes(MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE));
+    assert.equal(
+      exportsMetadata.includes(MeetingActionItemTaskDraftSourceAdapter),
       false,
     );
   });
