@@ -16,21 +16,52 @@ const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service.ts");
 
-function createRuntime(taskService) {
+const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
+const ACTOR_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
+const ACTOR = { memberId: ACTOR_MEMBER_ID };
+
+function createWorkspaceAccess() {
+  const calls = [];
+
+  return {
+    calls,
+    service: {
+      async requireWorkspaceMember(workspaceId, actor) {
+        calls.push({ workspaceId, actor });
+
+        if (!actor?.memberId && !actor?.userId) {
+          throw new UnauthorizedException("Authentication is required");
+        }
+
+        return {
+          id: actor.memberId ?? "33333333-3333-4333-8333-333333333399",
+          workspaceId,
+          userId: actor.userId ?? "11111111-1111-4111-8111-111111111111",
+          role: "member",
+        };
+      },
+    },
+  };
+}
+
+function createRuntime(taskService, workspaceAccess = createWorkspaceAccess()) {
   const service = new AgentRuntimeService(
     new AgentRuntimeRepository(),
+    workspaceAccess.service,
     taskService,
   );
 
   return {
     controller: new AgentRuntimeController(service),
     service,
+    workspaceAccess,
   };
 }
 
 function createPlanningRun(service) {
   return service.createRun({
-    workspaceId: "22222222-2222-4222-8222-222222222222",
+    workspaceId: WORKSPACE_ID,
+    actor: ACTOR,
     body: {
       workflowType: "planning.generate",
       workflowVersion: "v1",
@@ -43,12 +74,13 @@ function createPlanningRun(service) {
 }
 
 describe("Agent runtime local runner", () => {
-  it("creates a planning run with approval-gated actions", () => {
+  it("creates a planning run with approval-gated actions", async () => {
     const { service } = createRuntime();
 
-    const run = createPlanningRun(service);
+    const run = await createPlanningRun(service);
 
     assert.equal(run.workflowType, "planning.generate");
+    assert.equal(run.actorMemberId, ACTOR_MEMBER_ID);
     assert.equal(run.status, "requires_confirmation");
     assert.equal(run.actionRequired, true);
     assert.equal(run.pendingActionCount, 2);
@@ -61,19 +93,19 @@ describe("Agent runtime local runner", () => {
 
   it("keeps executed actions from being approved or rejected again", async () => {
     const { service } = createRuntime();
-    const run = createPlanningRun(service);
+    const run = await createPlanningRun(service);
     const actionId = run.actions[0].id;
 
-    const executed = await service.approveAction({ actionId });
+    const executed = await service.approveAction({ actionId, actor: ACTOR });
 
     assert.equal(executed.status, "executed");
     assert.ok(executed.executedAt);
     await assert.rejects(
-      () => service.approveAction({ actionId }),
+      () => service.approveAction({ actionId, actor: ACTOR }),
       /Terminal Agent actions cannot change status/,
     );
     await assert.rejects(
-      () => service.rejectAction({ actionId }),
+      () => service.rejectAction({ actionId, actor: ACTOR }),
       /Terminal Agent actions cannot change status/,
     );
   });
@@ -102,16 +134,16 @@ describe("Agent runtime local runner", () => {
       },
     };
     const { service } = createRuntime(taskService);
-    const run = createPlanningRun(service);
+    const run = await createPlanningRun(service);
     const action = run.actions.find(
       (candidate) => candidate.type === "task.create.draft",
     );
 
     const executed = await service.approveAction({
       actionId: action.id,
-      actor: { memberId: "33333333-3333-4333-8333-333333333331" },
+      actor: ACTOR,
     });
-    const nextRun = service.getRun(run.id);
+    const nextRun = await service.getRun(run.id, ACTOR);
     const [ownerResult] =
       nextRun.output.planDraft.detail.approval.ownerApiResults;
 
@@ -119,12 +151,10 @@ describe("Agent runtime local runner", () => {
     assert.equal(calls.length, 1);
     assert.equal(
       calls[0].workspaceId,
-      "22222222-2222-4222-8222-222222222222",
+      WORKSPACE_ID,
     );
     assert.equal(calls[0].body.title, "Project kickoff intake");
-    assert.deepEqual(calls[0].actor, {
-      memberId: "33333333-3333-4333-8333-333333333331",
-    });
+    assert.deepEqual(calls[0].actor, ACTOR);
     assert.equal(ownerResult.status, "succeeded");
     assert.equal(
       ownerResult.targetEntityId,
@@ -139,17 +169,17 @@ describe("Agent runtime local runner", () => {
       },
     };
     const { service } = createRuntime(taskService);
-    const run = createPlanningRun(service);
+    const run = await createPlanningRun(service);
     const action = run.actions.find(
       (candidate) => candidate.type === "task.create.draft",
     );
 
     await assert.rejects(
-      () => service.approveAction({ actionId: action.id }),
+      () => service.approveAction({ actionId: action.id, actor: ACTOR }),
       /Authentication is required/,
     );
 
-    const nextRun = service.getRun(run.id);
+    const nextRun = await service.getRun(run.id, ACTOR);
     const nextAction = nextRun.actions.find(
       (candidate) => candidate.id === action.id,
     );
@@ -159,15 +189,47 @@ describe("Agent runtime local runner", () => {
 
   it("rejects only non-terminal confirmation actions", async () => {
     const { service } = createRuntime();
-    const run = createPlanningRun(service);
+    const run = await createPlanningRun(service);
     const actionId = run.actions[1].id;
 
-    const rejected = await service.rejectAction({ actionId });
+    const rejected = await service.rejectAction({ actionId, actor: ACTOR });
 
     assert.equal(rejected.status, "rejected");
     await assert.rejects(
-      () => service.rejectAction({ actionId }),
+      () => service.rejectAction({ actionId, actor: ACTOR }),
       /Terminal Agent actions cannot change status/,
+    );
+  });
+
+  it("requires workspace membership for run and action APIs", async () => {
+    const { service } = createRuntime();
+
+    await assert.rejects(
+      () =>
+        service.createRun({
+          workspaceId: WORKSPACE_ID,
+          body: {
+            workflowType: "planning.generate",
+            workflowVersion: "v1",
+          },
+        }),
+      /Authentication is required/,
+    );
+
+    const run = await createPlanningRun(service);
+    const actionId = run.actions[0].id;
+
+    await assert.rejects(
+      () => service.getRun(run.id),
+      /Authentication is required/,
+    );
+    await assert.rejects(
+      () => service.listWorkspaceActions(WORKSPACE_ID),
+      /Authentication is required/,
+    );
+    await assert.rejects(
+      () => service.approveAction({ actionId }),
+      /Authentication is required/,
     );
   });
 
@@ -176,10 +238,15 @@ describe("Agent runtime local runner", () => {
 
     await assert.rejects(
       () =>
-        controller.createAgentRun("22222222-2222-4222-8222-222222222222", {
-          workflowType: "review.analysis.generate",
-          workflowVersion: "v1",
-        }),
+        controller.createAgentRun(
+          WORKSPACE_ID,
+          {
+            workflowType: "review.analysis.generate",
+            workflowVersion: "v1",
+          },
+          undefined,
+          ACTOR_MEMBER_ID,
+        ),
       /Only planning.generate is available in the local MVP runner/,
     );
   });

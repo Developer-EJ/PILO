@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../database/database.module";
 import { JuhyungModule } from "../juhyung/juhyung.module";
+import { WorkspaceModule } from "../workspace/workspace.module";
 import { AgentRuntimeController } from "./agent-runtime.controller";
 import { AgentRuntimeRepository } from "./agent-runtime.repository";
 import { AgentRuntimeService } from "./agent-runtime.service";
@@ -8,7 +9,7 @@ import { AgentRegistryRepository } from "./agent-registry.repository";
 import { AgentRegistryService } from "./agent-registry.service";
 
 @Module({
-  imports: [DatabaseModule, JuhyungModule],
+  imports: [DatabaseModule, JuhyungModule, WorkspaceModule],
   controllers: [AgentRuntimeController],
   providers: [
     AgentRegistryRepository,

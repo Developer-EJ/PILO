@@ -23,23 +23,41 @@ export class AgentRuntimeController {
   createAgentRun(
     @Param("workspaceId") workspaceId: string,
     @Body() body: unknown,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
   ) {
     return this.handleRequest(() =>
       this.service.createRun({
         workspaceId,
         body: body ?? {},
+        actor: toCurrentActor(userId, memberId),
       }),
     );
   }
 
   @Get("agent-runs/:runId")
-  getAgentRun(@Param("runId") runId: string) {
-    return this.handleRequest(() => this.service.getRun(runId));
+  getAgentRun(
+    @Param("runId") runId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.handleRequest(() =>
+      this.service.getRun(runId, toCurrentActor(userId, memberId)),
+    );
   }
 
   @Get("workspaces/:workspaceId/agent-actions")
-  listWorkspaceAgentActions(@Param("workspaceId") workspaceId: string) {
-    return this.service.listWorkspaceActions(workspaceId);
+  listWorkspaceAgentActions(
+    @Param("workspaceId") workspaceId: string,
+    @Headers("x-user-id") userId?: string | string[],
+    @Headers("x-member-id") memberId?: string | string[],
+  ) {
+    return this.handleRequest(() =>
+      this.service.listWorkspaceActions(
+        workspaceId,
+        toCurrentActor(userId, memberId),
+      ),
+    );
   }
 
   @Post("agent-actions/:actionId/approve")

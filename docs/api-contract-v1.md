@@ -717,6 +717,7 @@ Rules:
 - Agent context is explicit. No RAG retrieval in MVP.
 - AgentAction execution delegates to owner domain API.
 - Approval does not bypass permission checks.
+- Agent run creation, run reads, action lists, approvals, and rejections require Workspace membership for the target run/workspace.
 - Local MVP runtime currently executes `planning.generate` deterministically.
 - `planning.approve` approval only updates the planning approval state.
 - `task.create.draft` approval calls the Task draft owner API and stores the created Task Draft id in `output.planDraft.detail.approval.ownerApiResults`.

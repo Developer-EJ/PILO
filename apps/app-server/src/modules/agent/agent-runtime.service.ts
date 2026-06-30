@@ -1,7 +1,10 @@
 import { HttpException, HttpStatus, Injectable, Optional } from "@nestjs/common";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
 import type { CreateTaskDraftBody } from "../juhyung/juhyung-task.service";
-import type { WorkspaceActor } from "../workspace/public/workspace-access-public.service";
+import {
+  WorkspaceAccessPublicService,
+  type WorkspaceActor,
+} from "../workspace/public/workspace-access-public.service";
 import {
   AGENT_WORKFLOW_TYPES,
   DEFAULT_AGENT_WORKFLOW_VERSION,
@@ -16,8 +19,6 @@ import {
   AgentRuntimeValidationError,
 } from "./agent-runtime.types";
 import { createPlanningGenerateRun } from "./planning-local-runner";
-
-const LOCAL_ACTOR_MEMBER_ID = "33333333-3333-4333-8333-333333333331";
 
 interface PlanningOwnerApiResult {
   owner: "task";
@@ -79,23 +80,25 @@ function errorMessageFrom(error: unknown) {
     : "Owner API execution failed";
 }
 
-function confirmingMemberId(actor?: WorkspaceActor) {
-  return actor?.memberId ?? LOCAL_ACTOR_MEMBER_ID;
-}
-
 @Injectable()
 export class AgentRuntimeService {
   private sequence = 1;
 
   constructor(
     private readonly repository: AgentRuntimeRepository,
+    private readonly workspaceAccess: WorkspaceAccessPublicService,
     @Optional() private readonly taskService?: JuhyungTaskService,
   ) {}
 
-  createRun(input: AgentRuntimeCreateInput) {
+  async createRun(input: AgentRuntimeCreateInput) {
     if (!input.workspaceId.trim()) {
       throw new AgentRuntimeValidationError("workspaceId is required");
     }
+
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      input.workspaceId,
+      input.actor,
+    );
 
     const body = isRecord(input.body) ? input.body : {};
     const workflowType =
@@ -119,6 +122,7 @@ export class AgentRuntimeService {
 
     const run = createPlanningGenerateRun({
       sequence: this.sequence,
+      actorMemberId: currentMember.id,
       workspaceId: input.workspaceId,
       workflowVersion,
       rawInput: body.input,
@@ -129,17 +133,21 @@ export class AgentRuntimeService {
     return this.repository.saveRun(run);
   }
 
-  getRun(runId: string) {
+  async getRun(runId: string, actor?: WorkspaceActor) {
     const run = this.repository.findRun(runId);
 
     if (!run) {
       throw new AgentRuntimeNotFoundError("Agent run not found");
     }
 
+    await this.workspaceAccess.requireWorkspaceMember(run.workspaceId, actor);
+
     return run;
   }
 
-  listWorkspaceActions(workspaceId: string) {
+  async listWorkspaceActions(workspaceId: string, actor?: WorkspaceActor) {
+    await this.workspaceAccess.requireWorkspaceMember(workspaceId, actor);
+
     return this.repository.listWorkspaceActions(workspaceId);
   }
 
@@ -168,6 +176,11 @@ export class AgentRuntimeService {
       throw new AgentRuntimeNotFoundError("Agent action not found");
     }
 
+    const currentMember = await this.workspaceAccess.requireWorkspaceMember(
+      run.workspaceId,
+      actor,
+    );
+
     if (isTerminalAction(action)) {
       throw new AgentRuntimeValidationError(
         "Terminal Agent actions cannot change status",
@@ -194,7 +207,7 @@ export class AgentRuntimeService {
             {
               ...action,
               status: "confirmed",
-              confirmedByMemberId: confirmingMemberId(actor),
+              confirmedByMemberId: currentMember.id,
               confirmedAt: decidedAt,
               executedAt: null,
             },

@@ -33,11 +33,13 @@ function sequenceId(prefix: string, sequence: number) {
 
 function buildPlanDraft({
   actionId,
+  actorMemberId,
   draftId,
   input,
   workspaceId,
 }: {
   actionId: string;
+  actorMemberId: string;
   draftId: string;
   input: Record<string, unknown>;
   workspaceId: string;
@@ -138,7 +140,7 @@ function buildPlanDraft({
       duration,
       outputGoal,
       status: "reviewing",
-      createdByMemberId: LOCAL_ACTOR_MEMBER_ID,
+      createdByMemberId: actorMemberId,
       techStack: {
         id: "aaaaaaaa-aaaa-4aaa-8aaa-300000000001",
         draftId,
@@ -159,7 +161,7 @@ function buildPlanDraft({
           id: "aaaaaaaa-aaaa-4aaa-8aaa-400000000001",
           draftId,
           member: {
-            memberId: LOCAL_ACTOR_MEMBER_ID,
+            memberId: actorMemberId,
             name: "Sein",
           },
           suggestedRole: "Agent Runtime / Planning",
@@ -201,7 +203,7 @@ function buildPlanDraft({
           "Confirm action approval semantics",
           "Assign owner API follow-ups",
         ],
-        attendeeMemberIds: [LOCAL_ACTOR_MEMBER_ID],
+        attendeeMemberIds: [actorMemberId],
         durationMinutes: 45,
         createdAt: LOCAL_NOW,
       },
@@ -221,11 +223,13 @@ function buildPlanDraft({
 
 export function createPlanningGenerateRun({
   sequence,
+  actorMemberId = LOCAL_ACTOR_MEMBER_ID,
   workspaceId,
   workflowVersion,
   rawInput,
 }: {
   sequence: number;
+  actorMemberId?: string;
   workspaceId: string;
   workflowVersion: string;
   rawInput: unknown;
@@ -238,6 +242,7 @@ export function createPlanningGenerateRun({
   const taskActionId = sequenceId("99999999-9999-4999-8996-", sequence);
   const draft = buildPlanDraft({
     actionId: planningActionId,
+    actorMemberId,
     draftId,
     input,
     workspaceId,
@@ -344,7 +349,7 @@ export function createPlanningGenerateRun({
     workflowType: "planning.generate",
     workflowVersion,
     workspaceId,
-    actorMemberId: LOCAL_ACTOR_MEMBER_ID,
+    actorMemberId,
     status: "requires_confirmation",
     actionRequired: true,
     pendingActionCount: actions.length,

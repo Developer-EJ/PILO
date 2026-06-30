@@ -488,6 +488,7 @@ async function requestAgentJson(path, init, { baseUrl, fetcher }) {
     credentials: "include",
     headers: {
       Accept: "application/json",
+      "x-member-id": LOCAL_ACTOR_MEMBER_ID,
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...(init?.headers ?? {}),
     },

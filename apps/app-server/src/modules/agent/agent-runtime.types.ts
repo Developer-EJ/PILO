@@ -102,6 +102,7 @@ export interface AgentRunCreateRequest {
 export interface AgentRuntimeCreateInput {
   workspaceId: string;
   body: AgentRunCreateRequest;
+  actor?: WorkspaceActor;
 }
 
 export interface AgentActionDecisionInput {
