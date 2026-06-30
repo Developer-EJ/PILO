@@ -9,7 +9,8 @@ require("reflect-metadata");
 const { MODULE_METADATA } = require("@nestjs/common/constants");
 const { AgentModule } = require("../src/modules/agent/agent.module");
 const {
-  MockAgentOwnerActionExecutor,
+  AGENT_OWNER_ACTION_EXECUTOR,
+  AgentOwnerActionExecutorService,
 } = require("../src/modules/agent/agent-owner-action.executor");
 const {
   AgentRegistryRepository,
@@ -23,18 +24,29 @@ const {
 const {
   AgentRuntimeService,
 } = require("../src/modules/agent/agent-runtime.service");
+const { JuhyungModule } = require("../src/modules/juhyung/juhyung.module");
 
 describe("AgentModule", () => {
   it("registers the Agent runtime controller and exports runtime boundaries", () => {
     const controllersMetadata =
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, AgentModule) ?? [];
+    const importsMetadata =
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, AgentModule) ?? [];
     const providersMetadata =
       Reflect.getMetadata(MODULE_METADATA.PROVIDERS, AgentModule) ?? [];
     const exportsMetadata =
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, AgentModule) ?? [];
 
     assert.ok(controllersMetadata.includes(AgentRuntimeController));
-    assert.ok(providersMetadata.includes(MockAgentOwnerActionExecutor));
+    assert.ok(importsMetadata.includes(JuhyungModule));
+    assert.ok(providersMetadata.includes(AgentOwnerActionExecutorService));
+    assert.ok(
+      providersMetadata.some(
+        (provider) =>
+          provider.provide === AGENT_OWNER_ACTION_EXECUTOR &&
+          provider.useExisting === AgentOwnerActionExecutorService,
+      ),
+    );
     assert.ok(exportsMetadata.includes(AgentRegistryRepository));
     assert.ok(exportsMetadata.includes(AgentRegistryService));
     assert.ok(exportsMetadata.includes(AgentRuntimeService));

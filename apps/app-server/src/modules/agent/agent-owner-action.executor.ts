@@ -1,8 +1,13 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import {
+  TASK_DRAFT_PUBLIC_WRITE_ADAPTER,
+  type TaskDraftPublicWriteAdapter,
+} from "../juhyung/public/task-draft-public-write.adapter";
 import {
   TASK_PRIORITIES,
   type AgentAction,
   type AgentOwnerActionExecution,
+  type AgentOwnerActionExecutor,
   type TaskPriority,
 } from "./agent-runtime.types";
 
@@ -13,8 +18,19 @@ const TASK_DRAFT_SOURCE_TYPES = [
   "manual",
 ] as const;
 
+export const AGENT_OWNER_ACTION_EXECUTOR = Symbol(
+  "AGENT_OWNER_ACTION_EXECUTOR",
+);
+
 @Injectable()
-export class MockAgentOwnerActionExecutor {
+export class AgentOwnerActionExecutorService
+  implements AgentOwnerActionExecutor
+{
+  constructor(
+    @Inject(TASK_DRAFT_PUBLIC_WRITE_ADAPTER)
+    private readonly taskDraftWriter: TaskDraftPublicWriteAdapter,
+  ) {}
+
   async execute(action: AgentAction): Promise<AgentOwnerActionExecution> {
     if (action.type !== "task.create.draft") {
       return {
@@ -27,23 +43,24 @@ export class MockAgentOwnerActionExecutor {
       };
     }
 
+    if (!action.confirmedByMemberId) {
+      return {
+        owner: "task",
+        operation: "task.create.draft",
+        status: "failed",
+        targetEntityId: null,
+        errorMessage:
+          "Confirmed member is required to execute task.create.draft",
+        detail: null,
+      };
+    }
+
     const payload = parseTaskCreateDraftPayload(action.payload);
-    const now = action.confirmedAt ?? new Date().toISOString();
-    const taskDraft = {
-      id: action.id,
+    const taskDraft = await this.taskDraftWriter.createTaskDraft({
       workspaceId: payload.workspaceId,
-      sourceType: payload.sourceType,
-      sourceId: payload.sourceId,
-      title: payload.title,
-      description: payload.description,
-      assigneeMemberId: payload.assigneeMemberId,
-      priority: payload.priority,
-      dueDate: payload.dueDate,
-      status: "draft",
-      taskId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
+      actorMemberId: action.confirmedByMemberId,
+      payload,
+    });
 
     return {
       owner: "task",

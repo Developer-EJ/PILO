@@ -1,19 +1,27 @@
 import { Module } from "@nestjs/common";
 import { DatabaseModule } from "../database/database.module";
-import { MockAgentOwnerActionExecutor } from "./agent-owner-action.executor";
+import { JuhyungModule } from "../juhyung/juhyung.module";
+import {
+  AGENT_OWNER_ACTION_EXECUTOR,
+  AgentOwnerActionExecutorService,
+} from "./agent-owner-action.executor";
 import { AgentRegistryRepository } from "./agent-registry.repository";
 import { AgentRegistryService } from "./agent-registry.service";
 import { AgentRuntimeController } from "./agent-runtime.controller";
 import { AgentRuntimeService } from "./agent-runtime.service";
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, JuhyungModule],
   controllers: [AgentRuntimeController],
   providers: [
     AgentRegistryRepository,
     AgentRegistryService,
     AgentRuntimeService,
-    MockAgentOwnerActionExecutor,
+    AgentOwnerActionExecutorService,
+    {
+      provide: AGENT_OWNER_ACTION_EXECUTOR,
+      useExisting: AgentOwnerActionExecutorService,
+    },
   ],
   exports: [AgentRegistryRepository, AgentRegistryService, AgentRuntimeService],
 })

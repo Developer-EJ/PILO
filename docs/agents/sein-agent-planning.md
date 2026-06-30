@@ -56,7 +56,7 @@
 - `GET /api/agent-runs/:runId` returns Mock/In-memory run detail.
 - `POST /api/agent-actions/:actionId/approve` records `waiting_confirmation -> confirmed`.
 - `POST /api/agent-actions/:actionId/reject` records `waiting_confirmation -> rejected`.
-- `POST /api/agent-actions/:actionId/execute` executes confirmed actions through the current Mock/In-memory owner boundary.
+- `POST /api/agent-actions/:actionId/execute` executes confirmed actions through the explicit owner boundary.
 - `agents` and `agent_workflows` have a registry service/repository.
 - Current Agent Runtime HTTP APIs are backed by the internal deterministic
   `AgentRuntimeService` skeleton. They are not DB-backed persistence and do not
@@ -71,11 +71,11 @@
 - `meeting.report.generate`, `planning.generate`, review, GitHub, and orchestrator paths are local/mock workflow shells only.
 - Approval is modeled as AgentAction state. `approve` stops at `confirmed`.
 - `execute` is the explicit owner execution boundary. Current execution supports
-  `task.create.draft` only through a Mock/In-memory TaskDraft owner executor that
-  validates `TaskCreateDraft` and records a `TaskDraftSummary`-shaped trace
-  result.
-- Real 주형 TaskDraft public write adapter integration remains Deferred until a
-  safe owner public boundary is provided.
+  `task.create.draft` only through the 주형 TaskDraft public write adapter. It
+  validates `TaskCreateDraft`, creates a TaskDraft, and records the returned
+  `TaskDraftSummary` in trace metadata.
+- TaskDraft approve / actual Task creation remains a 주형 TaskDraft approval
+  step, not part of AgentAction `approve`.
 - Persistence is process memory only. DB-backed `agent_runs`, `agent_actions`, and `agent_traces` remain Deferred.
 
 ## Deferred APIs

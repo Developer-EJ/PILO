@@ -307,7 +307,8 @@ Deferred:
 
 ### Agent Runtime
 
-상태: `Implemented`, `Mock/In-memory` for Agent Run/Action HTTP runtime
+상태: `Implemented`, `Mock/In-memory` for Agent Run/Action HTTP runtime;
+`Implemented` for `task.create.draft` TaskDraft public write execution
 
 Implemented:
 
@@ -327,16 +328,17 @@ Implemented:
     - moves confirmable actions from `draft` to `waiting_confirmation`
     - records confirmation as `confirmed`
     - records rejection as `rejected`
-    - executes only confirmed actions through an explicit adapter/mock boundary
-    - supports `task.create.draft` execution through a Mock/In-memory TaskDraft
-      owner executor that validates the `TaskCreateDraft` payload and records a
-      `TaskDraftSummary`-shaped result in trace metadata
+    - executes only confirmed actions through an explicit owner public boundary
+    - supports `task.create.draft` execution through the 주형 TaskDraft public
+      write adapter
+    - creates a real DB-backed `TaskDraftSummary` for `task.create.draft`
+      without approving the draft or creating a Task
 
   Deferred:
 
   - Agent chat message APIs
   - `GET /api/workspaces/:workspaceId/agent-recommendations`
-  - real 주형 TaskDraft public write adapter integration from Agent Runtime
+  - TaskDraft approve / actual Task creation from Agent Runtime
   - Task/Meeting/Review/GitHub general owner execution
   - DB-backed `agent_runs`, `agent_actions`, `agent_traces`
   - SQS result persistence into `agent_runs`, `agent_actions`, `agent_traces`
@@ -350,9 +352,11 @@ Implemented:
     mock/current member boundary until Auth/Workspace guard wiring lands.
     Temporary mock member boundary. Not production auth.
   - `approve` stops at `confirmed`. It does not execute owner-domain work.
-  - `execute` is the explicit owner execution boundary. Current execution is
-    Mock/In-memory for `task.create.draft`; actual Task/Meeting/Review/GitHub
-    source data changes remain owner-domain API work.
+  - `execute` is the explicit owner execution boundary. Current execution uses
+    the 주형 TaskDraft public write adapter for `task.create.draft` and creates
+    a TaskDraft only. TaskDraft approval, actual Task creation, and
+    Task/Meeting/Review/GitHub general source data changes remain owner-domain
+    API work.
 
 ### Planning
 
@@ -442,7 +446,9 @@ Deferred:
 
 - `docs/contracts/task.md`: Task draft API를 Current Runtime APIs로 이동
 - `docs/contracts/review.md`: 실제 구현된 graph/comment/checklist API를 Current Runtime APIs로 이동
-- `docs/contracts/agent-actions.md`: Agent Run/Action API를 Current Mock/In-memory runtime으로 표시
+- `docs/contracts/agent-actions.md`: Agent Run/Action API를 Current
+  Mock/In-memory runtime으로 표시하고 `task.create.draft` execute는 주형
+  TaskDraft public write adapter로 구분
 - `docs/contracts/planning.md`: HTTP API 전체를 Deferred APIs로 표시
 - `docs/contracts/README.md`: Current Runtime / Deferred / MVP Target 용어 정의
 
