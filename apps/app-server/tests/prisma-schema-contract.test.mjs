@@ -45,6 +45,15 @@ const reviewRoomArtifactsMigration = readFileSync(
     encoding: "utf8",
   },
 );
+const reviewPrSummarySnapshotMigration = readFileSync(
+  new URL(
+    "../prisma/migrations/202606301600_review_pr_summary_snapshot/migration.sql",
+    import.meta.url,
+  ),
+  {
+    encoding: "utf8",
+  },
+);
 const logicalSchema = readFileSync(
   new URL("../../../docs/db/pilo_erd_schema.sql", import.meta.url),
   {
@@ -168,7 +177,7 @@ describe("Prisma workspace member task relations", () => {
   it("maps Review room artifacts persistence to current runtime APIs", () => {
     assert.match(
       schema,
-      /model CodeReviewRoom\s+{[\s\S]*pullRequestId\s+String\s+@unique\s+@map\("pull_request_id"\)\s+@db\.Uuid[\s\S]*@@map\("code_review_rooms"\)/,
+      /model CodeReviewRoom\s+{[\s\S]*pullRequestId\s+String\s+@unique\s+@map\("pull_request_id"\)\s+@db\.Uuid[\s\S]*pullRequestSnapshot\s+Json\?\s+@map\("pull_request_snapshot"\)\s+@db\.JsonB[\s\S]*@@map\("code_review_rooms"\)/,
     );
     assert.match(
       schema,
@@ -193,6 +202,27 @@ describe("Prisma workspace member task relations", () => {
     assert.match(
       logicalSchema,
       /CREATE INDEX IF NOT EXISTS idx_review_checklist_items_analysis_id ON review_checklist_items\(analysis_id\);/,
+    );
+    assert.match(logicalSchema, /pull_request_snapshot JSONB/);
+    assert.match(
+      reviewPrSummarySnapshotMigration,
+      /ALTER TABLE code_review_rooms\s+DROP CONSTRAINT IF EXISTS code_review_rooms_pull_request_id_fkey;/,
+    );
+    assert.match(
+      reviewPrSummarySnapshotMigration,
+      /ALTER TABLE pull_request_analyses\s+DROP CONSTRAINT IF EXISTS pull_request_analyses_pull_request_id_fkey;/,
+    );
+    assert.match(
+      reviewPrSummarySnapshotMigration,
+      /ALTER TABLE review_graphs\s+DROP CONSTRAINT IF EXISTS review_graphs_pull_request_id_fkey;/,
+    );
+    assert.doesNotMatch(
+      logicalSchema,
+      /CREATE TABLE code_review_rooms \([\s\S]*pull_request_id UUID NOT NULL REFERENCES pull_requests/,
+    );
+    assert.doesNotMatch(
+      logicalSchema,
+      /CREATE TABLE pull_request_analyses \([\s\S]*pull_request_id UUID NOT NULL REFERENCES pull_requests/,
     );
   });
 });

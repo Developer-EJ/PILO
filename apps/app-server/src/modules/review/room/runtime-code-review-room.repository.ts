@@ -4,6 +4,7 @@ import { DatabaseService } from "../../database/database.service";
 import {
   CodeReviewRoomRecord,
   CreateCodeReviewRoomInput,
+  PullRequestSummaryRef,
 } from "./code-review-room.types";
 import { CodeReviewRoomRepository } from "./code-review-room.repository";
 import { InMemoryCodeReviewRoomRepository } from "./in-memory-code-review-room.repository";
@@ -23,6 +24,7 @@ type DbCodeReviewRoomRow = {
   createdByMemberId: string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
+  pullRequestSnapshot: unknown;
 };
 
 @Injectable()
@@ -72,6 +74,9 @@ export class RuntimeCodeReviewRoomRepository
       return this.memory.create(input);
     }
 
+    const pullRequestSnapshotJson = input.pullRequestSnapshot
+      ? JSON.stringify(input.pullRequestSnapshot)
+      : null;
     const rows = await this.db.$queryRaw<DbCodeReviewRoomRow[]>`
       INSERT INTO code_review_rooms (
         id,
@@ -80,7 +85,8 @@ export class RuntimeCodeReviewRoomRepository
         status,
         created_by_member_id,
         created_at,
-        updated_at
+        updated_at,
+        pull_request_snapshot
       )
       VALUES (
         ${input.id}::uuid,
@@ -89,10 +95,14 @@ export class RuntimeCodeReviewRoomRepository
         ${"open"},
         ${input.createdByMemberId}::uuid,
         ${input.createdAt}::timestamptz,
-        ${input.createdAt}::timestamptz
+        ${input.createdAt}::timestamptz,
+        ${pullRequestSnapshotJson}::jsonb
       )
       ON CONFLICT (pull_request_id) DO UPDATE SET
-        pull_request_id = EXCLUDED.pull_request_id
+        pull_request_snapshot = COALESCE(
+          EXCLUDED.pull_request_snapshot,
+          code_review_rooms.pull_request_snapshot
+        )
       RETURNING ${roomSelectColumns}
     `;
 
@@ -121,7 +131,8 @@ const roomSelectColumns = Prisma.sql`
   status,
   created_by_member_id::text AS "createdByMemberId",
   created_at AS "createdAt",
-  updated_at AS "updatedAt"
+  updated_at AS "updatedAt",
+  pull_request_snapshot AS "pullRequestSnapshot"
 `;
 
 function requireSingleRow<T>(rows: T[], label: string): T {
@@ -143,7 +154,80 @@ function toRoomRecord(row: DbCodeReviewRoomRow): CodeReviewRoomRecord {
     createdByMemberId: row.createdByMemberId,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
+    pullRequestSnapshot: toPullRequestSummaryRef(row.pullRequestSnapshot),
   };
+}
+
+function toPullRequestSummaryRef(value: unknown): PullRequestSummaryRef | null {
+  const parsed = typeof value === "string" ? safeParseJson(value) : value;
+
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  const candidate = parsed as Partial<PullRequestSummaryRef>;
+
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.repositoryId !== "string" ||
+    typeof candidate.number !== "number" ||
+    typeof candidate.title !== "string" ||
+    typeof candidate.state !== "string" ||
+    typeof candidate.url !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    repositoryId: candidate.repositoryId,
+    number: candidate.number,
+    title: candidate.title,
+    authorLogin:
+      typeof candidate.authorLogin === "string" ? candidate.authorLogin : null,
+    state: toPullRequestState(candidate.state),
+    branch: typeof candidate.branch === "string" ? candidate.branch : null,
+    baseBranch:
+      typeof candidate.baseBranch === "string" ? candidate.baseBranch : null,
+    url: candidate.url,
+    changedFilesCount: toInteger(candidate.changedFilesCount),
+    additions: toInteger(candidate.additions),
+    deletions: toInteger(candidate.deletions),
+    linkedTaskIds: Array.isArray(candidate.linkedTaskIds)
+      ? candidate.linkedTaskIds.filter(
+          (id): id is string => typeof id === "string",
+        )
+      : [],
+    syncedAt: typeof candidate.syncedAt === "string" ? candidate.syncedAt : null,
+  };
+}
+
+function toInteger(value: unknown): number {
+  return Number.isInteger(value) ? (value as number) : 0;
+}
+
+function toPullRequestState(
+  value: string,
+): PullRequestSummaryRef["state"] {
+  if (
+    value === "open" ||
+    value === "review_requested" ||
+    value === "changes_requested" ||
+    value === "merged" ||
+    value === "closed"
+  ) {
+    return value;
+  }
+
+  return "open";
+}
+
+function safeParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function toIsoString(value: Date | string): string {

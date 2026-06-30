@@ -84,6 +84,12 @@ runtime-registered PR summaries. Missing summaries fail with 404 instead of
 silently falling back to fixtures. Local fixture seeding is available only when
 `PILO_SEED_REVIEW_FIXTURES=true`.
 
+Review-owned DB tables store the `pull_request_id` value and the room-level
+`pullRequest` snapshot, but they must not require a foreign key to the GitHub
+`pull_requests` source table. This keeps Review usable when a caller provides a
+valid `PullRequestSummary` body before GitHub sync has materialized the same PR
+row locally.
+
 ```json
 {
   "id": "uuid",

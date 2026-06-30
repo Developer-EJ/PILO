@@ -605,7 +605,8 @@ CREATE TABLE meeting_action_items (
 CREATE TABLE code_review_rooms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  pull_request_id UUID NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+  pull_request_id UUID NOT NULL,
+  pull_request_snapshot JSONB,
   status VARCHAR(20) NOT NULL DEFAULT 'open',
   created_by_member_id UUID REFERENCES workspace_members(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -616,7 +617,7 @@ CREATE TABLE code_review_rooms (
 
 CREATE TABLE pull_request_analyses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  pull_request_id UUID NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+  pull_request_id UUID NOT NULL,
   purpose_summary TEXT,
   impact_summary TEXT,
   test_recommendation TEXT,
@@ -638,7 +639,7 @@ CREATE TABLE pull_request_analyses (
 CREATE TABLE review_graphs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   analysis_id UUID NOT NULL REFERENCES pull_request_analyses(id) ON DELETE CASCADE,
-  pull_request_id UUID REFERENCES pull_requests(id) ON DELETE CASCADE,
+  pull_request_id UUID,
   summary TEXT,
   intent_summary TEXT NOT NULL DEFAULT '',
   review_strategy TEXT NOT NULL DEFAULT '',

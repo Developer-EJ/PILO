@@ -25,6 +25,15 @@ export class InMemoryCodeReviewRoomRepository
     const existing = this.findByPullRequestId(input.pullRequestId);
 
     if (existing) {
+      if (input.pullRequestSnapshot) {
+        const updated = {
+          ...existing,
+          pullRequestSnapshot: input.pullRequestSnapshot,
+        };
+        this.roomsById.set(updated.id, updated);
+        return updated;
+      }
+
       return existing;
     }
 
@@ -36,6 +45,7 @@ export class InMemoryCodeReviewRoomRepository
       createdByMemberId: input.createdByMemberId,
       createdAt: input.createdAt,
       updatedAt: input.createdAt,
+      pullRequestSnapshot: input.pullRequestSnapshot ?? null,
     };
 
     this.roomsById.set(room.id, room);

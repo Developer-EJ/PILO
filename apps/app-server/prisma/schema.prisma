@@ -270,6 +270,7 @@ model CodeReviewRoom {
   id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId       String   @map("workspace_id") @db.Uuid
   pullRequestId     String   @unique @map("pull_request_id") @db.Uuid
+  pullRequestSnapshot Json?  @map("pull_request_snapshot") @db.JsonB
   status            String   @default("open") @db.VarChar(20)
   createdByMemberId String?  @map("created_by_member_id") @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

@@ -14,6 +14,22 @@ const ROOM_ID = "88888888-8888-4888-8888-888888888811";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const PULL_REQUEST_ID = "66666666-6666-4666-8666-666666666661";
 const MEMBER_ID = "33333333-3333-4333-8333-333333333331";
+const PULL_REQUEST_SUMMARY = {
+  id: PULL_REQUEST_ID,
+  repositoryId: "55555555-5555-4555-8555-555555555501",
+  number: 7,
+  title: "Wire OAuth callback flow",
+  authorLogin: "reviewer",
+  state: "open",
+  branch: "feature/auth-callback",
+  baseBranch: "dev",
+  url: "https://github.com/example/pilo/pull/7",
+  changedFilesCount: 2,
+  additions: 42,
+  deletions: 8,
+  linkedTaskIds: [],
+  syncedAt: "2026-06-30T00:00:00.000Z",
+};
 
 describe("RuntimeCodeReviewRoomRepository database persistence", () => {
   it("restores review rooms after repository restart", async () => {
@@ -27,6 +43,7 @@ describe("RuntimeCodeReviewRoomRepository database persistence", () => {
         pullRequestId: PULL_REQUEST_ID,
         createdByMemberId: MEMBER_ID,
         createdAt: "2026-06-30T00:00:00.000Z",
+        pullRequestSnapshot: PULL_REQUEST_SUMMARY,
       });
       const restartedRepository = new RuntimeCodeReviewRoomRepository(database);
 
@@ -56,6 +73,7 @@ describe("RuntimeCodeReviewRoomRepository database persistence", () => {
         pullRequestId: PULL_REQUEST_ID,
         createdByMemberId: MEMBER_ID,
         createdAt: "2026-06-30T00:00:00.000Z",
+        pullRequestSnapshot: PULL_REQUEST_SUMMARY,
       });
 
       assert.equal(repository.mode, "memory");
@@ -131,19 +149,29 @@ function createReviewRoomDatabaseStub() {
           createdByMemberId,
           createdAt,
           updatedAt,
+          pullRequestSnapshotJson,
         ] = params;
         const existingId = state.roomIdsByPullRequestId.get(pullRequestId);
         const existing = state.roomsById.get(existingId);
-        const room =
-          existing ?? {
-            id,
-            workspaceId,
-            pullRequestId,
-            status,
-            createdByMemberId,
-            createdAt,
-            updatedAt,
-          };
+        const incomingSnapshot = pullRequestSnapshotJson
+          ? JSON.parse(pullRequestSnapshotJson)
+          : null;
+        const room = existing
+          ? {
+              ...existing,
+              pullRequestSnapshot:
+                incomingSnapshot ?? existing.pullRequestSnapshot,
+            }
+          : {
+              id,
+              workspaceId,
+              pullRequestId,
+              status,
+              createdByMemberId,
+              createdAt,
+              updatedAt,
+              pullRequestSnapshot: incomingSnapshot,
+            };
 
         state.roomsById.set(room.id, room);
         state.roomIdsByPullRequestId.set(pullRequestId, room.id);
@@ -166,6 +194,7 @@ function rowForRoom(room) {
           createdByMemberId: room.createdByMemberId,
           createdAt: room.createdAt,
           updatedAt: room.updatedAt,
+          pullRequestSnapshot: room.pullRequestSnapshot,
         },
       ]
     : [];

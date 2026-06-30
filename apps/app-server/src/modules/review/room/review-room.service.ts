@@ -28,13 +28,6 @@ export class ReviewRoomService {
     body: OpenReviewRoomBody = {},
   ): Promise<CodeReviewRoomSummary> {
     const pullRequest = this.resolvePullRequest(pullRequestId, body);
-    const existingRoom =
-      await this.roomRepository.findByPullRequestId(pullRequestId);
-
-    if (existingRoom) {
-      return this.toSummary(existingRoom, pullRequest);
-    }
-
     const createdAt = new Date().toISOString();
     const room = await this.roomRepository.create({
       id: randomUUID(),
@@ -42,6 +35,7 @@ export class ReviewRoomService {
       pullRequestId,
       createdByMemberId: context.memberId,
       createdAt,
+      pullRequestSnapshot: pullRequest,
     });
 
     return this.toSummary(room, pullRequest);
@@ -54,7 +48,8 @@ export class ReviewRoomService {
       throw new NotFoundException(`Code review room was not found: ${roomId}`);
     }
 
-    const pullRequest = this.findPullRequestOrThrow(room.pullRequestId);
+    const pullRequest =
+      room.pullRequestSnapshot ?? this.findPullRequestOrThrow(room.pullRequestId);
     return this.toSummary(room, pullRequest);
   }
 
@@ -102,7 +97,13 @@ export class ReviewRoomService {
     pullRequest: PullRequestSummaryRef,
   ): CodeReviewRoomSummary {
     return {
-      ...room,
+      id: room.id,
+      workspaceId: room.workspaceId,
+      pullRequestId: room.pullRequestId,
+      status: room.status,
+      createdByMemberId: room.createdByMemberId,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
       pullRequest,
     };
   }

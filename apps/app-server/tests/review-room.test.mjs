@@ -173,6 +173,35 @@ describe("review room API boundary", () => {
     assert.deepEqual(loaded.pullRequest, room.pullRequest);
   });
 
+  it("loads a persisted room from its PullRequestSummary snapshot", async () => {
+    const repository = new InMemoryCodeReviewRoomRepository();
+    const pullRequest = createPullRequestSummary({
+      id: "77777777-7777-4777-8777-777777777771",
+      title: "Persist review room summary snapshot",
+    });
+    const creatingService = new ReviewRoomService(
+      repository,
+      new PullRequestSummaryRegistry(),
+    );
+    const room = await creatingService.openRoomForPullRequest(
+      pullRequest.id,
+      {
+        workspaceId: "22222222-2222-4222-8222-222222222222",
+        memberId: "33333333-3333-4333-8333-333333333331",
+      },
+      { pullRequest },
+    );
+    const restartedService = new ReviewRoomService(
+      repository,
+      new PullRequestSummaryRegistry(),
+    );
+
+    const loaded = await restartedService.getRoom(room.id);
+
+    assert.equal(loaded.pullRequest.id, pullRequest.id);
+    assert.equal(loaded.pullRequest.title, pullRequest.title);
+  });
+
   it("loads a review room by room id", async () => {
     const controller = createController();
     const opened = await controller.openRoomForPullRequest(
