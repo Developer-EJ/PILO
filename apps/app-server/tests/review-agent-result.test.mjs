@@ -30,6 +30,9 @@ const {
   ReviewGraphService,
 } = require("../src/modules/review/graph/review-graph.service.ts");
 const {
+  PullRequestSummaryRegistry,
+} = require("../src/modules/review/room/pull-request-summary.registry.ts");
+const {
   AgentChangedFilesResultService,
 } = require("../src/modules/review/result/agent-changed-files-result.service.ts");
 const {
@@ -42,8 +45,32 @@ const {
   AgentResultConsumerService,
 } = require("../src/modules/review/result/agent-result-consumer.service.ts");
 
+const DEFAULT_PULL_REQUEST_ID = "66666666-6666-4666-8666-666666666661";
+
+function createPullRequestSummary(overrides = {}) {
+  return {
+    id: DEFAULT_PULL_REQUEST_ID,
+    repositoryId: "55555555-5555-4555-8555-555555555501",
+    number: 7,
+    title: "Wire OAuth callback flow",
+    authorLogin: "reviewer",
+    state: "open",
+    branch: "feature/auth-callback",
+    baseBranch: "dev",
+    url: "https://github.com/example/pilo/pull/7",
+    changedFilesCount: 2,
+    additions: 42,
+    deletions: 8,
+    linkedTaskIds: [],
+    syncedAt: "2026-06-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function createServices() {
   const repository = new InMemoryPullRequestAnalysisRepository();
+  const pullRequestRegistry = new PullRequestSummaryRegistry();
+  pullRequestRegistry.save(createPullRequestSummary());
   const graphRepository = new InMemoryReviewGraphRepository();
   const changedFilesService = new ChangedFilesService(
     new InMemoryChangedFilesRepository(),
@@ -53,7 +80,11 @@ function createServices() {
   );
 
   return {
-    analysisService: new PullRequestAnalysisService(repository),
+    analysisService: new PullRequestAnalysisService(
+      repository,
+      {},
+      pullRequestRegistry,
+    ),
     artifactsService,
     changedFilesService,
     graphService: new ReviewGraphService(graphRepository),

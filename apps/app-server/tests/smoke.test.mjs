@@ -54,6 +54,9 @@ const {
 const {
   PullRequestAnalysisService,
 } = require("../src/modules/review/analysis/pull-request-analysis.service");
+const {
+  ReviewRoomService,
+} = require("../src/modules/review/room/review-room.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { configureApp } = require("../src/app.config");
@@ -3278,9 +3281,11 @@ describe("app-server package", () => {
     );
   });
 
-  it("boots the Nest app module with Auth, Workspace, and Canvas modules registered", async () => {
+  it("boots the Nest app module with Auth, Workspace, Canvas, and runtime Review modules registered", async () => {
     const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    const previousReviewFixtureSeed = process.env.PILO_SEED_REVIEW_FIXTURES;
     process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+    delete process.env.PILO_SEED_REVIEW_FIXTURES;
     let app;
 
     try {
@@ -3295,23 +3300,51 @@ describe("app-server package", () => {
       assert.deepEqual(app.get(CanvasService).getRepositoryStatus(), {
         storageMode: "memory",
       });
-      assert.equal(
-        app
-          .get(PullRequestAnalysisService)
-          .getAnalysis("66666666-6666-4666-8666-666666666661").id,
-        "88888888-8888-4888-8888-888888888881",
+      const pullRequest = {
+        id: "66666666-6666-4666-8666-666666666661",
+        repositoryId: "55555555-5555-4555-8555-555555555501",
+        number: 7,
+        title: "Wire OAuth callback flow",
+        authorLogin: "reviewer",
+        state: "open",
+        branch: "feature/auth-callback",
+        baseBranch: "dev",
+        url: "https://github.com/example/pilo/pull/7",
+        changedFilesCount: 2,
+        additions: 42,
+        deletions: 8,
+        linkedTaskIds: [],
+        syncedAt: "2026-06-30T00:00:00.000Z",
+      };
+      const analysisService = app.get(PullRequestAnalysisService);
+
+      assert.throws(
+        () => analysisService.getAnalysis(pullRequest.id),
+        /Pull request analysis was not found/,
       );
+      app.get(ReviewRoomService).openRoomForPullRequest(
+        pullRequest.id,
+        {
+          workspaceId: "22222222-2222-4222-8222-222222222222",
+          memberId: "33333333-3333-4333-8333-333333333331",
+        },
+        { pullRequest },
+      );
+      const analysis = analysisService.requestAnalysis(pullRequest.id);
+
+      assert.equal(analysis.pullRequestId, pullRequest.id);
+      assert.equal(analysis.analysisStatus, "pending");
       assert.equal(
         app
           .get(ReviewGraphService)
-          .getGraph("88888888-8888-4888-8888-888888888881").nodes.length,
-        2,
+          .getGraph(analysis.id).pullRequestId,
+        pullRequest.id,
       );
-      assert.equal(
+      assert.deepEqual(
         app
           .get(ChangedFilesService)
-          .listChangedFiles("88888888-8888-4888-8888-888888888881").length,
-        1,
+          .listChangedFiles(analysis.id),
+        [],
       );
     } finally {
       try {
@@ -3321,6 +3354,11 @@ describe("app-server package", () => {
           delete process.env.PILO_SKIP_DATABASE_CONNECT;
         } else {
           process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+        }
+        if (previousReviewFixtureSeed === undefined) {
+          delete process.env.PILO_SEED_REVIEW_FIXTURES;
+        } else {
+          process.env.PILO_SEED_REVIEW_FIXTURES = previousReviewFixtureSeed;
         }
       }
     }

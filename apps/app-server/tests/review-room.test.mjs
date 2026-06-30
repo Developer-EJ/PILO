@@ -14,16 +14,58 @@ const {
 const {
   ReviewRoomService,
 } = require("../src/modules/review/room/review-room.service.ts");
+const {
+  PullRequestSummaryRegistry,
+} = require("../src/modules/review/room/pull-request-summary.registry.ts");
 
-function createController() {
-  return new ReviewRoomController(
-    new ReviewRoomService(new InMemoryCodeReviewRoomRepository()),
+const DEFAULT_PULL_REQUEST_ID = "66666666-6666-4666-8666-666666666661";
+
+function createPullRequestSummary(overrides = {}) {
+  return {
+    id: DEFAULT_PULL_REQUEST_ID,
+    repositoryId: "55555555-5555-4555-8555-555555555501",
+    number: 7,
+    title: "Wire OAuth callback flow",
+    authorLogin: "reviewer",
+    state: "open",
+    branch: "feature/auth-callback",
+    baseBranch: "dev",
+    url: "https://github.com/example/pilo/pull/7",
+    changedFilesCount: 2,
+    additions: 42,
+    deletions: 8,
+    linkedTaskIds: [],
+    syncedAt: "2026-06-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function createRegistry(options = {}) {
+  const registry = new PullRequestSummaryRegistry(
+    options.seedFixture ? { seedFixture: true } : {},
+  );
+
+  if (!options.seedFixture) {
+    registry.save(createPullRequestSummary());
+  }
+
+  return registry;
+}
+
+function createService(options = {}) {
+  return new ReviewRoomService(
+    new InMemoryCodeReviewRoomRepository(),
+    createRegistry(options),
   );
 }
 
+function createController(options = {}) {
+  return new ReviewRoomController(createService(options));
+}
+
 describe("review room API boundary", () => {
-  it("opens a code review room from a PullRequestSummary fixture", () => {
-    const controller = createController();
+  it("opens a code review room from an explicitly seeded PullRequestSummary fixture", () => {
+    const controller = createController({ seedFixture: true });
 
     const room = controller.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",
@@ -35,10 +77,22 @@ describe("review room API boundary", () => {
     assert.equal(room.pullRequest.number, 7);
   });
 
-  it("stores the caller context instead of a hard-coded room owner", () => {
-    const service = new ReviewRoomService(
-      new InMemoryCodeReviewRoomRepository(),
+  it("does not open rooms for unknown pull requests by default", () => {
+    const controller = new ReviewRoomController(
+      new ReviewRoomService(
+        new InMemoryCodeReviewRoomRepository(),
+        new PullRequestSummaryRegistry(),
+      ),
     );
+
+    assert.throws(
+      () => controller.openRoomForPullRequest(DEFAULT_PULL_REQUEST_ID),
+      /PullRequestSummary was not found/,
+    );
+  });
+
+  it("stores the caller context instead of a hard-coded room owner", () => {
+    const service = createService();
 
     const room = service.openRoomForPullRequest(
       "66666666-6666-4666-8666-666666666661",

@@ -30,10 +30,46 @@ const {
   ReviewGraphService,
 } = require("../src/modules/review/graph/review-graph.service.ts");
 
+const DEFAULT_PULL_REQUEST_ID = "66666666-6666-4666-8666-666666666661";
+
+function createPullRequestSummary(overrides = {}) {
+  return {
+    id: DEFAULT_PULL_REQUEST_ID,
+    repositoryId: "55555555-5555-4555-8555-555555555501",
+    number: 7,
+    title: "Wire OAuth callback flow",
+    authorLogin: "reviewer",
+    state: "open",
+    branch: "feature/auth-callback",
+    baseBranch: "dev",
+    url: "https://github.com/example/pilo/pull/7",
+    changedFilesCount: 2,
+    additions: 42,
+    deletions: 8,
+    linkedTaskIds: [],
+    syncedAt: "2026-06-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function createRegistry(options = {}) {
+  const registry = new PullRequestSummaryRegistry(
+    options.seedFixture ? { seedFixture: true } : {},
+  );
+
+  if (!options.seedFixture) {
+    registry.save(createPullRequestSummary());
+  }
+
+  return registry;
+}
+
 function createService(options = {}) {
   return new PullRequestAnalysisService(
     new InMemoryPullRequestAnalysisRepository(),
     options,
+    options.pullRequestRegistry ?? createRegistry(options),
+    options.graphService,
   );
 }
 
@@ -95,6 +131,19 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.equal(analysis.id, "88888888-8888-4888-8888-888888888881");
     assert.equal(analysis.analysisStatus, "succeeded");
     assert.equal(analysis.riskLevel, "medium");
+  });
+
+  it("rejects analysis requests for pull requests that were not registered", () => {
+    const service = new PullRequestAnalysisService(
+      new InMemoryPullRequestAnalysisRepository(),
+      {},
+      new PullRequestSummaryRegistry(),
+    );
+
+    assert.throws(
+      () => service.requestAnalysis(DEFAULT_PULL_REQUEST_ID),
+      /PullRequestSummary was not found/,
+    );
   });
 
   it("requests analysis for runtime PR summaries registered by review rooms", () => {

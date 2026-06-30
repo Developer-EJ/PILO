@@ -109,10 +109,6 @@ export class ReviewGraphService {
   }
 
   private resolvePullRequestId(analysisId: string): string | null {
-    if (analysisId === FIXTURE_ANALYSIS_ID) {
-      return FIXTURE_PULL_REQUEST_ID;
-    }
-
     return this.analysisRepository?.findById(analysisId)?.pullRequestId ?? null;
   }
 

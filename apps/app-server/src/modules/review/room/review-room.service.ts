@@ -89,7 +89,7 @@ export class ReviewRoomService {
 
     if (!pullRequest) {
       throw new NotFoundException(
-        `PullRequestSummary fixture was not found: ${pullRequestId}`,
+        `PullRequestSummary was not found: ${pullRequestId}`,
       );
     }
 

@@ -33,7 +33,13 @@ import { ReviewRoomService } from "./room/review-room.service";
   ],
   providers: [
     ReviewPublicService,
-    PullRequestSummaryRegistry,
+    {
+      provide: PullRequestSummaryRegistry,
+      useFactory: () =>
+        new PullRequestSummaryRegistry({
+          seedFixture: shouldSeedReviewFixtures(),
+        }),
+    },
     ReviewRoomService,
     InMemoryCodeReviewRoomRepository,
     InMemoryPullRequestAnalysisRepository,
@@ -46,7 +52,7 @@ import { ReviewRoomService } from "./room/review-room.service";
       ) =>
         new PullRequestAnalysisService(
           repository,
-          { seedFixture: true },
+          { seedFixture: shouldSeedReviewFixtures() },
           pullRequestRegistry,
           graphService,
         ),
@@ -63,7 +69,9 @@ import { ReviewRoomService } from "./room/review-room.service";
     {
       provide: ChangedFilesService,
       useFactory: (repository: InMemoryChangedFilesRepository) =>
-        new ChangedFilesService(repository, { seedFixture: true }),
+        new ChangedFilesService(repository, {
+          seedFixture: shouldSeedReviewFixtures(),
+        }),
       inject: [InMemoryChangedFilesRepository],
     },
     {
@@ -74,7 +82,7 @@ import { ReviewRoomService } from "./room/review-room.service";
       ) =>
         new ReviewGraphService(
           repository,
-          { seedFixture: true },
+          { seedFixture: shouldSeedReviewFixtures() },
           analysisRepository,
         ),
       inject: [
@@ -89,3 +97,7 @@ import { ReviewRoomService } from "./room/review-room.service";
   ],
 })
 export class ReviewModule {}
+
+function shouldSeedReviewFixtures() {
+  return process.env.PILO_SEED_REVIEW_FIXTURES === "true";
+}
