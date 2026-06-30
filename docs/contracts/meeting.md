@@ -609,6 +609,10 @@ Internal public source boundary:
   boundary, not a public HTTP endpoint.
 - It reads the current Mock/In-memory Meeting ActionItem source and returns only
   the contract-safe `TaskCreateDraft` payload shape.
+- It rejects source reads when `meeting.workspaceId` does not match the Agent
+  run workspace supplied to the boundary.
+- It rejects action items that are missing or whose report does not belong to
+  the requested meeting.
 - It does not create TaskDraft rows, change ActionItem status, or call Task
   service/repository/Prisma.
 - 세인 Agent Runtime consumes this boundary for

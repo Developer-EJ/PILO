@@ -310,6 +310,15 @@ Deferred:
 
 ### Agent Runtime
 
+07 status update:
+
+- Agent Run/Action HTTP routes now enforce workspace membership through
+  `WorkspaceAccessPublicService` using `x-member-id`.
+- Temporary mock member boundary. Not production auth.
+- Real production Auth/session conversion remains Deferred.
+- `approve` still stops at `confirmed`; explicit `execute` is still required.
+- `execute` requires the requesting member to match `confirmedByMemberId` and
+  rejects payload/run workspace mismatch before owner writes.
 상태: `Implemented`, `Mock/In-memory` for Agent Run/Action HTTP runtime;
 `Implemented` for `task.create.draft` TaskDraft public write execution
 
@@ -354,7 +363,8 @@ Implemented:
 - Agent Run/Action HTTP routes are callable Current Runtime APIs, but state is
   process memory only and must not be treated as DB-backed persistence.
   - Current Agent Runtime controller uses `x-member-id` as the temporary
-    mock/current member boundary until Auth/Workspace guard wiring lands.
+    mock/current member boundary and validates workspace membership through
+    the Workspace public boundary.
     Temporary mock member boundary. Not production auth.
   - `approve` stops at `confirmed`. It does not execute owner-domain work.
   - `execute` is the explicit owner execution boundary. Current execution uses

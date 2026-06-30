@@ -34,6 +34,9 @@ const {
   MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE,
   MeetingActionItemTaskDraftSourceAdapter,
 } = require("../src/modules/meeting/public/meeting-action-item-taskdraft-source.adapter");
+const {
+  WorkspaceModule,
+} = require("../src/modules/workspace/workspace.module");
 
 describe("AgentModule", () => {
   it("registers the Agent runtime controller and exports runtime boundaries", () => {
@@ -49,6 +52,7 @@ describe("AgentModule", () => {
     assert.ok(controllersMetadata.includes(AgentRuntimeController));
     assert.ok(importsMetadata.includes(JuhyungModule));
     assert.ok(importsMetadata.includes(MeetingModule));
+    assert.ok(importsMetadata.includes(WorkspaceModule));
     assert.ok(providersMetadata.includes(AgentOwnerActionExecutorService));
     assert.ok(
       providersMetadata.some(

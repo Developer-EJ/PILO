@@ -12,17 +12,19 @@ require("reflect-metadata");
 const { NestFactory } = require("@nestjs/core");
 const {
   BadRequestException,
+  ForbiddenException,
+  Module,
   NotFoundException,
   RequestMethod,
 } = require("@nestjs/common");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { METHOD_METADATA, PATH_METADATA } = require("@nestjs/common/constants");
 const { configureApp } = require("../src/app.config");
-const { AgentModule } = require("../src/modules/agent/agent.module");
 const {
   AgentRuntimeController,
 } = require("../src/modules/agent/agent-runtime.controller");
 const {
+  AGENT_OWNER_ACTION_EXECUTOR,
   AgentOwnerActionExecutorService,
 } = require("../src/modules/agent/agent-owner-action.executor");
 const {
@@ -50,12 +52,18 @@ const {
 const {
   MeetingActionItemTaskDraftSourceAdapter,
 } = require("../src/modules/meeting/public/meeting-action-item-taskdraft-source.adapter");
+const {
+  WorkspaceAccessPublicService,
+} = require("../src/modules/workspace/public/workspace-access-public.service");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const UUIDS = {
   workspace: "11111111-1111-4111-8111-111111111111",
+  otherWorkspace: "11111111-1111-4111-8111-999999999999",
   member: "22222222-2222-4222-8222-222222222222",
+  otherMember: "22222222-2222-4222-8222-999999999999",
+  sameWorkspaceMember: "22222222-2222-4222-8222-333333333333",
   taskDraft: "33333333-3333-4333-8333-333333333333",
   user: "44444444-4444-4444-8444-444444444444",
 };
@@ -85,10 +93,10 @@ describe("AgentRuntimeController", () => {
     );
   });
 
-  it("creates and reads task draft runs without owner domain writes", () => {
+  it("creates and reads task draft runs without owner domain writes", async () => {
     const controller = createController();
 
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "task.draft.generate",
@@ -122,14 +130,14 @@ describe("AgentRuntimeController", () => {
     assert.equal(run.input.nested.password, "[redacted]");
     assert.equal(run.input.nested.privateKey, "[redacted]");
 
-    const fetched = controller.getRun(run.id, UUIDS.member);
+    const fetched = await controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.id, run.id);
     assert.equal(fetched.actions[0].status, "waiting_confirmation");
   });
 
-  it("approves a waiting action without executing the owner boundary", () => {
+  it("approves a waiting action without executing the owner boundary", async () => {
     const controller = createController();
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "task.draft.generate",
@@ -141,13 +149,16 @@ describe("AgentRuntimeController", () => {
       UUIDS.member,
     );
 
-    const action = controller.approveAction(run.actions[0].id, UUIDS.member);
+    const action = await controller.approveAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
 
     assert.equal(action.status, "confirmed");
     assert.equal(action.confirmedByMemberId, UUIDS.member);
     assert.equal(action.executedAt, null);
 
-    const fetched = controller.getRun(run.id, UUIDS.member);
+    const fetched = await controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.status, "running");
     assert.equal(fetched.pendingActionCount, 1);
     assert.equal(fetched.actions[0].status, "confirmed");
@@ -159,7 +170,7 @@ describe("AgentRuntimeController", () => {
       new AgentRuntimeService(),
       stack.executor,
     );
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "task.draft.generate",
@@ -172,7 +183,7 @@ describe("AgentRuntimeController", () => {
     );
 
     assert.equal(run.actions[0].status, "waiting_confirmation");
-    const approvedAction = controller.approveAction(
+    const approvedAction = await controller.approveAction(
       run.actions[0].id,
       UUIDS.member,
     );
@@ -198,7 +209,7 @@ describe("AgentRuntimeController", () => {
     assert.equal(executedAction.status, "executed");
     assert.equal(typeof executedAction.executedAt, "string");
 
-    const fetched = controller.getRun(run.id, UUIDS.member);
+    const fetched = await controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.status, "succeeded");
     assert.equal(fetched.pendingActionCount, 0);
     assert.equal(
@@ -221,7 +232,7 @@ describe("AgentRuntimeController", () => {
       taskStack.executor,
     );
 
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "meeting.action-item.to-task-draft",
@@ -256,7 +267,7 @@ describe("AgentRuntimeController", () => {
       dueDate: "2026-07-03",
     });
 
-    const approvedAction = controller.approveAction(
+    const approvedAction = await controller.approveAction(
       run.actions[0].id,
       UUIDS.member,
     );
@@ -277,7 +288,7 @@ describe("AgentRuntimeController", () => {
     assert.equal(taskStack.taskDrafts[0].sourceType, "meeting_action_item");
     assert.equal(taskStack.taskDrafts[0].sourceId, meetingStack.actionItem.id);
 
-    const fetched = controller.getRun(run.id, UUIDS.member);
+    const fetched = await controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.status, "succeeded");
     assert.equal(fetched.pendingActionCount, 0);
     assert.equal(
@@ -294,13 +305,13 @@ describe("AgentRuntimeController", () => {
     );
   });
 
-  it("fails the Meeting ActionItem workflow when the source item is unavailable", () => {
+  it("fails the Meeting ActionItem workflow when the source item is unavailable", async () => {
     const meetingStack = createMeetingActionItemSourceStack();
     const controller = createController(
       new AgentRuntimeService(meetingStack.source),
     );
 
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "meeting.action-item.to-task-draft",
@@ -322,9 +333,39 @@ describe("AgentRuntimeController", () => {
     );
   });
 
-  it("rejects a waiting action as a terminal state", () => {
+  it("fails Meeting ActionItem runs when the source workspace does not match the run", async () => {
+    const meetingStack = createMeetingActionItemSourceStack();
+    const workspaceAccessStack = createWorkspaceAccess([
+      workspaceMember(UUIDS.member, UUIDS.workspace),
+      workspaceMember(UUIDS.otherMember, UUIDS.otherWorkspace),
+    ]);
+    const controller = createController(
+      new AgentRuntimeService(meetingStack.source),
+      createTaskDraftExecutorStack().executor,
+      workspaceAccessStack.workspaceAccess,
+    );
+
+    const run = await controller.createRun(
+      UUIDS.otherWorkspace,
+      {
+        workflowType: "meeting.action-item.to-task-draft",
+        input: {
+          meetingId: meetingStack.meeting.id,
+          actionItemId: meetingStack.actionItem.id,
+        },
+        contextRefs: [],
+      },
+      UUIDS.otherMember,
+    );
+
+    assert.equal(run.status, "failed");
+    assert.equal(run.actions.length, 0);
+    assert.equal(run.error.message, "Meeting not found");
+  });
+
+  it("rejects a waiting action as a terminal state", async () => {
     const controller = createController();
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "task.draft.generate",
@@ -336,13 +377,16 @@ describe("AgentRuntimeController", () => {
       UUIDS.member,
     );
 
-    const action = controller.rejectAction(run.actions[0].id, UUIDS.member);
+    const action = await controller.rejectAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
 
     assert.equal(action.status, "rejected");
     assert.equal(action.confirmedByMemberId, null);
     assert.equal(action.executedAt, null);
 
-    const fetched = controller.getRun(run.id, UUIDS.member);
+    const fetched = await controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.status, "succeeded");
     assert.equal(fetched.pendingActionCount, 0);
     assert.equal(fetched.actions[0].status, "rejected");
@@ -350,7 +394,7 @@ describe("AgentRuntimeController", () => {
 
   it("does not execute rejected or already executed actions", async () => {
     const controller = createController();
-    const rejectedRun = controller.createRun(
+    const rejectedRun = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "task.draft.generate",
@@ -361,18 +405,18 @@ describe("AgentRuntimeController", () => {
       },
       UUIDS.member,
     );
-    controller.rejectAction(rejectedRun.actions[0].id, UUIDS.member);
+    await controller.rejectAction(rejectedRun.actions[0].id, UUIDS.member);
 
     await assert.rejects(
       () => controller.executeAction(rejectedRun.actions[0].id, UUIDS.member),
       BadRequestException,
     );
     assert.equal(
-      controller.getRun(rejectedRun.id, UUIDS.member).actions[0].status,
+      (await controller.getRun(rejectedRun.id, UUIDS.member)).actions[0].status,
       "rejected",
     );
 
-    const executedRun = controller.createRun(
+    const executedRun = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "task.draft.generate",
@@ -383,7 +427,7 @@ describe("AgentRuntimeController", () => {
       },
       UUIDS.member,
     );
-    controller.approveAction(executedRun.actions[0].id, UUIDS.member);
+    await controller.approveAction(executedRun.actions[0].id, UUIDS.member);
     await controller.executeAction(executedRun.actions[0].id, UUIDS.member);
 
     await assert.rejects(
@@ -391,14 +435,14 @@ describe("AgentRuntimeController", () => {
       BadRequestException,
     );
     assert.equal(
-      controller.getRun(executedRun.id, UUIDS.member).actions[0].status,
+      (await controller.getRun(executedRun.id, UUIDS.member)).actions[0].status,
       "executed",
     );
   });
 
   it("marks unsupported confirmed actions as failed at the execute boundary", async () => {
     const controller = createController();
-    const run = controller.createRun(
+    const run = await controller.createRun(
       UUIDS.workspace,
       {
         workflowType: "review.analysis.generate",
@@ -409,7 +453,7 @@ describe("AgentRuntimeController", () => {
       },
       UUIDS.member,
     );
-    controller.approveAction(run.actions[0].id, UUIDS.member);
+    await controller.approveAction(run.actions[0].id, UUIDS.member);
 
     const action = await controller.executeAction(
       run.actions[0].id,
@@ -417,7 +461,7 @@ describe("AgentRuntimeController", () => {
     );
 
     assert.equal(action.status, "failed");
-    const fetched = controller.getRun(run.id, UUIDS.member);
+    const fetched = await controller.getRun(run.id, UUIDS.member);
     assert.equal(fetched.status, "failed");
     assert.equal(
       fetched.error.message,
@@ -438,7 +482,7 @@ describe("AgentRuntimeController", () => {
   it("requires the current mock member boundary for HTTP routes", async () => {
     const controller = createController();
 
-    assert.throws(
+    await assert.rejects(
       () =>
         controller.createRun(
           UUIDS.workspace,
@@ -451,7 +495,7 @@ describe("AgentRuntimeController", () => {
         ),
       BadRequestException,
     );
-    assert.throws(
+    await assert.rejects(
       () => controller.getRun(UUIDS.workspace, undefined),
       BadRequestException,
     );
@@ -461,18 +505,128 @@ describe("AgentRuntimeController", () => {
     );
   });
 
+  it("requires workspace membership for Agent run and action HTTP routes", async () => {
+    const workspaceAccessStack = createWorkspaceAccess([
+      workspaceMember(UUIDS.member, UUIDS.workspace),
+      workspaceMember(UUIDS.otherMember, UUIDS.otherWorkspace),
+    ]);
+    const controller = createController(
+      new AgentRuntimeService(),
+      createTaskDraftExecutorStack().executor,
+      workspaceAccessStack.workspaceAccess,
+    );
+    const run = await controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Guard this run",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+
+    await assert.rejects(
+      () =>
+        controller.createRun(
+          UUIDS.workspace,
+          {
+            workflowType: "task.draft.generate",
+            input: {},
+            contextRefs: [],
+          },
+          UUIDS.otherMember,
+        ),
+      ForbiddenException,
+    );
+    await assert.rejects(
+      () => controller.getRun(run.id, UUIDS.otherMember),
+      ForbiddenException,
+    );
+    await assert.rejects(
+      () => controller.approveAction(run.actions[0].id, UUIDS.otherMember),
+      ForbiddenException,
+    );
+    await assert.rejects(
+      () => controller.rejectAction(run.actions[0].id, UUIDS.otherMember),
+      ForbiddenException,
+    );
+
+    const approvedAction = await controller.approveAction(
+      run.actions[0].id,
+      UUIDS.member,
+    );
+    assert.equal(approvedAction.status, "confirmed");
+    await assert.rejects(
+      () => controller.executeAction(run.actions[0].id, UUIDS.otherMember),
+      ForbiddenException,
+    );
+
+    const fetched = await controller.getRun(run.id, UUIDS.member);
+    assert.equal(fetched.actions[0].status, "confirmed");
+    assert.equal(workspaceAccessStack.calls.length >= 6, true);
+  });
+
+  it("requires the execute requester to match the confirming workspace member", async () => {
+    const workspaceAccessStack = createWorkspaceAccess([
+      workspaceMember(UUIDS.member, UUIDS.workspace),
+      workspaceMember(UUIDS.sameWorkspaceMember, UUIDS.workspace),
+    ]);
+    const taskStack = createTaskDraftExecutorStack();
+    const controller = createController(
+      new AgentRuntimeService(),
+      taskStack.executor,
+      workspaceAccessStack.workspaceAccess,
+    );
+    const run = await controller.createRun(
+      UUIDS.workspace,
+      {
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Only confirmer executes",
+        },
+        contextRefs: [],
+      },
+      UUIDS.member,
+    );
+    const approvedAction = await controller.approveAction(
+      run.actions[0].id,
+      UUIDS.sameWorkspaceMember,
+    );
+    assert.equal(approvedAction.confirmedByMemberId, UUIDS.sameWorkspaceMember);
+
+    await assert.rejects(
+      () => controller.executeAction(run.actions[0].id, UUIDS.member),
+      ForbiddenException,
+    );
+    assert.equal(taskStack.taskDrafts.length, 0);
+    assert.equal(
+      (await controller.getRun(run.id, UUIDS.member)).actions[0].status,
+      "confirmed",
+    );
+
+    const executedAction = await controller.executeAction(
+      run.actions[0].id,
+      UUIDS.sameWorkspaceMember,
+    );
+    assert.equal(executedAction.status, "executed");
+    assert.equal(taskStack.calls[1][2], UUIDS.sameWorkspaceMember);
+    assert.equal(taskStack.taskDrafts.length, 1);
+  });
+
   it("surfaces missing run and action errors", async () => {
     const controller = createController();
 
-    assert.throws(
+    await assert.rejects(
       () => controller.getRun(UUIDS.workspace, UUIDS.member),
       NotFoundException,
     );
-    assert.throws(
+    await assert.rejects(
       () => controller.approveAction(UUIDS.workspace, UUIDS.member),
       NotFoundException,
     );
-    assert.throws(
+    await assert.rejects(
       () => controller.rejectAction(UUIDS.workspace, UUIDS.member),
       NotFoundException,
     );
@@ -503,7 +657,11 @@ describe("AgentRuntimeController", () => {
       );
       assert.doesNotMatch(
         source,
-        /JuhyungTaskService|JuhyungRepository|@prisma\/client|PrismaClient|MeetingService|MeetingRepository|Review\w*Service|Review\w*Repository/,
+        /from\s+["']\.\.\/workspace\/(?!(?:public\/|workspace\.module["']))/,
+      );
+      assert.doesNotMatch(
+        source,
+        /JuhyungTaskService|JuhyungRepository|WorkspaceMemberAccessService|WorkspaceRepository|DatabaseService|@prisma\/client|PrismaClient|MeetingService|MeetingRepository|Review\w*Service|Review\w*Repository/,
       );
     }
   });
@@ -512,9 +670,13 @@ describe("AgentRuntimeController", () => {
     const previousSkipDatabaseConnect =
       globalThis.process.env.PILO_SKIP_DATABASE_CONNECT;
     globalThis.process.env.PILO_SKIP_DATABASE_CONNECT = "true";
-    const app = await NestFactory.create(AgentModule, new FastifyAdapter(), {
-      logger: false,
-    });
+    const app = await NestFactory.create(
+      createAgentRuntimeHttpTestModule(),
+      new FastifyAdapter(),
+      {
+        logger: false,
+      },
+    );
     configureApp(app);
 
     try {
@@ -607,11 +769,71 @@ function assertRoute(methodName, method, path) {
   assert.equal(Reflect.getMetadata(PATH_METADATA, handler), path);
 }
 
+function createAgentRuntimeHttpTestModule() {
+  class AgentRuntimeHttpTestModule {}
+
+  Module({
+    controllers: [AgentRuntimeController],
+    providers: [
+      AgentRuntimeService,
+      {
+        provide: AGENT_OWNER_ACTION_EXECUTOR,
+        useValue: createTaskDraftExecutorStack().executor,
+      },
+      {
+        provide: WorkspaceAccessPublicService,
+        useValue: createWorkspaceAccess().workspaceAccess,
+      },
+    ],
+  })(AgentRuntimeHttpTestModule);
+
+  return AgentRuntimeHttpTestModule;
+}
+
 function createController(
   runtimeService = new AgentRuntimeService(),
   ownerExecutor = createTaskDraftExecutorStack().executor,
+  workspaceAccess = createWorkspaceAccess().workspaceAccess,
 ) {
-  return new AgentRuntimeController(runtimeService, ownerExecutor);
+  return new AgentRuntimeController(
+    runtimeService,
+    ownerExecutor,
+    workspaceAccess,
+  );
+}
+
+function createWorkspaceAccess(
+  members = [workspaceMember(UUIDS.member, UUIDS.workspace)],
+) {
+  const calls = [];
+  return {
+    calls,
+    workspaceAccess: {
+      requireWorkspaceMember: async (workspaceId, actor) => {
+        calls.push(["workspace.requireWorkspaceMember", workspaceId, actor]);
+        const member = members.find(
+          (candidate) =>
+            candidate.workspaceId === workspaceId &&
+            candidate.id === actor?.memberId,
+        );
+        if (!member) {
+          throw new ForbiddenException(
+            "Workspace membership is required. Temporary mock member boundary. Not production auth.",
+          );
+        }
+        return member;
+      },
+    },
+  };
+}
+
+function workspaceMember(id, workspaceId) {
+  return {
+    id,
+    workspaceId,
+    userId: `${id}-user`,
+    role: "member",
+  };
 }
 
 function createMeetingActionItemSourceStack() {

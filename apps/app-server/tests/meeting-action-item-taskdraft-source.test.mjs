@@ -102,6 +102,15 @@ describe("MeetingActionItemTaskDraftSourceAdapter", () => {
     assert.throws(
       () =>
         stack.source.createTaskDraftPayload({
+          workspaceId: "workspace-2",
+          meetingId: meeting.id,
+          actionItemId: actionItem.id,
+        }),
+      NotFoundException,
+    );
+    assert.throws(
+      () =>
+        stack.source.createTaskDraftPayload({
           workspaceId: "workspace-1",
           meetingId: otherMeeting.id,
           actionItemId: actionItem.id,

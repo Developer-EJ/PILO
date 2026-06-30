@@ -204,6 +204,60 @@ describe("AgentRuntimeService local skeleton", () => {
     );
   });
 
+  it("fails execution before owner writes when action payload workspace mismatches the run", async () => {
+    const service = new AgentRuntimeService();
+    const clock = createClock();
+    const job = service.createAgentJob(
+      {
+        workspaceId: UUIDS.workspace,
+        actorMemberId: UUIDS.member,
+        workflowType: "task.draft.generate",
+        input: {
+          message: "Reject mismatched workspace",
+        },
+        contextRefs: [],
+      },
+      clock,
+    );
+    const result = service.runLocalJob(job, clock);
+    result.actions[0].payload.workspaceId = "different-workspace";
+    const run = service.applyAgentResult(result, clock);
+    service.confirmAction(run.actions[0].id, UUIDS.member, clock);
+    let ownerWrites = 0;
+
+    const action = await service.executeConfirmedAction(
+      run.actions[0].id,
+      {
+        execute: async () => {
+          ownerWrites += 1;
+          return {
+            owner: "task",
+            operation: "task.create.draft",
+            status: "succeeded",
+            targetEntityId: "44444444-4444-4444-8444-444444444444",
+            errorMessage: null,
+          };
+        },
+      },
+      clock,
+    );
+
+    assert.equal(ownerWrites, 0);
+    assert.equal(action.status, "failed");
+    const fetched = service.getRun(run.id);
+    assert.equal(fetched.status, "failed");
+    assert.equal(
+      fetched.error.message,
+      "Agent action payload workspaceId must match the run workspaceId",
+    );
+    assert.equal(
+      fetched.trace.some(
+        (entry) => entry.message === "agent action execution failed",
+      ),
+      true,
+    );
+  });
+
   it("does not reject confirmed actions outside the documented state machine", () => {
     const service = new AgentRuntimeService();
     const run = service.createLocalRun(
