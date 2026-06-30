@@ -21,7 +21,7 @@ Task draft, Milestone, Canvas shape/view/filter, VoiceRoom, Review graph 세부 
 | --- | --- |
 | SQL bootstrap | `docs/db/pilo_erd_schema.sql` |
 | Local idempotent migrations | `docs/db/migrations/*.sql` |
-| Local seed | `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql` |
+| Local seed | `docs/db/seeds/001_donghyun_auth_workspace_canvas_seed.sql`, `docs/db/seeds/002_juhyung_github_review_seed.sql` |
 | Prisma schema | `apps/app-server/prisma/schema.prisma` |
 | 현재 table 수 | 70 |
 

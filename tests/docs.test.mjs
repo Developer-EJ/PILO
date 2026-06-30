@@ -1922,6 +1922,10 @@ describe("local development baseline", () => {
       compose,
       /docs\/db\/seeds\/001_donghyun_auth_workspace_canvas_seed\.sql/,
     );
+    assert.match(
+      compose,
+      /docs\/db\/seeds\/002_juhyung_github_review_seed\.sql/,
+    );
     assert.match(compose, /localstack\/init\/ready\.d/);
   });
 
@@ -1933,6 +1937,7 @@ describe("local development baseline", () => {
     );
     assert.match(script, /202606300500_mvp_task_drafts_rebaseline\.sql/);
     assert.match(script, /001_donghyun_auth_workspace_canvas_seed\.sql/);
+    assert.match(script, /002_juhyung_github_review_seed\.sql/);
     assert.match(script, /psql -v ON_ERROR_STOP=1/);
   });
 
@@ -2079,6 +2084,66 @@ describe("db schema contract alignment", () => {
     assert.doesNotMatch(
       seed,
       /INSERT INTO (tasks|github_issues|pull_requests|meetings|meeting_reports|code_review_rooms|agent_runs)\b/,
+    );
+  });
+
+  it("juhyung local GitHub seed keeps Review API mode selectable", () => {
+    const seedPath = "docs/db/seeds/002_juhyung_github_review_seed.sql";
+
+    assert.ok(exists(seedPath), `${seedPath} must exist`);
+
+    const seed = read(seedPath);
+    const dashboard = readJson(
+      "docs/contracts/fixtures/workspace-dashboard.fixture.json",
+    );
+    const githubRepositories = readJson(
+      "docs/contracts/fixtures/github-repositories.fixture.json",
+    ).githubRepositories;
+    const pullRequest = dashboard.pullRequests[0];
+    const issue = dashboard.githubIssues[0];
+    const repository = githubRepositories[0];
+
+    for (const table of [
+      "github_connections",
+      "github_repositories",
+      "github_issues",
+      "github_issue_labels",
+      "pull_requests",
+    ]) {
+      assert.match(seed, new RegExp(`INSERT INTO ${table}`));
+    }
+
+    for (const value of [
+      dashboard.workspace.id,
+      dashboard.members[0].memberId,
+      repository.id,
+      repository.owner,
+      repository.repoName,
+      repository.url,
+      repository.defaultBranch,
+      issue.id,
+      issue.number,
+      issue.title,
+      issue.url,
+      ...issue.labels,
+      pullRequest.id,
+      pullRequest.number,
+      pullRequest.title,
+      pullRequest.authorLogin,
+      pullRequest.state,
+      pullRequest.branch,
+      pullRequest.baseBranch,
+      pullRequest.url,
+      pullRequest.changedFilesCount,
+      pullRequest.additions,
+      pullRequest.deletions,
+    ]) {
+      assertSeedContains(seed, value);
+    }
+
+    assert.doesNotMatch(
+      seed,
+      /INSERT INTO (tasks|task_pull_requests|code_review_rooms|pull_request_analyses|agent_runs)\b/,
     );
   });
 
