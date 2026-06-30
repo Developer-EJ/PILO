@@ -505,6 +505,7 @@ describe("frontend package", () => {
     assert.match(dashboard, /notification-list/);
     assert.match(dashboard, /markNotificationRead/);
     assert.match(dashboard, /markWorkspaceNotificationsRead/);
+    assert.match(dashboard, /dashboard_fixture_source/);
 
     for (const featureKey of [
       "canvas",

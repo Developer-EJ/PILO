@@ -6,7 +6,10 @@ import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
 import { createNotificationClient } from "../../lib/notification/notificationClient.mjs";
-import { createWorkspaceDashboardClient } from "../../lib/workspace/dashboardClient.mjs";
+import {
+  createWorkspaceDashboardClient,
+  resolveWorkspaceDashboardClientMode,
+} from "../../lib/workspace/dashboardClient.mjs";
 import {
   buildWorkspaceFeatureRoutes,
   buildWorkspaceFeatureTabs,
@@ -68,6 +71,7 @@ type WorkspaceNotification = {
 };
 
 type DashboardRecord = {
+  source?: string;
   tasks: DashboardTask[];
   progress: {
     blockedTasks?: number;
@@ -421,6 +425,10 @@ export function WorkspaceDashboard({
     () => buildWorkspaceRoutes(workspaceId),
     [workspaceId],
   );
+  const dashboardMode = useMemo(
+    () => resolveWorkspaceDashboardClientMode(),
+    [],
+  );
   const notificationClient = useMemo(() => createNotificationClient(), []);
 
   useEffect(() => {
@@ -433,10 +441,16 @@ export function WorkspaceDashboard({
       const result = await dashboardClient.getDashboard(workspaceId);
 
       if (!cancelled) {
+        const warnings = [...result.warnings];
+
+        if (dashboardMode === "api" && result.dashboard?.source === "fixture") {
+          warnings.push("dashboard_fixture_source");
+        }
+
         setState({
           status: "ready",
           dashboard: result.dashboard as unknown as DashboardRecord,
-          warnings: result.warnings,
+          warnings,
         });
       }
     }
@@ -454,7 +468,7 @@ export function WorkspaceDashboard({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [dashboardMode, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
