@@ -678,6 +678,27 @@ describe("frontend package", () => {
     );
   });
 
+  it("keeps workspace routes server-renderable for runtime workspace ids", () => {
+    const nextConfig = readFileSync("next.config.js", "utf8");
+    assert.doesNotMatch(nextConfig, /output:\s*["']export["']/);
+
+    for (const routeFile of [
+      "app/workspaces/[workspaceId]/page.tsx",
+      "app/workspaces/[workspaceId]/canvas/page.tsx",
+      "app/workspaces/[workspaceId]/canvas/[boardId]/page.tsx",
+      "app/workspaces/[workspaceId]/tasks/page.tsx",
+      "app/workspaces/[workspaceId]/github/page.tsx",
+      "app/workspaces/[workspaceId]/meetings/page.tsx",
+      "app/workspaces/[workspaceId]/reviews/page.tsx",
+      "app/workspaces/[workspaceId]/agent/page.tsx",
+      "app/workspaces/[workspaceId]/planning/page.tsx",
+    ]) {
+      const route = readFileSync(routeFile, "utf8");
+
+      assert.doesNotMatch(route, /dynamicParams\s*=\s*false/);
+    }
+  });
+
   it("does not silently use stored workspace when URL workspace is invalid", () => {
     const selection = resolveCurrentWorkspaceSelection({
       workspaces: mockWorkspaces,
