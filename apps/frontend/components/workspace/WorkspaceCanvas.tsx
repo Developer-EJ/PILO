@@ -102,6 +102,8 @@ type CanvasNavItem = {
   href?: string;
 };
 
+const LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE = "freeform-shapes";
+
 const canvasNavLabels = [
   "홈 / 대시보드",
   "프로젝트 시작",
@@ -651,7 +653,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     );
     const storedViewSetting = readCanvasStorage("view-setting", board.id);
     const storedFreeformShapes = normalizeCanvasFreeformShapes(
-      readCanvasStorage("freeform-shapes", board.id),
+      readCanvasStorage(LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE, board.id),
     ) as PiloCanvasFreeformShape[];
 
     queueMicrotask(() => {
@@ -702,7 +704,12 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           return currentFreeformShapes;
         }
 
-        writeCanvasStorage("freeform-shapes", board.id, nextFreeformShapes);
+        // Freeform tldraw shapes are MVP local-only UI state, not Canvas API shapes.
+        writeCanvasStorage(
+          LOCAL_ONLY_FREEFORM_SHAPES_STORAGE_SCOPE,
+          board.id,
+          nextFreeformShapes,
+        );
 
         return nextFreeformShapes;
       });

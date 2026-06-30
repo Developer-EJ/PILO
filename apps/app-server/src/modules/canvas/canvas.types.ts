@@ -18,6 +18,14 @@ export type CanvasEntityType =
 
 export type CanvasBoardType = "project_map" | "meeting" | "review" | "custom";
 
+export type CanvasConnectionType =
+  | "related_to"
+  | "created_from"
+  | "blocks"
+  | "references"
+  | "implements"
+  | "reviews";
+
 export type CanvasBoardRecord = {
   id: string;
   workspaceId: string;
@@ -59,7 +67,7 @@ export type CanvasConnectionRecord = {
   boardId: string;
   sourceShapeId: string;
   targetShapeId: string;
-  connectionType: string;
+  connectionType: CanvasConnectionType;
   label: string | null;
   createdAt: string;
   updatedAt: string;
@@ -139,14 +147,14 @@ export type CanvasConnectionSummary = {
   id: string;
   sourceShapeId: string;
   targetShapeId: string;
-  connectionType: string;
+  connectionType: CanvasConnectionType;
   label: string | null;
 };
 
 export type CanvasConnectionRequest = {
   sourceShapeId: string;
   targetShapeId: string;
-  connectionType: string;
+  connectionType: CanvasConnectionType;
   label: string | null;
 };
 

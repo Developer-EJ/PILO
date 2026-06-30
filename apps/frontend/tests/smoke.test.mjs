@@ -95,30 +95,38 @@ describe("frontend package", () => {
   it("keeps auth provider hrefs relative when no app server URL is configured", () => {
     assert.equal(
       authProviderHref("/auth/google/start", undefined),
-      "/auth/google/start",
+      "/api/auth/google/start",
     );
     assert.equal(
       authProviderHref("/auth/github/start", undefined),
-      "/auth/github/start",
+      "/api/auth/github/start",
     );
   });
 
   it("uses the configured app server URL for auth provider hrefs", () => {
     assert.equal(
       authProviderHref("/auth/google/start", "https://api.pilo.dev/"),
-      "https://api.pilo.dev/auth/google/start",
+      "https://api.pilo.dev/api/auth/google/start",
     );
     assert.equal(
       authProviderHref("/auth/github/start", "https://api.pilo.dev"),
-      "https://api.pilo.dev/auth/github/start",
+      "https://api.pilo.dev/api/auth/github/start",
+    );
+    assert.equal(
+      authProviderHref("/auth/github/start", "https://api.pilo.dev/api"),
+      "https://api.pilo.dev/api/auth/github/start",
     );
   });
 
   it("builds workspace API URLs from the configured app server base URL", () => {
-    assert.equal(buildWorkspaceApiUrl("/workspaces", ""), "/workspaces");
+    assert.equal(buildWorkspaceApiUrl("/workspaces", ""), "/api/workspaces");
     assert.equal(
       buildWorkspaceApiUrl("/workspaces", "https://api.pilo.dev/"),
-      "https://api.pilo.dev/workspaces",
+      "https://api.pilo.dev/api/workspaces",
+    );
+    assert.equal(
+      buildWorkspaceApiUrl("/api/workspaces", "https://api.pilo.dev/api/"),
+      "https://api.pilo.dev/api/workspaces",
     );
   });
 
@@ -141,7 +149,7 @@ describe("frontend package", () => {
     });
 
     assert.deepEqual(await apiClient.listWorkspaces(), mockWorkspaces);
-    assert.equal(requests[0].url, "https://api.pilo.dev/workspaces");
+    assert.equal(requests[0].url, "https://api.pilo.dev/api/workspaces");
     assert.equal(requests[0].init.credentials, "include");
 
     assert.deepEqual(
@@ -160,7 +168,7 @@ describe("frontend package", () => {
       (error) =>
         error instanceof WorkspaceApiError &&
         error.status === 401 &&
-        error.path === "/workspaces",
+        error.path === "/api/workspaces",
     );
   });
 
@@ -187,7 +195,7 @@ describe("frontend package", () => {
 
     assert.equal(
       requests[0].url,
-      `https://api.pilo.dev/workspaces/${workspaceId}/dashboard`,
+      `https://api.pilo.dev/api/workspaces/${workspaceId}/dashboard`,
     );
     assert.equal(requests[0].init.credentials, "include");
     assert.equal(apiResult.dashboard.workspace.id, workspaceId);
@@ -464,6 +472,28 @@ describe("frontend package", () => {
     const defs = contractSchema.$defs;
     const boardDetail = defs.CanvasBoardDetail;
 
+    assert.deepEqual(defs.CanvasBoardType.enum, [
+      "project_map",
+      "meeting",
+      "review",
+      "custom",
+    ]);
+    assert.deepEqual(defs.CanvasConnectionType.enum, [
+      "related_to",
+      "created_from",
+      "blocks",
+      "references",
+      "implements",
+      "reviews",
+    ]);
+    assert.equal(
+      defs.CanvasConnectionSummary.properties.connectionType.$ref,
+      "#/$defs/CanvasConnectionType",
+    );
+    assert.equal(
+      defs.CanvasConnectionRequest.properties.connectionType.$ref,
+      "#/$defs/CanvasConnectionType",
+    );
     assert.deepEqual(Object.keys(contractCanvasBoardDetailFixture).sort(), [
       "boardType",
       "connectionCount",
@@ -508,14 +538,14 @@ describe("frontend package", () => {
         authProviderHref("/auth/google/start", {
           next: "/canvas?filter=task",
         }),
-        "https://api.pilo.dev/auth/google/start?next=%2Fcanvas%3Ffilter%3Dtask",
+        "https://api.pilo.dev/api/auth/google/start?next=%2Fcanvas%3Ffilter%3Dtask",
       );
       assert.equal(
         authProviderHref("/auth/github/start", {
           baseUrl: "",
           next: "https://evil.example",
         }),
-        "/auth/github/start?next=%2F",
+        "/api/auth/github/start?next=%2F",
       );
     } finally {
       if (previousBaseUrl === undefined) {
@@ -637,13 +667,14 @@ describe("frontend package", () => {
   });
 
   it("builds auth API URLs from a configured app server base URL", () => {
-    assert.throws(
-      () => buildAuthApiUrl("/auth/me", ""),
-      /Auth API base URL is required/,
-    );
+    assert.equal(buildAuthApiUrl("/auth/me", ""), "/api/auth/me");
     assert.equal(
       buildAuthApiUrl("/auth/logout", "https://api.pilo.dev/"),
-      "https://api.pilo.dev/auth/logout",
+      "https://api.pilo.dev/api/auth/logout",
+    );
+    assert.equal(
+      buildAuthApiUrl("/api/auth/logout", "https://api.pilo.dev/api"),
+      "https://api.pilo.dev/api/auth/logout",
     );
   });
 
@@ -691,9 +722,9 @@ describe("frontend package", () => {
     await authClient.logout();
 
     assert.equal(user.email, mockCurrentUser.email);
-    assert.equal(requests[0].url, "https://api.pilo.dev/auth/me");
+    assert.equal(requests[0].url, "https://api.pilo.dev/api/auth/me");
     assert.equal(requests[0].init.credentials, "include");
-    assert.equal(requests[1].url, "https://api.pilo.dev/auth/logout");
+    assert.equal(requests[1].url, "https://api.pilo.dev/api/auth/logout");
     assert.equal(requests[1].init.method, "POST");
     assert.equal(requests[1].init.credentials, "include");
   });
@@ -733,9 +764,9 @@ describe("frontend package", () => {
 
       assert.equal(apiSession.authenticated, true);
       assert.equal(apiSession.user.email, mockCurrentUser.email);
-      assert.equal(requests[0].url, "https://api.pilo.dev/auth/me");
+      assert.equal(requests[0].url, "https://api.pilo.dev/api/auth/me");
       assert.equal(requests[0].init.credentials, "include");
-      assert.equal(requests[1].url, "https://api.pilo.dev/auth/logout");
+      assert.equal(requests[1].url, "https://api.pilo.dev/api/auth/logout");
       assert.equal(requests[1].init.method, "POST");
     } finally {
       if (previousMode === undefined) {
@@ -804,7 +835,14 @@ describe("frontend package", () => {
 
     assert.equal(
       buildCanvasApiUrl("/canvas-boards/board-1", ""),
-      "/canvas-boards/board-1",
+      "/api/canvas-boards/board-1",
+    );
+    assert.equal(
+      buildCanvasApiUrl(
+        "/api/canvas-boards/board-1",
+        "https://api.pilo.dev/api",
+      ),
+      "https://api.pilo.dev/api/canvas-boards/board-1",
     );
     assert.equal(resolveCanvasClientMode("api"), "api");
     assert.equal(resolveCanvasClientMode("fixture"), "mock");
@@ -873,7 +911,7 @@ describe("frontend package", () => {
     assert.equal(detail.workspaceId, workspaceId);
     assert.equal(
       requests[0].url,
-      `https://api.pilo.dev/workspaces/${workspaceId}/canvas-boards`,
+      `https://api.pilo.dev/api/workspaces/${workspaceId}/canvas-boards`,
     );
     assert.equal(requests[0].init.credentials, "include");
     assert.deepEqual(
