@@ -281,6 +281,10 @@ export function ReviewNodeWorkspace({
     selectedNodeId === undefined ? internalSelectedNodeId : selectedNodeId;
   const activeCommentDraft =
     commentDraft === undefined ? internalCommentDraft : commentDraft;
+  const useLocalDecisions =
+    selectedSessionId === undefined &&
+    selectedNodeId === undefined &&
+    onNodeDecision === undefined;
 
   const selectedSession =
     sessions.find((session) => session.pullRequest.id === activeSessionId) ??
@@ -314,6 +318,8 @@ export function ReviewNodeWorkspace({
         (comment) => comment.nodeId === null || comment.nodeId === selectedNode.id,
       )
     : comments;
+  const nodeDecision = (node: ReviewCanvasNode) =>
+    useLocalDecisions ? (decisions[node.id] ?? node.status) : node.status;
 
   const selectSession = (session: ReviewSession) => {
     setInternalSelectedSessionId(session.pullRequest.id);
@@ -350,10 +356,13 @@ export function ReviewNodeWorkspace({
       return;
     }
 
-    setDecisions((current) => ({
-      ...current,
-      [selectedNode.id]: decision,
-    }));
+    if (useLocalDecisions) {
+      setDecisions((current) => ({
+        ...current,
+        [selectedNode.id]: decision,
+      }));
+    }
+
     onNodeDecision?.(decision);
   };
 
@@ -642,8 +651,7 @@ export function ReviewNodeWorkspace({
                 (decision) => (
                   <button
                     className={
-                      (decisions[selectedNode.id] ?? selectedNode.status) ===
-                      decision
+                      nodeDecision(selectedNode) === decision
                         ? `${styles.decisionButton} ${styles.decisionButtonActive}`
                         : styles.decisionButton
                     }
@@ -727,11 +735,9 @@ export function ReviewNodeWorkspace({
                   <strong>{node.label}</strong>
                   <small>
                     {node.nodeType}
-                    {decisions[node.id] ?? node.status
+                    {nodeDecision(node)
                       ? ` / ${
-                          decisionLabels[
-                            decisions[node.id] ?? node.status ?? "unknown"
-                          ]
+                          decisionLabels[nodeDecision(node) ?? "unknown"]
                         }`
                       : ""}
                   </small>

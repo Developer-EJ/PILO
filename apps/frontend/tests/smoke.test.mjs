@@ -593,7 +593,7 @@ describe("frontend package", () => {
       },
       meetings: {
         file: "app/workspaces/[workspaceId]/meetings/page.tsx",
-        component: /<WorkspaceMeetings \/>/,
+        component: /<WorkspaceMeetings workspaceId={workspaceId} \/>/,
       },
       reviews: {
         file: "app/workspaces/[workspaceId]/reviews/page.tsx",
@@ -641,6 +641,7 @@ describe("frontend package", () => {
     assert.match(meetings, /Start browser recording/);
     assert.match(meetings, /Stop and submit recording/);
     assert.match(meetings, /submitAudioChunk/);
+    assert.match(meetings, /routeWorkspaceId/);
   });
 
   it("keeps API-mode workspace routes and Canvas failures from falling back to fixtures silently", () => {

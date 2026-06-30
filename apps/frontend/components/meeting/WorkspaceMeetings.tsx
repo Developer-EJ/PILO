@@ -164,6 +164,10 @@ type TaskDraftResult = {
   };
 };
 
+type WorkspaceMeetingsProps = {
+  workspaceId?: string;
+};
+
 const statusActions: { label: string; status: MeetingStatus }[] = [
   { label: "Start", status: "in_progress" },
   { label: "End", status: "ended" },
@@ -182,8 +186,14 @@ const recordingStatuses: RecordingStatus[] = [
   "failed",
 ];
 
-function resolveWorkspaceId(pathname: string) {
-  return extractWorkspaceIdFromPathname(pathname) ?? mockWorkspaces[0].id;
+function resolveWorkspaceId(pathname: string, routeWorkspaceId?: string) {
+  const normalizedRouteWorkspaceId = routeWorkspaceId?.trim();
+
+  return (
+    normalizedRouteWorkspaceId ||
+    extractWorkspaceIdFromPathname(pathname) ||
+    mockWorkspaces[0].id
+  );
 }
 
 function formatDateTime(value: string | null) {
@@ -243,9 +253,14 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   return <p className="meetings-empty">{children}</p>;
 }
 
-export function WorkspaceMeetings() {
+export function WorkspaceMeetings({
+  workspaceId: routeWorkspaceId,
+}: WorkspaceMeetingsProps = {}) {
   const pathname = usePathname() ?? "/";
-  const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
+  const workspaceId = useMemo(
+    () => resolveWorkspaceId(pathname, routeWorkspaceId),
+    [pathname, routeWorkspaceId],
+  );
   const dashboard = useMemo(
     () => createWorkspaceDashboardFixture(workspaceId),
     [workspaceId],

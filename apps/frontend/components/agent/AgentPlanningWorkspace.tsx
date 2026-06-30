@@ -86,6 +86,8 @@ type PlanDraftDetail = {
     ownerApiResults: Array<{
       owner: string;
       operation: string;
+      sourceDraftId?: string | null;
+      sourceDraftType?: string | null;
       status: string;
       targetEntityId: string | null;
       errorMessage: string | null;
@@ -160,6 +162,132 @@ function statusTone(status: string) {
   if (status === "waiting_confirmation") return "warning";
 
   return "primary";
+}
+
+function textPayloadValue(
+  payload: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = payload[key];
+
+  return typeof value === "string" && value.trim().length ? value.trim() : null;
+}
+
+function actionSourceDraftId(action: AgentAction) {
+  return textPayloadValue(action.payload, "sourceId") ?? action.id;
+}
+
+function ownerResultForAction(
+  action: AgentAction,
+  ownerApiResults: PlanDraftDetail["approval"]["ownerApiResults"],
+) {
+  if (action.type !== "task.create.draft") {
+    return null;
+  }
+
+  const sourceDraftId = actionSourceDraftId(action);
+
+  return (
+    ownerApiResults.find(
+      (result) =>
+        result.owner === "task" &&
+        result.operation === "task.create" &&
+        result.sourceDraftId === sourceDraftId,
+    ) ??
+    ownerApiResults.find(
+      (result) => result.owner === "task" && result.operation === "task.create",
+    ) ??
+    null
+  );
+}
+
+function ownerOperationLabel(
+  result: PlanDraftDetail["approval"]["ownerApiResults"][number],
+) {
+  if (result.owner === "task" && result.operation === "task.create") {
+    return "task draft create";
+  }
+
+  return result.operation;
+}
+
+function ownerResultSummary(
+  result: PlanDraftDetail["approval"]["ownerApiResults"][number],
+) {
+  const operation = ownerOperationLabel(result);
+
+  if (
+    result.owner === "task" &&
+    result.operation === "task.create" &&
+    result.status === "succeeded" &&
+    result.targetEntityId
+  ) {
+    return `${operation}: TaskDraft ${result.targetEntityId}`;
+  }
+
+  if (result.status === "succeeded" && result.targetEntityId) {
+    return `${operation}: ${result.targetEntityId}`;
+  }
+
+  if (result.status === "succeeded") {
+    return result.owner === "task" && result.operation === "task.create"
+      ? `${operation}: succeeded without a returned TaskDraft id`
+      : `${operation}: succeeded without a returned entity id`;
+  }
+
+  return `${operation}: ${statusLabel(result.status)}`;
+}
+
+function actionOutcomeMessage(
+  action: AgentAction,
+  ownerResult: PlanDraftDetail["approval"]["ownerApiResults"][number] | null,
+) {
+  const payloadErrorMessage = textPayloadValue(action.payload, "errorMessage");
+  const ownerErrorMessage =
+    typeof ownerResult?.errorMessage === "string" &&
+    ownerResult.errorMessage.trim().length
+      ? ownerResult.errorMessage.trim()
+      : null;
+
+  if (action.status === "waiting_confirmation") {
+    return null;
+  }
+
+  if (action.status === "rejected") {
+    return "Rejected; no owner API write was attempted.";
+  }
+
+  if (action.status === "failed") {
+    return (
+      payloadErrorMessage ??
+      ownerErrorMessage ??
+      "Owner API write failed; no persisted owner result was returned."
+    );
+  }
+
+  if (action.type === "planning.approve") {
+    return "Plan approval is local only; no owner API write was executed.";
+  }
+
+  if (action.type === "task.create.draft") {
+    if (ownerResult?.status === "succeeded" && ownerResult.targetEntityId) {
+      return `TaskDraft created: ${ownerResult.targetEntityId}`;
+    }
+
+    if (ownerResult?.status === "failed") {
+      return ownerErrorMessage ?? "TaskDraft creation failed.";
+    }
+
+    if (action.executedAt) {
+      return "Owner API reported execution, but no TaskDraft id was returned.";
+    }
+
+    return "TaskDraft was not created.";
+  }
+
+  return action.executedAt
+    ? "Executed by owner API."
+    : "Owner API write not executed.";
 }
 
 export function AgentPlanningWorkspace({
@@ -413,45 +541,52 @@ export function AgentPlanningWorkspace({
 
             <div className="agent-action-list">
               {run?.actions.length ? (
-                run.actions.map((action) => (
-                  <article className="agent-action-row" key={action.id}>
-                    <div>
-                      <strong>{actionTitle(action)}</strong>
-                      <span>
-                        {action.type} from {action.source}
-                      </span>
-                    </div>
-                    <b
-                      className={`agent-pill tone-${statusTone(action.status)}`}
-                    >
-                      {statusLabel(action.status)}
-                    </b>
-                    {action.status === "waiting_confirmation" ? (
-                      <div className="agent-action-buttons">
-                        <button
-                          disabled={actionIdInFlight === action.id}
-                          onClick={() => decideAction(action, "approve")}
-                          type="button"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          disabled={actionIdInFlight === action.id}
-                          onClick={() => decideAction(action, "reject")}
-                          type="button"
-                        >
-                          Reject
-                        </button>
+                run.actions.map((action) => {
+                  const ownerResult = ownerResultForAction(
+                    action,
+                    planDraft?.approval.ownerApiResults ?? [],
+                  );
+                  const outcomeMessage = actionOutcomeMessage(
+                    action,
+                    ownerResult,
+                  );
+
+                  return (
+                    <article className="agent-action-row" key={action.id}>
+                      <div>
+                        <strong>{actionTitle(action)}</strong>
+                        <span>
+                          {action.type} from {action.source}
+                        </span>
                       </div>
-                    ) : (
-                      <small>
-                        {action.executedAt
-                          ? "Executed by owner API"
-                          : "Owner API write not executed"}
-                      </small>
-                    )}
-                  </article>
-                ))
+                      <b
+                        className={`agent-pill tone-${statusTone(action.status)}`}
+                      >
+                        {statusLabel(action.status)}
+                      </b>
+                      {action.status === "waiting_confirmation" ? (
+                        <div className="agent-action-buttons">
+                          <button
+                            disabled={actionIdInFlight === action.id}
+                            onClick={() => decideAction(action, "approve")}
+                            type="button"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            disabled={actionIdInFlight === action.id}
+                            onClick={() => decideAction(action, "reject")}
+                            type="button"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : outcomeMessage ? (
+                        <small>{outcomeMessage}</small>
+                      ) : null}
+                    </article>
+                  );
+                })
               ) : (
                 <p className="agent-empty">No Agent actions are waiting.</p>
               )}
@@ -465,9 +600,10 @@ export function AgentPlanningWorkspace({
                     key={`${result.owner}-${result.operation}-${result.targetEntityId ?? result.status}`}
                   >
                     <strong>{result.owner}</strong>
-                    <span>
-                      {result.operation}: {result.status}
-                    </span>
+                    <span>{ownerResultSummary(result)}</span>
+                    {result.errorMessage ? (
+                      <small>{result.errorMessage}</small>
+                    ) : null}
                   </p>
                 ))}
               </div>

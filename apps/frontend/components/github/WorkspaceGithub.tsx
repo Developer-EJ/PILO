@@ -374,7 +374,11 @@ export function WorkspaceGithub() {
                     </button>
                   ))
                 ) : (
-                  <p className="github-empty">No repositories.</p>
+                  <p className="github-empty">
+                    {connections.length
+                      ? "Repository import is not available yet, or no repositories have been synced."
+                      : "No repositories."}
+                  </p>
                 )}
               </div>
             </aside>
