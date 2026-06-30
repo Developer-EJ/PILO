@@ -10,7 +10,7 @@ type CurrentUserAvatarState = {
 
 const guestAvatar: CurrentUserAvatarState = {
   label: "P",
-  title: "Guest",
+  title: "게스트",
 };
 
 function createAvatarState(name: string | null | undefined) {

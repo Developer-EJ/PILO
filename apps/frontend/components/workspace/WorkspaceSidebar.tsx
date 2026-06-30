@@ -20,8 +20,8 @@ export function WorkspaceSidebar({
   items,
   id,
   className = "sidebar",
-  ariaLabel = "PILO navigation",
-  navAriaLabel = "Workspace navigation",
+  ariaLabel = "PILO 내비게이션",
+  navAriaLabel = "워크스페이스 내비게이션",
 }: WorkspaceSidebarProps) {
   return (
     <aside id={id} className={className} aria-label={ariaLabel}>

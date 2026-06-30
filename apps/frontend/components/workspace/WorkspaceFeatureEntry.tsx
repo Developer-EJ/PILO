@@ -68,9 +68,9 @@ type FeatureDashboardFixture = {
 
 const surfaceConfig = {
   tasks: {
-    eyebrow: "TASKS",
-    title: "Tasks",
-    navLabel: "Tasks",
+    eyebrow: "태스크",
+    title: "태스크",
+    navLabel: "태스크",
   },
   github: {
     eyebrow: "GITHUB",
@@ -78,24 +78,24 @@ const surfaceConfig = {
     navLabel: "GitHub",
   },
   meetings: {
-    eyebrow: "MEETINGS",
-    title: "Meetings / Voice / Reports",
-    navLabel: "Meetings",
+    eyebrow: "회의",
+    title: "회의 / 음성 / 리포트",
+    navLabel: "회의",
   },
   reviews: {
-    eyebrow: "REVIEWS",
-    title: "Reviews",
-    navLabel: "Reviews",
+    eyebrow: "리뷰",
+    title: "리뷰",
+    navLabel: "리뷰",
   },
   agent: {
-    eyebrow: "AGENT",
-    title: "Agent / Planning",
-    navLabel: "Agent",
+    eyebrow: "에이전트",
+    title: "에이전트 / 프로젝트 설정",
+    navLabel: "에이전트",
   },
   planning: {
-    eyebrow: "PLANNING",
-    title: "Planning",
-    navLabel: "Planning",
+    eyebrow: "프로젝트 설정",
+    title: "프로젝트 설정",
+    navLabel: "프로젝트 설정",
   },
 } satisfies Record<
   WorkspaceFeatureSurface,
@@ -136,7 +136,7 @@ function createFeatureCards(
   if (surface === "meetings") {
     return dashboard.meetingReports.map((report) => ({
       title: report.title,
-      meta: `${report.decisionCount} decisions / ${report.actionItemCount} actions`,
+      meta: `결정 ${report.decisionCount}개 / 액션 ${report.actionItemCount}개`,
       tone: report.riskCount ? "warning" : "success",
     }));
   }
@@ -144,7 +144,7 @@ function createFeatureCards(
   if (surface === "reviews") {
     return dashboard.prAnalyses.map((analysis) => ({
       title: analysis.purposeSummary,
-      meta: `${analysis.analysisStatus} / ${analysis.riskLevel} risk`,
+      meta: `${analysis.analysisStatus} / ${analysis.riskLevel} 리스크`,
       tone: analysis.riskLevel === "high" ? "danger" : "warning",
     }));
   }
@@ -181,8 +181,8 @@ export function WorkspaceFeatureEntry({
     <main className="dashboard-shell feature-entry-shell">
       <WorkspaceSidebar
         items={navItems}
-        ariaLabel="Workspace feature navigation"
-        navAriaLabel="Workspace feature surfaces"
+        ariaLabel="워크스페이스 기능 내비게이션"
+        navAriaLabel="워크스페이스 기능 화면"
       />
 
       <section className="workspace">
@@ -193,17 +193,17 @@ export function WorkspaceFeatureEntry({
           </div>
           <div className="topbar-actions">
             <Link className="meeting-chip" href={routes.dashboard}>
-              Dashboard
+              대시보드
             </Link>
             <Link className="meeting-chip" href={routes.canvas}>
-              Canvas
+              캔버스
             </Link>
           </div>
         </header>
 
         <section
           className="dashboard-content feature-entry-content"
-          aria-label={`${config.navLabel} workspace surface`}
+          aria-label={`${config.navLabel} 워크스페이스 화면`}
         >
           <div className="feature-entry-grid">
             {featureCards.length ? (
@@ -215,7 +215,7 @@ export function WorkspaceFeatureEntry({
                 </article>
               ))
             ) : (
-              <p className="canvas-board-empty">No fixture items yet.</p>
+              <p className="canvas-board-empty">아직 표시할 fixture 항목이 없습니다.</p>
             )}
           </div>
         </section>

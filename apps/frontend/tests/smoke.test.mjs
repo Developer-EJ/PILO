@@ -186,13 +186,24 @@ describe("frontend package", () => {
     assert.doesNotMatch(runtimeStyles, /roomLayout|prCard|reviewNode/);
   });
 
-  it("keeps auth provider hrefs relative when no app server URL is configured", () => {
+  it("uses the local app server for auth provider hrefs by default", () => {
     assert.equal(
       authProviderHref("/api/auth/google/start", undefined),
-      "/api/auth/google/start",
+      "http://localhost:4000/api/auth/google/start",
     );
     assert.equal(
       authProviderHref("/api/auth/github/start", undefined),
+      "http://localhost:4000/api/auth/github/start",
+    );
+  });
+
+  it("keeps auth provider hrefs relative when base URL is explicitly empty", () => {
+    assert.equal(
+      authProviderHref("/api/auth/google/start", ""),
+      "/api/auth/google/start",
+    );
+    assert.equal(
+      authProviderHref("/api/auth/github/start", ""),
       "/api/auth/github/start",
     );
   });

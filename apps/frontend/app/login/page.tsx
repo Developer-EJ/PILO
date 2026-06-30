@@ -11,31 +11,23 @@ const providerEntries: LoginProviderEntry[] = [
   {
     id: "google",
     name: "Google",
-    eyebrow: "Workspace 계정으로 계속",
+    eyebrow: "Google 이메일 계정으로 계속",
     path: "/api/auth/google/start",
     mark: "G",
     tone: "google",
-  },
-  {
-    id: "github",
-    name: "GitHub",
-    eyebrow: "개발자 계정으로 계속",
-    path: "/api/auth/github/start",
-    mark: "GH",
-    tone: "github",
   },
 ];
 
 const backdropNavItems = [
   { label: "홈 / 대시보드", active: true },
-  { label: "프로젝트 시작" },
+  { label: "프로젝트 설정" },
   { label: "기능 목록" },
-  { label: "Task 보드", badge: "7" },
-  { label: "회의 / Report" },
-  { label: "음성채팅" },
-  { label: "Canvas" },
+  { label: "태스크 보드", badge: "7" },
+  { label: "회의 / 리포트" },
+  { label: "음성 채팅" },
+  { label: "캔버스" },
   { label: "GitHub PR", badge: "3" },
-  { label: "Code Review" },
+  { label: "코드 리뷰" },
   { label: "설정" },
 ];
 
@@ -48,7 +40,7 @@ function LoginProviderFallback() {
             {provider.mark}
           </span>
           <span>
-            <strong>{provider.name}</strong>
+            <strong>{provider.name}로 계속하기</strong>
             <small>{provider.eyebrow}</small>
           </span>
           <b aria-hidden="true">&rarr;</b>
@@ -71,12 +63,12 @@ export default function LoginPage() {
             <div className="brand-mark">P</div>
             <div>
               <p>PILO</p>
-              <span>AI Project OS</span>
+              <span>AI 프로젝트 OS</span>
             </div>
           </div>
           <nav
             className="nav-list backdrop-nav-list"
-            aria-label="Dashboard navigation preview"
+            aria-label="대시보드 미리보기 내비게이션"
           >
             {backdropNavItems.map((item) => (
               <div
@@ -94,15 +86,15 @@ export default function LoginPage() {
         <section>
           <header className="backdrop-topbar">
             <div>
-              <span>DASHBOARD</span>
-              <strong>PILO Team</strong>
+              <span>대시보드</span>
+              <strong>PILO 팀</strong>
             </div>
             <b>회의 중 03:18</b>
           </header>
 
           <div className="backdrop-stats">
             <div>
-              <span>진행 중 Task</span>
+              <span>진행 중 태스크</span>
               <strong>3</strong>
             </div>
             <div>
@@ -123,7 +115,7 @@ export default function LoginPage() {
             <section className="backdrop-panel">
               <div className="backdrop-panel-head">
                 <strong>오늘 해야 할 일</strong>
-                <span>Task 보드</span>
+                <span>태스크 보드</span>
               </div>
               <p>
                 <i className="danger-dot" />
@@ -131,17 +123,17 @@ export default function LoginPage() {
               </p>
               <p>
                 <i className="warning-dot" />
-                Canvas card shape<span>D-1</span>
+                캔버스 카드 정리<span>D-1</span>
               </p>
               <p>
                 <i className="primary-dot" />
-                PR #42 코드리뷰<span>리뷰</span>
+                PR #42 코드 리뷰<span>리뷰</span>
               </p>
             </section>
 
             <section className="backdrop-panel">
               <div className="backdrop-panel-head">
-                <strong>Agent 다음 제안</strong>
+                <strong>에이전트 다음 제안</strong>
                 <span>추천</span>
               </div>
               <p>
@@ -150,7 +142,7 @@ export default function LoginPage() {
               </p>
               <p>
                 <i className="warning-dot" />
-                오늘 마감 Task 범위 재확인<span>Task</span>
+                오늘 마감 태스크 범위 재확인<span>태스크</span>
               </p>
             </section>
           </div>
@@ -164,15 +156,15 @@ export default function LoginPage() {
           <div className="brand-mark">P</div>
           <div>
             <p>PILO</p>
-            <span>AI Project OS</span>
+            <span>AI 프로젝트 OS</span>
           </div>
         </div>
 
         <div className="login-card">
           <div className="login-card-head">
-            <p className="eyebrow">SIGN IN</p>
-            <h1 id="login-title">PILO에 로그인</h1>
-            <p>Workspace로 계속하려면 계정을 선택하세요.</p>
+            <p className="eyebrow">로그인</p>
+            <h1 id="login-title">PILO 로그인</h1>
+            <p>워크스페이스로 계속하려면 Google 계정을 선택하세요.</p>
           </div>
 
           <Suspense fallback={null}>
@@ -184,14 +176,13 @@ export default function LoginPage() {
           </Suspense>
 
           <p className="login-boundary-note">
-            GitHub 로그인은 인증용이며 Repository 연결 권한은 별도 단계에서
-            관리됩니다.
+            GitHub 저장소 연결 권한은 로그인 이후 별도 단계에서 관리됩니다.
           </p>
         </div>
 
         <div className="login-meta-links">
-          <span>Terms</span>
-          <span>Privacy</span>
+          <span>이용약관</span>
+          <span>개인정보 처리방침</span>
         </div>
       </section>
     </main>

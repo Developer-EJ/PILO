@@ -49,9 +49,17 @@ export function LoginProviderList({ providers }: LoginProviderListProps) {
             return provider;
           }
 
+          const missingEnv = providerSummary.missingEnv ?? [];
+          const eyebrow = providerSummary.configured
+            ? provider.eyebrow
+            : missingEnv.length
+              ? `${missingEnv.join(", ")} 필요`
+              : "OAuth 설정이 필요합니다";
+
           return {
             ...provider,
             name: providerSummary.label || provider.name,
+            eyebrow,
             path: providerSummary.startPath || provider.path,
             callbackPath: providerSummary.callbackPath,
           };

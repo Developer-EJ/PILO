@@ -135,7 +135,7 @@ export function CurrentWorkspaceSwitcher() {
     state.status === "error";
   const selectedName = state.selectedWorkspace?.name ?? "PILO";
   const selectedDescription =
-    state.selectedWorkspace?.description ?? "AI Project OS";
+    state.selectedWorkspace?.description ?? "AI 프로젝트 OS";
 
   if (state.status === "loading") {
     return (
@@ -143,7 +143,7 @@ export function CurrentWorkspaceSwitcher() {
         <div className="brand-mark">P</div>
         <div className="workspace-brand-copy">
           <p>PILO</p>
-          <span>Loading workspace</span>
+          <span>워크스페이스 불러오는 중</span>
         </div>
       </div>
     );
@@ -157,8 +157,8 @@ export function CurrentWorkspaceSwitcher() {
           <p>PILO</p>
           <span>
             {state.status === "empty"
-              ? "Workspace setup needed"
-              : "Workspace list failed"}
+              ? "워크스페이스 생성 필요"
+              : "목록을 불러오지 못함"}
           </span>
         </div>
       </div>
@@ -179,7 +179,7 @@ export function CurrentWorkspaceSwitcher() {
         className="workspace-brand-button"
         aria-expanded={isOpen}
         aria-haspopup="listbox"
-        aria-label="Select current workspace"
+        aria-label="현재 워크스페이스 선택"
         onClick={() => setIsOpen((open) => !open)}
       >
         <div className="brand-mark" aria-hidden="true">
@@ -188,7 +188,7 @@ export function CurrentWorkspaceSwitcher() {
         <div className="workspace-brand-copy">
           <p>
             {state.status === "url_not_found"
-              ? "Unknown workspace"
+              ? "알 수 없는 워크스페이스"
               : selectedName}
           </p>
           <span>
@@ -206,7 +206,7 @@ export function CurrentWorkspaceSwitcher() {
         <div className="workspace-brand-menu" role="listbox">
           {state.status === "url_not_found" ? (
             <div className="workspace-brand-menu-note">
-              This URL workspace is not available.
+              이 URL의 워크스페이스를 찾을 수 없습니다.
             </div>
           ) : null}
           {state.workspaces.map((workspace) => (

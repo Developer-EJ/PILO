@@ -22,7 +22,7 @@ export function LoginProviderButtons({ providers }: LoginProviderButtonsProps) {
             <strong>{provider.name}로 계속하기</strong>
             <small>{provider.eyebrow}</small>
           </span>
-          <b aria-hidden="true">→</b>
+          <b aria-hidden="true">&rarr;</b>
         </a>
       ))}
     </div>

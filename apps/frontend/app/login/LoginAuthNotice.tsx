@@ -22,7 +22,7 @@ export function LoginAuthNotice() {
       return {
         kind: "success",
         title: "로그인 완료",
-        message: `${provider} 인증이 완료되었습니다. Workspace로 이동합니다.`,
+        message: `${provider} 인증이 완료되었습니다. 워크스페이스로 이동합니다.`,
       };
     }
 
@@ -32,7 +32,7 @@ export function LoginAuthNotice() {
         title: "로그인 실패",
         message:
           searchParams.get("message") ??
-          `${provider} 인증이 완료되지 않았습니다. 다시 시도해 주세요.`,
+          `${provider} 인증을 완료하지 못했습니다. 다시 시도해 주세요.`,
         code: errorCode ?? "oauth_callback_failed",
       };
     }

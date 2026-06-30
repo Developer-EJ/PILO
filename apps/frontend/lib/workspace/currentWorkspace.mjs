@@ -184,14 +184,14 @@ export function buildWorkspaceFeatureRoutes(workspaceId) {
 }
 
 const workspaceFeatureTabDefinitions = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "canvas", label: "Canvas" },
-  { key: "tasks", label: "Tasks" },
+  { key: "dashboard", label: "대시보드" },
+  { key: "canvas", label: "캔버스" },
+  { key: "tasks", label: "태스크" },
   { key: "github", label: "GitHub" },
-  { key: "meetings", label: "Meetings / Voice / Reports" },
-  { key: "reviews", label: "Reviews" },
-  { key: "agent", label: "Agent" },
-  { key: "planning", label: "Planning" },
+  { key: "meetings", label: "회의 / 음성 / 리포트" },
+  { key: "reviews", label: "리뷰" },
+  { key: "agent", label: "에이전트" },
+  { key: "planning", label: "프로젝트 설정" },
 ];
 
 function formatWorkspaceTabBadge(value) {

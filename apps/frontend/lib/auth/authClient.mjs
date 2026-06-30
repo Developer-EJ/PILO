@@ -1,13 +1,14 @@
 import { createMockAuthClient } from "./mockAuthClient.mjs";
 
-const DEFAULT_AUTH_MODE = "mock";
+const DEFAULT_APP_SERVER_URL = "http://localhost:4000";
+const DEFAULT_AUTH_MODE = "api";
 const authProvidersPath = "/api/auth/providers";
 
 export function defaultAppServerUrl() {
   return (
     process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ??
     process.env.NEXT_PUBLIC_APP_SERVER_URL ??
-    ""
+    DEFAULT_APP_SERVER_URL
   );
 }
 
