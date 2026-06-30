@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import {
   WorkspaceAccessPublicService,
   WorkspaceActor,
@@ -33,6 +33,7 @@ import {
 } from "./agent-runtime.types";
 
 const LOCAL_MODEL_NAME = "local-deterministic-planner";
+const agentRuntimeLogger = new Logger("AgentRuntimeService");
 
 @Injectable()
 export class AgentRuntimeService {
@@ -727,7 +728,12 @@ async function tryBuildOnboardingWithOpenAI(
   fallback: AgentOnboardingTurnResult,
 ): Promise<AgentOnboardingTurnResult | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    agentRuntimeLogger.warn(
+      "Agent onboarding OpenAI fallback used: missing_api_key",
+    );
+    return null;
+  }
 
   const model =
     process.env.PILO_AGENT_ONBOARDING_MODEL ??
@@ -747,7 +753,7 @@ async function tryBuildOnboardingWithOpenAI(
           {
             role: "system",
             content:
-              "You are PILO's onboarding planning agent. Return only compact JSON matching the requested fields. Do not create a workspace. Ask exactly one missing question unless all required fields are complete.",
+              "You are PILO's onboarding planning agent. Return one raw compact JSON object only. Do not wrap it in Markdown or code fences. Do not add prose before or after the JSON. Do not create a workspace. Ask exactly one missing question unless all required fields are complete.",
           },
           {
             role: "user",
@@ -756,19 +762,41 @@ async function tryBuildOnboardingWithOpenAI(
               currentDraft: body.draft,
               messages: body.messages,
               fallback,
+              responseRules: [
+                "Return JSON only.",
+                "The first character must be { and the last character must be }.",
+                "Do not include markdown fences such as ```json.",
+              ],
             }),
           },
         ],
       }),
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      agentRuntimeLogger.warn(
+        `Agent onboarding OpenAI fallback used: http_status status=${response.status}`,
+      );
+      return null;
+    }
 
     const payload = (await response.json()) as Record<string, unknown>;
     const rawText = extractOpenAIText(payload);
-    if (!rawText) return null;
+    if (!rawText) {
+      agentRuntimeLogger.warn(
+        "Agent onboarding OpenAI fallback used: empty_output",
+      );
+      return null;
+    }
 
-    const parsed = JSON.parse(rawText) as Partial<AgentOnboardingTurnResult>;
+    const parsed = parseOpenAIJson(rawText);
+    if (!parsed) {
+      agentRuntimeLogger.warn(
+        "Agent onboarding OpenAI fallback used: parse_error",
+      );
+      return null;
+    }
+
     const draft = normalizeOnboardingDraft(parsed.draft ?? fallback.draft);
     const missingFields = missingOnboardingFields(draft);
     const ready = missingFields.length === 0;
@@ -803,7 +831,10 @@ async function tryBuildOnboardingWithOpenAI(
       usedModel: model,
       fallback: false,
     };
-  } catch {
+  } catch (error) {
+    agentRuntimeLogger.warn(
+      `Agent onboarding OpenAI fallback used: request_error message=${safeErrorMessage(error)}`,
+    );
     return null;
   }
 }
@@ -826,6 +857,36 @@ function extractOpenAIText(payload: Record<string, unknown>): string | null {
         return contentItem.text.trim();
       }
     }
+  }
+
+  return null;
+}
+
+function parseOpenAIJson(rawText: string): Partial<AgentOnboardingTurnResult> | null {
+  const jsonText = extractJsonObjectText(rawText);
+  if (!jsonText) return null;
+
+  try {
+    return JSON.parse(jsonText) as Partial<AgentOnboardingTurnResult>;
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonObjectText(rawText: string): string | null {
+  const text = rawText.trim();
+  if (!text) return null;
+
+  const fencedMatch = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const candidate = (fencedMatch?.[1] ?? text).trim();
+  if (candidate.startsWith("{") && candidate.endsWith("}")) {
+    return candidate;
+  }
+
+  const objectStart = candidate.indexOf("{");
+  const objectEnd = candidate.lastIndexOf("}");
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    return candidate.slice(objectStart, objectEnd + 1);
   }
 
   return null;
@@ -1368,4 +1429,8 @@ function text(value: unknown): string | null {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function safeErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "unknown_error";
 }

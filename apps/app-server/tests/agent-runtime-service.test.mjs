@@ -34,6 +34,59 @@ function createService() {
   };
 }
 
+const completeOnboardingDraft = {
+  workspaceTitle: "PILO Sprint",
+  goal: "Build a usable MVP plan",
+  problem: "The team starts with scattered ideas",
+  targetUser: "student builders",
+  duration: "4 weeks",
+  teamSize: 4,
+  experienceLevel: "beginner",
+  outputGoal: "demo-ready workspace",
+};
+
+function collectStrings(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStrings);
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectStrings);
+  }
+  return [];
+}
+
+function createOnboardingOpenAiPayload(overrides = {}) {
+  return {
+    reply: "요약을 확인하고 워크스페이스 생성을 확정해 주세요.",
+    draft: completeOnboardingDraft,
+    missingFields: [],
+    ready: true,
+    fieldInFocus: null,
+    summary: "PILO Sprint 온보딩 요약",
+    planningSeed: completeOnboardingDraft,
+    taskCandidates: [
+      {
+        workspaceId: null,
+        sourceType: "planning_feature",
+        sourceId: "onboarding-feature-brief",
+        title: "MVP 요구사항 정리",
+        description: "사용자 시나리오와 성공 기준을 정리합니다.",
+        assigneeMemberId: null,
+        priority: "high",
+        dueDate: null,
+      },
+    ],
+    milestoneCandidates: [
+      {
+        title: "MVP 방향 확정",
+        status: "planned",
+        startDate: null,
+        endDate: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe("AgentRuntimeService", () => {
   it("creates a planning draft with user-confirmable owner action proposals", async () => {
     const { repository, service, workspaceAccess } = createService();
@@ -171,16 +224,7 @@ describe("AgentRuntimeService", () => {
 
       const completed = await service.runOnboardingTurn({
         messages: [],
-        draft: {
-          workspaceTitle: "PILO Sprint",
-          goal: "Build a usable MVP plan",
-          problem: "The team starts with scattered ideas",
-          targetUser: "student builders",
-          duration: "4 weeks",
-          teamSize: 4,
-          experienceLevel: "beginner",
-          outputGoal: "demo-ready workspace",
-        },
+        draft: completeOnboardingDraft,
       });
 
       assert.equal(completed.ready, true);
@@ -197,10 +241,122 @@ describe("AgentRuntimeService", () => {
         ),
       );
       assert.equal(completed.taskCandidates[0].workspaceId, null);
+
+      const fallbackText = collectStrings(completed).join("\n");
+      for (const fragment of [
+        "?뚰",
+        "?꾩",
+        "紐",
+        "寃",
+        "臾몄",
+        "湲",
+        "�",
+      ]) {
+        assert.equal(
+          fallbackText.includes(fragment),
+          false,
+          `onboarding fallback text contains mojibake fragment: ${fragment}`,
+        );
+      }
     } finally {
-      if (originalApiKey) {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
         process.env.OPENAI_API_KEY = originalApiKey;
       }
+    }
+  });
+
+  it("uses raw JSON OpenAI onboarding responses without falling back", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalModel = process.env.PILO_AGENT_ONBOARDING_MODEL;
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.PILO_AGENT_ONBOARDING_MODEL = "gpt-test";
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), init });
+      return Response.json({
+        output_text: JSON.stringify(createOnboardingOpenAiPayload()),
+      });
+    };
+
+    try {
+      const { service } = createService();
+      const result = await service.runOnboardingTurn({
+        messages: [{ role: "user", body: "PILO Sprint" }],
+        draft: {},
+      });
+
+      assert.equal(result.fallback, false);
+      assert.equal(result.usedModel, "gpt-test");
+      assert.equal(result.ready, true);
+      assert.equal(result.draft.workspaceTitle, "PILO Sprint");
+      assert.equal(result.taskCandidates[0].sourceType, "planning_feature");
+      const requestBody = JSON.parse(requests[0].init.body);
+      assert.equal(
+        requestBody.input[0].content.includes("raw compact JSON object only"),
+        true,
+      );
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+      if (originalModel === undefined) {
+        delete process.env.PILO_AGENT_ONBOARDING_MODEL;
+      } else {
+        process.env.PILO_AGENT_ONBOARDING_MODEL = originalModel;
+      }
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("parses fenced JSON OpenAI onboarding responses without falling back", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    const originalModel = process.env.PILO_AGENT_ONBOARDING_MODEL;
+    const originalFetch = globalThis.fetch;
+
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.PILO_AGENT_ONBOARDING_MODEL = "gpt-test";
+    globalThis.fetch = async () =>
+      Response.json({
+        output_text:
+          "```json\n" +
+          JSON.stringify(
+            createOnboardingOpenAiPayload({
+              reply: "코드펜스 응답도 정상 처리했습니다.",
+              summary: "코드펜스 온보딩 요약",
+            }),
+          ) +
+          "\n```",
+      });
+
+    try {
+      const { service } = createService();
+      const result = await service.runOnboardingTurn({
+        messages: [{ role: "user", body: "PILO Sprint" }],
+        draft: {},
+      });
+
+      assert.equal(result.fallback, false);
+      assert.equal(result.usedModel, "gpt-test");
+      assert.equal(result.reply, "코드펜스 응답도 정상 처리했습니다.");
+      assert.equal(result.summary, "코드펜스 온보딩 요약");
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+      if (originalModel === undefined) {
+        delete process.env.PILO_AGENT_ONBOARDING_MODEL;
+      } else {
+        process.env.PILO_AGENT_ONBOARDING_MODEL = originalModel;
+      }
+      globalThis.fetch = originalFetch;
     }
   });
 });

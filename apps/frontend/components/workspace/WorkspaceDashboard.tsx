@@ -4,8 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  createWorkspaceDailyBriefingClient,
+  createWorkspaceDailyBriefingFixture,
   createWorkspaceDashboardClient,
   createWorkspaceDashboardFixture,
+  dailyBriefingUserMessageFromError,
 } from "../../lib/workspace/dashboardClient.mjs";
 import {
   extractWorkspaceIdFromPathname,
@@ -15,6 +18,9 @@ import {
 import { mockWorkspaces } from "../../lib/workspace/workspaceClient.mjs";
 
 type WorkspaceDashboardData = ReturnType<typeof createWorkspaceDashboardFixture>;
+type WorkspaceDailyBriefingData = ReturnType<
+  typeof createWorkspaceDailyBriefingFixture
+>;
 
 type WorkspaceDashboardState =
   | { status: "loading"; dashboard: null; warnings: string[]; error: null }
@@ -25,6 +31,13 @@ type WorkspaceDashboardState =
       error: null;
     }
   | { status: "error"; dashboard: null; warnings: string[]; error: string };
+
+type WorkspaceDailyBriefingState = {
+  status: "loading" | "ready" | "error";
+  briefing: WorkspaceDailyBriefingData | null;
+  error: string | null;
+  isRegenerating: boolean;
+};
 
 type DashboardTask = {
   id: string;
@@ -75,6 +88,13 @@ const initialDashboardState: WorkspaceDashboardState = {
   error: null,
 };
 
+const initialDailyBriefingState: WorkspaceDailyBriefingState = {
+  status: "loading",
+  briefing: null,
+  error: null,
+  isRegenerating: false,
+};
+
 const taskStatusLabels: Record<string, string> = {
   todo: "할 일",
   in_progress: "진행 중",
@@ -109,6 +129,21 @@ function formatGeneratedAt(value: string | null | undefined) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) return "갱신 시간 없음";
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatDailyBriefingGeneratedAt(value: string | null | undefined) {
+  if (!value) return "생성 시각 없음";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "생성 시각 없음";
 
   return new Intl.DateTimeFormat("ko-KR", {
     month: "short",
@@ -217,11 +252,74 @@ function EmptyRow({ text }: { text: string }) {
   return <p className="empty-row">{text}</p>;
 }
 
+function BriefingList({
+  items,
+  emptyText,
+}: {
+  items: string[];
+  emptyText: string;
+}) {
+  if (!items.length) {
+    return <p className="daily-briefing-empty">{emptyText}</p>;
+  }
+
+  return (
+    <ul className="daily-briefing-list">
+      {items.map((item, index) => (
+        <li key={`${item}-${index}`}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function describeSourceDetail(detail: Record<string, unknown>) {
+  const source = typeof detail.source === "string" ? detail.source : null;
+  const status = typeof detail.status === "string" ? detail.status : null;
+  const label = typeof detail.label === "string" ? detail.label : null;
+  const sourceLabels: Record<string, string> = {
+    dashboard: "대시보드",
+    tasks: "작업",
+    progress: "진행률",
+    meetings: "회의",
+    reviews: "리뷰",
+    github: "GitHub",
+    personalization: "개인화",
+    workspace_dashboard_fixture: "워크스페이스",
+  };
+  const sourceText = source ? sourceLabels[source] ?? source : null;
+
+  if (label) {
+    return sourceText ? `${sourceText}: ${label}` : label;
+  }
+
+  if (status === "fixture" || status === "deferred") {
+    return sourceText
+      ? `${sourceText}: 워크스페이스 기준 참고 신호`
+      : "워크스페이스 기준 참고 신호";
+  }
+
+  return [sourceText, status].filter(Boolean).join(" · ") || "워크스페이스 참고 신호";
+}
+
+function humanizeWarning(warning: string) {
+  if (warning.includes("fixture") || warning.includes("fallback")) {
+    return "일부 데이터가 부족해 임시 요약을 포함했어요.";
+  }
+
+  if (warning.includes("deferred")) {
+    return "아직 연결 대기 중인 데이터는 워크스페이스 기준 참고 신호로만 반영했어요.";
+  }
+
+  return warning.replace(/_/g, " ");
+}
+
 export function WorkspaceDashboard() {
   const pathname = usePathname() ?? "/";
   const workspaceId = useMemo(() => resolveWorkspaceId(pathname), [pathname]);
   const [dashboardState, setDashboardState] =
     useState<WorkspaceDashboardState>(initialDashboardState);
+  const [dailyBriefingState, setDailyBriefingState] =
+    useState<WorkspaceDailyBriefingState>(initialDailyBriefingState);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,7 +361,75 @@ export function WorkspaceDashboard() {
     };
   }, [workspaceId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const dailyBriefingClient = createWorkspaceDailyBriefingClient();
+
+    async function loadDailyBriefing() {
+      setDailyBriefingState(initialDailyBriefingState);
+
+      try {
+        const briefing = await dailyBriefingClient.getDailyBriefing(workspaceId);
+
+        if (cancelled) return;
+
+        setDailyBriefingState({
+          status: "ready",
+          briefing: briefing as WorkspaceDailyBriefingData,
+          error: null,
+          isRegenerating: false,
+        });
+      } catch (error) {
+        if (cancelled) return;
+
+        setDailyBriefingState({
+          status: "error",
+          briefing: createWorkspaceDailyBriefingFixture(workspaceId),
+          error: dailyBriefingUserMessageFromError(error),
+          isRegenerating: false,
+        });
+      }
+    }
+
+    void loadDailyBriefing();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  async function regenerateDailyBriefing() {
+    const dailyBriefingClient = createWorkspaceDailyBriefingClient();
+
+    setDailyBriefingState((currentState) => ({
+      ...currentState,
+      error: null,
+      isRegenerating: true,
+    }));
+
+    try {
+      const briefing =
+        await dailyBriefingClient.regenerateDailyBriefing(workspaceId);
+
+      setDailyBriefingState({
+        status: "ready",
+        briefing: briefing as WorkspaceDailyBriefingData,
+        error: null,
+        isRegenerating: false,
+      });
+    } catch (error) {
+      setDailyBriefingState((currentState) => ({
+        status: currentState.briefing ? "ready" : "error",
+        briefing:
+          currentState.briefing ?? createWorkspaceDailyBriefingFixture(workspaceId),
+        error: dailyBriefingUserMessageFromError(error),
+        isRegenerating: false,
+      }));
+    }
+  }
+
   const dashboard = dashboardState.dashboard;
+  const dailyBriefing = dailyBriefingState.briefing;
   const stats = dashboard ? buildStats(dashboard) : [];
   const upcomingTasks = dashboard
     ? [...(dashboard.tasks as DashboardTask[])]
@@ -324,6 +490,134 @@ export function WorkspaceDashboard() {
               일부 섹션 데이터가 비어 있어 가능한 정보만 표시하고 있어요.
             </div>
           ) : null}
+
+          <section className="panel daily-briefing-panel" aria-label="데일리 브리핑">
+            <div className="panel-head">
+              <div>
+                <h2>데일리 브리핑</h2>
+                <span>
+                  {dailyBriefing
+                    ? formatDailyBriefingGeneratedAt(dailyBriefing.generatedAt)
+                    : "브리핑 준비 중"}
+                </span>
+              </div>
+              <button
+                className="daily-briefing-refresh"
+                disabled={dailyBriefingState.isRegenerating}
+                onClick={regenerateDailyBriefing}
+                type="button"
+              >
+                {dailyBriefingState.isRegenerating ? "생성 중" : "다시 생성"}
+              </button>
+            </div>
+
+            {dailyBriefingState.status === "loading" ? (
+              <p className="dashboard-muted">
+                오늘의 프로젝트 흐름과 내 할 일을 불러오고 있어요.
+              </p>
+            ) : null}
+
+            {dailyBriefing ? (
+              <>
+                <div className="daily-briefing-meta">
+                  <span
+                    className={
+                      dailyBriefing.fallback
+                        ? "daily-briefing-status is-fallback"
+                        : "daily-briefing-status"
+                    }
+                  >
+                    {dailyBriefing.fallback
+                      ? "임시 요약"
+                      : `AI 사용${dailyBriefing.usedModel ? ` · ${dailyBriefing.usedModel}` : ""}`}
+                  </span>
+                  <span>생성 시각 {formatDailyBriefingGeneratedAt(dailyBriefing.generatedAt)}</span>
+                </div>
+
+                {dailyBriefingState.error ? (
+                  <p className="daily-briefing-warning">
+                    {dailyBriefingState.error} 현재 화면에는 가능한 참고 요약을
+                    표시합니다.
+                  </p>
+                ) : null}
+
+                <div className="daily-briefing-grid">
+                  <article className="daily-briefing-card">
+                    <p className="eyebrow">프로젝트 브리핑</p>
+                    <h3>{dailyBriefing.projectBriefing.headline}</h3>
+                    <p>{dailyBriefing.projectBriefing.summary}</p>
+                    <div className="daily-briefing-columns">
+                      <div>
+                        <strong>주요 신호</strong>
+                        <BriefingList
+                          emptyText="표시할 주요 신호가 아직 없어요."
+                          items={dailyBriefing.projectBriefing.highlights}
+                        />
+                      </div>
+                      <div>
+                        <strong>위험 요소</strong>
+                        <BriefingList
+                          emptyText="표시할 위험 요소가 아직 없어요."
+                          items={dailyBriefing.projectBriefing.risks}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <strong>추천 행동</strong>
+                      <BriefingList
+                        emptyText="추천 행동이 아직 없어요."
+                        items={dailyBriefing.projectBriefing.recommendedActions}
+                      />
+                    </div>
+                  </article>
+
+                  <article className="daily-briefing-card">
+                    <p className="eyebrow">나의 브리핑</p>
+                    <h3>{dailyBriefing.personalBriefing.headline}</h3>
+                    <p>{dailyBriefing.personalBriefing.summary}</p>
+                    <div className="daily-briefing-columns">
+                      <div>
+                        <strong>내 작업</strong>
+                        <BriefingList
+                          emptyText="표시할 내 작업이 아직 없어요."
+                          items={dailyBriefing.personalBriefing.myTasks}
+                        />
+                      </div>
+                      <div>
+                        <strong>주의 필요</strong>
+                        <BriefingList
+                          emptyText="주의가 필요한 항목이 아직 없어요."
+                          items={dailyBriefing.personalBriefing.needsAttention}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <strong>추천 행동</strong>
+                      <BriefingList
+                        emptyText="추천 행동이 아직 없어요."
+                        items={dailyBriefing.personalBriefing.recommendedActions}
+                      />
+                    </div>
+                  </article>
+                </div>
+
+                {dailyBriefing.sourceDetails.length || dailyBriefing.warnings.length ? (
+                  <div className="daily-briefing-footnotes">
+                    {dailyBriefing.sourceDetails.map((detail, index) => (
+                      <span key={`source-${index}`}>
+                        {describeSourceDetail(detail)}
+                      </span>
+                    ))}
+                    {dailyBriefing.warnings.map((warning, index) => (
+                      <span key={`warning-${index}`}>
+                        {humanizeWarning(warning)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </section>
 
           {workspaceBriefItems.length ? (
             <section className="workspace-brief-panel" aria-label="워크스페이스 요약">

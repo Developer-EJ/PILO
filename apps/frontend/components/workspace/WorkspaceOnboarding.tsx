@@ -8,22 +8,15 @@ import {
   writeStoredWorkspaceId,
 } from "../../lib/workspace/currentWorkspace.mjs";
 import { createWorkspaceClient } from "../../lib/workspace/workspaceClient.mjs";
-import { writeWorkspacePlanningOnboardingSeed } from "../../lib/workspace/workspaceOnboardingSeed.mjs";
+import {
+  writeWorkspaceOnboardingPayload,
+  writeWorkspacePlanningOnboardingSeed,
+} from "../../lib/workspace/workspaceOnboardingSeed.mjs";
 import {
   AgentOnboardingFlow,
   type AgentOnboardingWorkspacePayload,
 } from "../agent/AgentOnboardingFlow";
-
-type WorkspaceOnboardingValues = {
-  title: string;
-  goal: string;
-  problem: string;
-  targetUsers: string;
-  duration: string;
-  teamSize: string;
-  experienceLevel: string;
-  finalDeliverable: string;
-};
+import { AgentOnboardingReview } from "../agent/AgentOnboardingReview";
 
 function text(value: unknown) {
   if (typeof value !== "string") return "";
@@ -31,40 +24,16 @@ function text(value: unknown) {
   return value.trim();
 }
 
-function teamSizeText(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  return text(value);
-}
-
-function toWorkspaceOnboardingValues(
-  payload: AgentOnboardingWorkspacePayload,
-): WorkspaceOnboardingValues {
+function buildWorkspaceDescription(payload: AgentOnboardingWorkspacePayload) {
   const onboarding = payload.onboarding ?? payload.planningSeed ?? {};
-
-  return {
-    title: text(onboarding.workspaceTitle) || text(payload.name) || "새 워크스페이스",
-    goal: text(onboarding.goal),
-    problem: text(onboarding.problem),
-    targetUsers: text(onboarding.targetUser),
-    duration: text(onboarding.duration),
-    teamSize: teamSizeText(onboarding.teamSize),
-    experienceLevel: text(onboarding.experienceLevel),
-    finalDeliverable: text(onboarding.outputGoal),
-  };
-}
-
-function buildWorkspaceDescription(values: WorkspaceOnboardingValues) {
   const description = [
-    `목표: ${values.goal}`,
-    `해결할 문제: ${values.problem}`,
-    `대상 사용자: ${values.targetUsers}`,
-    `기간: ${values.duration}`,
-    `팀 규모: ${values.teamSize}`,
-    `경험 수준: ${values.experienceLevel}`,
-    `최종 산출물: ${values.finalDeliverable}`,
+    `목표: ${text(onboarding.goal)}`,
+    `해결할 문제: ${text(onboarding.problem)}`,
+    `대상 사용자: ${text(onboarding.targetUser)}`,
+    `기간: ${text(onboarding.duration)}`,
+    `팀 규모: ${String(onboarding.teamSize ?? "").trim()}`,
+    `경험 수준: ${text(onboarding.experienceLevel)}`,
+    `최종 산출물: ${text(onboarding.outputGoal)}`,
   ]
     .filter((line) => !line.endsWith(": "))
     .join("\n");
@@ -74,12 +43,32 @@ function buildWorkspaceDescription(values: WorkspaceOnboardingValues) {
     : description;
 }
 
+function withWorkspaceId(
+  payload: AgentOnboardingWorkspacePayload,
+  workspaceId: string,
+): AgentOnboardingWorkspacePayload {
+  return {
+    ...payload,
+    taskCandidates: payload.taskCandidates.map((candidate) => ({
+      ...candidate,
+      workspaceId,
+    })),
+    milestoneCandidates: payload.milestoneCandidates.map((candidate) => ({
+      ...candidate,
+      workspaceId,
+    })),
+  };
+}
+
 export function WorkspaceOnboarding() {
   const router = useRouter();
+  const [reviewPayload, setReviewPayload] =
+    useState<AgentOnboardingWorkspacePayload | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  async function handleConfirm(payload: AgentOnboardingWorkspacePayload) {
-    const values = toWorkspaceOnboardingValues(payload);
+  async function createWorkspace(payload: AgentOnboardingWorkspacePayload) {
+    const onboarding = payload.onboarding ?? payload.planningSeed ?? {};
     const workspaceClient = createWorkspaceClient({
       mock: {
         workspaces: [],
@@ -87,37 +76,75 @@ export function WorkspaceOnboarding() {
     });
 
     setSubmitting(true);
+    setErrorMessage(null);
 
     try {
       const workspace = await workspaceClient.createWorkspace({
-        name: values.title,
-        description: buildWorkspaceDescription(values) || payload.description,
+        name: text(payload.name) || text(onboarding.workspaceTitle) || "새 워크스페이스",
+        description: buildWorkspaceDescription(payload) || text(payload.description),
         type: payload.type ?? "side_project",
-        onboarding: values,
+        onboarding,
       });
+      const payloadWithWorkspaceId = withWorkspaceId(payload, workspace.id);
 
       writeStoredWorkspaceId(workspace.id);
       writeWorkspacePlanningOnboardingSeed({
         workspaceId: workspace.id,
-        values: payload.planningSeed ?? payload.onboarding ?? values,
+        values: payloadWithWorkspaceId.planningSeed ?? payloadWithWorkspaceId.onboarding,
+      });
+      writeWorkspaceOnboardingPayload({
+        workspaceId: workspace.id,
+        payload: payloadWithWorkspaceId,
       });
       router.replace(workspaceDashboardHref(workspace.id));
     } catch (error) {
       setSubmitting(false);
-      throw new Error(
-        "워크스페이스를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "워크스페이스를 만들지 못했어요. 잠시 후 다시 시도해 주세요.",
       );
     }
   }
 
+  if (!reviewPayload) {
+    return (
+      <main className="workspace-onboarding-shell workspace-onboarding-agent-shell">
+        <AgentOnboardingFlow
+          className="workspace-agent-onboarding-flow"
+          disabled={submitting}
+          onCancel={() => router.replace(workspaceEntryHref())}
+          onComplete={(payload) => {
+            setReviewPayload(payload);
+            setErrorMessage(null);
+          }}
+        />
+        {errorMessage ? (
+          <p className="workspace-onboarding-error">{errorMessage}</p>
+        ) : null}
+      </main>
+    );
+  }
+
   return (
-    <main className="workspace-onboarding-shell workspace-onboarding-agent-shell">
-      <AgentOnboardingFlow
-        className="workspace-agent-onboarding-flow"
+    <main className="workspace-onboarding-shell">
+      <AgentOnboardingReview
+        className="workspace-agent-onboarding-review"
         disabled={submitting}
-        onCancel={() => router.replace(workspaceEntryHref())}
-        onConfirm={handleConfirm}
+        onBack={() => {
+          setReviewPayload(null);
+          setErrorMessage(null);
+        }}
+        onChange={(payload) => {
+          setReviewPayload(payload);
+          setErrorMessage(null);
+        }}
+        onConfirm={createWorkspace}
+        payload={reviewPayload}
       />
+      {errorMessage ? (
+        <p className="workspace-onboarding-error">{errorMessage}</p>
+      ) : null}
     </main>
   );
 }

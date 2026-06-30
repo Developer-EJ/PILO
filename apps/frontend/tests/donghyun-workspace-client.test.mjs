@@ -21,13 +21,25 @@ import {
   workspaceOnboardingHref,
 } from "../lib/workspace/currentWorkspace.mjs";
 import {
+  dailyBriefingUserMessageFromError,
+  defaultWorkspaceDailyBriefingMode,
+  createWorkspaceDailyBriefingClient,
+  createMockWorkspaceDailyBriefingClient,
+  createWorkspaceDailyBriefingApiClient,
   createWorkspaceDashboardApiClient,
+  createWorkspaceDailyBriefingFixture,
   createWorkspaceDashboardFixture,
+  normalizeWorkspaceDailyBriefing,
+  WorkspaceDailyBriefingApiError,
 } from "../lib/workspace/dashboardClient.mjs";
 import {
   PLANNING_ONBOARDING_LAST_SEED_STORAGE_KEY,
+  WORKSPACE_ONBOARDING_LAST_PAYLOAD_STORAGE_KEY,
+  buildWorkspaceOnboardingPayloadSnapshot,
   buildWorkspacePlanningOnboardingSeed,
+  workspaceOnboardingPayloadStorageKey,
   workspacePlanningOnboardingSeedStorageKey,
+  writeWorkspaceOnboardingPayload,
   writeWorkspacePlanningOnboardingSeed,
 } from "../lib/workspace/workspaceOnboardingSeed.mjs";
 import { resolveWorkspaceLoginNextPath } from "../app/login/loginRedirects.mjs";
@@ -295,6 +307,87 @@ describe("donghyun workspace client", () => {
     );
   });
 
+  it("stores Agent onboarding candidates with the created workspace id", () => {
+    const workspaceId = "workspace-onboarding-candidates";
+    const storage = new Map();
+    const storageLike = {
+      getItem(key) {
+        return storage.get(key) ?? null;
+      },
+      setItem(key, value) {
+        storage.set(key, value);
+      },
+    };
+    const payload = {
+      name: "Candidate Workspace",
+      description: "Candidate workspace goal",
+      type: "side_project",
+      onboarding: {
+        workspaceTitle: "Candidate Workspace",
+        goal: "Ship MVP",
+        problem: "No shared plan",
+        targetUser: "Project team",
+        duration: "4 weeks",
+        teamSize: 5,
+        experienceLevel: "beginner",
+        outputGoal: "Demoable MVP",
+      },
+      planningSeed: {
+        workspaceTitle: "Candidate Workspace",
+        goal: "Ship MVP",
+        problem: "No shared plan",
+        targetUser: "Project team",
+        duration: "4 weeks",
+        teamSize: 5,
+        experienceLevel: "beginner",
+        outputGoal: "Demoable MVP",
+      },
+      taskCandidates: [
+        {
+          workspaceId: null,
+          sourceType: "planning_feature",
+          sourceId: "task-1",
+          title: "Define scope",
+        },
+      ],
+      milestoneCandidates: [
+        {
+          title: "MVP direction",
+          status: "planned",
+        },
+      ],
+    };
+
+    const snapshot = writeWorkspaceOnboardingPayload({
+      workspaceId,
+      payload,
+      storage: storageLike,
+    });
+    const scopedSnapshot = JSON.parse(
+      storageLike.getItem(workspaceOnboardingPayloadStorageKey(workspaceId)),
+    );
+    const lastSnapshot = JSON.parse(
+      storageLike.getItem(WORKSPACE_ONBOARDING_LAST_PAYLOAD_STORAGE_KEY),
+    );
+
+    assert.deepEqual(snapshot.taskCandidates[0], {
+      workspaceId,
+      sourceType: "planning_feature",
+      sourceId: "task-1",
+      title: "Define scope",
+    });
+    assert.equal(snapshot.planningSeed.workspaceId, workspaceId);
+    assert.equal(scopedSnapshot.taskCandidates[0].workspaceId, workspaceId);
+    assert.deepEqual(lastSnapshot, scopedSnapshot);
+    assert.equal(
+      buildWorkspaceOnboardingPayloadSnapshot({
+        workspaceId,
+        payload,
+      }).milestoneCandidates[0].workspaceId,
+      workspaceId,
+    );
+  });
+
   it("keeps Planning and Agent out of the workspace sidebar contract", () => {
     const workspaceShellSource = readFileSync(
       new URL("../components/workspace/WorkspaceShell.tsx", import.meta.url),
@@ -442,5 +535,314 @@ describe("donghyun workspace client", () => {
     assert.equal(result.dashboard.tasks[0].title, "런타임 작업");
     assert.equal(result.dashboard.pullRequests.length, 0);
     assert.equal(result.dashboard.progress.progressRate, 0);
+  });
+
+  it("calls Daily Briefing GET and regenerate endpoints with runtime metadata", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const requests = [];
+    const firstBriefing = {
+      ...createWorkspaceDailyBriefingFixture(workspaceId),
+      generatedAt: "2026-06-30T01:00:00.000Z",
+      usedModel: "gpt-4.1-mini",
+      fallback: false,
+      projectBriefing: {
+        headline: "프로젝트 브리핑",
+        summary: "런타임 프로젝트 요약",
+        highlights: ["작업 흐름이 갱신됨"],
+        risks: ["리뷰 대기 확인 필요"],
+        recommendedActions: ["작업 보드를 확인하세요"],
+      },
+      personalBriefing: {
+        headline: "나의 브리핑",
+        summary: "개인 작업 요약",
+        myTasks: ["오늘 할 일 확인"],
+        needsAttention: ["막힌 작업 확인"],
+        recommendedActions: ["우선순위 갱신"],
+      },
+      sourceDetails: [{ source: "github", status: "deferred" }],
+      warnings: ["github_deferred"],
+    };
+    const regeneratedBriefing = {
+      ...firstBriefing,
+      generatedAt: "2026-06-30T02:00:00.000Z",
+      projectBriefing: {
+        ...firstBriefing.projectBriefing,
+        headline: "재생성된 프로젝트 브리핑",
+      },
+    };
+    const client = createWorkspaceDailyBriefingApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher: async (url, init = {}) => {
+        requests.push({ url, init });
+
+        return Response.json(
+          init.method === "POST" ? regeneratedBriefing : firstBriefing,
+        );
+      },
+    });
+
+    const current = await client.getDailyBriefing(workspaceId);
+    const regenerated = await client.regenerateDailyBriefing(workspaceId);
+
+    assert.equal(
+      requests[0].url,
+      `https://api.pilo.dev/api/workspaces/${workspaceId}/daily-briefing`,
+    );
+    assert.equal(requests[0].init.credentials, "include");
+    assert.equal(requests[0].init.method ?? "GET", "GET");
+    assert.equal(
+      requests[1].url,
+      `https://api.pilo.dev/api/workspaces/${workspaceId}/daily-briefing/regenerate`,
+    );
+    assert.equal(requests[1].init.method, "POST");
+    assert.equal(current.usedModel, "gpt-4.1-mini");
+    assert.equal(current.fallback, false);
+    assert.equal(current.generatedAt, "2026-06-30T01:00:00.000Z");
+    assert.equal(current.sourceDetails[0].status, "deferred");
+    assert.equal(regenerated.generatedAt, "2026-06-30T02:00:00.000Z");
+    assert.equal(
+      regenerated.projectBriefing.headline,
+      "재생성된 프로젝트 브리핑",
+    );
+  });
+
+  it("keeps Daily Briefing mock fallback explicit", async () => {
+    const workspaceId = "workspace-daily-briefing-fallback";
+    const client = createMockWorkspaceDailyBriefingClient();
+
+    const briefing = await client.getDailyBriefing(workspaceId);
+
+    assert.equal(briefing.workspaceId, workspaceId);
+    assert.equal(briefing.fallback, true);
+    assert.equal(briefing.usedModel, null);
+    assert.ok(briefing.generatedAt);
+    assert.ok(briefing.projectBriefing.headline);
+    assert.ok(briefing.personalBriefing.headline);
+    assert.ok(briefing.warnings.includes("daily_briefing_fixture_fallback"));
+  });
+
+  it("keeps Daily Briefing in mock mode when the dashboard is mock", async () => {
+    const workspaceId = "workspace-daily-briefing-mock-dashboard";
+    const previousAuthMode = process.env.NEXT_PUBLIC_PILO_AUTH_MODE;
+    const previousDashboardMode = process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE;
+    const previousWorkspaceMode = process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE;
+    const previousDailyBriefingMode =
+      process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE;
+    let apiCalled = false;
+
+    try {
+      process.env.NEXT_PUBLIC_PILO_AUTH_MODE = "api";
+      delete process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE;
+      delete process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE;
+      delete process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE;
+
+      const client = createWorkspaceDailyBriefingClient({
+        fetcher: async () => {
+          apiCalled = true;
+          return new Response(null, { status: 401 });
+        },
+      });
+      const briefing = await client.getDailyBriefing(workspaceId);
+
+      assert.equal(defaultWorkspaceDailyBriefingMode(), "mock");
+      assert.equal(apiCalled, false);
+      assert.equal(briefing.workspaceId, workspaceId);
+      assert.equal(briefing.fallback, true);
+    } finally {
+      if (previousAuthMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_AUTH_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_AUTH_MODE = previousAuthMode;
+      }
+
+      if (previousDashboardMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE = previousDashboardMode;
+      }
+
+      if (previousWorkspaceMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_WORKSPACE_MODE = previousWorkspaceMode;
+      }
+
+      if (previousDailyBriefingMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE =
+          previousDailyBriefingMode;
+      }
+    }
+  });
+
+  it("keeps Daily Briefing API mode explicit and maps unauthenticated errors", async () => {
+    const workspaceId = "workspace-daily-briefing-api-guest";
+    const requests = [];
+    const previousDashboardMode = process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE;
+    const previousDailyBriefingMode =
+      process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE;
+
+    try {
+      process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE = "mock";
+      process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE = "api";
+
+      const client = createWorkspaceDailyBriefingClient({
+        baseUrl: "https://api.pilo.dev",
+        fetcher: async (url, init = {}) => {
+          requests.push({ url, init });
+          return new Response(null, { status: 401 });
+        },
+      });
+
+      await assert.rejects(
+        () => client.regenerateDailyBriefing(workspaceId),
+        (error) => {
+          const userMessage = dailyBriefingUserMessageFromError(error);
+
+          assert.equal(error.status, 401);
+          assert.equal(
+            userMessage,
+            "AI 브리핑을 불러오려면 로그인/세션이 필요합니다.",
+          );
+          assert.equal(userMessage.includes("Failed"), false);
+          return true;
+        },
+      );
+
+      assert.equal(defaultWorkspaceDailyBriefingMode(), "api");
+      assert.equal(requests[0].init.credentials, "include");
+      assert.equal(requests[0].init.method, "POST");
+    } finally {
+      if (previousDashboardMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_DASHBOARD_MODE = previousDashboardMode;
+      }
+
+      if (previousDailyBriefingMode === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_DAILY_BRIEFING_MODE =
+          previousDailyBriefingMode;
+      }
+    }
+  });
+
+  it("uses user-friendly Daily Briefing messages for auth failures", () => {
+    assert.equal(
+      dailyBriefingUserMessageFromError(
+        new WorkspaceDailyBriefingApiError("Failed to load daily briefing", {
+          status: 401,
+        }),
+      ),
+      "AI 브리핑을 불러오려면 로그인/세션이 필요합니다.",
+    );
+    assert.equal(
+      dailyBriefingUserMessageFromError(new Error("Failed to load daily briefing")),
+      "데일리 브리핑을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+    );
+  });
+
+  it("preserves app-server Daily Briefing source maps and normalizes details", () => {
+    const workspaceId = "workspace-daily-briefing-source-details";
+    const briefing = normalizeWorkspaceDailyBriefing(
+      {
+        workspaceId,
+        generatedAt: "2026-06-30T03:00:00.000Z",
+        usedModel: "gpt-4.1-mini",
+        fallback: false,
+        projectBriefing: {
+          headline: "프로젝트 브리핑",
+          summary: "실제 출처 기반 요약",
+          highlights: [],
+          risks: [],
+          recommendedActions: [],
+        },
+        personalBriefing: {
+          headline: "나의 브리핑",
+          summary: "현재 멤버 기준 요약",
+          myTasks: [],
+          needsAttention: [],
+          recommendedActions: [],
+        },
+        sources: {
+          dashboard: true,
+          tasks: true,
+          progress: true,
+          meetings: true,
+          reviews: true,
+        },
+        sourceDetails: {
+          dashboard: "fixture",
+          tasks: "dashboard_read_model",
+          progress: "dashboard_read_model",
+          meetings: "empty",
+          reviews: "empty",
+          github: "deferred",
+          personalization: "current_member",
+        },
+        warnings: ["github_deferred"],
+      },
+      { workspaceId },
+    );
+
+    assert.deepEqual(briefing.sources, {
+      dashboard: true,
+      tasks: true,
+      progress: true,
+      meetings: true,
+      reviews: true,
+    });
+    assert.equal(
+      briefing.sourceDetails.find((detail) => detail.source === "github")
+        ?.status,
+      "deferred",
+    );
+    assert.equal(
+      briefing.sourceDetails.find((detail) => detail.source === "github")?.label,
+      "워크스페이스 기준 참고 신호",
+    );
+    assert.equal(
+      briefing.sourceDetails.find(
+        (detail) => detail.source === "personalization",
+      )?.label,
+      "현재 멤버 기준",
+    );
+    assert.equal(
+      briefing.sourceDetails.find((detail) => detail.source === "tasks")
+        ?.status,
+      "dashboard_read_model",
+    );
+    assert.equal(
+      briefing.sourceDetails.find((detail) => detail.source === "meetings")
+        ?.label,
+      "데이터 없음",
+    );
+  });
+
+  it("keeps Daily Briefing array sourceDetails compatible", () => {
+    const workspaceId = "workspace-daily-briefing-array-details";
+    const briefing = normalizeWorkspaceDailyBriefing(
+      {
+        ...createWorkspaceDailyBriefingFixture(workspaceId),
+        sources: ["dashboard", "tasks"],
+        sourceDetails: [
+          {
+            source: "dashboard",
+            status: "fixture",
+            label: "워크스페이스 기준 참고 신호",
+          },
+        ],
+      },
+      { workspaceId },
+    );
+
+    assert.deepEqual(briefing.sources, ["dashboard", "tasks"]);
+    assert.deepEqual(briefing.sourceDetails[0], {
+      source: "dashboard",
+      status: "fixture",
+      label: "워크스페이스 기준 참고 신호",
+    });
   });
 });

@@ -333,6 +333,63 @@
   color: #172033;
 }
 
+.onboardingChatShell {
+  min-height: min(760px, calc(100vh - 56px));
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.onboardingChatHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #d9dee7;
+  padding-bottom: 18px;
+}
+
+.onboardingChatHeader h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.onboardingChatHeader p {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: #5e6878;
+  line-height: 1.55;
+}
+
+.onboardingChatPanel {
+  display: grid;
+  grid-template-rows: auto minmax(320px, 1fr) auto;
+  min-height: 0;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  padding: 18px;
+  background: #ffffff;
+}
+
+.onboardingChatMeta {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 14px;
+}
+
+.onboardingChatMeta span {
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #eef2f7;
+  color: #415066;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.onboardingReviewShell {
+  width: min(1180px, 100%);
+}
+
 .progressGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -363,22 +420,38 @@
   align-items: start;
 }
 
+.onboardingReviewLayout {
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
 .messages {
   display: grid;
   gap: 10px;
-  max-height: 470px;
+  align-content: start;
+  max-height: min(56vh, 560px);
   overflow: auto;
   padding-right: 4px;
 }
 
 .message {
+  width: min(78%, 640px);
   border: 1px solid #dde4ed;
   border-radius: 8px;
   padding: 12px;
   background: #ffffff;
 }
 
+.messageAssistant {
+  justify-self: start;
+  border-color: #d6e2ee;
+  background: #fbfcfe;
+}
+
 .messageUser {
+  justify-self: end;
   border-color: #d8d0ff;
   background: #f6f3ff;
 }
@@ -399,6 +472,8 @@
   display: grid;
   gap: 10px;
   margin-top: 16px;
+  border-top: 1px solid #e3e8f0;
+  padding-top: 14px;
 }
 
 .summaryGrid {
@@ -424,6 +499,31 @@
 .successText {
   background: #f1fbf5;
   color: #247348;
+}
+
+.completionBanner {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  border: 1px solid #bde5cb;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f1fbf5;
+  color: #247348;
+}
+
+.completionBanner strong {
+  color: #17603a;
+}
+
+.completionBanner p {
+  margin: 0;
+  color: #247348;
+  line-height: 1.45;
+}
+
+.completionBanner .button {
+  width: fit-content;
 }
 
 .actionCard {
@@ -460,9 +560,15 @@
   .grid,
   .seedPanel,
   .chatShell,
+  .onboardingChatHeader,
   .onboardingLayout,
+  .onboardingReviewLayout,
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .onboardingChatHeader {
+    display: grid;
   }
 
   .progressGrid {
@@ -484,5 +590,9 @@
 
   .onboardingShell {
     padding: 20px;
+  }
+
+  .message {
+    width: 100%;
   }
 }

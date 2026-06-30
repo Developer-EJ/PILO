@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   createAgentApiClient,
@@ -6,7 +7,10 @@ import {
   resolveAgentClientMode,
 } from "../lib/agent/agentClient.mjs";
 import {
+  agentOnboardingFieldLabels,
+  buildFallbackOnboardingTurn,
   buildWorkspaceCreationPayload,
+  createAgentOnboardingClient,
   createAgentOnboardingApiClient,
   createMockAgentOnboardingClient,
 } from "../lib/agent/agentOnboardingClient.mjs";
@@ -17,6 +21,15 @@ import {
   planningOnboardingSeedStorageKey,
   readPlanningOnboardingSeed,
 } from "../lib/agent/onboardingPlanningSeed.mjs";
+
+function collectStrings(value) {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStrings);
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectStrings);
+  }
+  return [];
+}
 
 describe("agent frontend client", () => {
   it("builds Current Runtime API calls for planning and action approval", async () => {
@@ -325,6 +338,58 @@ describe("agent frontend client", () => {
     assert.equal(payload.onboarding.outputGoal, "demo-ready workspace");
   });
 
+  it("keeps AI onboarding mock and fallback copy readable Korean", async () => {
+    const client = createMockAgentOnboardingClient();
+    const partial = await client.runTurn({
+      messages: [
+        {
+          role: "assistant",
+          body: "먼저 워크스페이스 이름을 정해볼까요?",
+          fieldKey: "workspaceTitle",
+        },
+        { role: "user", body: "PILO Sprint" },
+      ],
+      draft: {},
+    });
+    const complete = buildFallbackOnboardingTurn({
+      messages: [],
+      draft: {
+        workspaceTitle: "PILO Sprint",
+        goal: "Build a usable MVP plan",
+        problem: "The team starts with scattered ideas",
+        targetUser: "student builders",
+        duration: "4 weeks",
+        teamSize: 4,
+        experienceLevel: "beginner",
+        outputGoal: "demo-ready workspace",
+      },
+    });
+    const text = collectStrings({
+      agentOnboardingFieldLabels,
+      partial,
+      complete,
+    }).join("\n");
+
+    assert.equal(partial.reply, "이 워크스페이스로 이루고 싶은 가장 중요한 목표는 무엇인가요?");
+    assert.equal(complete.reply.includes("필수 정보가 모두 채워졌습니다."), true);
+    assert.equal(complete.summary.includes("워크스페이스: PILO Sprint"), true);
+    for (const fragment of [
+      "?뚰",
+      "?꾩",
+      "紐",
+      "寃",
+      "臾몄",
+      "湲",
+      "�",
+    ]) {
+      assert.equal(
+        text.includes(fragment),
+        false,
+        `frontend onboarding fallback text contains mojibake fragment: ${fragment}`,
+      );
+    }
+  });
+
   it("calls the server-only onboarding runtime endpoint in API mode", async () => {
     const requests = [];
     const client = createAgentOnboardingApiClient({
@@ -368,5 +433,85 @@ describe("agent frontend client", () => {
     assert.equal(requests[0].init.method, "POST");
     assert.equal(requests[0].init.credentials, "include");
     assert.equal(JSON.parse(requests[0].init.body).messages[0].body, "PILO Sprint");
+  });
+
+  it("uses the configured app-server URL for onboarding API mode by default", async () => {
+    const previousPiloUrl = process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL;
+    const previousAppUrl = process.env.NEXT_PUBLIC_APP_SERVER_URL;
+    process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL = "http://localhost:4000";
+    delete process.env.NEXT_PUBLIC_APP_SERVER_URL;
+
+    try {
+      const requests = [];
+      const client = createAgentOnboardingClient({
+        mode: "api",
+        fetcher: async (url, init = {}) => {
+          requests.push({ url, init });
+          return Response.json({
+            reply: "다음 정보를 알려 주세요.",
+            draft: {
+              workspaceTitle: "PILO Sprint",
+              goal: null,
+              problem: null,
+              targetUser: null,
+              duration: null,
+              teamSize: null,
+              experienceLevel: null,
+              outputGoal: null,
+            },
+            missingFields: ["goal"],
+            ready: false,
+            fieldInFocus: "goal",
+            summary: null,
+            planningSeed: null,
+            taskCandidates: [],
+            milestoneCandidates: [],
+            usedModel: null,
+            fallback: false,
+          });
+        },
+      });
+
+      await client.runTurn({
+        messages: [{ role: "user", body: "PILO Sprint" }],
+        draft: {},
+      });
+
+      assert.equal(
+        requests[0].url,
+        "http://localhost:4000/api/agent-onboarding/turn",
+      );
+      assert.equal(requests[0].init.credentials, "include");
+    } finally {
+      if (previousPiloUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL;
+      } else {
+        process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL = previousPiloUrl;
+      }
+      if (previousAppUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_APP_SERVER_URL;
+      } else {
+        process.env.NEXT_PUBLIC_APP_SERVER_URL = previousAppUrl;
+      }
+    }
+  });
+
+  it("keeps onboarding step one chat-only and moves review UI to a separate component", () => {
+    const flowSource = readFileSync(
+      new URL("../components/agent/AgentOnboardingFlow.tsx", import.meta.url),
+      "utf8",
+    );
+    const reviewSource = readFileSync(
+      new URL("../components/agent/AgentOnboardingReview.tsx", import.meta.url),
+      "utf8",
+    );
+
+    assert.equal(flowSource.includes("onboardingChatPanel"), true);
+    assert.equal(flowSource.includes("summaryGrid"), false);
+    assert.equal(flowSource.includes("taskCandidates.map"), false);
+    assert.equal(flowSource.includes("milestoneCandidates.map"), false);
+    assert.equal(reviewSource.includes("summaryGrid"), true);
+    assert.equal(reviewSource.includes("taskCandidates.map"), true);
+    assert.equal(reviewSource.includes("milestoneCandidates.map"), true);
   });
 });

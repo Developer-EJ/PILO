@@ -622,6 +622,145 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.daily-briefing-panel {
+  margin-bottom: 20px;
+}
+
+.daily-briefing-panel .panel-head {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.daily-briefing-panel .panel-head > div {
+  min-width: 0;
+}
+
+.daily-briefing-refresh {
+  min-height: 36px;
+  flex: none;
+  border: 1px solid var(--pilo-line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--pilo-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 0 13px;
+}
+
+.daily-briefing-refresh:disabled {
+  cursor: progress;
+  opacity: 0.62;
+}
+
+.daily-briefing-meta,
+.daily-briefing-footnotes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 12px;
+}
+
+.daily-briefing-meta span,
+.daily-briefing-footnotes span {
+  border-radius: 999px;
+  background: #f1f3f7;
+  color: var(--pilo-text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.daily-briefing-status {
+  background: #eefbf3 !important;
+  color: #247348 !important;
+}
+
+.daily-briefing-status.is-fallback {
+  background: #fff7e6 !important;
+  color: #8a5b05 !important;
+}
+
+.daily-briefing-warning {
+  margin: 0 18px 12px;
+  border: 1px solid #f5d7a8;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #8a5b05;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.daily-briefing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 18px 16px;
+}
+
+.daily-briefing-card {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border: 1px solid var(--pilo-line);
+  border-radius: 8px;
+  background: #fbfcff;
+  padding: 14px;
+}
+
+.daily-briefing-card h3 {
+  margin: 0;
+  color: var(--pilo-ink);
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.daily-briefing-card p {
+  margin: 0;
+  color: var(--pilo-text-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.daily-briefing-card strong {
+  display: block;
+  color: var(--pilo-ink);
+  font-size: 12px;
+  font-weight: 900;
+  margin-bottom: 7px;
+}
+
+.daily-briefing-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.daily-briefing-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 17px;
+}
+
+.daily-briefing-list li,
+.daily-briefing-empty {
+  color: var(--pilo-text-soft);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.daily-briefing-empty {
+  margin: 0;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

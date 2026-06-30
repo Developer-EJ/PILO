@@ -1,4 +1,4 @@
-import { buildPiloApiUrl } from "../api/apiUrl.mjs";
+import { buildPiloApiUrl, defaultAppServerUrl } from "../api/apiUrl.mjs";
 
 export const agentOnboardingRequiredFields = [
   "workspaceTitle",
@@ -34,7 +34,7 @@ const fieldQuestions = {
 };
 
 export function createAgentOnboardingClient({
-  baseUrl = "",
+  baseUrl = defaultAppServerUrl(),
   fetcher = fetch,
   mode = process.env.NEXT_PUBLIC_PILO_AGENT_ONBOARDING_MODE ??
     process.env.NEXT_PUBLIC_PILO_AGENT_MODE ??
@@ -46,7 +46,7 @@ export function createAgentOnboardingClient({
 }
 
 export function createAgentOnboardingApiClient({
-  baseUrl = "",
+  baseUrl = defaultAppServerUrl(),
   fetcher = fetch,
 } = {}) {
   return {

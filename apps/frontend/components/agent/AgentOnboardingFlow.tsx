@@ -69,14 +69,6 @@ type AgentOnboardingFlowProps = {
   className?: string;
 };
 
-const fieldInputKinds: Partial<Record<AgentOnboardingFieldKey, "textarea" | "number">> = {
-  goal: "textarea",
-  problem: "textarea",
-  targetUser: "textarea",
-  outputGoal: "textarea",
-  teamSize: "number",
-};
-
 const onboardingFields =
   agentOnboardingRequiredFields as AgentOnboardingFieldKey[];
 
@@ -107,6 +99,12 @@ function makeId() {
     return crypto.randomUUID();
   }
   return `agent-onboarding-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildPayloadFromTurn(
+  turn: AgentOnboardingTurnResult,
+): AgentOnboardingWorkspacePayload {
+  return buildWorkspaceCreationPayload(turn) as AgentOnboardingWorkspacePayload;
 }
 
 export function AgentOnboardingFlow({
@@ -140,11 +138,11 @@ export function AgentOnboardingFlow({
     ];
   });
   const [input, setInput] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "confirming" | "confirmed">(
-    "idle",
-  );
+  const [status, setStatus] = useState<
+    "idle" | "submitting" | "completing" | "completed"
+  >("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [confirmedPayload, setConfirmedPayload] =
+  const [completedPayload, setCompletedPayload] =
     useState<AgentOnboardingWorkspacePayload | null>(null);
 
   const client = useMemo(
@@ -152,25 +150,44 @@ export function AgentOnboardingFlow({
     [clientMode],
   );
   const missingFields = missingOnboardingFields(draft) as AgentOnboardingFieldKey[];
-  const ready = missingFields.length === 0;
   const progressCount = onboardingFields.length - missingFields.length;
-  const completionResult = useMemo(() => {
-    if (result.ready && missingOnboardingFields(result.draft).length === 0) {
-      return result;
+  const currentField = result.fieldInFocus ?? missingFields[0] ?? null;
+  const isComplete = Boolean(completedPayload);
+  const statusLabel = isComplete
+    ? "답변 완료"
+    : status === "submitting"
+      ? "정리 중"
+      : "대화 진행 중";
+
+  async function completeTurn(turn: AgentOnboardingTurnResult) {
+    const payload = buildPayloadFromTurn(turn);
+    setCompletedPayload(payload);
+
+    if (!onComplete) {
+      setStatus("completed");
+      return;
     }
 
-    return (ready
-      ? buildFallbackOnboardingTurn({ messages: [], draft })
-      : result) as AgentOnboardingTurnResult;
-  }, [draft, ready, result]);
-  const payloadPreview = ready
-    ? (buildWorkspaceCreationPayload(completionResult) as AgentOnboardingWorkspacePayload)
-    : null;
+    setStatus("completing");
+    try {
+      await onComplete(payload);
+      setStatus("completed");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "다음 단계로 이동하는 중 오류가 발생했습니다.",
+      );
+      setStatus("completed");
+    }
+  }
 
   async function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = input.trim();
-    if (!body || disabled || status === "submitting") return;
+    if (!body || disabled || status === "submitting" || status === "completing") {
+      return;
+    }
 
     const userMessage: AgentOnboardingMessage = {
       id: makeId(),
@@ -189,140 +206,139 @@ export function AgentOnboardingFlow({
         draft,
       })) as AgentOnboardingTurnResult;
       const normalizedDraft = normalizeOnboardingDraft(turn.draft);
+      const assistantMessage: AgentOnboardingMessage = {
+        id: makeId(),
+        role: "assistant",
+        body: turn.reply,
+        fieldKey: turn.fieldInFocus,
+      };
+
       setDraft(normalizedDraft);
       setResult(turn);
-      setMessages([
-        ...nextMessages,
-        {
-          id: makeId(),
-          role: "assistant",
-          body: turn.reply,
-          fieldKey: turn.fieldInFocus,
-        },
-      ]);
+      setMessages([...nextMessages, assistantMessage]);
+
+      if (turn.ready) {
+        await completeTurn({
+          ...turn,
+          draft: normalizedDraft,
+        });
+        return;
+      }
+
       setStatus("idle");
     } catch {
       const fallbackTurn = buildFallbackOnboardingTurn({
         messages: nextMessages.map(stripMessageForApi),
         draft,
       }) as AgentOnboardingTurnResult;
-      setDraft(normalizeOnboardingDraft(fallbackTurn.draft));
+      const normalizedDraft = normalizeOnboardingDraft(fallbackTurn.draft);
+      const assistantMessage: AgentOnboardingMessage = {
+        id: makeId(),
+        role: "assistant",
+        body: fallbackTurn.reply,
+        fieldKey: fallbackTurn.fieldInFocus,
+      };
+
+      setDraft(normalizedDraft);
       setResult(fallbackTurn);
-      setMessages([
-        ...nextMessages,
-        {
-          id: makeId(),
-          role: "assistant",
-          body: fallbackTurn.reply,
-          fieldKey: fallbackTurn.fieldInFocus,
-        },
-      ]);
+      setMessages([...nextMessages, assistantMessage]);
       setErrorMessage("서버 응답을 받지 못해 로컬 fallback으로 이어갑니다.");
+
+      if (fallbackTurn.ready) {
+        await completeTurn({
+          ...fallbackTurn,
+          draft: normalizedDraft,
+        });
+        return;
+      }
+
       setStatus("idle");
     }
   }
 
-  function updateDraft(field: AgentOnboardingFieldKey, value: string) {
-    const nextDraft = normalizeOnboardingDraft({
-      ...draft,
-      [field]: field === "teamSize" ? Number(value) : value,
-    });
-    const nextResult = buildFallbackOnboardingTurn({
-      messages: [],
-      draft: nextDraft,
-    }) as AgentOnboardingTurnResult;
-    setDraft(nextDraft);
-    setResult(nextResult);
-    setConfirmedPayload(null);
-  }
+  async function continueFromCompletedState() {
+    if (!completedPayload || disabled || status === "completing") return;
 
-  async function confirmPayload() {
-    if (!ready || disabled || status === "confirming") return;
+    const callback = onComplete ?? onConfirm;
+    if (!callback) return;
 
-    const finalResult = buildFallbackOnboardingTurn({
-      messages: [],
-      draft,
-    }) as AgentOnboardingTurnResult;
-    const payload = buildWorkspaceCreationPayload(
-      finalResult,
-    ) as AgentOnboardingWorkspacePayload;
-
-    setStatus("confirming");
+    setStatus("completing");
     setErrorMessage(null);
     try {
-      if (onConfirm) {
-        await onConfirm(payload);
-      } else if (onComplete) {
-        await onComplete(payload);
-      }
-      setConfirmedPayload(payload);
-      setStatus("confirmed");
+      await callback(completedPayload);
+      setStatus("completed");
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "확정 처리 중 오류가 발생했습니다.",
+          : "다음 단계로 이동하는 중 오류가 발생했습니다.",
       );
-      setStatus("idle");
+      setStatus("completed");
     }
   }
 
   return (
-    <section className={className ? `${styles.onboardingShell} ${className}` : styles.onboardingShell}>
-      <div className={styles.header}>
+    <section
+      className={
+        className
+          ? `${styles.onboardingShell} ${styles.onboardingChatShell} ${className}`
+          : `${styles.onboardingShell} ${styles.onboardingChatShell}`
+      }
+    >
+      <div className={styles.onboardingChatHeader}>
         <div>
           <p className={styles.eyebrow}>AI 온보딩</p>
           <h1>새 워크스페이스 준비</h1>
-          <p>
-            답변을 모아 초기 기획 맥락, MVP 방향, Task 후보를 함께 만듭니다.
-          </p>
+          <p>질문에 하나씩 답하면 프로젝트 시작에 필요한 맥락을 정리합니다.</p>
         </div>
-        <div className={styles.statusStrip} aria-label="온보딩 진행률">
+        <div className={styles.statusStrip} aria-label="온보딩 진행 상태">
           <span className={styles.chip}>
             {progressCount}/{onboardingFields.length} 완료
           </span>
-          <span className={styles.chip}>
-            {ready ? "요약 확인 가능" : "대화 진행 중"}
-          </span>
+          <span className={styles.chip}>{statusLabel}</span>
         </div>
       </div>
 
-      <div className={styles.progressGrid}>
-        {onboardingFields.map((field) => {
-          const isDone = !missingFields.includes(field);
-          return (
-            <span
-              className={
-                isDone
-                  ? `${styles.progressItem} ${styles.progressItemDone}`
-                  : styles.progressItem
-              }
-              key={field}
-            >
-              {agentOnboardingFieldLabels[field]}
-            </span>
-          );
-        })}
-      </div>
+      <section className={styles.onboardingChatPanel} aria-label="AI 온보딩 대화">
+        <div className={styles.onboardingChatMeta}>
+          <span>
+            현재 질문:{" "}
+            {currentField ? agentOnboardingFieldLabels[currentField] : "완료"}
+          </span>
+        </div>
 
-      <div className={styles.onboardingLayout}>
-        <section className={styles.panel} aria-label="AI 에이전트 대화">
-          <h2>대화</h2>
-          <div className={styles.messages}>
-            {messages.map((message) => (
-              <article
-                className={
-                  message.role === "user"
-                    ? `${styles.message} ${styles.messageUser}`
-                    : styles.message
-                }
-                key={message.id}
+        <div className={styles.messages}>
+          {messages.map((message) => (
+            <article
+              className={
+                message.role === "user"
+                  ? `${styles.message} ${styles.messageUser}`
+                  : `${styles.message} ${styles.messageAssistant}`
+              }
+              key={message.id}
+            >
+              <small>{message.role === "user" ? "나" : "AI 에이전트"}</small>
+              <p>{message.body}</p>
+            </article>
+          ))}
+        </div>
+
+        {completedPayload ? (
+          <div className={styles.completionBanner}>
+            <strong>필수 답변이 모두 채워졌습니다.</strong>
+            <p>다음 단계에서 요약을 확인하고 필요한 내용을 수정할 수 있습니다.</p>
+            {onComplete || onConfirm ? (
+              <button
+                className={styles.button}
+                disabled={disabled || status === "completing"}
+                onClick={continueFromCompletedState}
+                type="button"
               >
-                <small>{message.role === "user" ? "나" : "AI 에이전트"}</small>
-                <p>{message.body}</p>
-              </article>
-            ))}
+                {status === "completing" ? "이동 중" : "요약 확인으로 이동"}
+              </button>
+            ) : null}
           </div>
+        ) : (
           <form className={styles.composer} onSubmit={submitMessage}>
             <label className={styles.field}>
               <span>답변</span>
@@ -353,90 +369,10 @@ export function AgentOnboardingFlow({
               ) : null}
             </div>
           </form>
-          {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
-        </section>
+        )}
 
-        <aside className={styles.panel} aria-label="온보딩 요약">
-          <h2>요약과 수정</h2>
-          <div className={styles.summaryGrid}>
-            {onboardingFields.map((field) => {
-              const inputKind = fieldInputKinds[field];
-              const value = draft[field] ?? "";
-              return (
-                <label className={styles.field} key={field}>
-                  <span>{agentOnboardingFieldLabels[field]}</span>
-                  {inputKind === "textarea" ? (
-                    <textarea
-                      disabled={disabled}
-                      onChange={(event) => updateDraft(field, event.target.value)}
-                      value={String(value)}
-                    />
-                  ) : (
-                    <input
-                      disabled={disabled}
-                      min={field === "teamSize" ? 1 : undefined}
-                      onChange={(event) => updateDraft(field, event.target.value)}
-                      type={inputKind ?? "text"}
-                      value={String(value)}
-                    />
-                  )}
-                </label>
-              );
-            })}
-          </div>
-          <div className={styles.buttonRow}>
-            <button
-              className={styles.button}
-              disabled={!ready || disabled || status === "confirming"}
-              onClick={confirmPayload}
-              type="button"
-            >
-              {status === "confirming" ? "확정 중" : "이 내용으로 확정"}
-            </button>
-          </div>
-          {!ready ? (
-            <p className={styles.muted}>
-              아직 비어 있는 항목이 있습니다. 대화로 채우거나 직접 수정해 주세요.
-            </p>
-          ) : null}
-          {confirmedPayload ? (
-            <p className={styles.successText}>워크스페이스 생성 payload가 준비됐습니다.</p>
-          ) : null}
-        </aside>
-      </div>
-
-      {payloadPreview ? (
-        <section className={styles.split} aria-label="초기 후보">
-          <article className={styles.card}>
-            <div className={styles.cardHead}>
-              <h3>초기 Task 후보</h3>
-              <span className={styles.tag}>planning_feature</span>
-            </div>
-            <ul className={styles.list}>
-              {payloadPreview.taskCandidates.map((task, index) => (
-                <li className={styles.listItem} key={String(task.sourceId ?? index)}>
-                  <strong>{String(task.title ?? "")}</strong>
-                  <p>{String(task.description ?? "")}</p>
-                </li>
-              ))}
-            </ul>
-          </article>
-          <article className={styles.card}>
-            <div className={styles.cardHead}>
-              <h3>초기 마일스톤 후보</h3>
-              <span className={styles.tag}>후보</span>
-            </div>
-            <ul className={styles.list}>
-              {payloadPreview.milestoneCandidates.map((milestone, index) => (
-                <li className={styles.listItem} key={`${milestone.title}-${index}`}>
-                  <strong>{String(milestone.title ?? "")}</strong>
-                  <p>상태: {String(milestone.status ?? "planned")}</p>
-                </li>
-              ))}
-            </ul>
-          </article>
-        </section>
-      ) : null}
+        {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+      </section>
     </section>
   );
 }
