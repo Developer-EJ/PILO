@@ -49,6 +49,7 @@ export class AgentGraphResultService {
   applyGraph(
     analysisId: string,
     graphResult: AgentReviewGraphResult,
+    pullRequestId: string | null = null,
   ): ReviewGraphSummary {
     const nodes = graphResult.nodes ?? [];
     const existingGraph = this.graphRepository.findGraphByAnalysis(analysisId);
@@ -58,6 +59,7 @@ export class AgentGraphResultService {
     this.graphRepository.saveGraph({
       id: graphId,
       analysisId,
+      pullRequestId: pullRequestId ?? existingGraph?.pullRequestId ?? null,
       summary: graphResult.summary ?? null,
       intentSummary:
         graphResult.intentSummary ?? graphResult.summary ?? "PR 변경 의도",
@@ -74,6 +76,7 @@ export class AgentGraphResultService {
     return {
       id: graphId,
       analysisId,
+      pullRequestId: pullRequestId ?? existingGraph?.pullRequestId ?? null,
       summary: graphResult.summary ?? null,
       intentSummary:
         graphResult.intentSummary ?? graphResult.summary ?? "PR 변경 의도",
@@ -81,6 +84,7 @@ export class AgentGraphResultService {
         graphResult.reviewStrategy ??
         "AI가 제안한 순서대로 변경 파일을 확인한다.",
       reviewOrder,
+      edges: [],
       nodes: this.graphRepository.listNodesByGraph(graphId).map((node) => ({
         id: node.id,
         analysisId,

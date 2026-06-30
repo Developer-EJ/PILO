@@ -14,6 +14,7 @@ export type ReviewNodeStatus = "ok" | "discuss" | "unknown";
 export interface ReviewGraphRecord {
   id: string;
   analysisId: string;
+  pullRequestId: string | null;
   summary: string | null;
   intentSummary: string;
   reviewStrategy: string;
@@ -67,11 +68,20 @@ export interface ReviewNodeSummary {
 export interface ReviewGraphSummary {
   id: string;
   analysisId: string;
+  pullRequestId: string | null;
   summary: string | null;
   intentSummary: string;
   reviewStrategy: string;
   reviewOrder: string[];
   nodes: ReviewNodeSummary[];
+  edges: ReviewCanvasEdgeSummary[];
+}
+
+export interface ReviewCanvasEdgeSummary {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label: string | null;
 }
 
 export interface UpsertNodeReviewStateInput {

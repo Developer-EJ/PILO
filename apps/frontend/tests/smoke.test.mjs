@@ -1327,6 +1327,32 @@ describe("frontend package", () => {
       syncedAt: "2026-06-30T00:00:00.000Z",
     };
     const analysisId = "88888888-8888-4888-8888-888888888881";
+    const pendingAnalysis = {
+      id: analysisId,
+      pullRequestId: pullRequest.id,
+      purposeSummary: null,
+      impactSummary: null,
+      testRecommendation: null,
+      riskLevel: "low",
+      analysisStatus: "pending",
+      okCount: 0,
+      discussCount: 0,
+      riskCount: 0,
+      conclusion: null,
+    };
+    const pendingCanvas = {
+      id: `pending-review-graph-${analysisId}`,
+      analysisId,
+      pullRequestId: pullRequest.id,
+      summary: null,
+      intentSummary:
+        "Analysis is pending. The review graph will be populated after analyzer output arrives.",
+      reviewStrategy:
+        "Keep the review canvas available with no nodes until analysis results are written.",
+      reviewOrder: [],
+      nodes: [],
+      edges: [],
+    };
     const changedFile = {
       id: "88888888-8888-4888-8888-8888888888b1",
       analysisId,
@@ -1400,6 +1426,14 @@ describe("frontend package", () => {
         });
       }
 
+      if (url.endsWith(`/pull-requests/${pullRequest.id}/analysis`)) {
+        return Response.json(pendingAnalysis);
+      }
+
+      if (url.endsWith(`/pull-request-analyses/${analysisId}/canvas`)) {
+        return Response.json(pendingCanvas);
+      }
+
       if (url.endsWith(`/pull-request-analyses/${analysisId}/changed-files`)) {
         return Response.json([changedFile]);
       }
@@ -1457,6 +1491,8 @@ describe("frontend package", () => {
       memberId: "member-1",
       pullRequest: pullRequests[0],
     });
+    const analysis = await apiClient.requestAnalysis(pullRequests[0].id);
+    const canvas = await apiClient.getCanvas(analysis.id);
     const changedFiles = await apiClient.listChangedFiles(analysisId);
     const checklist = await apiClient.listChecklistItems(analysisId);
     const comments = await apiClient.listComments(room.id);
@@ -1483,6 +1519,14 @@ describe("frontend package", () => {
 
     assert.equal(pullRequests[0].id, pullRequest.id);
     assert.equal(room.pullRequest.title, pullRequest.title);
+    assert.equal(analysis.analysisStatus, "pending");
+    assert.equal(analysis.purposeSummary, null);
+    assert.equal(analysis.impactSummary, null);
+    assert.equal(analysis.testRecommendation, null);
+    assert.equal(analysis.conclusion, null);
+    assert.equal(canvas.pullRequestId, pullRequest.id);
+    assert.deepEqual(canvas.nodes, []);
+    assert.deepEqual(canvas.edges, []);
     assert.equal(changedFiles[0].filePath, changedFile.filePath);
     assert.equal(changedFiles[0].functions[0].name, "openPullRequest");
     assert.equal(checklist[0].id, checklistItem.id);
@@ -1496,6 +1540,8 @@ describe("frontend package", () => {
         `https://api.pilo.dev/api/workspaces/${workspaceId}/github/repositories`,
         `https://api.pilo.dev/api/repositories/${repositoryId}/pull-requests`,
         `https://api.pilo.dev/api/pull-requests/${pullRequest.id}/review-room`,
+        `https://api.pilo.dev/api/pull-requests/${pullRequest.id}/analysis`,
+        `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/canvas`,
         `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/changed-files`,
         `https://api.pilo.dev/api/pull-request-analyses/${analysisId}/checklist-items`,
         `https://api.pilo.dev/api/code-review-rooms/${room.id}/comments`,
@@ -1506,7 +1552,19 @@ describe("frontend package", () => {
     );
     assert.deepEqual(
       requests.map((request) => request.init.method ?? "GET"),
-      ["GET", "GET", "POST", "GET", "GET", "GET", "POST", "PATCH", "POST"],
+      [
+        "GET",
+        "GET",
+        "POST",
+        "POST",
+        "GET",
+        "GET",
+        "GET",
+        "GET",
+        "POST",
+        "PATCH",
+        "POST",
+      ],
     );
     assert.deepEqual(
       JSON.parse(requests[2].init.body).pullRequest,
@@ -1523,6 +1581,8 @@ describe("frontend package", () => {
     assertLocalActorHeaders(requests[6]);
     assertLocalActorHeaders(requests[7]);
     assertLocalActorHeaders(requests[8]);
+    assertLocalActorHeaders(requests[9]);
+    assertLocalActorHeaders(requests[10]);
   });
 
   it("calls Notification API client with MVP route contracts", async () => {

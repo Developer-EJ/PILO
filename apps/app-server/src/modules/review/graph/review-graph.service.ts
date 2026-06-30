@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
+import { InMemoryPullRequestAnalysisRepository } from "../analysis/in-memory-pull-request-analysis.repository";
 import { InMemoryReviewGraphRepository } from "./in-memory-review-graph.repository";
 import {
   NodeReviewStateRecord,
@@ -15,6 +16,7 @@ import {
 } from "./review-graph.types";
 
 const NODE_STATUSES = ["ok", "discuss", "unknown"];
+const FIXTURE_PULL_REQUEST_ID = "66666666-6666-4666-8666-666666666661";
 const FIXTURE_ANALYSIS_ID = "88888888-8888-4888-8888-888888888881";
 
 export interface ReviewGraphServiceOptions {
@@ -27,13 +29,18 @@ export class ReviewGraphService {
     private readonly graphRepository: InMemoryReviewGraphRepository,
     @Optional()
     options: ReviewGraphServiceOptions = {},
+    @Optional()
+    private readonly analysisRepository?: InMemoryPullRequestAnalysisRepository,
   ) {
     if (options.seedFixture) {
       this.seedFixture();
     }
   }
 
-  ensurePendingGraph(analysisId: string): ReviewGraphSummary {
+  ensurePendingGraph(
+    analysisId: string,
+    pullRequestId: string | null = null,
+  ): ReviewGraphSummary {
     const existing = this.graphRepository.findGraphByAnalysis(analysisId);
 
     if (existing) {
@@ -44,6 +51,7 @@ export class ReviewGraphService {
       this.graphRepository.saveGraph({
         id: `pending-review-graph-${analysisId}`,
         analysisId,
+        pullRequestId: pullRequestId ?? this.resolvePullRequestId(analysisId),
         summary: null,
         intentSummary:
           "Analysis is pending. The review graph will be populated after analyzer output arrives.",
@@ -67,6 +75,7 @@ export class ReviewGraphService {
   private toSummary(graph: {
     id: string;
     analysisId: string;
+    pullRequestId: string | null;
     summary: string | null;
     intentSummary: string;
     reviewStrategy: string;
@@ -75,6 +84,8 @@ export class ReviewGraphService {
     return {
       id: graph.id,
       analysisId: graph.analysisId,
+      pullRequestId:
+        graph.pullRequestId ?? this.resolvePullRequestId(graph.analysisId),
       summary: graph.summary,
       intentSummary: graph.intentSummary,
       reviewStrategy: graph.reviewStrategy,
@@ -93,7 +104,16 @@ export class ReviewGraphService {
         reviewReason: node.reviewReason,
         position: node.position,
       })),
+      edges: [],
     };
+  }
+
+  private resolvePullRequestId(analysisId: string): string | null {
+    if (analysisId === FIXTURE_ANALYSIS_ID) {
+      return FIXTURE_PULL_REQUEST_ID;
+    }
+
+    return this.analysisRepository?.findById(analysisId)?.pullRequestId ?? null;
   }
 
   upsertNodeState(
@@ -202,6 +222,7 @@ export class ReviewGraphService {
     this.graphRepository.saveGraph({
       id: graphId,
       analysisId: FIXTURE_ANALYSIS_ID,
+      pullRequestId: FIXTURE_PULL_REQUEST_ID,
       summary: "OAuth callback review graph",
       intentSummary:
         "로그인 callback 진입점을 만들고 provider error 상태를 사용자에게 보여준다.",

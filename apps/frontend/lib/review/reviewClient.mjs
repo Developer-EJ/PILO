@@ -334,15 +334,25 @@ export function normalizeReviewAnalysis(rawAnalysis, pullRequestId) {
     pullRequestId: pullRequestId ?? reviewFixture.analysis.pullRequestId,
   };
   const analysis = isRecord(rawAnalysis) ? rawAnalysis : fallback;
+  const valueOrFallback = (value, fallbackValue) =>
+    value === undefined ? fallbackValue : value;
 
   return {
     ...fallback,
     ...analysis,
-    purposeSummary: analysis.purposeSummary ?? fallback.purposeSummary,
-    impactSummary: analysis.impactSummary ?? fallback.impactSummary,
-    testRecommendation:
-      analysis.testRecommendation ?? fallback.testRecommendation,
-    conclusion: analysis.conclusion ?? fallback.conclusion,
+    purposeSummary: valueOrFallback(
+      analysis.purposeSummary,
+      fallback.purposeSummary,
+    ),
+    impactSummary: valueOrFallback(
+      analysis.impactSummary,
+      fallback.impactSummary,
+    ),
+    testRecommendation: valueOrFallback(
+      analysis.testRecommendation,
+      fallback.testRecommendation,
+    ),
+    conclusion: valueOrFallback(analysis.conclusion, fallback.conclusion),
     okCount: Number.isInteger(analysis.okCount) ? analysis.okCount : 0,
     discussCount: Number.isInteger(analysis.discussCount)
       ? analysis.discussCount
@@ -361,6 +371,7 @@ function fallbackEdgesFromNodes(nodes) {
 }
 
 export function normalizeReviewCanvas(rawCanvas, analysisId) {
+  const canvasIsRecord = isRecord(rawCanvas);
   const fallback = {
     ...reviewFixture.canvas,
     analysisId: analysisId ?? reviewFixture.canvas.analysisId,
@@ -369,8 +380,12 @@ export function normalizeReviewCanvas(rawCanvas, analysisId) {
       analysisId: analysisId ?? node.analysisId,
     })),
   };
-  const canvas = isRecord(rawCanvas) ? rawCanvas : fallback;
-  const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : fallback.nodes;
+  const canvas = canvasIsRecord ? rawCanvas : fallback;
+  const nodes = Array.isArray(canvas.nodes)
+    ? canvas.nodes
+    : canvasIsRecord
+      ? []
+      : fallback.nodes;
   const normalizedNodes = nodes.map((node, index) => ({
     ...fallback.nodes[index % fallback.nodes.length],
     ...node,
@@ -381,16 +396,25 @@ export function normalizeReviewCanvas(rawCanvas, analysisId) {
       : fallback.nodes[index % fallback.nodes.length].position,
   }));
   const edges = Array.isArray(canvas.edges) ? canvas.edges : [];
+  const fallbackPullRequestId = canvasIsRecord ? null : fallback.pullRequestId;
 
   return {
     ...fallback,
     ...canvas,
     analysisId: canvas.analysisId ?? fallback.analysisId,
+    pullRequestId:
+      canvas.pullRequestId === undefined
+        ? fallbackPullRequestId
+        : canvas.pullRequestId,
     reviewOrder: Array.isArray(canvas.reviewOrder)
       ? canvas.reviewOrder
       : normalizedNodes.map((node) => node.id),
     nodes: normalizedNodes,
-    edges: edges.length ? edges : fallbackEdgesFromNodes(normalizedNodes),
+    edges: edges.length
+      ? edges
+      : canvasIsRecord
+        ? []
+        : fallbackEdgesFromNodes(normalizedNodes),
   };
 }
 

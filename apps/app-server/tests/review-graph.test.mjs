@@ -29,6 +29,8 @@ describe("review graph API boundary", () => {
 
     const graph = controller.getGraph("88888888-8888-4888-8888-888888888881");
 
+    assert.equal(graph.pullRequestId, "66666666-6666-4666-8666-666666666661");
+    assert.deepEqual(graph.edges, []);
     assert.equal(graph.nodes.length, 2);
     assert.equal(graph.nodes[0].status, "unknown");
     assert.equal(graph.nodes[0].reviewOrder, 1);

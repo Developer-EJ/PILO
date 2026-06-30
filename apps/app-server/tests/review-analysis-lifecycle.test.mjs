@@ -145,6 +145,7 @@ describe("PR analysis lifecycle API boundary", () => {
     assert.deepEqual(graphService.getGraph(analysis.id), {
       id: `pending-review-graph-${analysis.id}`,
       analysisId: analysis.id,
+      pullRequestId: pullRequest.id,
       summary: null,
       intentSummary:
         "Analysis is pending. The review graph will be populated after analyzer output arrives.",
@@ -152,6 +153,7 @@ describe("PR analysis lifecycle API boundary", () => {
         "Keep the review canvas available with no nodes until analysis results are written.",
       reviewOrder: [],
       nodes: [],
+      edges: [],
     });
   });
 });

@@ -160,7 +160,11 @@ export class AgentResultConsumerService {
     const graph = this.toPersistableGraph(output.graph);
 
     if (graph && this.graphResultService) {
-      this.graphResultService.applyGraph(analysisId, graph);
+      this.graphResultService.applyGraph(
+        analysisId,
+        graph,
+        output.pullRequestId ?? null,
+      );
     }
 
     if (output.changedFiles && this.changedFilesResultService) {

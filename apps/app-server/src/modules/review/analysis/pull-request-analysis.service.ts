@@ -154,7 +154,7 @@ export class PullRequestAnalysisService {
       return;
     }
 
-    this.graphService?.ensurePendingGraph(analysis.id);
+    this.graphService?.ensurePendingGraph(analysis.id, analysis.pullRequestId);
   }
 
   private toResultPatch(
