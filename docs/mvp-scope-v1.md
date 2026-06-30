@@ -115,7 +115,7 @@ MVP 제외:
 | 기능 | 범위 |
 | --- | --- |
 | Task CRUD | 생성, 목록, 상세, 수정, 삭제 |
-| 상태 변경 | `todo`, `in_progress`, `review`, `done`, `blocked` |
+| 상태 변경 | `todo`, `in_progress`, `in_review`, `done`, `blocked` |
 | 담당자 지정 | Workspace Member 중 선택 |
 | 마감일 설정 | optional dueDate |
 | 우선순위 | `low`, `medium`, `high` |

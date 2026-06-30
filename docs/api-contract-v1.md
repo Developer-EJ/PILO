@@ -298,7 +298,7 @@ Rules:
 Enums:
 
 ```ts
-type TaskStatus = "todo" | "in_progress" | "review" | "done" | "blocked";
+type TaskStatus = "todo" | "in_progress" | "in_review" | "done" | "blocked";
 type TaskPriority = "low" | "medium" | "high";
 type TaskType = "development" | "planning" | "meeting" | "review" | "document" | "bug" | "etc";
 type TaskSourceType = "manual" | "agent" | "meeting" | "github";
@@ -512,7 +512,7 @@ Rules:
       "recommendedAssigneeId": "user-id|null",
       "dueDate": "2026-07-03",
       "status": "draft",
-      "createdTaskId": null
+      "convertedTaskId": null
     }
   ],
   "createdAt": "2026-06-30T00:00:00.000Z",
@@ -523,12 +523,12 @@ Rules:
 Enums:
 
 ```ts
-type MeetingStatus = "active" | "ended" | "report_created";
-type VoiceSessionStatus = "recording" | "processing" | "completed" | "failed" | "cancelled";
-type TranscriptSource = "stt" | "manual";
+type MeetingStatus = "scheduled" | "in_progress" | "ended" | "report_generated";
+type VoiceRecordingStatus = "not_recording" | "recording" | "processing" | "completed" | "failed";
+type TranscriptSource = "text" | "stt";
 type TranscriptStatus = "draft" | "confirmed" | "corrected";
 type ReportStatus = "draft" | "confirmed";
-type ActionItemStatus = "draft" | "approved" | "converted_to_task" | "rejected";
+type ActionItemStatus = "draft" | "approved" | "converted" | "rejected";
 ```
 
 Rules:
@@ -566,7 +566,7 @@ Rules:
   "id": "review-room-id",
   "workspaceId": "workspace-id",
   "pullRequestId": "github-pr-id",
-  "analysisStatus": "completed",
+  "analysisStatus": "succeeded",
   "summary": {
     "purpose": "string",
     "changeScope": "string",
@@ -602,7 +602,7 @@ Rules:
 Enums:
 
 ```ts
-type ReviewAnalysisStatus = "not_started" | "running" | "completed" | "failed" | "limit_exceeded";
+type ReviewAnalysisStatus = "pending" | "running" | "succeeded" | "failed";
 type ReviewDecision = "no_issue" | "needs_discussion" | "unknown";
 ```
 
@@ -618,7 +618,7 @@ Diff limit policy:
 
 Rules:
 
-- If the diff limit is exceeded, API returns `analysisStatus = "limit_exceeded"` and a partial summary.
+- If the diff limit is exceeded, API returns `analysisStatus = "failed"` with error context. A distinct overflow status requires a contract update.
 - GitHub comments, approvals, change requests, and merge are excluded.
 
 ## Agent Runtime API
@@ -852,7 +852,7 @@ Rules:
   "taskSummary": {
     "todo": 3,
     "inProgress": 4,
-    "review": 2,
+    "reviewTasks": 2,
     "done": 10,
     "blocked": 1
   },

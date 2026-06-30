@@ -427,6 +427,14 @@ describe("contract document set", () => {
     const api = read("docs/api-contract-v1.md");
     assert.doesNotMatch(api, /\/api\/project-start\//);
     assert.doesNotMatch(api, /\/api\/task-candidates/);
+    assert.match(api, /type TaskStatus = "todo" \| "in_progress" \| "in_review" \| "done" \| "blocked";/);
+    assert.match(api, /type MeetingStatus = "scheduled" \| "in_progress" \| "ended" \| "report_generated";/);
+    assert.match(api, /type VoiceRecordingStatus = "not_recording" \| "recording" \| "processing" \| "completed" \| "failed";/);
+    assert.match(api, /type TranscriptSource = "text" \| "stt";/);
+    assert.match(api, /type ActionItemStatus = "draft" \| "approved" \| "converted" \| "rejected";/);
+    assert.match(api, /type ReviewAnalysisStatus = "pending" \| "running" \| "succeeded" \| "failed";/);
+    assert.doesNotMatch(api, /type TaskStatus = "todo" \| "in_progress" \| "review"/);
+    assert.doesNotMatch(api, /converted_to_task|createdTaskId|limit_exceeded|not_started/);
     assert.match(api, /workflowType": "planning\.generate"/);
     assert.match(api, /`\/api\/workspaces\/:workspaceId\/agent-runs`/);
     assert.match(api, /`\/api\/workspaces\/:workspaceId\/task-drafts`/);
@@ -469,6 +477,20 @@ describe("contract document set", () => {
     );
     assert.match(commonCurrent, /\/api\/notifications\/:notificationId\/read/);
     assert.doesNotMatch(commonDeferred, /notifications/);
+  });
+
+  it("keeps high-level docs aligned with current TaskDraft and task status vocabulary", () => {
+    const scope = read("docs/mvp-scope-v1.md");
+    const boundary = read("docs/domain-boundary-v1.md");
+    const task = read("docs/contracts/task.md");
+    const schema = readJson("docs/contracts/schemas/pilo-public-contracts.schema.json");
+
+    assert.match(scope, /`todo`, `in_progress`, `in_review`, `done`, `blocked`/);
+    assert.doesNotMatch(scope, /`todo`, `in_progress`, `review`, `done`, `blocked`/);
+    assert.match(boundary, /TaskDraft/);
+    assert.doesNotMatch(boundary, /TaskCandidate/);
+    assert.doesNotMatch(task, /"status": "waiting_confirmation"/);
+    assert.deepEqual(schema.$defs.TaskDraft.properties.status.enum, ["draft", "approved", "rejected"]);
   });
 });
 

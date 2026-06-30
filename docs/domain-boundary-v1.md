@@ -45,7 +45,7 @@
 | WorkspaceInvite | Workspace | Workspace DB/API | Invite accept API |
 | ProjectBrief | Agent/Planning | Planning DB/API | Project start API |
 | Task | Task | Task DB/API | Task API/read model |
-| TaskCandidate | Task + Agent | Candidate API until approval | Approval API |
+| TaskDraft | Task | Draft API until approval | Task draft approval API |
 | GitHubConnection | GitHub | GitHub integration DB/API | Connection status API |
 | GitHubRepository | GitHub | GitHub integration DB/API | Repository API |
 | GitHubIssue | GitHub | GitHub metadata DB/API | Issue API/read model |
@@ -131,7 +131,7 @@ Owns:
 - Task due date.
 - Task type.
 - Acceptance criteria.
-- TaskCandidate approval result.
+- TaskDraft approval result.
 - Links from Task to GitHub Issue/PR by ID.
 
 Does not own:
@@ -144,7 +144,7 @@ Does not own:
 Allowed consumers:
 
 - Meeting may request Action Item to Task conversion.
-- Agent may create TaskCandidate.
+- Agent may create TaskDraft through Task owner API.
 - GitHub may display linked Task summary.
 - Review may display linked Task summary.
 - Dashboard may read Task summary.
@@ -389,7 +389,7 @@ Notification does not execute the action by itself.
 
 ### Project Start To Task
 
-1. Agent Runtime creates ProjectBrief and TaskCandidate list.
+1. Agent Runtime creates ProjectBrief and TaskDraft/AgentAction list.
 2. User reviews candidates.
 3. User approves selected candidates.
 4. Task API creates real Tasks.

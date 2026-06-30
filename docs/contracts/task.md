@@ -438,7 +438,7 @@ Required fields:
   "assigneeMemberId": "uuid",
   "priority": "high",
   "dueDate": "2026-07-03",
-  "status": "waiting_confirmation",
+  "status": "draft",
   "createdAt": "2026-06-27T12:00:00.000Z"
 }
 ```
