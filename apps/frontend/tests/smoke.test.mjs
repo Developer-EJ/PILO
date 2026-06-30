@@ -84,6 +84,14 @@ import {
   resolveAgentPlanningClientMode,
 } from "../lib/agent/agentPlanningClient.mjs";
 import {
+  buildNotificationApiUrl,
+  createMockNotificationClient,
+  createNotificationApiClient,
+  createNotificationClient,
+  createNotificationFixture,
+  resolveNotificationClientMode,
+} from "../lib/notification/notificationClient.mjs";
+import {
   buildReviewApiUrl,
   createMockReviewClient,
   createReviewApiClient,
@@ -472,6 +480,11 @@ describe("frontend package", () => {
     );
     assert.match(dashboard, /dashboard-feature-links/);
     assert.match(dashboard, /href={feature\.href}/);
+    assert.match(dashboard, /createNotificationClient/);
+    assert.match(dashboard, /workspace-notifications/);
+    assert.match(dashboard, /notification-list/);
+    assert.match(dashboard, /markNotificationRead/);
+    assert.match(dashboard, /markWorkspaceNotificationsRead/);
 
     for (const featureKey of [
       "canvas",
@@ -1288,6 +1301,100 @@ describe("frontend package", () => {
     assert.deepEqual(JSON.parse(requests[2].init.body).pullRequest, pullRequest);
     assert.equal(requests[2].init.headers["x-workspace-id"], workspaceId);
     assert.equal(requests[2].init.headers["x-member-id"], "member-1");
+  });
+
+  it("calls Notification API client with MVP route contracts", async () => {
+    const workspaceId = mockWorkspaces[0].id;
+    const notificationId = "notification-1";
+    const notifications = createNotificationFixture(workspaceId);
+    const requests = [];
+    const fetcher = async (url, init = {}) => {
+      requests.push({ url, init });
+
+      if (url.endsWith(`/workspaces/${workspaceId}/notifications`)) {
+        return Response.json(notifications);
+      }
+
+      if (url.endsWith(`/notifications/${notificationId}/read`)) {
+        return Response.json({
+          ...notifications[0],
+          id: notificationId,
+          readAt: "2026-06-30T01:00:00.000Z",
+        });
+      }
+
+      if (url.endsWith(`/workspaces/${workspaceId}/notifications/read-all`)) {
+        return Response.json({
+          workspaceId,
+          recipientUserId: notifications[0].recipientUserId,
+          updatedCount: notifications.length,
+          notifications: notifications.map((notification) => ({
+            ...notification,
+            readAt: "2026-06-30T01:00:00.000Z",
+          })),
+        });
+      }
+
+      return Response.json({});
+    };
+
+    assert.equal(
+      buildNotificationApiUrl("/api/notifications/notification-1/read", ""),
+      "/api/notifications/notification-1/read",
+    );
+    assert.equal(resolveNotificationClientMode("api"), "api");
+    assert.equal(resolveNotificationClientMode("fixture"), "mock");
+
+    const mockClient = createMockNotificationClient();
+    const mockNotifications = await mockClient.listNotifications(workspaceId);
+    assert.equal(mockNotifications.length, 3);
+    assert.equal(
+      mockNotifications.every((notification) => notification.readAt === null),
+      true,
+    );
+
+    const mockRead = await mockClient.markNotificationRead(
+      mockNotifications[0].id,
+      { workspaceId },
+    );
+    assert.notEqual(mockRead.readAt, null);
+
+    const mockReadAll =
+      await createNotificationClient({
+        mode: "mock",
+      }).markWorkspaceNotificationsRead(workspaceId);
+    assert.equal(
+      mockReadAll.notifications.every(
+        (notification) => notification.readAt !== null,
+      ),
+      true,
+    );
+
+    const apiClient = createNotificationApiClient({
+      baseUrl: "https://api.pilo.dev",
+      fetcher,
+    });
+
+    await apiClient.listNotifications(workspaceId);
+    await apiClient.markNotificationRead(notificationId);
+    await apiClient.markWorkspaceNotificationsRead(workspaceId);
+
+    assert.deepEqual(
+      requests.map((request) => request.url),
+      [
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/notifications`,
+        `https://api.pilo.dev/api/notifications/${notificationId}/read`,
+        `https://api.pilo.dev/api/workspaces/${workspaceId}/notifications/read-all`,
+      ],
+    );
+    assert.deepEqual(
+      requests.map((request) => request.init.method ?? "GET"),
+      ["GET", "PATCH", "PATCH"],
+    );
+    assert.equal(
+      requests.every((request) => request.init.credentials === "include"),
+      true,
+    );
   });
 
   it("calls Meeting, Voice, and Agent API clients with MVP route contracts", async () => {

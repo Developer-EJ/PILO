@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CurrentUserAvatar } from "../auth/CurrentUserAvatar";
 import { LogoutButton } from "../auth/LogoutButton";
+import { createNotificationClient } from "../../lib/notification/notificationClient.mjs";
 import { createWorkspaceDashboardClient } from "../../lib/workspace/dashboardClient.mjs";
 import {
   buildWorkspaceFeatureRoutes,
@@ -51,6 +52,21 @@ type DashboardMeetingReport = {
   riskCount: number;
 };
 
+type WorkspaceNotification = {
+  id: string;
+  workspaceId: string;
+  recipientUserId: string;
+  type: string;
+  title: string;
+  body: string;
+  readAt: string | null;
+  relatedObject: {
+    type: string;
+    id: string;
+  } | null;
+  createdAt: string;
+};
+
 type DashboardRecord = {
   tasks: DashboardTask[];
   progress: {
@@ -77,10 +93,20 @@ type DashboardState =
   | { status: "ready"; dashboard: DashboardRecord; warnings: string[] }
   | { status: "error"; dashboard: null; warnings: string[] };
 
+type NotificationState =
+  | { status: "loading"; notifications: WorkspaceNotification[] }
+  | { status: "ready"; notifications: WorkspaceNotification[] }
+  | { status: "error"; notifications: WorkspaceNotification[] };
+
 const initialState: DashboardState = {
   status: "loading",
   dashboard: null,
   warnings: [],
+};
+
+const initialNotificationState: NotificationState = {
+  status: "loading",
+  notifications: [],
 };
 
 function buildWorkspaceRoutes(workspaceId: string) {
@@ -175,6 +201,33 @@ function formatAgentAction(action: DashboardAgentAction) {
   }
 
   return `${action.type} is waiting for review.`;
+}
+
+function formatNotificationType(type: string) {
+  return type.replace(/_/g, " ");
+}
+
+function toneForNotification(notification: WorkspaceNotification) {
+  if (notification.type === "agent_approval_required") return "warning";
+  if (notification.type === "github_sync_failed") return "danger";
+  if (notification.type === "report_created") return "success";
+
+  return "primary";
+}
+
+function notificationHref(
+  notification: WorkspaceNotification,
+  routes: ReturnType<typeof buildWorkspaceRoutes>,
+) {
+  const relatedType = notification.relatedObject?.type;
+
+  if (relatedType === "task") return routes.tasks;
+  if (relatedType === "pull_request") return routes.reviews;
+  if (relatedType === "agent_action") return routes.agent;
+  if (relatedType === "meeting_report") return routes.meetings;
+  if (relatedType === "github_connection") return routes.github;
+
+  return routes.dashboard;
 }
 
 function buildDashboardViewModel(
@@ -346,7 +399,12 @@ export function WorkspaceDashboard() {
     [pathname],
   );
   const [state, setState] = useState<DashboardState>(initialState);
+  const [notificationState, setNotificationState] =
+    useState<NotificationState>(initialNotificationState);
+  const [notificationActionIdInFlight, setNotificationActionIdInFlight] =
+    useState<string | null>(null);
   const routes = useMemo(() => buildWorkspaceRoutes(workspaceId), [workspaceId]);
+  const notificationClient = useMemo(() => createNotificationClient(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -381,11 +439,91 @@ export function WorkspaceDashboard() {
     };
   }, [workspaceId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadNotifications() {
+      setNotificationState(initialNotificationState);
+
+      const notifications = (await notificationClient.listNotifications(
+        workspaceId,
+      )) as WorkspaceNotification[];
+
+      if (!cancelled) {
+        setNotificationState({
+          status: "ready",
+          notifications,
+        });
+      }
+    }
+
+    loadNotifications().catch(() => {
+      if (!cancelled) {
+        setNotificationState({
+          status: "error",
+          notifications: [],
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [notificationClient, workspaceId]);
+
   const viewModel = state.dashboard
     ? buildDashboardViewModel(state.dashboard, workspaceId)
     : null;
   const navItems: DashboardNavItem[] =
     viewModel?.navItems ?? buildDashboardNavItems(null, workspaceId);
+  const unreadNotificationCount = notificationState.notifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
+
+  async function markNotificationRead(notification: WorkspaceNotification) {
+    if (notification.readAt || notificationActionIdInFlight) {
+      return;
+    }
+
+    setNotificationActionIdInFlight(notification.id);
+
+    try {
+      const updatedNotification =
+        (await notificationClient.markNotificationRead(notification.id, {
+          workspaceId,
+        })) as WorkspaceNotification;
+
+      setNotificationState((current) => ({
+        status: current.status === "error" ? "ready" : current.status,
+        notifications: current.notifications.map((item) =>
+          item.id === updatedNotification.id ? updatedNotification : item,
+        ),
+      }));
+    } finally {
+      setNotificationActionIdInFlight(null);
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    if (!unreadNotificationCount || notificationActionIdInFlight) {
+      return;
+    }
+
+    setNotificationActionIdInFlight("all");
+
+    try {
+      const result = (await notificationClient.markWorkspaceNotificationsRead(
+        workspaceId,
+      )) as { notifications: WorkspaceNotification[] };
+
+      setNotificationState({
+        status: "ready",
+        notifications: result.notifications,
+      });
+    } finally {
+      setNotificationActionIdInFlight(null);
+    }
+  }
 
   return (
     <main className="dashboard-shell">
@@ -398,6 +536,9 @@ export function WorkspaceDashboard() {
             <h1>PILO Dashboard</h1>
           </div>
           <div className="topbar-actions">
+            <Link className="meeting-chip" href="#workspace-notifications">
+              Notifications <code>{unreadNotificationCount}</code>
+            </Link>
             <Link className="meeting-chip" href={routes.meetings}>
               <span className="live-dot" />
               Meetings <code>{state.dashboard?.meetingReports.length ?? 0}</code>
@@ -543,6 +684,89 @@ export function WorkspaceDashboard() {
                 </div>
 
                 <div className="right-column">
+                  <section
+                    className="panel notification-panel"
+                    id="workspace-notifications"
+                  >
+                    <div className="panel-head">
+                      <h2>Notifications</h2>
+                      <button
+                        className="panel-action notification-read-all-button"
+                        disabled={
+                          !unreadNotificationCount ||
+                          notificationActionIdInFlight === "all"
+                        }
+                        onClick={() => void markAllNotificationsRead()}
+                        type="button"
+                      >
+                        Mark all read
+                      </button>
+                    </div>
+                    <div className="notification-list">
+                      {notificationState.status === "loading" ? (
+                        <EmptyRow text="Loading notifications." />
+                      ) : null}
+
+                      {notificationState.status === "error" ? (
+                        <EmptyRow text="Notifications could not be loaded." />
+                      ) : null}
+
+                      {notificationState.status === "ready" &&
+                      notificationState.notifications.length ? (
+                        notificationState.notifications.map((notification) => {
+                          const tone = toneForNotification(notification);
+
+                          return (
+                            <article
+                              className={
+                                notification.readAt
+                                  ? "notification-row is-read"
+                                  : "notification-row"
+                              }
+                              key={notification.id}
+                            >
+                              <Link
+                                className="notification-copy"
+                                href={notificationHref(
+                                  notification,
+                                  viewModel.routes,
+                                )}
+                              >
+                                <i className={`status-dot tone-${tone}`} />
+                                <span>
+                                  <small>
+                                    {formatNotificationType(notification.type)}
+                                  </small>
+                                  <strong>{notification.title}</strong>
+                                  <p>{notification.body}</p>
+                                </span>
+                              </Link>
+                              <button
+                                aria-label={`Mark ${notification.title} as read`}
+                                disabled={
+                                  Boolean(notification.readAt) ||
+                                  notificationActionIdInFlight ===
+                                    notification.id
+                                }
+                                onClick={() =>
+                                  void markNotificationRead(notification)
+                                }
+                                type="button"
+                              >
+                                {notification.readAt ? "Read" : "Mark read"}
+                              </button>
+                            </article>
+                          );
+                        })
+                      ) : null}
+
+                      {notificationState.status === "ready" &&
+                      !notificationState.notifications.length ? (
+                        <EmptyRow text="No notifications yet." />
+                      ) : null}
+                    </div>
+                  </section>
+
                   <section className="agent-panel">
                     <div className="agent-title">
                       <span>AI</span>
