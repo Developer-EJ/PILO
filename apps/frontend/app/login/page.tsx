@@ -11,14 +11,14 @@ const providerEntries: LoginProviderEntry[] = [
   {
     name: "Google",
     eyebrow: "Workspace 계정으로 계속",
-    path: "/auth/google/start",
+    path: "/api/auth/google/start",
     mark: "G",
     tone: "google",
   },
   {
     name: "GitHub",
     eyebrow: "개발자 계정으로 계속",
-    path: "/auth/github/start",
+    path: "/api/auth/github/start",
     mark: "GH",
     tone: "github",
   },

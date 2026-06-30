@@ -844,8 +844,14 @@ describe("app-server package", () => {
     const response = service.getProviders();
 
     assert.equal(response.providers.length, 2);
-    assert.equal(response.providers[0].startPath.startsWith("/api/auth/"), true);
-    assert.equal(response.providers[0].callbackUrl.includes("/api/auth/"), true);
+    assert.equal(
+      response.providers[0].startPath.startsWith("/api/auth/"),
+      true,
+    );
+    assert.equal(
+      response.providers[0].callbackUrl.includes("/api/auth/"),
+      true,
+    );
     assert.equal(JSON.stringify(response).includes("clientSecret"), false);
     assert.equal(JSON.stringify(response).includes("secret"), false);
   });
@@ -1296,6 +1302,14 @@ describe("app-server package", () => {
       "review",
       "custom",
     ]);
+    assert.deepEqual(defs.CanvasConnectionType.enum, [
+      "related_to",
+      "created_from",
+      "blocks",
+      "references",
+      "implements",
+      "reviews",
+    ]);
     assert.deepEqual(defs.CanvasBoardDetail.required, [
       "id",
       "workspaceId",
@@ -1324,6 +1338,14 @@ describe("app-server package", () => {
       "connectionType",
       "label",
     ]);
+    assert.equal(
+      defs.CanvasConnectionSummary.properties.connectionType.$ref,
+      "#/$defs/CanvasConnectionType",
+    );
+    assert.equal(
+      defs.CanvasConnectionRequest.properties.connectionType.$ref,
+      "#/$defs/CanvasConnectionType",
+    );
     assert.equal(defs.CanvasPositionRequest.$ref, "#/$defs/CanvasPosition");
     assert.deepEqual(defs.CanvasViewSetting.required, [
       "zoom",
@@ -1921,7 +1943,7 @@ describe("app-server package", () => {
       boardId: "board-1",
       sourceShapeId: "shape-1",
       targetShapeId: "shape-2",
-      connectionType: "implemented_by",
+      connectionType: "implements",
       label: "Task to PR",
       now: new Date("2026-06-28T00:04:00.000Z"),
     });
@@ -1929,7 +1951,7 @@ describe("app-server package", () => {
       boardId: "board-1",
       sourceShapeId: "shape-1",
       targetShapeId: "shape-2",
-      connectionType: "implemented_by",
+      connectionType: "implements",
       label: "Duplicate label",
     });
     const crossBoard = await repository.createConnectionForBoard({
@@ -2323,7 +2345,7 @@ describe("app-server package", () => {
       body: {
         sourceShapeId: "shape-1",
         targetShapeId: "shape-2",
-        connectionType: "implemented_by",
+        connectionType: "implements",
         label: "Task to PR",
       },
     });
@@ -2336,7 +2358,7 @@ describe("app-server package", () => {
       id: "connection-1",
       sourceShapeId: "shape-1",
       targetShapeId: "shape-2",
-      connectionType: "implemented_by",
+      connectionType: "implements",
       label: "Task to PR",
     });
     assert.deepEqual(deleted, {
@@ -2361,7 +2383,7 @@ describe("app-server package", () => {
           boardId: "board-1",
           sourceShapeId: "shape-1",
           targetShapeId: "shape-2",
-          connectionType: "implemented_by",
+          connectionType: "implements",
           label: "Task to PR",
         },
       ],
@@ -2583,7 +2605,7 @@ describe("app-server package", () => {
           body: {
             sourceShapeId: "shape-1",
             targetShapeId: "shape-2",
-            connectionType: "implemented_by",
+            connectionType: "implements",
             label: "Task to PR",
           },
         }),
@@ -2591,6 +2613,42 @@ describe("app-server package", () => {
         error instanceof CanvasConflictError &&
         error.code === "canvas_connection_duplicate",
     );
+  });
+
+  it("rejects unsupported Canvas connection types before storage", async () => {
+    let storageCalled = false;
+    const service = new CanvasService(
+      {
+        storageMode: "test",
+        async findBoardWorkspaceId() {
+          storageCalled = true;
+          return "workspace-1";
+        },
+      },
+      {
+        async requireCurrentMember() {
+          throw new Error("workspace access should not be requested");
+        },
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        service.createCanvasConnection({
+          boardId: "board-1",
+          currentUser: { id: "user-1" },
+          body: {
+            sourceShapeId: "shape-1",
+            targetShapeId: "shape-2",
+            connectionType: "implemented_by",
+            label: "Task to PR",
+          },
+        }),
+      (error) =>
+        error instanceof CanvasValidationError &&
+        error.code === "canvas_validation_failed",
+    );
+    assert.equal(storageCalled, false);
   });
 
   it("rejects Canvas shape position updates without write permission", async () => {

@@ -118,7 +118,7 @@ export function WorkspaceCanvasBoards() {
     try {
       const board = (await canvasClient.createBoard(workspaceId, {
         title: nextTitle,
-        boardType: "freeform",
+        boardType: "custom",
       })) as CanvasBoardSummary;
 
       router.push(workspaceCanvasBoardHref(workspaceId, board.id));

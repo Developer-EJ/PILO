@@ -740,7 +740,7 @@ describe("auth HTTP integration", () => {
         payload: JSON.stringify({
           sourceShapeId: taskShape.id,
           targetShapeId: prShape.id,
-          connectionType: "implemented_by",
+          connectionType: "implements",
           label: "Task to PR",
         }),
       });
@@ -759,7 +759,7 @@ describe("auth HTTP integration", () => {
         payload: JSON.stringify({
           sourceShapeId: taskShape.id,
           targetShapeId: prShape.id,
-          connectionType: "implemented_by",
+          connectionType: "implements",
           label: "Duplicate",
         }),
       });

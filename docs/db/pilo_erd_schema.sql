@@ -352,10 +352,11 @@ CREATE TABLE canvas_boards (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   title VARCHAR(200) NOT NULL,
-  board_type VARCHAR(80) NOT NULL DEFAULT 'workspace',
+  board_type VARCHAR(80) NOT NULL DEFAULT 'project_map',
   created_by_member_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT canvas_boards_type_check CHECK (board_type IN ('project_map', 'meeting', 'review', 'custom')),
   CONSTRAINT canvas_boards_created_by_member_fk FOREIGN KEY (workspace_id, created_by_member_id) REFERENCES workspace_members(workspace_id, id) ON DELETE SET NULL,
   UNIQUE (workspace_id, id)
 );

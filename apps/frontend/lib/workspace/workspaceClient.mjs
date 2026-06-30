@@ -1,3 +1,8 @@
+import {
+  buildPiloApiUrl,
+  defaultAppServerUrl,
+} from "../api/apiUrl.mjs";
+
 const DEFAULT_WORKSPACE_MODE = "mock";
 
 export const mockWorkspaces = [
@@ -28,7 +33,7 @@ function defaultWorkspaceMode() {
 }
 
 export function defaultWorkspaceApiBaseUrl() {
-  return process.env.NEXT_PUBLIC_PILO_APP_SERVER_URL ?? "";
+  return defaultAppServerUrl();
 }
 
 export function resolveWorkspaceClientMode(mode = defaultWorkspaceMode()) {
@@ -54,11 +59,7 @@ export function buildWorkspaceApiUrl(
     });
   }
 
-  if (!baseUrl) {
-    return path;
-  }
-
-  return `${baseUrl.replace(/\/$/, "")}${path}`;
+  return buildPiloApiUrl(path, baseUrl);
 }
 
 async function readWorkspaceJson(response, path) {
@@ -89,7 +90,7 @@ export function createWorkspaceApiClient({
 } = {}) {
   return {
     async listWorkspaces() {
-      const path = "/workspaces";
+      const path = "/api/workspaces";
       const response = await requestWorkspaceJson(path, undefined, {
         baseUrl,
         fetcher,

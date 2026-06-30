@@ -1,4 +1,5 @@
 import { defaultAppServerUrl } from "../../lib/auth/authClient.mjs";
+import { buildPiloApiUrl } from "../../lib/api/apiUrl.mjs";
 import { safeNextPath } from "../../lib/auth/protectedRoutes.mjs";
 
 function normalizeOptions(options) {
@@ -17,8 +18,7 @@ function normalizeOptions(options) {
 
 export function authProviderHref(path, options) {
   const { baseUrl, next } = normalizeOptions(options);
-  const normalizedBaseUrl = baseUrl?.replace(/\/$/, "");
-  const href = normalizedBaseUrl ? `${normalizedBaseUrl}${path}` : path;
+  const href = buildPiloApiUrl(path, baseUrl);
 
   if (!next) {
     return href;

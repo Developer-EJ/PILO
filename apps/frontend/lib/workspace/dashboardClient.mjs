@@ -227,7 +227,7 @@ export function createWorkspaceDashboardApiClient({
 } = {}) {
   return {
     async getDashboard(workspaceId) {
-      const path = `/workspaces/${encodeURIComponent(workspaceId)}/dashboard`;
+      const path = `/api/workspaces/${encodeURIComponent(workspaceId)}/dashboard`;
       const response = await fetcher(buildWorkspaceApiUrl(path, baseUrl), {
         credentials: "include",
         headers: {
