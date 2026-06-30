@@ -53,6 +53,15 @@
 ## Current Runtime APIs
 
 - None. `agents` and `agent_workflows` have a registry service/repository, but there is no Agent Run or Planning HTTP controller in current `temp-dev`.
+- `codex/01-agent-runtime-skeleton` added an internal app-server `AgentRuntimeService` skeleton. It is in-memory and deterministic, can create/apply `AgentJobMessage` and `AgentResultMessage` shapes, and can surface `task.create.draft` actions as `waiting_confirmation`.
+- This internal service skeleton is not a public HTTP API. Do not document or consume it as Current Runtime API until the Agent Run/Action controller lands.
+
+## Current Internal Skeleton
+
+- `task.draft.generate` local workflow returns `task.create.draft` payloads that match `TaskCreateDraft`.
+- `meeting.report.generate`, `planning.generate`, review, GitHub, and orchestrator paths are local/mock workflow shells only.
+- Approval is modeled as AgentAction state. Owner domain writes still require an explicit owner adapter/API after user confirmation.
+- Persistence is process memory only. DB-backed `agent_runs`, `agent_actions`, and `agent_traces` remain Deferred.
 
 ## Deferred APIs
 

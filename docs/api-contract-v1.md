@@ -715,6 +715,17 @@ Rules:
 
 ## Agent Runtime / Command Chat API
 
+This section is the MVP Target surface. In current runtime, the Agent registry
+and an internal deterministic service skeleton exist, but no Agent Run/Action
+HTTP controller exists yet. Therefore the Agent Run/Action HTTP routes below
+remain Deferred until the controller PR lands. Do not treat the internal service
+skeleton as a callable Current Runtime API.
+
+The next Agent Runtime implementation PR should start with the smaller approval
+surface: create run, read run, approve action, and reject action. Agent chat and
+recommendation list routes stay follow-up targets unless a separate contract PR
+changes that sequence.
+
 ### Endpoints
 
 | Method | Path | Auth | Role | Description |
