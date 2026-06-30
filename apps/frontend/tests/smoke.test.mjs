@@ -102,6 +102,7 @@ import {
 } from "../lib/review/reviewClient.mjs";
 import {
   applyCanvasShapeState,
+  buildCanvasShapeStateMutations,
   canvasStorageKey,
   filterCanvasBoard,
   normalizeCanvasFilterSetting,
@@ -1855,6 +1856,57 @@ describe("frontend package", () => {
     });
     assert.equal(persistedBoard.shapes[0].position.x, 320);
     assert.equal(persistedBoard.shapes[0].width, 340);
+    assert.deepEqual(
+      buildCanvasShapeStateMutations(board.shapes, {}, {
+        [board.shapes[0].id]: {
+          x: board.shapes[0].position.x,
+          y: board.shapes[0].position.y,
+          width: board.shapes[0].width,
+          height: board.shapes[0].height,
+        },
+      }),
+      [],
+    );
+    assert.deepEqual(
+      buildCanvasShapeStateMutations(
+        board.shapes,
+        {
+          [board.shapes[0].id]: {
+            x: board.shapes[0].position.x,
+            y: board.shapes[0].position.y,
+            width: board.shapes[0].width,
+            height: board.shapes[0].height,
+          },
+        },
+        {
+          [board.shapes[0].id]: {
+            x: 320,
+            y: 180,
+            width: 340,
+            height: 190,
+          },
+          "local-note-1": {
+            x: 20,
+            y: 30,
+            width: 100,
+            height: 80,
+          },
+        },
+      ),
+      [
+        {
+          shapeId: board.shapes[0].id,
+          position: {
+            x: 320,
+            y: 180,
+          },
+          shape: {
+            width: 340,
+            height: 190,
+          },
+        },
+      ],
+    );
     assert.deepEqual(
       filteredBoard.shapes.map((shape) => shape.entityType),
       ["task"],

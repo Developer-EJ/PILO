@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { createWorkspaceDashboardFixture } from "../../lib/workspace/dashboardClient.mjs";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../../lib/workspace/canvasClient.mjs";
 import {
   applyCanvasShapeState,
+  buildCanvasShapeStateMutations,
   CANVAS_FILTER_ENTITY_TYPES,
   filterCanvasBoard,
   normalizeCanvasFreeformShapes,
@@ -482,6 +483,8 @@ function buildFreeformShapesKey(shapes: PiloCanvasFreeformShape[]) {
 
 export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const pathname = usePathname() ?? "/";
+  const canvasClient = useMemo(() => createCanvasClient(), []);
+  const canvasMode = useMemo(() => resolveCanvasClientMode(), []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [boardState, setBoardState] = useState<CanvasBoardState>({
     board: null,
@@ -504,6 +507,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   const [shapeStateById, setShapeStateById] = useState<
     Record<string, PiloCanvasShapeState>
   >({});
+  const shapeStateByIdRef = useRef<Record<string, PiloCanvasShapeState>>({});
   const [freeformShapes, setFreeformShapes] = useState<
     PiloCanvasFreeformShape[]
   >([]);
@@ -535,6 +539,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     pullRequestCount: dashboard.pullRequests.length,
   });
   const board = boardState.board ?? fallbackBoard;
+  const shouldPersistCanvasApi = boardState.source === "api";
   const activeFilterSetting = filterSetting ?? board.filterSetting;
   const persistedBoard = useMemo(
     () => ({
@@ -553,8 +558,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    const canvasClient = createCanvasClient();
-    const mode = resolveCanvasClientMode();
 
     async function loadCanvasBoard() {
       setBoardState({
@@ -579,7 +582,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
         setBoardState({
           board: detail,
-          source: mode === "api" ? "api" : "fixture",
+          source: canvasMode === "api" ? "api" : "fixture",
           status: "ready",
         });
       } catch (error) {
@@ -602,18 +605,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [boardId, workspaceId]);
+  }, [boardId, canvasClient, canvasMode, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
-    const storedShapeState = normalizeCanvasShapeState(
-      readCanvasStorage("shape-state", board.id),
-    );
-    const storedFilterSetting = normalizeCanvasFilterSetting(
-      readCanvasStorage("filter-setting", board.id),
-      board.filterSetting,
-    );
-    const storedViewSetting = readCanvasStorage("view-setting", board.id);
     const storedFreeformShapes = normalizeCanvasFreeformShapes(
       readCanvasStorage("freeform-shapes", board.id),
     ) as PiloCanvasFreeformShape[];
@@ -621,6 +616,27 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     queueMicrotask(() => {
       if (cancelled) return;
 
+      if (shouldPersistCanvasApi) {
+        shapeStateByIdRef.current = {};
+        setShapeStateById({});
+        setFreeformShapes(storedFreeformShapes);
+        setFilterSetting(board.filterSetting);
+        setViewSetting(board.viewSetting);
+        setHasStoredViewSetting(true);
+        setCanvasHydrationVersion((version) => version + 1);
+        return;
+      }
+
+      const storedShapeState = normalizeCanvasShapeState(
+        readCanvasStorage("shape-state", board.id),
+      );
+      const storedFilterSetting = normalizeCanvasFilterSetting(
+        readCanvasStorage("filter-setting", board.id),
+        board.filterSetting,
+      );
+      const storedViewSetting = readCanvasStorage("view-setting", board.id);
+
+      shapeStateByIdRef.current = storedShapeState;
       setShapeStateById(storedShapeState);
       setFreeformShapes(storedFreeformShapes);
       setFilterSetting(storedFilterSetting);
@@ -639,21 +655,44 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [board.id, board.filterSetting, board.viewSetting]);
+  }, [board.id, board.filterSetting, board.viewSetting, shouldPersistCanvasApi]);
 
   const persistShapeState = useCallback(
     (nextShapeStateById: Record<string, PiloCanvasShapeState>) => {
-      setShapeStateById((currentShapeStateById) => {
-        if (areShapeStatesEqual(currentShapeStateById, nextShapeStateById)) {
-          return currentShapeStateById;
-        }
+      const currentShapeStateById = shapeStateByIdRef.current;
 
+      if (areShapeStatesEqual(currentShapeStateById, nextShapeStateById)) {
+        return;
+      }
+
+      shapeStateByIdRef.current = nextShapeStateById;
+      setShapeStateById(nextShapeStateById);
+
+      if (!shouldPersistCanvasApi) {
         writeCanvasStorage("shape-state", board.id, nextShapeStateById);
+        return;
+      }
 
-        return nextShapeStateById;
+      const mutations = buildCanvasShapeStateMutations(
+        board.shapes,
+        currentShapeStateById,
+        nextShapeStateById,
+      );
+
+      if (!mutations.length) return;
+
+      void Promise.all(
+        mutations.flatMap((mutation) => [
+          canvasClient.updateShapePosition(mutation.shapeId, mutation.position),
+          mutation.shape
+            ? canvasClient.updateShape(mutation.shapeId, mutation.shape)
+            : Promise.resolve(null),
+        ]),
+      ).catch(() => {
+        writeCanvasStorage("shape-state", board.id, nextShapeStateById);
       });
     },
-    [board.id],
+    [board.id, board.shapes, canvasClient, shouldPersistCanvasApi],
   );
 
   const persistFreeformShapes = useCallback(
@@ -688,17 +727,37 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           : normalizedViewSetting,
       );
       setHasStoredViewSetting(true);
-      writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
+
+      if (!shouldPersistCanvasApi) {
+        writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
+        return;
+      }
+
+      void canvasClient
+        .updateViewSetting(board.id, normalizedViewSetting)
+        .catch(() => {
+          writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
+        });
     },
-    [board.id],
+    [board.id, canvasClient, shouldPersistCanvasApi],
   );
 
   const persistFilterSetting = useCallback(
     (nextFilterSetting: CanvasFilterSetting) => {
       setFilterSetting(nextFilterSetting);
-      writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
+
+      if (!shouldPersistCanvasApi) {
+        writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
+        return;
+      }
+
+      void canvasClient.updateFilterSetting(board.id, nextFilterSetting).catch(
+        () => {
+          writeCanvasStorage("filter-setting", board.id, nextFilterSetting);
+        },
+      );
     },
-    [board.id],
+    [board.id, canvasClient, shouldPersistCanvasApi],
   );
 
   function selectCanvasTool(tool: PiloCanvasTool) {

@@ -80,6 +80,90 @@ export function normalizeCanvasShapeState(value) {
   );
 }
 
+function areFiniteNumbersEqual(left, right) {
+  return isFiniteNumber(left) && isFiniteNumber(right) && left === right;
+}
+
+function areOptionalFiniteNumbersEqual(left, right) {
+  if (left === undefined && right === undefined) return true;
+
+  return areFiniteNumbersEqual(left, right);
+}
+
+function isShapeStateEqual(left, right) {
+  if (!left || !right) return false;
+
+  return (
+    areFiniteNumbersEqual(left.x, right.x) &&
+    areFiniteNumbersEqual(left.y, right.y) &&
+    areOptionalFiniteNumbersEqual(left.width, right.width) &&
+    areOptionalFiniteNumbersEqual(left.height, right.height)
+  );
+}
+
+function isShapeStateSameAsBoardShape(shape, state) {
+  if (!shape || !state) return false;
+
+  return (
+    areFiniteNumbersEqual(state.x, shape.position?.x) &&
+    areFiniteNumbersEqual(state.y, shape.position?.y) &&
+    areOptionalFiniteNumbersEqual(state.width, shape.width) &&
+    areOptionalFiniteNumbersEqual(state.height, shape.height)
+  );
+}
+
+export function buildCanvasShapeStateMutations(
+  boardShapes,
+  currentShapeStateById,
+  nextShapeStateById,
+) {
+  const shapesById = new Map(
+    Array.isArray(boardShapes)
+      ? boardShapes
+          .filter((shape) => isRecord(shape) && typeof shape.id === "string")
+          .map((shape) => [shape.id, shape])
+      : [],
+  );
+  const current = isRecord(currentShapeStateById)
+    ? currentShapeStateById
+    : {};
+  const next = normalizeCanvasShapeState(nextShapeStateById);
+
+  return Object.entries(next).flatMap(([shapeId, nextState]) => {
+    const shape = shapesById.get(shapeId);
+
+    if (!shape) return [];
+
+    const currentState = current[shapeId];
+
+    if (isShapeStateEqual(currentState, nextState)) return [];
+    if (!currentState && isShapeStateSameAsBoardShape(shape, nextState)) {
+      return [];
+    }
+
+    return [
+      {
+        shapeId,
+        position: {
+          x: nextState.x,
+          y: nextState.y,
+        },
+        shape:
+          isFiniteNumber(nextState.width) || isFiniteNumber(nextState.height)
+            ? {
+                ...(isFiniteNumber(nextState.width)
+                  ? { width: nextState.width }
+                  : {}),
+                ...(isFiniteNumber(nextState.height)
+                  ? { height: nextState.height }
+                  : {}),
+              }
+            : null,
+      },
+    ];
+  });
+}
+
 export function normalizeCanvasFreeformShapes(value) {
   if (!Array.isArray(value)) return [];
 
