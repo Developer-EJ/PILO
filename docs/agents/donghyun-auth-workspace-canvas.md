@@ -60,6 +60,10 @@
 - `PUT /api/workspaces/:workspaceId/dashboard-preferences` saves dashboard preferences.
 - `GET /api/workspaces/:workspaceId/dashboard` aggregates read models.
 - Canvas shape/connection APIs are defined in `docs/contracts/canvas.md`.
+- WorkspaceAccessPublicService is the current internal public boundary used by
+  Agent/Task/GitHub flows to validate workspace membership. Agent currently
+  passes x-member-id through this temporary boundary. Temporary mock member
+  boundary. Not production auth.
 
 ## Deferred APIs
 

@@ -61,6 +61,8 @@
 - Internal `MEETING_ACTION_ITEM_TASK_DRAFT_SOURCE` exposes a Meeting-owned
   source boundary for 세인 Agent Runtime. It maps Meeting ActionItem to
   `TaskCreateDraft` payload only and does not create TaskDraft rows.
+  It validates that the Meeting source workspace matches the Agent run
+  workspace and that the ActionItem belongs to the requested meeting report.
 - Voice APIs are defined in `docs/contracts/voice.md` and use `/api/...` public paths.
 
 ## Deferred APIs

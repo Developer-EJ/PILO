@@ -208,6 +208,16 @@ Contract test 기준:
 
 ## Boundaries
 
+Current internal membership validation boundary:
+
+- `WorkspaceAccessPublicService` is the public app-server boundary for checking
+  whether an actor is a member of a workspace.
+- Agent Run/Action HTTP routes use this boundary with `x-member-id` in the
+  current runtime. Temporary mock member boundary. Not production auth.
+- TaskDraft public write execution uses the same workspace member rule through
+  the Task owner service; Agent must not import Workspace repository or Prisma.
+- Real production Auth/session conversion remains Deferred until the Auth and
+  Workspace runtime are unified behind a production current-user boundary.
 - 동현은 workspace와 membership 원본을 소유한다.
 - 주형/진호/은재/세인은 `workspace_member_id`를 참조할 수 있지만, 멤버 role을 직접 수정하지 않는다.
 - 다른 도메인은 권한 확인이 필요할 때 Workspace API 또는 auth guard의 `currentMember`를 사용한다.

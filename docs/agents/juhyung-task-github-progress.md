@@ -68,6 +68,8 @@ need a separate contract/spec/infra hygiene PR before use.
   `task.create.draft` execution by reusing the current TaskDraft service
   validation and creation path. This is not a public HTTP route and does not
   approve drafts or create Tasks.
+  It requires an actor member in the same workspace and is only called by
+  Agent after run/action workspace validation passes.
 - Meeting ActionItem sources may arrive through Agent
   `meeting.action-item.to-task-draft`; the TaskDraft public write adapter
   preserves `sourceType = "meeting_action_item"` and the MeetingActionItem id.

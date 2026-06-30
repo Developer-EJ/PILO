@@ -63,8 +63,12 @@
   current owner-domain side effect is explicit `task.create.draft` execute
   through the 주형 TaskDraft public write adapter.
 - Current controller uses `x-member-id` as the temporary mock/current member
-  boundary until Auth/Workspace guard wiring lands.
+  boundary and validates workspace membership through the Workspace public
+  boundary.
 - Temporary mock member boundary. Not production auth.
+- Real production Auth/session conversion remains Deferred.
+- execute requires the requesting member to match confirmedByMemberId and
+  rejects payload/run workspace mismatch before owner writes.
 
 ## Current Internal Skeleton
 

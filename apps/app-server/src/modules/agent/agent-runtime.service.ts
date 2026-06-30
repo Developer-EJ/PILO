@@ -234,6 +234,17 @@ export class AgentRuntimeService {
     return cloneRun(this.requireRun(runId));
   }
 
+  getActionAuthorizationContext(actionId: string) {
+    const { run, action } = this.requireAction(actionId);
+    return {
+      actionId: action.id,
+      runId: run.id,
+      workspaceId: run.workspaceId,
+      status: action.status,
+      confirmedByMemberId: action.confirmedByMemberId,
+    };
+  }
+
   getRunStatus(runId: string): AgentRunStatusResponse {
     return toRunStatusResponse(this.requireRun(runId));
   }
@@ -300,6 +311,7 @@ export class AgentRuntimeService {
     }
 
     try {
+      this.assertActionPayloadWorkspaceMatchesRun(run, action);
       const result = await executor.execute(clone(action));
       if (result.status === "deferred") {
         const deferredAt = clock.now();
@@ -357,6 +369,21 @@ export class AgentRuntimeService {
       );
       this.refreshRunState(run, failedAt, normalizedError);
       return clone(action);
+    }
+  }
+
+  private assertActionPayloadWorkspaceMatchesRun(
+    run: AgentRunDetail,
+    action: AgentAction,
+  ) {
+    const payloadWorkspaceId = readString(action.payload.workspaceId);
+    if (!payloadWorkspaceId) {
+      return;
+    }
+    if (payloadWorkspaceId !== run.workspaceId) {
+      throw new BadRequestException(
+        "Agent action payload workspaceId must match the run workspaceId",
+      );
     }
   }
 

@@ -93,6 +93,9 @@ Internal owner public write boundary:
   reuses the same validation and creation rules as
   `POST /api/workspaces/:workspaceId/task-drafts`, and returns
   `TaskDraftSummary`.
+- The actor member id must resolve to a member of the target workspace. In the
+  Agent execute flow, the Agent run workspace and `TaskCreateDraft.workspaceId`
+  must match before this owner boundary is called.
 - It creates only a TaskDraft in `draft` status. It does not approve the draft
   or create a Task.
 - Consumers such as Agent Runtime must depend on this public adapter
@@ -466,6 +469,9 @@ boundary and Agent `meeting.action-item.to-task-draft` workflow. The Agent run
 and approve steps do not create a TaskDraft; explicit AgentAction execute calls
 the 주형 `TASK_DRAFT_PUBLIC_WRITE_ADAPTER` and preserves the same `sourceType`
 and `sourceId` in the returned `TaskDraftSummary`.
+
+Workspace mismatch is rejected before TaskDraft creation; no TaskDraft row is
+created when the Agent action payload workspace differs from the run workspace.
 
 `sourceType`과 `sourceId`는 함께 보내거나 둘 다 생략한다. 둘 중 하나만 있으면
 현재 runtime은 `400`으로 거절한다.
