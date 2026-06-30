@@ -142,7 +142,7 @@ export class AgentRuntimeService {
   }
 
   async getRun(runId: string, actor?: WorkspaceActor) {
-    const run = this.repository.findRun(runId);
+    const run = await this.repository.findRun(runId);
 
     if (!run) {
       throw new AgentRuntimeNotFoundError("Agent run not found");
@@ -172,7 +172,7 @@ export class AgentRuntimeService {
     decision: "approve" | "reject",
     actor?: WorkspaceActor,
   ) {
-    const run = this.repository.findRunByActionId(actionId);
+    const run = await this.repository.findRunByActionId(actionId);
 
     if (!run) {
       throw new AgentRuntimeNotFoundError("Agent action not found");
@@ -240,9 +240,9 @@ export class AgentRuntimeService {
       execution.ownerApiResults,
     );
 
-    return this.repository
-      .saveRun(nextRun)
-      .actions.find((candidate) => candidate.id === actionId);
+    return (await this.repository.saveRun(nextRun)).actions.find(
+      (candidate) => candidate.id === actionId,
+    );
   }
 
   private async executeApprovedAction(
