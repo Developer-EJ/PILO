@@ -62,6 +62,12 @@ const {
 const {
   ReviewRoomService,
 } = require("../src/modules/review/room/review-room.service");
+const {
+  AgentRuntimeService,
+} = require("../src/modules/agent/agent-runtime.service");
+const {
+  JuhyungTaskService,
+} = require("../src/modules/juhyung/juhyung-task.service");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
 const { configureApp } = require("../src/app.config");
@@ -3616,6 +3622,39 @@ describe("app-server package", () => {
       assert.equal(localDashboard.currentMember.memberId, LOCAL_MVP_MEMBER_ID);
       assert.equal(localDashboard.source, "mixed");
       assert.deepEqual(localDashboard.tasks, []);
+
+      const localActor = {
+        userId: LOCAL_MVP_USER_ID,
+        memberId: LOCAL_MVP_MEMBER_ID,
+      };
+      const agentRun = await app.get(AgentRuntimeService).createRun({
+        workspaceId: LOCAL_MVP_WORKSPACE_ID,
+        actor: localActor,
+        body: {
+          workflowType: "planning.generate",
+          workflowVersion: "v1",
+          input: {
+            goal: "Stabilize the local MVP runtime",
+          },
+        },
+      });
+      const taskDraftAction = agentRun.actions.find(
+        (action) => action.type === "task.create.draft",
+      );
+
+      assert.ok(taskDraftAction);
+
+      const executedAction = await app.get(AgentRuntimeService).approveAction({
+        actionId: taskDraftAction.id,
+        actor: localActor,
+      });
+      const taskDrafts = await app
+        .get(JuhyungTaskService)
+        .listTaskDrafts(LOCAL_MVP_WORKSPACE_ID, localActor);
+
+      assert.equal(executedAction.status, "executed");
+      assert.equal(taskDrafts.length, 1);
+      assert.equal(taskDrafts[0].status, "draft");
       const pullRequest = {
         id: "66666666-6666-4666-8666-666666666661",
         repositoryId: "55555555-5555-4555-8555-555555555501",

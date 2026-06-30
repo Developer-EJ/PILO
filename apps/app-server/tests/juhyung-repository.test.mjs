@@ -71,6 +71,82 @@ describe("JuhyungRepository", () => {
     }
   });
 
+  it("persists local task and draft writes without touching Prisma when database connect is skipped", async () => {
+    const previousSkipDatabaseConnect = process.env.PILO_SKIP_DATABASE_CONNECT;
+    process.env.PILO_SKIP_DATABASE_CONNECT = "true";
+    const database = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("should not query Prisma in local memory mode");
+        },
+      },
+    );
+    const repository = new JuhyungRepository(database);
+
+    try {
+      const draft = await repository.createTaskDraft(
+        {
+          workspaceId: "workspace-1",
+          sourceType: "agent",
+          sourceId: "agent-draft-1",
+          title: "Review generated task",
+          description: "Created by Agent Planning",
+          assigneeMemberId: null,
+          priority: "high",
+          dueDate: "2026-07-05",
+        },
+        "member-1",
+      );
+
+      assert.equal(draft.status, "draft");
+      assert.deepEqual(await repository.listTaskDraftsForWorkspace("workspace-1"), [
+        draft,
+      ]);
+
+      const approvedDraft = await repository.approveTaskDraft(
+        draft.id,
+        {
+          workspaceId: "workspace-1",
+          title: draft.title,
+          description: draft.description,
+          assigneeMemberId: null,
+          status: "todo",
+          priority: "high",
+          dueDate: "2026-07-05",
+          milestoneId: null,
+        },
+        "member-1",
+      );
+      const tasks = await repository.listTasksForWorkspace("workspace-1");
+
+      assert.equal(approvedDraft.status, "approved");
+      assert.equal(approvedDraft.taskId, tasks[0].id);
+      assert.equal(tasks[0].title, "Review generated task");
+
+      const moved = await repository.updateTaskStatus(
+        tasks[0].id,
+        "in_progress",
+        "member-1",
+        "todo",
+      );
+      const activity = await repository.listTaskActivityLogs(tasks[0].id);
+
+      assert.equal(moved.status, "in_progress");
+      assert.equal(activity[0].action, "task.status_changed");
+      assert.equal(
+        (await repository.getTaskById(tasks[0].id)).status,
+        "in_progress",
+      );
+    } finally {
+      if (previousSkipDatabaseConnect === undefined) {
+        delete process.env.PILO_SKIP_DATABASE_CONNECT;
+      } else {
+        process.env.PILO_SKIP_DATABASE_CONNECT = previousSkipDatabaseConnect;
+      }
+    }
+  });
+
   it("reads non-deleted tasks within one workspace", async () => {
     const calls = [];
     const database = {

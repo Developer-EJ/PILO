@@ -1,11 +1,16 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { DatabaseService } from "../database/database.service";
 import {
   GithubIssueState,
+  MilestoneRecord,
   MilestoneStatus,
+  TaskActivityLogRecord,
   TaskChecklistStatus,
+  TaskDraftRecord,
   TaskPriority,
+  TaskRecord,
   TaskStatus,
 } from "./juhyung-public.types";
 
@@ -122,13 +127,40 @@ export interface ListTasksOptions {
   offset: number;
 }
 
+type MemoryTaskRecord = TaskRecord & {
+  description: string | null;
+  createdAt: Date;
+  deletedAt: Date | null;
+  createdByMemberId: string;
+};
+
+type MemoryTaskDraftRecord = TaskDraftRecord & {
+  createdByMemberId: string;
+  approvedByMemberId: string | null;
+  approvedAt: Date | null;
+  rejectedByMemberId: string | null;
+  rejectedAt: Date | null;
+};
+
+type MemoryMilestoneRecord = MilestoneRecord & {
+  createdAt: Date;
+};
+
 @Injectable()
 export class JuhyungRepository {
+  private readonly memoryTasks = new Map<string, MemoryTaskRecord>();
+  private readonly memoryTaskDrafts = new Map<string, MemoryTaskDraftRecord>();
+  private readonly memoryMilestones = new Map<string, MemoryMilestoneRecord>();
+  private readonly memoryTaskActivityLogs = new Map<
+    string,
+    TaskActivityLogRecord[]
+  >();
+
   constructor(private readonly database: DatabaseService) {}
 
   listTasksForWorkspace(workspaceId: string, options?: ListTasksOptions) {
     if (!this.shouldUseDatabase) {
-      return [];
+      return this.listMemoryTasksForWorkspace(workspaceId, options);
     }
 
     return this.database.task.findMany({
@@ -147,7 +179,7 @@ export class JuhyungRepository {
 
   getTaskById(taskId: string) {
     if (!this.shouldUseDatabase) {
-      return null;
+      return this.getMemoryTaskById(taskId);
     }
 
     return this.database.task.findFirst({
@@ -238,7 +270,11 @@ export class JuhyungRepository {
 
   listMilestonesForWorkspace(workspaceId: string) {
     if (!this.shouldUseDatabase) {
-      return [];
+      return Array.from(this.memoryMilestones.values())
+        .filter((milestone) => milestone.workspaceId === workspaceId)
+        .sort((left, right) =>
+          compareNullableValues(left.endDate, right.endDate, "asc"),
+        );
     }
 
     return this.database.milestone.findMany({
@@ -250,6 +286,20 @@ export class JuhyungRepository {
   }
 
   createMilestone(input: CreateMilestoneInput) {
+    if (!this.shouldUseDatabase) {
+      const now = new Date();
+      const milestone: MemoryMilestoneRecord = {
+        id: randomUUID(),
+        ...input,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      this.memoryMilestones.set(milestone.id, milestone);
+
+      return milestone;
+    }
+
     const data = {
       ...input,
     } satisfies Prisma.MilestoneUncheckedCreateInput;
@@ -259,7 +309,7 @@ export class JuhyungRepository {
 
   getMilestoneById(milestoneId: string) {
     if (!this.shouldUseDatabase) {
-      return null;
+      return this.memoryMilestones.get(milestoneId) ?? null;
     }
 
     return this.database.milestone.findUnique({
@@ -270,6 +320,24 @@ export class JuhyungRepository {
   }
 
   updateMilestone(milestoneId: string, input: UpdateMilestoneInput) {
+    if (!this.shouldUseDatabase) {
+      const milestone = this.memoryMilestones.get(milestoneId);
+
+      if (!milestone) {
+        throw new ForbiddenException("Milestone was not found");
+      }
+
+      const updatedMilestone: MemoryMilestoneRecord = {
+        ...milestone,
+        ...input,
+        updatedAt: new Date(),
+      };
+
+      this.memoryMilestones.set(milestoneId, updatedMilestone);
+
+      return updatedMilestone;
+    }
+
     const data = {
       ...input,
     } satisfies Prisma.MilestoneUncheckedUpdateInput;
@@ -283,6 +351,20 @@ export class JuhyungRepository {
   }
 
   async createTask(input: CreateTaskInput, createdByMemberId: string) {
+    if (!this.shouldUseDatabase) {
+      if (
+        input.milestoneId &&
+        this.memoryMilestones.get(input.milestoneId)?.workspaceId !==
+          input.workspaceId
+      ) {
+        throw new ForbiddenException(
+          "Task milestone must belong to the task workspace",
+        );
+      }
+
+      return this.createMemoryTask(input, createdByMemberId);
+    }
+
     if (input.milestoneId) {
       const milestone = await this.database.milestone.findFirst({
         where: {
@@ -307,6 +389,27 @@ export class JuhyungRepository {
   }
 
   createTaskDraft(input: CreateTaskDraftInput, createdByMemberId: string) {
+    if (!this.shouldUseDatabase) {
+      const now = new Date();
+      const draft: MemoryTaskDraftRecord = {
+        id: randomUUID(),
+        ...input,
+        status: "draft",
+        taskId: null,
+        createdByMemberId,
+        approvedByMemberId: null,
+        approvedAt: null,
+        rejectedByMemberId: null,
+        rejectedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      this.memoryTaskDrafts.set(draft.id, draft);
+
+      return draft;
+    }
+
     const data = {
       ...input,
       status: "draft",
@@ -319,7 +422,18 @@ export class JuhyungRepository {
 
   listTaskDraftsForWorkspace(workspaceId: string) {
     if (!this.shouldUseDatabase) {
-      return [];
+      return Array.from(this.memoryTaskDrafts.values())
+        .filter((draft) => draft.workspaceId === workspaceId)
+        .sort((left, right) => {
+          const updatedAt = compareNullableValues(
+            left.updatedAt,
+            right.updatedAt,
+            "desc",
+          );
+
+          return updatedAt || compareNullableValues(left.id, right.id, "asc");
+        })
+        .slice(0, 50);
     }
 
     return this.database.taskDraft.findMany({
@@ -333,7 +447,7 @@ export class JuhyungRepository {
 
   getTaskDraftById(draftId: string) {
     if (!this.shouldUseDatabase) {
-      return null;
+      return this.memoryTaskDrafts.get(draftId) ?? null;
     }
 
     return this.database.taskDraft.findUnique({
@@ -348,6 +462,29 @@ export class JuhyungRepository {
     input: CreateTaskInput,
     actorMemberId: string,
   ) {
+    if (!this.shouldUseDatabase) {
+      const draft = this.memoryTaskDrafts.get(draftId);
+
+      if (!draft || draft.status !== "draft") {
+        return null;
+      }
+
+      const approvedAt = new Date();
+      const task = this.createMemoryTask(input, actorMemberId, approvedAt);
+      const approvedDraft: MemoryTaskDraftRecord = {
+        ...draft,
+        status: "approved",
+        approvedByMemberId: actorMemberId,
+        approvedAt,
+        taskId: task.id,
+        updatedAt: approvedAt,
+      };
+
+      this.memoryTaskDrafts.set(draftId, approvedDraft);
+
+      return approvedDraft;
+    }
+
     return this.database.$transaction(async (transaction) => {
       const approvedAt = new Date();
       const claimed = await transaction.taskDraft.updateMany({
@@ -386,6 +523,27 @@ export class JuhyungRepository {
   }
 
   async rejectTaskDraft(draftId: string, actorMemberId: string) {
+    if (!this.shouldUseDatabase) {
+      const draft = this.memoryTaskDrafts.get(draftId);
+
+      if (!draft || draft.status !== "draft") {
+        return null;
+      }
+
+      const rejectedAt = new Date();
+      const rejectedDraft: MemoryTaskDraftRecord = {
+        ...draft,
+        status: "rejected",
+        rejectedByMemberId: actorMemberId,
+        rejectedAt,
+        updatedAt: rejectedAt,
+      };
+
+      this.memoryTaskDrafts.set(draftId, rejectedDraft);
+
+      return rejectedDraft;
+    }
+
     const rejectedAt = new Date();
     const rejected = await this.database.taskDraft.updateMany({
       where: {
@@ -416,6 +574,33 @@ export class JuhyungRepository {
     actorMemberId?: string,
     previousTask?: Partial<Record<keyof UpdateTaskInput, unknown>>,
   ) {
+    if (!this.shouldUseDatabase) {
+      const task = this.getMemoryTaskById(taskId);
+
+      if (!task) {
+        throw new ForbiddenException("Task was not found");
+      }
+
+      const updatedTask = {
+        ...task,
+        ...input,
+        updatedAt: new Date(),
+      } as MemoryTaskRecord;
+
+      this.memoryTasks.set(taskId, updatedTask);
+
+      if (actorMemberId && previousTask) {
+        this.appendMemoryTaskActivityLog(taskId, {
+          actorMemberId,
+          action: "task.updated",
+          beforeValue: buildActivitySnapshot(input, previousTask),
+          afterValue: buildActivitySnapshot(input, input),
+        });
+      }
+
+      return updatedTask;
+    }
+
     const data = {
       ...input,
     } satisfies Prisma.TaskUncheckedUpdateInput;
@@ -457,6 +642,30 @@ export class JuhyungRepository {
     actorMemberId: string,
     previousStatus: TaskStatus,
   ) {
+    if (!this.shouldUseDatabase) {
+      const task = this.getMemoryTaskById(taskId);
+
+      if (!task) {
+        throw new ForbiddenException("Task was not found");
+      }
+
+      const updatedTask: MemoryTaskRecord = {
+        ...task,
+        status,
+        updatedAt: new Date(),
+      };
+
+      this.memoryTasks.set(taskId, updatedTask);
+      this.appendMemoryTaskActivityLog(taskId, {
+        actorMemberId,
+        action: "task.status_changed",
+        beforeValue: { status: previousStatus },
+        afterValue: { status },
+      });
+
+      return updatedTask;
+    }
+
     return this.database.$transaction(async (transaction) => {
       const task = await transaction.task.update({
         where: {
@@ -486,6 +695,25 @@ export class JuhyungRepository {
   }
 
   softDeleteTask(taskId: string) {
+    if (!this.shouldUseDatabase) {
+      const task = this.getMemoryTaskById(taskId);
+
+      if (!task) {
+        throw new ForbiddenException("Task was not found");
+      }
+
+      const now = new Date();
+      const deletedTask: MemoryTaskRecord = {
+        ...task,
+        deletedAt: now,
+        updatedAt: now,
+      };
+
+      this.memoryTasks.set(taskId, deletedTask);
+
+      return deletedTask;
+    }
+
     return this.database.task.update({
       where: {
         id: taskId,
@@ -541,7 +769,10 @@ export class JuhyungRepository {
 
   listTaskActivityLogs(taskId: string) {
     if (!this.shouldUseDatabase) {
-      return [];
+      return [...(this.memoryTaskActivityLogs.get(taskId) ?? [])].sort(
+        (left, right) =>
+          compareNullableValues(left.createdAt, right.createdAt, "desc"),
+      );
     }
 
     return this.database.taskActivityLog.findMany({
@@ -892,6 +1123,130 @@ export class JuhyungRepository {
     });
   }
 
+  private createMemoryTask(
+    input: CreateTaskInput,
+    createdByMemberId: string,
+    now = new Date(),
+  ) {
+    const task: MemoryTaskRecord = {
+      id: randomUUID(),
+      ...input,
+      createdByMemberId,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+    };
+
+    this.memoryTasks.set(task.id, task);
+
+    return task;
+  }
+
+  private getMemoryTaskById(taskId: string) {
+    const task = this.memoryTasks.get(taskId);
+
+    if (!task || task.deletedAt) {
+      return null;
+    }
+
+    return task;
+  }
+
+  private listMemoryTasksForWorkspace(
+    workspaceId: string,
+    options?: ListTasksOptions,
+  ) {
+    let tasks = Array.from(this.memoryTasks.values()).filter(
+      (task) => task.workspaceId === workspaceId && !task.deletedAt,
+    );
+
+    if (options?.status?.length) {
+      tasks = tasks.filter((task) =>
+        options.status?.includes(task.status as TaskStatus),
+      );
+    }
+
+    if (options?.assigneeMemberId) {
+      tasks = tasks.filter(
+        (task) => task.assigneeMemberId === options.assigneeMemberId,
+      );
+    }
+
+    if (options?.priority?.length) {
+      tasks = tasks.filter((task) =>
+        options.priority?.includes(task.priority as TaskPriority),
+      );
+    }
+
+    if (options?.milestoneId) {
+      tasks = tasks.filter((task) => task.milestoneId === options.milestoneId);
+    }
+
+    if (options?.dueDateFrom || options?.dueDateTo) {
+      tasks = tasks.filter((task) => {
+        const dueDate = normalizeComparableValue(task.dueDate);
+        const dueDateFrom = normalizeComparableValue(options.dueDateFrom);
+        const dueDateTo = normalizeComparableValue(options.dueDateTo);
+
+        return (
+          (!dueDateFrom || Boolean(dueDate && dueDate >= dueDateFrom)) &&
+          (!dueDateTo || Boolean(dueDate && dueDate <= dueDateTo))
+        );
+      });
+    }
+
+    if (options) {
+      const direction = options.sortDirection === "asc" ? "asc" : "desc";
+
+      tasks = tasks.sort((left, right) => {
+        const sorted = compareNullableValues(
+          left[options.sortBy],
+          right[options.sortBy],
+          direction,
+        );
+
+        return sorted || compareNullableValues(left.id, right.id, "asc");
+      });
+
+      return tasks.slice(options.offset, options.offset + options.limit);
+    }
+
+    return tasks.sort((left, right) => {
+      const updatedAt = compareNullableValues(
+        left.updatedAt,
+        right.updatedAt,
+        "desc",
+      );
+
+      return (
+        updatedAt ||
+        compareNullableValues(left.createdAt, right.createdAt, "desc") ||
+        compareNullableValues(left.id, right.id, "asc")
+      );
+    });
+  }
+
+  private appendMemoryTaskActivityLog(
+    taskId: string,
+    input: {
+      actorMemberId: string;
+      action: string;
+      beforeValue: unknown;
+      afterValue: unknown;
+    },
+  ) {
+    const activityLogs = this.memoryTaskActivityLogs.get(taskId) ?? [];
+    const now = new Date();
+
+    activityLogs.push({
+      id: randomUUID(),
+      taskId,
+      ...input,
+      createdAt: now,
+    });
+    this.memoryTaskActivityLogs.set(taskId, activityLogs);
+  }
+
   private async getNextChecklistSortOrder(taskId: string): Promise<number> {
     const aggregate = await this.database.taskChecklistItem.aggregate({
       where: {
@@ -929,6 +1284,43 @@ function toActivityValue(value: unknown): Prisma.InputJsonValue | null {
     return null;
   }
   return value as Prisma.InputJsonValue;
+}
+
+function normalizeComparableValue(value: unknown) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return String(value);
+}
+
+function compareNullableValues(
+  left: unknown,
+  right: unknown,
+  direction: "asc" | "desc",
+) {
+  const normalizedLeft = normalizeComparableValue(left);
+  const normalizedRight = normalizeComparableValue(right);
+
+  if (normalizedLeft === normalizedRight) {
+    return 0;
+  }
+
+  if (normalizedLeft === null) {
+    return 1;
+  }
+
+  if (normalizedRight === null) {
+    return -1;
+  }
+
+  const result = normalizedLeft > normalizedRight ? 1 : -1;
+
+  return direction === "asc" ? result : -result;
 }
 
 function buildTaskListWhere(
