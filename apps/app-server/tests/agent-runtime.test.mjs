@@ -94,6 +94,31 @@ describe("Agent runtime local runner", () => {
     );
   });
 
+  it("uses restart-safe ids for planning runs and generated task draft sources", async () => {
+    const firstRuntime = createRuntime();
+    const secondRuntime = createRuntime();
+
+    const firstRun = await createPlanningRun(firstRuntime.service);
+    const secondRun = await createPlanningRun(secondRuntime.service);
+    const firstTaskAction = firstRun.actions.find(
+      (candidate) => candidate.type === "task.create.draft",
+    );
+    const secondTaskAction = secondRun.actions.find(
+      (candidate) => candidate.type === "task.create.draft",
+    );
+
+    assert.notEqual(firstRun.id, secondRun.id);
+    assert.notEqual(
+      firstRun.output.planDraft.detail.id,
+      secondRun.output.planDraft.detail.id,
+    );
+    assert.notEqual(firstTaskAction.id, secondTaskAction.id);
+    assert.notEqual(
+      firstTaskAction.payload.sourceId,
+      secondTaskAction.payload.sourceId,
+    );
+  });
+
   it("does not mark the plan-level approval executed without owner API writes", async () => {
     const { service } = createRuntime();
     const run = await createPlanningRun(service);

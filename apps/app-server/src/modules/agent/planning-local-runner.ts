@@ -31,17 +31,29 @@ function sequenceId(prefix: string, sequence: number) {
   return `${prefix}${String(sequence).padStart(12, "0")}`;
 }
 
+function createSequenceIdFactory(sequence: number) {
+  let offset = 0;
+
+  return (prefix: string) => {
+    offset += 1;
+
+    return sequenceId(prefix, sequence * 1000 + offset);
+  };
+}
+
 function buildPlanDraft({
   actionId,
   actorMemberId,
   draftId,
   input,
+  nextId,
   workspaceId,
 }: {
   actionId: string;
   actorMemberId: string;
   draftId: string;
   input: Record<string, unknown>;
+  nextId: (prefix: string) => string;
   workspaceId: string;
 }) {
   const goal = textFromInput(input, "goal", "Launch a focused PILO MVP");
@@ -64,7 +76,7 @@ function buildPlanDraft({
 
   const featureDrafts = [
     {
-      id: "aaaaaaaa-aaaa-4aaa-8aaa-100000000001",
+      id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
       draftId,
       title: "Project kickoff intake",
       description:
@@ -75,7 +87,7 @@ function buildPlanDraft({
       createdAt: LOCAL_NOW,
     },
     {
-      id: "aaaaaaaa-aaaa-4aaa-8aaa-100000000002",
+      id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
       draftId,
       title: "Approval-first action queue",
       description:
@@ -86,7 +98,7 @@ function buildPlanDraft({
       createdAt: LOCAL_NOW,
     },
     {
-      id: "aaaaaaaa-aaaa-4aaa-8aaa-100000000003",
+      id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
       draftId,
       title: "Dashboard handoff destination",
       description:
@@ -100,7 +112,7 @@ function buildPlanDraft({
 
   const milestoneDrafts = [
     {
-      id: "aaaaaaaa-aaaa-4aaa-8aaa-200000000001",
+      id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
       draftId,
       title: "Planning approval checkpoint",
       startDate: "2026-07-01",
@@ -109,7 +121,7 @@ function buildPlanDraft({
       createdAt: LOCAL_NOW,
     },
     {
-      id: "aaaaaaaa-aaaa-4aaa-8aaa-200000000002",
+      id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
       draftId,
       title: "Owner API execution handoff",
       startDate: "2026-07-06",
@@ -142,7 +154,7 @@ function buildPlanDraft({
       status: "reviewing",
       createdByMemberId: actorMemberId,
       techStack: {
-        id: "aaaaaaaa-aaaa-4aaa-8aaa-300000000001",
+        id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
         draftId,
         frontend: "Next.js",
         backend: "NestJS",
@@ -158,7 +170,7 @@ function buildPlanDraft({
       featureDrafts,
       roleDrafts: [
         {
-          id: "aaaaaaaa-aaaa-4aaa-8aaa-400000000001",
+          id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
           draftId,
           member: {
             memberId: actorMemberId,
@@ -174,7 +186,7 @@ function buildPlanDraft({
       milestoneDrafts,
       riskNotes: [
         {
-          id: "aaaaaaaa-aaaa-4aaa-8aaa-500000000001",
+          id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
           draftId,
           content:
             "Task and Meeting owner APIs may not be available when a planning draft is approved.",
@@ -183,7 +195,7 @@ function buildPlanDraft({
           createdAt: LOCAL_NOW,
         },
         {
-          id: "aaaaaaaa-aaaa-4aaa-8aaa-500000000002",
+          id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
           draftId,
           content:
             "Contract drift can make fixture-backed UI look complete while runtime routes lag behind.",
@@ -193,7 +205,7 @@ function buildPlanDraft({
         },
       ],
       firstAgendaDraft: {
-        id: "aaaaaaaa-aaaa-4aaa-8aaa-600000000001",
+        id: nextId("aaaaaaaa-aaaa-4aaa-8aaa-"),
         draftId,
         title: "MVP planning approval",
         objective:
@@ -222,34 +234,40 @@ function buildPlanDraft({
 }
 
 export function createPlanningGenerateRun({
-  sequence,
+  idFactory,
+  sequence = 1,
   actorMemberId = LOCAL_ACTOR_MEMBER_ID,
   workspaceId,
   workflowVersion,
   rawInput,
 }: {
-  sequence: number;
+  idFactory?: () => string;
+  sequence?: number;
   actorMemberId?: string;
   workspaceId: string;
   workflowVersion: string;
   rawInput: unknown;
 }): AgentRunDetail {
   const input = isRecord(rawInput) ? rawInput : {};
-  const runId = sequenceId("99999999-9999-4999-8999-", sequence);
-  const workflowId = sequenceId("99999999-9999-4999-8998-", sequence);
-  const draftId = sequenceId("aaaaaaaa-aaaa-4aaa-8aaa-", sequence);
-  const planningActionId = sequenceId("99999999-9999-4999-8997-", sequence);
-  const taskActionId = sequenceId("99999999-9999-4999-8996-", sequence);
+  const nextId: (prefix: string) => string = idFactory
+    ? () => idFactory()
+    : createSequenceIdFactory(sequence);
+  const runId = nextId("99999999-9999-4999-8999-");
+  const workflowId = nextId("99999999-9999-4999-8998-");
+  const draftId = nextId("aaaaaaaa-aaaa-4aaa-8aaa-");
+  const planningActionId = nextId("99999999-9999-4999-8997-");
+  const taskActionId = nextId("99999999-9999-4999-8996-");
   const draft = buildPlanDraft({
     actionId: planningActionId,
     actorMemberId,
     draftId,
     input,
+    nextId,
     workspaceId,
   });
   const steps = [
     {
-      id: sequenceId("88888888-8888-4888-8888-", sequence * 10 + 1),
+      id: nextId("88888888-8888-4888-8888-"),
       runId,
       stepName: "collect_project_start_context",
       status: "succeeded" as const,
@@ -269,7 +287,7 @@ export function createPlanningGenerateRun({
       createdAt: LOCAL_NOW,
     },
     {
-      id: sequenceId("88888888-8888-4888-8888-", sequence * 10 + 2),
+      id: nextId("88888888-8888-4888-8888-"),
       runId,
       stepName: "draft_project_plan",
       status: "succeeded" as const,
@@ -331,8 +349,8 @@ export function createPlanningGenerateRun({
       executedAt: null,
     },
   ];
-  const trace: AgentTraceEntry[] = steps.map((step, index) => ({
-    id: sequenceId("77777777-7777-4777-8777-", sequence * 10 + index + 1),
+  const trace: AgentTraceEntry[] = steps.map((step) => ({
+    id: nextId("77777777-7777-4777-8777-"),
     runId,
     stepId: step.id,
     message: `${step.stepName} completed`,

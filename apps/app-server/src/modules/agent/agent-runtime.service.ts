@@ -4,6 +4,7 @@ import {
   Injectable,
   Optional,
 } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { JuhyungTaskService } from "../juhyung/juhyung-task.service";
 import type { CreateTaskDraftBody } from "../juhyung/juhyung-task.service";
 import {
@@ -90,8 +91,6 @@ function errorMessageFrom(error: unknown) {
 
 @Injectable()
 export class AgentRuntimeService {
-  private sequence = 1;
-
   constructor(
     private readonly repository: AgentRuntimeRepository,
     private readonly workspaceAccess: WorkspaceAccessPublicService,
@@ -129,14 +128,12 @@ export class AgentRuntimeService {
     }
 
     const run = createPlanningGenerateRun({
-      sequence: this.sequence,
       actorMemberId: currentMember.id,
       workspaceId: input.workspaceId,
       workflowVersion,
       rawInput: body.input,
+      idFactory: randomUUID,
     });
-
-    this.sequence += 1;
 
     return this.repository.saveRun(run);
   }
