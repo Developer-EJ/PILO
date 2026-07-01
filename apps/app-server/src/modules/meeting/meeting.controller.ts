@@ -4,6 +4,7 @@ import {
   CreateMeetingActionItemRequestDto,
   CreateMeetingAgendaRequestDto,
   CreateMeetingDecisionRequestDto,
+  CreateMeetingEventRequestDto,
   CreateMeetingMemoRequestDto,
   CreateMeetingRequestDto,
   CreateMeetingParticipantRequestDto,
@@ -14,6 +15,7 @@ import {
   MeetingActionItemTaskDraftResponseDto,
   MeetingAgendaResponseDto,
   MeetingDecisionResponseDto,
+  MeetingEventResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
   MeetingReportCanvasEntityRefDto,
@@ -153,6 +155,21 @@ export class MeetingController {
     @Param("meetingId") meetingId: string,
   ): TranscriptSegmentResponseDto[] {
     return this.meetingService.listTranscriptSegments(meetingId);
+  }
+
+  @Post("meeting-sessions/:sessionId/events")
+  createMeetingEvent(
+    @Param("sessionId") sessionId: string,
+    @Body() requestBody: CreateMeetingEventRequestDto,
+  ): MeetingEventResponseDto {
+    return this.meetingService.createMeetingEvent(sessionId, requestBody);
+  }
+
+  @Get("meeting-sessions/:sessionId/events")
+  listMeetingEvents(
+    @Param("sessionId") sessionId: string,
+  ): MeetingEventResponseDto[] {
+    return this.meetingService.listMeetingEvents(sessionId);
   }
 
   @Post("meetings/:meetingId/report-generation")

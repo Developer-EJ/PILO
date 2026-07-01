@@ -28,6 +28,9 @@ const {
 const {
   MEETING_STATUS_VALUES,
 } = require("../src/modules/meeting/types/meeting.types");
+const {
+  validateMeetingEventPayloadContract,
+} = require("../src/modules/meeting/types/meeting-event-payload.schema");
 const workspaceDashboardFixture = require("../../../docs/contracts/fixtures/workspace-dashboard.fixture.json");
 
 function createMeetingService(
@@ -41,6 +44,105 @@ function createMeetingService(
     new MockMeetingReportWorkflowClient(),
     taskDraftClient,
   );
+}
+
+function taskStatusChangedPayload() {
+  return {
+    schemaVersion: "meeting-event.v1",
+    action: "TASK_STATUS_CHANGED",
+    occurredAt: "2026-06-27T08:44:00.000Z",
+    source: {
+      domain: "task",
+      requestId: "req-task-001",
+    },
+    actor: {
+      userId: "user-2",
+      memberId: "member-2",
+      displayName: "Sarah Kinski",
+    },
+    target: {
+      workspaceId: "workspace-1",
+      entityType: "task",
+      entityId: "task-1",
+    },
+    change: {
+      operation: "UPDATE",
+      changedFields: ["status"],
+      before: {
+        status: "todo",
+      },
+      after: {
+        status: "in_progress",
+      },
+      snapshot: {
+        taskId: "task-1",
+        title: "OAuth callback 처리",
+        status: "in_progress",
+        assigneeMemberId: "member-2",
+        priority: "high",
+        dueDate: "2026-07-03",
+        descriptionExcerpt: "Google/GitHub callback 실패 상태를 처리한다.",
+      },
+    },
+    summary: "Task moved to in_progress: OAuth callback 처리",
+  };
+}
+
+function canvasShapePositionChangedPayload() {
+  return {
+    schemaVersion: "meeting-event.v1",
+    action: "SHAPE_POSITION_CHANGED",
+    occurredAt: "2026-06-27T08:41:12.000Z",
+    source: {
+      domain: "canvas",
+      clientEventId: "canvas-evt-001",
+    },
+    actor: {
+      userId: "user-1",
+      memberId: "member-1",
+      displayName: "Alex Linderman",
+    },
+    target: {
+      workspaceId: "workspace-1",
+      boardId: "board-1",
+      entityType: "canvas_shape",
+      entityId: "shape-1",
+    },
+    change: {
+      operation: "UPDATE",
+      changedFields: ["position"],
+      before: {
+        position: {
+          x: 80,
+          y: 120,
+        },
+      },
+      after: {
+        position: {
+          x: 160,
+          y: 180,
+        },
+      },
+      snapshot: {
+        shapeId: "shape-1",
+        boardId: "board-1",
+        shapeType: "task",
+        entityType: "task",
+        entityId: "task-1",
+        displayTitle: "OAuth callback",
+        position: {
+          x: 160,
+          y: 180,
+        },
+        size: {
+          width: 280,
+          height: 160,
+        },
+        color: "#6d5bd6",
+      },
+    },
+    summary: "Canvas task shape moved: OAuth callback",
+  };
 }
 
 describe("meeting module scaffold", () => {
@@ -375,6 +477,63 @@ describe("meeting module scaffold", () => {
         speakerMemberId: "speaker-2",
         body: "Wrong workspace.",
       }),
+    );
+  });
+
+  it("validates meeting event payload contracts before saving events", () => {
+    const repository = new MockMeetingRepository();
+    const currentMemberAdapter = new MockCurrentMemberAdapter();
+    const service = createMeetingService(repository, currentMemberAdapter);
+    const controller = new MeetingController(service);
+    const payload = taskStatusChangedPayload();
+
+    const event = controller.createMeetingEvent("meeting-session-1", {
+      eventType: "TASK",
+      userId: "user-2",
+      payload,
+      createdAt: "2026-06-27T08:44:00.000Z",
+    });
+
+    assert.equal(event.sessionId, "meeting-session-1");
+    assert.equal(event.eventType, "TASK");
+    assert.equal(event.userId, "user-2");
+    assert.deepEqual(event.payload, payload);
+    assert.deepEqual(controller.listMeetingEvents("meeting-session-1"), [
+      event,
+    ]);
+
+    assert.throws(
+      () =>
+        controller.createMeetingEvent("meeting-session-1", {
+          eventType: "TASK",
+          payload: {
+            ...payload,
+            action: "SHAPE_POSITION_CHANGED",
+          },
+        }),
+      /payload must match TASK meeting event schema/,
+    );
+  });
+
+  it("rejects deprecated Canvas node terminology in meeting event payloads", () => {
+    const validPayload = canvasShapePositionChangedPayload();
+    const invalidPayload = JSON.parse(JSON.stringify(validPayload));
+    invalidPayload.target.nodeId = "legacy-node-1";
+
+    const validResult = validateMeetingEventPayloadContract(
+      "CANVAS",
+      validPayload,
+    );
+    const invalidResult = validateMeetingEventPayloadContract(
+      "CANVAS",
+      invalidPayload,
+    );
+
+    assert.equal(validResult.valid, true, validResult.errors.join(", "));
+    assert.equal(invalidResult.valid, false);
+    assert.match(
+      invalidResult.errors.join("\n"),
+      /must use shape\/connection terminology/,
     );
   });
 

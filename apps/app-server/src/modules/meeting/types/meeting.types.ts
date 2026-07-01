@@ -1,3 +1,8 @@
+import type {
+  MeetingEventPayload,
+  MeetingEventType,
+} from "./meeting-event-payload.schema";
+
 export const MEETING_STATUS_VALUES = Object.freeze([
   "scheduled",
   "in_progress",
@@ -32,6 +37,12 @@ export const MEETING_ACTION_ITEM_STATUS_VALUES = [
   "converted",
   "rejected",
 ] as const;
+
+export {
+  MEETING_EVENT_TYPE_VALUES,
+  type MeetingEventPayload,
+  type MeetingEventType,
+} from "./meeting-event-payload.schema";
 
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
 
@@ -155,6 +166,23 @@ export interface CreateTranscriptSegmentInput {
   body: string;
   startedAt?: string | null;
   endedAt?: string | null;
+}
+
+export interface MeetingEventRecord {
+  id: string;
+  sessionId: string;
+  eventType: MeetingEventType;
+  userId: string | null;
+  payload: MeetingEventPayload;
+  createdAt: string;
+}
+
+export interface CreateMeetingEventInput {
+  sessionId: string;
+  eventType: MeetingEventType;
+  userId?: string | null;
+  payload: MeetingEventPayload;
+  createdAt: string;
 }
 
 export interface MeetingReportRecord {

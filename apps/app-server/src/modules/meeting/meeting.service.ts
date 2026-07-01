@@ -25,6 +25,7 @@ import {
   CreateMeetingActionItemRequestDto,
   CreateMeetingAgendaRequestDto,
   CreateMeetingDecisionRequestDto,
+  CreateMeetingEventRequestDto,
   CreateMeetingMemoRequestDto,
   CreateMeetingReportNextAgendaRequestDto,
   CreateMeetingReportRiskRequestDto,
@@ -35,6 +36,7 @@ import {
   MeetingActionItemTaskDraftResponseDto,
   MeetingAgendaResponseDto,
   MeetingDecisionResponseDto,
+  MeetingEventResponseDto,
   MeetingMemoResponseDto,
   MeetingParticipantResponseDto,
   MeetingReportCanvasEntityRefDto,
@@ -56,6 +58,7 @@ import {
 import {
   MEETING_AGENDA_STATUS_VALUES,
   MEETING_DECISION_STATUS_VALUES,
+  MEETING_EVENT_TYPE_VALUES,
   MEETING_REPORT_RISK_SEVERITY_VALUES,
   MEETING_STATUS_VALUES,
   TRANSCRIPT_SOURCE_VALUES,
@@ -65,6 +68,7 @@ import {
   MeetingAgendaStatus,
   MeetingDecisionRecord,
   MeetingDecisionStatus,
+  MeetingEventType,
   MeetingRecord,
   MeetingParticipantRecord,
   MeetingReportNextAgendaRecord,
@@ -74,6 +78,7 @@ import {
   MeetingStatus,
   TranscriptSource,
 } from "./types/meeting.types";
+import { validateMeetingEventPayloadContract } from "./types/meeting-event-payload.schema";
 
 @Injectable()
 export class MeetingService {
@@ -323,6 +328,39 @@ export class MeetingService {
     const meeting = this.requireMeeting(meetingId);
 
     return this.meetingRepository.listTranscriptSegmentsByMeeting(meeting.id);
+  }
+
+  createMeetingEvent(
+    sessionId: string,
+    requestBody: CreateMeetingEventRequestDto,
+  ): MeetingEventResponseDto {
+    const eventType = this.parseMeetingEventType(requestBody.eventType);
+    const payloadValidation = validateMeetingEventPayloadContract(
+      eventType,
+      requestBody.payload,
+    );
+
+    if (!payloadValidation.valid || !payloadValidation.payload) {
+      throw new BadRequestException(
+        `payload must match ${eventType} meeting event schema: ${payloadValidation.errors.join("; ")}`,
+      );
+    }
+
+    return this.meetingRepository.createMeetingEvent({
+      sessionId: this.requireNonEmptyString(sessionId, "sessionId"),
+      eventType,
+      userId: this.optionalString(requestBody.userId, "userId"),
+      payload: payloadValidation.payload,
+      createdAt:
+        this.optionalIsoDateTime(requestBody.createdAt, "createdAt") ??
+        new Date().toISOString(),
+    });
+  }
+
+  listMeetingEvents(sessionId: string): MeetingEventResponseDto[] {
+    return this.meetingRepository.listMeetingEventsBySession(
+      this.requireNonEmptyString(sessionId, "sessionId"),
+    );
   }
 
   requestReportGeneration(meetingId: string): MeetingReportResponseDto {
@@ -925,6 +963,19 @@ export class MeetingService {
 
     throw new BadRequestException(
       `source must be one of: ${TRANSCRIPT_SOURCE_VALUES.join(", ")}`,
+    );
+  }
+
+  private parseMeetingEventType(value: unknown): MeetingEventType {
+    if (
+      typeof value === "string" &&
+      MEETING_EVENT_TYPE_VALUES.includes(value as MeetingEventType)
+    ) {
+      return value as MeetingEventType;
+    }
+
+    throw new BadRequestException(
+      `eventType must be one of: ${MEETING_EVENT_TYPE_VALUES.join(", ")}`,
     );
   }
 

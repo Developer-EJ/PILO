@@ -242,15 +242,658 @@ Rules:
 
 녹음/트래킹 세션이 `IN_PROGRESS`인 동안 아래 입력이 `meeting_events`로 저장될 수 있다.
 
-| Input             | Event Type | Description                                             |
-| ----------------- | ---------- | ------------------------------------------------------- |
-| 챗봇과의 채팅내역 | `CHAT`     | 회의와 관련된 내용만 포함한다.                          |
-| Canvas 작업       | `CANVAS`   | 회의 중 생성/수정된 Canvas 노드와 노드 내용을 포함한다. |
-| 메모              | `NOTE`     | 회의 중 작성 가능한 텍스트 메모다.                      |
-| Canvas 투표 결과  | `CANVAS`   | MVP 제외. 이후 payload subtype으로 확장한다.            |
-| Task 변경         | `TASK`     | 회의 중 생성/수정/삭제된 Task event다.                  |
-| GitHub Issue/PR   | `GITHUB`   | 회의에서 언급된 개발 작업과 관련 Issue/PR이다.          |
-| 음성 transcript   | `STT`      | 녹음된 음성을 STT로 전사한 전체 내용이다.               |
+| Input             | Event Type   | Description                                                         |
+| ----------------- | ------------ | ------------------------------------------------------------------- |
+| 챗봇과의 채팅내역 | `CHAT`       | 회의와 관련된 내용만 포함한다.                                      |
+| Canvas 작업       | `CANVAS`     | 회의 중 생성/수정/삭제된 Canvas shapes/connections 내용을 포함한다. |
+| 메모              | `NOTE`       | 회의 중 작성 가능한 텍스트 메모다.                                  |
+| Canvas 투표 결과  | `CANVAS`     | MVP 제외. 이후 payload subtype으로 확장한다.                        |
+| Task 변경         | `TASK`       | 회의 중 생성/수정/삭제된 Task event다.                              |
+| GitHub Issue/PR   | `GITHUB`     | 회의에서 언급된 개발 작업과 관련 Issue/PR이다.                      |
+| 음성방 상태       | `VOICE_ROOM` | 음성방 참여/퇴장, 마이크 상태 변경 같은 voice room event다.         |
+| 음성 transcript   | `STT`        | 녹음된 음성을 STT로 전사한 전체 내용이다.                           |
+
+## Meeting Event Payload Contract
+
+이 섹션은 `meeting_events.payload`의 도메인별 JSON 계약이다. 녹음/트래킹 세션이
+`IN_PROGRESS`인 동안 발생한 workspace CUD 작업은 이 계약을 따라 `meeting_events`에
+기록한다.
+
+General rules:
+
+- Canvas 용어는 항상 `shapes`와 `connections`만 사용한다.
+- `event_type`은 상위 분류이고, 실제 행위는 `payload.action`으로 구분한다.
+- PR review 요청, PR comment, Issue 상태 변경은 별도 event type을 만들지 않고
+  `event_type = GITHUB`로 저장한다.
+- `meeting_events.user_id`는 event를 발생시킨 사용자의 user id를 복사한다. system/STT
+  event면 `null`일 수 있다.
+- `payload.actor`는 UI/Agent가 읽을 수 있는 actor snapshot이다. user/member 이름이 나중에
+  바뀌어도 회의 당시 맥락을 유지하기 위해 저장한다.
+- `payload.target`은 event가 직접 바꾼 대상을 가리킨다. `workspaceId`, `entityType`,
+  `entityId`는 모든 domain event에서 필수다.
+- `payload.source.clientEventId` 또는 `payload.source.requestId`가 있으면 같은 값으로 들어온
+  중복 event는 idempotent하게 처리한다.
+- secret, OAuth token, GitHub token, LiveKit token, raw credential은 payload에 저장하지
+  않는다.
+- App Server는 `apps/app-server/src/modules/meeting/types/meeting-event-payload.schema.ts`의
+  `validateMeetingEventPayloadContract(eventType, payload)`를 통과한 payload만
+  `meeting_events`에 저장할 수 있다.
+- schema validation에 실패한 `POST /api/meeting-sessions/:sessionId/events` 요청은
+  `400 Bad Request`로 거절한다. mock 저장소와 테스트 fixture도 이 예외를 우회하면 안 된다.
+
+### Base Schema
+
+```ts
+type MeetingEventPayloadSchemaVersion = "meeting-event.v1";
+
+type MeetingEventSourceDomain =
+  | "canvas"
+  | "task"
+  | "github"
+  | "chat"
+  | "voice_room";
+
+type MeetingEventEntityType =
+  | "canvas_shape"
+  | "canvas_connection"
+  | "task"
+  | "github_pull_request"
+  | "github_issue"
+  | "github_comment"
+  | "chat_message"
+  | "voice_room"
+  | "voice_session";
+
+type MeetingEventChangeOperation = "CREATE" | "UPDATE" | "DELETE" | "STATE";
+
+interface MeetingEventActorRef {
+  userId: string | null;
+  memberId: string | null;
+  displayName: string | null;
+}
+
+interface MeetingEventSourceRef {
+  domain: MeetingEventSourceDomain;
+  clientEventId?: string;
+  requestId?: string;
+}
+
+interface MeetingEventTargetRef {
+  workspaceId: string;
+  entityType: MeetingEventEntityType;
+  entityId: string;
+  boardId?: string;
+  voiceRoomId?: string;
+}
+
+interface MeetingEventChange<TPatch, TSnapshot> {
+  operation: MeetingEventChangeOperation;
+  changedFields: string[];
+  before: TPatch | null;
+  after: TPatch | null;
+  snapshot: TSnapshot | null;
+}
+
+interface MeetingEventPayloadBase<TAction extends string, TPatch, TSnapshot> {
+  schemaVersion: MeetingEventPayloadSchemaVersion;
+  action: TAction;
+  occurredAt: string;
+  source: MeetingEventSourceRef;
+  actor: MeetingEventActorRef;
+  target: MeetingEventTargetRef;
+  change: MeetingEventChange<TPatch, TSnapshot>;
+  summary: string;
+}
+```
+
+### Diff vs Snapshot Rule
+
+Update event는 전체 snapshot만 저장하지 않는다. 변경된 필드의 `before`/`after` diff와
+Agent가 문맥을 즉시 파악할 수 있는 compact `snapshot`을 함께 저장한다.
+
+| Operation | `before`                    | `after`                     | `snapshot`                                |
+| --------- | --------------------------- | --------------------------- | ----------------------------------------- |
+| `CREATE`  | `null`                      | 생성된 주요 필드 전체       | 생성 후 compact snapshot                  |
+| `UPDATE`  | 변경된 필드의 이전 값만     | 변경된 필드의 이후 값만     | 변경 후 compact snapshot                  |
+| `DELETE`  | 삭제 직전 주요 필드 전체    | `null`                      | `null`                                    |
+| `STATE`   | 상태 변경 전 값 또는 `null` | 상태 변경 후 값 또는 `null` | 상태 변경 후 compact snapshot 또는 `null` |
+
+이 구조를 쓰는 이유:
+
+- diff만 저장하면 Agent가 제목, 담당자, 연결 대상 같은 주변 맥락을 잃기 쉽다.
+- 전체 snapshot만 저장하면 변경 이유와 변경 필드가 불명확하고 저장량이 불필요하게 커진다.
+- 따라서 update는 diff를 기준으로 하되, Report 생성에 필요한 최소 표시 정보를 snapshot에
+  함께 둔다.
+
+### `CANVAS` Payload
+
+Canvas event는 Canvas domain의 `shapes`와 `connections` 변경만 기록한다. Canvas는 원본
+Task, Meeting Report, GitHub data를 수정하지 않고, Canvas 계약의 `entityType`/`entityId`로
+참조만 남긴다.
+
+```ts
+type CanvasMeetingEventAction =
+  | "SHAPE_CREATED"
+  | "SHAPE_UPDATED"
+  | "SHAPE_DELETED"
+  | "SHAPE_DISPLAY_TITLE_CHANGED"
+  | "SHAPE_POSITION_CHANGED"
+  | "CONNECTION_CREATED"
+  | "CONNECTION_UPDATED"
+  | "CONNECTION_DELETED"
+  | "CONNECTION_LABEL_CHANGED";
+
+type CanvasEntityType =
+  | "task"
+  | "meeting_report"
+  | "pull_request"
+  | "github_issue"
+  | "document"
+  | "file"
+  | "code"
+  | "decision"
+  | "risk";
+
+interface CanvasShapeSnapshot {
+  shapeId: string;
+  boardId: string;
+  shapeType: CanvasEntityType;
+  entityType: CanvasEntityType;
+  entityId: string;
+  displayTitle: string;
+  position?: { x: number; y: number };
+  size?: { width: number; height: number };
+  color?: string;
+}
+
+interface CanvasConnectionSnapshot {
+  connectionId: string;
+  boardId: string;
+  sourceShapeId: string;
+  targetShapeId: string;
+  connectionType: string;
+  label: string | null;
+}
+
+type CanvasMeetingPatch =
+  | Partial<CanvasShapeSnapshot>
+  | Partial<CanvasConnectionSnapshot>;
+
+type CanvasMeetingSnapshot = CanvasShapeSnapshot | CanvasConnectionSnapshot;
+
+interface CanvasMeetingEventPayload
+  extends MeetingEventPayloadBase<
+    CanvasMeetingEventAction,
+    CanvasMeetingPatch,
+    CanvasMeetingSnapshot
+  > {
+  source: MeetingEventSourceRef & { domain: "canvas" };
+  target: MeetingEventTargetRef & {
+    entityType: "canvas_shape" | "canvas_connection";
+    boardId: string;
+  };
+}
+```
+
+Required fields:
+
+- `schemaVersion`, `action`, `occurredAt`, `source.domain`, `actor`, `target`, `change`,
+  `summary`
+- `target.workspaceId`, `target.boardId`, `target.entityType`, `target.entityId`
+- shape event: `target.entityType = "canvas_shape"`, `target.entityId = shapeId`
+- connection event: `target.entityType = "canvas_connection"`, `target.entityId = connectionId`
+
+Example:
+
+```json
+{
+  "eventType": "CANVAS",
+  "userId": "user-1",
+  "payload": {
+    "schemaVersion": "meeting-event.v1",
+    "action": "SHAPE_POSITION_CHANGED",
+    "occurredAt": "2026-06-27T08:41:12.000Z",
+    "source": {
+      "domain": "canvas",
+      "clientEventId": "canvas-evt-001"
+    },
+    "actor": {
+      "userId": "user-1",
+      "memberId": "member-1",
+      "displayName": "Alex Linderman"
+    },
+    "target": {
+      "workspaceId": "workspace-1",
+      "boardId": "board-1",
+      "entityType": "canvas_shape",
+      "entityId": "shape-1"
+    },
+    "change": {
+      "operation": "UPDATE",
+      "changedFields": ["position"],
+      "before": {
+        "position": {
+          "x": 80,
+          "y": 120
+        }
+      },
+      "after": {
+        "position": {
+          "x": 160,
+          "y": 180
+        }
+      },
+      "snapshot": {
+        "shapeId": "shape-1",
+        "boardId": "board-1",
+        "shapeType": "task",
+        "entityType": "task",
+        "entityId": "task-1",
+        "displayTitle": "OAuth callback",
+        "position": {
+          "x": 160,
+          "y": 180
+        },
+        "size": {
+          "width": 280,
+          "height": 160
+        },
+        "color": "#6d5bd6"
+      }
+    },
+    "summary": "Canvas task shape moved: OAuth callback"
+  },
+  "createdAt": "2026-06-27T08:41:12.000Z"
+}
+```
+
+### `TASK` Payload
+
+```ts
+type TaskMeetingEventAction =
+  | "TASK_CREATED"
+  | "TASK_UPDATED"
+  | "TASK_DELETED"
+  | "TASK_STATUS_CHANGED"
+  | "TASK_ASSIGNEE_CHANGED"
+  | "TASK_DESCRIPTION_CHANGED"
+  | "TASK_DUE_DATE_CHANGED"
+  | "TASK_PRIORITY_CHANGED";
+
+interface TaskSnapshot {
+  taskId: string;
+  title: string;
+  status: string;
+  assigneeMemberId: string | null;
+  priority?: string | null;
+  dueDate?: string | null;
+  descriptionExcerpt?: string | null;
+}
+
+interface TaskMeetingEventPayload
+  extends MeetingEventPayloadBase<
+    TaskMeetingEventAction,
+    Partial<TaskSnapshot>,
+    TaskSnapshot
+  > {
+  source: MeetingEventSourceRef & { domain: "task" };
+  target: MeetingEventTargetRef & {
+    entityType: "task";
+    entityId: string;
+  };
+}
+```
+
+Required fields:
+
+- `target.workspaceId`, `target.entityType = "task"`, `target.entityId = taskId`
+- `change.changedFields`
+- create/delete: compact Task snapshot in `after` or `before`
+- update/state change: changed field diff plus post-change `snapshot`
+
+Example:
+
+```json
+{
+  "eventType": "TASK",
+  "userId": "user-2",
+  "payload": {
+    "schemaVersion": "meeting-event.v1",
+    "action": "TASK_STATUS_CHANGED",
+    "occurredAt": "2026-06-27T08:44:00.000Z",
+    "source": {
+      "domain": "task",
+      "requestId": "req-task-001"
+    },
+    "actor": {
+      "userId": "user-2",
+      "memberId": "member-2",
+      "displayName": "Sarah Kinski"
+    },
+    "target": {
+      "workspaceId": "workspace-1",
+      "entityType": "task",
+      "entityId": "task-1"
+    },
+    "change": {
+      "operation": "UPDATE",
+      "changedFields": ["status"],
+      "before": {
+        "status": "todo"
+      },
+      "after": {
+        "status": "in_progress"
+      },
+      "snapshot": {
+        "taskId": "task-1",
+        "title": "OAuth callback 처리",
+        "status": "in_progress",
+        "assigneeMemberId": "member-2",
+        "priority": "high",
+        "dueDate": "2026-07-03",
+        "descriptionExcerpt": "Google/GitHub callback 실패 상태를 처리한다."
+      }
+    },
+    "summary": "Task moved to in_progress: OAuth callback 처리"
+  },
+  "createdAt": "2026-06-27T08:44:00.000Z"
+}
+```
+
+### `GITHUB` Payload
+
+GitHub PR review 요청, comment, Issue 상태 변경은 `event_type = GITHUB`와 action enum으로
+구분한다.
+
+```ts
+type GithubMeetingEventAction =
+  | "PR_REVIEW_REQUESTED"
+  | "PR_COMMENT_CREATED"
+  | "PR_STATUS_CHANGED"
+  | "PR_MERGED"
+  | "ISSUE_STATUS_CHANGED"
+  | "ISSUE_COMMENT_CREATED"
+  | "ISSUE_LINKED_TO_TASK";
+
+interface GithubSnapshot {
+  provider: "github";
+  repositoryId: string;
+  repositoryFullName: string;
+  pullRequestId?: string;
+  issueId?: string;
+  commentId?: string;
+  title?: string;
+  state?: string;
+  url: string;
+  authorLogin?: string | null;
+  bodyExcerpt?: string | null;
+}
+
+interface GithubMeetingEventPayload
+  extends MeetingEventPayloadBase<
+    GithubMeetingEventAction,
+    Partial<GithubSnapshot>,
+    GithubSnapshot
+  > {
+  source: MeetingEventSourceRef & { domain: "github" };
+  target: MeetingEventTargetRef & {
+    entityType: "github_pull_request" | "github_issue" | "github_comment";
+    entityId: string;
+  };
+}
+```
+
+Required fields:
+
+- `target.workspaceId`, `target.entityType`, `target.entityId`
+- `snapshot.provider`, `snapshot.repositoryId`, `snapshot.repositoryFullName`, `snapshot.url`
+- PR actions: `pullRequestId`
+- Issue actions: `issueId`
+- comment actions: `commentId`, `bodyExcerpt`
+
+Example:
+
+```json
+{
+  "eventType": "GITHUB",
+  "userId": "user-3",
+  "payload": {
+    "schemaVersion": "meeting-event.v1",
+    "action": "PR_COMMENT_CREATED",
+    "occurredAt": "2026-06-27T08:46:20.000Z",
+    "source": {
+      "domain": "github",
+      "requestId": "github-webhook-001"
+    },
+    "actor": {
+      "userId": "user-3",
+      "memberId": "member-3",
+      "displayName": "Marcus Jenson"
+    },
+    "target": {
+      "workspaceId": "workspace-1",
+      "entityType": "github_comment",
+      "entityId": "comment-99"
+    },
+    "change": {
+      "operation": "CREATE",
+      "changedFields": ["commentId", "bodyExcerpt"],
+      "before": null,
+      "after": {
+        "provider": "github",
+        "repositoryId": "repo-1",
+        "repositoryFullName": "team/pilo",
+        "pullRequestId": "pr-12",
+        "commentId": "comment-99",
+        "url": "https://github.com/team/pilo/pull/12#discussion_r99",
+        "authorLogin": "marcus",
+        "bodyExcerpt": "이 auth callback 경계는 실패 상태를 UI에 노출해야 합니다."
+      },
+      "snapshot": {
+        "provider": "github",
+        "repositoryId": "repo-1",
+        "repositoryFullName": "team/pilo",
+        "pullRequestId": "pr-12",
+        "commentId": "comment-99",
+        "title": "OAuth callback handling",
+        "state": "open",
+        "url": "https://github.com/team/pilo/pull/12#discussion_r99",
+        "authorLogin": "marcus",
+        "bodyExcerpt": "이 auth callback 경계는 실패 상태를 UI에 노출해야 합니다."
+      }
+    },
+    "summary": "GitHub PR comment added on PR #12"
+  },
+  "createdAt": "2026-06-27T08:46:20.000Z"
+}
+```
+
+### `CHAT` Payload
+
+```ts
+type ChatMeetingEventAction =
+  | "MESSAGE_SENT"
+  | "MESSAGE_EDITED"
+  | "MESSAGE_DELETED";
+
+interface ChatMessageSnapshot {
+  messageId: string;
+  threadId: string | null;
+  body: string | null;
+  mentions: Array<{ memberId: string; displayName: string }>;
+  attachmentRefs?: Array<{ fileId: string; displayName: string }>;
+}
+
+interface ChatMeetingEventPayload
+  extends MeetingEventPayloadBase<
+    ChatMeetingEventAction,
+    Partial<ChatMessageSnapshot>,
+    ChatMessageSnapshot
+  > {
+  source: MeetingEventSourceRef & { domain: "chat" };
+  target: MeetingEventTargetRef & {
+    entityType: "chat_message";
+    entityId: string;
+  };
+}
+```
+
+Required fields:
+
+- `target.workspaceId`, `target.entityType = "chat_message"`, `target.entityId = messageId`
+- `body` for `MESSAGE_SENT` and `MESSAGE_EDITED`
+- `mentions` defaults to `[]`
+
+Example:
+
+```json
+{
+  "eventType": "CHAT",
+  "userId": "user-1",
+  "payload": {
+    "schemaVersion": "meeting-event.v1",
+    "action": "MESSAGE_SENT",
+    "occurredAt": "2026-06-27T08:47:05.000Z",
+    "source": {
+      "domain": "chat",
+      "clientEventId": "chat-evt-001"
+    },
+    "actor": {
+      "userId": "user-1",
+      "memberId": "member-1",
+      "displayName": "Alex Linderman"
+    },
+    "target": {
+      "workspaceId": "workspace-1",
+      "entityType": "chat_message",
+      "entityId": "message-1"
+    },
+    "change": {
+      "operation": "CREATE",
+      "changedFields": ["body", "mentions"],
+      "before": null,
+      "after": {
+        "messageId": "message-1",
+        "threadId": null,
+        "body": "이 내용은 후속 Task로 빼는 게 좋겠습니다.",
+        "mentions": [
+          {
+            "memberId": "member-2",
+            "displayName": "Sarah Kinski"
+          }
+        ]
+      },
+      "snapshot": {
+        "messageId": "message-1",
+        "threadId": null,
+        "body": "이 내용은 후속 Task로 빼는 게 좋겠습니다.",
+        "mentions": [
+          {
+            "memberId": "member-2",
+            "displayName": "Sarah Kinski"
+          }
+        ],
+        "attachmentRefs": []
+      }
+    },
+    "summary": "Chat message sent during recording"
+  },
+  "createdAt": "2026-06-27T08:47:05.000Z"
+}
+```
+
+### `VOICE_ROOM` Payload
+
+Voice room event는 음성방 참여/퇴장, 마이크 상태 변경, speaking 상태 변경을 기록한다.
+녹화/트래킹 구간 자체의 시작/종료는 `MeetingSession` API가 소유한다.
+
+```ts
+type VoiceRoomMeetingEventAction =
+  | "PARTICIPANT_JOINED"
+  | "PARTICIPANT_LEFT"
+  | "MICROPHONE_MUTED"
+  | "MICROPHONE_UNMUTED"
+  | "SPEAKING_STARTED"
+  | "SPEAKING_STOPPED";
+
+interface VoiceRoomSnapshot {
+  voiceRoomId: string;
+  voiceSessionId: string | null;
+  memberId: string | null;
+  displayName: string | null;
+  microphoneState: "muted" | "unmuted" | "unknown";
+  speaking: boolean;
+}
+
+interface VoiceRoomMeetingEventPayload
+  extends MeetingEventPayloadBase<
+    VoiceRoomMeetingEventAction,
+    Partial<VoiceRoomSnapshot>,
+    VoiceRoomSnapshot
+  > {
+  source: MeetingEventSourceRef & { domain: "voice_room" };
+  target: MeetingEventTargetRef & {
+    entityType: "voice_room" | "voice_session";
+    voiceRoomId: string;
+  };
+}
+```
+
+Required fields:
+
+- `target.workspaceId`, `target.voiceRoomId`
+- participant-specific actions: `voiceSessionId`, `memberId`
+- microphone actions: `microphoneState`
+- speaking actions: `speaking`
+
+Example:
+
+```json
+{
+  "eventType": "VOICE_ROOM",
+  "userId": "user-2",
+  "payload": {
+    "schemaVersion": "meeting-event.v1",
+    "action": "MICROPHONE_MUTED",
+    "occurredAt": "2026-06-27T08:48:30.000Z",
+    "source": {
+      "domain": "voice_room",
+      "clientEventId": "voice-evt-001"
+    },
+    "actor": {
+      "userId": "user-2",
+      "memberId": "member-2",
+      "displayName": "Sarah Kinski"
+    },
+    "target": {
+      "workspaceId": "workspace-1",
+      "voiceRoomId": "voice-room-1",
+      "entityType": "voice_session",
+      "entityId": "voice-session-2"
+    },
+    "change": {
+      "operation": "STATE",
+      "changedFields": ["microphoneState"],
+      "before": {
+        "microphoneState": "unmuted"
+      },
+      "after": {
+        "microphoneState": "muted"
+      },
+      "snapshot": {
+        "voiceRoomId": "voice-room-1",
+        "voiceSessionId": "voice-session-2",
+        "memberId": "member-2",
+        "displayName": "Sarah Kinski",
+        "microphoneState": "muted",
+        "speaking": false
+      }
+    },
+    "summary": "Sarah Kinski muted microphone"
+  },
+  "createdAt": "2026-06-27T08:48:30.000Z"
+}
+```
 
 ## Report Includes
 
@@ -355,14 +998,14 @@ Future scope:
 
 녹음/트래킹 중 발생한 모든 정보를 담는 통합 이벤트 테이블이다.
 
-| Column       | Type          | Constraints | Description                                       |
-| ------------ | ------------- | ----------- | ------------------------------------------------- |
-| `id`         | `BIGSERIAL`   | PK          | 이벤트 고유 식별자                                |
-| `session_id` | `UUID`        | FK          | 연관된 회의 세션 ID                               |
-| `event_type` | `VARCHAR(50)` | NOT NULL    | `STT`, `CHAT`, `CANVAS`, `NOTE`, `TASK`, `GITHUB` |
-| `user_id`    | `UUID`        | FK          | 이벤트를 발생시킨 사용자 ID                       |
-| `payload`    | `JSONB`       | NOT NULL    | 이벤트 상세 데이터                                |
-| `created_at` | `TIMESTAMP`   | NOT NULL    | 이벤트 발생 시간                                  |
+| Column       | Type          | Constraints | Description                                                     |
+| ------------ | ------------- | ----------- | --------------------------------------------------------------- |
+| `id`         | `BIGSERIAL`   | PK          | 이벤트 고유 식별자                                              |
+| `session_id` | `UUID`        | FK          | 연관된 회의 세션 ID                                             |
+| `event_type` | `VARCHAR(50)` | NOT NULL    | `STT`, `CHAT`, `CANVAS`, `NOTE`, `TASK`, `GITHUB`, `VOICE_ROOM` |
+| `user_id`    | `UUID`        | FK          | 이벤트를 발생시킨 사용자 ID                                     |
+| `payload`    | `JSONB`       | NOT NULL    | 이벤트 상세 데이터                                              |
+| `created_at` | `TIMESTAMP`   | NOT NULL    | 이벤트 발생 시간                                                |
 
 ### `meeting_reports`
 
@@ -489,19 +1132,54 @@ Deferred index rules:
 ```json
 {
   "eventType": "TASK",
-  "userId": "uuid",
+  "userId": "user-2",
   "payload": {
-    "action": "updated",
-    "taskId": "uuid",
-    "title": "OAuth 실패 상태 UI 추가"
+    "schemaVersion": "meeting-event.v1",
+    "action": "TASK_STATUS_CHANGED",
+    "occurredAt": "2026-06-27T08:44:00.000Z",
+    "source": {
+      "domain": "task",
+      "requestId": "req-task-001"
+    },
+    "actor": {
+      "userId": "user-2",
+      "memberId": "member-2",
+      "displayName": "Sarah Kinski"
+    },
+    "target": {
+      "workspaceId": "workspace-1",
+      "entityType": "task",
+      "entityId": "task-1"
+    },
+    "change": {
+      "operation": "UPDATE",
+      "changedFields": ["status"],
+      "before": {
+        "status": "todo"
+      },
+      "after": {
+        "status": "in_progress"
+      },
+      "snapshot": {
+        "taskId": "task-1",
+        "title": "OAuth 실패 상태 UI 추가",
+        "status": "in_progress",
+        "assigneeMemberId": "member-2",
+        "priority": "high",
+        "dueDate": "2026-07-03",
+        "descriptionExcerpt": "Google/GitHub callback 실패 상태를 처리한다."
+      }
+    },
+    "summary": "Task moved to in_progress: OAuth 실패 상태 UI 추가"
   },
   "createdAt": "2026-06-27T08:40:00.000Z"
 }
 ```
 
-- `eventType`: `STT`, `CHAT`, `CANVAS`, `NOTE`, `TASK`, `GITHUB`
+- `eventType`: `STT`, `CHAT`, `CANVAS`, `NOTE`, `TASK`, `GITHUB`, `VOICE_ROOM`
 - `userId`: nullable. 시스템/STT 이벤트면 `null` 가능
-- `payload`: required JSON object
+- `payload`: required JSON object. `CANVAS`, `TASK`, `GITHUB`, `CHAT`, `VOICE_ROOM`은
+  `validateMeetingEventPayloadContract(eventType, payload)` validation을 통과해야 한다.
 - `createdAt`: optional ISO date-time. 없으면 서버 시간이 들어간다.
 
 ### CreateMeetingMemoRequest
@@ -770,11 +1448,11 @@ Canvas가 소비하는 최소 entity ref이다.
 
 ## Status Values
 
-| Table / Model      | Field        | Values                                            | Notes                 |
-| ------------------ | ------------ | ------------------------------------------------- | --------------------- |
-| `meeting_sessions` | `status`     | `IN_PROGRESS`, `COMPLETED`                        | 녹음/트래킹 구간 상태 |
-| `meeting_events`   | `event_type` | `STT`, `CHAT`, `CANVAS`, `NOTE`, `TASK`, `GITHUB` | 통합 이벤트 종류      |
-| `meeting_reports`  | `status`     | `DRAFT`, `FINALIZED`                              | Report 저장/확정 상태 |
+| Table / Model      | Field        | Values                                                          | Notes                 |
+| ------------------ | ------------ | --------------------------------------------------------------- | --------------------- |
+| `meeting_sessions` | `status`     | `IN_PROGRESS`, `COMPLETED`                                      | 녹음/트래킹 구간 상태 |
+| `meeting_events`   | `event_type` | `STT`, `CHAT`, `CANVAS`, `NOTE`, `TASK`, `GITHUB`, `VOICE_ROOM` | 통합 이벤트 종류      |
+| `meeting_reports`  | `status`     | `DRAFT`, `FINALIZED`                                            | Report 저장/확정 상태 |
 
 ## Events
 

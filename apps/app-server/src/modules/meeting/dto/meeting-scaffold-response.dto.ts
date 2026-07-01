@@ -2,6 +2,7 @@ import {
   MeetingActionItemReadModel,
   MeetingAgendaRecord,
   MeetingDecisionReadModel,
+  MeetingEventRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
@@ -63,6 +64,13 @@ export interface CreateTranscriptSegmentRequestDto {
   endedAt?: unknown;
 }
 
+export interface CreateMeetingEventRequestDto {
+  eventType?: unknown;
+  userId?: unknown;
+  payload?: unknown;
+  createdAt?: unknown;
+}
+
 export interface CreateMeetingDecisionRequestDto {
   content?: unknown;
   status?: unknown;
@@ -105,6 +113,8 @@ export type MeetingAgendaResponseDto = MeetingAgendaRecord;
 export type MeetingMemoResponseDto = MeetingMemoRecord;
 
 export type TranscriptSegmentResponseDto = TranscriptSegmentRecord;
+
+export type MeetingEventResponseDto = MeetingEventRecord;
 
 export type MeetingReportResponseDto = MeetingReportDetail;
 

@@ -5,6 +5,7 @@ import {
   CreateMeetingActionItemInput,
   CreateMeetingAgendaInput,
   CreateMeetingDecisionInput,
+  CreateMeetingEventInput,
   CreateMeetingMemoInput,
   CreateMeetingParticipantInput,
   CreateMeetingReportInput,
@@ -15,6 +16,7 @@ import {
   MeetingActionItemRecord,
   MeetingAgendaRecord,
   MeetingDecisionRecord,
+  MeetingEventRecord,
   MeetingMemoRecord,
   MeetingRecord,
   MeetingParticipantRecord,
@@ -42,6 +44,7 @@ export class MockMeetingRepository implements MeetingRepository {
     string,
     TranscriptSegmentRecord
   >();
+  private readonly meetingEvents = new Map<string, MeetingEventRecord>();
   private readonly reports = new Map<string, MeetingReportRecord>();
   private readonly decisions = new Map<string, MeetingDecisionRecord>();
   private readonly risks = new Map<string, MeetingReportRiskRecord>();
@@ -284,6 +287,31 @@ export class MockMeetingRepository implements MeetingRepository {
     return [...this.transcriptSegments.values()].filter(
       (segment) => segment.meetingId === meetingId,
     );
+  }
+
+  createMeetingEvent(input: CreateMeetingEventInput): MeetingEventRecord {
+    const event: MeetingEventRecord = {
+      id: randomUUID(),
+      sessionId: input.sessionId,
+      eventType: input.eventType,
+      userId: input.userId ?? null,
+      payload: input.payload,
+      createdAt: input.createdAt,
+    };
+
+    this.meetingEvents.set(event.id, event);
+
+    return event;
+  }
+
+  listMeetingEventsBySession(sessionId: string): MeetingEventRecord[] {
+    return [...this.meetingEvents.values()]
+      .filter((event) => event.sessionId === sessionId)
+      .sort(
+        (left, right) =>
+          new Date(left.createdAt).getTime() -
+          new Date(right.createdAt).getTime(),
+      );
   }
 
   createReport(input: CreateMeetingReportInput): MeetingReportRecord {
