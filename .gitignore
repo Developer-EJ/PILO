@@ -1,0 +1,39 @@
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# App dependencies/build output
+node_modules/
+dist/
+.next/
+out/
+coverage/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Terraform
+.tools/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 개인 폴더
+.personal/
