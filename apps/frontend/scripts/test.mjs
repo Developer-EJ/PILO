@@ -102,3 +102,5 @@ assert.match(routes, /as default/);
 assert.doesNotMatch(routes, /MainShell/);
 assert.match(pages, /MainShell/);
 assert.match(pages, /Panel/);
+
+await import("./calendar/test.mjs");
