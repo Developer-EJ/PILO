@@ -3,9 +3,11 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Post,
   Query,
+  RawBody,
   UseGuards
 } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
@@ -13,6 +15,7 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import type {
   GithubAppInstallationCallbackQuery,
+  GithubWebhookRequest,
   GithubOAuthCallbackQuery,
   ListGithubSyncRunsQuery,
   ListGithubPullRequestFilesQuery,
@@ -45,6 +48,7 @@ import type {
   GithubPullRequestDetailPayload,
   GithubPullRequestFilePayload,
   GithubPullRequestListItemPayload,
+  GithubWebhookDeliveryPayload,
   GithubRepositoryDetailPayload,
   GithubRepositoryListItemPayload,
   GithubSyncRunDetailPayload,
@@ -132,6 +136,26 @@ export class GithubIntegrationController {
   ): Promise<ApiSuccessResponse<GithubAppInstallationCallbackPayload>> {
     const result =
       await this.githubIntegrationService.completeGithubAppInstallationCallback(query);
+    return apiResponse(result);
+  }
+
+  @Post("github/webhooks")
+  async receiveGithubWebhook(
+    @Headers("x-github-delivery") deliveryId: string | undefined,
+    @Headers("x-github-event") eventName: string | undefined,
+    @Headers("x-hub-signature-256") signature256: string | undefined,
+    @RawBody() rawBody: Buffer | undefined,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<GithubWebhookDeliveryPayload>> {
+    const request: GithubWebhookRequest = {
+      deliveryId,
+      eventName,
+      signature256,
+      rawBody,
+      body
+    };
+    const result =
+      await this.githubIntegrationService.receiveGithubWebhook(request);
     return apiResponse(result);
   }
 
