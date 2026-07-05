@@ -47,6 +47,17 @@ assert.match(controllerFile, /@Delete\("me\/github"\)/);
 assert.match(controllerFile, /@Post\("workspaces\/:workspaceId\/github\/installations\/start"\)/);
 assert.match(controllerFile, /@Get\("github\/installations\/callback"\)/);
 assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/installations"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories\/:repositoryId"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/fields"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/status-options"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/kanban"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/projects-v2\/:projectV2Id\/items"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/issues\/:issueId"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/repositories\/:repositoryId\/pull-requests"\)/);
+assert.match(controllerFile, /@Get\("workspaces\/:workspaceId\/github\/pull-requests\/:pullRequestId"\)/);
 assert.match(controllerFile, /@UseGuards\(AuthGuard\)/);
 
 assert.match(serviceFile, /getModuleInfo\(\): GitHubIntegrationModuleInfo/);
@@ -59,6 +70,17 @@ assert.match(serviceFile, /disconnectGithubOAuth/);
 assert.match(serviceFile, /startGithubAppInstallation/);
 assert.match(serviceFile, /completeGithubAppInstallationCallback/);
 assert.match(serviceFile, /listGithubAppInstallations/);
+assert.match(serviceFile, /listGithubRepositories/);
+assert.match(serviceFile, /getGithubRepository/);
+assert.match(serviceFile, /listGithubProjectsV2/);
+assert.match(serviceFile, /getGithubProjectV2/);
+assert.match(serviceFile, /listGithubProjectV2Fields/);
+assert.match(serviceFile, /listGithubProjectV2StatusOptions/);
+assert.match(serviceFile, /getGithubProjectV2Kanban/);
+assert.match(serviceFile, /listGithubProjectV2Items/);
+assert.match(serviceFile, /getGithubIssue/);
+assert.match(serviceFile, /listGithubPullRequests/);
+assert.match(serviceFile, /getGithubPullRequest/);
 
 assert.match(typesIndex, /export type GitHubIntegrationModuleInfo/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
@@ -73,3 +95,5 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 
 await import("./oauth.test.mjs");
 await import("./installation.test.mjs");
+await import("./source-read.test.mjs");
+await import("./project-v2.test.mjs");
