@@ -169,8 +169,9 @@ CREATE TABLE workspaces (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_workspaces_owner_user_id
-  ON workspaces(owner_user_id);
+CREATE UNIQUE INDEX unique_workspace_per_owner_user_id
+  ON workspaces(owner_user_id)
+  WHERE owner_user_id IS NOT NULL;
 
 CREATE TRIGGER trg_workspaces_updated_at
 BEFORE UPDATE ON workspaces
@@ -1205,9 +1206,6 @@ CREATE TABLE meeting_recordings (
     REFERENCES meetings(id)
     ON DELETE CASCADE,
 
-  CONSTRAINT unique_recording_per_meeting
-    UNIQUE (meeting_id),
-
   -- meeting_reports에서 recording_id와 meeting_id가 같은 회의에 속하는지 FK로 검증하기 위한 제약
   CONSTRAINT unique_recording_id_meeting_id
     UNIQUE (id, meeting_id),
@@ -1247,6 +1245,10 @@ CREATE UNIQUE INDEX unique_livekit_egress_id
 ON meeting_recordings (livekit_egress_id)
 WHERE livekit_egress_id IS NOT NULL;
 
+CREATE UNIQUE INDEX unique_running_recording_per_meeting
+ON meeting_recordings (meeting_id)
+WHERE status = 'RUNNING';
+
 CREATE INDEX idx_meeting_recordings_status
 ON meeting_recordings (status);
 
@@ -1256,7 +1258,7 @@ ON meeting_recordings (meeting_id);
 -- =========================================================
 -- 5. meeting_reports
 -- STT / LLM 회의록 생성 결과 저장
--- 60초 미만 회의는 MeetingReport를 생성하지 않는다.
+-- duration_sec이 60 이하인 녹음은 MeetingReport를 생성하지 않는다.
 -- =========================================================
 
 CREATE TABLE meeting_reports (
@@ -1291,9 +1293,6 @@ CREATE TABLE meeting_reports (
     FOREIGN KEY (recording_id, meeting_id)
     REFERENCES meeting_recordings(id, meeting_id)
     ON DELETE CASCADE,
-
-  CONSTRAINT unique_report_per_meeting
-    UNIQUE (meeting_id),
 
   CONSTRAINT unique_report_per_recording
     UNIQUE (recording_id),
@@ -1343,12 +1342,11 @@ USING GIN (action_item_candidates);
 CREATE OR REPLACE FUNCTION enforce_meeting_report_policy()
 RETURNS TRIGGER AS $$
 DECLARE
-  meeting_started_at timestamptz;
-  meeting_ended_at timestamptz;
   recording_status meeting_recording_status;
+  recording_duration_sec integer;
 BEGIN
-  SELECT m.started_at, m.ended_at, r.status
-  INTO meeting_started_at, meeting_ended_at, recording_status
+  SELECT r.status, r.duration_sec
+  INTO recording_status, recording_duration_sec
   FROM meetings m
   JOIN meeting_recordings r
     ON r.meeting_id = m.id
@@ -1359,16 +1357,13 @@ BEGIN
     RAISE EXCEPTION 'meeting_report must reference a recording from the same meeting';
   END IF;
 
-  IF meeting_ended_at IS NULL THEN
-    RAISE EXCEPTION 'meeting_report cannot be created before the meeting ends';
-  END IF;
-
-  IF EXTRACT(EPOCH FROM (meeting_ended_at - meeting_started_at)) < 60 THEN
-    RAISE EXCEPTION 'meeting_report cannot be created for meetings shorter than 60 seconds';
-  END IF;
-
   IF recording_status = 'RUNNING' THEN
     RAISE EXCEPTION 'meeting_report cannot be created while recording is still running';
+  END IF;
+
+  IF recording_status = 'COMPLETED'
+     AND (recording_duration_sec IS NULL OR recording_duration_sec <= 60) THEN
+    RAISE EXCEPTION 'meeting_report cannot be created for recordings shorter than or equal to 60 seconds';
   END IF;
 
   IF recording_status = 'FAILED'
