@@ -142,4 +142,5 @@ assert.match(meetingService, /INSERT INTO meeting_recordings/);
 
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
+await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");
