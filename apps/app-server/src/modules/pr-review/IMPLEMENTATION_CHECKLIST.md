@@ -96,17 +96,17 @@
 
 ## 5. Review Read APIs
 
-- [ ] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/summary`를
+- [x] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/summary`를
   구현한다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/result`를
+- [x] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/result`를
   구현한다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/canvas`를
+- [x] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/canvas`를
   구현한다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/flows`를
+- [x] `GET /workspaces/{workspaceId}/github/review-sessions/{reviewSessionId}/flows`를
   구현한다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-flows/{flowId}/files`를 구현한다.
-- [ ] `GET /workspaces/{workspaceId}/github/review-files/{reviewFileId}`를 구현한다.
-- [ ] canvas 응답은 자유형 canvas table이 아니라 PR Review table에서 만든다.
+- [x] `GET /workspaces/{workspaceId}/github/review-flows/{flowId}/files`를 구현한다.
+- [x] `GET /workspaces/{workspaceId}/github/review-files/{reviewFileId}`를 구현한다.
+- [x] canvas 응답은 자유형 canvas table이 아니라 PR Review table에서 만든다.
 
 ## 6. Diff View Model
 
