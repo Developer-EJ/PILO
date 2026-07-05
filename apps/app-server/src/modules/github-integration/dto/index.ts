@@ -17,6 +17,14 @@ export interface GithubAppInstallationCallbackQuery {
   state?: unknown;
 }
 
+export interface GithubWebhookRequest {
+  deliveryId?: unknown;
+  eventName?: unknown;
+  signature256?: unknown;
+  rawBody?: unknown;
+  body?: unknown;
+}
+
 export interface ListGithubRepositoriesQuery {
   q?: unknown;
   includeArchived?: unknown;

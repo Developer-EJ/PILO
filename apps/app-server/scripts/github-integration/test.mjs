@@ -119,3 +119,4 @@ await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
 await import("./pr-files.test.mjs");
 await import("./sync-runs.test.mjs");
+await import("./webhook.test.mjs");

@@ -53,6 +53,17 @@ export interface GithubAppInstallationCallbackPayload
   installationId: string;
 }
 
+export type GithubWebhookDeliveryStatus = "received" | "ignored";
+
+export interface GithubWebhookDeliveryPayload {
+  deliveryId: string;
+  eventName: string;
+  status: GithubWebhookDeliveryStatus;
+  receivedAt: string;
+  processedAt: string | null;
+  message: string;
+}
+
 export interface GithubPaginationMeta {
   page: number;
   limit: number;
