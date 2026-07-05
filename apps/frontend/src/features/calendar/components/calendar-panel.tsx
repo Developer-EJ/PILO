@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import {
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type FormEvent
@@ -37,6 +36,7 @@ import {
   SheetTitle
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import {
   formatCalendarDate,
@@ -77,9 +77,6 @@ type CalendarSheetMode =
       returnTo: "detail" | "edit";
     };
 
-const ACCESS_TOKEN_STORAGE_KEY = "pilo_access_token";
-const DEFAULT_WORKSPACE_ID =
-  process.env.NEXT_PUBLIC_PILO_WORKSPACE_ID ?? "pilo-local-workspace";
 const DEFAULT_EVENT_COLOR = "#3B82F6";
 const calendarGridCellCount = 42;
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
@@ -91,14 +88,6 @@ const calendarColorOptions = [
   { label: "주황", value: "#F97316" },
   { label: "회색", value: "#64748B" }
 ];
-
-function readStoredAccessToken() {
-  try {
-    return window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY)?.trim() ?? "";
-  } catch (error) {
-    return "";
-  }
-}
 
 function startOfCalendarMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -639,7 +628,7 @@ function CalendarEventSheet({
 }
 
 export function CalendarPanel() {
-  const [accessToken, setAccessToken] = useState("");
+  const authSession = useAuthSession();
   const [monthDate, setMonthDate] = useState(() =>
     startOfCalendarMonth(new Date())
   );
@@ -652,10 +641,10 @@ export function CalendarPanel() {
   );
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const workspaceId = DEFAULT_WORKSPACE_ID;
+  const workspaceId = authSession?.activeWorkspaceId ?? "";
   const monthLabel = formatMonthLabel(monthDate);
   const today = useMemo(() => formatCalendarDate(new Date()), []);
-  const normalizedAccessToken = accessToken.trim();
+  const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
   const calendarEvents = useCalendarMonthEvents({
     accessToken: normalizedAccessToken,
     monthDate,
@@ -685,21 +674,6 @@ export function CalendarPanel() {
   const canUseCalendar = Boolean(workspaceId.trim() && normalizedAccessToken);
   const selectedDateLabel =
     selectedDate === today ? "오늘 일정" : "선택 날짜 일정";
-
-  useEffect(() => {
-    function syncAccessToken() {
-      setAccessToken(readStoredAccessToken());
-    }
-
-    syncAccessToken();
-    window.addEventListener("storage", syncAccessToken);
-    window.addEventListener("focus", syncAccessToken);
-
-    return () => {
-      window.removeEventListener("storage", syncAccessToken);
-      window.removeEventListener("focus", syncAccessToken);
-    };
-  }, []);
 
   const goToMonth = useCallback((nextMonthDate: Date) => {
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
