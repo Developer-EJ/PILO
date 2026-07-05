@@ -4,7 +4,13 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   DeletePrReviewSessionPayload,
+  PrReviewCanvasPayload,
+  PrReviewFilePayload,
+  PrReviewFlowFilesPayload,
+  PrReviewFlowListPayload,
+  PrReviewResultPayload,
   PrReviewService,
+  PrReviewSummaryPayload,
   PrReviewSessionPayload
 } from "./pr-review.service";
 
@@ -39,6 +45,90 @@ export class PrReviewController {
       reviewSessionId
     );
     return apiResponse(session);
+  }
+
+  @Get("review-sessions/:reviewSessionId/summary")
+  async getReviewSessionSummary(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string
+  ): Promise<ApiSuccessResponse<PrReviewSummaryPayload>> {
+    const summary = await this.prReviewService.getReviewSessionSummary(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    return apiResponse(summary);
+  }
+
+  @Get("review-sessions/:reviewSessionId/result")
+  async getReviewSessionResult(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string
+  ): Promise<ApiSuccessResponse<PrReviewResultPayload>> {
+    const result = await this.prReviewService.getReviewSessionResult(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    return apiResponse(result);
+  }
+
+  @Get("review-sessions/:reviewSessionId/canvas")
+  async getReviewSessionCanvas(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string
+  ): Promise<ApiSuccessResponse<PrReviewCanvasPayload>> {
+    const canvas = await this.prReviewService.getReviewSessionCanvas(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    return apiResponse(canvas);
+  }
+
+  @Get("review-sessions/:reviewSessionId/flows")
+  async listReviewFlows(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewSessionId") reviewSessionId: string
+  ): Promise<ApiSuccessResponse<PrReviewFlowListPayload>> {
+    const flows = await this.prReviewService.listReviewFlows(
+      currentUserId,
+      workspaceId,
+      reviewSessionId
+    );
+    return apiResponse(flows);
+  }
+
+  @Get("review-flows/:flowId/files")
+  async listReviewFlowFiles(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("flowId") flowId: string
+  ): Promise<ApiSuccessResponse<PrReviewFlowFilesPayload>> {
+    const files = await this.prReviewService.listReviewFlowFiles(
+      currentUserId,
+      workspaceId,
+      flowId
+    );
+    return apiResponse(files);
+  }
+
+  @Get("review-files/:reviewFileId")
+  async getReviewFile(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string
+  ): Promise<ApiSuccessResponse<PrReviewFilePayload>> {
+    const file = await this.prReviewService.getReviewFile(
+      currentUserId,
+      workspaceId,
+      reviewFileId
+    );
+    return apiResponse(file);
   }
 
   @Patch("review-sessions/:reviewSessionId")

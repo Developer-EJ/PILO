@@ -19,6 +19,12 @@ export type PrReviewConflictStatus =
 
 export type PrReviewFileStatus = "added" | "modified" | "deleted" | "renamed";
 
+export type PrReviewFileReviewStatus =
+  | "not_reviewed"
+  | "approved"
+  | "discussion_needed"
+  | "unknown";
+
 export interface PrReviewGithubOAuthStatus {
   connected: boolean;
   githubUserId: number | null;
