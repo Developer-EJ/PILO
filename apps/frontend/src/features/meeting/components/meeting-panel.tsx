@@ -54,6 +54,7 @@ type MeetingSection = "room" | "report";
 
 const MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
+const LOCATION_CHANGE_EVENT = "pilo:locationchange";
 const MIC_PERMISSION_ERROR_MESSAGE =
   "마이크 권한이 필요합니다. 브라우저 설정에서 마이크 접근을 허용한 뒤 다시 참여해주세요.";
 const LIVEKIT_CONNECTION_ERROR_MESSAGE =
@@ -335,9 +336,43 @@ export function MeetingPanel() {
       setActiveSection(getMeetingSectionFromHash(window.location.hash));
     }
 
+    function syncSectionAfterNavigationClick() {
+      window.setTimeout(syncSectionFromHash, 0);
+      window.setTimeout(syncSectionFromHash, 100);
+      window.setTimeout(syncSectionFromHash, 250);
+    }
+
+    const originalPushState = window.history.pushState;
+    const originalReplaceState = window.history.replaceState;
+    const dispatchLocationChange = () => {
+      window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+    };
+
+    window.history.pushState = function pushState(...args) {
+      const result = originalPushState.apply(this, args);
+      dispatchLocationChange();
+      return result;
+    };
+    window.history.replaceState = function replaceState(...args) {
+      const result = originalReplaceState.apply(this, args);
+      dispatchLocationChange();
+      return result;
+    };
+
     syncSectionFromHash();
+    window.addEventListener("click", syncSectionAfterNavigationClick, true);
     window.addEventListener("hashchange", syncSectionFromHash);
-    return () => window.removeEventListener("hashchange", syncSectionFromHash);
+    window.addEventListener("popstate", syncSectionFromHash);
+    window.addEventListener(LOCATION_CHANGE_EVENT, syncSectionFromHash);
+
+    return () => {
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+      window.removeEventListener("click", syncSectionAfterNavigationClick, true);
+      window.removeEventListener("hashchange", syncSectionFromHash);
+      window.removeEventListener("popstate", syncSectionFromHash);
+      window.removeEventListener(LOCATION_CHANGE_EVENT, syncSectionFromHash);
+    };
   }, []);
 
   const reloadParticipants = useCallback(
