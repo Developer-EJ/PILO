@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
+import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import type {
   PrReviewCanvas,
   PrReviewConflictStatus,
@@ -43,6 +44,9 @@ type PrReviewCanvasShellProps = {
 };
 
 type CanvasLoadStatus = "idle" | "loading" | "ready" | "error";
+type LoadCanvasDataOptions = {
+  quiet?: boolean;
+};
 
 const DETAIL_PANEL_MIN_WIDTH = 360;
 const DETAIL_PANEL_MAX_WIDTH = 620;
@@ -115,9 +119,13 @@ export function PrReviewCanvasShell({
   const [summary, setSummary] = useState<PrReviewSummary | null>(null);
   const [canvas, setCanvas] = useState<PrReviewCanvas | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [, setSelectedReviewFileId] = useState<string | null>(null);
+  const [selectedReviewFileId, setSelectedReviewFileId] = useState<
+    string | null
+  >(null);
 
-  const loadCanvasData = useCallback(async () => {
+  const loadCanvasData = useCallback(async (options: LoadCanvasDataOptions = {}) => {
+    const quiet = options.quiet ?? false;
+
     if (!workspaceId) {
       setLoadStatus("error");
       setLoadError("워크스페이스 정보를 확인할 수 없습니다.");
@@ -126,8 +134,10 @@ export function PrReviewCanvasShell({
       return;
     }
 
-    setLoadStatus("loading");
-    setLoadError(null);
+    if (!quiet) {
+      setLoadStatus("loading");
+      setLoadError(null);
+    }
 
     try {
       const [nextSummary, nextCanvas] = await Promise.all([
@@ -138,7 +148,13 @@ export function PrReviewCanvasShell({
       setSummary(nextSummary);
       setCanvas(nextCanvas);
       setLoadStatus("ready");
+      setLoadError(null);
     } catch (error) {
+      if (quiet) {
+        setLoadError(getErrorMessage(error));
+        return;
+      }
+
       setSummary(null);
       setCanvas(null);
       setLoadStatus("error");
@@ -242,10 +258,22 @@ export function PrReviewCanvasShell({
               canvas={canvas}
               className="h-full w-full"
               onFileSelect={setSelectedReviewFileId}
+              selectedReviewFileId={selectedReviewFileId}
             />
           ) : (
             <CanvasEmptyState />
           )}
+          {selectedReviewFileId ? (
+            <PrReviewFileDiffDrawer
+              apiClient={apiClient}
+              onClose={() => setSelectedReviewFileId(null)}
+              onDecisionSaved={() => {
+                void loadCanvasData({ quiet: true });
+              }}
+              reviewFileId={selectedReviewFileId}
+              workspaceId={workspaceId}
+            />
+          ) : null}
         </section>
 
         <button

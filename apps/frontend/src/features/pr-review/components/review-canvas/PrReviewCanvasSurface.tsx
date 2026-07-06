@@ -32,6 +32,7 @@ type PrReviewCanvasSurfaceProps = {
   canvas: PrReviewCanvas;
   className?: string;
   onFileSelect?: (reviewFileId: string | null) => void;
+  selectedReviewFileId?: string | null;
 };
 
 type NodePlacement = {
@@ -275,7 +276,36 @@ function buildPrReviewCanvasShapes(canvas: PrReviewCanvas): TLShapePartial[] {
   return [...edgeShapes, ...shapes];
 }
 
-function resetPrReviewCanvas(editor: Editor, shapes: TLShapePartial[]) {
+function selectReviewFileNode(
+  editor: Editor,
+  reviewFileId: string | null | undefined
+) {
+  if (!reviewFileId) {
+    editor.selectNone();
+    return;
+  }
+
+  const fileNode = editor
+    .getCurrentPageShapes()
+    .find(
+      (shape) =>
+        isPrReviewFileNodeShape(shape) &&
+        shape.props.reviewFileId === reviewFileId
+    );
+
+  if (fileNode) {
+    editor.select(fileNode.id);
+    return;
+  }
+
+  editor.selectNone();
+}
+
+function resetPrReviewCanvas(
+  editor: Editor,
+  shapes: TLShapePartial[],
+  selectedReviewFileId: string | null | undefined
+) {
   const existingShapeIds = editor
     .getCurrentPageShapes()
     .map((shape) => shape.id as TLShapeId);
@@ -285,11 +315,12 @@ function resetPrReviewCanvas(editor: Editor, shapes: TLShapePartial[]) {
   }
 
   if (!shapes.length) {
+    editor.selectNone();
     return;
   }
 
   editor.createShapes(shapes);
-  editor.selectNone();
+  selectReviewFileNode(editor, selectedReviewFileId);
   window.requestAnimationFrame(() => {
     editor.zoomToFit({ animation: { duration: 160 } });
   });
@@ -333,27 +364,47 @@ function PrReviewSelectionBridge({
 export function PrReviewCanvasSurface({
   canvas,
   className,
-  onFileSelect
+  onFileSelect,
+  selectedReviewFileId
 }: PrReviewCanvasSurfaceProps) {
   const editorRef = useRef<Editor | null>(null);
+  const selectedReviewFileIdRef = useRef<string | null>(
+    selectedReviewFileId ?? null
+  );
   const shapes = useMemo(() => buildPrReviewCanvasShapes(canvas), [canvas]);
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
       editor.setCurrentTool("select.idle");
       registerReadOnlyReviewShapes(editor);
-      resetPrReviewCanvas(editor, shapes);
+      resetPrReviewCanvas(editor, shapes, selectedReviewFileIdRef.current);
     },
     [shapes]
   );
+
+  useEffect(() => {
+    selectedReviewFileIdRef.current = selectedReviewFileId ?? null;
+  }, [selectedReviewFileId]);
 
   useEffect(() => {
     if (!editorRef.current) {
       return;
     }
 
-    resetPrReviewCanvas(editorRef.current, shapes);
+    resetPrReviewCanvas(
+      editorRef.current,
+      shapes,
+      selectedReviewFileIdRef.current
+    );
   }, [shapes]);
+
+  useEffect(() => {
+    if (!editorRef.current) {
+      return;
+    }
+
+    selectReviewFileNode(editorRef.current, selectedReviewFileId);
+  }, [selectedReviewFileId]);
 
   return (
     <TldrawSurface

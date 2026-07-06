@@ -94,6 +94,11 @@ export type PrReviewFileReviewStatus =
   | "discussion_needed"
   | "unknown";
 
+export type PrReviewFileDecisionStatus = Exclude<
+  PrReviewFileReviewStatus,
+  "not_reviewed"
+>;
+
 export type PrReviewSession = {
   id: string;
   pullRequestId: string;
@@ -195,6 +200,73 @@ export type PrReviewCanvas = {
   conflictStatus: PrReviewConflictStatus;
   flows: PrReviewCanvasFlow[];
   edges: PrReviewCanvasEdge[];
+};
+
+export type PrReviewFileFlowMembership = {
+  reviewFlowFileId: string;
+  flowId: string;
+  flowTitle: string;
+  workflowOrder: number;
+};
+
+export type PrReviewLatestDecision = {
+  id: string;
+  status: PrReviewFileDecisionStatus;
+  comment: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+};
+
+export type PrReviewFile = {
+  id: string;
+  sessionId: string;
+  filePath: string;
+  previousFilePath: string | null;
+  fileName: string;
+  fileStatus: PrReviewFileStatus;
+  additions: number;
+  deletions: number;
+  isBinary: boolean;
+  isLargeDiff: boolean;
+  githubFileUrl: string | null;
+  fileRole: string | null;
+  changeReason: string | null;
+  changeSummary: string | null;
+  reviewPoints: string[];
+  currentStatus: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  flowMemberships: PrReviewFileFlowMembership[];
+  latestDecision: PrReviewLatestDecision | null;
+};
+
+export type PrReviewDiffMode = "side_by_side" | "binary" | "large";
+
+export type PrReviewDiffRowType = "unchanged" | "added" | "deleted";
+
+export type PrReviewDiffRow = {
+  type: PrReviewDiffRowType;
+  oldLineNumber: number | null;
+  newLineNumber: number | null;
+  oldText: string | null;
+  newText: string | null;
+};
+
+export type PrReviewFileDiff = {
+  reviewFileId: string;
+  filePath: string;
+  mode: PrReviewDiffMode;
+  isBinary: boolean;
+  isLargeDiff: boolean;
+  githubFileUrl: string | null;
+  message?: string;
+  rows: PrReviewDiffRow[];
+};
+
+export type UpdatePrReviewFileDecisionInput = {
+  status: PrReviewFileDecisionStatus;
+  comment: string | null;
 };
 
 export type ListPrReviewRepositoriesQuery = {

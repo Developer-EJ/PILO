@@ -42,6 +42,13 @@ const prReviewCanvasSurface = await readFile(
   ),
   "utf8"
 );
+const prReviewFileDiffDrawer = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewFileNodeShapeUtil = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewFileNodeShapeUtil.tsx",
@@ -63,6 +70,9 @@ assert.match(prReviewTypes, /export type PrReviewSession/);
 assert.match(prReviewTypes, /export type PrReviewSummary/);
 assert.match(prReviewTypes, /export type PrReviewCanvas/);
 assert.match(prReviewTypes, /export type PrReviewFileNodeData/);
+assert.match(prReviewTypes, /export type PrReviewFile =/);
+assert.match(prReviewTypes, /export type PrReviewFileDiff =/);
+assert.match(prReviewTypes, /export type UpdatePrReviewFileDecisionInput =/);
 assert.match(prReviewNavigation, /href: "\/pr-review"/);
 assert.match(prReviewNavigation, /title: "PR/);
 assert.doesNotMatch(prReviewNavigation, /\/pr-review#/);
@@ -81,6 +91,11 @@ assert.match(prReviewApiClient, /listPullRequestFiles/);
 assert.match(prReviewApiClient, /createReviewSession/);
 assert.match(prReviewApiClient, /getReviewSessionSummary/);
 assert.match(prReviewApiClient, /getReviewSessionCanvas/);
+assert.match(prReviewApiClient, /getReviewFile/);
+assert.match(prReviewApiClient, /getReviewFileDiff/);
+assert.match(prReviewApiClient, /updateReviewFileDecision/);
+assert.match(prReviewApiClient, /\/review-files/);
+assert.match(prReviewApiClient, /method: "PATCH"/);
 assert.match(prReviewApiClient, /\/review-sessions/);
 assert.doesNotMatch(prReviewApiClient, /features\/github-integration/);
 assert.match(prReviewPanel, /useAuthSession/);
@@ -100,6 +115,13 @@ assert.match(prReviewCanvasShell, /getReviewSessionSummary/);
 assert.match(prReviewCanvasShell, /getReviewSessionCanvas/);
 assert.match(prReviewCanvasShell, /PrReviewCanvasSurface/);
 assert.match(prReviewCanvasShell, /setSelectedReviewFileId/);
+assert.match(prReviewCanvasShell, /PrReviewFileDiffDrawer/);
+assert.match(prReviewCanvasShell, /onDecisionSaved/);
+assert.match(prReviewCanvasShell, /loadCanvasData\(\{ quiet: true \}\)/);
+assert.match(
+  prReviewCanvasShell,
+  /selectedReviewFileId=\{selectedReviewFileId\}/
+);
 assert.match(prReviewCanvasShell, /Review 제출/);
 assert.match(prReviewCanvasShell, /Merge/);
 assert.match(prReviewCanvasShell, /DETAIL_PANEL_DEFAULT_WIDTH/);
@@ -113,9 +135,20 @@ assert.match(prReviewCanvasSurface, /createShapeId/);
 assert.match(prReviewCanvasSurface, /canvas\.edges/);
 assert.match(prReviewCanvasSurface, /canvas\.flows/);
 assert.match(prReviewCanvasSurface, /isPrReviewFileNodeShape/);
+assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
+assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
 assert.doesNotMatch(prReviewCanvasSurface, /features\/canvas/);
 assert.doesNotMatch(prReviewCanvasSurface, /PiloCanvasRuntime/);
 assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);
+assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
+assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
+assert.match(prReviewFileDiffDrawer, /approved/);
+assert.match(prReviewFileDiffDrawer, /discussion_needed/);
+assert.match(prReviewFileDiffDrawer, /unknown/);
+assert.match(prReviewFileDiffDrawer, /textarea/);
+assert.match(prReviewFileDiffDrawer, /DiffView/);
+assert.match(prReviewFileDiffDrawer, /reloadVersion/);
+assert.doesNotMatch(prReviewFileDiffDrawer, /features\/canvas/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_FILE_NODE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /reviewFileId/);
 assert.match(prReviewFileNodeShapeUtil, /workflowOrder/);
