@@ -351,6 +351,22 @@ export function createCanvasApiClient({
       return normalizeCanvasBoardDetail(board, { workspaceId });
     },
 
+    async enterCanvas(boardId: string, { workspaceId }: { workspaceId: string }) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/enter`,
+        { method: "POST" },
+        requestOptions,
+      );
+    },
+
+    async leaveCanvas(boardId: string, { workspaceId }: { workspaceId: string }) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/leave`,
+        { method: "PATCH" },
+        requestOptions,
+      );
+    },
+
     async syncShapesBatch(
       boardId: string,
       body: unknown,
@@ -455,6 +471,31 @@ export function createMockCanvasClient() {
       return {
         ...createMockBlankBoard(defaultBoard.workspaceId, "Untitled canvas"),
         id: boardId,
+      };
+    },
+
+    async enterCanvas(boardId: string, { workspaceId }: { workspaceId?: string } = {}) {
+      const now = new Date().toISOString();
+
+      return {
+        canvasId: boardId,
+        userId: "mock-user",
+        enteredAt: now,
+        leftAt: null,
+        workspaceId,
+      };
+    },
+
+    async leaveCanvas(boardId: string, { workspaceId }: { workspaceId?: string } = {}) {
+      const now = new Date().toISOString();
+
+      return {
+        canvasId: boardId,
+        userId: "mock-user",
+        enteredAt: now,
+        leftAt: now,
+        permanentlyDeletedShapeCount: 0,
+        workspaceId,
       };
     },
 

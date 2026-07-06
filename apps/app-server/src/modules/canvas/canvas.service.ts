@@ -39,6 +39,17 @@ interface CanvasShapeDeleteRow extends QueryResultRow {
   deleted_at: Date | string | null;
 }
 
+interface CanvasUserStateRow extends QueryResultRow {
+  canvas_id: string;
+  user_id: string;
+  entered_at: Date | string;
+  left_at: Date | string | null;
+}
+
+interface CanvasShapeCleanupRow extends QueryResultRow {
+  deleted_count: number | string;
+}
+
 export interface CreateCanvasRequest {
   title?: unknown;
 }
@@ -121,6 +132,17 @@ export interface CanvasShapeBatchPayload {
   created: number;
   updated: number;
   deleted: number;
+}
+
+export interface CanvasUserStatePayload {
+  canvasId: string;
+  userId: string;
+  enteredAt: string;
+  leftAt: string | null;
+}
+
+export interface CanvasLeavePayload extends CanvasUserStatePayload {
+  permanentlyDeletedShapeCount: number;
 }
 
 interface ShapeWriteValues {
@@ -539,6 +561,106 @@ export class CanvasService {
       }
 
       return result;
+    });
+  }
+
+  async enterCanvas(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string
+  ): Promise<CanvasUserStatePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const userState = await this.database.queryOne<CanvasUserStateRow>(
+      `
+        INSERT INTO canvas_user_states (
+          canvas_id,
+          user_id,
+          entered_at,
+          left_at
+        )
+        VALUES ($1, $2, now(), NULL)
+        ON CONFLICT (canvas_id, user_id)
+        DO UPDATE SET
+          entered_at = now(),
+          left_at = NULL
+        RETURNING
+          canvas_id,
+          user_id,
+          entered_at,
+          left_at
+      `,
+      [canvas.id, currentUserId]
+    );
+
+    if (!userState) {
+      throw badRequest("Canvas user state could not be recorded");
+    }
+
+    return this.mapCanvasUserState(userState);
+  }
+
+  async leaveCanvas(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string
+  ): Promise<CanvasLeavePayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    return this.database.transaction(async (transaction) => {
+      const userState = await transaction.queryOne<CanvasUserStateRow>(
+        `
+          INSERT INTO canvas_user_states (
+            canvas_id,
+            user_id,
+            entered_at,
+            left_at
+          )
+          VALUES ($1, $2, now(), now())
+          ON CONFLICT (canvas_id, user_id)
+          DO UPDATE SET
+            left_at = now()
+          RETURNING
+            canvas_id,
+            user_id,
+            entered_at,
+            left_at
+        `,
+        [canvas.id, currentUserId]
+      );
+
+      if (!userState) {
+        throw badRequest("Canvas user state could not be recorded");
+      }
+
+      const cleanup = await transaction.queryOne<CanvasShapeCleanupRow>(
+        `
+          WITH deleted_shapes AS (
+            DELETE FROM canvas_freeform_shapes
+            WHERE canvas_id = $1
+              AND deleted_at IS NOT NULL
+            RETURNING id
+          )
+          SELECT COUNT(*)::int AS deleted_count
+          FROM deleted_shapes
+        `,
+        [canvas.id]
+      );
+
+      return {
+        ...this.mapCanvasUserState(userState),
+        permanentlyDeletedShapeCount: Number(cleanup?.deleted_count ?? 0)
+      };
     });
   }
 
@@ -1078,6 +1200,18 @@ export class CanvasService {
       updatedAt: this.toIsoString(shape.updated_at),
       deletedAt:
         shape.deleted_at === null ? null : this.toIsoString(shape.deleted_at)
+    };
+  }
+
+  private mapCanvasUserState(
+    userState: CanvasUserStateRow
+  ): CanvasUserStatePayload {
+    return {
+      canvasId: userState.canvas_id,
+      userId: userState.user_id,
+      enteredAt: this.toIsoString(userState.entered_at),
+      leftAt:
+        userState.left_at === null ? null : this.toIsoString(userState.left_at)
     };
   }
 

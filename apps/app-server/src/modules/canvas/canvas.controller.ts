@@ -15,11 +15,13 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
+  CanvasLeavePayload,
   CanvasShapeBatchPayload,
   CanvasShapeDeletePayload,
   CanvasShapePayload,
   CanvasViewSettingPayload,
   CanvasService,
+  CanvasUserStatePayload,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
   SyncCanvasShapesBatchRequest,
@@ -107,6 +109,36 @@ export class CanvasController {
     );
 
     return apiResponse(result);
+  }
+
+  @Post("canvases/:canvasId/enter")
+  async enterCanvas(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string
+  ): Promise<ApiSuccessResponse<CanvasUserStatePayload>> {
+    const userState = await this.canvasService.enterCanvas(
+      currentUserId,
+      workspaceId,
+      canvasId
+    );
+
+    return apiResponse(userState);
+  }
+
+  @Patch("canvases/:canvasId/leave")
+  async leaveCanvas(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string
+  ): Promise<ApiSuccessResponse<CanvasLeavePayload>> {
+    const userState = await this.canvasService.leaveCanvas(
+      currentUserId,
+      workspaceId,
+      canvasId
+    );
+
+    return apiResponse(userState);
   }
 
   @Patch("canvas-shapes/:shapeId")
