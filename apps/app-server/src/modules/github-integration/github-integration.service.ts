@@ -113,6 +113,17 @@ export class GithubIntegrationService {
         tokenEncryptionService,
         configService
       );
+    const syncExecutorService =
+      githubSyncExecutorService ??
+      new GithubSyncExecutorService(database, githubAppClient);
+    const syncRunService =
+      githubSyncRunService ??
+      new GithubSyncRunService(
+        database,
+        configService,
+        workspaceService,
+        syncExecutorService
+      );
     this.githubAppInstallationService =
       githubAppInstallationService ??
       new GithubAppInstallationService(
@@ -123,7 +134,8 @@ export class GithubIntegrationService {
         workspaceService,
         installationStateService,
         callbackStateService,
-        githubAppClient
+        githubAppClient,
+        syncRunService
       );
     this.githubSourceReadService =
       githubSourceReadService ??
@@ -148,19 +160,9 @@ export class GithubIntegrationService {
         configService,
         workspaceService
       );
-    const syncExecutorService =
-      githubSyncExecutorService ??
-      new GithubSyncExecutorService(database, githubAppClient);
     this.githubWebhookService =
       githubWebhookService ?? new GithubWebhookService(database, configService);
-    this.githubSyncRunService =
-      githubSyncRunService ??
-      new GithubSyncRunService(
-        database,
-        configService,
-        workspaceService,
-        syncExecutorService
-      );
+    this.githubSyncRunService = syncRunService;
   }
 
   getModuleInfo(): GitHubIntegrationModuleInfo {
