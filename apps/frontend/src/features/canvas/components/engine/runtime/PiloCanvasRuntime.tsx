@@ -41,13 +41,23 @@ export type CanvasBoardDetail = {
 
 type PiloCanvasRuntimeProps = {
   board: CanvasBoardDetail;
-  canvasClient?: CanvasShapeApiClient | null;
+  canvasClient?: CanvasViewSettingApiClient | null;
   onReady: (actions: PiloCanvasActions | null) => void;
   storageMode?: "api" | "local";
 };
 
+type CanvasViewSettingApiClient = CanvasShapeApiClient & {
+  updateViewSetting: (
+    boardId: string,
+    body: CanvasViewSetting,
+    options: { workspaceId: string },
+  ) => Promise<unknown>;
+};
+
+const DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS = 360;
+
 function clampZoom(value: number) {
-  return Math.min(2, Math.max(0.5, Math.round(value * 100) / 100));
+  return Math.min(8, Math.max(0.12, Math.round(value * 100) / 100));
 }
 
 function areViewSettingsEqual(
@@ -63,6 +73,32 @@ function areViewSettingsEqual(
 
 function buildFreeformShapesKey(shapes: PiloCanvasFreeformShape[]) {
   return JSON.stringify(shapes);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function normalizeViewSetting(
+  value: unknown,
+  fallback: CanvasViewSetting,
+): CanvasViewSetting {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !isFiniteNumber((value as CanvasViewSetting).zoom) ||
+    !isFiniteNumber((value as CanvasViewSetting).viewportX) ||
+    !isFiniteNumber((value as CanvasViewSetting).viewportY)
+  ) {
+    return fallback;
+  }
+
+  return {
+    zoom: clampZoom((value as CanvasViewSetting).zoom),
+    viewportX: (value as CanvasViewSetting).viewportX,
+    viewportY: (value as CanvasViewSetting).viewportY,
+  };
 }
 
 export function PiloCanvasRuntime({
@@ -83,6 +119,11 @@ export function PiloCanvasRuntime({
     viewportY: 0,
   });
   const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);
+  const pendingViewSettingRef = useRef<CanvasViewSetting | null>(null);
+  const viewSettingRef = useRef<CanvasViewSetting>(viewSetting);
+  const viewSettingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [canvasHydrationVersion, setCanvasHydrationVersion] = useState(0);
 
   useEffect(() => {
@@ -100,12 +141,20 @@ export function PiloCanvasRuntime({
             readCanvasStorage("freeform-shapes", board.id),
           ) as PiloCanvasFreeformShape[])
         : boardFreeformShapes;
+    const storedViewSetting =
+      storageMode === "local"
+        ? normalizeViewSetting(
+            readCanvasStorage("view-setting", board.id),
+            board.viewSetting,
+          )
+        : board.viewSetting;
 
     queueMicrotask(() => {
       if (cancelled) return;
 
       setFreeformShapes(storedFreeformShapes);
-      setViewSetting(board.viewSetting);
+      viewSettingRef.current = storedViewSetting;
+      setViewSetting(storedViewSetting);
 
       setCanvasHydrationVersion((version) => version + 1);
     });
@@ -114,6 +163,10 @@ export function PiloCanvasRuntime({
       cancelled = true;
     };
   }, [board.id, board.shapes, board.viewSetting, storageMode]);
+
+  useEffect(() => {
+    viewSettingRef.current = viewSetting;
+  }, [viewSetting]);
 
   useEffect(() => {
     if (storageMode !== "api" || !canvasClient) {
@@ -140,6 +193,28 @@ export function PiloCanvasRuntime({
 
       if (shapeSyncQueueRef.current === shapeSyncQueue) {
         shapeSyncQueueRef.current = null;
+      }
+    };
+  }, [board.id, board.workspaceId, canvasClient, storageMode]);
+
+  useEffect(() => {
+    return () => {
+      if (viewSettingSyncTimerRef.current) {
+        clearTimeout(viewSettingSyncTimerRef.current);
+        viewSettingSyncTimerRef.current = null;
+      }
+
+      const pendingViewSetting = pendingViewSettingRef.current;
+      pendingViewSettingRef.current = null;
+
+      if (storageMode === "api" && canvasClient && pendingViewSetting) {
+        void canvasClient
+          .updateViewSetting(board.id, pendingViewSetting, {
+            workspaceId: board.workspaceId,
+          })
+          .catch((error: unknown) => {
+            console.error("Canvas API view setting sync failed", error);
+          });
       }
     };
   }, [board.id, board.workspaceId, canvasClient, storageMode]);
@@ -191,13 +266,42 @@ export function PiloCanvasRuntime({
         viewportY: nextViewSetting.viewportY,
       };
 
-      setViewSetting((currentViewSetting) =>
-        areViewSettingsEqual(currentViewSetting, normalizedViewSetting)
-          ? currentViewSetting
-          : normalizedViewSetting,
-      );
+      if (areViewSettingsEqual(viewSettingRef.current, normalizedViewSetting)) {
+        return;
+      }
+
+      viewSettingRef.current = normalizedViewSetting;
+      setViewSetting(normalizedViewSetting);
+
+      if (storageMode === "api" && canvasClient) {
+        pendingViewSettingRef.current = normalizedViewSetting;
+
+        if (viewSettingSyncTimerRef.current) {
+          clearTimeout(viewSettingSyncTimerRef.current);
+        }
+
+        viewSettingSyncTimerRef.current = setTimeout(() => {
+          const pendingViewSetting = pendingViewSettingRef.current;
+
+          viewSettingSyncTimerRef.current = null;
+          pendingViewSettingRef.current = null;
+
+          if (!pendingViewSetting) return;
+
+          void canvasClient
+            .updateViewSetting(board.id, pendingViewSetting, {
+              workspaceId: board.workspaceId,
+            })
+            .catch((error: unknown) => {
+              console.error("Canvas API view setting sync failed", error);
+            });
+        }, DEFAULT_VIEW_SETTING_SYNC_DEBOUNCE_MS);
+        return;
+      }
+
+      writeCanvasStorage("view-setting", board.id, normalizedViewSetting);
     },
-    [],
+    [board.id, board.workspaceId, canvasClient, storageMode],
   );
 
   const markCanvasUiEvent = useCallback(
@@ -215,6 +319,7 @@ export function PiloCanvasRuntime({
           board={board}
           freeformShapes={freeformShapes}
           hydrationVersion={canvasHydrationVersion}
+          initialViewSetting={viewSetting}
           onReady={setCanvasActions}
           onFreeformShapesChange={persistFreeformShapes}
           onViewChange={persistViewSetting}
@@ -239,10 +344,6 @@ export function PiloCanvasRuntime({
           aria-label="축소"
           onClick={() => {
             canvasActions?.zoomOut();
-            persistViewSetting({
-              ...viewSetting,
-              zoom: clampZoom(viewSetting.zoom - 0.1),
-            });
           }}
         >
           -
@@ -253,10 +354,6 @@ export function PiloCanvasRuntime({
           aria-label="확대"
           onClick={() => {
             canvasActions?.zoomIn();
-            persistViewSetting({
-              ...viewSetting,
-              zoom: clampZoom(viewSetting.zoom + 0.1),
-            });
           }}
         >
           +

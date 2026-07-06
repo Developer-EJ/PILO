@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards
 } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
@@ -16,9 +17,11 @@ import {
   CanvasBoardPayload,
   CanvasShapeDeletePayload,
   CanvasShapePayload,
+  CanvasViewSettingPayload,
   CanvasService,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
 } from "./canvas.service";
 
@@ -117,5 +120,22 @@ export class CanvasController {
     );
 
     return apiResponse(result);
+  }
+
+  @Put("canvases/:canvasId/view-settings")
+  async updateViewSetting(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: UpdateCanvasViewSettingRequest
+  ): Promise<ApiSuccessResponse<CanvasViewSettingPayload>> {
+    const viewSetting = await this.canvasService.updateViewSetting(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      body
+    );
+
+    return apiResponse(viewSetting);
   }
 }
