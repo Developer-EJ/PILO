@@ -59,6 +59,12 @@ export interface CreateCanvasShapeRequest {
 
 export type UpdateCanvasShapeRequest = Partial<CreateCanvasShapeRequest>;
 
+export interface UpdateCanvasViewSettingRequest {
+  zoom?: unknown;
+  viewportX?: unknown;
+  viewportY?: unknown;
+}
+
 export interface CanvasViewSettingPayload {
   zoom: number;
   viewportX: number;
@@ -329,6 +335,57 @@ export class CanvasService {
     return this.mapShape(shape);
   }
 
+  async updateViewSetting(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: UpdateCanvasViewSettingRequest
+  ): Promise<CanvasViewSettingPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const values = this.validateViewSetting(input);
+    const updatedCanvas = await this.database.queryOne<CanvasRow>(
+      `
+        UPDATE canvas
+        SET
+          zoom = $3,
+          viewport_x = $4,
+          viewport_y = $5
+        WHERE id = $1
+          AND workspace_id = $2
+          AND board_type = 'freeform'
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          board_type,
+          zoom,
+          viewport_x,
+          viewport_y,
+          updated_at,
+          0::int AS shape_count
+      `,
+      [canvas.id, workspaceId, values.zoom, values.viewportX, values.viewportY]
+    );
+
+    if (!updatedCanvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const payload = this.mapCanvas(updatedCanvas);
+
+    return {
+      zoom: payload.zoom,
+      viewportX: payload.viewportX,
+      viewportY: payload.viewportY
+    };
+  }
+
   async updateShape(
     currentUserId: string,
     workspaceId: string,
@@ -589,6 +646,25 @@ export class CanvasService {
     }
 
     return values;
+  }
+
+  private validateViewSetting(
+    input: UpdateCanvasViewSettingRequest
+  ): CanvasViewSettingPayload {
+    if (!this.isRecord(input)) {
+      throw badRequest("Canvas view setting body is required");
+    }
+
+    const zoom = this.validateNumber(input.zoom, "Canvas zoom");
+    if (zoom <= 0) {
+      throw badRequest("Canvas zoom must be greater than 0");
+    }
+
+    return {
+      zoom,
+      viewportX: this.validateNumber(input.viewportX, "Canvas viewportX"),
+      viewportY: this.validateNumber(input.viewportY, "Canvas viewportY")
+    };
   }
 
   private validateShapeType(value: unknown): string {

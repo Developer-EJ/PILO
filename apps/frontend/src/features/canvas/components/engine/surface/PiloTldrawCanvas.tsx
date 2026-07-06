@@ -119,6 +119,7 @@ export type PiloCanvasActions = {
 type PiloTldrawCanvasProps = {
   board: CanvasBoardDetail;
   hydrationVersion: number;
+  initialViewSetting: PiloCanvasViewSetting;
   freeformShapes: PiloCanvasFreeformShape[];
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesChange: (shapes: PiloCanvasFreeformShape[]) => void;
@@ -139,9 +140,26 @@ function hydrateFreeformShapes(
   editor.createShapes(sortFreeformShapesForCreate(shapes));
 }
 
+function applyViewSetting(editor: Editor, viewSetting: PiloCanvasViewSetting) {
+  if (
+    !Number.isFinite(viewSetting.zoom) ||
+    !Number.isFinite(viewSetting.viewportX) ||
+    !Number.isFinite(viewSetting.viewportY)
+  ) {
+    return;
+  }
+
+  editor.setCamera({
+    x: viewSetting.viewportX,
+    y: viewSetting.viewportY,
+    z: viewSetting.zoom,
+  });
+}
+
 function resetFreeformShapes(
   editor: Editor,
   shapes: PiloCanvasFreeformShape[],
+  viewSetting: PiloCanvasViewSetting,
 ) {
   const existingFreeformShapeIds = editor
     .getCurrentPageShapes()
@@ -152,10 +170,7 @@ function resetFreeformShapes(
   }
 
   hydrateFreeformShapes(editor, shapes);
-
-  if (shapes.length) {
-    editor.zoomToFit({ animation: { duration: 180 } });
-  }
+  applyViewSetting(editor, viewSetting);
 }
 
 function registerCanvasEditorSideEffects(editor: Editor) {
@@ -201,6 +216,7 @@ export function PiloTldrawCanvas({
   board,
   freeformShapes,
   hydrationVersion,
+  initialViewSetting,
   onReady,
   onFreeformShapesChange,
   onViewChange,
@@ -209,6 +225,7 @@ export function PiloTldrawCanvas({
   const placementRequestRef = useRef<PiloPlacementRequest | null>(null);
   const createdLocalCardsRef = useRef(0);
   const freeformShapesRef = useRef(freeformShapes);
+  const initialViewSettingRef = useRef(initialViewSetting);
   const seedKey = board.id;
 
   useEffect(() => {
@@ -216,21 +233,26 @@ export function PiloTldrawCanvas({
   }, [freeformShapes]);
 
   useEffect(() => {
+    initialViewSettingRef.current = initialViewSetting;
+  }, [initialViewSetting]);
+
+  useEffect(() => {
     const editor = editorRef.current;
 
     if (!editor) return;
 
-    resetFreeformShapes(editor, freeformShapesRef.current);
+    resetFreeformShapes(
+      editor,
+      freeformShapesRef.current,
+      initialViewSettingRef.current,
+    );
   }, [hydrationVersion, seedKey]);
 
   function mountEditor(editor: Editor) {
     editorRef.current = editor;
     registerCanvasEditorSideEffects(editor);
     hydrateFreeformShapes(editor, freeformShapes);
-
-    if (freeformShapes.length) {
-      editor.zoomToFit({ animation: { duration: 180 } });
-    }
+    applyViewSetting(editor, initialViewSetting);
 
     onReady({
       markUiEventAsHandled(event) {
