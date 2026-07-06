@@ -61,6 +61,27 @@ class FakeWorkspaceService {
   }
 }
 
+class FakeGithubSyncRunService {
+  constructor({ error = null } = {}) {
+    this.error = error;
+    this.calls = [];
+  }
+
+  async startGithubSyncRun(currentUserId, workspaceId, input) {
+    this.calls.push({ currentUserId, workspaceId, input });
+    if (this.error) {
+      throw this.error;
+    }
+
+    return {
+      id: "77777777-7777-4777-8777-777777777777",
+      target: input.target,
+      status: "success",
+      installationId: input.installationId
+    };
+  }
+}
+
 const fixedNow = new Date("2026-07-04T12:00:00.000Z");
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const currentUserId = "22222222-2222-4222-8222-222222222222";
@@ -100,7 +121,8 @@ function createService({
   database,
   workspaceService,
   githubOAuthClient,
-  githubAppClient
+  githubAppClient,
+  githubSyncRunService
 } = {}) {
   return new GithubIntegrationService(
     database ?? new FakeDatabase(),
@@ -110,7 +132,15 @@ function createService({
     configService,
     workspaceService ?? new FakeWorkspaceService(),
     new GithubAppInstallationStateService(),
-    githubAppClient ?? {}
+    githubAppClient ?? {},
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    githubSyncRunService ?? new FakeGithubSyncRunService()
   );
 }
 
@@ -313,7 +343,13 @@ function createService({
       };
     }
   };
-  const service = createService({ database, githubOAuthClient, githubAppClient });
+  const githubSyncRunService = new FakeGithubSyncRunService();
+  const service = createService({
+    database,
+    githubOAuthClient,
+    githubAppClient,
+    githubSyncRunService
+  });
 
   assert.equal(typeof service.completeGithubAppInstallationCallback, "function");
 
@@ -360,6 +396,16 @@ function createService({
     currentUserId,
     "2026-07-04T12:30:00.000Z",
     "2026-07-04T12:45:00.000Z"
+  ]);
+  assert.deepEqual(githubSyncRunService.calls, [
+    {
+      currentUserId,
+      workspaceId,
+      input: {
+        target: "full",
+        installationId: "33333333-3333-4333-8333-333333333333"
+      }
+    }
   ]);
 }
 
@@ -463,6 +509,105 @@ function createService({
     (error) =>
       error?.response?.error?.message === "Invalid GitHub App installation state"
   );
+}
+
+{
+  const stateService = new GithubAppInstallationStateService();
+  const state = stateService.createState(
+    {
+      userId: currentUserId,
+      workspaceId,
+      returnUrl: null
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url: null,
+            expires_at: new Date(statePayload.expiresAt)
+          };
+        }
+
+        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+          return connectedGithubOAuthRow;
+        }
+
+        if (/INSERT INTO github_installations/i.test(text)) {
+          return {
+            id: "33333333-3333-4333-8333-333333333333",
+            workspace_id: workspaceId,
+            github_installation_id: "12345678",
+            account_login: "my-team",
+            account_type: "Organization",
+            repository_selection: "selected",
+            permissions: {
+              metadata: "read"
+            },
+            installed_by_user_id: currentUserId,
+            installed_at: null,
+            suspended_at: null,
+            last_synced_at: null
+          };
+        }
+
+        return undefined;
+      }
+    }
+  });
+  const githubSyncRunService = new FakeGithubSyncRunService({
+    error: new Error("sync run could not be created")
+  });
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async hasUserInstallationAccess() {
+        return true;
+      }
+    },
+    githubAppClient: {
+      async getInstallation() {
+        return {
+          githubInstallationId: 12345678,
+          accountLogin: "my-team",
+          accountType: "Organization",
+          repositorySelection: "selected",
+          permissions: {
+            metadata: "read"
+          },
+          installedAt: null,
+          suspendedAt: null
+        };
+      }
+    },
+    githubSyncRunService
+  });
+
+  const callback = await service.completeGithubAppInstallationCallback(
+    {
+      installation_id: "12345678",
+      setup_action: "install",
+      state
+    },
+    "pilo_github_app_installation_state=installation-binding-token"
+  );
+
+  assert.equal(callback.installationId, "33333333-3333-4333-8333-333333333333");
+  assert.deepEqual(githubSyncRunService.calls, [
+    {
+      currentUserId,
+      workspaceId,
+      input: {
+        target: "full",
+        installationId: "33333333-3333-4333-8333-333333333333"
+      }
+    }
+  ]);
 }
 
 {
