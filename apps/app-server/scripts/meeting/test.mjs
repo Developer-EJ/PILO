@@ -1215,6 +1215,289 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const { database, service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /FROM meeting_reports/);
+          assert.match(text, /JOIN meetings/);
+          assert.match(text, /meetings\.workspace_id = \$1/);
+          assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
+          assert.match(text, /LIMIT \$2/);
+          assert.doesNotMatch(text, /transcript_text/);
+          assert.deepEqual(values, [workspaceId, 20]);
+          return [
+            meetingReportRow({
+              status: "FAILED",
+              failed_step: "STT",
+              error_message: "STT failed safely",
+              retry_count: "2"
+            })
+          ];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {});
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(database.queries.length, 1);
+  assert.equal(result.reports.length, 1);
+  assert.equal(result.reports[0].status, "FAILED");
+  assert.equal(result.reports[0].failedStep, "STT");
+  assert.equal(result.reports[0].retryCount, 2);
+  assert.equal("transcriptText" in result.reports[0], false);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /meeting_reports\.status = \$2/);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, "FAILED", 100]);
+          return [];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {
+    status: "FAILED",
+    limit: "101"
+  });
+
+  assert.deepEqual(result.reports, []);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /LIMIT \$2/);
+          assert.deepEqual(values, [workspaceId, 20]);
+          return [];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {
+    limit: ["20", "30"]
+  });
+
+  assert.deepEqual(result.reports, []);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /LIMIT \$2/);
+          assert.deepEqual(values, [workspaceId, 100]);
+          return [];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {
+    limit: "100"
+  });
+
+  assert.deepEqual(result.reports, []);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /LIMIT \$2/);
+          assert.deepEqual(values, [workspaceId, 20]);
+          return [];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {
+    limit: "not-a-number"
+  });
+
+  assert.deepEqual(result.reports, []);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /LIMIT \$2/);
+          assert.deepEqual(values, [workspaceId, 20]);
+          return [];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReports(currentUserId, workspaceId, {
+    limit: "10"
+  });
+
+  assert.deepEqual(result.reports, []);
+}
+
+{
+  const { service } = createSubject();
+
+  await assertBadRequest(
+    () =>
+      service.listReports(currentUserId, workspaceId, {
+        status: "DONE"
+      }),
+    /Invalid meeting report status/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertBadRequest(
+    () =>
+      service.listReports(currentUserId, workspaceId, {
+        status: ["FAILED", "COMPLETED"]
+      }),
+    /Invalid meeting report status/
+  );
+}
+
+{
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /FROM meeting_reports/);
+          assert.match(text, /JOIN meetings/);
+          assert.match(text, /meeting_reports\.transcript_text/);
+          assert.match(text, /meeting_reports\.id = \$2/);
+          assert.deepEqual(values, [workspaceId, reportId]);
+          return meetingReportRow({
+            transcript_text: "회의 원문",
+            action_item_candidates: JSON.stringify([{ title: "후속 작업" }])
+          });
+        }
+      ]
+    })
+  );
+
+  const result = await service.getReport(currentUserId, workspaceId, reportId);
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(result.report.id, reportId);
+  assert.equal(result.report.transcriptText, "회의 원문");
+  assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
+}
+
+{
+  const { service } = createSubject();
+
+  await assertNotFound(
+    () => service.getReport(currentUserId, workspaceId, "not-a-uuid"),
+    /Meeting report not found/
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        () => {
+          return null;
+        }
+      ]
+    })
+  );
+
+  await assertNotFound(
+    () => service.getReport(currentUserId, workspaceId, reportId),
+    /Meeting report not found/
+  );
+}
+
+{
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [currentMeetingRow()],
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /FROM meeting_reports/);
+          assert.match(text, /WHERE meeting_id = \$1/);
+          assert.match(text, /ORDER BY created_at DESC, id ASC/);
+          assert.doesNotMatch(text, /transcript_text/);
+          assert.deepEqual(values, [meetingId]);
+          return [meetingReportRow()];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listMeetingReports(
+    currentUserId,
+    workspaceId,
+    meetingId
+  );
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(result.reports.length, 1);
+  assert.equal(result.reports[0].id, reportId);
+  assert.equal("transcriptText" in result.reports[0], false);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [currentMeetingRow()],
+      queryRows: [[]]
+    })
+  );
+
+  const result = await service.listMeetingReports(
+    currentUserId,
+    workspaceId,
+    meetingId
+  );
+
+  assert.deepEqual(result.reports, []);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [null]
+    })
+  );
+
+  await assertNotFound(
+    () => service.listMeetingReports(currentUserId, workspaceId, meetingId),
+    /Meeting not found/
+  );
+}
+
+{
+  const { service } = createSubject();
+
+  await assertBadRequest(
+    () => service.requestReportRegeneration(currentUserId, workspaceId, reportId),
+    /not implemented yet/
+  );
+}
+
+{
   const { service } = createSubject(
     new FakeDatabase({
       queryOneRows: [null]
