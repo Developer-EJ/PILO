@@ -15,12 +15,14 @@ import { CurrentUserId } from "../../common/current-user.decorator";
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
+  CanvasShapeBatchPayload,
   CanvasShapeDeletePayload,
   CanvasShapePayload,
   CanvasViewSettingPayload,
   CanvasService,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
+  SyncCanvasShapesBatchRequest,
   UpdateCanvasViewSettingRequest,
   UpdateCanvasShapeRequest
 } from "./canvas.service";
@@ -88,6 +90,23 @@ export class CanvasController {
     );
 
     return apiResponse(shape);
+  }
+
+  @Post("canvases/:canvasId/shapes/batch")
+  async syncShapesBatch(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: SyncCanvasShapesBatchRequest
+  ): Promise<ApiSuccessResponse<CanvasShapeBatchPayload>> {
+    const result = await this.canvasService.syncShapesBatch(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      body
+    );
+
+    return apiResponse(result);
   }
 
   @Patch("canvas-shapes/:shapeId")

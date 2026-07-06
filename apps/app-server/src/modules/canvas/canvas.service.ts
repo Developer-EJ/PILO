@@ -65,6 +65,10 @@ export interface UpdateCanvasViewSettingRequest {
   viewportY?: unknown;
 }
 
+export interface SyncCanvasShapesBatchRequest {
+  operations?: unknown;
+}
+
 export interface CanvasViewSettingPayload {
   zoom: number;
   viewportX: number;
@@ -113,6 +117,12 @@ export interface CanvasShapeDeletePayload {
   deletedAt: string;
 }
 
+export interface CanvasShapeBatchPayload {
+  created: number;
+  updated: number;
+  deleted: number;
+}
+
 interface ShapeWriteValues {
   shapeType?: string;
   title?: string | null;
@@ -126,9 +136,26 @@ interface ShapeWriteValues {
   rawShape?: Record<string, unknown>;
 }
 
+type CanvasShapeBatchOperationValues =
+  | {
+      type: "create";
+      shapeId: string;
+      payload: CreateCanvasShapeRequest;
+    }
+  | {
+      type: "update";
+      shapeId: string;
+      payload: UpdateCanvasShapeRequest;
+    }
+  | {
+      type: "delete";
+      shapeId: string;
+    };
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_CANVAS_TITLE_LENGTH = 120;
+const MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100;
 const ALLOWED_SHAPE_TYPES = new Set([
   "sticky-note",
   "text",
@@ -333,6 +360,186 @@ export class CanvasService {
     }
 
     return this.mapShape(shape);
+  }
+
+  async syncShapesBatch(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: SyncCanvasShapesBatchRequest
+  ): Promise<CanvasShapeBatchPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const canvas = await this.findCanvas(workspaceId, canvasId);
+    if (!canvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const operations = this.validateShapeBatchOperations(input);
+
+    return this.database.transaction(async (transaction) => {
+      const result: CanvasShapeBatchPayload = {
+        created: 0,
+        updated: 0,
+        deleted: 0
+      };
+
+      for (const operation of operations) {
+        if (operation.type === "create") {
+          const values = this.validateShapeCreate(operation.payload);
+          const shape = await transaction.queryOne<CanvasShapeRow>(
+            `
+              INSERT INTO canvas_freeform_shapes (
+                id,
+                canvas_id,
+                shape_type,
+                title,
+                text_content,
+                x,
+                y,
+                width,
+                height,
+                rotation,
+                z_index,
+                raw_shape,
+                deleted_at
+              )
+              VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12::jsonb,
+                NULL
+              )
+              RETURNING
+                id,
+                canvas_id,
+                shape_type,
+                title,
+                text_content,
+                x,
+                y,
+                width,
+                height,
+                rotation,
+                z_index,
+                raw_shape,
+                created_at,
+                updated_at,
+                deleted_at
+            `,
+            [
+              operation.shapeId,
+              canvas.id,
+              values.shapeType,
+              values.title ?? null,
+              values.textContent ?? null,
+              values.x ?? 0,
+              values.y ?? 0,
+              values.width ?? null,
+              values.height ?? null,
+              values.rotation ?? 0,
+              values.zIndex ?? 0,
+              JSON.stringify(values.rawShape ?? {})
+            ]
+          );
+
+          if (!shape) {
+            throw badRequest("Canvas shape could not be created");
+          }
+
+          result.created += 1;
+          continue;
+        }
+
+        if (operation.type === "update") {
+          const values = this.validateShapeUpdate(operation.payload);
+          const updates: string[] = [];
+          const queryValues: unknown[] = [operation.shapeId, canvas.id];
+
+          this.addUpdate(updates, queryValues, "shape_type", values.shapeType);
+          this.addUpdate(updates, queryValues, "title", values.title);
+          this.addUpdate(updates, queryValues, "text_content", values.textContent);
+          this.addUpdate(updates, queryValues, "x", values.x);
+          this.addUpdate(updates, queryValues, "y", values.y);
+          this.addUpdate(updates, queryValues, "width", values.width);
+          this.addUpdate(updates, queryValues, "height", values.height);
+          this.addUpdate(updates, queryValues, "rotation", values.rotation);
+          this.addUpdate(updates, queryValues, "z_index", values.zIndex);
+          this.addUpdate(
+            updates,
+            queryValues,
+            "raw_shape",
+            values.rawShape === undefined
+              ? undefined
+              : JSON.stringify(values.rawShape),
+            values.rawShape === undefined ? "" : "::jsonb"
+          );
+
+          const shape = await transaction.queryOne<CanvasShapeRow>(
+            `
+              UPDATE canvas_freeform_shapes s
+              SET ${updates.join(", ")}
+              WHERE s.id = $1
+                AND s.canvas_id = $2
+                AND s.deleted_at IS NULL
+              RETURNING
+                s.id,
+                s.canvas_id,
+                s.shape_type,
+                s.title,
+                s.text_content,
+                s.x,
+                s.y,
+                s.width,
+                s.height,
+                s.rotation,
+                s.z_index,
+                s.raw_shape,
+                s.created_at,
+                s.updated_at,
+                s.deleted_at
+            `,
+            queryValues
+          );
+
+          if (!shape) {
+            throw notFound("Canvas shape not found");
+          }
+
+          result.updated += 1;
+          continue;
+        }
+
+        const shape = await transaction.queryOne<CanvasShapeDeleteRow>(
+          `
+            UPDATE canvas_freeform_shapes s
+            SET deleted_at = now()
+            WHERE s.id = $1
+              AND s.canvas_id = $2
+              AND s.deleted_at IS NULL
+            RETURNING s.id, s.deleted_at
+          `,
+          [operation.shapeId, canvas.id]
+        );
+
+        if (!shape || !shape.deleted_at) {
+          throw notFound("Canvas shape not found");
+        }
+
+        result.deleted += 1;
+      }
+
+      return result;
+    });
   }
 
   async updateViewSetting(
@@ -646,6 +853,76 @@ export class CanvasService {
     }
 
     return values;
+  }
+
+  private validateShapeBatchOperations(
+    input: SyncCanvasShapesBatchRequest
+  ): CanvasShapeBatchOperationValues[] {
+    if (!this.isRecord(input)) {
+      throw badRequest("Canvas shape batch body is required");
+    }
+
+    if (!Array.isArray(input.operations)) {
+      throw badRequest("Canvas shape batch operations must be an array");
+    }
+
+    if (input.operations.length > MAX_CANVAS_SHAPE_BATCH_OPERATIONS) {
+      throw badRequest(
+        `Canvas shape batch operations must be ${MAX_CANVAS_SHAPE_BATCH_OPERATIONS} or fewer`
+      );
+    }
+
+    return input.operations.map((operation, index) => {
+      if (!this.isRecord(operation)) {
+        throw badRequest(`Canvas shape batch operation ${index} is invalid`);
+      }
+
+      const type = operation.type;
+      if (type !== "create" && type !== "update" && type !== "delete") {
+        throw badRequest(`Canvas shape batch operation ${index} type is invalid`);
+      }
+
+      const shapeId = this.validateShapeId(operation.shapeId);
+
+      if (type === "delete") {
+        return {
+          type,
+          shapeId
+        };
+      }
+
+      if (!this.isRecord(operation.payload)) {
+        throw badRequest(
+          `Canvas shape batch operation ${index} payload is required`
+        );
+      }
+
+      if (type === "create") {
+        if (this.hasOwn(operation.payload, "id")) {
+          const payloadShapeId = this.validateShapeId(operation.payload.id);
+          if (payloadShapeId !== shapeId) {
+            throw badRequest(
+              `Canvas shape batch operation ${index} shapeId must match payload id`
+            );
+          }
+        }
+
+        return {
+          type,
+          shapeId,
+          payload: {
+            ...operation.payload,
+            id: shapeId
+          }
+        };
+      }
+
+      return {
+        type,
+        shapeId,
+        payload: operation.payload
+      };
+    });
   }
 
   private validateViewSetting(

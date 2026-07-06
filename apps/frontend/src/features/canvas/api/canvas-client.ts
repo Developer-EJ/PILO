@@ -351,6 +351,18 @@ export function createCanvasApiClient({
       return normalizeCanvasBoardDetail(board, { workspaceId });
     },
 
+    async syncShapesBatch(
+      boardId: string,
+      body: unknown,
+      { workspaceId }: { workspaceId: string },
+    ) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/shapes/batch`,
+        withJsonBody(body, { method: "POST" }),
+        requestOptions,
+      );
+    },
+
     async createShape(
       boardId: string,
       body: unknown,
@@ -443,6 +455,23 @@ export function createMockCanvasClient() {
       return {
         ...createMockBlankBoard(defaultBoard.workspaceId, "Untitled canvas"),
         id: boardId,
+      };
+    },
+
+    async syncShapesBatch(_boardId: string, body: unknown) {
+      const operations =
+        isRecord(body) && Array.isArray(body.operations) ? body.operations : [];
+
+      return {
+        created: operations.filter(
+          (operation) => isRecord(operation) && operation.type === "create",
+        ).length,
+        updated: operations.filter(
+          (operation) => isRecord(operation) && operation.type === "update",
+        ).length,
+        deleted: operations.filter(
+          (operation) => isRecord(operation) && operation.type === "delete",
+        ).length,
       };
     },
 
