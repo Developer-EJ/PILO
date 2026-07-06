@@ -149,6 +149,7 @@ const featurePages = await Promise.all(
 const navigation = navigationFiles.join("\n");
 const routes = routePages.join("\n");
 const pages = featurePages.join("\n");
+const deprecatedCanvasTokenEnv = "NEXT_PUBLIC_PILO_" + "ACCESS_TOKEN";
 
 assert.match(navigation, /Calendar/);
 assert.match(navigation, /GitHub sync/);
@@ -191,6 +192,7 @@ assert.match(appSidebar, /logout/);
 assert.match(canvasApiClient, /const DEFAULT_CANVAS_MODE = "api"/);
 assert.match(canvasApiClient, /\/api\/v1/);
 assert.match(canvasApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
+assert.doesNotMatch(canvasApiClient, new RegExp(deprecatedCanvasTokenEnv));
 assert.match(canvasApiClient, /Authorization: `Bearer \$\{authToken\}`/);
 assert.match(canvasApiClient, /credentials: "same-origin"/);
 assert.match(canvasApiClient, /unwrapCanvasApiData/);
