@@ -252,6 +252,8 @@ assert.match(piloTldrawCanvas, /piloCanvasShapeUtils/);
 assert.match(piloTldrawCanvas, /CanvasStateReporter/);
 assert.match(piloTldrawCanvas, /initialViewSetting/);
 assert.match(piloTldrawCanvas, /editor\.setCamera/);
+assert.match(piloTldrawCanvas, /cameraRestoreVersion/);
+assert.match(piloTldrawCanvas, /resetFreeformShapes\(editor, freeformShapesRef\.current\)/);
 assert.match(piloTldrawCanvas, /onShapeDetailRequest/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
 assert.match(piloTldrawCanvas, /placePiloCanvasShapeAt/);
