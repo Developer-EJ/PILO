@@ -15,7 +15,13 @@ import {
   Users,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore
+} from "react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -54,7 +60,6 @@ type MeetingSection = "room" | "report";
 
 const MEETING_STATUS_POLL_INTERVAL_MS = 5000;
 const RECORDING_CONSENT_STORAGE_KEY = "recordingConsentAccepted";
-const LOCATION_CHANGE_EVENT = "pilo:locationchange";
 const MIC_PERMISSION_ERROR_MESSAGE =
   "마이크 권한이 필요합니다. 브라우저 설정에서 마이크 접근을 허용한 뒤 다시 참여해주세요.";
 const LIVEKIT_CONNECTION_ERROR_MESSAGE =
@@ -68,6 +73,55 @@ function getInitial(name: string | null | undefined) {
 
 function getMeetingSectionFromHash(hash: string): MeetingSection {
   return hash === "#report" ? "report" : "room";
+}
+
+function getMeetingSectionSnapshot(): MeetingSection {
+  if (typeof window === "undefined") {
+    return "room";
+  }
+
+  return getMeetingSectionFromHash(window.location.hash);
+}
+
+function getMeetingSectionServerSnapshot(): MeetingSection {
+  return "room";
+}
+
+function subscribeToMeetingSection(onStoreChange: () => void) {
+  const frameIds: number[] = [];
+  const timeoutIds: number[] = [];
+
+  function scheduleSectionSync(delayMs = 50) {
+    const timeoutId = window.setTimeout(() => {
+      const frameId = window.requestAnimationFrame(onStoreChange);
+      frameIds.push(frameId);
+    }, delayMs);
+
+    timeoutIds.push(timeoutId);
+  }
+
+  function syncSectionAfterNavigationClick() {
+    scheduleSectionSync(50);
+    scheduleSectionSync(150);
+    scheduleSectionSync(300);
+  }
+
+  function syncSectionAfterNavigationChange() {
+    scheduleSectionSync();
+  }
+
+  scheduleSectionSync();
+  window.addEventListener("click", syncSectionAfterNavigationClick, true);
+  window.addEventListener("hashchange", syncSectionAfterNavigationChange);
+  window.addEventListener("popstate", syncSectionAfterNavigationChange);
+
+  return () => {
+    timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
+    window.removeEventListener("click", syncSectionAfterNavigationClick, true);
+    window.removeEventListener("hashchange", syncSectionAfterNavigationChange);
+    window.removeEventListener("popstate", syncSectionAfterNavigationChange);
+  };
 }
 
 function getParticipantName(participant: MeetingParticipant) {
@@ -270,8 +324,11 @@ export function MeetingPanel() {
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
   const currentUserId = authSession?.user.id ?? "";
-  const [activeSection, setActiveSection] =
-    useState<MeetingSection>("room");
+  const activeSection = useSyncExternalStore(
+    subscribeToMeetingSection,
+    getMeetingSectionSnapshot,
+    getMeetingSectionServerSnapshot
+  );
   const [reportStatusFilter, setReportStatusFilter] =
     useState<MeetingReportStatusFilter>("ALL");
   const reportsQuery = useMemo<MeetingReportListQuery>(
@@ -330,50 +387,6 @@ export function MeetingPanel() {
   const isInitialLoading = currentStatus === "loading" && meeting === null;
   const hasRunningRecording = currentRecording?.status === "RUNNING";
   const displayedActiveCount = activeParticipants.length || activeParticipantCount;
-
-  useEffect(() => {
-    function syncSectionFromHash() {
-      setActiveSection(getMeetingSectionFromHash(window.location.hash));
-    }
-
-    function syncSectionAfterNavigationClick() {
-      window.setTimeout(syncSectionFromHash, 0);
-      window.setTimeout(syncSectionFromHash, 100);
-      window.setTimeout(syncSectionFromHash, 250);
-    }
-
-    const originalPushState = window.history.pushState;
-    const originalReplaceState = window.history.replaceState;
-    const dispatchLocationChange = () => {
-      window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
-    };
-
-    window.history.pushState = function pushState(...args) {
-      const result = originalPushState.apply(this, args);
-      dispatchLocationChange();
-      return result;
-    };
-    window.history.replaceState = function replaceState(...args) {
-      const result = originalReplaceState.apply(this, args);
-      dispatchLocationChange();
-      return result;
-    };
-
-    syncSectionFromHash();
-    window.addEventListener("click", syncSectionAfterNavigationClick, true);
-    window.addEventListener("hashchange", syncSectionFromHash);
-    window.addEventListener("popstate", syncSectionFromHash);
-    window.addEventListener(LOCATION_CHANGE_EVENT, syncSectionFromHash);
-
-    return () => {
-      window.history.pushState = originalPushState;
-      window.history.replaceState = originalReplaceState;
-      window.removeEventListener("click", syncSectionAfterNavigationClick, true);
-      window.removeEventListener("hashchange", syncSectionFromHash);
-      window.removeEventListener("popstate", syncSectionFromHash);
-      window.removeEventListener(LOCATION_CHANGE_EVENT, syncSectionFromHash);
-    };
-  }, []);
 
   const reloadParticipants = useCallback(
     async (targetMeetingId = meeting?.id) => {
