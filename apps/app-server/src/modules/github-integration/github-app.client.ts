@@ -1664,7 +1664,7 @@ export class GithubAppClient {
     hasNextPage: boolean;
     endCursor: string | null;
   } {
-    const project = this.readProjectV2Node(data, errorMessage);
+    const project = this.readProjectV2ConnectionNode(data, errorMessage);
     const connection = this.toObject(project[fieldName]);
     const nodes = Array.isArray(connection.nodes)
       ? connection.nodes.filter((node): node is Record<string, unknown> =>
@@ -1685,6 +1685,18 @@ export class GithubAppClient {
           ? pageInfo.endCursor
           : null
     };
+  }
+
+  private readProjectV2ConnectionNode(
+    data: unknown,
+    errorMessage: string
+  ): Record<string, unknown> {
+    const node = this.toObject(this.toObject(data).node);
+    if (node.__typename && node.__typename !== "ProjectV2") {
+      throw badRequest(errorMessage);
+    }
+
+    return node;
   }
 
   private mapProjectV2(project: Record<string, unknown>): GithubProjectV2ApiItem {
