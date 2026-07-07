@@ -39,6 +39,16 @@ const canvasController = await readSource(
   "../src/modules/canvas/canvas.controller.ts"
 );
 const canvasService = await readSource("../src/modules/canvas/canvas.service.ts");
+const canvasTypes = await readSource("../src/modules/canvas/canvas.types.ts");
+const canvasShapeValidation = await readSource(
+  "../src/modules/canvas/canvas-shape.validation.ts"
+);
+const canvasShapeMapper = await readSource(
+  "../src/modules/canvas/canvas-shape.mapper.ts"
+);
+const canvasShapeHash = await readSource(
+  "../src/modules/canvas/canvas-shape-hash.ts"
+);
 const meetingController = await readSource(
   "../src/modules/meeting/meeting.controller.ts"
 );
@@ -55,6 +65,12 @@ const liveKitTokenService = await readSource(
 );
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
+);
+const workspaceMembershipMigration = await readSource(
+  "../../../db/migrations/008_create_workspace_memberships_and_invitations.sql"
+);
+const canvasShapeHashMigration = await readSource(
+  "../../../db/migrations/009_canvas_shape_hash_revision_viewport_index.sql"
 );
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
@@ -133,14 +149,33 @@ assert.match(githubLoginOAuthClient, /api\.github\.com\/user\/emails/);
 assert.match(workspaceController, /@Controller\("workspaces"\)/);
 assert.match(workspaceController, /@Get\(\)/);
 assert.match(workspaceController, /@Get\(":workspaceId"\)/);
-assert.match(workspaceService, /WHERE owner_user_id = \$1/);
-assert.match(workspaceService, /ORDER BY created_at ASC/);
+assert.match(workspaceController, /@Get\(":workspaceId\/members"\)/);
+assert.match(workspaceController, /@Delete\(":workspaceId\/members\/:userId"\)/);
+assert.match(workspaceController, /@Get\(":workspaceId\/invitations"\)/);
+assert.match(workspaceController, /@Post\(":workspaceId\/invitations"\)/);
+assert.match(workspaceController, /@Controller\("workspace-invitations"\)/);
+assert.match(workspaceController, /@Post\(":invitationToken\/accept"\)/);
+assert.match(workspaceService, /FROM workspace_members wm/);
+assert.match(workspaceService, /JOIN workspaces w/);
+assert.match(workspaceService, /WHERE wm\.user_id = \$1/);
+assert.match(workspaceService, /ORDER BY wm\.joined_at ASC, w\.created_at ASC/);
 assert.match(workspaceService, /assertWorkspaceAccess/);
+assert.match(workspaceService, /assertWorkspaceOwnerAccess/);
 assert.match(workspaceService, /ensureDefaultWorkspaceForUser/);
 assert.match(workspaceService, /INSERT INTO workspaces \(name, owner_user_id\)/);
 assert.match(workspaceService, /ON CONFLICT \(owner_user_id\) WHERE owner_user_id IS NOT NULL/);
+assert.match(workspaceService, /INSERT INTO workspace_members/);
+assert.match(workspaceService, /workspace_invitations/);
+assert.match(workspaceService, /hashInvitationToken/);
+assert.match(workspaceService, /accepted_by_user_id/);
 assert.match(workspaceMeetingConstraintMigration, /unique_workspace_per_owner_user_id/);
 assert.match(workspaceMeetingConstraintMigration, /WHERE owner_user_id IS NOT NULL/);
+assert.match(workspaceMembershipMigration, /CREATE TABLE public\.workspace_members/);
+assert.match(workspaceMembershipMigration, /CREATE TABLE public\.workspace_invitations/);
+assert.match(workspaceMembershipMigration, /UNIQUE \(workspace_id, user_id\)/);
+assert.match(workspaceMembershipMigration, /unique_pending_workspace_invitation_email/);
+assert.match(workspaceMembershipMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(workspaceMembershipMigration, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
 assert.match(canvasModule, /controllers: \[CanvasController\]/);
 assert.match(canvasModule, /providers: \[CanvasService\]/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
@@ -163,22 +198,44 @@ assert.match(canvasService, /UPDATE canvas/);
 assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
 assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
+assert.match(canvasService, /content_hash/);
+assert.match(canvasService, /revision = s\.revision \+ 1/);
+assert.match(canvasService, /max_x >= \$2/);
+assert.match(canvasService, /max_y >= \$4/);
 assert.match(canvasService, /listShapesInViewport/);
 assert.match(canvasService, /validateViewportBounds/);
 assert.match(canvasService, /getShapeDetail/);
 assert.match(canvasService, /syncShapesBatch/);
-assert.match(canvasService, /validateShapeBatchOperations/);
-assert.match(canvasService, /MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100/);
 assert.match(canvasService, /enterCanvas/);
 assert.match(canvasService, /leaveCanvas/);
 assert.match(canvasService, /canvas_user_states/);
 assert.match(canvasService, /DELETE FROM canvas_freeform_shapes/);
 assert.match(canvasService, /permanentlyDeletedShapeCount/);
-assert.match(canvasService, /SET deleted_at = now\(\)/);
+assert.match(canvasService, /deleted_at = now\(\)/);
 assert.match(canvasService, /deleted_at IS NULL/);
 assert.match(canvasService, /ON CONFLICT \(id\) DO UPDATE/);
 assert.match(canvasService, /deleted_at = NULL/);
 assert.match(canvasService, /canvas_freeform_shapes\.deleted_at IS NOT NULL/);
+assert.match(canvasTypes, /export interface CanvasShapePayload/);
+assert.match(canvasTypes, /contentHash: string/);
+assert.match(canvasTypes, /revision: number/);
+assert.match(canvasTypes, /export interface CanvasShapeRow/);
+assert.match(canvasShapeValidation, /validateShapeBatchOperations/);
+assert.match(canvasShapeValidation, /MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100/);
+assert.match(canvasShapeValidation, /Canvas shapeType is invalid/);
+assert.match(canvasShapeValidation, /Canvas viewport bounds query is required/);
+assert.match(canvasShapeMapper, /export function mapShape/);
+assert.match(canvasShapeMapper, /contentHash: shape\.content_hash/);
+assert.match(canvasShapeMapper, /revision: Number\(shape\.revision\)/);
+assert.match(canvasShapeMapper, /export function mapDeletedShape/);
+assert.match(canvasShapeHash, /export function computeShapeContentHash/);
+assert.match(canvasShapeHash, /createHash\("sha256"\)/);
+assert.match(canvasShapeHash, /\.sort\(\)/);
+assert.match(canvasShapeHashMigration, /ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''/);
+assert.match(canvasShapeHashMigration, /ADD COLUMN revision BIGINT NOT NULL DEFAULT 1/);
+assert.match(canvasShapeHashMigration, /ADD COLUMN max_x DOUBLE PRECISION/);
+assert.match(canvasShapeHashMigration, /idx_canvas_freeform_shapes_viewport_active/);
+assert.match(canvasShapeHashMigration, /idx_canvas_freeform_shapes_order_active/);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);

@@ -62,6 +62,7 @@ const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/utils/canvas-shape-sync.ts", import.meta.url),
   "utf8"
 );
+const packageJson = await readFile(new URL("../package.json", import.meta.url), "utf8");
 const tldrawSurface = await readFile(
   new URL("../src/shared/tldraw/TldrawSurface.tsx", import.meta.url),
   "utf8"
@@ -181,8 +182,15 @@ assert.match(authSession, /router\.replace\(`\/login\?returnUrl=/);
 assert.match(authSession, /Default workspace was not initialized during login/);
 assert.match(authSession, /isDevPreviewAccessToken/);
 assert.match(authSession, /PILO UI Preview/);
-assert.doesNotMatch(authSession, /createWorkspace/);
-assert.doesNotMatch(authApiClient, /createWorkspace/);
+assert.match(authSession, /activeWorkspace/);
+assert.match(authSession, /role: "owner"/);
+assert.match(authApiClient, /role: WorkspaceRole/);
+assert.match(authApiClient, /listWorkspaceInvitations/);
+assert.match(authApiClient, /createWorkspaceInvitation/);
+assert.match(authApiClient, /revokeWorkspaceInvitation/);
+assert.match(authApiClient, /acceptWorkspaceInvitation/);
+assert.doesNotMatch(authSession, /createWorkspace\(/);
+assert.doesNotMatch(authApiClient, /createWorkspace\(/);
 assert.match(loginPage, /Welcome back/);
 assert.match(loginPage, /Login with GitHub/);
 assert.match(loginPage, /Login with Google/);
@@ -198,6 +206,11 @@ assert.match(mainShell, /peer-data-\[variant=inset\]:!m-0/);
 assert.match(mainShell, /peer-data-\[state=collapsed\]:!ml-0/);
 assert.match(appSidebar, /useAuthSession/);
 assert.match(appSidebar, /logout/);
+assert.match(appSidebar, /activeWorkspaceDetail/);
+assert.match(appSidebar, /canManageWorkspace/);
+assert.match(appSidebar, /createWorkspaceInvitation/);
+assert.match(appSidebar, /listWorkspaceInvitations/);
+assert.match(appSidebar, /revokeWorkspaceInvitation/);
 assert.match(appSidebar, /AvatarImage/);
 assert.match(appSidebar, /avatarUrl: authSession\.user\.avatarUrl/);
 assert.match(appSidebar, /src=\{displayUser\.avatarUrl \|\| undefined\}/);
@@ -215,6 +228,7 @@ assert.match(canvasApiClient, /\/workspaces\/\$\{encodeURIComponent\(workspaceId
 assert.match(canvasApiClient, /\/shapes`/);
 assert.match(canvasApiClient, /listShapesInViewport/);
 assert.match(canvasApiClient, /getShapeDetail/);
+assert.match(canvasApiClient, /signal\?: AbortSignal/);
 assert.match(canvasApiClient, /enterCanvas/);
 assert.match(canvasApiClient, /leaveCanvas/);
 assert.match(canvasApiClient, /syncShapesBatch/);
@@ -228,6 +242,15 @@ assert.match(canvasApiClient, /method: "DELETE"/);
 assert.match(canvasRuntime, /syncCanvasFreeformShapes/);
 assert.match(canvasRuntime, /createCanvasShapeSyncQueue/);
 assert.match(canvasRuntime, /shapeSyncQueue\.enqueue/);
+assert.match(canvasRuntime, /@tanstack\/react-query/);
+assert.match(canvasRuntime, /QueryClientProvider/);
+assert.match(canvasRuntime, /queryClient\s*\.\s*fetchQuery/);
+assert.match(canvasRuntime, /queryClient\s*\.\s*cancelQueries/);
+assert.match(canvasRuntime, /queryClient\s*\.\s*invalidateQueries/);
+assert.match(canvasRuntime, /viewportShapeLoadRequestSeqRef/);
+assert.match(canvasRuntime, /shapeDetailRequestSeqRef/);
+assert.match(canvasRuntime, /areCanvasFreeformShapesEqual/);
+assert.match(canvasRuntime, /hasCanvasFreeformShapeChanged/);
 assert.match(canvasRuntime, /pendingLocalShapeVersionsRef/);
 assert.match(canvasRuntime, /getChangedFreeformShapeIds/);
 assert.match(canvasRuntime, /captureDraftFreeformShapes/);
@@ -272,7 +295,18 @@ assert.match(canvasWorkspace, /storageMode=\{shouldUseCanvasApi \? "api" : "loca
 assert.match(canvasShapeSync, /buildCanvasShapeSyncOperations/);
 assert.match(canvasShapeSync, /createCanvasShapeSyncQueue/);
 assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_QUEUE_DEBOUNCE_MS = 500/);
+assert.match(canvasShapeSync, /DEFAULT_CANVAS_SHAPE_SYNC_RETRY_ATTEMPTS = 3/);
+assert.match(canvasShapeSync, /CanvasShapeSyncFailure/);
+assert.match(canvasShapeSync, /runWithRetry/);
+assert.match(canvasShapeSync, /import diff from "microdiff"/);
+assert.match(canvasShapeSync, /import PQueue from "p-queue"/);
+assert.match(canvasShapeSync, /import pRetry from "p-retry"/);
+assert.match(canvasShapeSync, /new PQueue\(\{ concurrency: 1 \}\)/);
+assert.match(canvasShapeSync, /pRetry/);
+assert.match(canvasShapeSync, /hasCanvasFreeformShapeChanged/);
+assert.match(canvasShapeSync, /areCanvasFreeformShapesEqual/);
 assert.match(canvasShapeSync, /mergeQueuedCanvasShapeSyncOperation/);
+assert.match(canvasShapeSync, /queuedDuringFlush/);
 assert.match(canvasShapeSync, /whenIdle: \(\) => Promise<void>/);
 assert.match(canvasShapeSync, /resolveIdleWaiters/);
 assert.match(canvasShapeSync, /syncShapesBatch/);
@@ -284,6 +318,10 @@ assert.match(canvasShapeSync, /shapeType: typeof shape.type === "string" \? shap
 assert.match(canvasShapeSync, /x: readFiniteNumber\(shape.x, 0\)/);
 assert.match(canvasShapeSync, /y: readFiniteNumber\(shape.y, 0\)/);
 assert.match(canvasShapeSync, /rawShape: cloneRawShape\(shape\)/);
+assert.match(packageJson, /"@tanstack\/react-query"/);
+assert.match(packageJson, /"p-queue"/);
+assert.match(packageJson, /"p-retry"/);
+assert.match(packageJson, /"microdiff"/);
 assert.match(tldrawSurface, /export function TldrawSurface/);
 assert.match(tldrawSurface, /shapeUtils=\{shapeUtils\}/);
 assert.match(tldrawSurface, /onMount=\{onMount\}/);
