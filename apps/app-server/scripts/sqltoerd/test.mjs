@@ -654,6 +654,18 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     () =>
       service.createSession(currentUserId, workspaceId, {
         sourceFormat: "sql",
+        modelJson: modelJson({ extra: true }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /modelJson has unknown field/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
         modelJson: modelJson({
           schema: {
             ...modelJson().schema,
@@ -723,6 +735,63 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     400,
     "BAD_REQUEST",
     /relation fromColumnIds reference is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_duplicate",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_users_id"]
+              ),
+              relation(
+                "relation_duplicate",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_users_id"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /duplicate relation id/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson({
+          schema: {
+            ...modelJson().schema,
+            relations: [
+              relation(
+                "relation_missing_to_column",
+                "table_orders",
+                ["column_orders_user_id"],
+                "table_users",
+                ["column_missing"]
+              )
+            ]
+          }
+        }),
+        layoutJson: layoutJson()
+      }),
+    400,
+    "BAD_REQUEST",
+    /relation toColumnIds reference is invalid/
   );
 }
 
@@ -819,6 +888,23 @@ async function assertApiError(action, status, code, messagePattern, forbiddenPat
     400,
     "BAD_REQUEST",
     /layoutJson.tableLayouts tableId reference is invalid/
+  );
+
+  await assertApiError(
+    () =>
+      service.createSession(currentUserId, workspaceId, {
+        sourceFormat: "sql",
+        modelJson: modelJson(),
+        layoutJson: layoutJson({
+          tableLayouts: [
+            { tableId: "table_users", x: 0, y: 0 },
+            { tableId: "table_users", x: 10, y: 10 }
+          ]
+        })
+      }),
+    400,
+    "BAD_REQUEST",
+    /duplicate layout tableId/
   );
 
   await assertApiError(

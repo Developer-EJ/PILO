@@ -354,6 +354,8 @@ function stringifyJsonObject(
 }
 
 function readModelMetadata(modelJson: SqlErdJsonObject): ModelMetadata {
+  assertAllowedFields(modelJson, new Set(["version", "schema"]), "modelJson");
+
   const schema = modelJson.schema;
   if (!isPlainJsonObject(schema)) {
     throw badRequest("modelJson.schema must be an object");
