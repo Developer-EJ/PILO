@@ -449,7 +449,6 @@ function projectNode(overrides = {}) {
             data: {
               node: {
                 __typename: "ProjectV2",
-                id: "PVT_kwDOExample",
                 fields: {
                   nodes: [],
                   pageInfo: {
@@ -472,7 +471,6 @@ function projectNode(overrides = {}) {
             data: {
               node: {
                 __typename: "ProjectV2",
-                id: "PVT_kwDOExample",
                 items: {
                   nodes: [],
                   pageInfo: {
