@@ -91,9 +91,11 @@ export function createCanvasPresenceService(): CanvasPresenceService {
       const state: StoredPresence = {
         cursor: payload.cursor,
         selectedShapeIds: payload.selectedShapeIds,
+        ...(payload.sentAt ? { sentAt: payload.sentAt } : {}),
         socketId,
         updatedAt: new Date().toISOString(),
         user,
+        ...(payload.viewport ? { viewport: payload.viewport } : {}),
       };
 
       getRoomPresence(payload).set(user.userId, state);

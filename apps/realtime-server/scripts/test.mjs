@@ -58,8 +58,12 @@ assert.match(socketServer, /validateSessionToken/);
 assert.match(socketServer, /canvasClientEvents\.join/);
 assert.match(socketServer, /canvasServerEvents\.presenceUpdate/);
 assert.match(socketServer, /room_not_joined/);
+assert.match(socketServer, /isCanvasPresenceViewport/);
+assert.match(socketServer, /isIsoDateString/);
 assert.match(socketServer, /createSocketIoRedisAdapter/);
 
 assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);
+assert.match(canvasPresence, /payload\.sentAt/);
+assert.match(canvasPresence, /payload\.viewport/);
 assert.match(redisPubSub, /createAdapter/);

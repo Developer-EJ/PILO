@@ -14,11 +14,21 @@ export type CanvasPresencePoint = {
   y: number;
 };
 
+export type CanvasPresenceViewport = {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+  zoom: number;
+};
+
 export type CanvasPresenceState = {
   cursor: CanvasPresencePoint | null;
   selectedShapeIds: string[];
+  sentAt?: string;
   updatedAt: string;
   user: CanvasPresenceUser;
+  viewport?: CanvasPresenceViewport;
 };
 
 export type CanvasJoinPayload = CanvasRoomRef & {
@@ -34,6 +44,8 @@ export type CanvasJoinedPayload = CanvasRoomRef & {
 export type CanvasPresenceUpdatePayload = CanvasRoomRef & {
   cursor: CanvasPresencePoint | null;
   selectedShapeIds: string[];
+  sentAt?: string;
+  viewport?: CanvasPresenceViewport;
 };
 
 export type CanvasPresenceLeavePayload = CanvasRoomRef & {

@@ -76,6 +76,28 @@ function isCanvasPresencePoint(value: unknown): value is CanvasPresencePoint {
   );
 }
 
+function isCanvasPresenceViewport(
+  value: unknown,
+): value is CanvasPresenceUpdatePayload["viewport"] {
+  return (
+    isRecord(value) &&
+    typeof value.height === "number" &&
+    typeof value.width === "number" &&
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    typeof value.zoom === "number" &&
+    Number.isFinite(value.height) &&
+    Number.isFinite(value.width) &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y) &&
+    Number.isFinite(value.zoom)
+  );
+}
+
+function isIsoDateString(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
 function readJoinPayload(payload: unknown): CanvasJoinPayload | null {
   const room = readRoomRef(payload);
 
@@ -102,9 +124,13 @@ function readPresenceUpdatePayload(
 
   const cursor = payload.cursor;
   const selectedShapeIds = payload.selectedShapeIds;
+  const sentAt = payload.sentAt;
+  const viewport = payload.viewport;
   const validCursor = cursor === null || isCanvasPresencePoint(cursor);
 
   if (!validCursor) return null;
+  if (sentAt !== undefined && !isIsoDateString(sentAt)) return null;
+  if (viewport !== undefined && !isCanvasPresenceViewport(viewport)) return null;
   if (
     !Array.isArray(selectedShapeIds) ||
     !selectedShapeIds.every((shapeId) => typeof shapeId === "string")
@@ -116,6 +142,8 @@ function readPresenceUpdatePayload(
     ...room,
     cursor,
     selectedShapeIds,
+    ...(sentAt ? { sentAt } : {}),
+    ...(viewport ? { viewport } : {}),
   };
 }
 
