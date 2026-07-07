@@ -197,8 +197,10 @@ function createRuntimeTestSession(overrides = {}) {
     relationCount:
       overrides.relationCount ?? modelJson.schema.relations.length,
     revision: overrides.revision ?? 3,
-    createdBy: overrides.createdBy ?? "user-1",
-    updatedBy: overrides.updatedBy ?? "user-1",
+    createdBy:
+      Object.hasOwn(overrides, "createdBy") ? overrides.createdBy : "user-1",
+    updatedBy:
+      Object.hasOwn(overrides, "updatedBy") ? overrides.updatedBy : "user-1",
     createdAt: overrides.createdAt ?? "2026-07-07T00:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-07-07T00:01:00.000Z",
     deletedAt: overrides.deletedAt ?? null
@@ -309,7 +311,10 @@ assert.equal(
 );
 
 const sqlErdApiRequests = [];
-const runtimeSession = createRuntimeTestSession();
+const runtimeSession = createRuntimeTestSession({
+  createdBy: null,
+  updatedBy: null
+});
 const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
   accessToken: "token-1",
   baseUrl: "https://api.example.test/api/v1/",
@@ -332,6 +337,8 @@ const sqlErdApiClient = apiClientRuntime.createSqlErdApiClient({
 const restoredSession = await sqlErdApiClient.getActiveSession("workspace 1");
 
 assert.deepEqual(restoredSession, runtimeSession);
+assert.equal(restoredSession.createdBy, null);
+assert.equal(restoredSession.updatedBy, null);
 assert.equal(sqlErdApiRequests.length, 1);
 assert.equal(
   sqlErdApiRequests[0].url,
@@ -570,6 +577,8 @@ assert.match(types, /type: "table"/);
 assert.match(types, /type: "column"/);
 assert.match(types, /type: "relation"/);
 assert.match(types, /export type SqltoerdSessionPayload/);
+assert.match(types, /createdBy: string \| null/);
+assert.match(types, /updatedBy: string \| null/);
 
 assert.match(commerceFixture, /commerceSqltoerdFixture/);
 assert.match(commerceFixture, /title: "Commerce ERD"/);

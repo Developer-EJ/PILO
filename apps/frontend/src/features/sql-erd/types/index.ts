@@ -91,8 +91,8 @@ export type SqltoerdSessionPayload = {
   tableCount: number;
   relationCount: number;
   revision: number;
-  createdBy: string;
-  updatedBy: string;
+  createdBy: string | null;
+  updatedBy: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
