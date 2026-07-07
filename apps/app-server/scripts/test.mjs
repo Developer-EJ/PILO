@@ -57,7 +57,7 @@ const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
 const workspaceMembershipMigration = await readSource(
-  "../../../db/migrations/007_create_workspace_memberships_and_invitations.sql"
+  "../../../db/migrations/008_create_workspace_memberships_and_invitations.sql"
 );
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
