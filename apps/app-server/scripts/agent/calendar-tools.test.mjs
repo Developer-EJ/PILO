@@ -162,6 +162,30 @@ function errorCode(error) {
 
 {
   const { calendarService, registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+  const input = tool.validateInput({
+    title: "주간 회의",
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00"
+  });
+  await tool.execute(context, input);
+
+  assert.equal(input.isAllDay, false);
+  assert.deepEqual(calendarService.calls[0].body, {
+    title: "주간 회의",
+    description: null,
+    color: "#3B82F6",
+    isAllDay: false,
+    startDate: "2026-07-08",
+    endDate: "2026-07-08",
+    startTime: "15:00",
+    endTime: null
+  });
+}
+
+{
+  const { calendarService, registry } = createRegistry();
   const tool = registry.getDefinition("update_calendar_event");
   const input = tool.validateInput({
     eventId: "1",
@@ -209,6 +233,49 @@ function errorCode(error) {
       assert.equal(error.getStatus(), 400);
       assert.equal(errorCode(error), "BAD_REQUEST");
       assert.match(error.getResponse().error.message, /workspaceId/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        title: "주간 회의",
+        isAllDay: false,
+        startDate: "2026-07-08",
+        endDate: "2026-07-08"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /startTime/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("create_calendar_event");
+
+  assert.throws(
+    () =>
+      tool.validateInput({
+        title: "주간 회의",
+        isAllDay: true,
+        startDate: "2026-07-08",
+        endDate: "2026-07-08",
+        startTime: "15:00"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /all-day events/);
       return true;
     }
   );

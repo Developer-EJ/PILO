@@ -315,10 +315,19 @@ export class CalendarAgentToolsService {
       "Calendar create input"
     );
 
-    const isAllDay = this.readOptionalBoolean(draft, "isAllDay") ?? true;
     const startDate = this.requireDate(draft.startDate, "startDate");
     const endDate = this.requireDate(draft.endDate, "endDate");
+    const startTime = this.readOptionalNullableTime(draft, "startTime");
+    const endTime = this.readOptionalNullableTime(draft, "endTime");
+    const isAllDay = this.resolveCreateIsAllDay(draft, startTime, endTime);
+
     this.assertDateOrder(startDate, endDate);
+    this.assertScheduleTimeFields({
+      isAllDay,
+      startTime,
+      endTime,
+      label: "Calendar create input"
+    });
 
     return {
       title: this.requireTitle(draft.title),
@@ -327,8 +336,8 @@ export class CalendarAgentToolsService {
       isAllDay,
       startDate,
       endDate,
-      startTime: this.readOptionalNullableTime(draft, "startTime"),
-      endTime: this.readOptionalNullableTime(draft, "endTime")
+      startTime,
+      endTime
     };
   }
 
@@ -406,6 +415,15 @@ export class CalendarAgentToolsService {
 
     if (input.endTime !== undefined) {
       changes.endTime = this.readOptionalNullableTime(input, "endTime");
+    }
+
+    if (changes.isAllDay !== undefined) {
+      this.assertScheduleTimeFields({
+        isAllDay: changes.isAllDay,
+        startTime: changes.startTime ?? null,
+        endTime: changes.endTime ?? null,
+        label: "Calendar update changes"
+      });
     }
 
     return changes;
@@ -564,6 +582,39 @@ export class CalendarAgentToolsService {
     }
 
     return input;
+  }
+
+  private resolveCreateIsAllDay(
+    input: AgentJsonObject,
+    startTime: string | null,
+    endTime: string | null
+  ): boolean {
+    const provided = this.readOptionalBoolean(input, "isAllDay");
+
+    if (provided !== undefined) {
+      return provided;
+    }
+
+    return startTime !== null || endTime !== null ? false : true;
+  }
+
+  private assertScheduleTimeFields(input: {
+    isAllDay: boolean;
+    startTime: string | null;
+    endTime: string | null;
+    label: string;
+  }): void {
+    if (input.isAllDay) {
+      if (input.startTime !== null || input.endTime !== null) {
+        throw badRequest(`${input.label} must not include time for all-day events`);
+      }
+
+      return;
+    }
+
+    if (!input.startTime) {
+      throw badRequest(`${input.label}.startTime is required for timed events`);
+    }
   }
 
   private readOptionalColor(input: unknown): string | undefined {
