@@ -222,16 +222,7 @@ export class AgentLoggingService {
         );
 
         if (existing) {
-          if (existing.prompt !== prompt || existing.timezone !== timezone) {
-            throw clientRequestIdConflict(
-              "clientRequestId was already used for a different Agent run"
-            );
-          }
-
-          return {
-            run: this.mapRun(existing),
-            created: false
-          };
+          return this.mapIdempotentRun(existing, prompt, timezone);
         }
       }
 
@@ -247,12 +238,29 @@ export class AgentLoggingService {
             message
           )
           VALUES ($1, $2, $3, 'planning', $4, $5, $6)
+          ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
+          WHERE client_request_id IS NOT NULL
+            AND requested_by_user_id IS NOT NULL
+          DO NOTHING
           RETURNING *
         `,
         [workspaceId, currentUserId, clientRequestId, prompt, timezone, message]
       );
 
       if (!run) {
+        if (clientRequestId) {
+          const existing = await this.findRunByClientRequest(
+            transaction,
+            workspaceId,
+            currentUserId,
+            clientRequestId
+          );
+
+          if (existing) {
+            return this.mapIdempotentRun(existing, prompt, timezone);
+          }
+        }
+
         throw new Error("Agent run could not be created");
       }
 
@@ -277,6 +285,23 @@ export class AgentLoggingService {
         created: true
       };
     });
+  }
+
+  private mapIdempotentRun(
+    run: AgentRunRow,
+    prompt: string,
+    timezone: string
+  ): CreateAgentRunResult {
+    if (run.prompt !== prompt || run.timezone !== timezone) {
+      throw clientRequestIdConflict(
+        "clientRequestId was already used for a different Agent run"
+      );
+    }
+
+    return {
+      run: this.mapRun(run),
+      created: false
+    };
   }
 
   async startStep(

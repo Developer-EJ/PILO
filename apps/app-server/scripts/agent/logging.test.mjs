@@ -124,6 +124,11 @@ class FakeTransaction {
   }
 
   findRunByClientRequest([workspaceId, currentUserId, clientRequestId]) {
+    if (this.state.clientRequestMissesRemaining > 0) {
+      this.state.clientRequestMissesRemaining -= 1;
+      return null;
+    }
+
     const run = this.state.runs.find(
       (candidate) =>
         candidate.workspace_id === workspaceId &&
@@ -153,6 +158,10 @@ class FakeTransaction {
     timezone,
     message
   ]) {
+    if (this.state.insertRunConflict) {
+      return null;
+    }
+
     const run = createRun({
       workspace_id: workspaceId,
       requested_by_user_id: currentUserId,
@@ -343,6 +352,66 @@ function errorMessage(error) {
 
   assert.equal(result.created, false);
   assert.equal(result.run.id, RUN_ID);
+  assert.equal(state.logs.length, 0);
+}
+
+{
+  const state = {
+    runs: [
+      createRun({
+        client_request_id: "request-1",
+        prompt: "내일 회의 일정 만들어줘",
+        timezone: "Asia/Seoul"
+      })
+    ],
+    steps: [],
+    logs: [],
+    clientRequestMissesRemaining: 1,
+    insertRunConflict: true
+  };
+  const { service } = createService(state);
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "내일 회의 일정 만들어줘",
+    timezone: "Asia/Seoul",
+    clientRequestId: "request-1"
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(result.run.id, RUN_ID);
+  assert.equal(state.runs.length, 1);
+  assert.equal(state.logs.length, 0);
+}
+
+{
+  const state = {
+    runs: [
+      createRun({
+        client_request_id: "request-1",
+        prompt: "내일 회의 일정 만들어줘",
+        timezone: "Asia/Seoul"
+      })
+    ],
+    steps: [],
+    logs: [],
+    clientRequestMissesRemaining: 1,
+    insertRunConflict: true
+  };
+  const { service } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "다른 요청",
+        timezone: "Asia/Seoul",
+        clientRequestId: "request-1"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 409);
+      assert.equal(errorCode(error), "CLIENT_REQUEST_ID_CONFLICT");
+      return true;
+    }
+  );
+  assert.equal(state.runs.length, 1);
   assert.equal(state.logs.length, 0);
 }
 
