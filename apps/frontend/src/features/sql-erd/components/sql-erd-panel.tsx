@@ -137,9 +137,7 @@ export function createSqlErdInspectorViewModel(
     }
 
     const relations = (modelIndex.relationsByTableId.get(table.id) ?? []).filter(
-      (relation) =>
-        relation.fromColumnIds.includes(column.id) ||
-        relation.toColumnIds.includes(column.id)
+      (relation) => isColumnConnectedToRelation(relation, table.id, column.id)
     );
 
     return {
@@ -186,6 +184,18 @@ function getRelationSummaries(
         : relation.toTableId
     };
   });
+}
+
+function isColumnConnectedToRelation(
+  relation: ErdRelation,
+  tableId: string,
+  columnId: string
+) {
+  return (
+    (relation.fromTableId === tableId &&
+      relation.fromColumnIds.includes(columnId)) ||
+    (relation.toTableId === tableId && relation.toColumnIds.includes(columnId))
+  );
 }
 
 function formatRelationEndpoint(table: ErdTable, columns: ErdColumn[]) {

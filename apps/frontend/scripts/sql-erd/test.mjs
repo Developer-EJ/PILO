@@ -85,6 +85,7 @@ assert.match(modelUtils, /getRelationEndpoints/);
 assert.match(modelUtils, /getTableDisplayName/);
 assert.match(modelUtils, /relationsByTableId/);
 assert.match(modelUtils, /columnsByTableId/);
+assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
 assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
 assert.match(navigation, /SQLtoERD/);
@@ -97,6 +98,9 @@ assert.match(panel, /createSqlErdInspectorViewModel/);
 assert.match(panel, /Column details/);
 assert.match(panel, /Table details/);
 assert.match(panel, /Relation details/);
+assert.match(panel, /isColumnConnectedToRelation/);
+assert.match(panel, /relation\.fromTableId === tableId/);
+assert.match(panel, /relation\.toTableId === tableId/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
 
 assert.match(canvasSurface, /TldrawSurface/);
