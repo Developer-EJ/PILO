@@ -29,8 +29,8 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
   규칙은 각 도메인 문서와 owner 기준을 따른다.
 - 기존 Calendar, Board, Meeting API의 endpoint, request, response, status code, auth
   rule을 바꾸면 Agent 작업이 아니라 해당 도메인의 API 계약 변경으로 취급한다.
-- `agent_runs`, `agent_steps`, `agent_confirmations` 같은 신규 테이블이 필요하므로 구현 전
-  DB Schema owner 확인이 필요하다.
+- `agent_runs`, `agent_steps`, `agent_confirmations`, `agent_logs` 같은 신규 테이블이
+  필요하므로 구현 전 DB Schema owner 확인이 필요하다.
 
 ## 공통 규칙
 
@@ -44,6 +44,7 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
 - Agent 응답과 저장 데이터에는 provider raw response, token, secret, 복호화된 credential을 포함하지 않는다.
 - Agent run 보존 기간은 30일이다.
 - 1차는 streaming 없이 polling으로 run 상태를 조회한다.
+- `clientRequestId`는 선택값이며, 같은 Workspace와 요청자 안에서 run 생성 재시도 idempotency key로 사용한다.
 
 ## 처리 구조
 
@@ -85,6 +86,7 @@ Frontend
 | tool input | 제한 저장 | 실행에 필요한 최소 JSON만 저장한다. |
 | tool output | 제한 저장 | 요약, resource id, 상태만 저장한다. |
 | confirmation plan JSON | 저장 | 승인 시 그대로 실행해야 하므로 저장한다. 단, 실행에 필요한 값만 포함한다. |
+| agent log metadata | 제한 저장 | Agent 전용 문제 추적 로그에는 bounded metadata, resource id, 상태만 저장한다. |
 | 긴 원문/전문/transcript | 저장 금지 | MeetingReport transcript 전문, 긴 문서 전문 등은 저장하지 않는다. |
 | provider raw response | 저장 금지 | OpenAI/GitHub 등 provider raw payload는 저장하지 않는다. |
 | token/secret/credential | 저장 금지 | OAuth token, installation token, secret, encrypted token 원문은 저장하지 않는다. |
@@ -140,6 +142,7 @@ Frontend
 | `id` | string | Agent run id |
 | `workspaceId` | string | Workspace id |
 | `requestedByUserId` | string | 요청 사용자 id |
+| `clientRequestId` | string \| null | run 생성 재시도 방지용 idempotency key |
 | `status` | AgentRun status | run 상태 |
 | `riskLevel` | Risk level \| null | run에서 확인된 최고 위험도 |
 | `prompt` | string | 사용자 입력 원문 |
@@ -147,6 +150,7 @@ Frontend
 | `message` | string \| null | 현재 상태를 설명하는 짧은 메시지 |
 | `finalAnswer` | string \| null | 최종 답변. 완료 전이면 null |
 | `errorMessage` | string \| null | 사용자에게 보여줄 안전한 실패 메시지 |
+| `expiresAt` | string | ISO datetime. 생성 후 30일 |
 | `createdAt` | string | ISO datetime |
 | `updatedAt` | string | ISO datetime |
 | `completedAt` | string \| null | ISO datetime |
@@ -252,7 +256,8 @@ Request:
 ```json
 {
   "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
-  "timezone": "Asia/Seoul"
+  "timezone": "Asia/Seoul",
+  "clientRequestId": "agent-run-20260707-0001"
 }
 ```
 
@@ -260,12 +265,16 @@ Request:
 | --- | --- | --- |
 | `prompt` | Yes | 사용자 자연어 요청. 빈 문자열 불가 |
 | `timezone` | No | IANA timezone. 없으면 `Asia/Seoul` |
+| `clientRequestId` | No | 클라이언트가 재시도 방지를 위해 보내는 idempotency key. 최대 128 bytes |
 
 서버 규칙:
 
 - request body의 `workspaceId`, `userId`, `createdBy`, `requestedByUserId`는 무시하지 않고 받지 않는다.
 - `prompt`는 trim 후 저장한다.
 - `timezone`이 없으면 `Asia/Seoul`을 저장한다.
+- `clientRequestId`가 있으면 같은 Workspace와 요청자가 같은 key로 만든 run을 중복 생성하지 않는다.
+- 같은 `clientRequestId`, `prompt`, `timezone`으로 재시도하면 기존 run을 반환하고 AI job을 새로 enqueue하지 않는다.
+- 같은 `clientRequestId`로 다른 `prompt` 또는 `timezone`을 보내면 `409 CLIENT_REQUEST_ID_CONFLICT`를 반환한다.
 - run은 `planning` 상태로 생성된다.
 - App Server는 Agent planning job을 AI Worker queue에 enqueue한다.
 - 클라이언트는 응답의 `run.id`로 상세 조회를 polling한다.
@@ -280,6 +289,7 @@ Request:
       "id": "agent_run_uuid",
       "workspaceId": "workspace_uuid",
       "requestedByUserId": "user_uuid",
+      "clientRequestId": "agent-run-20260707-0001",
       "status": "planning",
       "riskLevel": null,
       "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
@@ -287,6 +297,7 @@ Request:
       "message": "요청을 분석하고 있습니다.",
       "finalAnswer": null,
       "errorMessage": null,
+      "expiresAt": "2026-08-06T00:00:00.000Z",
       "createdAt": "2026-07-07T00:00:00.000Z",
       "updatedAt": "2026-07-07T00:00:00.000Z",
       "completedAt": null,
@@ -297,7 +308,7 @@ Request:
 }
 ```
 
-Status code: `202 Accepted`
+Status code: 새 run 생성은 `202 Accepted`, 기존 run idempotent 반환은 `200 OK`
 
 주요 오류:
 
@@ -306,6 +317,7 @@ Status code: `202 Accepted`
 | `400` | `BAD_REQUEST` | prompt가 없거나 timezone이 잘못됨 |
 | `401` | `UNAUTHORIZED` | 인증 없음 또는 만료 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |
+| `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 clientRequestId로 다른 요청을 보냄 |
 | `503` | `SERVICE_UNAVAILABLE` | AI job queue enqueue 실패 |
 
 ## Run 목록 조회
@@ -340,6 +352,7 @@ Query:
         "id": "agent_run_uuid",
         "workspaceId": "workspace_uuid",
         "requestedByUserId": "user_uuid",
+        "clientRequestId": "agent-run-20260707-0001",
         "status": "waiting_confirmation",
         "riskLevel": "medium",
         "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
@@ -347,6 +360,7 @@ Query:
         "message": "일정 생성 전 확인이 필요합니다.",
         "finalAnswer": null,
         "errorMessage": null,
+        "expiresAt": "2026-08-06T00:00:00.000Z",
         "createdAt": "2026-07-07T00:00:00.000Z",
         "updatedAt": "2026-07-07T00:00:03.000Z",
         "completedAt": null,
@@ -392,6 +406,7 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
       "id": "agent_run_uuid",
       "workspaceId": "workspace_uuid",
       "requestedByUserId": "user_uuid",
+      "clientRequestId": "agent-run-20260707-0001",
       "status": "waiting_confirmation",
       "riskLevel": "medium",
       "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
@@ -399,6 +414,7 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
       "message": "일정 생성 전 확인이 필요합니다.",
       "finalAnswer": null,
       "errorMessage": null,
+      "expiresAt": "2026-08-06T00:00:00.000Z",
       "createdAt": "2026-07-07T00:00:00.000Z",
       "updatedAt": "2026-07-07T00:00:03.000Z",
       "completedAt": null,
@@ -631,6 +647,7 @@ Status code: `200 OK`
 | `404` | `NOT_FOUND` | run, confirmation, 도메인 resource를 찾을 수 없음 |
 | `409` | `CONFIRMATION_NOT_PENDING` | confirmation 상태가 pending이 아님 |
 | `409` | `CONFIRMATION_EXPIRED` | confirmation이 만료됨 |
+| `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 clientRequestId로 다른 요청을 보냄 |
 | `422` | `UNPROCESSABLE_REQUEST` | 자연어 요청을 실행 가능한 tool plan으로 해석할 수 없음 |
 | `502` | `BAD_GATEWAY` | 외부 provider 실패. raw error는 노출하지 않음 |
 | `503` | `SERVICE_UNAVAILABLE` | AI job queue 또는 AI Worker 처리를 시작할 수 없음 |
