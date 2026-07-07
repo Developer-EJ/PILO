@@ -302,7 +302,12 @@ export function syncSqlErdRelationShapes(editor: Editor) {
     return 0;
   }
 
-  editor.updateShapes(updates);
+  editor.run(
+    () => {
+      editor.updateShapes(updates);
+    },
+    { history: "ignore" }
+  );
 
   return updates.length;
 }
