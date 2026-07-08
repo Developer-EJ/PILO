@@ -454,6 +454,7 @@ assert.match(canvasMockClient, /writeCanvasStorage/);
 assert.match(canvasMockClient, /createMockCanvasClient/);
 assert.match(canvasMockClient, /mock-board-list/);
 assert.match(canvasMockClient, /mock-user/);
+assert.match(canvasMockClient, /zoom: 0\.8/);
 assert.match(canvasMockClient, /listOperationsAfterSeq/);
 assert.doesNotMatch(canvasMockClient, /Authorization: `Bearer/);
 assert.doesNotMatch(canvasMockClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
@@ -461,6 +462,7 @@ assert.doesNotMatch(canvasMockClient, /requestCanvasJson/);
 assert.match(canvasNormalizers, /createMockCanvasBoardDetail/);
 assert.match(canvasNormalizers, /normalizeCanvasBoardDetail/);
 assert.match(canvasNormalizers, /unwrapCanvasApiData/);
+assert.match(canvasNormalizers, /zoom: 0\.8/);
 assert.match(canvasNormalizers, /normalizeCanvasShapes/);
 assert.match(canvasNormalizers, /PILO_CHILD_SHAPE_COUNT_META_KEY/);
 assert.match(canvasNormalizers, /value\.parentShapeId/);
@@ -523,11 +525,20 @@ assert.match(canvasViewSettingPersistence, /updateViewSetting/);
 assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
 assert.match(canvasViewSettingPersistence, /writeCanvasStorage\("view-setting"/);
 assert.match(canvasRuntime, /onSnapStateChange/);
+assert.match(canvasRuntime, /INITIAL_CANVAS_VIEW_SETTING/);
+assert.match(canvasRuntime, /zoom: 0\.8/);
 assert.match(canvasRuntime, /canvasSnapState\.isSmartGuideEnabled/);
 assert.match(canvasRuntime, /setSmartGuidesEnabled/);
 assert.match(canvasZoomControls, /aria-label="스마트가이드"/);
 assert.match(canvasZoomControls, /<Magnet/);
-assert.match(canvasZoomControls, /aria-label="스마트가이드"[\s\S]*aria-label="축소"[\s\S]*<strong>/);
+assert.match(canvasZoomControls, /Magnet, Trash2/);
+assert.match(
+  canvasZoomControls,
+  /aria-label="축소"[\s\S]*<strong>\{Math\.round\(viewSetting\.zoom \* 100\)\}%<\/strong>[\s\S]*aria-label="확대"[\s\S]*aria-label="스마트가이드"[\s\S]*aria-label="선택 삭제"/
+);
+assert.match(canvasZoomControls, /className="canvas-trash-drop-zone"/);
+assert.match(canvasZoomControls, /data-tooltip="휴지통"/);
+assert.match(canvasZoomControls, /canvasActions\?\.deleteSelection\(\)/);
 assert.match(canvasWorkspace, /useAuthSession/);
 assert.match(canvasWorkspace, /authSession\?\.activeWorkspaceId/);
 assert.match(canvasWorkspace, /authToken: authSession\?\.accessToken/);
@@ -681,6 +692,18 @@ assert.match(piloTldrawCanvas, /PiloCanvasSnapState/);
 assert.match(piloTldrawCanvas, /CanvasSnapStateReporter/);
 assert.match(piloTldrawCanvas, /editor\.user\.getIsSnapMode/);
 assert.match(piloTldrawCanvas, /editor\.user\.updateUserPreferences/);
+assert.match(piloTldrawCanvas, /deleteSelection: \(\) => void/);
+assert.match(piloTldrawCanvas, /function isPointerInsideTrashDropZone/);
+assert.match(piloTldrawCanvas, /function updateTrashDropZoneAttraction/);
+assert.match(
+  piloTldrawCanvas,
+  /Boolean\(trashDropZone\) && editor\.getSelectedShapeIds\(\)\.length > 0/,
+);
+assert.match(piloTldrawCanvas, /window\.addEventListener\("pointermove"/);
+assert.match(piloTldrawCanvas, /closest\("\.canvas-trash-drop-zone"\)/);
+assert.match(piloTldrawCanvas, /window\.addEventListener\("pointerup"/);
+assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\(\) => \{/);
+assert.match(piloTldrawCanvas, /editor\.deleteShapes\(selectedShapeIds\)/);
 assert.match(piloTldrawCanvas, /history: "ignore"/);
 assert.match(piloTldrawCanvas, /SelectedGroupToolbar/);
 assert.doesNotMatch(piloTldrawCanvas, /PiloCanvasSmartGuides/);
