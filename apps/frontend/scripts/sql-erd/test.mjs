@@ -800,17 +800,31 @@ assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
 assert.match(panel, /AUTOSAVE_DEBOUNCE_MS = 2000/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
+assert.match(panel, /type LayoutAutosaveBlockReason/);
+assert.match(panel, /layoutAutosaveBlockReason/);
+assert.match(panel, /getLayoutAutosaveBlockReason/);
+assert.match(panel, /getLayoutAutosavePausedBanner/);
+assert.match(panel, /AutosavePausedBanner/);
+assert.match(panel, /Autosave paused/);
+assert.match(panel, /Reload session/);
+assert.match(panel, /Retry once/);
+assert.match(panel, /handleReloadSession/);
+assert.match(panel, /handleRetryLayoutAutosaveOnce/);
 assert.match(panel, /handleLayoutChange/);
-assert.match(panel, /isLayoutAutosaveBlocked/);
+assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
 assert.match(panel, /status === 409/);
 assert.match(panel, /isSqlErdApiTransientAutosaveError/);
 assert.match(panel, /status === 408 \|\| status === 429 \|\| status >= 500/);
+assert.match(panel, /status === 401/);
+assert.match(panel, /status === 403/);
+assert.match(panel, /status === 404/);
+assert.match(panel, /status === 400 \|\| status === 413/);
 assert.match(panel, /baseRevision: currentRevision/);
 assert.match(panel, /layoutJson: requestLayoutJson/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
 const layoutAutosaveNonConflictCatch =
   panel.match(
-    /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, getLayoutAutosaveDelayMs/
+    /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, autosaveDelayMs/
   )?.[1] ?? "";
 assert.match(
   layoutAutosaveNonConflictCatch,
@@ -818,11 +832,19 @@ assert.match(
 );
 assert.match(
   layoutAutosaveNonConflictCatch,
-  /if \(!isSqlErdApiTransientAutosaveError\(error\)\) \{[\s\S]*?setIsLayoutAutosaveBlocked\(true\)[\s\S]*?return;/
+  /if \(layoutAutosaveBlockReason\) \{[\s\S]*?setLayoutAutosaveBlockReason\(layoutAutosaveBlockReason\)[\s\S]*?return;/
 );
 assert.doesNotMatch(
   layoutAutosaveNonConflictCatch,
   /setPendingLayoutAutosaveJson/
+);
+const layoutAutosaveConflictCatch =
+  panel.match(
+    /if \(isSqlErdApiConflictError\(error\)\) \{([\s\S]*?)\n\s*return;\n\s*\}/
+  )?.[1] ?? "";
+assert.doesNotMatch(
+  layoutAutosaveConflictCatch,
+  /setPendingLayoutAutosaveJson\(null\)/
 );
 assert.match(panel, /createSqltoerdLayoutForModel/);
 assert.match(panel, /handleDialectChange/);
