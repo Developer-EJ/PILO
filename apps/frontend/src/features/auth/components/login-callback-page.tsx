@@ -60,7 +60,7 @@ export function LoginCallbackPage() {
         });
         await waitForMotion(ENTRY_MOTION_MS);
         if (isActive) {
-          router.replace(returnTo?.startsWith("/") ? returnTo : "/calendar");
+          router.replace(returnTo?.startsWith("/") ? returnTo : "/home");
         }
       } catch {
         if (!isActive) {

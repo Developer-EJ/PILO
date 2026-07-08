@@ -201,7 +201,7 @@ function readReturnUrl() {
 
   return returnUrl?.startsWith("/") && !returnUrl.startsWith("//")
     ? returnUrl
-    : "/calendar";
+    : "/home";
 }
 
 function buildDevPreviewCallbackUrl(returnUrl: string) {
@@ -220,7 +220,7 @@ function routeToEntry(
   returnUrl: string
 ) {
   saveSelectedWorkspaceId(session.activeWorkspaceId);
-  router.replace(returnUrl || "/calendar");
+  router.replace(returnUrl || "/home");
 }
 
 function getErrorMessage(error: string) {

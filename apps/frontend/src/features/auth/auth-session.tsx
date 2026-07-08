@@ -102,7 +102,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
       const storedSession = getStoredAuthSession();
       if (!storedSession) {
-        router.replace(`/login?returnUrl=${encodeURIComponent(pathname || "/calendar")}`);
+        router.replace(`/login?returnUrl=${encodeURIComponent(pathname || "/home")}`);
         return;
       }
 
@@ -119,7 +119,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         clearStoredAuthSession();
         if (!cancelled) {
           router.replace(
-            `/login?returnUrl=${encodeURIComponent(pathname || "/calendar")}&error=session_expired`
+            `/login?returnUrl=${encodeURIComponent(pathname || "/home")}&error=session_expired`
           );
         }
       }
