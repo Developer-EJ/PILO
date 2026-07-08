@@ -1,4 +1,4 @@
-import { Magnet } from "lucide-react";
+import { Magnet, Trash2 } from "lucide-react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type {
   PiloCanvasActions,
@@ -33,18 +33,6 @@ export function CanvasZoomControls({
     >
       <button
         type="button"
-        aria-label="스마트가이드"
-        className={
-          canvasSnapState.isSmartGuideEnabled ? "is-active" : undefined
-        }
-        data-tooltip="스마트가이드"
-        disabled={!canvasActions}
-        onClick={onToggleSmartGuides}
-      >
-        <Magnet />
-      </button>
-      <button
-        type="button"
         aria-label="축소"
         onClick={() => {
           canvasActions?.zoomOut();
@@ -61,6 +49,30 @@ export function CanvasZoomControls({
         }}
       >
         +
+      </button>
+      <button
+        type="button"
+        aria-label="스마트가이드"
+        className={
+          canvasSnapState.isSmartGuideEnabled ? "is-active" : undefined
+        }
+        data-tooltip="스마트가이드"
+        disabled={!canvasActions}
+        onClick={onToggleSmartGuides}
+      >
+        <Magnet />
+      </button>
+      <button
+        type="button"
+        aria-label="선택 삭제"
+        className="canvas-trash-drop-zone"
+        data-tooltip="휴지통"
+        disabled={!canvasActions}
+        onClick={() => {
+          canvasActions?.deleteSelection();
+        }}
+      >
+        <Trash2 />
       </button>
     </div>
   );

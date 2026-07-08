@@ -15,10 +15,6 @@ export type PiloPlacementRequest =
       color?: PiloStickyNoteColor;
     }
   | {
-      type: "sticky-stack";
-      color?: PiloStickyNoteColor;
-    }
-  | {
       type: "code";
     }
   | {
@@ -43,23 +39,6 @@ export function placePiloCanvasShapeAt({
     editor.createShapes([shape]);
     editor.select(shape.id as TLShapeId);
     return { placed: true, createdCount: 1 };
-  }
-
-  if (placementRequest.type === "sticky-stack") {
-    const stackColors: PiloStickyNoteColor[] = placementRequest.color
-      ? [
-          placementRequest.color,
-          placementRequest.color,
-          placementRequest.color,
-        ]
-      : ["butter", "peach", "pink"];
-    const shapes = stackColors.map((stackColor, stackIndex) =>
-      createStickyNoteShape(index + stackIndex, point, stackColor),
-    );
-
-    editor.createShapes(shapes);
-    editor.select(shapes[shapes.length - 1].id as TLShapeId);
-    return { placed: true, createdCount: shapes.length };
   }
 
   if (placementRequest.type === "code") {

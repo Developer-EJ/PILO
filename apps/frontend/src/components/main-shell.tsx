@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { LayoutDashboard } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -12,16 +13,16 @@ import {
 import { HeaderMeetingStatus } from "@/features/meeting/components/header-meeting-status";
 import {
   featureNavigationItems,
-  getFeatureNavigationItem
+  getFeatureNavigationItemForPathname
 } from "@/features/navigation";
 
 type MainShellProps = {
-  activeFeatureId: string;
   children: ReactNode;
 };
 
-export function MainShell({ activeFeatureId, children }: MainShellProps) {
-  const activeFeature = getFeatureNavigationItem(activeFeatureId);
+export function MainShell({ children }: MainShellProps) {
+  const pathname = usePathname();
+  const activeFeature = getFeatureNavigationItemForPathname(pathname);
 
   return (
     <SidebarProvider>

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const navigationFiles = await Promise.all(
   [
+    "../src/features/home/navigation.ts",
     "../src/features/calendar/navigation.ts",
     "../src/features/github-integration/navigation.ts",
     "../src/features/board/navigation.ts",
@@ -300,6 +301,7 @@ const piloCanvasGroupToolbar = await readFile(
 const routePages = await Promise.all(
   [
     "../src/app/(workspace)/calendar/page.tsx",
+    "../src/app/(workspace)/home/page.tsx",
     "../src/app/(workspace)/github/page.tsx",
     "../src/app/(workspace)/board/page.tsx",
     "../src/app/(workspace)/pr-review/page.tsx",
@@ -310,6 +312,7 @@ const routePages = await Promise.all(
 const featurePages = await Promise.all(
   [
     "../src/features/calendar/page.tsx",
+    "../src/features/home/page.tsx",
     "../src/features/github-integration/page.tsx",
     "../src/features/board/page.tsx",
     "../src/features/pr-review/page.tsx",
@@ -323,6 +326,7 @@ const pages = featurePages.join("\n");
 const deprecatedCanvasTokenEnv = "NEXT_PUBLIC_PILO_" + "ACCESS_TOKEN";
 
 assert.match(navigation, /Calendar/);
+assert.match(navigation, /Home/);
 assert.match(navigation, /GitHub sync/);
 assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
@@ -366,13 +370,18 @@ assert.match(loginPage, /devPreview/);
 assert.match(loginPage, /UI Preview/);
 assert.match(loginPage, /buildDevPreviewCallbackUrl/);
 assert.match(loginPage, /PILO_DEV_PREVIEW_ACCESS_TOKEN/);
+assert.match(loginPage, /\/home/);
 assert.doesNotMatch(loginPage, /Or continue with/);
 assert.doesNotMatch(loginPage, /Forgot your password/);
 assert.match(loginCallbackPage, /access_token/);
 assert.match(loginCallbackPage, /loadAuthSessionEntry/);
+assert.match(loginCallbackPage, /\/home/);
 assert.match(workspaceLayout, /AuthGate/);
 assert.match(workspaceLayout, /MeetingRuntimeProvider/);
+assert.match(workspaceLayout, /<MainShell>\{children\}<\/MainShell>/);
 assert.doesNotMatch(mainShell, /AuthGate/);
+assert.match(mainShell, /usePathname/);
+assert.match(mainShell, /getFeatureNavigationItemForPathname/);
 assert.match(mainShell, /HeaderMeetingStatus/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
@@ -454,6 +463,7 @@ assert.match(canvasMockClient, /writeCanvasStorage/);
 assert.match(canvasMockClient, /createMockCanvasClient/);
 assert.match(canvasMockClient, /mock-board-list/);
 assert.match(canvasMockClient, /mock-user/);
+assert.match(canvasMockClient, /zoom: 0\.8/);
 assert.match(canvasMockClient, /listOperationsAfterSeq/);
 assert.doesNotMatch(canvasMockClient, /Authorization: `Bearer/);
 assert.doesNotMatch(canvasMockClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
@@ -461,6 +471,7 @@ assert.doesNotMatch(canvasMockClient, /requestCanvasJson/);
 assert.match(canvasNormalizers, /createMockCanvasBoardDetail/);
 assert.match(canvasNormalizers, /normalizeCanvasBoardDetail/);
 assert.match(canvasNormalizers, /unwrapCanvasApiData/);
+assert.match(canvasNormalizers, /zoom: 0\.8/);
 assert.match(canvasNormalizers, /normalizeCanvasShapes/);
 assert.match(canvasNormalizers, /PILO_CHILD_SHAPE_COUNT_META_KEY/);
 assert.match(canvasNormalizers, /value\.parentShapeId/);
@@ -523,11 +534,20 @@ assert.match(canvasViewSettingPersistence, /updateViewSetting/);
 assert.match(canvasShapePersistence, /writeCanvasStorage\([\s\S]*"freeform-shapes"/);
 assert.match(canvasViewSettingPersistence, /writeCanvasStorage\("view-setting"/);
 assert.match(canvasRuntime, /onSnapStateChange/);
+assert.match(canvasRuntime, /INITIAL_CANVAS_VIEW_SETTING/);
+assert.match(canvasRuntime, /zoom: 0\.8/);
 assert.match(canvasRuntime, /canvasSnapState\.isSmartGuideEnabled/);
 assert.match(canvasRuntime, /setSmartGuidesEnabled/);
 assert.match(canvasZoomControls, /aria-label="스마트가이드"/);
 assert.match(canvasZoomControls, /<Magnet/);
-assert.match(canvasZoomControls, /aria-label="스마트가이드"[\s\S]*aria-label="축소"[\s\S]*<strong>/);
+assert.match(canvasZoomControls, /Magnet, Trash2/);
+assert.match(
+  canvasZoomControls,
+  /aria-label="축소"[\s\S]*<strong>\{Math\.round\(viewSetting\.zoom \* 100\)\}%<\/strong>[\s\S]*aria-label="확대"[\s\S]*aria-label="스마트가이드"[\s\S]*aria-label="선택 삭제"/
+);
+assert.match(canvasZoomControls, /className="canvas-trash-drop-zone"/);
+assert.match(canvasZoomControls, /data-tooltip="휴지통"/);
+assert.match(canvasZoomControls, /canvasActions\?\.deleteSelection\(\)/);
 assert.match(canvasWorkspace, /useAuthSession/);
 assert.match(canvasWorkspace, /authSession\?\.activeWorkspaceId/);
 assert.match(canvasWorkspace, /authToken: authSession\?\.accessToken/);
@@ -681,6 +701,18 @@ assert.match(piloTldrawCanvas, /PiloCanvasSnapState/);
 assert.match(piloTldrawCanvas, /CanvasSnapStateReporter/);
 assert.match(piloTldrawCanvas, /editor\.user\.getIsSnapMode/);
 assert.match(piloTldrawCanvas, /editor\.user\.updateUserPreferences/);
+assert.match(piloTldrawCanvas, /deleteSelection: \(\) => void/);
+assert.match(piloTldrawCanvas, /function isPointerInsideTrashDropZone/);
+assert.match(piloTldrawCanvas, /function updateTrashDropZoneAttraction/);
+assert.match(
+  piloTldrawCanvas,
+  /Boolean\(trashDropZone\) && editor\.getSelectedShapeIds\(\)\.length > 0/,
+);
+assert.match(piloTldrawCanvas, /window\.addEventListener\("pointermove"/);
+assert.match(piloTldrawCanvas, /closest\("\.canvas-trash-drop-zone"\)/);
+assert.match(piloTldrawCanvas, /window\.addEventListener\("pointerup"/);
+assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\(\) => \{/);
+assert.match(piloTldrawCanvas, /editor\.deleteShapes\(selectedShapeIds\)/);
 assert.match(piloTldrawCanvas, /history: "ignore"/);
 assert.match(piloTldrawCanvas, /SelectedGroupToolbar/);
 assert.doesNotMatch(piloTldrawCanvas, /PiloCanvasSmartGuides/);
@@ -712,6 +744,7 @@ assert.match(piloCanvasStateReporter, /onFreeformShapesDraftChange/);
 assert.match(piloCanvasStateReporter, /onViewChange/);
 assert.match(piloCanvasStateReporter, /getViewportPageBounds/);
 assert.match(piloCanvasStateReporter, /withSerializedArrowBindings/);
+assert.match(piloCanvasStateReporter, /withPiloMediaAsset/);
 assert.match(piloCanvasArrowBindings, /piloArrowBindingsV1/);
 assert.match(piloCanvasArrowBindings, /getBindingsInvolvingShape\(shape\.id, "arrow"\)/);
 assert.match(piloCanvasArrowBindings, /editor\.createBindings/);
@@ -725,6 +758,9 @@ assert.match(piloCanvasTypes, /export type PiloCanvasShapeDetailRequest/);
 assert.match(canvasRuntimeHydration, /normalizeCanvasFreeformShapes/);
 assert.match(canvasRemoteOperations, /normalizeCanvasFreeformShapes/);
 assert.match(canvasShapeSync, /rawShape: cloneRawShape\(shape\)/);
+assert.match(piloCanvasAssets, /withPiloMediaAsset/);
+assert.match(piloCanvasAssets, /editor\.getAsset\(assetId\)/);
+assert.match(piloCanvasAssets, /piloAsset/);
 assert.doesNotMatch(piloCanvasAssets, /surface\/pilo-canvas-state-reporter/);
 assert.match(piloCanvasShapeFactory, /createStickyNoteShape/);
 assert.match(piloCanvasShapeFactory, /createCodeBlockShape/);
@@ -739,7 +775,7 @@ assert.match(piloFrameShapeUtil, /FrameShapeUtil\.configure/);
 assert.match(piloFrameShapeUtil, /resolveNextFrameName/);
 assert.match(piloFrameShapeUtil, /isPiloFrameCollapsed/);
 assert.match(piloFrameShapeUtil, /shouldClipChild/);
-assert.match(piloFrameShapeUtil, /child\.type !== "text"/);
+assert.match(piloFrameShapeUtil, /return false/);
 assert.doesNotMatch(piloFrameSelectionToolbar, /FrameShapeUtil\.configure/);
 assert.match(piloFrameSelectionToolbar, /onFrameCollapsedChange/);
 assert.match(piloFrameSelectionToolbar, /FRAME_TOOLBAR_BASE_WIDTH/);
@@ -817,7 +853,7 @@ assert.match(piloCanvasGroupToolbar, /editor\.ungroupShapes/);
 assert.match(piloCanvasGroupToolbar, /LockOpen/);
 assert.match(routes, /as default/);
 assert.doesNotMatch(routes, /MainShell/);
-assert.match(pages, /MainShell/);
+assert.doesNotMatch(pages, /MainShell/);
 assert.match(pages, /Panel/);
 
 function createScenarioShape(id, value = 0) {

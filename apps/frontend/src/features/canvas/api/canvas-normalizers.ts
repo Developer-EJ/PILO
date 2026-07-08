@@ -16,7 +16,7 @@ export const isRecord = isCanvasRecord;
 
 export function defaultCanvasViewSetting(): CanvasViewSetting {
   return {
-    zoom: 1,
+    zoom: 0.8,
     viewportX: 0,
     viewportY: 0,
   };
@@ -164,7 +164,7 @@ export function createMockCanvasBoardDetail(
     workspaceId,
     title: "PILO Canvas",
     boardType: "freeform",
-    zoom: 1,
+    zoom: 0.8,
     viewportX: 0,
     viewportY: 0,
     shapeCount: 0,

@@ -47,6 +47,11 @@ type PiloCanvasRuntimeProps = {
 };
 
 const noopCanvasHistoryStateChange = () => {};
+const INITIAL_CANVAS_VIEW_SETTING: CanvasViewSetting = {
+  zoom: 0.8,
+  viewportX: 0,
+  viewportY: 0,
+};
 const initialCanvasSnapState: PiloCanvasSnapState = {
   isSmartGuideEnabled: false,
 };
@@ -90,11 +95,9 @@ function PiloCanvasRuntimeInner({
     PiloCanvasFreeformShape[]
   >([]);
   const freeformShapesRef = useRef<PiloCanvasFreeformShape[]>([]);
-  const [viewSetting, setViewSetting] = useState<CanvasViewSetting>({
-    zoom: 1,
-    viewportX: 0,
-    viewportY: 0,
-  });
+  const [viewSetting, setViewSetting] = useState<CanvasViewSetting>(
+    INITIAL_CANVAS_VIEW_SETTING,
+  );
   const [canvasSnapState, setCanvasSnapState] =
     useState<PiloCanvasSnapState>(initialCanvasSnapState);
   const shapeSyncQueueRef = useRef<CanvasShapeSyncQueue | null>(null);

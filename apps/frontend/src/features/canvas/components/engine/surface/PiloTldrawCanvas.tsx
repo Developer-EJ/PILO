@@ -140,9 +140,9 @@ export type PiloCanvasActions = {
   groupSelection: () => void;
   setSmartGuidesEnabled: (enabled: boolean) => void;
   createStickyNote: (color?: PiloStickyNoteColor) => void;
-  createStickyStack: (color?: PiloStickyNoteColor) => void;
   createCodeBlock: () => void;
   clearSelection: () => void;
+  deleteSelection: () => void;
   fit: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
@@ -381,6 +381,49 @@ function registerCanvasEditorSideEffects(
   });
 }
 
+function isPointerInsideTrashDropZone(event: globalThis.PointerEvent) {
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+
+  return Boolean(target?.closest(".canvas-trash-drop-zone"));
+}
+
+function updateTrashDropZoneAttraction(
+  editor: Editor,
+  event: globalThis.PointerEvent,
+) {
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const trashDropZone = target?.closest(".canvas-trash-drop-zone");
+
+  const shouldAttract =
+    Boolean(trashDropZone) && editor.getSelectedShapeIds().length > 0;
+
+  document
+    .querySelectorAll(".canvas-trash-drop-zone")
+    .forEach((currentTrashDropZone) =>
+      currentTrashDropZone.classList.toggle(
+        "is-attracting",
+        shouldAttract && currentTrashDropZone === trashDropZone,
+      ),
+    );
+}
+
+function clearTrashDropZoneAttraction() {
+  document
+    .querySelectorAll(".canvas-trash-drop-zone.is-attracting")
+    .forEach((trashDropZone) =>
+      trashDropZone.classList.remove("is-attracting"),
+    );
+}
+
+function deleteSelectedShapes(editor: Editor) {
+  const selectedShapeIds = editor.getSelectedShapeIds();
+
+  if (!selectedShapeIds.length) return false;
+
+  editor.deleteShapes(selectedShapeIds);
+  return true;
+}
+
 export function PiloTldrawCanvas({
   board,
   cameraRestoreVersion,
@@ -540,14 +583,6 @@ export function PiloTldrawCanvas({
           color,
         };
       },
-      createStickyStack(color) {
-        editor.cancel();
-        editor.setCurrentTool("select.idle");
-        placementRequestRef.current = {
-          type: "sticky-stack",
-          color,
-        };
-      },
       createCodeBlock() {
         editor.cancel();
         editor.setCurrentTool("select.idle");
@@ -576,6 +611,9 @@ export function PiloTldrawCanvas({
       clearSelection() {
         placementRequestRef.current = null;
         editor.selectNone();
+      },
+      deleteSelection() {
+        deleteSelectedShapes(editor);
       },
       fit() {
         editor.zoomToFit({ animation: { duration: 180 } });
@@ -606,6 +644,54 @@ export function PiloTldrawCanvas({
       onReady(null);
     };
   }, [onReady]);
+
+  useEffect(() => {
+    function handlePointerMove(event: globalThis.PointerEvent) {
+      const editor = editorRef.current;
+
+      if (!editor || event.isPrimary === false) return;
+
+      updateTrashDropZoneAttraction(editor, event);
+    }
+
+    function handlePointerUp(event: globalThis.PointerEvent) {
+      const editor = editorRef.current;
+
+      if (!editor || event.isPrimary === false) return;
+      clearTrashDropZoneAttraction();
+      if (!isPointerInsideTrashDropZone(event)) return;
+
+      const selectedShapeIds = editor.getSelectedShapeIds();
+
+      if (!selectedShapeIds.length) return;
+
+      window.requestAnimationFrame(() => {
+        editor.deleteShapes(selectedShapeIds);
+      });
+    }
+
+    window.addEventListener("pointermove", handlePointerMove, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener("pointerup", handlePointerUp, { capture: true });
+    window.addEventListener("pointercancel", clearTrashDropZoneAttraction, {
+      capture: true,
+    });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove, {
+        capture: true,
+      });
+      window.removeEventListener("pointerup", handlePointerUp, {
+        capture: true,
+      });
+      window.removeEventListener("pointercancel", clearTrashDropZoneAttraction, {
+        capture: true,
+      });
+      clearTrashDropZoneAttraction();
+    };
+  }, []);
 
   function handleCanvasWheel(event: globalThis.WheelEvent) {
     const editor = editorRef.current;
