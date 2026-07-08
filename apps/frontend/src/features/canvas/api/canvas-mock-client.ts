@@ -42,7 +42,7 @@ function createMockBlankBoard(
     workspaceId,
     title: normalizedTitle || "Untitled canvas",
     boardType: "freeform",
-    zoom: 1,
+    zoom: 0.8,
     viewportX: 0,
     viewportY: 0,
     shapeCount: 0,

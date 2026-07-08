@@ -329,11 +329,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [activeMemoColor, canvasActions],
   );
 
-  const createMemoStack = useCallback(() => {
-    setOpenPopover("memo");
-    canvasActions?.createStickyStack(activeMemoColor);
-  }, [activeMemoColor, canvasActions]);
-
   const createCodeBlock = useCallback(() => {
     closePopover();
     setActiveCanvasTool("code");
@@ -677,26 +672,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                   />
                 ))}
               </div>
-              <button
-                type="button"
-                className="canvas-memo-command"
-                aria-label="메모 생성"
-                data-tooltip="생성"
-                onClick={() => createMemo()}
-              >
-                <Sparkles />
-                <span>생성</span>
-              </button>
-              <button
-                type="button"
-                className="canvas-memo-command"
-                aria-label="메모 스택 생성"
-                data-tooltip="스택"
-                onClick={createMemoStack}
-              >
-                <StickyNote />
-                <span>스택</span>
-              </button>
             </section>
           ) : null}
 
