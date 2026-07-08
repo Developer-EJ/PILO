@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const navigationFiles = await Promise.all(
   [
+    "../src/features/home/navigation.ts",
     "../src/features/calendar/navigation.ts",
     "../src/features/github-integration/navigation.ts",
     "../src/features/board/navigation.ts",
@@ -300,6 +301,7 @@ const piloCanvasGroupToolbar = await readFile(
 const routePages = await Promise.all(
   [
     "../src/app/(workspace)/calendar/page.tsx",
+    "../src/app/(workspace)/home/page.tsx",
     "../src/app/(workspace)/github/page.tsx",
     "../src/app/(workspace)/board/page.tsx",
     "../src/app/(workspace)/pr-review/page.tsx",
@@ -310,6 +312,7 @@ const routePages = await Promise.all(
 const featurePages = await Promise.all(
   [
     "../src/features/calendar/page.tsx",
+    "../src/features/home/page.tsx",
     "../src/features/github-integration/page.tsx",
     "../src/features/board/page.tsx",
     "../src/features/pr-review/page.tsx",
@@ -323,6 +326,7 @@ const pages = featurePages.join("\n");
 const deprecatedCanvasTokenEnv = "NEXT_PUBLIC_PILO_" + "ACCESS_TOKEN";
 
 assert.match(navigation, /Calendar/);
+assert.match(navigation, /Home/);
 assert.match(navigation, /GitHub sync/);
 assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
@@ -366,13 +370,18 @@ assert.match(loginPage, /devPreview/);
 assert.match(loginPage, /UI Preview/);
 assert.match(loginPage, /buildDevPreviewCallbackUrl/);
 assert.match(loginPage, /PILO_DEV_PREVIEW_ACCESS_TOKEN/);
+assert.match(loginPage, /\/home/);
 assert.doesNotMatch(loginPage, /Or continue with/);
 assert.doesNotMatch(loginPage, /Forgot your password/);
 assert.match(loginCallbackPage, /access_token/);
 assert.match(loginCallbackPage, /loadAuthSessionEntry/);
+assert.match(loginCallbackPage, /\/home/);
 assert.match(workspaceLayout, /AuthGate/);
 assert.match(workspaceLayout, /MeetingRuntimeProvider/);
+assert.match(workspaceLayout, /<MainShell>\{children\}<\/MainShell>/);
 assert.doesNotMatch(mainShell, /AuthGate/);
+assert.match(mainShell, /usePathname/);
+assert.match(mainShell, /getFeatureNavigationItemForPathname/);
 assert.match(mainShell, /HeaderMeetingStatus/);
 assert.match(mainShell, /sticky top-0/);
 assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/span>/);
@@ -844,7 +853,7 @@ assert.match(piloCanvasGroupToolbar, /editor\.ungroupShapes/);
 assert.match(piloCanvasGroupToolbar, /LockOpen/);
 assert.match(routes, /as default/);
 assert.doesNotMatch(routes, /MainShell/);
-assert.match(pages, /MainShell/);
+assert.doesNotMatch(pages, /MainShell/);
 assert.match(pages, /Panel/);
 
 function createScenarioShape(id, value = 0) {
