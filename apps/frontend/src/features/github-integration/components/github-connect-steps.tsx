@@ -1,9 +1,9 @@
 import {
-  CheckCircle2,
   ExternalLink,
   GitBranch,
   Loader2,
-  ShieldCheck,
+  Play,
+  RefreshCcw,
   Trash2,
   Unplug
 } from "lucide-react";
@@ -11,41 +11,31 @@ import {
 import { Button } from "@/components/ui/button";
 import type {
   GithubAppInstallation,
-  GithubOAuthStatus,
-  GithubProjectOAuthStatus,
-  GithubProjectV2,
-  GithubRepository
+  GithubProjectOAuthStatus
 } from "@/features/github-integration/types";
-import {
-  formatGithubConnectDateTime,
-  formatGithubConnectNumber
-} from "@/features/github-integration/utils/github-connect-format";
 
 import {
-  GithubConnectFieldRow,
   GithubConnectPanel,
   GithubConnectPill
 } from "./github-connect-primitives";
 
 type StepsProps = {
   connected: boolean;
-  oauth: GithubOAuthStatus | null;
   projectOAuth: GithubProjectOAuthStatus | null;
   selectedInstallation: GithubAppInstallation | undefined;
-  repositoriesTotal: number;
-  projectsTotal: number;
-  selectedRepository: GithubRepository | undefined;
-  selectedProject: GithubProjectV2 | undefined;
   isLoading: boolean;
   isDisconnecting: boolean;
   isDisconnectingProjectOAuth: boolean;
   isDeletingInstallation: boolean;
   isInstallationDeleteRequested: boolean;
+  isSyncing: boolean;
   redirectAction: "oauth" | "installation" | "project_oauth" | null;
   onStartOAuth: () => void;
   onDisconnectOAuth: () => void;
   onStartGithubProjectOAuth: () => void;
   onDisconnectGithubProjectOAuth: () => void;
+  onRefresh: () => void;
+  onStartSync: () => void;
   onStartInstallation: () => void;
   onRequestDeleteInstallation: () => void;
   onCancelDeleteInstallation: () => void;
@@ -54,23 +44,21 @@ type StepsProps = {
 
 export function GithubConnectSteps({
   connected,
-  oauth,
   projectOAuth,
   selectedInstallation,
-  repositoriesTotal,
-  projectsTotal,
-  selectedRepository,
-  selectedProject,
   isLoading,
   isDisconnecting,
   isDisconnectingProjectOAuth,
   isDeletingInstallation,
   isInstallationDeleteRequested,
+  isSyncing,
   redirectAction,
   onStartOAuth,
   onDisconnectOAuth,
   onStartGithubProjectOAuth,
   onDisconnectGithubProjectOAuth,
+  onRefresh,
+  onStartSync,
   onStartInstallation,
   onRequestDeleteInstallation,
   onCancelDeleteInstallation,
@@ -82,166 +70,48 @@ export function GithubConnectSteps({
   return (
     <div className="space-y-[15px]">
       <GithubConnectPanel
-        icon={<ShieldCheck className="size-4" />}
-        title="연결 진행"
-        subtitle="OAuth 연결과 GitHub App 설치가 끝나면 저장소와 Project 데이터를 확인할 수 있습니다."
-      >
-        <div className="stepper grid gap-3 md:grid-cols-3">
-          <StepCard
-            active={!hasInstallation}
-            complete={hasInstallation}
-            description={
-              connected
-                ? `@${oauth?.githubLogin ?? "unknown"} 계정 OAuth 연결 완료`
-                : "GitHub 계정을 PILO와 연결합니다."
-            }
-            eyebrow="01"
-            title="GitHub App 설치"
-          />
-          <StepCard
-            active={hasInstallation}
-            complete={hasInstallation && repositoriesTotal + projectsTotal > 0}
-            description={
-              hasInstallation
-                ? "백엔드가 검증한 저장소와 Projects v2 목록을 확인합니다."
-                : "설치가 끝난 뒤 동기화된 데이터를 확인합니다."
-            }
-            eyebrow="02"
-            title="연결 데이터 확인"
-          />
-          <StepCard
-            active={hasInstallation && !projectOAuthConnected}
-            complete={projectOAuthConnected}
-            description={
-              projectOAuthConnected
-                ? `@${projectOAuth?.githubLogin ?? "unknown"} ProjectV2 OAuth ready`
-                : "Personal ProjectV2 sync requires a separate project-scoped OAuth token."
-            }
-            eyebrow="03"
-            title="GitHub ProjectV2 OAuth"
-          />
-        </div>
-      </GithubConnectPanel>
-
-      <GithubConnectPanel
         action={
-          projectOAuthConnected ? (
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              className="h-9 rounded-[8px] bg-[#3157d5] px-3 text-white hover:bg-[#2447bd]"
+              disabled={!hasInstallation || isSyncing || isLoading}
+              onClick={onStartSync}
+              size="sm"
+              type="button"
+            >
+              {isSyncing ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <Play data-icon="inline-start" />
+              )}
+              동기화 시작
+            </Button>
             <Button
               className="h-9 rounded-[8px]"
-              disabled={isDisconnectingProjectOAuth || isLoading}
-              onClick={onDisconnectGithubProjectOAuth}
+              disabled={isLoading}
+              onClick={onRefresh}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isDisconnectingProjectOAuth ? (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              ) : (
-                <Unplug data-icon="inline-start" />
-              )}
-              Disconnect
-            </Button>
-          ) : null
-        }
-        icon={<ShieldCheck className="size-4" />}
-        title="GitHub ProjectV2 OAuth"
-        subtitle="Personal ProjectV2 discovery and status writes use a separate OAuth App token with project scope."
-      >
-        <div className="rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
-                ProjectV2 OAuth
-              </p>
-              <h3 className="mt-1 text-[18px] font-semibold text-[#101828]">
-                Personal ProjectV2 access
-              </h3>
-            </div>
-            <GithubConnectPill tone={projectOAuthConnected ? "success" : "warning"}>
-              {projectOAuthConnected ? "Connected" : "Required for personal projects"}
-            </GithubConnectPill>
-          </div>
-          <p className="mt-3 text-[13px] leading-5 text-[#687184]">
-            GitHub App user OAuth tokens can be scope-less. Connect this OAuth App
-            when syncing a personal ProjectV2 owner.
-          </p>
-          <div className="mt-4">
-            <Button
-              className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
-              disabled={
-                projectOAuthConnected ||
-                redirectAction === "project_oauth" ||
-                isLoading
-              }
-              onClick={onStartGithubProjectOAuth}
-              type="button"
-            >
-              {redirectAction === "project_oauth" ? (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              ) : (
-                <GitBranch data-icon="inline-start" />
-              )}
-              Connect ProjectV2 OAuth
+              <RefreshCcw data-icon="inline-start" />
+              새로고침
             </Button>
           </div>
-          <dl className="mt-4 rounded-[8px] border border-[#e5e9f2] bg-white px-4">
-            <GithubConnectFieldRow
-              label="Connected account"
-              value={
-                projectOAuthConnected
-                  ? `@${projectOAuth?.githubLogin ?? "unknown"}`
-                  : "-"
-              }
-            />
-            <GithubConnectFieldRow
-              label="Start API"
-              value={<code>/me/github/project-oauth/start</code>}
-            />
-            <GithubConnectFieldRow
-              label="Callback API"
-              value={<code>/github/project-oauth/callback</code>}
-            />
-            <GithubConnectFieldRow
-              label="Scope"
-              value={projectOAuth?.tokenScope ?? "project"}
-            />
-          </dl>
-        </div>
-      </GithubConnectPanel>
-
-      <GithubConnectPanel
-        action={
-          connected ? (
-            <Button
-              className="h-9 rounded-[8px]"
-              disabled={isDisconnecting || isLoading}
-              onClick={onDisconnectOAuth}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {isDisconnecting ? (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              ) : (
-                <Unplug data-icon="inline-start" />
-              )}
-              연결 해제
-            </Button>
-          ) : null
         }
         icon={<GitBranch className="size-4" />}
         title="현재 작업"
         subtitle="현재 연결 상태에 따라 다음에 필요한 작업만 노출합니다."
       >
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]">
-          <div className="rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
                   OAuth
                 </p>
                 <h3 className="mt-1 text-[18px] font-semibold text-[#101828]">
-                  GitHub 계정 연결
+                  1. GitHub 계정 연결
                 </h3>
               </div>
               <GithubConnectPill tone={connected ? "success" : "warning"}>
@@ -252,7 +122,7 @@ export function GithubConnectSteps({
               사용자 OAuth 토큰으로 GitHub App 설치 URL을 발급하고 연결 상태를
               검증합니다.
             </p>
-            <div className="mt-4">
+            <div className="mt-auto flex flex-wrap gap-2 pt-5">
               <Button
                 className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
                 disabled={connected || redirectAction === "oauth" || isLoading}
@@ -266,35 +136,33 @@ export function GithubConnectSteps({
                 )}
                 GitHub로 연결
               </Button>
+              {connected ? (
+                <Button
+                  className="h-10 rounded-[8px]"
+                  disabled={isDisconnecting || isLoading}
+                  onClick={onDisconnectOAuth}
+                  type="button"
+                  variant="outline"
+                >
+                  {isDisconnecting ? (
+                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                  ) : (
+                    <Unplug data-icon="inline-start" />
+                  )}
+                  연결 해제
+                </Button>
+              ) : null}
             </div>
-            <dl className="mt-4 rounded-[8px] border border-[#e5e9f2] bg-white px-4">
-              <GithubConnectFieldRow
-                label="연결 계정"
-                value={connected ? `@${oauth?.githubLogin ?? "unknown"}` : "-"}
-              />
-              <GithubConnectFieldRow
-                label="설치 URL API"
-                value={<code>/me/github/oauth/start</code>}
-              />
-              <GithubConnectFieldRow
-                label="콜백 검증 API"
-                value={<code>/me/github/oauth/callback</code>}
-              />
-              <GithubConnectFieldRow
-                label="요청 권한"
-                value={oauth?.tokenScope ?? "연결 후 GitHub 응답 scope를 표시합니다"}
-              />
-            </dl>
           </div>
 
-          <div className="rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
+          <div className="flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
                   GitHub App
                 </p>
                 <h3 className="mt-1 text-[18px] font-semibold text-[#101828]">
-                  설치와 데이터 확인
+                  2. 설치와 데이터 확인
                 </h3>
               </div>
               <GithubConnectPill tone={hasInstallation ? "success" : "warning"}>
@@ -305,7 +173,7 @@ export function GithubConnectSteps({
               설치 후 백엔드가 저장소, Pull Request, Projects v2 데이터를
               동기화합니다.
             </p>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-auto flex flex-wrap gap-2 pt-5">
               <Button
                 className="h-10 rounded-[8px] bg-[#3157d5] px-4 text-white hover:bg-[#2447bd]"
                 disabled={
@@ -379,80 +247,67 @@ export function GithubConnectSteps({
                 </div>
               </div>
             ) : null}
-            <dl className="mt-4 rounded-[8px] border border-[#e5e9f2] bg-white px-4">
-              <GithubConnectFieldRow
-                label="돌아온 뒤"
-                value="installation callback 검증 후 저장소와 Project 목록 갱신"
-              />
-              <GithubConnectFieldRow
-                label="설치 계정"
-                value={selectedInstallation?.accountLogin ?? "-"}
-              />
-              <GithubConnectFieldRow
-                label="허용 저장소"
-                value={`${formatGithubConnectNumber(repositoriesTotal)}개`}
-              />
-              <GithubConnectFieldRow
-                label="Projects"
-                value={`${formatGithubConnectNumber(projectsTotal)}개`}
-              />
-              <GithubConnectFieldRow
-                label="대표 저장소"
-                value={selectedRepository?.fullName ?? "-"}
-              />
-              <GithubConnectFieldRow
-                label="대표 Project"
-                value={selectedProject?.title ?? "-"}
-              />
-              <GithubConnectFieldRow
-                label="마지막 동기화"
-                value={formatGithubConnectDateTime(
-                  selectedInstallation?.lastSyncedAt ?? null
+          </div>
+
+          <div className="flex h-full flex-col rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-[#7a8497]">
+                  ProjectV2 OAuth
+                </p>
+                <h3 className="mt-1 text-[18px] font-semibold text-[#101828]">
+                  3. Personal Project access
+                </h3>
+              </div>
+              <GithubConnectPill
+                className="shrink-0"
+                tone={projectOAuthConnected ? "success" : "warning"}
+              >
+                {projectOAuthConnected ? "Connected" : "Required"}
+              </GithubConnectPill>
+            </div>
+            <p className="mt-3 text-[13px] leading-5 text-[#687184]">
+              Personal ProjectV2 동기화와 상태 쓰기에는 project scope OAuth
+              토큰이 필요합니다.
+            </p>
+            <div className="mt-auto flex flex-wrap gap-2 pt-5">
+              <Button
+                className="h-10 rounded-[8px] bg-[#111827] px-4 text-white hover:bg-[#2b3343]"
+                disabled={
+                  projectOAuthConnected ||
+                  redirectAction === "project_oauth" ||
+                  isLoading
+                }
+                onClick={onStartGithubProjectOAuth}
+                type="button"
+              >
+                {redirectAction === "project_oauth" ? (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <GitBranch data-icon="inline-start" />
                 )}
-              />
-            </dl>
+                Project access 연결
+              </Button>
+              {projectOAuthConnected ? (
+                <Button
+                  className="h-10 rounded-[8px]"
+                  disabled={isDisconnectingProjectOAuth || isLoading}
+                  onClick={onDisconnectGithubProjectOAuth}
+                  type="button"
+                  variant="outline"
+                >
+                  {isDisconnectingProjectOAuth ? (
+                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                  ) : (
+                    <Unplug data-icon="inline-start" />
+                  )}
+                  연결 해제
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
       </GithubConnectPanel>
     </div>
-  );
-}
-
-function StepCard({
-  eyebrow,
-  title,
-  description,
-  active,
-  complete
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  active: boolean;
-  complete: boolean;
-}) {
-  return (
-    <article
-      className={`step-card rounded-[8px] border p-4 transition-colors ${
-        active || complete
-          ? "border-[#c7d2fe] bg-[#f5f7ff]"
-          : "border-[#e1e6ef] bg-[#fbfcfe]"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-[#111827] text-[12px] font-semibold text-white">
-          {eyebrow}
-        </span>
-        {complete ? (
-          <CheckCircle2 className="size-5 shrink-0 text-[#159947]" />
-        ) : null}
-      </div>
-      <h3 className="mt-3 text-[15px] font-semibold text-[#101828]">
-        {title}
-      </h3>
-      <p className="mt-2 text-[13px] leading-5 text-[#687184]">
-        {description}
-      </p>
-    </article>
   );
 }

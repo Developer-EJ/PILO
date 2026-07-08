@@ -95,23 +95,6 @@ export function GithubConnectEmptyState({
   );
 }
 
-export function GithubConnectFieldRow({
-  label,
-  value
-}: {
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[118px_minmax(0,1fr)] gap-3 border-b border-[#eef1f6] py-2.5 last:border-b-0 max-[520px]:grid-cols-1 max-[520px]:gap-1">
-      <dt className="text-[12px] font-semibold uppercase tracking-[0.04em] text-[#838da0]">
-        {label}
-      </dt>
-      <dd className="min-w-0 text-[13px] leading-5 text-[#293142]">{value}</dd>
-    </div>
-  );
-}
-
 export function GithubConnectProgress({ value }: { value: number }) {
   return (
     <div className="h-2 overflow-hidden rounded-full bg-[#eef1f6]">

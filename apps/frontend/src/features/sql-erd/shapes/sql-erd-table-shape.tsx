@@ -238,7 +238,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
 
   return (
     <HTMLContainer
-      className="overflow-visible"
+      className="pointer-events-auto overflow-visible"
       style={{ width: shape.props.w, height: shape.props.h }}
     >
       <article
