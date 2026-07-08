@@ -201,6 +201,20 @@ function isSqlErdApiConflictError(error: unknown) {
   return error instanceof SqlErdApiError && error.status === 409;
 }
 
+function isSqlErdApiTransientAutosaveError(error: unknown) {
+  if (!(error instanceof SqlErdApiError)) {
+    return true;
+  }
+
+  const status = error.status;
+
+  if (typeof status !== "number") {
+    return true;
+  }
+
+  return status === 408 || status === 429 || status >= 500;
+}
+
 function getLayoutAutosaveDelayMs(retryAttempt: number) {
   return Math.min(
     AUTOSAVE_DEBOUNCE_MS * 2 ** retryAttempt,
@@ -288,8 +302,8 @@ export function SqlErdPanel() {
 
       if (isLayoutAutosaveBlocked) {
         setSessionLoadState({
-          label: "Conflict",
-          message: "Reload the Workspace session before autosaving layout",
+          label: "Autosave paused",
+          message: "Resolve the current save error before autosaving layout",
           tone: "error"
         });
         return;
@@ -481,6 +495,18 @@ export function SqlErdPanel() {
           setSessionLoadState({
             label: "Conflict",
             message: "Workspace session changed. Reload before autosaving layout",
+            tone: "error"
+          });
+          return;
+        }
+
+        if (!isSqlErdApiTransientAutosaveError(error)) {
+          setLayoutAutosaveRetryAttempt(0);
+          setIsLayoutAutosaveBlocked(true);
+          setSessionLoadState({
+            label: "Save error",
+            message:
+              "Table layout autosave stopped. Resolve the API error before retrying",
             tone: "error"
           });
           return;

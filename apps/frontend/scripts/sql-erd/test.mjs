@@ -803,6 +803,8 @@ assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /handleLayoutChange/);
 assert.match(panel, /isLayoutAutosaveBlocked/);
 assert.match(panel, /status === 409/);
+assert.match(panel, /isSqlErdApiTransientAutosaveError/);
+assert.match(panel, /status === 408 \|\| status === 429 \|\| status >= 500/);
 assert.match(panel, /baseRevision: currentRevision/);
 assert.match(panel, /layoutJson: requestLayoutJson/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
@@ -813,6 +815,10 @@ const layoutAutosaveNonConflictCatch =
 assert.match(
   layoutAutosaveNonConflictCatch,
   /setLayoutAutosaveRetryAttempt\(\(currentAttempt\) => currentAttempt \+ 1\)/
+);
+assert.match(
+  layoutAutosaveNonConflictCatch,
+  /if \(!isSqlErdApiTransientAutosaveError\(error\)\) \{[\s\S]*?setIsLayoutAutosaveBlocked\(true\)[\s\S]*?return;/
 );
 assert.doesNotMatch(
   layoutAutosaveNonConflictCatch,
