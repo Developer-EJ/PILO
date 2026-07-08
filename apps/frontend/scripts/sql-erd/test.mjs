@@ -653,6 +653,43 @@ assert.deepEqual(generatedLayout.tableLayouts[1], {
   y: 80
 });
 
+const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
+  runtimeModel,
+  {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 10, y: 20, width: 240 },
+      { tableId: "table.orders", x: 360, y: 20, width: 260 }
+    ]
+  },
+  [
+    { tableId: "table.orders", x: 460, y: 180 },
+    { tableId: "table.unknown", x: 999, y: 999 }
+  ]
+);
+
+assert.deepEqual(movedRuntimeLayout.tableLayouts, [
+  { tableId: "table.users", x: 10, y: 20, width: 240 },
+  { tableId: "table.orders", x: 460, y: 180, width: 260 }
+]);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    movedRuntimeLayout,
+    movedRuntimeLayout
+  ),
+  true
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 10, y: 20, width: 240 },
+      { tableId: "table.orders", x: 461, y: 180, width: 260 }
+    ]
+  }),
+  false
+);
+
 const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "auto",
   sourceText: `CREATE TABLE users (
@@ -735,6 +772,8 @@ assert.match(modelUtils, /getTableLayout/);
 assert.match(modelUtils, /getRelationEndpoints/);
 assert.match(modelUtils, /getTableDisplayName/);
 assert.match(modelUtils, /createSqltoerdLayoutForModel/);
+assert.match(modelUtils, /updateSqltoerdLayoutWithTablePositions/);
+assert.match(modelUtils, /areSqltoerdLayoutsEqual/);
 assert.match(modelUtils, /relationsByTableId/);
 assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
@@ -758,6 +797,13 @@ assert.match(panel, /handleGenerate/);
 assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
 assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
+assert.match(panel, /AUTOSAVE_DEBOUNCE_MS = 2000/);
+assert.match(panel, /pendingLayoutAutosaveJson/);
+assert.match(panel, /handleLayoutChange/);
+assert.match(panel, /isLayoutAutosaveBlocked/);
+assert.match(panel, /status === 409/);
+assert.match(panel, /baseRevision: currentRevision/);
+assert.match(panel, /layoutJson: pendingLayoutAutosaveJson/);
 assert.match(panel, /createSqltoerdLayoutForModel/);
 assert.match(panel, /handleDialectChange/);
 assert.match(panel, /onDialectChange=\{handleDialectChange\}/);
@@ -840,6 +886,7 @@ assert.match(inspectorUtils, /relation\.toTableId === tableId/);
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
 assert.match(canvasSurface, /SqlErdCanvasShapeSync/);
+assert.match(canvasSurface, /areSqlErdCanvasShapesApplied/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
@@ -851,6 +898,9 @@ assert.match(canvasSurface, /editor\.updateShapes/);
 assert.match(canvasSurface, /history: "ignore"/);
 assert.match(canvasSurface, /SqlErdSelectionSync/);
 assert.match(canvasSurface, /SqlErdSelectedColumnSync/);
+assert.match(canvasSurface, /SqlErdLayoutSync/);
+assert.match(canvasSurface, /onLayoutChange/);
+assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
