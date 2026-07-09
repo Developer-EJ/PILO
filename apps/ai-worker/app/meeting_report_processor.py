@@ -301,10 +301,7 @@ def _is_agent_run_requested_job(message_body: str) -> bool:
     except json.JSONDecodeError:
         return False
 
-    return (
-        isinstance(payload, dict)
-        and payload.get("jobType") == AGENT_RUN_REQUESTED_JOB_TYPE
-    )
+    return isinstance(payload, dict) and payload.get("jobType") == AGENT_RUN_REQUESTED_JOB_TYPE
 
 
 def _parse_action_item(value: object) -> ActionItemCandidate:
