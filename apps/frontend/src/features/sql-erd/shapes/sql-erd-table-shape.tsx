@@ -43,6 +43,8 @@ export type SqlErdTableColumnShapeProps = {
   nullable: boolean;
 };
 
+export type SqlErdTableSelectionState = "none" | "table" | "column";
+
 export type SqlErdTableShapeProps = {
   w: number;
   h: number;
@@ -51,6 +53,8 @@ export type SqlErdTableShapeProps = {
   schemaName: string | null;
   badgeColumnWidth: number;
   selectedColumnId: string | null;
+  selectedState: SqlErdTableSelectionState;
+  highlightedColumnIds: string[];
   columns: SqlErdTableColumnShapeProps[];
 };
 
@@ -232,6 +236,8 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
+  const selectedState = shape.props.selectedState ?? "none";
+  const highlightedColumnIds = shape.props.highlightedColumnIds ?? [];
 
   function handleTableClick() {
     editor.select(shape.id);
@@ -249,11 +255,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   }
 
   function handleColumnClick(columnId: string) {
-    editor.select(shape.id);
     selectSqlErdColumn({
       columnId,
       tableId: shape.props.tableId
     });
+    editor.select(shape.id);
   }
 
   function handleColumnPointerDown(
@@ -306,7 +312,16 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
       style={{ width: shape.props.w, height: shape.props.h }}
     >
       <article
-        className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)]"
+        className={`overflow-hidden rounded-md border bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)] transition-[border-color,box-shadow] ${
+          selectedState === "table"
+            ? "border-blue-500 ring-2 ring-blue-200"
+            : selectedState === "column"
+              ? "border-blue-300"
+              : "border-slate-200"
+        }`}
+        data-sqltoerd-table-selected={
+          selectedState === "table" ? "true" : undefined
+        }
         style={{
           height: shape.props.h,
           minWidth: shape.props.w,
@@ -333,12 +348,16 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
           {shape.props.columns.map((column, columnIndex) => {
             const badges = getColumnBadges(column);
             const isSelected = shape.props.selectedColumnId === column.id;
+            const isHighlighted = highlightedColumnIds.includes(column.id);
 
             return (
               <div
                 aria-pressed={isSelected}
                 className="group relative grid h-[42px] cursor-pointer items-center px-6 font-mono text-[20px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
                 data-sqltoerd-column-id={column.id}
+                data-sqltoerd-column-highlighted={
+                  isHighlighted ? "true" : undefined
+                }
                 key={column.id}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -372,12 +391,16 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 style={{
                   backgroundColor: isSelected
                     ? "#eff6ff"
+                    : isHighlighted
+                      ? "#f0f7ff"
                     : columnIndex % 2 === 0
                       ? "#ffffff"
                       : "#f8fafc",
                   boxShadow: isSelected
                     ? "inset 3px 0 0 rgba(37, 99, 235, 0.85)"
-                    : undefined,
+                    : isHighlighted
+                      ? "inset 3px 0 0 rgba(96, 165, 250, 0.55)"
+                      : undefined,
                   columnGap: ROW_COLUMN_GAP,
                   gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(max-content, 1fr)`
                 }}
@@ -385,12 +408,16 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
               >
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute left-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                  className={`pointer-events-none absolute left-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
+                    isSelected || isHighlighted ? "opacity-100" : "opacity-0"
+                  }`}
                   data-sqltoerd-column-port="left"
                 />
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute right-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                  className={`pointer-events-none absolute right-[-4px] top-1/2 size-2 -translate-y-1/2 rounded-full border border-blue-400 bg-white shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 ${
+                    isSelected || isHighlighted ? "opacity-100" : "opacity-0"
+                  }`}
                   data-sqltoerd-column-port="right"
                 />
                 <div className="flex min-w-0 items-center gap-1">
@@ -429,6 +456,8 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
     schemaName: T.nullable(T.string),
     badgeColumnWidth: T.number,
     selectedColumnId: T.nullable(T.string),
+    selectedState: T.string,
+    highlightedColumnIds: T.arrayOf(T.string),
     columns: T.arrayOf(
       T.object({
         id: T.string,
@@ -459,6 +488,8 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
       schemaName: null,
       badgeColumnWidth: BADGE_MIN_COLUMN_WIDTH,
       selectedColumnId: null,
+      selectedState: "none",
+      highlightedColumnIds: [],
       columns: []
     };
   }

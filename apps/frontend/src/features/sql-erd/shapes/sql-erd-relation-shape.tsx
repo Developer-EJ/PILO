@@ -13,6 +13,7 @@ import {
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 
 export const SQLTOERD_RELATION_SHAPE_TYPE = "sqltoerd_relation";
+export const SQLTOERD_RELATION_HOVER_EVENT = "sqltoerd:relation-hover";
 
 const RELATION_BOUNDS_PADDING = 16;
 const TABLE_HEADER_HEIGHT = 54;
@@ -102,6 +103,24 @@ export function isSqlErdRelationShape(
   shape: TLShape | null | undefined
 ): shape is SqlErdRelationShape {
   return shape?.type === SQLTOERD_RELATION_SHAPE_TYPE;
+}
+
+function emitSqlErdRelationHover(
+  shape: SqlErdRelationShape,
+  isHovered: boolean
+) {
+  window.dispatchEvent(
+    new CustomEvent(SQLTOERD_RELATION_HOVER_EVENT, {
+      detail: {
+        isHovered,
+        relationId: shape.props.relationId,
+        fromTableId: shape.props.fromTableId,
+        fromColumnIds: shape.props.fromColumnIds,
+        toTableId: shape.props.toTableId,
+        toColumnIds: shape.props.toColumnIds
+      }
+    })
+  );
 }
 
 export function getSqlErdRelationTableEdgeAnchors(
@@ -475,6 +494,8 @@ export function getSqlErdRelationShapeLayout(
 function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   return (
     <SVGContainer
+      onPointerEnter={() => emitSqlErdRelationHover(shape, true)}
+      onPointerLeave={() => emitSqlErdRelationHover(shape, false)}
       style={{
         height: shape.props.h,
         overflow: "visible",
