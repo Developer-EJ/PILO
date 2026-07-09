@@ -62,15 +62,14 @@ import type {
   GithubRepository
 } from "@/features/github-integration/types";
 import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
+import { createMeetingApiClient } from "@/features/meeting/api/client";
 import type { MeetingReportSummary } from "@/features/meeting/types";
 
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const homeIssueListLimit = 5;
 const homePullRequestListLimit = 3;
-
-type HomeMeetingReportPreview = MeetingReportSummary & {
-  title: string;
-};
+const homeMeetingReportListLimit = 4;
+const homeMeetingReportFetchLimit = 100;
 
 type HomeIssuesMode = "assigned" | "recent";
 
@@ -88,6 +87,13 @@ type HomePullRequestsState = {
   pullRequests: GithubPullRequest[];
   status: "idle" | "loading" | "success" | "error";
   total: number;
+};
+
+type HomeMeetingReportsState = {
+  error: Error | null;
+  reports: MeetingReportSummary[];
+  status: "idle" | "loading" | "success" | "error";
+  todayCount: number;
 };
 
 const mockWorkspaceMembers: WorkspaceMember[] = [
@@ -188,88 +194,6 @@ const mockGithubConnectionStatus = {
   }
 };
 
-const mockMeetingReports: HomeMeetingReportPreview[] = [
-  {
-    id: "meeting_report_001",
-    meetingId: "meeting_20260709_home",
-    recordingId: "recording_20260709_home",
-    title: "Home 메인페이지 구성 회의",
-    status: "COMPLETED",
-    failedStep: null,
-    errorMessage: null,
-    summary: "Home 메인페이지는 읽기 전용 대시보드로 구성하고, 데이터 연결은 카드별로 나누어 진행하기로 했습니다.",
-    discussionPoints: "달력은 월간 캘린더 형태로 보여주고, 이슈는 Todo만 우선 표시합니다.",
-    decisions: "Home은 여러 도메인 데이터를 소비하는 화면으로 유지합니다.",
-    actionItemCandidates: [
-      {
-        title: "Home mock UI 확인",
-        assignee: "동현"
-      }
-    ],
-    retryCount: 0,
-    createdAt: "2026-07-09T05:30:00.000Z",
-    updatedAt: "2026-07-09T05:35:00.000Z"
-  },
-  {
-    id: "meeting_report_002",
-    meetingId: "meeting_20260708_api",
-    recordingId: "recording_20260708_api",
-    title: "API 소비 후보 정리",
-    status: "PROCESSING",
-    failedStep: null,
-    errorMessage: null,
-    summary: "API 소비 후보 정리 중입니다.",
-    discussionPoints: null,
-    decisions: null,
-    actionItemCandidates: [],
-    retryCount: 0,
-    createdAt: "2026-07-08T08:00:00.000Z",
-    updatedAt: "2026-07-08T08:05:00.000Z"
-  },
-  {
-    id: "meeting_report_003",
-    meetingId: "meeting_20260707_calendar",
-    recordingId: "recording_20260707_calendar",
-    title: "Calendar 연동 방식 논의",
-    status: "COMPLETED",
-    failedStep: null,
-    errorMessage: null,
-    summary: "Home 달력 영역은 기존 Calendar 데이터를 읽기 전용으로 소비하는 방향으로 정리했습니다.",
-    discussionPoints: "Home에서 날짜를 선택하면 Calendar 화면으로 이동하고 선택 날짜를 유지합니다.",
-    decisions: "Home은 Calendar 생성/수정 기능을 직접 가지지 않습니다.",
-    actionItemCandidates: [
-      {
-        title: "Calendar date query 연동 확인",
-        assignee: "세인"
-      }
-    ],
-    retryCount: 0,
-    createdAt: "2026-07-07T09:00:00.000Z",
-    updatedAt: "2026-07-07T09:12:00.000Z"
-  },
-  {
-    id: "meeting_report_004",
-    meetingId: "meeting_20260706_workspace",
-    recordingId: "recording_20260706_workspace",
-    title: "Workspace 멤버 관리 흐름 점검",
-    status: "COMPLETED",
-    failedStep: null,
-    errorMessage: null,
-    summary: "초대, pending 취소, 멤버 프로필 조회, 추방 액션을 Home 멤버 카드에서 처리하는 방향으로 정리했습니다.",
-    discussionPoints: "사이드바는 workspace 전환과 내가 받은 초대 알림만 남기고, owner 관리 기능은 Home으로 이동합니다.",
-    decisions: "초대 이력 표시는 생략하고 pending 멤버는 Home 카드 안에서만 노출합니다.",
-    actionItemCandidates: [
-      {
-        title: "Home 멤버 카드 액션 정리",
-        assignee: "동현"
-      }
-    ],
-    retryCount: 0,
-    createdAt: "2026-07-06T07:20:00.000Z",
-    updatedAt: "2026-07-06T07:35:00.000Z"
-  }
-];
-
 export function HomeDashboard() {
   const authSession = useAuthSession();
   const issuesState = useHomeIssues({
@@ -280,6 +204,10 @@ export function HomeDashboard() {
     accessToken: authSession?.accessToken ?? null,
     workspaceId: authSession?.activeWorkspaceId ?? ""
   });
+  const meetingReportsState = useHomeMeetingReports({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
@@ -287,11 +215,13 @@ export function HomeDashboard() {
         <MembersCard />
         <CalendarCard
           issuesState={issuesState}
+          meetingReportsState={meetingReportsState}
           pullRequestsState={pullRequestsState}
         />
         <GithubConnectionCard />
         <MiddleDashboardCards
           issuesState={issuesState}
+          meetingReportsState={meetingReportsState}
           pullRequestsState={pullRequestsState}
         />
         <GithubWorkspaceCards />
@@ -818,15 +748,18 @@ function MemberProfileDialog({
 
 function CalendarCard({
   issuesState,
+  meetingReportsState,
   pullRequestsState
 }: {
   issuesState: HomeIssuesState;
+  meetingReportsState: HomeMeetingReportsState;
   pullRequestsState: HomePullRequestsState;
 }) {
   return (
     <div className="grid min-h-0 grid-rows-[minmax(108px,4fr)_minmax(0,6fr)] gap-3 xl:row-start-1">
       <ReadonlyCalendar
         issuesState={issuesState}
+        meetingReportsState={meetingReportsState}
         pullRequestsState={pullRequestsState}
       />
     </div>
@@ -835,16 +768,18 @@ function CalendarCard({
 
 function MiddleDashboardCards({
   issuesState,
+  meetingReportsState,
   pullRequestsState
 }: {
   issuesState: HomeIssuesState;
+  meetingReportsState: HomeMeetingReportsState;
   pullRequestsState: HomePullRequestsState;
 }) {
   return (
     <div className="grid min-h-0 gap-4 md:grid-cols-3 xl:col-span-3 xl:col-start-1 xl:row-start-2">
       <IssuesCard issuesState={issuesState} />
       <PullRequestsCard pullRequestsState={pullRequestsState} />
-      <MeetingReportsCard />
+      <MeetingReportsCard meetingReportsState={meetingReportsState} />
     </div>
   );
 }
@@ -938,9 +873,17 @@ function GithubConnectionCard() {
   );
 }
 
-function MeetingReportsCard() {
+function MeetingReportsCard({
+  meetingReportsState
+}: {
+  meetingReportsState: HomeMeetingReportsState;
+}) {
   const router = useRouter();
-  const visibleMeetingReports = mockMeetingReports.slice(0, 4);
+  const visibleMeetingReports = meetingReportsState.reports.slice(
+    0,
+    homeMeetingReportListLimit
+  );
+  const isLoading = meetingReportsState.status === "loading";
 
   return (
     <DashboardCard
@@ -958,25 +901,47 @@ function MeetingReportsCard() {
       titleClassName="text-[#1F7A00]"
     >
       <div className="grid min-h-0 flex-1 grid-rows-[repeat(4,minmax(0,1fr))] gap-2 overflow-hidden">
-        {visibleMeetingReports.map((report) => (
-          <button
-            key={report.id}
-            aria-label={`${report.title} 회의록으로 이동`}
-            className="flex min-h-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-2.5 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            onClick={() => router.push("/meeting#report")}
-            type="button"
-          >
-            <p className="min-w-0 truncate text-sm font-medium leading-5">
-              {report.title}
-            </p>
-            <p className="mt-0.5 min-w-0 truncate text-xs leading-4 text-muted-foreground">
-              {report.summary ?? "요약 생성 중"}
-            </p>
-          </button>
-        ))}
+        {isLoading ? (
+          <DashboardCardMessage rowSpanClassName="row-span-4">
+            회의록 불러오는 중
+          </DashboardCardMessage>
+        ) : meetingReportsState.status === "error" ? (
+          <DashboardCardMessage rowSpanClassName="row-span-4" tone="danger">
+            회의록을 불러오지 못했습니다
+          </DashboardCardMessage>
+        ) : visibleMeetingReports.length > 0 ? (
+          visibleMeetingReports.map((report) => (
+            <button
+              key={report.id}
+              aria-label={`${formatMeetingReportTitle(report)} 회의록으로 이동`}
+              className="flex min-h-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-2.5 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              onClick={() => router.push(buildMeetingReportHref(report.id))}
+              type="button"
+            >
+              <p className="min-w-0 truncate text-sm font-medium leading-5">
+                {formatMeetingReportTitle(report)}
+              </p>
+              <p className="mt-0.5 min-w-0 truncate text-xs leading-4 text-muted-foreground">
+                {report.summary?.trim() || getMeetingReportFallbackSummary(report)}
+              </p>
+            </button>
+          ))
+        ) : (
+          <DashboardCardMessage rowSpanClassName="row-span-4">
+            표시할 회의록이 없습니다
+          </DashboardCardMessage>
+        )}
       </div>
     </DashboardCard>
   );
+}
+
+function buildMeetingReportHref(reportId: string) {
+  const searchParams = new URLSearchParams({
+    reportId
+  });
+
+  return `/meeting?${searchParams.toString()}#report`;
 }
 
 function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
@@ -1380,9 +1345,11 @@ function PullRequestsBackground() {
 
 function ReadonlyCalendar({
   issuesState,
+  meetingReportsState,
   pullRequestsState
 }: {
   issuesState: HomeIssuesState;
+  meetingReportsState: HomeMeetingReportsState;
   pullRequestsState: HomePullRequestsState;
 }) {
   const router = useRouter();
@@ -1415,6 +1382,10 @@ function ReadonlyCalendar({
     issuesState.mode === "assigned" ? "내 이슈" : "최근 이슈";
   const pullRequestCount =
     pullRequestsState.status === "loading" ? "-" : String(pullRequestsState.total);
+  const meetingReportCount =
+    meetingReportsState.status === "loading"
+      ? "-"
+      : String(meetingReportsState.todayCount);
   const summaryItems: SummaryMetricItem[] = [
     {
       icon: <CalendarDays className="size-4" />,
@@ -1457,12 +1428,18 @@ function ReadonlyCalendar({
     },
     {
       icon: <FileText className="size-4" />,
-      label: "미확인 회의록",
-      value: "4",
+      label: "최근 생성된 회의록",
+      value: meetingReportCount,
       background: <SummaryMeetingReportsBackground />,
       className:
         "border-[#CBEFBD] bg-[#F5FCF2] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]",
-      progress: "80%",
+      progress:
+        meetingReportsState.status === "loading"
+          ? "0%"
+          : getCappedProgressPercent(
+              meetingReportsState.todayCount,
+              homeMeetingReportListLimit
+            ),
       tone: "meetingReports"
     }
   ];
@@ -1822,6 +1799,13 @@ const emptyHomePullRequestsState: HomePullRequestsState = {
   total: 0
 };
 
+const emptyHomeMeetingReportsState: HomeMeetingReportsState = {
+  error: null,
+  reports: [],
+  status: "idle",
+  todayCount: 0
+};
+
 function useHomeIssues({
   accessToken,
   workspaceId
@@ -2023,6 +2007,77 @@ function useHomePullRequests({
   return state;
 }
 
+function useHomeMeetingReports({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const meetingClient = useMemo(
+    () =>
+      createMeetingApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeMeetingReportsState>(
+    emptyHomeMeetingReportsState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadMeetingReports() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeMeetingReportsState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeMeetingReportsState,
+        status: "loading"
+      });
+
+      try {
+        const reports = await meetingClient.listMeetingReports(
+          normalizedWorkspaceId,
+          {
+            limit: homeMeetingReportFetchLimit
+          }
+        );
+
+        if (active) {
+          setState({
+            error: null,
+            reports: reports.reports.slice(0, homeMeetingReportListLimit),
+            status: "success",
+            todayCount: countTodayMeetingReports(reports.reports)
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            ...emptyHomeMeetingReportsState,
+            error: errorFromUnknown(error),
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadMeetingReports();
+
+    return () => {
+      active = false;
+    };
+  }, [meetingClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
 function selectHomeBoard(boards: BoardPayload[], workspaceId: string) {
   const selection = readGithubBoardSelection(workspaceId);
 
@@ -2145,7 +2200,36 @@ function useHomeWeekCalendarEvents({
 function errorFromUnknown(error: unknown) {
   return error instanceof Error
     ? error
-    : new Error("Calendar events could not be loaded");
+    : new Error("Home data could not be loaded");
+}
+
+function countTodayMeetingReports(reports: MeetingReportSummary[]) {
+  const today = new Date();
+
+  return reports.filter((report) =>
+    isSameCalendarDate(new Date(report.createdAt), today)
+  ).length;
+}
+
+function formatMeetingReportTitle(report: MeetingReportSummary) {
+  return `${formatMeetingReportDateTime(report.createdAt)} 회의록`;
+}
+
+function formatMeetingReportDateTime(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "long"
+  }).format(new Date(value));
+}
+
+function getMeetingReportFallbackSummary(report: MeetingReportSummary) {
+  if (report.errorMessage?.trim()) {
+    return report.errorMessage;
+  }
+
+  return report.status === "PROCESSING" ? "요약 생성 중" : "요약이 없습니다";
 }
 
 function isCalendarEventOnDate(event: CalendarEvent, date: string) {
