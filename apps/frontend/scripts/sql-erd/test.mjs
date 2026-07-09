@@ -1425,6 +1425,8 @@ assert.match(canvasSurface, /SqlErdLayoutSync/);
 assert.match(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
+assert.match(canvasSurface, /selectedShape\.props\.selectedState === "column"/);
+assert.match(canvasSurface, /selectedShape\.props\.selectedColumnId/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);
@@ -1460,9 +1462,12 @@ assert.match(tableShape, /data-sqltoerd-column-port/);
 assert.match(tableShape, /selectedColumnId/);
 assert.match(tableShape, /selectedState/);
 assert.match(tableShape, /highlightedColumnIds/);
+assert.match(tableShape, /function selectSqlErdTableShapeColumn/);
+assert.match(tableShape, /function selectSqlErdTableShape/);
+assert.match(tableShape, /editor\.updateShapes\(updates\)/);
 assert.match(
   tableShape,
-  /function handleColumnClick\(columnId: string\) \{[\s\S]*?selectSqlErdColumn\({[\s\S]*?}\);[\s\S]*?editor\.select\(shape\.id\);/
+  /function handleColumnClick\(columnId: string\) \{[\s\S]*?selectSqlErdTableShapeColumn\(editor, shape, columnId\);[\s\S]*?selectSqlErdColumn\({/
 );
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /function handleTableKeyDown/);

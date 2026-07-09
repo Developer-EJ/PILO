@@ -391,10 +391,7 @@ function areSqlErdSelectionsEqual(
   return true;
 }
 
-function getSqlErdSelectionFromEditor(
-  editor: Editor,
-  currentSelection: SqlErdSelection
-): SqlErdSelection {
+function getSqlErdSelectionFromEditor(editor: Editor): SqlErdSelection {
   const selectedShapes = editor.getSelectedShapes();
 
   if (selectedShapes.length !== 1) {
@@ -412,10 +409,14 @@ function getSqlErdSelectionFromEditor(
 
   if (isSqlErdTableShape(selectedShape)) {
     if (
-      currentSelection.type === "column" &&
-      currentSelection.tableId === selectedShape.props.tableId
+      selectedShape.props.selectedState === "column" &&
+      selectedShape.props.selectedColumnId
     ) {
-      return currentSelection;
+      return {
+        type: "column",
+        tableId: selectedShape.props.tableId,
+        columnId: selectedShape.props.selectedColumnId
+      };
     }
 
     return {
@@ -771,9 +772,7 @@ function SqlErdSelectionSync({
     }
 
     function syncSelectionFromEditor() {
-      setSelection(
-        getSqlErdSelectionFromEditor(editor, selectedSqlErdObjectRef.current)
-      );
+      setSelection(getSqlErdSelectionFromEditor(editor));
     }
 
     function handleColumnSelect(event: Event) {
