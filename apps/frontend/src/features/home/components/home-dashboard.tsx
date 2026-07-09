@@ -57,12 +57,16 @@ import type { BoardIssueCardPayload, BoardPayload } from "@/features/board/types
 import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
 import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
-import type { GithubPullRequest } from "@/features/github-integration/types";
+import type {
+  GithubPullRequest,
+  GithubRepository
+} from "@/features/github-integration/types";
 import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import type { MeetingReportSummary } from "@/features/meeting/types";
 
 const calendarWeekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const homeIssueListLimit = 5;
+const homePullRequestListLimit = 3;
 
 type HomeMeetingReportPreview = MeetingReportSummary & {
   title: string;
@@ -75,6 +79,13 @@ type HomeIssuesState = {
   githubLogin: string | null;
   issues: BoardIssueCardPayload[];
   mode: HomeIssuesMode;
+  status: "idle" | "loading" | "success" | "error";
+  total: number;
+};
+
+type HomePullRequestsState = {
+  error: Error | null;
+  pullRequests: GithubPullRequest[];
   status: "idle" | "loading" | "success" | "error";
   total: number;
 };
@@ -259,93 +270,13 @@ const mockMeetingReports: HomeMeetingReportPreview[] = [
   }
 ];
 
-const mockPullRequests: GithubPullRequest[] = [
-  {
-    id: "pull_request_001",
-    repositoryId: "repo_pilo",
-    githubPullRequestId: 912,
-    githubNodeId: "PR_kwDOPILO912",
-    githubNumber: 912,
-    title: "Home 기본 진입 경로와 대시보드 UI 구성",
-    authorName: "ndh5178",
-    authorAvatarUrl: null,
-    state: "open",
-    draft: false,
-    mergeable: true,
-    createdAtGithub: "2026-07-09T04:40:00.000Z",
-    updatedAtGithub: "2026-07-09T06:20:00.000Z",
-    headBranch: "feat/415-home-main-page",
-    baseBranch: "dev",
-    headSha: "abc4150",
-    baseSha: "def0001",
-    changedFilesCount: 8,
-    additions: 420,
-    deletions: 36,
-    commitsCount: 5,
-    commentsCount: 2,
-    reviewCommentsCount: 1,
-    githubUrl: "https://github.com/pilo/pilo/pull/912",
-    lastSyncedAt: "2026-07-09T06:25:00.000Z"
-  },
-  {
-    id: "pull_request_002",
-    repositoryId: "repo_pilo",
-    githubPullRequestId: 907,
-    githubNodeId: "PR_kwDOPILO907",
-    githubNumber: 907,
-    title: "Meeting report 목록 조회 안정화",
-    authorName: "team-pilo",
-    authorAvatarUrl: null,
-    state: "open",
-    draft: true,
-    mergeable: null,
-    createdAtGithub: "2026-07-08T02:20:00.000Z",
-    updatedAtGithub: "2026-07-08T10:00:00.000Z",
-    headBranch: "feat/meeting-report-list",
-    baseBranch: "dev",
-    headSha: "abc9070",
-    baseSha: "def0001",
-    changedFilesCount: 4,
-    additions: 128,
-    deletions: 12,
-    commitsCount: 2,
-    commentsCount: 0,
-    reviewCommentsCount: 0,
-    githubUrl: "https://github.com/pilo/pilo/pull/907",
-    lastSyncedAt: "2026-07-09T06:25:00.000Z"
-  },
-  {
-    id: "pull_request_003",
-    repositoryId: "repo_pilo",
-    githubPullRequestId: 901,
-    githubNodeId: "PR_kwDOPILO901",
-    githubNumber: 901,
-    title: "Calendar selected date query 처리",
-    authorName: "sein",
-    authorAvatarUrl: null,
-    state: "open",
-    draft: false,
-    mergeable: true,
-    createdAtGithub: "2026-07-07T07:15:00.000Z",
-    updatedAtGithub: "2026-07-08T09:30:00.000Z",
-    headBranch: "feat/calendar-selected-date",
-    baseBranch: "dev",
-    headSha: "abc9010",
-    baseSha: "def0001",
-    changedFilesCount: 3,
-    additions: 74,
-    deletions: 9,
-    commitsCount: 2,
-    commentsCount: 1,
-    reviewCommentsCount: 0,
-    githubUrl: "https://github.com/pilo/pilo/pull/901",
-    lastSyncedAt: "2026-07-09T06:25:00.000Z"
-  }
-];
-
 export function HomeDashboard() {
   const authSession = useAuthSession();
   const issuesState = useHomeIssues({
+    accessToken: authSession?.accessToken ?? null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+  const pullRequestsState = useHomePullRequests({
     accessToken: authSession?.accessToken ?? null,
     workspaceId: authSession?.activeWorkspaceId ?? ""
   });
@@ -354,9 +285,15 @@ export function HomeDashboard() {
     <section className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="grid min-h-0 gap-4 xl:grid-cols-[0.9fr_1.75fr_1fr] xl:grid-rows-[minmax(260px,0.95fr)_minmax(272px,0.96fr)_minmax(128px,0.44fr)]">
         <MembersCard />
-        <CalendarCard issuesState={issuesState} />
+        <CalendarCard
+          issuesState={issuesState}
+          pullRequestsState={pullRequestsState}
+        />
         <GithubConnectionCard />
-        <MiddleDashboardCards issuesState={issuesState} />
+        <MiddleDashboardCards
+          issuesState={issuesState}
+          pullRequestsState={pullRequestsState}
+        />
         <GithubWorkspaceCards />
       </div>
     </section>
@@ -879,19 +816,34 @@ function MemberProfileDialog({
   );
 }
 
-function CalendarCard({ issuesState }: { issuesState: HomeIssuesState }) {
+function CalendarCard({
+  issuesState,
+  pullRequestsState
+}: {
+  issuesState: HomeIssuesState;
+  pullRequestsState: HomePullRequestsState;
+}) {
   return (
     <div className="grid min-h-0 grid-rows-[minmax(108px,4fr)_minmax(0,6fr)] gap-3 xl:row-start-1">
-      <ReadonlyCalendar issuesState={issuesState} />
+      <ReadonlyCalendar
+        issuesState={issuesState}
+        pullRequestsState={pullRequestsState}
+      />
     </div>
   );
 }
 
-function MiddleDashboardCards({ issuesState }: { issuesState: HomeIssuesState }) {
+function MiddleDashboardCards({
+  issuesState,
+  pullRequestsState
+}: {
+  issuesState: HomeIssuesState;
+  pullRequestsState: HomePullRequestsState;
+}) {
   return (
     <div className="grid min-h-0 gap-4 md:grid-cols-3 xl:col-span-3 xl:col-start-1 xl:row-start-2">
       <IssuesCard issuesState={issuesState} />
-      <PullRequestsCard />
+      <PullRequestsCard pullRequestsState={pullRequestsState} />
       <MeetingReportsCard />
     </div>
   );
@@ -1053,15 +1005,17 @@ function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
     >
       <div className="grid min-h-0 flex-1 grid-rows-[repeat(5,minmax(0,1fr))] gap-2 overflow-hidden">
         {isLoading ? (
-          <IssueCardMessage>이슈 불러오는 중</IssueCardMessage>
+          <DashboardCardMessage>이슈 불러오는 중</DashboardCardMessage>
         ) : issuesState.status === "error" ? (
-          <IssueCardMessage tone="danger">이슈를 불러오지 못했습니다</IssueCardMessage>
+          <DashboardCardMessage tone="danger">
+            이슈를 불러오지 못했습니다
+          </DashboardCardMessage>
         ) : visibleTodoIssues.length > 0 ? (
           visibleTodoIssues.map((issue) => (
             <IssueTodoRow key={issue.id} issue={issue} />
           ))
         ) : (
-          <IssueCardMessage>표시할 open 이슈가 없습니다</IssueCardMessage>
+          <DashboardCardMessage>표시할 open 이슈가 없습니다</DashboardCardMessage>
         )}
       </div>
     </DashboardCard>
@@ -1220,8 +1174,16 @@ function SqlErdShortcutCard() {
   );
 }
 
-function PullRequestsCard() {
-  const visiblePullRequests = mockPullRequests.slice(0, 3);
+function PullRequestsCard({
+  pullRequestsState
+}: {
+  pullRequestsState: HomePullRequestsState;
+}) {
+  const visiblePullRequests = pullRequestsState.pullRequests.slice(
+    0,
+    homePullRequestListLimit
+  );
+  const isLoading = pullRequestsState.status === "loading";
 
   return (
     <DashboardCard
@@ -1236,9 +1198,23 @@ function PullRequestsCard() {
       titleClassName="text-[#000080]"
     >
       <div className="grid min-h-0 flex-1 grid-rows-[repeat(3,minmax(0,1fr))] gap-2 overflow-hidden">
-        {visiblePullRequests.map((pullRequest) => (
-          <PullRequestRow key={pullRequest.id} pullRequest={pullRequest} />
-        ))}
+        {isLoading ? (
+          <DashboardCardMessage rowSpanClassName="row-span-3">
+            PR 불러오는 중
+          </DashboardCardMessage>
+        ) : pullRequestsState.status === "error" ? (
+          <DashboardCardMessage rowSpanClassName="row-span-3" tone="danger">
+            PR을 불러오지 못했습니다
+          </DashboardCardMessage>
+        ) : visiblePullRequests.length > 0 ? (
+          visiblePullRequests.map((pullRequest) => (
+            <PullRequestRow key={pullRequest.id} pullRequest={pullRequest} />
+          ))
+        ) : (
+          <DashboardCardMessage rowSpanClassName="row-span-3">
+            표시할 open PR이 없습니다
+          </DashboardCardMessage>
+        )}
       </div>
     </DashboardCard>
   );
@@ -1402,7 +1378,13 @@ function PullRequestsBackground() {
   );
 }
 
-function ReadonlyCalendar({ issuesState }: { issuesState: HomeIssuesState }) {
+function ReadonlyCalendar({
+  issuesState,
+  pullRequestsState
+}: {
+  issuesState: HomeIssuesState;
+  pullRequestsState: HomePullRequestsState;
+}) {
   const router = useRouter();
   const authSession = useAuthSession();
   const today = useMemo(() => new Date(), []);
@@ -1431,6 +1413,8 @@ function ReadonlyCalendar({ issuesState }: { issuesState: HomeIssuesState }) {
     issuesState.status === "loading" ? "-" : String(issuesState.total);
   const issueSummaryLabel =
     issuesState.mode === "assigned" ? "내 이슈" : "최근 이슈";
+  const pullRequestCount =
+    pullRequestsState.status === "loading" ? "-" : String(pullRequestsState.total);
   const summaryItems: SummaryMetricItem[] = [
     {
       icon: <CalendarDays className="size-4" />,
@@ -1458,11 +1442,17 @@ function ReadonlyCalendar({ issuesState }: { issuesState: HomeIssuesState }) {
     {
       icon: <GitPullRequest className="size-4" />,
       label: "리뷰 대기",
-      value: "2",
+      value: pullRequestCount,
       background: <SummaryPullRequestsBackground />,
       className:
         "border-[#C8CCF2] bg-[#F5F6FF] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]",
-      progress: "40%",
+      progress:
+        pullRequestsState.status === "loading"
+          ? "0%"
+          : getCappedProgressPercent(
+              pullRequestsState.total,
+              homePullRequestListLimit
+            ),
       tone: "pullRequests"
     },
     {
@@ -1726,16 +1716,18 @@ function getSummaryMetricTone(tone: SummaryMetricTone) {
   }[tone];
 }
 
-function IssueCardMessage({
+function DashboardCardMessage({
   children,
+  rowSpanClassName = "row-span-5",
   tone = "muted"
 }: {
   children: ReactNode;
+  rowSpanClassName?: string;
   tone?: "danger" | "muted";
 }) {
   return (
     <div
-      className={`row-span-5 flex min-h-0 items-center justify-center rounded-lg border bg-background/80 p-3 text-center text-xs font-medium shadow-sm backdrop-blur ${
+      className={`${rowSpanClassName} flex min-h-0 items-center justify-center rounded-lg border bg-background/80 p-3 text-center text-xs font-medium shadow-sm backdrop-blur ${
         tone === "danger" ? "text-destructive" : "text-muted-foreground"
       }`}
     >
@@ -1770,11 +1762,20 @@ function IssueTodoRow({ issue }: { issue: BoardIssueCardPayload }) {
 function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
   const router = useRouter();
 
+  const handleOpenPullRequest = () => {
+    const searchParams = new URLSearchParams({
+      pullRequestId: pullRequest.id,
+      repositoryId: pullRequest.repositoryId
+    });
+
+    router.push(`/pr-review?${searchParams.toString()}`);
+  };
+
   return (
     <button
       aria-label={`${pullRequest.title} PR 리뷰로 이동`}
       className="flex min-h-0 min-w-0 flex-col justify-center overflow-hidden rounded-lg border bg-background/90 p-3 text-left shadow-sm backdrop-blur transition hover:bg-background hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-      onClick={() => router.push("/pr-review")}
+      onClick={handleOpenPullRequest}
       type="button"
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
@@ -1810,6 +1811,13 @@ const emptyHomeIssuesState: HomeIssuesState = {
   githubLogin: null,
   issues: [],
   mode: "recent",
+  status: "idle",
+  total: 0
+};
+
+const emptyHomePullRequestsState: HomePullRequestsState = {
+  error: null,
+  pullRequests: [],
   status: "idle",
   total: 0
 };
@@ -1917,6 +1925,104 @@ function useHomeIssues({
   return state;
 }
 
+function useHomePullRequests({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomePullRequestsState>(
+    emptyHomePullRequestsState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPullRequests() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomePullRequestsState);
+        return;
+      }
+
+      setState({
+        ...emptyHomePullRequestsState,
+        status: "loading"
+      });
+
+      try {
+        const repositories = await githubClient.listGithubRepositories(
+          normalizedWorkspaceId,
+          {
+            includeArchived: false,
+            limit: 100
+          }
+        );
+        const repositoryId = selectHomeRepositoryId(
+          repositories.data,
+          normalizedWorkspaceId
+        );
+
+        if (!repositoryId) {
+          if (active) {
+            setState({
+              error: null,
+              pullRequests: [],
+              status: "success",
+              total: 0
+            });
+          }
+          return;
+        }
+
+        const pullRequests = await githubClient.listGithubPullRequests(
+          normalizedWorkspaceId,
+          repositoryId,
+          {
+            limit: homePullRequestListLimit,
+            page: 1,
+            state: "open"
+          }
+        );
+
+        if (active) {
+          setState({
+            error: null,
+            pullRequests: pullRequests.data,
+            status: "success",
+            total: pullRequests.meta.total
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            ...emptyHomePullRequestsState,
+            error: errorFromUnknown(error),
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadPullRequests();
+
+    return () => {
+      active = false;
+    };
+  }, [githubClient, normalizedAccessToken, normalizedWorkspaceId]);
+
+  return state;
+}
+
 function selectHomeBoard(boards: BoardPayload[], workspaceId: string) {
   const selection = readGithubBoardSelection(workspaceId);
 
@@ -1933,6 +2039,22 @@ function selectHomeBoard(boards: BoardPayload[], workspaceId: string) {
   }
 
   return boards[0] ?? null;
+}
+
+function selectHomeRepositoryId(
+  repositories: GithubRepository[],
+  workspaceId: string
+) {
+  const selection = readGithubBoardSelection(workspaceId);
+
+  if (
+    selection &&
+    repositories.some((repository) => repository.id === selection.repositoryId)
+  ) {
+    return selection.repositoryId;
+  }
+
+  return repositories[0]?.id ?? null;
 }
 
 type HomeWeekCalendarEventsState = {
