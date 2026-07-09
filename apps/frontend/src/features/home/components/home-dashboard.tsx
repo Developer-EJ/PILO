@@ -76,6 +76,7 @@ import {
 } from "@/features/canvas/api/canvas-client";
 import { createGithubIntegrationApiClient } from "@/features/github-integration/api/client";
 import type {
+  GithubOAuthStatus,
   GithubPullRequest,
   GithubRepository
 } from "@/features/github-integration/types";
@@ -128,8 +129,13 @@ type HomeSqlErdState = {
   status: "idle" | "loading" | "success" | "error";
 };
 
+type HomeGithubOAuthState = {
+  error: Error | null;
+  status: "idle" | "loading" | "success" | "error";
+  value: GithubOAuthStatus | null;
+};
+
 const mockGithubConnectionStatus = {
-  account: "ndh5178",
   repository: {
     name: "PILO",
     fullName: "PILO-APP/PILO",
@@ -903,28 +909,64 @@ function MiddleDashboardCards({
 }
 
 function GithubConnectionCard() {
+  const authSession = useAuthSession();
+  const githubOAuthState = useHomeGithubOAuthStatus({
+    accessToken: authSession?.accessToken ?? null
+  });
+  const githubOAuth = githubOAuthState.value;
+  const isGithubConnected = githubOAuth?.connected === true;
+  const githubLogin = githubOAuth?.githubLogin?.trim() || null;
+  const githubStatusLabel =
+    githubOAuthState.status === "loading"
+      ? "확인 중"
+      : isGithubConnected
+        ? "연결됨"
+        : githubOAuthState.status === "error"
+          ? "확인 실패"
+          : "미연결";
+  const githubStatusTone =
+    githubOAuthState.status === "loading"
+      ? "bg-muted-foreground"
+      : isGithubConnected
+        ? "bg-emerald-500"
+        : "bg-red-500";
+  const githubAccountLabel =
+    githubOAuthState.status === "loading"
+      ? "확인 중"
+      : githubLogin
+        ? `@${githubLogin}`
+        : githubOAuthState.status === "error"
+          ? "확인 실패"
+          : "연결 필요";
+  const githubAccountClassName =
+    githubOAuthState.status === "error"
+      ? "text-red-600"
+      : isGithubConnected
+        ? "text-foreground"
+        : "text-muted-foreground";
+
   return (
     <div className="grid min-h-0 grid-rows-[repeat(3,minmax(0,1fr))] gap-3 xl:col-start-3 xl:row-start-1">
       <Card
         className="min-h-0 bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_100%)] shadow-sm"
         size="sm"
       >
-        <CardContent className="flex min-h-0 flex-1 flex-col justify-center gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-                <GithubMarkIcon className="size-4" />
-              </span>
-              <p className="truncate text-sm font-medium">GitHub 연결</p>
-            </div>
-            <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              연결됨
+        <CardContent className="flex min-h-0 flex-1 items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+              <GithubMarkIcon className="size-4" />
             </span>
+            <p className="shrink-0 text-sm font-medium">GitHub 연결</p>
+            <p
+              className={`min-w-0 flex-1 truncate text-sm font-semibold ${githubAccountClassName}`}
+            >
+              {githubAccountLabel}
+            </p>
           </div>
-          <p className="truncate text-xs text-muted-foreground">
-            @{mockGithubConnectionStatus.account}
-          </p>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">
+            <span className={`size-1.5 rounded-full ${githubStatusTone}`} />
+            {githubStatusLabel}
+          </span>
         </CardContent>
       </Card>
       <Card
@@ -1973,6 +2015,74 @@ const emptyHomeSqlErdState: HomeSqlErdState = {
   session: null,
   status: "idle"
 };
+
+const emptyHomeGithubOAuthState: HomeGithubOAuthState = {
+  error: null,
+  status: "idle",
+  value: null
+};
+
+function useHomeGithubOAuthStatus({
+  accessToken
+}: {
+  accessToken: string | null;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeGithubOAuthState>(
+    emptyHomeGithubOAuthState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadGithubOAuthStatus() {
+      if (!normalizedAccessToken) {
+        setState(emptyHomeGithubOAuthState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeGithubOAuthState,
+        status: "loading"
+      });
+
+      try {
+        const value = await githubClient.getGithubOAuthStatus();
+
+        if (active) {
+          setState({
+            error: null,
+            status: "success",
+            value
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            error: error instanceof Error ? error : new Error(String(error)),
+            status: "error",
+            value: null
+          });
+        }
+      }
+    }
+
+    void loadGithubOAuthStatus();
+
+    return () => {
+      active = false;
+    };
+  }, [githubClient, normalizedAccessToken]);
+
+  return state;
+}
 
 function useHomeIssues({
   accessToken,
