@@ -99,6 +99,7 @@ class FakeAgentRunRepository:
         self.completed_steps: list[tuple[str, str, dict[str, object]]] = []
         self.failed_steps: list[tuple[str, str, str, str]] = []
         self.completed_runs: list[tuple[str, str, str, str | None]] = []
+        self.tool_execution_ready_updates: list[tuple[str, str, str]] = []
 
     def try_acquire_run_lock(self, run_id: str) -> bool:
         self.lock_calls.append(run_id)
@@ -141,6 +142,14 @@ class FakeAgentRunRepository:
         risk_level: str | None,
     ) -> None:
         self.completed_runs.append((run_id, final_answer, message, risk_level))
+
+    def mark_tool_execution_ready(
+        self,
+        run_id: str,
+        message: str,
+        risk_level: str,
+    ) -> None:
+        self.tool_execution_ready_updates.append((run_id, message, risk_level))
 
     def mark_failed(
         self,
@@ -214,7 +223,7 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_planning_completed"
+    assert result.reason == "agent_tool_candidate_planned"
     assert result.run_id == RUN_ID
     assert repository.lock_calls == [RUN_ID]
     assert repository.release_calls == [RUN_ID]
@@ -228,10 +237,10 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
         "start": "2026-07-09",
         "end": "2026-07-16",
     }
-    assert repository.completed_runs == [
+    assert repository.completed_runs == []
+    assert repository.tool_execution_ready_updates == [
         (
             RUN_ID,
-            "일정 조회 계획을 만들었습니다.",
             "Calendar 일정 조회 후보입니다.",
             "low",
         )
@@ -256,7 +265,7 @@ def test_processor_uses_run_timezone_for_current_date() -> None:
     result = processor.process_payload(agent_payload())
 
     assert result.delete_message is True
-    assert result.reason == "agent_planning_completed"
+    assert result.reason == "agent_tool_candidate_planned"
     assert seen_timezones == ["America/Los_Angeles"]
     assert planner_client.requests[0].current_date == "2026-07-08"
     assert planner_client.requests[0].timezone == "America/Los_Angeles"
