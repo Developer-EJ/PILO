@@ -15,6 +15,7 @@ import {
   getSqlErdRelationShapeLayout,
   getSqlErdTableBoundsFromShape,
   isSqlErdRelationShape,
+  SQLTOERD_RELATION_HOVER_EVENT,
   SQLTOERD_RELATION_SHAPE_TYPE,
   SqlErdRelationShapeUtil,
   type SqlErdRelationShape,
@@ -28,7 +29,8 @@ import {
   SqlErdTableShapeUtil,
   toSqlErdTableShapeColumns,
   isSqlErdTableShape,
-  type SqlErdTableShape
+  type SqlErdTableShape,
+  type SqlErdTableSelectionState
 } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 import type {
   SqlErdSelection,
@@ -51,6 +53,15 @@ type SqlErdCanvasProps = {
   onLayoutChange?: (layoutJson: SqltoerdLayoutJsonV1) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
   selectedSqlErdObject?: SqlErdSelection;
+};
+
+type SqlErdRelationHoverEventDetail = {
+  isHovered: boolean;
+  relationId: string;
+  fromTableId: string;
+  fromColumnIds: string[];
+  toTableId: string;
+  toColumnIds: string[];
 };
 
 const sqlErdShapeUtils = [SqlErdRelationShapeUtil, SqlErdTableShapeUtil];
@@ -115,6 +126,8 @@ export function createSqltoerdTableShapes(
         schemaName: table.schemaName,
         badgeColumnWidth,
         selectedColumnId: null,
+        selectedState: "none",
+        highlightedColumnIds: [],
         columns: toSqlErdTableShapeColumns(table.columns)
       }
     };
@@ -276,6 +289,8 @@ function isSqlErdRelationLayoutEqual(
     Math.abs(shape.y - layout.y) < 0.01 &&
     Math.abs(shape.props.w - layout.w) < 0.01 &&
     Math.abs(shape.props.h - layout.h) < 0.01 &&
+    shape.props.startSide === layout.startSide &&
+    shape.props.endSide === layout.endSide &&
     areSqlErdRelationPointsEqual(shape.props.points, layout.points) &&
     areSqlErdRelationPointsEqual(shape.props.arrowPoints, layout.arrowPoints)
   );
@@ -414,7 +429,8 @@ function getSqlErdSelectionFromEditor(
 
 function resetSqlErdCanvas(
   editor: Editor,
-  shapes: TLShapePartial[]
+  shapes: TLShapePartial[],
+  { zoomToFit = true }: { zoomToFit?: boolean } = {}
 ) {
   editor.run(
     () => {
@@ -440,9 +456,91 @@ function resetSqlErdCanvas(
     },
     { history: "ignore" }
   );
-  window.requestAnimationFrame(() => {
-    editor.zoomToFit({ animation: { duration: 160 } });
-  });
+
+  if (zoomToFit) {
+    window.requestAnimationFrame(() => {
+      editor.zoomToFit({ animation: { duration: 160 } });
+    });
+  }
+}
+
+function shouldResetSqlErdCanvas(editor: Editor, shapes: TLShapePartial[]) {
+  const currentSqlErdShapes = editor
+    .getCurrentPageShapes()
+    .filter(
+      (shape) => isSqlErdTableShape(shape) || isSqlErdRelationShape(shape)
+    );
+
+  if (!currentSqlErdShapes.length) {
+    return true;
+  }
+
+  if (currentSqlErdShapes.length !== shapes.length) {
+    return true;
+  }
+
+  const nextShapeTypesById = new Map(
+    shapes.map((shape) => [shape.id as TLShapeId, shape.type])
+  );
+
+  return currentSqlErdShapes.some(
+    (shape) => nextShapeTypesById.get(shape.id) !== shape.type
+  );
+}
+
+function preserveSqlErdTableInteractionState(
+  editor: Editor,
+  shape: TLShapePartial<SqlErdTableShape>
+): TLShapePartial<SqlErdTableShape> {
+  const currentShape = editor.getShape(shape.id as TLShapeId);
+
+  if (!isSqlErdTableShape(currentShape) || !shape.props) {
+    return shape;
+  }
+
+  return {
+    ...shape,
+    props: {
+      ...shape.props,
+      selectedColumnId: currentShape.props.selectedColumnId,
+      selectedState: currentShape.props.selectedState,
+      highlightedColumnIds: currentShape.props.highlightedColumnIds
+    }
+  };
+}
+
+function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
+  if (shouldResetSqlErdCanvas(editor, shapes)) {
+    resetSqlErdCanvas(editor, shapes);
+    return;
+  }
+
+  const updates = shapes
+    .filter((shape) => !isSqlErdCanvasShapePartialApplied(editor, shape))
+    .map((shape) =>
+      shape.type === SQLTOERD_TABLE_SHAPE_TYPE
+        ? preserveSqlErdTableInteractionState(
+            editor,
+            shape as TLShapePartial<SqlErdTableShape>
+          )
+        : shape
+    );
+
+  if (!updates.length) {
+    return;
+  }
+
+  editor.run(
+    () => {
+      editor.updateShapes(updates);
+      editor.sendToBack(
+        shapes
+          .filter((shape) => shape.type === SQLTOERD_RELATION_SHAPE_TYPE)
+          .map((shape) => shape.id as TLShapeId)
+      );
+    },
+    { history: "ignore" }
+  );
 }
 
 function areShapeNumbersEqual(left?: number, right?: number) {
@@ -610,7 +708,7 @@ function SqlErdCanvasShapeSync({ shapes }: { shapes: TLShapePartial[] }) {
       return;
     }
 
-    resetSqlErdCanvas(editor, shapes);
+    applySqlErdCanvasShapes(editor, shapes);
   }, [editor, shapes]);
 
   return null;
@@ -739,6 +837,21 @@ function getSelectedColumnIdForTable(
     : null;
 }
 
+function getSelectedStateForTable(
+  selection: SqlErdSelection,
+  tableId: string
+): SqlErdTableSelectionState {
+  if (selection.type === "table" && selection.tableId === tableId) {
+    return "table";
+  }
+
+  if (selection.type === "column" && selection.tableId === tableId) {
+    return "column";
+  }
+
+  return "none";
+}
+
 function syncSqlErdSelectedColumnShapes(
   editor: Editor,
   selectedSqlErdObject: SqlErdSelection
@@ -754,8 +867,15 @@ function syncSqlErdSelectedColumnShapes(
       selectedSqlErdObject,
       shape.props.tableId
     );
+    const selectedState = getSelectedStateForTable(
+      selectedSqlErdObject,
+      shape.props.tableId
+    );
 
-    if (shape.props.selectedColumnId === selectedColumnId) {
+    if (
+      shape.props.selectedColumnId === selectedColumnId &&
+      shape.props.selectedState === selectedState
+    ) {
       continue;
     }
 
@@ -764,7 +884,8 @@ function syncSqlErdSelectedColumnShapes(
       type: SQLTOERD_TABLE_SHAPE_TYPE,
       props: {
         ...shape.props,
-        selectedColumnId
+        selectedColumnId,
+        selectedState
       }
     });
   }
@@ -791,6 +912,151 @@ function SqlErdSelectedColumnSync({
   useEffect(() => {
     syncSqlErdSelectedColumnShapes(editor, selectedSqlErdObject);
   }, [editor, selectedSqlErdObject]);
+
+  return null;
+}
+
+function getHighlightedColumnIdsForTable(
+  detail: SqlErdRelationHoverEventDetail | null,
+  tableId: string
+) {
+  if (!detail) {
+    return [];
+  }
+
+  const highlightedColumnIds: string[] = [];
+
+  if (detail.fromTableId === tableId) {
+    highlightedColumnIds.push(...detail.fromColumnIds);
+  }
+
+  if (detail.toTableId === tableId) {
+    highlightedColumnIds.push(...detail.toColumnIds);
+  }
+
+  return highlightedColumnIds;
+}
+
+function syncSqlErdHighlightedColumnShapes(
+  editor: Editor,
+  detail: SqlErdRelationHoverEventDetail | null
+) {
+  const updates: TLShapePartial<SqlErdTableShape>[] = [];
+
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (!isSqlErdTableShape(shape)) {
+      continue;
+    }
+
+    const highlightedColumnIds = getHighlightedColumnIdsForTable(
+      detail,
+      shape.props.tableId
+    );
+
+    if (
+      areStringArraysEqual(
+        shape.props.highlightedColumnIds,
+        highlightedColumnIds
+      )
+    ) {
+      continue;
+    }
+
+    updates.push({
+      id: shape.id,
+      type: SQLTOERD_TABLE_SHAPE_TYPE,
+      props: {
+        ...shape.props,
+        highlightedColumnIds
+      }
+    });
+  }
+
+  if (!updates.length) {
+    return;
+  }
+
+  editor.run(
+    () => {
+      editor.updateShapes(updates);
+    },
+    { history: "ignore" }
+  );
+}
+
+function parseSqlErdRelationHoverEventDetail(
+  detail: unknown
+): SqlErdRelationHoverEventDetail | null {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+
+  const eventDetail = detail as Partial<SqlErdRelationHoverEventDetail>;
+
+  if (
+    typeof eventDetail.isHovered !== "boolean" ||
+    typeof eventDetail.relationId !== "string" ||
+    typeof eventDetail.fromTableId !== "string" ||
+    typeof eventDetail.toTableId !== "string" ||
+    !Array.isArray(eventDetail.fromColumnIds) ||
+    !Array.isArray(eventDetail.toColumnIds) ||
+    !eventDetail.fromColumnIds.every((columnId) => typeof columnId === "string") ||
+    !eventDetail.toColumnIds.every((columnId) => typeof columnId === "string")
+  ) {
+    return null;
+  }
+
+  return {
+    isHovered: eventDetail.isHovered,
+    relationId: eventDetail.relationId,
+    fromTableId: eventDetail.fromTableId,
+    fromColumnIds: eventDetail.fromColumnIds,
+    toTableId: eventDetail.toTableId,
+    toColumnIds: eventDetail.toColumnIds
+  };
+}
+
+function SqlErdRelationHoverSync() {
+  const editor = useEditor();
+  const hoveredRelationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    function handleRelationHover(event: Event) {
+      const detail = parseSqlErdRelationHoverEventDetail(
+        (event as CustomEvent).detail
+      );
+
+      if (!detail) {
+        return;
+      }
+
+      if (detail.isHovered) {
+        hoveredRelationIdRef.current = detail.relationId;
+        syncSqlErdHighlightedColumnShapes(editor, detail);
+        return;
+      }
+
+      if (hoveredRelationIdRef.current !== detail.relationId) {
+        return;
+      }
+
+      hoveredRelationIdRef.current = null;
+      syncSqlErdHighlightedColumnShapes(editor, null);
+    }
+
+    window.addEventListener(
+      SQLTOERD_RELATION_HOVER_EVENT,
+      handleRelationHover
+    );
+
+    return () => {
+      window.removeEventListener(
+        SQLTOERD_RELATION_HOVER_EVENT,
+        handleRelationHover
+      );
+      syncSqlErdHighlightedColumnShapes(editor, null);
+    };
+  }, [editor]);
 
   return null;
 }
@@ -922,6 +1188,7 @@ export function SqlErdCanvas({
     >
       <SqlErdCanvasShapeSync shapes={shapes} />
       <SqlErdRelationLayoutSync />
+      <SqlErdRelationHoverSync />
       <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
       {onLayoutChange ? (
         <SqlErdLayoutSync
