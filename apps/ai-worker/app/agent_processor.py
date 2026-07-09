@@ -132,6 +132,13 @@ class AgentRunRepository(Protocol):
         risk_level: str | None,
     ) -> None: ...
 
+    def mark_tool_execution_ready(
+        self,
+        run_id: str,
+        message: str,
+        risk_level: str,
+    ) -> None: ...
+
     def mark_failed(
         self,
         run_id: str,
@@ -244,6 +251,18 @@ class AgentRunProcessor:
                 step_id,
                 normalized.output_summary,
             )
+            if normalized.status == "tool_candidate" and normalized.risk_level is not None:
+                self.repository.mark_tool_execution_ready(
+                    job.run_id,
+                    normalized.message,
+                    normalized.risk_level,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason="agent_tool_candidate_planned",
+                )
+
             self.repository.complete_run(
                 job.run_id,
                 normalized.final_answer,

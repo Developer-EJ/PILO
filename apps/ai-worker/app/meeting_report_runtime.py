@@ -355,6 +355,30 @@ class PgAgentRunRepository:
             (risk_level, final_answer, message, run_id),
         )
 
+    def mark_tool_execution_ready(
+        self,
+        run_id: str,
+        message: str,
+        risk_level: str,
+    ) -> None:
+        self.connection.execute(
+            """
+            UPDATE agent_runs
+            SET
+              status = 'running',
+              risk_level = %s,
+              final_answer = NULL,
+              message = %s,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = NULL,
+              updated_at = now()
+            WHERE id = %s
+              AND status = 'planning'
+            """,
+            (risk_level, message, run_id),
+        )
+
     def mark_failed(
         self,
         run_id: str,
