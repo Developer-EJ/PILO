@@ -43,6 +43,7 @@ import {
   updateSqltoerdLayoutWithTablePositions,
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
+import { getSqlErdSelectionFromSelectedShapes } from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 
@@ -392,40 +393,7 @@ function areSqlErdSelectionsEqual(
 }
 
 function getSqlErdSelectionFromEditor(editor: Editor): SqlErdSelection {
-  const selectedShapes = editor.getSelectedShapes();
-
-  if (selectedShapes.length !== 1) {
-    return { type: "none" };
-  }
-
-  const [selectedShape] = selectedShapes;
-
-  if (isSqlErdRelationShape(selectedShape)) {
-    return {
-      type: "relation",
-      relationId: selectedShape.props.relationId
-    };
-  }
-
-  if (isSqlErdTableShape(selectedShape)) {
-    if (
-      selectedShape.props.selectedState === "column" &&
-      selectedShape.props.selectedColumnId
-    ) {
-      return {
-        type: "column",
-        tableId: selectedShape.props.tableId,
-        columnId: selectedShape.props.selectedColumnId
-      };
-    }
-
-    return {
-      type: "table",
-      tableId: selectedShape.props.tableId
-    };
-  }
-
-  return { type: "none" };
+  return getSqlErdSelectionFromSelectedShapes(editor.getSelectedShapes());
 }
 
 function resetSqlErdCanvas(

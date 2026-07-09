@@ -107,7 +107,7 @@ export function selectSqlErdTable(detail: SqlErdTableSelectEventDetail) {
   );
 }
 
-function getSqlErdTableShapeSelectionUpdates(
+export function getSqlErdTableShapeSelectionUpdates(
   editor: Editor,
   selectedTableShape: SqlErdTableShape,
   selection:
@@ -156,7 +156,7 @@ function getSqlErdTableShapeSelectionUpdates(
   return updates;
 }
 
-function selectSqlErdTableShape(
+export function selectSqlErdTableShape(
   editor: Editor,
   selectedTableShape: SqlErdTableShape
 ) {
@@ -178,7 +178,7 @@ function selectSqlErdTableShape(
   );
 }
 
-function selectSqlErdTableShapeColumn(
+export function selectSqlErdTableShapeColumn(
   editor: Editor,
   selectedTableShape: SqlErdTableShape,
   columnId: string
