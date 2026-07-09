@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 from app.agent_processor import (
@@ -5,6 +6,7 @@ from app.agent_processor import (
     AgentPlannerDecision,
     AgentRunContext,
     AgentRunProcessor,
+    _agent_planner_schema,
     parse_agent_planner_output,
     parse_agent_run_job_payload,
 )
@@ -174,7 +176,7 @@ def create_processor(
     return AgentRunProcessor(
         repository,
         planner_client or FakePlannerClient(),
-        current_date_provider=lambda: date(2026, 7, 9),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
     )
 
 
@@ -236,6 +238,28 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     ]
     assert repository.failed_updates == []
     assert planner_client.requests[0].current_date == "2026-07-09"
+    assert planner_client.requests[0].timezone == "Asia/Seoul"
+
+
+def test_processor_uses_run_timezone_for_current_date() -> None:
+    repository = FakeAgentRunRepository(context=run_context(timezone="America/Los_Angeles"))
+    planner_client = FakePlannerClient()
+    seen_timezones: list[str] = []
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        current_date_provider=lambda timezone: (
+            seen_timezones.append(timezone) or date(2026, 7, 8)
+        ),
+    )
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "agent_planning_completed"
+    assert seen_timezones == ["America/Los_Angeles"]
+    assert planner_client.requests[0].current_date == "2026-07-08"
+    assert planner_client.requests[0].timezone == "America/Los_Angeles"
 
 
 def test_processor_deletes_invalid_agent_payload_without_repository_calls() -> None:
@@ -392,26 +416,28 @@ def test_processor_retries_planner_infrastructure_failure() -> None:
 
 def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
     decision = parse_agent_planner_output(
-        """
-        {
-          "status": "tool_candidate",
-          "message": "Calendar 일정 조회 후보입니다.",
-          "finalAnswerDraft": "일정 조회 계획을 만들었습니다.",
-          "toolName": "list_calendar_events",
-          "input": {
-            "start": "2026-07-09",
-            "end": "2026-07-16",
-            "token": "must-not-leak",
-            "nested": {
-              "providerRawResponse": "must-not-leak",
-              "visible": "ok"
+        json.dumps(
+            {
+                "status": "tool_candidate",
+                "message": "Calendar 일정 조회 후보입니다.",
+                "finalAnswerDraft": "일정 조회 계획을 만들었습니다.",
+                "toolName": "list_calendar_events",
+                "inputJson": json.dumps(
+                    {
+                        "start": "2026-07-09",
+                        "end": "2026-07-16",
+                        "token": "must-not-leak",
+                        "nested": {
+                            "providerRawResponse": "must-not-leak",
+                            "visible": "ok",
+                        },
+                    }
+                ),
+                "requiresConfirmation": False,
+                "missingFields": [],
+                "unsupportedReason": None,
             }
-          },
-          "requiresConfirmation": false,
-          "missingFields": [],
-          "unsupportedReason": null
-        }
-        """
+        )
     )
 
     assert decision.tool_input == {
@@ -421,3 +447,39 @@ def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
             "visible": "ok",
         },
     }
+
+
+def test_parse_agent_planner_output_rejects_invalid_input_json() -> None:
+    try:
+        parse_agent_planner_output(
+            json.dumps(
+                {
+                    "status": "tool_candidate",
+                    "message": "Calendar 일정 조회 후보입니다.",
+                    "finalAnswerDraft": "일정 조회 계획을 만들었습니다.",
+                    "toolName": "list_calendar_events",
+                    "inputJson": "{not-json",
+                    "requiresConfirmation": False,
+                    "missingFields": [],
+                    "unsupportedReason": None,
+                }
+            )
+        )
+    except Exception as error:
+        assert "inputJson must be valid JSON" in str(error)
+    else:
+        raise AssertionError("invalid inputJson should be rejected")
+
+
+def test_agent_planner_schema_is_strict_closed_schema() -> None:
+    def assert_closed_objects(schema: object) -> None:
+        if isinstance(schema, dict):
+            if schema.get("type") == "object":
+                assert schema.get("additionalProperties") is False
+            for value in schema.values():
+                assert_closed_objects(value)
+        elif isinstance(schema, list):
+            for value in schema:
+                assert_closed_objects(value)
+
+    assert_closed_objects(_agent_planner_schema())

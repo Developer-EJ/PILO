@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from app.meeting_report_processor import InfrastructureError
 
@@ -166,11 +167,11 @@ class AgentRunProcessor:
         self,
         repository: AgentRunRepository,
         planner_client: AgentPlannerClient,
-        current_date_provider: Callable[[], date] | None = None,
+        current_date_provider: Callable[[str], date] | None = None,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
-        self.current_date_provider = current_date_provider or (lambda: datetime.now(UTC).date())
+        self.current_date_provider = current_date_provider or _current_date_for_timezone
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
         try:
@@ -232,7 +233,7 @@ class AgentRunProcessor:
                     run_id=job.run_id,
                     prompt=context.prompt,
                     timezone=context.timezone,
-                    current_date=self.current_date_provider().isoformat(),
+                    current_date=self.current_date_provider(context.timezone).isoformat(),
                     tool_schema_version=job.tool_schema_version,
                     tools=job.tools,
                 )
@@ -478,8 +479,7 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
     message = _planner_string(payload, "message")
     final_answer_draft = _planner_optional_string(payload, "finalAnswerDraft")
     tool_name = _planner_optional_string(payload, "toolName")
-    raw_input = payload.get("input")
-    tool_input = _sanitize_json_value(raw_input if isinstance(raw_input, dict) else {})
+    tool_input = _parse_planner_input_json(_planner_optional_string(payload, "inputJson"))
     requires_confirmation = payload.get("requiresConfirmation") is True
     missing_fields = _planner_string_list(payload.get("missingFields"))
     unsupported_reason = _planner_optional_string(payload, "unsupportedReason")
@@ -509,6 +509,8 @@ def _agent_planner_system_prompt() -> str:
         "question in finalAnswerDraft. "
         "Normalize relative dates using the provided timezone and current date. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
+        "Put the selected tool input object into inputJson as a compact JSON string. "
+        "Use null inputJson when there is no tool input. "
         "Never include provider raw responses, tokens, secrets, credentials, cookies, "
         "authorization headers, or long transcripts."
     )
@@ -547,7 +549,7 @@ def _agent_planner_schema() -> dict[str, object]:
             "message",
             "finalAnswerDraft",
             "toolName",
-            "input",
+            "inputJson",
             "requiresConfirmation",
             "missingFields",
             "unsupportedReason",
@@ -560,10 +562,7 @@ def _agent_planner_schema() -> dict[str, object]:
             "message": {"type": "string"},
             "finalAnswerDraft": {"type": ["string", "null"]},
             "toolName": {"type": ["string", "null"]},
-            "input": {
-                "type": "object",
-                "additionalProperties": True,
-            },
+            "inputJson": {"type": ["string", "null"]},
             "requiresConfirmation": {"type": "boolean"},
             "missingFields": {
                 "type": "array",
@@ -603,11 +602,33 @@ def _planner_string_list(value: object) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
+def _parse_planner_input_json(value: str | None) -> dict[str, object]:
+    if value is None:
+        return {}
+
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise AgentPlannerOutputError("Agent planner inputJson must be valid JSON") from error
+
+    if not isinstance(parsed, dict):
+        raise AgentPlannerOutputError("Agent planner inputJson must be a JSON object")
+
+    return _sanitize_json_value(parsed)
+
+
 def _sanitize_json_value(value: object) -> dict[str, object]:
     sanitized = _sanitize_any_json_value(value)
     if isinstance(sanitized, dict):
         return sanitized
     return {}
+
+
+def _current_date_for_timezone(timezone: str) -> date:
+    try:
+        return datetime.now(ZoneInfo(timezone)).date()
+    except Exception as error:
+        raise AgentPlannerOutputError("Agent run timezone is invalid") from error
 
 
 def _sanitize_any_json_value(value: object) -> object:
