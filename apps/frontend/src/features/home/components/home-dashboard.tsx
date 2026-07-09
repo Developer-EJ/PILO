@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarDays,
@@ -47,6 +53,7 @@ import {
 } from "@/features/auth/api/client";
 import { useAuthSession } from "@/features/auth/auth-session";
 import type { BoardIssueCardPayload } from "@/features/board/types";
+import { createCalendarApiClient } from "@/features/calendar/api/client";
 import type { CalendarEvent } from "@/features/calendar/types";
 import type { GithubPullRequest } from "@/features/github-integration/types";
 import type { MeetingReportSummary } from "@/features/meeting/types";
@@ -154,66 +161,6 @@ const mockGithubConnectionStatus = {
     hasAccess: false
   }
 };
-
-const mockCalendarEvents: CalendarEvent[] = [
-  {
-    id: 41501,
-    title: "Home 대시보드 UI 리뷰",
-    description: "Home 메인페이지 구성 확인",
-    color: "#7c3aed",
-    isAllDay: false,
-    startDate: "2026-07-09",
-    endDate: "2026-07-09",
-    startTime: "10:00",
-    endTime: "11:00",
-    createdBy: "user_donghyun",
-    createdByUser: {
-      id: "user_donghyun",
-      name: "동현",
-      avatarUrl: null
-    },
-    createdAt: "2026-07-08T07:30:00.000Z",
-    updatedAt: "2026-07-08T07:30:00.000Z"
-  },
-  {
-    id: 41502,
-    title: "캘린더 API 연결 범위 논의",
-    description: null,
-    color: "#0ea5e9",
-    isAllDay: false,
-    startDate: "2026-07-13",
-    endDate: "2026-07-13",
-    startTime: "14:00",
-    endTime: "14:30",
-    createdBy: "user_sein",
-    createdByUser: {
-      id: "user_sein",
-      name: "세인",
-      avatarUrl: null
-    },
-    createdAt: "2026-07-08T08:10:00.000Z",
-    updatedAt: "2026-07-08T08:10:00.000Z"
-  },
-  {
-    id: 41503,
-    title: "PR Review 데모",
-    description: null,
-    color: "#16a34a",
-    isAllDay: true,
-    startDate: "2026-07-22",
-    endDate: "2026-07-22",
-    startTime: null,
-    endTime: null,
-    createdBy: "user_eunjae",
-    createdByUser: {
-      id: "user_eunjae",
-      name: "은재",
-      avatarUrl: null
-    },
-    createdAt: "2026-07-08T09:00:00.000Z",
-    updatedAt: "2026-07-08T09:00:00.000Z"
-  }
-];
 
 const mockMeetingReports: HomeMeetingReportPreview[] = [
   {
@@ -1529,17 +1476,38 @@ function PullRequestsBackground() {
 
 function ReadonlyCalendar() {
   const router = useRouter();
-  const today = useMemo(() => new Date(2026, 6, 9), []);
+  const authSession = useAuthSession();
+  const today = useMemo(() => new Date(), []);
   const weekDates = useMemo(() => getCalendarWeekDates(today), [today]);
+  const weekRange = useMemo(
+    () => ({
+      end: formatCalendarDate(weekDates[weekDates.length - 1]),
+      start: formatCalendarDate(weekDates[0])
+    }),
+    [weekDates]
+  );
+  const {
+    events: calendarEvents,
+    error: calendarEventsError,
+    status: calendarEventsStatus
+  } = useHomeWeekCalendarEvents({
+    accessToken: authSession?.accessToken ?? null,
+    range: weekRange,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
+  const todayDate = formatCalendarDate(today);
+  const todayEventCount = calendarEvents.filter((event) =>
+    isCalendarEventOnDate(event, todayDate)
+  ).length;
   const summaryItems: SummaryMetricItem[] = [
     {
       icon: <CalendarDays className="size-4" />,
       label: "오늘 일정",
-      value: "1",
+      value: String(todayEventCount),
       background: <SummaryCalendarBackground />,
       className:
         "border-[#B7DCD7] bg-[#F4FBFA] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)]",
-      progress: "20%",
+      progress: getCappedProgressPercent(todayEventCount, 5),
       tone: "calendar"
     },
     {
@@ -1589,6 +1557,14 @@ function ReadonlyCalendar() {
               <CalendarDays className="size-4" />
             </span>
             <p className="text-sm font-semibold text-foreground">이번 주</p>
+            {calendarEventsStatus === "error" ? (
+              <span
+                className="truncate text-xs text-destructive"
+                title={calendarEventsError?.message}
+              >
+                일정 불러오기 실패
+              </span>
+            ) : null}
             <Button
               aria-label="캘린더로 이동"
               className="ml-auto"
@@ -1604,10 +1580,11 @@ function ReadonlyCalendar() {
             {weekDates.map((date) => {
               const isToday = isSameCalendarDate(date, today);
               const dateValue = formatCalendarDate(date);
-              const dateEvents = mockCalendarEvents.filter(
-                (event) => event.startDate === dateValue
+              const dateEvents = calendarEvents.filter((event) =>
+                isCalendarEventOnDate(event, dateValue)
               );
               const firstEvent = dateEvents[0];
+              const hiddenEventCount = Math.max(0, dateEvents.length - 1);
 
               return (
                 <button
@@ -1638,12 +1615,22 @@ function ReadonlyCalendar() {
                   </span>
                   <span className="flex min-h-0 flex-1 items-center justify-center">
                     {firstEvent ? (
-                      <span
-                        className="block max-w-full truncate rounded-sm px-1 py-0.5 text-center text-[0.65rem] leading-none text-white"
-                        style={{ backgroundColor: firstEvent.color }}
-                      >
-                        {firstEvent.isAllDay ? "종일" : firstEvent.startTime}{" "}
-                        {firstEvent.title}
+                      <span className="flex max-w-full min-w-0 items-center justify-center gap-1">
+                        <span
+                          className="block min-w-0 truncate rounded-sm px-1 py-0.5 text-center text-[0.65rem] leading-none text-white"
+                          style={{ backgroundColor: firstEvent.color }}
+                        >
+                          {firstEvent.isAllDay ? "종일" : firstEvent.startTime}{" "}
+                          {firstEvent.title}
+                        </span>
+                        {hiddenEventCount > 0 ? (
+                          <span
+                            aria-label={`${hiddenEventCount}개 일정 더 있음`}
+                            className="shrink-0 rounded-full border border-[#B7DCD7] bg-[#2EC4B6]/10 px-1.5 py-0.5 text-[0.6rem] font-semibold leading-none text-[#0F766E]"
+                          >
+                            +{hiddenEventCount}
+                          </span>
+                        ) : null}
                       </span>
                     ) : null}
                   </span>
@@ -1860,6 +1847,109 @@ function getCalendarWeekDates(anchorDate: Date) {
     date.setDate(weekStartDate.getDate() + index);
     return date;
   });
+}
+
+type HomeWeekCalendarEventsState = {
+  error: Error | null;
+  events: CalendarEvent[];
+  status: "idle" | "loading" | "success" | "error";
+};
+
+const idleHomeWeekCalendarEventsState: HomeWeekCalendarEventsState = {
+  error: null,
+  events: [],
+  status: "idle"
+};
+
+function useHomeWeekCalendarEvents({
+  accessToken,
+  range,
+  workspaceId
+}: {
+  accessToken: string | null;
+  range: {
+    end: string;
+    start: string;
+  };
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const calendarClient = useMemo(
+    () => createCalendarApiClient({ accessToken: normalizedAccessToken }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeWeekCalendarEventsState>(
+    idleHomeWeekCalendarEventsState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadWeekEvents() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(idleHomeWeekCalendarEventsState);
+        return;
+      }
+
+      setState((currentState) => ({
+        ...currentState,
+        error: null,
+        status: "loading"
+      }));
+
+      try {
+        const events = await calendarClient.listEvents(normalizedWorkspaceId, range);
+
+        if (active) {
+          setState({
+            error: null,
+            events,
+            status: "success"
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            error: errorFromUnknown(error),
+            events: [],
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadWeekEvents();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    calendarClient,
+    normalizedAccessToken,
+    normalizedWorkspaceId,
+    range
+  ]);
+
+  return state;
+}
+
+function errorFromUnknown(error: unknown) {
+  return error instanceof Error
+    ? error
+    : new Error("Calendar events could not be loaded");
+}
+
+function isCalendarEventOnDate(event: CalendarEvent, date: string) {
+  return event.startDate <= date && event.endDate >= date;
+}
+
+function getCappedProgressPercent(value: number, maxValue: number) {
+  if (maxValue <= 0) {
+    return "0%";
+  }
+
+  return `${Math.min(100, Math.round((value / maxValue) * 100))}%`;
 }
 
 function isSameCalendarDate(firstDate: Date, secondDate: Date) {
