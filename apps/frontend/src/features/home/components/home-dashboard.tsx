@@ -232,8 +232,20 @@ function MembersCard() {
   const canManageWorkspace =
     activeWorkspace?.role === "owner" || activeWorkspace?.isOwner === true;
   const currentUserId = authSession?.user.id ?? null;
-  const onlineMembers = members;
-  const offlineMembers: WorkspaceMember[] = [];
+  const onlineMembers = activeWorkspace
+    ? members.filter(
+        (member) =>
+          member.user.activeWorkspaceId === activeWorkspace.id ||
+          member.userId === currentUserId
+      )
+    : [];
+  const offlineMembers = activeWorkspace
+    ? members.filter(
+        (member) =>
+          member.user.activeWorkspaceId !== activeWorkspace.id &&
+          member.userId !== currentUserId
+      )
+    : [];
   const canLeaveWorkspace = Boolean(activeWorkspace) && !canManageWorkspace;
 
   useEffect(() => {
