@@ -78,7 +78,8 @@ import { createGithubIntegrationApiClient } from "@/features/github-integration/
 import type {
   GithubOAuthStatus,
   GithubPullRequest,
-  GithubRepository
+  GithubRepository,
+  GithubRepositoryCollaboratorStatus
 } from "@/features/github-integration/types";
 import { readGithubBoardSelection } from "@/features/github-integration/utils/github-board-selection";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
@@ -135,12 +136,14 @@ type HomeGithubOAuthState = {
   value: GithubOAuthStatus | null;
 };
 
+type HomeRepositoryAccessState = {
+  access: GithubRepositoryCollaboratorStatus | null;
+  error: Error | null;
+  repository: GithubRepository | null;
+  status: "idle" | "loading" | "success" | "error";
+};
+
 const mockGithubConnectionStatus = {
-  repository: {
-    name: "PILO",
-    fullName: "PILO-APP/PILO",
-    hasCollaboratorAccess: true
-  },
   project: {
     title: "PILO Workspace",
     owner: "PILO-APP",
@@ -915,6 +918,10 @@ function GithubConnectionCard() {
   });
   const githubOAuth = githubOAuthState.value;
   const isGithubConnected = githubOAuth?.connected === true;
+  const repositoryAccessState = useHomeRepositoryAccess({
+    accessToken: isGithubConnected ? (authSession?.accessToken ?? null) : null,
+    workspaceId: authSession?.activeWorkspaceId ?? ""
+  });
   const githubLogin = githubOAuth?.githubLogin?.trim() || null;
   const githubStatusLabel =
     githubOAuthState.status === "loading"
@@ -944,6 +951,32 @@ function GithubConnectionCard() {
       : isGithubConnected
         ? "text-foreground"
         : "text-muted-foreground";
+  const repositoryLabel =
+    repositoryAccessState.repository?.fullName ??
+    repositoryAccessState.access?.repository.fullName ??
+    (repositoryAccessState.status === "loading"
+      ? "확인 중"
+      : repositoryAccessState.status === "error"
+        ? "Repository 확인 실패"
+        : "연결된 Repository 없음");
+  const repositoryAccessLabel =
+    repositoryAccessState.status === "loading"
+      ? "확인 중"
+      : repositoryAccessState.status === "error"
+        ? "확인 실패"
+        : repositoryAccessState.access?.hasAccess === true
+          ? "권한 있음"
+          : repositoryAccessState.repository
+            ? "권한 없음"
+            : "없음";
+  const repositoryAccessTone: "danger" | "muted" | "neutral" | "success" =
+    repositoryAccessState.status === "loading" ||
+    (!repositoryAccessState.repository &&
+      repositoryAccessState.status !== "error")
+      ? "muted"
+      : repositoryAccessState.access?.hasAccess === true
+        ? "success"
+        : "danger";
 
   return (
     <div className="grid min-h-0 grid-rows-[repeat(3,minmax(0,1fr))] gap-3 xl:col-start-3 xl:row-start-1">
@@ -982,20 +1015,12 @@ function GithubConnectionCard() {
               <p className="truncate text-sm font-medium">Repository</p>
             </div>
             <StatusPill
-              label={
-                mockGithubConnectionStatus.repository.hasCollaboratorAccess
-                  ? "권한 있음"
-                  : "권한 없음"
-              }
-              tone={
-                mockGithubConnectionStatus.repository.hasCollaboratorAccess
-                  ? "success"
-                  : "danger"
-              }
+              label={repositoryAccessLabel}
+              tone={repositoryAccessTone}
             />
           </div>
           <p className="truncate text-sm font-medium">
-            {mockGithubConnectionStatus.repository.fullName}
+            {repositoryLabel}
           </p>
         </CardContent>
       </Card>
@@ -2022,6 +2047,13 @@ const emptyHomeGithubOAuthState: HomeGithubOAuthState = {
   value: null
 };
 
+const emptyHomeRepositoryAccessState: HomeRepositoryAccessState = {
+  access: null,
+  error: null,
+  repository: null,
+  status: "idle"
+};
+
 function useHomeGithubOAuthStatus({
   accessToken
 }: {
@@ -2080,6 +2112,112 @@ function useHomeGithubOAuthStatus({
       active = false;
     };
   }, [githubClient, normalizedAccessToken]);
+
+  return state;
+}
+
+function useHomeRepositoryAccess({
+  accessToken,
+  workspaceId
+}: {
+  accessToken: string | null;
+  workspaceId: string;
+}) {
+  const normalizedAccessToken = accessToken?.trim() || null;
+  const normalizedWorkspaceId = workspaceId.trim();
+  const githubClient = useMemo(
+    () =>
+      createGithubIntegrationApiClient({
+        accessToken: normalizedAccessToken
+      }),
+    [normalizedAccessToken]
+  );
+  const [state, setState] = useState<HomeRepositoryAccessState>(
+    emptyHomeRepositoryAccessState
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadRepositoryAccess() {
+      if (!normalizedAccessToken || !normalizedWorkspaceId) {
+        setState(emptyHomeRepositoryAccessState);
+        return;
+      }
+
+      setState({
+        ...emptyHomeRepositoryAccessState,
+        status: "loading"
+      });
+
+      try {
+        const repositories = await githubClient.listGithubRepositories(
+          normalizedWorkspaceId,
+          {
+            includeArchived: false,
+            limit: 50
+          }
+        );
+        const repositoryId = selectHomeRepositoryId(
+          repositories.data,
+          normalizedWorkspaceId
+        );
+        const repository =
+          repositories.data.find((item) => item.id === repositoryId) ?? null;
+
+        if (!repository) {
+          if (active) {
+            setState({
+              ...emptyHomeRepositoryAccessState,
+              status: "success"
+            });
+          }
+          return;
+        }
+
+        try {
+          const access =
+            await githubClient.getGithubRepositoryCollaboratorStatus(
+              normalizedWorkspaceId,
+              repository.id
+            );
+
+          if (active) {
+            setState({
+              access,
+              error: null,
+              repository,
+              status: "success"
+            });
+          }
+        } catch (error) {
+          if (active) {
+            setState({
+              access: null,
+              error: errorFromUnknown(error),
+              repository,
+              status: "error"
+            });
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setState({
+            access: null,
+            error: errorFromUnknown(error),
+            repository: null,
+            status: "error"
+          });
+        }
+      }
+    }
+
+    void loadRepositoryAccess();
+
+    return () => {
+      active = false;
+    };
+  }, [githubClient, normalizedAccessToken, normalizedWorkspaceId]);
 
   return state;
 }

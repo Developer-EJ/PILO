@@ -57,6 +57,7 @@ import type {
   GithubPullRequestListItemPayload,
   GithubWebhookDeliveryPayload,
   GithubRepositoryDetailPayload,
+  GithubRepositoryCollaboratorStatusPayload,
   GithubRepositoryListItemPayload,
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
@@ -341,6 +342,22 @@ export class GithubIntegrationController {
       query
     );
     return apiPaginatedResponse(result);
+  }
+
+  @Get("workspaces/:workspaceId/github/repositories/:repositoryId/collaborator-status")
+  @UseGuards(AuthGuard)
+  async getGithubRepositoryCollaboratorStatus(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("repositoryId") repositoryId: string
+  ): Promise<ApiSuccessResponse<GithubRepositoryCollaboratorStatusPayload>> {
+    const result =
+      await this.githubIntegrationService.getGithubRepositoryCollaboratorStatus(
+        currentUserId,
+        workspaceId,
+        repositoryId
+      );
+    return apiResponse(result);
   }
 
   @Get("workspaces/:workspaceId/github/repositories/:repositoryId")

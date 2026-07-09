@@ -1,4 +1,6 @@
 ﻿import { Injectable, Optional } from "@nestjs/common";
+import type { QueryResultRow } from "pg";
+import { badRequest, notFound, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubAppClient } from "./github-app.client";
@@ -61,11 +63,26 @@ import type {
   GithubPullRequestReviewSubmissionPayload,
   GithubWebhookDeliveryPayload,
   GithubRepositoryDetailPayload,
+  GithubRepositoryCollaboratorStatusPayload,
   GithubRepositoryListItemPayload,
   SubmitGithubPullRequestReviewInput,
   GithubSyncRunDetailPayload,
   GithubSyncRunPayload
 } from "./types";
+
+interface GithubRepositoryAccessOAuthRow extends QueryResultRow {
+  github_login: string | null;
+  github_access_token_encrypted: string | null;
+  github_connected_at: Date | string | null;
+  github_revoked_at: Date | string | null;
+}
+
+interface GithubRepositoryAccessRow extends QueryResultRow {
+  id: string;
+  owner_login: string;
+  name: string;
+  full_name: string;
+}
 
 @Injectable()
 export class GithubIntegrationService {
@@ -337,6 +354,82 @@ export class GithubIntegrationService {
       workspaceId,
       repositoryId
     );
+  }
+
+  async getGithubRepositoryCollaboratorStatus(
+    currentUserId: string,
+    workspaceId: string,
+    repositoryId: string
+  ): Promise<GithubRepositoryCollaboratorStatusPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const [oauthRow, repository] = await Promise.all([
+      this.database.queryOne<GithubRepositoryAccessOAuthRow>(
+        `
+          SELECT
+            github_login,
+            github_access_token_encrypted,
+            github_connected_at,
+            github_revoked_at
+          FROM users
+          WHERE id = $1
+        `,
+        [currentUserId]
+      ),
+      this.database.queryOne<GithubRepositoryAccessRow>(
+        `
+          SELECT
+            id,
+            owner_login,
+            name,
+            full_name
+          FROM github_repositories
+          WHERE workspace_id = $1
+            AND id = $2
+        `,
+        [workspaceId, repositoryId]
+      )
+    ]);
+
+    if (!oauthRow) {
+      throw unauthorized("Current user not found");
+    }
+
+    if (!repository) {
+      throw notFound("GitHub repository not found");
+    }
+
+    if (
+      !oauthRow.github_access_token_encrypted ||
+      !oauthRow.github_login ||
+      !oauthRow.github_connected_at ||
+      oauthRow.github_revoked_at
+    ) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const accessToken = this.tokenEncryptionService.decryptToken(
+      oauthRow.github_access_token_encrypted,
+      this.configService.getGithubOAuthConfig()
+    );
+    const { permission } =
+      await this.githubOAuthClient.getRepositoryCollaboratorPermission({
+        accessToken,
+        owner: repository.owner_login,
+        repo: repository.name,
+        username: oauthRow.github_login
+      });
+
+    return {
+      repository: {
+        id: repository.id,
+        fullName: repository.full_name
+      },
+      githubLogin: oauthRow.github_login,
+      permission,
+      hasAccess: Boolean(permission && permission !== "none"),
+      checkedAt: new Date().toISOString()
+    };
   }
 
   async listGithubProjectsV2(

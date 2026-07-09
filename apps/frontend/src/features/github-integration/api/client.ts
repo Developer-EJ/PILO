@@ -13,6 +13,7 @@ import type {
   GithubProjectV2,
   GithubPullRequest,
   GithubRepository,
+  GithubRepositoryCollaboratorStatus,
   GithubSyncRun,
   ListGithubProjectsV2Query,
   ListGithubPullRequestsQuery,
@@ -431,6 +432,17 @@ export function createGithubIntegrationApiClient({
     async getGithubRepository(workspaceId: string, repositoryId: string) {
       return requestGithubIntegrationData<GithubRepository>(
         repositoryGithubPath(workspaceId, repositoryId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async getGithubRepositoryCollaboratorStatus(
+      workspaceId: string,
+      repositoryId: string
+    ) {
+      return requestGithubIntegrationData<GithubRepositoryCollaboratorStatus>(
+        `${repositoryGithubPath(workspaceId, repositoryId)}/collaborator-status`,
         undefined,
         requestOptions
       );

@@ -75,6 +75,17 @@ export type GithubRepository = {
   lastSyncedAt: string | null;
 };
 
+export type GithubRepositoryCollaboratorStatus = {
+  repository: {
+    id: string;
+    fullName: string;
+  };
+  githubLogin: string;
+  permission: string | null;
+  hasAccess: boolean;
+  checkedAt: string;
+};
+
 export type GithubProjectV2 = {
   id: string;
   installationId: string;

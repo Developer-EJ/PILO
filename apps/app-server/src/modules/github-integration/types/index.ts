@@ -114,6 +114,17 @@ export interface GithubRepositoryDetailPayload
   githubUpdatedAt: string | null;
 }
 
+export interface GithubRepositoryCollaboratorStatusPayload {
+  repository: {
+    id: string;
+    fullName: string;
+  };
+  githubLogin: string;
+  permission: string | null;
+  hasAccess: boolean;
+  checkedAt: string;
+}
+
 export type GithubProjectV2OwnerType = "User" | "Organization";
 
 export type GithubProjectV2ItemContentType =
