@@ -16,7 +16,11 @@ async function compileSqlErdRuntimeModules() {
   const modelOutputPath = join(outputDir, "model.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
+  const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
+  const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
+  const sessionStateOutputPath = join(outputDir, "session-state.mjs");
+  const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -34,8 +38,31 @@ async function compileSqlErdRuntimeModules() {
       [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/generate-session.ts",
+      generateSessionOutputPath,
+      [
+        [
+          /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
+          'from "./ddl-parser.mjs"'
+        ],
+        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+      ]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/layout-autosave.ts",
+      layoutAutosaveOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/api/client.ts",
       apiClientOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-state.ts",
+      sessionStateOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/status-copy.ts",
+      statusCopyOutputPath
     );
 
     await writeFile(
@@ -47,15 +74,32 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       inspectorRuntime,
       ddlParserRuntime,
-      apiClientRuntime
+      generateSessionRuntime,
+      layoutAutosaveRuntime,
+      apiClientRuntime,
+      sessionStateRuntime,
+      statusCopyRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
-      import(pathToFileHref(apiClientOutputPath))
+      import(pathToFileHref(generateSessionOutputPath)),
+      import(pathToFileHref(layoutAutosaveOutputPath)),
+      import(pathToFileHref(apiClientOutputPath)),
+      import(pathToFileHref(sessionStateOutputPath)),
+      import(pathToFileHref(statusCopyOutputPath))
     ]);
 
-    return { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime };
+    return {
+      apiClientRuntime,
+      ddlParserRuntime,
+      generateSessionRuntime,
+      layoutAutosaveRuntime,
+      inspectorRuntime,
+      modelRuntime,
+      sessionStateRuntime,
+      statusCopyRuntime
+    };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }
@@ -216,6 +260,10 @@ const [
   page,
   navigation,
   panel,
+  sessionStateUtils,
+  generateSessionUtils,
+  layoutAutosaveUtils,
+  statusCopyUtils,
   canvasSurface,
   tableShape,
   relationShape,
@@ -232,6 +280,10 @@ const [
     readSqlErdFile("../../src/features/sql-erd/page.tsx"),
     readSqlErdFile("../../src/features/sql-erd/navigation.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-panel.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/utils/session-state.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
@@ -240,8 +292,16 @@ const [
     readSqlErdFile("../../package.json")
   ]);
 
-const { apiClientRuntime, ddlParserRuntime, inspectorRuntime, modelRuntime } =
-  await compileSqlErdRuntimeModules();
+const {
+  apiClientRuntime,
+  ddlParserRuntime,
+  generateSessionRuntime,
+  layoutAutosaveRuntime,
+  inspectorRuntime,
+  modelRuntime,
+  sessionStateRuntime,
+  statusCopyRuntime
+} = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
@@ -310,6 +370,289 @@ assert.equal(
     (relation) => relation.id === runtimeUsersSelfRelation.id
   ).length,
   1
+);
+
+const manualReloadFailureAction =
+  sessionStateRuntime.getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: false
+  });
+
+assert.equal(manualReloadFailureAction.kind, "preserve_current");
+assert.equal(
+  manualReloadFailureAction.sessionLoadState.label,
+  "Reload failed"
+);
+assert.equal(
+  manualReloadFailureAction.sessionLoadState.message,
+  "Workspace session could not be reloaded. Keep editing the current ERD or try reloading again."
+);
+
+const initialReloadFailureAction =
+  sessionStateRuntime.getSqlErdSessionReloadFailureAction({
+    fallbackToSampleOnFailure: true
+  });
+
+assert.equal(initialReloadFailureAction.kind, "fallback_to_sample");
+assert.deepEqual(initialReloadFailureAction.selectedSqlErdObject, {
+  type: "none"
+});
+assert.deepEqual(initialReloadFailureAction.sessionLoadState, {
+  label: "Sample",
+  message: "Workspace session could not be loaded. Showing the built-in sample instead.",
+  tone: "neutral"
+});
+assert.equal(
+  sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 7),
+  true
+);
+assert.equal(
+  sessionStateRuntime.shouldApplySqlErdSessionLoadResult(7, 8),
+  false
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(409),
+  "conflict"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(401),
+  "unauthorized"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(403),
+  "forbidden"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(404),
+  "not_found"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(400),
+  "invalid_payload"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(413),
+  "invalid_payload"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(418),
+  "unknown_non_transient"
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(408),
+  null
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(429),
+  null
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(500),
+  null
+);
+assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(undefined),
+  null
+);
+assert.equal(sessionStateRuntime.isLayoutAutosaveTransientStatus(500), true);
+assert.equal(sessionStateRuntime.isLayoutAutosaveTransientStatus(400), false);
+assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(0), 2000);
+assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(1), 4000);
+assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(4), 30000);
+assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("conflict"), {
+  canRetry: false,
+  message: "Workspace session changed. Reload the latest session before saving this layout.",
+  reason: "conflict"
+});
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner("unauthorized"),
+  {
+    canRetry: false,
+    message: "Sign in again, then reload this SQLtoERD session.",
+    reason: "unauthorized"
+  }
+);
+assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("forbidden"), {
+  canRetry: false,
+  message: "You do not have permission to save this SQLtoERD session.",
+  reason: "forbidden"
+});
+assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("not_found"), {
+  canRetry: false,
+  message: "This SQLtoERD session was deleted or cannot be found. Reload the session.",
+  reason: "not_found"
+});
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner("invalid_payload"),
+  {
+    canRetry: true,
+    message: "Current layout payload cannot be autosaved. Try moving a table again or reload the session.",
+    reason: "invalid_payload"
+  }
+);
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner("unknown_non_transient"),
+  {
+    canRetry: true,
+    message: "Autosave stopped after a non-retryable API error. Retry once or reload the session.",
+    reason: "unknown_non_transient"
+  }
+);
+
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("EMPTY_SOURCE"),
+  "Enter at least one CREATE TABLE statement to generate an ERD."
+);
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("UNSUPPORTED_DIALECT"),
+  "This SQL dialect is not supported yet. Choose PostgreSQL or MySQL."
+);
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("NO_CREATE_TABLE"),
+  "SQLtoERD MVP supports CREATE TABLE DDL. Add at least one CREATE TABLE statement."
+);
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("PARSE_FAILED"),
+  "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again."
+);
+assert.deepEqual(statusCopyRuntime.getSqlErdSignInRequiredState(), {
+  label: "Sign in",
+  message: "Sign in to save this SQLtoERD session in the Workspace.",
+  tone: "error"
+});
+assert.deepEqual(statusCopyRuntime.getSqlErdWorkspaceSaveErrorState(), {
+  label: "Save error",
+  message: "Workspace session could not be saved. Check your connection and try Generate again.",
+  tone: "error"
+});
+
+const generateSmokeSource = `
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE
+);
+
+CREATE TABLE posts (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+`;
+const generateSmokeBaseSession = {
+  id: null,
+  revision: null,
+  title: "Generated ERD",
+  sourceFormat: "sql",
+  dialect: "postgresql",
+  sourceText: generateSmokeSource,
+  modelJson: createRuntimeTestModel(),
+  layoutJson: {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 512, y: 256, width: 320 }]
+  },
+  settingsJson: { sourcePanelOpen: true }
+};
+const createGenerateRequest =
+  generateSessionRuntime.createSqlErdGenerateWorkspaceRequest(
+    generateSmokeBaseSession
+  );
+
+assert.equal(createGenerateRequest.ok, true);
+assert.equal(createGenerateRequest.kind, "create");
+assert.equal(createGenerateRequest.payload.title, "Generated ERD");
+assert.equal(createGenerateRequest.payload.sourceText, generateSmokeSource);
+assert.equal(createGenerateRequest.payload.dialect, "postgresql");
+assert.equal(createGenerateRequest.payload.modelJson.schema.tables.length, 2);
+assert.equal(createGenerateRequest.payload.modelJson.schema.relations.length, 1);
+assert.deepEqual(createGenerateRequest.payload.layoutJson.tableLayouts[0], {
+  tableId: "table.users",
+  x: 512,
+  y: 256,
+  width: 320
+});
+assert.equal(
+  createGenerateRequest.payload.layoutJson.tableLayouts[1].tableId,
+  "table.posts"
+);
+assert.deepEqual(createGenerateRequest.payload.settingsJson, {
+  sourcePanelOpen: true
+});
+
+const updateGenerateRequest =
+  generateSessionRuntime.createSqlErdGenerateWorkspaceRequest({
+    ...generateSmokeBaseSession,
+    id: "session-1",
+    revision: 7
+  });
+
+assert.equal(updateGenerateRequest.ok, true);
+assert.equal(updateGenerateRequest.kind, "update");
+assert.equal(updateGenerateRequest.sessionId, "session-1");
+assert.equal(updateGenerateRequest.payload.baseRevision, 7);
+assert.equal(updateGenerateRequest.payload.modelJson.schema.tables.length, 2);
+
+const invalidGenerateRequest =
+  generateSessionRuntime.createSqlErdGenerateWorkspaceRequest({
+    ...generateSmokeBaseSession,
+    sourceText: "SELECT 1;"
+  });
+
+assert.equal(invalidGenerateRequest.ok, false);
+assert.equal(invalidGenerateRequest.error.code, "NO_CREATE_TABLE");
+
+const autosaveLayoutJson = {
+  version: 1,
+  tableLayouts: [
+    { tableId: "table.users", x: 720, y: 360, width: 320 },
+    { tableId: "table.posts", x: 1080, y: 360 }
+  ]
+};
+const layoutAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdLayoutAutosaveRequest(
+    {
+      ...generateSmokeBaseSession,
+      id: "session-2",
+      revision: 12
+    },
+    autosaveLayoutJson
+  );
+
+assert.equal(layoutAutosaveRequest.ok, true);
+assert.equal(layoutAutosaveRequest.sessionId, "session-2");
+assert.deepEqual(layoutAutosaveRequest.payload, {
+  baseRevision: 12,
+  layoutJson: autosaveLayoutJson
+});
+assert.equal(Object.hasOwn(layoutAutosaveRequest.payload, "sourceText"), false);
+assert.equal(Object.hasOwn(layoutAutosaveRequest.payload, "modelJson"), false);
+assert.equal(Object.hasOwn(layoutAutosaveRequest.payload, "settingsJson"), false);
+
+const sampleLayoutAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdLayoutAutosaveRequest(
+    generateSmokeBaseSession,
+    autosaveLayoutJson
+  );
+
+assert.equal(sampleLayoutAutosaveRequest.ok, false);
+assert.equal(
+  sampleLayoutAutosaveRequest.reason,
+  "missing_workspace_session"
+);
+
+const missingRevisionLayoutAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdLayoutAutosaveRequest(
+    {
+      ...generateSmokeBaseSession,
+      id: "session-3",
+      revision: null
+    },
+    autosaveLayoutJson
+  );
+
+assert.equal(missingRevisionLayoutAutosaveRequest.ok, false);
+assert.equal(
+  missingRevisionLayoutAutosaveRequest.reason,
+  "missing_workspace_session"
 );
 
 const sqlErdApiRequests = [];
@@ -653,6 +996,43 @@ assert.deepEqual(generatedLayout.tableLayouts[1], {
   y: 80
 });
 
+const movedRuntimeLayout = modelRuntime.updateSqltoerdLayoutWithTablePositions(
+  runtimeModel,
+  {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 10, y: 20, width: 240 },
+      { tableId: "table.orders", x: 360, y: 20, width: 260 }
+    ]
+  },
+  [
+    { tableId: "table.orders", x: 460, y: 180 },
+    { tableId: "table.unknown", x: 999, y: 999 }
+  ]
+);
+
+assert.deepEqual(movedRuntimeLayout.tableLayouts, [
+  { tableId: "table.users", x: 10, y: 20, width: 240 },
+  { tableId: "table.orders", x: 460, y: 180, width: 260 }
+]);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    movedRuntimeLayout,
+    movedRuntimeLayout
+  ),
+  true
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 10, y: 20, width: 240 },
+      { tableId: "table.orders", x: 461, y: 180, width: 260 }
+    ]
+  }),
+  false
+);
+
 const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "auto",
   sourceText: `CREATE TABLE users (
@@ -735,6 +1115,8 @@ assert.match(modelUtils, /getTableLayout/);
 assert.match(modelUtils, /getRelationEndpoints/);
 assert.match(modelUtils, /getTableDisplayName/);
 assert.match(modelUtils, /createSqltoerdLayoutForModel/);
+assert.match(modelUtils, /updateSqltoerdLayoutWithTablePositions/);
+assert.match(modelUtils, /areSqltoerdLayoutsEqual/);
 assert.match(modelUtils, /relationsByTableId/);
 assert.match(modelUtils, /columnsByTableId/);
 assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
@@ -749,16 +1131,113 @@ assert.match(navigation, /href: "\/sql-erd"/);
 assert.doesNotMatch(navigation, /Inspector/);
 assert.doesNotMatch(navigation, /href: "\/sql-erd#inspector"/);
 
+assert.match(sessionStateUtils, /getSqlErdSessionReloadFailureAction/);
+assert.match(sessionStateUtils, /kind: "preserve_current"/);
+assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
+assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
+assert.match(sessionStateUtils, /SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000/);
+assert.match(
+  sessionStateUtils,
+  /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/
+);
+assert.match(sessionStateUtils, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(sessionStateUtils, /isLayoutAutosaveTransientStatus/);
+assert.match(sessionStateUtils, /getLayoutAutosaveDelayMs/);
+assert.match(sessionStateUtils, /getLayoutAutosavePausedBanner/);
+assert.match(sessionStateUtils, /status === 409/);
+assert.match(sessionStateUtils, /status === 408 \|\| status === 429 \|\| status >= 500/);
+assert.match(sessionStateUtils, /status === 401/);
+assert.match(sessionStateUtils, /status === 403/);
+assert.match(sessionStateUtils, /status === 404/);
+assert.match(sessionStateUtils, /status === 400 \|\| status === 413/);
+
+assert.match(generateSessionUtils, /createSqlErdGenerateWorkspaceRequest/);
+assert.match(generateSessionUtils, /parseSqlDdlToErdModel/);
+assert.match(generateSessionUtils, /createSqltoerdLayoutForModel/);
+assert.match(generateSessionUtils, /kind: "create"/);
+assert.match(generateSessionUtils, /kind: "update"/);
+assert.match(generateSessionUtils, /baseRevision: session\.revision/);
+
+assert.match(layoutAutosaveUtils, /createSqlErdLayoutAutosaveRequest/);
+assert.match(layoutAutosaveUtils, /baseRevision: session\.revision/);
+assert.match(layoutAutosaveUtils, /layoutJson/);
+assert.match(layoutAutosaveUtils, /missing_workspace_session/);
+
+assert.match(statusCopyUtils, /getSqlErdGenerateErrorMessage/);
+assert.match(statusCopyUtils, /getSqlErdSignInRequiredState/);
+assert.match(statusCopyUtils, /getSqlErdWorkspaceSaveErrorState/);
+assert.match(statusCopyUtils, /CREATE TABLE statement/);
+assert.match(statusCopyUtils, /Check your connection and try Generate again/);
+
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
 assert.match(panel, /createSqlErdApiClient/);
 assert.match(panel, /getActiveSession/);
-assert.match(panel, /parseSqlDdlToErdModel/);
+assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
+assert.match(panel, /getSqlErdGenerateErrorMessage/);
+assert.match(panel, /getSqlErdSignInRequiredState/);
+assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(panel, /handleGenerate/);
 assert.match(panel, /createSession/);
 assert.match(panel, /updateSession/);
-assert.match(panel, /baseRevision: sqlErdViewSession\.revision/);
-assert.match(panel, /createSqltoerdLayoutForModel/);
+assert.match(panel, /pendingLayoutAutosaveJson/);
+assert.match(panel, /layoutAutosaveRetryAttempt/);
+assert.match(panel, /type LayoutAutosaveBlockReason/);
+assert.match(panel, /layoutAutosaveBlockReason/);
+assert.match(panel, /getLayoutAutosaveBlockReason/);
+assert.match(panel, /getLayoutAutosavePausedBanner/);
+assert.match(panel, /AutosavePausedBanner/);
+assert.match(panel, /Autosave paused/);
+assert.match(panel, /Reload session/);
+assert.match(panel, /Retry once/);
+assert.match(panel, /handleReloadSession/);
+assert.match(panel, /handleReloadPausedSession/);
+assert.match(panel, /handleRetryLayoutAutosaveOnce/);
+assert.match(panel, /handleLayoutChange/);
+assert.match(panel, /sessionLoadRequestIdRef/);
+assert.match(panel, /shouldApplySqlErdSessionLoadResult/);
+assert.match(panel, /fallbackToSampleOnFailure/);
+assert.match(panel, /getSqlErdSessionReloadFailureAction/);
+assert.match(
+  panel,
+  /void handleReloadSession\(\{ fallbackToSampleOnFailure: true \}\)/
+);
+assert.match(panel, /onReloadSession=\{handleReloadPausedSession\}/);
+assert.doesNotMatch(panel, /onReloadSession=\{handleReloadSession\}/);
+assert.doesNotMatch(
+  panel,
+  /catch \{\s*setSqlErdViewSession\(sampleSqlErdViewSession\);[\s\S]*?setPendingLayoutAutosaveJson\(null\);/
+);
+assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
+assert.match(panel, /isSqlErdApiTransientAutosaveError/);
+assert.match(panel, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(panel, /isLayoutAutosaveTransientStatus/);
+assert.match(panel, /createSqlErdLayoutAutosaveRequest/);
+assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
+const layoutAutosaveNonConflictCatch =
+  panel.match(
+    /if \(isSqlErdApiConflictError\(error\)\) \{[\s\S]*?return;\n\s*\}\n\n([\s\S]*?)\n\s*\}\n\s*\}, autosaveDelayMs/
+  )?.[1] ?? "";
+assert.match(
+  layoutAutosaveNonConflictCatch,
+  /setLayoutAutosaveRetryAttempt\(\(currentAttempt\) => currentAttempt \+ 1\)/
+);
+assert.match(
+  layoutAutosaveNonConflictCatch,
+  /if \(layoutAutosaveBlockReason\) \{[\s\S]*?setLayoutAutosaveBlockReason\(layoutAutosaveBlockReason\)[\s\S]*?return;/
+);
+assert.doesNotMatch(
+  layoutAutosaveNonConflictCatch,
+  /setPendingLayoutAutosaveJson/
+);
+const layoutAutosaveConflictCatch =
+  panel.match(
+    /if \(isSqlErdApiConflictError\(error\)\) \{([\s\S]*?)\n\s*return;\n\s*\}/
+  )?.[1] ?? "";
+assert.doesNotMatch(
+  layoutAutosaveConflictCatch,
+  /setPendingLayoutAutosaveJson\(null\)/
+);
 assert.match(panel, /handleDialectChange/);
 assert.match(panel, /onDialectChange=\{handleDialectChange\}/);
 assert.match(panel, /DialectSelect/);
@@ -840,6 +1319,7 @@ assert.match(inspectorUtils, /relation\.toTableId === tableId/);
 assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
 assert.match(canvasSurface, /SqlErdCanvasShapeSync/);
+assert.match(canvasSurface, /areSqlErdCanvasShapesApplied/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
@@ -851,6 +1331,9 @@ assert.match(canvasSurface, /editor\.updateShapes/);
 assert.match(canvasSurface, /history: "ignore"/);
 assert.match(canvasSurface, /SqlErdSelectionSync/);
 assert.match(canvasSurface, /SqlErdSelectedColumnSync/);
+assert.match(canvasSurface, /SqlErdLayoutSync/);
+assert.match(canvasSurface, /onLayoutChange/);
+assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
