@@ -190,7 +190,7 @@ module "ecs" {
         PORT                          = tostring(var.app_server_port)
         DATABASE_SSL                  = "true"
         S3_UPLOADS_BUCKET             = module.s3.uploads_bucket_name
-        SQS_AGENT_JOBS_QUEUE_URL            = module.sqs.agent_jobs_queue_url
+        SQS_AGENT_JOBS_QUEUE_URL          = module.sqs.agent_jobs_queue_url
         SQS_MEETING_REPORT_JOBS_QUEUE_URL = module.sqs.ai_jobs_queue_url
         SQS_GITHUB_WEBHOOKS_QUEUE_URL = module.sqs.github_webhooks_queue_url
         FRONTEND_URL                  = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
