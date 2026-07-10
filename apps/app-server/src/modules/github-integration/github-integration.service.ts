@@ -237,6 +237,10 @@ export class GithubIntegrationService {
     };
   }
 
+  getGithubCallbackFailureRedirectUrl(): string {
+    return this.configService.getGithubConnectionPageUrl();
+  }
+
   async receiveGithubWebhook(
     input: GithubWebhookRequest
   ): Promise<GithubWebhookDeliveryPayload> {

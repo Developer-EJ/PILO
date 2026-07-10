@@ -36,6 +36,10 @@ const GITHUB_APP_SLUG_PATTERN = /^[a-zA-Z0-9-]+$/;
 
 @Injectable()
 export class GithubIntegrationConfigService {
+  getGithubConnectionPageUrl(): string {
+    return new URL("/github", this.getFrontendUrl()).toString();
+  }
+
   getGithubOAuthConfig(): GithubOAuthRuntimeConfig {
     const clientId = this.requireConfig(process.env.GITHUB_USER_OAUTH_CLIENT_ID);
     const clientSecret = this.requireConfig(process.env.GITHUB_USER_OAUTH_CLIENT_SECRET);
@@ -160,6 +164,12 @@ export class GithubIntegrationConfigService {
         "GitHub App webhook is not configured"
       )
     };
+  }
+
+  private getFrontendUrl(): string {
+    return this.normalizeOrigin(
+      process.env.FRONTEND_URL?.trim() || DEFAULT_FRONTEND_URL
+    );
   }
 
   private requireConfig(
