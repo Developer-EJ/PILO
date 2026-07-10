@@ -72,7 +72,6 @@ assert.match(agentChatWidget, /getRun/);
 assert.match(agentChatWidget, /approveConfirmation/);
 assert.match(agentChatWidget, /rejectConfirmation/);
 assert.match(agentChatWidget, /AgentConfirmationCard/);
-assert.match(agentChatWidget, /z-\[80\]/);
 assert.match(agentChatWidget, /handleConfirmationAction/);
 assert.match(agentChatWidget, /CONFIRMATION_EXPIRED/);
 assert.match(agentChatWidget, /CONFIRMATION_NOT_PENDING/);

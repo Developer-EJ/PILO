@@ -499,7 +499,7 @@ export function AgentChatWidget() {
   }
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[80] flex justify-end px-4 sm:bottom-6 sm:px-6">
+    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-end px-4 sm:bottom-6 sm:px-6">
       <div className="pointer-events-auto flex w-full max-w-[400px] flex-col items-end gap-3">
         {isOpen ? (
           <section
