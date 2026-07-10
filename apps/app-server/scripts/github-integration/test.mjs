@@ -136,6 +136,10 @@ assert.match(envExample, /^GITHUB_PROJECT_OAUTH_CLIENT_ID=/m);
 assert.match(envExample, /^GITHUB_PROJECT_OAUTH_CLIENT_SECRET=/m);
 assert.match(githubIntegrationApi, /GitHub account is already connected to another PILO account/);
 assert.match(githubIntegrationApi, /409 CONFLICT/);
+assert.match(githubIntegrationApi, /github_callback_error=invalid_state/);
+assert.match(githubIntegrationApi, /github_callback_error=authorization_cancelled/);
+assert.match(githubIntegrationApi, /github_callback_error=token_exchange_failed/);
+assert.match(githubIntegrationApi, /github_callback_error=installation_not_accessible/);
 assert.match(githubIntegrationApi, /github_oauth_error=account_already_connected/);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 

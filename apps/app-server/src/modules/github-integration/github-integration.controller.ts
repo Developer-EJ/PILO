@@ -30,9 +30,9 @@ import type {
 } from "./dto";
 import { GithubIntegrationService } from "./github-integration.service";
 import {
-  appendGithubOAuthCallbackError,
-  GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_QUERY_VALUE,
-  GithubOAuthAccountAlreadyConnectedError
+  appendGithubCallbackError,
+  getGithubCallbackErrorCode,
+  getGithubCallbackErrorReturnUrl
 } from "./github-oauth-callback-error";
 import type {
   GithubAppInstallationCallbackPayload,
@@ -92,17 +92,45 @@ function redirectToReturnUrl(reply: FastifyReply, returnUrl: string | null): boo
   return true;
 }
 
-function redirectToGithubOAuthCallbackError(
+function redirectToGithubCallbackError(
   reply: FastifyReply,
-  returnUrl: string | null,
-  errorValue: string
-): boolean {
-  if (!returnUrl) {
-    return false;
+  returnUrl: string,
+  error: unknown
+): void {
+  reply.redirect(
+    appendGithubCallbackError(returnUrl, getGithubCallbackErrorCode(error)),
+    302
+  );
+}
+
+function redirectToGithubCallbackFailure(
+  reply: FastifyReply,
+  fallbackUrl: string,
+  error: unknown
+): void {
+  redirectToGithubCallbackError(
+    reply,
+    getGithubCallbackErrorReturnUrl(error) ?? fallbackUrl,
+    error
+  );
+}
+
+function redirectGithubCallbackException(
+  reply: FastifyReply,
+  githubIntegrationService: GithubIntegrationService,
+  error: unknown
+): void {
+  const returnUrl = getGithubCallbackErrorReturnUrl(error);
+  if (returnUrl) {
+    redirectToGithubCallbackError(reply, returnUrl, error);
+    return;
   }
 
-  reply.redirect(appendGithubOAuthCallbackError(returnUrl, errorValue), 302);
-  return true;
+  redirectToGithubCallbackFailure(
+    reply,
+    githubIntegrationService.getGithubCallbackFailureRedirectUrl(),
+    error
+  );
 }
 
 @Controller()
@@ -146,18 +174,12 @@ export class GithubIntegrationController {
         cookieHeader
       );
     } catch (error) {
-      if (
-        error instanceof GithubOAuthAccountAlreadyConnectedError &&
-        redirectToGithubOAuthCallbackError(
-          reply,
-          error.returnUrl,
-          GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_QUERY_VALUE
-        )
-      ) {
-        return undefined;
-      }
-
-      throw error;
+      redirectGithubCallbackException(
+        reply,
+        this.githubIntegrationService,
+        error
+      );
+      return undefined;
     }
 
     if (redirectToReturnUrl(reply, result.returnUrl)) {
@@ -212,11 +234,21 @@ export class GithubIntegrationController {
     @Headers("cookie") cookieHeader: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<GithubProjectOAuthCallbackPayload> | undefined> {
-    const result =
-      await this.githubIntegrationService.completeGithubProjectOAuthCallback(
-        query,
-        cookieHeader
+    let result: GithubProjectOAuthCallbackPayload;
+    try {
+      result =
+        await this.githubIntegrationService.completeGithubProjectOAuthCallback(
+          query,
+          cookieHeader
+        );
+    } catch (error) {
+      redirectGithubCallbackException(
+        reply,
+        this.githubIntegrationService,
+        error
       );
+      return undefined;
+    }
     if (redirectToReturnUrl(reply, result.returnUrl)) {
       return undefined;
     }
@@ -260,11 +292,21 @@ export class GithubIntegrationController {
     @Headers("cookie") cookieHeader: string | undefined,
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<ApiSuccessResponse<GithubAppInstallationCallbackPayload> | undefined> {
-    const result =
-      await this.githubIntegrationService.completeGithubAppInstallationCallback(
-        query,
-        cookieHeader
+    let result: GithubAppInstallationCallbackPayload;
+    try {
+      result =
+        await this.githubIntegrationService.completeGithubAppInstallationCallback(
+          query,
+          cookieHeader
+        );
+    } catch (error) {
+      redirectGithubCallbackException(
+        reply,
+        this.githubIntegrationService,
+        error
       );
+      return undefined;
+    }
     if (redirectToReturnUrl(reply, result.returnUrl)) {
       return undefined;
     }

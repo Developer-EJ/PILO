@@ -6,6 +6,7 @@ import { GithubOAuthCallbackQuery, StartGithubOAuthRequest } from "./dto";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubOAuthClient } from "./github-oauth.client";
+import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { GithubOAuthStateService } from "./github-oauth-state.service";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
@@ -123,10 +124,6 @@ export class GithubProjectOAuthIntegrationService {
     cookieHeader?: string | null
   ): Promise<GithubProjectOAuthCallbackPayload> {
     const config = this.configService.getGithubProjectOAuthConfig();
-    const code = this.validateRequiredString(
-      query.code,
-      "GitHub ProjectV2 OAuth code is required"
-    );
     const state = this.validateRequiredString(
       query.state,
       "GitHub ProjectV2 OAuth state is required"
@@ -137,65 +134,89 @@ export class GithubProjectOAuthIntegrationService {
       stateNonce: statePayload.nonce,
       cookieHeader
     });
-    const token = await this.githubOAuthClient.exchangeCodeForAccessToken({
+    this.throwIfProviderCancelled(query.error, storedState.returnUrl);
+    const code = this.validateCallbackCode(query.code, storedState.returnUrl);
+    const token = await this.exchangeCodeForAccessToken(
       code,
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      redirectUri: this.getCallbackUrl(config)
-    });
+      config,
+      storedState.returnUrl
+    );
 
     if (!this.hasProjectScope(token.scope)) {
-      throw badRequest(GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE);
+      throw githubCallbackBadRequest(
+        GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE,
+        storedState.returnUrl,
+        "project_oauth_scope_missing"
+      );
     }
 
-    const githubUser = await this.githubOAuthClient.getAuthenticatedUser(
-      token.accessToken
+    const githubUser = await this.getAuthenticatedUser(
+      token.accessToken,
+      storedState.returnUrl
     );
-    await this.assertMatchesPrimaryGithubAccount(
+    await this.assertMatchesPrimaryGithubAccountForCallback(
       storedState.userId,
-      githubUser.login
+      githubUser.login,
+      storedState.returnUrl
     );
 
     const encryptedToken = this.tokenEncryptionService.encryptToken(
       token.accessToken,
       config
     );
-    const row = await this.database.queryOne<GithubProjectOAuthStatusRow>(
-      `
-        UPDATE users
-        SET
-          github_project_user_id = $2,
-          github_project_login = $3,
-          github_project_access_token_encrypted = $4,
-          github_project_token_scope = $5,
-          github_project_connected_at = now(),
-          github_project_revoked_at = NULL
-        WHERE id = $1
-        RETURNING
-          github_project_user_id,
-          github_project_login,
-          github_project_token_scope,
-          github_project_connected_at,
-          github_project_revoked_at
-      `,
-      [
-        storedState.userId,
-        githubUser.id,
-        githubUser.login,
-        encryptedToken,
-        token.scope
-      ]
-    );
+    let row: GithubProjectOAuthStatusRow | null;
+    try {
+      row = await this.database.queryOne<GithubProjectOAuthStatusRow>(
+        `
+          UPDATE users
+          SET
+            github_project_user_id = $2,
+            github_project_login = $3,
+            github_project_access_token_encrypted = $4,
+            github_project_token_scope = $5,
+            github_project_connected_at = now(),
+            github_project_revoked_at = NULL
+          WHERE id = $1
+          RETURNING
+            github_project_user_id,
+            github_project_login,
+            github_project_token_scope,
+            github_project_connected_at,
+            github_project_revoked_at
+        `,
+        [
+          storedState.userId,
+          githubUser.id,
+          githubUser.login,
+          encryptedToken,
+          token.scope
+        ]
+      );
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub ProjectV2 OAuth callback failed",
+        storedState.returnUrl,
+        "connection_failed"
+      );
+    }
 
     if (!row) {
-      throw badRequest("Invalid ProjectV2 OAuth state");
+      throw githubCallbackBadRequest(
+        "Invalid ProjectV2 OAuth state",
+        storedState.returnUrl,
+        "invalid_state"
+      );
     }
 
     const githubConnectedAt = this.toNullableIsoString(
       row.github_project_connected_at
     );
     if (!githubConnectedAt) {
-      throw badRequest("GitHub ProjectV2 OAuth callback failed");
+      throw githubCallbackBadRequest(
+        "GitHub ProjectV2 OAuth callback failed",
+        storedState.returnUrl,
+        "connection_failed"
+      );
     }
 
     return {
@@ -266,6 +287,36 @@ export class GithubProjectOAuthIntegrationService {
     }
   }
 
+  private async assertMatchesPrimaryGithubAccountForCallback(
+    currentUserId: string,
+    projectGithubLogin: string,
+    returnUrl: string | null
+  ): Promise<void> {
+    try {
+      await this.assertMatchesPrimaryGithubAccount(
+        currentUserId,
+        projectGithubLogin
+      );
+    } catch (error) {
+      if (
+        this.readApiErrorMessage(error) ===
+        "GitHub ProjectV2 OAuth account must match GitHub OAuth account"
+      ) {
+        throw githubCallbackBadRequest(
+          "GitHub ProjectV2 OAuth account must match GitHub OAuth account",
+          returnUrl,
+          "project_oauth_account_mismatch"
+        );
+      }
+
+      throw githubCallbackBadRequest(
+        "GitHub ProjectV2 OAuth callback failed",
+        returnUrl,
+        "connection_failed"
+      );
+    }
+  }
+
   private mapGithubProjectOAuthStatus(
     row: GithubProjectOAuthStatusRow
   ): GithubProjectOAuthStatusPayload {
@@ -290,6 +341,70 @@ export class GithubProjectOAuthIntegrationService {
     apiBasePath: string;
   }): string {
     return `${config.apiPublicOrigin}${config.apiBasePath}/github/project-oauth/callback`;
+  }
+
+  private async exchangeCodeForAccessToken(
+    code: string,
+    config: ReturnType<GithubIntegrationConfigService["getGithubProjectOAuthConfig"]>,
+    returnUrl: string | null
+  ) {
+    try {
+      return await this.githubOAuthClient.exchangeCodeForAccessToken({
+        code,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        redirectUri: this.getCallbackUrl(config)
+      });
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth token exchange failed",
+        returnUrl,
+        "token_exchange_failed"
+      );
+    }
+  }
+
+  private async getAuthenticatedUser(
+    accessToken: string,
+    returnUrl: string | null
+  ) {
+    try {
+      return await this.githubOAuthClient.getAuthenticatedUser(accessToken);
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth user lookup failed",
+        returnUrl,
+        "connection_failed"
+      );
+    }
+  }
+
+  private throwIfProviderCancelled(
+    value: unknown,
+    returnUrl: string | null
+  ): void {
+    if (typeof value === "string" && value.trim()) {
+      throw githubCallbackBadRequest(
+        "GitHub authorization was cancelled",
+        returnUrl,
+        "authorization_cancelled"
+      );
+    }
+  }
+
+  private validateCallbackCode(value: unknown, returnUrl: string | null): string {
+    try {
+      return this.validateRequiredString(
+        value,
+        "GitHub ProjectV2 OAuth code is required"
+      );
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub ProjectV2 OAuth code is required",
+        returnUrl,
+        "callback_failed"
+      );
+    }
   }
 
   private hasProjectScope(scope: string | null): boolean {
@@ -319,6 +434,31 @@ export class GithubProjectOAuthIntegrationService {
     }
 
     return value.trim();
+  }
+
+  private readApiErrorMessage(error: unknown): string | null {
+    if (typeof error !== "object" || error === null) {
+      return null;
+    }
+
+    const candidate = error as { response?: unknown };
+    if (
+      typeof candidate.response === "object" &&
+      candidate.response !== null &&
+      "error" in candidate.response
+    ) {
+      const response = candidate.response as { error?: unknown };
+      if (
+        typeof response.error === "object" &&
+        response.error !== null &&
+        "message" in response.error
+      ) {
+        const apiError = response.error as { message?: unknown };
+        return typeof apiError.message === "string" ? apiError.message : null;
+      }
+    }
+
+    return null;
   }
 
   private toNullableNumber(value: string | number | null): number | null {

@@ -642,9 +642,37 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - If `GET /github/oauth/callback` cannot save the GitHub account because
   `users.github_user_id` or `users.github_login` already belongs to another
   PILO user, the failure is treated as a safe duplicate-account conflict.
-  Without `returnUrl`, the callback returns `409 CONFLICT` with
-  `error.code = "CONFLICT"` and
+  Without callback redirect handling, the equivalent API error is
+  `409 CONFLICT` with `error.code = "CONFLICT"` and
   `error.message = "GitHub account is already connected to another PILO account"`.
-  With `returnUrl`, app-server redirects to `returnUrl` with `302` and appends
-  `github_oauth_error=account_already_connected` so the frontend can show a
-  user-facing error message instead of exposing raw JSON or a raw 500 page.
+- On callback failure, app-server redirects with `302` to the stored `returnUrl`
+  when it can be safely recovered from callback state. If `returnUrl` cannot be
+  recovered, app-server redirects to the configured frontend GitHub connection
+  page, `{FRONTEND_URL}/github`.
+- Callback failure redirects append `github_callback_error=<code>` so the
+  frontend can show a user-facing error message instead of exposing raw JSON,
+  raw provider errors, or a raw 500 page. The legacy
+  `github_oauth_error=account_already_connected` query is still appended for the
+  duplicate GitHub account OAuth case.
+- Callback error query values:
+  - `github_callback_error=account_already_connected`: the GitHub account is
+    already connected to another PILO user.
+  - `github_callback_error=authorization_cancelled`: GitHub authorization was
+    cancelled or denied by the user.
+  - `github_callback_error=invalid_state`: signed state, binding cookie, or
+    one-time server-side state validation failed.
+  - `github_callback_error=token_exchange_failed`: GitHub OAuth token exchange
+    failed.
+  - `github_callback_error=project_oauth_scope_missing`: ProjectV2 OAuth token
+    was returned without the required `project` scope.
+  - `github_callback_error=project_oauth_account_mismatch`: ProjectV2 OAuth
+    account does not match the connected GitHub OAuth account.
+  - `github_callback_error=installation_not_accessible`: callback installation
+    is not accessible to the connected GitHub user.
+  - `github_callback_error=installation_lookup_failed`: app-server could not
+    look up the GitHub App installation safely.
+  - `github_callback_error=installation_failed`: app-server could not save the
+    GitHub App installation.
+  - `github_callback_error=callback_failed` or
+    `github_callback_error=connection_failed`: generic safe fallback for
+    callback validation or connection failures.

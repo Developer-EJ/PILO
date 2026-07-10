@@ -7,6 +7,7 @@ import { GithubCallbackStateService } from "./github-callback-state.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import {
   GithubOAuthAccountAlreadyConnectedError,
+  githubCallbackBadRequest,
   isGithubOAuthAccountUniqueViolation
 } from "./github-oauth-callback-error";
 import { GithubOAuthClient } from "./github-oauth.client";
@@ -116,10 +117,6 @@ export class GithubOAuthIntegrationService {
     cookieHeader?: string | null
   ): Promise<GithubOAuthCallbackPayload> {
     const config = this.configService.getGithubOAuthConfig();
-    const code = this.validateRequiredString(
-      query.code,
-      "GitHub OAuth code is required"
-    );
     const state = this.validateRequiredString(
       query.state,
       "GitHub OAuth state is required"
@@ -130,14 +127,16 @@ export class GithubOAuthIntegrationService {
       stateNonce: statePayload.nonce,
       cookieHeader
     });
-    const token = await this.githubOAuthClient.exchangeCodeForAccessToken({
+    this.throwIfProviderCancelled(query.error, storedState.returnUrl);
+    const code = this.validateCallbackCode(query.code, storedState.returnUrl);
+    const token = await this.exchangeCodeForAccessToken(
       code,
-      clientId: config.clientId,
-      clientSecret: config.clientSecret,
-      redirectUri: this.getCallbackUrl(config)
-    });
-    const githubUser = await this.githubOAuthClient.getAuthenticatedUser(
-      token.accessToken
+      config,
+      storedState.returnUrl
+    );
+    const githubUser = await this.getAuthenticatedUser(
+      token.accessToken,
+      storedState.returnUrl
     );
     const encryptedToken = this.tokenEncryptionService.encryptToken(
       token.accessToken,
@@ -176,16 +175,28 @@ export class GithubOAuthIntegrationService {
         throw new GithubOAuthAccountAlreadyConnectedError(storedState.returnUrl);
       }
 
-      throw error;
+      throw githubCallbackBadRequest(
+        "GitHub OAuth callback failed",
+        storedState.returnUrl,
+        "connection_failed"
+      );
     }
 
     if (!row) {
-      throw badRequest("Invalid OAuth state");
+      throw githubCallbackBadRequest(
+        "Invalid OAuth state",
+        storedState.returnUrl,
+        "invalid_state"
+      );
     }
 
     const githubConnectedAt = this.toNullableIsoString(row.github_connected_at);
     if (!githubConnectedAt) {
-      throw badRequest("GitHub OAuth callback failed");
+      throw githubCallbackBadRequest(
+        "GitHub OAuth callback failed",
+        storedState.returnUrl,
+        "connection_failed"
+      );
     }
 
     return {
@@ -243,6 +254,67 @@ export class GithubOAuthIntegrationService {
     apiBasePath: string;
   }): string {
     return `${config.apiPublicOrigin}${config.apiBasePath}/github/oauth/callback`;
+  }
+
+  private async exchangeCodeForAccessToken(
+    code: string,
+    config: ReturnType<GithubIntegrationConfigService["getGithubOAuthConfig"]>,
+    returnUrl: string | null
+  ) {
+    try {
+      return await this.githubOAuthClient.exchangeCodeForAccessToken({
+        code,
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        redirectUri: this.getCallbackUrl(config)
+      });
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth token exchange failed",
+        returnUrl,
+        "token_exchange_failed"
+      );
+    }
+  }
+
+  private async getAuthenticatedUser(
+    accessToken: string,
+    returnUrl: string | null
+  ) {
+    try {
+      return await this.githubOAuthClient.getAuthenticatedUser(accessToken);
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth user lookup failed",
+        returnUrl,
+        "connection_failed"
+      );
+    }
+  }
+
+  private throwIfProviderCancelled(
+    value: unknown,
+    returnUrl: string | null
+  ): void {
+    if (typeof value === "string" && value.trim()) {
+      throw githubCallbackBadRequest(
+        "GitHub authorization was cancelled",
+        returnUrl,
+        "authorization_cancelled"
+      );
+    }
+  }
+
+  private validateCallbackCode(value: unknown, returnUrl: string | null): string {
+    try {
+      return this.validateRequiredString(value, "GitHub OAuth code is required");
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth code is required",
+        returnUrl,
+        "callback_failed"
+      );
+    }
   }
 
   private validateRequiredString(value: unknown, message: string): string {

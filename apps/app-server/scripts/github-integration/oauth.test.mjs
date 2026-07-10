@@ -377,6 +377,61 @@ const projectOAuthConnectedRow = {
 }
 
 {
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: "https://pilo.test/settings/integrations/github"
+    },
+    projectOAuthConfig
+  );
+  const statePayload = stateService.verifyState(state, projectOAuthConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: "https://pilo.test/settings/integrations/github",
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      return undefined;
+    }
+  });
+  const service = new GithubIntegrationService(
+    database,
+    {
+      async exchangeCodeForAccessToken() {
+        return {
+          accessToken: "plain-project-access-token",
+          scope: "read:user,user:email"
+        };
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubProjectOAuthCallback(
+        {
+          code: "project-oauth-code",
+          state
+        },
+        "pilo_github_project_oauth_state=project-binding-token"
+      ),
+    (error) =>
+      error?.returnUrl === "https://pilo.test/settings/integrations/github" &&
+      error?.callbackError === "project_oauth_scope_missing" &&
+      error?.response?.error?.message ===
+        "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+  );
+}
+
+{
   const database = new FakeDatabase([{ id: "user-1" }]);
   const service = new GithubIntegrationService(
     database,
@@ -473,6 +528,111 @@ const projectOAuthConnectedRow = {
   assert.equal(update.values[2], "juhyeong");
   assert.notEqual(update.values[3], "plain-access-token");
   assert.match(update.values[3], /^v1:/);
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: "https://pilo.test/settings/integrations/github"
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: "https://pilo.test/settings/integrations/github",
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      return undefined;
+    }
+  });
+  const service = new GithubIntegrationService(
+    database,
+    {
+      async exchangeCodeForAccessToken() {
+        throw new Error("provider network details must not leak");
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubOAuthCallback(
+        {
+          code: "oauth-code",
+          state
+        },
+        "pilo_github_oauth_state=oauth-binding-token"
+      ),
+    (error) =>
+      error?.returnUrl === "https://pilo.test/settings/integrations/github" &&
+      error?.callbackError === "token_exchange_failed" &&
+      error?.response?.error?.message === "GitHub OAuth token exchange failed"
+  );
+}
+
+{
+  const state = stateService.createState(
+    {
+      userId: "user-1",
+      returnUrl: "https://pilo.test/settings/integrations/github"
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase([], {
+    queryOne(text) {
+      if (/UPDATE github_callback_states/i.test(text)) {
+        return {
+          user_id: "user-1",
+          workspace_id: null,
+          return_url: "https://pilo.test/settings/integrations/github",
+          expires_at: new Date(statePayload.expiresAt)
+        };
+      }
+
+      return undefined;
+    }
+  });
+  let tokenExchangeCalled = false;
+  const service = new GithubIntegrationService(
+    database,
+    {
+      async exchangeCodeForAccessToken() {
+        tokenExchangeCalled = true;
+        throw new Error("token exchange should not run after provider cancel");
+      }
+    },
+    stateService,
+    tokenEncryption,
+    configService
+  );
+
+  await assert.rejects(
+    () =>
+      service.completeGithubOAuthCallback(
+        {
+          error: "access_denied",
+          state
+        },
+        "pilo_github_oauth_state=oauth-binding-token"
+      ),
+    (error) =>
+      error?.returnUrl === "https://pilo.test/settings/integrations/github" &&
+      error?.callbackError === "authorization_cancelled" &&
+      error?.response?.error?.message === "GitHub authorization was cancelled"
+  );
+  assert.equal(tokenExchangeCalled, false);
 }
 
 {
