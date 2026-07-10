@@ -113,8 +113,14 @@ function isKnownStaleSession(
 }
 
 function buildDefaultReviewBody(result: PrReviewSessionResult) {
+  const readiness = result.readyToSubmit
+    ? "All files have saved decisions."
+    : `${result.counts.notReviewed} file(s) still need review decisions.`;
+
   const lines = [
     "## PILO PR Review",
+    "",
+    `Merge readiness: ${readiness}`,
     "",
     result.reviewResultSummary,
     "",
