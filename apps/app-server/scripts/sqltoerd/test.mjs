@@ -67,14 +67,20 @@ assert.match(sqlErdController, /@Post\("sql-erd-session"\)/);
 assert.match(sqlErdController, /@Patch\("sql-erd-session\/:sessionId"\)/);
 assert.match(sqlErdController, /@Delete\("sql-erd-session\/:sessionId"\)/);
 assert.match(sqlErdController, /@Get\("sql-erd-sessions"\)/);
+assert.match(sqlErdController, /@Post\("sql-erd-sessions"\)/);
 assert.match(sqlErdController, /@Get\("sql-erd-sessions\/:sessionId"\)/);
-assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 2);
-assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 2);
+assert.match(sqlErdController, /@Patch\("sql-erd-sessions\/:sessionId"\)/);
+assert.match(sqlErdController, /@Delete\("sql-erd-sessions\/:sessionId"\)/);
+assert.equal(sqlErdController.match(/@RouteConfig/g)?.length, 4);
+assert.equal(sqlErdController.match(/bodyLimit/g)?.length, 4);
 assert.match(sqlErdTypes, /SQL_ERD_REQUEST_BODY_LIMIT_BYTES = 2 \* 1024 \* 1024/);
 assert.match(sqlErdService, /domain: "sqltoerd"/);
 assert.match(sqlErdService, /apiContract: "docs\/api\/sqltoerd-api.md"/);
 assert.match(sqlErdService, /assertWorkspaceAccess/);
 assert.match(sqlErdService, /DatabaseService/);
+assert.match(sqlErdService, /DatabaseTransaction/);
+assert.match(sqlErdService, /database\.transaction/);
+assert.match(sqlErdService, /FOR UPDATE/);
 assert.match(sqlErdService, /FROM sql_erd_sessions/);
 assert.match(sqlErdService, /INSERT INTO sql_erd_sessions/);
 assert.match(sqlErdService, /UPDATE sql_erd_sessions/);
@@ -144,10 +150,28 @@ class FakeDatabase {
     this.queryRows = [...queryRows];
     this.queryOneRows = [...queryOneRows];
     this.queries = [];
+    this.transactions = [];
   }
 
   async query(text, values = []) {
-    this.queries.push({ method: "query", text, values });
+    return this.readQuery(text, values, false);
+  }
+
+  async queryOne(text, values = []) {
+    return this.readQueryOne(text, values, false);
+  }
+
+  async transaction(callback) {
+    const transaction = {
+      query: (text, values = []) => this.readQuery(text, values, true),
+      queryOne: (text, values = []) => this.readQueryOne(text, values, true)
+    };
+    this.transactions.push(transaction);
+    return callback(transaction);
+  }
+
+  async readQuery(text, values, transaction) {
+    this.queries.push({ method: "query", text, values, transaction });
     const next = this.queryRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -156,8 +180,8 @@ class FakeDatabase {
     return next ?? [];
   }
 
-  async queryOne(text, values = []) {
-    this.queries.push({ method: "queryOne", text, values });
+  async readQueryOne(text, values, transaction) {
+    this.queries.push({ method: "queryOne", text, values, transaction });
     const next = this.queryOneRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -367,6 +391,10 @@ function sessionSummaryRow(overrides = {}) {
   };
 }
 
+function workspaceLockRow() {
+  return { id: workspaceId };
+}
+
 class FakeSqlErdHttpService {
   constructor() {
     this.calls = [];
@@ -472,6 +500,18 @@ await assertRouteBodyLimit(
   "POST",
   `/api/v1/workspaces/${workspaceId}/sql-erd-session`,
   "createSession"
+);
+
+await assertRouteBodyLimit(
+  "POST",
+  `/api/v1/workspaces/${workspaceId}/sql-erd-sessions`,
+  "createPluralSession"
+);
+
+await assertRouteBodyLimit(
+  "PATCH",
+  `/api/v1/workspaces/${workspaceId}/sql-erd-sessions/${sessionId}`,
+  "updateSession"
 );
 
 await assertRouteBodyLimit(
@@ -631,6 +671,12 @@ await assertRouteBodyLimit(
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {
+        assert.match(text, /FROM workspaces/);
+        assert.match(text, /FOR UPDATE/);
+        assert.deepEqual(values, [workspaceId]);
+        return workspaceLockRow();
+      },
+      (text, values) => {
         assert.match(text, /FROM sql_erd_sessions/);
         assert.deepEqual(values, [workspaceId]);
         return null;
@@ -675,10 +721,14 @@ await assertRouteBodyLimit(
   assert.equal(session.relationCount, 1);
   assert.equal(session.createdBy, currentUserId);
   assert.equal(session.updatedBy, currentUserId);
+  assert.equal(database.transactions.length, 1);
+  assert.equal(database.queries.every((query) => query.transaction), true);
 }
 
 {
-  const database = new FakeDatabase({ queryOneRows: [sessionRow()] });
+  const database = new FakeDatabase({
+    queryOneRows: [workspaceLockRow(), sessionRow()]
+  });
   const { service } = createSubject(database);
 
   await assertApiError(
@@ -697,6 +747,7 @@ await assertRouteBodyLimit(
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      workspaceLockRow(),
       null,
       () => {
         throw { code: "23505" };
@@ -772,6 +823,7 @@ await assertRouteBodyLimit(
 {
   const database = new FakeDatabase({
     queryOneRows: [
+      workspaceLockRow(),
       null,
       () => {
         throw {
@@ -793,6 +845,71 @@ await assertRouteBodyLimit(
     413,
     "PAYLOAD_TOO_LARGE",
     /JSON payload is too large/
+  );
+}
+
+{
+  const requestModelJson = modelJson();
+  const requestLayoutJson = layoutJson();
+  const database = new FakeDatabase({
+    queryOneRows: [
+      workspaceLockRow(),
+      (text, values) => {
+        assert.match(text, /INSERT INTO sql_erd_sessions/);
+        assert.deepEqual(values, [
+          workspaceId,
+          "Untitled ERD",
+          "sql",
+          "auto",
+          "",
+          JSON.stringify(requestModelJson),
+          JSON.stringify(requestLayoutJson),
+          JSON.stringify({}),
+          2,
+          1,
+          currentUserId
+        ]);
+        return sessionRow();
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  assert.equal(typeof service.createPluralSession, "function");
+  const session = await service.createPluralSession(currentUserId, workspaceId, {
+    modelJson: requestModelJson,
+    layoutJson: requestLayoutJson
+  });
+
+  assert.equal(session.id, sessionId);
+  assert.equal(database.transactions.length, 1);
+  assert.equal(
+    database.queries.some((query) => /FROM sql_erd_sessions/.test(query.text)),
+    false
+  );
+  assert.equal(database.queries.every((query) => query.transaction), true);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      workspaceLockRow(),
+      () => {
+        throw { code: "23505" };
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  await assertApiError(
+    () =>
+      service.createPluralSession(currentUserId, workspaceId, {
+        modelJson: modelJson(),
+        layoutJson: layoutJson()
+      }),
+    409,
+    "CONFLICT",
+    /database schema conflict/
   );
 }
 

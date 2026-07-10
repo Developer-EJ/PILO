@@ -5,7 +5,10 @@ import {
   notFound,
   payloadTooLarge
 } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { encodeSqlErdSessionCursor } from "./sql-erd.cursor";
 import {
@@ -17,6 +20,7 @@ import {
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
   ListSqlErdSessionsQuery,
+  NormalizedCreateSqlErdSessionInput,
   NormalizedUpdateSqlErdSessionInput,
   SqlErdDeletedSessionPayload,
   SqlErdSessionListPayload,
@@ -174,14 +178,96 @@ export class SqlErdService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const input = validateCreateSqlErdSessionRequest(body);
-    const existing = await this.findActiveSession(workspaceId);
-    if (existing) {
-      throw conflict("sqltoerd active session already exists");
-    }
+    return this.createSessionWithWorkspaceLock(
+      workspaceId,
+      currentUserId,
+      input,
+      true
+    );
+  }
 
+  async createPluralSession(
+    currentUserId: string,
+    workspaceId: string,
+    body: CreateSqlErdSessionRequest
+  ): Promise<SqlErdSessionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = validateCreateSqlErdSessionRequest(body);
+    return this.createSessionWithWorkspaceLock(
+      workspaceId,
+      currentUserId,
+      input,
+      false
+    );
+  }
+
+  private async createSessionWithWorkspaceLock(
+    workspaceId: string,
+    currentUserId: string,
+    input: NormalizedCreateSqlErdSessionInput,
+    requireEmptyWorkspace: boolean
+  ): Promise<SqlErdSessionPayload> {
     try {
-      const session = await this.database.queryOne<SqlErdSessionRow>(
-        `
+      const session = await this.database.transaction(async (transaction) => {
+        const workspace = await transaction.queryOne<{ id: string }>(
+          `
+            SELECT id
+            FROM workspaces
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [workspaceId]
+        );
+        if (!workspace) {
+          throw notFound("Workspace not found");
+        }
+
+        if (requireEmptyWorkspace) {
+          const existing = await this.findActiveSession(workspaceId, transaction);
+          if (existing) {
+            throw conflict("sqltoerd active session already exists");
+          }
+        }
+
+        return this.insertSession(
+          transaction,
+          workspaceId,
+          currentUserId,
+          input
+        );
+      });
+
+      if (!session) {
+        throw badRequest("sqltoerd session could not be created");
+      }
+
+      return mapSqlErdSession(session);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw conflict(
+          requireEmptyWorkspace
+            ? "sqltoerd active session already exists"
+            : "sqltoerd multi-session database schema conflict"
+        );
+      }
+
+      if (this.isJsonSizeConstraintViolation(error)) {
+        throw payloadTooLarge("sqltoerd JSON payload is too large");
+      }
+
+      throw error;
+    }
+  }
+
+  private insertSession(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string,
+    input: NormalizedCreateSqlErdSessionInput
+  ): Promise<SqlErdSessionRow | null> {
+    return transaction.queryOne<SqlErdSessionRow>(
+      `
           INSERT INTO sql_erd_sessions (
             workspace_id,
             title,
@@ -230,38 +316,21 @@ export class SqlErdService {
             created_at,
             updated_at,
             deleted_at
-        `,
-        [
-          workspaceId,
-          input.title,
-          input.sourceFormat,
-          input.dialect,
-          input.sourceText,
-          JSON.stringify(input.modelJson),
-          JSON.stringify(input.layoutJson),
-          JSON.stringify(input.settingsJson),
-          input.tableCount,
-          input.relationCount,
-          currentUserId
-        ]
-      );
-
-      if (!session) {
-        throw badRequest("sqltoerd session could not be created");
-      }
-
-      return mapSqlErdSession(session);
-    } catch (error) {
-      if (this.isUniqueViolation(error)) {
-        throw conflict("sqltoerd active session already exists");
-      }
-
-      if (this.isJsonSizeConstraintViolation(error)) {
-        throw payloadTooLarge("sqltoerd JSON payload is too large");
-      }
-
-      throw error;
-    }
+      `,
+      [
+        workspaceId,
+        input.title,
+        input.sourceFormat,
+        input.dialect,
+        input.sourceText,
+        JSON.stringify(input.modelJson),
+        JSON.stringify(input.layoutJson),
+        JSON.stringify(input.settingsJson),
+        input.tableCount,
+        input.relationCount,
+        currentUserId
+      ]
+    );
   }
 
   async updateSession(
@@ -372,8 +441,11 @@ export class SqlErdService {
     );
   }
 
-  private findActiveSession(workspaceId: string): Promise<SqlErdSessionRow | null> {
-    return this.database.queryOne<SqlErdSessionRow>(
+  private findActiveSession(
+    workspaceId: string,
+    database: Pick<DatabaseTransaction, "queryOne"> = this.database
+  ): Promise<SqlErdSessionRow | null> {
+    return database.queryOne<SqlErdSessionRow>(
       `
         ${SQL_ERD_SESSION_SELECT}
         WHERE workspace_id = $1

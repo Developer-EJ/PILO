@@ -90,6 +90,22 @@ export class SqlErdSessionController {
   }
 
   @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Post("sql-erd-sessions")
+  async createPluralSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: CreateSqlErdSessionRequest
+  ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
+    const session = await this.sqlErdService.createPluralSession(
+      currentUserId,
+      workspaceId,
+      body
+    );
+
+    return apiResponse(session);
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
   @Patch("sql-erd-session/:sessionId")
   async updateSession(
     @CurrentUserId() currentUserId: string,
@@ -107,8 +123,43 @@ export class SqlErdSessionController {
     return apiResponse(session);
   }
 
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Patch("sql-erd-sessions/:sessionId")
+  async updatePluralSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: UpdateSqlErdSessionRequest
+  ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
+    const session = await this.sqlErdService.updateSession(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      body
+    );
+
+    return apiResponse(session);
+  }
+
   @Delete("sql-erd-session/:sessionId")
   async deleteSession(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Query() query: DeleteSqlErdSessionQuery
+  ): Promise<ApiSuccessResponse<SqlErdDeletedSessionPayload>> {
+    const result = await this.sqlErdService.deleteSession(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      query
+    );
+
+    return apiResponse(result);
+  }
+
+  @Delete("sql-erd-sessions/:sessionId")
+  async deletePluralSession(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,
     @Param("sessionId") sessionId: string,
