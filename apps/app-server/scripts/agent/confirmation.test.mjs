@@ -132,6 +132,14 @@ class FakeDatabaseService {
   async transaction(callback) {
     return callback(new FakeTransaction(this.state));
   }
+
+  async query(text) {
+    if (text.includes("FROM agent_runs r") && text.includes("c.status = 'approved'")) {
+      return this.state.staleExecutions ?? [];
+    }
+
+    throw new Error(`Unhandled query: ${text}`);
+  }
 }
 
 class FakeAgentLoggingService {
@@ -140,10 +148,10 @@ class FakeAgentLoggingService {
     this.calls = [];
   }
 
-  async startNextStep(currentUserId, workspaceId, input) {
+  async createToolExecutionClaim(transaction, workspaceId, input) {
     this.calls.push({
-      method: "startNextStep",
-      currentUserId,
+      method: "createToolExecutionClaim",
+      transaction,
       workspaceId,
       input
     });
@@ -516,6 +524,33 @@ function errorMessage(error) {
 
 {
   const state = {
+    runs: [createRun({ status: "running" })],
+    confirmations: [createConfirmation({ status: "approved" })],
+    staleExecutions: [
+      {
+        run_id: RUN_ID,
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: USER_ID,
+        tool_step_id: STEP_ID,
+        tool_step_status: "running"
+      }
+    ]
+  };
+  const { service, loggingService, toolRegistryService } = createService(state);
+  const recovered = await service.recoverStaleApprovedExecutions();
+
+  assert.equal(recovered, 1);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["failStep", "failRun"]
+  );
+  assert.equal(loggingService.calls[0].input.errorCode, "AGENT_EXECUTION_STALE");
+  assert.equal(state.runs[0].status, "failed");
+  assert.deepEqual(toolRegistryService.calls, []);
+}
+
+{
+  const state = {
     runs: [createRun()],
     confirmations: [createConfirmation()]
   };
@@ -537,7 +572,7 @@ function errorMessage(error) {
   assert.equal(workspaceService.calls.length, 1);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextStep", "completeStep", "completeRun"]
+    ["createToolExecutionClaim", "completeStep", "completeRun"]
   );
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
@@ -585,11 +620,6 @@ function errorMessage(error) {
   assert.equal(result.run.confirmation.status, "approved");
   assert.deepEqual(toolRegistryService.calls[2].input, {
     eventId: "77",
-    before: {
-      title: "주간 회의",
-      startDate: "2026-07-08",
-      startTime: "15:00"
-    },
     changes: {
       title: "변경된 회의",
       startTime: "16:00"
@@ -643,7 +673,7 @@ function errorMessage(error) {
   assert.equal(result.run.confirmation.status, "approved");
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextStep", "failStep", "failRun"]
+    ["createToolExecutionClaim", "failStep", "failRun"]
   );
   assert.equal(
     loggingService.calls[1].input.errorCode,
