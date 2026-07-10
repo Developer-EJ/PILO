@@ -28,6 +28,10 @@ const sqlErdValidation = await readSource(
 const sqlErdMapper = await readSource(
   "../../src/modules/sql-erd/sql-erd.mapper.ts"
 );
+const sqlErdMultiSessionMigration = await readSource(
+  "../../../../db/migrations/023_enable_sql_erd_multi_sessions.sql"
+);
+const dbReadme = await readSource("../../../../db/README.md");
 const { Module } = require("@nestjs/common");
 const { NestFactory } = require("@nestjs/core");
 const { FastifyAdapter } = require("@nestjs/platform-fastify");
@@ -80,6 +84,27 @@ assert.match(sqlErdService, /CHECK_VIOLATION_CODE/);
 assert.match(sqlErdService, /sql_erd_sessions_model_json_size_check/);
 assert.match(sqlErdService, /sql_erd_sessions_layout_json_size_check/);
 assert.match(sqlErdService, /sql_erd_sessions_settings_json_size_check/);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /DROP INDEX IF EXISTS public\.ux_sql_erd_sessions_workspace_active/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /DROP INDEX IF EXISTS public\.idx_sql_erd_sessions_workspace_updated_at/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /CREATE INDEX idx_sql_erd_sessions_workspace_updated_at_id/
+);
+assert.match(
+  sqlErdMultiSessionMigration,
+  /ON public\.sql_erd_sessions\s*\(workspace_id, updated_at DESC, id DESC\)\s*WHERE deleted_at IS NULL/s
+);
+assert.doesNotMatch(
+  sqlErdMultiSessionMigration,
+  /\b(?:DELETE|UPDATE)\s+public\.sql_erd_sessions\b/i
+);
+assert.match(dbReadme, /023_enable_sql_erd_multi_sessions\.sql/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
 assert.match(sqlErdValidation, /validateCreateSqlErdSessionRequest/);
 assert.match(sqlErdValidation, /validateUpdateSqlErdSessionRequest/);
