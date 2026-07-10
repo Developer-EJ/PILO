@@ -12,7 +12,6 @@ import {
   historyKeymap,
   indentWithTab
 } from "@codemirror/commands";
-import { sql } from "@codemirror/lang-sql";
 import {
   bracketMatching,
   defaultHighlightStyle,
@@ -48,6 +47,7 @@ import type {
   SqlErdSelection,
   SqltoerdDialect,
   SqltoerdLayoutJsonV1,
+  SqltoerdResolvedDialect,
   SqltoerdSessionPayload
 } from "@/features/sql-erd/types";
 import {
@@ -83,6 +83,11 @@ import {
   getSqlErdSignInRequiredState,
   getSqlErdWorkspaceSaveErrorState
 } from "@/features/sql-erd/utils/status-copy";
+import {
+  createSqlSourceEditorDialectReconfigureEffect,
+  getSqlSourceEditorLanguageExtension,
+  resolveSqlSourceEditorDialect
+} from "@/features/sql-erd/utils/sql-editor-dialect";
 import { cn } from "@/lib/utils";
 
 const sampleSqlErdViewSession = createSampleSqlErdViewSession(
@@ -197,6 +202,12 @@ export function SqlErdPanel() {
     useState(0);
   const [layoutAutosaveBlockReason, setLayoutAutosaveBlockReason] =
     useState<LayoutAutosaveBlockReason | null>(null);
+  const [lastResolvedDialect, setLastResolvedDialect] =
+    useState<SqltoerdResolvedDialect | null>(null);
+  const sourceEditorDialect = resolveSqlSourceEditorDialect(
+    sqlErdViewSession.dialect,
+    lastResolvedDialect
+  );
   const modelIndex = useMemo(
     () => createSqltoerdModelIndex(sqlErdViewSession.modelJson),
     [sqlErdViewSession.modelJson]
@@ -309,6 +320,7 @@ export function SqlErdPanel() {
 
         if (action.kind === "fallback_to_sample") {
           setSqlErdViewSession(sampleSqlErdViewSession);
+          setLastResolvedDialect(null);
           setPendingLayoutAutosaveJson(null);
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason(null);
@@ -346,6 +358,9 @@ export function SqlErdPanel() {
 
         if (activeSession) {
           setSqlErdViewSession(createWorkspaceSqlErdViewSession(activeSession));
+          setLastResolvedDialect(
+            activeSession.dialect === "auto" ? null : activeSession.dialect
+          );
           setSessionLoadState({
             label: "Workspace",
             message: `Workspace session revision ${activeSession.revision}`,
@@ -353,6 +368,7 @@ export function SqlErdPanel() {
           });
         } else {
           setSqlErdViewSession(sampleSqlErdViewSession);
+          setLastResolvedDialect(null);
           setSessionLoadState({
             label: "Sample",
             message: "No saved workspace session",
@@ -402,6 +418,8 @@ export function SqlErdPanel() {
       setIsGenerating(false);
       return;
     }
+
+    setLastResolvedDialect(generateRequest.resolvedDialect);
 
     const sqlErdApiClient = createSqlErdApiClient({
       accessToken: authSession.accessToken
@@ -703,6 +721,7 @@ export function SqlErdPanel() {
           isGenerating || sessionLoadState.label === "Loading"
         }
         sourceText={sqlErdViewSession.sourceText}
+        resolvedDialect={sourceEditorDialect}
         width={clampedSourcePanelWidth}
       />
       {isSourceOpen ? (
@@ -766,6 +785,7 @@ type SourcePanelProps = PanelToggleProps & {
   onSourceTextChange: (sourceText: string) => void;
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
+  resolvedDialect: SqltoerdResolvedDialect;
   width: number;
 };
 
@@ -783,6 +803,7 @@ function SourcePanel({
   onToggle,
   sessionLoadState,
   sourceText,
+  resolvedDialect,
   width
 }: SourcePanelProps) {
   if (!isOpen) {
@@ -858,6 +879,7 @@ function SourcePanel({
           </button>
         </div>
         <SqlSourceEditor
+          dialect={resolvedDialect}
           onChange={onSourceTextChange}
           readOnly={isSourceTextReadOnly}
           value={sourceText}
@@ -868,14 +890,21 @@ function SourcePanel({
 }
 
 type SqlSourceEditorProps = {
+  dialect: SqltoerdResolvedDialect;
   onChange: (sourceText: string) => void;
   readOnly: boolean;
   value: string;
 };
 
-function SqlSourceEditor({ onChange, readOnly, value }: SqlSourceEditorProps) {
+function SqlSourceEditor({
+  dialect,
+  onChange,
+  readOnly,
+  value
+}: SqlSourceEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const languageCompartmentRef = useRef(new Compartment());
   const readOnlyCompartmentRef = useRef(new Compartment());
   const isApplyingExternalValueRef = useRef(false);
   const onChangeRef = useRef(onChange);
@@ -891,6 +920,7 @@ function SqlSourceEditor({ onChange, readOnly, value }: SqlSourceEditorProps) {
       return;
     }
 
+    const languageCompartment = languageCompartmentRef.current;
     const readOnlyCompartment = readOnlyCompartmentRef.current;
     const view = new EditorView({
       parent: container,
@@ -905,7 +935,9 @@ function SqlSourceEditor({ onChange, readOnly, value }: SqlSourceEditorProps) {
           highlightActiveLine(),
           highlightActiveLineGutter(),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          sql(),
+          languageCompartment.of(
+            getSqlSourceEditorLanguageExtension(dialect)
+          ),
           keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
           sqlSourceEditorTheme,
           readOnlyCompartment.of([
@@ -948,6 +980,15 @@ function SqlSourceEditor({ onChange, readOnly, value }: SqlSourceEditorProps) {
     });
     isApplyingExternalValueRef.current = false;
   }, [value]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: createSqlSourceEditorDialectReconfigureEffect(
+        languageCompartmentRef.current,
+        dialect
+      )
+    });
+  }, [dialect]);
 
   useEffect(() => {
     viewRef.current?.dispatch({

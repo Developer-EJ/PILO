@@ -3,6 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { history, undoDepth } from "@codemirror/commands";
+import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
+import { Compartment, EditorState } from "@codemirror/state";
 import ts from "typescript";
 
 async function readSqlErdFile(path) {
@@ -21,6 +24,7 @@ async function compileSqlErdRuntimeModules() {
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
+  const sqlEditorDialectOutputPath = join(outputDir, "sql-editor-dialect.mjs");
   const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
   const tableShapeOutputPath = join(outputDir, "table-shape.mjs");
   const canvasSelectionOutputPath = join(outputDir, "canvas-selection.mjs");
@@ -66,6 +70,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/status-copy.ts",
       statusCopyOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/sql-editor-dialect.ts",
+      sqlEditorDialectOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx",
@@ -143,6 +151,7 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionStateRuntime,
+      sqlEditorDialectRuntime,
       statusCopyRuntime,
       relationShapeRuntime,
       tableShapeRuntime,
@@ -155,6 +164,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
+      import(pathToFileHref(sqlEditorDialectOutputPath)),
       import(pathToFileHref(statusCopyOutputPath)),
       import(pathToFileHref(relationShapeOutputPath)),
       import(pathToFileHref(tableShapeOutputPath)),
@@ -171,6 +181,7 @@ async function compileSqlErdRuntimeModules() {
       modelRuntime,
       relationShapeRuntime,
       sessionStateRuntime,
+      sqlEditorDialectRuntime,
       statusCopyRuntime,
       tableShapeRuntime
     };
@@ -411,6 +422,7 @@ const [
   tableShape,
   relationShape,
   ddlParserUtils,
+  sqlEditorDialectUtils,
   apiClient,
   packageJson
 ] =
@@ -432,6 +444,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/api/client.ts"),
     readSqlErdFile("../../package.json")
   ]);
@@ -446,10 +459,67 @@ const {
   modelRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
+  sqlEditorDialectRuntime,
   statusCopyRuntime,
   tableShapeRuntime
 } = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
+
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("postgresql", "mysql"),
+  "postgresql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("mysql", "postgresql"),
+  "mysql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("auto", null),
+  "postgresql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("auto", "mysql"),
+  "mysql"
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("postgresql"),
+  PostgreSQL
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("mysql"),
+  MySQL
+);
+const runtimeDialectCompartment = new Compartment();
+let runtimeDialectEditorState = EditorState.create({
+  doc: "CREATE TABLE users (id BIGINT);",
+  selection: { anchor: 13 },
+  extensions: [
+    history(),
+    runtimeDialectCompartment.of(
+      sqlEditorDialectRuntime.getSqlSourceEditorLanguageExtension("postgresql")
+    )
+  ]
+});
+runtimeDialectEditorState = runtimeDialectEditorState.update({
+  changes: { from: runtimeDialectEditorState.doc.length, insert: "\n" },
+  selection: { anchor: 6 },
+  userEvent: "input"
+}).state;
+const runtimeDialectDocument = runtimeDialectEditorState.doc.toString();
+const runtimeDialectSelection = runtimeDialectEditorState.selection.main;
+const runtimeDialectUndoDepth = undoDepth(runtimeDialectEditorState);
+
+runtimeDialectEditorState = runtimeDialectEditorState.update({
+  effects:
+    sqlEditorDialectRuntime.createSqlSourceEditorDialectReconfigureEffect(
+      runtimeDialectCompartment,
+      "mysql"
+    )
+}).state;
+
+assert.equal(runtimeDialectEditorState.doc.toString(), runtimeDialectDocument);
+assert.deepEqual(runtimeDialectEditorState.selection.main, runtimeDialectSelection);
+assert.equal(undoDepth(runtimeDialectEditorState), runtimeDialectUndoDepth);
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
 const runtimeOrdersToUsersRelation =
   runtimeModel.schema.relations.find(
@@ -941,6 +1011,7 @@ const createGenerateRequest =
 
 assert.equal(createGenerateRequest.ok, true);
 assert.equal(createGenerateRequest.kind, "create");
+assert.equal(createGenerateRequest.resolvedDialect, "postgresql");
 assert.equal(createGenerateRequest.payload.title, "Generated ERD");
 assert.equal(createGenerateRequest.payload.sourceText, generateSmokeSource);
 assert.equal(createGenerateRequest.payload.dialect, "postgresql");
@@ -1232,6 +1303,7 @@ CREATE TABLE reviews (
 });
 
 assert.equal(postgresParseResult.ok, true);
+assert.equal(postgresParseResult.resolvedDialect, "postgresql");
 assert.equal(postgresParseResult.modelJson.version, 1);
 assert.deepEqual(
   postgresParseResult.modelJson.schema.tables.map((table) => table.id),
@@ -1314,6 +1386,7 @@ CREATE TABLE orders (
 });
 
 assert.equal(mysqlParseResult.ok, true);
+assert.equal(mysqlParseResult.resolvedDialect, "mysql");
 assert.deepEqual(
   mysqlParseResult.modelJson.schema.tables.map((table) => table.id),
   ["table.users", "table.orders"]
@@ -1632,10 +1705,79 @@ const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 
 assert.equal(autoDialectParseResult.ok, true);
+assert.equal(autoDialectParseResult.resolvedDialect, "mysql");
 assert.equal(autoDialectParseResult.modelJson.schema.tables[0].id, "table.users");
 assert.equal(
   autoDialectParseResult.modelJson.schema.tables[0].columns[0].dataType,
   "BIGINT"
+);
+
+const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: `CREATE TYPE order_status AS ENUM ('pending', 'paid');
+CREATE DOMAIN currency_amount AS NUMERIC(12, 2);
+
+CREATE TABLE payments (
+  id BIGSERIAL PRIMARY KEY,
+  status order_status NOT NULL,
+  amount currency_amount
+);`
+});
+
+assert.equal(customPostgreSqlTypeParseResult.ok, true);
+assert.equal(customPostgreSqlTypeParseResult.resolvedDialect, "postgresql");
+assert.deepEqual(
+  customPostgreSqlTypeParseResult.modelJson.schema.tables[0].columns.map(
+    (column) => column.dataType
+  ),
+  ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
+);
+
+const caseSensitivePostgreSqlDomainParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE DOMAIN "CaseType570" AS TEXT;
+CREATE DOMAIN "casetype570" AS TEXT;
+
+CREATE TABLE case_sensitive_values (
+  upper_value "CaseType570" NOT NULL,
+  lower_value "casetype570" NOT NULL
+);`
+  });
+
+assert.equal(caseSensitivePostgreSqlDomainParseResult.ok, true);
+
+const commentOnlyPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `-- CREATE TYPE comment_only_type_570 AS ENUM ('ignored');
+CREATE TABLE comment_only_values (
+  value comment_only_type_570 NOT NULL
+);`
+  });
+
+assert.equal(commentOnlyPostgreSqlTypeParseResult.ok, false);
+
+const stringOnlyPostgreSqlTypeParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE TABLE string_only_values (
+  note TEXT DEFAULT 'CREATE DOMAIN string_only_type_570',
+  value string_only_type_570 NOT NULL
+);`
+  });
+
+assert.equal(stringOnlyPostgreSqlTypeParseResult.ok, false);
+
+assert.deepEqual(
+  ddlParserRuntime.collectPostgreSqlUserDefinedTypeDeclarations(`-- CREATE TYPE comment_type AS ENUM ('ignored');
+/* CREATE DOMAIN block_comment_type AS TEXT; */
+SELECT 'CREATE DOMAIN string_type AS TEXT';
+DO $body$ BEGIN RAISE NOTICE 'CREATE TYPE dollar_string_type'; END $body$;
+CREATE /* real declaration */ DOMAIN "CaseType570" AS TEXT;
+CREATE DOMAIN "casetype570" AS TEXT;
+CREATE TYPE public.order_status AS ENUM ('pending');`),
+  ["\"CaseType570\"", "\"casetype570\"", "public.order_status"]
 );
 
 const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -1843,14 +1985,21 @@ assert.match(panel, /disabled=\{isDialectSelectDisabled\}/);
 assert.match(panel, /isDialectSelectDisabled/);
 assert.match(panel, /onSourceTextChange/);
 assert.match(panel, /isSourceTextReadOnly/);
-assert.match(panel, /@codemirror\/lang-sql/);
+assert.match(sqlEditorDialectUtils, /@codemirror\/lang-sql/);
 assert.match(panel, /@codemirror\/state/);
 assert.match(panel, /@codemirror\/view/);
 assert.match(panel, /SqlSourceEditor/);
 assert.match(panel, /sqlSourceEditorTheme/);
+assert.match(panel, /lastResolvedDialect/);
+assert.match(panel, /resolveSqlSourceEditorDialect/);
+assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
+assert.match(panel, /languageCompartmentRef/);
+assert.match(panel, /getSqlSourceEditorLanguageExtension/);
+assert.match(panel, /languageCompartment\.of/);
+assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
-assert.match(panel, /sql\(\)/);
+assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
 assert.match(panel, /setSqlErdViewSession\(\(currentSession\) =>/);
 assert.match(panel, /sessionLoadState/);
