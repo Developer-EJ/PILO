@@ -15,8 +15,10 @@ class FakeDispatcher:
 class FakeSqsClient:
     def __init__(self) -> None:
         self.deleted: list[dict[str, str]] = []
+        self.receive_calls: list[dict[str, object]] = []
 
-    def receive_message(self, **_kwargs):
+    def receive_message(self, **kwargs):
+        self.receive_calls.append(kwargs)
         return {
             "Messages": [
                 {
@@ -42,6 +44,19 @@ class FakeStaleExecutionRecovery:
 
     def recover_stale_executions(self) -> None:
         self.calls += 1
+
+
+class FakeAgentRetryExhaustionRecovery:
+    def __init__(self, result: bool = True, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[str] = []
+
+    def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
+        self.calls.append(run_id)
+        if self.error:
+            raise self.error
+        return self.result
 
 
 def runtime_settings() -> RuntimeSettings:
@@ -99,6 +114,120 @@ def test_sqs_worker_deletes_only_dispatcher_completed_messages() -> None:
             "ReceiptHandle": "receipt-delete",
         }
     ]
+    assert sqs_client.receive_calls[0]["AttributeNames"] == ["ApproximateReceiveCount"]
+
+
+def test_sqs_worker_terminalizes_third_agent_infrastructure_failure() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="agent_run_requested",
+                resource_id="run-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"agent_run_requested"}',
+                "ReceiptHandle": "receipt-terminal",
+                "MessageId": "message-terminal",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakeAgentRetryExhaustionRecovery()
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        agent_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == [
+        {
+            "QueueUrl": "https://sqs.example.com/jobs",
+            "ReceiptHandle": "receipt-terminal",
+        }
+    ]
+
+
+def test_sqs_worker_preserves_agent_message_when_terminalization_fails() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="agent_run_requested",
+                resource_id="run-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"agent_run_requested"}',
+                "ReceiptHandle": "receipt-dlq",
+                "MessageId": "message-dlq",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakeAgentRetryExhaustionRecovery(result=False)
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        agent_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == []
+
+
+def test_sqs_worker_preserves_agent_message_when_terminalization_errors() -> None:
+    dispatcher = FakeDispatcher(
+        [
+            JobProcessResult(
+                delete_message=False,
+                reason="infrastructure_failure",
+                job_type="agent_run_requested",
+                resource_id="run-1",
+            )
+        ]
+    )
+    sqs_client = FakeSqsClient()
+    sqs_client.receive_message = lambda **kwargs: {
+        "Messages": [
+            {
+                "Body": '{"jobType":"agent_run_requested"}',
+                "ReceiptHandle": "receipt-db-error",
+                "MessageId": "message-db-error",
+                "Attributes": {"ApproximateReceiveCount": "3"},
+            }
+        ]
+    }
+    recovery = FakeAgentRetryExhaustionRecovery(error=RuntimeError("database unavailable"))
+    worker = SqsAiJobWorker(
+        runtime_settings(),
+        dispatcher,
+        sqs_client,
+        agent_retry_exhaustion_recovery=recovery,
+    )
+
+    worker.run_once()
+
+    assert recovery.calls == ["run-1"]
+    assert sqs_client.deleted == []
 
 
 def test_sqs_worker_sweeps_stale_agent_executions_on_interval() -> None:
