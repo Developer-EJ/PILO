@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -70,6 +71,31 @@ const PERSONAL_PROJECT_OAUTH_ACCOUNT_MISMATCH_MESSAGE =
   "GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner";
 const PERSONAL_PROJECT_OAUTH_SCOPE_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
+const GITHUB_CALLBACK_ERROR_PARAM = "github_callback_error";
+const GITHUB_OAUTH_CALLBACK_ERROR_PARAM = "github_oauth_error";
+const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR = "account_already_connected";
+const GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE =
+  "이미 다른 PILO 계정에 연결된 GitHub 계정입니다. 다른 GitHub 계정을 사용하거나 기존 연결을 해제한 뒤 다시 시도하세요.";
+const GITHUB_CALLBACK_ERROR_MESSAGES: Record<string, string> = {
+  account_already_connected: GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE,
+  authorization_cancelled: "GitHub 승인이 취소되었습니다. 다시 시도하세요.",
+  callback_failed: "GitHub 연동을 완료하지 못했습니다. 다시 시도하세요.",
+  connection_failed: "GitHub 연동을 완료하지 못했습니다. 다시 시도하세요.",
+  installation_failed:
+    "GitHub App 설치 정보를 저장하지 못했습니다. 다시 시도하세요.",
+  installation_lookup_failed:
+    "GitHub App 설치 정보를 확인하지 못했습니다. 다시 시도하세요.",
+  installation_not_accessible:
+    "현재 연결된 GitHub 계정에서 접근할 수 없는 GitHub App 설치입니다.",
+  invalid_state:
+    "GitHub 연동 요청이 만료되었거나 이미 사용되었습니다. 다시 시작하세요.",
+  project_oauth_account_mismatch:
+    "GitHub ProjectV2 OAuth 계정은 GitHub OAuth 계정과 같아야 합니다.",
+  project_oauth_scope_missing:
+    "GitHub ProjectV2 권한이 부족합니다. project 권한으로 다시 연결하세요.",
+  token_exchange_failed:
+    "GitHub 인증 토큰을 발급받지 못했습니다. 다시 시도하세요."
+};
 
 function requiresProjectOAuth(target: GithubSyncTarget) {
   return target === "full" || projectScopedSyncTargets.has(target);
@@ -95,8 +121,40 @@ function getErrorMessage(error: unknown) {
   return "GitHub 연동 정보를 불러오지 못했습니다.";
 }
 
+function getGithubCallbackErrorMessage(params: URLSearchParams) {
+  const callbackError = params.get(GITHUB_CALLBACK_ERROR_PARAM);
+  if (callbackError) {
+    return (
+      GITHUB_CALLBACK_ERROR_MESSAGES[callbackError] ??
+      GITHUB_CALLBACK_ERROR_MESSAGES.connection_failed
+    );
+  }
+
+  return getGithubLegacyOAuthCallbackErrorMessage(
+    params.get(GITHUB_OAUTH_CALLBACK_ERROR_PARAM)
+  );
+}
+
+function getGithubLegacyOAuthCallbackErrorMessage(value: string | null) {
+  return value === GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_ERROR
+    ? GITHUB_OAUTH_ACCOUNT_ALREADY_CONNECTED_MESSAGE
+    : null;
+}
+
+function removeGithubCallbackErrorFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(GITHUB_CALLBACK_ERROR_PARAM);
+  url.searchParams.delete(GITHUB_OAUTH_CALLBACK_ERROR_PARAM);
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${url.pathname}${url.search}${url.hash}`
+  );
+}
+
 export function GithubPanel() {
   const authSession = useAuthSession();
+  const searchParams = useSearchParams();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const apiClient = useMemo(
     () =>
@@ -281,6 +339,18 @@ export function GithubPanel() {
     // refreshes data explicitly through handlers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, apiClient]);
+
+  useEffect(() => {
+    const callbackError = getGithubCallbackErrorMessage(searchParams);
+    if (!callbackError) {
+      return;
+    }
+
+    setActionError(callbackError);
+    setActionMessage(null);
+    setRedirectAction(null);
+    removeGithubCallbackErrorFromUrl();
+  }, [searchParams]);
 
   async function handleStartGithubOAuth() {
     setRedirectAction("oauth");

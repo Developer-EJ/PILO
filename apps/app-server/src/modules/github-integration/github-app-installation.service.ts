@@ -11,11 +11,13 @@ import { GithubAppClient } from "./github-app.client";
 import { GithubAppInstallationStateService } from "./github-app-installation-state.service";
 import { GithubCallbackStateService } from "./github-callback-state.service";
 import {
+  type GithubAppRuntimeConfig,
   GithubIntegrationConfigService,
   type GithubOAuthRuntimeConfig
 } from "./github-integration-config.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import { GithubOAuthClient } from "./github-oauth.client";
+import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import type {
@@ -148,80 +150,95 @@ export class GithubAppInstallationService {
     }
 
     const oauthConfig = this.configService.getGithubOAuthConfig();
-    const accessToken = await this.getConnectedGithubOAuthAccessToken(
+    const accessToken = await this.getConnectedGithubOAuthAccessTokenForCallback(
       storedState.userId,
-      oauthConfig
+      oauthConfig,
+      storedState.returnUrl
     );
-    const hasInstallationAccess =
-      await this.githubOAuthClient.hasUserInstallationAccess({
-        accessToken,
-        installationId: githubInstallationId
-      });
+    const hasInstallationAccess = await this.hasUserInstallationAccessForCallback(
+      accessToken,
+      githubInstallationId,
+      storedState.returnUrl
+    );
     if (!hasInstallationAccess) {
-      throw badRequest(
-        "GitHub App installation is not accessible to the connected GitHub user"
+      throw githubCallbackBadRequest(
+        "GitHub App installation is not accessible to the connected GitHub user",
+        storedState.returnUrl,
+        "installation_not_accessible"
       );
     }
 
-    const installation = await this.githubAppClient.getInstallation({
-      installationId: githubInstallationId,
-      appId: config.appId,
-      privateKey: config.privateKey,
-      now: config.now
-    });
-
-    const row = await this.database.queryOne<GithubInstallationRow>(
-      `
-        INSERT INTO github_installations (
-          workspace_id,
-          github_installation_id,
-          account_login,
-          account_type,
-          repository_selection,
-          permissions,
-          installed_by_user_id,
-          installed_at,
-          suspended_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        ON CONFLICT (workspace_id, github_installation_id)
-        DO UPDATE SET
-          account_login = EXCLUDED.account_login,
-          account_type = EXCLUDED.account_type,
-          repository_selection = EXCLUDED.repository_selection,
-          permissions = EXCLUDED.permissions,
-          installed_by_user_id = EXCLUDED.installed_by_user_id,
-          installed_at = EXCLUDED.installed_at,
-          suspended_at = EXCLUDED.suspended_at,
-          updated_at = now()
-        RETURNING
-          id,
-          workspace_id,
-          github_installation_id,
-          account_login,
-          account_type,
-          repository_selection,
-          permissions,
-          installed_by_user_id,
-          installed_at,
-          suspended_at,
-          last_synced_at
-      `,
-      [
-        storedState.workspaceId,
-        installation.githubInstallationId,
-        installation.accountLogin,
-        installation.accountType,
-        installation.repositorySelection,
-        installation.permissions,
-        storedState.userId,
-        installation.installedAt,
-        installation.suspendedAt
-      ]
+    const installation = await this.getInstallationForCallback(
+      githubInstallationId,
+      config,
+      storedState.returnUrl
     );
 
+    let row: GithubInstallationRow | null;
+    try {
+      row = await this.database.queryOne<GithubInstallationRow>(
+        `
+          INSERT INTO github_installations (
+            workspace_id,
+            github_installation_id,
+            account_login,
+            account_type,
+            repository_selection,
+            permissions,
+            installed_by_user_id,
+            installed_at,
+            suspended_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ON CONFLICT (workspace_id, github_installation_id)
+          DO UPDATE SET
+            account_login = EXCLUDED.account_login,
+            account_type = EXCLUDED.account_type,
+            repository_selection = EXCLUDED.repository_selection,
+            permissions = EXCLUDED.permissions,
+            installed_by_user_id = EXCLUDED.installed_by_user_id,
+            installed_at = EXCLUDED.installed_at,
+            suspended_at = EXCLUDED.suspended_at,
+            updated_at = now()
+          RETURNING
+            id,
+            workspace_id,
+            github_installation_id,
+            account_login,
+            account_type,
+            repository_selection,
+            permissions,
+            installed_by_user_id,
+            installed_at,
+            suspended_at,
+            last_synced_at
+        `,
+        [
+          storedState.workspaceId,
+          installation.githubInstallationId,
+          installation.accountLogin,
+          installation.accountType,
+          installation.repositorySelection,
+          installation.permissions,
+          storedState.userId,
+          installation.installedAt,
+          installation.suspendedAt
+        ]
+      );
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub App installation could not be saved",
+        storedState.returnUrl,
+        "installation_failed"
+      );
+    }
+
     if (!row) {
-      throw badRequest("GitHub App installation could not be saved");
+      throw githubCallbackBadRequest(
+        "GitHub App installation could not be saved",
+        storedState.returnUrl,
+        "installation_failed"
+      );
     }
 
     await this.triggerInitialFullSync(
@@ -251,6 +268,62 @@ export class GithubAppInstallationService {
     } catch (error) {
       this.logger.warn(
         `GitHub initial full sync failed after installation callback: ${this.getErrorMessage(error)}`
+      );
+    }
+  }
+
+  private async getConnectedGithubOAuthAccessTokenForCallback(
+    currentUserId: string,
+    config: GithubOAuthRuntimeConfig,
+    returnUrl: string | null
+  ): Promise<string> {
+    try {
+      return await this.getConnectedGithubOAuthAccessToken(currentUserId, config);
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth connection is required",
+        returnUrl,
+        "connection_failed"
+      );
+    }
+  }
+
+  private async hasUserInstallationAccessForCallback(
+    accessToken: string,
+    installationId: number,
+    returnUrl: string | null
+  ): Promise<boolean> {
+    try {
+      return await this.githubOAuthClient.hasUserInstallationAccess({
+        accessToken,
+        installationId
+      });
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub OAuth installation lookup failed",
+        returnUrl,
+        "installation_lookup_failed"
+      );
+    }
+  }
+
+  private async getInstallationForCallback(
+    installationId: number,
+    config: GithubAppRuntimeConfig,
+    returnUrl: string | null
+  ) {
+    try {
+      return await this.githubAppClient.getInstallation({
+        installationId,
+        appId: config.appId,
+        privateKey: config.privateKey,
+        now: config.now
+      });
+    } catch {
+      throw githubCallbackBadRequest(
+        "GitHub App installation lookup failed",
+        returnUrl,
+        "installation_lookup_failed"
       );
     }
   }

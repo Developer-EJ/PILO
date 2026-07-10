@@ -6,6 +6,8 @@ import {
   DeletePrReviewSessionPayload,
   PrReviewCanvasPayload,
   PrReviewConflictAnalysisPayload,
+  PrReviewConflictApplyPayload,
+  PrReviewConflictSuggestionPayload,
   PrReviewFileDecisionListPayload,
   PrReviewFileDiffPayload,
   PrReviewFilePayload,
@@ -92,6 +94,38 @@ export class PrReviewController {
       reviewSessionId
     );
     return apiResponse(conflicts);
+  }
+
+  @Post("review-files/:reviewFileId/conflict-suggestion")
+  async createReviewFileConflictSuggestion(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string
+  ): Promise<ApiSuccessResponse<PrReviewConflictSuggestionPayload>> {
+    const suggestion =
+      await this.prReviewService.createReviewFileConflictSuggestion(
+        currentUserId,
+        workspaceId,
+        reviewFileId
+      );
+    return apiResponse(suggestion);
+  }
+
+  @Post("review-files/:reviewFileId/conflict-apply")
+  async applyReviewFileConflictResolution(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reviewFileId") reviewFileId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<PrReviewConflictApplyPayload>> {
+    const applyResult =
+      await this.prReviewService.applyReviewFileConflictResolution(
+        currentUserId,
+        workspaceId,
+        reviewFileId,
+        body
+      );
+    return apiResponse(applyResult);
   }
 
   @Get("review-sessions/:reviewSessionId/canvas")

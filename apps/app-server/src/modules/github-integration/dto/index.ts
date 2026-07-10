@@ -4,6 +4,7 @@ export interface StartGithubOAuthRequest {
 
 export interface GithubOAuthCallbackQuery {
   code?: unknown;
+  error?: unknown;
   state?: unknown;
 }
 

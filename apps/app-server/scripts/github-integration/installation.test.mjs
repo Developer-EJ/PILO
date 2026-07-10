@@ -670,6 +670,74 @@ function createService({
     {
       userId: currentUserId,
       workspaceId,
+      returnUrl:
+        "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github"
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url:
+              "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github",
+            expires_at: new Date(statePayload.expiresAt)
+          };
+        }
+
+        if (/SELECT[\s\S]*github_access_token_encrypted[\s\S]*FROM users/i.test(text)) {
+          return connectedGithubOAuthRow;
+        }
+
+        return undefined;
+      }
+    }
+  });
+  let appLookupCalled = false;
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async hasUserInstallationAccess(input) {
+        assert.equal(input.accessToken, "plain-user-token");
+        assert.equal(input.installationId, 12345678);
+        return false;
+      }
+    },
+    githubAppClient: {
+      async getInstallation() {
+        appLookupCalled = true;
+        throw new Error("should not call app lookup");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback({
+        installation_id: "12345678",
+        setup_action: "install",
+        state
+      }, "pilo_github_app_installation_state=installation-binding-token"),
+    (error) =>
+      error?.returnUrl ===
+        "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github" &&
+      error?.callbackError === "installation_not_accessible" &&
+      error?.response?.error?.message ===
+        "GitHub App installation is not accessible to the connected GitHub user"
+  );
+  assert.equal(appLookupCalled, false);
+}
+
+{
+  const stateService = new GithubAppInstallationStateService();
+  const state = stateService.createState(
+    {
+      userId: currentUserId,
+      workspaceId,
       returnUrl: null
     },
     baseConfig

@@ -7,8 +7,10 @@ import {
   ShapeUtil,
   T,
   useEditor,
+  type Editor,
   type TLBaseShape,
-  type TLShape
+  type TLShape,
+  type TLShapePartial
 } from "tldraw";
 
 import type { ErdColumn, ErdTable } from "@/features/sql-erd/types";
@@ -102,6 +104,103 @@ export function selectSqlErdTable(detail: SqlErdTableSelectEventDetail) {
     new CustomEvent(SQLTOERD_TABLE_SELECT_EVENT, {
       detail
     })
+  );
+}
+
+export function getSqlErdTableShapeSelectionUpdates(
+  editor: Editor,
+  selectedTableShape: SqlErdTableShape,
+  selection:
+    | {
+        type: "column";
+        columnId: string;
+      }
+    | {
+        type: "table";
+      }
+) {
+  const updates: TLShapePartial<SqlErdTableShape>[] = [];
+
+  for (const shape of editor.getCurrentPageShapes()) {
+    if (!isSqlErdTableShape(shape)) {
+      continue;
+    }
+
+    const isSelectedTable = shape.id === selectedTableShape.id;
+    const selectedState: SqlErdTableSelectionState = isSelectedTable
+      ? selection.type
+      : "none";
+    const selectedColumnId =
+      isSelectedTable && selection.type === "column"
+        ? selection.columnId
+        : null;
+
+    if (
+      shape.props.selectedState === selectedState &&
+      shape.props.selectedColumnId === selectedColumnId
+    ) {
+      continue;
+    }
+
+    updates.push({
+      id: shape.id,
+      type: SQLTOERD_TABLE_SHAPE_TYPE,
+      props: {
+        ...shape.props,
+        selectedColumnId,
+        selectedState
+      }
+    });
+  }
+
+  return updates;
+}
+
+export function selectSqlErdTableShape(
+  editor: Editor,
+  selectedTableShape: SqlErdTableShape
+) {
+  const updates = getSqlErdTableShapeSelectionUpdates(
+    editor,
+    selectedTableShape,
+    { type: "table" }
+  );
+
+  editor.run(
+    () => {
+      if (updates.length) {
+        editor.updateShapes(updates);
+      }
+
+      editor.select(selectedTableShape.id);
+    },
+    { history: "ignore" }
+  );
+}
+
+export function selectSqlErdTableShapeColumn(
+  editor: Editor,
+  selectedTableShape: SqlErdTableShape,
+  columnId: string
+) {
+  const updates = getSqlErdTableShapeSelectionUpdates(
+    editor,
+    selectedTableShape,
+    {
+      type: "column",
+      columnId
+    }
+  );
+
+  editor.run(
+    () => {
+      if (updates.length) {
+        editor.updateShapes(updates);
+      }
+
+      editor.select(selectedTableShape.id);
+    },
+    { history: "ignore" }
   );
 }
 
@@ -240,7 +339,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const highlightedColumnIds = shape.props.highlightedColumnIds ?? [];
 
   function handleTableClick() {
-    editor.select(shape.id);
+    selectSqlErdTableShape(editor, shape);
     selectSqlErdTable({ tableId: shape.props.tableId });
   }
 
@@ -255,11 +354,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   }
 
   function handleColumnClick(columnId: string) {
+    selectSqlErdTableShapeColumn(editor, shape, columnId);
     selectSqlErdColumn({
       columnId,
       tableId: shape.props.tableId
     });
-    editor.select(shape.id);
   }
 
   function handleColumnPointerDown(
@@ -309,7 +408,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   return (
     <HTMLContainer
       className="pointer-events-auto overflow-visible"
-      style={{ width: shape.props.w, height: shape.props.h }}
+      style={{
+        height: shape.props.h,
+        pointerEvents: "all",
+        width: shape.props.w
+      }}
     >
       <article
         className={`overflow-hidden rounded-md border bg-white shadow-[0_12px_28px_rgba(15,23,42,0.12)] transition-[border-color,box-shadow] ${

@@ -21,6 +21,7 @@ import {
 } from "./pr-review-conflict-analyzer";
 import {
   PrReviewAnalysisService,
+  type PrReviewConflictSuggestionResult,
   type PrReviewAnalysisResult,
   type ReviewFileMetadata
 } from "./pr-review-analysis.service";
@@ -156,6 +157,14 @@ interface ReviewFileConflictTargetRow extends QueryResultRow {
   is_large_diff: boolean;
 }
 
+interface ReviewFileConflictSuggestionTargetRow
+  extends ReviewFileConflictTargetRow {
+  session_id: string;
+  pull_request_id: string;
+  head_sha: string;
+  conflict_status: PrReviewConflictStatus;
+}
+
 type PrReviewDecisionStatus = Exclude<PrReviewFileReviewStatus, "not_reviewed">;
 type PrReviewSubmissionStatus =
   | "not_submitted"
@@ -214,6 +223,12 @@ interface PrReviewFileDecisionDraft {
 interface PrReviewSubmissionDraft {
   submitType?: unknown;
   reviewBody?: unknown;
+}
+
+interface PrReviewConflictApplyDraft {
+  resolvedContent?: unknown;
+  expectedHeadSha?: unknown;
+  expectedHeadBlobSha?: unknown;
 }
 
 interface ReviewProgressRow extends QueryResultRow {
@@ -451,6 +466,7 @@ export interface PrReviewConflictFilePayload {
   type: PrReviewConflictFileType;
   isSupported: true;
   resolutionStatus: PrReviewConflictResolutionStatus;
+  headBlobSha: string;
   hunks: PrReviewConflictHunkPayload[];
   aiSummary: string | null;
   aiSuggestion: string | null;
@@ -475,6 +491,39 @@ export interface PrReviewConflictAnalysisPayload {
   supportedTypes: ["content"];
   files: PrReviewConflictFilePayload[];
   unsupportedFiles: PrReviewUnsupportedConflictFilePayload[];
+}
+
+export type PrReviewConflictSuggestionStatus = "suggested" | "invalid";
+
+export interface PrReviewConflictSuggestionPayload {
+  reviewFileId: string;
+  filePath: string;
+  previousFilePath: string | null;
+  type: "content";
+  status: PrReviewConflictSuggestionStatus;
+  headSha: string;
+  headBlobSha: string;
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedContent: string;
+  validationMessages: string[];
+  stored: false;
+}
+
+export interface PrReviewConflictApplyPayload {
+  reviewFileId: string;
+  filePath: string;
+  type: "content";
+  status: "applied";
+  appliedByGithubLogin: string;
+  commitSha: string;
+  commitUrl: string | null;
+  headShaBefore: string;
+  headShaAfter: string;
+  headBlobShaBefore: string;
+  headBlobShaAfter: string;
+  conflictStatus: PrReviewConflictStatus;
+  conflictCheckedAt: string | null;
 }
 
 export interface PrReviewSubmissionFileResultPayload {
@@ -539,6 +588,8 @@ const REVIEW_SUBMIT_TYPES: readonly PrReviewGithubReviewSubmitType[] = [
 
 const LARGE_DIFF_LINE_THRESHOLD = 1000;
 const LARGE_DIFF_PATCH_BYTES = 200 * 1024;
+const MAX_CONFLICT_APPLY_CONTENT_CHARS = 200 * 1024;
+const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
 @Injectable()
 export class PrReviewService {
@@ -775,12 +826,23 @@ export class PrReviewService {
       if (
         conflictInput.mergeBaseContent === null ||
         conflictInput.baseContent === null ||
-        conflictInput.headContent === null
+        conflictInput.headContent === null ||
+        conflictInput.headBlobSha === null
       ) {
         unsupportedFiles.push(
           this.mapUnsupportedConflictFile(
             file,
             "content conflict input is not available"
+          )
+        );
+        continue;
+      }
+
+      if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+        unsupportedFiles.push(
+          this.mapUnsupportedConflictFile(
+            file,
+            "file content is too large for conflict resolution apply"
           )
         );
         continue;
@@ -796,7 +858,7 @@ export class PrReviewService {
         continue;
       }
 
-      files.push(this.mapContentConflictFile(file, hunks));
+      files.push(this.mapContentConflictFile(file, hunks, conflictInput.headBlobSha));
     }
 
     return this.buildConflictAnalysisPayload({
@@ -1036,6 +1098,228 @@ export class PrReviewService {
     };
   }
 
+  async createReviewFileConflictSuggestion(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string
+  ): Promise<PrReviewConflictSuggestionPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const file = await this.findReviewFileConflictSuggestionTarget(
+      workspaceId,
+      reviewFileId
+    );
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    if (file.conflict_status !== "conflicted") {
+      throw badRequest("Review session is not conflicted");
+    }
+
+    const unsupportedReason = this.getUnsupportedConflictFileReason(file);
+    if (unsupportedReason) {
+      throw badRequest(unsupportedReason);
+    }
+
+    const currentPullRequest = await this.githubDependency.getPullRequestDetail(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id
+    );
+    if (currentPullRequest.headSha !== file.head_sha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    if (!currentPullRequest.baseSha) {
+      throw badRequest("GitHub pull request base SHA is not synced");
+    }
+
+    const conflictInputs = await this.githubDependency.getPullRequestConflictInputs(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id,
+      {
+        baseSha: currentPullRequest.baseSha,
+        headSha: file.head_sha,
+        filePaths: [file.file_path]
+      }
+    );
+    const conflictInput = conflictInputs.files.find(
+      (candidate) => candidate.filePath === file.file_path
+    );
+
+    if (!conflictInput || conflictInput.unsupportedReason) {
+      throw badRequest(
+        conflictInput?.unsupportedReason ?? "content conflict input is not available"
+      );
+    }
+
+    if (
+      conflictInput.mergeBaseContent === null ||
+      conflictInput.baseContent === null ||
+      conflictInput.headContent === null ||
+      conflictInput.headBlobSha === null
+    ) {
+      throw badRequest("content conflict input is not available");
+    }
+
+    if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest("file content is too large for conflict resolution apply");
+    }
+
+    const hunks = extractContentConflictHunks({
+      mergeBaseContent: conflictInput.mergeBaseContent,
+      baseContent: conflictInput.baseContent,
+      headContent: conflictInput.headContent
+    });
+
+    if (hunks.length === 0) {
+      throw badRequest("Content conflict hunk not found");
+    }
+
+    const suggestion = await this.analysisService.suggestConflictResolution({
+      filePath: file.file_path,
+      previousFilePath: file.previous_file_path,
+      headContent: conflictInput.headContent,
+      hunks
+    });
+
+    return this.mapConflictSuggestion(file, conflictInput.headBlobSha, suggestion);
+  }
+
+  async applyReviewFileConflictResolution(
+    currentUserId: string,
+    workspaceId: string,
+    reviewFileId: string,
+    body: unknown
+  ): Promise<PrReviewConflictApplyPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const input = this.normalizeConflictApply(body);
+    const file = await this.findReviewFileConflictSuggestionTarget(
+      workspaceId,
+      reviewFileId
+    );
+    if (!file) {
+      throw notFound("Review file not found");
+    }
+
+    if (file.conflict_status !== "conflicted") {
+      throw badRequest("Review session is not conflicted");
+    }
+
+    const unsupportedReason = this.getUnsupportedConflictFileReason(file);
+    if (unsupportedReason) {
+      throw badRequest(unsupportedReason);
+    }
+
+    if (file.head_sha !== input.expectedHeadSha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    const currentPullRequest = await this.githubDependency.getPullRequestDetail(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id
+    );
+    if (currentPullRequest.headSha !== file.head_sha) {
+      throw conflictError("Review session head SHA is stale");
+    }
+
+    if (!currentPullRequest.baseSha) {
+      throw badRequest("GitHub pull request base SHA is not synced");
+    }
+
+    const conflictInputs = await this.githubDependency.getPullRequestConflictInputs(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id,
+      {
+        baseSha: currentPullRequest.baseSha,
+        headSha: file.head_sha,
+        filePaths: [file.file_path]
+      }
+    );
+    const conflictInput = conflictInputs.files.find(
+      (candidate) => candidate.filePath === file.file_path
+    );
+
+    if (!conflictInput || conflictInput.unsupportedReason) {
+      throw badRequest(
+        conflictInput?.unsupportedReason ?? "content conflict input is not available"
+      );
+    }
+
+    if (
+      conflictInput.mergeBaseContent === null ||
+      conflictInput.baseContent === null ||
+      conflictInput.headContent === null ||
+      conflictInput.headBlobSha === null
+    ) {
+      throw badRequest("content conflict input is not available");
+    }
+
+    if (conflictInput.headContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest("file content is too large for conflict resolution apply");
+    }
+
+    if (conflictInput.headBlobSha !== input.expectedHeadBlobSha) {
+      throw conflictError("Review file blob SHA is stale");
+    }
+
+    const hunks = extractContentConflictHunks({
+      mergeBaseContent: conflictInput.mergeBaseContent,
+      baseContent: conflictInput.baseContent,
+      headContent: conflictInput.headContent
+    });
+
+    if (hunks.length === 0) {
+      throw badRequest("Content conflict hunk not found");
+    }
+
+    const applyResult = await this.githubDependency.applyPullRequestFileResolution(
+      currentUserId,
+      workspaceId,
+      file.pull_request_id,
+      {
+        filePath: file.file_path,
+        resolvedContent: input.resolvedContent,
+        expectedHeadSha: input.expectedHeadSha,
+        expectedHeadBlobSha: input.expectedHeadBlobSha
+      }
+    );
+    const refreshedConflict =
+      await this.githubDependency.getPullRequestConflictStatus(
+        currentUserId,
+        workspaceId,
+        file.pull_request_id
+      );
+
+    await this.updateReviewSessionAfterConflictApply({
+      reviewSessionId: file.session_id,
+      headSha: applyResult.headShaAfter,
+      conflictStatus: refreshedConflict.conflictStatus,
+      conflictCheckedAt: refreshedConflict.checkedAt
+    });
+
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      type: "content",
+      status: "applied",
+      appliedByGithubLogin: applyResult.appliedByGithubLogin,
+      commitSha: applyResult.commitSha,
+      commitUrl: applyResult.commitUrl,
+      headShaBefore: applyResult.headShaBefore,
+      headShaAfter: applyResult.headShaAfter,
+      headBlobShaBefore: applyResult.headBlobShaBefore,
+      headBlobShaAfter: applyResult.headBlobShaAfter,
+      conflictStatus: refreshedConflict.conflictStatus,
+      conflictCheckedAt: refreshedConflict.checkedAt
+    };
+  }
+
   async submitReviewSession(
     currentUserId: string,
     workspaceId: string,
@@ -1203,6 +1487,36 @@ export class PrReviewService {
     }
 
     return this.mapSession(session);
+  }
+
+  private async updateReviewSessionAfterConflictApply(input: {
+    reviewSessionId: string;
+    headSha: string;
+    conflictStatus: PrReviewConflictStatus;
+    conflictCheckedAt: string | null;
+  }): Promise<void> {
+    const updated = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE pr_review_sessions
+        SET
+          head_sha = $2,
+          conflict_status = $3,
+          conflict_checked_at = $4,
+          updated_at = now()
+        WHERE id = $1
+        RETURNING id
+      `,
+      [
+        input.reviewSessionId,
+        input.headSha,
+        input.conflictStatus,
+        input.conflictCheckedAt
+      ]
+    );
+
+    if (!updated) {
+      throw badRequest("Review session could not be updated");
+    }
   }
 
   async deleteReviewSession(
@@ -1399,6 +1713,39 @@ export class PrReviewService {
         ORDER BY review_file.file_path ASC
       `,
       [workspaceId, this.requireUuid(reviewSessionId, "reviewSessionId")]
+    );
+  }
+
+  private async findReviewFileConflictSuggestionTarget(
+    workspaceId: string,
+    reviewFileId: string
+  ): Promise<ReviewFileConflictSuggestionTargetRow | null> {
+    if (!UUID_PATTERN.test(reviewFileId)) {
+      return null;
+    }
+
+    return this.database.queryOne<ReviewFileConflictSuggestionTargetRow>(
+      `
+        SELECT
+          review_file.id,
+          review_file.session_id,
+          review_session.pull_request_id,
+          review_session.head_sha,
+          review_session.conflict_status,
+          review_file.file_path,
+          review_file.previous_file_path,
+          review_file.file_status,
+          review_file.is_binary,
+          review_file.is_large_diff
+        FROM review_files AS review_file
+        JOIN pr_review_sessions AS review_session
+          ON review_session.id = review_file.session_id
+        JOIN github_pull_requests AS pull_request
+          ON pull_request.id = review_session.pull_request_id
+        WHERE pull_request.workspace_id = $1
+          AND review_file.id = $2
+      `,
+      [workspaceId, reviewFileId]
     );
   }
 
@@ -2279,7 +2626,8 @@ export class PrReviewService {
 
   private mapContentConflictFile(
     file: ReviewFileConflictTargetRow,
-    hunks: PrReviewConflictHunkPayload[]
+    hunks: PrReviewConflictHunkPayload[],
+    headBlobSha: string
   ): PrReviewConflictFilePayload {
     return {
       reviewFileId: file.id,
@@ -2288,6 +2636,7 @@ export class PrReviewService {
       type: "content",
       isSupported: true,
       resolutionStatus: "unresolved",
+      headBlobSha,
       hunks,
       aiSummary: null,
       aiSuggestion: null,
@@ -2304,6 +2653,28 @@ export class PrReviewService {
       filePath: file.file_path,
       type: "unsupported",
       reason
+    };
+  }
+
+  private mapConflictSuggestion(
+    file: ReviewFileConflictSuggestionTargetRow,
+    headBlobSha: string,
+    suggestion: PrReviewConflictSuggestionResult
+  ): PrReviewConflictSuggestionPayload {
+    return {
+      reviewFileId: file.id,
+      filePath: file.file_path,
+      previousFilePath: file.previous_file_path,
+      type: "content",
+      status:
+        suggestion.validationStatus === "valid" ? "suggested" : "invalid",
+      headSha: file.head_sha,
+      headBlobSha,
+      aiSummary: suggestion.aiSummary,
+      aiSuggestion: suggestion.aiSuggestion,
+      resolvedContent: suggestion.resolvedContent,
+      validationMessages: suggestion.validationMessages,
+      stored: false
     };
   }
 
@@ -2375,6 +2746,56 @@ export class PrReviewService {
     return {
       status: draft.status,
       comment: draft.comment
+    };
+  }
+
+  private normalizeConflictApply(body: unknown): {
+    resolvedContent: string;
+    expectedHeadSha: string;
+    expectedHeadBlobSha: string;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+
+    const draft = body as PrReviewConflictApplyDraft;
+    if (typeof draft.resolvedContent !== "string") {
+      throw badRequest("resolvedContent must be a string");
+    }
+
+    const resolvedContent = draft.resolvedContent
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+    if (!resolvedContent.trim()) {
+      throw badRequest("resolvedContent must not be empty");
+    }
+
+    if (resolvedContent.length > MAX_CONFLICT_APPLY_CONTENT_CHARS) {
+      throw badRequest("resolvedContent is too large");
+    }
+
+    if (CONFLICT_MARKER_PATTERN.test(resolvedContent)) {
+      throw badRequest("resolvedContent must not contain conflict markers");
+    }
+
+    if (
+      typeof draft.expectedHeadSha !== "string" ||
+      !draft.expectedHeadSha.trim()
+    ) {
+      throw badRequest("expectedHeadSha must not be empty");
+    }
+
+    if (
+      typeof draft.expectedHeadBlobSha !== "string" ||
+      !draft.expectedHeadBlobSha.trim()
+    ) {
+      throw badRequest("expectedHeadBlobSha must not be empty");
+    }
+
+    return {
+      resolvedContent,
+      expectedHeadSha: draft.expectedHeadSha.trim(),
+      expectedHeadBlobSha: draft.expectedHeadBlobSha.trim()
     };
   }
 
