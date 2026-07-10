@@ -5,10 +5,13 @@ const require = createRequire(import.meta.url);
 const { AGENT_TOOL_SCHEMA_VERSION, AgentJobService } = require(
   "../../dist/modules/agent/agent-job.service.js"
 );
+const { AgentOutboxPublisherService } = require(
+  "../../dist/modules/agent/agent-outbox-publisher.service.js"
+);
 
 const originalEnv = {
   AWS_REGION: process.env.AWS_REGION,
-  SQS_AI_JOBS_QUEUE_URL: process.env.SQS_AI_JOBS_QUEUE_URL,
+  SQS_AGENT_JOBS_QUEUE_URL: process.env.SQS_AGENT_JOBS_QUEUE_URL,
   SQS_ENDPOINT: process.env.SQS_ENDPOINT
 };
 
@@ -79,9 +82,103 @@ class TestAgentJobService extends AgentJobService {
   }
 }
 
+class FakeOutboxDatabaseService {
+  constructor({ claim, dueRows = [], terminalRun = null } = {}) {
+    this.claim = claim ?? null;
+    this.dueRows = dueRows;
+    this.terminalRun = terminalRun;
+    this.calls = [];
+  }
+
+  async query(text, values = []) {
+    this.calls.push({ method: "query", text, values });
+    return this.dueRows;
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    return { rows: [] };
+  }
+
+  async transaction(callback) {
+    return callback({
+      queryOne: async (text, values = []) => {
+        this.calls.push({ method: "queryOne", text, values });
+
+        if (text.includes("WITH candidate")) {
+          return this.claim;
+        }
+
+        if (text.includes("RETURNING run_id, workspace_id")) {
+          return this.claim
+            ? {
+                run_id: this.claim.run_id,
+                workspace_id: this.claim.workspace_id
+              }
+            : null;
+        }
+
+        if (text.includes("UPDATE agent_runs")) {
+          return this.terminalRun;
+        }
+
+        throw new Error(`Unhandled outbox queryOne: ${text}`);
+      },
+      execute: async (text, values = []) => {
+        this.calls.push({ method: "transaction.execute", text, values });
+        return { rows: [] };
+      }
+    });
+  }
+}
+
+class FakeOutboxJobService {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.calls = [];
+  }
+
+  async enqueueAgentRunRequestedJob(job) {
+    this.calls.push(job);
+
+    if (this.shouldFail) {
+      throw new Error("SQS unavailable");
+    }
+  }
+}
+
+class FakeOutboxToolRegistryService {
+  listDefinitions() {
+    return [
+      {
+        name: "list_calendar_events",
+        description: "Calendar 일정 목록을 조회합니다.",
+        riskLevel: "low",
+        executionMode: "auto",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false
+        }
+      }
+    ];
+  }
+}
+
+function createOutboxClaim(overrides = {}) {
+  return {
+    id: "44444444-4444-4444-4444-444444444444",
+    run_id: payload.runId,
+    workspace_id: payload.workspaceId,
+    requested_by_user_id: payload.requestedByUserId,
+    attempt_count: 1,
+    claim_token: "55555555-5555-5555-5555-555555555555",
+    ...overrides
+  };
+}
+
 try {
   process.env.AWS_REGION = "ap-northeast-2";
-  process.env.SQS_AI_JOBS_QUEUE_URL =
+  process.env.SQS_AGENT_JOBS_QUEUE_URL =
     "http://localhost:4566/000000000000/pilo-dev-ai-jobs";
   process.env.SQS_ENDPOINT = "http://localhost:4566";
 
@@ -121,7 +218,7 @@ try {
   }
 
   {
-    delete process.env.SQS_AI_JOBS_QUEUE_URL;
+    delete process.env.SQS_AGENT_JOBS_QUEUE_URL;
     const client = new FakeSqsClient();
     const service = new TestAgentJobService(client);
 
@@ -143,7 +240,7 @@ try {
   }
 
   {
-    process.env.SQS_AI_JOBS_QUEUE_URL =
+    process.env.SQS_AGENT_JOBS_QUEUE_URL =
       "http://localhost:4566/000000000000/pilo-dev-ai-jobs";
     const client = new FakeSqsClient({ shouldFail: true });
     const service = new TestAgentJobService(client);
@@ -165,6 +262,114 @@ try {
         /raw AWS queue failure|pilo-dev-ai-jobs/
       );
     }
+  }
+
+  {
+    const database = new FakeOutboxDatabaseService({
+      claim: createOutboxClaim(),
+      dueRows: [{ run_id: payload.runId }]
+    });
+    const jobService = new FakeOutboxJobService();
+    const publisher = new AgentOutboxPublisherService(
+      database,
+      jobService,
+      new FakeOutboxToolRegistryService()
+    );
+
+    await publisher.publishDueEvents();
+
+    assert.equal(jobService.calls.length, 1);
+    assert.equal(jobService.calls[0].runId, payload.runId);
+    assert.equal(jobService.calls[0].toolSchemaVersion, AGENT_TOOL_SCHEMA_VERSION);
+    assert.deepEqual(jobService.calls[0].tools, [
+      {
+        name: "list_calendar_events",
+        description: "Calendar 일정 목록을 조회합니다.",
+        riskLevel: "low",
+        executionMode: "auto",
+        inputSchema: {
+          type: "object",
+          additionalProperties: false
+        }
+      }
+    ]);
+    assert.match(
+      database.calls.find((call) => call.method === "queryOne").text,
+      /FOR UPDATE OF outbox SKIP LOCKED/
+    );
+    assert.match(
+      database.calls.find((call) => call.method === "query").text,
+      /outbox.status = 'publishing'/
+    );
+    const delivered = database.calls.find(
+      (call) => call.method === "execute" && call.text.includes("delivered_at")
+    );
+    assert.match(
+      delivered.text,
+      /SET status = 'delivered'/
+    );
+    assert.deepEqual(delivered.values, [
+      "44444444-4444-4444-4444-444444444444",
+      "55555555-5555-5555-5555-555555555555"
+    ]);
+  }
+
+  {
+    const database = new FakeOutboxDatabaseService({
+      claim: createOutboxClaim({ attempt_count: 1 })
+    });
+    const publisher = new AgentOutboxPublisherService(
+      database,
+      new FakeOutboxJobService({ shouldFail: true }),
+      new FakeOutboxToolRegistryService()
+    );
+
+    await publisher.publishCreatedRun(payload.runId);
+
+    const retry = database.calls.find(
+      (call) =>
+        call.method === "execute" && call.text.includes("next_attempt_at = $2")
+    );
+    assert.equal(retry.values[2], "AGENT_OUTBOX_PUBLISH_FAILED");
+    assert.equal(retry.values[3], "Agent planning job could not be published");
+    assert.equal(retry.values[4], "55555555-5555-5555-5555-555555555555");
+    assert.ok(retry.values[1] instanceof Date);
+    assert.ok(retry.values[1].getTime() > Date.now());
+  }
+
+  {
+    const database = new FakeOutboxDatabaseService({
+      claim: createOutboxClaim({ attempt_count: 6 }),
+      terminalRun: { id: payload.runId }
+    });
+    const publisher = new AgentOutboxPublisherService(
+      database,
+      new FakeOutboxJobService({ shouldFail: true }),
+      new FakeOutboxToolRegistryService()
+    );
+
+    await publisher.publishCreatedRun(payload.runId);
+
+    assert.match(
+      database.calls.find(
+        (call) =>
+          call.method === "queryOne" &&
+          call.text.includes("RETURNING run_id, workspace_id")
+      ).text,
+      /SET status = 'failed'/
+    );
+    assert.match(
+      database.calls.find(
+        (call) => call.method === "queryOne" && call.text.includes("UPDATE agent_runs")
+      ).text,
+      /AND status = 'planning'/
+    );
+    assert.match(
+      database.calls.find(
+        (call) => call.method === "transaction.execute"
+      ).text,
+      /outbox_publish_exhausted/
+    );
   }
 } finally {
   for (const [key, value] of Object.entries(originalEnv)) {

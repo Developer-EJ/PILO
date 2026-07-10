@@ -19,17 +19,6 @@ from app.agent_processor import (
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
 )
-from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
-from app.canvas_agent.embeddings import (
-    DEFAULT_CANVAS_EMBEDDING_MODEL,
-    DEFAULT_CANVAS_EMBEDDING_REVISION,
-    DEFAULT_MAX_SEQUENCE_LENGTH,
-    LocalSentenceTransformerCanvasEmbedder,
-)
-from app.canvas_agent.planner import OpenAiCanvasAgentPlanner
-from app.canvas_agent.processor import CanvasAgentProcessor
-from app.canvas_agent.repository import PgCanvasAgentRepository
-from app.canvas_agent.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
 from app.meeting_report_processor import (
     AudioObjectMetadata,
@@ -53,6 +42,9 @@ DEFAULT_WAIT_TIME_SECONDS = 20
 DEFAULT_VISIBILITY_TIMEOUT_SECONDS = 900
 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = 10
 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS = 60
+AGENT_RETRY_TERMINAL_RECEIVE_COUNT = 3
+AGENT_RETRY_EXHAUSTED_ERROR_CODE = "AGENT_PLANNER_RETRY_EXHAUSTED"
+AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE = "요청을 분석하지 못했습니다. 잠시 후 다시 시도해주세요."
 LOCAL_APP_ENVS = {"local", "test", "development"}
 
 
@@ -72,12 +64,6 @@ class RuntimeSettings:
     agent_execution_handoff_token: str
     agent_execution_handoff_timeout_seconds: int
     agent_stale_execution_sweep_interval_seconds: int
-    canvas_embedding_model: str
-    canvas_embedding_revision: str
-    canvas_embedding_max_sequence_length: int
-    canvas_agent_shape_similarity_min: float
-    canvas_agent_similarity_margin_min: float
-    concurrency: int
     wait_time_seconds: int
     visibility_timeout_seconds: int
 
@@ -110,31 +96,6 @@ class RuntimeSettings:
                 "AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS",
                 DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
             ),
-            canvas_embedding_model=_env(
-                "CANVAS_EMBEDDING_MODEL",
-                DEFAULT_CANVAS_EMBEDDING_MODEL,
-            ),
-            canvas_embedding_revision=_env(
-                "CANVAS_EMBEDDING_REVISION",
-                DEFAULT_CANVAS_EMBEDDING_REVISION,
-            ),
-            canvas_embedding_max_sequence_length=_positive_int_env(
-                "CANVAS_EMBEDDING_MAX_SEQUENCE_LENGTH",
-                DEFAULT_MAX_SEQUENCE_LENGTH,
-            ),
-            canvas_agent_shape_similarity_min=_bounded_float_env(
-                "CANVAS_AGENT_SHAPE_SIMILARITY_MIN",
-                0.78,
-                minimum=0.5,
-                maximum=1.0,
-            ),
-            canvas_agent_similarity_margin_min=_bounded_float_env(
-                "CANVAS_AGENT_SIMILARITY_MARGIN_MIN",
-                0.08,
-                minimum=0.0,
-                maximum=0.5,
-            ),
-            concurrency=_positive_int_env("AI_WORKER_CONCURRENCY", 1),
             wait_time_seconds=_positive_int_env(
                 "AI_WORKER_SQS_WAIT_TIME_SECONDS",
                 DEFAULT_WAIT_TIME_SECONDS,
@@ -354,8 +315,8 @@ class PgAgentRunRepository:
         run_id: str,
         step_id: str,
         output_summary: dict[str, object],
-    ) -> None:
-        self.connection.execute(
+    ) -> bool:
+        row = self.connection.execute(
             """
             UPDATE agent_steps
             SET
@@ -365,9 +326,12 @@ class PgAgentRunRepository:
               updated_at = now()
             WHERE id = %s
               AND run_id = %s
+              AND status = 'running'
+            RETURNING id
             """,
             (json.dumps(output_summary, ensure_ascii=False), step_id, run_id),
-        )
+        ).fetchone()
+        return row is not None
 
     def fail_planner_step(
         self,
@@ -462,6 +426,90 @@ class PgAgentRunRepository:
             """,
             (error_code, error_message, message, run_id),
         )
+
+    def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
+        if not self.try_acquire_run_lock(run_id):
+            return False
+
+        try:
+            with self.connection.transaction():
+                run = self.connection.execute(
+                    """
+                    UPDATE agent_runs
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE id = %s
+                      AND status = 'planning'
+                    RETURNING workspace_id
+                    """,
+                    (
+                        AGENT_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                ).fetchone()
+
+                if run is None:
+                    return False
+
+                self.connection.execute(
+                    """
+                    UPDATE agent_steps
+                    SET
+                      status = 'failed',
+                      error_code = %s,
+                      error_message = %s,
+                      completed_at = now(),
+                      updated_at = now()
+                    WHERE run_id = %s
+                      AND step_type = 'planner'
+                      AND status = 'running'
+                    """,
+                    (
+                        AGENT_RETRY_EXHAUSTED_ERROR_CODE,
+                        AGENT_RETRY_EXHAUSTED_ERROR_MESSAGE,
+                        run_id,
+                    ),
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO agent_logs (
+                      workspace_id,
+                      run_id,
+                      actor_type,
+                      level,
+                      event_type,
+                      message,
+                      metadata_json,
+                      resource_refs
+                    )
+                    VALUES (
+                      %s,
+                      %s,
+                      'system',
+                      'error',
+                      'planner_retry_exhausted',
+                      %s,
+                      %s::jsonb,
+                      '[]'::jsonb
+                    )
+                    """,
+                    (
+                        str(run["workspace_id"]),
+                        run_id,
+                        "Agent planner retries exhausted",
+                        json.dumps({"maxReceiveCount": AGENT_RETRY_TERMINAL_RECEIVE_COUNT}),
+                    ),
+                )
+                return True
+        finally:
+            self.release_run_lock(run_id)
 
 
 class S3RecordingStorage:
@@ -573,14 +621,14 @@ class SqsAiJobWorker:
         dispatcher: JobDispatcher,
         sqs_client: Any,
         stale_execution_recovery: Any | None = None,
-        canvas_embedding_processor: CanvasEmbeddingProcessor | None = None,
+        agent_retry_exhaustion_recovery: Any | None = None,
         monotonic_time: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
         self.dispatcher = dispatcher
         self.sqs_client = sqs_client
         self.stale_execution_recovery = stale_execution_recovery
-        self.canvas_embedding_processor = canvas_embedding_processor
+        self.agent_retry_exhaustion_recovery = agent_retry_exhaustion_recovery
         self.monotonic_time = monotonic_time
         self.last_stale_execution_sweep_at: float | None = None
 
@@ -591,12 +639,12 @@ class SqsAiJobWorker:
 
     def run_once(self) -> int:
         self.recover_stale_executions_if_due()
-        self._process_canvas_embedding_jobs()
         response = self.sqs_client.receive_message(
             QueueUrl=self.settings.sqs_queue_url,
-            MaxNumberOfMessages=min(max(self.settings.concurrency, 1), 10),
+            MaxNumberOfMessages=1,
             WaitTimeSeconds=self.settings.wait_time_seconds,
             VisibilityTimeout=self.settings.visibility_timeout_seconds,
+            AttributeNames=["ApproximateReceiveCount"],
         )
         messages = response.get("Messages", [])
 
@@ -612,13 +660,53 @@ class SqsAiJobWorker:
                 result.resource_id,
                 message.get("MessageId"),
             )
-            if result.delete_message and receipt_handle:
+            should_delete = result.delete_message or self._terminalize_agent_retry(
+                result,
+                message,
+            )
+            if should_delete and receipt_handle:
                 self.sqs_client.delete_message(
                     QueueUrl=self.settings.sqs_queue_url,
                     ReceiptHandle=receipt_handle,
                 )
 
         return len(messages)
+
+    def _terminalize_agent_retry(self, result: Any, message: dict[str, Any]) -> bool:
+        if (
+            self.agent_retry_exhaustion_recovery is None
+            or result.job_type != "agent_run_requested"
+            or result.reason != "infrastructure_failure"
+            or not result.resource_id
+            or self._receive_count(message) < AGENT_RETRY_TERMINAL_RECEIVE_COUNT
+        ):
+            return False
+
+        try:
+            return bool(
+                self.agent_retry_exhaustion_recovery.fail_planning_after_retry_exhaustion(
+                    result.resource_id
+                )
+            )
+        except Exception:
+            LOGGER.exception(
+                "Agent retry terminalization failed run_id=%s message_id=%s",
+                result.resource_id,
+                message.get("MessageId"),
+            )
+            return False
+
+    @staticmethod
+    def _receive_count(message: dict[str, Any]) -> int:
+        attributes = message.get("Attributes")
+        if not isinstance(attributes, dict):
+            return 0
+
+        raw_count = attributes.get("ApproximateReceiveCount")
+        try:
+            return int(raw_count)
+        except (TypeError, ValueError):
+            return 0
 
     def recover_stale_executions_if_due(self) -> None:
         if self.stale_execution_recovery is None:
@@ -637,15 +725,6 @@ class SqsAiJobWorker:
             self.stale_execution_recovery.recover_stale_executions()
         except InfrastructureError:
             LOGGER.exception("stale Agent execution recovery failed")
-
-    def _process_canvas_embedding_jobs(self) -> None:
-        if self.canvas_embedding_processor is None:
-            return
-        for _ in range(4):
-            result = self.canvas_embedding_processor.process_next()
-            if result is None:
-                return
-            LOGGER.info("canvas embedding result=%s", result)
 
 
 class HttpAgentExecutionHandoffClient(AgentExecutionHandoffClient):
@@ -698,10 +777,6 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         resolved_settings.database_url,
         resolved_settings.database_ssl,
     )
-    canvas_agent_repository = PgCanvasAgentRepository(
-        resolved_settings.database_url,
-        resolved_settings.database_ssl,
-    )
     storage = S3RecordingStorage(s3_client, resolved_settings.recordings_bucket)
     ai_client = OpenAiMeetingReportClient(
         resolved_settings.openai_api_key,
@@ -711,25 +786,6 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     agent_planner_client = OpenAiAgentPlannerClient(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
-    )
-    canvas_agent_planner = OpenAiCanvasAgentPlanner(
-        resolved_settings.openai_api_key,
-        resolved_settings.openai_agent_planner_model,
-    )
-    canvas_embedder = LocalSentenceTransformerCanvasEmbedder(
-        model_name=resolved_settings.canvas_embedding_model,
-        model_version=resolved_settings.canvas_embedding_revision,
-        max_sequence_length=resolved_settings.canvas_embedding_max_sequence_length,
-    )
-    canvas_semantic_router = CanvasSemanticRouter(
-        canvas_agent_repository,
-        canvas_embedder,
-        shape_similarity_min=resolved_settings.canvas_agent_shape_similarity_min,
-        similarity_margin_min=resolved_settings.canvas_agent_similarity_margin_min,
-    )
-    canvas_embedding_processor = CanvasEmbeddingProcessor(
-        canvas_agent_repository,
-        canvas_embedder,
     )
     meeting_report_processor = MeetingReportProcessor(
         meeting_report_repository,
@@ -746,22 +802,13 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
         agent_planner_client,
         agent_execution_handoff_client,
     )
-    canvas_agent_processor = CanvasAgentProcessor(
-        canvas_agent_repository,
-        canvas_agent_planner,
-        canvas_semantic_router,
-    )
-    dispatcher = JobDispatcher(
-        meeting_report_processor,
-        agent_run_processor,
-        canvas_agent_processor,
-    )
+    dispatcher = JobDispatcher(meeting_report_processor, agent_run_processor)
     return SqsAiJobWorker(
         resolved_settings,
         dispatcher,
         sqs_client,
         stale_execution_recovery=agent_execution_handoff_client,
-        canvas_embedding_processor=canvas_embedding_processor,
+        agent_retry_exhaustion_recovery=agent_run_repository,
     )
 
 
@@ -835,19 +882,6 @@ def _positive_int_env(key: str, default: int) -> int:
         return default
 
     return max(parsed, 1)
-
-
-def _bounded_float_env(key: str, default: float, *, minimum: float, maximum: float) -> float:
-    value = os.getenv(key)
-    if value is None or not value.strip():
-        return default
-    try:
-        parsed = float(value)
-    except ValueError:
-        return default
-    if parsed < minimum or parsed > maximum:
-        return default
-    return parsed
 
 
 def _openai_retryable_errors() -> tuple[type[BaseException], ...]:
