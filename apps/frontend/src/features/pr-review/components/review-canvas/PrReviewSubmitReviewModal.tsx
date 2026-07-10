@@ -113,12 +113,21 @@ function isKnownStaleSession(
 }
 
 function buildDefaultReviewBody(result: PrReviewSessionResult) {
+  const decisionSummary = [
+    `Approved ${result.counts.approved}`,
+    `Discuss ${result.counts.discussionNeeded}`,
+    `Unknown ${result.counts.unknown}`,
+    `Not reviewed ${result.counts.notReviewed}`
+  ].join(" / ");
+
   const lines = [
-    "## PILO PR Review",
+    "## PILO Review Summary",
     "",
     result.reviewResultSummary,
     "",
-    "### File decisions"
+    `Decision summary: ${decisionSummary}`,
+    "",
+    "### Reviewed files"
   ];
 
   for (const file of result.fileReviewResults) {
