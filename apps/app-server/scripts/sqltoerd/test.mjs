@@ -9,6 +9,9 @@ function readSource(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
 
+const SQL_ERD_SESSION_DATA_MUTATION_PATTERN =
+  /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\s+(?:public\.)?sql_erd_sessions\b/i;
+
 const appModule = await readSource("../../src/app.module.ts");
 const sqlErdModule = await readSource(
   "../../src/modules/sql-erd/sql-erd.module.ts"
@@ -100,9 +103,17 @@ assert.match(
   sqlErdMultiSessionMigration,
   /ON public\.sql_erd_sessions\s*\(workspace_id, updated_at DESC, id DESC\)\s*WHERE deleted_at IS NULL/s
 );
+[
+  "INSERT INTO public.sql_erd_sessions (id) VALUES ('session-id')",
+  "UPDATE sql_erd_sessions SET title = 'Updated'",
+  "DELETE FROM public.sql_erd_sessions",
+  "TRUNCATE public.sql_erd_sessions"
+].forEach((statement) => {
+  assert.match(statement, SQL_ERD_SESSION_DATA_MUTATION_PATTERN);
+});
 assert.doesNotMatch(
   sqlErdMultiSessionMigration,
-  /\b(?:DELETE|UPDATE)\s+public\.sql_erd_sessions\b/i
+  SQL_ERD_SESSION_DATA_MUTATION_PATTERN
 );
 assert.match(dbReadme, /023_enable_sql_erd_multi_sessions\.sql/);
 assert.match(sqlErdValidation, /validateSqlErdSessionId/);
