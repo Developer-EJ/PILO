@@ -11,12 +11,17 @@ import {
   type SqltoerdModelJsonV1,
   type SqltoerdResolvedDialect
 } from "@/features/sql-erd/types";
+import {
+  createSqltoerdSourceMap,
+  type SqltoerdSourceMap
+} from "@/features/sql-erd/utils/sql-source-map";
 
 const { Parser } = sqlParser;
 
 export type SqltoerdDdlParseInput = {
   sourceText: string;
   dialect: SqltoerdDialect;
+  sourceMapModelJson?: SqltoerdModelJsonV1;
 };
 
 export type SqltoerdDdlParseResult =
@@ -24,6 +29,7 @@ export type SqltoerdDdlParseResult =
       ok: true;
       modelJson: SqltoerdModelJsonV1;
       resolvedDialect: SqltoerdResolvedDialect;
+      sourceMap: SqltoerdSourceMap;
     }
   | {
       ok: false;
@@ -123,16 +129,23 @@ export function parseSqlDdlToErdModel(
     );
   }
 
+  const modelJson: SqltoerdModelJsonV1 = {
+    version: SQLTOERD_MODEL_JSON_VERSION,
+    schema: {
+      tables: tableStates.map((tableState) => tableState.table),
+      relations
+    }
+  };
+
   return {
     ok: true,
     resolvedDialect,
-    modelJson: {
-      version: SQLTOERD_MODEL_JSON_VERSION,
-      schema: {
-        tables: tableStates.map((tableState) => tableState.table),
-        relations
-      }
-    }
+    modelJson,
+    sourceMap: createSqltoerdSourceMap({
+      dialect: resolvedDialect,
+      modelJson: input.sourceMapModelJson ?? modelJson,
+      sourceText: input.sourceText
+    })
   };
 }
 
