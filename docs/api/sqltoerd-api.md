@@ -469,8 +469,10 @@ Request:
 생성 규칙:
 
 - `title`이 없으면 `Untitled ERD`를 사용한다.
-- `sourceFormat`은 `sql`만 허용한다.
+- `sourceFormat`이 없으면 `sql`을 사용하며 현재는 `sql`만 허용한다.
 - `dialect`가 없으면 `auto`를 사용한다.
+- `sourceText`가 없으면 빈 문자열 `""`을 사용한다.
+- `modelJson`과 `layoutJson`은 필수다.
 - `sourceText`, `modelJson`, `layoutJson`은 Generate 성공 결과를 기준으로 보낸다.
 - `settingsJson`이 없으면 `{}`를 사용한다.
 - 서버는 `modelJson`에서 `tableCount`, `relationCount`를 계산한다.
@@ -514,6 +516,8 @@ Request:
 수정 규칙:
 
 - `baseRevision`은 필수다.
+- `baseRevision` 외에 수정 가능한 field를 최소 하나 포함해야 한다.
+- `baseRevision`만 보낸 request는 `400 Bad Request`다.
 - 서버의 현재 `revision`과 `baseRevision`이 다르면 `409 Conflict`를 반환한다.
 - 수정 가능한 필드는 `title`, `sourceFormat`, `dialect`, `sourceText`, `modelJson`, `layoutJson`, `settingsJson`이다.
 - `workspaceId`와 `sessionId`가 함께 일치하는 활성 session만 수정한다.
@@ -569,7 +573,13 @@ DELETE /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}?baseRevisio
 
 기존 frontend가 plural API로 전환될 때까지 singular endpoint를 유지한다.
 
-- singular endpoint 응답에는 `Deprecation: true` header를 포함한다.
+- plural API가 배포되고 singular endpoint의 deprecation이 시작되면 singular 응답에
+  [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html#section-2.1)의 Structured
+  Field Date 형식인 `Deprecation` header를 포함한다.
+- `Deprecation`에는 boolean value를 사용하지 않는다. 형식 예시는
+  `Deprecation: @1688169599`다.
+- 실제 `Deprecation` timestamp는 plural API 운영 배포 시각을 기준으로 구현 PR에서
+  확정한다. deprecation 시작 전에는 이 header를 보내지 않는다.
 - `GET /sql-erd-session`은 `updatedAt DESC, id DESC` 기준 첫 번째 활성 session
   detail 또는 `data: null`을 반환한다.
 - `POST /sql-erd-session`은 활성 session이 하나라도 있으면 기존 동작대로
@@ -577,7 +587,7 @@ DELETE /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}?baseRevisio
 - singular PATCH/DELETE의 request, response, validation, revision 규칙은 같은
   `sessionId`를 사용하는 plural PATCH/DELETE와 동일하다.
 - 신규 frontend와 다른 신규 consumer는 singular endpoint를 사용하지 않는다.
-- 제거 날짜가 확정되지 않았으므로 이번 계약에서는 `Sunset` header를 보내지 않는다.
+- 제거 예정일이 확정되지 않았으므로 이번 계약에서는 `Sunset` header를 보내지 않는다.
 - frontend의 singular 호출 제거와 운영 전환 확인 후 별도 breaking-change Issue에서
   singular endpoint 제거를 진행한다.
 
@@ -626,7 +636,7 @@ DB migration과 app-server/frontend 구현이 완료되기 전에는 plural endp
 
 | Status | 상황 |
 | ---: | --- |
-| `400 Bad Request` | validation 실패, 잘못된 enum, 잘못된 JSON 구조, `baseRevision` 누락 |
+| `400 Bad Request` | validation 실패, 잘못된 enum/JSON/cursor 구조, `baseRevision` 누락, PATCH 수정 field 누락 |
 | `401 Unauthorized` | 인증 없음 또는 만료된 bearer token |
 | `403 Forbidden` | Workspace 접근 권한 없음 |
 | `404 Not Found` | Workspace 없음, 상세/수정/삭제 대상 session 없음, 삭제된 session 접근 |
@@ -644,7 +654,12 @@ DB migration과 app-server/frontend 구현이 완료되기 전에는 plural endp
 - API error response는 SQL 일부를 echo하지 않는다.
 - DB 저장은 parameterized query만 사용한다.
 - 화면 출력은 HTML 주입이 아니라 React text rendering/escape를 사용한다.
-- 모든 조회/수정/삭제는 `workspaceId`와 `sessionId`를 함께 조건으로 검증한다.
+- 목록 조회와 singular GET은 current user의 Workspace 접근 권한과 `workspaceId`를
+  검증한다.
+- 상세 조회, PATCH, DELETE는 Workspace 접근 권한을 확인한 뒤 `workspaceId`,
+  `sessionId`, `deletedAt IS NULL`을 함께 조건으로 검증한다.
+- POST는 Workspace 접근 권한을 확인하고 request body가 아닌 path의 `workspaceId`와
+  current user를 저장 기준으로 사용한다.
 
 ## 향후 확장
 
