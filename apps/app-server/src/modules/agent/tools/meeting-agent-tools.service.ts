@@ -215,6 +215,7 @@ export class MeetingAgentToolsService {
       reportId: report.id,
       meetingId: report.meetingId,
       status: report.status,
+      createdAt: report.createdAt,
       sections: this.buildSections(report, options),
       actionItems: this.buildActionItems(report.actionItemCandidates),
       transcript: this.buildTranscriptSummary(report)
