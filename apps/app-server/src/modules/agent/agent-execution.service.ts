@@ -11,6 +11,7 @@ import {
   AgentLoggingService,
   AgentRunPayload
 } from "./agent-logging.service";
+import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import type {
   AgentJsonObject,
@@ -47,8 +48,10 @@ interface AgentRunRow extends QueryResultRow {
 }
 
 interface AgentExecutionRunRow extends AgentRunRow {
+  prompt: string;
   workspace_id: string;
   requested_by_user_id: string;
+  timezone: string;
 }
 
 interface AgentPlannerStepRow extends QueryResultRow {
@@ -92,7 +95,7 @@ export class AgentExecutionService {
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
     const run = await this.database.queryOne<AgentExecutionRunRow>(
       `
-        SELECT id, workspace_id, requested_by_user_id, status
+        SELECT id, workspace_id, requested_by_user_id, status, prompt, timezone
         FROM agent_runs
         WHERE id = $1
       `,
@@ -106,14 +109,19 @@ export class AgentExecutionService {
     return this.executeLatestPlannedTool(
       run.requested_by_user_id,
       run.workspace_id,
-      run.id
+      run.id,
+      {
+        prompt: run.prompt,
+        timezone: run.timezone
+      }
     );
   }
 
   async executeLatestPlannedTool(
     currentUserId: string,
     workspaceId: string,
-    runId: string
+    runId: string,
+    context: { prompt?: string; timezone?: string } = {}
   ): Promise<AgentExecutionResult> {
     const plannerStep = await this.findReadyPlannerStep(
       currentUserId,
@@ -136,7 +144,9 @@ export class AgentExecutionService {
     }
 
     return this.executePlannerOutput(currentUserId, workspaceId, runId, {
-      plannerOutput: plannerStep.output_json
+      plannerOutput: plannerStep.output_json,
+      prompt: context.prompt,
+      timezone: context.timezone
     });
   }
 
@@ -144,7 +154,11 @@ export class AgentExecutionService {
     currentUserId: string,
     workspaceId: string,
     runId: string,
-    input: { plannerOutput: AgentJsonObject }
+    input: {
+      plannerOutput: AgentJsonObject;
+      prompt?: string;
+      timezone?: string;
+    }
   ): Promise<AgentExecutionResult> {
     const candidate = this.parsePlannerOutput(input.plannerOutput);
     const definition = this.agentToolRegistryService.getDefinition(
@@ -202,7 +216,9 @@ export class AgentExecutionService {
       runId,
       definition,
       validatedInput.input,
-      candidate.input
+      candidate.input,
+      input.prompt,
+      input.timezone
     );
   }
 
@@ -417,7 +433,9 @@ export class AgentExecutionService {
     runId: string,
     definition: AgentToolDefinition<unknown>,
     validatedInput: unknown,
-    plannerInput: AgentJsonObject
+    plannerInput: AgentJsonObject,
+    prompt?: string,
+    timezone?: string
   ): Promise<AgentExecutionResult> {
     const step = await this.agentLoggingService.startNextToolStepIfAbsent(
       currentUserId,
@@ -466,7 +484,13 @@ export class AgentExecutionService {
         {
           runId,
           riskLevel: definition.riskLevel,
-          finalAnswer: this.buildFinalAnswer(definition.name, resourceRefs),
+          finalAnswer: buildAgentReadResultAnswer({
+            toolName: definition.name,
+            outputSummary,
+            resourceRefs,
+            prompt,
+            timezone
+          }),
           message: "요청을 완료했습니다."
         }
       );
@@ -540,17 +564,6 @@ export class AgentExecutionService {
       status: "failed",
       run
     };
-  }
-
-  private buildFinalAnswer(
-    toolName: string,
-    resourceRefs: AgentResourceRef[]
-  ): string {
-    if (resourceRefs.length === 0) {
-      return `${toolName} 실행을 완료했습니다.`;
-    }
-
-    return `${toolName} 실행을 완료했습니다. 관련 리소스 ${resourceRefs.length}개를 확인했습니다.`;
   }
 
   private toSafeErrorMessage(error: unknown, fallback: string): string {
