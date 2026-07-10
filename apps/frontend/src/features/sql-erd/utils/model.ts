@@ -18,6 +18,16 @@ export type SqltoerdRelationEndpoints = {
   to: SqltoerdRelationEndpoint;
 };
 
+export type SqlErdRelationCardinality =
+  | "one"
+  | "zero_or_one"
+  | "zero_or_many";
+
+export type SqlErdRelationCardinalityEndpoints = {
+  from: SqlErdRelationCardinality;
+  to: SqlErdRelationCardinality;
+};
+
 export type SqltoerdModelIndex = {
   tablesById: Map<string, ErdTable>;
   columnsByTableId: Map<string, Map<string, ErdColumn>>;
@@ -244,6 +254,43 @@ export function getRelationEndpoints(
       table: toTable,
       columns: toColumns
     }
+  };
+}
+
+export function inferSqlErdRelationCardinality(
+  relation: ErdRelation,
+  modelIndex: SqltoerdModelIndex
+): SqlErdRelationCardinalityEndpoints | null {
+  if (
+    relation.fromColumnIds.length !== 1 ||
+    relation.toColumnIds.length !== 1
+  ) {
+    return null;
+  }
+
+  const endpoints = getRelationEndpoints(relation, modelIndex);
+
+  if (
+    !endpoints ||
+    endpoints.from.columns.length !== 1 ||
+    endpoints.to.columns.length !== 1
+  ) {
+    return null;
+  }
+
+  const fromColumn = endpoints.from.columns[0];
+  const isFromColumnUnique =
+    fromColumn.unique ||
+    endpoints.from.table.constraints.some(
+      (constraint) =>
+        (constraint.kind === "primary_key" || constraint.kind === "unique") &&
+        constraint.columnIds.length === 1 &&
+        constraint.columnIds[0] === fromColumn.id
+    );
+
+  return {
+    from: isFromColumnUnique ? "zero_or_one" : "zero_or_many",
+    to: fromColumn.nullable ? "zero_or_one" : "one"
   };
 }
 
