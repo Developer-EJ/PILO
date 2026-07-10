@@ -7,7 +7,8 @@ import {
   type ErdRelation,
   type ErdTable,
   type SqltoerdDialect,
-  type SqltoerdModelJsonV1
+  type SqltoerdModelJsonV1,
+  type SqltoerdResolvedDialect
 } from "@/features/sql-erd/types";
 
 const { Parser } = sqlParser;
@@ -21,6 +22,7 @@ export type SqltoerdDdlParseResult =
   | {
       ok: true;
       modelJson: SqltoerdModelJsonV1;
+      resolvedDialect: SqltoerdResolvedDialect;
     }
   | {
       ok: false;
@@ -50,7 +52,7 @@ export function parseSqlDdlToErdModel(
     return createParseFailure("EMPTY_SOURCE", "SQL DDL source is empty.");
   }
 
-  const databases = resolveParserDatabases(input.dialect);
+  const databases = resolveParserDatabases(input.dialect, sourceText);
 
   if (databases.length === 0) {
     return createParseFailure(
@@ -60,12 +62,14 @@ export function parseSqlDdlToErdModel(
   }
 
   let astNodes: SqlParserAstNode[] | null = null;
+  let resolvedDialect: SqltoerdResolvedDialect | null = null;
   let lastParseErrorMessage = "Failed to parse SQL DDL.";
 
   for (const database of databases) {
     try {
       const ast = parser.astify(sourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
+      resolvedDialect = database;
       break;
     } catch (error) {
       lastParseErrorMessage =
@@ -73,7 +77,7 @@ export function parseSqlDdlToErdModel(
     }
   }
 
-  if (!astNodes) {
+  if (!astNodes || !resolvedDialect) {
     return createParseFailure(
       "PARSE_FAILED",
       lastParseErrorMessage
@@ -112,6 +116,7 @@ export function parseSqlDdlToErdModel(
 
   return {
     ok: true,
+    resolvedDialect,
     modelJson: {
       version: SQLTOERD_MODEL_JSON_VERSION,
       schema: {
@@ -122,9 +127,12 @@ export function parseSqlDdlToErdModel(
   };
 }
 
-function resolveParserDatabases(dialect: SqltoerdDialect) {
+function resolveParserDatabases(
+  dialect: SqltoerdDialect,
+  sourceText: string
+): SqltoerdResolvedDialect[] {
   if (dialect === "auto") {
-    return ["postgresql", "mysql"];
+    return getAutoParserDatabases(sourceText);
   }
 
   if (dialect === "postgresql") {
@@ -136,6 +144,25 @@ function resolveParserDatabases(dialect: SqltoerdDialect) {
   }
 
   return [];
+}
+
+function getAutoParserDatabases(
+  sourceText: string
+): SqltoerdResolvedDialect[] {
+  const hasMySqlMarker =
+    /\b(?:AUTO_INCREMENT|UNSIGNED|UNIQUE\s+KEY|DATETIME)\b|\bENGINE\s*=|`[^`]+`/i.test(
+      sourceText
+    );
+  const hasPostgreSqlMarker =
+    /\b(?:BIGSERIAL|SMALLSERIAL|SERIAL|TIMESTAMPTZ|JSONB|BYTEA)\b|::/i.test(
+      sourceText
+    );
+
+  if (hasMySqlMarker && !hasPostgreSqlMarker) {
+    return ["mysql", "postgresql"];
+  }
+
+  return ["postgresql", "mysql"];
 }
 
 function createTableState(createTableNode: SqlParserAstNode): MutableTableParseState {

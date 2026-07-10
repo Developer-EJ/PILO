@@ -941,6 +941,7 @@ const createGenerateRequest =
 
 assert.equal(createGenerateRequest.ok, true);
 assert.equal(createGenerateRequest.kind, "create");
+assert.equal(createGenerateRequest.resolvedDialect, "postgresql");
 assert.equal(createGenerateRequest.payload.title, "Generated ERD");
 assert.equal(createGenerateRequest.payload.sourceText, generateSmokeSource);
 assert.equal(createGenerateRequest.payload.dialect, "postgresql");
@@ -1232,6 +1233,7 @@ CREATE TABLE reviews (
 });
 
 assert.equal(postgresParseResult.ok, true);
+assert.equal(postgresParseResult.resolvedDialect, "postgresql");
 assert.equal(postgresParseResult.modelJson.version, 1);
 assert.deepEqual(
   postgresParseResult.modelJson.schema.tables.map((table) => table.id),
@@ -1314,6 +1316,7 @@ CREATE TABLE orders (
 });
 
 assert.equal(mysqlParseResult.ok, true);
+assert.equal(mysqlParseResult.resolvedDialect, "mysql");
 assert.deepEqual(
   mysqlParseResult.modelJson.schema.tables.map((table) => table.id),
   ["table.users", "table.orders"]
@@ -1632,6 +1635,7 @@ const autoDialectParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 
 assert.equal(autoDialectParseResult.ok, true);
+assert.equal(autoDialectParseResult.resolvedDialect, "mysql");
 assert.equal(autoDialectParseResult.modelJson.schema.tables[0].id, "table.users");
 assert.equal(
   autoDialectParseResult.modelJson.schema.tables[0].columns[0].dataType,
