@@ -44,6 +44,22 @@ export interface GithubPullRequestLookupRequest
   pullNumber: number;
 }
 
+export interface GithubRepositoryCompareRequest
+  extends GithubAppInstallationTokenRequest {
+  owner: string;
+  repo: string;
+  baseRef: string;
+  headRef: string;
+}
+
+export interface GithubRepositoryFileContentRequest
+  extends GithubAppInstallationTokenRequest {
+  owner: string;
+  repo: string;
+  path: string;
+  ref: string;
+}
+
 export interface GithubInstallationRepositoriesRequest
   extends GithubAppInstallationTokenRequest {}
 
@@ -86,6 +102,19 @@ export interface GithubProjectV2LookupRequest
   extends GithubAppInstallationTokenRequest,
     GithubProjectV2UserAccessTokenRequest {
   projectNodeId: string;
+}
+
+export type GithubProjectV2PermissionLevel = "ADMIN" | "WRITE" | "READ";
+
+export interface GithubProjectV2PermissionLookupRequest {
+  ownerLogin: string;
+  ownerType: "User" | "Organization";
+  projectNodeId: string;
+  userAccessToken: string;
+}
+
+export interface GithubProjectV2PermissionLookupResult {
+  permission: GithubProjectV2PermissionLevel | null;
 }
 
 export interface GithubProjectV2ItemAddRequest
@@ -207,6 +236,17 @@ export interface GithubPullRequestApiDetails {
   mergeable: boolean | null;
 }
 
+export interface GithubRepositoryMergeBaseApiDetails {
+  mergeBaseSha: string;
+}
+
+export interface GithubRepositoryFileContentApiDetails {
+  path: string;
+  sha: string;
+  size: number;
+  content: string;
+}
+
 export interface GithubProjectV2ApiItem {
   id: string;
   databaseId: number | null;
@@ -301,6 +341,21 @@ interface GithubInstallationTokenApiPayload {
 
 interface GithubInstallationRepositoriesApiPayload {
   repositories?: unknown;
+}
+
+interface GithubRepositoryCompareApiPayload {
+  merge_base_commit?: {
+    sha?: unknown;
+  } | null;
+}
+
+interface GithubRepositoryContentApiPayload {
+  type?: unknown;
+  path?: unknown;
+  sha?: unknown;
+  size?: unknown;
+  encoding?: unknown;
+  content?: unknown;
 }
 
 type GithubProjectV2GraphqlTokenSource = "user" | "installation";
@@ -443,6 +498,52 @@ const GITHUB_PROJECT_V2_QUERY = `
         createdAt
         updatedAt
         closedAt
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_ORGANIZATION_PERMISSION_QUERY = `
+  query PiloOrganizationProjectV2Permission(
+    $login: String!,
+    $cursor: String,
+    $minPermissionLevel: ProjectV2PermissionLevel!
+  ) {
+    organization(login: $login) {
+      projectsV2(
+        first: 100,
+        after: $cursor,
+        minPermissionLevel: $minPermissionLevel
+      ) {
+        nodes {
+          id
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`;
+const GITHUB_PROJECT_V2_USER_PERMISSION_QUERY = `
+  query PiloUserProjectV2Permission(
+    $login: String!,
+    $cursor: String,
+    $minPermissionLevel: ProjectV2PermissionLevel!
+  ) {
+    user(login: $login) {
+      projectsV2(
+        first: 100,
+        after: $cursor,
+        minPermissionLevel: $minPermissionLevel
+      ) {
+        nodes {
+          id
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
     }
   }
@@ -1129,6 +1230,24 @@ export class GithubAppClient {
     return this.mapProjectV2(project);
   }
 
+  async getProjectV2PermissionLevel(
+    input: GithubProjectV2PermissionLookupRequest
+  ): Promise<GithubProjectV2PermissionLookupResult> {
+    const levels: GithubProjectV2PermissionLevel[] = ["ADMIN", "WRITE", "READ"];
+
+    for (const level of levels) {
+      if (await this.hasProjectV2PermissionLevel(input, level)) {
+        return {
+          permission: level
+        };
+      }
+    }
+
+    return {
+      permission: null
+    };
+  }
+
   async listProjectV2Fields(
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2FieldApiItem[]> {
@@ -1368,6 +1487,110 @@ export class GithubAppClient {
     };
   }
 
+  async getRepositoryMergeBase(
+    input: GithubRepositoryCompareRequest
+  ): Promise<GithubRepositoryMergeBaseApiDetails> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/compare/${encodeURIComponent(input.baseRef)}...${encodeURIComponent(input.headRef)}`
+    );
+    const payload = await this.fetchJsonWithToken(
+      url,
+      installationToken.token,
+      "GitHub repository compare lookup failed"
+    );
+
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      throw badRequest("GitHub repository compare lookup failed");
+    }
+
+    const compare = payload as GithubRepositoryCompareApiPayload;
+    const mergeBaseSha = compare.merge_base_commit?.sha;
+    if (typeof mergeBaseSha !== "string" || !mergeBaseSha.trim()) {
+      throw badRequest("GitHub repository compare lookup failed");
+    }
+
+    return {
+      mergeBaseSha
+    };
+  }
+
+  async getRepositoryFileContent(
+    input: GithubRepositoryFileContentRequest
+  ): Promise<GithubRepositoryFileContentApiDetails | null> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const encodedPath = input.path
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/contents/${encodedPath}`
+    );
+    url.searchParams.set("ref", input.ref);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${installationToken.token}`,
+          "X-GitHub-Api-Version": GITHUB_API_VERSION
+        }
+      });
+    } catch {
+      throw badRequest("GitHub repository file content lookup failed");
+    }
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub repository file content lookup failed");
+    }
+
+    const payload = await this.readJson(
+      response,
+      "GitHub repository file content lookup failed"
+    );
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
+      throw badRequest("GitHub repository file content lookup failed");
+    }
+
+    const contentPayload = payload as GithubRepositoryContentApiPayload;
+    if (contentPayload.type !== "file") {
+      return null;
+    }
+
+    if (
+      typeof contentPayload.path !== "string" ||
+      typeof contentPayload.sha !== "string" ||
+      typeof contentPayload.size !== "number" ||
+      contentPayload.encoding !== "base64" ||
+      typeof contentPayload.content !== "string"
+    ) {
+      throw badRequest("GitHub repository file content lookup failed");
+    }
+
+    return {
+      path: contentPayload.path,
+      sha: contentPayload.sha,
+      size: contentPayload.size,
+      content: Buffer.from(
+        contentPayload.content.replace(/\s/g, ""),
+        "base64"
+      ).toString("utf8")
+    };
+  }
+
   private async getProjectV2GraphqlAuth(
     input: GithubProjectV2LookupRequest | GithubProjectV2DiscoveryRequest
   ): Promise<GithubProjectV2GraphqlAuth> {
@@ -1471,6 +1694,47 @@ export class GithubAppClient {
     }
 
     return repositoryNodeIds;
+  }
+
+  private async hasProjectV2PermissionLevel(
+    input: GithubProjectV2PermissionLookupRequest,
+    permission: GithubProjectV2PermissionLevel
+  ): Promise<boolean> {
+    const query =
+      input.ownerType === "Organization"
+        ? GITHUB_PROJECT_V2_ORGANIZATION_PERMISSION_QUERY
+        : GITHUB_PROJECT_V2_USER_PERMISSION_QUERY;
+    let cursor: string | null = null;
+
+    do {
+      const data = await this.fetchGraphqlWithToken(
+        input.userAccessToken,
+        query,
+        {
+          cursor,
+          login: input.ownerLogin,
+          minPermissionLevel: permission
+        },
+        "GitHub ProjectV2 permission lookup failed",
+        {
+          accountType: input.ownerType,
+          tokenSource: "user"
+        }
+      );
+      const page = this.readProjectV2PermissionPage(
+        data,
+        input.ownerType,
+        "GitHub ProjectV2 permission lookup failed"
+      );
+
+      if (page.nodeIds.includes(input.projectNodeId)) {
+        return true;
+      }
+
+      cursor = page.hasNextPage ? page.endCursor : null;
+    } while (cursor);
+
+    return false;
   }
 
   private async listRemainingProjectV2ItemFieldValues(
@@ -1672,6 +1936,41 @@ export class GithubAppClient {
 
     return {
       nodes,
+      hasNextPage: pageInfo.hasNextPage,
+      endCursor:
+        typeof pageInfo.endCursor === "string" && pageInfo.endCursor
+          ? pageInfo.endCursor
+          : null
+    };
+  }
+
+  private readProjectV2PermissionPage(
+    data: unknown,
+    accountType: "User" | "Organization",
+    errorMessage: string
+  ): {
+    nodeIds: string[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+  } {
+    const ownerField = accountType === "Organization" ? "organization" : "user";
+    const owner = this.toObject(this.toObject(data)[ownerField]);
+    const connection = this.toObject(owner.projectsV2);
+    const nodes = Array.isArray(connection.nodes)
+      ? connection.nodes.filter((node): node is Record<string, unknown> =>
+          this.isRecord(node)
+        )
+      : null;
+    const pageInfo = this.toObject(connection.pageInfo);
+
+    if (!nodes || typeof pageInfo.hasNextPage !== "boolean") {
+      throw badRequest(errorMessage);
+    }
+
+    return {
+      nodeIds: nodes
+        .map((node) => node.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
       hasNextPage: pageInfo.hasNextPage,
       endCursor:
         typeof pageInfo.endCursor === "string" && pageInfo.endCursor

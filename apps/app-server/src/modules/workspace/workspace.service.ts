@@ -32,6 +32,8 @@ interface WorkspaceMemberRow extends QueryResultRow {
   user_name: string | null;
   user_email: string | null;
   user_avatar_url: string | null;
+  user_active_workspace_id: string | null;
+  user_last_seen_at: Date | string | null;
 }
 
 interface WorkspaceInvitationRow extends QueryResultRow {
@@ -88,6 +90,8 @@ export interface WorkspaceMemberPayload {
     name: string | null;
     email: string | null;
     avatarUrl: string | null;
+    activeWorkspaceId: string | null;
+    lastSeenAt: string | null;
   };
 }
 
@@ -269,7 +273,7 @@ export class WorkspaceService {
     currentUserId: string,
     workspaceId: string
   ): Promise<WorkspaceMemberPayload[]> {
-    await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const members = await this.database.query<WorkspaceMemberRow>(
       `
@@ -284,7 +288,9 @@ export class WorkspaceService {
           wm.updated_at,
           u.name AS user_name,
           u.email AS user_email,
-          u.avatar_url AS user_avatar_url
+          u.avatar_url AS user_avatar_url,
+          u.active_workspace_id AS user_active_workspace_id,
+          u.last_seen_at AS user_last_seen_at
         FROM workspace_members wm
         JOIN users u
           ON u.id = wm.user_id
@@ -321,7 +327,9 @@ export class WorkspaceService {
             wm.updated_at,
             u.name AS user_name,
             u.email AS user_email,
-            u.avatar_url AS user_avatar_url
+            u.avatar_url AS user_avatar_url,
+            u.active_workspace_id AS user_active_workspace_id,
+            u.last_seen_at AS user_last_seen_at
           FROM workspace_members wm
           JOIN users u
             ON u.id = wm.user_id
@@ -361,6 +369,32 @@ export class WorkspaceService {
         [workspaceId, targetUserId]
       );
     });
+
+    return {
+      removed: true
+    };
+  }
+
+  async leaveWorkspace(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<RemoveWorkspaceMemberPayload> {
+    const workspace = await this.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    if (workspace.role === "owner") {
+      throw badRequest("Workspace owner cannot leave own workspace");
+    }
+
+    await this.database.execute(
+      `
+        DELETE FROM workspace_members
+        WHERE workspace_id = $1
+          AND user_id = $2
+      `,
+      [workspaceId, currentUserId]
+    );
+
+    await this.ensureDefaultWorkspaceForUser(currentUserId);
 
     return {
       removed: true
@@ -830,7 +864,9 @@ export class WorkspaceService {
           updated_at,
           NULL::text AS user_name,
           $4::text AS user_email,
-          NULL::text AS user_avatar_url
+          NULL::text AS user_avatar_url,
+          NULL::uuid AS user_active_workspace_id,
+          NULL::timestamptz AS user_last_seen_at
       `,
       [
         invitation.workspace_id,
@@ -1065,7 +1101,9 @@ export class WorkspaceService {
         id: member.user_id,
         name: member.user_name,
         email: member.user_email,
-        avatarUrl: member.user_avatar_url
+        avatarUrl: member.user_avatar_url,
+        activeWorkspaceId: member.user_active_workspace_id,
+        lastSeenAt: this.toNullableIsoString(member.user_last_seen_at)
       }
     };
   }

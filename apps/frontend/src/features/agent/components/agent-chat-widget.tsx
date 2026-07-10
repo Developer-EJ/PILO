@@ -1,10 +1,18 @@
 "use client";
 
-import { type FormEvent, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import {
   Bot,
   CalendarPlus,
   CheckCircle2,
+  Loader2,
   MessageCircle,
   SendHorizontal,
   Sparkles,
@@ -17,13 +25,32 @@ import {
   TooltipContent,
   TooltipTrigger
 } from "@/components/ui/tooltip";
+import { useAuthSession } from "@/features/auth";
+import {
+  AgentApiError,
+  createAgentApiClient
+} from "@/features/agent/api/client";
+import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
+import type { AgentRun } from "@/features/agent/types";
 import { cn } from "@/lib/utils";
 
 type AgentChatMessage = {
   id: string;
   content: string;
+  run?: AgentRun;
   role: "assistant" | "user";
 };
+
+type AgentConfirmationActionState = {
+  action: "approve" | "reject";
+  confirmationId: string;
+  messageId: string;
+};
+
+type AgentChatBusyState = "idle" | "polling" | "submitting";
+
+const AGENT_RUN_POLL_INTERVAL_MS = 1800;
+const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
 
 const initialMessages: AgentChatMessage[] = [
   {
@@ -57,57 +84,408 @@ const suggestionPrompts = [
   }
 ];
 
-function createMockAssistantReply(prompt: string) {
-  if (prompt.includes("일정") || prompt.includes("캘린더")) {
-    return "일정 생성 요청으로 이해했어요. 실제 연결 후에는 제목, 날짜, 시간, 참석자를 확인하고 승인 요청을 띄울 예정입니다.";
+function createClientId(prefix: string) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
   }
 
-  if (prompt.includes("회의") || prompt.includes("회의록")) {
-    return "회의록 조회 요청으로 이해했어요. 실제 연결 후에는 최근 MeetingReport를 찾아 요약과 결정사항을 보여줄 예정입니다.";
-  }
-
-  if (
-    prompt.toLowerCase().includes("board") ||
-    prompt.includes("이슈") ||
-    prompt.includes("칸반")
-  ) {
-    return "Board 이슈 검색 요청으로 이해했어요. 실제 연결 후에는 조건에 맞는 이슈와 현재 컬럼을 찾아 보여줄 예정입니다.";
-  }
-
-  return "요청을 받았어요. 실제 Agent API가 연결되면 필요한 워크스페이스 tool을 선택해 실행하거나 승인 요청을 만들 예정입니다.";
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function AgentChatWidget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<AgentChatMessage[]>(initialMessages);
-  const [draft, setDraft] = useState("");
+function getBrowserTimezone() {
+  if (typeof Intl === "undefined") {
+    return DEFAULT_AGENT_TIMEZONE;
+  }
 
-  const canSend = draft.trim().length > 0;
-  const panelTitleId = useMemo(() => "agent-chat-title", []);
+  return (
+    Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_AGENT_TIMEZONE
+  );
+}
 
-  function appendPrompt(prompt: string) {
-    const trimmedPrompt = prompt.trim();
+function createAbortError() {
+  const error = new Error("Agent run polling was aborted");
+  error.name = "AbortError";
+  return error;
+}
 
-    if (!trimmedPrompt) {
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function waitForAgentRunPollInterval(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(createAbortError());
       return;
     }
 
-    const timestamp = Date.now();
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      reject(createAbortError());
+    };
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, AGENT_RUN_POLL_INTERVAL_MS);
+
+    signal.addEventListener("abort", handleAbort, {
+      once: true
+    });
+  });
+}
+
+function shouldStopPolling(run: AgentRun) {
+  return (
+    run.status === "waiting_confirmation" ||
+    run.status === "completed" ||
+    run.status === "failed" ||
+    run.status === "cancelled"
+  );
+}
+
+function getAgentRunDisplayMessage(run: AgentRun) {
+  switch (run.status) {
+    case "completed":
+      return (
+        run.finalAnswer?.trim() ||
+        run.message?.trim() ||
+        "요청 처리가 완료됐습니다."
+      );
+    case "failed":
+      return (
+        run.errorMessage?.trim() ||
+        run.message?.trim() ||
+        "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+      );
+    case "cancelled":
+      return run.message?.trim() || "요청이 취소됐습니다.";
+    case "waiting_confirmation": {
+      return run.message?.trim() || "승인이 필요한 작업입니다.";
+    }
+    case "running":
+      return run.message?.trim() || "요청한 작업을 실행하고 있습니다.";
+    case "planning":
+      return run.message?.trim() || "요청을 분석하고 있습니다.";
+  }
+}
+
+function getAgentRequestErrorMessage(error: unknown) {
+  if (error instanceof AgentApiError) {
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Agent 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+export function AgentChatWidget() {
+  const authSession = useAuthSession();
+  const workspaceId = authSession?.activeWorkspaceId ?? "";
+  const accessToken = authSession?.accessToken ?? null;
+  const agentApiClient = useMemo(
+    () =>
+      createAgentApiClient({
+        accessToken
+      }),
+    [accessToken]
+  );
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<AgentChatMessage[]>(initialMessages);
+  const [draft, setDraft] = useState("");
+  const [busyState, setBusyState] = useState<AgentChatBusyState>("idle");
+  const [confirmationAction, setConfirmationAction] =
+    useState<AgentConfirmationActionState | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const activeRunAbortControllerRef = useRef<AbortController | null>(null);
+
+  const isBusy = busyState !== "idle";
+  const hasActiveAgentRequest =
+    isBusy || activeRunAbortControllerRef.current !== null;
+  const canSend = draft.trim().length > 0 && !hasActiveAgentRequest;
+  const panelTitleId = useMemo(() => "agent-chat-title", []);
+  const hasPendingConfirmation = useMemo(
+    () =>
+      messages.some(
+        (message) =>
+          message.run?.status === "waiting_confirmation" &&
+          message.run.confirmation?.status === "pending"
+      ),
+    [messages]
+  );
+
+  useEffect(() => {
+    return () => {
+      activeRunAbortControllerRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasPendingConfirmation) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasPendingConfirmation]);
+
+  const updateAssistantMessage = useCallback(
+    (messageId: string, content: string, run?: AgentRun | null) => {
+      setMessages((currentMessages) =>
+        currentMessages.map((message) => {
+          if (message.id !== messageId) {
+            return message;
+          }
+
+          return {
+            ...message,
+            content,
+            ...(run !== undefined ? { run: run ?? undefined } : {})
+          };
+        })
+      );
+    },
+    []
+  );
+
+  async function pollAgentRunUntilStop(
+    initialRun: AgentRun,
+    assistantMessageId: string,
+    signal: AbortSignal
+  ) {
+    let currentRun = initialRun;
+    updateAssistantMessage(
+      assistantMessageId,
+      getAgentRunDisplayMessage(currentRun),
+      currentRun
+    );
+
+    if (!shouldStopPolling(currentRun)) {
+      setBusyState("polling");
+    }
+
+    while (!shouldStopPolling(currentRun)) {
+      await waitForAgentRunPollInterval(signal);
+      const runPayload = await agentApiClient.getRun(
+        workspaceId,
+        currentRun.id,
+        {
+          signal
+        }
+      );
+      currentRun = runPayload.run;
+      updateAssistantMessage(
+        assistantMessageId,
+        getAgentRunDisplayMessage(currentRun),
+        currentRun
+      );
+    }
+
+    return currentRun;
+  }
+
+  async function appendPrompt(prompt: string) {
+    const trimmedPrompt = prompt.trim();
+
+    if (!trimmedPrompt || isBusy || activeRunAbortControllerRef.current) {
+      return;
+    }
+
+    const userMessageId = createClientId("user");
+    const assistantMessageId = createClientId("assistant");
+    const clientRequestId = createClientId("agent-run");
+
     setMessages((currentMessages) => [
       ...currentMessages,
       {
-        id: `user-${timestamp}`,
+        id: userMessageId,
         role: "user",
         content: trimmedPrompt
       },
       {
-        id: `assistant-${timestamp}`,
+        id: assistantMessageId,
         role: "assistant",
-        content: createMockAssistantReply(trimmedPrompt)
+        content: "요청을 Agent API로 보내고 있습니다."
       }
     ]);
     setDraft("");
     setIsOpen(true);
+
+    if (!workspaceId || !accessToken?.trim()) {
+      updateAssistantMessage(
+        assistantMessageId,
+        "Agent를 사용하려면 로그인과 워크스페이스 선택이 필요합니다."
+      );
+      return;
+    }
+
+    const abortController = new AbortController();
+    activeRunAbortControllerRef.current = abortController;
+    setBusyState("submitting");
+
+    try {
+      const createdRunPayload = await agentApiClient.createRun(
+        workspaceId,
+        {
+          clientRequestId,
+          prompt: trimmedPrompt,
+          timezone: getBrowserTimezone()
+        },
+        {
+          signal: abortController.signal
+        }
+      );
+      await pollAgentRunUntilStop(
+        createdRunPayload.run,
+        assistantMessageId,
+        abortController.signal
+      );
+    } catch (error) {
+      if (!isAbortError(error)) {
+        updateAssistantMessage(
+          assistantMessageId,
+          getAgentRequestErrorMessage(error)
+        );
+      }
+    } finally {
+      if (activeRunAbortControllerRef.current === abortController) {
+        activeRunAbortControllerRef.current = null;
+      }
+      setBusyState("idle");
+    }
+  }
+
+  async function handleConfirmationAction(
+    message: AgentChatMessage,
+    action: "approve" | "reject"
+  ) {
+    const run = message.run;
+    const confirmation = run?.confirmation;
+
+    if (
+      !run ||
+      !confirmation ||
+      confirmationAction ||
+      isBusy ||
+      activeRunAbortControllerRef.current !== null
+    ) {
+      return;
+    }
+
+    if (!workspaceId || !accessToken?.trim()) {
+      updateAssistantMessage(
+        message.id,
+        "Agent confirmation을 처리하려면 로그인과 워크스페이스 선택이 필요합니다.",
+        run
+      );
+      return;
+    }
+
+    const abortController = new AbortController();
+    activeRunAbortControllerRef.current = abortController;
+    setBusyState("submitting");
+    setConfirmationAction({
+      action,
+      confirmationId: confirmation.id,
+      messageId: message.id
+    });
+    updateAssistantMessage(
+      message.id,
+      action === "approve"
+        ? "승인 요청을 보내고 있습니다."
+        : "거절 요청을 보내고 있습니다.",
+      run
+    );
+
+    let lastKnownRun = run;
+    try {
+      const actionPayload =
+        action === "approve"
+          ? await agentApiClient.approveConfirmation(
+              workspaceId,
+              run.id,
+              confirmation.id,
+              {
+                signal: abortController.signal
+              }
+            )
+          : await agentApiClient.rejectConfirmation(
+              workspaceId,
+              run.id,
+              confirmation.id,
+              {
+                signal: abortController.signal
+              }
+            );
+      const updatedRun: AgentRun = {
+        ...run,
+        status: actionPayload.run.status,
+        message: actionPayload.run.message,
+        confirmation: {
+          ...confirmation,
+          ...actionPayload.run.confirmation
+        }
+      };
+      lastKnownRun = updatedRun;
+      updateAssistantMessage(
+        message.id,
+        getAgentRunDisplayMessage(updatedRun),
+        updatedRun
+      );
+
+      const runPayload = await agentApiClient.getRun(workspaceId, run.id, {
+        signal: abortController.signal
+      });
+      await pollAgentRunUntilStop(
+        runPayload.run,
+        message.id,
+        abortController.signal
+      );
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+
+      let refreshedAfterActionError = false;
+      if (
+        error instanceof AgentApiError &&
+        (error.code === "CONFIRMATION_EXPIRED" ||
+          error.code === "CONFIRMATION_NOT_PENDING")
+      ) {
+        await agentApiClient
+          .getRun(workspaceId, run.id, {
+            signal: abortController.signal
+          })
+          .then((runPayload) => {
+            updateAssistantMessage(
+              message.id,
+              getAgentRunDisplayMessage(runPayload.run),
+              runPayload.run
+            );
+            refreshedAfterActionError = true;
+          })
+          .catch(() => undefined);
+      }
+
+      if (!refreshedAfterActionError) {
+        updateAssistantMessage(
+          message.id,
+          getAgentRequestErrorMessage(error),
+          lastKnownRun
+        );
+      }
+    } finally {
+      if (activeRunAbortControllerRef.current === abortController) {
+        activeRunAbortControllerRef.current = null;
+      }
+      setConfirmationAction(null);
+      setBusyState("idle");
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -117,7 +495,7 @@ export function AgentChatWidget() {
       return;
     }
 
-    appendPrompt(draft);
+    void appendPrompt(draft);
   }
 
   return (
@@ -141,8 +519,15 @@ export function AgentChatWidget() {
                     PILO AI
                   </h2>
                   <div className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-500">
-                    <span className="size-1.5 rounded-full bg-emerald-500" />
-                    Mockup
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        hasActiveAgentRequest
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                      )}
+                    />
+                    {hasActiveAgentRequest ? "처리 중" : "API 연결"}
                   </div>
                 </div>
               </div>
@@ -159,26 +544,68 @@ export function AgentChatWidget() {
             </header>
 
             <div className="max-h-[min(520px,calc(100vh-220px))] space-y-3 overflow-y-auto bg-white px-4 py-4">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={cn(
-                    "flex",
-                    message.role === "user" ? "justify-end" : "justify-start"
-                  )}
-                >
+              {messages.map((message) => {
+                const confirmation =
+                  message.run?.status === "waiting_confirmation"
+                    ? message.run.confirmation
+                    : null;
+                const isActionTarget =
+                  confirmationAction?.messageId === message.id &&
+                  confirmationAction.confirmationId === confirmation?.id;
+
+                return (
                   <div
+                    key={message.id}
                     className={cn(
-                      "max-w-[82%] rounded-lg px-3 py-2 text-sm leading-6",
-                      message.role === "user"
-                        ? "bg-slate-900 text-white"
-                        : "border border-slate-200 bg-slate-50 text-slate-800"
+                      "flex",
+                      message.role === "user" ? "justify-end" : "justify-start"
                     )}
                   >
-                    {message.content}
+                    <div
+                      className={cn(
+                        "min-w-0",
+                        confirmation ? "max-w-[94%]" : "max-w-[82%]"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "whitespace-pre-wrap rounded-lg px-3 py-2 text-sm leading-6",
+                          message.role === "user"
+                            ? "bg-slate-900 text-white"
+                            : "border border-slate-200 bg-slate-50 text-slate-800"
+                        )}
+                      >
+                        {message.content}
+                      </div>
+                      {confirmation ? (
+                        <AgentConfirmationCard
+                          confirmation={confirmation}
+                          disabled={
+                            !workspaceId ||
+                            !accessToken?.trim() ||
+                            hasActiveAgentRequest
+                          }
+                          isApproving={
+                            isActionTarget &&
+                            confirmationAction?.action === "approve"
+                          }
+                          isRejecting={
+                            isActionTarget &&
+                            confirmationAction?.action === "reject"
+                          }
+                          nowMs={nowMs}
+                          onApprove={() =>
+                            void handleConfirmationAction(message, "approve")
+                          }
+                          onReject={() =>
+                            void handleConfirmationAction(message, "reject")
+                          }
+                        />
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="border-t border-slate-200 bg-white px-4 py-3">
@@ -187,8 +614,9 @@ export function AgentChatWidget() {
                   <button
                     key={suggestion.label}
                     type="button"
+                    disabled={hasActiveAgentRequest}
                     className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
-                    onClick={() => appendPrompt(suggestion.prompt)}
+                    onClick={() => void appendPrompt(suggestion.prompt)}
                   >
                     {suggestion.icon === "calendar" ? (
                       <CalendarPlus className="size-3.5" />
@@ -210,6 +638,7 @@ export function AgentChatWidget() {
                   placeholder="메시지를 입력하세요"
                   className="min-h-9 flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-900 outline-none transition placeholder:text-slate-400 focus-visible:border-slate-400 focus-visible:ring-2 focus-visible:ring-slate-200"
                   onChange={(event) => setDraft(event.target.value)}
+                  disabled={isBusy}
                 />
                 <Button
                   type="submit"
@@ -217,7 +646,11 @@ export function AgentChatWidget() {
                   aria-label="AI에게 메시지 보내기"
                   disabled={!canSend}
                 >
-                  <SendHorizontal className="size-4" />
+                  {isBusy ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <SendHorizontal className="size-4" />
+                  )}
                 </Button>
               </form>
             </div>

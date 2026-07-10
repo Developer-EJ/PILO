@@ -13,6 +13,7 @@ import {
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
 
 export const SQLTOERD_RELATION_SHAPE_TYPE = "sqltoerd_relation";
+export const SQLTOERD_RELATION_HOVER_EVENT = "sqltoerd:relation-hover";
 
 const RELATION_BOUNDS_PADDING = 16;
 const TABLE_HEADER_HEIGHT = 54;
@@ -30,15 +31,27 @@ export type SqlErdRelationShapeLayout = {
   y: number;
   w: number;
   h: number;
+  endSide: RelationPortSide;
   points: SqlErdRelationRoutePoint[];
   arrowPoints: SqlErdRelationRoutePoint[];
+  startSide: RelationPortSide;
 };
+
+type RelationPortSide = "left" | "right";
 
 type RelationAnchors = {
   endX: number;
+  endSide?: RelationPortSide;
   endY: number;
+  startSide?: RelationPortSide;
   startX: number;
   startY: number;
+};
+
+type RelationPortAnchor = {
+  side: RelationPortSide;
+  x: number;
+  y: number;
 };
 
 type RelationColumnIds = {
@@ -69,8 +82,10 @@ export type SqlErdRelationShapeProps = {
   constraintName: string | null;
   fromTableShapeId: string;
   toTableShapeId: string;
+  endSide: RelationPortSide;
   points: SqlErdRelationRoutePoint[];
   arrowPoints: SqlErdRelationRoutePoint[];
+  startSide: RelationPortSide;
 };
 
 export type SqlErdRelationShape = TLBaseShape<
@@ -88,6 +103,24 @@ export function isSqlErdRelationShape(
   shape: TLShape | null | undefined
 ): shape is SqlErdRelationShape {
   return shape?.type === SQLTOERD_RELATION_SHAPE_TYPE;
+}
+
+function emitSqlErdRelationHover(
+  shape: SqlErdRelationShape,
+  isHovered: boolean
+) {
+  window.dispatchEvent(
+    new CustomEvent(SQLTOERD_RELATION_HOVER_EVENT, {
+      detail: {
+        isHovered,
+        relationId: shape.props.relationId,
+        fromTableId: shape.props.fromTableId,
+        fromColumnIds: shape.props.fromColumnIds,
+        toTableId: shape.props.toTableId,
+        toColumnIds: shape.props.toColumnIds
+      }
+    })
+  );
 }
 
 export function getSqlErdRelationTableEdgeAnchors(
@@ -166,16 +199,95 @@ export function getSqlErdRelationColumnAnchors(
   toTable: TableBounds,
   columnIds: RelationColumnIds
 ): RelationAnchors {
+  const { endPort, startPort } = getSqlErdNearestColumnPortAnchors(
+    fromTable,
+    toTable,
+    columnIds
+  );
+
+  return {
+    startX: startPort.x,
+    startY: startPort.y,
+    startSide: startPort.side,
+    endX: endPort.x,
+    endY: endPort.y,
+    endSide: endPort.side
+  };
+}
+
+export function getSqlErdColumnPortAnchors(
+  table: TableBounds,
+  columnIds: string[]
+): {
+  left: RelationPortAnchor;
+  right: RelationPortAnchor;
+} {
+  const y = getSqlErdColumnAnchorY(table, columnIds);
+
+  return {
+    left: {
+      side: "left",
+      x: table.x,
+      y
+    },
+    right: {
+      side: "right",
+      x: table.x + table.w,
+      y
+    }
+  };
+}
+
+export function getSqlErdNearestColumnPortAnchors(
+  fromTable: TableBounds,
+  toTable: TableBounds,
+  columnIds: RelationColumnIds
+): {
+  endPort: RelationPortAnchor;
+  startPort: RelationPortAnchor;
+} {
+  const fromPorts = getSqlErdColumnPortAnchors(
+    fromTable,
+    columnIds.fromColumnIds
+  );
+  const toPorts = getSqlErdColumnPortAnchors(toTable, columnIds.toColumnIds);
   const fromCenterX = fromTable.x + fromTable.w / 2;
   const toCenterX = toTable.x + toTable.w / 2;
   const isToRight = toCenterX >= fromCenterX;
+  const candidates = [
+    {
+      endPort: toPorts.left,
+      preference: isToRight ? 0 : 2,
+      startPort: fromPorts.right
+    },
+    {
+      endPort: toPorts.right,
+      preference: isToRight ? 2 : 0,
+      startPort: fromPorts.left
+    },
+    {
+      endPort: toPorts.right,
+      preference: 1,
+      startPort: fromPorts.right
+    },
+    {
+      endPort: toPorts.left,
+      preference: 1,
+      startPort: fromPorts.left
+    }
+  ];
 
-  return {
-    startX: isToRight ? fromTable.x + fromTable.w : fromTable.x,
-    startY: getSqlErdColumnAnchorY(fromTable, columnIds.fromColumnIds),
-    endX: isToRight ? toTable.x : toTable.x + toTable.w,
-    endY: getSqlErdColumnAnchorY(toTable, columnIds.toColumnIds)
-  };
+  return candidates
+    .map((candidate) => ({
+      ...candidate,
+      distance:
+        (candidate.endPort.x - candidate.startPort.x) ** 2 +
+        (candidate.endPort.y - candidate.startPort.y) ** 2
+    }))
+    .sort(
+      (left, right) =>
+        left.distance - right.distance || left.preference - right.preference
+    )[0];
 }
 
 export function getSqlErdRelationRoutePoints(
@@ -192,7 +304,11 @@ export function getSqlErdRelationRoutePoints(
   ];
 }
 
-function getRelationCurvePathData(points: SqlErdRelationRoutePoint[]) {
+function getRelationCurvePathData(
+  points: SqlErdRelationRoutePoint[],
+  startSide: RelationPortSide,
+  endSide: RelationPortSide
+) {
   const startPoint = points[0];
   const endPoint = points.at(-1);
 
@@ -201,7 +317,7 @@ function getRelationCurvePathData(points: SqlErdRelationRoutePoint[]) {
   }
 
   const [controlPointOne, controlPointTwo] =
-    getRelationCurveControlPoints(points);
+    getRelationCurveControlPoints(points, startSide, endSide);
 
   if (!controlPointOne || !controlPointTwo) {
     return "";
@@ -211,7 +327,9 @@ function getRelationCurvePathData(points: SqlErdRelationRoutePoint[]) {
 }
 
 function getRelationCurveControlPoints(
-  points: SqlErdRelationRoutePoint[]
+  points: SqlErdRelationRoutePoint[],
+  startSide: RelationPortSide,
+  endSide: RelationPortSide
 ): SqlErdRelationRoutePoint[] {
   const startPoint = points[0];
   const endPoint = points.at(-1);
@@ -221,17 +339,18 @@ function getRelationCurveControlPoints(
   }
 
   const dx = endPoint.x - startPoint.x;
-  const direction = dx >= 0 ? 1 : -1;
   const controlOffset = Math.max(
     RELATION_CURVE_MIN_CONTROL_OFFSET,
     Math.abs(dx) * 0.5
   );
+  const startDirection = startSide === "right" ? 1 : -1;
+  const endDirection = endSide === "right" ? 1 : -1;
   const controlPointOne = {
-    x: startPoint.x + controlOffset * direction,
+    x: startPoint.x + controlOffset * startDirection,
     y: startPoint.y
   };
   const controlPointTwo = {
-    x: endPoint.x - controlOffset * direction,
+    x: endPoint.x + controlOffset * endDirection,
     y: endPoint.y
   };
 
@@ -239,21 +358,25 @@ function getRelationCurveControlPoints(
 }
 
 function getRelationCurveBoundsPoints(
-  points: SqlErdRelationRoutePoint[]
+  points: SqlErdRelationRoutePoint[],
+  startSide: RelationPortSide,
+  endSide: RelationPortSide
 ): SqlErdRelationRoutePoint[] {
   return [
     ...points,
-    ...getRelationCurveControlPoints(points)
+    ...getRelationCurveControlPoints(points, startSide, endSide)
   ];
 }
 
 function getRelationCurveGeometryPoints(
-  points: SqlErdRelationRoutePoint[]
+  points: SqlErdRelationRoutePoint[],
+  startSide: RelationPortSide,
+  endSide: RelationPortSide
 ): SqlErdRelationRoutePoint[] {
   const startPoint = points[0];
   const endPoint = points.at(-1);
   const [controlPointOne, controlPointTwo] =
-    getRelationCurveControlPoints(points);
+    getRelationCurveControlPoints(points, startSide, endSide);
 
   if (!startPoint || !endPoint || !controlPointOne || !controlPointTwo) {
     return points;
@@ -272,7 +395,8 @@ function getPointListData(points: SqlErdRelationRoutePoint[]) {
 }
 
 function getArrowPoints(
-  routePoints: SqlErdRelationRoutePoint[]
+  routePoints: SqlErdRelationRoutePoint[],
+  endSide?: RelationPortSide
 ): SqlErdRelationRoutePoint[] {
   const endPoint = routePoints.at(-1);
   const previousPoint = routePoints.at(-2);
@@ -280,6 +404,16 @@ function getArrowPoints(
 
   if (!endPoint || !previousPoint) {
     return [];
+  }
+
+  if (endSide) {
+    const direction = endSide === "left" ? 1 : -1;
+
+    return [
+      { x: endPoint.x, y: endPoint.y },
+      { x: endPoint.x - arrowSize * direction, y: endPoint.y - arrowSize },
+      { x: endPoint.x - arrowSize * direction, y: endPoint.y + arrowSize }
+    ];
   }
 
   const dx = endPoint.x - previousPoint.x;
@@ -339,23 +473,29 @@ export function getSqlErdRelationShapeLayout(
   }
 ): SqlErdRelationShapeLayout {
   const anchors = getSqlErdRelationColumnAnchors(fromTable, toTable, columnIds);
+  const startSide = anchors.startSide ?? (anchors.endX >= anchors.startX ? "right" : "left");
+  const endSide = anchors.endSide ?? (anchors.endX >= anchors.startX ? "left" : "right");
   const pagePoints = getSqlErdRelationRoutePoints(anchors);
-  const pageArrowPoints = getArrowPoints(pagePoints);
+  const pageArrowPoints = getArrowPoints(pagePoints, endSide);
   const bounds = getPaddedBounds([
-    ...getRelationCurveBoundsPoints(pagePoints),
+    ...getRelationCurveBoundsPoints(pagePoints, startSide, endSide),
     ...pageArrowPoints
   ]);
 
   return {
     ...bounds,
+    endSide,
     points: toLocalPoints(pagePoints, bounds),
-    arrowPoints: toLocalPoints(pageArrowPoints, bounds)
+    arrowPoints: toLocalPoints(pageArrowPoints, bounds),
+    startSide
   };
 }
 
 function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
   return (
     <SVGContainer
+      onPointerEnter={() => emitSqlErdRelationHover(shape, true)}
+      onPointerLeave={() => emitSqlErdRelationHover(shape, false)}
       style={{
         height: shape.props.h,
         overflow: "visible",
@@ -364,7 +504,11 @@ function SqlErdRelationLine({ shape }: { shape: SqlErdRelationShape }) {
       }}
     >
       <path
-        d={getRelationCurvePathData(shape.props.points)}
+        d={getRelationCurvePathData(
+          shape.props.points,
+          shape.props.startSide,
+          shape.props.endSide
+        )}
         fill="none"
         pointerEvents="stroke"
         stroke="rgba(37, 99, 235, 0.58)"
@@ -395,6 +539,7 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
     constraintName: T.nullable(T.string),
     fromTableShapeId: T.string,
     toTableShapeId: T.string,
+    endSide: T.string,
     points: T.arrayOf(
       T.object({
         x: T.number,
@@ -406,7 +551,8 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
         x: T.number,
         y: T.number
       })
-    )
+    ),
+    startSide: T.string
   };
 
   override canBind() {
@@ -429,19 +575,23 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
       constraintName: null,
       fromTableShapeId: "",
       toTableShapeId: "",
+      endSide: "left",
       points: [
         { x: 0, y: 0 },
         { x: 1, y: 1 }
       ],
-      arrowPoints: []
+      arrowPoints: [],
+      startSide: "right"
     };
   }
 
   override getGeometry(shape: SqlErdRelationShape) {
     return new Polyline2d({
-      points: getRelationCurveGeometryPoints(shape.props.points).map(
-        (point) => new Vec(point.x, point.y)
-      )
+      points: getRelationCurveGeometryPoints(
+        shape.props.points,
+        shape.props.startSide,
+        shape.props.endSide
+      ).map((point) => new Vec(point.x, point.y))
     });
   }
 
@@ -458,6 +608,12 @@ export class SqlErdRelationShapeUtil extends ShapeUtil<SqlErdRelationShape> {
   }
 
   override getIndicatorPath(shape: SqlErdRelationShape) {
-    return new Path2D(getRelationCurvePathData(shape.props.points));
+    return new Path2D(
+      getRelationCurvePathData(
+        shape.props.points,
+        shape.props.startSide,
+        shape.props.endSide
+      )
+    );
   }
 }

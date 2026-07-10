@@ -180,7 +180,9 @@ token으로 GitHub의 user installations 목록을 조회해 callback의
 | `DELETE` | `/workspaces/{workspaceId}/github/installations/{installationId}` | GitHub 원격 App installation 삭제 후 local 연결 정리 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories` | 동기화된 repository 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}` | Repository 상세 조회 |
+| `GET` | `/workspaces/{workspaceId}/github/repositories/{repositoryId}/collaborator-status` | 현재 사용자의 Repository collaborator 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2` | 동기화된 ProjectV2 목록 조회 |
+| `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/access-status` | 현재 사용자의 ProjectV2 접근 권한 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}` | ProjectV2 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/fields` | ProjectV2 Field 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/github/projects-v2/{projectV2Id}/status-options` | ProjectV2 Status 옵션 조회 |

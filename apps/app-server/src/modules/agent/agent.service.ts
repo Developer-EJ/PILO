@@ -3,12 +3,20 @@ import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import { agentJobUnavailable } from "./agent-api-error";
+import { AgentExecutionService } from "./agent-execution.service";
+import {
+  AGENT_TOOL_SCHEMA_VERSION,
+  AgentJobService,
+  AgentToolSchemaSnapshotItem
+} from "./agent-job.service";
 import {
   AgentLoggingService,
   AgentRunPayload as StoredAgentRunPayload,
   AgentRunStatus,
   AgentStepPayload as StoredAgentStepPayload
 } from "./agent-logging.service";
+import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -208,7 +216,10 @@ export class AgentService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly agentLoggingService: AgentLoggingService
+    private readonly agentLoggingService: AgentLoggingService,
+    private readonly agentJobService: AgentJobService,
+    private readonly agentToolRegistryService: AgentToolRegistryService,
+    private readonly agentExecutionService: AgentExecutionService
   ) {}
 
   async createRun(
@@ -223,6 +234,10 @@ export class AgentService {
       input
     );
 
+    if (result.created) {
+      await this.enqueueCreatedRun(currentUserId, workspaceId, result.run.id);
+    }
+
     return {
       run: {
         ...this.mapStoredRun(result.run),
@@ -231,6 +246,58 @@ export class AgentService {
       },
       created: result.created
     };
+  }
+
+  private async enqueueCreatedRun(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<void> {
+    try {
+      await this.agentJobService.enqueueAgentRunRequestedJob({
+        jobType: "agent_run_requested",
+        runId,
+        workspaceId,
+        requestedByUserId: currentUserId,
+        toolSchemaVersion: AGENT_TOOL_SCHEMA_VERSION,
+        tools: this.buildToolSchemaSnapshot()
+      });
+    } catch {
+      await this.markRunFailedAfterEnqueueFailure(
+        currentUserId,
+        workspaceId,
+        runId
+      );
+      throw agentJobUnavailable("Agent job could not be enqueued");
+    }
+  }
+
+  private buildToolSchemaSnapshot(): AgentToolSchemaSnapshotItem[] {
+    return this.agentToolRegistryService.listDefinitions().map((definition) => ({
+      name: definition.name,
+      description: definition.description,
+      riskLevel: definition.riskLevel,
+      executionMode: definition.executionMode,
+      inputSchema: definition.inputSchema
+    }));
+  }
+
+  private async markRunFailedAfterEnqueueFailure(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<void> {
+    try {
+      await this.agentLoggingService.failRun(currentUserId, workspaceId, {
+        runId,
+        errorCode: "AGENT_JOB_ENQUEUE_FAILED",
+        errorMessage: "Agent job could not be enqueued",
+        message: "요청을 시작하지 못했습니다. 잠시 후 다시 시도해주세요."
+      });
+    } catch {
+      // The API still returns the safe enqueue failure even if failure persistence
+      // cannot be completed.
+    }
   }
 
   async listRuns(
@@ -297,6 +364,11 @@ export class AgentService {
     runId: string
   ): Promise<AgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.agentExecutionService.executeLatestPlannedTool(
+      currentUserId,
+      workspaceId,
+      runId
+    );
 
     const run = await this.database.queryOne<AgentRunRow>(
       `

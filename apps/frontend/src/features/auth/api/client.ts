@@ -39,7 +39,14 @@ export type WorkspaceMember = {
     name: string | null;
     email: string | null;
     avatarUrl: string | null;
+    activeWorkspaceId: string | null;
+    lastSeenAt: string | null;
   };
+};
+
+export type UserPresencePayload = {
+  activeWorkspaceId: string | null;
+  lastSeenAt: string;
 };
 
 export type WorkspaceInvitation = {
@@ -128,16 +135,19 @@ async function requestJson<T>(
   {
     accessToken,
     body,
+    keepalive = false,
     method = "GET"
   }: {
     accessToken?: string | null;
     body?: unknown;
+    keepalive?: boolean;
     method?: string;
   } = {}
 ) {
   const response = await fetch(buildAuthApiUrl(path), {
     method,
     credentials: "same-origin",
+    keepalive,
     headers: {
       Accept: "application/json",
       ...(body ? { "Content-Type": "application/json" } : {}),
@@ -182,6 +192,23 @@ export async function getCurrentUser(accessToken: string) {
   });
 }
 
+export async function updateCurrentUserPresence(
+  accessToken: string,
+  activeWorkspaceId: string | null,
+  options: {
+    keepalive?: boolean;
+  } = {}
+) {
+  return requestJson<UserPresencePayload>("/me/presence", {
+    accessToken,
+    body: {
+      activeWorkspaceId
+    },
+    keepalive: options.keepalive,
+    method: "POST"
+  });
+}
+
 export async function listWorkspaces(accessToken: string) {
   return requestJson<Workspace[]>("/workspaces", {
     accessToken
@@ -209,6 +236,16 @@ export async function removeWorkspaceMember(
     `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(
       userId
     )}`,
+    {
+      accessToken,
+      method: "DELETE"
+    }
+  );
+}
+
+export async function leaveWorkspace(accessToken: string, workspaceId: string) {
+  return requestJson<{ removed: true }>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
     {
       accessToken,
       method: "DELETE"

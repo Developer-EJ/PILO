@@ -21,6 +21,9 @@ async function compileSqlErdRuntimeModules() {
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
+  const relationShapeOutputPath = join(outputDir, "relation-shape.mjs");
+  const tableShapeOutputPath = join(outputDir, "table-shape.mjs");
+  const canvasSelectionOutputPath = join(outputDir, "canvas-selection.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -64,10 +67,71 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/utils/status-copy.ts",
       statusCopyOutputPath
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx",
+      relationShapeOutputPath,
+      [
+        [/from "tldraw"/g, 'from "./tldraw-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-table-shape"/g,
+          'from "./table-shape-stub.mjs"'
+        ]
+      ]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx",
+      tableShapeOutputPath,
+      [
+        [/from "tldraw"/g, 'from "./tldraw-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/model"/g,
+          'from "./model-stub.mjs"'
+        ]
+      ]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/canvas-selection.ts",
+      canvasSelectionOutputPath,
+      [
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
+          'from "./relation-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-table-shape"/g,
+          'from "./table-shape-stub.mjs"'
+        ]
+      ]
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
       "export const SQLTOERD_MODEL_JSON_VERSION = 1;\n"
+    );
+    await writeFile(
+      join(outputDir, "tldraw-stub.mjs"),
+      [
+        "export function HTMLContainer(props) { return props.children ?? null; }",
+        "export class Polyline2d { constructor(config) { this.config = config; } }",
+        "export class Rectangle2d { constructor(config) { this.config = config; } }",
+        "export class ShapeUtil {}",
+        "export function SVGContainer(props) { return props.children ?? null; }",
+        "export const T = { arrayOf: (value) => value, boolean: {}, nullable: (value) => value, number: {}, object: (value) => value, string: {} };",
+        "export function useEditor() { return null; }",
+        "export class Vec { constructor(x, y) { this.x = x; this.y = y; } }"
+      ].join("\n")
+    );
+    await writeFile(
+      join(outputDir, "table-shape-stub.mjs"),
+      "export function isSqlErdTableShape(shape) { return shape?.type === 'sqltoerd_table'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "relation-shape-stub.mjs"),
+      "export function isSqlErdRelationShape(shape) { return shape?.type === 'sqltoerd_relation'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "model-stub.mjs"),
+      "export function getTableDisplayName(table) { return table.schemaName ? `${table.schemaName}.${table.name}` : table.name; }\n"
     );
 
     const [
@@ -78,7 +142,10 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionStateRuntime,
-      statusCopyRuntime
+      statusCopyRuntime,
+      relationShapeRuntime,
+      tableShapeRuntime,
+      canvasSelectionRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
@@ -87,18 +154,24 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
-      import(pathToFileHref(statusCopyOutputPath))
+      import(pathToFileHref(statusCopyOutputPath)),
+      import(pathToFileHref(relationShapeOutputPath)),
+      import(pathToFileHref(tableShapeOutputPath)),
+      import(pathToFileHref(canvasSelectionOutputPath))
     ]);
 
     return {
       apiClientRuntime,
+      canvasSelectionRuntime,
       ddlParserRuntime,
       generateSessionRuntime,
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
+      relationShapeRuntime,
       sessionStateRuntime,
-      statusCopyRuntime
+      statusCopyRuntime,
+      tableShapeRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -251,6 +324,66 @@ function createRuntimeTestSession(overrides = {}) {
   };
 }
 
+function createRuntimeTableShape(id, table, tableShapeRuntime, overrides = {}) {
+  return {
+    id,
+    type: "sqltoerd_table",
+    x: overrides.x ?? 0,
+    y: overrides.y ?? 0,
+    props: {
+      w: overrides.w ?? 320,
+      h: overrides.h ?? 180,
+      tableId: table.id,
+      tableName: table.name,
+      schemaName: table.schemaName,
+      badgeColumnWidth: overrides.badgeColumnWidth ?? 72,
+      selectedColumnId: overrides.selectedColumnId ?? null,
+      selectedState: overrides.selectedState ?? "none",
+      highlightedColumnIds: overrides.highlightedColumnIds ?? [],
+      columns: tableShapeRuntime.toSqlErdTableShapeColumns(table.columns)
+    }
+  };
+}
+
+function createRuntimeTableSelectionEditor(shapes) {
+  let selectedShapeId = null;
+  const runOptions = [];
+
+  return {
+    getCurrentPageShapes: () => shapes,
+    getSelectedShapes: () =>
+      selectedShapeId
+        ? shapes.filter((shape) => shape.id === selectedShapeId)
+        : [],
+    run: (callback, options) => {
+      runOptions.push(options);
+      callback();
+    },
+    runOptions,
+    select: (shapeId) => {
+      selectedShapeId = shapeId;
+    },
+    updateShapes: (updates) => {
+      for (const update of updates) {
+        const targetShape = shapes.find((shape) => shape.id === update.id);
+
+        if (!targetShape) {
+          continue;
+        }
+
+        Object.assign(targetShape, update);
+
+        if (update.props) {
+          targetShape.props = {
+            ...targetShape.props,
+            ...update.props
+          };
+        }
+      }
+    }
+  };
+}
+
 const [
   apiSpec,
   types,
@@ -265,6 +398,7 @@ const [
   layoutAutosaveUtils,
   statusCopyUtils,
   canvasSurface,
+  mainShell,
   tableShape,
   relationShape,
   ddlParserUtils,
@@ -285,6 +419,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
+    readSqlErdFile("../../src/components/main-shell.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
@@ -294,13 +429,16 @@ const [
 
 const {
   apiClientRuntime,
+  canvasSelectionRuntime,
   ddlParserRuntime,
   generateSessionRuntime,
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
+  relationShapeRuntime,
   sessionStateRuntime,
-  statusCopyRuntime
+  statusCopyRuntime,
+  tableShapeRuntime
 } = await compileSqlErdRuntimeModules();
 const runtimeModel = createRuntimeTestModel();
 const runtimeModelIndex = modelRuntime.createSqltoerdModelIndex(runtimeModel);
@@ -371,6 +509,90 @@ assert.equal(
   ).length,
   1
 );
+
+const runtimeUsersTable =
+  runtimeModel.schema.tables.find((table) => table.id === "table.users") ??
+  null;
+const runtimeOrdersTable =
+  runtimeModel.schema.tables.find((table) => table.id === "table.orders") ??
+  null;
+
+assert.ok(runtimeUsersTable);
+assert.ok(runtimeOrdersTable);
+
+const runtimeUsersShape = createRuntimeTableShape(
+  "shape:users",
+  runtimeUsersTable,
+  tableShapeRuntime,
+  { selectedColumnId: "id", selectedState: "column" }
+);
+const runtimeOrdersShape = createRuntimeTableShape(
+  "shape:orders",
+  runtimeOrdersTable,
+  tableShapeRuntime
+);
+const runtimeSelectionEditor = createRuntimeTableSelectionEditor([
+  runtimeUsersShape,
+  runtimeOrdersShape
+]);
+
+tableShapeRuntime.selectSqlErdTableShapeColumn(
+  runtimeSelectionEditor,
+  runtimeOrdersShape,
+  "user_id"
+);
+
+assert.deepEqual(runtimeSelectionEditor.runOptions.at(-1), {
+  history: "ignore"
+});
+assert.equal(runtimeOrdersShape.props.selectedState, "column");
+assert.equal(runtimeOrdersShape.props.selectedColumnId, "user_id");
+assert.equal(runtimeUsersShape.props.selectedState, "none");
+assert.equal(runtimeUsersShape.props.selectedColumnId, null);
+
+const selectedColumnFromCanvas =
+  canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes(
+    runtimeSelectionEditor.getSelectedShapes()
+  );
+
+assert.deepEqual(selectedColumnFromCanvas, {
+  type: "column",
+  tableId: "table.orders",
+  columnId: "user_id"
+});
+
+const selectedColumnInspectorView =
+  inspectorRuntime.createSqlErdInspectorViewModel(
+    selectedColumnFromCanvas,
+    runtimeModelIndex
+  );
+
+assert.equal(selectedColumnInspectorView.type, "column");
+assert.equal(selectedColumnInspectorView.table.id, "table.orders");
+assert.equal(selectedColumnInspectorView.column.id, "user_id");
+assert.deepEqual(
+  selectedColumnInspectorView.relations.map((relation) => relation.id),
+  ["relation.orders.user_id.users.id"]
+);
+
+tableShapeRuntime.selectSqlErdTableShape(
+  runtimeSelectionEditor,
+  runtimeUsersShape
+);
+
+const selectedTableFromCanvas =
+  canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes(
+    runtimeSelectionEditor.getSelectedShapes()
+  );
+
+assert.deepEqual(selectedTableFromCanvas, {
+  type: "table",
+  tableId: "table.users"
+});
+assert.equal(runtimeUsersShape.props.selectedState, "table");
+assert.equal(runtimeUsersShape.props.selectedColumnId, null);
+assert.equal(runtimeOrdersShape.props.selectedState, "none");
+assert.equal(runtimeOrdersShape.props.selectedColumnId, null);
 
 const manualReloadFailureAction =
   sessionStateRuntime.getSqlErdSessionReloadFailureAction({
@@ -1022,6 +1244,54 @@ assert.equal(
   ),
   true
 );
+
+const stackedRelationLayout = relationShapeRuntime.getSqlErdRelationShapeLayout(
+  {
+    columns: [
+      { id: "column.posts.id" },
+      { id: "column.posts.user_id" },
+      { id: "column.posts.title" },
+      { id: "column.posts.body" },
+      { id: "column.posts.created_at" }
+    ],
+    h: 266,
+    w: 300,
+    x: 100,
+    y: 40
+  },
+  {
+    columns: [
+      { id: "column.users.id" },
+      { id: "column.users.email" },
+      { id: "column.users.created_at" }
+    ],
+    h: 182,
+    w: 300,
+    x: 100,
+    y: 360
+  },
+  {
+    fromColumnIds: ["column.posts.user_id"],
+    toColumnIds: ["column.users.id"]
+  }
+);
+const stackedRelationStartPoint = {
+  x: stackedRelationLayout.x + stackedRelationLayout.points[0].x,
+  y: stackedRelationLayout.y + stackedRelationLayout.points[0].y
+};
+const stackedRelationEndPoint = {
+  x:
+    stackedRelationLayout.x +
+    stackedRelationLayout.points[stackedRelationLayout.points.length - 1].x,
+  y:
+    stackedRelationLayout.y +
+    stackedRelationLayout.points[stackedRelationLayout.points.length - 1].y
+};
+
+assert.deepEqual(stackedRelationStartPoint, { x: 400, y: 158 });
+assert.deepEqual(stackedRelationEndPoint, { x: 400, y: 436 });
+assert.equal(stackedRelationLayout.startSide, "right");
+assert.equal(stackedRelationLayout.endSide, "right");
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(movedRuntimeLayout, {
     version: 1,
@@ -1123,8 +1393,12 @@ assert.match(modelUtils, /relation\.fromTableId === relation\.toTableId/);
 assert.doesNotMatch(modelUtils, /columnsById: Map<string, SqltoerdColumnRef>/);
 
 assert.match(page, /sql-erd-full-bleed/);
-assert.match(page, /-m-6/);
-assert.match(page, /h-\[calc\(100vh-3\.5rem\)\]/);
+assert.match(page, /h-screen/);
+assert.doesNotMatch(page, /-m-6/);
+assert.doesNotMatch(page, /h-\[calc\(100vh-3\.5rem\)\]/);
+
+assert.match(mainShell, /isSqlErdImmersiveRoute/);
+assert.match(mainShell, /pathname\.startsWith\("\/sql-erd"\)/);
 
 assert.match(navigation, /SQLtoERD/);
 assert.match(navigation, /href: "\/sql-erd"/);
@@ -1289,6 +1563,8 @@ assert.match(panel, /inspectorPanelWidth/);
 assert.match(panel, /emptyState=\{\{/);
 assert.match(panel, /title: sqlErdViewSession\.title/);
 assert.match(panel, /const inspectorSubtitle = getInspectorSubtitle\(viewModel\)/);
+assert.match(panel, /const inspectorTitle = getInspectorTitle\(viewModel\)/);
+assert.match(panel, /\{inspectorTitle\}/);
 assert.match(panel, /inspectorSubtitle \?/);
 assert.doesNotMatch(panel, /viewModel\.title\}.*table/i);
 assert.doesNotMatch(panel, /min-h-\[calc\(100vh-8\.5rem\)\]/);
@@ -1320,10 +1596,14 @@ assert.match(canvasSurface, /TldrawSurface/);
 assert.match(canvasSurface, /commerceSqltoerdFixture/);
 assert.match(canvasSurface, /SqlErdCanvasShapeSync/);
 assert.match(canvasSurface, /areSqlErdCanvasShapesApplied/);
+assert.match(canvasSurface, /applySqlErdCanvasShapes/);
+assert.match(canvasSurface, /shouldResetSqlErdCanvas/);
+assert.match(canvasSurface, /editor\.updateShapes\(updates\)/);
 assert.match(canvasSurface, /createSqltoerdTableShapes/);
 assert.match(canvasSurface, /createSqltoerdRelationShapes/);
 assert.match(canvasSurface, /createSqltoerdCanvasShapes/);
 assert.match(canvasSurface, /SqlErdRelationLayoutSync/);
+assert.match(canvasSurface, /SqlErdRelationHoverSync/);
 assert.match(canvasSurface, /syncSqlErdRelationShapes/);
 assert.match(canvasSurface, /editor\.store\.listen/);
 assert.match(canvasSurface, /editor\.run/);
@@ -1335,6 +1615,7 @@ assert.match(canvasSurface, /SqlErdLayoutSync/);
 assert.match(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
+assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);
@@ -1345,6 +1626,9 @@ assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
 assert.match(canvasSurface, /selectedColumnId/);
+assert.match(canvasSurface, /selectedState/);
+assert.match(canvasSurface, /highlightedColumnIds/);
+assert.match(canvasSurface, /SQLTOERD_RELATION_HOVER_EVENT/);
 assert.doesNotMatch(canvasSurface, /createShapeId\(`sqltoerd-table-\$\{shapeIdSuffix\(table\.id\)\}`\)/);
 
 assert.match(tableShape, /SQLTOERD_TABLE_SHAPE_TYPE/);
@@ -1361,14 +1645,31 @@ assert.match(tableShape, /ROW_CONTENT_SAFETY_PADDING/);
 assert.match(tableShape, /ROW_COLUMN_GAP \* 2/);
 assert.match(tableShape, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(tableShape, /selectSqlErdColumn/);
+assert.match(tableShape, /data-sqltoerd-table-header/);
 assert.match(tableShape, /data-sqltoerd-column-id/);
+assert.match(tableShape, /data-sqltoerd-column-port/);
 assert.match(tableShape, /selectedColumnId/);
+assert.match(tableShape, /selectedState/);
+assert.match(tableShape, /highlightedColumnIds/);
+assert.match(tableShape, /function selectSqlErdTableShapeColumn/);
+assert.match(tableShape, /function selectSqlErdTableShape/);
+assert.match(tableShape, /editor\.updateShapes\(updates\)/);
+assert.match(
+  tableShape,
+  /function handleColumnClick\(columnId: string\) \{[\s\S]*?selectSqlErdTableShapeColumn\(editor, shape, columnId\);[\s\S]*?selectSqlErdColumn\({/
+);
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
+assert.match(tableShape, /function handleTableKeyDown/);
 assert.match(tableShape, /COLUMN_CLICK_DRAG_THRESHOLD/);
 assert.match(tableShape, /columnPointerStartRef/);
 assert.match(tableShape, /suppressNextColumnClickRef/);
 assert.match(tableShape, /onPointerDown/);
 assert.match(tableShape, /onPointerUp/);
+assert.doesNotMatch(tableShape, /<article[\s\S]*?onClick=\{handleTableClick\}/);
+assert.doesNotMatch(tableShape, /isSelected \|\| column\.foreignKey\s*\?\s*"border-blue-400 opacity-100"/);
+assert.match(tableShape, /isHighlighted/);
+assert.match(tableShape, /data-sqltoerd-column-highlighted/);
+assert.match(tableShape, /data-sqltoerd-table-selected/);
 assert.match(tableShape, /pointer-events-auto/);
 assert.match(tableShape, /justify-self-end/);
 assert.match(tableShape, /minmax\(max-content, 1fr\)/);
@@ -1378,6 +1679,7 @@ assert.doesNotMatch(tableShape, /truncate/);
 assert.doesNotMatch(tableShape, /text-overflow/);
 
 assert.match(relationShape, /SQLTOERD_RELATION_SHAPE_TYPE/);
+assert.match(relationShape, /SQLTOERD_RELATION_HOVER_EVENT/);
 assert.match(relationShape, /class SqlErdRelationShapeUtil extends ShapeUtil/);
 assert.match(relationShape, /SVGContainer/);
 assert.match(relationShape, /getSqlErdRelationTableEdgeAnchors/);
@@ -1396,13 +1698,18 @@ assert.match(relationShape, /fromColumnIds/);
 assert.match(relationShape, /toColumnIds/);
 assert.match(relationShape, /fromTableShapeId/);
 assert.match(relationShape, /toTableShapeId/);
+assert.match(relationShape, /startSide: T\.string/);
+assert.match(relationShape, /endSide: T\.string/);
 assert.match(relationShape, /points: T\.arrayOf/);
 assert.match(relationShape, /arrowPoints: T\.arrayOf/);
 assert.match(relationShape, /fromColumnIds: string\[\]/);
 assert.match(relationShape, /toColumnIds: string\[\]/);
-assert.match(relationShape, /getRelationCurvePathData\(shape\.props\.points\)/);
-assert.match(relationShape, /getRelationCurveGeometryPoints\(shape\.props\.points\)/);
-assert.match(relationShape, /getRelationCurveGeometryPoints\(shape\.props\.points\)\.map/);
+assert.match(relationShape, /shape\.props\.startSide/);
+assert.match(relationShape, /shape\.props\.endSide/);
+assert.match(relationShape, /onPointerEnter/);
+assert.match(relationShape, /onPointerLeave/);
+assert.match(relationShape, /getRelationCurvePathData\(/);
+assert.match(relationShape, /getRelationCurveGeometryPoints\(/);
 assert.match(relationShape, / C /);
 assert.doesNotMatch(relationShape, /useValue/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);

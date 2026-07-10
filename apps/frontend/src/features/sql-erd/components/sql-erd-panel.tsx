@@ -1231,6 +1231,7 @@ function InspectorPanel({
   viewModel,
   width
 }: InspectorPanelProps) {
+  const inspectorTitle = getInspectorTitle(viewModel);
   const inspectorSubtitle = getInspectorSubtitle(viewModel);
 
   if (!isOpen) {
@@ -1253,7 +1254,7 @@ function InspectorPanel({
     >
       <div className="flex min-h-20 items-center justify-between gap-3 border-b px-6">
         <div className="min-w-0">
-          <p className="text-xl font-semibold">상세 정보</p>
+          <p className="text-xl font-semibold">{inspectorTitle}</p>
           {inspectorSubtitle ? (
             <p className="truncate text-base text-muted-foreground">
               {inspectorSubtitle}
@@ -1292,6 +1293,22 @@ function InspectorPanel({
       </div>
     </aside>
   );
+}
+
+function getInspectorTitle(viewModel: SqlErdInspectorViewModel) {
+  if (viewModel.type === "table") {
+    return "테이블 정보";
+  }
+
+  if (viewModel.type === "column") {
+    return "컬럼 정보";
+  }
+
+  if (viewModel.type === "relation") {
+    return "관계 정보";
+  }
+
+  return "상세 정보";
 }
 
 function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {

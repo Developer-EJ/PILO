@@ -157,6 +157,28 @@ def test_parse_meeting_report_job_validates_required_payload() -> None:
         parse_meeting_report_job(meeting_report_job_payload(jobType="pr_analysis"))
 
 
+def test_processor_deletes_unsupported_job_type() -> None:
+    repository = FakeRepository()
+    processor = MeetingReportProcessor(repository, FakeStorage(), FakeAiClient())
+
+    result = processor.process_message(
+        json.dumps(
+            {
+                "jobType": "agent_run_requested",
+                "runId": "33333333-3333-3333-3333-333333333333",
+                "workspaceId": "22222222-2222-2222-2222-222222222222",
+                "requestedByUserId": "11111111-1111-1111-1111-111111111111",
+            }
+        )
+    )
+
+    assert result.delete_message is True
+    assert result.reason == "invalid_job"
+    assert result.report_id is None
+    assert repository.lock_calls == []
+    assert repository.release_calls == []
+
+
 def test_processor_completes_processing_report() -> None:
     repository = FakeRepository()
     storage = FakeStorage()
@@ -297,6 +319,18 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     settings = RuntimeSettings.from_env()
 
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
+    assert settings.openai_agent_planner_model == "gpt-5.4-mini"
+
+
+def test_runtime_settings_reads_agent_planner_model(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
+    monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AGENT_PLANNER_MODEL", "gpt-agent-planner")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.openai_agent_planner_model == "gpt-agent-planner"
 
 
 def test_runtime_settings_reads_database_ssl(monkeypatch) -> None:
