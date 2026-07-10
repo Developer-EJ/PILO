@@ -71,6 +71,14 @@ interface ApprovedToolExecution {
   toolInput: unknown;
 }
 
+interface StaleAgentExecutionRow extends QueryResultRow {
+  run_id: string;
+  workspace_id: string;
+  requested_by_user_id: string;
+  tool_step_id: string | null;
+  tool_step_status: string | null;
+}
+
 export interface CreateAgentConfirmationInput {
   runId: string;
   toolName: string;
@@ -108,6 +116,7 @@ export interface AgentConfirmationActionPayload {
 }
 
 const CONFIRMATION_TTL_MS = 15 * 60 * 1000;
+const STALE_AGENT_EXECUTION_SECONDS = 120;
 const FORBIDDEN_JSON_KEY_PARTS = [
   "authorization",
   "cookie",
@@ -269,12 +278,23 @@ export class AgentConfirmationService {
         message: "승인된 작업을 실행하고 있습니다.",
         completed: false
       });
+      const step = await this.agentLoggingService.createToolExecutionClaim(
+        transaction,
+        workspaceId,
+        {
+          runId,
+          toolName: approved.tool_name,
+          riskLevel: approved.risk_level,
+          inputSummary: this.buildStepInputSummary(approved.plan_json)
+        }
+      );
 
       return {
         expired: false,
         payload: this.mapActionPayload(run, approved),
         confirmation: approved,
-        toolExecution
+        toolExecution,
+        step
       } as const;
     });
 
@@ -287,7 +307,8 @@ export class AgentConfirmationService {
       workspaceId,
       runId,
       result.confirmation,
-      result.toolExecution
+      result.toolExecution,
+      result.step
     );
   }
 
@@ -357,6 +378,64 @@ export class AgentConfirmationService {
     }
 
     return result.payload;
+  }
+
+  async recoverStaleApprovedExecutions(): Promise<number> {
+    const rows = await this.database.query<StaleAgentExecutionRow>(
+      `
+        SELECT
+          r.id AS run_id,
+          r.workspace_id,
+          r.requested_by_user_id,
+          s.id AS tool_step_id,
+          s.status AS tool_step_status
+        FROM agent_runs r
+        JOIN agent_confirmations c
+          ON c.run_id = r.id
+          AND c.status = 'approved'
+        LEFT JOIN LATERAL (
+          SELECT id, status
+          FROM agent_steps
+          WHERE run_id = r.id
+            AND step_type = 'tool'
+          ORDER BY step_order DESC
+          LIMIT 1
+        ) s ON true
+        WHERE r.status = 'running'
+          AND r.updated_at <= now() - make_interval(secs => $1)
+        ORDER BY r.updated_at ASC
+        LIMIT 50
+      `,
+      [STALE_AGENT_EXECUTION_SECONDS]
+    );
+
+    for (const row of rows) {
+      if (row.tool_step_id && row.tool_step_status === "running") {
+        await this.agentLoggingService.failStep(
+          row.requested_by_user_id,
+          row.workspace_id,
+          {
+            runId: row.run_id,
+            stepId: row.tool_step_id,
+            errorCode: "AGENT_EXECUTION_STALE",
+            errorMessage: "Agent execution did not finish before the recovery timeout"
+          }
+        );
+      }
+
+      await this.agentLoggingService.failRun(
+        row.requested_by_user_id,
+        row.workspace_id,
+        {
+          runId: row.run_id,
+          errorCode: "AGENT_EXECUTION_STALE",
+          errorMessage: "Agent execution did not finish before the recovery timeout",
+          message: "승인된 작업이 시간 안에 완료되지 않아 실행을 종료했습니다."
+        }
+      );
+    }
+
+    return rows.length;
   }
 
   private async findConfirmationForUpdate(
@@ -515,23 +594,10 @@ export class AgentConfirmationService {
     workspaceId: string,
     runId: string,
     confirmation: AgentConfirmationRow,
-    toolExecution: ApprovedToolExecution
+    toolExecution: ApprovedToolExecution,
+    step: AgentStepPayload
   ): Promise<AgentConfirmationActionPayload> {
-    let step: AgentStepPayload | null = null;
-
     try {
-      step = await this.agentLoggingService.startNextStep(
-        currentUserId,
-        workspaceId,
-        {
-          runId,
-          type: "tool",
-          toolName: confirmation.tool_name,
-          riskLevel: confirmation.risk_level,
-          inputSummary: this.buildStepInputSummary(confirmation.plan_json)
-        }
-      );
-
       const result = await toolExecution.definition.execute(
         {
           currentUserId,
@@ -565,14 +631,12 @@ export class AgentConfirmationService {
     } catch (error) {
       const message = this.toSafeErrorMessage(error);
 
-      if (step) {
-        await this.agentLoggingService.failStep(currentUserId, workspaceId, {
-          runId,
-          stepId: step.id,
-          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-          errorMessage: message
-        });
-      }
+      await this.agentLoggingService.failStep(currentUserId, workspaceId, {
+        runId,
+        stepId: step.id,
+        errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+        errorMessage: message
+      });
 
       const run = await this.agentLoggingService.failRun(
         currentUserId,
@@ -600,7 +664,6 @@ export class AgentConfirmationService {
     if (definition.name === "update_calendar_event") {
       return {
         eventId: this.readCalendarEventId(plan),
-        before: plan.before ?? {},
         changes: plan.after
       };
     }
