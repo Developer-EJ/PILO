@@ -1718,13 +1718,20 @@ export class PrReviewService {
           pull_request.deletions,
           pull_request.commits_count,
           pull_request.html_url,
-          COALESCE(NULLIF(pull_request.raw->>'state', ''), pull_request.state::text)
-            AS pull_request_state,
+          COALESCE(
+            NULLIF(pull_request.raw->>'state', ''),
+            CASE
+              WHEN pull_request.merged_at IS NOT NULL
+                OR pull_request.github_closed_at IS NOT NULL
+                THEN 'closed'
+              ELSE 'open'
+            END
+          ) AS pull_request_state,
           CASE
             WHEN pull_request.raw ? 'mergeable'
               AND jsonb_typeof(pull_request.raw->'mergeable') = 'boolean'
               THEN (pull_request.raw->>'mergeable')::boolean
-            ELSE pull_request.mergeable
+            ELSE NULL
           END AS pull_request_mergeable,
           pull_request.merged_at AS pull_request_merged_at
         FROM pr_review_sessions AS review_session
