@@ -51,14 +51,6 @@ class CanvasSemanticShapeMatch:
 
 
 @dataclass(frozen=True)
-class CanvasIntentExampleMatch:
-    intent_example_id: str
-    intent: str
-    action_template: dict[str, object]
-    similarity: float
-
-
-@dataclass(frozen=True)
 class CanvasAgentProcessResult:
     delete_message: bool
     reason: str

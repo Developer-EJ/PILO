@@ -26,18 +26,6 @@ class CanvasEmbeddingRepository(Protocol):
 
     def fail_embedding_job(self, job_id: str, message: str) -> None: ...
 
-    def claim_pending_intent_embedding(self) -> dict[str, object] | None: ...
-
-    def complete_intent_embedding(
-        self,
-        intent_example_id: str,
-        embedding: list[float],
-        model_name: str,
-        model_version: str,
-    ) -> bool: ...
-
-    def fail_intent_embedding(self, intent_example_id: str, message: str) -> None: ...
-
 
 class CanvasEmbeddingProcessor:
     def __init__(self, repository: CanvasEmbeddingRepository, embedder: CanvasEmbedder) -> None:
@@ -45,10 +33,6 @@ class CanvasEmbeddingProcessor:
         self.embedder = embedder
 
     def process_next(self) -> str | None:
-        intent_example = self.repository.claim_pending_intent_embedding()
-        if intent_example is not None:
-            return self._process_intent_example(intent_example)
-
         job = self.repository.claim_embedding_job()
         if job is not None:
             return self._process_shape_job(job)
@@ -94,29 +78,6 @@ class CanvasEmbeddingProcessor:
         except Exception:
             self.repository.fail_embedding_job(job_id, "Canvas shape embedding failed")
             return "canvas_shape_embedding_failed"
-
-    def _process_intent_example(self, intent_example: dict[str, object]) -> str:
-        intent_example_id = str(intent_example["id"])
-        try:
-            embedding = self.embedder.embed_query(str(intent_example["utterance"]))
-            if not self.repository.complete_intent_embedding(
-                intent_example_id,
-                embedding,
-                self.embedder.model_name,
-                self.embedder.model_version,
-            ):
-                return "canvas_intent_embedding_superseded"
-            return "canvas_intent_embedding_completed"
-        except CanvasEmbeddingError as error:
-            self.repository.fail_intent_embedding(intent_example_id, str(error))
-            return "canvas_intent_embedding_failed"
-        except Exception:
-            self.repository.fail_intent_embedding(
-                intent_example_id,
-                "Canvas intent embedding failed",
-            )
-            return "canvas_intent_embedding_failed"
-
 
 def _optional_text(value: object) -> str | None:
     return value if isinstance(value, str) else None

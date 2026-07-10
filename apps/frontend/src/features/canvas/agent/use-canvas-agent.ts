@@ -5,7 +5,6 @@ import type { Editor, TLShapeId } from "tldraw";
 import { createCanvasAgentClient } from "../api/canvas-agent-client";
 import type {
   CanvasAgentDraft,
-  CanvasAgentIntentExample,
   CanvasAgentProgress,
   CanvasAgentRun,
   CanvasAgentViewport,
@@ -34,8 +33,6 @@ export function useCanvasAgent({
   const client = useMemo(() => createCanvasAgentClient(), []);
   const [run, setRun] = useState<CanvasAgentRun | null>(null);
   const [draft, setDraft] = useState<CanvasAgentDraft | null>(null);
-  const [intentExample, setIntentExample] = useState<CanvasAgentIntentExample | null>(null);
-  const [canRememberIntent, setCanRememberIntent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const runIdRef = useRef<string | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
@@ -93,8 +90,6 @@ export function useCanvasAgent({
       setError(null);
       setRun(null);
       setDraft(null);
-      setIntentExample(null);
-      setCanRememberIntent(false);
       clearProgressHideTimer();
       setVisibleProgress(null);
 
@@ -194,44 +189,11 @@ export function useCanvasAgent({
     try {
       const result = await client.applyDraft(workspaceId, canvasId, draft.id, crypto.randomUUID());
       setDraft(result.draft);
-      setIntentExample(result.intentExample);
-      setCanRememberIntent(false);
       onApplied();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Canvas AI 초안을 적용하지 못했습니다.");
     }
   }, [canvasId, client, draft, onApplied, workspaceId]);
-
-  const rememberRunIntent = useCallback(async () => {
-    if (!runIdRef.current || !canRememberIntent) return;
-    try {
-      const result = await client.rememberRunIntent(workspaceId, canvasId, runIdRef.current);
-      setIntentExample(result.intentExample);
-      setCanRememberIntent(false);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Canvas AI 표현을 기억하지 못했습니다.");
-    }
-  }, [canvasId, canRememberIntent, client, workspaceId]);
-
-  const approveIntentExample = useCallback(async () => {
-    if (!intentExample) return;
-    try {
-      const result = await client.approveIntentExample(workspaceId, canvasId, intentExample.id);
-      setIntentExample(result.intentExample);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Canvas AI 표현을 승인하지 못했습니다.");
-    }
-  }, [canvasId, client, intentExample, workspaceId]);
-
-  const rejectIntentExample = useCallback(async () => {
-    if (!intentExample) return;
-    try {
-      const result = await client.rejectIntentExample(workspaceId, canvasId, intentExample.id);
-      setIntentExample(result.intentExample);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Canvas AI 표현을 거절하지 못했습니다.");
-    }
-  }, [canvasId, client, intentExample, workspaceId]);
 
   const discardDraft = useCallback(async () => {
     if (!draft) return;
@@ -245,9 +207,7 @@ export function useCanvasAgent({
 
   useEffect(() => {
     const runId = runIdRef.current;
-    const isIntentPreparing = intentExample?.status === "pending"
-      && (intentExample.embeddingStatus === "pending" || intentExample.embeddingStatus === "processing");
-    if (!runId || !run || (!ACTIVE_STATUSES.has(run.status) && !isIntentPreparing)) return undefined;
+    if (!runId || !run || !ACTIVE_STATUSES.has(run.status)) return undefined;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -256,9 +216,6 @@ export function useCanvasAgent({
         presentRun(detail.run);
         const preview = detail.drafts.find((item) => item.status === "preview") ?? null;
         if (preview) setDraft(preview);
-        const nextIntentExample = detail.intentExamples[detail.intentExamples.length - 1] ?? null;
-        setIntentExample(nextIntentExample);
-        setCanRememberIntent(detail.canRememberIntent);
       } catch (requestError) {
         if (!cancelled) setError(requestError instanceof Error ? requestError.message : "Canvas AI 상태를 불러오지 못했습니다.");
       }
@@ -269,24 +226,19 @@ export function useCanvasAgent({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [canvasId, client, intentExample, presentRun, run, workspaceId]);
+  }, [canvasId, client, presentRun, run, workspaceId]);
 
   useEffect(() => () => clearProgressHideTimer(), [clearProgressHideTimer]);
 
   return {
     applyDraft,
-    approveIntentExample,
     cancel,
-    canRememberIntent,
     discardDraft,
     draft: draft?.status === "preview" ? draft : null,
     error,
-    intentExample,
     isRunning: run ? ACTIVE_STATUSES.has(run.status) : false,
     message: error ?? run?.progress?.message ?? run?.message ?? null,
     progress: visibleProgress,
-    rememberRunIntent,
-    rejectIntentExample,
     submit,
   };
 }

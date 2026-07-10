@@ -37,9 +37,6 @@ not read, create, update, delete, or represent them as Canvas shapes.
   waiting for AI Worker planning to finish.
 - Canvas Agent has no confirmation table. A draft is not persisted to the
   Canvas until its requester calls the apply endpoint.
-- A successfully applied GPT draft may create one `pending` personal expression
-  memory. It becomes eligible for automatic local routing only after the same
-  user explicitly approves it.
 - A run is retained for 7 days and a preview draft for 24 hours.
 
 ## Processing model
@@ -62,13 +59,11 @@ exact title/text ILIKE match
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
   It never embeds full `raw_shape`, layout, bindings, styles, or provider data.
-- Active expression memories are per-user and per-Workspace. They are never
-  shared with other Workspace members.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
-- The default local-route thresholds are shape similarity `0.78`, intent
-  similarity `0.90`, and winner margin `0.08`. A missing or ambiguous local
-  match falls through to GPT Planner.
+- The default local-route thresholds are shape similarity `0.78` and winner
+  margin `0.08`. A missing or ambiguous local match falls through to GPT
+  Planner.
 
 - Each AI Worker decision can choose exactly one action.
 - App Server limits a run to its configured maximum number of steps.
@@ -168,11 +163,8 @@ Basic Canvas tool targets:
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs` | Create an asynchronous Canvas Agent run. |
 | `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs/{runId}` | Get a requester-owned run and bounded step summaries. |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs/{runId}/cancel` | Cancel a queued, planning, or executing run. |
-| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs/{runId}/intent-examples` | Create a pending personal expression-memory candidate from a completed planner result. |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/apply` | Apply a requester-owned preview draft to the Canvas. |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/discard` | Discard a requester-owned preview draft. |
-| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-intent-examples/{intentExampleId}/approve` | Activate a prepared pending personal expression memory. |
-| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-intent-examples/{intentExampleId}/reject` | Reject a pending personal expression memory. |
 
 ## Create Canvas Agent run
 
@@ -284,19 +276,7 @@ resource ids, not raw shape payloads or AI provider output.
         "summary": "문제 → 해결 → 기대 효과 흐름",
         "expiresAt": "2026-07-11T00:00:03.000Z"
       }
-    ],
-    "intentExamples": [
-      {
-        "id": "canvas_agent_intent_example_uuid",
-        "intent": "create_draft",
-        "status": "pending",
-        "embeddingStatus": "completed",
-        "createdAt": "2026-07-10T00:00:05.000Z",
-        "reviewedAt": null,
-        "expiresAt": "2026-08-09T00:00:05.000Z"
-      }
-    ],
-    "canRememberIntent": false
+    ]
   }
 }
 ```
@@ -366,43 +346,9 @@ Response: `200 OK`
 }
 ```
 
-When the applied draft came from a GPT Planner action that can safely be reused,
-the response additionally contains a pending `intentExample`. For a completed
-non-draft planner result, `GET` returns `canRememberIntent: true` until the
-requester calls the run intent-example endpoint. The client polls until
-`embeddingStatus` becomes `completed`, then the requester may approve or
-reject it. A pending or rejected example never affects routing.
-
 Main errors: `400 BAD_REQUEST`, `401 UNAUTHORIZED`, `403 FORBIDDEN`,
 `404 CANVAS_AGENT_DRAFT_NOT_FOUND`, `409 CANVAS_AGENT_DRAFT_STALE`,
 `409 CANVAS_AGENT_DRAFT_NOT_PREVIEW`.
-
-## Review personal expression memory
-
-```http
-POST /api/v1/workspaces/{workspaceId}/canvases/{canvasId}/agent-intent-examples/{intentExampleId}/approve
-```
-
-Only the requester who created the candidate can approve it. The server permits
-approval only while the candidate is `pending` and its local embedding is
-prepared. Otherwise it returns `409 CANVAS_AGENT_INTENT_NOT_READY` or
-`409 CANVAS_AGENT_INTENT_NOT_REVIEWABLE`.
-
-```json
-{
-  "success": true,
-  "data": {
-    "intentExample": {
-      "id": "canvas_agent_intent_example_uuid",
-      "intent": "create_draft",
-      "status": "active",
-      "embeddingStatus": "completed"
-    }
-  }
-}
-```
-
-Use the same path with `/reject` to permanently reject the pending candidate.
 
 ## Discard Canvas Agent draft
 

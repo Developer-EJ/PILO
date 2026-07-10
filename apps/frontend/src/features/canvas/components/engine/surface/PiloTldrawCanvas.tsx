@@ -1253,18 +1253,13 @@ export function PiloTldrawCanvas({
       </button>
       <CanvasAiChatOverlay
         anchor={canvasAiChatAnchor}
-        canRememberIntent={canvasAgent.canRememberIntent}
         draft={canvasAgent.draft}
         error={canvasAgent.error}
         holdProgress={canvasAiChatHoldProgress}
-        intentExample={canvasAgent.intentExample}
         isRunning={canvasAgent.isRunning}
         onApplyDraft={canvasAgent.applyDraft}
-        onApproveIntentExample={canvasAgent.approveIntentExample}
         onClose={() => setCanvasAiChatAnchor(null)}
         onDiscardDraft={canvasAgent.discardDraft}
-        onRejectIntentExample={canvasAgent.rejectIntentExample}
-        onRememberIntent={canvasAgent.rememberRunIntent}
         onSubmit={canvasAgent.submit}
         statusMessage={canvasAgent.message}
       />

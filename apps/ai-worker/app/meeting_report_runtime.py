@@ -75,7 +75,6 @@ class RuntimeSettings:
     canvas_embedding_model: str
     canvas_embedding_revision: str
     canvas_embedding_max_sequence_length: int
-    canvas_agent_intent_similarity_min: float
     canvas_agent_shape_similarity_min: float
     canvas_agent_similarity_margin_min: float
     concurrency: int
@@ -122,12 +121,6 @@ class RuntimeSettings:
             canvas_embedding_max_sequence_length=_positive_int_env(
                 "CANVAS_EMBEDDING_MAX_SEQUENCE_LENGTH",
                 DEFAULT_MAX_SEQUENCE_LENGTH,
-            ),
-            canvas_agent_intent_similarity_min=_bounded_float_env(
-                "CANVAS_AGENT_INTENT_SIMILARITY_MIN",
-                0.9,
-                minimum=0.5,
-                maximum=1.0,
             ),
             canvas_agent_shape_similarity_min=_bounded_float_env(
                 "CANVAS_AGENT_SHAPE_SIMILARITY_MIN",
@@ -731,7 +724,6 @@ def create_worker(settings: RuntimeSettings | None = None) -> SqsAiJobWorker:
     canvas_semantic_router = CanvasSemanticRouter(
         canvas_agent_repository,
         canvas_embedder,
-        intent_similarity_min=resolved_settings.canvas_agent_intent_similarity_min,
         shape_similarity_min=resolved_settings.canvas_agent_shape_similarity_min,
         similarity_margin_min=resolved_settings.canvas_agent_similarity_margin_min,
     )

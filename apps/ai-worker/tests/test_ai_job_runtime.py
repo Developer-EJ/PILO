@@ -63,7 +63,6 @@ def runtime_settings() -> RuntimeSettings:
         canvas_embedding_model="intfloat/multilingual-e5-small",
         canvas_embedding_revision="main",
         canvas_embedding_max_sequence_length=256,
-        canvas_agent_intent_similarity_min=0.9,
         canvas_agent_shape_similarity_min=0.78,
         canvas_agent_similarity_margin_min=0.08,
         concurrency=2,

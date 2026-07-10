@@ -2,10 +2,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, SendHorizontal, X } from "lucide-react";
-import type {
-  CanvasAgentDraft,
-  CanvasAgentIntentExample,
-} from "@/features/canvas/api/canvas-agent-types";
+import type { CanvasAgentDraft } from "@/features/canvas/api/canvas-agent-types";
 
 export type CanvasAiChatAnchor = {
   x: number;
@@ -14,18 +11,13 @@ export type CanvasAiChatAnchor = {
 
 type CanvasAiChatOverlayProps = {
   anchor: CanvasAiChatAnchor | null;
-  canRememberIntent: boolean;
   draft: CanvasAgentDraft | null;
   error: string | null;
   holdProgress: (CanvasAiChatAnchor & { progress: number }) | null;
-  intentExample: CanvasAgentIntentExample | null;
   isRunning: boolean;
-  onApproveIntentExample: () => void;
   onApplyDraft: () => void;
   onClose: () => void;
   onDiscardDraft: () => void;
-  onRejectIntentExample: () => void;
-  onRememberIntent: () => void;
   onSubmit: (message: string, options?: { toolHelpMode?: boolean }) => void;
   statusMessage: string | null;
 };
@@ -37,18 +29,13 @@ type CanvasAiMessage = {
 
 export function CanvasAiChatOverlay({
   anchor,
-  canRememberIntent,
   draft,
   error,
   holdProgress,
-  intentExample,
   isRunning,
   onApplyDraft,
-  onApproveIntentExample,
   onClose,
   onDiscardDraft,
-  onRejectIntentExample,
-  onRememberIntent,
   onSubmit,
   statusMessage,
 }: CanvasAiChatOverlayProps) {
@@ -57,7 +44,7 @@ export function CanvasAiChatOverlay({
   const [messages, setMessages] = useState<CanvasAiMessage[]>([
     {
       content:
-        "캔버스에 관한 작업을 도와드릴게요. 저는 C를 0.5초 길게 누르면 어디서든 부를 수 있어요.",
+        "캔버스에 관한 작업을 도와드릴게요. 저는 C를 누르면 캔버스 어디서든 부를 수 있어요.",
       role: "assistant",
     },
   ]);
@@ -88,7 +75,7 @@ export function CanvasAiChatOverlay({
 
   useEffect(() => {
     messageListEndRef.current?.scrollIntoView({ block: "end" });
-  }, [draft, intentExample, messages]);
+  }, [draft, messages]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -202,48 +189,6 @@ export function CanvasAiChatOverlay({
                     폐기
                   </button>
                 </div>
-              </div>
-            ) : null}
-            {intentExample?.status === "pending" ? (
-              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-slate-700">
-                <strong className="block text-sm text-slate-950">이 표현을 기억할까요?</strong>
-                <span className="mt-1 block">
-                  {intentExample.embeddingStatus === "completed"
-                    ? "승인하면 다음 Canvas 작업에서만 비슷한 표현을 빠르게 처리합니다."
-                    : "Canvas AI가 이 표현을 로컬 검색용으로 준비하고 있습니다."}
-                </span>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    className="rounded-lg bg-violet-700 px-3 py-1.5 font-medium text-white disabled:cursor-not-allowed disabled:bg-violet-300"
-                    disabled={intentExample.embeddingStatus !== "completed"}
-                    onClick={onApproveIntentExample}
-                    type="button"
-                  >
-                    승인
-                  </button>
-                  <button
-                    className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 font-medium text-slate-700"
-                    onClick={onRejectIntentExample}
-                    type="button"
-                  >
-                    기억 안 함
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {canRememberIntent && !intentExample ? (
-              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-slate-700">
-                <strong className="block text-sm text-slate-950">이 표현을 기억할까요?</strong>
-                <span className="mt-1 block">
-                  같은 종류의 Canvas 작업을 다음에는 로컬 검색으로 먼저 처리할 수 있습니다.
-                </span>
-                <button
-                  className="mt-3 rounded-lg bg-violet-700 px-3 py-1.5 font-medium text-white"
-                  onClick={onRememberIntent}
-                  type="button"
-                >
-                  이 표현 기억
-                </button>
               </div>
             ) : null}
             <div ref={messageListEndRef} />

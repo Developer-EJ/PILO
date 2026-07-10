@@ -1,7 +1,7 @@
 import { buildCanvasApiUrl, CanvasApiError } from "./canvas-api-client";
 import type {
   CanvasAgentDraft,
-  CanvasAgentIntentExample,
+  CanvasAgentDraftApplyResult,
   CanvasAgentRun,
   CanvasAgentRunDetail,
   CanvasAgentViewport,
@@ -83,14 +83,8 @@ export function createCanvasAgentClient() {
         { method: "POST" },
       );
     },
-    rememberRunIntent(workspaceId: string, canvasId: string, runId: string) {
-      return request<{ intentExample: CanvasAgentIntentExample }>(
-        `${pathBase(workspaceId, canvasId)}/agent-runs/${encodeURIComponent(runId)}/intent-examples`,
-        { method: "POST" },
-      );
-    },
     applyDraft(workspaceId: string, canvasId: string, draftId: string, clientOperationId: string) {
-      return request<{ draft: CanvasAgentDraft; intentExample: CanvasAgentIntentExample | null }>(
+      return request<CanvasAgentDraftApplyResult>(
         `${pathBase(workspaceId, canvasId)}/agent-drafts/${encodeURIComponent(draftId)}/apply`,
         { method: "POST", body: JSON.stringify({ clientOperationId }) },
       );
@@ -98,18 +92,6 @@ export function createCanvasAgentClient() {
     discardDraft(workspaceId: string, canvasId: string, draftId: string) {
       return request<{ draft: CanvasAgentDraft }>(
         `${pathBase(workspaceId, canvasId)}/agent-drafts/${encodeURIComponent(draftId)}/discard`,
-        { method: "POST" },
-      );
-    },
-    approveIntentExample(workspaceId: string, canvasId: string, intentExampleId: string) {
-      return request<{ intentExample: CanvasAgentIntentExample }>(
-        `${pathBase(workspaceId, canvasId)}/agent-intent-examples/${encodeURIComponent(intentExampleId)}/approve`,
-        { method: "POST" },
-      );
-    },
-    rejectIntentExample(workspaceId: string, canvasId: string, intentExampleId: string) {
-      return request<{ intentExample: CanvasAgentIntentExample }>(
-        `${pathBase(workspaceId, canvasId)}/agent-intent-examples/${encodeURIComponent(intentExampleId)}/reject`,
         { method: "POST" },
       );
     },

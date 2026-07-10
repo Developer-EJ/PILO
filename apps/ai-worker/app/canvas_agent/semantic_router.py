@@ -6,7 +6,6 @@ from app.canvas_agent.embeddings import CanvasEmbedder, CanvasEmbeddingError
 from app.canvas_agent.types import (
     CanvasAgentPlan,
     CanvasAgentRunContext,
-    CanvasIntentExampleMatch,
     CanvasSemanticShapeMatch,
 )
 
@@ -20,16 +19,6 @@ class SemanticCanvasAgentRepository(Protocol):
         limit: int = 4,
     ) -> list[CanvasSemanticShapeMatch]: ...
 
-    def search_active_intent_examples(
-        self,
-        workspace_id: str,
-        owner_user_id: str,
-        query_embedding: list[float],
-        limit: int = 2,
-    ) -> list[CanvasIntentExampleMatch]: ...
-
-    def increment_intent_example_usage(self, intent_example_id: str) -> None: ...
-
 
 class CanvasSemanticRouter:
     def __init__(
@@ -37,13 +26,11 @@ class CanvasSemanticRouter:
         repository: SemanticCanvasAgentRepository,
         embedder: CanvasEmbedder,
         *,
-        intent_similarity_min: float = 0.9,
         shape_similarity_min: float = 0.78,
         similarity_margin_min: float = 0.08,
     ) -> None:
         self.repository = repository
         self.embedder = embedder
-        self.intent_similarity_min = intent_similarity_min
         self.shape_similarity_min = shape_similarity_min
         self.similarity_margin_min = similarity_margin_min
 
@@ -55,43 +42,23 @@ class CanvasSemanticRouter:
         request = _semantic_request(context)
         if request is None:
             return None
-        query, allows_shape_search = request
+        query = request
 
         try:
             query_embedding = self.embedder.embed_query(query)
         except CanvasEmbeddingError:
             return None
 
-        intent_matches = self.repository.search_active_intent_examples(
+        shape_matches = self.repository.search_semantic_shapes(
             context.workspace_id,
-            context.requested_by_user_id,
+            context.canvas_id,
             query_embedding,
-        )
-        shape_matches = (
-            self.repository.search_semantic_shapes(
-                context.workspace_id,
-                context.canvas_id,
-                query_embedding,
-            )
-            if allows_shape_search
-            else []
-        )
-        intent_match = _confident(
-            intent_matches,
-            self.intent_similarity_min,
-            self.similarity_margin_min,
         )
         shape_match = _confident(
             shape_matches,
             self.shape_similarity_min,
             self.similarity_margin_min,
         )
-
-        if isinstance(intent_match, CanvasIntentExampleMatch):
-            remembered_plan = self._plan_from_intent(intent_match, shape_matches, query)
-            if remembered_plan is not None:
-                self.repository.increment_intent_example_usage(intent_match.intent_example_id)
-                return remembered_plan
 
         if isinstance(shape_match, CanvasSemanticShapeMatch):
             shape_ids = [match.shape_id for match in shape_matches[:4]]
@@ -108,49 +75,11 @@ class CanvasSemanticRouter:
 
         return None
 
-    def _plan_from_intent(
-        self,
-        match: CanvasIntentExampleMatch,
-        shape_matches: list[CanvasSemanticShapeMatch],
-        query: str,
-    ) -> CanvasAgentPlan | None:
-        action_name = match.action_template.get("actionName")
-        if action_name == "create_draft":
-            kind = "organize" if match.action_template.get("kind") == "organize" else "diagram"
-            style = match.action_template.get("style")
-            action_input: dict[str, object] = {"kind": kind}
-            if isinstance(style, str) and style.strip():
-                action_input["style"] = style.strip()[:300]
-            return CanvasAgentPlan(
-                action_name="create_draft",
-                input=action_input,
-                message="이전에 승인한 Canvas 작업 방식으로 초안을 준비하고 있습니다.",
-            )
 
-        shape_match = _confident(
-            shape_matches,
-            self.shape_similarity_min,
-            self.similarity_margin_min,
-        )
-        if action_name != "find_shapes" or not isinstance(shape_match, CanvasSemanticShapeMatch):
-            return None
-        return CanvasAgentPlan(
-            action_name="find_shapes",
-            input={
-                "query": query,
-                "shapeIds": [item.shape_id for item in shape_matches[:4]],
-                "continuePlanning": False,
-                "focusResult": match.action_template.get("focusResult") is True,
-            },
-            message="이전에 승인한 Canvas 탐색 방식으로 관련 도형을 찾았습니다.",
-        )
-
-
-def _semantic_request(context: CanvasAgentRunContext) -> tuple[str, bool] | None:
+def _semantic_request(context: CanvasAgentRunContext) -> str | None:
     previous = context.previous_action
     if previous is None:
-        normalized = context.prompt.strip()
-        return (normalized[:2000], False) if normalized else None
+        return None
     if previous.get("actionName") != "find_shapes":
         return None
     resource_refs = previous.get("resourceRefs")
@@ -165,7 +94,7 @@ def _semantic_request(context: CanvasAgentRunContext) -> tuple[str, bool] | None
     if not isinstance(query, str):
         return None
     normalized = query.strip()
-    return (normalized[:120], True) if normalized else None
+    return normalized[:120] if normalized else None
 
 
 T = TypeVar("T")

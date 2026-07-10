@@ -21,7 +21,6 @@ import type {
   ApplyCanvasAgentDraftRequest,
   CanvasAgentDraftApplyPayload,
   CanvasAgentDraftPayload,
-  CanvasAgentIntentExamplePayload,
   CanvasAgentRunDetailPayload,
   CanvasAgentRunPayload,
   CreateCanvasAgentRunRequest
@@ -104,57 +103,6 @@ export class CanvasController {
     );
 
     return apiResponse({ run });
-  }
-
-  @Post("canvases/:canvasId/agent-runs/:runId/intent-examples")
-  async rememberCanvasAgentRunIntent(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("canvasId") canvasId: string,
-    @Param("runId") runId: string
-  ): Promise<ApiSuccessResponse<{ intentExample: CanvasAgentIntentExamplePayload }>> {
-    const intentExample = await this.canvasAgentService.rememberRunIntent(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      runId
-    );
-
-    return apiResponse({ intentExample });
-  }
-
-  @Post("canvases/:canvasId/agent-intent-examples/:intentExampleId/approve")
-  async approveCanvasAgentIntentExample(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("canvasId") canvasId: string,
-    @Param("intentExampleId") intentExampleId: string
-  ): Promise<ApiSuccessResponse<{ intentExample: CanvasAgentIntentExamplePayload }>> {
-    const intentExample = await this.canvasAgentService.approveIntentExample(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      intentExampleId
-    );
-
-    return apiResponse({ intentExample });
-  }
-
-  @Post("canvases/:canvasId/agent-intent-examples/:intentExampleId/reject")
-  async rejectCanvasAgentIntentExample(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("canvasId") canvasId: string,
-    @Param("intentExampleId") intentExampleId: string
-  ): Promise<ApiSuccessResponse<{ intentExample: CanvasAgentIntentExamplePayload }>> {
-    const intentExample = await this.canvasAgentService.rejectIntentExample(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      intentExampleId
-    );
-
-    return apiResponse({ intentExample });
   }
 
   @Post("canvases/:canvasId/agent-drafts/:draftId/apply")

@@ -25,9 +25,8 @@ Canvas Agent contract: `docs/api/canvas-agent-api.md`
 
 `agent/`는 Canvas 전용 AI orchestration을 담당한다. 실제 Canvas shape mutation은
 `CanvasService`를 호출하며, AI Worker는 Canvas action 계획만 만든다. Canvas shape
-의 검색용 텍스트는 pgvector로 비동기 인덱싱하고, 사용자 승인 표현 기억은 같은
-사용자·Workspace 범위에서만 local routing에 사용한다. raw tldraw JSON과 외부
-도메인 데이터는 검색 인덱스나 Canvas AI action에 넣지 않는다.
+의 검색용 텍스트는 pgvector로 비동기 인덱싱한다. raw tldraw JSON과 외부 도메인
+데이터는 검색 인덱스나 Canvas AI action에 넣지 않는다.
 
 주의:
 

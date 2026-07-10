@@ -279,7 +279,7 @@ CREATE INDEX idx_canvas_agent_drafts_expires_at_preview
 -- Durable, Canvas-scoped indexing jobs. Job payloads contain only shape ids,
 -- text hashes, and revisions; worker code must load a bounded safe-text
 -- projection and must never embed raw tldraw JSON.
-CREATE TABLE public.canvas_agent_embedding_jobs (
+CREATE TABLE public.canvas_agent_shape_embedding_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   workspace_id UUID NOT NULL,
@@ -300,48 +300,48 @@ CREATE TABLE public.canvas_agent_embedding_jobs (
   completed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  CONSTRAINT canvas_agent_embedding_jobs_canvas_workspace_fk
+  CONSTRAINT canvas_agent_shape_embedding_jobs_canvas_workspace_fk
     FOREIGN KEY (canvas_id, workspace_id)
     REFERENCES public.canvas(id, workspace_id)
     ON DELETE CASCADE,
 
-  CONSTRAINT canvas_agent_embedding_jobs_operation_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_operation_check
     CHECK (operation IN ('upsert', 'delete')),
 
-  CONSTRAINT canvas_agent_embedding_jobs_shape_revision_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_shape_revision_check
     CHECK (expected_shape_revision > 0),
 
-  CONSTRAINT canvas_agent_embedding_jobs_source_text_hash_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_source_text_hash_check
     CHECK (
       expected_source_text_hash = btrim(expected_source_text_hash)
       AND octet_length(expected_source_text_hash) BETWEEN 1 AND 128
     ),
 
-  CONSTRAINT canvas_agent_embedding_jobs_status_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_status_check
     CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'superseded')),
 
-  CONSTRAINT canvas_agent_embedding_jobs_attempt_count_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_attempt_count_check
     CHECK (attempt_count >= 0),
 
-  CONSTRAINT canvas_agent_embedding_jobs_error_code_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_error_code_check
     CHECK (error_code IS NULL OR octet_length(error_code) BETWEEN 1 AND 80),
 
-  CONSTRAINT canvas_agent_embedding_jobs_error_message_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_error_message_check
     CHECK (error_message IS NULL OR octet_length(error_message) <= 4096),
 
-  CONSTRAINT canvas_agent_embedding_jobs_completed_at_order_check
+  CONSTRAINT canvas_agent_shape_embedding_jobs_completed_at_order_check
     CHECK (completed_at IS NULL OR completed_at >= created_at),
 
-  CONSTRAINT canvas_agent_embedding_jobs_unique_revision
+  CONSTRAINT canvas_agent_shape_embedding_jobs_unique_revision
     UNIQUE (canvas_id, shape_id, operation, expected_shape_revision)
 );
 
-CREATE INDEX idx_canvas_agent_embedding_jobs_pending
-  ON public.canvas_agent_embedding_jobs(status, created_at)
+CREATE INDEX idx_canvas_agent_shape_embedding_jobs_pending
+  ON public.canvas_agent_shape_embedding_jobs(status, created_at)
   WHERE status IN ('pending', 'processing');
 
-CREATE INDEX idx_canvas_agent_embedding_jobs_canvas_shape
-  ON public.canvas_agent_embedding_jobs(canvas_id, shape_id, created_at DESC);
+CREATE INDEX idx_canvas_agent_shape_embedding_jobs_canvas_shape
+  ON public.canvas_agent_shape_embedding_jobs(canvas_id, shape_id, created_at DESC);
 
 -- Queue a semantic-index refresh only when search-relevant Canvas text changes.
 -- Geometry, color, bindings, and arbitrary raw_shape changes deliberately do
@@ -389,7 +389,7 @@ BEGIN
     'hex'
   );
 
-  INSERT INTO public.canvas_agent_embedding_jobs (
+  INSERT INTO public.canvas_agent_shape_embedding_jobs (
     workspace_id,
     canvas_id,
     shape_id,
@@ -420,7 +420,7 @@ EXECUTE FUNCTION public.enqueue_canvas_agent_shape_embedding_job();
 
 -- Index existing active Canvas shapes after this migration as well as future
 -- writes captured by the trigger above.
-INSERT INTO public.canvas_agent_embedding_jobs (
+INSERT INTO public.canvas_agent_shape_embedding_jobs (
   workspace_id,
   canvas_id,
   shape_id,
@@ -515,158 +515,11 @@ BEFORE UPDATE ON public.canvas_agent_shape_embeddings
 FOR EACH ROW
 EXECUTE FUNCTION public.update_updated_at_column();
 
--- User-approved semantic routing memories. They are intentionally scoped to
--- the requesting user and Workspace so one user's phrasing never trains another
--- user's Canvas AI behavior.
-CREATE TABLE public.canvas_agent_intent_examples (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-  workspace_id UUID NOT NULL
-    REFERENCES public.workspaces(id) ON DELETE CASCADE,
-  owner_user_id UUID NOT NULL
-    REFERENCES public.users(id) ON DELETE CASCADE,
-  source_run_id UUID
-    REFERENCES public.canvas_agent_runs(id) ON DELETE SET NULL,
-
-  utterance TEXT NOT NULL,
-  intent TEXT NOT NULL,
-  action_template_json JSONB NOT NULL,
-  confidence DOUBLE PRECISION NOT NULL,
-
-  embedding extensions.vector(384),
-  embedding_model TEXT,
-  embedding_version TEXT,
-  embedding_status TEXT NOT NULL DEFAULT 'pending',
-  embedding_attempt_count INTEGER NOT NULL DEFAULT 0,
-  embedding_claimed_at TIMESTAMPTZ,
-  embedding_error_code TEXT,
-  embedding_error_message TEXT,
-
-  source TEXT NOT NULL DEFAULT 'planner',
-  status TEXT NOT NULL DEFAULT 'pending',
-  reviewed_by_user_id UUID
-    REFERENCES public.users(id) ON DELETE SET NULL,
-  reviewed_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '30 days'),
-  usage_count INTEGER NOT NULL DEFAULT 0,
-
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-  CONSTRAINT canvas_agent_intent_examples_utterance_check
-    CHECK (
-      utterance = btrim(utterance)
-      AND octet_length(utterance) BETWEEN 1 AND 2000
-    ),
-
-  CONSTRAINT canvas_agent_intent_examples_intent_check
-    CHECK (intent IN (
-      'find_canvas_tool',
-      'find_shapes',
-      'select_shapes',
-      'focus_viewport',
-      'create_draft',
-      'create_code_block'
-    )),
-
-  CONSTRAINT canvas_agent_intent_examples_action_template_object_check
-    CHECK (jsonb_typeof(action_template_json) = 'object'),
-
-  CONSTRAINT canvas_agent_intent_examples_action_template_size_check
-    CHECK (octet_length(action_template_json::text) <= 8192),
-
-  CONSTRAINT canvas_agent_intent_examples_confidence_check
-    CHECK (confidence >= 0 AND confidence <= 1),
-
-  CONSTRAINT canvas_agent_intent_examples_model_check
-    CHECK (
-      embedding_model IS NULL
-      OR (
-        embedding_model = btrim(embedding_model)
-        AND octet_length(embedding_model) BETWEEN 1 AND 160
-      )
-    ),
-
-  CONSTRAINT canvas_agent_intent_examples_version_check
-    CHECK (
-      embedding_version IS NULL
-      OR (
-        embedding_version = btrim(embedding_version)
-        AND octet_length(embedding_version) BETWEEN 1 AND 160
-      )
-    ),
-
-  CONSTRAINT canvas_agent_intent_examples_embedding_status_check
-    CHECK (embedding_status IN ('pending', 'processing', 'completed', 'failed')),
-
-  CONSTRAINT canvas_agent_intent_examples_embedding_attempt_count_check
-    CHECK (embedding_attempt_count >= 0),
-
-  CONSTRAINT canvas_agent_intent_examples_embedding_error_code_check
-    CHECK (embedding_error_code IS NULL OR octet_length(embedding_error_code) BETWEEN 1 AND 80),
-
-  CONSTRAINT canvas_agent_intent_examples_embedding_error_message_check
-    CHECK (embedding_error_message IS NULL OR octet_length(embedding_error_message) <= 4096),
-
-  CONSTRAINT canvas_agent_intent_examples_embedding_state_check
-    CHECK (
-      (embedding_status = 'completed'
-        AND embedding IS NOT NULL
-        AND embedding_model IS NOT NULL
-        AND embedding_version IS NOT NULL)
-      OR (embedding_status <> 'completed' AND embedding IS NULL)
-    ),
-
-  CONSTRAINT canvas_agent_intent_examples_source_check
-    CHECK (source IN ('planner', 'seed')),
-
-  CONSTRAINT canvas_agent_intent_examples_status_check
-    CHECK (status IN ('pending', 'active', 'rejected', 'expired')),
-
-  CONSTRAINT canvas_agent_intent_examples_review_check
-    CHECK (
-      (status = 'pending' AND reviewed_by_user_id IS NULL AND reviewed_at IS NULL)
-      OR (status IN ('active', 'rejected') AND reviewed_at IS NOT NULL)
-      OR (status = 'expired' AND reviewed_by_user_id IS NULL)
-    ),
-
-  CONSTRAINT canvas_agent_intent_examples_active_embedding_check
-    CHECK (status <> 'active' OR embedding_status = 'completed'),
-
-  CONSTRAINT canvas_agent_intent_examples_usage_count_check
-    CHECK (usage_count >= 0),
-
-  CONSTRAINT canvas_agent_intent_examples_expires_at_order_check
-    CHECK (expires_at > created_at)
-);
-
-CREATE INDEX idx_canvas_agent_intent_examples_owner_status
-  ON public.canvas_agent_intent_examples(workspace_id, owner_user_id, status, created_at DESC);
-
-CREATE INDEX idx_canvas_agent_intent_examples_source_run
-  ON public.canvas_agent_intent_examples(source_run_id)
-  WHERE source_run_id IS NOT NULL;
-
-CREATE UNIQUE INDEX idx_canvas_agent_intent_examples_source_run_unique
-  ON public.canvas_agent_intent_examples(source_run_id)
-  WHERE source_run_id IS NOT NULL;
-
-CREATE INDEX idx_canvas_agent_intent_examples_active_embedding_hnsw
-  ON public.canvas_agent_intent_examples
-  USING hnsw (embedding extensions.vector_cosine_ops)
-  WHERE status = 'active' AND embedding_status = 'completed';
-
-CREATE TRIGGER trg_canvas_agent_intent_examples_updated_at
-BEFORE UPDATE ON public.canvas_agent_intent_examples
-FOR EACH ROW
-EXECUTE FUNCTION public.update_updated_at_column();
-
 ALTER TABLE public.canvas_agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.canvas_agent_steps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.canvas_agent_drafts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.canvas_agent_embedding_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.canvas_agent_shape_embedding_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.canvas_agent_shape_embeddings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.canvas_agent_intent_examples ENABLE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE public.canvas_agent_runs IS
   'Canvas-scoped asynchronous AI run history. Stores bounded prompt and result summaries, not provider raw payloads or secrets.';
@@ -677,14 +530,11 @@ COMMENT ON TABLE public.canvas_agent_steps IS
 COMMENT ON TABLE public.canvas_agent_drafts IS
   'Per-user Canvas AI draft specifications. Drafts are previews until explicitly applied through CanvasService.';
 
-COMMENT ON TABLE public.canvas_agent_embedding_jobs IS
+COMMENT ON TABLE public.canvas_agent_shape_embedding_jobs IS
   'Durable Canvas shape embedding jobs. Contains bounded identifiers and hashes only; it must not contain raw tldraw shapes or external-domain data.';
 
 COMMENT ON TABLE public.canvas_agent_shape_embeddings IS
   'Canvas-only semantic-search index. Embeddings are derived from safe Canvas text and must match the current source shape revision and text hash.';
-
-COMMENT ON TABLE public.canvas_agent_intent_examples IS
-  'Per-user, Workspace-scoped Canvas AI phrasing memories. Only user-approved active examples may drive an automatic Canvas action.';
 
 COMMENT ON COLUMN public.canvas_agent_runs.canvas_revision IS
   'Canvas latest_op_seq observed when the run started. Used to detect stale draft inputs before applying a draft.';
@@ -700,8 +550,5 @@ COMMENT ON COLUMN public.canvas_agent_runs.parent_agent_run_id IS
 
 COMMENT ON COLUMN public.canvas_agent_drafts.draft_spec_json IS
   'Validated CanvasDraftSpec only. Do not store raw tldraw shape payloads here.';
-
-COMMENT ON COLUMN public.canvas_agent_intent_examples.action_template_json IS
-  'Validated Canvas action template only. Never store fixed shape ids, raw shapes, provider payloads, or external-domain actions.';
 
 COMMIT;

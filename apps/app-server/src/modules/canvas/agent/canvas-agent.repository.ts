@@ -1,9 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import type { DatabaseTransaction } from "../../../database/database.service";
 import { DatabaseService } from "../../../database/database.service";
 import type {
   CanvasAgentDraftRow,
-  CanvasAgentIntentExampleRow,
   CanvasAgentRunRow,
   CanvasAgentShapeRow,
   CanvasAgentStepRow,
@@ -117,18 +115,6 @@ export class CanvasAgentRepository {
   async listDrafts(runId: string): Promise<CanvasAgentDraftRow[]> {
     return this.database.query<CanvasAgentDraftRow>(
       `SELECT * FROM canvas_agent_drafts WHERE run_id = $1 ORDER BY created_at ASC`,
-      [runId]
-    );
-  }
-
-  async listIntentExamples(runId: string): Promise<CanvasAgentIntentExampleRow[]> {
-    return this.database.query<CanvasAgentIntentExampleRow>(
-      `
-        SELECT *
-        FROM canvas_agent_intent_examples
-        WHERE source_run_id = $1
-        ORDER BY created_at ASC
-      `,
       [runId]
     );
   }
@@ -455,139 +441,6 @@ export class CanvasAgentRepository {
         RETURNING *
       `,
       [draftId]
-    );
-  }
-
-  async findLatestPlannerStep(runId: string): Promise<CanvasAgentStepRow | null> {
-    return this.database.queryOne<CanvasAgentStepRow>(
-      `
-        SELECT *
-        FROM canvas_agent_steps
-        WHERE run_id = $1
-          AND status = 'completed'
-          AND model_name IS NOT NULL
-          AND model_name NOT LIKE 'local:%'
-          AND action_name <> 'finish'
-        ORDER BY step_order DESC
-        LIMIT 1
-      `,
-      [runId]
-    );
-  }
-
-  async findIntentExampleForRun(
-    currentUserId: string,
-    workspaceId: string,
-    runId: string
-  ): Promise<CanvasAgentIntentExampleRow | null> {
-    return this.database.queryOne<CanvasAgentIntentExampleRow>(
-      `
-        SELECT example.*
-        FROM canvas_agent_intent_examples example
-        INNER JOIN canvas_agent_runs run ON run.id = example.source_run_id
-        WHERE example.source_run_id = $1
-          AND example.workspace_id = $2
-          AND example.owner_user_id = $3
-          AND run.requested_by_user_id = $3
-        LIMIT 1
-      `,
-      [runId, workspaceId, currentUserId]
-    );
-  }
-
-  async createPendingIntentExample(input: {
-    actionTemplate: Record<string, unknown>;
-    currentUserId: string;
-    intent: CanvasAgentActionName;
-    runId: string;
-    utterance: string;
-    workspaceId: string;
-  }): Promise<CanvasAgentIntentExampleRow> {
-    const example = await this.database.queryOne<CanvasAgentIntentExampleRow>(
-      `
-        INSERT INTO canvas_agent_intent_examples (
-          workspace_id,
-          owner_user_id,
-          source_run_id,
-          utterance,
-          intent,
-          action_template_json,
-          confidence,
-          status,
-          embedding_status
-        )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, 1, 'pending', 'pending')
-        ON CONFLICT (source_run_id) WHERE source_run_id IS NOT NULL
-        DO UPDATE SET updated_at = now()
-        RETURNING *
-      `,
-      [
-        input.workspaceId,
-        input.currentUserId,
-        input.runId,
-        input.utterance,
-        input.intent,
-        JSON.stringify(input.actionTemplate)
-      ]
-    );
-    if (!example) throw new Error("Canvas Agent intent example could not be created");
-    return example;
-  }
-
-  async findIntentExampleForRequester(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    intentExampleId: string
-  ): Promise<CanvasAgentIntentExampleRow | null> {
-    return this.database.queryOne<CanvasAgentIntentExampleRow>(
-      `
-        SELECT example.*
-        FROM canvas_agent_intent_examples example
-        INNER JOIN canvas_agent_runs run ON run.id = example.source_run_id
-        WHERE example.id = $1
-          AND example.workspace_id = $2
-          AND example.owner_user_id = $3
-          AND run.canvas_id = $4
-          AND run.requested_by_user_id = $3
-        LIMIT 1
-      `,
-      [intentExampleId, workspaceId, currentUserId, canvasId]
-    );
-  }
-
-  async approveIntentExample(
-    intentExampleId: string,
-    currentUserId: string
-  ): Promise<CanvasAgentIntentExampleRow | null> {
-    return this.database.queryOne<CanvasAgentIntentExampleRow>(
-      `
-        UPDATE canvas_agent_intent_examples
-        SET status = 'active', reviewed_by_user_id = $2, reviewed_at = now()
-        WHERE id = $1
-          AND owner_user_id = $2
-          AND status = 'pending'
-          AND embedding_status = 'completed'
-        RETURNING *
-      `,
-      [intentExampleId, currentUserId]
-    );
-  }
-
-  async rejectIntentExample(
-    intentExampleId: string,
-    currentUserId: string
-  ): Promise<CanvasAgentIntentExampleRow | null> {
-    return this.database.queryOne<CanvasAgentIntentExampleRow>(
-      `
-        UPDATE canvas_agent_intent_examples
-        SET status = 'rejected', reviewed_by_user_id = $2, reviewed_at = now()
-        WHERE id = $1
-          AND owner_user_id = $2
-          AND status = 'pending'
-        RETURNING *
-      `,
-      [intentExampleId, currentUserId]
     );
   }
 

@@ -7,7 +7,6 @@ from typing import Any
 from app.canvas_agent.types import (
     CanvasAgentJob,
     CanvasAgentRunContext,
-    CanvasIntentExampleMatch,
     CanvasSemanticShapeMatch,
 )
 
@@ -199,72 +198,19 @@ class PgCanvasAgentRepository:
             for row in rows
         ]
 
-    def search_active_intent_examples(
-        self,
-        workspace_id: str,
-        owner_user_id: str,
-        query_embedding: list[float],
-        limit: int = 2,
-    ) -> list[CanvasIntentExampleMatch]:
-        rows = self.connection.execute(
-            """
-            SELECT
-              id,
-              intent,
-              action_template_json,
-              1 - (embedding <=> %s::extensions.vector) AS similarity
-            FROM canvas_agent_intent_examples
-            WHERE workspace_id = %s
-              AND owner_user_id = %s
-              AND status = 'active'
-              AND embedding_status = 'completed'
-              AND expires_at > now()
-            ORDER BY embedding <=> %s::extensions.vector
-            LIMIT %s
-            """,
-            (
-                _vector_literal(query_embedding),
-                workspace_id,
-                owner_user_id,
-                _vector_literal(query_embedding),
-                max(1, min(limit, 10)),
-            ),
-        ).fetchall()
-        return [
-            CanvasIntentExampleMatch(
-                intent_example_id=str(row["id"]),
-                intent=str(row["intent"]),
-                action_template=_json_object(row["action_template_json"]),
-                similarity=float(row["similarity"]),
-            )
-            for row in rows
-        ]
-
-    def increment_intent_example_usage(self, intent_example_id: str) -> None:
-        self.connection.execute(
-            """
-            UPDATE canvas_agent_intent_examples
-            SET usage_count = usage_count + 1
-            WHERE id = %s
-              AND status = 'active'
-              AND embedding_status = 'completed'
-            """,
-            (intent_example_id,),
-        )
-
     def claim_embedding_job(self) -> dict[str, object] | None:
         with self.connection.transaction():
             return self.connection.execute(
                 """
                 WITH candidate AS (
                   SELECT id
-                  FROM canvas_agent_embedding_jobs
+                  FROM canvas_agent_shape_embedding_jobs
                   WHERE status = 'pending'
                   ORDER BY created_at ASC
                   FOR UPDATE SKIP LOCKED
                   LIMIT 1
                 )
-                UPDATE canvas_agent_embedding_jobs job
+                UPDATE canvas_agent_shape_embedding_jobs job
                 SET
                   status = 'processing',
                   attempt_count = attempt_count + 1,
@@ -403,7 +349,7 @@ class PgCanvasAgentRepository:
     def complete_embedding_job(self, job_id: str) -> None:
         self.connection.execute(
             """
-            UPDATE canvas_agent_embedding_jobs
+            UPDATE canvas_agent_shape_embedding_jobs
             SET status = 'completed', completed_at = now()
             WHERE id = %s
               AND status = 'processing'
@@ -414,7 +360,7 @@ class PgCanvasAgentRepository:
     def supersede_embedding_job(self, job_id: str) -> None:
         self.connection.execute(
             """
-            UPDATE canvas_agent_embedding_jobs
+            UPDATE canvas_agent_shape_embedding_jobs
             SET status = 'superseded', completed_at = now()
             WHERE id = %s
               AND status = 'processing'
@@ -425,7 +371,7 @@ class PgCanvasAgentRepository:
     def fail_embedding_job(self, job_id: str, message: str) -> None:
         self.connection.execute(
             """
-            UPDATE canvas_agent_embedding_jobs
+            UPDATE canvas_agent_shape_embedding_jobs
             SET status = 'failed', error_code = 'CANVAS_EMBEDDING_FAILED',
                 error_message = %s, completed_at = now()
             WHERE id = %s
@@ -433,74 +379,6 @@ class PgCanvasAgentRepository:
             """,
             (message[:4096], job_id),
         )
-
-    def claim_pending_intent_embedding(self) -> dict[str, object] | None:
-        with self.connection.transaction():
-            return self.connection.execute(
-                """
-                WITH candidate AS (
-                  SELECT id
-                  FROM canvas_agent_intent_examples
-                  WHERE status = 'pending'
-                    AND embedding_status = 'pending'
-                    AND expires_at > now()
-                  ORDER BY created_at ASC
-                  FOR UPDATE SKIP LOCKED
-                  LIMIT 1
-                )
-                UPDATE canvas_agent_intent_examples example
-                SET
-                  embedding_status = 'processing',
-                  embedding_attempt_count = embedding_attempt_count + 1,
-                  embedding_claimed_at = now(),
-                  embedding_error_code = NULL,
-                  embedding_error_message = NULL
-                FROM candidate
-                WHERE example.id = candidate.id
-                RETURNING example.*
-                """
-            ).fetchone()
-
-    def complete_intent_embedding(
-        self,
-        intent_example_id: str,
-        embedding: list[float],
-        model_name: str,
-        model_version: str,
-    ) -> bool:
-        result = self.connection.execute(
-            """
-            UPDATE canvas_agent_intent_examples
-            SET
-              embedding = %s::extensions.vector,
-              embedding_model = %s,
-              embedding_version = %s,
-              embedding_status = 'completed',
-              embedding_claimed_at = NULL
-            WHERE id = %s
-              AND status = 'pending'
-              AND embedding_status = 'processing'
-            """,
-            (_vector_literal(embedding), model_name, model_version, intent_example_id),
-        )
-        return result.rowcount == 1
-
-    def fail_intent_embedding(self, intent_example_id: str, message: str) -> None:
-        self.connection.execute(
-            """
-            UPDATE canvas_agent_intent_examples
-            SET
-              embedding_status = 'failed',
-              embedding_claimed_at = NULL,
-              embedding_error_code = 'CANVAS_INTENT_EMBEDDING_FAILED',
-              embedding_error_message = %s
-            WHERE id = %s
-              AND status = 'pending'
-              AND embedding_status = 'processing'
-            """,
-            (message[:4096], intent_example_id),
-        )
-
 
 def _json_object(value: object) -> dict[str, object]:
     if isinstance(value, dict):

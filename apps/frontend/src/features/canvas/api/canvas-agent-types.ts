@@ -70,21 +70,10 @@ export type CanvasAgentDraft = {
   expiresAt: string;
 };
 
-export type CanvasAgentIntentExample = {
-  id: string;
-  intent:
-    | "find_canvas_tool"
-    | "find_shapes"
-    | "select_shapes"
-    | "focus_viewport"
-    | "create_draft"
-    | "create_code_block"
-    | "finish";
-  status: "pending" | "active" | "rejected" | "expired";
-  embeddingStatus: "pending" | "processing" | "completed" | "failed";
-  createdAt: string;
-  reviewedAt: string | null;
-  expiresAt: string;
+export type CanvasAgentDraftApplyResult = {
+  draft: CanvasAgentDraft;
+  latestOpSeq: number;
+  batch: unknown;
 };
 
 export type CanvasAgentRunDetail = {
@@ -98,6 +87,4 @@ export type CanvasAgentRunDetail = {
     completedAt: string | null;
   }>;
   drafts: CanvasAgentDraft[];
-  intentExamples: CanvasAgentIntentExample[];
-  canRememberIntent: boolean;
 };

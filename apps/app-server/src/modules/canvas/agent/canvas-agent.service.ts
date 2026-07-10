@@ -5,9 +5,7 @@ import { WorkspaceService } from "../../workspace/workspace.service";
 import {
   canvasAgentClientRequestIdConflict,
   canvasAgentDraftNotPreview,
-  canvasAgentDraftStale,
-  canvasAgentIntentNotReady,
-  canvasAgentIntentNotReviewable
+  canvasAgentDraftStale
 } from "./canvas-agent.error";
 import { CanvasAgentActionService } from "./canvas-agent-action.service";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
@@ -21,8 +19,6 @@ import type {
   CanvasAgentDraftRow,
   CanvasAgentActionName,
   CanvasAgentPlannedAction,
-  CanvasAgentIntentExamplePayload,
-  CanvasAgentIntentExampleRow,
   CanvasAgentProgressPayload,
   CanvasAgentRunDetailPayload,
   CanvasAgentRunPayload,
@@ -244,19 +240,14 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const run = await this.repository.findRunForRequester(currentUserId, workspaceId, canvasId, runId);
     if (!run) throw notFound("Canvas Agent run not found");
-    const [steps, drafts, intentExamples] = await Promise.all([
+    const [steps, drafts] = await Promise.all([
       this.repository.listSteps(run.id),
-      this.repository.listDrafts(run.id),
-      this.repository.listIntentExamples(run.id)
+      this.repository.listDrafts(run.id)
     ]);
     return {
       run: this.mapRun(run),
       steps: steps.map((step) => this.mapStep(step)),
-      drafts: drafts.map((draft) => this.mapDraft(draft)),
-      intentExamples: intentExamples.map((example) => this.mapIntentExample(example)),
-      canRememberIntent: run.status === "completed"
-        && intentExamples.length === 0
-        && this.canCreateIntentExampleFromSteps(steps)
+      drafts: drafts.map((draft) => this.mapDraft(draft))
     };
   }
 
@@ -310,90 +301,11 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       },
       appliedDraftId: applied.id
     });
-    const intentExample = await this.createIntentExampleForRun(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      draft.run_id
-    );
     return {
       draft: this.mapDraft(applied),
-      intentExample: intentExample ? this.mapIntentExample(intentExample) : null,
       latestOpSeq,
       batch
     };
-  }
-
-  async rememberRunIntent(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    runId: string
-  ): Promise<CanvasAgentIntentExamplePayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    const run = await this.repository.findRunForRequester(currentUserId, workspaceId, canvasId, runId);
-    if (!run) throw notFound("Canvas Agent run not found");
-    if (run.status !== "completed") {
-      throw canvasAgentIntentNotReviewable("Canvas Agent result must be completed before it can be remembered");
-    }
-
-    const example = await this.createIntentExampleForRun(currentUserId, workspaceId, canvasId, run.id);
-    if (!example) {
-      throw canvasAgentIntentNotReviewable("This Canvas Agent result cannot be remembered safely");
-    }
-    return this.mapIntentExample(example);
-  }
-
-  async approveIntentExample(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    intentExampleId: string
-  ): Promise<CanvasAgentIntentExamplePayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    const existing = await this.repository.findIntentExampleForRequester(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      intentExampleId
-    );
-    if (!existing) throw notFound("Canvas Agent intent example not found");
-    if (existing.status !== "pending") {
-      throw canvasAgentIntentNotReviewable("Canvas Agent intent example is no longer pending review");
-    }
-    if (existing.embedding_status !== "completed") {
-      throw canvasAgentIntentNotReady("Canvas Agent is preparing this expression for review");
-    }
-
-    const approved = await this.repository.approveIntentExample(intentExampleId, currentUserId);
-    if (!approved) {
-      throw canvasAgentIntentNotReviewable("Canvas Agent intent example is no longer pending review");
-    }
-    return this.mapIntentExample(approved);
-  }
-
-  async rejectIntentExample(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    intentExampleId: string
-  ): Promise<CanvasAgentIntentExamplePayload> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    const existing = await this.repository.findIntentExampleForRequester(
-      currentUserId,
-      workspaceId,
-      canvasId,
-      intentExampleId
-    );
-    if (!existing) throw notFound("Canvas Agent intent example not found");
-    if (existing.status !== "pending") {
-      throw canvasAgentIntentNotReviewable("Canvas Agent intent example is no longer pending review");
-    }
-    const rejected = await this.repository.rejectIntentExample(intentExampleId, currentUserId);
-    if (!rejected) {
-      throw canvasAgentIntentNotReviewable("Canvas Agent intent example is no longer pending review");
-    }
-    return this.mapIntentExample(rejected);
   }
 
   async discardDraft(
@@ -630,72 +542,6 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     }
   }
 
-  private async createIntentExampleForRun(
-    currentUserId: string,
-    workspaceId: string,
-    canvasId: string,
-    runId: string
-  ): Promise<CanvasAgentIntentExampleRow | null> {
-    const existing = await this.repository.findIntentExampleForRun(currentUserId, workspaceId, runId);
-    if (existing) return existing;
-
-    const run = await this.repository.findRunForRequester(currentUserId, workspaceId, canvasId, runId);
-    if (!run || run.status !== "completed") return null;
-    const step = await this.repository.findLatestPlannerStep(run.id);
-    if (!step) return null;
-
-    const candidate = this.toIntentCandidate(step.action_name, step.input_json);
-    if (!candidate) return null;
-    return this.repository.createPendingIntentExample({
-      actionTemplate: candidate.actionTemplate,
-      currentUserId,
-      intent: candidate.intent,
-      runId: run.id,
-      utterance: run.prompt,
-      workspaceId
-    });
-  }
-
-  private toIntentCandidate(
-    actionName: CanvasAgentActionName,
-    input: Record<string, unknown>
-  ): { actionTemplate: Record<string, unknown>; intent: CanvasAgentActionName } | null {
-    if (actionName === "find_shapes") {
-      return {
-        intent: "find_shapes",
-        actionTemplate: {
-          actionName: "find_shapes",
-          focusResult: input.focusResult === true
-        }
-      };
-    }
-
-    if (actionName === "create_draft") {
-      const kind = input.kind === "organize" ? "organize" : "diagram";
-      const style = typeof input.style === "string" ? input.style.trim().slice(0, 300) : "";
-      return {
-        intent: "create_draft",
-        actionTemplate: {
-          actionName: "create_draft",
-          kind,
-          ...(style ? { style } : {})
-        }
-      };
-    }
-
-    return null;
-  }
-
-  private canCreateIntentExampleFromSteps(steps: CanvasAgentStepRow[]): boolean {
-    const plannerStep = [...steps].reverse().find((step) =>
-      step.status === "completed"
-      && Boolean(step.model_name)
-      && !step.model_name?.startsWith("local:")
-      && step.action_name !== "finish"
-    );
-    return Boolean(plannerStep && this.toIntentCandidate(plannerStep.action_name, plannerStep.input_json));
-  }
-
   private mapRun(row: CanvasAgentRunRow): CanvasAgentRunPayload {
     const progress = this.readProgress(row.result_json);
     return {
@@ -733,18 +579,6 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       spec: row.draft_spec_json,
       appliedShapeIds: row.applied_shape_ids.filter((item): item is string => typeof item === "string"),
       appliedAt: row.applied_at === null ? null : this.iso(row.applied_at),
-      expiresAt: this.iso(row.expires_at)
-    };
-  }
-
-  private mapIntentExample(row: CanvasAgentIntentExampleRow): CanvasAgentIntentExamplePayload {
-    return {
-      id: row.id,
-      intent: row.intent,
-      status: row.status,
-      embeddingStatus: row.embedding_status,
-      createdAt: this.iso(row.created_at),
-      reviewedAt: row.reviewed_at === null ? null : this.iso(row.reviewed_at),
       expiresAt: this.iso(row.expires_at)
     };
   }

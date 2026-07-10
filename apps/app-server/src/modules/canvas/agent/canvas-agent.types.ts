@@ -33,8 +33,6 @@ export type CanvasAgentDraftStatus =
   | "applied"
   | "discarded"
   | "expired";
-export type CanvasAgentIntentExampleStatus = "pending" | "active" | "rejected" | "expired";
-export type CanvasAgentIntentEmbeddingStatus = "pending" | "processing" | "completed" | "failed";
 
 export interface CanvasAgentRunRow extends QueryResultRow {
   id: string;
@@ -87,25 +85,6 @@ export interface CanvasAgentDraftRow extends QueryResultRow {
   created_at: Date | string;
   applied_at: Date | string | null;
   expires_at: Date | string;
-}
-
-export interface CanvasAgentIntentExampleRow extends QueryResultRow {
-  id: string;
-  workspace_id: string;
-  owner_user_id: string;
-  source_run_id: string | null;
-  utterance: string;
-  intent: CanvasAgentActionName;
-  action_template_json: Record<string, unknown>;
-  confidence: number | string;
-  status: CanvasAgentIntentExampleStatus;
-  embedding_status: CanvasAgentIntentEmbeddingStatus;
-  reviewed_by_user_id: string | null;
-  reviewed_at: Date | string | null;
-  expires_at: Date | string;
-  usage_count: number | string;
-  created_at: Date | string;
-  updated_at: Date | string;
 }
 
 export interface CanvasAgentShapeRow extends QueryResultRow {
@@ -216,27 +195,14 @@ export interface CanvasAgentDraftPayload {
   expiresAt: string;
 }
 
-export interface CanvasAgentIntentExamplePayload {
-  id: string;
-  intent: CanvasAgentActionName;
-  status: CanvasAgentIntentExampleStatus;
-  embeddingStatus: CanvasAgentIntentEmbeddingStatus;
-  createdAt: string;
-  reviewedAt: string | null;
-  expiresAt: string;
-}
-
 export interface CanvasAgentRunDetailPayload {
   run: CanvasAgentRunPayload;
   steps: CanvasAgentStepPayload[];
   drafts: CanvasAgentDraftPayload[];
-  intentExamples: CanvasAgentIntentExamplePayload[];
-  canRememberIntent: boolean;
 }
 
 export interface CanvasAgentDraftApplyPayload {
   draft: CanvasAgentDraftPayload;
-  intentExample: CanvasAgentIntentExamplePayload | null;
   latestOpSeq: number;
   batch: CanvasShapeBatchPayload;
 }
