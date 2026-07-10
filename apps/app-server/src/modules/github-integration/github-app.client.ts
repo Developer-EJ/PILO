@@ -244,6 +244,7 @@ export interface GithubPullRequestApiDetails {
   draft: boolean;
   mergeable: boolean | null;
   htmlUrl: string;
+  updatedAt: string | null;
   closedAt: string | null;
   mergedAt: string | null;
   head?: GithubPullRequestApiItem["head"];
@@ -1530,6 +1531,7 @@ export class GithubAppClient {
       draft: pullRequest.draft ?? false,
       mergeable,
       htmlUrl: pullRequest.html_url,
+      updatedAt: pullRequest.updated_at ?? null,
       closedAt: pullRequest.closed_at ?? null,
       mergedAt: pullRequest.merged_at ?? null,
       headRef,

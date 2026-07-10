@@ -102,10 +102,12 @@ export class GithubPullRequestMergeService {
     });
     const mergedAt =
       refreshedPullRequest?.mergedAt ?? this.getCurrentIsoString(oauthConfig);
+    const updatedAt = refreshedPullRequest?.updatedAt ?? mergedAt;
     const nextPullRequest = {
       ...(refreshedPullRequest ?? pullRequest),
       state: "closed",
       mergedAt,
+      updatedAt,
       closedAt: refreshedPullRequest?.closedAt ?? pullRequest.closedAt ?? mergedAt,
       mergeable: refreshedPullRequest?.mergeable ?? false,
       headSha: refreshedPullRequest?.headSha ?? expectedHeadSha
@@ -281,6 +283,7 @@ export class GithubPullRequestMergeService {
           commits_count = $10,
           github_closed_at = $11::timestamptz,
           merged_at = $12::timestamptz,
+          github_updated_at = $13::timestamptz,
           raw = jsonb_set(
             jsonb_set(
               jsonb_set(
@@ -317,6 +320,10 @@ export class GithubPullRequestMergeService {
             COALESCE(to_jsonb($12::text), 'null'::jsonb),
             true
           ),
+            '{updated_at}',
+            COALESCE(to_jsonb($13::text), 'null'::jsonb),
+            true
+          ),
           last_synced_at = now(),
           updated_at = now()
         WHERE workspace_id = $1
@@ -335,7 +342,8 @@ export class GithubPullRequestMergeService {
         pullRequest.deletions,
         pullRequest.commits,
         closedAt,
-        pullRequest.mergedAt
+        pullRequest.mergedAt,
+        pullRequest.updatedAt
       ]
     );
 
