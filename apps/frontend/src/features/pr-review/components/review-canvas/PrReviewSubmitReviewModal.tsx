@@ -113,11 +113,15 @@ function isKnownStaleSession(
 }
 
 function buildDefaultReviewBody(result: PrReviewSessionResult) {
+  const readiness = result.readyToSubmit
+    ? "All files have saved decisions."
+    : `${result.counts.notReviewed} file(s) still need review decisions.`;
   const decisionSummary = [
     `Approved ${result.counts.approved}`,
     `Discuss ${result.counts.discussionNeeded}`,
     `Unknown ${result.counts.unknown}`,
-    `Not reviewed ${result.counts.notReviewed}`
+    `Not reviewed ${result.counts.notReviewed}`,
+    readiness
   ].join(" / ");
 
   const lines = [
