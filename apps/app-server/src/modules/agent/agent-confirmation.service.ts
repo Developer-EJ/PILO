@@ -381,14 +381,9 @@ export class AgentConfirmationService {
   }
 
   async recoverStaleApprovedExecutions(): Promise<number> {
-    const rows = await this.database.query<StaleAgentExecutionRow>(
+    const candidates = await this.database.query<{ run_id: string }>(
       `
-        SELECT
-          r.id AS run_id,
-          r.workspace_id,
-          r.requested_by_user_id,
-          s.id AS tool_step_id,
-          s.status AS tool_step_status
+        SELECT r.id AS run_id
         FROM agent_runs r
         JOIN agent_confirmations c
           ON c.run_id = r.id
@@ -409,33 +404,85 @@ export class AgentConfirmationService {
       [STALE_AGENT_EXECUTION_SECONDS]
     );
 
-    for (const row of rows) {
-      if (row.tool_step_id && row.tool_step_status === "running") {
-        await this.agentLoggingService.failStep(
-          row.requested_by_user_id,
-          row.workspace_id,
-          {
-            runId: row.run_id,
-            stepId: row.tool_step_id,
-            errorCode: "AGENT_EXECUTION_STALE",
-            errorMessage: "Agent execution did not finish before the recovery timeout"
-          }
+    let recoveredCount = 0;
+    for (const candidate of candidates) {
+      const recovered = await this.database.transaction(async (transaction) => {
+        const row = await transaction.queryOne<StaleAgentExecutionRow>(
+          `
+            SELECT
+              r.id AS run_id,
+              r.workspace_id,
+              r.requested_by_user_id,
+              s.id AS tool_step_id,
+              s.status AS tool_step_status
+            FROM agent_runs r
+            JOIN agent_confirmations c
+              ON c.run_id = r.id
+              AND c.status = 'approved'
+            LEFT JOIN LATERAL (
+              SELECT id, status
+              FROM agent_steps
+              WHERE run_id = r.id
+                AND step_type = 'tool'
+              ORDER BY step_order DESC
+              LIMIT 1
+            ) s ON true
+            WHERE r.id = $1
+              AND r.status = 'running'
+              AND r.updated_at <= now() - make_interval(secs => $2)
+            FOR UPDATE OF r
+          `,
+          [candidate.run_id, STALE_AGENT_EXECUTION_SECONDS]
         );
-      }
 
-      await this.agentLoggingService.failRun(
-        row.requested_by_user_id,
-        row.workspace_id,
-        {
-          runId: row.run_id,
-          errorCode: "AGENT_EXECUTION_STALE",
-          errorMessage: "Agent execution did not finish before the recovery timeout",
-          message: "승인된 작업이 시간 안에 완료되지 않아 실행을 종료했습니다."
+        if (!row || row.tool_step_status === "completed") {
+          return false;
         }
-      );
+
+        if (row.tool_step_id) {
+          const step = await transaction.queryOne<{ id: string }>(
+            `
+              UPDATE agent_steps
+              SET status = 'failed',
+                  error_code = 'AGENT_EXECUTION_STALE',
+                  error_message = 'Agent execution did not finish before the recovery timeout',
+                  completed_at = now()
+              WHERE id = $1
+                AND status = 'running'
+              RETURNING id
+            `,
+            [row.tool_step_id]
+          );
+
+          if (!step) {
+            return false;
+          }
+        }
+
+        const run = await transaction.queryOne<{ id: string }>(
+          `
+            UPDATE agent_runs
+            SET status = 'failed',
+                error_code = 'AGENT_EXECUTION_STALE',
+                error_message = 'Agent execution did not finish before the recovery timeout',
+                message = '승인된 작업이 시간 안에 완료되지 않아 실행을 종료했습니다.',
+                completed_at = now()
+            WHERE id = $1
+              AND status = 'running'
+            RETURNING id
+          `,
+          [row.run_id]
+        );
+
+        return run !== null;
+      });
+
+      if (recovered) {
+        recoveredCount += 1;
+      }
     }
 
-    return rows.length;
+    return recoveredCount;
   }
 
   private async findConfirmationForUpdate(

@@ -485,6 +485,7 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND run_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [
@@ -607,6 +608,7 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND workspace_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [

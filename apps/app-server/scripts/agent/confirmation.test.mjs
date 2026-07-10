@@ -312,6 +312,27 @@ class FakeTransaction {
   }
 
   async queryOne(text, values = []) {
+    if (text.includes("r.updated_at <= now()")) {
+      return this.findStaleExecution(values);
+    }
+
+    if (text.includes("UPDATE agent_steps") && text.includes("AGENT_EXECUTION_STALE")) {
+      return { id: values[0] };
+    }
+
+    if (
+      text.includes("UPDATE agent_runs") &&
+      text.includes("AGENT_EXECUTION_STALE")
+    ) {
+      const run = this.state.runs.find((candidate) => candidate.id === values[0]);
+      if (!run || run.status !== "running") {
+        return null;
+      }
+      run.status = "failed";
+      run.message = "승인된 작업이 시간 안에 완료되지 않아 실행을 종료했습니다.";
+      return { id: run.id };
+    }
+
     if (text.includes("INSERT INTO agent_confirmations")) {
       return this.insertConfirmation(values);
     }
@@ -395,6 +416,13 @@ class FakeTransaction {
       run_status: run.status,
       run_message: run.message
     };
+  }
+
+  findStaleExecution([runId]) {
+    const stale = this.state.staleExecutions?.find(
+      (candidate) => candidate.run_id === runId
+    );
+    return stale ? { ...stale } : null;
   }
 
   insertConfirmation([
@@ -540,11 +568,7 @@ function errorMessage(error) {
   const recovered = await service.recoverStaleApprovedExecutions();
 
   assert.equal(recovered, 1);
-  assert.deepEqual(
-    loggingService.calls.map((call) => call.method),
-    ["failStep", "failRun"]
-  );
-  assert.equal(loggingService.calls[0].input.errorCode, "AGENT_EXECUTION_STALE");
+  assert.deepEqual(loggingService.calls, []);
   assert.equal(state.runs[0].status, "failed");
   assert.deepEqual(toolRegistryService.calls, []);
 }
