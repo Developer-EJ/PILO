@@ -85,9 +85,16 @@ export interface GithubRepositoryIssueUpdateRequest
   owner: string;
   repo: string;
   issueNumber: number;
+  assignees?: string[];
   title?: string;
   body?: string;
   state?: "open" | "closed";
+}
+
+export interface GithubRepositoryAssigneesRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  owner: string;
+  repo: string;
 }
 
 export interface GithubRepositoryIssueCreateRequest
@@ -178,6 +185,11 @@ export interface GithubIssueApiItem {
   created_at?: string | null;
   updated_at?: string | null;
   closed_at?: string | null;
+}
+
+export interface GithubIssueAssigneeApiItem {
+  login: string;
+  avatar_url?: string | null;
 }
 
 export interface GithubPullRequestApiItem {
@@ -393,6 +405,7 @@ interface GithubProjectV2GraphqlErrorContext {
 
 const GITHUB_SYNC_PER_PAGE = 100;
 const GITHUB_SYNC_MAX_PAGES = 100;
+const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
   "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
@@ -1065,6 +1078,9 @@ export class GithubAppClient {
     }
 
     const body: Record<string, unknown> = {};
+    if (input.assignees !== undefined) {
+      body.assignees = input.assignees;
+    }
     if (input.title !== undefined) {
       body.title = input.title;
     }
@@ -1108,6 +1124,53 @@ export class GithubAppClient {
     }
 
     return payload;
+  }
+
+  async listRepositoryAssignees(
+    input: GithubRepositoryAssigneesRequest
+  ): Promise<GithubIssueAssigneeApiItem[]> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS
+    );
+
+    try {
+      const assignees: GithubIssueAssigneeApiItem[] = [];
+      for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
+        const url = new URL(
+          `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/assignees`
+        );
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("per_page", String(GITHUB_SYNC_PER_PAGE));
+
+        const payload = await this.fetchJsonWithToken(
+          url,
+          input.userAccessToken,
+          "GitHub issue assignee lookup failed",
+          controller.signal
+        );
+        if (
+          !Array.isArray(payload) ||
+          !payload.every((item) => this.isIssueAssigneePayload(item))
+        ) {
+          throw badRequest("GitHub issue assignee lookup failed");
+        }
+
+        assignees.push(...payload);
+        if (payload.length < GITHUB_SYNC_PER_PAGE) {
+          break;
+        }
+      }
+
+      return assignees;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async createRepositoryIssue(
@@ -2402,7 +2465,8 @@ export class GithubAppClient {
   private async fetchJsonWithToken(
     url: URL,
     token: string,
-    errorMessage: string
+    errorMessage: string,
+    signal?: AbortSignal
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -2411,7 +2475,8 @@ export class GithubAppClient {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${token}`,
           "X-GitHub-Api-Version": GITHUB_API_VERSION
-        }
+        },
+        ...(signal ? { signal } : {})
       });
     } catch {
       throw badRequest(errorMessage);
@@ -2549,6 +2614,21 @@ export class GithubAppClient {
       this.isOptionalString(payload.created_at) &&
       this.isOptionalString(payload.updated_at) &&
       this.isOptionalString(payload.closed_at)
+    );
+  }
+
+  private isIssueAssigneePayload(
+    value: unknown
+  ): value is GithubIssueAssigneeApiItem {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+
+    const payload = value as GithubIssueAssigneeApiItem;
+    return (
+      typeof payload.login === "string" &&
+      payload.login.length > 0 &&
+      this.isOptionalString(payload.avatar_url)
     );
   }
 
