@@ -14,8 +14,9 @@ import {
   PanelsTopLeft,
   Pencil,
   Redo2,
+  RotateCcw,
   Slash,
-  Sparkles,
+  Plus,
   Square,
   StickyNote,
   Triangle,
@@ -47,16 +48,12 @@ import {
 import type { CanvasRealtimeConfig } from "@/features/canvas/realtime/canvas-realtime-types";
 import {
   type PiloCanvasActions,
+  type PiloCanvasColor,
   type PiloCanvasHistoryState,
   type PiloCanvasTool,
   type PiloDrawingPreset,
   type PiloInsertableTool,
 } from "@/features/canvas/components/engine/surface/PiloTldrawCanvas";
-import {
-  piloStickyNoteColors,
-  type PiloStickyNoteColor,
-} from "@/features/canvas/components/engine/shapes/sticky-note/PiloStickyNoteShapeUtil";
-import { cn } from "@/lib/utils";
 
 type CanvasBoardState = {
   board: CanvasBoardDetail | null;
@@ -74,11 +71,12 @@ type ToolButtonProps = {
 
 const MOCK_CANVAS_WORKSPACE_ID = "pilo-local-workspace";
 
-const drawingColorOptions: {
+const canvasColorOptions: {
   label: string;
-  value: PiloDrawingPreset;
+  value: PiloCanvasColor;
   className: string;
 }[] = [
+  { label: "기본", value: "default", className: "is-default" },
   { label: "검정", value: "black", className: "is-black" },
   { label: "빨강", value: "red", className: "is-red" },
   { label: "노랑", value: "yellow", className: "is-yellow" },
@@ -148,10 +146,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     useState<PiloCanvasTool>("select");
   const [activeDrawingPreset, setActiveDrawingPreset] =
     useState<PiloDrawingPreset>("pen");
-  const [activeMemoColor, setActiveMemoColor] =
-    useState<PiloStickyNoteColor>("butter");
+  const [activeCanvasColor, setActiveCanvasColor] =
+    useState<PiloCanvasColor>("default");
   const [openPopover, setOpenPopover] = useState<
-    "memo" | "draw" | "draw-color" | "line" | "shape" | "insert" | null
+    "color" | "draw" | "line" | "insert" | null
   >(null);
   const canvasClientMode = resolveCanvasClientMode();
   const canvasClient = useMemo(
@@ -215,9 +213,9 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
   );
   const isCanvasToolActive = (tool: PiloCanvasTool) =>
     openPopover === null && activeCanvasTool === tool;
-  const activeDrawingColor =
-    drawingColorOptions.find((color) => color.value === activeDrawingPreset) ??
-    drawingColorOptions[4];
+  const activeColor =
+    canvasColorOptions.find((color) => color.value === activeCanvasColor) ??
+    canvasColorOptions[0];
 
   useEffect(() => {
     let cancelled = false;
@@ -298,6 +296,10 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [canvasActions, closePopover],
   );
 
+  const handleOneShotToolCreated = useCallback(() => {
+    setActiveCanvasTool("select");
+  }, []);
+
   const selectDrawingPreset = useCallback(
     (preset: PiloDrawingPreset) => {
       setOpenPopover("draw");
@@ -308,11 +310,20 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [canvasActions],
   );
 
+  const selectCanvasColor = useCallback(
+    (color: PiloCanvasColor) => {
+      setActiveCanvasColor(color);
+      setOpenPopover("color");
+      canvasActions?.setColor(color);
+    },
+    [canvasActions],
+  );
+
   const selectShapePreset = useCallback(
     (
       preset: Extract<PiloDrawingPreset, "rectangle" | "circle" | "triangle">,
     ) => {
-      setOpenPopover("shape");
+      setOpenPopover("draw");
       setActiveDrawingPreset(preset);
       setActiveCanvasTool("geo");
       canvasActions?.selectDrawingPreset(preset);
@@ -320,14 +331,11 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [canvasActions],
   );
 
-  const createMemo = useCallback(
-    (color = activeMemoColor) => {
-      setActiveMemoColor(color);
-      setOpenPopover("memo");
-      canvasActions?.createStickyNote(color);
-    },
-    [activeMemoColor, canvasActions],
-  );
+  const createMemo = useCallback(() => {
+    closePopover();
+    setActiveCanvasTool("note");
+    canvasActions?.createNote();
+  }, [canvasActions, closePopover]);
 
   const createCodeBlock = useCallback(() => {
     closePopover();
@@ -447,18 +455,18 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               <MousePointer2 />
             </ToolButton>
             <ToolButton
+              label="메모"
+              active={isCanvasToolActive("note")}
+              onClick={createMemo}
+            >
+              <StickyNote />
+            </ToolButton>
+            <ToolButton
               label="프레임"
               active={isCanvasToolActive("frame")}
               onClick={() => selectCanvasTool("frame")}
             >
               <Square />
-            </ToolButton>
-            <ToolButton
-              label="메모"
-              active={openPopover === "memo"}
-              onClick={() => togglePopover("memo")}
-            >
-              <StickyNote />
             </ToolButton>
             <ToolButton
               label="코드블럭"
@@ -483,7 +491,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </ToolButton>
             <ToolButton
               label="그리기"
-              active={openPopover === "draw" || openPopover === "draw-color"}
+              active={openPopover === "draw"}
               onClick={() => {
                 togglePopover("draw");
                 canvasActions?.selectDrawingPreset(activeDrawingPreset);
@@ -492,25 +500,25 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               <Pencil />
             </ToolButton>
             <ToolButton
-              label="도형"
-              active={openPopover === "shape"}
-              onClick={() => togglePopover("shape")}
+              label="색상"
+              active={openPopover === "color"}
+              onClick={() => togglePopover("color")}
             >
-              <Triangle />
+              <span className={`canvas-color-swatch ${activeColor.className}`} />
             </ToolButton>
             <ToolButton
               label="더보기"
               active={openPopover === "insert"}
               onClick={() => togglePopover("insert")}
             >
-              <Sparkles />
+              <Plus />
             </ToolButton>
             <ToolButton label="화면 맞춤" onClick={() => canvasActions?.fit()}>
               <Maximize2 />
             </ToolButton>
           </section>
 
-          {openPopover === "draw" || openPopover === "draw-color" ? (
+          {openPopover === "draw" ? (
             <section
               className="canvas-tool-popover canvas-draw-popover"
               aria-label="그리기 도구"
@@ -536,36 +544,49 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
               >
                 <Eraser />
               </ToolButton>
-              <div className="canvas-draw-color-picker">
+              <ToolButton
+                label="사각형"
+                active={activeDrawingPreset === "rectangle"}
+                onClick={() => selectShapePreset("rectangle")}
+              >
+                <Square />
+              </ToolButton>
+              <ToolButton
+                label="원"
+                active={activeDrawingPreset === "circle"}
+                onClick={() => selectShapePreset("circle")}
+              >
+                <Circle />
+              </ToolButton>
+              <ToolButton
+                label="삼각형"
+                active={activeDrawingPreset === "triangle"}
+                onClick={() => selectShapePreset("triangle")}
+              >
+                <Triangle />
+              </ToolButton>
+            </section>
+          ) : null}
+
+          {openPopover === "color" ? (
+            <section
+              className="canvas-tool-popover canvas-color-popover"
+              aria-label="색상"
+            >
+              {canvasColorOptions.map((color) => (
                 <ToolButton
-                  label="색상"
-                  active={openPopover === "draw-color"}
-                  onClick={() => togglePopover("draw-color")}
+                  key={color.value}
+                  label={color.label}
+                  active={activeCanvasColor === color.value}
+                  onClick={() => selectCanvasColor(color.value)}
                 >
-                  <span
-                    className={`canvas-color-swatch ${activeDrawingColor.className}`}
-                  />
+                  {color.value === "default" ? (
+                    <RotateCcw />
+                  ) : (
+                    <span className={`canvas-color-swatch ${color.className}`} />
+                  )}
                 </ToolButton>
-                {openPopover === "draw-color" ? (
-                  <div
-                    className="canvas-draw-color-menu"
-                    aria-label="그리기 색상"
-                  >
-                    {drawingColorOptions.map((color) => (
-                      <ToolButton
-                        key={color.value}
-                        label={color.label}
-                        active={activeDrawingPreset === color.value}
-                        onClick={() => selectDrawingPreset(color.value)}
-                      >
-                        <span
-                          className={`canvas-color-swatch ${color.className}`}
-                        />
-                      </ToolButton>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
+              ))}
             </section>
           ) : null}
 
@@ -587,35 +608,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 onClick={() => selectCanvasTool("line")}
               >
                 <Slash />
-              </ToolButton>
-            </section>
-          ) : null}
-
-          {openPopover === "shape" ? (
-            <section
-              className="canvas-tool-popover canvas-draw-popover"
-              aria-label="도형 도구"
-            >
-              <ToolButton
-                label="사각형"
-                active={activeDrawingPreset === "rectangle"}
-                onClick={() => selectShapePreset("rectangle")}
-              >
-                <Square />
-              </ToolButton>
-              <ToolButton
-                label="원"
-                active={activeDrawingPreset === "circle"}
-                onClick={() => selectShapePreset("circle")}
-              >
-                <Circle />
-              </ToolButton>
-              <ToolButton
-                label="삼각형"
-                active={activeDrawingPreset === "triangle"}
-                onClick={() => selectShapePreset("triangle")}
-              >
-                <Triangle />
               </ToolButton>
             </section>
           ) : null}
@@ -649,32 +641,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </section>
           ) : null}
 
-          {openPopover === "memo" ? (
-            <section
-              className="canvas-tool-popover canvas-memo-popover"
-              aria-label="메모 색상"
-            >
-              <div className="canvas-memo-color-grid">
-                {piloStickyNoteColors.map((color) => (
-                  <button
-                    key={color.value}
-                    type="button"
-                    aria-label={`${color.label} 메모`}
-                    data-tooltip={color.label}
-                    className={cn(
-                      activeMemoColor === color.value && "is-active",
-                    )}
-                    style={{
-                      background: color.fill,
-                      borderColor: color.border,
-                    }}
-                    onClick={() => createMemo(color.value)}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
           <section className="canvas-history-section" aria-label="작업 기록">
             <ToolButton
               label="실행 취소"
@@ -700,6 +666,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
           board={board}
           canvasClient={shouldUseCanvasApi ? canvasClient : null}
           onHistoryStateChange={setCanvasHistoryState}
+          onOneShotToolCreated={handleOneShotToolCreated}
           onReady={setCanvasActions}
           realtime={canvasRealtimeConfig}
           storageMode={shouldUseCanvasApi ? "api" : "local"}
