@@ -78,6 +78,10 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 - read-only 요청은 confirmation 없이 자동 실행할 수 있다.
 - write 요청은 `waiting_confirmation` 상태의 run과 pending confirmation을 만든다.
 - 사용자가 승인하면 서버는 confirmation에 저장된 plan만 실행한다.
+- 승인 transaction은 `running` tool step을 execution claim으로 함께 만든다. 승인 직후 process가
+  중단돼도 tool step이 없는 `running` run을 남기지 않는다.
+- AI Worker는 60초마다 2분 이상 stale인 승인 execution을 확인한다. `running` tool step이 남아 있으면
+  domain tool을 재실행하지 않고 safe failure로 terminal 상태를 만든다.
 - 사용자가 거절하거나 confirmation이 만료되면 write tool은 실행하지 않는다.
 - confirmation 만료 시간은 생성 시점 기준 15분이다.
 - 상대 날짜 해석 기준은 사용자 timezone이다.
