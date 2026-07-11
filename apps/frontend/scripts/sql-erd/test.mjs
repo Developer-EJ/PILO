@@ -1337,6 +1337,64 @@ assert.deepEqual(
 );
 assert.deepEqual(
   statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: {
+        code: "PARSE_FAILED",
+        message: "parser detail"
+      },
+      requestSequence: 8,
+      status: "error"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Parse error",
+    message:
+      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 9,
+      status: "parsing"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Parsing",
+    message: "Parsing SQL DDL",
+    tone: "neutral"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
+    autosaveBlockReason: "conflict",
+    fallbackState: conflictSourceStatus,
+    isDraftDirty: true,
+    parse: {
+      error: null,
+      requestSequence: 10,
+      status: "idle"
+    },
+    sourceAutosaveState: "pending"
+  }),
+  {
+    label: "Waiting",
+    message: "Waiting to parse SQL changes",
+    tone: "neutral"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
     fallbackState: fallbackSourceStatus,
     isDraftDirty: false,
     parse: {

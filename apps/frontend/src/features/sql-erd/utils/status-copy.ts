@@ -65,10 +65,6 @@ export function getSqlErdSourceStatus({
   parse: SqlErdParseState;
   sourceAutosaveState: SqlErdSourceAutosaveState;
 }): SqlErdSessionLoadState {
-  if (autosaveBlockReason) {
-    return fallbackState;
-  }
-
   if (parse.status === "error") {
     return {
       label: "Parse error",
@@ -93,6 +89,10 @@ export function getSqlErdSourceStatus({
       message: "Waiting to parse SQL changes",
       tone: "neutral"
     };
+  }
+
+  if (autosaveBlockReason) {
+    return fallbackState;
   }
 
   if (sourceAutosaveState === "pending") {
