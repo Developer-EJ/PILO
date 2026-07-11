@@ -2,7 +2,11 @@ import { Injectable } from "@nestjs/common";
 import { WebhookEvent, WebhookReceiver } from "livekit-server-sdk";
 import { QueryResultRow } from "pg";
 import { badRequest, unauthorized } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
+import { MeetingService } from "./meeting.service";
 
 export type LiveKitWebhookDeliveryStatus = "received" | "ignored";
 
@@ -21,6 +25,8 @@ interface LiveKitWebhookDeliveryRow extends QueryResultRow {
   received_at: Date | string;
 }
 
+type DeliveryQueryExecutor = DatabaseService | DatabaseTransaction;
+
 const PARTICIPANT_DEPARTURE_EVENTS = new Set([
   "participant_left",
   "participant_connection_aborted"
@@ -33,7 +39,10 @@ const INVALID_LIVEKIT_WEBHOOK_SIGNATURE_MESSAGE =
 
 @Injectable()
 export class LiveKitWebhookService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly meetingService: MeetingService
+  ) {}
 
   async receiveWebhook(
     rawBody: Buffer | undefined,
@@ -45,34 +54,51 @@ export class LiveKitWebhookService {
     const deliveryId = this.validateRequiredString(event.id, "LiveKit webhook delivery id is required");
     const eventName = this.validateRequiredString(event.event, "LiveKit webhook event name is required");
 
-    const existing = await this.findDelivery(deliveryId);
-    if (existing !== null) {
-      return this.mapDelivery(existing);
-    }
-
     const status: LiveKitWebhookDeliveryStatus = PARTICIPANT_DEPARTURE_EVENTS.has(
       eventName
     )
       ? "received"
       : "ignored";
-    const inserted = await this.insertDelivery({
-      deliveryId,
-      eventName,
-      roomName: event.room?.name ?? null,
-      participantIdentity: event.participant?.identity ?? null,
-      status
+    const result = await this.database.transaction(async (transaction) => {
+      const existing = await this.findDelivery(transaction, deliveryId);
+      if (existing !== null) {
+        return { delivery: existing, job: null };
+      }
+
+      const inserted = await this.insertDelivery(transaction, {
+        deliveryId,
+        eventName,
+        roomName: event.room?.name ?? null,
+        participantIdentity: event.participant?.identity ?? null,
+        status
+      });
+
+      if (inserted === null) {
+        const recovered = await this.findDelivery(transaction, deliveryId);
+        if (recovered === null) {
+          throw badRequest("LiveKit webhook delivery could not be recorded");
+        }
+
+        return { delivery: recovered, job: null };
+      }
+
+      const reconciliation =
+        status === "received"
+          ? await this.meetingService.reconcileLiveKitParticipantDeparture(
+              transaction,
+              {
+                roomName: this.optionalString(event.room?.name),
+                participantIdentity: this.optionalString(event.participant?.identity),
+                eventCreatedAt: this.toEventCreatedAt(event.createdAt)
+              }
+            )
+          : { job: null };
+
+      return { delivery: inserted, job: reconciliation.job };
     });
 
-    if (inserted !== null) {
-      return this.mapDelivery(inserted);
-    }
-
-    const recovered = await this.findDelivery(deliveryId);
-    if (recovered === null) {
-      throw badRequest("LiveKit webhook delivery could not be recorded");
-    }
-
-    return this.mapDelivery(recovered);
+    await this.meetingService.enqueueReconciledMeetingReportJob(result.job);
+    return this.mapDelivery(result.delivery);
   }
 
   private async receiveVerifiedEvent(
@@ -90,9 +116,10 @@ export class LiveKitWebhookService {
   }
 
   private async findDelivery(
+    executor: DeliveryQueryExecutor,
     deliveryId: string
   ): Promise<LiveKitWebhookDeliveryRow | null> {
-    return this.database.queryOne<LiveKitWebhookDeliveryRow>(
+    return executor.queryOne<LiveKitWebhookDeliveryRow>(
       `
         SELECT delivery_id, event_name, status, received_at
         FROM livekit_webhook_deliveries
@@ -103,14 +130,17 @@ export class LiveKitWebhookService {
     );
   }
 
-  private async insertDelivery(input: {
-    deliveryId: string;
-    eventName: string;
-    roomName: string | null;
-    participantIdentity: string | null;
-    status: LiveKitWebhookDeliveryStatus;
-  }): Promise<LiveKitWebhookDeliveryRow | null> {
-    return this.database.queryOne<LiveKitWebhookDeliveryRow>(
+  private async insertDelivery(
+    executor: DeliveryQueryExecutor,
+    input: {
+      deliveryId: string;
+      eventName: string;
+      roomName: string | null;
+      participantIdentity: string | null;
+      status: LiveKitWebhookDeliveryStatus;
+    }
+  ): Promise<LiveKitWebhookDeliveryRow | null> {
+    return executor.queryOne<LiveKitWebhookDeliveryRow>(
       `
         INSERT INTO livekit_webhook_deliveries (
           delivery_id,
@@ -170,6 +200,24 @@ export class LiveKitWebhookService {
     }
 
     return value.trim();
+  }
+
+  private optionalString(value: string | undefined): string | null {
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    const normalized = value.trim();
+    return normalized ? normalized : null;
+  }
+
+  private toEventCreatedAt(value: bigint): Date | null {
+    const seconds = Number(value);
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+      return null;
+    }
+
+    return new Date(seconds * 1000);
   }
 
   private requireConfig(value: string | undefined): string {

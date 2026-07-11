@@ -32,6 +32,34 @@ class FakeDatabase {
     const next = this.rows.shift();
     return typeof next === "function" ? next(text, values) : (next ?? null);
   }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+}
+
+class FakeMeetingService {
+  constructor() {
+    this.reconciliationCalls = [];
+    this.enqueueCalls = [];
+  }
+
+  async reconcileLiveKitParticipantDeparture(_transaction, input) {
+    this.reconciliationCalls.push(input);
+    return { job: null };
+  }
+
+  async enqueueReconciledMeetingReportJob(job) {
+    this.enqueueCalls.push(job);
+  }
+}
+
+function createSubject(database = new FakeDatabase()) {
+  const meetingService = new FakeMeetingService();
+  return {
+    meetingService,
+    service: new LiveKitWebhookService(database, meetingService)
+  };
 }
 
 function deliveryRow(overrides = {}) {
@@ -54,6 +82,7 @@ function participantDepartureBody(overrides = {}) {
     participant: {
       identity: "meeting-1-user-1"
     },
+    createdAt: "1783728000",
     ...overrides
   });
 }
@@ -84,7 +113,7 @@ try {
   {
     const body = participantDepartureBody();
     const database = new FakeDatabase([null, deliveryRow()]);
-    const service = new LiveKitWebhookService(database);
+    const { service, meetingService } = createSubject(database);
 
     const result = await service.receiveWebhook(
       Buffer.from(body),
@@ -106,16 +135,18 @@ try {
       "meeting-1-user-1",
       "received"
     ]);
-    assert.equal(
-      database.queries.some(({ text }) => /meeting_participants|meeting_recordings|meeting_reports/.test(text)),
-      false
-    );
+    assert.deepEqual(meetingService.reconciliationCalls, [{
+      roomName: "meeting-1",
+      participantIdentity: "meeting-1-user-1",
+      eventCreatedAt: new Date("2026-07-11T00:00:00.000Z")
+    }]);
+    assert.deepEqual(meetingService.enqueueCalls, [null]);
   }
 
   {
     const body = participantDepartureBody();
     const database = new FakeDatabase([deliveryRow()]);
-    const service = new LiveKitWebhookService(database);
+    const { service, meetingService } = createSubject(database);
 
     const result = await service.receiveWebhook(
       Buffer.from(body),
@@ -124,6 +155,7 @@ try {
 
     assert.equal(result.status, "received");
     assert.equal(database.queries.length, 1);
+    assert.equal(meetingService.reconciliationCalls.length, 0);
   }
 
   {
@@ -138,7 +170,7 @@ try {
         event_name: "participant_connection_aborted"
       })
     ]);
-    const service = new LiveKitWebhookService(database);
+    const { service, meetingService } = createSubject(database);
 
     const result = await service.receiveWebhook(
       Buffer.from(body),
@@ -147,6 +179,7 @@ try {
 
     assert.equal(result.status, "received");
     assert.equal(result.eventName, "participant_connection_aborted");
+    assert.equal(meetingService.reconciliationCalls.length, 1);
   }
 
   {
@@ -160,7 +193,7 @@ try {
         delivery_id: "event-race"
       })
     ]);
-    const service = new LiveKitWebhookService(database);
+    const { service } = createSubject(database);
 
     const result = await service.receiveWebhook(
       Buffer.from(body),
@@ -185,7 +218,7 @@ try {
         status: "ignored"
       })
     ]);
-    const service = new LiveKitWebhookService(database);
+    const { service, meetingService } = createSubject(database);
 
     const result = await service.receiveWebhook(
       Buffer.from(body),
@@ -194,6 +227,7 @@ try {
 
     assert.equal(result.status, "ignored");
     assert.equal(result.message, "Unsupported LiveKit webhook event ignored");
+    assert.equal(meetingService.reconciliationCalls.length, 0);
   }
 
   {
@@ -201,7 +235,7 @@ try {
       providerError: "provider-raw-secret"
     });
     const database = new FakeDatabase();
-    const service = new LiveKitWebhookService(database);
+    const { service } = createSubject(database);
 
     await assert.rejects(
       () => service.receiveWebhook(Buffer.from(body), undefined),
@@ -220,7 +254,7 @@ try {
 
   {
     const database = new FakeDatabase();
-    const service = new LiveKitWebhookService(database);
+    const { service } = createSubject(database);
 
     await assertApiError(
       () => service.receiveWebhook(Buffer.from("not-json"), "irrelevant"),

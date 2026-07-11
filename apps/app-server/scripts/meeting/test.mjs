@@ -2222,3 +2222,126 @@ async function assertError(action, messagePattern) {
     service.startMeeting(currentUserId, workspaceId, {})
   );
 }
+
+{
+  const { database, service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({ active_participant_count: 2 }),
+        participantRow(),
+        activeParticipantCountRow(2),
+        participantRow({ left_at: leftAt })
+      ]
+    })
+  );
+
+  const result = await service.reconcileLiveKitParticipantDeparture(database, {
+    roomName: `meeting-${meetingId}`,
+    participantIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    eventCreatedAt: new Date("2026-07-05T00:05:00.000Z")
+  });
+
+  assert.equal(result.job, null);
+  assert.equal(liveKitEgressService.stopCalls.length, 0);
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE meetings/.test(text)),
+    false
+  );
+}
+
+{
+  const liveKitEgressService = new FakeLiveKitEgressService({
+    stopShouldFail: true
+  });
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow(),
+        activeParticipantCountRow(1),
+        recordingRow(),
+        recordingRow({
+          status: "FAILED",
+          ended_at: endedAt,
+          error_message: "LiveKit recording could not be stopped safely"
+        }),
+        participantRow({ left_at: leftAt }),
+        currentMeetingRow({ ended_at: endedAt })
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    liveKitEgressService
+  );
+
+  const result = await service.reconcileLiveKitParticipantDeparture(database, {
+    roomName: `meeting-${meetingId}`,
+    participantIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    eventCreatedAt: new Date("2026-07-05T00:05:00.000Z")
+  });
+
+  assert.equal(result.job, null);
+  assert.equal(liveKitEgressService.stopCalls.length, 1);
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE meeting_participants/.test(text)),
+    true
+  );
+  assert.equal(
+    database.queries.some(({ text }) => /UPDATE meetings/.test(text)),
+    true
+  );
+}
+
+{
+  const { database, service, liveKitEgressService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow(),
+        participantRow()
+      ]
+    })
+  );
+
+  const result = await service.reconcileLiveKitParticipantDeparture(database, {
+    roomName: `meeting-${meetingId}`,
+    participantIdentity: `meeting-${meetingId}-user-${currentUserId}`,
+    eventCreatedAt: new Date("2026-07-05T00:00:00.000Z")
+  });
+
+  assert.equal(result.job, null);
+  assert.equal(liveKitEgressService.stopCalls.length, 0);
+  assert.equal(database.queries.length, 2);
+}
+
+{
+  const meetingReportJobService = new FakeMeetingReportJobService({
+    shouldFail: true
+  });
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_reports/);
+          assert.match(text, /status = 'FAILED'/);
+          assert.match(text, /AND status = 'PROCESSING'/);
+          assert.deepEqual(values, [reportId]);
+          return { id: reportId };
+        }
+      ]
+    }),
+    new FakeLiveKitTokenService(),
+    new FakeLiveKitEgressService(),
+    meetingReportJobService
+  );
+
+  await service.enqueueReconciledMeetingReportJob({
+    jobType: "meeting_report",
+    reportId,
+    meetingId,
+    recordingId,
+    audioFileKey: "recordings/meeting.mp3",
+    retryCount: 0
+  });
+
+  assert.equal(meetingReportJobService.calls.length, 1);
+  assert.equal(database.queryOneRows.length, 0);
+}

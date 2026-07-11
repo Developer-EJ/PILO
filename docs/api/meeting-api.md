@@ -90,9 +90,12 @@ POST /api/v1/livekit/webhooks
 - Workspace bearer session은 사용하지 않는다. App Server는 `Authorization` header와 raw request body를 현재 `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`으로 검증한다.
 - App Server는 LiveKit raw payload나 API secret을 DB, 로그, 응답에 저장하거나 노출하지 않는다.
 - `participant_left`와 `participant_connection_aborted` delivery는 `livekit_webhook_deliveries`에 멱등하게 기록한다. 같은 event id가 재전송되면 기존 결과를 반환한다.
+- 신규 departure delivery는 같은 transaction 안에서 room·participant identity 기준의 active participant를 `leftAt`으로 보정한다. 매칭되지 않거나 이미 나간 participant는 안전하게 무시한다.
+- 재입장 뒤 늦게 도착한 이전 departure delivery는 LiveKit event 시각이 현재 participant의 `joinedAt`보다 이른 경우 무시한다.
+- 보정으로 마지막 active participant가 남지 않으면 Meeting을 종료한다. `RUNNING` Recording은 종료를 시도하고, 실패하면 Recording을 `FAILED`로 기록한다. 이 경우에도 실제로 끊긴 participant와 Meeting을 다시 active로 복구하지 않는다.
+- 정상 종료된 Recording이 60초를 초과하면 MeetingReport job을 준비한다. job enqueue 실패 시 Report만 `FAILED`로 기록하며, participant·Meeting 종료를 되돌리지 않는다. durable 재시도는 별도 운영 흐름에서 처리한다.
 - 다른 LiveKit event는 `ignored`로 기록하고 `200`을 반환한다.
 - 유효·중복·미지원 delivery는 `200`, 서명 불일치는 `401`, JSON 형식 오류는 `400`을 반환한다.
-- 이 단계는 delivery 검증·기록만 담당한다. participant `leftAt` 보정, 마지막 participant 판단, recording 종료는 Post-MVP MP-03에서 처리한다.
 
 ## 상태값
 
