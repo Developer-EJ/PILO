@@ -382,7 +382,7 @@ BEGIN
   END IF;
 
   v_source_text_hash := encode(
-    digest(
+    extensions.digest(
       concat_ws(E'\n', NEW.shape_type, COALESCE(NEW.title, ''), COALESCE(NEW.text_content, '')),
       'sha256'
     ),
@@ -435,7 +435,7 @@ SELECT
   'upsert',
   shape.revision,
   encode(
-    digest(
+      extensions.digest(
       concat_ws(
         E'\n',
         shape.shape_type,

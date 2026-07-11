@@ -32,7 +32,8 @@ SET
                 )
               )
             )
-          END,
+          )
+        END,
       'size', 'm',
       'font', 'draw',
       'align', 'middle',
