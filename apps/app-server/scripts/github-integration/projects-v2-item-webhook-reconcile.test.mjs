@@ -286,8 +286,9 @@ function pullRequestWebhookItem() {
 }
 
 class ReconcileFakeDatabase {
-  constructor() {
+  constructor({ fieldValueNames = [] } = {}) {
     this.queries = [];
+    this.fieldValueNames = [...fieldValueNames];
   }
 
   async queryOne(text, values = []) {
@@ -358,7 +359,8 @@ class ReconcileFakeDatabase {
     }
 
     if (/hydrate_pilo_board_from_github/i.test(text)) {
-      assert.deepEqual(values, ["project-1", "repository-1"]);
+      assert.equal(values[0], "project-1");
+      assert.ok(["repository-1", "repository-a"].includes(values[1]));
       return { board_id: "board-1" };
     }
 
@@ -368,6 +370,12 @@ class ReconcileFakeDatabase {
   async query(text, values = []) {
     this.queries.push({ method: "query", text, values });
     assert.match(text, /FROM boards/i);
+    if (values.length === 3) {
+      assert.match(text, /AND b\.repository_id = \$3/i);
+      assert.deepEqual(values, ["workspace-1", "project-1", "repository-a"]);
+      return [{ project_v2_id: "project-1", repository_id: "repository-a" }];
+    }
+
     assert.deepEqual(values, ["workspace-1", "project-1"]);
     return [{ project_v2_id: "project-1", repository_id: "repository-1" }];
   }
@@ -376,6 +384,15 @@ class ReconcileFakeDatabase {
     this.queries.push({ method: "execute", text, values });
     if (/INSERT INTO github_project_v2_repositories/i.test(text)) {
       assert.deepEqual(values, ["project-1", "repository-1"]);
+      return { rowCount: 1 };
+    }
+
+    if (/DELETE FROM github_project_v2_item_field_values/i.test(text)) {
+      assert.equal(values[0], "project-item-1");
+      assert.ok(Array.isArray(values[1]));
+      this.fieldValueNames = this.fieldValueNames.filter((fieldName) =>
+        values[1].includes(fieldName)
+      );
       return { rowCount: 1 };
     }
 
@@ -393,6 +410,10 @@ class ReconcileFakeDatabase {
         "TEXT"
       ]);
       assert.equal(values[5], "Persisted from the later page");
+      this.fieldValueNames = [
+        ...this.fieldValueNames.filter((fieldName) => fieldName !== values[3]),
+        values[3]
+      ];
       return { rowCount: 1 };
     }
 
@@ -400,7 +421,7 @@ class ReconcileFakeDatabase {
   }
 }
 
-function reconcileContext() {
+function reconcileContext(repository = null) {
   return {
     currentUserId: "user-1",
     workspaceId: "workspace-1",
@@ -411,7 +432,7 @@ function reconcileContext() {
       account_login: "example",
       account_type: "Organization"
     },
-    repository: null,
+    repository,
     projectV2: {
       id: "project-1",
       workspace_id: "workspace-1",
@@ -917,23 +938,78 @@ class ReconcileFailedRecoveryFakeDatabase {
     this.delivery = {
       delivery_id: "reconcile-failed-delivery",
       status: "received",
-      error_message: "GitHub ProjectV2 webhook reconcile failed",
+      error_message: null,
       lease_owner: null,
       lease_expires_at: null
+    };
+    this.retryCooldownExpired = false;
+    this.targets = [{
+      workspace_id: "workspace-1",
+      installation_id: "installation-1",
+      github_installation_id: context.githubInstallationId,
+      account_login: "example",
+      account_type: "Organization",
+      project_v2_id: "project-1",
+      project_v2_installation_id: "installation-1",
+      project_v2_workspace_id: "workspace-1",
+      github_project_node_id: context.projectV2NodeId
+    }];
+  }
+
+  expireRetryCooldown() {
+    this.retryCooldownExpired = true;
+    this.delivery.lease_expires_at = receivedAt;
+  }
+
+  async queryOne(text, values = []) {
+    assert.match(text, /UPDATE github_webhook_deliveries\b/i);
+    if (this.delivery.status !== "received") return null;
+
+    this.delivery.status = "processing";
+    this.delivery.error_message = null;
+    this.delivery.lease_owner = values[1];
+    this.delivery.lease_expires_at = "2026-07-11T09:10:00.000Z";
+    return {
+      delivery_id: this.delivery.delivery_id,
+      project_item_node_id: context.projectItemNodeId,
+      github_installation_id: context.githubInstallationId,
+      project_v2_node_id: context.projectV2NodeId
     };
   }
 
   async query(text) {
+    if (/FROM github_installations/i.test(text)) {
+      return this.targets;
+    }
+
+    const hasRetryCooldownGuard =
+      /lease_expires_at < now\(\)\s+OR lease_expires_at IS NULL/i.test(text);
     return this.delivery.status === "received" &&
       this.delivery.error_message === "GitHub ProjectV2 webhook reconcile failed" &&
-      text.includes("GitHub ProjectV2 webhook reconcile failed")
+      text.includes("GitHub ProjectV2 webhook reconcile failed") &&
+      (this.retryCooldownExpired || !hasRetryCooldownGuard)
       ? [{ delivery_id: this.delivery.delivery_id }]
       : [];
   }
 
   async execute(text, values = []) {
+    if (/error_message=\$3/i.test(text)) {
+      this.delivery.status = "received";
+      this.delivery.error_message = values[2];
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = /interval '6 minutes'/i.test(text)
+        ? "2026-07-11T09:06:00.000Z"
+        : null;
+      return { rowCount: 1 };
+    }
+
     if (/SET\s+status='received',\s+processed_at=NULL,\s+error_message='GitHub webhook enqueue is publishing'/i.test(text)) {
       if (!text.includes("GitHub ProjectV2 webhook reconcile failed")) {
+        return { rowCount: 0 };
+      }
+      const hasRetryCooldownGuard =
+        /lease_expires_at < now\(\)\s+OR lease_expires_at IS NULL/i.test(text);
+      if (!this.retryCooldownExpired && hasRetryCooldownGuard) {
         return { rowCount: 0 };
       }
       this.delivery.error_message = "GitHub webhook enqueue is publishing";
@@ -953,7 +1029,7 @@ class ReconcileFailedRecoveryFakeDatabase {
   }
 }
 
-class MultiWorkspaceDeliveryFakeDatabase {
+class RepositoryScopedDeliveryFakeDatabase {
   constructor(deliveryId) {
     this.delivery = {
       delivery_id: deliveryId,
@@ -964,26 +1040,40 @@ class MultiWorkspaceDeliveryFakeDatabase {
     };
     this.targets = [
       {
-        workspace_id: "workspace-a",
-        installation_id: "installation-a",
+        workspace_id: "workspace-1",
+        installation_id: "installation-1",
         github_installation_id: context.githubInstallationId,
         account_login: "example",
         account_type: "Organization",
-        project_v2_id: "project-a",
-        project_v2_installation_id: "installation-a",
-        project_v2_workspace_id: "workspace-a",
-        github_project_node_id: context.projectV2NodeId
+        project_v2_id: "project-1",
+        project_v2_installation_id: "installation-1",
+        project_v2_workspace_id: "workspace-1",
+        github_project_node_id: context.projectV2NodeId,
+        repository_id: "repository-a",
+        repository_workspace_id: "workspace-1",
+        repository_installation_id: "installation-1",
+        repository_github_node_id: "R_kgDORepositoryA",
+        repository_owner_login: "example",
+        repository_name: "repository-a",
+        repository_full_name: "example/repository-a"
       },
       {
-        workspace_id: "workspace-b",
-        installation_id: "installation-b",
+        workspace_id: "workspace-1",
+        installation_id: "installation-1",
         github_installation_id: context.githubInstallationId,
         account_login: "example",
         account_type: "Organization",
-        project_v2_id: "project-b",
-        project_v2_installation_id: "installation-b",
-        project_v2_workspace_id: "workspace-b",
-        github_project_node_id: context.projectV2NodeId
+        project_v2_id: "project-1",
+        project_v2_installation_id: "installation-1",
+        project_v2_workspace_id: "workspace-1",
+        github_project_node_id: context.projectV2NodeId,
+        repository_id: "repository-b",
+        repository_workspace_id: "workspace-1",
+        repository_installation_id: "installation-1",
+        repository_github_node_id: "R_kgDORepositoryB",
+        repository_owner_login: "example",
+        repository_name: "repository-b",
+        repository_full_name: "example/repository-b"
       }
     ];
   }
@@ -1061,8 +1151,11 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.match(apiContract, /processing` lease[\s\S]*recovery and requeue/i);
   assert.match(apiContract, /pending publication marker/i);
   assert.match(apiContract, /publishing lease/i);
-  assert.match(apiContract, /one GitHub GraphQL target-item fetch.*all matching selected workspace targets/i);
+  assert.match(apiContract, /one GitHub GraphQL target-item fetch.*all matching selected repository targets/i);
   assert.match(apiContract, /GitHub ProjectV2 webhook reconcile failed[\s\S]*recoverable/i);
+  assert.match(apiContract, /\(repository_id, project_v2_id\).*Board hydration/i);
+  assert.match(apiContract, /field values are a current GitHub snapshot[\s\S]*before Board hydration/i);
+  assert.match(apiContract, /six-minute SQS redrive cooldown[\s\S]*SQS redelivery remains the primary retry path/i);
   assert.doesNotMatch(apiContract, /receiver.*does not.*background job/i);
   assert.doesNotMatch(workerSource, /FROM github_webhook_deliveries/i);
   assert.match(reconcileSource, /SELECT delivery_id FROM github_webhook_deliveries/i);
@@ -1070,33 +1163,36 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
 }
 
 {
-  const database = new MultiWorkspaceDeliveryFakeDatabase("multi-workspace-delivery");
+  const database = new RepositoryScopedDeliveryFakeDatabase("repository-scoped-delivery");
   let graphqlLookups = 0;
-  const reconciledWorkspaceIds = [];
+  const reconciledRepositoryIds = [];
+  const boardHydrationRepositoryIds = [];
   const reconcileService = createDeliveryReconcileService(database, {
     getProjectV2Item: async () => {
       graphqlLookups += 1;
       return { item: { id: context.projectItemNodeId } };
     },
     reconcile: async (syncContext) => {
-      reconciledWorkspaceIds.push(syncContext.workspaceId);
+      reconciledRepositoryIds.push(syncContext.repository?.id ?? null);
+      boardHydrationRepositoryIds.push(syncContext.repository?.id ?? null);
     },
     archive: async () => {}
   });
 
   assert.equal(await reconcileService.processDelivery(database.delivery.delivery_id), "terminal");
   assert.equal(graphqlLookups, 1);
-  assert.deepEqual(reconciledWorkspaceIds.sort(), ["workspace-a", "workspace-b"]);
+  assert.deepEqual(reconciledRepositoryIds.sort(), ["repository-a", "repository-b"]);
+  assert.deepEqual(boardHydrationRepositoryIds.sort(), ["repository-a", "repository-b"]);
   assert.equal(database.delivery.status, "processed");
 }
 
 {
-  const database = new MultiWorkspaceDeliveryFakeDatabase("partial-multi-workspace-delivery");
+  const database = new RepositoryScopedDeliveryFakeDatabase("partial-repository-scoped-delivery");
   const reconcileService = createDeliveryReconcileService(database, {
     getProjectV2Item: async () => ({ item: { id: context.projectItemNodeId } }),
     reconcile: async (syncContext) => {
-      if (syncContext.workspaceId === "workspace-b") {
-        throw new Error("workspace-b reconciliation failed");
+      if (syncContext.repository?.id === "repository-b") {
+        throw new Error("repository-b reconciliation failed");
       }
     },
     archive: async () => {}
@@ -1113,12 +1209,30 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
 {
   const database = new ReconcileFailedRecoveryFakeDatabase();
   const reconcileService = createDeliveryReconcileService(database, {
-    getProjectV2Item: async () => null,
-    reconcile: async () => {},
+    getProjectV2Item: async () => ({ item: { id: context.projectItemNodeId } }),
+    reconcile: async () => {
+      throw new Error("reconcile failed");
+    },
     archive: async () => {}
   });
   const published = [];
 
+  assert.equal(await reconcileService.processDelivery(database.delivery.delivery_id), "retry");
+  assert.deepEqual(database.delivery, {
+    delivery_id: "reconcile-failed-delivery",
+    status: "received",
+    error_message: "GitHub ProjectV2 webhook reconcile failed",
+    lease_owner: null,
+    lease_expires_at: "2026-07-11T09:06:00.000Z"
+  });
+
+  await reconcileService.recoverDeliveries(async (deliveryId) => {
+    published.push(deliveryId);
+  });
+
+  assert.deepEqual(published, []);
+
+  database.expireRetryCooldown();
   await reconcileService.recoverDeliveries(async (deliveryId) => {
     published.push(deliveryId);
   });
@@ -1636,6 +1750,57 @@ let fetchedTargetItem;
   assert.ok(sql.some(({ text }) => /INSERT INTO github_project_v2_items/i.test(text)));
   assert.ok(sql.some(({ text }) => /INSERT INTO github_project_v2_item_field_values/i.test(text)));
   assert.ok(sql.some(({ text }) => /hydrate_pilo_board_from_github/i.test(text)));
+}
+
+{
+  const database = new ReconcileFakeDatabase();
+  const executor = new GithubSyncExecutorService(database, {});
+
+  await executor.reconcileGithubProjectV2WebhookItem(
+    reconcileContext({
+      id: "repository-a",
+      workspace_id: "workspace-1",
+      installation_id: "installation-1",
+      github_node_id: "R_kgDORepositoryA",
+      owner_login: "example",
+      name: "repository-a",
+      full_name: "example/repository-a"
+    }),
+    fetchedTargetItem
+  );
+
+  const boardSelection = database.queries.find(({ method, text }) =>
+    method === "query" && /FROM boards/i.test(text)
+  );
+  const boardHydration = database.queries.find(({ method, text }) =>
+    method === "queryOne" && /hydrate_pilo_board_from_github/i.test(text)
+  );
+  assert.deepEqual(boardSelection.values, ["workspace-1", "project-1", "repository-a"]);
+  assert.deepEqual(boardHydration.values, ["project-1", "repository-a"]);
+}
+
+{
+  const database = new ReconcileFakeDatabase({ fieldValueNames: ["Status"] });
+  const executor = new GithubSyncExecutorService(database, {});
+
+  await executor.reconcileGithubProjectV2WebhookItem(reconcileContext(), fetchedTargetItem);
+
+  const snapshotDeleteIndex = database.queries.findIndex(({ text }) =>
+    /DELETE FROM github_project_v2_item_field_values/i.test(text)
+  );
+  const snapshotDelete = database.queries[snapshotDeleteIndex];
+  const fieldValueUpsertIndex = database.queries.findIndex(({ text }) =>
+    /INSERT INTO github_project_v2_item_field_values/i.test(text)
+  );
+  const boardHydrationIndex = database.queries.findIndex(({ text }) =>
+    /hydrate_pilo_board_from_github/i.test(text)
+  );
+
+  assert.ok(snapshotDeleteIndex >= 0, "missing GitHub field values must be deleted");
+  assert.ok(snapshotDeleteIndex < fieldValueUpsertIndex, "field snapshot cleanup must precede upserts");
+  assert.ok(snapshotDeleteIndex < boardHydrationIndex, "field snapshot cleanup must precede Board hydration");
+  assert.deepEqual(snapshotDelete.values, ["project-item-1", ["Implementation note"]]);
+  assert.deepEqual(database.fieldValueNames, ["Implementation note"]);
 }
 
 {

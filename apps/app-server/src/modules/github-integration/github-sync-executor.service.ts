@@ -214,6 +214,14 @@ export class GithubSyncExecutorService {
     const row = await this.upsertGithubProjectV2Item(context, item.item);
     if (row) {
       const projectV2 = this.requireGithubSyncProjectV2(context);
+      await this.database.execute(
+        `
+          DELETE FROM github_project_v2_item_field_values
+          WHERE project_item_id = $1
+            AND NOT (field_name = ANY($2::text[]))
+        `,
+        [row.id, item.item.fieldValues.map((fieldValue) => fieldValue.fieldName)]
+      );
       for (const fieldValue of item.item.fieldValues) {
         await this.upsertGithubProjectV2ItemFieldValue(
           projectV2.id,

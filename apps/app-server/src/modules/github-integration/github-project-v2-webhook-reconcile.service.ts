@@ -28,6 +28,13 @@ interface GithubProjectV2WebhookSelectedTarget extends QueryResultRow {
   project_v2_installation_id: string;
   project_v2_workspace_id: string;
   github_project_node_id: string;
+  repository_id: string;
+  repository_workspace_id: string;
+  repository_installation_id: string | null;
+  repository_github_node_id: string | null;
+  repository_owner_login: string;
+  repository_name: string;
+  repository_full_name: string;
 }
 
 interface DeliveryIdRow extends QueryResultRow {
@@ -41,6 +48,7 @@ export interface GithubWebhookDeliveryRecoveryFailure {
 
 const WEBHOOK_RECONCILE_ERROR_MESSAGE =
   "GitHub ProjectV2 webhook reconcile failed";
+const WEBHOOK_RECONCILE_RECOVERY_COOLDOWN = "6 minutes";
 
 @Injectable()
 export class GithubProjectV2WebhookReconcileService {
@@ -122,6 +130,10 @@ export class GithubProjectV2WebhookReconcileService {
        ) OR (
          status = 'received'
          AND error_message = 'GitHub ProjectV2 webhook reconcile failed'
+         AND (
+           lease_expires_at < now()
+           OR lease_expires_at IS NULL
+         )
        ) OR (
          status = 'received'
          AND error_message = 'GitHub webhook enqueue is publishing'
@@ -203,18 +215,29 @@ export class GithubProjectV2WebhookReconcileService {
           project.id AS project_v2_id,
           project.installation_id AS project_v2_installation_id,
           project.workspace_id AS project_v2_workspace_id,
-          project.github_project_node_id
+          project.github_project_node_id,
+          repository.id AS repository_id,
+          repository.workspace_id AS repository_workspace_id,
+          repository.installation_id AS repository_installation_id,
+          repository.github_node_id AS repository_github_node_id,
+          repository.owner_login AS repository_owner_login,
+          repository.name AS repository_name,
+          repository.full_name AS repository_full_name
         FROM github_installations AS installation
         JOIN github_projects_v2 AS project
           ON project.installation_id = installation.id
-         AND project.workspace_id = installation.workspace_id
+          AND project.workspace_id = installation.workspace_id
         JOIN github_project_v2_selections AS selection
           ON selection.installation_id = installation.id
-         AND selection.project_v2_id = project.id
+          AND selection.project_v2_id = project.id
+        JOIN github_repositories AS repository
+          ON repository.id = selection.repository_id
+          AND repository.workspace_id = installation.workspace_id
+          AND repository.installation_id = installation.id
         WHERE installation.github_installation_id = $1
           AND project.github_project_node_id = $2
           AND project.owner_type = 'Organization'
-        ORDER BY installation.workspace_id ASC, project.id ASC
+        ORDER BY installation.workspace_id ASC, project.id ASC, repository.id ASC
       `,
       [claim.github_installation_id, claim.project_v2_node_id]
     );
@@ -254,7 +277,7 @@ export class GithubProjectV2WebhookReconcileService {
           processed_at=NULL,
           error_message=$3,
           lease_owner=NULL,
-          lease_expires_at=NULL
+          lease_expires_at=now() + interval '${WEBHOOK_RECONCILE_RECOVERY_COOLDOWN}'
         WHERE delivery_id=$1
           AND status='processing'
           AND lease_owner=$2
@@ -282,6 +305,10 @@ export class GithubProjectV2WebhookReconcileService {
           OR (
             status='received'
             AND error_message='GitHub ProjectV2 webhook reconcile failed'
+            AND (
+              lease_expires_at < now()
+              OR lease_expires_at IS NULL
+            )
           )
           OR (
             status='received'
@@ -357,7 +384,15 @@ export class GithubProjectV2WebhookReconcileService {
         account_login: target.account_login,
         account_type: target.account_type
       },
-      repository: null,
+      repository: {
+        id: target.repository_id,
+        workspace_id: target.repository_workspace_id,
+        installation_id: target.repository_installation_id,
+        github_node_id: target.repository_github_node_id,
+        owner_login: target.repository_owner_login,
+        name: target.repository_name,
+        full_name: target.repository_full_name
+      },
       projectV2: {
         id: target.project_v2_id,
         workspace_id: target.project_v2_workspace_id,
