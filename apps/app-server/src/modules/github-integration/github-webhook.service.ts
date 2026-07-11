@@ -28,6 +28,11 @@ interface GithubWebhookDeliveryRow extends QueryResultRow {
   project_item_node_id: string | null;
 }
 
+interface RecordedGithubWebhookDelivery {
+  row: GithubWebhookDeliveryRow;
+  inserted: boolean;
+}
+
 const SUPPORTED_GITHUB_WEBHOOK_EVENTS = new Set([
   "ping",
   "installation",
@@ -114,7 +119,7 @@ export class GithubWebhookService {
 
     const status: GithubWebhookDeliveryStatus =
       SUPPORTED_GITHUB_WEBHOOK_EVENTS.has(eventName) ? "received" : "ignored";
-    const row = await this.recordGithubWebhookDelivery({
+    const delivery = await this.recordGithubWebhookDelivery({
       deliveryId,
       eventName,
       status,
@@ -122,9 +127,11 @@ export class GithubWebhookService {
         status === "ignored" ? UNSUPPORTED_GITHUB_WEBHOOK_MESSAGE : null
     });
 
-    if (status === "received") await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+    if (status === "received" && delivery.inserted) {
+      await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+    }
 
-    return this.mapGithubWebhookDelivery(row);
+    return this.mapGithubWebhookDelivery(delivery.row);
   }
 
   private async receiveProjectV2ItemWebhook(
@@ -134,18 +141,18 @@ export class GithubWebhookService {
   ): Promise<GithubWebhookDeliveryPayload> {
     const context = parseGithubProjectV2WebhookContext(body);
     if (!context) {
-      const row = await this.recordGithubWebhookDelivery({
+      const delivery = await this.recordGithubWebhookDelivery({
         deliveryId,
         eventName,
         status: "ignored",
         errorMessage: INVALID_PROJECT_V2_ITEM_WEBHOOK_CONTEXT_MESSAGE
       });
-      return this.mapGithubWebhookDelivery(row);
+      return this.mapGithubWebhookDelivery(delivery.row);
     }
 
     const selected = await this.findSelectedOrganizationProjectV2(context);
     const status: GithubWebhookDeliveryStatus = selected ? "received" : "ignored";
-    const row = await this.recordGithubWebhookDelivery({
+    const delivery = await this.recordGithubWebhookDelivery({
       deliveryId,
       eventName,
       status,
@@ -153,9 +160,11 @@ export class GithubWebhookService {
       context
     });
 
-    if (status === "received") await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+    if (status === "received" && delivery.inserted) {
+      await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
+    }
 
-    return this.mapGithubWebhookDelivery(row);
+    return this.mapGithubWebhookDelivery(delivery.row);
   }
 
   private async enqueueWebhookDeliveryAndMarkReceived(deliveryId: string): Promise<void> {
@@ -240,7 +249,7 @@ export class GithubWebhookService {
     status: GithubWebhookDeliveryStatus | "failed";
     errorMessage: string | null;
     context?: GithubProjectV2WebhookContext;
-  }): Promise<GithubWebhookDeliveryRow> {
+  }): Promise<RecordedGithubWebhookDelivery> {
     const context = input.context;
     if (context) {
       return this.recordGithubProjectV2WebhookDelivery({ ...input, context });
@@ -276,7 +285,7 @@ export class GithubWebhookService {
     );
 
     if (row) {
-      return row;
+      return { row, inserted: true };
     }
 
     const existing = await this.findGithubWebhookDelivery(input.deliveryId);
@@ -284,7 +293,7 @@ export class GithubWebhookService {
       throw badRequest("GitHub webhook delivery could not be recorded");
     }
 
-    return existing;
+    return { row: existing, inserted: false };
   }
 
   private async recordGithubProjectV2WebhookDelivery(input: {
@@ -293,7 +302,7 @@ export class GithubWebhookService {
     status: GithubWebhookDeliveryStatus | "failed";
     errorMessage: string | null;
     context: GithubProjectV2WebhookContext;
-  }): Promise<GithubWebhookDeliveryRow> {
+  }): Promise<RecordedGithubWebhookDelivery> {
     const row = await this.database.queryOne<GithubWebhookDeliveryRow>(
       `
         INSERT INTO github_webhook_deliveries (
@@ -345,7 +354,7 @@ export class GithubWebhookService {
     );
 
     if (row) {
-      return row;
+      return { row, inserted: true };
     }
 
     const existing = await this.findGithubWebhookDelivery(input.deliveryId);
@@ -353,7 +362,7 @@ export class GithubWebhookService {
       throw badRequest("GitHub webhook delivery could not be recorded");
     }
 
-    return existing;
+    return { row: existing, inserted: false };
   }
 
   private async findSelectedOrganizationProjectV2(

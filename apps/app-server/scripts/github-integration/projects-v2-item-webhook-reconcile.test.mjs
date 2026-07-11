@@ -85,6 +85,63 @@ class FakeDatabase {
   }
 }
 
+class ConcurrentFakeDatabase extends FakeDatabase {
+  constructor() {
+    super({ selected: true });
+    this.deliveryLookups = 0;
+    this.bothInitialLookups = new Promise((resolve) => {
+      this.releaseInitialLookups = resolve;
+    });
+  }
+
+  async queryOne(text, values = []) {
+    this.queries.push({ method: "queryOne", text, values });
+
+    if (/FROM github_webhook_deliveries/i.test(text) && !/INSERT INTO/i.test(text)) {
+      const delivery = this.deliveries.get(values[0]) ?? null;
+      this.deliveryLookups += 1;
+
+      if (this.deliveryLookups <= 2) {
+        if (this.deliveryLookups === 2) this.releaseInitialLookups();
+        await this.bothInitialLookups;
+      }
+
+      return delivery;
+    }
+
+    if (/FROM github_installations/i.test(text)) {
+      assert.match(text, /JOIN github_projects_v2/i);
+      assert.match(text, /JOIN github_project_v2_selections/i);
+      assert.deepEqual(values, [context.githubInstallationId, context.projectV2NodeId]);
+      return { id: "selected-project" };
+    }
+
+    if (/INSERT INTO github_webhook_deliveries/i.test(text)) {
+      const existing = this.deliveries.get(values[0]);
+      if (existing) return null;
+
+      const delivery = {
+        delivery_id: values[0],
+        event_name: values[1],
+        status: values[2],
+        received_at: receivedAt,
+        processed_at: null,
+        error_message: values[7],
+        context: {
+          action: values[3],
+          githubInstallationId: values[4],
+          projectV2NodeId: values[5],
+          projectItemNodeId: values[6]
+        }
+      };
+      this.deliveries.set(delivery.delivery_id, delivery);
+      return delivery;
+    }
+
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
 function sign(rawBody) {
   return `sha256=${createHmac("sha256", webhookSecret).update(rawBody).digest("hex")}`;
 }
@@ -183,6 +240,21 @@ for (const status of ["received", "ignored"]) {
   await receive(service, deliveryId, payload());
 
   assert.equal(enqueuedDeliveryIds.length, 0, `duplicate ${status} delivery must not be queued`);
+}
+
+{
+  const deliveryId = "projects-v2-item-concurrent-duplicate";
+  const enqueuedDeliveryIds = [];
+  const database = new ConcurrentFakeDatabase();
+  const service = createService(database, enqueuedDeliveryIds);
+
+  await Promise.all([
+    receive(service, deliveryId, payload()),
+    receive(service, deliveryId, payload())
+  ]);
+
+  assert.equal(database.deliveryLookups, 3, "losing insert must read the winning delivery");
+  assert.deepEqual(enqueuedDeliveryIds, [deliveryId], "concurrent duplicate delivery queues once");
 }
 
 console.log("projects v2 item webhook reconcile tests passed");
