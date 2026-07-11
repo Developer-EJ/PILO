@@ -51,3 +51,5 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/032_create_livekit_webhook_deliveries.sql` adds durable verified LiveKit participant departure webhook delivery records with all-deny RLS.
 - `migrations/033_create_meeting_report_outbox.sql` adds durable MeetingReport SQS delivery intents and retry lease state with all-deny RLS.
 - `migrations/034_repository_scope_github_project_v2_selections.sql` adds the `source` GitHub sync target and scopes ProjectV2 selections to repositories while preserving cache tables and all-deny RLS.
+- `migrations/035_remove_owner_workspace_unique_limit.sql` removes the one-owner-Workspace-per-user unique index and restores a non-unique owner lookup index for multi-Workspace ownership.
+- `migrations/036_add_workspace_icon.sql` adds an optional Workspace icon with a bounded text length for navigation and onboarding display.

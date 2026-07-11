@@ -80,6 +80,17 @@ const appSettingsDialog = await readFile(
   new URL("../src/components/app-settings-dialog.tsx", import.meta.url),
   "utf8"
 );
+const workspaceCreationPage = await readFile(
+  new URL(
+    "../src/features/auth/components/workspace-creation-page.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const workspaceCreationRoute = await readFile(
+  new URL("../src/app/workspace/new/page.tsx", import.meta.url),
+  "utf8"
+);
 const canvasRuntime = await readFile(
   new URL(
     "../src/features/canvas/components/engine/runtime/PiloCanvasRuntime.tsx",
@@ -365,7 +376,8 @@ assert.match(authSessionStorage, /isDevPreviewEnabled/);
 assert.match(authSessionStorage, /NEXT_PUBLIC_PILO_ENABLE_UI_PREVIEW/);
 assert.match(authSession, /AuthGate/);
 assert.match(authSession, /router\.replace\(`\/login\?returnUrl=/);
-assert.match(authSession, /Default workspace was not initialized during login/);
+assert.match(authSession, /WorkspaceOnboardingRequiredError/);
+assert.match(authSession, /\/workspace\/new\?onboarding=1/);
 assert.match(authSession, /isDevPreviewAccessToken/);
 assert.match(authSession, /PILO UI Preview/);
 assert.match(authSession, /activeWorkspace/);
@@ -382,7 +394,7 @@ assert.doesNotMatch(authApiClient, /revokeWorkspaceInvitation/);
 assert.match(authApiClient, /rejectCurrentUserWorkspaceInvitation/);
 assert.match(authApiClient, /acceptWorkspaceInvitation/);
 assert.doesNotMatch(authSession, /createWorkspace\(/);
-assert.doesNotMatch(authApiClient, /createWorkspace\(/);
+assert.match(authApiClient, /createWorkspace\(/);
 assert.match(loginPage, /Welcome back/);
 assert.match(loginPage, /Login with GitHub/);
 assert.match(loginPage, /Login with Google/);
@@ -437,12 +449,35 @@ assert.doesNotMatch(appSidebar, /pendingInvitationCount/);
 assert.doesNotMatch(appSidebar, /handleOpenInvitations/);
 assert.doesNotMatch(appSidebar, /listCurrentUserWorkspaceInvitations/);
 assert.match(appSidebar, /handleSelectWorkspace/);
+assert.match(appSidebar, /내가 만든 워크스페이스/);
+assert.match(appSidebar, /참여 중인 워크스페이스/);
+assert.match(appSidebar, /새 워크스페이스 만들기/);
+assert.match(appSidebar, /previewWorkspaces/);
+assert.match(appSidebar, /router\.push\("\/workspace\/new"\)/);
+assert.match(appSidebar, /canManageWorkspace=\{activeWorkspace\.role === "owner"\}/);
+assert.match(appSettingsDialog, /id: "workspace"/);
+assert.match(appSettingsDialog, /canManageWorkspace \?/);
+assert.match(appSettingsDialog, /Owner 전용 설정입니다/);
+assert.match(appSettingsDialog, /id: "github"/);
+assert.match(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
+assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
+assert.match(appSettingsDialog, /canManageWorkspace \? "연결 관리" : "조회 전용"/);
+assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
+assert.match(workspaceCreationPage, /const STEPS = \[/);
+assert.match(workspaceCreationPage, /GitHub 연결 여부 선택/);
+assert.match(workspaceCreationPage, /MOCK_REPOSITORIES/);
+assert.match(workspaceCreationPage, /MOCK_PROJECTS/);
+assert.match(workspaceCreationPage, /createWorkspace\(/);
+assert.match(workspaceCreationPage, /saveSelectedWorkspaceId/);
+assert.match(workspaceCreationPage, /beforeunload/);
+assert.match(workspaceCreationPage, /popstate/);
+assert.match(workspaceCreationPage, /입력한 이름과 GitHub 선택 내용/);
+assert.match(workspaceCreationPage, /clearStoredAuthSession/);
 assert.match(
   headerNotificationDropdown,
   /authSession\.refreshSession\(result\.workspace\.id\)/
 );
 assert.doesNotMatch(appSidebar, /activeWorkspaceDetail/);
-assert.doesNotMatch(appSidebar, /canManageWorkspace/);
 assert.doesNotMatch(appSidebar, /listWorkspaceMembers/);
 assert.doesNotMatch(appSidebar, /removeWorkspaceMember/);
 assert.doesNotMatch(appSidebar, /handleRemoveWorkspaceMember/);
@@ -464,8 +499,6 @@ assert.match(appSidebar, /setIsSettingsDialogOpen\(true\)/);
 assert.match(appSettingsDialog, /DialogContent/);
 assert.match(appSettingsDialog, /SETTINGS_TABS/);
 assert.match(appSettingsDialog, /aria-label="설정 메뉴"/);
-assert.match(appSettingsDialog, /MOCK_CONNECTIONS/);
-assert.match(appSettingsDialog, /MOCK_WORKSPACES/);
 assert.match(appSettingsDialog, /MOCK_SESSIONS/);
 assert.match(appSettingsDialog, /현재 설정 데이터와 동작은 목업입니다/);
 assert.match(canvasClientFacade, /const DEFAULT_CANVAS_MODE = "api"/);

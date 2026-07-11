@@ -10,6 +10,7 @@ import {
   GalleryVerticalEnd,
   Loader2,
   LogOut,
+  Plus,
   Settings,
   Sparkles,
   UserRound
@@ -51,6 +52,7 @@ import {
   useSidebar
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
+import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
 import { cn } from "@/lib/utils";
@@ -70,17 +72,50 @@ const workspaces = [
   {
     name: "PILO",
     description: "AI Project OS",
-    icon: GalleryVerticalEnd
+    icon: GalleryVerticalEnd,
+    iconText: "P",
+    role: "owner" as const
   },
   {
     name: "Frontend",
     description: "Main page sprint",
-    icon: Sparkles
+    icon: Sparkles,
+    iconText: "F",
+    role: "member" as const
   },
   {
     name: "Review Lab",
     description: "PR review flow",
-    icon: BadgeCheck
+    icon: BadgeCheck,
+    iconText: "R",
+    role: "member" as const
+  }
+];
+
+const previewWorkspaces = [
+  {
+    id: "preview-owner-design-team",
+    name: "Design Team",
+    description: "Owner 워크스페이스",
+    icon: Sparkles,
+    iconText: "D",
+    role: "owner" as const
+  },
+  {
+    id: "preview-member-frontend",
+    name: "Frontend",
+    description: "Member 워크스페이스",
+    icon: BadgeCheck,
+    iconText: "F",
+    role: "member" as const
+  },
+  {
+    id: "preview-member-review-lab",
+    name: "Review Lab",
+    description: "Member 워크스페이스",
+    icon: BadgeCheck,
+    iconText: "R",
+    role: "member" as const
   }
 ];
 
@@ -116,8 +151,11 @@ export function AppSidebar({
     "idle" | "logging-out" | "switching-workspace"
   >("idle");
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+  const [previewActiveWorkspaceId, setPreviewActiveWorkspaceId] = useState<
+    string | null
+  >(null);
   const isSessionActionPending = sessionActionStatus !== "idle";
-  const workspaceOptions =
+  const sessionWorkspaceOptions =
     authSession?.workspaces.map((workspace) => ({
       id: workspace.id,
       name: workspace.name,
@@ -125,9 +163,26 @@ export function AppSidebar({
         workspace.role === "owner" || workspace.isOwner
           ? "Owner 워크스페이스"
           : "Member 워크스페이스",
-      icon: GalleryVerticalEnd
+      icon: GalleryVerticalEnd,
+      iconText: workspace.icon ?? getWorkspaceInitial(workspace.name),
+      role: workspace.role
     })) ?? workspaces.map((workspace) => ({ ...workspace, id: workspace.name }));
+  const isDevPreviewSession = Boolean(
+    authSession && isDevPreviewAccessToken(authSession.accessToken)
+  );
+  const workspaceOptions = isDevPreviewSession
+    ? [...sessionWorkspaceOptions, ...previewWorkspaces]
+    : sessionWorkspaceOptions;
+  const ownedWorkspaceOptions = workspaceOptions.filter(
+    (workspace) => workspace.role === "owner"
+  );
+  const memberWorkspaceOptions = workspaceOptions.filter(
+    (workspace) => workspace.role === "member"
+  );
   const activeWorkspace =
+    workspaceOptions.find(
+      (workspace) => workspace.id === previewActiveWorkspaceId
+    ) ??
     workspaceOptions.find(
       (workspace) => workspace.id === authSession?.activeWorkspaceId
     ) ??
@@ -136,7 +191,9 @@ export function AppSidebar({
       id: "PILO",
       name: "PILO",
       description: "AI Project OS",
-      icon: GalleryVerticalEnd
+      icon: GalleryVerticalEnd,
+      iconText: "P",
+      role: "owner" as const
     };
   const displayUser = authSession
     ? {
@@ -184,7 +241,11 @@ export function AppSidebar({
       return;
     }
 
-    if (authSession) {
+    const isPersistedWorkspace = Boolean(
+      authSession?.workspaces.some((workspace) => workspace.id === workspaceId)
+    );
+
+    if (authSession && isPersistedWorkspace && !isDevPreviewSession) {
       if (authSession.activeWorkspaceId === workspaceId) {
         return;
       }
@@ -206,6 +267,7 @@ export function AppSidebar({
       return;
     }
 
+    setPreviewActiveWorkspaceId(workspaceId);
     setActiveWorkspaceIndex(index);
   };
 
@@ -228,6 +290,10 @@ export function AppSidebar({
       });
   };
 
+  const openSettings = () => {
+    setIsSettingsDialogOpen(true);
+  };
+
   return (
     <>
       <Sidebar collapsible="icon" variant="inset">
@@ -237,7 +303,7 @@ export function AppSidebar({
             <DropdownMenu>
               <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <activeWorkspace.icon className="size-5!" />
+                  <span className="text-sm font-semibold">{activeWorkspace.iconText}</span>
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">
@@ -256,16 +322,21 @@ export function AppSidebar({
                 sideOffset={8}
               >
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel>워크스페이스</DropdownMenuLabel>
-                  {workspaceOptions.map((workspace, index) => (
+                  <DropdownMenuLabel>내가 만든 워크스페이스</DropdownMenuLabel>
+                  {ownedWorkspaceOptions.map((workspace) => (
                     <DropdownMenuItem
                       className="gap-2 p-2"
                       disabled={isSessionActionPending}
                       key={workspace.id}
-                      onClick={() => handleSelectWorkspace(workspace.id, index)}
+                      onClick={() =>
+                        handleSelectWorkspace(
+                          workspace.id,
+                          workspaceOptions.indexOf(workspace)
+                        )
+                      }
                     >
                       <div className="flex size-6 items-center justify-center rounded-md border bg-background">
-                        <workspace.icon className="size-3.5" />
+                        <span className="text-xs font-semibold">{workspace.iconText}</span>
                       </div>
                       <div className="grid flex-1 leading-tight">
                         <span className="font-medium">{workspace.name}</span>
@@ -274,11 +345,49 @@ export function AppSidebar({
                         </span>
                       </div>
                       <DropdownMenuShortcut>
-                        Alt+{index + 1}
+                        Owner
                       </DropdownMenuShortcut>
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>참여 중인 워크스페이스</DropdownMenuLabel>
+                  {memberWorkspaceOptions.map((workspace) => (
+                    <DropdownMenuItem
+                      className="gap-2 p-2"
+                      disabled={isSessionActionPending}
+                      key={workspace.id}
+                      onClick={() =>
+                        handleSelectWorkspace(
+                          workspace.id,
+                          workspaceOptions.indexOf(workspace)
+                        )
+                      }
+                    >
+                      <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                        <span className="text-xs font-semibold">{workspace.iconText}</span>
+                      </div>
+                      <div className="grid flex-1 leading-tight">
+                        <span className="font-medium">{workspace.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {workspace.description}
+                        </span>
+                      </div>
+                      <DropdownMenuShortcut>Member</DropdownMenuShortcut>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="gap-2 p-2"
+                  onClick={() => router.push("/workspace/new")}
+                >
+                  <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                    <Plus className="size-3.5" />
+                  </div>
+                  <span className="font-medium">새 워크스페이스 만들기</span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
@@ -453,7 +562,7 @@ export function AppSidebar({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="gap-2"
-                    onClick={() => setIsSettingsDialogOpen(true)}
+                    onClick={openSettings}
                   >
                     <Settings />
                     설정
@@ -485,6 +594,8 @@ export function AppSidebar({
       <SidebarRail />
       </Sidebar>
       <AppSettingsDialog
+        activeWorkspaceName={activeWorkspace.name}
+        canManageWorkspace={activeWorkspace.role === "owner"}
         email={displayUser.email}
         name={displayUser.name}
         onOpenChange={setIsSettingsDialogOpen}
@@ -504,4 +615,8 @@ function getUserInitials(name: string | null, email: string | null) {
     .join("");
 
   return initials || "P";
+}
+
+function getWorkspaceInitial(name: string) {
+  return name.trim().slice(0, 1).toUpperCase() || "W";
 }

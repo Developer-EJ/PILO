@@ -7,7 +7,6 @@ import {
   GitBranch,
   KeyRound,
   Laptop,
-  Link2,
   ShieldCheck,
   UserRound,
   type LucideIcon
@@ -26,13 +25,15 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type AppSettingsDialogProps = {
+  activeWorkspaceName: string;
+  canManageWorkspace: boolean;
   email: string;
   name: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 };
 
-type SettingsTabId = "account" | "connections" | "workspaces" | "security";
+type SettingsTabId = "account" | "github" | "workspace" | "security";
 
 const SETTINGS_TABS: Array<{
   description: string;
@@ -47,16 +48,16 @@ const SETTINGS_TABS: Array<{
     label: "내 계정"
   },
   {
-    description: "외부 서비스 연결 상태",
-    icon: Link2,
-    id: "connections",
-    label: "연결"
+    description: "현재 워크스페이스의 GitHub 연동",
+    icon: GitBranch,
+    id: "github",
+    label: "GitHub 연결"
   },
   {
-    description: "참여 중인 워크스페이스",
+    description: "현재 워크스페이스 설정",
     icon: Building2,
-    id: "workspaces",
-    label: "워크스페이스"
+    id: "workspace",
+    label: "워크스페이스 관리"
   },
   {
     description: "로그인과 활성 세션",
@@ -66,22 +67,22 @@ const SETTINGS_TABS: Array<{
   }
 ];
 
-const MOCK_CONNECTIONS = [
+const MOCK_GITHUB_CONNECTIONS = [
   {
-    id: "github",
-    name: "GitHub",
+    id: "github-user",
+    name: "GitHub 사용자 연결",
     account: "donghyun-pilo",
     description: "PR Review와 GitHub App 사용자 인증",
     connectedAt: "2026. 7. 2.",
     icon: GitBranch
   },
   {
-    id: "google",
-    name: "Google",
-    account: "donghyun@pilo.local",
-    description: "PILO 로그인 계정",
-    connectedAt: "2026. 6. 12.",
-    icon: UserRound
+    id: "github-app",
+    name: "GitHub App 설치",
+    account: "pilo-team · selected repositories",
+    description: "Repository, Issue, PR 원본 동기화",
+    connectedAt: "2026. 7. 4.",
+    icon: GitBranch
   },
   {
     id: "github-project",
@@ -90,30 +91,6 @@ const MOCK_CONNECTIONS = [
     description: "개인 ProjectV2 조회와 상태 변경",
     connectedAt: "2026. 7. 8.",
     icon: KeyRound
-  }
-];
-
-const MOCK_WORKSPACES = [
-  {
-    id: "workspace-pilo",
-    name: "PILO",
-    role: "owner",
-    joinedAt: "2026. 6. 12.",
-    active: true
-  },
-  {
-    id: "workspace-frontend",
-    name: "Frontend",
-    role: "member",
-    joinedAt: "2026. 6. 20.",
-    active: false
-  },
-  {
-    id: "workspace-review-lab",
-    name: "Review Lab",
-    role: "member",
-    joinedAt: "2026. 7. 1.",
-    active: false
   }
 ];
 
@@ -137,6 +114,8 @@ const MOCK_SESSIONS = [
 ];
 
 export function AppSettingsDialog({
+  activeWorkspaceName,
+  canManageWorkspace,
   email,
   name,
   onOpenChange,
@@ -256,13 +235,17 @@ export function AppSettingsDialog({
                 </SettingsPage>
               ) : null}
 
-              {activeTab === "connections" ? (
+              {activeTab === "github" ? (
                 <SettingsPage
-                  description="로그인과 GitHub 기능에 사용하는 연결 상태입니다."
-                  title="연결된 서비스"
+                  description={
+                    canManageWorkspace
+                      ? "현재 Workspace의 GitHub 연결을 확인하고 관리합니다."
+                      : "현재 Workspace의 GitHub 연결 상태를 조회할 수 있습니다. 변경은 Owner만 가능합니다."
+                  }
+                  title={`${activeWorkspaceName} GitHub 연결`}
                 >
                   <div className="grid gap-2">
-                    {MOCK_CONNECTIONS.map((connection) => {
+                    {MOCK_GITHUB_CONNECTIONS.map((connection) => {
                       const Icon = connection.icon;
 
                       return (
@@ -290,13 +273,14 @@ export function AppSettingsDialog({
                             </p>
                           </div>
                           <Button
+                            disabled={!canManageWorkspace}
                             onClick={() =>
-                              showMockNotice(`${connection.name} 연결 해제를 선택했습니다.`)
+                              showMockNotice(`${connection.name} 관리를 선택했습니다.`)
                             }
                             size="sm"
                             variant="outline"
                           >
-                            연결 해제
+                            {canManageWorkspace ? "연결 관리" : "조회 전용"}
                           </Button>
                         </div>
                       );
@@ -305,48 +289,44 @@ export function AppSettingsDialog({
                 </SettingsPage>
               ) : null}
 
-              {activeTab === "workspaces" ? (
-                <SettingsPage
-                  description="참여 중인 워크스페이스와 역할을 확인합니다."
-                  title="내 워크스페이스"
-                >
-                  <div className="grid gap-2">
-                    {MOCK_WORKSPACES.map((workspace) => (
-                      <div
-                        className="flex items-center gap-3 rounded-lg border p-3"
-                        key={workspace.id}
-                      >
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                          <Building2 className="size-4" />
+              {activeTab === "workspace" ? (
+                canManageWorkspace ? (
+                  <SettingsPage
+                    description="현재 선택된 워크스페이스의 관리 설정입니다. 실제 저장은 후속 API 연결에서 제공됩니다."
+                    title={`${activeWorkspaceName} 관리`}
+                  >
+                    <div className="grid gap-4 rounded-lg border p-4">
+                      <div className="flex items-center gap-3">
+                        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                          <Building2 className="size-5" />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="truncate text-sm font-medium">
-                              {workspace.name}
-                            </p>
-                            {workspace.active ? (
-                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                                현재
-                              </span>
-                            ) : null}
-                          </div>
+                          <p className="truncate text-sm font-semibold">
+                            {activeWorkspaceName}
+                          </p>
                           <p className="text-xs text-muted-foreground">
-                            {workspace.role} · 참여일 {workspace.joinedAt}
+                            Owner 권한 · 관리 가능
                           </p>
                         </div>
-                        <Button
-                          onClick={() =>
-                            showMockNotice(`${workspace.name} 선택을 요청했습니다.`)
-                          }
-                          size="sm"
-                          variant={workspace.active ? "secondary" : "outline"}
-                        >
-                          {workspace.active ? "사용 중" : "전환"}
-                        </Button>
                       </div>
-                    ))}
+
+                      <label className="grid gap-1.5 text-sm font-medium">
+                        워크스페이스 이름
+                        <Input disabled value={activeWorkspaceName} />
+                      </label>
+                    </div>
+
+                  </SettingsPage>
+                ) : (
+                  <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+                    <ShieldCheck className="size-8 text-muted-foreground" />
+                    <p className="mt-3 text-sm font-semibold">Owner 전용 설정입니다.</p>
+                    <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                      {activeWorkspaceName}의 Workspace 설정과 GitHub 연결은 Owner만
+                      관리할 수 있습니다.
+                    </p>
                   </div>
-                </SettingsPage>
+                )
               ) : null}
 
               {activeTab === "security" ? (
