@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
 
@@ -13,6 +14,7 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
   constructor(private readonly database: DatabaseService) {}
 
   onModuleInit(): void {
+    if (process.env.APP_SERVER_RUNTIME === "github-sync-worker") return;
     this.interval = setInterval(() => void this.recoverStaleReports().catch(() => {
       this.logger.error("MeetingReport stale recovery sweep failed");
     }), SWEEP_INTERVAL_MS);
@@ -25,9 +27,9 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
   }
 
   async recoverStaleReports(): Promise<number> {
-    const rows = await this.database.query<{ id: string }>(
-      `WITH candidate AS (
-         SELECT report.id
+    const recovered = await this.database.transaction(async transaction => {
+      const candidates = await transaction.query<{ id: string }>(
+        `SELECT report.id
          FROM meeting_reports AS report
          JOIN meeting_report_outbox AS outbox ON outbox.report_id = report.id
          WHERE report.status = 'PROCESSING'
@@ -35,17 +37,29 @@ export class MeetingReportOutboxRecoveryService implements OnModuleInit, OnModul
            AND report.updated_at <= now() - ($1 * INTERVAL '1 second')
          ORDER BY report.updated_at ASC
          LIMIT $2
-         FOR UPDATE OF report, outbox SKIP LOCKED
-       )
-       UPDATE meeting_reports AS report
-       SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report processing timed out', updated_at = now()
-       FROM candidate
-       WHERE report.id = candidate.id
-         AND report.status = 'PROCESSING'
-       RETURNING report.id`,
-      [PROCESSING_STALE_TIMEOUT_SECONDS, BATCH_SIZE]
-    );
-    if (rows.length) this.logger.warn(`Recovered ${rows.length} stale MeetingReport(s)`);
-    return rows.length;
+         FOR UPDATE OF report, outbox SKIP LOCKED`,
+        [PROCESSING_STALE_TIMEOUT_SECONDS, BATCH_SIZE]
+      );
+      let count = 0;
+      for (const candidate of candidates) {
+        const lockKey = createHash("sha256").update(candidate.id).digest().readBigInt64BE(0);
+        const lock = await transaction.queryOne<{ acquired: boolean }>(
+          "SELECT pg_try_advisory_lock($1::bigint) AS acquired", [lockKey]
+        );
+        if (!lock?.acquired) continue;
+        try {
+          const report = await transaction.queryOne<{ id: string }>(
+            `UPDATE meeting_reports SET status = 'FAILED', failed_step = 'STT', error_message = 'Meeting report processing timed out', updated_at = now()
+             WHERE id = $1 AND status = 'PROCESSING' RETURNING id`, [candidate.id]
+          );
+          if (report) count += 1;
+        } finally {
+          await transaction.execute("SELECT pg_advisory_unlock($1::bigint)", [lockKey]);
+        }
+      }
+      return count;
+    });
+    if (recovered) this.logger.warn(`Recovered ${recovered} stale MeetingReport(s)`);
+    return recovered;
   }
 }

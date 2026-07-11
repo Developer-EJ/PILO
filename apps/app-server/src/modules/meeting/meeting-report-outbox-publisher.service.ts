@@ -30,6 +30,7 @@ export class MeetingReportOutboxPublisherService implements OnModuleInit, OnModu
   ) {}
 
   onModuleInit(): void {
+    if (process.env.APP_SERVER_RUNTIME === "github-sync-worker") return;
     this.interval = setInterval(() => void this.publishDue().catch(() => {
       this.logger.error("MeetingReport outbox recovery sweep failed");
     }), SWEEP_INTERVAL_MS);

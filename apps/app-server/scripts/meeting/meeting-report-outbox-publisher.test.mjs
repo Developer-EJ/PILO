@@ -20,19 +20,16 @@ const claim = {
 };
 
 class FakeOutboxDatabase {
-  constructor({ dueRows = [], claimRow = null, recoveryRows = [] } = {}) {
+  constructor({ dueRows = [], claimRow = null, recoveryCandidates = [], lockAcquired = true } = {}) {
     this.dueRows = dueRows;
     this.claimRow = claimRow;
-    this.recoveryRows = recoveryRows;
+    this.recoveryCandidates = recoveryCandidates;
+    this.lockAcquired = lockAcquired;
     this.calls = [];
   }
 
   async query(text, values = []) {
     this.calls.push({ method: "query", text, values });
-
-    if (text.includes("UPDATE meeting_reports AS report")) {
-      return this.recoveryRows;
-    }
 
     return this.dueRows;
   }
@@ -44,8 +41,18 @@ class FakeOutboxDatabase {
 
   async transaction(callback) {
     return callback({
+      query: async (text, values = []) => {
+        this.calls.push({ method: "transaction.query", text, values });
+        return this.recoveryCandidates;
+      },
       queryOne: async (text, values = []) => {
         this.calls.push({ method: "queryOne", text, values });
+        if (text.includes("pg_try_advisory_lock")) {
+          return { acquired: this.lockAcquired };
+        }
+        if (text.includes("UPDATE meeting_reports")) {
+          return this.lockAcquired ? { id: claim.report_id } : null;
+        }
         return this.claimRow;
       },
       execute: async (text, values = []) => {
@@ -144,12 +151,53 @@ class FakeMeetingReportJobService {
 
 {
   const database = new FakeOutboxDatabase({
-    recoveryRows: [{ id: claim.report_id }]
+    recoveryCandidates: [{ id: claim.report_id }]
   });
   const recovery = new MeetingReportOutboxRecoveryService(database);
 
   assert.equal(await recovery.recoverStaleReports(), 1);
-  const query = database.calls.find((call) => call.method === "query");
+  const query = database.calls.find((call) => call.method === "transaction.query");
   assert.match(query.text, /outbox.status = 'delivered'/);
   assert.match(query.text, /FOR UPDATE OF report, outbox SKIP LOCKED/);
+  assert.match(
+    database.calls.find((call) => call.text?.includes("pg_try_advisory_lock")).text,
+    /pg_try_advisory_lock/
+  );
+  assert.match(
+    database.calls.find((call) => call.text?.includes("pg_advisory_unlock")).text,
+    /pg_advisory_unlock/
+  );
+}
+
+{
+  const database = new FakeOutboxDatabase({
+    recoveryCandidates: [{ id: claim.report_id }],
+    lockAcquired: false
+  });
+  const recovery = new MeetingReportOutboxRecoveryService(database);
+
+  assert.equal(await recovery.recoverStaleReports(), 0);
+  assert.equal(
+    database.calls.some((call) => call.text?.includes("UPDATE meeting_reports")),
+    false
+  );
+}
+
+{
+  const originalRuntime = process.env.APP_SERVER_RUNTIME;
+  process.env.APP_SERVER_RUNTIME = "github-sync-worker";
+  const database = new FakeOutboxDatabase();
+  const publisher = new MeetingReportOutboxPublisherService(
+    database,
+    new FakeMeetingReportJobService()
+  );
+  const recovery = new MeetingReportOutboxRecoveryService(database);
+
+  publisher.onModuleInit();
+  recovery.onModuleInit();
+  await Promise.resolve();
+  assert.equal(database.calls.length, 0);
+
+  if (originalRuntime === undefined) delete process.env.APP_SERVER_RUNTIME;
+  else process.env.APP_SERVER_RUNTIME = originalRuntime;
 }
