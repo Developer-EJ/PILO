@@ -171,7 +171,13 @@ export function reduceSqlErdEditState(
   }
 
   if (action.type === "layout_saved") {
-    if (state.lastSuccessfulSnapshot.id !== action.snapshot.id) {
+    if (
+      state.lastSuccessfulSnapshot.id === null ||
+      state.lastSuccessfulSnapshot.id !== action.snapshot.id ||
+      state.lastSuccessfulSnapshot.revision === null ||
+      action.snapshot.revision === null ||
+      action.snapshot.revision <= state.lastSuccessfulSnapshot.revision
+    ) {
       return state;
     }
 

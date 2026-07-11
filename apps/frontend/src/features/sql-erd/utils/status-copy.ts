@@ -1,4 +1,7 @@
-import type { SqlErdSessionLoadState } from "@/features/sql-erd/utils/session-state";
+import type {
+  LayoutAutosaveBlockReason,
+  SqlErdSessionLoadState
+} from "@/features/sql-erd/utils/session-state";
 import type { SqlErdParseState } from "@/features/sql-erd/utils/sql-edit-state";
 
 export type SqlErdGenerateErrorCode =
@@ -50,16 +53,22 @@ export function getSqlErdWorkspaceSaveErrorState(): SqlErdSessionLoadState {
 export type SqlErdSourceAutosaveState = "idle" | "pending" | "saving";
 
 export function getSqlErdSourceStatus({
+  autosaveBlockReason,
   fallbackState,
   isDraftDirty,
   parse,
   sourceAutosaveState
 }: {
+  autosaveBlockReason: LayoutAutosaveBlockReason | null;
   fallbackState: SqlErdSessionLoadState;
   isDraftDirty: boolean;
   parse: SqlErdParseState;
   sourceAutosaveState: SqlErdSourceAutosaveState;
 }): SqlErdSessionLoadState {
+  if (autosaveBlockReason) {
+    return fallbackState;
+  }
+
   if (parse.status === "error") {
     return {
       label: "Parse error",

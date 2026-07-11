@@ -62,6 +62,7 @@ import {
   getLayoutAutosaveDelayMs,
   getLayoutAutosavePausedBanner,
   getSqlErdSessionLoadFailureState,
+  isSqlErdAutosaveRequestCurrent,
   isLayoutAutosaveTransientStatus,
   shouldApplySqlErdSessionLoadResult,
   type LayoutAutosaveBlockReason,
@@ -226,6 +227,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const hasLoadedSessionRef = useRef(false);
   const currentSessionIdRef = useRef(sessionId);
   const autosaveInFlightRef = useRef(false);
+  const autosaveLifecycleGenerationRef = useRef(0);
   const pendingSourceAutosaveSnapshotRef =
     useRef<SqlErdViewSession | null>(null);
   currentSessionIdRef.current = sessionId;
@@ -274,13 +276,19 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     autosaveInFlightRef.current = false;
     setAutosaveCompletionEpoch((currentEpoch) => currentEpoch + 1);
   }, []);
-  const isCurrentAutosaveSession = useCallback((requestSessionId: string) => {
-    return (
-      currentSessionIdRef.current === requestSessionId &&
-      sqlErdEditStateRef.current.lastSuccessfulSnapshot.id ===
+  const isCurrentAutosaveRequest = useCallback(
+    (requestSessionId: string, requestGeneration: number) => {
+      return isSqlErdAutosaveRequestCurrent({
+        currentGeneration: autosaveLifecycleGenerationRef.current,
+        currentSessionId: currentSessionIdRef.current,
+        currentSnapshotSessionId:
+          sqlErdEditStateRef.current.lastSuccessfulSnapshot.id,
+        requestGeneration,
         requestSessionId
-    );
-  }, []);
+      });
+    },
+    []
+  );
   const sqlErdViewSession =
     sqlErdEditState.lastSuccessfulSnapshot;
   const [sessionLoadState, setSessionLoadState] =
@@ -315,7 +323,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     sqlErdEditState.draftDialect,
     lastResolvedDialect
   );
+  const autoParseDraftSourceText = sqlErdEditState.draftSourceText;
+  const autoParseDraftDialect = sqlErdEditState.draftDialect;
   const sourceStatus = getSqlErdSourceStatus({
+    autosaveBlockReason: layoutAutosaveBlockReason,
     fallbackState: sessionLoadState,
     isDraftDirty: isSqlErdDraftDirty(sqlErdEditState),
     parse: sqlErdEditState.parse,
@@ -420,6 +431,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [pendingLayoutAutosaveJson, pendingSourceAutosaveSnapshot]);
   const handleReloadSession = useCallback(
     async () => {
+      autosaveLifecycleGenerationRef.current += 1;
       const requestId = sessionLoadRequestIdRef.current + 1;
       sessionLoadRequestIdRef.current = requestId;
 
@@ -520,73 +532,82 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (
       !isSessionReady ||
-      !shouldScheduleSqlErdAutoParse(sqlErdEditState)
+      !shouldScheduleSqlErdAutoParse(sqlErdEditStateRef.current)
     ) {
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
+    let parseExecutionTimeoutId: number | null = null;
+    const debounceTimeoutId = window.setTimeout(() => {
       const parseStart = beginSqlErdParse(sqlErdEditStateRef.current);
       sqlErdEditStateRef.current = parseStart.state;
       setSqlErdEditState(parseStart.state);
 
-      const generateRequest =
-        createSqlErdGenerateWorkspaceRequest(parseStart.session);
+      parseExecutionTimeoutId = window.setTimeout(() => {
+        const generateRequest =
+          createSqlErdGenerateWorkspaceRequest(parseStart.session);
 
-      if (
-        !isSqlErdParseRequestCurrent(
-          sqlErdEditStateRef.current,
-          parseStart.requestSequence
-        ) ||
-        parseStart.session.id !== currentSessionIdRef.current
-      ) {
-        return;
-      }
+        if (
+          !isSqlErdParseRequestCurrent(
+            sqlErdEditStateRef.current,
+            parseStart.requestSequence
+          ) ||
+          parseStart.session.id !== currentSessionIdRef.current
+        ) {
+          return;
+        }
 
-      if (!generateRequest.ok) {
+        if (!generateRequest.ok) {
+          applySqlErdEditAction({
+            error: generateRequest.error,
+            requestSequence: parseStart.requestSequence,
+            type: "parse_failed"
+          });
+          return;
+        }
+
+        if (generateRequest.kind !== "update") {
+          applySqlErdEditAction({
+            requestSequence: parseStart.requestSequence,
+            type: "parse_finished"
+          });
+          return;
+        }
+
+        const parsedSnapshot: SqlErdViewSession = {
+          ...parseStart.session,
+          layoutJson: generateRequest.payload.layoutJson!,
+          modelJson: generateRequest.payload.modelJson!
+        };
+
         applySqlErdEditAction({
-          error: generateRequest.error,
+          requestLayoutJson: parseStart.session.layoutJson,
           requestSequence: parseStart.requestSequence,
-          type: "parse_failed"
+          snapshot: parsedSnapshot,
+          type: "parse_succeeded"
         });
-        return;
-      }
-
-      if (generateRequest.kind !== "update") {
-        applySqlErdEditAction({
-          requestSequence: parseStart.requestSequence,
-          type: "parse_finished"
-        });
-        return;
-      }
-
-      const parsedSnapshot: SqlErdViewSession = {
-        ...parseStart.session,
-        layoutJson: generateRequest.payload.layoutJson!,
-        modelJson: generateRequest.payload.modelJson!
-      };
-
-      applySqlErdEditAction({
-        requestLayoutJson: parseStart.session.layoutJson,
-        requestSequence: parseStart.requestSequence,
-        snapshot: parsedSnapshot,
-        type: "parse_succeeded"
-      });
-      setLastResolvedDialect(generateRequest.resolvedDialect);
-      setSqlSourceMap(generateRequest.sourceMap);
-      setPendingSourceAutosaveSnapshot(parsedSnapshot);
-      setSourceAutosaveRetryAttempt(0);
-      setSelectedSqlErdObject({ type: "none" });
+        setLastResolvedDialect(generateRequest.resolvedDialect);
+        setSqlSourceMap(generateRequest.sourceMap);
+        setPendingSourceAutosaveSnapshot(parsedSnapshot);
+        setSourceAutosaveRetryAttempt(0);
+        setSelectedSqlErdObject({ type: "none" });
+      }, 0);
     }, SQL_ERD_AUTO_PARSE_DEBOUNCE_MS);
 
     return () => {
-      window.clearTimeout(timeoutId);
+      window.clearTimeout(debounceTimeoutId);
+      if (parseExecutionTimeoutId !== null) {
+        window.clearTimeout(parseExecutionTimeoutId);
+      }
     };
   }, [
+    activeWorkspaceId,
     applySqlErdEditAction,
+    autoParseDraftDialect,
+    autoParseDraftSourceText,
     isSessionReady,
+    sessionId,
     setPendingSourceAutosaveSnapshot,
-    sqlErdEditState
   ]);
 
   useEffect(() => {
@@ -605,6 +626,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     if (!requestSessionId) {
       return;
     }
+    const requestLifecycleGeneration =
+      autosaveLifecycleGenerationRef.current;
     const autosaveDelayMs = manualAutosaveRetryRef.current
       ? 0
       : getLayoutAutosaveDelayMs(sourceAutosaveRetryAttempt);
@@ -612,39 +635,45 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
     const timeoutId = window.setTimeout(async () => {
       if (
-        !isCurrentAutosaveSession(requestSessionId) ||
+        !isCurrentAutosaveRequest(
+          requestSessionId,
+          requestLifecycleGeneration
+        ) ||
         !tryBeginAutosave()
       ) {
         return;
       }
 
-      const sourceAutosaveRequest = createSqlErdSourceAutosaveRequest(
-        requestParsedSnapshot,
-        sqlErdEditStateRef.current.lastSuccessfulSnapshot
-      );
-
-      if (!sourceAutosaveRequest.ok) {
-        completeAutosave();
-        return;
-      }
-
-      const requestLayoutJson = sourceAutosaveRequest.payload.layoutJson!;
-      if (
-        pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot
-      ) {
-        setSourceAutosaveState("saving");
-      }
-
-      const sqlErdApiClient = createSqlErdApiClient({ accessToken });
-
       try {
+        const sourceAutosaveRequest = createSqlErdSourceAutosaveRequest(
+          requestParsedSnapshot,
+          sqlErdEditStateRef.current.lastSuccessfulSnapshot
+        );
+
+        if (!sourceAutosaveRequest.ok) {
+          return;
+        }
+
+        const requestLayoutJson = sourceAutosaveRequest.payload.layoutJson!;
+        if (
+          pendingSourceAutosaveSnapshotRef.current === requestParsedSnapshot
+        ) {
+          setSourceAutosaveState("saving");
+        }
+
+        const sqlErdApiClient = createSqlErdApiClient({ accessToken });
         const savedSession = await sqlErdApiClient.updateSession(
           activeWorkspaceId,
           sourceAutosaveRequest.sessionId,
           sourceAutosaveRequest.payload
         );
 
-        if (!isCurrentAutosaveSession(requestSessionId)) {
+        if (
+          !isCurrentAutosaveRequest(
+            requestSessionId,
+            requestLifecycleGeneration
+          )
+        ) {
           return;
         }
 
@@ -674,7 +703,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           tone: "success"
         });
       } catch (error) {
-        if (!isCurrentAutosaveSession(requestSessionId)) {
+        if (
+          !isCurrentAutosaveRequest(
+            requestSessionId,
+            requestLifecycleGeneration
+          )
+        ) {
           return;
         }
 
@@ -716,7 +750,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     applySqlErdEditAction,
     autosaveCompletionEpoch,
     completeAutosave,
-    isCurrentAutosaveSession,
+    isCurrentAutosaveRequest,
     layoutAutosaveBlockReason,
     pendingSourceAutosaveSnapshot,
     setPendingSourceAutosaveSnapshot,
@@ -737,6 +771,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
     const requestLayoutJson = pendingLayoutAutosaveJson;
     const requestSessionId = sqlErdViewSession.id;
+    const requestLifecycleGeneration =
+      autosaveLifecycleGenerationRef.current;
     const autosaveDelayMs = manualAutosaveRetryRef.current
       ? 0
       : getLayoutAutosaveDelayMs(layoutAutosaveRetryAttempt);
@@ -744,40 +780,47 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
     const timeoutId = window.setTimeout(async () => {
       if (
-        !isCurrentAutosaveSession(requestSessionId) ||
+        !isCurrentAutosaveRequest(
+          requestSessionId,
+          requestLifecycleGeneration
+        ) ||
         !tryBeginAutosave()
       ) {
         return;
       }
 
-      const layoutAutosaveRequest = createSqlErdLayoutAutosaveRequest(
-        sqlErdEditStateRef.current.lastSuccessfulSnapshot,
-        requestLayoutJson
-      );
-
-      if (!layoutAutosaveRequest.ok) {
-        completeAutosave();
-        return;
-      }
-
-      const sqlErdApiClient = createSqlErdApiClient({
-        accessToken
-      });
-
-      setSessionLoadState({
-        label: "Saving",
-        message: "Autosaving table layout",
-        tone: "neutral"
-      });
-
       try {
+        const layoutAutosaveRequest = createSqlErdLayoutAutosaveRequest(
+          sqlErdEditStateRef.current.lastSuccessfulSnapshot,
+          requestLayoutJson
+        );
+
+        if (!layoutAutosaveRequest.ok) {
+          return;
+        }
+
+        const sqlErdApiClient = createSqlErdApiClient({
+          accessToken
+        });
+
+        setSessionLoadState({
+          label: "Saving",
+          message: "Autosaving table layout",
+          tone: "neutral"
+        });
+
         const savedSession = await sqlErdApiClient.updateSession(
           activeWorkspaceId,
           layoutAutosaveRequest.sessionId,
           layoutAutosaveRequest.payload
         );
 
-        if (!isCurrentAutosaveSession(requestSessionId)) {
+        if (
+          !isCurrentAutosaveRequest(
+            requestSessionId,
+            requestLifecycleGeneration
+          )
+        ) {
           return;
         }
 
@@ -799,7 +842,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           tone: "success"
         });
       } catch (error) {
-        if (!isCurrentAutosaveSession(requestSessionId)) {
+        if (
+          !isCurrentAutosaveRequest(
+            requestSessionId,
+            requestLifecycleGeneration
+          )
+        ) {
           return;
         }
 
@@ -853,7 +901,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     applySqlErdEditAction,
     autosaveCompletionEpoch,
     completeAutosave,
-    isCurrentAutosaveSession,
+    isCurrentAutosaveRequest,
     layoutAutosaveBlockReason,
     layoutAutosaveRetryAttempt,
     pendingLayoutAutosaveJson,
@@ -892,6 +940,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, []);
 
   useEffect(() => {
+    autosaveLifecycleGenerationRef.current += 1;
     hasLoadedSessionRef.current = false;
     setPendingSourceAutosaveSnapshot(null);
     setSourceAutosaveRetryAttempt(0);

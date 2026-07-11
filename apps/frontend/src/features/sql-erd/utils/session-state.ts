@@ -239,3 +239,23 @@ export function shouldApplySqlErdSessionLoadResult(
 ) {
   return requestId === currentRequestId;
 }
+
+export function isSqlErdAutosaveRequestCurrent({
+  currentGeneration,
+  currentSessionId,
+  currentSnapshotSessionId,
+  requestGeneration,
+  requestSessionId
+}: {
+  currentGeneration: number;
+  currentSessionId: string;
+  currentSnapshotSessionId: string | null;
+  requestGeneration: number;
+  requestSessionId: string;
+}) {
+  return (
+    requestGeneration === currentGeneration &&
+    requestSessionId === currentSessionId &&
+    requestSessionId === currentSnapshotSessionId
+  );
+}
