@@ -1303,6 +1303,15 @@ assert.deepEqual(initialSqlEditState.parse, {
   requestSequence: 0,
   status: "idle"
 });
+assert.equal(sqlEditStateRuntime.SQL_ERD_AUTO_PARSE_DEBOUNCE_MS, 500);
+assert.equal(
+  sqlEditStateRuntime.isSqlErdDraftDirty(initialSqlEditState),
+  false
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(initialSqlEditState),
+  false
+);
 
 const dirtySqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
   initialSqlEditState,
@@ -1323,6 +1332,11 @@ assert.deepEqual(
 );
 assert.equal(dirtySqlEditState.parse.requestSequence, 1);
 assert.equal(dirtySqlEditState.parse.status, "idle");
+assert.equal(sqlEditStateRuntime.isSqlErdDraftDirty(dirtySqlEditState), true);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(dirtySqlEditState),
+  true
+);
 
 const mysqlDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
   dirtySqlEditState,
@@ -1340,6 +1354,10 @@ const staleParseStart =
 
 assert.equal(staleParseStart.requestSequence, 3);
 assert.equal(staleParseStart.state.parse.status, "parsing");
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(staleParseStart.state),
+  false
+);
 assert.equal(staleParseStart.session.sourceText, "SELECT 1;");
 assert.equal(staleParseStart.session.dialect, "mysql");
 assert.equal(
@@ -1414,6 +1432,45 @@ assert.equal(
 assert.equal(
   latestParseFailureState.lastSuccessfulSnapshot.sourceText,
   generateSmokeSource
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    latestParseFailureState
+  ),
+  false
+);
+
+const layoutChangedAfterParseError = sqlEditStateRuntime.reduceSqlErdEditState(
+  latestParseFailureState,
+  {
+    type: "layout_changed",
+    layoutJson: {
+      version: 1,
+      tableLayouts: [{ tableId: "table.users", x: 640, y: 320 }]
+    }
+  }
+);
+
+assert.equal(layoutChangedAfterParseError.parse.status, "error");
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    layoutChangedAfterParseError
+  ),
+  false
+);
+
+const dialectChangedAfterParseError =
+  sqlEditStateRuntime.reduceSqlErdEditState(layoutChangedAfterParseError, {
+    type: "draft_dialect_changed",
+    dialect: "postgresql"
+  });
+
+assert.equal(dialectChangedAfterParseError.parse.status, "idle");
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(
+    dialectChangedAfterParseError
+  ),
+  true
 );
 
 const successfulParseStart =
@@ -1621,6 +1678,66 @@ assert.deepEqual(
   preservedNewerLayoutState.lastSuccessfulSnapshot.layoutJson,
   newerLayout
 );
+
+const newestParsedModel = createRuntimeTestModel();
+const staleSourceSaveCurrentState = {
+  ...newerLayoutState,
+  draftDialect: "postgresql",
+  draftSourceText: "CREATE TABLE newest_draft (id BIGINT PRIMARY KEY);",
+  lastSuccessfulSnapshot: {
+    ...newerLayoutState.lastSuccessfulSnapshot,
+    dialect: "postgresql",
+    modelJson: newestParsedModel,
+    revision: 14,
+    sourceText: "CREATE TABLE newest_parsed (id BIGINT PRIMARY KEY);"
+  }
+};
+const staleSourceSavedSnapshot = {
+  ...savedLayoutSnapshot,
+  dialect: "mysql",
+  modelJson: generateSmokeBaseSession.modelJson,
+  revision: 15,
+  sourceText: "CREATE TABLE stale_saved (id BIGINT PRIMARY KEY);"
+};
+const revisionAdvancedAfterStaleSourceSave =
+  sqlEditStateRuntime.reduceSqlErdEditState(staleSourceSaveCurrentState, {
+    type: "source_autosave_saved",
+    snapshot: staleSourceSavedSnapshot
+  });
+
+assert.deepEqual(revisionAdvancedAfterStaleSourceSave, {
+  ...staleSourceSaveCurrentState,
+  lastSuccessfulSnapshot: {
+    ...staleSourceSaveCurrentState.lastSuccessfulSnapshot,
+    revision: 15
+  }
+});
+
+const mismatchedSourceSaveState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleSourceSaveCurrentState,
+  {
+    type: "source_autosave_saved",
+    snapshot: {
+      ...staleSourceSavedSnapshot,
+      id: "another-session"
+    }
+  }
+);
+
+assert.strictEqual(mismatchedSourceSaveState, staleSourceSaveCurrentState);
+
+const nonAdvancingSourceSaveState = sqlEditStateRuntime.reduceSqlErdEditState(
+  staleSourceSaveCurrentState,
+  {
+    type: "source_autosave_saved",
+    snapshot: {
+      ...staleSourceSavedSnapshot,
+      revision: 14
+    }
+  }
+);
+
+assert.strictEqual(nonAdvancingSourceSaveState, staleSourceSaveCurrentState);
 const createGenerateRequest =
   generateSessionRuntime.createSqlErdGenerateWorkspaceRequest(
     generateSmokeBaseSession
@@ -1729,6 +1846,72 @@ const missingRevisionLayoutAutosaveRequest =
 assert.equal(missingRevisionLayoutAutosaveRequest.ok, false);
 assert.equal(
   missingRevisionLayoutAutosaveRequest.reason,
+  "missing_workspace_session"
+);
+
+const parsedSourceSnapshot = {
+  ...generateSmokeBaseSession,
+  dialect: "mysql",
+  id: "session-source-autosave",
+  layoutJson: {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 120, y: 60 }]
+  },
+  modelJson: createRuntimeTestModel(),
+  revision: 20,
+  sourceText: "CREATE TABLE parsed_source (id BIGINT PRIMARY KEY);"
+};
+const currentSourceAutosaveSession = {
+  ...parsedSourceSnapshot,
+  layoutJson: autosaveLayoutJson,
+  revision: 21
+};
+const sourceAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
+    parsedSourceSnapshot,
+    currentSourceAutosaveSession
+  );
+
+assert.equal(sourceAutosaveRequest.ok, true);
+assert.equal(sourceAutosaveRequest.sessionId, "session-source-autosave");
+assert.deepEqual(sourceAutosaveRequest.payload, {
+  baseRevision: 21,
+  dialect: "mysql",
+  layoutJson: autosaveLayoutJson,
+  modelJson: parsedSourceSnapshot.modelJson,
+  sourceText: parsedSourceSnapshot.sourceText
+});
+assert.equal(Object.hasOwn(sourceAutosaveRequest.payload, "title"), false);
+assert.equal(
+  Object.hasOwn(sourceAutosaveRequest.payload, "settingsJson"),
+  false
+);
+
+const mismatchedSourceAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
+    parsedSourceSnapshot,
+    {
+      ...currentSourceAutosaveSession,
+      id: "another-session"
+    }
+  );
+
+assert.equal(mismatchedSourceAutosaveRequest.ok, false);
+assert.equal(mismatchedSourceAutosaveRequest.reason, "session_mismatch");
+
+const sampleSourceAutosaveRequest =
+  layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
+    parsedSourceSnapshot,
+    {
+      ...currentSourceAutosaveSession,
+      id: null,
+      revision: null
+    }
+  );
+
+assert.equal(sampleSourceAutosaveRequest.ok, false);
+assert.equal(
+  sampleSourceAutosaveRequest.reason,
   "missing_workspace_session"
 );
 
@@ -3100,6 +3283,43 @@ const invalidParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 
 assert.equal(invalidParseResult.ok, false);
 assert.match(invalidParseResult.error.message, /CREATE TABLE/);
+
+assert.equal(
+  ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES,
+  1024 * 1024
+);
+const oversizedUtf8Source = "한".repeat(
+  Math.floor(ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES / 3) + 1
+);
+
+assert.equal(
+  oversizedUtf8Source.length <
+    ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES,
+  true
+);
+assert.equal(
+  new TextEncoder().encode(oversizedUtf8Source).byteLength >
+    ddlParserRuntime.SQL_ERD_SOURCE_TEXT_MAX_BYTES,
+  true
+);
+
+const oversizedSourceParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: oversizedUtf8Source
+  });
+
+assert.deepEqual(oversizedSourceParseResult, {
+  ok: false,
+  error: {
+    code: "SOURCE_TOO_LARGE",
+    message: "SQL DDL source exceeds the 1 MiB UTF-8 limit."
+  }
+});
+assert.equal(
+  statusCopyRuntime.getSqlErdGenerateErrorMessage("SOURCE_TOO_LARGE"),
+  "SQL source is too large. Keep it at or below 1 MiB and try again."
+);
 
 for (const typeName of [
   "SqltoerdModelJsonV1",

@@ -4,7 +4,8 @@ export type SqlErdGenerateErrorCode =
   | "EMPTY_SOURCE"
   | "UNSUPPORTED_DIALECT"
   | "PARSE_FAILED"
-  | "NO_CREATE_TABLE";
+  | "NO_CREATE_TABLE"
+  | "SOURCE_TOO_LARGE";
 
 export function getSqlErdGenerateErrorMessage(
   errorCode: SqlErdGenerateErrorCode | string
@@ -19,6 +20,10 @@ export function getSqlErdGenerateErrorMessage(
 
   if (errorCode === "NO_CREATE_TABLE") {
     return "SQLtoERD MVP supports CREATE TABLE DDL. Add at least one CREATE TABLE statement.";
+  }
+
+  if (errorCode === "SOURCE_TOO_LARGE") {
+    return "SQL source is too large. Keep it at or below 1 MiB and try again.";
   }
 
   return "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.";

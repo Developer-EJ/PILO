@@ -12,6 +12,8 @@ export type SqlErdParseState = {
   status: "error" | "idle" | "parsing";
 };
 
+export const SQL_ERD_AUTO_PARSE_DEBOUNCE_MS = 500;
+
 export type SqlErdEditState = {
   draftDialect: SqltoerdDialect;
   draftSourceText: string;
@@ -55,6 +57,10 @@ export type SqlErdEditAction =
       requestLayoutJson: SqltoerdLayoutJsonV1;
       snapshot: SqlErdViewSession;
       type: "layout_saved";
+    }
+  | {
+      snapshot: SqlErdViewSession;
+      type: "source_autosave_saved";
     };
 
 export type SqlErdParseStart = {
@@ -183,6 +189,26 @@ export function reduceSqlErdEditState(
     };
   }
 
+  if (action.type === "source_autosave_saved") {
+    if (
+      state.lastSuccessfulSnapshot.id === null ||
+      state.lastSuccessfulSnapshot.id !== action.snapshot.id ||
+      state.lastSuccessfulSnapshot.revision === null ||
+      action.snapshot.revision === null ||
+      action.snapshot.revision <= state.lastSuccessfulSnapshot.revision
+    ) {
+      return state;
+    }
+
+    return {
+      ...state,
+      lastSuccessfulSnapshot: {
+        ...state.lastSuccessfulSnapshot,
+        revision: action.snapshot.revision
+      }
+    };
+  }
+
   if (!isSqlErdParseRequestCurrent(state, action.requestSequence)) {
     return state;
   }
@@ -239,4 +265,15 @@ export function isSqlErdParseRequestCurrent(
     state.parse.status === "parsing" &&
     state.parse.requestSequence === requestSequence
   );
+}
+
+export function isSqlErdDraftDirty(state: SqlErdEditState) {
+  return (
+    state.draftSourceText !== state.lastSuccessfulSnapshot.sourceText ||
+    state.draftDialect !== state.lastSuccessfulSnapshot.dialect
+  );
+}
+
+export function shouldScheduleSqlErdAutoParse(state: SqlErdEditState) {
+  return state.parse.status === "idle" && isSqlErdDraftDirty(state);
 }
