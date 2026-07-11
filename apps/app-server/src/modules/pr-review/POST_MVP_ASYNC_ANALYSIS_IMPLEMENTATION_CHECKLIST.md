@@ -44,7 +44,7 @@
 | 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 완료 |
 | 2-E | Review room 분석 진행/실패/retry UX | #703 | #704 | 완료 |
 | 2-F1 | stale 분석 복구와 retry/DLQ 정합성 | #709 | #715 | 완료 |
-| 2-F2 | 관측성, health와 배포 설정 | #710 | TBD | 진행 |
+| 2-F2 | 관측성, health와 배포 설정 | #710 | #736 | 진행 |
 | 2-F3 | dev E2E와 운영 재처리 절차 | #711 | TBD | 대기 |
 
 ## 공통 Stop Gate
@@ -266,6 +266,9 @@
 - [x] 중복 전달과 늦게 도착한 Worker 결과가 terminal 상태를 덮어쓰지 않는지 검증한다.
 
 ### 2-F2 Observability and Deployment (#710)
+
+> App Server 직접 실행 구조의 재현 기준과 당시 설정은
+> `PR_REVIEW_ANALYSIS_BENCHMARK_BASELINE.md`에 기록한다.
 
 - [x] 최근 24시간 pending/publishing/processing/succeeded/failed 수를 60초 상태 집계 로그로 남기고,
   SQS/ECS 기본 CloudWatch metric과 함께 추적하도록 정의한다.
