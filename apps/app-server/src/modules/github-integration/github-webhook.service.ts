@@ -85,7 +85,7 @@ export class GithubWebhookService {
 
     const existing = await this.findGithubWebhookDelivery(deliveryId);
     if (existing) {
-      if (this.syncJobService && (this.isRecoverableWebhookEnqueueFailure(existing) || existing.status === "received")) {
+      if (this.syncJobService && this.isRecoverableWebhookEnqueueFailure(existing)) {
         await this.enqueueWebhookDeliveryAndMarkReceived(deliveryId);
         const recovered = await this.findGithubWebhookDelivery(deliveryId);
         if (!recovered) throw badRequest("GitHub webhook delivery could not be recorded");

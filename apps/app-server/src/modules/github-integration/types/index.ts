@@ -156,6 +156,15 @@ export interface GithubProjectV2ListItemPayload {
 export interface GithubProjectV2SelectionPayload {
   installationId: string;
   projectV2Ids: string[];
+  syncRunId: string | null;
+  syncStatus: "queued" | "failed" | null;
+  syncError: string | null;
+}
+
+export interface GithubProjectV2DiscoveryPayload {
+  connectionRequired: boolean;
+  installationId: string;
+  projects: GithubProjectV2ListItemPayload[];
 }
 
 export interface GithubProjectV2DetailPayload

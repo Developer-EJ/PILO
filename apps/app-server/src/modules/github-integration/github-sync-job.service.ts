@@ -4,9 +4,9 @@ import {
   SendMessageCommand,
   SQSClient
 } from "@aws-sdk/client-sqs";
-import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest } from "../../common/api-error";
+import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
@@ -40,6 +40,13 @@ interface DeliveryIdRow extends QueryResultRow {
 
 class TerminalSyncJobError extends Error {}
 
+export class GithubSyncJobEnqueueError extends ApiError {
+  constructor(readonly syncRunId: string) {
+    super(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "GitHub sync job could not be enqueued");
+    this.message = "GitHub sync job could not be enqueued";
+  }
+}
+
 @Injectable()
 export class GithubSyncJobService implements OnModuleDestroy {
   private readonly logger = new Logger(GithubSyncJobService.name);
@@ -69,7 +76,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
       }));
     } catch {
       await this.failEnqueue(syncRunId, job.id);
-      throw badRequest("GitHub sync job could not be enqueued");
+      throw new GithubSyncJobEnqueueError(syncRunId);
     }
   }
 
@@ -155,8 +162,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async recoverWebhookOutbox(): Promise<void> {
     const rows = await this.database.query<DeliveryIdRow>(
       `SELECT delivery_id FROM github_webhook_deliveries
-       WHERE status = 'received'
-          OR (status = 'failed' AND error_message = 'GitHub webhook could not be enqueued')
+       WHERE status = 'failed'
+         AND error_message = 'GitHub webhook could not be enqueued'
        ORDER BY received_at ASC LIMIT 10`
     );
     for (const row of rows) {

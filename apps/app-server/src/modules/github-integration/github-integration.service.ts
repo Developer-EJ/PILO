@@ -61,6 +61,7 @@ import type {
   GithubProjectOAuthStatusPayload,
   GithubProjectV2AccessStatusPayload,
   GithubProjectV2DetailPayload,
+  GithubProjectV2DiscoveryPayload,
   GithubProjectV2FieldPayload,
   GithubProjectV2ItemPayload,
   GithubProjectV2KanbanPayload,
@@ -208,8 +209,7 @@ export class GithubIntegrationService {
         workspaceService,
         installationStateService,
         callbackStateService,
-        githubAppClient,
-        syncRunService
+        githubAppClient
       );
     this.githubSourceReadService =
       githubSourceReadService ??
@@ -228,7 +228,11 @@ export class GithubIntegrationService {
         database,
         workspaceService,
         githubAppClient,
-        projectV2WriteService
+        projectV2WriteService,
+        syncExecutorService,
+        syncRunService,
+        projectV2SyncTokenService,
+        configService
       );
     this.githubPullRequestRemoteService =
       githubPullRequestRemoteService ??
@@ -505,6 +509,16 @@ export class GithubIntegrationService {
       currentUserId,
       workspaceId,
       query
+    );
+  }
+
+  async discoverGithubProjectV2(
+    currentUserId: string,
+    workspaceId: string,
+    installationId: string
+  ): Promise<GithubProjectV2DiscoveryPayload> {
+    return this.githubProjectV2Service.discoverGithubProjectV2(
+      currentUserId, workspaceId, installationId
     );
   }
 

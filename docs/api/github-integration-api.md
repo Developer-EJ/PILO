@@ -108,9 +108,8 @@ GitHub App installation 연결을 시작하려면 현재 사용자의 GitHub OAu
 선행되어야 한다. Installation callback 처리 시 서버는 저장된 사용자 OAuth
 token으로 GitHub의 user installations 목록을 조회해 callback의
 `installation_id`가 현재 연결된 GitHub 사용자에게 접근 가능한 installation인지
-검증한 뒤 `github_installations`에 저장한다. 저장 성공 후 서버는 같은 요청 흐름에서
-초기 `full` sync run을 시도한다. 초기 sync 실패는 callback 자체를 실패시키지 않고
-서버 warning log와 실패한 sync run 기록으로 남긴다.
+검증한 뒤 `github_installations`에 저장한다. 설치 callback은 초기 `full` sync를
+시작하지 않고, 저장된 installation을 ProjectV2 선택 단계로 전달한다.
 
 ## 데이터 규칙
 
@@ -304,7 +303,7 @@ token과 scope를 제거하고 revoked timestamp를 남긴다.
 
 callback은 state와 binding cookie를 소비한 뒤, 저장된 사용자 OAuth token으로 해당
 installation이 현재 GitHub 사용자에게 접근 가능한지 검증한다. 성공하면
-`github_installations`를 upsert하고 초기 `full` sync를 시도한다.
+`github_installations`를 upsert하고 ProjectV2 선택 단계로 이동한다.
 
 Installation 목록 응답:
 
@@ -725,9 +724,10 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - Missing cookies, expired rows, already-consumed rows, or nonce/binding
   mismatches are rejected as invalid callback state. Callback state is one-time
   use and MUST NOT be accepted on replay.
-- On callback success, app-server enqueues an initial `full` sync, then redirects to
-  `returnUrl` with `302` and appends `syncRunId` as a query parameter. The run starts
-  in `queued` state; clients query the sync-run endpoint for completion.
+- On callback success, app-server does not enqueue an initial `full` sync. It redirects to
+  `returnUrl` with `302` and appends `github_installation_id` as a query parameter so the
+  client can begin ProjectV2 discovery and selection. The client starts sync only after a
+  nonempty ProjectV2 selection is saved.
 - If `returnUrl` is omitted, the callback returns the JSON payload for
   diagnostic/API-client use.
 - If `GET /github/oauth/callback` cannot save the GitHub account because
@@ -774,3 +774,47 @@ Manual `POST /workspaces/{workspaceId}/github/sync-runs` returns `202 Accepted`.
 It creates a `queued` run and publishes a durable `github-sync-jobs` message; a worker
 performs the transition `queued → running → success|failed`. A queue-publish failure
 marks the run failed and returns an API error instead of leaving a stranded queued run.
+
+## ProjectV2 setup and selected sync scope
+
+An installation callback persists the installation and redirects with the
+`github_installation_id` query parameter. It does **not** start a full sync.
+The client must call `POST /workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery`
+before showing the selection UI. Discovery stores only ProjectV2 list metadata and
+repository links. Organization installations use the installation token; a personal
+installation without a valid matching Project OAuth token with `project` scope returns:
+
+```json
+{ "success": true, "data": { "connectionRequired": true, "installationId": "...", "projects": [] } }
+```
+
+The client starts `/me/github/project-oauth/start` in that case and retries discovery
+after its callback. A successful discovery returns `connectionRequired: false` and all
+discovered ProjectV2 metadata for the installation.
+
+`PUT /workspaces/{workspaceId}/github/project-v2-selections` atomically replaces an
+installation's selection. With one or more IDs it immediately creates one queued
+`full` sync and returns `{ installationId, projectV2Ids, syncRunId, syncStatus: "queued", syncError: null }`.
+If queue publication fails after selection persistence, it returns the failed run as
+`{ syncRunId, syncStatus: "failed", syncError }` so the client can distinguish saved
+selection from failed sync. With an empty array it clears the selection, creates no sync
+job, and returns `syncRunId: null`, `syncStatus: null`, and `syncError: null`.
+Existing ProjectV2, field, item, and Board cache rows are not deleted by deselection.
+
+Normal `GET /workspaces/{workspaceId}/github/projects-v2` responses contain only
+selected ProjectV2 rows. The selection-management screen may pass `management=true`
+to retrieve the full discovered list. Full sync continues repository discovery but
+performs ProjectV2 fields, items, and Board hydration only for stored selections.
+
+## Worker rollout
+
+`github-sync-worker` shares the `pilo-app-server:latest` image and runs
+`node dist/github-sync-worker-main.js`. Before its ECS service exists, leave
+`ECS_GITHUB_SYNC_WORKER_SERVICE` empty so App Server CD deploys only the app service.
+Push an image containing the worker entry point before Terraform creates the worker
+service, then register the Terraform output in that GitHub Actions variable. Later
+deployments force both services and wait for both to become stable.
+
+Webhook outbox recovery republishes only deliveries with status `failed` and the
+`GitHub webhook could not be enqueued` marker. A normally received delivery is never
+republished by recovery or by a duplicate webhook request.
