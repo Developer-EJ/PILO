@@ -397,6 +397,84 @@ class DeliveryLeaseFakeDatabase {
   }
 }
 
+class ExpiredLeaseRecoveryFakeDatabase {
+  constructor(deliveryId) {
+    this.delivery = {
+      delivery_id: deliveryId,
+      status: "received",
+      lease_expires_at: null,
+      attempt_count: 0
+    };
+    this.failRetryRelease = true;
+    this.queries = [];
+  }
+
+  expireLease() {
+    this.delivery.lease_expires_at = receivedAt;
+  }
+
+  async queryOne(text, values = []) {
+    this.queries.push({ method: "queryOne", text, values });
+    assert.match(text, /UPDATE github_webhook_deliveries/i);
+    assert.match(text, /attempt_count\s*=\s*.*attempt_count\s*\+\s*1/i);
+
+    const claimable = this.delivery.status === "received" ||
+      (this.delivery.status === "processing" && this.delivery.lease_expires_at === receivedAt);
+    if (!claimable) return null;
+
+    this.delivery.status = "processing";
+    this.delivery.attempt_count += 1;
+    this.delivery.lease_owner = values[1];
+    this.delivery.lease_expires_at = "2026-07-11T09:10:00.000Z";
+    return {
+      delivery_id: this.delivery.delivery_id,
+      project_item_node_id: context.projectItemNodeId,
+      workspace_id: "workspace-1",
+      installation_id: "installation-1",
+      github_installation_id: context.githubInstallationId,
+      account_login: "example",
+      account_type: "Organization",
+      project_v2_id: "project-1",
+      project_v2_installation_id: "installation-1",
+      project_v2_workspace_id: "workspace-1",
+      github_project_node_id: context.projectV2NodeId
+    };
+  }
+
+  async query(text) {
+    this.queries.push({ method: "query", text });
+    assert.match(text, /status\s*=\s*'processing'/i);
+    assert.match(text, /lease_expires_at\s*<\s*now\(\)/i);
+    return this.delivery.status === "processing" && this.delivery.lease_expires_at === receivedAt
+      ? [{ delivery_id: this.delivery.delivery_id }]
+      : [];
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ method: "execute", text, values });
+
+    if (/error_message=\$3/i.test(text) && this.failRetryRelease) {
+      throw new Error("database unavailable while releasing retry");
+    }
+
+    if (/status='received'/i.test(text)) {
+      this.delivery.status = "received";
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      return { rowCount: 1 };
+    }
+
+    if (/status='processed'/i.test(text)) {
+      this.delivery.status = "processed";
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      return { rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected execute: ${text}`);
+  }
+}
+
 function createDeliveryReconcileService(database, { getProjectV2Item, reconcile, archive }) {
   return new GithubProjectV2WebhookReconcileService(
     database,
@@ -502,6 +580,45 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.equal(await expiredLeaseService.processDelivery(deliveryId), "terminal");
   assert.equal(graphqlCalls.length, 1, "expired lease must become claimable again");
   assert.match(database.updates.at(-1).text, /status='processed'/);
+}
+
+{
+  const deliveryId = "projects-v2-item-retry-release-recovery";
+  const database = new ExpiredLeaseRecoveryFakeDatabase(deliveryId);
+  const retryingService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => {
+      throw new Error("provider unavailable");
+    },
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+
+  assert.equal(await retryingService.processDelivery(deliveryId), "retry");
+  assert.equal(database.delivery.status, "processing");
+
+  database.expireLease();
+  const worker = new GithubSyncJobService(database, {}, {}, {}, {});
+  const republished = [];
+  worker.client = () => ({
+    send: async (command) => {
+      republished.push(command.constructor.name);
+      return {};
+    }
+  });
+  process.env.SQS_GITHUB_WEBHOOKS_QUEUE_URL = "queue-url";
+
+  await worker.recoverWebhookOutbox();
+  await worker.recoverWebhookOutbox();
+  assert.deepEqual(republished, ["SendMessageCommand"]);
+  assert.equal(database.delivery.status, "received");
+
+  const reclaimedService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => ({ item: { id: context.projectItemNodeId } }),
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+  assert.equal(await reclaimedService.processDelivery(deliveryId), "terminal");
+  assert.equal(database.delivery.status, "processed");
 }
 
 {

@@ -160,8 +160,13 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async recoverWebhookOutbox(): Promise<void> {
     const rows = await this.database.query<DeliveryIdRow>(
       `SELECT delivery_id FROM github_webhook_deliveries
-       WHERE status = 'failed'
+       WHERE (
+         status = 'failed'
          AND error_message = 'GitHub webhook could not be enqueued'
+       ) OR (
+         status = 'processing'
+         AND lease_expires_at < now()
+       )
        ORDER BY received_at ASC LIMIT 10`
     );
     for (const row of rows) {
@@ -169,8 +174,11 @@ export class GithubSyncJobService implements OnModuleDestroy {
         await this.enqueueWebhookDelivery(row.delivery_id);
         await this.database.execute(
           `UPDATE github_webhook_deliveries
-           SET status='received', processed_at=NULL, error_message=NULL
-           WHERE delivery_id=$1`,
+           SET status='received', processed_at=NULL, error_message=NULL, lease_owner=NULL, lease_expires_at=NULL
+           WHERE delivery_id=$1 AND (
+             (status='failed' AND error_message='GitHub webhook could not be enqueued')
+             OR (status='processing' AND lease_expires_at < now())
+           )`,
           [row.delivery_id]
         );
       } catch (error) {
