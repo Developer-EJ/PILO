@@ -115,9 +115,11 @@ class CanvasAgentProcessor:
                         local_plan.action_name,
                         local_plan.input,
                         local_plan.message,
-                        self.semantic_router.model
-                        if self.semantic_router
-                        else "local:canvas-embedding",
+                        (
+                            self.semantic_router.model
+                            if self.semantic_router
+                            else "local:canvas-embedding"
+                        ),
                     )
                     return CanvasAgentProcessResult(
                         True,

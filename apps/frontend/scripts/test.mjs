@@ -851,7 +851,7 @@ assert.match(canvasWorkspace, /useState<PiloCanvasColor>\("default"\)/);
 assert.doesNotMatch(piloTldrawCanvas, /pilo-sticky-note/);
 assert.doesNotMatch(piloCanvasShapeUtils, /PiloStickyNoteShapeUtil/);
 assert.match(piloTldrawCanvas, /event\.key\.toLowerCase\(\) !== "c"/);
-assert.match(piloTldrawCanvas, /CANVAS_AI_CHAT_HOLD_MS = 1_000/);
+assert.match(piloTldrawCanvas, /CANVAS_AI_CHAT_HOLD_MS = 500/);
 assert.match(piloTldrawCanvas, /window\.addEventListener\("keydown", startCanvasAiChatWithShortcut, true\)/);
 assert.match(piloTldrawCanvas, /window\.addEventListener\("keyup", cancelCanvasAiChatWithShortcut, true\)/);
 assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\s*updateHoldProgress/);

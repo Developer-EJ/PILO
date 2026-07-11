@@ -48,9 +48,8 @@ class CanvasEmbeddingProcessor:
                 return "canvas_shape_embedding_deleted"
 
             source = self.repository.get_shape_embedding_source(job)
-            if (
-                source is None
-                or source.get("source_text_hash") != job.get("expected_source_text_hash")
+            if source is None or source.get("source_text_hash") != job.get(
+                "expected_source_text_hash"
             ):
                 self.repository.supersede_embedding_job(job_id)
                 return "canvas_shape_embedding_superseded"
@@ -78,6 +77,7 @@ class CanvasEmbeddingProcessor:
         except Exception:
             self.repository.fail_embedding_job(job_id, "Canvas shape embedding failed")
             return "canvas_shape_embedding_failed"
+
 
 def _optional_text(value: object) -> str | None:
     return value if isinstance(value, str) else None

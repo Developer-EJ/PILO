@@ -120,7 +120,10 @@ def _sanitize_value(value: object) -> object:
 
 def _is_forbidden_key(key: str) -> bool:
     normalized = key.replace("_", "").replace("-", "").lower()
-    return any(part in normalized for part in ("token", "secret", "credential", "password", "cookie", "authorization"))
+    return any(
+        part in normalized
+        for part in ("token", "secret", "credential", "password", "cookie", "authorization")
+    )
 
 
 def _retryable_errors() -> tuple[type[BaseException], ...]:

@@ -56,6 +56,7 @@ class FakeRepository:
     def fail_embedding_job(self, _job_id, _message):
         raise AssertionError("embedding must not fail")
 
+
 def test_embedding_processor_indexes_shape_job() -> None:
     repository = FakeRepository()
     processor = CanvasEmbeddingProcessor(repository, FakeEmbedder())

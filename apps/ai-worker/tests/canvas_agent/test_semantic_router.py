@@ -37,9 +37,15 @@ class FakeRepository:
     def search_semantic_shapes(self, _workspace_id, _canvas_id, _embedding, limit=4):
         assert limit == 4
         if _embedding[0] == 0.2:
-            return [CanvasSemanticShapeMatch("shape:login", 0.92), CanvasSemanticShapeMatch("shape:other", 0.7)]
+            return [
+                CanvasSemanticShapeMatch("shape:login", 0.92),
+                CanvasSemanticShapeMatch("shape:other", 0.7),
+            ]
         if _embedding[0] == 0.3:
-            return [CanvasSemanticShapeMatch("shape:auth", 0.91), CanvasSemanticShapeMatch("shape:other", 0.7)]
+            return [
+                CanvasSemanticShapeMatch("shape:auth", 0.91),
+                CanvasSemanticShapeMatch("shape:other", 0.7),
+            ]
         return self.shapes
 
 

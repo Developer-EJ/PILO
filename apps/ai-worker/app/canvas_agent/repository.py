@@ -380,6 +380,7 @@ class PgCanvasAgentRepository:
             (message[:4096], job_id),
         )
 
+
 def _json_object(value: object) -> dict[str, object]:
     if isinstance(value, dict):
         return {str(key): item for key, item in value.items()}

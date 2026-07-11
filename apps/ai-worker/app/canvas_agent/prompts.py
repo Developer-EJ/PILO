@@ -325,7 +325,9 @@ def user_prompt(context: CanvasAgentRunContext) -> str:
                         "sourceShapeIds": ["optional selected shape id"],
                         "nodes": ["Canvas nodes using only availableCanvasTools"],
                         "connections": ["Canvas node connections using arrow or line"],
-                        "recommendedColors": ["Chosen colors from availableCanvasColors with usage"],
+                        "recommendedColors": [
+                            "Chosen colors from availableCanvasColors with usage"
+                        ],
                     },
                 },
                 {"name": "finish", "input": {"summary": "short result"}},

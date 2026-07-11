@@ -174,7 +174,9 @@ class CanvasSemanticRouter:
 
         self._prototype_embeddings = _PrototypeEmbeddings(
             shape_search=[self.embedder.embed_query(text) for text in SHAPE_SEARCH_PROTOTYPES],
-            non_shape_search=[self.embedder.embed_query(text) for text in NON_SHAPE_SEARCH_PROTOTYPES],
+            non_shape_search=[
+                self.embedder.embed_query(text) for text in NON_SHAPE_SEARCH_PROTOTYPES
+            ],
         )
         return self._prototype_embeddings
 
@@ -218,7 +220,9 @@ def _connect_request(context: CanvasAgentRunContext) -> tuple[str, str, str] | N
         return None
 
     connection_kind = "line" if _is_line_connect_prompt(normalized) else "arrow"
-    subject = re.split(r"(?:연결|이어|이어서|화살표|커넥터|선으로)", normalized, maxsplit=1)[0].strip()
+    subject = re.split(r"(?:연결|이어|이어서|화살표|커넥터|선으로)", normalized, maxsplit=1)[
+        0
+    ].strip()
     if not subject:
         return None
 
