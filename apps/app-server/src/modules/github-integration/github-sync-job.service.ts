@@ -9,6 +9,7 @@ import { QueryResultRow } from "pg";
 import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
+import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import {
@@ -55,7 +56,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly configService: GithubIntegrationConfigService,
     private readonly executor: GithubSyncExecutorService,
     private readonly tokenService: GithubProjectV2SyncTokenService,
-    private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService
+    private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService,
+    private readonly pollingService?: GithubProjectV2PollingService
   ) {}
 
   async enqueueSyncJob(syncRunId: string, requestedByUserId: string): Promise<void> {
@@ -135,6 +137,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
 
   async pollOnce(): Promise<void> {
     await this.recoverWebhookOutbox();
+    await this.enqueueDueProjectV2PollingSchedules();
     await this.pollQueue(this.requireEnv("SQS_GITHUB_SYNC_JOBS_QUEUE_URL"), "jobId", (id) => this.processSyncJob(id));
     await this.pollQueue(this.requireEnv("SQS_GITHUB_WEBHOOKS_QUEUE_URL"), "deliveryId", (id) => this.processWebhookDelivery(id));
   }
@@ -164,6 +167,20 @@ export class GithubSyncJobService implements OnModuleDestroy {
     }
   }
 
+  private async enqueueDueProjectV2PollingSchedules(): Promise<void> {
+    if (!this.pollingService) return;
+    const claims = await this.pollingService.claimDueSchedules(10);
+    for (const claim of claims) {
+      try {
+        await this.enqueueSyncJob(claim.syncRunId, claim.requestedByUserId);
+      } catch (error) {
+        this.logger.warn(
+          `GitHub ProjectV2 polling run ${claim.syncRunId} could not be enqueued: ${this.errorMessage(error)}`
+        );
+      }
+    }
+  }
+
   private async acquireLease(jobId: string): Promise<SyncJobRow | null> {
     return this.database.queryOne<SyncJobRow>(
       `WITH leased AS (
@@ -181,12 +198,14 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async completeSuccess(job: SyncJobRow, summary: GithubSyncRunSummary): Promise<void> {
     await this.database.execute(`UPDATE github_sync_runs SET status='success', finished_at=now(), fetched_count=$2, created_count=$3, updated_count=$4, skipped_count=$5, error_message=NULL, cursor=$6::jsonb WHERE id=$1`, [job.sync_run_id, summary.fetchedCount, summary.createdCount, summary.updatedCount, summary.skippedCount, JSON.stringify(summary.cursor)]);
     await this.database.execute(`UPDATE github_sync_jobs SET status='success', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=NULL WHERE id=$1`, [job.id]);
+    await this.pollingService?.markRunSucceeded(job.sync_run_id);
   }
   private async completeFailure(job: SyncJobRow, message: string): Promise<void> {
     await this.database.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message=$2 WHERE id=$1`, [job.sync_run_id, message]);
     await this.database.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$2 WHERE id=$1`, [job.id, message]);
+    await this.pollingService?.markRunFailed(job.sync_run_id, message, false);
   }
-  private async failEnqueue(runId: string, jobId: string): Promise<void> { await this.database.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued' WHERE id=$1`, [runId]); await this.database.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued' WHERE id=$1`, [jobId]); }
+  private async failEnqueue(runId: string, jobId: string): Promise<void> { await this.database.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued' WHERE id=$1`, [runId]); await this.database.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued' WHERE id=$1`, [jobId]); await this.pollingService?.markRunFailed(runId, "GitHub sync job could not be enqueued", false); }
   private installation(workspaceId: string, id: string): Promise<GithubSyncInstallationRow | null> { return this.database.queryOne(`SELECT id, workspace_id, github_installation_id, account_login, account_type FROM github_installations WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private repository(workspaceId: string, id: string): Promise<GithubSyncRepositoryContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name FROM github_repositories WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private project(workspaceId: string, id: string): Promise<GithubSyncProjectV2ContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_project_node_id FROM github_projects_v2 WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }

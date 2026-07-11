@@ -30,11 +30,16 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     "GithubIntegrationConfigService",
     "GithubSyncExecutorService",
     "GithubAppClient",
+    "GithubProjectV2PollingService",
     "GithubProjectV2SyncTokenService",
     "GithubTokenEncryptionService"
   ]) {
     assert.match(workerModule, new RegExp(provider));
   }
+  assert.match(
+    workerModule,
+    /providers:\s*\[[\s\S]*?GithubProjectV2PollingService,\s*\n\s*GithubProjectV2SyncTokenService/
+  );
   for (const excludedModule of [
     "PrReviewModule",
     "AgentModule",
@@ -81,6 +86,97 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   received.push({ Body: JSON.stringify({ jobId: "job-1" }), ReceiptHandle: "receipt-2" });
   await worker.pollQueue("queue-url", "jobId", async () => "terminal");
   assert.deepEqual(commands.slice(-2), ["ReceiveMessageCommand", "DeleteMessageCommand"]);
+}
+
+{
+  const events = [];
+  const worker = new GithubSyncJobService(
+    { query: async () => [] },
+    {},
+    {},
+    {},
+    {},
+    {
+      claimDueSchedules: async () => [{ syncRunId, requestedByUserId: userId }]
+    }
+  );
+  worker.recoverWebhookOutbox = async () => { events.push("recover-webhooks"); };
+  worker.enqueueSyncJob = async (runId, requestedByUserId) => {
+    events.push(`enqueue:${runId}:${requestedByUserId}`);
+  };
+  worker.pollQueue = async (queueUrl) => { events.push(`queue:${queueUrl}`); };
+  process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
+  process.env.SQS_GITHUB_WEBHOOKS_QUEUE_URL = "webhook-queue";
+
+  await worker.pollOnce();
+
+  assert.deepEqual(events, [
+    "recover-webhooks",
+    `enqueue:${syncRunId}:${userId}`,
+    "queue:sync-queue",
+    "queue:webhook-queue"
+  ]);
+}
+
+{
+  const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
+  const terminalCalls = [];
+  const worker = new GithubSyncJobService(
+    { execute: async () => ({ rowCount: 1 }) },
+    { getGithubAppConfig: () => ({}) },
+    { runGithubSyncTarget: async () => ({ fetchedCount: 1, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} }) },
+    { resolvePersonalProjectV2UserAccessToken: async () => null },
+    {},
+    {
+      markRunSucceeded: async (runId) => terminalCalls.push(["success", runId]),
+      markRunFailed: async (...args) => terminalCalls.push(["failed", ...args])
+    }
+  );
+  worker.acquireLease = async () => job;
+  worker.installation = async () => ({ id: installationId });
+
+  assert.equal(await worker.processSyncJob("job-1"), "terminal");
+  assert.deepEqual(terminalCalls, [["success", syncRunId]]);
+}
+
+{
+  const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 3 };
+  const terminalCalls = [];
+  const worker = new GithubSyncJobService(
+    { execute: async () => ({ rowCount: 1 }) },
+    { getGithubAppConfig: () => ({}) },
+    { runGithubSyncTarget: async () => { throw new Error("provider unavailable"); } },
+    { resolvePersonalProjectV2UserAccessToken: async () => null },
+    {},
+    {
+      markRunFailed: async (...args) => terminalCalls.push(args)
+    }
+  );
+  worker.acquireLease = async () => job;
+  worker.installation = async () => ({ id: installationId });
+
+  assert.equal(await worker.processSyncJob("job-1"), "terminal");
+  assert.deepEqual(terminalCalls, [[syncRunId, "provider unavailable", false]]);
+}
+
+{
+  const failedRuns = [];
+  const worker = new GithubSyncJobService(
+    {
+      queryOne: async () => ({ id: "job-1" }),
+      execute: async () => ({ rowCount: 1 })
+    },
+    {},
+    {},
+    {},
+    {},
+    { markRunFailed: async (...args) => failedRuns.push(args) }
+  );
+  worker.client = () => ({ send: async () => { throw new Error("SQS unavailable"); } });
+  process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
+
+  await assert.rejects(() => worker.enqueueSyncJob(syncRunId, userId));
+  assert.deepEqual(failedRuns, [[syncRunId, "GitHub sync job could not be enqueued", false]]);
 }
 
 {

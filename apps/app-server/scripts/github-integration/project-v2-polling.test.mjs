@@ -35,6 +35,10 @@ class FakeDatabase {
     this.queries.push({ method: "query", text, values });
     return this.claimedRows;
   }
+
+  async execute(text, values = []) {
+    this.queries.push({ method: "execute", text, values });
+  }
 }
 
 {
@@ -83,6 +87,47 @@ class FakeDatabase {
   assert.match(claim.text, /lease_owner = \$2/i);
   assert.match(claim.text, /lease_expires_at = now\(\) \+ interval '10 minutes'/i);
   assert.equal(claim.values[0], 3);
+}
+
+{
+  const syncRunId = "77777777-7777-4777-8777-777777777777";
+  const database = new FakeDatabase();
+  const service = new GithubProjectV2PollingService(database);
+
+  await service.markRunSucceeded(syncRunId);
+
+  const [completion] = database.queries;
+  assert.match(completion.text, /active_sync_run_id = NULL/i);
+  assert.match(completion.text, /lease_owner = NULL/i);
+  assert.match(completion.text, /next_poll_at = now\(\) \+ interval '1 minute'/i);
+  assert.match(completion.text, /failure_count = 0/i);
+  assert.deepEqual(completion.values, [syncRunId]);
+}
+
+{
+  const syncRunId = "88888888-8888-4888-8888-888888888888";
+  const database = new FakeDatabase();
+  const service = new GithubProjectV2PollingService(database);
+
+  await service.markRunFailed(syncRunId, "provider unavailable", false);
+
+  const [completion] = database.queries;
+  assert.match(completion.text, /active_sync_run_id = NULL/i);
+  assert.match(completion.text, /next_poll_at = now\(\) \+ interval '5 minutes'/i);
+  assert.match(completion.text, /failure_count = failure_count \+ 1/i);
+  assert.match(completion.text, /last_error = \$2/i);
+  assert.deepEqual(completion.values, [syncRunId, "provider unavailable"]);
+}
+
+{
+  const syncRunId = "99999999-9999-4999-8999-999999999999";
+  const database = new FakeDatabase();
+  const service = new GithubProjectV2PollingService(database);
+
+  await service.markRunFailed(syncRunId, "GitHub API rate limit exceeded", true);
+
+  const [completion] = database.queries;
+  assert.match(completion.text, /next_poll_at = now\(\) \+ interval '30 minutes'/i);
 }
 
 {

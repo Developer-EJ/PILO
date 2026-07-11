@@ -143,4 +143,41 @@ export class GithubProjectV2PollingService {
       requestedByUserId: row.requested_by_user_id
     }));
   }
+
+  async markRunSucceeded(syncRunId: string): Promise<void> {
+    await this.database.execute(
+      `
+        UPDATE github_project_v2_polling_schedules
+        SET
+          active_sync_run_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          next_poll_at = now() + interval '1 minute',
+          failure_count = 0,
+          last_error = NULL,
+          updated_at = now()
+        WHERE active_sync_run_id = $1
+      `,
+      [syncRunId]
+    );
+  }
+
+  async markRunFailed(syncRunId: string, message: string, isRateLimited: boolean): Promise<void> {
+    const retryInterval = isRateLimited ? "30 minutes" : "5 minutes";
+    await this.database.execute(
+      `
+        UPDATE github_project_v2_polling_schedules
+        SET
+          active_sync_run_id = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          next_poll_at = now() + interval '${retryInterval}',
+          failure_count = failure_count + 1,
+          last_error = $2,
+          updated_at = now()
+        WHERE active_sync_run_id = $1
+      `,
+      [syncRunId, message.slice(0, 1000)]
+    );
+  }
 }
