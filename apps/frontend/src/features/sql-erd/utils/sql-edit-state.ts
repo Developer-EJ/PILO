@@ -38,6 +38,7 @@ export type SqlErdEditAction =
       type: "parse_finished";
     }
   | {
+      requestLayoutJson: SqltoerdLayoutJsonV1;
       requestSequence: number;
       snapshot: SqlErdViewSession;
       type: "parse_succeeded";
@@ -123,9 +124,19 @@ export function reduceSqlErdEditState(
   }
 
   if (action.type === "session_loaded") {
+    const shouldPreserveDraft =
+      state.lastSuccessfulSnapshot.id !== null &&
+      state.lastSuccessfulSnapshot.id === action.snapshot.id &&
+      (state.draftSourceText !== state.lastSuccessfulSnapshot.sourceText ||
+        state.draftDialect !== state.lastSuccessfulSnapshot.dialect);
+
     return {
-      draftDialect: action.snapshot.dialect,
-      draftSourceText: action.snapshot.sourceText,
+      draftDialect: shouldPreserveDraft
+        ? state.draftDialect
+        : action.snapshot.dialect,
+      draftSourceText: shouldPreserveDraft
+        ? state.draftSourceText
+        : action.snapshot.sourceText,
       lastSuccessfulSnapshot: action.snapshot,
       parse: createIdleParseState(state.parse.requestSequence + 1)
     };
@@ -172,7 +183,7 @@ export function reduceSqlErdEditState(
     };
   }
 
-  if (!isCurrentParseRequest(state, action.requestSequence)) {
+  if (!isSqlErdParseRequestCurrent(state, action.requestSequence)) {
     return state;
   }
 
@@ -188,10 +199,20 @@ export function reduceSqlErdEditState(
   }
 
   if (action.type === "parse_succeeded") {
+    const shouldApplySavedLayout = areSqltoerdLayoutsEqual(
+      state.lastSuccessfulSnapshot.layoutJson,
+      action.requestLayoutJson
+    );
+
     return {
       draftDialect: action.snapshot.dialect,
       draftSourceText: action.snapshot.sourceText,
-      lastSuccessfulSnapshot: action.snapshot,
+      lastSuccessfulSnapshot: {
+        ...action.snapshot,
+        layoutJson: shouldApplySavedLayout
+          ? action.snapshot.layoutJson
+          : state.lastSuccessfulSnapshot.layoutJson
+      },
       parse: createIdleParseState(action.requestSequence)
     };
   }
@@ -210,7 +231,7 @@ function createIdleParseState(requestSequence: number): SqlErdParseState {
   };
 }
 
-function isCurrentParseRequest(
+export function isSqlErdParseRequestCurrent(
   state: SqlErdEditState,
   requestSequence: number
 ) {

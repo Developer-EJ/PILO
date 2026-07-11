@@ -1342,6 +1342,13 @@ assert.equal(staleParseStart.requestSequence, 3);
 assert.equal(staleParseStart.state.parse.status, "parsing");
 assert.equal(staleParseStart.session.sourceText, "SELECT 1;");
 assert.equal(staleParseStart.session.dialect, "mysql");
+assert.equal(
+  sqlEditStateRuntime.isSqlErdParseRequestCurrent(
+    staleParseStart.state,
+    staleParseStart.requestSequence
+  ),
+  true
+);
 
 const latestDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
   staleParseStart.state,
@@ -1359,6 +1366,7 @@ const staleSuccessState = sqlEditStateRuntime.reduceSqlErdEditState(
   latestDraftState,
   {
     type: "parse_succeeded",
+    requestLayoutJson: staleParseStart.session.layoutJson,
     requestSequence: staleParseStart.requestSequence,
     snapshot: staleSuccessSnapshot
   }
@@ -1378,6 +1386,13 @@ const staleFailureState = sqlEditStateRuntime.reduceSqlErdEditState(
 
 assert.strictEqual(staleSuccessState, latestDraftState);
 assert.strictEqual(staleFailureState, latestDraftState);
+assert.equal(
+  sqlEditStateRuntime.isSqlErdParseRequestCurrent(
+    latestDraftState,
+    staleParseStart.requestSequence
+  ),
+  false
+);
 
 const latestParseStart =
   sqlEditStateRuntime.beginSqlErdParse(latestDraftState);
@@ -1412,6 +1427,7 @@ const successfulSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
   successfulParseStart.state,
   {
     type: "parse_succeeded",
+    requestLayoutJson: successfulParseStart.session.layoutJson,
     requestSequence: successfulParseStart.requestSequence,
     snapshot: successfulSnapshot
   }
@@ -1433,6 +1449,40 @@ const locallyChangedLayout = {
   version: 1,
   tableLayouts: [{ tableId: "table.users", x: 800, y: 400 }]
 };
+const layoutDuringGenerateParseStart =
+  sqlEditStateRuntime.beginSqlErdParse(successfulSqlEditState);
+const layoutChangedDuringGenerateState =
+  sqlEditStateRuntime.reduceSqlErdEditState(
+    layoutDuringGenerateParseStart.state,
+    {
+      type: "layout_changed",
+      layoutJson: locallyChangedLayout
+    }
+  );
+const layoutGenerateSavedSnapshot = {
+  ...layoutDuringGenerateParseStart.session,
+  revision: 9
+};
+const layoutPreservedAfterGenerateState =
+  sqlEditStateRuntime.reduceSqlErdEditState(
+    layoutChangedDuringGenerateState,
+    {
+      type: "parse_succeeded",
+      requestLayoutJson: layoutDuringGenerateParseStart.session.layoutJson,
+      requestSequence: layoutDuringGenerateParseStart.requestSequence,
+      snapshot: layoutGenerateSavedSnapshot
+    }
+  );
+
+assert.equal(
+  layoutPreservedAfterGenerateState.lastSuccessfulSnapshot.revision,
+  9
+);
+assert.deepEqual(
+  layoutPreservedAfterGenerateState.lastSuccessfulSnapshot.layoutJson,
+  locallyChangedLayout
+);
+
 const layoutChangedSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
   latestParseFailureState,
   {
@@ -1476,6 +1526,42 @@ assert.equal(
   latestParseFailureState.parse.requestSequence + 1
 );
 assert.equal(loadedSqlEditState.parse.status, "idle");
+
+const dirtyLoadedSqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
+  sqlEditStateRuntime.reduceSqlErdEditState(loadedSqlEditState, {
+    type: "draft_source_changed",
+    sourceText: "CREATE TABLE local_draft (id BIGINT PRIMARY KEY);"
+  }),
+  {
+    type: "draft_dialect_changed",
+    dialect: "mysql"
+  }
+);
+const refreshedSameSessionSnapshot = {
+  ...loadedSnapshot,
+  revision: 14,
+  sourceText: "CREATE TABLE server_refresh (id BIGINT PRIMARY KEY);"
+};
+const refreshedDirtySqlEditState = sqlEditStateRuntime.reduceSqlErdEditState(
+  dirtyLoadedSqlEditState,
+  {
+    type: "session_loaded",
+    snapshot: refreshedSameSessionSnapshot
+  }
+);
+
+assert.equal(
+  refreshedDirtySqlEditState.draftSourceText,
+  dirtyLoadedSqlEditState.draftSourceText
+);
+assert.equal(
+  refreshedDirtySqlEditState.draftDialect,
+  dirtyLoadedSqlEditState.draftDialect
+);
+assert.deepEqual(
+  refreshedDirtySqlEditState.lastSuccessfulSnapshot,
+  refreshedSameSessionSnapshot
+);
 
 const pendingLayoutSnapshot = {
   ...loadedSnapshot,
@@ -3174,7 +3260,9 @@ assert.match(panel, /getSession/);
 assert.match(panel, /sessionId: string/);
 assert.match(panel, /createSqlErdEditState/);
 assert.match(panel, /beginSqlErdParse/);
+assert.match(panel, /isSqlErdParseRequestCurrent/);
 assert.match(panel, /reduceSqlErdEditState/);
+assert.match(panel, /sqlErdEditStateRef/);
 assert.match(
   panel,
   /const \[sqlErdEditState, setSqlErdEditState\] = useState/
@@ -3197,6 +3285,30 @@ assert.match(panel, /getSqlErdSignInRequiredState/);
 assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(panel, /handleGenerate/);
 assert.match(panel, /updateSession/);
+const generateHandlerSource = panel.slice(
+  panel.indexOf("const handleGenerate"),
+  panel.indexOf("useEffect", panel.indexOf("const handleGenerate"))
+);
+assert.equal(
+  [
+    ...generateHandlerSource.matchAll(
+      /isSqlErdParseRequestCurrent\(/g
+    )
+  ].length,
+  2
+);
+assert.doesNotMatch(
+  generateHandlerSource,
+  /setPendingLayoutAutosaveJson\(null\)/
+);
+assert.match(
+  generateHandlerSource,
+  /setPendingLayoutAutosaveJson\(\(currentLayoutJson\) =>/
+);
+assert.match(
+  generateHandlerSource,
+  /areSqltoerdLayoutsEqual\(\s*currentLayoutJson,\s*parseStart\.session\.layoutJson\s*\)/
+);
 assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
 assert.match(panel, /label: "Save conflict"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
