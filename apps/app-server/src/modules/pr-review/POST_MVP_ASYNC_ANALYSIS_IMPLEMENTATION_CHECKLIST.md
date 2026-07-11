@@ -41,7 +41,7 @@
 | 2-A | Scope, API, 상태 전이와 Worker 경계 확정 | #652 | #658 | 완료 |
 | 2-B | `analyzing` 세션 생성과 durable Job enqueue | #659 | #664 | 완료 |
 | 2-C | AI Worker PR 분석 processor | #666 | #668 | 완료 |
-| 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | TBD | 진행 |
+| 2-D | 분석 결과 원자 저장과 stale/idempotency guard | #670 | #699 | 진행 |
 | 2-E | Review room 분석 진행/실패/retry UX | TBD | TBD | 대기 |
 | 2-F | 운영 복구, 관측성, 배포 검증 | TBD | TBD | 대기 |
 
@@ -189,7 +189,7 @@
 
 ## 2-D Atomic Result Persistence and Guards
 
-> Tracking: Issue #670. Result/failure handoff, stale head terminalization, atomic graph persistence, and duplicate delivery handling are implemented in this slice. PR number is added when the implementation PR is opened.
+> Tracking: Issue #670, PR #699. Result/failure handoff, stale head terminalization, atomic graph persistence, and duplicate delivery handling are implemented in this slice.
 
 목표:
 
