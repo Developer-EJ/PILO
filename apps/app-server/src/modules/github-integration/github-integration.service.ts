@@ -516,10 +516,11 @@ export class GithubIntegrationService {
   async discoverGithubProjectV2(
     currentUserId: string,
     workspaceId: string,
-    installationId: string
+    installationId: string,
+    input: { repositoryId?: unknown } | undefined
   ): Promise<GithubProjectV2DiscoveryPayload> {
     return this.githubProjectV2Service.discoverGithubProjectV2(
-      currentUserId, workspaceId, installationId
+      currentUserId, workspaceId, installationId, input
     );
   }
 
