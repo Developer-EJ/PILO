@@ -111,6 +111,9 @@ export class PrReviewAnalysisJobPublisherService
         headSha: claim.head_sha
       });
       await this.markQueued(claim);
+      this.logger.log(
+        `PR Review analysis published job_id=${claim.id} session_id=${claim.review_session_id}`
+      );
     } catch {
       await this.markPublishFailure(claim);
     }
@@ -206,6 +209,9 @@ export class PrReviewAnalysisJobPublisherService
           claim.publish_claim_token
         ]
       );
+      this.logger.warn(
+        `PR Review analysis publish retry scheduled job_id=${claim.id} session_id=${claim.review_session_id} attempt=${attemptCount}`
+      );
       return;
     }
 
@@ -254,7 +260,7 @@ export class PrReviewAnalysisJobPublisherService
 
     if (failed) {
       this.logger.warn(
-        `PR Review analysis publish retries exhausted job_id=${claim.id}`
+        `PR Review analysis publish retries exhausted job_id=${claim.id} session_id=${claim.review_session_id}`
       );
     }
   }

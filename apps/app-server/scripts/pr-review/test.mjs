@@ -223,6 +223,7 @@ assert.match(prReviewAnalysisJobPublisher, /publishDueJobs/);
 assert.match(prReviewAnalysisJobRecovery, /PROCESSING_STALE_TIMEOUT_SECONDS/);
 assert.match(prReviewAnalysisJobRecovery, /QUEUED_STALE_TIMEOUT_SECONDS/);
 assert.match(prReviewAnalysisJobRecovery, /recoverStaleJobs/);
+assert.match(prReviewAnalysisJobRecovery, /logStatusCounts/);
 assert.match(prReviewAnalysisJobMigration, /CREATE TABLE public\.pr_review_analysis_jobs/);
 assert.match(prReviewAnalysisJobMigration, /UNIQUE \(review_session_id\)/);
 assert.match(
