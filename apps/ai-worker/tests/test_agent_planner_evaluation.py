@@ -160,3 +160,12 @@ def test_fixed_korean_suite_loads() -> None:
         "get_meeting_report",
         "summarize_meeting_report",
     }
+    expectations = {case.case_id: case.expectation for case in suite.cases}
+    assert expectations["calendar_today"].input_contains == {
+        "start": "2026-07-11",
+        "end": "2026-07-11",
+    }
+    assert expectations["calendar_next_monday"].input_contains == {
+        "start": "2026-07-13",
+        "end": "2026-07-13",
+    }

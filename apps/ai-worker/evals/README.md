@@ -2,7 +2,8 @@
 
 `agent_planner_korean_v1.json`은 Calendar와 MeetingReport의 한국어 고정 평가셋이다. 도구 스키마는
 App Server의 `CalendarAgentToolsService`와 `MeetingAgentToolsService`가 outbox에 담는 스냅샷과
-동일하게 유지한다.
+동일하게 유지한다. App Server의 `scripts/agent/agent-job.test.mjs`가 실제 registry snapshot과 이 파일의
+`tools`를 전체 비교하므로, schema가 달라지면 CI가 실패한다.
 
 아래 명령은 OpenAI planner만 호출한다. SQS, DB, Agent handoff, Calendar/MeetingReport 도구 실행과
 confirmation 승인은 수행하지 않는다.
