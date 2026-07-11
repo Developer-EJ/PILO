@@ -73,6 +73,15 @@ const liveKitEgressService = await readSource(
 const liveKitTokenService = await readSource(
   "../src/modules/meeting/livekit-token.service.ts"
 );
+const liveKitWebhookController = await readSource(
+  "../src/modules/meeting/livekit-webhook.controller.ts"
+);
+const liveKitWebhookService = await readSource(
+  "../src/modules/meeting/livekit-webhook.service.ts"
+);
+const liveKitWebhookMigration = await readSource(
+  "../../../db/migrations/032_create_livekit_webhook_deliveries.sql"
+);
 const workspaceMeetingConstraintMigration = await readSource(
   "../../../db/migrations/006_update_workspace_and_meeting_recording_constraints.sql"
 );
@@ -406,6 +415,14 @@ assert.match(liveKitTokenService, /canSubscribe:\s*true/);
 assert.match(liveKitTokenService, /LIVEKIT_API_KEY/);
 assert.match(liveKitTokenService, /LIVEKIT_API_SECRET/);
 assert.match(liveKitTokenService, /LIVEKIT_URL/);
+assert.match(liveKitWebhookController, /@Controller\("livekit"\)/);
+assert.match(liveKitWebhookController, /@Post\("webhooks"\)/);
+assert.doesNotMatch(liveKitWebhookController, /@UseGuards/);
+assert.match(liveKitWebhookService, /WebhookReceiver/);
+assert.match(liveKitWebhookService, /participant_left/);
+assert.match(liveKitWebhookService, /participant_connection_aborted/);
+assert.match(liveKitWebhookService, /livekit_webhook_deliveries/);
+assert.match(liveKitWebhookMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(
   terraformSecretsModule,
   /app_server_ecs_secret_names = \[[^\]]*"LIVEKIT_WS_URL"/
@@ -420,6 +437,7 @@ assert.match(devTerraformMain, /LIVEKIT_EGRESS_S3_PREFIX\s*=\s*"recordings\/meet
 await import("./meeting/livekit-egress.test.mjs");
 await import("./auth/test.mjs");
 await import("./meeting/livekit-token.test.mjs");
+await import("./meeting/livekit-webhook.test.mjs");
 await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
 await import("./meeting/test.mjs");
