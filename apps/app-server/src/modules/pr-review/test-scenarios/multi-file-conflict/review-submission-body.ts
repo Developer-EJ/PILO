@@ -15,22 +15,27 @@ export function buildReviewSubmissionBody(
 ): string {
   const progress = calculateReviewProgress(input.counts);
   const decisionSummary = [
-    `Approved ${input.counts.approved}`,
-    `Discuss ${input.counts.discussionNeeded}`,
-    `Unknown ${input.counts.unknown}`,
-    `Not reviewed ${input.counts.notReviewed}`
-  ].join(" / ");
+    `- Approved: ${input.counts.approved}`,
+    `- Discussion needed: ${input.counts.discussionNeeded}`,
+    `- Needs classification: ${input.counts.unknown}`,
+    `- Not reviewed: ${input.counts.notReviewed}`
+  ].join("\n");
 
-  const readiness = progress.complete
-    ? "All files have saved decisions."
-    : `${input.counts.notReviewed} file(s) still need review decisions.`;
+  const unresolvedCount = input.counts.unknown + input.counts.notReviewed;
+  const readiness =
+    unresolvedCount === 0
+      ? "Review decisions are ready to submit."
+      : `${unresolvedCount} file(s) still need a final classification.`;
 
   return [
-    `## ${input.pullRequestTitle}`,
+    `## Review result: ${input.pullRequestTitle}`,
     "",
-    `Reviewer: @${input.reviewerLogin}`,
-    `Progress: ${formatReviewProgress(progress)}`,
-    `Decisions: ${decisionSummary}`,
+    `Submitted by @${input.reviewerLogin}`,
+    `Review progress: ${formatReviewProgress(progress)}`,
+    "",
+    "### Decision summary",
+    decisionSummary,
+    "",
     readiness
   ].join("\n");
 }

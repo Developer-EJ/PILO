@@ -14,17 +14,19 @@ export interface ReviewProgress {
 export function calculateReviewProgress(
   counts: ReviewDecisionCounts
 ): ReviewProgress {
-  const reviewed =
-    counts.approved + counts.discussionNeeded + counts.unknown;
-  const total = reviewed + counts.notReviewed;
+  const reviewed = counts.approved + counts.discussionNeeded;
+  const total = reviewed + counts.unknown + counts.notReviewed;
 
   return {
     reviewed,
     total,
-    complete: total > 0 && reviewed === total
+    complete: total === 0 || reviewed === total
   };
 }
 
 export function formatReviewProgress(progress: ReviewProgress): string {
-  return `${progress.reviewed} / ${progress.total} files reviewed`;
+  const percentage =
+    progress.total === 0 ? 100 : Math.round((progress.reviewed / progress.total) * 100);
+
+  return `${progress.reviewed} of ${progress.total} reviewed (${percentage}%)`;
 }

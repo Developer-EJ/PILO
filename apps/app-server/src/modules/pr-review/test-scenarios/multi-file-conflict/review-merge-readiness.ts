@@ -4,6 +4,7 @@ export interface MergeReadinessInput {
   conflictStatus: "checking" | "clean" | "conflicted" | "unknown";
   reviewSubmitted: boolean;
   progress: ReviewProgress;
+  requiredChecks: "pending" | "passing" | "failing";
 }
 
 export interface MergeReadinessResult {
@@ -17,15 +18,19 @@ export function evaluateMergeReadiness(
   const blockers: string[] = [];
 
   if (input.conflictStatus !== "clean") {
-    blockers.push("Resolve every conflict before merging.");
+    blockers.push("The pull request must have a clean merge status.");
+  }
+
+  if (input.requiredChecks !== "passing") {
+    blockers.push("Every required check must pass before merging.");
   }
 
   if (!input.reviewSubmitted) {
-    blockers.push("Submit the GitHub review before merging.");
+    blockers.push("A GitHub review submission is required.");
   }
 
   if (!input.progress.complete) {
-    blockers.push("Save a decision for every changed file.");
+    blockers.push("Every changed file needs a final review decision.");
   }
 
   return {
