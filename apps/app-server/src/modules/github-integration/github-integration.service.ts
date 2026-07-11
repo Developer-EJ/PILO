@@ -35,6 +35,7 @@ import type {
   ListGithubPullRequestsQuery,
   ListGithubProjectsV2Query,
   ListGithubRepositoriesQuery,
+  ReplaceGithubProjectV2SelectionsRequest,
   StartGithubAppInstallationRequest,
   StartGithubSyncRunRequest,
   StartGithubOAuthRequest
@@ -63,6 +64,7 @@ import type {
   GithubProjectV2ItemPayload,
   GithubProjectV2KanbanPayload,
   GithubProjectV2ListItemPayload,
+  GithubProjectV2SelectionPayload,
   GithubProjectV2StatusOptionPayload,
   GithubPullRequestConflictInputsPayload,
   GithubPullRequestConflictStatusPayload,
@@ -499,6 +501,18 @@ export class GithubIntegrationService {
       currentUserId,
       workspaceId,
       query
+    );
+  }
+
+  async replaceGithubProjectV2Selections(
+    currentUserId: string,
+    workspaceId: string,
+    input: ReplaceGithubProjectV2SelectionsRequest | undefined
+  ): Promise<GithubProjectV2SelectionPayload> {
+    return this.githubProjectV2Service.replaceGithubProjectV2Selections(
+      currentUserId,
+      workspaceId,
+      input
     );
   }
 

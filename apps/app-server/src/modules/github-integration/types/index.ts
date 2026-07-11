@@ -148,7 +148,13 @@ export interface GithubProjectV2ListItemPayload {
   closed: boolean;
   template: boolean;
   repositoryIds: string[];
+  selected: boolean;
   lastSyncedAt: string | null;
+}
+
+export interface GithubProjectV2SelectionPayload {
+  installationId: string;
+  projectV2Ids: string[];
 }
 
 export interface GithubProjectV2DetailPayload
