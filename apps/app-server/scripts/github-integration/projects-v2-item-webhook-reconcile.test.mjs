@@ -454,11 +454,10 @@ class DeliveryLeaseFakeDatabase {
     assert.match(text, /attempt_count\s*=\s*.*attempt_count\s*\+\s*1/i);
     assert.match(text, /lease_owner\s*=\s*\$2/i);
     assert.match(text, /interval '10 minutes'/i);
-    assert.match(text, /JOIN github_projects_v2/i);
-    assert.match(text, /JOIN github_project_v2_selections/i);
-    assert.match(text, /owner_type\s*=\s*'Organization'/i);
+    assert.doesNotMatch(text, /JOIN github_projects_v2/i);
+    assert.doesNotMatch(text, /JOIN github_project_v2_selections/i);
 
-    const claimable = this.projectV2Context && (
+    const claimable = (
       this.delivery.status === "received" ||
       (this.delivery.status === "processing" && this.delivery.lease_expires_at === receivedAt)
     );
@@ -471,6 +470,20 @@ class DeliveryLeaseFakeDatabase {
     return {
       delivery_id: this.delivery.delivery_id,
       project_item_node_id: context.projectItemNodeId,
+      github_installation_id: context.githubInstallationId,
+      project_v2_node_id: context.projectV2NodeId
+    };
+  }
+
+  async query(text, values = []) {
+    this.queries.push({ method: "query", text, values });
+    assert.match(text, /FROM github_installations/i);
+    assert.match(text, /JOIN github_projects_v2/i);
+    assert.match(text, /JOIN github_project_v2_selections/i);
+    assert.match(text, /owner_type\s*=\s*'Organization'/i);
+    assert.deepEqual(values, [context.githubInstallationId, context.projectV2NodeId]);
+
+    return this.projectV2Context ? [{
       workspace_id: "workspace-1",
       installation_id: "installation-1",
       github_installation_id: context.githubInstallationId,
@@ -480,7 +493,7 @@ class DeliveryLeaseFakeDatabase {
       project_v2_installation_id: "installation-1",
       project_v2_workspace_id: "workspace-1",
       github_project_node_id: context.projectV2NodeId
-    };
+    }] : [];
   }
 
   async execute(text, values = []) {
@@ -543,6 +556,7 @@ class ExpiredLeaseRecoveryFakeDatabase {
       workspace_id: "workspace-1",
       installation_id: "installation-1",
       github_installation_id: context.githubInstallationId,
+      project_v2_node_id: context.projectV2NodeId,
       account_login: "example",
       account_type: "Organization",
       project_v2_id: "project-1",
@@ -552,8 +566,22 @@ class ExpiredLeaseRecoveryFakeDatabase {
     };
   }
 
-  async query(text) {
+  async query(text, values = []) {
     this.queries.push({ method: "query", text });
+    if (/FROM github_installations/i.test(text)) {
+      assert.deepEqual(values, [context.githubInstallationId, context.projectV2NodeId]);
+      return [{
+        workspace_id: "workspace-1",
+        installation_id: "installation-1",
+        github_installation_id: context.githubInstallationId,
+        account_login: "example",
+        account_type: "Organization",
+        project_v2_id: "project-1",
+        project_v2_installation_id: "installation-1",
+        project_v2_workspace_id: "workspace-1",
+        github_project_node_id: context.projectV2NodeId
+      }];
+    }
     assert.match(text, /status\s*=\s*'failed'/i);
     assert.match(text, /status\s*=\s*'received'/i);
     assert.match(text, /status\s*=\s*'processing'/i);
@@ -664,7 +692,7 @@ class RecoveryPublicationRaceFakeDatabase {
   async queryOne(text, values = []) {
     this.queries.push({ method: "queryOne", text, values });
 
-    if (/UPDATE github_webhook_deliveries AS delivery/i.test(text)) {
+    if (/UPDATE github_webhook_deliveries\b/i.test(text)) {
       if (this.delivery.status !== "received") return null;
       this.delivery.status = "processing";
       this.delivery.lease_owner = values[1];
@@ -677,6 +705,7 @@ class RecoveryPublicationRaceFakeDatabase {
         workspace_id: "workspace-1",
         installation_id: "installation-1",
         github_installation_id: context.githubInstallationId,
+        project_v2_node_id: context.projectV2NodeId,
         account_login: "example",
         account_type: "Organization",
         project_v2_id: "project-1",
@@ -715,8 +744,22 @@ class RecoveryPublicationRaceFakeDatabase {
     throw new Error(`Unexpected queryOne: ${text}`);
   }
 
-  async query(text) {
+  async query(text, values = []) {
     this.queries.push({ method: "query", text });
+    if (/FROM github_installations/i.test(text)) {
+      assert.deepEqual(values, [context.githubInstallationId, context.projectV2NodeId]);
+      return [{
+        workspace_id: "workspace-1",
+        installation_id: "installation-1",
+        github_installation_id: context.githubInstallationId,
+        account_login: "example",
+        account_type: "Organization",
+        project_v2_id: "project-1",
+        project_v2_installation_id: "installation-1",
+        project_v2_workspace_id: "workspace-1",
+        github_project_node_id: context.projectV2NodeId
+      }];
+    }
     assert.match(text, /status\s*=\s*'failed'/i);
     assert.match(text, /status\s*=\s*'received'/i);
     assert.match(text, /GitHub webhook could not be enqueued/);
@@ -869,6 +912,127 @@ class ConcurrentPendingRecoveryFakeDatabase {
   }
 }
 
+class ReconcileFailedRecoveryFakeDatabase {
+  constructor() {
+    this.delivery = {
+      delivery_id: "reconcile-failed-delivery",
+      status: "received",
+      error_message: "GitHub ProjectV2 webhook reconcile failed",
+      lease_owner: null,
+      lease_expires_at: null
+    };
+  }
+
+  async query(text) {
+    return this.delivery.status === "received" &&
+      this.delivery.error_message === "GitHub ProjectV2 webhook reconcile failed" &&
+      text.includes("GitHub ProjectV2 webhook reconcile failed")
+      ? [{ delivery_id: this.delivery.delivery_id }]
+      : [];
+  }
+
+  async execute(text, values = []) {
+    if (/SET\s+status='received',\s+processed_at=NULL,\s+error_message='GitHub webhook enqueue is publishing'/i.test(text)) {
+      if (!text.includes("GitHub ProjectV2 webhook reconcile failed")) {
+        return { rowCount: 0 };
+      }
+      this.delivery.error_message = "GitHub webhook enqueue is publishing";
+      this.delivery.lease_owner = values[1];
+      this.delivery.lease_expires_at = "2026-07-11T09:10:00.000Z";
+      return { rowCount: 1 };
+    }
+
+    if (/SET\s+error_message=NULL/i.test(text)) {
+      this.delivery.error_message = null;
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      return { rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected execute: ${text}`);
+  }
+}
+
+class MultiWorkspaceDeliveryFakeDatabase {
+  constructor(deliveryId) {
+    this.delivery = {
+      delivery_id: deliveryId,
+      status: "received",
+      error_message: null,
+      lease_owner: null,
+      lease_expires_at: null
+    };
+    this.targets = [
+      {
+        workspace_id: "workspace-a",
+        installation_id: "installation-a",
+        github_installation_id: context.githubInstallationId,
+        account_login: "example",
+        account_type: "Organization",
+        project_v2_id: "project-a",
+        project_v2_installation_id: "installation-a",
+        project_v2_workspace_id: "workspace-a",
+        github_project_node_id: context.projectV2NodeId
+      },
+      {
+        workspace_id: "workspace-b",
+        installation_id: "installation-b",
+        github_installation_id: context.githubInstallationId,
+        account_login: "example",
+        account_type: "Organization",
+        project_v2_id: "project-b",
+        project_v2_installation_id: "installation-b",
+        project_v2_workspace_id: "workspace-b",
+        github_project_node_id: context.projectV2NodeId
+      }
+    ];
+  }
+
+  async queryOne(text, values = []) {
+    assert.match(text, /UPDATE github_webhook_deliveries\b/i);
+    if (this.delivery.status !== "received") return null;
+
+    this.delivery.status = "processing";
+    this.delivery.error_message = null;
+    this.delivery.lease_owner = values[1];
+    this.delivery.lease_expires_at = "2026-07-11T09:10:00.000Z";
+    return {
+      delivery_id: this.delivery.delivery_id,
+      project_item_node_id: context.projectItemNodeId,
+      project_v2_node_id: context.projectV2NodeId,
+      ...this.targets[0]
+    };
+  }
+
+  async query(text, values = []) {
+    assert.match(text, /FROM github_installations/i);
+    assert.deepEqual(values, [context.githubInstallationId, context.projectV2NodeId]);
+    return this.targets;
+  }
+
+  async execute(text, values = []) {
+    if (/status='processed'/i.test(text)) {
+      if (this.delivery.status !== "processing") return { rowCount: 0 };
+      this.delivery.status = "processed";
+      this.delivery.error_message = null;
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      return { rowCount: 1 };
+    }
+
+    if (/error_message=\$3/i.test(text)) {
+      if (this.delivery.status !== "processing") return { rowCount: 0 };
+      this.delivery.status = "received";
+      this.delivery.error_message = values[2];
+      this.delivery.lease_owner = null;
+      this.delivery.lease_expires_at = null;
+      return { rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected execute: ${text}`);
+  }
+}
+
 function createDeliveryReconcileService(database, { getProjectV2Item, reconcile, archive }) {
   return new GithubProjectV2WebhookReconcileService(
     database,
@@ -897,10 +1061,71 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.match(apiContract, /processing` lease[\s\S]*recovery and requeue/i);
   assert.match(apiContract, /pending publication marker/i);
   assert.match(apiContract, /publishing lease/i);
+  assert.match(apiContract, /one GitHub GraphQL target-item fetch.*all matching selected workspace targets/i);
+  assert.match(apiContract, /GitHub ProjectV2 webhook reconcile failed[\s\S]*recoverable/i);
   assert.doesNotMatch(apiContract, /receiver.*does not.*background job/i);
   assert.doesNotMatch(workerSource, /FROM github_webhook_deliveries/i);
   assert.match(reconcileSource, /SELECT delivery_id FROM github_webhook_deliveries/i);
   assert.match(reconcileSource, /status\s*=\s*'processing'\s+AND lease_expires_at < now\(\)/i);
+}
+
+{
+  const database = new MultiWorkspaceDeliveryFakeDatabase("multi-workspace-delivery");
+  let graphqlLookups = 0;
+  const reconciledWorkspaceIds = [];
+  const reconcileService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => {
+      graphqlLookups += 1;
+      return { item: { id: context.projectItemNodeId } };
+    },
+    reconcile: async (syncContext) => {
+      reconciledWorkspaceIds.push(syncContext.workspaceId);
+    },
+    archive: async () => {}
+  });
+
+  assert.equal(await reconcileService.processDelivery(database.delivery.delivery_id), "terminal");
+  assert.equal(graphqlLookups, 1);
+  assert.deepEqual(reconciledWorkspaceIds.sort(), ["workspace-a", "workspace-b"]);
+  assert.equal(database.delivery.status, "processed");
+}
+
+{
+  const database = new MultiWorkspaceDeliveryFakeDatabase("partial-multi-workspace-delivery");
+  const reconcileService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => ({ item: { id: context.projectItemNodeId } }),
+    reconcile: async (syncContext) => {
+      if (syncContext.workspaceId === "workspace-b") {
+        throw new Error("workspace-b reconciliation failed");
+      }
+    },
+    archive: async () => {}
+  });
+
+  assert.equal(await reconcileService.processDelivery(database.delivery.delivery_id), "retry");
+  assert.notEqual(database.delivery.status, "processed");
+  assert.equal(
+    database.delivery.error_message,
+    "GitHub ProjectV2 webhook reconcile failed"
+  );
+}
+
+{
+  const database = new ReconcileFailedRecoveryFakeDatabase();
+  const reconcileService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => null,
+    reconcile: async () => {},
+    archive: async () => {}
+  });
+  const published = [];
+
+  await reconcileService.recoverDeliveries(async (deliveryId) => {
+    published.push(deliveryId);
+  });
+
+  assert.deepEqual(published, ["reconcile-failed-delivery"]);
+  assert.equal(database.delivery.error_message, null);
+  assert.equal(database.delivery.lease_owner, null);
 }
 
 {
