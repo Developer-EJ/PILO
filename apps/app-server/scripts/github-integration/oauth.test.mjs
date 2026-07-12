@@ -25,6 +25,18 @@ class FakeDatabase {
     return this.rows.shift() ?? null;
   }
 
+  async query(text, values = []) {
+    this.queries.push({ text, values });
+    if (this.handlers.query) {
+      return this.handlers.query(text, values);
+    }
+    return [];
+  }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+
   async execute(text, values = []) {
     this.queries.push({ text, values });
     if (this.handlers.execute) {
@@ -66,16 +78,18 @@ const configService = {
 const connectedRow = {
   github_user_id: "12345678",
   github_login: "juhyeong",
-  github_token_scope: "",
-  github_connected_at: fixedNow,
-  github_revoked_at: null
+  access_token_encrypted: tokenEncryption.encryptToken("plain-access-token", baseConfig),
+  token_scope: "",
+  connected_at: fixedNow,
+  revoked_at: null
 };
 const projectOAuthConnectedRow = {
-  github_project_user_id: "12345678",
-  github_project_login: "juhyeong",
-  github_project_token_scope: "read:user,user:email,project",
-  github_project_connected_at: fixedNow,
-  github_project_revoked_at: null
+  github_user_id: "12345678",
+  github_login: "juhyeong",
+  access_token_encrypted: tokenEncryption.encryptToken("project-access-token", projectOAuthConfig),
+  token_scope: "read:user,user:email,project",
+  connected_at: fixedNow,
+  revoked_at: null
 };
 
 {
@@ -245,19 +259,12 @@ const projectOAuthConnectedRow = {
         };
       }
 
-      if (/SELECT[\s\S]*github_login[\s\S]*FROM users/i.test(text)) {
-        return {
-          github_login: "juhyeong",
-          github_connected_at: fixedNow,
-          github_revoked_at: null
-        };
+      if (/FROM github_oauth_connections/i.test(text)) {
+        return connectedRow;
       }
 
-      if (/UPDATE users/i.test(text)) {
-        return {
-          ...projectOAuthConnectedRow,
-          github_project_connected_at: fixedNow
-        };
+      if (/INSERT INTO github_oauth_connections/i.test(text)) {
+        return projectOAuthConnectedRow;
       }
 
       return undefined;
@@ -309,12 +316,13 @@ const projectOAuthConnectedRow = {
   });
 
   const update = database.queries.at(-1);
-  assert.match(update.text, /github_project_access_token_encrypted = \$4/i);
+  assert.match(update.text, /INSERT INTO github_oauth_connections/i);
   assert.equal(update.values[0], "user-1");
-  assert.equal(update.values[1], 12345678);
-  assert.equal(update.values[2], "juhyeong");
-  assert.notEqual(update.values[3], "plain-project-access-token");
-  assert.match(update.values[3], /^v1:/);
+  assert.equal(update.values[1], "project_v2");
+  assert.equal(update.values[2], 12345678);
+  assert.equal(update.values[3], "juhyeong");
+  assert.notEqual(update.values[4], "plain-project-access-token");
+  assert.match(update.values[4], /^v1:/);
 }
 
 {
@@ -445,11 +453,11 @@ const projectOAuthConnectedRow = {
 
   assert.deepEqual(result, { disconnected: true });
   assert.match(
-    database.queries[0].text,
-    /github_project_access_token_encrypted = NULL/i
+    database.queries[1].text,
+    /UPDATE github_oauth_connections/i
   );
-  assert.match(database.queries[0].text, /github_project_revoked_at = now\(\)/i);
-  assert.deepEqual(database.queries[0].values, ["user-1"]);
+  assert.match(database.queries[1].text, /access_token_encrypted = NULL/i);
+  assert.deepEqual(database.queries[1].values, ["user-1", "project_v2"]);
 }
 
 {
@@ -472,11 +480,8 @@ const projectOAuthConnectedRow = {
         };
       }
 
-      if (/UPDATE users/i.test(text)) {
-        return {
-          ...connectedRow,
-          github_connected_at: fixedNow
-        };
+      if (/INSERT INTO github_oauth_connections/i.test(text)) {
+        return connectedRow;
       }
 
       return undefined;
@@ -522,12 +527,13 @@ const projectOAuthConnectedRow = {
   });
 
   const update = database.queries.at(-1);
-  assert.match(update.text, /UPDATE users/i);
+  assert.match(update.text, /INSERT INTO github_oauth_connections/i);
   assert.equal(update.values[0], "user-1");
-  assert.equal(update.values[1], 12345678);
-  assert.equal(update.values[2], "juhyeong");
-  assert.notEqual(update.values[3], "plain-access-token");
-  assert.match(update.values[3], /^v1:/);
+  assert.equal(update.values[1], "app_user");
+  assert.equal(update.values[2], 12345678);
+  assert.equal(update.values[3], "juhyeong");
+  assert.notEqual(update.values[4], "plain-access-token");
+  assert.match(update.values[4], /^v1:/);
 }
 
 {
@@ -658,7 +664,7 @@ const projectOAuthConnectedRow = {
         };
       }
 
-      if (/UPDATE users/i.test(text)) {
+      if (/INSERT INTO github_oauth_connections/i.test(text)) {
         throw uniqueViolation;
       }
 
@@ -728,10 +734,10 @@ const projectOAuthConnectedRow = {
         };
       }
 
-      if (/UPDATE users/i.test(text)) {
+      if (/INSERT INTO github_oauth_connections/i.test(text)) {
         return {
           ...connectedRow,
-          github_connected_at: fixedNow
+          connected_at: fixedNow
         };
       }
 
@@ -831,7 +837,7 @@ const projectOAuthConnectedRow = {
   const result = await service.disconnectGithubOAuth("user-1");
 
   assert.deepEqual(result, { disconnected: true });
-  assert.match(database.queries[0].text, /github_access_token_encrypted = NULL/i);
-  assert.match(database.queries[0].text, /github_revoked_at = now\(\)/i);
-  assert.deepEqual(database.queries[0].values, ["user-1"]);
+  assert.match(database.queries[1].text, /UPDATE github_oauth_connections/i);
+  assert.match(database.queries[1].text, /access_token_encrypted = NULL/i);
+  assert.deepEqual(database.queries[1].values, ["user-1", "app_user"]);
 }
