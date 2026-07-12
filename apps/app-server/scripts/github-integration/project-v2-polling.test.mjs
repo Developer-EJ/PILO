@@ -101,6 +101,11 @@ class FakeDatabase {
   const [cancellation] = database.queries;
   assert.match(cancellation.text, /deselected_schedules AS MATERIALIZED/i);
   assert.match(cancellation.text, /NOT \(schedule\.project_v2_id = ANY\(\$2::uuid\[\]\)\)/i);
+  assert.match(
+    cancellation.text,
+    /deselected_schedules AS MATERIALIZED \([\s\S]*?SELECT schedule\.active_sync_run_id[\s\S]*?NOT \(schedule\.project_v2_id = ANY\(\$2::uuid\[\]\)\)[\s\S]*?FOR UPDATE OF schedule\s*\)/i,
+    "cancellation must lock each deselected schedule before reading its current active sync run"
+  );
   assert.match(cancellation.text, /locked_jobs AS MATERIALIZED/i);
   assert.match(cancellation.text, /job\.status = 'queued'/i);
   assert.match(cancellation.text, /job\.lease_owner IS NULL/i);
@@ -110,7 +115,7 @@ class FakeDatabase {
   assert.match(
     cancellation.text,
     /terminal_runs AS \([\s\S]*?FROM deselected_schedules AS schedule[\s\S]*?run\.id = schedule\.active_sync_run_id[\s\S]*?run\.status = 'queued'/i,
-    "a claimed run without a job must be terminalized before its deselected schedule is deleted"
+    "the current active queued run of a locked, deselected schedule must be terminalized before its schedule is deleted"
   );
   assert.doesNotMatch(cancellation.text, /job\.status = 'running'/i);
   assert.deepEqual(cancellation.values, [repositoryId, []]);

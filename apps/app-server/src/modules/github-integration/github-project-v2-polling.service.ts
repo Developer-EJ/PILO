@@ -47,6 +47,7 @@ export class GithubProjectV2PollingService {
           WHERE schedule.repository_id = $1
             AND project.owner_type = 'User'
             AND NOT (schedule.project_v2_id = ANY($2::uuid[]))
+          FOR UPDATE OF schedule
         ), locked_jobs AS MATERIALIZED (
           SELECT job.id, job.sync_run_id, job.lease_generation
           FROM github_sync_jobs AS job
