@@ -3,6 +3,17 @@ import { Server, type Socket } from "socket.io";
 
 import type { RealtimeServerConfig } from "../config/realtime-config";
 import { createRealtimeSessionService } from "../auth/session.service";
+import { createBoardAccessService } from "../board/board-access.service";
+import { createBoardRoomService } from "../board/board-room.service";
+import {
+  boardClientEvents,
+  boardServerEvents,
+} from "../board/board-socket-events";
+import type {
+  BoardInvalidationPayload,
+  BoardJoinPayload,
+  BoardRoomRef,
+} from "../board/board-types";
 import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-events";
 import {
   createCanvasAccessService,
@@ -20,6 +31,7 @@ import type {
 } from "../canvas/canvas-types";
 import { createRealtimeDatabase } from "../database/database";
 import { createSocketIoRedisAdapter } from "../redis/redis-pubsub";
+import { createBoardRoomName } from "./board/board-room-names";
 import { createCanvasRoomName } from "./room-names";
 import { createSocketAuthContext } from "./socket-auth";
 import { createSocketErrorPayload } from "./socket-errors";
@@ -42,6 +54,10 @@ type AuthedSocket = Socket & {
 };
 
 const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
+const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -68,6 +84,24 @@ function readRoomRef(payload: unknown): CanvasRoomRef | null {
   if (!workspaceId || !canvasId) return null;
 
   return { canvasId, workspaceId };
+}
+
+function readBoardRoomRef(payload: unknown): BoardRoomRef | null {
+  if (!isRecord(payload)) return null;
+
+  const workspaceId = readRequiredString(payload, "workspaceId");
+  const boardId = readRequiredString(payload, "boardId");
+
+  if (
+    !workspaceId ||
+    !boardId ||
+    !UUID_PATTERN.test(workspaceId) ||
+    !POSITIVE_INTEGER_PATTERN.test(boardId)
+  ) {
+    return null;
+  }
+
+  return { boardId, workspaceId };
 }
 
 function isCanvasPresencePoint(value: unknown): value is CanvasPresencePoint {
@@ -164,6 +198,26 @@ function readJoinPayload(payload: unknown): CanvasJoinPayload | null {
   };
 }
 
+function readBoardJoinPayload(payload: unknown): BoardJoinPayload | null {
+  return readBoardRoomRef(payload);
+}
+
+function readBoardInvalidationPayload(
+  payload: unknown,
+): BoardInvalidationPayload | null {
+  const room = readBoardRoomRef(payload);
+
+  if (!room || !isRecord(payload) || !isIsoDateString(payload.updatedAt)) {
+    return null;
+  }
+
+  return {
+    boardId: room.boardId,
+    updatedAt: payload.updatedAt,
+    workspaceId: room.workspaceId,
+  };
+}
+
 function readPresenceUpdatePayload(
   payload: unknown,
 ): CanvasPresenceUpdatePayload | null {
@@ -224,6 +278,13 @@ function emitCanvasError(socket: Socket, message: string) {
   );
 }
 
+function emitBoardError(socket: Socket, message: string) {
+  socket.emit(
+    boardServerEvents.error,
+    createSocketErrorPayload("invalid_payload", message),
+  );
+}
+
 export async function createRealtimeSocketServer({
   config,
   httpServer,
@@ -249,10 +310,14 @@ export async function createRealtimeSocketServer({
 
   const sessionService = createRealtimeSessionService(database);
   const accessService = createCanvasAccessService(database);
+  const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
   const roomService = createCanvasRoomService({
     accessService,
     presenceService,
+  });
+  const boardRoomService = createBoardRoomService({
+    accessService: boardAccessService,
   });
   const unsubscribeCanvasOperations = redisAdapter
     ? await redisAdapter.subscribe(CANVAS_OPERATION_REDIS_CHANNEL, (payload) => {
@@ -264,6 +329,21 @@ export async function createRealtimeSocketServer({
         io.to(createCanvasRoomName(payload)).emit(
           canvasServerEvents.operation,
           payload,
+        );
+      })
+    : null;
+  const unsubscribeBoardInvalidations = redisAdapter
+    ? await redisAdapter.subscribe(BOARD_INVALIDATION_REDIS_CHANNEL, (payload) => {
+        const invalidation = readBoardInvalidationPayload(payload);
+
+        if (!invalidation) {
+          console.error("Board invalidation Redis payload is invalid");
+          return;
+        }
+
+        io.to(createBoardRoomName(invalidation)).emit(
+          boardServerEvents.invalidated,
+          invalidation,
         );
       })
     : null;
@@ -342,6 +422,42 @@ export async function createRealtimeSocketServer({
       }
     });
 
+    socket.on(boardClientEvents.join, async (payload) => {
+      const joinPayload = readBoardJoinPayload(payload);
+
+      if (!joinPayload) {
+        emitBoardError(socket, "board:join payload is invalid");
+        return;
+      }
+
+      const result = await boardRoomService.joinBoardRoom(
+        authedSocket.data.auth,
+        joinPayload,
+      );
+
+      if (!result.joined) {
+        socket.emit(
+          boardServerEvents.error,
+          createSocketErrorPayload("forbidden", "board room access denied"),
+        );
+        return;
+      }
+
+      await socket.join(result.roomName);
+      socket.emit(boardServerEvents.joined, result.payload);
+    });
+
+    socket.on(boardClientEvents.leave, async (payload) => {
+      const room = readBoardRoomRef(payload);
+
+      if (!room) {
+        emitBoardError(socket, "board:leave payload is invalid");
+        return;
+      }
+
+      await socket.leave(createBoardRoomName(room));
+    });
+
     socket.on(canvasClientEvents.presenceUpdate, (payload) => {
       const presencePayload = readPresenceUpdatePayload(payload);
 
@@ -389,6 +505,7 @@ export async function createRealtimeSocketServer({
   return {
     async close() {
       await unsubscribeCanvasOperations?.();
+      await unsubscribeBoardInvalidations?.();
       await io.close();
       await redisAdapter?.close();
       await database.close();
