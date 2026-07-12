@@ -449,11 +449,92 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     /EXISTS \([\s\S]*?FROM locked_schedule[\s\S]*?OR NOT EXISTS \([\s\S]*?FROM github_project_v2_polling_schedules/i,
     "a deleted polling schedule must still allow the current owned job and run to terminate"
   );
+  assert.match(
+    writes[0].text,
+    /locked_schedule AS MATERIALIZED \([\s\S]*?schedule\.active_sync_run_id=\$4[\s\S]*?schedule\.lease_owner=\$2[\s\S]*?FOR UPDATE OF schedule/i,
+    "a lost-lease worker may only terminalize a schedule it still owns"
+  );
   assert.deepEqual(
     writes[0].values.slice(0, 5),
     [job.id, worker.workerId, job.lease_generation, job.sync_run_id, "GitHub sync job lease ownership was lost"],
     "a newer lease generation must not be terminalized by the stale worker"
   );
+}
+
+{
+  const job = { id: "job-stale-a", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 9, is_polling: true };
+  const state = {
+    job: { status: "running", lease_owner: "worker-a", lease_generation: "9" },
+    run: { status: "running" },
+    schedule: { active_sync_run_id: syncRunId, lease_owner: "worker-b" }
+  };
+  let terminalWrites = 0;
+  const worker = new GithubSyncJobService(
+    {
+      transaction: async (callback) => callback({
+        execute: async (text, values) => {
+          assert.match(text, /schedule\.lease_owner=\$2/i);
+          const scheduleAbsent = state.schedule === null;
+          const scheduleOwnedByStaleWorker = state.schedule?.lease_owner === values[1];
+          const fencedJob = state.job.status === "running"
+            && state.job.lease_owner === values[1]
+            && state.job.lease_generation === String(values[2]);
+          if (fencedJob && (scheduleAbsent || scheduleOwnedByStaleWorker)) {
+            state.job.status = "failed";
+            state.run.status = "failed";
+            terminalWrites += 1;
+          }
+          return { rowCount: terminalWrites };
+        }
+      })
+    },
+    {}, {}, {}
+  );
+  state.job.lease_owner = worker.workerId;
+
+  await worker.completeLostLeaseFailure(job, "GitHub sync job lease ownership was lost");
+
+  assert.equal(terminalWrites, 0, "worker A must not terminalize a run after worker B reclaims its schedule");
+  assert.equal(state.job.status, "running");
+  assert.equal(state.run.status, "running");
+  assert.equal(state.schedule.lease_owner, "worker-b");
+}
+
+{
+  const job = { id: "job-deleted-schedule", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 10, is_polling: true };
+  const state = {
+    job: { status: "running", lease_owner: "worker-a", lease_generation: "10" },
+    run: { status: "running" },
+    schedule: null
+  };
+  let terminalWrites = 0;
+  const worker = new GithubSyncJobService(
+    {
+      transaction: async (callback) => callback({
+        execute: async (text, values) => {
+          assert.match(text, /OR NOT EXISTS \([\s\S]*?FROM github_project_v2_polling_schedules/i);
+          const scheduleAbsent = state.schedule === null;
+          const fencedJob = state.job.status === "running"
+            && state.job.lease_owner === values[1]
+            && state.job.lease_generation === String(values[2]);
+          if (fencedJob && scheduleAbsent) {
+            state.job.status = "failed";
+            state.run.status = "failed";
+            terminalWrites += 1;
+          }
+          return { rowCount: terminalWrites };
+        }
+      })
+    },
+    {}, {}, {}
+  );
+  state.job.lease_owner = worker.workerId;
+
+  await worker.completeLostLeaseFailure(job, "GitHub sync job lease ownership was lost");
+
+  assert.equal(terminalWrites, 1, "a deleted schedule must still allow its old owned job and run to terminate");
+  assert.equal(state.job.status, "failed");
+  assert.equal(state.run.status, "failed");
 }
 
 {

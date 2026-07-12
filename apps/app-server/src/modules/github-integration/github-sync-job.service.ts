@@ -493,6 +493,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
         SELECT schedule.active_sync_run_id
         FROM github_project_v2_polling_schedules AS schedule
         WHERE schedule.active_sync_run_id=$4
+          AND schedule.lease_owner=$2
         FOR UPDATE OF schedule
       ), terminal_job AS (
         UPDATE github_sync_jobs AS job
