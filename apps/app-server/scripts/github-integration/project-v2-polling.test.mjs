@@ -28,9 +28,11 @@ class FakeDatabase {
   constructor({ claimedRows = [] } = {}) {
     this.claimedRows = claimedRows;
     this.queries = [];
+    this.transactionCalls = 0;
   }
 
   async transaction(callback) {
+    this.transactionCalls += 1;
     return callback({
       execute: async (text, values = []) => {
         this.queries.push({ method: "execute", text, values });
@@ -69,6 +71,22 @@ class FakeDatabase {
   );
   assert.match(insertPersonalSchedules.text, /ON CONFLICT \(repository_id, project_v2_id\)/i);
   assert.deepEqual(insertPersonalSchedules.values, [repositoryId, requestedByUserId]);
+}
+
+{
+  const database = new FakeDatabase();
+  const service = new GithubProjectV2PollingService(database);
+  const transactionQueries = [];
+  const transaction = {
+    execute: async (text, values = []) => {
+      transactionQueries.push({ text, values });
+    }
+  };
+
+  await service.syncSelectionSchedules({ repositoryId, requestedByUserId }, transaction);
+
+  assert.equal(database.transactionCalls, 0, "a caller-owned transaction must be reused");
+  assert.equal(transactionQueries.length, 2);
 }
 
 {
@@ -247,9 +265,13 @@ class FakeDatabase {
   const pollingCalls = [];
   const selectionQueries = [];
   const selectionEvents = [];
+  let transactionCalls = 0;
+  let selectionTransaction;
   const database = {
     async transaction(callback) {
-      return callback({
+      transactionCalls += 1;
+      selectionEvents.push("transaction-begin");
+      const transaction = {
         queryOne: async (text) => {
           if (/FROM github_installations/i.test(text)) return { id: installationId };
           if (/FROM github_repositories/i.test(text)) {
@@ -271,7 +293,11 @@ class FakeDatabase {
           if (/DELETE FROM github_project_v2_selections/i.test(text)) selectionEvents.push("delete-selections");
           return { rows: [] };
         }
-      });
+      };
+      selectionTransaction = transaction;
+      const result = await callback(transaction);
+      selectionEvents.push("transaction-commit");
+      return result;
     }
   };
   const service = new GithubProjectV2Service(
@@ -288,8 +314,8 @@ class FakeDatabase {
         pollingCalls.push({ type: "cancel", input, transaction });
         selectionEvents.push("cancel-queued-polling");
       },
-      syncSelectionSchedules: async (input) => {
-        pollingCalls.push({ type: "sync", input });
+      syncSelectionSchedules: async (input, transaction) => {
+        pollingCalls.push({ type: "sync", input, transaction });
         selectionEvents.push("sync-schedules");
       }
     }
@@ -314,6 +340,12 @@ class FakeDatabase {
   );
   assert.equal(pollingCalls[1].type, "sync");
   assert.deepEqual(pollingCalls[1].input, { repositoryId, requestedByUserId });
+  assert.equal(pollingCalls[1].transaction, selectionTransaction);
+  assert.equal(transactionCalls, 1, "selection scheduling must not open a post-commit transaction");
+  assert.ok(
+    selectionEvents.indexOf("sync-schedules") < selectionEvents.indexOf("transaction-commit"),
+    "selection schedules must be synchronized before the selection transaction commits"
+  );
 }
 
 {

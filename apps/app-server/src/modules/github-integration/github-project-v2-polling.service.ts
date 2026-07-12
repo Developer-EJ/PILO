@@ -85,51 +85,66 @@ export class GithubProjectV2PollingService {
   async syncSelectionSchedules(input: {
     repositoryId: string;
     requestedByUserId: string;
-  }): Promise<void> {
-    await this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        `
-          DELETE FROM github_project_v2_polling_schedules AS schedule
-          WHERE schedule.repository_id = $1
-            AND NOT EXISTS (
-              SELECT 1
-              FROM github_project_v2_selections AS selection
-              INNER JOIN github_projects_v2 AS project
-                ON project.id = selection.project_v2_id
-              WHERE selection.repository_id = schedule.repository_id
-                AND selection.project_v2_id = schedule.project_v2_id
-                AND project.owner_type = 'User'
-            )
-        `,
-        [input.repositoryId]
-      );
+  }, executor?: GithubProjectV2PollingQueryExecutor): Promise<void> {
+    if (executor) {
+      await this.syncSelectionSchedulesInTransaction(input, executor);
+      return;
+    }
 
-      await transaction.execute(
-        `
-          INSERT INTO github_project_v2_polling_schedules (
-            repository_id,
-            project_v2_id,
-            requested_by_user_id,
-            next_poll_at
-          )
-          SELECT
-            selection.repository_id,
-            selection.project_v2_id,
-            $2,
-            now() + interval '1 minute'
-          FROM github_project_v2_selections AS selection
-          INNER JOIN github_projects_v2 AS project
-            ON project.id = selection.project_v2_id
-          WHERE selection.repository_id = $1
-            AND project.owner_type = 'User'
-          ON CONFLICT (repository_id, project_v2_id)
-          DO UPDATE SET
-            requested_by_user_id = EXCLUDED.requested_by_user_id,
-            updated_at = now()
-        `,
-        [input.repositoryId, input.requestedByUserId]
-      );
+    await this.database.transaction(async (transaction) => {
+      await this.syncSelectionSchedulesInTransaction(input, transaction);
     });
+  }
+
+  private async syncSelectionSchedulesInTransaction(
+    input: {
+      repositoryId: string;
+      requestedByUserId: string;
+    },
+    executor: GithubProjectV2PollingQueryExecutor
+  ): Promise<void> {
+    await executor.execute(
+      `
+        DELETE FROM github_project_v2_polling_schedules AS schedule
+        WHERE schedule.repository_id = $1
+          AND NOT EXISTS (
+            SELECT 1
+            FROM github_project_v2_selections AS selection
+            INNER JOIN github_projects_v2 AS project
+              ON project.id = selection.project_v2_id
+            WHERE selection.repository_id = schedule.repository_id
+              AND selection.project_v2_id = schedule.project_v2_id
+              AND project.owner_type = 'User'
+          )
+      `,
+      [input.repositoryId]
+    );
+
+    await executor.execute(
+      `
+        INSERT INTO github_project_v2_polling_schedules (
+          repository_id,
+          project_v2_id,
+          requested_by_user_id,
+          next_poll_at
+        )
+        SELECT
+          selection.repository_id,
+          selection.project_v2_id,
+          $2,
+          now() + interval '1 minute'
+        FROM github_project_v2_selections AS selection
+        INNER JOIN github_projects_v2 AS project
+          ON project.id = selection.project_v2_id
+        WHERE selection.repository_id = $1
+          AND project.owner_type = 'User'
+        ON CONFLICT (repository_id, project_v2_id)
+        DO UPDATE SET
+          requested_by_user_id = EXCLUDED.requested_by_user_id,
+          updated_at = now()
+      `,
+      [input.repositoryId, input.requestedByUserId]
+    );
   }
 
   async claimDueSchedules(limit: number): Promise<GithubProjectV2PollingClaim[]> {

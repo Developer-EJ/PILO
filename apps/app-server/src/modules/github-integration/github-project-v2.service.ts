@@ -318,12 +318,12 @@ export class GithubProjectV2Service {
         );
       }
 
-      return { installationId, repositoryId, projectV2Ids };
-    });
+      await this.pollingService?.syncSelectionSchedules(
+        { repositoryId, requestedByUserId: currentUserId },
+        transaction
+      );
 
-    await this.pollingService?.syncSelectionSchedules({
-      repositoryId: selection.repositoryId,
-      requestedByUserId: currentUserId
+      return { installationId, repositoryId, projectV2Ids };
     });
 
     if (!selection.projectV2Ids.length || !this.syncRunService) {
