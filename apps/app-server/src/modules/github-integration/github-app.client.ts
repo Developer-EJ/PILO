@@ -24,10 +24,12 @@ const githubGraphqlRateLimitErrorMarker = Symbol("githubGraphqlRateLimitError");
 
 export class GithubGraphqlRateLimitError extends ApiError {
   readonly [githubGraphqlRateLimitErrorMarker] = true;
+  readonly rateLimitRemaining: number | null;
 
-  constructor(message: string) {
+  constructor(message: string, rateLimitRemaining: number | null = null) {
     super(HttpStatus.BAD_REQUEST, "BAD_REQUEST", message);
     this.message = message;
+    this.rateLimitRemaining = rateLimitRemaining;
   }
 }
 
@@ -2055,7 +2057,7 @@ export class GithubAppClient {
     }
 
     if (this.isGraphqlRateLimitedResponse(response)) {
-      throw new GithubGraphqlRateLimitError(errorMessage);
+      throw new GithubGraphqlRateLimitError(errorMessage, this.rateLimitRemaining(response));
     }
 
     if (response.status === 403 && context?.writePermissionMessage) {
@@ -2072,7 +2074,7 @@ export class GithubAppClient {
     const record = this.toObject(payload);
     if (Array.isArray(record.errors) && record.errors.length > 0) {
       if (this.hasGraphqlRateLimitError(record.errors)) {
-        throw new GithubGraphqlRateLimitError(errorMessage);
+        throw new GithubGraphqlRateLimitError(errorMessage, this.rateLimitRemaining(response));
       }
 
       if (
@@ -2101,6 +2103,13 @@ export class GithubAppClient {
       (response.headers?.get?.("x-ratelimit-remaining") === "0" ||
         response.headers?.get?.("retry-after") != null)
     );
+  }
+
+  private rateLimitRemaining(response: Response): number | null {
+    const value = response.headers.get("x-ratelimit-remaining");
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const remaining = Number(value);
+    return Number.isSafeInteger(remaining) ? remaining : null;
   }
 
   private hasGraphqlRateLimitError(errors: unknown[]): boolean {
