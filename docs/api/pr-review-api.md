@@ -364,6 +364,18 @@ Worker parser는 Graph 결과의 file path가 입력 변경 파일 집합과 일
 유지되는지, Flow가 입력 후보와 대응하는지, relation endpoint와 type이 유효한지 확인한다.
 App Server의 최종 저장 Validator와 원자 저장은 후속 Semantic Graph 단계에서 적용한다.
 
+App Server Validator는 Worker 검증을 통과한 결과도 다시 검사한다. 기존 relation 후보를
+AI가 보강하면 기존 confidence와 `source = hybrid`를 사용하고, AI가 새로 제안한 relation은
+`confidence = 60`, `source = ai`를 사용한다. `confidence < 60` relation은 제거한다.
+Flow별 relation은 `min(file count * 2, 40)`, PR 전체 relation은 `100`개로 제한한다.
+의미 relation cycle은 허용하지만 각 Flow의 `reviewOrder`는 모든 membership을 중복 없이
+정확히 한 번 포함해야 한다.
+
+AI Graph의 version, file/Flow membership, 잠긴 role, relation endpoint/type/candidate key 중
+하나라도 유효하지 않으면 AI Graph 전체를 폐기하고 같은 입력에서 생성한 deterministic
+Graph 전체를 사용한다. 일부 AI relation이나 Flow만 선택적으로 저장하지 않는다. 검증된
+복수 Flow와 relation의 DB 원자 저장은 후속 단계에서 적용한다.
+
 App Server는 현재 GitHub head SHA, Job head SHA, session head SHA를 다시 비교한다.
 셋 중 하나라도 다르면 flow/file을 만들지 않고 Job과 session을
 `failed(PR_HEAD_CHANGED)`로 끝낸다. 일치하면 summary, flow, file, flow-file 관계와

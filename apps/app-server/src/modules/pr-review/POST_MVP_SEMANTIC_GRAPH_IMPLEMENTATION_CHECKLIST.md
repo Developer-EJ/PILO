@@ -167,13 +167,13 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 - [x] AI에는 deterministic 후보와 제한된 patch context만 전달한다.
 - [x] AI가 새 file path를 발명하지 못하도록 입력 file path 집합으로 검증한다.
 - [x] AI가 Flow 제목, 설명, relation reason과 리뷰 순서를 보강한다.
-- [ ] App Server validator가 self edge, 없는 파일, 중복 edge를 제거한다.
-- [ ] relation/Flow별 최대 edge 수와 전체 edge 수를 제한한다.
-- [ ] confidence가 기준보다 낮은 relation을 제거한다.
-- [ ] 순환 relation을 허용할 type과 리뷰 순서 cycle을 구분한다.
+- [x] App Server validator가 self edge, 없는 파일, 중복 edge를 제거한다.
+- [x] relation/Flow별 최대 edge 수와 전체 edge 수를 제한한다.
+- [x] confidence가 기준보다 낮은 relation을 제거한다.
+- [x] 순환 relation을 허용할 type과 리뷰 순서 cycle을 구분한다.
 - [ ] 검증 결과를 session, Flow, file membership, relation과 함께 원자 저장한다.
 - [ ] 동일 Job 재전달과 result 재전송에도 relation이 중복 생성되지 않게 한다.
-- [ ] invalid AI output은 안전한 실패로 처리하고 부분 graph를 저장하지 않는다.
+- [x] invalid AI output은 안전한 실패로 처리하고 부분 graph를 저장하지 않는다.
 
 완료 기준:
 
@@ -212,7 +212,7 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 - [ ] migration apply와 rollback 검토를 완료한다.
 - [ ] 같은 session/Flow에 속하지 않은 relation insert를 거부한다.
-- [ ] duplicate, self edge와 invalid type을 거부한다.
+- [x] duplicate, self edge와 invalid type을 거부한다.
 - [ ] semantic graph 원자 저장과 idempotency 테스트가 통과한다.
 - [ ] 기존 session 순차 edge fallback 테스트가 통과한다.
 - [ ] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
