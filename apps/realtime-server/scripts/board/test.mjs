@@ -50,6 +50,13 @@ assert.match(boardApiContract, /board:join/);
 assert.match(boardApiContract, /board:leave/);
 assert.match(boardApiContract, /board:joined/);
 assert.match(boardApiContract, /board:error/);
+assert.match(boardApiContract, /boardId is a positive integer string/i);
+assert.match(boardApiContract, /"boardId": "42"/);
+assert.match(boardApiContract, /connect_error[\s\S]*unauthenticated/i);
+assert.match(
+  boardApiContract,
+  /board:error[\s\S]*invalid payload[\s\S]*forbidden Board join/i
+);
 assert.match(boardApiContract, /workspace_members/);
 assert.match(boardApiContract, /hydrate_pilo_board_from_github[\s\S]*board:invalidations/);
 assert.match(boardApiContract, /reconnect[\s\S]*snapshot/i);
