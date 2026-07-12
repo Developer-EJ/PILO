@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
-import { Injectable } from "@nestjs/common";
-import { badRequest, forbidden } from "../../common/api-error";
+import { HttpStatus, Injectable } from "@nestjs/common";
+import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
 
 export interface GithubAppInstallationLookupRequest {
@@ -20,11 +20,19 @@ export interface GithubAppInstallationDeleteResult {
   alreadyDeleted: boolean;
 }
 
-export class GithubGraphqlRateLimitError extends Error {
+const githubGraphqlRateLimitErrorMarker = Symbol("githubGraphqlRateLimitError");
+
+export class GithubGraphqlRateLimitError extends ApiError {
+  readonly [githubGraphqlRateLimitErrorMarker] = true;
+
   constructor(message: string) {
-    super(message);
-    this.name = "GithubGraphqlRateLimitError";
+    super(HttpStatus.BAD_REQUEST, "BAD_REQUEST", message);
+    this.message = message;
   }
+}
+
+export function isGithubGraphqlRateLimitError(error: unknown): boolean {
+  return error instanceof GithubGraphqlRateLimitError && error[githubGraphqlRateLimitErrorMarker] === true;
 }
 
 export interface GithubAppInstallationDetails {

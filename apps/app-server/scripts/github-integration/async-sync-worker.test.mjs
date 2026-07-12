@@ -123,13 +123,13 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
   const terminalCalls = [];
   const worker = new GithubSyncJobService(
-    { execute: async () => ({ rowCount: 1 }) },
+    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => ({ fetchedCount: 1, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} }) },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
     {},
     {
-      markRunSucceeded: async (runId) => terminalCalls.push(["success", runId]),
+      markRunSucceeded: async (runId, transaction) => terminalCalls.push(["success", runId, transaction]),
       markRunFailed: async (...args) => terminalCalls.push(["failed", ...args])
     }
   );
@@ -137,14 +137,16 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   worker.installation = async () => ({ id: installationId });
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
-  assert.deepEqual(terminalCalls, [["success", syncRunId]]);
+  assert.equal(terminalCalls[0][0], "success");
+  assert.equal(terminalCalls[0][1], syncRunId);
+  assert.ok(terminalCalls[0][2], "schedule success must share the terminal database transaction");
 }
 
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 3 };
   const terminalCalls = [];
   const worker = new GithubSyncJobService(
-    { execute: async () => ({ rowCount: 1 }) },
+    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => { throw new Error("provider unavailable"); } },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
@@ -157,14 +159,17 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   worker.installation = async () => ({ id: installationId });
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
-  assert.deepEqual(terminalCalls, [[syncRunId, "provider unavailable", false]]);
+  assert.equal(terminalCalls[0][0], syncRunId);
+  assert.equal(terminalCalls[0][1], "provider unavailable");
+  assert.equal(terminalCalls[0][2], false);
+  assert.ok(terminalCalls[0][3], "schedule failure must share the terminal database transaction");
 }
 
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
   const terminalCalls = [];
   const worker = new GithubSyncJobService(
-    { execute: async () => ({ rowCount: 1 }) },
+    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => { throw new GithubGraphqlRateLimitError("GitHub API rate limit exceeded"); } },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
@@ -175,7 +180,10 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   worker.installation = async () => ({ id: installationId });
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
-  assert.deepEqual(terminalCalls, [[syncRunId, "GitHub API rate limit exceeded", true]]);
+  assert.equal(terminalCalls[0][0], syncRunId);
+  assert.equal(terminalCalls[0][1], "GitHub API rate limit exceeded");
+  assert.equal(terminalCalls[0][2], true);
+  assert.ok(terminalCalls[0][3], "rate-limit failure must share the terminal database transaction");
 }
 
 {
@@ -183,7 +191,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   const worker = new GithubSyncJobService(
     {
       queryOne: async () => ({ id: "job-1" }),
-      execute: async () => ({ rowCount: 1 })
+      transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) })
     },
     {},
     {},
@@ -195,7 +203,10 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
 
   await assert.rejects(() => worker.enqueueSyncJob(syncRunId, userId));
-  assert.deepEqual(failedRuns, [[syncRunId, "GitHub sync job could not be enqueued", false]]);
+  assert.equal(failedRuns[0][0], syncRunId);
+  assert.equal(failedRuns[0][1], "GitHub sync job could not be enqueued");
+  assert.equal(failedRuns[0][2], false);
+  assert.ok(failedRuns[0][3], "enqueue failure must share the terminal database transaction");
 }
 
 {
@@ -210,7 +221,11 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
   const writes = [];
   const worker = new GithubSyncJobService(
-    { execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } },
+    {
+      transaction: async (callback) => callback({
+        execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; }
+      })
+    },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => { throw new Error("transient provider failure"); } },
     { resolvePersonalProjectV2UserAccessToken: async () => null }

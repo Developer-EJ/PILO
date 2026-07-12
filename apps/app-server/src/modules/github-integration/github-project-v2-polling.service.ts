@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { DatabaseService } from "../../database/database.service";
+import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
 
 interface GithubProjectV2PollingClaimRow extends QueryResultRow {
   sync_run_id: string;
@@ -15,6 +15,8 @@ export interface GithubProjectV2PollingClaim {
   projectV2Id: string;
   requestedByUserId: string;
 }
+
+type GithubProjectV2PollingQueryExecutor = Pick<DatabaseService | DatabaseTransaction, "execute">;
 
 @Injectable()
 export class GithubProjectV2PollingService {
@@ -92,7 +94,24 @@ export class GithubProjectV2PollingService {
           INNER JOIN github_projects_v2 AS project
             ON project.id = schedule.project_v2_id
           WHERE schedule.next_poll_at <= now()
-            AND (schedule.active_sync_run_id IS NULL OR schedule.lease_expires_at < now())
+            AND (
+              schedule.active_sync_run_id IS NULL
+              OR (
+                schedule.lease_expires_at < now()
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM github_sync_runs AS active_run
+                  WHERE active_run.id = schedule.active_sync_run_id
+                    AND active_run.status NOT IN ('success', 'failed')
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM github_sync_jobs AS active_job
+                  WHERE active_job.sync_run_id = schedule.active_sync_run_id
+                    AND active_job.status NOT IN ('success', 'failed')
+                )
+              )
+            )
             AND project.owner_type = 'User'
           ORDER BY schedule.next_poll_at ASC, schedule.repository_id ASC, schedule.project_v2_id ASC
           LIMIT $1
@@ -143,8 +162,11 @@ export class GithubProjectV2PollingService {
     }));
   }
 
-  async markRunSucceeded(syncRunId: string): Promise<void> {
-    await this.database.execute(
+  async markRunSucceeded(
+    syncRunId: string,
+    executor: GithubProjectV2PollingQueryExecutor = this.database
+  ): Promise<void> {
+    await executor.execute(
       `
         UPDATE github_project_v2_polling_schedules
         SET
@@ -161,9 +183,14 @@ export class GithubProjectV2PollingService {
     );
   }
 
-  async markRunFailed(syncRunId: string, message: string, isRateLimited: boolean): Promise<void> {
+  async markRunFailed(
+    syncRunId: string,
+    message: string,
+    isRateLimited: boolean,
+    executor: GithubProjectV2PollingQueryExecutor = this.database
+  ): Promise<void> {
     const retryInterval = isRateLimited ? "30 minutes" : "5 minutes";
-    await this.database.execute(
+    await executor.execute(
       `
         UPDATE github_project_v2_polling_schedules
         SET

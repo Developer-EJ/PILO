@@ -9,7 +9,7 @@ import { QueryResultRow } from "pg";
 import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
-import { GithubGraphqlRateLimitError } from "./github-app.client";
+import { isGithubGraphqlRateLimitError } from "./github-app.client";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
@@ -119,7 +119,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
       await this.completeSuccess(job, summary);
       return "terminal";
     } catch (error) {
-      const isRateLimited = error instanceof GithubGraphqlRateLimitError;
+      const isRateLimited = isGithubGraphqlRateLimitError(error);
       if (error instanceof TerminalSyncJobError || isRateLimited) {
         await this.completeFailure(job, this.errorMessage(error), isRateLimited);
         return "terminal";
@@ -198,16 +198,20 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   private async completeSuccess(job: SyncJobRow, summary: GithubSyncRunSummary): Promise<void> {
-    await this.database.execute(`UPDATE github_sync_runs SET status='success', finished_at=now(), fetched_count=$2, created_count=$3, updated_count=$4, skipped_count=$5, error_message=NULL, cursor=$6::jsonb WHERE id=$1`, [job.sync_run_id, summary.fetchedCount, summary.createdCount, summary.updatedCount, summary.skippedCount, JSON.stringify(summary.cursor)]);
-    await this.database.execute(`UPDATE github_sync_jobs SET status='success', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=NULL WHERE id=$1`, [job.id]);
-    await this.pollingService?.markRunSucceeded(job.sync_run_id);
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(`UPDATE github_sync_runs SET status='success', finished_at=now(), fetched_count=$2, created_count=$3, updated_count=$4, skipped_count=$5, error_message=NULL, cursor=$6::jsonb WHERE id=$1`, [job.sync_run_id, summary.fetchedCount, summary.createdCount, summary.updatedCount, summary.skippedCount, JSON.stringify(summary.cursor)]);
+      await transaction.execute(`UPDATE github_sync_jobs SET status='success', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=NULL WHERE id=$1`, [job.id]);
+      await this.pollingService?.markRunSucceeded(job.sync_run_id, transaction);
+    });
   }
   private async completeFailure(job: SyncJobRow, message: string, isRateLimited = false): Promise<void> {
-    await this.database.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message=$2 WHERE id=$1`, [job.sync_run_id, message]);
-    await this.database.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$2 WHERE id=$1`, [job.id, message]);
-    await this.pollingService?.markRunFailed(job.sync_run_id, message, isRateLimited);
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message=$2 WHERE id=$1`, [job.sync_run_id, message]);
+      await transaction.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$2 WHERE id=$1`, [job.id, message]);
+      await this.pollingService?.markRunFailed(job.sync_run_id, message, isRateLimited, transaction);
+    });
   }
-  private async failEnqueue(runId: string, jobId: string): Promise<void> { await this.database.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued' WHERE id=$1`, [runId]); await this.database.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued' WHERE id=$1`, [jobId]); await this.pollingService?.markRunFailed(runId, "GitHub sync job could not be enqueued", false); }
+  private async failEnqueue(runId: string, jobId: string): Promise<void> { await this.database.transaction(async (transaction) => { await transaction.execute(`UPDATE github_sync_runs SET status='failed', finished_at=now(), error_message='GitHub sync job could not be enqueued' WHERE id=$1`, [runId]); await transaction.execute(`UPDATE github_sync_jobs SET status='failed', finished_at=now(), last_error='GitHub sync job could not be enqueued' WHERE id=$1`, [jobId]); await this.pollingService?.markRunFailed(runId, "GitHub sync job could not be enqueued", false, transaction); }); }
   private installation(workspaceId: string, id: string): Promise<GithubSyncInstallationRow | null> { return this.database.queryOne(`SELECT id, workspace_id, github_installation_id, account_login, account_type FROM github_installations WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private repository(workspaceId: string, id: string): Promise<GithubSyncRepositoryContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name FROM github_repositories WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private project(workspaceId: string, id: string): Promise<GithubSyncProjectV2ContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_project_node_id FROM github_projects_v2 WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }

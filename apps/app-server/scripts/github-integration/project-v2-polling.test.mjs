@@ -90,8 +90,18 @@ class FakeDatabase {
   assert.match(claim.text, /active_sync_run_id = created_run\.id/i);
   assert.match(
     claim.text,
-    /\(schedule\.active_sync_run_id IS NULL OR schedule\.lease_expires_at < now\(\)\)/i,
+    /schedule\.active_sync_run_id IS NULL[\s\S]*?schedule\.lease_expires_at < now\(\)/i,
     "an expired active lease must be claimable for recovery"
+  );
+  assert.match(
+    claim.text,
+    /NOT EXISTS\s*\(\s*SELECT 1\s+FROM github_sync_runs AS active_run[\s\S]*?active_run\.status NOT IN \('success', 'failed'\)/i,
+    "a running active sync run must prevent schedule reclamation"
+  );
+  assert.match(
+    claim.text,
+    /NOT EXISTS\s*\(\s*SELECT 1\s+FROM github_sync_jobs AS active_job[\s\S]*?active_job\.status NOT IN \('success', 'failed'\)/i,
+    "a running active sync job must prevent schedule reclamation"
   );
   assert.match(claim.text, /lease_owner = \$2/i);
   assert.match(claim.text, /lease_expires_at = now\(\) \+ interval '10 minutes'/i);
@@ -121,7 +131,18 @@ class FakeDatabase {
           userAccessToken: "user-oauth-token",
           accountType: "Organization"
         }),
-        (error) => error instanceof GithubGraphqlRateLimitError
+        (error) => {
+          assert.ok(error instanceof GithubGraphqlRateLimitError);
+          assert.equal(error.getStatus(), 400);
+          assert.deepEqual(error.getResponse(), {
+            success: false,
+            error: {
+              code: "BAD_REQUEST",
+              message: "GitHub ProjectV2 item lookup failed"
+            }
+          });
+          return true;
+        }
       );
     }
   } finally {
