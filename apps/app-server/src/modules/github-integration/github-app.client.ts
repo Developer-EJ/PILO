@@ -20,6 +20,13 @@ export interface GithubAppInstallationDeleteResult {
   alreadyDeleted: boolean;
 }
 
+export class GithubGraphqlRateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GithubGraphqlRateLimitError";
+  }
+}
+
 export interface GithubAppInstallationDetails {
   githubInstallationId: number;
   accountLogin: string;
@@ -2039,6 +2046,10 @@ export class GithubAppClient {
       throw badRequest(errorMessage);
     }
 
+    if (this.isGraphqlRateLimitedResponse(response)) {
+      throw new GithubGraphqlRateLimitError(errorMessage);
+    }
+
     if (response.status === 403 && context?.writePermissionMessage) {
       throw forbidden(context.writePermissionMessage);
     }
@@ -2052,6 +2063,10 @@ export class GithubAppClient {
     const payload = await this.readJson(response, errorMessage);
     const record = this.toObject(payload);
     if (Array.isArray(record.errors) && record.errors.length > 0) {
+      if (this.hasGraphqlRateLimitError(record.errors)) {
+        throw new GithubGraphqlRateLimitError(errorMessage);
+      }
+
       if (
         context?.writePermissionMessage &&
         record.errors.some((error) => this.isProjectV2WritePermissionError(error))
@@ -2070,6 +2085,21 @@ export class GithubAppClient {
     }
 
     return data;
+  }
+
+  private isGraphqlRateLimitedResponse(response: Response): boolean {
+    return response.status === 429 || (
+      response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0"
+    );
+  }
+
+  private hasGraphqlRateLimitError(errors: unknown[]): boolean {
+    return errors.some((error) => {
+      const record = this.toObject(error);
+      const type = typeof record.type === "string" ? record.type : "";
+      const message = typeof record.message === "string" ? record.message : "";
+      return type === "RATE_LIMITED" || /\brate limit\b/i.test(message);
+    });
   }
 
   private async listRemainingProjectV2RepositoryNodeIds(

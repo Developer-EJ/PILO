@@ -10,6 +10,10 @@ const {
 const {
   GithubProjectV2Service
 } = require("../../dist/modules/github-integration/github-project-v2.service.js");
+const {
+  GithubAppClient,
+  GithubGraphqlRateLimitError
+} = require("../../dist/modules/github-integration/github-app.client.js");
 
 const repositoryId = "11111111-1111-4111-8111-111111111111";
 const projectV2Id = "22222222-2222-4222-8222-222222222222";
@@ -84,9 +88,45 @@ class FakeDatabase {
   assert.match(claim.text, /INSERT INTO github_sync_runs/i);
   assert.match(claim.text, /'project_v2_items'/i);
   assert.match(claim.text, /active_sync_run_id = created_run\.id/i);
+  assert.match(
+    claim.text,
+    /\(schedule\.active_sync_run_id IS NULL OR schedule\.lease_expires_at < now\(\)\)/i,
+    "an expired active lease must be claimable for recovery"
+  );
   assert.match(claim.text, /lease_owner = \$2/i);
   assert.match(claim.text, /lease_expires_at = now\(\) \+ interval '10 minutes'/i);
   assert.equal(claim.values[0], 3);
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    new Response(null, { status: 429 }),
+    new Response(null, { status: 403, headers: { "x-ratelimit-remaining": "0" } }),
+    new Response(JSON.stringify({ errors: [{ message: "API rate limit exceeded" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    })
+  ];
+  globalThis.fetch = async () => responses.shift();
+
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      await assert.rejects(
+        () => new GithubAppClient().getProjectV2Item({
+          installationId: 1,
+          appId: "unused",
+          privateKey: "unused",
+          projectItemNodeId: "PVT_kwDOExample",
+          userAccessToken: "user-oauth-token",
+          accountType: "Organization"
+        }),
+        (error) => error instanceof GithubGraphqlRateLimitError
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 {

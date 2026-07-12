@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { GithubGraphqlRateLimitError } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubWebhookService } = require("../../dist/modules/github-integration/github-webhook.service.js");
 const root = fileURLToPath(new URL("../../../..", import.meta.url));
 
@@ -157,6 +158,24 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
   assert.deepEqual(terminalCalls, [[syncRunId, "provider unavailable", false]]);
+}
+
+{
+  const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1 };
+  const terminalCalls = [];
+  const worker = new GithubSyncJobService(
+    { execute: async () => ({ rowCount: 1 }) },
+    { getGithubAppConfig: () => ({}) },
+    { runGithubSyncTarget: async () => { throw new GithubGraphqlRateLimitError("GitHub API rate limit exceeded"); } },
+    { resolvePersonalProjectV2UserAccessToken: async () => null },
+    {},
+    { markRunFailed: async (...args) => terminalCalls.push(args) }
+  );
+  worker.acquireLease = async () => job;
+  worker.installation = async () => ({ id: installationId });
+
+  assert.equal(await worker.processSyncJob("job-1"), "terminal");
+  assert.deepEqual(terminalCalls, [[syncRunId, "GitHub API rate limit exceeded", true]]);
 }
 
 {

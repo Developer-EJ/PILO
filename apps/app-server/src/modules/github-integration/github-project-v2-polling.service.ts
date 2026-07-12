@@ -92,8 +92,7 @@ export class GithubProjectV2PollingService {
           INNER JOIN github_projects_v2 AS project
             ON project.id = schedule.project_v2_id
           WHERE schedule.next_poll_at <= now()
-            AND schedule.active_sync_run_id IS NULL
-            AND (schedule.lease_expires_at IS NULL OR schedule.lease_expires_at < now())
+            AND (schedule.active_sync_run_id IS NULL OR schedule.lease_expires_at < now())
             AND project.owner_type = 'User'
           ORDER BY schedule.next_poll_at ASC, schedule.repository_id ASC, schedule.project_v2_id ASC
           LIMIT $1
