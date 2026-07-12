@@ -1,27 +1,7 @@
 BEGIN;
 
--- Server-side MeetingReport keyword search and keyset pagination.
-CREATE INDEX idx_meeting_reports_created_cursor
-  ON public.meeting_reports (created_at DESC, id ASC);
-
-CREATE INDEX idx_meeting_reports_search_document
-  ON public.meeting_reports
-  USING gin (
-    to_tsvector(
-      'simple',
-      concat_ws(
-        ' ',
-        COALESCE(summary, ''),
-        COALESCE(discussion_points, ''),
-        COALESCE(decisions, ''),
-        COALESCE(action_item_candidates::text, ''),
-        COALESCE(error_message, '')
-      )
-    )
-  );
-
--- Raw transcript is not part of list keyword search. It is chunked and indexed
--- separately for bounded, workspace-authorized RAG retrieval.
+-- Raw transcript is chunked and indexed separately for bounded,
+-- workspace-authorized RAG retrieval.
 CREATE TABLE public.meeting_report_transcript_embedding_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   meeting_report_id UUID NOT NULL
