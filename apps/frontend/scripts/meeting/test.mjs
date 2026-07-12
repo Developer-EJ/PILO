@@ -241,6 +241,8 @@ assert.match(meetingPanel, /녹음을 종료할까요\?/);
 assert.match(meetingPanel, /녹음만 종료하며 회의와 참여자는 계속 유지됩니다/);
 assert.match(meetingPanel, /targetRecording\.id !== targetRecordingId/);
 assert.match(meetingPanel, /result\.recording\.durationSec/);
+assert.match(meetingPanel, /result\.recording\.status === "FAILED"/);
+assert.match(meetingPanel, /result\.recording\.durationSec <= 60/);
 assert.doesNotMatch(meetingPanel, /window\.confirm/);
 assert.doesNotMatch(meetingPanel, /AvatarImage/);
 assert.doesNotMatch(meetingPanel, /aria-label="회의 상태"/);

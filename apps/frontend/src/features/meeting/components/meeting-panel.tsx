@@ -622,11 +622,15 @@ export function MeetingPanel() {
       const result = await endRecording(meeting.id, targetRecordingId);
       await Promise.all([reloadCurrentMeeting(), reloadParticipants(meeting.id)]);
       setToastMessage(
-        result.report
-          ? "녹음을 종료했습니다. 회의는 계속 참여할 수 있으며 회의록 생성을 준비합니다."
-          : typeof result.recording.durationSec === "number"
-            ? `녹음을 ${result.recording.durationSec}초에 종료했습니다. 60초 이하 녹음은 회의록이 생성되지 않습니다.`
-            : "녹음을 종료했습니다. 60초 이하 녹음은 회의록이 생성되지 않습니다."
+        result.recording.status === "FAILED"
+          ? "녹음 종료에 실패했습니다. 회의는 계속 참여할 수 있으며 잠시 후 다시 시도해주세요."
+          : result.report
+            ? "녹음을 종료했습니다. 회의는 계속 참여할 수 있으며 회의록 생성을 준비합니다."
+            : result.recording.status === "COMPLETED" &&
+                typeof result.recording.durationSec === "number" &&
+                result.recording.durationSec <= 60
+              ? `녹음을 ${result.recording.durationSec}초에 종료했습니다. 60초 이하 녹음은 회의록이 생성되지 않습니다.`
+              : "녹음을 종료했습니다. 회의록 생성 상태는 회의록 목록에서 확인해주세요."
       );
     } catch (error) {
       const message = getErrorMessage(error);
