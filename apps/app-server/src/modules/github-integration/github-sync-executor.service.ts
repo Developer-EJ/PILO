@@ -214,13 +214,9 @@ export class GithubSyncExecutorService {
     const row = await this.upsertGithubProjectV2Item(context, item.item);
     if (row) {
       const projectV2 = this.requireGithubSyncProjectV2(context);
-      await this.database.execute(
-        `
-          DELETE FROM github_project_v2_item_field_values
-          WHERE project_item_id = $1
-            AND NOT (field_name = ANY($2::text[]))
-        `,
-        [row.id, item.item.fieldValues.map((fieldValue) => fieldValue.fieldName)]
+      await this.deleteGithubProjectV2ItemFieldValuesNotInSnapshot(
+        row.id,
+        item.item.fieldValues.map((fieldValue) => fieldValue.fieldName)
       );
       for (const fieldValue of item.item.fieldValues) {
         await this.upsertGithubProjectV2ItemFieldValue(
@@ -614,6 +610,10 @@ export class GithubSyncExecutorService {
         updatedCount += 1;
       }
 
+      await this.deleteGithubProjectV2ItemFieldValuesNotInSnapshot(
+        row.id,
+        item.fieldValues.map((fieldValue) => fieldValue.fieldName)
+      );
       for (const fieldValue of item.fieldValues) {
         await this.upsertGithubProjectV2ItemFieldValue(
           projectV2.id,
@@ -623,12 +623,51 @@ export class GithubSyncExecutorService {
       }
     }
 
+    await this.archiveGithubProjectV2ItemsNotInSnapshot(
+      context,
+      items.map((item) => item.id)
+    );
+
     return this.createGithubSyncSummary({
       fetchedCount: items.length,
       createdCount,
       updatedCount,
       skippedCount
     });
+  }
+
+  private async deleteGithubProjectV2ItemFieldValuesNotInSnapshot(
+    projectItemId: string,
+    fieldNames: string[]
+  ): Promise<void> {
+    await this.database.execute(
+      `
+        DELETE FROM github_project_v2_item_field_values
+        WHERE project_item_id = $1
+          AND NOT (field_name = ANY($2::text[]))
+      `,
+      [projectItemId, fieldNames]
+    );
+  }
+
+  private async archiveGithubProjectV2ItemsNotInSnapshot(
+    context: GithubSyncRunContext,
+    itemNodeIds: string[]
+  ): Promise<void> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
+    await this.database.execute(
+      `
+        UPDATE github_project_v2_items
+        SET is_archived = true,
+            last_synced_at = now(),
+            updated_at = now()
+        WHERE workspace_id = $1
+          AND project_v2_id = $2
+          AND is_archived = false
+          AND NOT (github_project_item_node_id = ANY($3::text[]))
+      `,
+      [context.workspaceId, projectV2.id, itemNodeIds]
+    );
   }
 
   private async syncGithubProjectV2FieldsAndHydrate(

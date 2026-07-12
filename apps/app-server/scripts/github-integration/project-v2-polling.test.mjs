@@ -14,6 +14,9 @@ const {
   GithubAppClient,
   GithubGraphqlRateLimitError
 } = require("../../dist/modules/github-integration/github-app.client.js");
+const {
+  GithubSyncExecutorService
+} = require("../../dist/modules/github-integration/github-sync-executor.service.js");
 
 const repositoryId = "11111111-1111-4111-8111-111111111111";
 const projectV2Id = "22222222-2222-4222-8222-222222222222";
@@ -268,6 +271,141 @@ class FakeDatabase {
   assert.match(migration, /FOREIGN KEY \(repository_id, project_v2_id\)[\s\S]*github_project_v2_selections[\s\S]*ON DELETE CASCADE/i);
   assert.match(migration, /ALTER TABLE github_project_v2_polling_schedules ENABLE ROW LEVEL SECURITY/i);
   assert.match(migration, /idx_github_project_v2_polling_schedules_due/i);
+}
+
+class ProjectV2ItemSnapshotDatabase {
+  constructor() {
+    this.queries = [];
+  }
+
+  async queryOne(text, values = []) {
+    this.queries.push({ method: "queryOne", text, values });
+
+    if (/FROM github_issues/i.test(text)) {
+      return { id: "issue-1", repository_id: repositoryId };
+    }
+
+    if (/FROM github_project_v2_fields/i.test(text)) {
+      return { id: "field-1", created: false };
+    }
+
+    if (/INSERT INTO github_project_v2_items/i.test(text)) {
+      return { id: "project-item-1", created: false };
+    }
+
+    if (/hydrate_pilo_board_from_github/i.test(text)) {
+      return { board_id: "board-1" };
+    }
+
+    throw new Error(`Unexpected queryOne: ${text}`);
+  }
+
+  async query(text, values = []) {
+    this.queries.push({ method: "query", text, values });
+    assert.match(text, /FROM boards/i);
+    assert.deepEqual(values, [workspaceId, projectV2Id]);
+    return [{ project_v2_id: projectV2Id, repository_id: repositoryId }];
+  }
+
+  async execute(text, values = []) {
+    this.queries.push({ method: "execute", text, values });
+    return { rowCount: 1 };
+  }
+}
+
+function projectV2ItemSnapshotApiItem() {
+  return {
+    id: "PVTI_remote-current",
+    databaseId: 9001,
+    contentType: "ISSUE",
+    contentNodeId: "I_kgDOExample",
+    isArchived: false,
+    statusFieldNodeId: null,
+    statusOptionId: null,
+    statusName: null,
+    position: 1,
+    createdAt: "2026-07-12T00:00:00.000Z",
+    updatedAt: "2026-07-12T00:00:00.000Z",
+    fieldValues: [{
+      id: "PVTFV_status",
+      fieldNodeId: "PVTF_status",
+      fieldName: "Status",
+      fieldDataType: "SINGLE_SELECT",
+      textValue: null,
+      numberValue: null,
+      dateValue: null,
+      singleSelectOptionId: "option-in-progress",
+      singleSelectName: "In Progress",
+      iterationId: null,
+      iterationTitle: null,
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+      raw: {}
+    }],
+    raw: {}
+  };
+}
+
+function projectV2ItemSnapshotContext() {
+  return {
+    currentUserId: requestedByUserId,
+    workspaceId,
+    installation: {
+      id: installationId,
+      workspace_id: workspaceId,
+      github_installation_id: 123,
+      account_login: "octocat",
+      account_type: "User"
+    },
+    repository: null,
+    projectV2: {
+      id: projectV2Id,
+      workspace_id: workspaceId,
+      installation_id: installationId,
+      github_project_node_id: "PVT_kgDOExample"
+    },
+    githubUserAccessToken: "user-oauth-token",
+    config: {
+      appId: "12345",
+      privateKey: "unused",
+      now: () => new Date("2026-07-12T00:00:00.000Z")
+    }
+  };
+}
+
+{
+  const database = new ProjectV2ItemSnapshotDatabase();
+  const executor = new GithubSyncExecutorService(database, {
+    async listProjectV2Items() {
+      return [projectV2ItemSnapshotApiItem()];
+    }
+  });
+
+  await executor.runGithubSyncTarget("project_v2_items", projectV2ItemSnapshotContext());
+
+  const fieldValueDeleteIndex = database.queries.findIndex(({ text }) =>
+    /DELETE FROM github_project_v2_item_field_values/i.test(text)
+  );
+  const itemArchiveIndex = database.queries.findIndex(({ text }) =>
+    /UPDATE github_project_v2_items[\s\S]*SET is_archived = true/i.test(text)
+  );
+  const hydrationIndex = database.queries.findIndex(({ text }) =>
+    /hydrate_pilo_board_from_github/i.test(text)
+  );
+
+  assert.ok(fieldValueDeleteIndex >= 0, "missing field values must be deleted");
+  assert.ok(itemArchiveIndex >= 0, "cached items absent from the remote snapshot must be archived");
+  assert.ok(fieldValueDeleteIndex < hydrationIndex, "field values must be reconciled before Board hydration");
+  assert.ok(itemArchiveIndex < hydrationIndex, "items must be archived before Board hydration");
+  assert.deepEqual(database.queries[fieldValueDeleteIndex].values, [
+    "project-item-1",
+    ["Status"]
+  ]);
+  assert.deepEqual(database.queries[itemArchiveIndex].values, [
+    workspaceId,
+    projectV2Id,
+    ["PVTI_remote-current"]
+  ]);
 }
 
 console.log("project-v2 polling tests passed");
