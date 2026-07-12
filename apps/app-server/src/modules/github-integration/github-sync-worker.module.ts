@@ -8,12 +8,14 @@ import { GithubProjectV2PollingService } from "./github-project-v2-polling.servi
 import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
+import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 
 @Module({
   imports: [DatabaseModule],
   providers: [
     GithubSyncJobService,
+    GithubSyncObservabilityService,
     GithubProjectV2WebhookReconcileService,
     GithubIntegrationConfigService,
     GithubBoardInvalidationPublisherService,

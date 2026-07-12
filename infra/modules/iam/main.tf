@@ -63,11 +63,6 @@ resource "aws_iam_role_policy" "app_server_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = local.s3_object_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secrets_manager_arns
       }
     ]
   })
@@ -89,11 +84,6 @@ resource "aws_iam_role_policy" "realtime_server_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject"]
         Resource = local.s3_object_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secrets_manager_arns
       }
     ]
   })
@@ -126,11 +116,6 @@ resource "aws_iam_role_policy" "ai_worker_task" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = local.s3_object_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secrets_manager_arns
       }
     ]
   })
@@ -152,11 +137,87 @@ resource "aws_iam_role_policy" "github_sync_worker_task" {
     Effect   = "Allow"
     Action   = ["sqs:SendMessage"]
     Resource = var.github_webhooks_queue_arn
-    }, {
-    Effect   = "Allow"
-    Action   = ["secretsmanager:GetSecretValue"]
-    Resource = var.secrets_manager_arns
   }] })
+}
+
+resource "aws_iam_user" "github_sync_operator" {
+  count = var.github_sync_operator_user_name == "" ? 0 : 1
+
+  name = var.github_sync_operator_user_name
+}
+
+resource "aws_iam_policy" "github_sync_operator" {
+  count = var.github_sync_operator_user_name == "" ? 0 : 1
+
+  name        = "${var.name_prefix}-github-sync-operator"
+  description = "Least-privilege GitHub Sync queue redrive and worker log access."
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "InspectGithubSyncQueues"
+        Effect = "Allow"
+        Action = [
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+        ]
+        Resource = concat(var.github_sync_worker_queue_arns, var.github_sync_operator_dlq_arns)
+      },
+      {
+        Sid    = "RedriveGithubSyncDeadLetters"
+        Effect = "Allow"
+        Action = [
+          "sqs:StartMessageMoveTask",
+          "sqs:ListMessageMoveTasks",
+          "sqs:CancelMessageMoveTask",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+        ]
+        Resource = var.github_sync_operator_dlq_arns
+      },
+      {
+        Sid      = "MoveGithubSyncDeadLetterMessages"
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage"]
+        Resource = var.github_sync_operator_dlq_arns
+      },
+      {
+        Sid    = "ReadGithubSyncWorkerLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogStreams",
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents",
+          "logs:StartQuery",
+        ]
+        Resource = [
+          var.github_sync_operator_log_group_arn,
+          "${var.github_sync_operator_log_group_arn}:*",
+        ]
+      },
+      {
+        Sid    = "ReadGithubSyncLogQueryResults"
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogGroups",
+          "logs:GetQueryResults",
+          "logs:StopQuery",
+          "cloudwatch:GetMetricData",
+          "cloudwatch:GetMetricStatistics",
+          "cloudwatch:ListMetrics",
+        ]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_user_policy_attachment" "github_sync_operator" {
+  count = var.github_sync_operator_user_name == "" ? 0 : 1
+
+  user       = aws_iam_user.github_sync_operator[0].name
+  policy_arn = aws_iam_policy.github_sync_operator[0].arn
 }
 
 resource "aws_iam_openid_connect_provider" "github" {

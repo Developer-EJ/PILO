@@ -143,17 +143,17 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 ### 3-B2 Support Relations and Flow Grouping (#777)
 
-- [ ] migration/config/docs 파일의 support 관계 후보를 만든다.
-- [ ] 같은 기능 경로와 관계 연결성을 기준으로 Flow 후보를 만든다.
-- [ ] 어떤 Flow에도 묶이지 않은 파일을 fallback Flow에 보존한다.
-- [ ] package manifest/lockfile의 명시적 support 관계를 만든다.
-- [ ] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함되도록 한다.
+- [x] migration/config/docs 파일의 support 관계 후보를 만든다.
+- [x] 같은 기능 경로와 관계 연결성을 기준으로 Flow 후보를 만든다.
+- [x] 어떤 Flow에도 묶이지 않은 파일을 fallback Flow에 보존한다.
+- [x] package manifest/lockfile의 명시적 support 관계를 만든다.
+- [x] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함되도록 한다.
 
 완료 기준:
 
 - [x] OpenAI 호출 없이 고정 fixture에서 동일한 role/core relation 후보를 만든다.
 - [x] 존재하지 않는 file path와 self edge를 생성하지 않는다.
-- [ ] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함된다.
+- [x] 모든 변경 파일이 정확히 하나 이상의 Flow에 포함된다.
 
 ## 3-C AI Enrichment and Graph Validator
 
@@ -163,21 +163,21 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 작업 체크리스트:
 
-- [ ] PR Review analysis strict JSON schema를 복수 Flow와 relation output으로 확장한다.
-- [ ] AI에는 deterministic 후보와 제한된 patch context만 전달한다.
-- [ ] AI가 새 file path를 발명하지 못하도록 입력 file path 집합으로 검증한다.
-- [ ] AI가 Flow 제목, 설명, relation reason과 리뷰 순서를 보강한다.
-- [ ] App Server validator가 self edge, 없는 파일, 중복 edge를 제거한다.
-- [ ] relation/Flow별 최대 edge 수와 전체 edge 수를 제한한다.
-- [ ] confidence가 기준보다 낮은 relation을 제거한다.
-- [ ] 순환 relation을 허용할 type과 리뷰 순서 cycle을 구분한다.
+- [x] PR Review analysis strict JSON schema를 복수 Flow와 relation output으로 확장한다.
+- [x] AI에는 deterministic 후보와 제한된 patch context만 전달한다.
+- [x] AI가 새 file path를 발명하지 못하도록 입력 file path 집합으로 검증한다.
+- [x] AI가 Flow 제목, 설명, relation reason과 리뷰 순서를 보강한다.
+- [x] App Server validator가 self edge, 없는 파일, 중복 edge를 제거한다.
+- [x] relation/Flow별 최대 edge 수와 전체 edge 수를 제한한다.
+- [x] confidence가 기준보다 낮은 relation을 제거한다.
+- [x] 순환 relation을 허용할 type과 리뷰 순서 cycle을 구분한다.
 - [ ] 검증 결과를 session, Flow, file membership, relation과 함께 원자 저장한다.
 - [ ] 동일 Job 재전달과 result 재전송에도 relation이 중복 생성되지 않게 한다.
-- [ ] invalid AI output은 안전한 실패로 처리하고 부분 graph를 저장하지 않는다.
+- [x] invalid AI output은 안전한 실패로 처리하고 부분 graph를 저장하지 않는다.
 
 완료 기준:
 
-- [ ] Worker와 App Server가 같은 versioned graph schema를 사용한다.
+- [x] Worker와 App Server가 같은 versioned graph schema를 사용한다.
 - [ ] AI가 잘못된 edge를 반환해도 저장 graph는 서버 제약을 만족한다.
 - [ ] stale head SHA 결과가 Flow/file/relation을 저장하지 않는다.
 
@@ -212,15 +212,15 @@ DB migration과 schema 검증을 같은 PR에 포함한다.
 
 - [ ] migration apply와 rollback 검토를 완료한다.
 - [ ] 같은 session/Flow에 속하지 않은 relation insert를 거부한다.
-- [ ] duplicate, self edge와 invalid type을 거부한다.
+- [x] duplicate, self edge와 invalid type을 거부한다.
 - [ ] semantic graph 원자 저장과 idempotency 테스트가 통과한다.
 - [ ] 기존 session 순차 edge fallback 테스트가 통과한다.
 - [ ] `format:check`, `lint`, `build`, PR Review focused test가 통과한다.
 
 ### AI Worker
 
-- [ ] strict schema validation과 serializer 테스트가 통과한다.
-- [ ] 후보 graph 보강 성공과 invalid output 테스트가 통과한다.
+- [x] strict schema validation과 serializer 테스트가 통과한다.
+- [x] 후보 graph 보강 성공과 invalid output 테스트가 통과한다.
 - [ ] 없는 파일, 중복 relation, 과도한 edge output을 거부한다.
 - [ ] Python format/lint/test와 image build가 통과한다.
 

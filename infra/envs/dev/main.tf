@@ -119,17 +119,20 @@ module "secrets" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix                   = local.name_prefix
-  aws_region                    = var.aws_region
-  github_owner                  = var.github_owner
-  github_repo                   = var.github_repo
-  ecr_repository_arns           = module.ecr.repository_arns
-  s3_bucket_arns                = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
-  sqs_queue_arns                = module.sqs.queue_arns
-  github_sync_worker_queue_arns = module.sqs.github_sync_worker_queue_arns
-  github_webhooks_queue_arn     = module.sqs.github_webhooks_queue_arn
-  secrets_manager_arns          = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
-  cloudfront_distribution       = module.cloudfront.distribution_arn
+  name_prefix                        = local.name_prefix
+  aws_region                         = var.aws_region
+  github_owner                       = var.github_owner
+  github_repo                        = var.github_repo
+  ecr_repository_arns                = module.ecr.repository_arns
+  s3_bucket_arns                     = [module.s3.frontend_bucket_arn, module.s3.uploads_bucket_arn]
+  sqs_queue_arns                     = module.sqs.queue_arns
+  github_sync_worker_queue_arns      = module.sqs.github_sync_worker_queue_arns
+  github_webhooks_queue_arn          = module.sqs.github_webhooks_queue_arn
+  github_sync_operator_user_name     = "pilo-juhyung-github-ops"
+  github_sync_operator_dlq_arns      = module.sqs.github_sync_worker_dlq_arns
+  github_sync_operator_log_group_arn = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
+  secrets_manager_arns               = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
+  cloudfront_distribution            = module.cloudfront.distribution_arn
 }
 
 module "rds" {
@@ -248,6 +251,7 @@ module "ecs" {
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = "10"
         MEETING_REPORT_EVENT_BASE_URL           = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         MEETING_REPORT_EVENT_TIMEOUT_SECONDS    = "10"
+        MEETING_REPORT_EVENT_MAX_ATTEMPTS       = "3"
         OPENAI_STT_MODEL                        = "gpt-4o-mini-transcribe"
         OPENAI_MEETING_REPORT_MODEL             = "gpt-5.4-mini"
       }
@@ -298,6 +302,14 @@ module "ecs" {
       secrets = module.secrets.github_sync_worker_ecs_secrets
     }
   }
+}
+
+module "github_sync_observability" {
+  source = "../../modules/github-sync-observability"
+
+  depends_on = [module.ecs]
+
+  name_prefix = local.name_prefix
 }
 
 resource "aws_route53_record" "frontend" {

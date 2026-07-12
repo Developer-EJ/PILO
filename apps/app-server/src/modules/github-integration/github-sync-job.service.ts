@@ -4,12 +4,12 @@ import {
   SendMessageCommand,
   SQSClient
 } from "@aws-sdk/client-sqs";
-import { HttpStatus, Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
-import { isGithubGraphqlRateLimitError } from "./github-app.client";
+import { GithubGraphqlRateLimitError, isGithubGraphqlRateLimitError } from "./github-app.client";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
 import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
@@ -21,6 +21,7 @@ import {
   type GithubSyncRunSummary
 } from "./github-sync-executor.service";
 import { createGithubSyncProgressCursor } from "./github-sync-progress";
+import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 import type { GithubSyncTarget } from "./types";
 
 type GithubSqsClient = Pick<SQSClient, "send"> & Partial<Pick<SQSClient, "destroy">>;
@@ -68,7 +69,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly executor: GithubSyncExecutorService,
     private readonly tokenService: GithubProjectV2SyncTokenService,
     private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService,
-    private readonly pollingService?: GithubProjectV2PollingService
+    private readonly pollingService?: GithubProjectV2PollingService,
+    @Optional() private readonly observability?: GithubSyncObservabilityService
   ) {}
 
   async enqueueSyncJob(
@@ -177,18 +179,27 @@ export class GithubSyncJobService implements OnModuleDestroy {
       return "terminal";
     } catch (error) {
       if (error instanceof LostSyncJobLeaseError) {
-        await this.completeLostLeaseFailure(job, this.errorMessage(error));
+        if (await this.completeLostLeaseFailure(job, this.errorMessage(error))) {
+          this.emitTerminalFailure(job, null);
+        }
         return "terminal";
       }
       const isRateLimited = isGithubGraphqlRateLimitError(error);
       if (error instanceof TerminalSyncJobError || isRateLimited) {
         await this.completeFailure(job, this.errorMessage(error), isRateLimited);
+        this.emitTerminalFailure(
+          job,
+          isRateLimited && error instanceof GithubGraphqlRateLimitError ? error.rateLimitRemaining : null,
+          isRateLimited
+        );
         return "terminal";
       }
       if (job.attempt_count >= 3) {
         await this.completeFailure(job, this.errorMessage(error));
+        this.emitTerminalFailure(job, null);
         return "terminal";
       }
+      this.observability?.emitRetry(this.operationInput(job, null), 900);
       this.logger.warn(`GitHub sync job ${job.id} will be retried: ${this.errorMessage(error)}`);
       return "retry";
     } finally {
@@ -197,7 +208,9 @@ export class GithubSyncJobService implements OnModuleDestroy {
   }
 
   async processWebhookDelivery(deliveryId: string): Promise<"terminal" | "retry"> {
-    return this.webhookReconcileService.processDelivery(deliveryId);
+    const result = await this.webhookReconcileService.processDelivery(deliveryId);
+    if (result === "retry") this.observability?.emitWebhookRetry(deliveryId);
+    return result;
   }
 
   async pollOnce(): Promise<void> {
@@ -487,9 +500,9 @@ export class GithubSyncJobService implements OnModuleDestroy {
     });
   }
 
-  private async completeLostLeaseFailure(job: SyncJobRow, message: string): Promise<void> {
-    await this.database.transaction(async (transaction) => {
-      await transaction.execute(`WITH locked_schedule AS MATERIALIZED (
+  private async completeLostLeaseFailure(job: SyncJobRow, message: string): Promise<boolean> {
+    return this.database.transaction(async (transaction) => {
+      const result = await transaction.execute(`WITH locked_schedule AS MATERIALIZED (
         SELECT schedule.active_sync_run_id
         FROM github_project_v2_polling_schedules AS schedule
         WHERE schedule.active_sync_run_id=$4
@@ -530,6 +543,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
         WHERE schedule.active_sync_run_id=terminal_run.id
       )
       SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, job.sync_run_id, message.slice(0, 1000)]);
+      return (result.rowCount ?? 0) > 0;
     });
   }
 
@@ -582,4 +596,16 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private client(): GithubSqsClient { if (!this.sqs) this.sqs = new SQSClient({ region: this.requireEnv("AWS_REGION"), endpoint: process.env.SQS_ENDPOINT?.trim() || undefined }); return this.sqs; }
   private requireEnv(name: string): string { const value = process.env[name]?.trim(); if (!value) throw badRequest(`GitHub queue configuration is missing: ${name}`); return value; }
   private errorMessage(error: unknown): string { return (error instanceof Error ? error.message : "GitHub sync failed").slice(0, 1000); }
+  private operationInput(job: SyncJobRow, rateLimitRemaining: number | null) {
+    return {
+      jobId: job.id,
+      syncRunId: job.sync_run_id,
+      target: job.target,
+      attemptCount: job.attempt_count,
+      rateLimitRemaining
+    };
+  }
+  private emitTerminalFailure(job: SyncJobRow, rateLimitRemaining: number | null, isRateLimited = false): void {
+    this.observability?.emitTerminalFailure(this.operationInput(job, rateLimitRemaining), isRateLimited);
+  }
 }

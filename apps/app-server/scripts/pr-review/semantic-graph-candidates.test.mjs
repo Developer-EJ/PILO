@@ -155,6 +155,14 @@ assert.equal(
 );
 assert.equal(
   relation(
+    "db/migrations/041_create_user_profiles.sql",
+    "apps/app-server/src/users/user.service.ts",
+    "supports"
+  )?.confidence,
+  65
+);
+assert.equal(
+  relation(
     "apps/app-server/src/users/legacy-consumer.ts",
     "apps/app-server/src/users/legacy-user.ts",
     "depends_on"
@@ -177,6 +185,22 @@ assert.equal(
   true
 );
 
+const flowFilePaths = result.flows.flatMap((flow) => flow.filePaths);
+assert.equal(flowFilePaths.length, new Set(flowFilePaths).size);
+assert.deepEqual(new Set(flowFilePaths), knownPaths);
+assert.equal(
+  result.flows
+    .find((flow) => flow.fallback)
+    ?.filePaths.includes("docs/users.md"),
+  true
+);
+assert.equal(
+  result.flows.every((flow) =>
+    flow.relationKeys.every((key) => result.relations.some((relation) => relation.key === key))
+  ),
+  true
+);
+
 {
   const aliasResult = buildDeterministicSemanticGraphCandidates([
     changedFile(
@@ -192,6 +216,77 @@ assert.equal(
   ]);
 
   assert.equal(aliasResult.relations.length, 0);
+  assert.equal(aliasResult.flows.length, 1);
+  assert.equal(aliasResult.flows[0].fallback, true);
+  assert.equal(aliasResult.flows[0].filePaths.length, 2);
+}
+
+{
+  const packageResult = buildDeterministicSemanticGraphCandidates([
+    changedFile(
+      "apps/app-server/package.json",
+      `@@ -1,3 +1,4 @@
++  "new-package": "1.0.0"`
+    ),
+    changedFile(
+      "apps/app-server/package-lock.json",
+      `@@ -1,3 +1,4 @@
++  "new-package": "1.0.0"`
+    )
+  ]);
+
+  assert.deepEqual(
+    packageResult.relations.map((candidate) => ({
+      fromFilePath: candidate.fromFilePath,
+      toFilePath: candidate.toFilePath,
+      relationType: candidate.relationType,
+      confidence: candidate.confidence,
+      evidence: candidate.evidence
+    })),
+    [
+      {
+        fromFilePath: "apps/app-server/package-lock.json",
+        toFilePath: "apps/app-server/package.json",
+        relationType: "supports",
+        confidence: 98,
+        evidence: "package_lock_manifest"
+      }
+    ]
+  );
+  assert.equal(packageResult.flows.length, 1);
+  assert.equal(packageResult.flows[0].fallback, false);
+}
+
+{
+  const explicitReferenceResult = buildDeterministicSemanticGraphCandidates([
+    changedFile(
+      "docs/user-service.md",
+      `@@ -0,0 +1 @@
++Review apps/app-server/src/users/user.service.ts before deployment.`
+    ),
+    changedFile(
+      "apps/app-server/src/users/user.service.ts",
+      `@@ -1 +1,2 @@
++export const enabled = true;`
+    )
+  ]);
+
+  assert.equal(explicitReferenceResult.relations[0]?.evidence, "explicit_file_reference");
+  assert.equal(explicitReferenceResult.relations[0]?.confidence, 75);
+  assert.equal(explicitReferenceResult.flows[0]?.fallback, false);
+}
+
+{
+  const reverseReferenceResult = buildDeterministicSemanticGraphCandidates([
+    changedFile("docs/deployment.md", null),
+    changedFile(
+      "apps/app-server/src/deployment.ts",
+      `@@ -1 +1,2 @@
++// Keep docs/deployment.md synchronized with this policy.`
+    )
+  ]);
+
+  assert.equal(reverseReferenceResult.relations[0]?.evidence, "explicit_file_reference");
 }
 
 assert.throws(
