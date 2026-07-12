@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { GithubSyncObservabilityService } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
 const { GithubProjectV2PollingService } = require("../../dist/modules/github-integration/github-project-v2-polling.service.js");
-const { GithubGraphqlRateLimitError } = require("../../dist/modules/github-integration/github-app.client.js");
+const { GithubAppClient, GithubGraphqlRateLimitError } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubWebhookService } = require("../../dist/modules/github-integration/github-webhook.service.js");
 const root = fileURLToPath(new URL("../../../..", import.meta.url));
 
@@ -15,6 +16,114 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
 const installationId = "33333333-3333-4333-8333-333333333333";
 const syncRunId = "44444444-4444-4444-8444-444444444444";
+
+{
+  const observabilityPath = `${root}/apps/app-server/src/modules/github-integration/github-sync-observability.service.ts`;
+  assert.ok(existsSync(observabilityPath), "GitHub sync observability service must exist");
+
+  const observabilitySource = readFileSync(observabilityPath, "utf8");
+  assert.match(observabilitySource, /github_sync_retry/);
+  assert.match(observabilitySource, /github_sync_terminal_failure/);
+  assert.match(observabilitySource, /github_sync_rate_limit_terminal_failure/);
+  assert.match(observabilitySource, /JSON\.stringify/);
+
+  const appClientSource = readFileSync(`${root}/apps/app-server/src/modules/github-integration/github-app.client.ts`, "utf8");
+  assert.match(appClientSource, /rateLimitRemaining: number \| null/);
+  assert.match(appClientSource, /headers\.get\("x-ratelimit-remaining"\)/);
+}
+
+{
+  const output = [];
+  const originalWrite = process.stdout.write;
+  const observability = new GithubSyncObservabilityService();
+  const input = {
+    jobId: "job-observability",
+    syncRunId,
+    target: "full",
+    attemptCount: 2,
+    rateLimitRemaining: null
+  };
+
+  process.stdout.write = (chunk, encoding, callback) => {
+    output.push(String(chunk));
+    const done = typeof encoding === "function" ? encoding : callback;
+    if (typeof done === "function") done();
+    return true;
+  };
+  try {
+    observability.emitRetry(input, 900);
+    observability.emitTerminalFailure({ ...input, rateLimitRemaining: 0 }, true);
+    observability.emitWebhookRetry("delivery-observability");
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  assert.deepEqual(output.map((line) => JSON.parse(line)), [
+    { event: "github_sync_retry", ...input, deliveryId: null, retryAfterSeconds: 900 },
+    { event: "github_sync_rate_limit_terminal_failure", ...input, deliveryId: null, rateLimitRemaining: 0 },
+    {
+      event: "github_sync_retry",
+      jobId: null,
+      syncRunId: null,
+      deliveryId: "delivery-observability",
+      target: "webhook_delivery",
+      attemptCount: null,
+      retryAfterSeconds: 120,
+      rateLimitRemaining: null
+    }
+  ]);
+  assert.ok(output.every((line) => line.endsWith("\n")), "each event must be one raw stdout JSON line");
+}
+
+{
+  const output = [];
+  const originalFetch = globalThis.fetch;
+  const originalWrite = process.stdout.write;
+  const observability = new GithubSyncObservabilityService();
+  const client = new GithubAppClient(observability);
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: {} }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "x-ratelimit-remaining": "42"
+    }
+  });
+  process.stdout.write = (chunk) => { output.push(String(chunk)); return true; };
+
+  try {
+    assert.deepEqual(
+      await client.fetchGraphqlWithToken("test-user-access-token", "query Test { viewer { login } }", {}, "GraphQL test failed"),
+      {}
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalWrite;
+  }
+
+  assert.deepEqual(output.map((line) => JSON.parse(line)), [{
+    event: "github_sync_rate_limit_observed",
+    jobId: null,
+    syncRunId: null,
+    deliveryId: null,
+    target: "graphql",
+    attemptCount: null,
+    rateLimitRemaining: 42
+  }]);
+  assert.doesNotMatch(output.join(""), /test-user-access-token|viewer/);
+}
+
+{
+  const deliveryEvents = [];
+  const worker = new GithubSyncJobService(
+    {}, {}, {}, {},
+    { processDelivery: async () => "retry" },
+    undefined,
+    { emitWebhookRetry: (deliveryId) => deliveryEvents.push(deliveryId) }
+  );
+
+  assert.equal(await worker.processWebhookDelivery("delivery-retry-observability"), "retry");
+  assert.deepEqual(deliveryEvents, ["delivery-retry-observability"]);
+}
 
 {
   const workerModulePath = `${root}/apps/app-server/src/modules/github-integration/github-sync-worker.module.ts`;
@@ -42,6 +151,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     workerModule,
     /providers:\s*\[[\s\S]*?GithubProjectV2PollingService,\s*\n\s*GithubProjectV2SyncTokenService/
   );
+  assert.match(workerModule, /GithubSyncObservabilityService/);
   for (const excludedModule of [
     "PrReviewModule",
     "AgentModule",
@@ -693,6 +803,11 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 {
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1 };
   const writes = [];
+  const events = [];
+  const observability = {
+    emitRetry: (input, retryAfterSeconds) => events.push({ type: "retry", input, retryAfterSeconds }),
+    emitTerminalFailure: (input, isRateLimited) => events.push({ type: "terminal_failure", input, isRateLimited })
+  };
   const worker = new GithubSyncJobService(
     {
       transaction: async (callback) => callback({
@@ -701,17 +816,191 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => { throw new Error("transient provider failure"); } },
-    { resolvePersonalProjectV2UserAccessToken: async () => null }
+    { resolvePersonalProjectV2UserAccessToken: async () => null },
+    {},
+    undefined,
+    observability
   );
   worker.acquireLease = async () => job;
   worker.installation = async () => ({ id: installationId });
   assert.equal(await worker.processSyncJob("job-1"), "retry");
   assert.equal(writes.length, 0, "transient failure keeps the SQS message and job runnable");
+  assert.deepEqual(events, [{
+    type: "retry",
+    input: {
+      jobId: job.id,
+      syncRunId: job.sync_run_id,
+      target: job.target,
+      attemptCount: 1,
+      rateLimitRemaining: null
+    },
+    retryAfterSeconds: 900
+  }]);
   job.attempt_count = 3;
   assert.equal(await worker.processSyncJob("job-1"), "terminal");
   assert.equal(writes.length, 1, "maximum attempts terminally fail the fenced run and job atomically");
   assert.match(writes[0].text, /status='failed'/);
   assert.match(writes[0].text, /lease_generation=\$3/);
+  assert.deepEqual(events[1], {
+    type: "terminal_failure",
+    input: {
+      jobId: job.id,
+      syncRunId: job.sync_run_id,
+      target: job.target,
+      attemptCount: 3,
+      rateLimitRemaining: null
+    },
+    isRateLimited: false
+  });
+}
+
+{
+  const rateLimitError = new GithubGraphqlRateLimitError("GitHub API rate limit reached", 0);
+  assert.equal(rateLimitError.rateLimitRemaining, 0);
+
+  const job = { id: "job-rate-limit", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1 };
+  const events = [];
+  const worker = new GithubSyncJobService(
+    { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
+    { getGithubAppConfig: () => ({}) },
+    { runGithubSyncTarget: async () => { throw rateLimitError; } },
+    { resolvePersonalProjectV2UserAccessToken: async () => null },
+    {},
+    undefined,
+    {
+      emitRetry: (input, retryAfterSeconds) => events.push({ type: "retry", input, retryAfterSeconds }),
+      emitTerminalFailure: (input, isRateLimited) => events.push({ type: "terminal_failure", input, isRateLimited })
+    }
+  );
+  worker.acquireLease = async () => job;
+  worker.installation = async () => ({ id: installationId });
+
+  assert.equal(await worker.processSyncJob(job.id), "terminal");
+  assert.deepEqual(events, [{
+    type: "terminal_failure",
+    input: {
+      jobId: job.id,
+      syncRunId: job.sync_run_id,
+      target: job.target,
+      attemptCount: 1,
+      rateLimitRemaining: 0
+    },
+    isRateLimited: true
+  }]);
+}
+
+{
+  const job = { id: "job-lost-lease-observability", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1, is_polling: false };
+
+  for (const [terminalRowCount, expectedEvents] of [
+    [0, []],
+    [1, [{
+      type: "terminal_failure",
+      input: {
+        jobId: job.id,
+        syncRunId: job.sync_run_id,
+        target: job.target,
+        attemptCount: job.attempt_count,
+        rateLimitRemaining: null
+      },
+      isRateLimited: false
+    }]]
+  ]) {
+    const events = [];
+    const worker = new GithubSyncJobService(
+      {
+        queryOne: async () => null,
+        transaction: async (callback) => callback({
+          execute: async () => ({ rowCount: terminalRowCount })
+        })
+      },
+      { getGithubAppConfig: () => ({}) },
+      {
+        runGithubSyncTarget: async (_target, input) => {
+          await input.assertLease();
+          return { fetchedCount: 0, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} };
+        }
+      },
+      { resolvePersonalProjectV2UserAccessToken: async () => null },
+      {},
+      undefined,
+      {
+        emitRetry: (input, retryAfterSeconds) => events.push({ type: "retry", input, retryAfterSeconds }),
+        emitTerminalFailure: (input, isRateLimited) => events.push({ type: "terminal_failure", input, isRateLimited })
+      }
+    );
+    worker.acquireLease = async () => job;
+    worker.installation = async () => ({ id: installationId });
+
+    assert.equal(await worker.processSyncJob(job.id), "terminal");
+    assert.deepEqual(events, expectedEvents, "lost lease emits only after its fenced terminal transition succeeds");
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [headerValue, expectedRemaining] of [
+      ["100", 100],
+      ["0", 0],
+      ["not-a-number", null],
+      [null, null]
+    ]) {
+      globalThis.fetch = async () => new Response(null, {
+        status: 429,
+        headers: headerValue === null ? {} : { "x-ratelimit-remaining": headerValue }
+      });
+
+      let rateLimitError;
+      await assert.rejects(
+        () => new GithubAppClient().getProjectV2Item({
+          installationId: 1,
+          appId: "unused",
+          privateKey: "unused",
+          projectItemNodeId: "PVT_rate_limit_test",
+          userAccessToken: "test-user-access-token",
+          accountType: "Organization"
+        }),
+        (error) => {
+          assert.ok(error instanceof GithubGraphqlRateLimitError);
+          rateLimitError = error;
+          return true;
+        }
+      );
+
+      const job = { id: `job-rate-limit-header-${expectedRemaining ?? "null"}`, sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1 };
+      const events = [];
+      const worker = new GithubSyncJobService(
+        { transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) }) },
+        { getGithubAppConfig: () => ({}) },
+        { runGithubSyncTarget: async () => { throw rateLimitError; } },
+        { resolvePersonalProjectV2UserAccessToken: async () => null },
+        {},
+        undefined,
+        {
+          emitRetry: (input, retryAfterSeconds) => events.push({ type: "retry", input, retryAfterSeconds }),
+          emitTerminalFailure: (input, isRateLimited) => events.push({ type: "terminal_failure", input, isRateLimited })
+        }
+      );
+      worker.acquireLease = async () => job;
+      worker.installation = async () => ({ id: installationId });
+
+      assert.equal(await worker.processSyncJob(job.id), "terminal");
+      assert.deepEqual(events, [{
+        type: "terminal_failure",
+        input: {
+          jobId: job.id,
+          syncRunId: job.sync_run_id,
+          target: job.target,
+          attemptCount: 1,
+          rateLimitRemaining: expectedRemaining
+        },
+        isRateLimited: true
+      }]);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 {

@@ -1,7 +1,8 @@
 import { createSign } from "node:crypto";
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
+import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 
 export interface GithubAppInstallationLookupRequest {
   installationId: number;
@@ -24,10 +25,12 @@ const githubGraphqlRateLimitErrorMarker = Symbol("githubGraphqlRateLimitError");
 
 export class GithubGraphqlRateLimitError extends ApiError {
   readonly [githubGraphqlRateLimitErrorMarker] = true;
+  readonly rateLimitRemaining: number | null;
 
-  constructor(message: string) {
+  constructor(message: string, rateLimitRemaining: number | null = null) {
     super(HttpStatus.BAD_REQUEST, "BAD_REQUEST", message);
     this.message = message;
+    this.rateLimitRemaining = rateLimitRemaining;
   }
 }
 
@@ -1033,6 +1036,8 @@ const GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION = `
 
 @Injectable()
 export class GithubAppClient {
+  constructor(@Optional() private readonly observability?: GithubSyncObservabilityService) {}
+
   async getInstallation(
     input: GithubAppInstallationLookupRequest
   ): Promise<GithubAppInstallationDetails> {
@@ -2055,7 +2060,7 @@ export class GithubAppClient {
     }
 
     if (this.isGraphqlRateLimitedResponse(response)) {
-      throw new GithubGraphqlRateLimitError(errorMessage);
+      throw new GithubGraphqlRateLimitError(errorMessage, this.rateLimitRemaining(response));
     }
 
     if (response.status === 403 && context?.writePermissionMessage) {
@@ -2072,7 +2077,7 @@ export class GithubAppClient {
     const record = this.toObject(payload);
     if (Array.isArray(record.errors) && record.errors.length > 0) {
       if (this.hasGraphqlRateLimitError(record.errors)) {
-        throw new GithubGraphqlRateLimitError(errorMessage);
+        throw new GithubGraphqlRateLimitError(errorMessage, this.rateLimitRemaining(response));
       }
 
       if (
@@ -2092,6 +2097,8 @@ export class GithubAppClient {
       throw badRequest(errorMessage);
     }
 
+    const rateLimitRemaining = this.rateLimitRemaining(response);
+    if (rateLimitRemaining !== null) this.observability?.emitRateLimitObserved(rateLimitRemaining);
     return data;
   }
 
@@ -2101,6 +2108,13 @@ export class GithubAppClient {
       (response.headers?.get?.("x-ratelimit-remaining") === "0" ||
         response.headers?.get?.("retry-after") != null)
     );
+  }
+
+  private rateLimitRemaining(response: Response): number | null {
+    const value = response.headers?.get?.("x-ratelimit-remaining") ?? null;
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const remaining = Number(value);
+    return Number.isSafeInteger(remaining) ? remaining : null;
   }
 
   private hasGraphqlRateLimitError(errors: unknown[]): boolean {
