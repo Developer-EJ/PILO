@@ -171,7 +171,7 @@ function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
 
 function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
   const summary = report.participantSummary;
-  if (summary.totalCount === 0) return null;
+  if (!summary || summary.totalCount === 0) return null;
   const names = summary.participants
     .map((participant) => participant.name?.trim() || "이름 없음")
     .join(", ");
