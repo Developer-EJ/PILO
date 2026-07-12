@@ -17,6 +17,7 @@ async function compileSqlErdRuntimeModules() {
     fileURLToPath(new URL("../../.pilo-sqltoerd-runtime-", import.meta.url))
   );
   const modelOutputPath = join(outputDir, "model.mjs");
+  const modelToSqlOutputPath = join(outputDir, "model-to-sql.mjs");
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
@@ -52,6 +53,11 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/model.ts",
       modelOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/model-to-sql.ts",
+      modelToSqlOutputPath,
+      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/inspector.ts",
@@ -219,6 +225,7 @@ async function compileSqlErdRuntimeModules() {
 
     const [
       modelRuntime,
+      modelToSqlRuntime,
       inspectorRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
@@ -239,6 +246,7 @@ async function compileSqlErdRuntimeModules() {
       tablePinRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
+      import(pathToFileHref(modelToSqlOutputPath)),
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
@@ -270,6 +278,7 @@ async function compileSqlErdRuntimeModules() {
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
+      modelToSqlRuntime,
       relationShapeRuntime,
       sessionListStateRuntime,
       sessionNavigationRuntime,
@@ -627,6 +636,7 @@ const {
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
+  modelToSqlRuntime,
   relationShapeRuntime,
   sessionStateRuntime,
   sqlEditStateRuntime,
@@ -3207,6 +3217,86 @@ assert.equal(
   ),
   "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
 );
+
+const generatedMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: mysqlParseResult.modelJson
+});
+assert.match(generatedMySql.sql, /CREATE TABLE `users`/);
+assert.match(generatedMySql.sql, /`email` VARCHAR\(255\) NOT NULL/);
+assert.match(generatedMySql.sql, /UNIQUE \(`email`\)/);
+assert.match(
+  generatedMySql.sql,
+  /CONSTRAINT `fk_orders_user` FOREIGN KEY \(`user_id`\) REFERENCES `users` \(`id`\)/
+);
+const generatedMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: generatedMySql.sql
+});
+assert.equal(generatedMySqlParseResult.ok, true);
+assert.equal(generatedMySqlParseResult.modelJson.schema.relations.length, 1);
+const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "postgresql",
+  modelJson: mysqlParseResult.modelJson
+});
+assert.match(generatedPostgreSql.sql, /CREATE TABLE "users"/);
+assert.match(
+  generatedPostgreSql.sql,
+  /CONSTRAINT "fk_orders_user" FOREIGN KEY \("user_id"\) REFERENCES "users" \("id"\)/
+);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: generatedPostgreSql.sql
+  }).ok,
+  true
+);
+
+const cyclicModel = {
+  version: 1,
+  schema: {
+    tables: [
+      {
+        id: "table.a",
+        name: "a",
+        schemaName: null,
+        columns: [
+          { id: "column.a.id", name: "id", dataType: "BIGINT", nullable: false, primaryKey: true, foreignKey: false, unique: false, defaultValue: null, comment: null },
+          { id: "column.a.b_id", name: "b_id", dataType: "BIGINT", nullable: true, primaryKey: false, foreignKey: true, unique: false, defaultValue: null, comment: null }
+        ],
+        constraints: [{ id: "constraint.a.pk", kind: "primary_key", columnIds: ["column.a.id"], name: null }],
+        comment: null
+      },
+      {
+        id: "table.b",
+        name: "b",
+        schemaName: null,
+        columns: [
+          { id: "column.b.id", name: "id", dataType: "BIGINT", nullable: false, primaryKey: true, foreignKey: false, unique: false, defaultValue: null, comment: null },
+          { id: "column.b.a_id", name: "a_id", dataType: "BIGINT", nullable: true, primaryKey: false, foreignKey: true, unique: false, defaultValue: null, comment: null }
+        ],
+        constraints: [{ id: "constraint.b.pk", kind: "primary_key", columnIds: ["column.b.id"], name: null }],
+        comment: null
+      }
+    ],
+    relations: [
+      { id: "relation.a.b_id.b.id", kind: "foreign_key", fromTableId: "table.a", fromColumnIds: ["column.a.b_id"], toTableId: "table.b", toColumnIds: ["column.b.id"], constraintName: "fk_a_b" },
+      { id: "relation.b.a_id.a.id", kind: "foreign_key", fromTableId: "table.b", fromColumnIds: ["column.b.a_id"], toTableId: "table.a", toColumnIds: ["column.a.id"], constraintName: "fk_b_a" }
+    ]
+  }
+};
+const generatedCyclicMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: cyclicModel
+});
+assert.match(generatedCyclicMySql.sql, /ALTER TABLE `a` ADD CONSTRAINT `fk_a_b`/);
+assert.match(generatedCyclicMySql.sql, /ALTER TABLE `b` ADD CONSTRAINT `fk_b_a`/);
+const generatedCyclicMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: generatedCyclicMySql.sql
+});
+assert.equal(generatedCyclicMySqlParseResult.ok, true);
+assert.equal(generatedCyclicMySqlParseResult.modelJson.schema.relations.length, 2);
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
   dialect: "mysql",
