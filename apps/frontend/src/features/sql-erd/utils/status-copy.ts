@@ -50,7 +50,11 @@ export function getSqlErdWorkspaceSaveErrorState(): SqlErdSessionLoadState {
   };
 }
 
-export type SqlErdSourceAutosaveState = "idle" | "pending" | "saving";
+export type SqlErdSourceAutosaveState =
+  | "idle"
+  | "pending"
+  | "retrying"
+  | "saving";
 
 export function getSqlErdSourceStatus({
   autosaveBlockReason,
@@ -95,11 +99,12 @@ export function getSqlErdSourceStatus({
     return fallbackState;
   }
 
-  if (sourceAutosaveState === "pending") {
+  if (sourceAutosaveState === "retrying") {
     return {
-      label: "Unsaved",
-      message: "Parsed SQL changes will autosave",
-      tone: "neutral"
+      label: "Save error",
+      message:
+        "Workspace session could not be autosaved. Retrying parsed SQL changes automatically.",
+      tone: "error"
     };
   }
 
@@ -107,6 +112,14 @@ export function getSqlErdSourceStatus({
     return {
       label: "Saving",
       message: "Autosaving parsed SQL changes",
+      tone: "neutral"
+    };
+  }
+
+  if (sourceAutosaveState === "pending") {
+    return {
+      label: "Unsaved",
+      message: "Parsed SQL changes will autosave",
       tone: "neutral"
     };
   }

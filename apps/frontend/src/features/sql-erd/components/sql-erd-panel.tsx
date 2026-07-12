@@ -79,7 +79,7 @@ import {
   type RelationSummary,
   type SqlErdInspectorViewModel
 } from "@/features/sql-erd/utils/inspector";
-import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
+import { isSqlErdSourceTextTooLarge } from "@/features/sql-erd/utils/ddl-parser";
 import {
   areSqltoerdLayoutsEqual,
   createSqltoerdModelIndex,
@@ -88,7 +88,10 @@ import {
   type SqlErdRelationCardinality,
   type SqlErdRelationCardinalityEndpoints
 } from "@/features/sql-erd/utils/model";
-import { createSqlErdGenerateWorkspaceRequest } from "@/features/sql-erd/utils/generate-session";
+import type {
+  ParseWorkerRequest,
+  ParseWorkerResponse
+} from "@/features/sql-erd/utils/parse-worker-protocol";
 import {
   createSqlErdLayoutAutosaveRequest,
   createSqlErdSourceAutosaveRequest
@@ -152,6 +155,11 @@ const MIN_CANVAS_WIDTH = 480;
 const PANEL_RESIZE_HANDLE_WIDTH = 4;
 const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
 const PANEL_RESIZE_KEYBOARD_STEP = 24;
+const SQL_ERD_PARSE_TIMEOUT_MS = 5000;
+
+type SqlErdParseWorkerController = {
+  terminate: () => void;
+};
 
 const sqlSourceEditorTheme = EditorView.theme({
   "&": {
@@ -236,6 +244,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const autosaveLifecycleGenerationRef = useRef(0);
   const pendingSourceAutosaveSnapshotRef =
     useRef<SqlErdViewSession | null>(null);
+  const parseWorkerRef = useRef<SqlErdParseWorkerController | null>(null);
   currentSessionIdRef.current = sessionId;
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -261,6 +270,99 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       setSqlErdEditState(nextState);
     },
     []
+  );
+  const terminateParseWorker = useCallback(() => {
+    const controller = parseWorkerRef.current;
+
+    if (!controller) {
+      return;
+    }
+
+    controller.terminate();
+    parseWorkerRef.current = null;
+  }, []);
+  const runSqlErdParseWorker = useCallback(
+    (request: ParseWorkerRequest): Promise<ParseWorkerResponse> => {
+      if (isSqlErdSourceTextTooLarge(request.sourceText)) {
+        return Promise.resolve({
+          error: {
+            code: "SOURCE_TOO_LARGE",
+            message: "SQL DDL source exceeds the 1 MiB UTF-8 limit."
+          },
+          ok: false,
+          requestSequence: request.requestSequence,
+          sessionId: request.sessionId
+        });
+      }
+
+      terminateParseWorker();
+
+      return new Promise((resolve) => {
+        const worker = new Worker(
+          new URL("../workers/sql-erd-parse-worker.ts", import.meta.url)
+        );
+        let didFinish = false;
+        let timeoutId: number | null = null;
+
+        const finish = (response: ParseWorkerResponse) => {
+          if (didFinish) {
+            return;
+          }
+
+          didFinish = true;
+          if (timeoutId !== null) {
+            window.clearTimeout(timeoutId);
+          }
+          if (parseWorkerRef.current === controller) {
+            parseWorkerRef.current = null;
+          }
+          worker.terminate();
+          resolve(response);
+        };
+        const controller: SqlErdParseWorkerController = {
+          terminate: () => {
+            finish({
+              error: {
+                code: "PARSE_FAILED",
+                message: "SQL parsing was cancelled."
+              },
+              ok: false,
+              requestSequence: request.requestSequence,
+              sessionId: request.sessionId
+            });
+          }
+        };
+        parseWorkerRef.current = controller;
+        timeoutId = window.setTimeout(() => {
+          finish({
+            error: {
+              code: "PARSE_FAILED",
+              message: "SQL parsing timed out after 5 seconds."
+            },
+            ok: false,
+            requestSequence: request.requestSequence,
+            sessionId: request.sessionId
+          });
+        }, SQL_ERD_PARSE_TIMEOUT_MS);
+
+        worker.addEventListener("message", (event: MessageEvent<ParseWorkerResponse>) => {
+          finish(event.data);
+        });
+        worker.addEventListener("error", () => {
+          finish({
+            error: {
+              code: "PARSE_FAILED",
+              message: "SQL parsing worker could not complete."
+            },
+            ok: false,
+            requestSequence: request.requestSequence,
+            sessionId: request.sessionId
+          });
+        });
+        worker.postMessage(request);
+      });
+    },
+    [terminateParseWorker]
   );
   const setPendingSourceAutosaveSnapshot = useCallback(
     (snapshot: SqlErdViewSession | null) => {
@@ -495,11 +597,22 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
         const activeViewSession =
           createWorkspaceSqlErdViewSession(activeSession);
-        const activeParseResult = parseSqlDdlToErdModel({
+        const activeParseResult = await runSqlErdParseWorker({
           dialect: activeViewSession.dialect,
-          sourceMapModelJson: activeViewSession.modelJson,
+          previousLayoutJson: activeViewSession.layoutJson,
+          previousModelJson: activeViewSession.modelJson,
+          requestSequence: requestId,
+          sessionId: activeSession.id,
           sourceText: activeViewSession.sourceText
         });
+
+        if (
+          !isCurrentRequest() ||
+          activeParseResult.requestSequence !== requestId ||
+          activeParseResult.sessionId !== activeSession.id
+        ) {
+          return;
+        }
 
         applySqlErdEditAction({
           snapshot: activeViewSession,
@@ -536,6 +649,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       accessToken,
       activeWorkspaceId,
       applySqlErdEditAction,
+      runSqlErdParseWorker,
       sessionId,
       setPendingSourceAutosaveSnapshot
     ]
@@ -551,47 +665,44 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       return;
     }
 
-    let parseExecutionTimeoutId: number | null = null;
     const debounceTimeoutId = window.setTimeout(() => {
       const parseStart = beginSqlErdParse(sqlErdEditStateRef.current);
       sqlErdEditStateRef.current = parseStart.state;
       setSqlErdEditState(parseStart.state);
 
-      parseExecutionTimeoutId = window.setTimeout(() => {
-        const generateRequest =
-          createSqlErdGenerateWorkspaceRequest(parseStart.session);
-
+      void runSqlErdParseWorker({
+        dialect: parseStart.session.dialect,
+        previousLayoutJson: parseStart.session.layoutJson,
+        previousModelJson: parseStart.session.modelJson,
+        requestSequence: parseStart.requestSequence,
+        sessionId: parseStart.session.id!,
+        sourceText: parseStart.session.sourceText
+      }).then((parseResult) => {
         if (
           !isSqlErdParseRequestCurrent(
             sqlErdEditStateRef.current,
             parseStart.requestSequence
           ) ||
-          parseStart.session.id !== currentSessionIdRef.current
+          parseStart.session.id !== currentSessionIdRef.current ||
+          parseResult.requestSequence !== parseStart.requestSequence ||
+          parseResult.sessionId !== parseStart.session.id
         ) {
           return;
         }
 
-        if (!generateRequest.ok) {
+        if (!parseResult.ok) {
           applySqlErdEditAction({
-            error: generateRequest.error,
+            error: parseResult.error,
             requestSequence: parseStart.requestSequence,
             type: "parse_failed"
           });
           return;
         }
 
-        if (generateRequest.kind !== "update") {
-          applySqlErdEditAction({
-            requestSequence: parseStart.requestSequence,
-            type: "parse_finished"
-          });
-          return;
-        }
-
         const parsedSnapshot: SqlErdViewSession = {
           ...parseStart.session,
-          layoutJson: generateRequest.payload.layoutJson!,
-          modelJson: generateRequest.payload.modelJson!
+          layoutJson: parseResult.layoutJson,
+          modelJson: parseResult.modelJson
         };
 
         applySqlErdEditAction({
@@ -600,19 +711,16 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           snapshot: parsedSnapshot,
           type: "parse_succeeded"
         });
-        setLastResolvedDialect(generateRequest.resolvedDialect);
-        setSqlSourceMap(generateRequest.sourceMap);
+        setLastResolvedDialect(parseResult.resolvedDialect);
+        setSqlSourceMap(parseResult.sourceMap);
         setPendingSourceAutosaveSnapshot(parsedSnapshot);
         setSourceAutosaveRetryAttempt(0);
         setSelectedSqlErdObject({ type: "none" });
-      }, 0);
+      });
     }, SQL_ERD_AUTO_PARSE_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(debounceTimeoutId);
-      if (parseExecutionTimeoutId !== null) {
-        window.clearTimeout(parseExecutionTimeoutId);
-      }
     };
   }, [
     activeWorkspaceId,
@@ -620,6 +728,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     autoParseDraftDialect,
     autoParseDraftSourceText,
     isSessionReady,
+    runSqlErdParseWorker,
     sessionId,
     setPendingSourceAutosaveSnapshot,
   ]);
@@ -726,7 +835,6 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
-        setSourceAutosaveState("pending");
         const autosaveBlockReason = getLayoutAutosaveBlockReason(error);
 
         if (autosaveBlockReason) {
@@ -745,6 +853,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         }
 
         if (isSqlErdApiTransientAutosaveError(error)) {
+          setSourceAutosaveState("retrying");
           setSourceAutosaveRetryAttempt(
             (currentAttempt) => currentAttempt + 1
           );
@@ -955,13 +1064,25 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     autosaveLifecycleGenerationRef.current += 1;
+    terminateParseWorker();
     hasLoadedSessionRef.current = false;
     setPendingSourceAutosaveSnapshot(null);
     setSourceAutosaveRetryAttempt(0);
     setPendingLayoutAutosaveJson(null);
     setLayoutAutosaveRetryAttempt(0);
     setLayoutAutosaveBlockReason(null);
-  }, [activeWorkspaceId, sessionId, setPendingSourceAutosaveSnapshot]);
+  }, [
+    activeWorkspaceId,
+    sessionId,
+    setPendingSourceAutosaveSnapshot,
+    terminateParseWorker
+  ]);
+
+  useEffect(() => {
+    return () => {
+      terminateParseWorker();
+    };
+  }, [terminateParseWorker]);
 
   useEffect(() => {
     void handleReloadSession();

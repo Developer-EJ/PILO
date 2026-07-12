@@ -64,10 +64,7 @@ const parser = new Parser();
 export function parseSqlDdlToErdModel(
   input: SqltoerdDdlParseInput
 ): SqltoerdDdlParseResult {
-  if (
-    new TextEncoder().encode(input.sourceText).byteLength >
-    SQL_ERD_SOURCE_TEXT_MAX_BYTES
-  ) {
+  if (isSqlErdSourceTextTooLarge(input.sourceText)) {
     return createParseFailure(
       "SOURCE_TOO_LARGE",
       "SQL DDL source exceeds the 1 MiB UTF-8 limit."
@@ -164,6 +161,13 @@ export function parseSqlDdlToErdModel(
       sourceText: input.sourceText
     })
   };
+}
+
+export function isSqlErdSourceTextTooLarge(sourceText: string) {
+  return (
+    new TextEncoder().encode(sourceText).byteLength >
+    SQL_ERD_SOURCE_TEXT_MAX_BYTES
+  );
 }
 
 function preparePostgreSqlParserSource(sourceText: string) {

@@ -25,6 +25,10 @@ async function compileSqlErdRuntimeModules() {
     "sql-source-decoration.mjs"
   );
   const generateSessionOutputPath = join(outputDir, "generate-session.mjs");
+  const parseWorkerProtocolOutputPath = join(
+    outputDir,
+    "parse-worker-protocol.mjs"
+  );
   const layoutAutosaveOutputPath = join(outputDir, "layout-autosave.mjs");
   const apiClientOutputPath = join(outputDir, "api-client.mjs");
   const sessionNavigationOutputPath = join(
@@ -75,6 +79,17 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/generate-session.ts",
       generateSessionOutputPath,
+      [
+        [
+          /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
+          'from "./ddl-parser.mjs"'
+        ],
+        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+      ]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/parse-worker-protocol.ts",
+      parseWorkerProtocolOutputPath,
       [
         [
           /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
@@ -196,6 +211,7 @@ async function compileSqlErdRuntimeModules() {
       sqlSourceMapRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
+      parseWorkerProtocolRuntime,
       layoutAutosaveRuntime,
       apiClientRuntime,
       sessionNavigationRuntime,
@@ -214,6 +230,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(sqlSourceMapOutputPath)),
       import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
+      import(pathToFileHref(parseWorkerProtocolOutputPath)),
       import(pathToFileHref(layoutAutosaveOutputPath)),
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionNavigationOutputPath)),
@@ -234,6 +251,7 @@ async function compileSqlErdRuntimeModules() {
       sqlSourceMapRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
+      parseWorkerProtocolRuntime,
       layoutAutosaveRuntime,
       inspectorRuntime,
       modelRuntime,
@@ -587,6 +605,7 @@ const {
   sqlSourceMapRuntime,
   sqlSourceDecorationRuntime,
   generateSessionRuntime,
+  parseWorkerProtocolRuntime,
   layoutAutosaveRuntime,
   inspectorRuntime,
   modelRuntime,
@@ -1405,6 +1424,24 @@ assert.deepEqual(
 );
 assert.deepEqual(
   statusCopyRuntime.getSqlErdSourceStatus({
+    fallbackState: fallbackSourceStatus,
+    isDraftDirty: false,
+    parse: {
+      error: null,
+      requestSequence: 11,
+      status: "idle"
+    },
+    sourceAutosaveState: "retrying"
+  }),
+  {
+    label: "Save error",
+    message:
+      "Workspace session could not be autosaved. Retrying parsed SQL changes automatically.",
+    tone: "error"
+  }
+);
+assert.deepEqual(
+  statusCopyRuntime.getSqlErdSourceStatus({
     autosaveBlockReason: "conflict",
     fallbackState: conflictSourceStatus,
     isDraftDirty: false,
@@ -1421,6 +1458,42 @@ assert.deepEqual(
     tone: "neutral"
   }
 );
+
+const parseWorkerRequest = {
+  dialect: "postgresql",
+  previousLayoutJson: {
+    annotations: {
+      links: [],
+      version: 1
+    },
+    tableLayouts: [
+      {
+        tableId: "table.users",
+        width: 320,
+        x: 912,
+        y: 416
+      }
+    ],
+    version: 1
+  },
+  previousModelJson: createRuntimeTestModel(),
+  requestSequence: 12,
+  sessionId: "session-worker-12",
+  sourceText: "CREATE TABLE users (id BIGINT PRIMARY KEY);"
+};
+const parseWorkerResponse =
+  parseWorkerProtocolRuntime.executeSqlErdParseWorkerRequest(
+    parseWorkerRequest
+  );
+assert.equal(parseWorkerResponse.ok, true);
+assert.equal(parseWorkerResponse.sessionId, parseWorkerRequest.sessionId);
+assert.equal(
+  parseWorkerResponse.requestSequence,
+  parseWorkerRequest.requestSequence
+);
+assert.equal(parseWorkerResponse.layoutJson.tableLayouts[0].x, 912);
+assert.equal(parseWorkerResponse.layoutJson.tableLayouts[0].y, 416);
+assert.equal(parseWorkerResponse.sourceMap.dialect, "postgresql");
 assert.deepEqual(
   statusCopyRuntime.getSqlErdSourceStatus({
     autosaveBlockReason: "conflict",
@@ -3873,6 +3946,8 @@ assert.match(statusCopyUtils, /getSqlErdSourceStatus/);
 assert.match(statusCopyUtils, /CREATE TABLE statement/);
 assert.doesNotMatch(statusCopyUtils, /try Generate again/);
 assert.match(statusCopyUtils, /retry automatically/);
+assert.match(statusCopyUtils, /"retrying"/);
+assert.match(statusCopyUtils, /Retrying parsed SQL changes automatically/);
 
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /useAuthSession/);
@@ -3884,6 +3959,10 @@ assert.match(panel, /beginSqlErdParse/);
 assert.match(panel, /isSqlErdParseRequestCurrent/);
 assert.match(panel, /shouldScheduleSqlErdAutoParse/);
 assert.match(panel, /SQL_ERD_AUTO_PARSE_DEBOUNCE_MS/);
+assert.match(panel, /SQL_ERD_PARSE_TIMEOUT_MS = 5000/);
+assert.match(panel, /new Worker\(/);
+assert.match(panel, /worker\.terminate\(\)/);
+assert.match(panel, /ParseWorkerRequest/);
 assert.match(panel, /autoParseDraftSourceText/);
 assert.match(panel, /autoParseDraftDialect/);
 assert.match(panel, /reduceSqlErdEditState/);
@@ -3902,9 +3981,8 @@ assert.match(panel, /type: "session_loaded"/);
 assert.match(panel, /type: "layout_changed"/);
 assert.match(panel, /type: "layout_saved"/);
 assert.match(panel, /type: "parse_failed"/);
-assert.match(panel, /type: "parse_finished"/);
 assert.match(panel, /type: "parse_succeeded"/);
-assert.match(panel, /createSqlErdGenerateWorkspaceRequest/);
+assert.match(panel, /runSqlErdParseWorker/);
 assert.match(panel, /createSqlErdSourceAutosaveRequest/);
 assert.match(panel, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(panel, /updateSession/);
@@ -3918,17 +3996,24 @@ assert.match(
   panel,
   /window\.setTimeout\([\s\S]*?SQL_ERD_AUTO_PARSE_DEBOUNCE_MS/
 );
+assert.match(panel, /runSqlErdParseWorker\(\{/);
+assert.doesNotMatch(panel, /parseExecutionTimeoutId/);
 assert.match(
   panel,
-  /parseExecutionTimeoutId = window\.setTimeout\([\s\S]*?\}, 0\)/
+  /const activeParseResult = await runSqlErdParseWorker\([\s\S]*?activeParseResult\.requestSequence !== requestId[\s\S]*?activeParseResult\.sessionId !== activeSession\.id[\s\S]*?type: "session_loaded"/
 );
+assert.match(panel, /parseResult\.requestSequence !== parseStart\.requestSequence/);
+assert.match(panel, /parseResult\.sessionId !== parseStart\.session\.id/);
 assert.match(
   panel,
   /shouldScheduleSqlErdAutoParse\(sqlErdEditStateRef\.current\)/
 );
 const autoParseEffectSource = panel.slice(
-  panel.indexOf("let parseExecutionTimeoutId"),
-  panel.indexOf("useEffect(() => {", panel.indexOf("let parseExecutionTimeoutId") + 1)
+  panel.indexOf("shouldScheduleSqlErdAutoParse(sqlErdEditStateRef.current)"),
+  panel.indexOf(
+    "useEffect(() => {",
+    panel.indexOf("shouldScheduleSqlErdAutoParse(sqlErdEditStateRef.current)")
+  )
 );
 assert.match(autoParseEffectSource, /autoParseDraftSourceText/);
 assert.match(autoParseEffectSource, /autoParseDraftDialect/);
@@ -4039,10 +4124,10 @@ assert.match(panel, /sqlSourceEditorTheme/);
 assert.match(panel, /lastResolvedDialect/);
 assert.match(panel, /sqlSourceMap/);
 assert.match(panel, /setSqlSourceMap\(null\)/);
-assert.match(panel, /setSqlSourceMap\(generateRequest\.sourceMap\)/);
+assert.match(panel, /setSqlSourceMap\(parseResult\.sourceMap\)/);
 assert.match(
   panel,
-  /sourceMapModelJson: activeViewSession\.modelJson/
+  /previousModelJson: activeViewSession\.modelJson/
 );
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
@@ -4057,7 +4142,7 @@ assert.match(panel, /aria-label="홈으로 이동"/);
 assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
 assert.doesNotMatch(panel, /scrollIntoView/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
-assert.match(panel, /setLastResolvedDialect\(generateRequest\.resolvedDialect\)/);
+assert.match(panel, /setLastResolvedDialect\(parseResult\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);
 assert.match(panel, /getSqlSourceEditorLanguageExtension/);
 assert.match(panel, /languageCompartment\.of/);
