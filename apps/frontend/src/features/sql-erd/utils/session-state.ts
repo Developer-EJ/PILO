@@ -38,6 +38,11 @@ export type LayoutAutosavePausedBannerViewModel = {
   reason: LayoutAutosaveBlockReason;
 };
 
+export type SqlErdAutosaveGateState = {
+  activeGeneration: number | null;
+  completionEpoch: number;
+};
+
 export const SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000;
 export const SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000;
 
@@ -258,4 +263,47 @@ export function isSqlErdAutosaveRequestCurrent({
     requestSessionId === currentSessionId &&
     requestSessionId === currentSnapshotSessionId
   );
+}
+
+export function tryBeginSqlErdAutosave({
+  requestGeneration,
+  state
+}: {
+  requestGeneration: number;
+  state: SqlErdAutosaveGateState;
+}) {
+  if (
+    state.activeGeneration !== null &&
+    requestGeneration <= state.activeGeneration
+  ) {
+    return { accepted: false, state };
+  }
+
+  return {
+    accepted: true,
+    state: {
+      ...state,
+      activeGeneration: requestGeneration
+    }
+  };
+}
+
+export function completeSqlErdAutosave({
+  requestGeneration,
+  state
+}: {
+  requestGeneration: number;
+  state: SqlErdAutosaveGateState;
+}) {
+  if (state.activeGeneration !== requestGeneration) {
+    return { completed: false, state };
+  }
+
+  return {
+    completed: true,
+    state: {
+      activeGeneration: null,
+      completionEpoch: state.completionEpoch + 1
+    }
+  };
 }

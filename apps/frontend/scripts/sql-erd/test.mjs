@@ -1146,6 +1146,52 @@ assert.equal(
   }),
   false
 );
+let autosaveGateState = {
+  activeGeneration: null,
+  completionEpoch: 0
+};
+let autosaveGateTransition = sessionStateRuntime.tryBeginSqlErdAutosave({
+  requestGeneration: 1,
+  state: autosaveGateState
+});
+assert.equal(autosaveGateTransition.accepted, true);
+autosaveGateState = autosaveGateTransition.state;
+
+autosaveGateTransition = sessionStateRuntime.tryBeginSqlErdAutosave({
+  requestGeneration: 1,
+  state: autosaveGateState
+});
+assert.equal(autosaveGateTransition.accepted, false);
+autosaveGateState = autosaveGateTransition.state;
+
+autosaveGateTransition = sessionStateRuntime.tryBeginSqlErdAutosave({
+  requestGeneration: 2,
+  state: autosaveGateState
+});
+assert.equal(autosaveGateTransition.accepted, true);
+autosaveGateState = autosaveGateTransition.state;
+
+let autosaveCompletionTransition =
+  sessionStateRuntime.completeSqlErdAutosave({
+    requestGeneration: 1,
+    state: autosaveGateState
+  });
+assert.equal(autosaveCompletionTransition.completed, false);
+assert.deepEqual(autosaveCompletionTransition.state, {
+  activeGeneration: 2,
+  completionEpoch: 0
+});
+autosaveGateState = autosaveCompletionTransition.state;
+
+autosaveCompletionTransition = sessionStateRuntime.completeSqlErdAutosave({
+  requestGeneration: 2,
+  state: autosaveGateState
+});
+assert.equal(autosaveCompletionTransition.completed, true);
+assert.deepEqual(autosaveCompletionTransition.state, {
+  activeGeneration: null,
+  completionEpoch: 1
+});
 assert.equal(
   sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(409),
   "conflict"
@@ -3784,6 +3830,8 @@ assert.match(sessionStateUtils, /kind: "preserve_current"/);
 assert.match(sessionStateUtils, /kind: "fallback_to_sample"/);
 assert.match(sessionStateUtils, /shouldApplySqlErdSessionLoadResult/);
 assert.match(sessionStateUtils, /isSqlErdAutosaveRequestCurrent/);
+assert.match(sessionStateUtils, /tryBeginSqlErdAutosave/);
+assert.match(sessionStateUtils, /completeSqlErdAutosave/);
 assert.match(sessionStateUtils, /SQL_ERD_LAYOUT_AUTOSAVE_DEBOUNCE_MS = 2000/);
 assert.match(
   sessionStateUtils,
@@ -3891,12 +3939,21 @@ assert.doesNotMatch(autoParseEffectSource, /sqlErdViewSession\.revision/);
 assert.match(panel, /setPendingSourceAutosaveSnapshot/);
 assert.match(panel, /type: "source_autosave_saved"/);
 assert.match(panel, /sourceAutosaveRetryAttempt/);
-assert.match(panel, /autosaveInFlightRef/);
+assert.match(panel, /autosaveGateRef/);
 assert.match(panel, /autosaveCompletionEpoch/);
 assert.match(panel, /autosaveLifecycleGenerationRef/);
 assert.match(panel, /requestLifecycleGeneration/);
 assert.match(panel, /isSqlErdAutosaveRequestCurrent/);
-assert.equal([...panel.matchAll(/completeAutosave\(\)/g)].length, 2);
+assert.equal(
+  [...panel.matchAll(/tryBeginAutosave\(requestLifecycleGeneration\)/g)]
+    .length,
+  2
+);
+assert.equal(
+  [...panel.matchAll(/completeAutosave\(requestLifecycleGeneration\)/g)]
+    .length,
+  2
+);
 assert.match(panel, /getSqlErdSourceStatus/);
 assert.match(panel, /autosaveBlockReason: layoutAutosaveBlockReason/);
 assert.match(panel, /aria-live="polite"/);

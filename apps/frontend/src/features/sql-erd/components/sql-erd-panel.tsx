@@ -57,6 +57,7 @@ import type {
   SqltoerdSessionPayload
 } from "@/features/sql-erd/types";
 import {
+  completeSqlErdAutosave,
   createWorkspaceSqlErdViewSession,
   getLayoutAutosaveBlockReasonForStatus,
   getLayoutAutosaveDelayMs,
@@ -65,8 +66,10 @@ import {
   isSqlErdAutosaveRequestCurrent,
   isLayoutAutosaveTransientStatus,
   shouldApplySqlErdSessionLoadResult,
+  tryBeginSqlErdAutosave,
   type LayoutAutosaveBlockReason,
   type LayoutAutosavePausedBannerViewModel,
+  type SqlErdAutosaveGateState,
   type SqlErdSessionLoadState,
   type SqlErdViewSession
 } from "@/features/sql-erd/utils/session-state";
@@ -226,7 +229,10 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const sessionLoadRequestIdRef = useRef(0);
   const hasLoadedSessionRef = useRef(false);
   const currentSessionIdRef = useRef(sessionId);
-  const autosaveInFlightRef = useRef(false);
+  const autosaveGateRef = useRef<SqlErdAutosaveGateState>({
+    activeGeneration: null,
+    completionEpoch: 0
+  });
   const autosaveLifecycleGenerationRef = useRef(0);
   const pendingSourceAutosaveSnapshotRef =
     useRef<SqlErdViewSession | null>(null);
@@ -264,17 +270,25 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     },
     []
   );
-  const tryBeginAutosave = useCallback(() => {
-    if (autosaveInFlightRef.current) {
-      return false;
-    }
+  const tryBeginAutosave = useCallback((requestGeneration: number) => {
+    const transition = tryBeginSqlErdAutosave({
+      requestGeneration,
+      state: autosaveGateRef.current
+    });
 
-    autosaveInFlightRef.current = true;
-    return true;
+    autosaveGateRef.current = transition.state;
+    return transition.accepted;
   }, []);
-  const completeAutosave = useCallback(() => {
-    autosaveInFlightRef.current = false;
-    setAutosaveCompletionEpoch((currentEpoch) => currentEpoch + 1);
+  const completeAutosave = useCallback((requestGeneration: number) => {
+    const transition = completeSqlErdAutosave({
+      requestGeneration,
+      state: autosaveGateRef.current
+    });
+
+    autosaveGateRef.current = transition.state;
+    if (transition.completed) {
+      setAutosaveCompletionEpoch(transition.state.completionEpoch);
+    }
   }, []);
   const isCurrentAutosaveRequest = useCallback(
     (requestSessionId: string, requestGeneration: number) => {
@@ -639,7 +653,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           requestSessionId,
           requestLifecycleGeneration
         ) ||
-        !tryBeginAutosave()
+        !tryBeginAutosave(requestLifecycleGeneration)
       ) {
         return;
       }
@@ -737,7 +751,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
         }
       } finally {
-        completeAutosave();
+        completeAutosave(requestLifecycleGeneration);
       }
     }, autosaveDelayMs);
 
@@ -784,7 +798,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           requestSessionId,
           requestLifecycleGeneration
         ) ||
-        !tryBeginAutosave()
+        !tryBeginAutosave(requestLifecycleGeneration)
       ) {
         return;
       }
@@ -888,7 +902,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           tone: "error"
         });
       } finally {
-        completeAutosave();
+        completeAutosave(requestLifecycleGeneration);
       }
     }, autosaveDelayMs);
 
