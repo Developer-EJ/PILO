@@ -6,6 +6,7 @@ const source = await readFile(
   new URL("./github-onboarding.ts", import.meta.url),
   "utf8"
 );
+const pageSource = await readFile(new URL("./page.tsx", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {
   compilerOptions: {
     module: ts.ModuleKind.ESNext,
@@ -26,6 +27,7 @@ assert.deepEqual(callback, {
   workspaceId: "workspace-1",
   step: "installation",
   installationId: "installation-7",
+  repositoryId: null,
   callbackError: "authorization_cancelled"
 });
 
@@ -33,6 +35,16 @@ assert.equal(
   onboarding.createGithubOnboardingReturnUrl("workspace-1", "project-oauth"),
   "/workspace/new?workspaceId=workspace-1&github_onboarding_step=project-oauth"
 );
+
+assert.equal(
+  onboarding.createGithubOnboardingReturnUrl("workspace-1", "projects", "installation-7", "repository-9"),
+  "/workspace/new?workspaceId=workspace-1&github_onboarding_step=projects&github_installation_id=installation-7&repositoryId=repository-9"
+);
+assert.match(pageSource, /startGithubAppInstallation\(existingWorkspaceId/);
+assert.match(pageSource, /startGithubProjectOAuth/);
+assert.match(pageSource, /icon: workspaceIcon/);
+assert.match(pageSource, /projectIds\.length === 0/);
+assert.doesNotMatch(pageSource, /accessToken.*returnUrl|state.*returnUrl/);
 assert.equal(
   onboarding.createGithubOnboardingReturnUrl(
     "workspace 1",

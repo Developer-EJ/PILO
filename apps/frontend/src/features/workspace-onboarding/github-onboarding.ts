@@ -19,13 +19,15 @@ export function readGithubOnboardingCallback(searchParams: URLSearchParams) {
     workspaceId: searchParams.get("workspaceId") || null,
     step: getGithubOnboardingStep(searchParams.get("github_onboarding_step")),
     installationId: searchParams.get("github_installation_id") || null,
+    repositoryId: searchParams.get("repositoryId") || null,
     callbackError: searchParams.get("github_callback_error") || null
   };
 }
 
-export function createGithubOnboardingReturnUrl(workspaceId: string, step: GithubOnboardingStep, installationId?: string | null) {
+export function createGithubOnboardingReturnUrl(workspaceId: string, step: GithubOnboardingStep, installationId?: string | null, repositoryId?: string | null) {
   const params = new URLSearchParams({ workspaceId, github_onboarding_step: step });
   if (installationId) params.set("github_installation_id", installationId);
+  if (repositoryId) params.set("repositoryId", repositoryId);
   return `/workspace/new?${params.toString()}`;
 }
 
