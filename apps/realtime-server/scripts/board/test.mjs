@@ -25,4 +25,13 @@ assert.match(boardRoomNames, /workspace:\$\{workspaceId\}:board:\$\{boardId\}/);
 assert.match(socketServer, /readBoardInvalidationPayload/);
 assert.match(socketServer, /createBoardRoomName/);
 
+const uppercaseWorkspaceId = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+const canonicalWorkspaceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+assert.equal(uppercaseWorkspaceId.toLowerCase(), canonicalWorkspaceId);
+assert.match(
+  socketServer,
+  /return \{ boardId, workspaceId: workspaceId\.toLowerCase\(\) \};/
+);
+
 console.log("board realtime tests passed");

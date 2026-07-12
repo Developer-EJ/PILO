@@ -101,7 +101,7 @@ function readBoardRoomRef(payload: unknown): BoardRoomRef | null {
     return null;
   }
 
-  return { boardId, workspaceId };
+  return { boardId, workspaceId: workspaceId.toLowerCase() };
 }
 
 function isCanvasPresencePoint(value: unknown): value is CanvasPresencePoint {
