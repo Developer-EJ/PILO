@@ -298,6 +298,14 @@ module "ecs" {
   }
 }
 
+module "github_sync_observability" {
+  source = "../../modules/github-sync-observability"
+
+  depends_on = [module.ecs]
+
+  name_prefix = local.name_prefix
+}
+
 resource "aws_route53_record" "frontend" {
   count = var.create_dns_records ? 1 : 0
 
