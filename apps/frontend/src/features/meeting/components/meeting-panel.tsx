@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   CircleUserRound,
+  Clock3,
   Loader2,
   Mic,
   MicOff,
@@ -15,6 +16,7 @@ import {
   Users,
   X
 } from "lucide-react";
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
   useCallback,
   useEffect,
@@ -47,6 +49,7 @@ import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-pr
 import { setHeaderMeetingRecordingStatus } from "@/features/meeting/stores/header-meeting-status-store";
 import type {
   MeetingParticipant,
+  MeetingRecording,
   MeetingReportListQuery
 } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
@@ -167,6 +170,47 @@ function formatDateTime(value: string | null | undefined) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function getRecordingElapsedSeconds(recording: MeetingRecording | null) {
+  if (!recording || recording.status !== "RUNNING") {
+    return 0;
+  }
+
+  const startedAt = Date.parse(recording.startedAt);
+  if (!Number.isFinite(startedAt)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+}
+
+function formatRecordingElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function useRecordingElapsedSeconds(recording: MeetingRecording | null) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
+    getRecordingElapsedSeconds(recording)
+  );
+
+  useEffect(() => {
+    setElapsedSeconds(getRecordingElapsedSeconds(recording));
+
+    if (!recording || recording.status !== "RUNNING") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setElapsedSeconds(getRecordingElapsedSeconds(recording));
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [recording]);
+
+  return elapsedSeconds;
 }
 
 function MeetingPanelSkeleton() {
@@ -308,6 +352,7 @@ export function MeetingPanel() {
   const [pendingConsentAction, setPendingConsentAction] =
     useState<EntryAction | null>(null);
   const [prejoinAction, setPrejoinAction] = useState<EntryAction | null>(null);
+  const [pendingEndRecordingId, setPendingEndRecordingId] = useState<string | null>(null);
   const [recordingConsentAccepted, setRecordingConsentAccepted] =
     useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -324,6 +369,7 @@ export function MeetingPanel() {
   const isActionPending = actionStatus !== "idle";
   const isInitialLoading = currentStatus === "loading" && meeting === null;
   const hasRunningRecording = currentRecording?.status === "RUNNING";
+  const recordingElapsedSeconds = useRecordingElapsedSeconds(currentRecording);
   const displayedActiveCount = activeParticipants.length || activeParticipantCount;
 
   useEffect(() => {
@@ -545,10 +591,26 @@ export function MeetingPanel() {
       return;
     }
 
+    if (!currentRecording) {
+      return;
+    }
+
+    setPendingEndRecordingId(currentRecording.id);
+  }
+
+  async function handleConfirmEndRecording() {
+    const targetRecording = currentRecording;
+    const targetRecordingId = pendingEndRecordingId;
+    setPendingEndRecordingId(null);
+
     if (
-      !currentRecording ||
-      !window.confirm("녹음을 종료하고 회의록 생성을 시작할까요?")
+      !meeting ||
+      !targetRecording ||
+      targetRecording.status !== "RUNNING" ||
+      !targetRecordingId ||
+      targetRecording.id !== targetRecordingId
     ) {
+      setToastMessage("진행 중인 녹음 상태가 바뀌었습니다. 최신 상태를 다시 확인해주세요.");
       return;
     }
 
@@ -557,12 +619,14 @@ export function MeetingPanel() {
     setToastMessage(null);
 
     try {
-      const result = await endRecording(meeting.id, currentRecording.id);
+      const result = await endRecording(meeting.id, targetRecordingId);
       await Promise.all([reloadCurrentMeeting(), reloadParticipants(meeting.id)]);
       setToastMessage(
         result.report
-          ? "녹음을 종료하고 회의록 생성을 요청했습니다."
-          : "60초 이하 녹음은 회의록이 생성되지 않습니다."
+          ? "녹음을 종료했습니다. 회의는 계속 참여할 수 있으며 회의록 생성을 준비합니다."
+          : typeof result.recording.durationSec === "number"
+            ? `녹음을 ${result.recording.durationSec}초에 종료했습니다. 60초 이하 녹음은 회의록이 생성되지 않습니다.`
+            : "녹음을 종료했습니다. 60초 이하 녹음은 회의록이 생성되지 않습니다."
       );
     } catch (error) {
       const message = getErrorMessage(error);
@@ -617,6 +681,37 @@ export function MeetingPanel() {
           />
         )}
 
+        <DialogPrimitive.Root
+          open={pendingEndRecordingId !== null}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              setPendingEndRecordingId(null);
+            }
+          }}
+        >
+          <DialogPrimitive.Portal>
+            <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/20 backdrop-blur-xs" />
+            <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-popover p-5 text-popover-foreground shadow-2xl outline-none">
+              <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+                녹음을 종료할까요?
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Description className="mt-2 text-sm leading-6 text-muted-foreground">
+                녹음만 종료하며 회의와 참여자는 계속 유지됩니다. 60초 이하 녹음은 회의록을 만들지 않습니다.
+              </DialogPrimitive.Description>
+              <div className="mt-5 flex justify-end gap-2">
+                <DialogPrimitive.Close
+                  render={<Button type="button" variant="outline" />}
+                >
+                  취소
+                </DialogPrimitive.Close>
+                <Button type="button" onClick={() => void handleConfirmEndRecording()}>
+                  녹음 종료
+                </Button>
+              </div>
+            </DialogPrimitive.Popup>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
+
         {activeSection === "room" ? (
           <section
             id="room"
@@ -637,6 +732,25 @@ export function MeetingPanel() {
                 </div>
 
                 <div className="w-full max-w-2xl space-y-3">
+                  {hasRunningRecording ? (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                          <Radio className="size-4 animate-pulse" />
+                        </span>
+                        <div>
+                          <p className="font-medium">녹음 진행 중</p>
+                          <p className="text-sm text-muted-foreground">
+                            60초를 초과하면 종료 뒤 회의록 생성을 준비합니다.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="flex shrink-0 items-center gap-1 font-mono text-lg font-semibold tabular-nums">
+                        <Clock3 className="size-4" />
+                        {formatRecordingElapsed(recordingElapsedSeconds)}
+                      </span>
+                    </div>
+                  ) : null}
                   {participantStatus === "loading" &&
                   participants.length === 0 ? (
                     <>
