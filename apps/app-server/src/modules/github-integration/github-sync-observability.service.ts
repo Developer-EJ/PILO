@@ -4,13 +4,15 @@ import type { GithubSyncTarget } from "./types";
 type GithubSyncOperationEventName =
   | "github_sync_retry"
   | "github_sync_terminal_failure"
-  | "github_sync_rate_limit_terminal_failure";
+  | "github_sync_rate_limit_terminal_failure"
+  | "github_sync_rate_limit_observed";
 
 interface GithubSyncOperationEvent {
   event: GithubSyncOperationEventName;
   jobId: string | null;
   syncRunId: string | null;
-  target: GithubSyncTarget | "webhook_delivery";
+  deliveryId: string | null;
+  target: GithubSyncTarget | "webhook_delivery" | "graphql";
   attemptCount: number | null;
   retryAfterSeconds?: number;
   rateLimitRemaining: number | null;
@@ -30,15 +32,17 @@ export class GithubSyncObservabilityService {
     this.emit({
       event: "github_sync_retry",
       ...input,
+      deliveryId: null,
       retryAfterSeconds
     });
   }
 
-  emitWebhookRetry(): void {
+  emitWebhookRetry(deliveryId: string): void {
     this.emit({
       event: "github_sync_retry",
       jobId: null,
       syncRunId: null,
+      deliveryId,
       target: "webhook_delivery",
       attemptCount: null,
       retryAfterSeconds: 120,
@@ -51,7 +55,20 @@ export class GithubSyncObservabilityService {
       event: isRateLimited
         ? "github_sync_rate_limit_terminal_failure"
         : "github_sync_terminal_failure",
-      ...input
+      ...input,
+      deliveryId: null
+    });
+  }
+
+  emitRateLimitObserved(rateLimitRemaining: number): void {
+    this.emit({
+      event: "github_sync_rate_limit_observed",
+      jobId: null,
+      syncRunId: null,
+      deliveryId: null,
+      target: "graphql",
+      attemptCount: null,
+      rateLimitRemaining
     });
   }
 

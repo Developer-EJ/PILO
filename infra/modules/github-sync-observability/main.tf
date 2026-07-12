@@ -152,7 +152,7 @@ resource "aws_cloudwatch_log_metric_filter" "rate_limit_terminal_failure" {
 resource "aws_cloudwatch_log_metric_filter" "rate_limit_remaining" {
   name           = "${var.name_prefix}-github-sync-rate-limit-remaining"
   log_group_name = local.github_sync_worker_log_group_name
-  pattern        = "{ $.event = \"github_sync_rate_limit_terminal_failure\" && $.rateLimitRemaining >= 0 }"
+  pattern        = "{ $.event = \"github_sync_rate_limit_observed\" && $.rateLimitRemaining >= 0 }"
 
   metric_transformation {
     name      = "RateLimitRemaining"

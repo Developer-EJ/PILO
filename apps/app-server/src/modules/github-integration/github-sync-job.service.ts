@@ -209,7 +209,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
 
   async processWebhookDelivery(deliveryId: string): Promise<"terminal" | "retry"> {
     const result = await this.webhookReconcileService.processDelivery(deliveryId);
-    if (result === "retry") this.observability?.emitWebhookRetry();
+    if (result === "retry") this.observability?.emitWebhookRetry(deliveryId);
     return result;
   }
 

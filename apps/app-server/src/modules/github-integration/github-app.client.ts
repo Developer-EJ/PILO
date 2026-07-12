@@ -1,7 +1,8 @@
 import { createSign } from "node:crypto";
-import { HttpStatus, Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
+import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 
 export interface GithubAppInstallationLookupRequest {
   installationId: number;
@@ -1035,6 +1036,8 @@ const GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION = `
 
 @Injectable()
 export class GithubAppClient {
+  constructor(@Optional() private readonly observability?: GithubSyncObservabilityService) {}
+
   async getInstallation(
     input: GithubAppInstallationLookupRequest
   ): Promise<GithubAppInstallationDetails> {
@@ -2094,6 +2097,8 @@ export class GithubAppClient {
       throw badRequest(errorMessage);
     }
 
+    const rateLimitRemaining = this.rateLimitRemaining(response);
+    if (rateLimitRemaining !== null) this.observability?.emitRateLimitObserved(rateLimitRemaining);
     return data;
   }
 
@@ -2106,7 +2111,7 @@ export class GithubAppClient {
   }
 
   private rateLimitRemaining(response: Response): number | null {
-    const value = response.headers.get("x-ratelimit-remaining");
+    const value = response.headers?.get?.("x-ratelimit-remaining") ?? null;
     if (value === null || !/^\d+$/.test(value)) return null;
     const remaining = Number(value);
     return Number.isSafeInteger(remaining) ? remaining : null;

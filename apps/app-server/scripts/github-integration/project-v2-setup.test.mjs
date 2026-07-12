@@ -36,11 +36,13 @@ assert.match(workflow, /aws ecs wait services-stable/);
 for (const event of [
   "github_sync_retry",
   "github_sync_terminal_failure",
-  "github_sync_rate_limit_terminal_failure"
+  "github_sync_rate_limit_terminal_failure",
+  "github_sync_rate_limit_observed"
 ]) assert.match(observability, new RegExp(event));
 assert.match(observability, /process\.stdout\.write/);
 assert.match(observabilityTerraform, /\/ecs\/\$\{var\.name_prefix\}\/github-sync-worker/);
 assert.match(observabilityTerraform, /aws_cloudwatch_log_metric_filter/);
+assert.match(observabilityTerraform, /github_sync_rate_limit_observed/);
 assert.match(observabilityTerraform, /ApproximateAgeOfOldestMessage/);
 assert.match(observabilityTerraform, /ApproximateNumberOfMessagesVisible/);
 assert.match(observabilityTerraform, /RunningTaskCount/);

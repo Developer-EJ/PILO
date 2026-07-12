@@ -53,18 +53,19 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   try {
     observability.emitRetry(input, 900);
     observability.emitTerminalFailure({ ...input, rateLimitRemaining: 0 }, true);
-    observability.emitWebhookRetry();
+    observability.emitWebhookRetry("delivery-observability");
   } finally {
     process.stdout.write = originalWrite;
   }
 
   assert.deepEqual(output.map((line) => JSON.parse(line)), [
-    { event: "github_sync_retry", ...input, retryAfterSeconds: 900 },
-    { event: "github_sync_rate_limit_terminal_failure", ...input, rateLimitRemaining: 0 },
+    { event: "github_sync_retry", ...input, deliveryId: null, retryAfterSeconds: 900 },
+    { event: "github_sync_rate_limit_terminal_failure", ...input, deliveryId: null, rateLimitRemaining: 0 },
     {
       event: "github_sync_retry",
       jobId: null,
       syncRunId: null,
+      deliveryId: "delivery-observability",
       target: "webhook_delivery",
       attemptCount: null,
       retryAfterSeconds: 120,
@@ -72,6 +73,56 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     }
   ]);
   assert.ok(output.every((line) => line.endsWith("\n")), "each event must be one raw stdout JSON line");
+}
+
+{
+  const output = [];
+  const originalFetch = globalThis.fetch;
+  const originalWrite = process.stdout.write;
+  const observability = new GithubSyncObservabilityService();
+  const client = new GithubAppClient(observability);
+  globalThis.fetch = async () => new Response(JSON.stringify({ data: {} }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "x-ratelimit-remaining": "42"
+    }
+  });
+  process.stdout.write = (chunk) => { output.push(String(chunk)); return true; };
+
+  try {
+    assert.deepEqual(
+      await client.fetchGraphqlWithToken("test-user-access-token", "query Test { viewer { login } }", {}, "GraphQL test failed"),
+      {}
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalWrite;
+  }
+
+  assert.deepEqual(output.map((line) => JSON.parse(line)), [{
+    event: "github_sync_rate_limit_observed",
+    jobId: null,
+    syncRunId: null,
+    deliveryId: null,
+    target: "graphql",
+    attemptCount: null,
+    rateLimitRemaining: 42
+  }]);
+  assert.doesNotMatch(output.join(""), /test-user-access-token|viewer/);
+}
+
+{
+  const deliveryEvents = [];
+  const worker = new GithubSyncJobService(
+    {}, {}, {}, {},
+    { processDelivery: async () => "retry" },
+    undefined,
+    { emitWebhookRetry: (deliveryId) => deliveryEvents.push(deliveryId) }
+  );
+
+  assert.equal(await worker.processWebhookDelivery("delivery-retry-observability"), "retry");
+  assert.deepEqual(deliveryEvents, ["delivery-retry-observability"]);
 }
 
 {

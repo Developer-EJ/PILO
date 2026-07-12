@@ -19,7 +19,7 @@ CloudWatch uses `/ecs/${name_prefix}/github-sync-worker` and existing SQS/ECS me
 | operation logs | `TerminalFailureCount` | 1 | 5 | Terminal failures occurred in five minutes. |
 | operation logs | `RateLimitRemaining` | 100 | 0 | GitHub GraphQL quota is low or exhausted. |
 
-`RetryCount` is produced by `github_sync_retry`. `TerminalFailureCount` is produced by `github_sync_terminal_failure` and `github_sync_rate_limit_terminal_failure`. `RateLimitRemaining` is emitted only for numeric values. Critical requires immediate human investigation; Warning requires trend and worker-health confirmation.
+`RetryCount` is produced by `github_sync_retry`. `TerminalFailureCount` is produced by `github_sync_terminal_failure` and `github_sync_rate_limit_terminal_failure`. `RateLimitRemaining` is produced by numeric `github_sync_rate_limit_observed` events from successful GraphQL responses, so it is a pre-exhaustion signal rather than only a terminal-failure signal. Critical requires immediate human investigation; Warning requires trend and worker-health confirmation.
 
 Consider a separate event worker or autoscaling only after worker health is confirmed and either of these is true:
 
@@ -33,8 +33,9 @@ The worker writes one raw JSON event per stdout line so CloudWatch JSON filters 
 - `github_sync_retry`
 - `github_sync_terminal_failure`
 - `github_sync_rate_limit_terminal_failure`
+- `github_sync_rate_limit_observed`
 
-Every event contains `event`, `jobId`, `syncRunId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry can have null `jobId`, `syncRunId`, and `attemptCount`.
+Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`.
 
 Never log access tokens, webhook payloads, provider raw errors, or secrets. Use event identifiers and DB state for investigation; do not add credentials or payloads to logs or incident evidence.
 
@@ -70,7 +71,7 @@ For revoked or invalid GitHub App/OAuth credentials, verify the workspace instal
 
 ### GitHub rate limit
 
-At `RateLimitRemaining` Warning, check remaining budget and request patterns. At Critical 0 or `github_sync_rate_limit_terminal_failure`, do not increase GraphQL traffic: wait for GitHub reset/backoff. A polling rate-limit failure schedules a retry after 30 minutes; do not immediately redrive an entire DLQ. After quota recovers, verify a bounded sample and DB terminal state.
+At `RateLimitRemaining` Warning from `github_sync_rate_limit_observed`, check remaining budget and request patterns before exhaustion. At Critical 0 or `github_sync_rate_limit_terminal_failure`, do not increase GraphQL traffic: wait for GitHub reset/backoff. A polling rate-limit failure schedules a retry after 30 minutes; do not immediately redrive an entire DLQ. After quota recovers, verify a bounded sample and DB terminal state.
 
 ## Dev smoke checklist
 
