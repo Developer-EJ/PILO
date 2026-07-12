@@ -42,6 +42,10 @@ assert.equal(
 );
 assert.match(pageSource, /startGithubAppInstallation\(existingWorkspaceId/);
 assert.match(pageSource, /startGithubProjectOAuth/);
+assert.match(pageSource, /setStage\("project-oauth"\)/);
+assert.match(pageSource, /ProjectV2 권한 동의/);
+assert.match(pageSource, /나중에 연결/);
+assert.match(pageSource, /callback\.step !== "project-oauth"/);
 assert.match(pageSource, /icon: workspaceIcon/);
 assert.match(pageSource, /projectIds\.length === 0/);
 assert.doesNotMatch(pageSource, /accessToken.*returnUrl|state.*returnUrl/);
