@@ -142,7 +142,11 @@ class FakeDatabase {
     requestedByUserId
   }]);
   const [claim] = database.queries;
-  assert.match(claim.text, /FOR UPDATE OF schedule SKIP LOCKED/i);
+  assert.match(
+    claim.text,
+    /FOR UPDATE OF repository, schedule SKIP LOCKED/i,
+    "due polling claims must lock the repository before its schedule so the run FK cannot deadlock with selection changes"
+  );
   assert.match(claim.text, /INSERT INTO github_sync_runs/i);
   assert.match(claim.text, /'project_v2_items'/i);
   assert.match(claim.text, /active_sync_run_id = claimed_run\.sync_run_id/i);

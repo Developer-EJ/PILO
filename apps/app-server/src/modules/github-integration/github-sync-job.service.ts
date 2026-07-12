@@ -172,10 +172,14 @@ export class GithubSyncJobService implements OnModuleDestroy {
           );
         }
       });
+      await heartbeat.assertLease();
       await this.completeSuccess(job, summary);
       return "terminal";
     } catch (error) {
-      if (error instanceof LostSyncJobLeaseError) return "terminal";
+      if (error instanceof LostSyncJobLeaseError) {
+        await this.completeLostLeaseFailure(job, this.errorMessage(error));
+        return "terminal";
+      }
       const isRateLimited = isGithubGraphqlRateLimitError(error);
       if (error instanceof TerminalSyncJobError || isRateLimited) {
         await this.completeFailure(job, this.errorMessage(error), isRateLimited);
@@ -482,6 +486,52 @@ export class GithubSyncJobService implements OnModuleDestroy {
       SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, message.slice(0, 1000)]);
     });
   }
+
+  private async completeLostLeaseFailure(job: SyncJobRow, message: string): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      await transaction.execute(`WITH locked_schedule AS MATERIALIZED (
+        SELECT schedule.active_sync_run_id
+        FROM github_project_v2_polling_schedules AS schedule
+        WHERE schedule.active_sync_run_id=$4
+        FOR UPDATE OF schedule
+      ), terminal_job AS (
+        UPDATE github_sync_jobs AS job
+        SET status='failed', finished_at=now(), lease_owner=NULL, lease_expires_at=NULL, last_error=$5
+        FROM github_sync_runs AS run
+        WHERE job.id=$1 AND job.sync_run_id=$4
+          AND job.status='running' AND job.lease_owner=$2 AND job.lease_generation=$3
+          AND run.id=job.sync_run_id AND run.status='running'
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM locked_schedule AS schedule
+              WHERE schedule.active_sync_run_id=job.sync_run_id
+            )
+            OR NOT EXISTS (
+              SELECT 1
+              FROM github_project_v2_polling_schedules AS schedule
+              WHERE schedule.active_sync_run_id=job.sync_run_id
+            )
+          )
+        RETURNING job.sync_run_id
+      ), terminal_run AS (
+        UPDATE github_sync_runs AS run
+        SET status='failed', finished_at=now(), error_message=$5
+        FROM terminal_job
+        WHERE run.id=terminal_job.sync_run_id
+        RETURNING run.id
+      ), terminal_schedule AS (
+        UPDATE github_project_v2_polling_schedules AS schedule
+        SET active_sync_run_id=NULL, lease_owner=NULL, lease_expires_at=NULL,
+          next_poll_at=now() + interval '5 minutes', failure_count=failure_count + 1,
+          last_error=$5, updated_at=now()
+        FROM terminal_run
+        WHERE schedule.active_sync_run_id=terminal_run.id
+      )
+      SELECT 1 FROM terminal_run`, [job.id, this.workerId, job.lease_generation, job.sync_run_id, message.slice(0, 1000)]);
+    });
+  }
+
   private async failEnqueue(runId: string, jobId: string, leaseGeneration: string): Promise<void> {
     await this.database.transaction(async (transaction) => {
       await transaction.execute(`WITH locked_polling_schedule AS MATERIALIZED (

@@ -182,7 +182,10 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   const job = { id: "job-1", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 1 };
   const writes = [];
   const worker = new GithubSyncJobService(
-    { transaction: async (callback) => callback({ execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } }) },
+    {
+      queryOne: async () => ({ ok: 1 }),
+      transaction: async (callback) => callback({ execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; } })
+    },
     { getGithubAppConfig: () => ({}) },
     { runGithubSyncTarget: async () => ({ fetchedCount: 1, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} }) },
     { resolvePersonalProjectV2UserAccessToken: async () => null },
@@ -412,6 +415,48 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 }
 
 {
+  const job = { id: "job-deselected-while-running", sync_run_id: syncRunId, requested_by_user_id: userId, workspace_id: workspaceId, installation_id: installationId, repository_id: null, project_v2_id: null, target: "full", attempt_count: 1, lease_generation: 8, is_polling: true };
+  const writes = [];
+  const worker = new GithubSyncJobService(
+    {
+      queryOne: async () => null,
+      transaction: async (callback) => callback({
+        execute: async (text, values) => {
+          writes.push({ text, values });
+          return { rowCount: 1 };
+        }
+      })
+    },
+    { getGithubAppConfig: () => ({}) },
+    {
+      runGithubSyncTarget: async () => ({ fetchedCount: 0, createdCount: 0, updatedCount: 0, skippedCount: 0, cursor: {} })
+    },
+    { resolvePersonalProjectV2UserAccessToken: async () => null },
+    {}
+  );
+  worker.acquireLease = async () => job;
+  worker.installation = async () => ({ id: installationId });
+
+  assert.equal(await worker.processSyncJob(job.id), "terminal");
+  assert.equal(writes.length, 1, "a deselected running poll must terminalize its owned job and run");
+  assert.match(
+    writes[0].text,
+    /locked_schedule AS MATERIALIZED \([\s\S]*?FOR UPDATE OF schedule[\s\S]*?terminal_job AS \([\s\S]*?job\.status='running'[\s\S]*?job\.lease_owner=\$2[\s\S]*?job\.lease_generation=\$3[\s\S]*?terminal_run AS \([\s\S]*?FROM terminal_job/i,
+    "lease loss must fence the job before failing its run"
+  );
+  assert.match(
+    writes[0].text,
+    /EXISTS \([\s\S]*?FROM locked_schedule[\s\S]*?OR NOT EXISTS \([\s\S]*?FROM github_project_v2_polling_schedules/i,
+    "a deleted polling schedule must still allow the current owned job and run to terminate"
+  );
+  assert.deepEqual(
+    writes[0].values.slice(0, 5),
+    [job.id, worker.workerId, job.lease_generation, job.sync_run_id, "GitHub sync job lease ownership was lost"],
+    "a newer lease generation must not be terminalized by the stale worker"
+  );
+}
+
+{
   let executorCalls = 0;
   const worker = new GithubSyncJobService(
     { queryOne: async () => null },
@@ -500,6 +545,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   try {
     const worker = new GithubSyncJobService(
       {
+        queryOne: async () => ({ ok: 1 }),
         execute: async (text, values) => { writes.push({ text, values }); return { rowCount: 1 }; },
         transaction: async (callback) => callback({ execute: async () => ({ rowCount: 1 }) })
       },

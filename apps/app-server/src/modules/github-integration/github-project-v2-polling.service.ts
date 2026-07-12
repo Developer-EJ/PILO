@@ -252,7 +252,7 @@ export class GithubProjectV2PollingService {
             AND project.owner_type = 'User'
           ORDER BY schedule.next_poll_at ASC, schedule.repository_id ASC, schedule.project_v2_id ASC
           LIMIT $1
-          FOR UPDATE OF schedule SKIP LOCKED
+          FOR UPDATE OF repository, schedule SKIP LOCKED
         ),
         created_runs AS (
           INSERT INTO github_sync_runs (
