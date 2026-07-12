@@ -4,6 +4,8 @@ import type {
   PrReviewFileStatus,
   PrReviewRelationType
 } from "./types";
+import { buildSemanticFlowCandidates } from "./pr-review-semantic-flow";
+import { buildSupportRelationCandidates } from "./pr-review-semantic-support";
 
 const CODE_EXTENSIONS = new Set([
   ".cjs",
@@ -59,9 +61,23 @@ export interface PrReviewRelationCandidate {
   evidence: string;
 }
 
+export type PrReviewRelationCandidateInput = Omit<
+  PrReviewRelationCandidate,
+  "key" | "source"
+>;
+
+export interface PrReviewFlowCandidate {
+  key: string;
+  title: string;
+  filePaths: string[];
+  relationKeys: string[];
+  fallback: boolean;
+}
+
 export interface PrReviewSemanticGraphCandidates {
   files: PrReviewFileRoleCandidate[];
   relations: PrReviewRelationCandidate[];
+  flows: PrReviewFlowCandidate[];
 }
 
 export function buildDeterministicSemanticGraphCandidates(
@@ -74,12 +90,17 @@ export function buildDeterministicSemanticGraphCandidates(
 
   addImportRelations(files, roleByPath, relationByKey);
   addTestNameRelations(files, roleByPath, relationByKey);
+  for (const relation of buildSupportRelationCandidates(files, roleByPath)) {
+    addRelation(relationByKey, relation);
+  }
 
   const relations = [...relationByKey.values()].sort(compareRelations);
+  const flows = buildSemanticFlowCandidates(roles, relations);
 
   return {
     files: roles,
-    relations
+    relations,
+    flows
   };
 }
 
@@ -399,7 +420,7 @@ function commonDirectoryPrefixLength(leftPath: string, rightPath: string): numbe
 
 function addRelation(
   relationByKey: Map<string, PrReviewRelationCandidate>,
-  input: Omit<PrReviewRelationCandidate, "key" | "source">
+  input: PrReviewRelationCandidateInput
 ): void {
   if (input.fromFilePath === input.toFilePath) {
     return;
