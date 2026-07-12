@@ -64,7 +64,7 @@
 
 PR Review 전용 Worker는 기존 AWS 서비스에 영향을 주지 않도록 다음 순서로 활성화한다.
 
-1. `pr_review_ai_worker_desired_count = 0` 상태로 전용 SQS/DLQ와 ECS service 정의를 먼저 적용한다.
+1. 최초 전용 Worker를 도입할 때만 `pr_review_ai_worker_desired_count = 0` 상태로 전용 SQS/DLQ와 ECS service 정의를 먼저 적용한다. 정상 운영 중인 dev의 기본값은 `1`이다.
 2. App Server와 Worker task definition에 기존 shared handoff secret이 주입됐는지 확인한다.
 3. repository variable `ECS_PR_REVIEW_AI_WORKER_SERVICE`를 등록한다.
 4. `pr_review_ai_worker_desired_count = 1`로 적용하고 AI Worker workflow를 수동 실행한다.
