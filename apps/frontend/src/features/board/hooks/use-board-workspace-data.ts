@@ -95,19 +95,23 @@ export function useBoardWorkspaceData({
       return emptyCatalog;
     }
 
-    const [repositories, projects, boards] = await Promise.all([
+    const [repositories, boards] = await Promise.all([
       boardClient.listGithubRepositories(normalizedWorkspaceId, {
         includeArchived: false,
-        limit: 100
-      }),
-      boardClient.listGithubProjectsV2(normalizedWorkspaceId, {
-        closed: false,
         limit: 100
       }),
       boardClient.listBoards(normalizedWorkspaceId, {
         limit: 50
       })
     ]);
+    const selectedRepositoryId = repositories[0]?.id;
+    const projects = selectedRepositoryId
+      ? await boardClient.listGithubProjectsV2(normalizedWorkspaceId, {
+          closed: false,
+          limit: 100,
+          repositoryId: selectedRepositoryId
+        })
+      : [];
 
     return {
       repositories,

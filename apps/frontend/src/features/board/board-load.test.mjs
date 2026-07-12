@@ -46,6 +46,22 @@ assert.doesNotMatch(
 );
 
 assert.match(
+  boardDataHook,
+  /const\s+selectedRepositoryId\s*=\s*repositories\[0\]\?\.id;/,
+  "Board catalog should select a repository before requesting ProjectV2 data"
+);
+assert.match(
+  boardDataHook,
+  /selectedRepositoryId\s*\?\s*await\s+boardClient\.listGithubProjectsV2\(\s*normalizedWorkspaceId,\s*\{[\s\S]*repositoryId:\s*selectedRepositoryId/,
+  "Board ProjectV2 request should include the selected repositoryId"
+);
+assert.match(
+  boardDataHook,
+  /selectedRepositoryId\s*\?\s*await\s+boardClient\.listGithubProjectsV2[\s\S]*:\s*\[\]/,
+  "Board catalog should keep ProjectV2 data empty when no repository is selectable"
+);
+
+assert.match(
   githubPanel,
   /if\s*\(\s*projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id\s*\)\s*\{\s*body\.projectV2Id\s*=\s*selectedProjectV2Id;\s*\}/,
   "Only explicit ProjectV2 sync targets should use the local Board ProjectV2 selection"
