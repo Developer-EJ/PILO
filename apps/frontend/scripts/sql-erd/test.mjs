@@ -1140,6 +1140,20 @@ assert.deepEqual(
   ]),
   { type: "annotation", annotationId: "annotation.users.orders" }
 );
+assert.equal(
+  canvasSelectionRuntime.areSqlErdSelectionsEqual(
+    { type: "annotation", annotationId: "annotation.users.orders" },
+    { type: "annotation", annotationId: "annotation.orders.products" }
+  ),
+  false
+);
+assert.equal(
+  canvasSelectionRuntime.areSqlErdSelectionsEqual(
+    { type: "annotation", annotationId: "annotation.users.orders" },
+    { type: "annotation", annotationId: "annotation.users.orders" }
+  ),
+  true
+);
 const selectedRelationInspectorView =
   inspectorRuntime.createSqlErdInspectorViewModel(
     selectedRelationFromCanvas,

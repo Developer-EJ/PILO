@@ -82,7 +82,10 @@ import {
   type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
 import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
-import { getSqlErdSelectionFromSelectedShapes } from "@/features/sql-erd/utils/canvas-selection";
+import {
+  areSqlErdSelectionsEqual,
+  getSqlErdSelectionFromSelectedShapes
+} from "@/features/sql-erd/utils/canvas-selection";
 import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 
@@ -576,29 +579,6 @@ export function syncSqlErdAnnotationShapes(editor: Editor) {
   );
 
   return updates.length;
-}
-
-function areSqlErdSelectionsEqual(
-  left: SqlErdSelection,
-  right: SqlErdSelection
-) {
-  if (left.type !== right.type) {
-    return false;
-  }
-
-  if (left.type === "table" && right.type === "table") {
-    return left.tableId === right.tableId;
-  }
-
-  if (left.type === "column" && right.type === "column") {
-    return left.tableId === right.tableId && left.columnId === right.columnId;
-  }
-
-  if (left.type === "relation" && right.type === "relation") {
-    return left.relationId === right.relationId;
-  }
-
-  return true;
 }
 
 function getSqlErdSelectionFromEditor(editor: Editor): SqlErdSelection {
