@@ -1750,6 +1750,23 @@ assert.equal(
   sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(cancelledParseState),
   false
 );
+const resumedParseState = sqlEditStateRuntime.reduceSqlErdEditState(
+  cancelledParseState,
+  {
+    type: "parse_resume_after_cancel"
+  }
+);
+
+assert.equal(resumedParseState.parse.status, "idle");
+assert.equal(resumedParseState.parse.error, null);
+assert.equal(
+  resumedParseState.parse.requestSequence,
+  cancelledParseState.parse.requestSequence + 1
+);
+assert.equal(
+  sqlEditStateRuntime.shouldScheduleSqlErdAutoParse(resumedParseState),
+  true
+);
 
 const latestDraftState = sqlEditStateRuntime.reduceSqlErdEditState(
   staleParseStart.state,
@@ -4012,6 +4029,7 @@ assert.match(panel, /type: "layout_changed"/);
 assert.match(panel, /type: "layout_saved"/);
 assert.match(panel, /type: "parse_failed"/);
 assert.match(panel, /type: "parse_cancelled"/);
+assert.match(panel, /type: "parse_resume_after_cancel"/);
 assert.match(panel, /type: "parse_succeeded"/);
 assert.match(panel, /runSqlErdParseWorker/);
 assert.match(panel, /createSqlErdSourceAutosaveRequest/);
@@ -4048,6 +4066,7 @@ const autoParseEffectSource = panel.slice(
 );
 assert.match(autoParseEffectSource, /autoParseDraftSourceText/);
 assert.match(autoParseEffectSource, /autoParseDraftDialect/);
+assert.match(autoParseEffectSource, /autoParseRequestSequence/);
 assert.match(autoParseEffectSource, /activeWorkspaceId/);
 assert.match(autoParseEffectSource, /sessionId/);
 assert.doesNotMatch(autoParseEffectSource, /sqlErdViewSession\.layoutJson/);

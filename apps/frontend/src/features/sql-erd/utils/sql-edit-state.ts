@@ -39,6 +39,9 @@ export type SqlErdEditAction =
       type: "parse_cancelled";
     }
   | {
+      type: "parse_resume_after_cancel";
+    }
+  | {
       requestSequence: number;
       type: "parse_finished";
     }
@@ -233,6 +236,17 @@ export function reduceSqlErdEditState(
         requestSequence: state.parse.requestSequence + 1,
         status: "cancelled"
       }
+    };
+  }
+
+  if (action.type === "parse_resume_after_cancel") {
+    if (state.parse.status !== "cancelled") {
+      return state;
+    }
+
+    return {
+      ...state,
+      parse: createIdleParseState(state.parse.requestSequence + 1)
     };
   }
 

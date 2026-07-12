@@ -437,6 +437,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   );
   const autoParseDraftSourceText = sqlErdEditState.draftSourceText;
   const autoParseDraftDialect = sqlErdEditState.draftDialect;
+  const autoParseRequestSequence = sqlErdEditState.parse.requestSequence;
   const sourceStatus = getSqlErdSourceStatus({
     autosaveBlockReason: layoutAutosaveBlockReason,
     fallbackState: sessionLoadState,
@@ -561,6 +562,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
+        applySqlErdEditAction({ type: "parse_resume_after_cancel" });
         setSessionLoadState(
           getSqlErdSessionLoadFailureState({
             hasLoadedSession: hasLoadedSessionRef.current
@@ -729,6 +731,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     applySqlErdEditAction,
     autoParseDraftDialect,
     autoParseDraftSourceText,
+    autoParseRequestSequence,
     isSessionReady,
     runSqlErdParseWorker,
     sessionId,
