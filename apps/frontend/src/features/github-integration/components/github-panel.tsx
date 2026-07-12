@@ -269,9 +269,13 @@ export function GithubPanel() {
     }
 
     const requestGeneration = syncRunsRequestGateRef.current.begin();
-    const [syncRuns, runningSyncRuns] = await Promise.all([
+    const [syncRuns, queuedSyncRuns, runningSyncRuns] = await Promise.all([
       apiClient.listGithubSyncRuns(workspaceId, {
         limit: 8
+      }),
+      apiClient.listGithubSyncRuns(workspaceId, {
+        status: "queued",
+        limit: 1
       }),
       apiClient.listGithubSyncRuns(workspaceId, {
         status: "running",
@@ -282,7 +286,8 @@ export function GithubPanel() {
       return null;
     }
 
-    const hasRunningRun = runningSyncRuns.meta.total > 0;
+    const hasRunningRun =
+      queuedSyncRuns.meta.total > 0 || runningSyncRuns.meta.total > 0;
     setSnapshot((current) => ({
       ...current,
       syncRuns: syncRuns.data,
@@ -384,6 +389,7 @@ export function GithubPanel() {
         installations,
         repositories,
         syncRuns,
+        queuedSyncRuns,
         runningSyncRuns
       ] = await Promise.all([
         apiClient.getGithubOAuthStatus(),
@@ -395,6 +401,10 @@ export function GithubPanel() {
         }),
         apiClient.listGithubSyncRuns(workspaceId, {
           limit: 8
+        }),
+        apiClient.listGithubSyncRuns(workspaceId, {
+          status: "queued",
+          limit: 1
         }),
         apiClient.listGithubSyncRuns(workspaceId, {
           status: "running",
@@ -438,7 +448,9 @@ export function GithubPanel() {
           : current.syncRunsTotal
       }));
       if (canApplySyncRuns) {
-        setHasRunningSyncRun(runningSyncRuns.meta.total > 0);
+        setHasRunningSyncRun(
+          queuedSyncRuns.meta.total > 0 || runningSyncRuns.meta.total > 0
+        );
       }
       setSelectedRepositoryId(nextRepositoryId);
       selectedRepositoryIdRef.current = nextRepositoryId;
