@@ -113,9 +113,9 @@ variable "ai_worker_desired_count" {
 }
 
 variable "pr_review_ai_worker_desired_count" {
-  description = "Dev PR Review AI worker task count. Enable after the dedicated queue and handoff configuration are verified."
+  description = "Dev PR Review AI worker task count. Keep one worker running while PR Review analysis is enabled."
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "github_sync_worker_desired_count" {
