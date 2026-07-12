@@ -2,13 +2,9 @@
 
 import { useEffect, useRef } from "react";
 
-import {
-  createBoardRealtimeSocket,
-  joinBoardRealtimeRoom,
-  leaveBoardRealtimeRoom
-} from "./board-realtime-client";
+import { createBoardRealtimeSocket } from "./board-realtime-client";
+import { createBoardRealtimeLifecycle } from "./board-realtime-lifecycle";
 import type {
-  BoardInvalidatedEvent,
   BoardRealtimeConfig,
   BoardRealtimeRoom
 } from "./board-realtime-types";
@@ -66,31 +62,16 @@ export function useBoardRealtime(config: BoardRealtimeConfig) {
     const realtimeSocket = socket;
     const room = usableRoom.room;
 
-    function joinBoardRoom() {
-      joinBoardRealtimeRoom(realtimeSocket, room);
-      reloadBoard();
-    }
+    const lifecycle = createBoardRealtimeLifecycle({
+      reloadBoard,
+      room,
+      socket: realtimeSocket
+    });
 
-    function handleBoardInvalidation(event: BoardInvalidatedEvent) {
-      if (
-        event.workspaceId === room.workspaceId &&
-        event.boardId === room.boardId
-      ) {
-        reloadBoard();
-      }
-    }
-
-    realtimeSocket.on("connect", joinBoardRoom);
-    realtimeSocket.on("board:invalidated", handleBoardInvalidation);
-    realtimeSocket.connect();
+    lifecycle.connect();
 
     return () => {
-      if (realtimeSocket.connected) {
-        leaveBoardRealtimeRoom(realtimeSocket, room);
-      }
-
-      realtimeSocket.removeAllListeners();
-      realtimeSocket.disconnect();
+      lifecycle.cleanup();
     };
   }, [usableRoom?.accessToken, usableRoom?.room.boardId, usableRoom?.room.workspaceId]);
 }
