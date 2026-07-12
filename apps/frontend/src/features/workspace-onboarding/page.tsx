@@ -85,23 +85,29 @@ function WorkspaceCreationPageContent() {
   }, [api, stage, workspaceId]);
 
   async function resumeGithub(existingWorkspaceId: string) {
-    const oauth = await api.getGithubOAuthStatus();
-    if (!oauth.connected) {
-      const start = await api.startGithubOAuth({ returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "oauth") });
-      window.location.assign(start.authorizeUrl); return;
-    }
-    const install = await api.startGithubAppInstallation(existingWorkspaceId, { returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "installation") });
-    window.location.assign(install.installUrl);
+    setBusy(true); setMessage(null);
+    try {
+      const oauth = await api.getGithubOAuthStatus();
+      if (!oauth.connected) {
+        const start = await api.startGithubOAuth({ returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "oauth") });
+        window.location.assign(start.authorizeUrl); return;
+      }
+      const install = await api.startGithubAppInstallation(existingWorkspaceId, { returnUrl: createGithubOnboardingReturnUrl(existingWorkspaceId, "installation") });
+      window.location.assign(install.installUrl);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "GitHub 연결을 시작하지 못했습니다."); setStage("installation"); }
+    finally { setBusy(false); }
   }
 
   async function createAndConnect(connect: boolean) {
-    if (!session || !workspaceName.trim()) return;
+    if (!session) return;
+    if (workspaceId) { await resumeGithub(workspaceId); return; }
+    if (!workspaceName.trim()) return;
     setBusy(true); setMessage(null);
     try {
       const workspace = await createWorkspace(session.accessToken, { name: workspaceName.trim(), icon: workspaceIcon });
       saveSelectedWorkspaceId(workspace.id); setWorkspaceId(workspace.id);
       if (!connect) { router.replace("/home"); return; }
-      await resumeGithub(workspace.id);
+      router.replace(createGithubOnboardingReturnUrl(workspace.id, "oauth"));
     } catch (error) { setMessage(error instanceof Error ? error.message : "workspace를 만들지 못했습니다."); }
     finally { setBusy(false); }
   }
