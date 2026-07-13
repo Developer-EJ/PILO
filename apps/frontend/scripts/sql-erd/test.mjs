@@ -41,6 +41,7 @@ async function compileSqlErdRuntimeModules() {
     outputDir,
     "session-list-state.mjs"
   );
+  const sessionTitleOutputPath = join(outputDir, "session-title.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const sqlEditStateOutputPath = join(outputDir, "sql-edit-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
@@ -185,6 +186,10 @@ async function compileSqlErdRuntimeModules() {
       sessionListStateOutputPath
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-title.ts",
+      sessionTitleOutputPath
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
       sessionStateOutputPath
     );
@@ -319,6 +324,7 @@ async function compileSqlErdRuntimeModules() {
       apiClientRuntime,
       sessionNavigationRuntime,
       sessionListStateRuntime,
+      sessionTitleRuntime,
       sessionStateRuntime,
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
@@ -343,6 +349,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionNavigationOutputPath)),
       import(pathToFileHref(sessionListStateOutputPath)),
+      import(pathToFileHref(sessionTitleOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
       import(pathToFileHref(sqlEditStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
@@ -371,6 +378,7 @@ async function compileSqlErdRuntimeModules() {
       relationShapeRuntime,
       sessionListStateRuntime,
       sessionNavigationRuntime,
+      sessionTitleRuntime,
       sessionStateRuntime,
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
@@ -722,6 +730,7 @@ const {
   apiClientRuntime,
   sessionListStateRuntime,
   sessionNavigationRuntime,
+  sessionTitleRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
@@ -3496,6 +3505,33 @@ assert.deepEqual(
     "session-1"
   ),
   [{ id: "session-2" }]
+);
+
+assert.equal(
+  sessionTitleRuntime.getSqlErdCreateSessionTitle("  주문 도메인 ERD  "),
+  "주문 도메인 ERD"
+);
+assert.equal(
+  sessionTitleRuntime.getSqlErdCreateSessionTitle("   "),
+  undefined
+);
+assert.equal(
+  sessionTitleRuntime.getSqlErdSessionTitleUpdate("  주문 도메인 ERD  "),
+  "주문 도메인 ERD"
+);
+assert.equal(sessionTitleRuntime.getSqlErdSessionTitleUpdate("   "), null);
+assert.deepEqual(
+  sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
+    [
+      { id: "session-1", revision: 3, title: "기존 제목", updatedAt: "old" },
+      { id: "session-2", revision: 2, title: "다른 제목", updatedAt: "other" }
+    ],
+    { id: "session-1", revision: 4, title: "변경된 제목", updatedAt: "new" }
+  ),
+  [
+    { id: "session-1", revision: 4, title: "변경된 제목", updatedAt: "new" },
+    { id: "session-2", revision: 2, title: "다른 제목", updatedAt: "other" }
+  ]
 );
 
 const listSqlErdSessionRequests = [];
