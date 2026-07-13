@@ -42,6 +42,7 @@ class FakeMeetingService {
   constructor() {
     this.reconciliationCalls = [];
     this.enqueueCalls = [];
+    this.stateEventCalls = [];
   }
 
   async reconcileLiveKitParticipantDeparture(_transaction, input) {
@@ -51,6 +52,10 @@ class FakeMeetingService {
 
   async enqueueReconciledMeetingReportJob(job) {
     this.enqueueCalls.push(job);
+  }
+
+  async publishReconciledMeetingStateEvents(stateEvents) {
+    this.stateEventCalls.push(stateEvents);
   }
 }
 
@@ -141,6 +146,7 @@ try {
       eventCreatedAt: new Date("2026-07-11T00:00:00.000Z")
     }]);
     assert.deepEqual(meetingService.enqueueCalls, [null]);
+    assert.deepEqual(meetingService.stateEventCalls, [[]]);
   }
 
   {
