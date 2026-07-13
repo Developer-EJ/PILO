@@ -20,6 +20,7 @@ import {
   LeaveMeetingPayload,
   MeetingDetailPayload,
   MeetingReportDetailResponsePayload,
+  MeetingReportActionItemCalendarEventPayload,
   MeetingReportActionItemMutationPayload,
   MeetingReportListPayload,
   MeetingReportRegenerationPayload,
@@ -260,6 +261,25 @@ export class MeetingController {
         workspaceId,
         reportId,
         actionItemId
+      )
+    );
+  }
+
+  @Post("meeting-reports/:reportId/action-items/:actionItemId/calendar-events")
+  async createReportActionItemCalendarEvent(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingReportActionItemCalendarEventPayload>> {
+    return apiResponse(
+      await this.meetingService.createMeetingReportActionItemCalendarEvent(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId,
+        body
       )
     );
   }

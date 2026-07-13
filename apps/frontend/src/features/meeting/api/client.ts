@@ -5,6 +5,8 @@ import type {
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
+  CreateMeetingReportActionItemCalendarEventInput,
+  MeetingReportActionItemCalendarEventPayload,
   MeetingReportActionItemMutationPayload,
   MeetingReportDetailPayload,
   MeetingReportListPayload,
@@ -447,6 +449,19 @@ export function createMeetingApiClient({
       return requestMeetingData<MeetingReportActionItemMutationPayload>(
         `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/dismiss`,
         { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async createMeetingReportActionItemCalendarEvent(
+      workspaceId: string,
+      reportId: string,
+      actionItemId: string,
+      body: CreateMeetingReportActionItemCalendarEventInput
+    ) {
+      return requestMeetingData<MeetingReportActionItemCalendarEventPayload>(
+        `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/calendar-events`,
+        withJsonBody(body, { method: "POST" }),
         requestOptions
       );
     }

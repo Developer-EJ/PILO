@@ -3,7 +3,8 @@
 ## 범위
 
 Calendar API는 Workspace 일정 CRUD를 담당한다. MVP Calendar는 GitHub issue, PR,
-meeting, meeting report를 자동으로 Calendar에 넣지 않는다.
+meeting, meeting report를 자동으로 Calendar에 넣지 않는다. 단, 승인된 MeetingReport
+Action Item은 Meeting API의 명시적 일정 생성 요청으로 Calendar event 하나를 만들 수 있다.
 
 ## 데이터 규칙
 

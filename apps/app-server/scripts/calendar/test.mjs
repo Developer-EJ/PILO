@@ -347,6 +347,25 @@ async function assertBadRequest(action, messagePattern) {
   const database = new FakeDatabase({
     queryOneRows: [
       (text, values) => {
+        assert.match(text, /FROM calendar_events/);
+        assert.match(text, /calendar_events\.id = \$2/);
+        assert.deepEqual(values, [workspaceId, 7]);
+        return calendarRow({ id: 7 });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.getEventInTransaction(database, workspaceId, 7);
+
+  assert.equal(event?.id, 7);
+  assert.equal(event?.createdBy, currentUserId);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
         assert.match(text, /DELETE FROM calendar_events/);
         assert.deepEqual(values, [workspaceId, 3]);
         return { id: "3" };

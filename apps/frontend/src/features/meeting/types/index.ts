@@ -112,8 +112,19 @@ export type MeetingReportActionItem = {
   approvedAt: string | null;
   dismissedByUserId: string | null;
   dismissedAt: string | null;
+  calendarEvent?: MeetingReportActionItemCalendarEvent | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type MeetingReportActionItemCalendarEvent = {
+  id: number;
+  title: string;
+  isAllDay: boolean;
+  startDate: string;
+  endDate: string;
+  startTime: string | null;
+  endTime: string | null;
 };
 
 export type UpdateMeetingReportActionItemInput = {
@@ -121,6 +132,13 @@ export type UpdateMeetingReportActionItemInput = {
   description?: string;
   priority?: "LOW" | "MEDIUM" | "HIGH";
   assigneeUserId?: string | null;
+};
+
+export type CreateMeetingReportActionItemCalendarEventInput = {
+  date: string;
+  isAllDay?: boolean;
+  startTime?: string | null;
+  endTime?: string | null;
 };
 
 export type CurrentMeetingPayload = {
@@ -211,4 +229,9 @@ export type MeetingReportRegenerationPayload = {
 
 export type MeetingReportActionItemMutationPayload = {
   actionItem: MeetingReportActionItem;
+};
+
+export type MeetingReportActionItemCalendarEventPayload = {
+  actionItem: MeetingReportActionItem;
+  calendarEvent: MeetingReportActionItemCalendarEvent;
 };

@@ -10,6 +10,10 @@ import {
   DatabaseService,
   DatabaseTransaction
 } from "../../database/database.service";
+import {
+  CalendarEventPayload,
+  CalendarService
+} from "../calendar/calendar.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import {
   LiveKitEgressService,
@@ -148,6 +152,13 @@ interface MeetingReportActionItemRow extends QueryResultRow {
   approved_at: Date | string | null;
   dismissed_by_user_id: string | null;
   dismissed_at: Date | string | null;
+  calendar_event_id: string | number | null;
+  calendar_event_title: string | null;
+  calendar_event_is_all_day: boolean | null;
+  calendar_event_start_date: Date | string | null;
+  calendar_event_end_date: Date | string | null;
+  calendar_event_start_time: string | null;
+  calendar_event_end_time: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -316,8 +327,24 @@ export interface MeetingReportActionItemPayload {
   approvedAt: string | null;
   dismissedByUserId: string | null;
   dismissedAt: string | null;
+  calendarEvent: MeetingReportActionItemCalendarEventSummaryPayload | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingReportActionItemCalendarEventSummaryPayload {
+  id: number;
+  title: string;
+  isAllDay: boolean;
+  startDate: string;
+  endDate: string;
+  startTime: string | null;
+  endTime: string | null;
+}
+
+export interface MeetingReportActionItemCalendarEventPayload {
+  actionItem: MeetingReportActionItemPayload;
+  calendarEvent: MeetingReportActionItemCalendarEventSummaryPayload;
 }
 
 export interface MeetingReportActionItemAssigneePayload {
@@ -444,6 +471,7 @@ export class MeetingService {
     private readonly liveKitTokenService: LiveKitTokenService,
     private readonly liveKitEgressService: LiveKitEgressService,
     private readonly meetingReportJobService: MeetingReportJobService,
+    private readonly calendarService: CalendarService,
     private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService
   ) {}
 
@@ -1155,6 +1183,78 @@ export class MeetingService {
       "DISMISSED"
     );
     return { actionItem: this.mapMeetingReportActionItem(actionItem) };
+  }
+
+  async createMeetingReportActionItemCalendarEvent(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string,
+    body: unknown
+  ): Promise<MeetingReportActionItemCalendarEventPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const draft = this.normalizeMeetingReportActionItemCalendarDraft(body);
+
+    return this.database.transaction(async (transaction) => {
+      const actionItem = await this.findMeetingReportActionItemForUpdate(
+        transaction,
+        workspaceId,
+        reportId,
+        actionItemId
+      );
+      this.assertApprovedMeetingReportActionItem(actionItem);
+      const calendarInput = this.calendarService.normalizeCreateInput({
+        title: actionItem.title,
+        description: actionItem.description,
+        isAllDay: draft.isAllDay,
+        startDate: draft.date,
+        endDate: draft.date,
+        startTime: draft.startTime,
+        endTime: draft.endTime
+      });
+
+      if (actionItem.calendar_event_id !== null) {
+        const existing = await this.calendarService.getEventInTransaction(
+          transaction,
+          workspaceId,
+          Number(actionItem.calendar_event_id)
+        );
+        if (existing !== null) {
+          const calendarEvent = this.mapMeetingReportActionItemCalendarEvent(existing);
+          return {
+            actionItem: this.mapMeetingReportActionItem(actionItem, calendarEvent),
+            calendarEvent
+          };
+        }
+      }
+
+      const event = await this.calendarService.createEventInTransaction(
+        transaction,
+        workspaceId,
+        currentUserId,
+        calendarInput
+      );
+      const linked = await transaction.queryOne<{ id: string }>(
+        `UPDATE meeting_report_action_items
+         SET calendar_event_id = $2,
+             calendar_event_linked_by_user_id = $3,
+             calendar_event_linked_at = now(),
+             updated_by_user_id = $3,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id`,
+        [actionItem.id, event.id, currentUserId]
+      );
+      if (linked === null) {
+        throw notFound("Meeting report action item not found");
+      }
+
+      const calendarEvent = this.mapMeetingReportActionItemCalendarEvent(event);
+      return {
+        actionItem: this.mapMeetingReportActionItem(actionItem, calendarEvent),
+        calendarEvent
+      };
+    });
   }
 
   async listMeetingReports(
@@ -2965,7 +3065,8 @@ export class MeetingService {
               users.avatar_url AS assignee_avatar_url, action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
-              action_items.dismissed_at, action_items.created_at, action_items.updated_at
+              action_items.dismissed_at, action_items.calendar_event_id,
+              action_items.created_at, action_items.updated_at
        FROM meeting_report_action_items AS action_items
        JOIN meeting_reports ON meeting_reports.id = action_items.meeting_report_id
        JOIN meetings ON meetings.id = meeting_reports.meeting_id
@@ -2985,6 +3086,14 @@ export class MeetingService {
   ): void {
     if (actionItem.status !== "PENDING") {
       throw badRequest("Action item is no longer pending");
+    }
+  }
+
+  private assertApprovedMeetingReportActionItem(
+    actionItem: MeetingReportActionItemRow
+  ): void {
+    if (actionItem.status !== "APPROVED") {
+      throw badRequest("Action item must be approved before creating a calendar event");
     }
   }
 
@@ -3083,6 +3192,27 @@ export class MeetingService {
     return normalized;
   }
 
+  private normalizeMeetingReportActionItemCalendarDraft(body: unknown): {
+    date: unknown;
+    isAllDay: unknown;
+    startTime: unknown;
+    endTime: unknown;
+  } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw badRequest("Request body must be an object");
+    }
+    const draft = body as Record<string, unknown>;
+    if (!Object.hasOwn(draft, "date")) {
+      throw badRequest("date is required");
+    }
+    return {
+      date: draft.date,
+      isAllDay: draft.isAllDay === undefined ? true : draft.isAllDay,
+      startTime: draft.startTime,
+      endTime: draft.endTime
+    };
+  }
+
   private normalizeActionItemText(value: unknown, field: string, maxLength: number): string {
     if (typeof value !== "string") throw badRequest(`Action item ${field} must be a string`);
     const normalized = value.trim();
@@ -3093,7 +3223,8 @@ export class MeetingService {
   }
 
   private mapMeetingReportActionItem(
-    actionItem: MeetingReportActionItemRow
+    actionItem: MeetingReportActionItemRow,
+    calendarEventOverride?: MeetingReportActionItemCalendarEventSummaryPayload
   ): MeetingReportActionItemPayload {
     return {
       id: actionItem.id,
@@ -3112,8 +3243,46 @@ export class MeetingService {
       approvedAt: this.toNullableIsoString(actionItem.approved_at),
       dismissedByUserId: actionItem.dismissed_by_user_id,
       dismissedAt: this.toNullableIsoString(actionItem.dismissed_at),
+      calendarEvent: calendarEventOverride ?? this.mapMeetingReportActionItemCalendarEventFromRow(actionItem),
       createdAt: this.toIsoString(actionItem.created_at),
       updatedAt: this.toIsoString(actionItem.updated_at)
+    };
+  }
+
+  private mapMeetingReportActionItemCalendarEvent(
+    event: CalendarEventPayload
+  ): MeetingReportActionItemCalendarEventSummaryPayload {
+    return {
+      id: event.id,
+      title: event.title,
+      isAllDay: event.isAllDay,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      startTime: event.startTime,
+      endTime: event.endTime
+    };
+  }
+
+  private mapMeetingReportActionItemCalendarEventFromRow(
+    actionItem: MeetingReportActionItemRow
+  ): MeetingReportActionItemCalendarEventSummaryPayload | null {
+    if (
+      actionItem.calendar_event_id == null ||
+      actionItem.calendar_event_title == null ||
+      actionItem.calendar_event_is_all_day == null ||
+      actionItem.calendar_event_start_date == null ||
+      actionItem.calendar_event_end_date == null
+    ) {
+      return null;
+    }
+    return {
+      id: Number(actionItem.calendar_event_id),
+      title: actionItem.calendar_event_title,
+      isAllDay: actionItem.calendar_event_is_all_day,
+      startDate: this.toCalendarDateString(actionItem.calendar_event_start_date),
+      endDate: this.toCalendarDateString(actionItem.calendar_event_end_date),
+      startTime: this.toCalendarTimeString(actionItem.calendar_event_start_time),
+      endTime: this.toCalendarTimeString(actionItem.calendar_event_end_time)
     };
   }
 
@@ -3140,9 +3309,17 @@ export class MeetingService {
               users.avatar_url AS assignee_avatar_url, action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
-              action_items.dismissed_at, action_items.created_at, action_items.updated_at
+              action_items.dismissed_at, action_items.calendar_event_id,
+              calendar_events.title AS calendar_event_title,
+              calendar_events.is_all_day AS calendar_event_is_all_day,
+              calendar_events.start_date AS calendar_event_start_date,
+              calendar_events.end_date AS calendar_event_end_date,
+              calendar_events.start_time AS calendar_event_start_time,
+              calendar_events.end_time AS calendar_event_end_time,
+              action_items.created_at, action_items.updated_at
        FROM meeting_report_action_items AS action_items
        LEFT JOIN users ON users.id = action_items.assignee_user_id
+       LEFT JOIN calendar_events ON calendar_events.id = action_items.calendar_event_id
        WHERE action_items.meeting_report_id = $1
        ORDER BY action_items.source_index ASC`,
       [reportId]
@@ -3342,6 +3519,14 @@ export class MeetingService {
 
   private toIsoString(value: Date | string): string {
     return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  }
+
+  private toCalendarDateString(value: Date | string): string {
+    return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+  }
+
+  private toCalendarTimeString(value: string | null): string | null {
+    return value === null ? null : value.slice(0, 5);
   }
 
   private toDate(value: Date | string): Date {

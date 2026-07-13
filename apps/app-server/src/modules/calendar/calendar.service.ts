@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 
 interface CalendarEventRow extends QueryResultRow {
@@ -21,7 +24,7 @@ interface CalendarEventRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
-interface NormalizedCalendarEventInput {
+export interface NormalizedCalendarEventInput {
   title: string;
   description: string | null;
   color: string;
@@ -30,6 +33,13 @@ interface NormalizedCalendarEventInput {
   endDate: string;
   startTime: string | null;
   endTime: string | null;
+}
+
+interface CalendarEventExecutor {
+  queryOne<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[]
+  ): Promise<T | null>;
 }
 
 interface ListCalendarEventsQuery {
@@ -163,7 +173,60 @@ export class CalendarService {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const input = this.normalizeCreateInput(body);
-    const event = await this.database.queryOne<CalendarEventRow>(
+    return this.createEventWithExecutor(
+      this.database,
+      workspaceId,
+      currentUserId,
+      input
+    );
+  }
+
+  async createEventInTransaction(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string,
+    input: NormalizedCalendarEventInput
+  ): Promise<CalendarEventPayload> {
+    return this.createEventWithExecutor(transaction, workspaceId, currentUserId, input);
+  }
+
+  async getEventInTransaction(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    eventId: number
+  ): Promise<CalendarEventPayload | null> {
+    const event = await this.findEventWithExecutor(transaction, workspaceId, eventId);
+    return event === null ? null : this.mapEvent(event);
+  }
+
+  normalizeCreateInput(body: unknown): NormalizedCalendarEventInput {
+    const draft = this.readBody(body);
+    const isAllDay = this.readOptionalBoolean(draft, "isAllDay") ?? true;
+    const title = this.requireTitle(draft.title);
+    const description = this.readOptionalNullableString(draft, "description");
+    const color = this.readOptionalColor(draft.color) ?? DEFAULT_COLOR;
+    const startDate = this.requireDate(draft.startDate, "startDate");
+    const endDate = this.requireDate(draft.endDate, "endDate");
+
+    return this.normalizeSchedule({
+      title,
+      description,
+      color,
+      isAllDay,
+      startDate,
+      endDate,
+      startTime: this.readOptionalNullableTime(draft, "startTime"),
+      endTime: this.readOptionalNullableTime(draft, "endTime")
+    });
+  }
+
+  private async createEventWithExecutor(
+    executor: CalendarEventExecutor,
+    workspaceId: string,
+    currentUserId: string,
+    input: NormalizedCalendarEventInput
+  ): Promise<CalendarEventPayload> {
+    const event = await executor.queryOne<CalendarEventRow>(
       `
         WITH inserted AS (
           INSERT INTO calendar_events (
@@ -320,35 +383,22 @@ export class CalendarService {
     workspaceId: string,
     eventId: string
   ): Promise<CalendarEventRow | null> {
-    return this.database.queryOne<CalendarEventRow>(
+    return this.findEventWithExecutor(this.database, workspaceId, this.parseEventId(eventId));
+  }
+
+  private async findEventWithExecutor(
+    executor: CalendarEventExecutor,
+    workspaceId: string,
+    eventId: number
+  ): Promise<CalendarEventRow | null> {
+    return executor.queryOne<CalendarEventRow>(
       `
         ${CALENDAR_EVENT_SELECT}
         WHERE calendar_events.workspace_id = $1
           AND calendar_events.id = $2
       `,
-      [workspaceId, this.parseEventId(eventId)]
+      [workspaceId, eventId]
     );
-  }
-
-  private normalizeCreateInput(body: unknown): NormalizedCalendarEventInput {
-    const draft = this.readBody(body);
-    const isAllDay = this.readOptionalBoolean(draft, "isAllDay") ?? true;
-    const title = this.requireTitle(draft.title);
-    const description = this.readOptionalNullableString(draft, "description");
-    const color = this.readOptionalColor(draft.color) ?? DEFAULT_COLOR;
-    const startDate = this.requireDate(draft.startDate, "startDate");
-    const endDate = this.requireDate(draft.endDate, "endDate");
-
-    return this.normalizeSchedule({
-      title,
-      description,
-      color,
-      isAllDay,
-      startDate,
-      endDate,
-      startTime: this.readOptionalNullableTime(draft, "startTime"),
-      endTime: this.readOptionalNullableTime(draft, "endTime")
-    });
   }
 
   private normalizeUpdateInput(

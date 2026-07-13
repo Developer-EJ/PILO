@@ -226,11 +226,49 @@ class FakeMeetingReportJobService {
   }
 }
 
+class FakeCalendarService {
+  constructor({ existingEvents = [], createdEvent } = {}) {
+    this.existingEvents = [...existingEvents];
+    this.createdEvent = createdEvent ?? {
+      id: 42,
+      title: "문서 정리",
+      description: "회의 문서를 정리한다",
+      color: "#3B82F6",
+      isAllDay: true,
+      startDate: "2026-07-10",
+      endDate: "2026-07-10",
+      startTime: null,
+      endTime: null,
+      createdBy: currentUserId,
+      createdByUser: { id: currentUserId, name: "Jinho", avatarUrl: null },
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString()
+    };
+    this.createCalls = [];
+    this.normalizeCalls = [];
+  }
+
+  normalizeCreateInput(body) {
+    this.normalizeCalls.push(body);
+    return body;
+  }
+
+  async createEventInTransaction(transaction, targetWorkspaceId, userId, input) {
+    this.createCalls.push({ transaction, workspaceId: targetWorkspaceId, userId, input });
+    return this.createdEvent;
+  }
+
+  async getEventInTransaction() {
+    return this.existingEvents.shift() ?? null;
+  }
+}
+
 function createSubject(
   database = new FakeDatabase(),
   liveKitTokenService = new FakeLiveKitTokenService(),
   liveKitEgressService = new FakeLiveKitEgressService(),
-  meetingReportJobService = new FakeMeetingReportJobService()
+  meetingReportJobService = new FakeMeetingReportJobService(),
+  calendarService = new FakeCalendarService()
 ) {
   const workspaceService = new FakeWorkspaceService();
   const service = new MeetingService(
@@ -238,7 +276,8 @@ function createSubject(
     workspaceService,
     liveKitTokenService,
     liveKitEgressService,
-    meetingReportJobService
+    meetingReportJobService,
+    calendarService
   );
   return {
     database,
@@ -246,7 +285,8 @@ function createSubject(
     workspaceService,
     liveKitTokenService,
     liveKitEgressService,
-    meetingReportJobService
+    meetingReportJobService,
+    calendarService
   };
 }
 
@@ -369,6 +409,13 @@ function meetingReportActionItemRow(overrides = {}) {
     approved_at: null,
     dismissed_by_user_id: null,
     dismissed_at: null,
+    calendar_event_id: null,
+    calendar_event_title: null,
+    calendar_event_is_all_day: null,
+    calendar_event_start_date: null,
+    calendar_event_end_date: null,
+    calendar_event_start_time: null,
+    calendar_event_end_time: null,
     created_at: createdAt,
     updated_at: updatedAt,
     ...overrides
@@ -2039,6 +2086,108 @@ async function assertError(action, messagePattern) {
 
   assert.equal(result.actionItem.status, "APPROVED");
   assert.equal(result.actionItem.approvedByUserId, currentUserId);
+}
+
+{
+  const calendarService = new FakeCalendarService();
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        () => meetingReportActionItemRow({
+          status: "APPROVED",
+          approved_by_user_id: currentUserId,
+          approved_at: updatedAt
+        }),
+        (text, values) => {
+          assert.match(text, /SET calendar_event_id = \$2/);
+          assert.deepEqual(values, [actionItemId, 42, currentUserId]);
+          return { id: actionItemId };
+        }
+      ]
+    }),
+    undefined,
+    undefined,
+    undefined,
+    calendarService
+  );
+
+  const result = await service.createMeetingReportActionItemCalendarEvent(
+    currentUserId,
+    workspaceId,
+    reportId,
+    actionItemId,
+    { date: "2026-07-10", isAllDay: true }
+  );
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(calendarService.createCalls.length, 1);
+  assert.deepEqual(calendarService.normalizeCalls[0], {
+    title: "문서 정리",
+    description: "회의 문서를 정리한다",
+    isAllDay: true,
+    startDate: "2026-07-10",
+    endDate: "2026-07-10",
+    startTime: undefined,
+    endTime: undefined
+  });
+  assert.equal(result.actionItem.calendarEvent?.id, 42);
+  assert.equal(result.calendarEvent.startDate, "2026-07-10");
+}
+
+{
+  const existingEvent = new FakeCalendarService().createdEvent;
+  existingEvent.id = 91;
+  const calendarService = new FakeCalendarService({ existingEvents: [existingEvent] });
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        () => meetingReportActionItemRow({
+          status: "APPROVED",
+          approved_by_user_id: currentUserId,
+          approved_at: updatedAt,
+          calendar_event_id: 91
+        })
+      ]
+    }),
+    undefined,
+    undefined,
+    undefined,
+    calendarService
+  );
+
+  const result = await service.createMeetingReportActionItemCalendarEvent(
+    currentUserId,
+    workspaceId,
+    reportId,
+    actionItemId,
+    { date: "2026-07-10", isAllDay: true }
+  );
+
+  assert.equal(result.calendarEvent.id, 91);
+  assert.equal(calendarService.createCalls.length, 0);
+}
+
+{
+  const calendarService = new FakeCalendarService();
+  const { service } = createSubject(
+    new FakeDatabase({ queryOneRows: [() => meetingReportActionItemRow()] }),
+    undefined,
+    undefined,
+    undefined,
+    calendarService
+  );
+
+  await assertBadRequest(
+    () => service.createMeetingReportActionItemCalendarEvent(
+      currentUserId,
+      workspaceId,
+      reportId,
+      actionItemId,
+      { date: "2026-07-10", isAllDay: true }
+    ),
+    /must be approved/
+  );
+  assert.equal(calendarService.createCalls.length, 0);
 }
 
 {

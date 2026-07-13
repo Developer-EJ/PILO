@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import type {
   CurrentMeetingPayload,
+  CreateMeetingReportActionItemCalendarEventInput,
   Meeting,
   MeetingRecording,
   UpdateMeetingReportActionItemInput,
@@ -316,6 +317,22 @@ export function useMeetingWorkspaceData({
     [meetingClient, requireWorkspace]
   );
 
+  const createMeetingReportActionItemCalendarEvent = useCallback(
+    async (
+      reportId: string,
+      actionItemId: string,
+      body: CreateMeetingReportActionItemCalendarEventInput
+    ) => {
+      return meetingClient.createMeetingReportActionItemCalendarEvent(
+        requireWorkspace(),
+        reportId,
+        actionItemId,
+        body
+      );
+    },
+    [meetingClient, requireWorkspace]
+  );
+
   useEffect(() => {
     let active = true;
 
@@ -393,6 +410,7 @@ export function useMeetingWorkspaceData({
     activeParticipantCount: currentState.activeParticipantCount,
     approveMeetingReportActionItem,
     canLoad,
+    createMeetingReportActionItemCalendarEvent,
     currentError,
     currentRecording: currentState.currentRecording,
     currentStatus,

@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
+import { CalendarModule } from "../calendar/calendar.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { LiveKitEgressService } from "./livekit-egress.service";
 import { LiveKitTokenService } from "./livekit-token.service";
@@ -16,7 +17,7 @@ import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime
 import { MeetingService } from "./meeting.service";
 
 @Module({
-  imports: [CommonModule, DatabaseModule, WorkspaceModule],
+  imports: [CommonModule, DatabaseModule, WorkspaceModule, CalendarModule],
   controllers: [MeetingController, LiveKitWebhookController, MeetingReportInternalController],
   providers: [
     MeetingService,

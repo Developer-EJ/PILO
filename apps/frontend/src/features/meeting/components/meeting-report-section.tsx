@@ -2,7 +2,9 @@
 
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowDownWideNarrow,
+  CalendarPlus,
   CheckCircle2,
   Clock3,
   FileText,
@@ -27,6 +29,7 @@ import {
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import type {
   MeetingReportActionItem,
+  CreateMeetingReportActionItemCalendarEventInput,
   MeetingReportActionItemAssignee,
   MeetingReportDetail,
   MeetingReportStatus,
@@ -78,6 +81,16 @@ function getReportRequestErrorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
     : "회의록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function toCalendarDateInput(value: string | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+  const normalized = Number.isNaN(date.getTime()) ? new Date() : date;
+  return [
+    normalized.getFullYear(),
+    String(normalized.getMonth() + 1).padStart(2, "0"),
+    String(normalized.getDate()).padStart(2, "0")
+  ].join("-");
 }
 
 function toDayBoundary(value: string, boundary: "start" | "end") {
@@ -442,6 +455,7 @@ function ActionItemReviewCard({
   evidenceSegments,
   onApprove,
   onDismiss,
+  onCreateSchedule,
   onEvidenceSelect,
   onSave
 }: {
@@ -451,6 +465,7 @@ function ActionItemReviewCard({
   evidenceSegments: MeetingReportTranscriptSegment[];
   onApprove: () => void;
   onDismiss: () => void;
+  onCreateSchedule: () => void;
   onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
   onSave: (body: UpdateMeetingReportActionItemInput) => void;
 }) {
@@ -571,6 +586,27 @@ function ActionItemReviewCard({
           </Button>
         </div>
       ) : null}
+
+      {actionItem.status === "APPROVED" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
+          {actionItem.calendarEvent ? (
+            <span className="text-muted-foreground">
+              일정 생성됨 · {actionItem.calendarEvent.startDate}
+              {actionItem.calendarEvent.isAllDay
+                ? " · 종일"
+                : ` · ${actionItem.calendarEvent.startTime ?? ""}`}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">연결된 일정이 없습니다.</span>
+          )}
+          {!actionItem.calendarEvent ? (
+            <Button type="button" size="sm" disabled={busy} onClick={onCreateSchedule}>
+              <CalendarPlus />
+              일정 생성
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -580,6 +616,7 @@ function MeetingReportDetailModal({
   detailStatus,
   mutatingActionItemId,
   onApproveActionItem,
+  onCreateActionItemCalendarEvent,
   onClose,
   onDismissActionItem,
   onRegenerate,
@@ -592,6 +629,10 @@ function MeetingReportDetailModal({
   detailStatus: ReportDetailStatus;
   mutatingActionItemId: string | null;
   onApproveActionItem: (actionItem: MeetingReportActionItem) => void;
+  onCreateActionItemCalendarEvent: (
+    actionItem: MeetingReportActionItem,
+    body: CreateMeetingReportActionItemCalendarEventInput
+  ) => Promise<void>;
   onClose: () => void;
   onDismissActionItem: (actionItem: MeetingReportActionItem) => void;
   onRegenerate: (report: MeetingReportSummary) => void;
@@ -610,6 +651,13 @@ function MeetingReportDetailModal({
   const [activeTranscriptSegmentId, setActiveTranscriptSegmentId] = useState<
     string | null
   >(null);
+  const [scheduleActionItem, setScheduleActionItem] =
+    useState<MeetingReportActionItem | null>(null);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleIsAllDay, setScheduleIsAllDay] = useState(true);
+  const [scheduleStartTime, setScheduleStartTime] = useState("09:00");
+  const [scheduleEndTime, setScheduleEndTime] = useState("");
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const transcriptSegments = report?.transcriptSegments ?? [];
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
@@ -624,7 +672,34 @@ function MeetingReportDetailModal({
 
   useEffect(() => {
     setActiveTranscriptSegmentId(null);
+    setScheduleActionItem(null);
+    setScheduleError(null);
   }, [report?.id, report?.transcriptSegments]);
+
+  function startSchedule(actionItem: MeetingReportActionItem) {
+    setScheduleActionItem(actionItem);
+    setScheduleDate(toCalendarDateInput(report?.createdAt));
+    setScheduleIsAllDay(true);
+    setScheduleStartTime("09:00");
+    setScheduleEndTime("");
+    setScheduleError(null);
+  }
+
+  async function submitSchedule() {
+    if (!scheduleActionItem) return;
+    setScheduleError(null);
+    try {
+      await onCreateActionItemCalendarEvent(scheduleActionItem, {
+        date: scheduleDate,
+        isAllDay: scheduleIsAllDay,
+        startTime: scheduleIsAllDay ? null : scheduleStartTime,
+        endTime: scheduleIsAllDay ? null : scheduleEndTime || null
+      });
+      setScheduleActionItem(null);
+    } catch (error) {
+      setScheduleError(getReportRequestErrorMessage(error));
+    }
+  }
 
   function registerTranscriptSegment(
     segmentId: string,
@@ -662,10 +737,14 @@ function MeetingReportDetailModal({
         <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(988px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[1080px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="border-b p-5 pr-14">
             <DialogPrimitive.Title className="font-heading text-lg font-semibold">
-              회의록 상세
+              {scheduleActionItem ? "일정 생성" : "회의록 상세"}
             </DialogPrimitive.Title>
             <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
-              {report ? formatReportDateTime(report.createdAt) : "불러오는 중"}
+              {scheduleActionItem
+                ? scheduleActionItem.title
+                : report
+                  ? formatReportDateTime(report.createdAt)
+                  : "불러오는 중"}
             </DialogPrimitive.Description>
           </div>
 
@@ -684,7 +763,96 @@ function MeetingReportDetailModal({
           </DialogPrimitive.Close>
 
           <div className="flex-1 overflow-y-auto px-5 py-5">
-            {detailStatus === "loading" && !report ? (
+            {scheduleActionItem ? (
+              <section className="grid gap-5">
+                <Button
+                  type="button"
+                  className="justify-self-start"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setScheduleActionItem(null)}
+                >
+                  <ArrowLeft />
+                  후속 작업으로 돌아가기
+                </Button>
+                <div className="rounded-lg border bg-muted/20 p-4 text-sm">
+                  <p className="font-medium">{scheduleActionItem.title}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+                    {scheduleActionItem.description}
+                  </p>
+                </div>
+                <label className="grid gap-2 text-sm font-medium">
+                  날짜
+                  <Input
+                    aria-label="일정 날짜"
+                    type="date"
+                    value={scheduleDate}
+                    onChange={(event) => setScheduleDate(event.target.value)}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    checked={scheduleIsAllDay}
+                    type="checkbox"
+                    onChange={(event) => setScheduleIsAllDay(event.target.checked)}
+                  />
+                  종일 일정
+                </label>
+                {!scheduleIsAllDay ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-2 text-sm font-medium">
+                      시작 시간
+                      <Input
+                        aria-label="일정 시작 시간"
+                        type="time"
+                        value={scheduleStartTime}
+                        onChange={(event) => setScheduleStartTime(event.target.value)}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-medium">
+                      종료 시간 (선택)
+                      <Input
+                        aria-label="일정 종료 시간"
+                        type="time"
+                        value={scheduleEndTime}
+                        onChange={(event) => setScheduleEndTime(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                {scheduleError ? (
+                  <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                    {scheduleError}
+                  </p>
+                ) : null}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={mutatingActionItemId === scheduleActionItem.id}
+                    onClick={() => setScheduleActionItem(null)}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={
+                      mutatingActionItemId === scheduleActionItem.id ||
+                      !scheduleDate ||
+                      (!scheduleIsAllDay && !scheduleStartTime)
+                    }
+                    onClick={() => void submitSchedule()}
+                  >
+                    {mutatingActionItemId === scheduleActionItem.id ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <CalendarPlus />
+                    )}
+                    일정 생성
+                  </Button>
+                </div>
+              </section>
+            ) : detailStatus === "loading" && !report ? (
               <div className="grid gap-4">
                 <Skeleton className="h-28 rounded-lg" />
                 <Skeleton className="h-32 rounded-lg" />
@@ -805,6 +973,7 @@ function MeetingReportDetailModal({
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
                             onApprove={() => onApproveActionItem(item)}
+                            onCreateSchedule={() => startSchedule(item)}
                             onDismiss={() => onDismissActionItem(item)}
                             onEvidenceSelect={selectTranscriptSegment}
                             onSave={(body) => onUpdateActionItem(item, body)}
@@ -879,6 +1048,7 @@ export function MeetingReportSection({
     accessToken,
     approveMeetingReportActionItem,
     canLoad,
+    createMeetingReportActionItemCalendarEvent,
     dismissMeetingReportActionItem,
     getMeetingReport,
     regenerateMeetingReport,
@@ -1061,6 +1231,33 @@ export function MeetingReportSection({
       onToastMessage,
       selectedReport,
       updateMeetingReportActionItem
+    ]
+  );
+
+  const handleCreateActionItemCalendarEvent = useCallback(
+    async (
+      actionItem: MeetingReportActionItem,
+      body: CreateMeetingReportActionItemCalendarEventInput
+    ) => {
+      if (!selectedReport) return;
+      setMutatingActionItemId(actionItem.id);
+      try {
+        await createMeetingReportActionItemCalendarEvent(
+          selectedReport.id,
+          actionItem.id,
+          body
+        );
+        await loadReportDetail(selectedReport.id, { silent: true });
+        onToastMessage("후속 작업 일정을 생성했습니다.");
+      } finally {
+        setMutatingActionItemId(null);
+      }
+    },
+    [
+      createMeetingReportActionItemCalendarEvent,
+      loadReportDetail,
+      onToastMessage,
+      selectedReport
     ]
   );
 
@@ -1339,9 +1536,10 @@ export function MeetingReportSection({
           regeneratingReportId === selectedReport?.id
         }
         report={selectedReport}
-        onApproveActionItem={(actionItem) =>
-          void handleActionItemMutation(actionItem, "approve")
-        }
+      onApproveActionItem={(actionItem) =>
+        void handleActionItemMutation(actionItem, "approve")
+      }
+      onCreateActionItemCalendarEvent={handleCreateActionItemCalendarEvent}
         onClose={handleCloseReport}
         onDismissActionItem={(actionItem) =>
           void handleActionItemMutation(actionItem, "dismiss")

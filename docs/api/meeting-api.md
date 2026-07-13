@@ -245,7 +245,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `discussionPoints` | string \| null | 논의사항 |
 | `decisions` | string \| null | 결정사항 |
 | `actionItemCandidates` | array | 후속 작업 후보 |
-| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `status`, 승인·반려 audit 시각을 포함한다. |
+| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `status`, 승인·반려 audit 시각과 `calendarEvent` 일정 요약을 포함한다. |
 | `actionItemAssignees` | array | 상세 조회에서만 반환. 같은 Workspace의 지정 가능한 사용자 목록. `userId`, `name`, `avatarUrl`을 포함한다. |
 | `retryCount` | number | 재시도 횟수 |
 | `participantSummary` | object | 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 참여 시각 순서다. |
@@ -275,6 +275,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `PATCH` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}` | pending 후속 작업 수정 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve` | pending 후속 작업 승인 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss` | pending 후속 작업 반려 |
+| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/calendar-events` | approved 후속 작업의 Calendar 일정 생성 또는 기존 일정 반환 |
 
 ## Endpoint 상세
 
@@ -584,8 +585,8 @@ Response `data`:
 `actionItems`는 AI 후보를 Worker가 `PENDING` 상태로 저장한 검토 모델이다.
 `sourceIndex`는 원본 `actionItemCandidates`와 transcript evidence 연결에 사용한다.
 `PENDING`만 수정·승인·반려할 수 있고, `APPROVED`와 `DISMISSED`는 이 API에서
-종결 상태다. 승인 자체는 Calendar, Board, GitHub 등 외부 도메인을 생성·변경하지
-않는다.
+종결 상태다. 승인 자체는 Calendar, Board, GitHub 등 외부 도메인을 자동으로 생성·변경하지
+않는다. Calendar 일정은 승인된 항목에서 아래 명시적 생성 endpoint를 호출할 때만 만든다.
 
 주요 오류: `401`, `403`, `404`
 
@@ -624,6 +625,43 @@ POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{a
 Request body 없음. Workspace member가 `PENDING` item을 각각 `APPROVED` 또는
 `DISMISSED`로 한 번만 전이한다. 응답은 `{ actionItem }`이며 전이 사용자와 시각을
 저장한다. 이미 terminal 상태인 item은 `400`, 다른 Workspace/report item은 `404`다.
+
+### MeetingReport 후속 작업 Calendar 일정 생성
+
+```http
+POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/calendar-events
+```
+
+Request body:
+
+```json
+{
+  "date": "2026-07-14",
+  "isAllDay": false,
+  "startTime": "14:00",
+  "endTime": "15:00"
+}
+```
+
+`date`는 필수 `YYYY-MM-DD` 날짜다. `isAllDay`는 생략하면 `true`이며, `false`일 때
+`startTime`은 필수다. `endTime`은 생략할 수 있고 Calendar 규칙대로 시작 시각 1시간 뒤로
+정규화한다. Calendar event의 title·description은 승인된 Action Item에서 가져오고,
+`createdBy`는 요청한 현재 Workspace member다.
+
+같은 Action Item의 재시도·중복 클릭·병렬 요청은 하나의 Calendar event로 수렴한다. 이미
+연결된 event가 있으면 새 event를 만들지 않고 기존 결과를 반환한다. 연결된 event가 Calendar에서
+삭제되면 link가 비워져 이후 요청에서 새 event를 만들 수 있다. Calendar의 수정·삭제는 Action
+Item 내용을 역동기화하지 않는다.
+
+Response `data`:
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `actionItem` | object | `calendarEvent`가 반영된 저장 Action Item |
+| `calendarEvent` | object | `id`, `title`, `isAllDay`, `startDate`, `endDate`, `startTime`, `endTime`만 포함한 안전한 일정 요약 |
+
+Workspace member만 호출할 수 있다. 다른 Workspace/report item은 `404`, `PENDING` 또는
+`DISMISSED` item·잘못된 날짜/시간 입력은 `400`을 반환한다.
 
 ### 특정 회의의 MeetingReport 목록 조회
 
