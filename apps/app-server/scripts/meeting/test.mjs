@@ -18,6 +18,7 @@ const participantId = "44444444-4444-4444-4444-444444444444";
 const recordingId = "55555555-5555-5555-5555-555555555555";
 const secondRecordingId = "66666666-6666-6666-6666-666666666666";
 const reportId = "77777777-7777-7777-7777-777777777777";
+const actionItemId = "12121212-1212-1212-1212-121212121212";
 const otherUserId = "88888888-8888-8888-8888-888888888888";
 const otherParticipantId = "99999999-9999-9999-9999-999999999999";
 const startedAt = new Date("2026-07-05T00:00:00.000Z");
@@ -345,6 +346,29 @@ function meetingReportRow(overrides = {}) {
     decisions: "결정사항",
     action_item_candidates: [{ title: "후속 작업" }],
     retry_count: 0,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    ...overrides
+  };
+}
+
+function meetingReportActionItemRow(overrides = {}) {
+  return {
+    id: actionItemId,
+    meeting_report_id: reportId,
+    source_index: 0,
+    title: "문서 정리",
+    description: "회의 문서를 정리한다",
+    priority: "MEDIUM",
+    assignee_user_id: currentUserId,
+    assignee_name: "Jinho",
+    assignee_avatar_url: "https://example.com/avatar.png",
+    status: "PENDING",
+    updated_by_user_id: null,
+    approved_by_user_id: null,
+    approved_at: null,
+    dismissed_by_user_id: null,
+    dismissed_at: null,
     created_at: createdAt,
     updated_at: updatedAt,
     ...overrides
@@ -1930,7 +1954,91 @@ async function assertError(action, messagePattern) {
   assert.equal(result.report.transcriptText, "회의 원문");
   assert.deepEqual(result.report.transcriptSegments, []);
   assert.deepEqual(result.report.evidence, []);
+  assert.deepEqual(result.report.actionItems, []);
+  assert.deepEqual(result.report.actionItemAssignees, []);
   assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
+}
+
+{
+  const { service, workspaceService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /FROM meeting_report_action_items/);
+          assert.match(text, /FOR UPDATE OF action_items/);
+          assert.deepEqual(values, [workspaceId, reportId, actionItemId]);
+          return meetingReportActionItemRow();
+        },
+        (text, values) => {
+          assert.match(text, /SELECT user_id FROM workspace_members/);
+          assert.deepEqual(values, [workspaceId, currentUserId]);
+          return { user_id: currentUserId };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_report_action_items/);
+          assert.match(text, /status = 'PENDING'/);
+          assert.deepEqual(values, [
+            actionItemId,
+            "수정된 문서 정리",
+            "수정된 설명",
+            "HIGH",
+            currentUserId,
+            currentUserId
+          ]);
+          return { id: actionItemId };
+        }
+      ]
+    })
+  );
+
+  const result = await service.updateMeetingReportActionItem(
+    currentUserId,
+    workspaceId,
+    reportId,
+    actionItemId,
+    {
+      title: "수정된 문서 정리",
+      description: "수정된 설명",
+      priority: "HIGH",
+      assigneeUserId: currentUserId
+    }
+  );
+
+  assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
+  assert.equal(result.actionItem.status, "PENDING");
+  assert.equal(result.actionItem.title, "수정된 문서 정리");
+  assert.equal(result.actionItem.assignee?.userId, currentUserId);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        () => meetingReportActionItemRow(),
+        (text, values) => {
+          assert.match(text, /status = 'APPROVED'/);
+          assert.deepEqual(values, [actionItemId, currentUserId]);
+          return { id: actionItemId };
+        },
+        () => meetingReportActionItemRow({
+          status: "APPROVED",
+          approved_by_user_id: currentUserId,
+          approved_at: updatedAt,
+          updated_by_user_id: currentUserId
+        })
+      ]
+    })
+  );
+
+  const result = await service.approveMeetingReportActionItem(
+    currentUserId,
+    workspaceId,
+    reportId,
+    actionItemId
+  );
+
+  assert.equal(result.actionItem.status, "APPROVED");
+  assert.equal(result.actionItem.approvedByUserId, currentUserId);
 }
 
 {

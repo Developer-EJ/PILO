@@ -7,6 +7,7 @@ import type {
   CurrentMeetingPayload,
   Meeting,
   MeetingRecording,
+  UpdateMeetingReportActionItemInput,
   MeetingReportListQuery,
   MeetingReportSummary,
   StartMeetingInput
@@ -277,6 +278,44 @@ export function useMeetingWorkspaceData({
     [meetingClient, reloadReports, requireWorkspace]
   );
 
+  const updateMeetingReportActionItem = useCallback(
+    async (
+      reportId: string,
+      actionItemId: string,
+      body: UpdateMeetingReportActionItemInput
+    ) => {
+      return meetingClient.updateMeetingReportActionItem(
+        requireWorkspace(),
+        reportId,
+        actionItemId,
+        body
+      );
+    },
+    [meetingClient, requireWorkspace]
+  );
+
+  const approveMeetingReportActionItem = useCallback(
+    async (reportId: string, actionItemId: string) => {
+      return meetingClient.approveMeetingReportActionItem(
+        requireWorkspace(),
+        reportId,
+        actionItemId
+      );
+    },
+    [meetingClient, requireWorkspace]
+  );
+
+  const dismissMeetingReportActionItem = useCallback(
+    async (reportId: string, actionItemId: string) => {
+      return meetingClient.dismissMeetingReportActionItem(
+        requireWorkspace(),
+        reportId,
+        actionItemId
+      );
+    },
+    [meetingClient, requireWorkspace]
+  );
+
   useEffect(() => {
     let active = true;
 
@@ -352,10 +391,12 @@ export function useMeetingWorkspaceData({
   return {
     accessToken: normalizedAccessToken,
     activeParticipantCount: currentState.activeParticipantCount,
+    approveMeetingReportActionItem,
     canLoad,
     currentError,
     currentRecording: currentState.currentRecording,
     currentStatus,
+    dismissMeetingReportActionItem,
     endRecording,
     getCurrentRecording,
     getMeeting,
@@ -375,6 +416,7 @@ export function useMeetingWorkspaceData({
     reportsStatus,
     startMeeting,
     startRecording,
+    updateMeetingReportActionItem,
     workspaceId: normalizedWorkspaceId
   };
 }

@@ -34,6 +34,7 @@ type MeetingReportStatus =
   | "COMPLETED"
   | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
+type MeetingReportActionItemStatus = "PENDING" | "APPROVED" | "DISMISSED";
 
 interface MeetingRow extends QueryResultRow {
   id: string;
@@ -129,6 +130,32 @@ interface MeetingReportRow extends QueryResultRow {
 
 interface MeetingReportDetailRow extends MeetingReportRow {
   transcript_text: string | null;
+}
+
+interface MeetingReportActionItemRow extends QueryResultRow {
+  id: string;
+  meeting_report_id: string;
+  source_index: number | string;
+  title: string;
+  description: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+  assignee_user_id: string | null;
+  assignee_name: string | null;
+  assignee_avatar_url: string | null;
+  status: MeetingReportActionItemStatus;
+  updated_by_user_id: string | null;
+  approved_by_user_id: string | null;
+  approved_at: Date | string | null;
+  dismissed_by_user_id: string | null;
+  dismissed_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface MeetingReportActionItemAssigneeRow extends QueryResultRow {
+  user_id: string;
+  name: string | null;
+  avatar_url: string | null;
 }
 
 interface MeetingReportRegenerationRow extends MeetingReportDetailRow {
@@ -272,6 +299,35 @@ export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload 
   transcriptText: string | null;
   transcriptSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
+  actionItems: MeetingReportActionItemPayload[];
+  actionItemAssignees: MeetingReportActionItemAssigneePayload[];
+}
+
+export interface MeetingReportActionItemPayload {
+  id: string;
+  sourceIndex: number;
+  title: string;
+  description: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+  assignee: MeetingReportActionItemAssigneePayload | null;
+  status: MeetingReportActionItemStatus;
+  updatedByUserId: string | null;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  dismissedByUserId: string | null;
+  dismissedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MeetingReportActionItemAssigneePayload {
+  userId: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+export interface MeetingReportActionItemMutationPayload {
+  actionItem: MeetingReportActionItemPayload;
 }
 
 export interface CurrentMeetingPayload {
@@ -1017,11 +1073,88 @@ export class MeetingService {
     if (report === null) {
       throw notFound("Meeting report not found");
     }
-    const evidence = await this.listMeetingReportEvidence(report.id);
+    const [evidence, actionItems, actionItemAssignees] = await Promise.all([
+      this.listMeetingReportEvidence(report.id),
+      this.listMeetingReportActionItems(report.id),
+      this.listMeetingReportActionItemAssignees(workspaceId)
+    ]);
 
     return {
-      report: this.mapMeetingReportDetail(report, evidence)
+      report: this.mapMeetingReportDetail(report, {
+        ...evidence,
+        actionItems,
+        actionItemAssignees
+      })
     };
+  }
+
+  async updateMeetingReportActionItem(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string,
+    body: unknown
+  ): Promise<MeetingReportActionItemMutationPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const patch = this.normalizeMeetingReportActionItemPatch(body);
+
+    const actionItem = await this.database.transaction(async (transaction) => {
+      const current = await this.findMeetingReportActionItemForUpdate(
+        transaction,
+        workspaceId,
+        reportId,
+        actionItemId
+      );
+      this.assertPendingMeetingReportActionItem(current);
+
+      const assigneeUserId = patch.assigneeUserId === undefined
+        ? current.assignee_user_id
+        : patch.assigneeUserId;
+      if (assigneeUserId !== null) {
+        await this.assertWorkspaceMember(transaction, workspaceId, assigneeUserId);
+      }
+
+      return this.updatePendingMeetingReportActionItem(transaction, current, {
+        assigneeUserId,
+        description: patch.description ?? current.description,
+        priority: patch.priority ?? current.priority,
+        title: patch.title ?? current.title
+      }, currentUserId);
+    });
+
+    return { actionItem: this.mapMeetingReportActionItem(actionItem) };
+  }
+
+  async approveMeetingReportActionItem(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string
+  ): Promise<MeetingReportActionItemMutationPayload> {
+    const actionItem = await this.transitionMeetingReportActionItem(
+      currentUserId,
+      workspaceId,
+      reportId,
+      actionItemId,
+      "APPROVED"
+    );
+    return { actionItem: this.mapMeetingReportActionItem(actionItem) };
+  }
+
+  async dismissMeetingReportActionItem(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string
+  ): Promise<MeetingReportActionItemMutationPayload> {
+    const actionItem = await this.transitionMeetingReportActionItem(
+      currentUserId,
+      workspaceId,
+      reportId,
+      actionItemId,
+      "DISMISSED"
+    );
+    return { actionItem: this.mapMeetingReportActionItem(actionItem) };
   }
 
   async listMeetingReports(
@@ -2775,12 +2908,265 @@ export class MeetingService {
     ) AS participant_summary ON true`;
   }
 
-  private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: { transcriptSegments: MeetingReportDetailPayload["transcriptSegments"]; evidence: MeetingReportDetailPayload["evidence"] }): MeetingReportDetailPayload {
+  private async transitionMeetingReportActionItem(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string,
+    status: "APPROVED" | "DISMISSED"
+  ): Promise<MeetingReportActionItemRow> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    return this.database.transaction(async (transaction) => {
+      const current = await this.findMeetingReportActionItemForUpdate(
+        transaction,
+        workspaceId,
+        reportId,
+        actionItemId
+      );
+      this.assertPendingMeetingReportActionItem(current);
+      const updated = await transaction.queryOne<{ id: string }>(
+        status === "APPROVED"
+          ? `UPDATE meeting_report_action_items
+             SET status = 'APPROVED', updated_by_user_id = $2,
+                 approved_by_user_id = $2, approved_at = now(), updated_at = now()
+             WHERE id = $1 AND status = 'PENDING'
+             RETURNING id`
+          : `UPDATE meeting_report_action_items
+             SET status = 'DISMISSED', updated_by_user_id = $2,
+                 dismissed_by_user_id = $2, dismissed_at = now(), updated_at = now()
+             WHERE id = $1 AND status = 'PENDING'
+             RETURNING id`,
+        [current.id, currentUserId]
+      );
+      if (updated === null) throw badRequest("Action item is no longer pending");
+      return this.findMeetingReportActionItemForUpdate(
+        transaction,
+        workspaceId,
+        reportId,
+        actionItemId
+      );
+    });
+  }
+
+  private async findMeetingReportActionItemForUpdate(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    reportId: string,
+    actionItemId: string
+  ): Promise<MeetingReportActionItemRow> {
+    if (!UUID_PATTERN.test(reportId) || !UUID_PATTERN.test(actionItemId)) {
+      throw notFound("Meeting report action item not found");
+    }
+    const actionItem = await executor.queryOne<MeetingReportActionItemRow>(
+      `SELECT action_items.id, action_items.meeting_report_id, action_items.source_index,
+              action_items.title, action_items.description, action_items.priority,
+              action_items.assignee_user_id, users.name AS assignee_name,
+              users.avatar_url AS assignee_avatar_url, action_items.status,
+              action_items.updated_by_user_id, action_items.approved_by_user_id,
+              action_items.approved_at, action_items.dismissed_by_user_id,
+              action_items.dismissed_at, action_items.created_at, action_items.updated_at
+       FROM meeting_report_action_items AS action_items
+       JOIN meeting_reports ON meeting_reports.id = action_items.meeting_report_id
+       JOIN meetings ON meetings.id = meeting_reports.meeting_id
+       LEFT JOIN users ON users.id = action_items.assignee_user_id
+       WHERE meetings.workspace_id = $1
+         AND action_items.meeting_report_id = $2
+         AND action_items.id = $3
+       FOR UPDATE OF action_items`,
+      [workspaceId, reportId, actionItemId]
+    );
+    if (actionItem === null) throw notFound("Meeting report action item not found");
+    return actionItem;
+  }
+
+  private assertPendingMeetingReportActionItem(
+    actionItem: MeetingReportActionItemRow
+  ): void {
+    if (actionItem.status !== "PENDING") {
+      throw badRequest("Action item is no longer pending");
+    }
+  }
+
+  private async assertWorkspaceMember(
+    executor: QueryOneExecutor,
+    workspaceId: string,
+    userId: string
+  ): Promise<void> {
+    const member = await executor.queryOne<{ user_id: string }>(
+      `SELECT user_id FROM workspace_members
+       WHERE workspace_id = $1 AND user_id = $2`,
+      [workspaceId, userId]
+    );
+    if (member === null) {
+      throw badRequest("Action item assignee must be a Workspace member");
+    }
+  }
+
+  private async updatePendingMeetingReportActionItem(
+    executor: QueryOneExecutor,
+    actionItem: MeetingReportActionItemRow,
+    values: {
+      title: string;
+      description: string;
+      priority: "LOW" | "MEDIUM" | "HIGH";
+      assigneeUserId: string | null;
+    },
+    currentUserId: string
+  ): Promise<MeetingReportActionItemRow> {
+    const updated = await executor.queryOne<{ id: string }>(
+      `UPDATE meeting_report_action_items
+       SET title = $2, description = $3, priority = $4, assignee_user_id = $5,
+           updated_by_user_id = $6, updated_at = now()
+       WHERE id = $1 AND status = 'PENDING'
+       RETURNING id`,
+      [
+        actionItem.id,
+        values.title,
+        values.description,
+        values.priority,
+        values.assigneeUserId,
+        currentUserId
+      ]
+    );
+    if (updated === null) throw badRequest("Action item is no longer pending");
+    return {
+      ...actionItem,
+      assignee_avatar_url: values.assigneeUserId === actionItem.assignee_user_id
+        ? actionItem.assignee_avatar_url
+        : null,
+      assignee_name: values.assigneeUserId === actionItem.assignee_user_id
+        ? actionItem.assignee_name
+        : null,
+      assignee_user_id: values.assigneeUserId,
+      description: values.description,
+      priority: values.priority,
+      title: values.title,
+      updated_at: new Date(),
+      updated_by_user_id: currentUserId
+    };
+  }
+
+  private normalizeMeetingReportActionItemPatch(body: unknown): {
+    title?: string;
+    description?: string;
+    priority?: "LOW" | "MEDIUM" | "HIGH";
+    assigneeUserId?: string | null;
+  } {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      throw badRequest("Action item patch must be an object");
+    }
+    const patch = body as Record<string, unknown>;
+    const allowed = new Set(["title", "description", "priority", "assigneeUserId"]);
+    if (!Object.keys(patch).length || Object.keys(patch).some((key) => !allowed.has(key))) {
+      throw badRequest("Invalid action item patch");
+    }
+    const normalized: {
+      title?: string;
+      description?: string;
+      priority?: "LOW" | "MEDIUM" | "HIGH";
+      assigneeUserId?: string | null;
+    } = {};
+    if (Object.hasOwn(patch, "title")) normalized.title = this.normalizeActionItemText(patch.title, "title", 500);
+    if (Object.hasOwn(patch, "description")) normalized.description = this.normalizeActionItemText(patch.description, "description", 5000);
+    if (Object.hasOwn(patch, "priority")) {
+      if (patch.priority !== "LOW" && patch.priority !== "MEDIUM" && patch.priority !== "HIGH") {
+        throw badRequest("Invalid action item priority");
+      }
+      normalized.priority = patch.priority;
+    }
+    if (Object.hasOwn(patch, "assigneeUserId")) {
+      if (patch.assigneeUserId === null) normalized.assigneeUserId = null;
+      else if (typeof patch.assigneeUserId === "string" && UUID_PATTERN.test(patch.assigneeUserId)) normalized.assigneeUserId = patch.assigneeUserId;
+      else throw badRequest("Invalid action item assignee");
+    }
+    return normalized;
+  }
+
+  private normalizeActionItemText(value: unknown, field: string, maxLength: number): string {
+    if (typeof value !== "string") throw badRequest(`Action item ${field} must be a string`);
+    const normalized = value.trim();
+    if (!normalized || Buffer.byteLength(normalized, "utf8") > maxLength) {
+      throw badRequest(`Invalid action item ${field}`);
+    }
+    return normalized;
+  }
+
+  private mapMeetingReportActionItem(
+    actionItem: MeetingReportActionItemRow
+  ): MeetingReportActionItemPayload {
+    return {
+      id: actionItem.id,
+      sourceIndex: Number(actionItem.source_index),
+      title: actionItem.title,
+      description: actionItem.description,
+      priority: actionItem.priority,
+      assignee: actionItem.assignee_user_id === null ? null : {
+        userId: actionItem.assignee_user_id,
+        name: actionItem.assignee_name,
+        avatarUrl: actionItem.assignee_avatar_url
+      },
+      status: actionItem.status,
+      updatedByUserId: actionItem.updated_by_user_id,
+      approvedByUserId: actionItem.approved_by_user_id,
+      approvedAt: this.toNullableIsoString(actionItem.approved_at),
+      dismissedByUserId: actionItem.dismissed_by_user_id,
+      dismissedAt: this.toNullableIsoString(actionItem.dismissed_at),
+      createdAt: this.toIsoString(actionItem.created_at),
+      updatedAt: this.toIsoString(actionItem.updated_at)
+    };
+  }
+
+  private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: {
+    transcriptSegments: MeetingReportDetailPayload["transcriptSegments"];
+    evidence: MeetingReportDetailPayload["evidence"];
+    actionItems: MeetingReportActionItemPayload[];
+    actionItemAssignees: MeetingReportActionItemAssigneePayload[];
+  }): MeetingReportDetailPayload {
     return {
       ...this.mapMeetingReportSummary(report),
       transcriptText: report.transcript_text,
       ...evidence
     };
+  }
+
+  private async listMeetingReportActionItems(
+    reportId: string
+  ): Promise<MeetingReportActionItemPayload[]> {
+    const rows = await this.database.query<MeetingReportActionItemRow>(
+      `SELECT action_items.id, action_items.meeting_report_id, action_items.source_index,
+              action_items.title, action_items.description, action_items.priority,
+              action_items.assignee_user_id, users.name AS assignee_name,
+              users.avatar_url AS assignee_avatar_url, action_items.status,
+              action_items.updated_by_user_id, action_items.approved_by_user_id,
+              action_items.approved_at, action_items.dismissed_by_user_id,
+              action_items.dismissed_at, action_items.created_at, action_items.updated_at
+       FROM meeting_report_action_items AS action_items
+       LEFT JOIN users ON users.id = action_items.assignee_user_id
+       WHERE action_items.meeting_report_id = $1
+       ORDER BY action_items.source_index ASC`,
+      [reportId]
+    );
+    return rows.map((actionItem) => this.mapMeetingReportActionItem(actionItem));
+  }
+
+  private async listMeetingReportActionItemAssignees(
+    workspaceId: string
+  ): Promise<MeetingReportActionItemAssigneePayload[]> {
+    const rows = await this.database.query<MeetingReportActionItemAssigneeRow>(
+      `SELECT workspace_members.user_id, users.name, users.avatar_url
+       FROM workspace_members
+       JOIN users ON users.id = workspace_members.user_id
+       WHERE workspace_members.workspace_id = $1
+       ORDER BY CASE workspace_members.role WHEN 'owner' THEN 0 ELSE 1 END,
+                workspace_members.joined_at ASC, workspace_members.user_id ASC`,
+      [workspaceId]
+    );
+    return rows.map((member) => ({
+      userId: member.user_id,
+      name: member.name,
+      avatarUrl: member.avatar_url
+    }));
   }
 
   private async listMeetingReportEvidence(reportId: string): Promise<{ transcriptSegments: MeetingReportDetailPayload["transcriptSegments"]; evidence: MeetingReportDetailPayload["evidence"] }> {

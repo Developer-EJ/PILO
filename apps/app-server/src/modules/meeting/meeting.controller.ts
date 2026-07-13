@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards
@@ -19,6 +20,7 @@ import {
   LeaveMeetingPayload,
   MeetingDetailPayload,
   MeetingReportDetailResponsePayload,
+  MeetingReportActionItemMutationPayload,
   MeetingReportListPayload,
   MeetingReportRegenerationPayload,
   MeetingService,
@@ -207,6 +209,59 @@ export class MeetingController {
       reportId
     );
     return apiResponse(result);
+  }
+
+  @Patch("meeting-reports/:reportId/action-items/:actionItemId")
+  async updateReportActionItem(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingReportActionItemMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.updateMeetingReportActionItem(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId,
+        body
+      )
+    );
+  }
+
+  @Post("meeting-reports/:reportId/action-items/:actionItemId/approve")
+  async approveReportActionItem(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string
+  ): Promise<ApiSuccessResponse<MeetingReportActionItemMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.approveMeetingReportActionItem(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId
+      )
+    );
+  }
+
+  @Post("meeting-reports/:reportId/action-items/:actionItemId/dismiss")
+  async dismissReportActionItem(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string
+  ): Promise<ApiSuccessResponse<MeetingReportActionItemMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.dismissMeetingReportActionItem(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId
+      )
+    );
   }
 
   @Get("meetings/:meetingId/reports")

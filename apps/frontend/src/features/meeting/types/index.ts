@@ -87,6 +87,40 @@ export type MeetingReportDetail = MeetingReportSummary & {
   transcriptText: string | null;
   transcriptSegments?: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence?: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
+  actionItems?: MeetingReportActionItem[];
+  actionItemAssignees?: MeetingReportActionItemAssignee[];
+};
+
+export type MeetingReportActionItemStatus = "PENDING" | "APPROVED" | "DISMISSED";
+
+export type MeetingReportActionItemAssignee = {
+  userId: string;
+  name: string | null;
+  avatarUrl: string | null;
+};
+
+export type MeetingReportActionItem = {
+  id: string;
+  sourceIndex: number;
+  title: string;
+  description: string;
+  priority: "LOW" | "MEDIUM" | "HIGH";
+  assignee: MeetingReportActionItemAssignee | null;
+  status: MeetingReportActionItemStatus;
+  updatedByUserId: string | null;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  dismissedByUserId: string | null;
+  dismissedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UpdateMeetingReportActionItemInput = {
+  title?: string;
+  description?: string;
+  priority?: "LOW" | "MEDIUM" | "HIGH";
+  assigneeUserId?: string | null;
 };
 
 export type CurrentMeetingPayload = {
@@ -173,4 +207,8 @@ export type MeetingReportDetailPayload = {
 
 export type MeetingReportRegenerationPayload = {
   report: MeetingReportSummary;
+};
+
+export type MeetingReportActionItemMutationPayload = {
+  actionItem: MeetingReportActionItem;
 };

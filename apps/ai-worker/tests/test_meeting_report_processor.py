@@ -19,6 +19,7 @@ from app.meeting_report_processor import (
 from app.meeting_report_runtime import (
     HttpMeetingReportEventPublisher,
     OpenAiMeetingReportClient,
+    PgMeetingReportRepository,
     RuntimeSettings,
     S3RecordingStorage,
 )
@@ -89,6 +90,33 @@ class FakeRepository:
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None:
         self.completed_updates.append((report_id, report))
+
+
+class FakeCompletedReportCursor:
+    rowcount = 1
+
+    def fetchone(self):
+        return {"id": "segment-id"}
+
+
+class FakeCompletedReportTransaction:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class FakeCompletedReportConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def transaction(self):
+        return FakeCompletedReportTransaction()
+
+    def execute(self, query: str, values: tuple[object, ...]):
+        self.calls.append((query, values))
+        return FakeCompletedReportCursor()
 
 
 class FakeStorage:
@@ -607,6 +635,34 @@ def test_serialize_action_items_uses_api_shape() -> None:
             "priority": "MEDIUM",
         }
     ]
+
+
+def test_completed_report_materializes_pending_action_items() -> None:
+    report = FakeAiClient().generate_report(
+        "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.",
+        [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.")],
+    )
+    repository = object.__new__(PgMeetingReportRepository)
+    connection = FakeCompletedReportConnection()
+    repository.connection = connection
+
+    repository.mark_completed(REPORT_ID, report)
+
+    inserts = [
+        (query, values)
+        for query, values in connection.calls
+        if "INSERT INTO meeting_report_action_items" in query
+    ]
+    assert len(inserts) == 1
+    query, values = inserts[0]
+    assert "ON CONFLICT (meeting_report_id, source_index) DO NOTHING" in query
+    assert values == (
+        REPORT_ID,
+        0,
+        "Worker 구현",
+        "meeting_report job processor를 구현한다.",
+        "HIGH",
+    )
 
 
 def test_parse_generated_report_json_deduplicates_evidence_segments() -> None:

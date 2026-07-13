@@ -245,6 +245,8 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `discussionPoints` | string \| null | 논의사항 |
 | `decisions` | string \| null | 결정사항 |
 | `actionItemCandidates` | array | 후속 작업 후보 |
+| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `status`, 승인·반려 audit 시각을 포함한다. |
+| `actionItemAssignees` | array | 상세 조회에서만 반환. 같은 Workspace의 지정 가능한 사용자 목록. `userId`, `name`, `avatarUrl`을 포함한다. |
 | `retryCount` | number | 재시도 횟수 |
 | `participantSummary` | object | 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 참여 시각 순서다. |
 | `createdAt` | string | ISO datetime |
@@ -270,6 +272,9 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `GET` | `/workspaces/{workspaceId}/meeting-reports/{reportId}` | MeetingReport 상세 조회 |
 | `GET` | `/workspaces/{workspaceId}/meetings/{meetingId}/reports` | 특정 회의의 MeetingReport 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jobs` | 실패한 회의록 재생성 요청 |
+| `PATCH` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}` | pending 후속 작업 수정 |
+| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve` | pending 후속 작업 승인 |
+| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss` | pending 후속 작업 반려 |
 
 ## Endpoint 상세
 
@@ -576,7 +581,49 @@ Response `data`:
 
 실패한 MeetingReport도 상세 조회할 수 있다.
 
+`actionItems`는 AI 후보를 Worker가 `PENDING` 상태로 저장한 검토 모델이다.
+`sourceIndex`는 원본 `actionItemCandidates`와 transcript evidence 연결에 사용한다.
+`PENDING`만 수정·승인·반려할 수 있고, `APPROVED`와 `DISMISSED`는 이 API에서
+종결 상태다. 승인 자체는 Calendar, Board, GitHub 등 외부 도메인을 생성·변경하지
+않는다.
+
 주요 오류: `401`, `403`, `404`
+
+### MeetingReport 후속 작업 수정
+
+```http
+PATCH /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}
+```
+
+Request body는 아래 필드 중 하나 이상을 가진다.
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `title` | string | 공백 제거 후 1~500 bytes |
+| `description` | string | 공백 제거 후 1~5000 bytes |
+| `priority` | `LOW` \| `MEDIUM` \| `HIGH` | 우선순위 |
+| `assigneeUserId` | string \| null | 같은 Workspace member의 user id. `null`이면 담당자 해제 |
+
+Workspace member는 `PENDING` 항목만 수정할 수 있다. 다른 Workspace 또는 다른
+MeetingReport의 item은 `404`, terminal item·잘못된 body·Workspace member가 아닌
+담당자는 `400`을 반환한다.
+
+Response `data`:
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `actionItem` | object | 수정된 저장 action item |
+
+### MeetingReport 후속 작업 승인·반려
+
+```http
+POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve
+POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss
+```
+
+Request body 없음. Workspace member가 `PENDING` item을 각각 `APPROVED` 또는
+`DISMISSED`로 한 번만 전이한다. 응답은 `{ actionItem }`이며 전이 사용자와 시각을
+저장한다. 이미 terminal 상태인 item은 `400`, 다른 Workspace/report item은 `404`다.
 
 ### 특정 회의의 MeetingReport 목록 조회
 
