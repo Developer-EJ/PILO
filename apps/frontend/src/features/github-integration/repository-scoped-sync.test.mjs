@@ -87,6 +87,23 @@ assert.match(
   repositorySelectionHandler,
   /handleDiscoverGithubProjectV2\(repository\.installationId, repositoryId\)/
 );
+const projectSelectionSaveHandler =
+  panel.match(
+    /async function handleSaveProjectV2Selections\(\) \{[\s\S]*?\n  \}\n\n  async function handleStartGithubSyncRun/
+  )?.[0] ?? "";
+assert.match(
+  projectSelectionSaveHandler,
+  /snapshot\.repositories\.find\([\s\S]*?candidate\.id === selectedRepositoryId/
+);
+assert.match(
+  projectSelectionSaveHandler,
+  /project\.installationId === repository\.installationId/
+);
+assert.match(
+  projectSelectionSaveHandler,
+  /installationId: repository\.installationId/
+);
+assert.doesNotMatch(projectSelectionSaveHandler, /projectIdsByInstallation/);
 assert.match(
   tables,
   /저장소를 선택하면 PR 및 ProjectV2 동기화 범위를 관리할 수 있습니다/
