@@ -825,6 +825,56 @@ assert.deepEqual(
   { ok: false, reason: "target_column_not_key" }
 );
 
+const foreignKeyUpdateCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyUpdateCandidate({
+    dialect: "postgresql",
+    modelJson: runtimeModel,
+    relationId: "relation.orders.user_id.users.id",
+    toColumnId: "id",
+    toTableId: "table.orders"
+  });
+
+assert.equal(foreignKeyUpdateCandidate.ok, true);
+assert.equal(
+  foreignKeyUpdateCandidate.relation.fromTableId,
+  "table.orders"
+);
+assert.deepEqual(foreignKeyUpdateCandidate.relation.fromColumnIds, ["user_id"]);
+assert.equal(foreignKeyUpdateCandidate.relation.toTableId, "table.orders");
+assert.deepEqual(foreignKeyUpdateCandidate.relation.toColumnIds, ["id"]);
+assert.equal(
+  foreignKeyUpdateCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ),
+  false
+);
+assert.equal(
+  foreignKeyUpdateCandidate.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.find((column) => column.id === "user_id").foreignKey,
+  true
+);
+
+const foreignKeyDeleteCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyDeleteCandidate({
+    modelJson: runtimeModel,
+    relationId: "relation.orders.user_id.users.id"
+  });
+
+assert.equal(foreignKeyDeleteCandidate.ok, true);
+assert.equal(
+  foreignKeyDeleteCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.user_id.users.id"
+  ),
+  false
+);
+assert.equal(
+  foreignKeyDeleteCandidate.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.find((column) => column.id === "user_id").foreignKey,
+  false
+);
+
 const incompatibleForeignKeyModel = structuredClone(runtimeModel);
 incompatibleForeignKeyModel.schema.tables
   .find((table) => table.id === "table.orders")
