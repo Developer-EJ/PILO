@@ -885,6 +885,7 @@ node와 relation materialization은 아직 수행하지 않는다.
     "comment": null,
     "reviewedByUserId": null,
     "reviewedAt": null,
+    "decisionCarriedOver": false,
     "flowMemberships": [
       {
         "reviewFlowFileId": "review_flow_file_uuid",
@@ -897,6 +898,12 @@ node와 relation materialization은 아직 수행하지 않는다.
   }
 }
 ```
+
+새 head 분석에서 같은 room file의 `headBlobSha`가 이전 current session과 같고 원본 판단
+이력이 있으면 상태, comment, 판단자와 판단 시각을 계승한다. 이때
+`decisionCarriedOver=true`이며 새 `file_review_decisions` 행은 만들지 않는다. 사용자가 새
+버전에서 판단을 저장하면 `decisionCarriedOver=false`로 바뀐다. SHA가 다르거나 `null`이면
+`not_reviewed`로 시작한다.
 
 ## Diff View Model
 

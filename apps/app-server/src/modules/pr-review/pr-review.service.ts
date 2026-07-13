@@ -199,6 +199,14 @@ interface ReviewFileRow extends QueryResultRow {
   id: string;
 }
 
+interface ReviewFileCarryOverRow extends QueryResultRow {
+  source_decision_id: string;
+  current_status: PrReviewFileReviewStatus;
+  comment: string | null;
+  reviewed_by_user_id: string;
+  reviewed_at: Date | string;
+}
+
 interface ReviewFileResultRow extends QueryResultRow {
   id: string;
   file_path: string;
@@ -246,6 +254,7 @@ interface ReviewFileDetailRow extends QueryResultRow {
   comment: string | null;
   reviewed_by_user_id: string | null;
   reviewed_at: Date | string | null;
+  carried_from_decision_id: string | null;
   latest_decision_id: string | null;
   latest_decision_status: PrReviewFileReviewStatus | null;
   latest_decision_comment: string | null;
@@ -696,6 +705,7 @@ export interface PrReviewFilePayload {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembershipPayload[];
   latestDecision: PrReviewLatestDecisionPayload | null;
 }
@@ -1451,7 +1461,12 @@ export class PrReviewService {
               change_summary = $3::jsonb,
               recommended_review_order = $4,
               caution_points = $5::jsonb,
-              reviewed_count = 0,
+              reviewed_count = (
+                SELECT COUNT(*)::integer
+                FROM review_files AS review_file
+                WHERE review_file.session_id = $1
+                  AND review_file.current_status <> 'not_reviewed'
+              ),
               total_file_count = $6,
               analysis_error_code = NULL,
               analysis_error_message = NULL
@@ -3836,6 +3851,7 @@ export class PrReviewService {
           review_file.comment,
           review_file.reviewed_by_user_id,
           review_file.reviewed_at,
+          review_file.carried_from_decision_id,
           latest_decision.id AS latest_decision_id,
           latest_decision.status AS latest_decision_status,
           latest_decision.comment AS latest_decision_comment,
@@ -4158,7 +4174,8 @@ export class PrReviewService {
         SET current_status = $3,
             comment = $4,
             reviewed_by_user_id = $5,
-            reviewed_at = now()
+            reviewed_at = now(),
+            carried_from_decision_id = NULL
         FROM pr_review_sessions AS review_session
         JOIN github_pull_requests AS pull_request
           ON pull_request.id = review_session.pull_request_id
@@ -4545,6 +4562,13 @@ export class PrReviewService {
       throw badRequest("PR Review room file could not be created");
     }
 
+    const carryOver = await this.findReviewFileCarryOver(
+      transaction,
+      roomId,
+      roomFile.id,
+      file.headBlobSha
+    );
+
     const reviewFile = await transaction.queryOne<ReviewFileRow>(
       `
         INSERT INTO review_files (
@@ -4565,7 +4589,13 @@ export class PrReviewService {
           risk_level,
           change_reason,
           change_summary,
-          review_points
+          review_points,
+          head_blob_sha,
+          carried_from_decision_id,
+          current_status,
+          comment,
+          reviewed_by_user_id,
+          reviewed_at
         )
         VALUES (
           $1,
@@ -4585,7 +4615,13 @@ export class PrReviewService {
           $15,
           $16,
           $17,
-          $18::jsonb
+          $18::jsonb,
+          $19,
+          $20,
+          $21,
+          $22,
+          $23,
+          $24
         )
         RETURNING id
       `,
@@ -4607,7 +4643,13 @@ export class PrReviewService {
         metadata.riskLevel,
         metadata.changeReason,
         metadata.changeSummary,
-        JSON.stringify(metadata.reviewPoints)
+        JSON.stringify(metadata.reviewPoints),
+        file.headBlobSha,
+        carryOver?.source_decision_id ?? null,
+        carryOver?.current_status ?? "not_reviewed",
+        carryOver?.comment ?? null,
+        carryOver?.reviewed_by_user_id ?? null,
+        carryOver?.reviewed_at ?? null
       ]
     );
 
@@ -4616,6 +4658,53 @@ export class PrReviewService {
     }
 
     return reviewFile;
+  }
+
+  private async findReviewFileCarryOver(
+    transaction: DatabaseTransaction,
+    roomId: string,
+    roomFileId: string,
+    headBlobSha: string | null
+  ): Promise<ReviewFileCarryOverRow | null> {
+    if (!headBlobSha) {
+      return null;
+    }
+
+    return transaction.queryOne<ReviewFileCarryOverRow>(
+      `
+        SELECT
+          COALESCE(
+            latest_decision.id,
+            previous_file.carried_from_decision_id
+          ) AS source_decision_id,
+          previous_file.current_status,
+          previous_file.comment,
+          previous_file.reviewed_by_user_id,
+          previous_file.reviewed_at
+        FROM pr_review_rooms AS review_room
+        JOIN review_files AS previous_file
+          ON previous_file.session_id = review_room.current_session_id
+         AND previous_file.room_id = review_room.id
+         AND previous_file.room_file_id = $2
+        LEFT JOIN LATERAL (
+          SELECT decision.id
+          FROM file_review_decisions AS decision
+          WHERE decision.review_file_id = previous_file.id
+          ORDER BY decision.reviewed_at DESC, decision.id DESC
+          LIMIT 1
+        ) AS latest_decision ON true
+        WHERE review_room.id = $1
+          AND previous_file.head_blob_sha = $3
+          AND previous_file.current_status <> 'not_reviewed'
+          AND previous_file.reviewed_by_user_id IS NOT NULL
+          AND previous_file.reviewed_at IS NOT NULL
+          AND COALESCE(
+            latest_decision.id,
+            previous_file.carried_from_decision_id
+          ) IS NOT NULL
+      `,
+      [roomId, roomFileId, headBlobSha]
+    );
   }
 
   private semanticGraphMembershipKey(flowKey: string, filePath: string): string {
@@ -5475,6 +5564,7 @@ export class PrReviewService {
       comment: file.comment,
       reviewedByUserId: file.reviewed_by_user_id,
       reviewedAt: this.toNullableIsoString(file.reviewed_at),
+      decisionCarriedOver: file.carried_from_decision_id !== null,
       flowMemberships: memberships.map((membership) => ({
         reviewFlowFileId: membership.review_flow_file_id,
         flowId: membership.flow_id,
