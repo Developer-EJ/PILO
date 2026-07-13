@@ -68,5 +68,15 @@ assert.match(pageSource, /router\.replace\(createGithubOnboardingReturnUrl\(work
 assert.match(pageSource, /if \(workspaceId\) \{ await resumeGithub\(workspaceId\); return; \}/);
 assert.match(pageSource, /projectIds\.length === 0/);
 assert.doesNotMatch(pageSource, /accessToken.*returnUrl|state.*returnUrl/);
+assert.match(pageSource, /const \[repositoryPage, setRepositoryPage\] = useState\(1\)/);
+assert.match(
+  pageSource,
+  /listGithubRepositories\(workspaceId, \{[\s\S]{0,160}page: repositoryPage/
+);
+assert.match(pageSource, /repositoryPage > 1/);
+assert.match(pageSource, /repositoriesTotal > repositoryPage \* REPOSITORIES_PER_PAGE/);
+assert.match(pageSource, /createRepositoryPageRequestGate/);
+assert.match(pageSource, /requestGate\.isCurrent\(requestGeneration\)/);
 
 await import("./source-sync-polling.test.mjs");
+await import("./repository-page-request-gate.test.mjs");
