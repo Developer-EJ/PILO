@@ -246,6 +246,14 @@ async function compileSqlErdRuntimeModules() {
           'from "./annotation-shape-stub.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-frame-shape"/g,
+          'from "./frame-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-note-shape"/g,
+          'from "./note-shape-stub.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
           'from "./relation-shape-stub.mjs"'
         ],
@@ -296,6 +304,14 @@ async function compileSqlErdRuntimeModules() {
     await writeFile(
       join(outputDir, "annotation-shape-stub.mjs"),
       "export function isSqlErdAnnotationShape(shape) { return shape?.type === 'sqltoerd_annotation'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "frame-shape-stub.mjs"),
+      "export function isSqlErdFrameShape(shape) { return shape?.type === 'sqltoerd_frame'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "note-shape-stub.mjs"),
+      "export function isSqlErdNoteShape(shape) { return shape?.type === 'sqltoerd_note'; }\n"
     );
     await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
@@ -6270,3 +6286,30 @@ assert.deepEqual(patchedLayout.tableLayouts, [
   { tableId: "table.users", x: 100, y: 200 }
 ]);
 assert.equal(patchedLayout.annotations.notes[0].text, "");
+const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
+  patchedLayout,
+  {
+    framesToAdd: [{
+      id: "frame.billing",
+      x: 10,
+      y: 20,
+      width: 640,
+      height: 420,
+      title: "Billing",
+      color: "blue",
+      isLocked: true
+    }]
+  }
+);
+assert.equal(layoutWithCreatedFrame.annotations.frames[0].title, "Billing");
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+    deleteNoteIds: ["note.users"]
+  }).annotations.notes,
+  []
+);
+
+assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
+assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
+assert.match(canvasSurface, /data-sqltoerd-add-note/);
+assert.match(canvasSurface, /data-sqltoerd-add-frame/);

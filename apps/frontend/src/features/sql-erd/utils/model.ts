@@ -175,7 +175,7 @@ export function applySqltoerdLayoutPatch(
   const positionsByTableId = new Map(
     (patch.tablePositions ?? []).map((position) => [position.tableId, position])
   );
-  const annotations = currentLayoutJson.annotations;
+  const annotations = currentLayoutJson.annotations ?? { version: 1, links: [] };
 
   return {
     ...currentLayoutJson,
@@ -183,19 +183,17 @@ export function applySqltoerdLayoutPatch(
       const position = positionsByTableId.get(layout.tableId);
       return position ? { ...layout, ...position } : layout;
     }),
-    ...(annotations
-      ? {
-          annotations: {
+    annotations: {
             ...annotations,
             notes: (annotations.notes ?? [])
               .filter((note) => !deletedNoteIds.has(note.id))
-              .map((note) => ({ ...note, ...notesById[note.id] })),
+              .map((note) => ({ ...note, ...notesById[note.id] }))
+              .concat(patch.notesToAdd ?? []),
             frames: (annotations.frames ?? [])
               .filter((frame) => !deletedFrameIds.has(frame.id))
               .map((frame) => ({ ...frame, ...framesById[frame.id] }))
+              .concat(patch.framesToAdd ?? [])
           }
-        }
-      : {})
   };
 }
 

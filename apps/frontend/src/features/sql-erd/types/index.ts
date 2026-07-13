@@ -11,7 +11,9 @@ export type SqlErdSelection =
   | { type: "table"; tableId: string }
   | { type: "column"; tableId: string; columnId: string }
   | { type: "relation"; relationId: string }
-  | { type: "annotation"; annotationId: string };
+  | { type: "annotation"; annotationId: string }
+  | { type: "note"; noteId: string }
+  | { type: "frame"; frameId: string };
 
 export type SqltoerdModelJsonV1 = {
   version: typeof SQLTOERD_MODEL_JSON_VERSION;
@@ -102,6 +104,8 @@ export type SqltoerdCanvasFrame = {
 
 export type SqltoerdLayoutPatch = {
   tablePositions?: SqltoerdTableLayout[];
+  notesToAdd?: SqltoerdCanvasNote[];
+  framesToAdd?: SqltoerdCanvasFrame[];
   notesById?: Record<string, Partial<Omit<SqltoerdCanvasNote, "id">>>;
   framesById?: Record<string, Partial<Omit<SqltoerdCanvasFrame, "id">>>;
   deleteNoteIds?: readonly string[];
