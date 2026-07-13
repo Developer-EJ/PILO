@@ -2101,7 +2101,10 @@ async function assertError(action, messagePattern) {
         (text, values) => {
           assert.match(text, /SET calendar_event_id = \$2/);
           assert.deepEqual(values, [actionItemId, 42, currentUserId]);
-          return { id: actionItemId };
+          return {
+            updated_by_user_id: currentUserId,
+            updated_at: new Date("2026-07-10T12:00:00.000Z")
+          };
         }
       ]
     }),
@@ -2131,6 +2134,8 @@ async function assertError(action, messagePattern) {
     endTime: undefined
   });
   assert.equal(result.actionItem.calendarEvent?.id, 42);
+  assert.equal(result.actionItem.updatedByUserId, currentUserId);
+  assert.equal(result.actionItem.updatedAt, "2026-07-10T12:00:00.000Z");
   assert.equal(result.calendarEvent.startDate, "2026-07-10");
 }
 

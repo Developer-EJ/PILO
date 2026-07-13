@@ -1234,7 +1234,10 @@ export class MeetingService {
         currentUserId,
         calendarInput
       );
-      const linked = await transaction.queryOne<{ id: string }>(
+      const linked = await transaction.queryOne<{
+        updated_by_user_id: string | null;
+        updated_at: Date | string;
+      }>(
         `UPDATE meeting_report_action_items
          SET calendar_event_id = $2,
              calendar_event_linked_by_user_id = $3,
@@ -1242,7 +1245,7 @@ export class MeetingService {
              updated_by_user_id = $3,
              updated_at = now()
          WHERE id = $1
-         RETURNING id`,
+         RETURNING updated_by_user_id, updated_at`,
         [actionItem.id, event.id, currentUserId]
       );
       if (linked === null) {
@@ -1251,7 +1254,15 @@ export class MeetingService {
 
       const calendarEvent = this.mapMeetingReportActionItemCalendarEvent(event);
       return {
-        actionItem: this.mapMeetingReportActionItem(actionItem, calendarEvent),
+        actionItem: this.mapMeetingReportActionItem(
+          {
+            ...actionItem,
+            calendar_event_id: event.id,
+            updated_by_user_id: linked.updated_by_user_id,
+            updated_at: linked.updated_at
+          },
+          calendarEvent
+        ),
         calendarEvent
       };
     });
