@@ -53,6 +53,13 @@ const prReviewCanvasSurface = await readFile(
   ),
   "utf8"
 );
+const prReviewCanvasPersistence = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/pr-review-canvas-persistence.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewFileDiffDrawer = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer.tsx",
@@ -164,6 +171,10 @@ assert.match(prReviewApiClient, /getReviewSession/);
 assert.match(prReviewApiClient, /retryReviewSession/);
 assert.match(prReviewApiClient, /getReviewSessionSummary/);
 assert.match(prReviewApiClient, /getReviewSessionCanvas/);
+assert.match(prReviewApiClient, /getReviewRoom/);
+assert.match(prReviewApiClient, /listReviewCanvasShapes/);
+assert.match(prReviewApiClient, /getReviewCanvasShape/);
+assert.match(prReviewApiClient, /updateReviewCanvasFileShape/);
 assert.match(prReviewApiClient, /getReviewSessionConflicts/);
 assert.match(prReviewApiClient, /createReviewFileConflictSuggestion/);
 assert.match(prReviewApiClient, /applyReviewSessionConflictResolutions/);
@@ -304,11 +315,19 @@ assert.match(prReviewCanvasSurface, /canvas\.flows/);
 assert.match(prReviewCanvasSurface, /isPrReviewFileNodeShape/);
 assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
 assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
+assert.match(prReviewCanvasSurface, /PrReviewCanvasPersistenceBridge/);
+assert.match(prReviewCanvasSurface, /registerReviewShapePolicy/);
+assert.match(prReviewCanvasSurface, /updatePrReviewRelationGeometry/);
+assert.match(prReviewCanvasSurface, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasSurface, /riskLevel: fileNodeData\.riskLevel/);
 assert.match(prReviewCanvasSurface, /conflictReason: conflictMetadata\.conflictReason/);
 assert.doesNotMatch(prReviewCanvasSurface, /features\/canvas/);
 assert.doesNotMatch(prReviewCanvasSurface, /PiloCanvasRuntime/);
 assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);
+assert.match(prReviewCanvasPersistence, /PR_REVIEW_CANVAS_LOAD_QUERY/);
+assert.match(prReviewCanvasPersistence, /buildPrReviewFileShapeUpdateInput/);
+assert.match(prReviewCanvasPersistence, /buildPrReviewRelationEdgeGeometry/);
+assert.doesNotMatch(prReviewCanvasPersistence, /features\/canvas/);
 assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
 assert.match(prReviewFileDiffDrawer, /Conflict 해결/);
@@ -430,3 +449,5 @@ await import("./multi-file-conflict-draft.test.mjs");
 await import("./conflict-hunk-manual.test.mjs");
 await import("./multi-file-conflict-client.test.mjs");
 await import("./oauth-reconnect-client.test.mjs");
+await import("./canvas-shape-client.test.mjs");
+await import("./canvas-shape-persistence.test.mjs");
