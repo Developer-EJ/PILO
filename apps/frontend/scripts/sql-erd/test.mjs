@@ -49,6 +49,8 @@ async function compileSqlErdRuntimeModules() {
   const tableShapeOutputPath = join(outputDir, "table-shape.mjs");
   const canvasSelectionOutputPath = join(outputDir, "canvas-selection.mjs");
   const tablePinOutputPath = join(outputDir, "table-pin.mjs");
+  const foreignKeyAddOutputPath = join(outputDir, "foreign-key-add.mjs");
+  const relationIdOutputPath = join(outputDir, "relation-id.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -93,6 +95,11 @@ async function compileSqlErdRuntimeModules() {
       sqlSourceDecorationOutputPath
     );
     await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/relation-id.ts",
+      relationIdOutputPath,
+      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+    );
+    await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/ddl-parser.ts",
       ddlParserOutputPath,
       [
@@ -100,6 +107,10 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/utils\/sql-source-map"/g,
           'from "./sql-source-map.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/relation-id"/g,
+          'from "./relation-id.mjs"'
         ]
       ]
     );
@@ -207,6 +218,17 @@ async function compileSqlErdRuntimeModules() {
       "../../src/features/sql-erd/utils/table-pin.ts",
       tablePinOutputPath
     );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/foreign-key-add.ts",
+      foreignKeyAddOutputPath,
+      [
+        [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/relation-id"/g,
+          'from "./relation-id.mjs"'
+        ]
+      ]
+    );
 
     await writeFile(
       join(outputDir, "types-stub.mjs"),
@@ -264,7 +286,8 @@ async function compileSqlErdRuntimeModules() {
       relationShapeRuntime,
       tableShapeRuntime,
       canvasSelectionRuntime,
-      tablePinRuntime
+      tablePinRuntime,
+      foreignKeyAddRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
@@ -286,7 +309,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(relationShapeOutputPath)),
       import(pathToFileHref(tableShapeOutputPath)),
       import(pathToFileHref(canvasSelectionOutputPath)),
-      import(pathToFileHref(tablePinOutputPath))
+      import(pathToFileHref(tablePinOutputPath)),
+      import(pathToFileHref(foreignKeyAddOutputPath))
     ]);
 
     return {
@@ -310,7 +334,8 @@ async function compileSqlErdRuntimeModules() {
       sqlEditorDialectRuntime,
       statusCopyRuntime,
       tableShapeRuntime,
-      tablePinRuntime
+      tablePinRuntime,
+      foreignKeyAddRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -669,7 +694,8 @@ const {
   sqlEditorDialectRuntime,
   statusCopyRuntime,
   tableShapeRuntime,
-  tablePinRuntime
+  tablePinRuntime,
+  foreignKeyAddRuntime
 } = await compileSqlErdRuntimeModules();
 
 const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
@@ -727,6 +753,481 @@ assert.equal(
   null
 );
 const runtimeModel = createRuntimeTestModel();
+
+const foreignKeyAddCandidate = foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+  fromColumnId: "id",
+  fromTableId: "table.orders",
+  modelJson: runtimeModel,
+  toColumnId: "id",
+  toTableId: "table.users"
+});
+
+assert.equal(foreignKeyAddCandidate.ok, true);
+assert.equal(foreignKeyAddCandidate.relation.id, "relation.orders.id.users.id");
+assert.equal(foreignKeyAddCandidate.relation.fromTableId, "table.orders");
+assert.equal(foreignKeyAddCandidate.relation.toTableId, "table.users");
+assert.equal(
+  foreignKeyAddCandidate.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.find((column) => column.id === "id").foreignKey,
+  true
+);
+
+const generatedForeignKeyCandidateSql =
+  modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: foreignKeyAddCandidate.modelJson
+  });
+const reparsedForeignKeyCandidate = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceMapModelJson: foreignKeyAddCandidate.modelJson,
+  sourceText: generatedForeignKeyCandidateSql.sql
+});
+
+assert.equal(reparsedForeignKeyCandidate.ok, true);
+assert.equal(reparsedForeignKeyCandidate.modelJson.schema.relations.length, 3);
+assert.ok(
+  reparsedForeignKeyCandidate.modelJson.schema.relations.some(
+    (relation) => relation.id === "relation.orders.id.users.id"
+  )
+);
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "user_id",
+    fromTableId: "table.orders",
+    modelJson: runtimeModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "duplicate_relation" }
+);
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "manager_id",
+    fromTableId: "table.users",
+    modelJson: runtimeModel,
+    toColumnId: "id",
+    toTableId: "table.orders"
+  }),
+  { ok: false, reason: "source_column_already_has_foreign_key" }
+);
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: runtimeModel,
+    toColumnId: "manager_id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "target_column_not_key" }
+);
+
+const incompatibleForeignKeyModel = structuredClone(runtimeModel);
+incompatibleForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.orders")
+  .columns.find((column) => column.id === "id").dataType = "VARCHAR(36)";
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: incompatibleForeignKeyModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "incompatible_column_type" }
+);
+
+const mysqlUnsignedForeignKeyModel = structuredClone(runtimeModel);
+mysqlUnsignedForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.orders")
+  .columns.find((column) => column.id === "id").dataType = "INT";
+mysqlUnsignedForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.users")
+  .columns.find((column) => column.id === "id").dataType = "INT UNSIGNED";
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "mysql",
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: mysqlUnsignedForeignKeyModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "incompatible_column_type" }
+);
+
+const mysqlDecimalForeignKeyModel = structuredClone(runtimeModel);
+mysqlDecimalForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.orders")
+  .columns.find((column) => column.id === "id").dataType = "DECIMAL(10, 2) UNSIGNED";
+mysqlDecimalForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.users")
+  .columns.find((column) => column.id === "id").dataType = "DECIMAL(12, 2) UNSIGNED";
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "mysql",
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: mysqlDecimalForeignKeyModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "incompatible_column_type" }
+);
+
+const mysqlDecimalUnsignedForeignKeyModel = structuredClone(runtimeModel);
+mysqlDecimalUnsignedForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.orders")
+  .columns.find((column) => column.id === "id").dataType = "DECIMAL(10, 2)";
+mysqlDecimalUnsignedForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.users")
+  .columns.find((column) => column.id === "id").dataType = "DECIMAL(10, 2) UNSIGNED";
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "mysql",
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: mysqlDecimalUnsignedForeignKeyModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "incompatible_column_type" }
+);
+
+const relationIdCollisionModel = structuredClone(runtimeModel);
+const collisionOrdersTable = relationIdCollisionModel.schema.tables.find(
+  (table) => table.id === "table.orders"
+);
+const collisionUsersTable = relationIdCollisionModel.schema.tables.find(
+  (table) => table.id === "table.users"
+);
+collisionOrdersTable.columns.push(
+  createRuntimeTestColumn("a", "a"),
+  createRuntimeTestColumn("b", "b"),
+  createRuntimeTestColumn("a_b", "a_b")
+);
+collisionUsersTable.columns.push(
+  createRuntimeTestColumn("c", "c"),
+  createRuntimeTestColumn("d", "d"),
+  createRuntimeTestColumn("c_d", "c_d", { unique: true })
+);
+collisionUsersTable.constraints.push({
+  columnIds: ["c_d"],
+  id: "constraint.users.c_d.unique",
+  kind: "unique",
+  name: null
+});
+relationIdCollisionModel.schema.relations.push({
+  constraintName: null,
+  fromColumnIds: ["a", "b"],
+  fromTableId: "table.orders",
+  id: "relation.orders.a_b.users.c_d",
+  kind: "foreign_key",
+  toColumnIds: ["c", "d"],
+  toTableId: "table.users"
+});
+
+const relationIdCollisionCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "postgresql",
+    fromColumnId: "a_b",
+    fromTableId: "table.orders",
+    modelJson: relationIdCollisionModel,
+    toColumnId: "c_d",
+    toTableId: "table.users"
+  });
+
+assert.equal(relationIdCollisionCandidate.ok, true);
+assert.equal(
+  relationIdCollisionCandidate.relation.id,
+  "relation.orders.a_b.users.c_d"
+);
+assert.equal(
+  new Set(
+    relationIdCollisionCandidate.modelJson.schema.relations.map((relation) => relation.id)
+  ).size,
+  relationIdCollisionCandidate.modelJson.schema.relations.length
+);
+assert.notEqual(
+  relationIdCollisionCandidate.relation.id,
+  relationIdCollisionCandidate.modelJson.schema.relations.find(
+    (relation) =>
+      relation.fromTableId === "table.orders" &&
+      relation.fromColumnIds.length === 2 &&
+      relation.fromColumnIds.includes("a") &&
+      relation.fromColumnIds.includes("b")
+  ).id
+);
+
+const reparsedRelationIdCollision = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: relationIdCollisionCandidate.modelJson
+  }).sql
+});
+
+assert.equal(reparsedRelationIdCollision.ok, true);
+assert.equal(reparsedRelationIdCollision.modelJson.schema.relations.length, 4);
+assert.equal(
+  new Set(reparsedRelationIdCollision.modelJson.schema.relations.map((relation) => relation.id))
+    .size,
+  4
+);
+
+const reparsedRelationIdCollisionWithSourceMap =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceMapModelJson: relationIdCollisionCandidate.modelJson,
+    sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect: "postgresql",
+      modelJson: relationIdCollisionCandidate.modelJson
+    }).sql
+  });
+
+assert.equal(reparsedRelationIdCollisionWithSourceMap.ok, true);
+const isRelationIdCollisionPair = (modelJson, relation) => {
+  const fromTable = modelJson.schema.tables.find(
+    (table) => table.id === relation.fromTableId
+  );
+  const toTable = modelJson.schema.tables.find(
+    (table) => table.id === relation.toTableId
+  );
+  const fromColumnNames = relation.fromColumnIds
+    .map((columnId) => fromTable?.columns.find((column) => column.id === columnId)?.name)
+    .filter(Boolean);
+  const toColumnNames = relation.toColumnIds
+    .map((columnId) => toTable?.columns.find((column) => column.id === columnId)?.name)
+    .filter(Boolean);
+
+  return (
+    fromTable?.name === "orders" &&
+    toTable?.name === "users" &&
+    ((fromColumnNames.length === 2 &&
+      fromColumnNames.includes("a") &&
+      fromColumnNames.includes("b") &&
+      toColumnNames.includes("c") &&
+      toColumnNames.includes("d")) ||
+      (fromColumnNames.length === 1 &&
+        fromColumnNames[0] === "a_b" &&
+        toColumnNames.length === 1 &&
+        toColumnNames[0] === "c_d"))
+  );
+};
+const collisionRelationIds = relationIdCollisionCandidate.modelJson.schema.relations
+  .filter((relation) =>
+    isRelationIdCollisionPair(relationIdCollisionCandidate.modelJson, relation)
+  )
+  .map((relation) => relation.id);
+assert.deepEqual(
+  Object.keys(reparsedRelationIdCollisionWithSourceMap.sourceMap.relationsById)
+    .filter((relationId) => collisionRelationIds.includes(relationId))
+    .sort(),
+  reparsedRelationIdCollisionWithSourceMap.modelJson.schema.relations
+    .filter((relation) =>
+      isRelationIdCollisionPair(
+        reparsedRelationIdCollisionWithSourceMap.modelJson,
+        relation
+      )
+    )
+    .map((relation) => relation.id)
+    .sort()
+);
+
+const dottedColumnRelationIdCollisionModel = {
+  version: 1,
+  schema: {
+    tables: [
+      {
+        id: "table.orders",
+        name: "orders",
+        schemaName: null,
+        columns: [
+          createRuntimeTestColumn("user.id", "user.id"),
+          createRuntimeTestColumn("user", "user")
+        ],
+        constraints: [],
+        comment: null
+      },
+      {
+        id: "table.users",
+        name: "users",
+        schemaName: null,
+        columns: [
+          createRuntimeTestColumn("id", "id", { primaryKey: true })
+        ],
+        constraints: [
+          {
+            id: "constraint.users.pk",
+            kind: "primary_key",
+            columnIds: ["id"],
+            name: null
+          }
+        ],
+        comment: null
+      },
+      {
+        id: "table.id",
+        name: "id",
+        schemaName: null,
+        columns: [
+          createRuntimeTestColumn("users.id", "users.id", {
+            primaryKey: true
+          })
+        ],
+        constraints: [
+          {
+            id: "constraint.id.users.id.pk",
+            kind: "primary_key",
+            columnIds: ["users.id"],
+            name: null
+          }
+        ],
+        comment: null
+      }
+    ],
+    relations: [
+      {
+        constraintName: null,
+        fromColumnIds: ["user.id"],
+        fromTableId: "table.orders",
+        id: "relation.orders.user.id.users.id",
+        kind: "foreign_key",
+        toColumnIds: ["id"],
+        toTableId: "table.users"
+      }
+    ]
+  }
+};
+const dottedColumnRelationIdCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "postgresql",
+    fromColumnId: "user",
+    fromTableId: "table.orders",
+    modelJson: dottedColumnRelationIdCollisionModel,
+    toColumnId: "users.id",
+    toTableId: "table.id"
+  });
+
+assert.equal(dottedColumnRelationIdCandidate.ok, true);
+assert.equal(
+  new Set(
+    dottedColumnRelationIdCandidate.modelJson.schema.relations.map(
+      (relation) => relation.id
+    )
+  ).size,
+  dottedColumnRelationIdCandidate.modelJson.schema.relations.length
+);
+assert.match(dottedColumnRelationIdCandidate.relation.id, /^relation\.v2\./);
+
+const longRelationIdentifierModel = structuredClone(runtimeModel);
+const longTableName = "t".repeat(62);
+const longColumnName = "c".repeat(62);
+longRelationIdentifierModel.schema.tables
+  .find((table) => table.id === "table.orders").name = longTableName;
+longRelationIdentifierModel.schema.tables
+  .find((table) => table.id === "table.users").name = `${longTableName}_target`;
+longRelationIdentifierModel.schema.tables
+  .find((table) => table.id === "table.orders")
+  .columns.find((column) => column.id === "id").name = longColumnName;
+longRelationIdentifierModel.schema.tables
+  .find((table) => table.id === "table.users")
+  .columns.find((column) => column.id === "id").name = `${longColumnName}_target`;
+
+const longRelationIdentifierCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    dialect: "postgresql",
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: longRelationIdentifierModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  });
+
+assert.equal(longRelationIdentifierCandidate.ok, true);
+assert.ok(longRelationIdentifierCandidate.relation.id.length <= 256);
+const reparsedLongRelationIdentifier = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect: "postgresql",
+    modelJson: longRelationIdentifierCandidate.modelJson
+  }).sql
+});
+
+assert.equal(reparsedLongRelationIdentifier.ok, true);
+assert.ok(
+  reparsedLongRelationIdentifier.modelJson.schema.relations.every(
+    (relation) => relation.id.length <= 256
+  )
+);
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "id",
+    fromTableId: "table.users",
+    modelJson: runtimeModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "same_endpoint" }
+);
+
+const selfReferencingForeignKeyModel = structuredClone(runtimeModel);
+selfReferencingForeignKeyModel.schema.tables
+  .find((table) => table.id === "table.users")
+  .columns.push(createRuntimeTestColumn("mentor_id", "mentor_id"));
+const selfReferencingForeignKeyCandidate =
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "mentor_id",
+    fromTableId: "table.users",
+    modelJson: selfReferencingForeignKeyModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  });
+
+assert.equal(selfReferencingForeignKeyCandidate.ok, true);
+assert.equal(
+  selfReferencingForeignKeyCandidate.relation.id,
+  "relation.users.mentor_id.users.id"
+);
+
+const compositeTargetKeyModel = structuredClone(runtimeModel);
+const compositeTargetUsersTable = compositeTargetKeyModel.schema.tables.find(
+  (table) => table.id === "table.users"
+);
+compositeTargetUsersTable.constraints = [
+  {
+    columnIds: ["id", "manager_id"],
+    id: "constraint.users.pk.composite",
+    kind: "primary_key",
+    name: null
+  }
+];
+
+assert.deepEqual(
+  foreignKeyAddRuntime
+    .getSqltoerdForeignKeyTargetColumns(compositeTargetUsersTable)
+    .map((column) => column.id),
+  []
+);
+
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
+    fromColumnId: "id",
+    fromTableId: "table.orders",
+    modelJson: compositeTargetKeyModel,
+    toColumnId: "id",
+    toTableId: "table.users"
+  }),
+  { ok: false, reason: "target_column_not_key" }
+);
 
 assert.equal(
   sqlEditorDialectRuntime.resolveSqlSourceEditorDialect("postgresql", "mysql"),
