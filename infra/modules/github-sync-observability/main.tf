@@ -107,7 +107,7 @@ locals {
       comparison_operator = "LessThanOrEqualToThreshold"
       threshold           = 0
     }
-    database_pool_exhausted_warning = {
+    database_pool_exhausted_warning   = {
       metric_name         = "DatabasePoolExhaustedCount"
       statistic           = "Sum"
       comparison_operator = "GreaterThanOrEqualToThreshold"
