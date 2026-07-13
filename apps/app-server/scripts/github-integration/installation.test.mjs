@@ -528,6 +528,120 @@ function createService({
   );
 }
 
+for (const {
+  description,
+  query,
+  expectedMessage
+} of [
+  {
+    description: "an invalid installation id",
+    query: {
+      installation_id: "invalid-installation-id",
+      setup_action: "install"
+    },
+    expectedMessage: "GitHub installation id must be a positive integer"
+  },
+  {
+    description: "a blank setup action",
+    query: {
+      installation_id: "12345678",
+      setup_action: " "
+    },
+    expectedMessage: "GitHub App setup action is required"
+  }
+]) {
+  const returnUrl =
+    "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github";
+  const stateService = new GithubAppInstallationStateService();
+  const state = stateService.createState(
+    {
+      userId: currentUserId,
+      workspaceId,
+      returnUrl
+    },
+    baseConfig
+  );
+  const statePayload = stateService.verifyState(state, baseConfig);
+  let stateConsumeCount = 0;
+  let installationAccessChecked = false;
+  let appInstallationLookedUp = false;
+  const database = new FakeDatabase({
+    handlers: {
+      queryOne(text) {
+        if (/UPDATE github_callback_states/i.test(text)) {
+          stateConsumeCount += 1;
+          if (stateConsumeCount > 1) {
+            return null;
+          }
+
+          return {
+            user_id: currentUserId,
+            workspace_id: workspaceId,
+            return_url: returnUrl,
+            expires_at: new Date(statePayload.expiresAt)
+          };
+        }
+
+        return undefined;
+      }
+    }
+  });
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async hasUserInstallationAccess() {
+        installationAccessChecked = true;
+        throw new Error("installation access lookup must not run");
+      }
+    },
+    githubAppClient: {
+      async getInstallation() {
+        appInstallationLookedUp = true;
+        throw new Error("GitHub App lookup must not run");
+      }
+    }
+  });
+  const cookieHeader =
+    "pilo_github_app_installation_state=installation-binding-token";
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback(
+        {
+          ...query,
+          state
+        },
+        cookieHeader
+      ),
+    (error) =>
+      error?.returnUrl === returnUrl &&
+      error?.callbackError === "callback_failed" &&
+      error?.response?.error?.message === expectedMessage,
+    `must consume state before rejecting ${description}`
+  );
+  assert.equal(stateConsumeCount, 1);
+  assert.equal(installationAccessChecked, false);
+  assert.equal(appInstallationLookedUp, false);
+
+  await assert.rejects(
+    () =>
+      service.completeGithubAppInstallationCallback(
+        {
+          installation_id: "12345678",
+          setup_action: "install",
+          state
+        },
+        cookieHeader
+      ),
+    (error) =>
+      error?.response?.error?.message === "Invalid GitHub App installation state",
+    `must reject replay after ${description}`
+  );
+  assert.equal(stateConsumeCount, 2);
+  assert.equal(installationAccessChecked, false);
+  assert.equal(appInstallationLookedUp, false);
+}
+
 {
   const stateService = new GithubAppInstallationStateService();
   const state = stateService.createState(
