@@ -69,6 +69,43 @@ export type SqltoerdLayoutJsonV1 = {
 export type SqltoerdAnnotationsV1 = {
   version: 1;
   links: SqltoerdAnnotationLink[];
+  notes?: SqltoerdCanvasNote[];
+  frames?: SqltoerdCanvasFrame[];
+};
+
+export type SqltoerdCanvasNote = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+};
+
+export type SqltoerdCanvasFrameColor =
+  | "slate"
+  | "blue"
+  | "green"
+  | "amber"
+  | "rose";
+
+export type SqltoerdCanvasFrame = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  color: SqltoerdCanvasFrameColor;
+  isLocked: boolean;
+};
+
+export type SqltoerdLayoutPatch = {
+  tablePositions?: SqltoerdTableLayout[];
+  notesById?: Record<string, Partial<Omit<SqltoerdCanvasNote, "id">>>;
+  framesById?: Record<string, Partial<Omit<SqltoerdCanvasFrame, "id">>>;
+  deleteNoteIds?: readonly string[];
+  deleteFrameIds?: readonly string[];
 };
 
 export type SqltoerdAnnotationLink =

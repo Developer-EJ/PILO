@@ -6239,3 +6239,34 @@ assert.match(apiClient, /sql-erd-sessions/);
 assert.doesNotMatch(apiClient, /sql-erd-session`/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);
+
+assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
+const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
+  {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 10, y: 20 }],
+    annotations: {
+      version: 1,
+      links: [],
+      notes: [
+        {
+          id: "note.users",
+          x: 40,
+          y: 60,
+          width: 240,
+          height: 160,
+          text: "before"
+        }
+      ],
+      frames: []
+    }
+  },
+  {
+    tablePositions: [{ tableId: "table.users", x: 100, y: 200 }],
+    notesById: { "note.users": { text: "" } }
+  }
+);
+assert.deepEqual(patchedLayout.tableLayouts, [
+  { tableId: "table.users", x: 100, y: 200 }
+]);
+assert.equal(patchedLayout.annotations.notes[0].text, "");

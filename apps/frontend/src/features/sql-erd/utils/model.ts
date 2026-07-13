@@ -4,6 +4,7 @@ import type {
   ErdTable,
   SqltoerdAnnotationLink,
   SqltoerdAnnotationsV1,
+  SqltoerdLayoutPatch,
   SqltoerdColumnAnnotationLink,
   SqltoerdLayoutJsonV1,
   SqltoerdModelCounts,
@@ -159,6 +160,41 @@ export function updateSqltoerdLayoutWithTablePositions(
       : {}),
     ...(previousLayoutJson.annotations
       ? { annotations: previousLayoutJson.annotations }
+      : {})
+  };
+}
+
+export function applySqltoerdLayoutPatch(
+  currentLayoutJson: SqltoerdLayoutJsonV1,
+  patch: SqltoerdLayoutPatch
+): SqltoerdLayoutJsonV1 {
+  const notesById = patch.notesById ?? {};
+  const framesById = patch.framesById ?? {};
+  const deletedNoteIds = new Set(patch.deleteNoteIds ?? []);
+  const deletedFrameIds = new Set(patch.deleteFrameIds ?? []);
+  const positionsByTableId = new Map(
+    (patch.tablePositions ?? []).map((position) => [position.tableId, position])
+  );
+  const annotations = currentLayoutJson.annotations;
+
+  return {
+    ...currentLayoutJson,
+    tableLayouts: currentLayoutJson.tableLayouts.map((layout) => {
+      const position = positionsByTableId.get(layout.tableId);
+      return position ? { ...layout, ...position } : layout;
+    }),
+    ...(annotations
+      ? {
+          annotations: {
+            ...annotations,
+            notes: (annotations.notes ?? [])
+              .filter((note) => !deletedNoteIds.has(note.id))
+              .map((note) => ({ ...note, ...notesById[note.id] })),
+            frames: (annotations.frames ?? [])
+              .filter((frame) => !deletedFrameIds.has(frame.id))
+              .map((frame) => ({ ...frame, ...framesById[frame.id] }))
+          }
+        }
       : {})
   };
 }
