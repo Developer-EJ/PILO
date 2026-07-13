@@ -5,6 +5,7 @@ import type {
   JoinMeetingPayload,
   LeaveMeetingPayload,
   MeetingDetailPayload,
+  MeetingReportActionItemMutationPayload,
   MeetingReportDetailPayload,
   MeetingReportListPayload,
   MeetingReportListQuery,
@@ -13,7 +14,8 @@ import type {
   RecordingListPayload,
   StartMeetingInput,
   StartMeetingPayload,
-  StartRecordingPayload
+  StartRecordingPayload,
+  UpdateMeetingReportActionItemInput
 } from "@/features/meeting/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -269,6 +271,16 @@ function meetingReportPath(workspaceId: string, reportId: string) {
   )}` as const;
 }
 
+function meetingReportActionItemPath(
+  workspaceId: string,
+  reportId: string,
+  actionItemId: string
+) {
+  return `${meetingReportPath(workspaceId, reportId)}/action-items/${encodeURIComponent(
+    actionItemId
+  )}` as const;
+}
+
 export function createMeetingApiClient({
   accessToken = null,
   baseUrl = defaultMeetingApiBaseUrl(),
@@ -397,6 +409,43 @@ export function createMeetingApiClient({
     async regenerateMeetingReport(workspaceId: string, reportId: string) {
       return requestMeetingData<MeetingReportRegenerationPayload>(
         `${meetingReportPath(workspaceId, reportId)}/regeneration-jobs`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async updateMeetingReportActionItem(
+      workspaceId: string,
+      reportId: string,
+      actionItemId: string,
+      body: UpdateMeetingReportActionItemInput
+    ) {
+      return requestMeetingData<MeetingReportActionItemMutationPayload>(
+        meetingReportActionItemPath(workspaceId, reportId, actionItemId),
+        withJsonBody(body, { method: "PATCH" }),
+        requestOptions
+      );
+    },
+
+    async approveMeetingReportActionItem(
+      workspaceId: string,
+      reportId: string,
+      actionItemId: string
+    ) {
+      return requestMeetingData<MeetingReportActionItemMutationPayload>(
+        `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/approve`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async dismissMeetingReportActionItem(
+      workspaceId: string,
+      reportId: string,
+      actionItemId: string
+    ) {
+      return requestMeetingData<MeetingReportActionItemMutationPayload>(
+        `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/dismiss`,
         { method: "POST" },
         requestOptions
       );
