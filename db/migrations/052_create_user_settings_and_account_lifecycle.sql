@@ -69,14 +69,8 @@ CREATE TABLE public.user_settings (
       default_landing_page IN (
         'home',
         'calendar',
-        'github',
         'board',
-        'pr-review',
-        'meeting',
-        'canvas',
-        'files',
-        'sql-erd',
-        'last'
+        'canvas'
       )
     )
 );

@@ -9,7 +9,7 @@ Workspace API는 PILO 도메인 API가 공유하는 Workspace 경계와 Workspac
 - 현재 사용자가 접근 가능한 Workspace 목록 조회
 - Workspace 상세 조회와 접근 확인
 - Workspace owner의 이름·아이콘 수정
-- Workspace owner의 삭제 가능 여부 조회와 Workspace 삭제
+- Workspace owner의 Workspace 삭제
 
 Workspace 역할/멤버십과 email 초대 모델은
 [workspace-membership-api.md](workspace-membership-api.md)를 따른다.
@@ -43,7 +43,6 @@ Workspace 역할/멤버십과 email 초대 모델은
 | `GET` | `/workspaces` | 현재 사용자가 접근 가능한 Workspace 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}` | Workspace 상세 조회와 접근 확인 |
 | `PATCH` | `/workspaces/{workspaceId}` | Owner의 Workspace 이름·아이콘 수정 |
-| `GET` | `/workspaces/{workspaceId}/deletion-eligibility` | Owner의 Workspace 삭제 가능 여부 조회 |
 | `DELETE` | `/workspaces/{workspaceId}` | Owner의 Workspace 삭제 |
 
 ## Workspace Payload
@@ -222,45 +221,6 @@ Request Body:
 - `icon`은 `null` 또는 trim 후 1자 이상 32자 이하여야 한다.
 - 성공 시 갱신된 Workspace payload를 반환한다.
 
-## Workspace 삭제 가능 여부 조회
-
-```http
-GET /api/v1/workspaces/{workspaceId}/deletion-eligibility
-```
-
-응답:
-
-```json
-{
-  "success": true,
-  "data": {
-    "canDelete": false,
-    "workspaceId": "workspace_uuid",
-    "workspaceName": "PILO Team",
-    "memberCount": 4,
-    "blockers": [
-      {
-        "code": "GITHUB_INSTALLATION_EXISTS",
-        "message": "GitHub App 연결을 먼저 해제해야 합니다."
-      }
-    ]
-  }
-}
-```
-
-서버 규칙:
-
-- 현재 사용자가 owner가 아니면 `403 FORBIDDEN`을 반환한다.
-- member가 남아 있는 것 자체는 삭제 차단 사유가 아니지만, 삭제 시 모든 member가
-  접근 권한을 잃는다는 정보를 UI에 표시한다.
-- 다음 상태는 삭제 blocker다.
-  - active GitHub App installation
-  - 진행 중인 Meeting
-  - `queued` 또는 `running` background job/sync run
-  - 정리 경계가 구현되지 않은 외부 object storage resource
-- GitHub installation이 있으면 GitHub Integration API로 먼저 해제한다. Workspace
-  API가 GitHub provider 삭제 계약을 복제하지 않는다.
-
 ## Workspace 삭제
 
 ```http
@@ -293,7 +253,10 @@ Request Body:
 - 현재 사용자가 해당 Workspace owner가 아니면 `403 FORBIDDEN`을 반환한다.
 - `confirmationName`이 현재 Workspace 이름과 정확히 일치하지 않으면
   `400 BAD_REQUEST`를 반환한다.
-- deletion eligibility blocker가 있으면 `409 CONFLICT`와 blocker 목록을 반환한다.
+- Owner 본인 외의 member가 한 명이라도 남아 있으면 `409 CONFLICT`를 반환한다.
+  Frontend는 삭제 확인창에 멤버를 먼저 제거하라는 경고를 표시한다.
+- active GitHub App installation, 진행 중인 Meeting, `queued` 또는 `running` GitHub
+  sync run이 있으면 `409 CONFLICT`를 반환하고 Workspace를 삭제하지 않는다.
 - 삭제 transaction은 `workspaces` row를 삭제하고 Workspace FK의
   `ON DELETE CASCADE`에 따라 membership, invitation과 domain row를 함께 삭제한다.
 - `users.active_workspace_id`와 `user_settings.default_workspace_id`는

@@ -83,8 +83,8 @@ const appSettingsDialog = await readFile(
   ),
   "utf8"
 );
-const settingsMockData = await readFile(
-  new URL("../src/features/settings/mock-data.ts", import.meta.url),
+const settingsApiClient = await readFile(
+  new URL("../src/features/settings/api/client.ts", import.meta.url),
   "utf8"
 );
 const memberProfileDialog = await readFile(
@@ -365,6 +365,14 @@ const featurePages = await Promise.all(
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
 );
 const navigation = navigationFiles.join("\n");
+const featureNavigation = await readFile(
+  new URL("../src/features/navigation.ts", import.meta.url),
+  "utf8"
+);
+const canvasNavigationSource = await readFile(
+  new URL("../src/features/canvas/navigation.ts", import.meta.url),
+  "utf8"
+);
 const routes = routePages.join("\n");
 const pages = featurePages.join("\n");
 const deprecatedCanvasTokenEnv = "NEXT_PUBLIC_PILO_" + "ACCESS_TOKEN";
@@ -376,6 +384,9 @@ assert.match(navigation, /Board/);
 assert.match(navigation, /PR review/);
 assert.match(navigation, /Voice meeting/);
 assert.match(navigation, /Canvas/);
+assert.match(featureNavigation, /meetingNavigation,[\s\S]*canvasNavigation,[\s\S]*driveNavigation/);
+assert.match(canvasNavigationSource, /items:\s*\[\]/);
+assert.doesNotMatch(canvasNavigationSource, /최근 캔버스|새 캔버스|도형 보드/);
 assert.match(githubApiClient, /\/api\/v1/);
 assert.match(githubApiClient, /NEXT_PUBLIC_PILO_APP_SERVER_URL/);
 assert.match(authApiClient, /\/auth\/\$\{provider\}\/start/);
@@ -476,8 +487,9 @@ assert.match(appSettingsDialog, /disabled=\{!canManageWorkspace\}/);
 assert.match(appSettingsDialog, /Workspace 삭제/);
 assert.match(appSettingsDialog, /Member는 Workspace 정보를 조회만 할 수 있습니다/);
 assert.doesNotMatch(appSettingsDialog, /MOCK_GITHUB_CONNECTIONS/);
-assert.match(settingsMockData, /MOCK_PROFILE/);
-assert.match(settingsMockData, /MOCK_SETTINGS_FORM/);
+assert.match(settingsApiClient, /\/me\/settings/);
+assert.match(settingsApiClient, /\/me\/profile/);
+assert.match(settingsApiClient, /deleteCurrentAccount/);
 assert.match(workspaceCreationRoute, /WorkspaceCreationPage/);
 assert.match(
   headerNotificationDropdown,
@@ -520,7 +532,14 @@ assert.doesNotMatch(appSettingsDialog, /DIALOG_VIEWS/);
 assert.doesNotMatch(appSettingsDialog, /aria-label="사용자 메뉴"/);
 assert.doesNotMatch(appSettingsDialog, /MOCK_CURRENT_SESSION/);
 assert.doesNotMatch(appSettingsDialog, /value="security"/);
-assert.match(appSettingsDialog, /목업 데이터/);
+assert.match(appSettingsDialog, /API 연결됨/);
+assert.match(appSettingsDialog, /updateCurrentSettings/);
+assert.match(appSettingsDialog, /updateCurrentProfile/);
+assert.match(appSettingsDialog, /deleteCurrentAccount/);
+assert.match(appSettingsDialog, /updateWorkspace/);
+assert.match(appSettingsDialog, /deleteWorkspace/);
+assert.match(appSettingsDialog, /workspaceDeleteError/);
+assert.match(appSettingsDialog, /role="alert"/);
 assert.match(appSettingsDialog, /계정 탈퇴/);
 assert.doesNotMatch(appSettingsDialog, /프로필 편집/);
 assert.doesNotMatch(appSettingsDialog, /파일 업로드 없이/);
@@ -529,6 +548,8 @@ assert.match(appSettingsDialog, /setCustomAvatarUrl/);
 assert.match(memberProfileDialog, /export function MemberProfileDialog/);
 assert.match(memberProfileDialog, /member\.user\.name/);
 assert.match(memberProfileDialog, /member\.user\.lastSeenAt/);
+assert.match(memberProfileDialog, /member\.user\.jobTitle/);
+assert.match(memberProfileDialog, /member\.user\.bio/);
 assert.match(memberProfileDialog, /canRemoveSelectedMember/);
 assert.match(memberProfileDialog, /member\.role !== "owner"/);
 assert.match(memberProfileDialog, /max-w-4xl/);

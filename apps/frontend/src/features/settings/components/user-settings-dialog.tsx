@@ -9,6 +9,7 @@ import {
   GitBranch,
   KeyRound,
   LayoutDashboard,
+  Loader2,
   MonitorCog,
   Moon,
   Palette,
@@ -63,15 +64,23 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  deleteWorkspace,
+  updateWorkspace
+} from "@/features/auth/api/client";
+import { useAuthSession } from "@/features/auth/auth-session";
+import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import { cn } from "@/lib/utils";
 import { GitHubSettingsPlaceholder } from "@/features/settings/components/github-settings-placeholder";
 import {
+  deleteCurrentAccount,
+  updateCurrentProfile,
+  updateCurrentSettings
+} from "@/features/settings/api/client";
+import {
   AVATAR_COLORS,
-  MOCK_ACCOUNT_FORM,
-  MOCK_PROFILE,
-  MOCK_SETTINGS_FORM,
   type SettingsSectionId
-} from "@/features/settings/mock-data";
+} from "@/features/settings/options";
 
 export type UserDialogProps = {
   activeWorkspaceName: string;
@@ -155,7 +164,13 @@ function ProfileView({
   joinedAt,
   name
 }: UserDialogProps) {
-  const initials = getInitials(name, email);
+  const authSession = useAuthSession();
+  const profile = authSession?.user;
+  const displayName = profile?.displayName ?? name;
+  const profileAvatarUrl = profile?.avatarUrl ?? avatarUrl;
+  const jobTitle = profile?.jobTitle;
+  const bio = profile?.bio;
+  const initials = getInitials(displayName, email);
 
   return (
     <div className="grid gap-5">
@@ -165,17 +180,17 @@ function ProfileView({
       >
         <CardContent className="flex flex-col gap-5 px-0 sm:flex-row sm:items-center">
           <Avatar className="size-20 ring-4 ring-background shadow-sm">
-            <AvatarImage alt={name} src={avatarUrl || undefined} />
+            <AvatarImage alt={displayName} src={profileAvatarUrl || undefined} />
             <AvatarFallback className="text-xl">{initials}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-xl font-semibold">{name}</h3>
-              <Badge variant="secondary">{MOCK_PROFILE.jobTitle}</Badge>
+              <h3 className="text-xl font-semibold">{displayName}</h3>
+              {jobTitle ? <Badge variant="secondary">{jobTitle}</Badge> : null}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">{email}</p>
             <p className="mt-4 max-w-xl text-sm leading-6">
-              {MOCK_PROFILE.bio}
+              {bio ?? "아직 등록된 소개가 없습니다."}
             </p>
           </div>
         </CardContent>
@@ -208,12 +223,12 @@ function ProfileView({
           </CardAction>
         </CardHeader>
         <CardContent className="grid gap-4 px-0 sm:grid-cols-2">
-          <ReadonlyField label="표시 이름" value={name} />
-          <ReadonlyField label="직무" value={MOCK_PROFILE.jobTitle} />
+          <ReadonlyField label="표시 이름" value={displayName} />
+          <ReadonlyField label="직무" value={jobTitle ?? "등록되지 않음"} />
           <ReadonlyField
             className="sm:col-span-2"
             label="소개"
-            value={MOCK_PROFILE.bio}
+            value={bio ?? "등록되지 않음"}
           />
         </CardContent>
       </Card>
@@ -223,22 +238,89 @@ function ProfileView({
 
 function AccountView(props: UserDialogProps) {
   const { avatarUrl, email, joinedAt, name } = props;
-  const [displayName, setDisplayName] = useState(name);
-  const [jobTitle, setJobTitle] = useState(MOCK_ACCOUNT_FORM.jobTitle);
-  const [bio, setBio] = useState(MOCK_ACCOUNT_FORM.bio);
-  const [avatarMode, setAvatarMode] = useState(MOCK_ACCOUNT_FORM.avatarMode);
-  const [customAvatarUrl, setCustomAvatarUrl] = useState(
-    MOCK_ACCOUNT_FORM.customAvatarUrl
+  const authSession = useAuthSession();
+  const profile = authSession?.user;
+  const [displayName, setDisplayName] = useState(profile?.displayName ?? name);
+  const [jobTitle, setJobTitle] = useState(profile?.jobTitle ?? "");
+  const [bio, setBio] = useState(profile?.bio ?? "");
+  const [avatarMode, setAvatarMode] = useState(
+    profile?.avatarMode ?? "provider"
   );
-  const [avatarColor, setAvatarColor] = useState(MOCK_ACCOUNT_FORM.avatarColor);
+  const [customAvatarUrl, setCustomAvatarUrl] = useState(
+    profile?.customAvatarUrl ?? ""
+  );
+  const [avatarColor, setAvatarColor] = useState(
+    profile?.avatarColor ?? "#8B5CF6"
+  );
   const [notice, setNotice] = useState<string | null>(null);
+  const [actionStatus, setActionStatus] = useState<
+    "idle" | "saving" | "deleting"
+  >("idle");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const initials = getInitials(displayName, email);
 
   useEffect(() => {
-    setDisplayName(name);
-  }, [name]);
+    setDisplayName(profile?.displayName ?? name);
+    setJobTitle(profile?.jobTitle ?? "");
+    setBio(profile?.bio ?? "");
+    setAvatarMode(profile?.avatarMode ?? "provider");
+    setCustomAvatarUrl(profile?.customAvatarUrl ?? "");
+    setAvatarColor(profile?.avatarColor ?? "#8B5CF6");
+  }, [name, profile]);
+
+  const handleSaveProfile = async () => {
+    if (!authSession) return;
+    if (avatarMode === "custom" && !customAvatarUrl.trim()) {
+      setNotice("URL 이미지를 사용하려면 HTTPS 이미지 주소를 입력해주세요.");
+      return;
+    }
+    setActionStatus("saving");
+    setNotice(null);
+    try {
+      if (!isDevPreviewAccessToken(authSession.accessToken)) {
+        await updateCurrentProfile(authSession.accessToken, {
+          displayName: displayName.trim() || null,
+          jobTitle: jobTitle.trim() || null,
+          bio: bio.trim() || null,
+          avatarMode,
+          customAvatarUrl: customAvatarUrl.trim() || null,
+          avatarColor
+        });
+        await authSession.refreshSession(authSession.activeWorkspaceId);
+      }
+      setNotice("프로필이 저장되었습니다.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "프로필을 저장하지 못했습니다."
+      );
+    } finally {
+      setActionStatus("idle");
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!authSession) return;
+    setActionStatus("deleting");
+    setNotice(null);
+    try {
+      if (isDevPreviewAccessToken(authSession.accessToken)) {
+        setDeleteOpen(false);
+        setNotice("UI Preview에서는 계정을 탈퇴할 수 없습니다.");
+        return;
+      }
+      await deleteCurrentAccount(authSession.accessToken, deleteConfirmation);
+      setDeleteOpen(false);
+      await authSession.logout();
+    } catch (error) {
+      setDeleteOpen(false);
+      setNotice(
+        error instanceof Error ? error.message : "계정을 탈퇴하지 못했습니다."
+      );
+    } finally {
+      setActionStatus("idle");
+    }
+  };
 
   return (
     <div className="grid gap-5">
@@ -252,7 +334,7 @@ function AccountView(props: UserDialogProps) {
                   avatarMode === "custom"
                     ? customAvatarUrl.trim() || undefined
                     : avatarMode === "provider"
-                      ? avatarUrl || undefined
+                      ? profile?.providerAvatarUrl || avatarUrl || undefined
                       : undefined
                 }
               />
@@ -328,36 +410,40 @@ function AccountView(props: UserDialogProps) {
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="표시 이름">
               <Input
+                maxLength={100}
                 onChange={(event) => setDisplayName(event.target.value)}
                 value={displayName}
               />
             </Field>
             <Field label="직무">
               <Input
+                maxLength={100}
                 onChange={(event) => setJobTitle(event.target.value)}
                 value={jobTitle}
               />
             </Field>
             <Field className="sm:col-span-2" label="소개">
               <Textarea
-                maxLength={240}
+                maxLength={500}
                 onChange={(event) => setBio(event.target.value)}
                 value={bio}
               />
               <span className="text-right text-[11px] text-muted-foreground">
-                {bio.length}/240
+                {bio.length}/500
               </span>
             </Field>
           </div>
         </CardContent>
         <CardFooter className="mt-1 justify-between gap-3 rounded-none bg-transparent px-0">
           <p className="text-xs text-muted-foreground" role="status">
-            {notice ?? "현재 값은 목업 데이터이며 서버로 전송되지 않습니다."}
+            {notice ?? "변경사항을 저장하면 사이드바와 멤버 프로필에 반영됩니다."}
           </p>
           <Button
-            onClick={() => setNotice("목업 저장 완료 · API 연결 후 실제 반영됩니다.")}
+            disabled={actionStatus !== "idle"}
+            onClick={() => void handleSaveProfile()}
           >
-            <Save /> 변경사항 저장
+            {actionStatus === "saving" ? <Loader2 className="animate-spin" /> : <Save />}
+            변경사항 저장
           </Button>
         </CardFooter>
       </Card>
@@ -372,7 +458,14 @@ function AccountView(props: UserDialogProps) {
         </CardHeader>
         <CardContent className="grid gap-4 px-0 sm:grid-cols-2">
           <ReadonlyField label="이메일" value={email} />
-          <ReadonlyField label="로그인 제공자" value={MOCK_PROFILE.provider} />
+          <ReadonlyField
+            label="로그인 제공자"
+            value={
+              profile?.loginProviders
+                .map((provider) => (provider === "github" ? "GitHub" : "Google"))
+                .join(", ") || "확인되지 않음"
+            }
+          />
           <ReadonlyField label="가입일" value={formatJoinedAt(joinedAt)} />
         </CardContent>
       </Card>
@@ -409,13 +502,15 @@ function AccountView(props: UserDialogProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleteConfirmation !== "계정 탈퇴"}
-              onClick={() => {
-                setDeleteOpen(false);
-                setNotice("목업 탈퇴 요청 확인 · 실제 계정은 변경되지 않았습니다.");
-              }}
+              disabled={
+                deleteConfirmation !== "계정 탈퇴" || actionStatus !== "idle"
+              }
+              onClick={() => void handleDeleteAccount()}
               variant="destructive"
             >
+              {actionStatus === "deleting" ? (
+                <Loader2 className="animate-spin" />
+              ) : null}
               탈퇴 요청
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -426,6 +521,7 @@ function AccountView(props: UserDialogProps) {
 }
 
 function SettingsView(props: UserDialogProps) {
+  const authSession = useAuthSession();
   const {
     activeWorkspaceName,
     avatarUrl,
@@ -438,36 +534,176 @@ function SettingsView(props: UserDialogProps) {
   const [activeSection, setActiveSection] =
     useState<SettingsDialogSectionId>("general");
   const [defaultWorkspace, setDefaultWorkspace] = useState(
-    MOCK_SETTINGS_FORM.defaultWorkspace
+    authSession?.settings.defaultWorkspaceId ?? "none"
   );
   const [defaultLandingPage, setDefaultLandingPage] = useState(
-    MOCK_SETTINGS_FORM.defaultLandingPage
+    authSession?.settings.defaultLandingPage ?? "home"
   );
   const [restoreLastWorkspace, setRestoreLastWorkspace] = useState(
-    MOCK_SETTINGS_FORM.restoreLastWorkspace
+    authSession?.settings.restoreLastWorkspace ?? true
   );
-  const [theme, setTheme] = useState(MOCK_SETTINGS_FORM.theme);
-  const [density, setDensity] = useState(MOCK_SETTINGS_FORM.density);
+  const [theme, setTheme] = useState(
+    authSession?.settings.theme ?? "system"
+  );
+  const [density, setDensity] = useState(
+    authSession?.settings.density ?? "comfortable"
+  );
   const [workspaceName, setWorkspaceName] = useState(activeWorkspaceName);
+  const [workspaceIcon, setWorkspaceIcon] = useState(
+    authSession?.activeWorkspace.icon ?? ""
+  );
   const [notice, setNotice] = useState<string | null>(null);
+  const [actionStatus, setActionStatus] = useState<
+    "idle" | "saving-settings" | "saving-workspace" | "deleting-workspace"
+  >("idle");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
-  const initials = getInitials(name, email);
+  const [workspaceDeleteError, setWorkspaceDeleteError] = useState<
+    string | null
+  >(null);
+  const sidebarDisplayName = authSession?.user.displayName ?? name;
+  const sidebarAvatarUrl = authSession?.user.avatarUrl ?? avatarUrl;
+  const initials = getInitials(sidebarDisplayName, email);
   const activeSectionCopy = SECTION_COPY[activeSection];
 
   useEffect(() => {
     setWorkspaceName(activeWorkspaceName);
-  }, [activeWorkspaceName]);
+    setWorkspaceIcon(authSession?.activeWorkspace.icon ?? "");
+  }, [activeWorkspaceName, authSession?.activeWorkspace.icon]);
+
+  useEffect(() => {
+    if (!open || !authSession) return;
+    setDefaultWorkspace(authSession.settings.defaultWorkspaceId ?? "none");
+    setDefaultLandingPage(authSession.settings.defaultLandingPage);
+    setRestoreLastWorkspace(authSession.settings.restoreLastWorkspace);
+    setTheme(authSession.settings.theme);
+    setDensity(authSession.settings.density);
+  }, [authSession, open]);
+
+  const handleSaveSettings = async () => {
+    if (!authSession) return;
+    setActionStatus("saving-settings");
+    setNotice(null);
+    try {
+      if (!isDevPreviewAccessToken(authSession.accessToken)) {
+        await updateCurrentSettings(authSession.accessToken, {
+          theme: theme as "system" | "light" | "dark",
+          density: density as "comfortable" | "compact",
+          defaultWorkspaceId:
+            defaultWorkspace === "none" ? null : defaultWorkspace,
+          defaultLandingPage: defaultLandingPage as
+            | "home"
+            | "calendar"
+            | "board"
+            | "canvas",
+          restoreLastWorkspace
+        });
+        await authSession.refreshSession(authSession.activeWorkspaceId);
+      }
+      setNotice("설정이 저장되었습니다.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "설정을 저장하지 못했습니다."
+      );
+    } finally {
+      setActionStatus("idle");
+    }
+  };
+
+  const handleSaveWorkspace = async () => {
+    if (!authSession || !canManageWorkspace) return;
+    setActionStatus("saving-workspace");
+    setNotice(null);
+    try {
+      if (!isDevPreviewAccessToken(authSession.accessToken)) {
+        const workspace = await updateWorkspace(
+          authSession.accessToken,
+          authSession.activeWorkspaceId,
+          { name: workspaceName, icon: workspaceIcon.trim() || null }
+        );
+        await authSession.refreshSession(workspace.id);
+      }
+      setNotice("Workspace 정보가 저장되었습니다.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Workspace 정보를 저장하지 못했습니다."
+      );
+    } finally {
+      setActionStatus("idle");
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!authSession || !canManageWorkspace) return;
+    setActionStatus("deleting-workspace");
+    setNotice(null);
+    setWorkspaceDeleteError(null);
+    try {
+      if (isDevPreviewAccessToken(authSession.accessToken)) {
+        setNotice("UI Preview에서는 Workspace를 삭제할 수 없습니다.");
+        setDeleteOpen(false);
+        return;
+      }
+      await deleteWorkspace(
+        authSession.accessToken,
+        authSession.activeWorkspaceId,
+        deleteConfirmation
+      );
+      setDeleteOpen(false);
+      const nextWorkspace = authSession.workspaces.find(
+        (workspace) => workspace.id !== authSession.activeWorkspaceId
+      );
+      if (!nextWorkspace) {
+        window.location.assign("/workspace/new?onboarding=1");
+        return;
+      }
+      await authSession.refreshSession(nextWorkspace.id);
+      onOpenChange(false);
+    } catch (error) {
+      setWorkspaceDeleteError(
+        error instanceof Error ? error.message : "Workspace를 삭제하지 못했습니다."
+      );
+    } finally {
+      setActionStatus("idle");
+    }
+  };
 
   const footer = (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
       <p className="text-xs text-muted-foreground" role="status">
-        {notice ?? "현재 설정은 목업 데이터이며 새로고침 시 초기화됩니다."}
+        {notice ?? "변경사항은 현재 사용자 설정으로 저장됩니다."}
       </p>
       <Button
-        onClick={() => setNotice("목업 저장 완료 · API 연결 후 실제 반영됩니다.")}
+        disabled={actionStatus !== "idle"}
+        onClick={() => void handleSaveSettings()}
       >
-        <Save /> 설정 저장
+        {actionStatus === "saving-settings" ? (
+          <Loader2 className="animate-spin" />
+        ) : (
+          <Save />
+        )}
+        설정 저장
+      </Button>
+    </div>
+  );
+
+  const workspaceFooter = (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+      <p className="text-xs text-muted-foreground" role="status">
+        {notice ?? "Owner만 Workspace 정보를 변경할 수 있습니다."}
+      </p>
+      <Button
+        disabled={!canManageWorkspace || actionStatus !== "idle"}
+        onClick={() => void handleSaveWorkspace()}
+      >
+        {actionStatus === "saving-workspace" ? (
+          <Loader2 className="animate-spin" />
+        ) : (
+          <Save />
+        )}
+        Workspace 저장
       </Button>
     </div>
   );
@@ -501,11 +737,16 @@ function SettingsView(props: UserDialogProps) {
               <p className="px-3 text-xs font-medium text-muted-foreground">계정</p>
               <div className="mt-3 hidden items-center gap-2 px-3 py-2 md:flex">
                 <Avatar size="sm">
-                  <AvatarImage alt={name} src={avatarUrl || undefined} />
+                  <AvatarImage
+                    alt={sidebarDisplayName}
+                    src={sidebarAvatarUrl || undefined}
+                  />
                   <AvatarFallback>{initials}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{name}</p>
+                  <p className="truncate text-sm font-medium">
+                    {sidebarDisplayName}
+                  </p>
                   <p className="truncate text-xs text-muted-foreground">{email}</p>
                 </div>
               </div>
@@ -572,7 +813,10 @@ function SettingsView(props: UserDialogProps) {
 
               <div className="mt-auto hidden px-3 md:block">
                 <Badge className="font-normal text-muted-foreground" variant="outline">
-                  <Sparkles /> 목업 데이터
+                  <Sparkles />
+                  {authSession && isDevPreviewAccessToken(authSession.accessToken)
+                    ? "UI Preview"
+                    : "API 연결됨"}
                 </Badge>
               </div>
             </aside>
@@ -608,19 +852,25 @@ function SettingsView(props: UserDialogProps) {
               label="기본 Workspace"
             >
               <Select
-                onValueChange={(value) => setDefaultWorkspace(value ?? "active")}
+                onValueChange={(value) => setDefaultWorkspace(value ?? "none")}
                 value={defaultWorkspace}
               >
                 <SelectTrigger className="w-full sm:w-64">
                   <SelectValue>
-                    {defaultWorkspace === "active"
-                      ? "현재 Workspace 유지"
-                      : activeWorkspaceName}
+                    {defaultWorkspace === "none"
+                      ? "자동 선택"
+                      : authSession?.workspaces.find(
+                            (workspace) => workspace.id === defaultWorkspace
+                          )?.name ?? "자동 선택"}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">현재 Workspace 유지</SelectItem>
-                  <SelectItem value="pilo">{activeWorkspaceName}</SelectItem>
+                  <SelectItem value="none">자동 선택</SelectItem>
+                  {authSession?.workspaces.map((workspace) => (
+                    <SelectItem key={workspace.id} value={workspace.id}>
+                      {workspace.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </SettingRow>
@@ -669,11 +919,11 @@ function SettingsView(props: UserDialogProps) {
             title="테마와 화면 밀도"
           >
             <div className="grid gap-3 sm:grid-cols-3">
-              {[
+              {([
                 { id: "light", label: "라이트", icon: Sun },
                 { id: "dark", label: "다크", icon: Moon },
                 { id: "system", label: "시스템", icon: MonitorCog }
-              ].map((option) => {
+              ] as const).map((option) => {
                 const Icon = option.icon;
                 return (
                   <Button
@@ -739,7 +989,8 @@ function SettingsView(props: UserDialogProps) {
                   <Input
                     disabled={!canManageWorkspace}
                     maxLength={2}
-                    value={workspaceName.slice(0, 1).toUpperCase()}
+                    onChange={(event) => setWorkspaceIcon(event.target.value)}
+                    value={workspaceIcon}
                   />
                 </Field>
                 <Field label="Workspace 이름">
@@ -757,6 +1008,7 @@ function SettingsView(props: UserDialogProps) {
                 description="Workspace의 보드, 일정, 회의, Canvas 데이터가 함께 제거됩니다. 삭제 전 연결 상태와 진행 중인 작업을 검사합니다."
                 onAction={() => {
                   setDeleteConfirmation("");
+                  setWorkspaceDeleteError(null);
                   setDeleteOpen(true);
                 }}
                 title="Workspace 삭제"
@@ -771,7 +1023,7 @@ function SettingsView(props: UserDialogProps) {
                 </CardContent>
               </Card>
             )}
-            {footer}
+            {workspaceFooter}
           </SettingsPanel>
         </TabsContent>
 
@@ -782,7 +1034,13 @@ function SettingsView(props: UserDialogProps) {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog onOpenChange={setDeleteOpen} open={deleteOpen}>
+      <AlertDialog
+        onOpenChange={(nextOpen) => {
+          setDeleteOpen(nextOpen);
+          if (!nextOpen) setWorkspaceDeleteError(null);
+        }}
+        open={deleteOpen}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-destructive/10 text-destructive">
@@ -799,16 +1057,27 @@ function SettingsView(props: UserDialogProps) {
             placeholder={activeWorkspaceName}
             value={deleteConfirmation}
           />
+          {workspaceDeleteError ? (
+            <p className="text-sm font-medium text-destructive" role="alert">
+              {workspaceDeleteError}
+            </p>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleteConfirmation !== activeWorkspaceName}
-              onClick={() => {
-                setDeleteOpen(false);
-                setNotice("목업 삭제 요청 확인 · 실제 Workspace는 변경되지 않았습니다.");
+              disabled={
+                deleteConfirmation !== activeWorkspaceName ||
+                actionStatus !== "idle"
+              }
+              onClick={(event) => {
+                event.preventDefault();
+                void handleDeleteWorkspace();
               }}
               variant="destructive"
             >
+              {actionStatus === "deleting-workspace" ? (
+                <Loader2 className="animate-spin" />
+              ) : null}
               Workspace 삭제
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -963,12 +1232,12 @@ function getInitials(name: string, email: string) {
 
 function formatJoinedAt(value: string | null) {
   if (!value) {
-    return MOCK_PROFILE.joinedAt;
+    return "확인되지 않음";
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return MOCK_PROFILE.joinedAt;
+    return "확인되지 않음";
   }
 
   return new Intl.DateTimeFormat("ko-KR", {

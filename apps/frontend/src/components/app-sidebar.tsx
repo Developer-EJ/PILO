@@ -143,7 +143,7 @@ export function AppSidebar({
     };
   const displayUser = authSession
     ? {
-        name: authSession.user.name ?? "PILO 사용자",
+        name: authSession.user.displayName,
         email: authSession.user.email ?? "이메일 없음",
         initials: getUserInitials(authSession.user.name, authSession.user.email),
         avatarUrl: authSession.user.avatarUrl,

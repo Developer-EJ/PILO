@@ -152,7 +152,7 @@ Request Body:
 | `theme` | `system`, `light`, `dark` |
 | `density` | `comfortable`, `compact` |
 | `defaultWorkspaceId` | `null` 또는 접근 가능한 Workspace UUID |
-| `defaultLandingPage` | `home`, `calendar`, `github`, `board`, `pr-review`, `meeting`, `canvas`, `files`, `sql-erd`, `last` |
+| `defaultLandingPage` | `home`, `calendar`, `board`, `canvas` |
 | `restoreLastWorkspace` | boolean |
 
 ## Frontend 적용 규칙
@@ -161,8 +161,6 @@ Request Body:
 - 저장 중에는 중복 요청을 막고 성공/실패 상태를 표시한다.
 - `theme`, `density`는 저장 성공 후 전역 shell에 즉시 반영한다.
 - `defaultWorkspaceId`와 `defaultLandingPage`는 다음 로그인/진입부터 사용한다.
-- `defaultLandingPage=last`이면 Frontend가 마지막 정상 Workspace route를 사용하고,
-  저장된 route가 없거나 접근할 수 없으면 `/home`으로 이동한다.
 - `restoreLastWorkspace=true`이면 접근 가능한 마지막 Workspace를 우선 사용하고,
   아니면 `defaultWorkspaceId`, 첫 번째 접근 가능 Workspace 순서로 선택한다.
 

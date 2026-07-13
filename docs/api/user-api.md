@@ -5,8 +5,8 @@
 User API는 PILO API 호출의 현재 로그인 사용자 정보를 제공한다.
 
 - 현재 사용자 profile 조회
-- 현재 사용자의 PILO profile override 조회와 수정
-- 계정 탈퇴 가능 여부 조회와 계정 탈퇴
+- 현재 사용자의 PILO profile override 수정
+- 계정 탈퇴
 - 도메인 API가 사용할 `currentUserId` 기준 제공
 
 로그인 OAuth 시작/콜백, session 발급/갱신, GitHub Review 제출용 사용자 GitHub
@@ -36,10 +36,8 @@ GitHub Integration API의 `/me/github`를 사용한다.
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
 | `GET` | `/me` | 현재 로그인 사용자 profile 조회 |
-| `GET` | `/me/profile` | 현재 사용자의 조회 전용 profile 상세 |
 | `PATCH` | `/me/profile` | 현재 사용자의 PILO profile override 수정 |
 | `POST` | `/me/presence` | 현재 사용자의 활성 Workspace presence 갱신 |
-| `GET` | `/me/deletion-eligibility` | 계정 탈퇴 가능 여부와 차단 Workspace 조회 |
 | `DELETE` | `/me` | 현재 계정 탈퇴와 개인정보 익명화 |
 
 ## 현재 사용자 조회
@@ -57,10 +55,15 @@ GET /api/v1/me
     "id": "user_uuid",
     "name": "Eunjae",
     "displayName": "은재",
+    "jobTitle": "Frontend Developer",
+    "bio": "PILO 프로젝트를 개발하고 있습니다.",
     "email": "eunjae@example.com",
-    "avatarUrl": "https://example.com/avatar.png",
-    "avatarMode": "provider",
+    "avatarUrl": "https://cdn.example.com/custom-avatar.png",
+    "providerAvatarUrl": "https://example.com/avatar.png",
+    "customAvatarUrl": "https://cdn.example.com/custom-avatar.png",
+    "avatarMode": "custom",
     "avatarColor": "#6366F1",
+    "loginProviders": ["google"],
     "createdAt": "2026-07-04T00:00:00.000Z",
     "updatedAt": "2026-07-04T00:00:00.000Z"
   }
@@ -75,6 +78,8 @@ GET /api/v1/me
 - `users.deleted_at IS NOT NULL`이면 `401 UNAUTHORIZED`를 반환한다.
 - `name`은 provider 동기화 원본 이름이며 `displayName`은 사용자 override가 있으면
   override, 없으면 fallback 이름을 반환한다.
+- `loginProviders`는 provider 식별자 존재 여부에서 파생하며 provider 내부 id는
+  노출하지 않는다.
 - 응답에는 token, encrypted token, provider raw profile을 포함하지 않는다.
 
 ## 현재 사용자 Presence 갱신
@@ -113,51 +118,6 @@ Request Body:
 - body가 없거나 `activeWorkspaceId`가 생략되면 `400 BAD_REQUEST`를 반환한다.
 - 성공 시 `users.active_workspace_id`와 `users.last_seen_at`을 갱신한다.
 - 브라우저 종료/탭 종료 이벤트에서는 Frontend가 현재 사용자의 기본 owner Workspace id로 이 endpoint를 `keepalive` 요청한다.
-
-## 현재 사용자 Profile 상세 조회
-
-```http
-GET /api/v1/me/profile
-```
-
-응답:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "user_uuid",
-    "providerName": "Eunjae",
-    "displayName": "은재",
-    "jobTitle": "Frontend Developer",
-    "bio": "PILO 프로젝트를 개발하고 있습니다.",
-    "email": "eunjae@example.com",
-    "avatarUrl": "https://cdn.example.com/custom-avatar.png",
-    "providerAvatarUrl": "https://example.com/avatar.png",
-    "customAvatarUrl": "https://cdn.example.com/custom-avatar.png",
-    "avatarMode": "custom",
-    "avatarColor": "#6366F1",
-    "loginProviders": ["google"],
-    "workspaceSummary": {
-      "ownedCount": 2,
-      "memberCount": 3,
-      "activeWorkspaceId": "workspace_uuid"
-    },
-    "createdAt": "2026-07-04T00:00:00.000Z",
-    "updatedAt": "2026-07-13T00:00:00.000Z"
-  }
-}
-```
-
-서버 규칙:
-
-- `loginProviders`는 `users.google_user_id`, `users.github_user_id` 존재 여부에서
-  파생하며 provider 내부 id는 노출하지 않는다.
-- `workspaceSummary.ownedCount`는 owner membership 수, `memberCount`는 member
-  membership 수다.
-- GitHub Integration OAuth/App installation 상태는 이 응답에 포함하지 않는다.
-  해당 상태는 GitHub Integration API가 소유한다.
-- 이 endpoint는 조회 전용 Profile 화면의 기준 payload다.
 
 ## 현재 사용자 Profile 수정
 
@@ -202,39 +162,7 @@ Validation:
 - 사용자 지정 URL은 `user_settings.custom_avatar_url`에 저장하며 OAuth 로그인으로
   갱신되는 `users.avatar_url`은 수정하지 않는다.
 - validation 후 `user_settings`를 현재 사용자 기준으로 upsert한다.
-- 성공 시 `GET /me/profile`과 같은 전체 payload를 반환한다.
-
-## 계정 탈퇴 가능 여부 조회
-
-```http
-GET /api/v1/me/deletion-eligibility
-```
-
-응답:
-
-```json
-{
-  "success": true,
-  "data": {
-    "canDelete": false,
-    "blockingReason": "OWNED_WORKSPACE_EXISTS",
-    "ownedWorkspaces": [
-      {
-        "id": "workspace_uuid",
-        "name": "PILO Team",
-        "memberCount": 3
-      }
-    ]
-  }
-}
-```
-
-서버 규칙:
-
-- 현재 사용자가 owner인 Workspace가 하나라도 있으면 `canDelete=false`다.
-- 계정 탈퇴 전에 각 소유 Workspace를 삭제하거나 후속 소유권 이전 기능으로
-  정리해야 한다.
-- 다른 Workspace에 member로만 참여 중인 것은 탈퇴 차단 사유가 아니다.
+- 성공 시 `GET /me`와 같은 전체 payload를 반환한다.
 
 ## 현재 계정 탈퇴
 
@@ -266,7 +194,7 @@ Request Body:
 
 - `confirmationText`가 정확히 `계정 탈퇴`가 아니면 `400 BAD_REQUEST`를 반환한다.
 - 현재 사용자가 owner인 Workspace가 있으면 `409 CONFLICT`와
-  `OWNED_WORKSPACE_EXISTS`를 반환한다.
+  소유 Workspace를 먼저 정리해야 한다는 메시지를 반환한다.
 - 현재 사용자의 모든 `user_sessions`를 revoke한다.
 - 현재 사용자의 active GitHub OAuth connection은 token을 revoke/clear하고
   `revoked_at`을 기록한다. GitHub provider raw error나 token은 노출하지 않는다.

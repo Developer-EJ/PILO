@@ -139,8 +139,19 @@ export function MemberProfileDialog({
                       <Mail className="size-4" />
                       {member.user.email ?? "이메일 없음"}
                     </p>
+                    {member.user.jobTitle ? (
+                      <p className="mt-2 text-sm font-medium text-foreground/80">
+                        {member.user.jobTitle}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
+
+                {member.user.bio ? (
+                  <p className="mt-5 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                    {member.user.bio}
+                  </p>
+                ) : null}
 
                 <Separator className="my-8" />
 
