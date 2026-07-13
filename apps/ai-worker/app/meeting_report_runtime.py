@@ -258,6 +258,22 @@ class PgMeetingReportRepository:
             )
             if updated.rowcount != 1:
                 return
+            for source_index, action_item in enumerate(report.action_item_candidates):
+                self.connection.execute(
+                    """
+                    INSERT INTO meeting_report_action_items
+                      (meeting_report_id, source_index, title, description, priority)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (meeting_report_id, source_index) DO NOTHING
+                    """,
+                    (
+                        report_id,
+                        source_index,
+                        action_item.title,
+                        action_item.description,
+                        action_item.priority,
+                    ),
+                )
             self.connection.execute(
                 "DELETE FROM meeting_report_transcript_segments WHERE meeting_report_id = %s",
                 (report_id,),

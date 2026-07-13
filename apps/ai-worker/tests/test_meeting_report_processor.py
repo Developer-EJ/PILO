@@ -19,6 +19,7 @@ from app.meeting_report_processor import (
 from app.meeting_report_runtime import (
     HttpMeetingReportEventPublisher,
     OpenAiMeetingReportClient,
+    PgMeetingReportRepository,
     RuntimeSettings,
     S3RecordingStorage,
 )
@@ -89,6 +90,33 @@ class FakeRepository:
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None:
         self.completed_updates.append((report_id, report))
+
+
+class FakeCompletedReportCursor:
+    rowcount = 1
+
+    def fetchone(self):
+        return {"id": "segment-id"}
+
+
+class FakeCompletedReportTransaction:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class FakeCompletedReportConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def transaction(self):
+        return FakeCompletedReportTransaction()
+
+    def execute(self, query: str, values: tuple[object, ...]):
+        self.calls.append((query, values))
+        return FakeCompletedReportCursor()
 
 
 class FakeStorage:
@@ -391,6 +419,86 @@ def test_processor_marks_llm_business_failure_and_deletes_message() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        ("   ", "유효한 설명"),
+        ("a" * 501, "유효한 설명"),
+        ("유효한 제목", "a" * 5_001),
+    ],
+)
+def test_parse_generated_report_rejects_action_items_that_violate_db_text_constraints(
+    title: str, description: str
+) -> None:
+    with pytest.raises(ProviderBusinessError, match="Invalid action item"):
+        parse_generated_report_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "discussionPoints": "논의",
+                    "decisions": "결정",
+                    "actionItemCandidates": [
+                        {
+                            "title": title,
+                            "description": description,
+                            "assigneeUserId": None,
+                            "priority": "MEDIUM",
+                        }
+                    ],
+                    "evidence": [
+                        {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
+                        {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                    ],
+                }
+            ),
+            "원문",
+            [TranscriptSegment(0, 0, 1_000, "원문")],
+        )
+
+
+def test_processor_marks_invalid_action_item_payload_as_llm_failure() -> None:
+    class InvalidActionItemAiClient(FakeAiClient):
+        def generate_report(
+            self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+        ) -> GeneratedMeetingReport:
+            self.generate_calls.append(transcript_text)
+            return parse_generated_report_json(
+                json.dumps(
+                    {
+                        "summary": "요약",
+                        "discussionPoints": "논의",
+                        "decisions": "결정",
+                        "actionItemCandidates": [
+                            {
+                                "title": " ",
+                                "description": "설명",
+                                "assigneeUserId": None,
+                                "priority": "MEDIUM",
+                            }
+                        ],
+                        "evidence": [
+                            {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0]},
+                            {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                        ],
+                    }
+                ),
+                transcript_text,
+                transcript_segments,
+            )
+
+    repository = FakeRepository()
+    processor = MeetingReportProcessor(repository, FakeStorage(), InvalidActionItemAiClient())
+
+    result = processor.process_message(meeting_report_job_payload())
+
+    assert result.delete_message is True
+    assert result.reason == "llm_failed"
+    assert repository.completed_updates == []
+    assert repository.failed_updates == [
+        (REPORT_ID, "LLM", "Meeting report could not be generated.")
+    ]
+
+
 def test_processor_leaves_infrastructure_failure_for_sqs_retry() -> None:
     repository = FakeRepository()
     processor = MeetingReportProcessor(repository, FakeStorage(fail_head=True), FakeAiClient())
@@ -607,6 +715,34 @@ def test_serialize_action_items_uses_api_shape() -> None:
             "priority": "MEDIUM",
         }
     ]
+
+
+def test_completed_report_materializes_pending_action_items() -> None:
+    report = FakeAiClient().generate_report(
+        "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.",
+        [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.")],
+    )
+    repository = object.__new__(PgMeetingReportRepository)
+    connection = FakeCompletedReportConnection()
+    repository.connection = connection
+
+    repository.mark_completed(REPORT_ID, report)
+
+    inserts = [
+        (query, values)
+        for query, values in connection.calls
+        if "INSERT INTO meeting_report_action_items" in query
+    ]
+    assert len(inserts) == 1
+    query, values = inserts[0]
+    assert "ON CONFLICT (meeting_report_id, source_index) DO NOTHING" in query
+    assert values == (
+        REPORT_ID,
+        0,
+        "Worker 구현",
+        "meeting_report job processor를 구현한다.",
+        "HIGH",
+    )
 
 
 def test_parse_generated_report_json_deduplicates_evidence_segments() -> None:

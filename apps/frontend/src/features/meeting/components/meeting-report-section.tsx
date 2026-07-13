@@ -3,7 +3,6 @@
 import {
   AlertCircle,
   ArrowDownWideNarrow,
-  CalendarPlus,
   CheckCircle2,
   Clock3,
   FileText,
@@ -16,7 +15,6 @@ import {
   XCircle
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -28,9 +26,12 @@ import {
 } from "@/features/meeting/hooks/use-meeting-report-realtime";
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import type {
+  MeetingReportActionItem,
+  MeetingReportActionItemAssignee,
   MeetingReportDetail,
   MeetingReportStatus,
-  MeetingReportSummary
+  MeetingReportSummary,
+  UpdateMeetingReportActionItemInput
 } from "@/features/meeting/types";
 import { cn } from "@/lib/utils";
 
@@ -58,20 +59,11 @@ function readInitialMeetingReportId() {
   return new URLSearchParams(window.location.search).get("reportId")?.trim() || null;
 }
 
-type ParsedActionItemCandidate = {
-  assigneeUserId: string | null;
-  description: string | null;
-  priority: string | null;
-  title: string;
-};
-
 type MeetingReportTranscriptSegment = NonNullable<
   MeetingReportDetail["transcriptSegments"]
 >[number];
 
 const REPORT_POLL_INTERVAL_MS = 10000;
-const CALENDAR_DRAFT_TITLE_MAX_LENGTH = 255;
-const CALENDAR_DRAFT_DESCRIPTION_MAX_LENGTH = 1000;
 const REPORT_STATUS_FILTERS: Array<{
   label: string;
   value: MeetingReportStatusFilter;
@@ -81,14 +73,6 @@ const REPORT_STATUS_FILTERS: Array<{
   { label: "완료", value: "COMPLETED" },
   { label: "실패", value: "FAILED" }
 ];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
 
 function getReportRequestErrorMessage(error: unknown) {
   return error instanceof Error
@@ -126,48 +110,6 @@ function formatReportDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
-function formatCalendarDraftDate(value: string | null | undefined) {
-  const date = value ? new Date(value) : new Date();
-  const normalizedDate = Number.isNaN(date.getTime()) ? new Date() : date;
-
-  return [
-    normalizedDate.getFullYear(),
-    String(normalizedDate.getMonth() + 1).padStart(2, "0"),
-    String(normalizedDate.getDate()).padStart(2, "0")
-  ].join("-");
-}
-
-function truncateCalendarDraftValue(value: string, maxLength: number) {
-  return value.trim().slice(0, maxLength);
-}
-
-function buildCalendarDraftHref(
-  item: ParsedActionItemCandidate,
-  report: MeetingReportDetail
-) {
-  const params = new URLSearchParams({
-    calendarAction: "create",
-    color: "#22C55E",
-    date: formatCalendarDraftDate(report.createdAt),
-    isAllDay: "true",
-    title: truncateCalendarDraftValue(
-      item.title,
-      CALENDAR_DRAFT_TITLE_MAX_LENGTH
-    )
-  });
-
-  if (item.description) {
-    params.set(
-      "description",
-      truncateCalendarDraftValue(
-        item.description,
-        CALENDAR_DRAFT_DESCRIPTION_MAX_LENGTH
-      )
-    );
-  }
-
-  return `/calendar?${params.toString()}`;
-}
 
 function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
   return `${formatReportDateTime(report.createdAt)} 회의록`;
@@ -282,42 +224,6 @@ function getActionPriorityLabel(priority: string | null) {
     default:
       return priority;
   }
-}
-
-function parseActionItemCandidates(
-  candidates: unknown[]
-): ParsedActionItemCandidate[] {
-  return candidates
-    .map((candidate, index) => {
-      if (typeof candidate === "string" && candidate.trim()) {
-        return {
-          assigneeUserId: null,
-          description: null,
-          priority: null,
-          title: candidate.trim()
-        };
-      }
-
-      if (!isRecord(candidate)) {
-        return null;
-      }
-
-      const title = readString(candidate.title);
-
-      if (!title) {
-        return null;
-      }
-
-      return {
-        assigneeUserId: readString(candidate.assigneeUserId),
-        description: readString(candidate.description),
-        priority: readString(candidate.priority),
-        title: title || `후속 작업 ${index + 1}`
-      };
-    })
-    .filter((candidate): candidate is ParsedActionItemCandidate =>
-      Boolean(candidate)
-    );
 }
 
 function ReportStatusPill({ status }: { status: MeetingReportStatus }) {
@@ -523,31 +429,181 @@ function ReportTextBlock({
   );
 }
 
+function getActionItemStatusLabel(status: MeetingReportActionItem["status"]) {
+  if (status === "APPROVED") return "승인됨";
+  if (status === "DISMISSED") return "반려됨";
+  return "검토 대기";
+}
+
+function ActionItemReviewCard({
+  actionItem,
+  assignees,
+  busy,
+  evidenceSegments,
+  onApprove,
+  onDismiss,
+  onEvidenceSelect,
+  onSave
+}: {
+  actionItem: MeetingReportActionItem;
+  assignees: MeetingReportActionItemAssignee[];
+  busy: boolean;
+  evidenceSegments: MeetingReportTranscriptSegment[];
+  onApprove: () => void;
+  onDismiss: () => void;
+  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
+  onSave: (body: UpdateMeetingReportActionItemInput) => void;
+}) {
+  const [title, setTitle] = useState(actionItem.title);
+  const [description, setDescription] = useState(actionItem.description);
+  const [priority, setPriority] = useState(actionItem.priority);
+  const [assigneeUserId, setAssigneeUserId] = useState(
+    actionItem.assignee?.userId ?? ""
+  );
+  const pending = actionItem.status === "PENDING";
+
+  useEffect(() => {
+    setTitle(actionItem.title);
+    setDescription(actionItem.description);
+    setPriority(actionItem.priority);
+    setAssigneeUserId(actionItem.assignee?.userId ?? "");
+  }, [actionItem]);
+
+  return (
+    <li className="grid gap-3 rounded-lg border bg-background p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          {getActionItemStatusLabel(actionItem.status)}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          AI 후보 #{actionItem.sourceIndex + 1}
+        </span>
+      </div>
+
+      {pending ? (
+        <div className="grid gap-2">
+          <Input
+            aria-label="후속 작업 제목"
+            disabled={busy}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+          <textarea
+            aria-label="후속 작업 설명"
+            className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={busy}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <select
+              aria-label="후속 작업 우선순위"
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              disabled={busy}
+              value={priority}
+              onChange={(event) => setPriority(event.target.value as typeof priority)}
+            >
+              <option value="HIGH">높음</option>
+              <option value="MEDIUM">보통</option>
+              <option value="LOW">낮음</option>
+            </select>
+            <select
+              aria-label="후속 작업 담당자"
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              disabled={busy}
+              value={assigneeUserId}
+              onChange={(event) => setAssigneeUserId(event.target.value)}
+            >
+              <option value="">담당자 미지정</option>
+              {assignees.map((assignee) => (
+                <option key={assignee.userId} value={assignee.userId}>
+                  {assignee.name?.trim() || "이름 없음"}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <p className="break-words font-medium text-foreground">{actionItem.title}</p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
+            {actionItem.description}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {getActionPriorityLabel(actionItem.priority)} · {actionItem.assignee?.name?.trim() || "담당자 미지정"}
+          </p>
+        </div>
+      )}
+
+      {evidenceSegments.length ? (
+        <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+      ) : null}
+
+      {pending ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onDismiss()}
+          >
+            반려
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy || !title.trim() || !description.trim()}
+            onClick={() =>
+              onSave({
+                title: title.trim(),
+                description: description.trim(),
+                priority,
+                assigneeUserId: assigneeUserId || null
+              })
+            }
+          >
+            수정 저장
+          </Button>
+          <Button type="button" size="sm" disabled={busy} onClick={() => onApprove()}>
+            승인
+          </Button>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 function MeetingReportDetailModal({
   detailError,
   detailStatus,
-  onCreateSchedule,
+  mutatingActionItemId,
+  onApproveActionItem,
   onClose,
+  onDismissActionItem,
   onRegenerate,
+  onUpdateActionItem,
   open,
   regenerating,
   report
 }: {
   detailError: string | null;
   detailStatus: ReportDetailStatus;
-  onCreateSchedule: (
-    item: ParsedActionItemCandidate,
-    report: MeetingReportDetail
-  ) => void;
+  mutatingActionItemId: string | null;
+  onApproveActionItem: (actionItem: MeetingReportActionItem) => void;
   onClose: () => void;
+  onDismissActionItem: (actionItem: MeetingReportActionItem) => void;
   onRegenerate: (report: MeetingReportSummary) => void;
+  onUpdateActionItem: (
+    actionItem: MeetingReportActionItem,
+    body: UpdateMeetingReportActionItemInput
+  ) => void;
   open: boolean;
   regenerating: boolean;
   report: MeetingReportDetail | null;
 }) {
-  const actionItems = parseActionItemCandidates(
-    report?.actionItemCandidates ?? []
-  );
+  const actionItems = report?.actionItems ?? [];
   const transcriptSegmentRefs = useRef(
     new Map<string, HTMLButtonElement>()
   );
@@ -558,8 +614,11 @@ function MeetingReportDetailModal({
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
         item,
-        index,
-        evidenceSegments: getEvidenceSegments(report, "action_item", index)
+        evidenceSegments: getEvidenceSegments(
+          report,
+          "action_item",
+          item.sourceIndex
+        )
       }))
     : [];
 
@@ -734,59 +793,28 @@ function MeetingReportDetailModal({
                 />
 
                 <section className="grid gap-2">
-                  <h3 className="font-heading text-base font-semibold">
-                    후속 작업 후보
-                  </h3>
+                  <h3 className="font-heading text-base font-semibold">후속 작업</h3>
                   {actionItems.length ? (
                     <ul className="grid gap-2">
                       {actionItemsWithEvidence.map(
-                        ({ evidenceSegments, index, item }) => (
-                          <li
-                            key={`${item.title}-${index}`}
-                            className="grid gap-3 rounded-lg border bg-background p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
-                          >
-                            <div className="min-w-0">
-                              <p className="break-words font-medium text-foreground">
-                                {item.title}
-                              </p>
-                              {item.description ? (
-                                <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-                                  {item.description}
-                                </p>
-                              ) : null}
-                              {evidenceSegments.length ? (
-                                <div className="mt-3">
-                                  <EvidenceTimeButtons
-                                    segments={evidenceSegments}
-                                    onSelect={selectTranscriptSegment}
-                                  />
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-                              {item.priority ? (
-                                <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                  {getActionPriorityLabel(item.priority)}
-                                </span>
-                              ) : null}
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/30"
-                                onClick={() => onCreateSchedule(item, report)}
-                              >
-                                <CalendarPlus className="size-3.5" />
-                                일정 생성
-                              </Button>
-                            </div>
-                          </li>
+                        ({ evidenceSegments, item }) => (
+                          <ActionItemReviewCard
+                            key={item.id}
+                            actionItem={item}
+                            assignees={report.actionItemAssignees ?? []}
+                            busy={mutatingActionItemId === item.id}
+                            evidenceSegments={evidenceSegments}
+                            onApprove={() => onApproveActionItem(item)}
+                            onDismiss={() => onDismissActionItem(item)}
+                            onEvidenceSelect={selectTranscriptSegment}
+                            onSave={(body) => onUpdateActionItem(item, body)}
+                          />
                         )
                       )}
                     </ul>
                   ) : (
                     <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                      등록된 후속 작업 후보가 없습니다.
+                      검토할 후속 작업이 없습니다.
                     </p>
                   )}
                 </section>
@@ -847,16 +875,18 @@ export function MeetingReportSection({
   onToastMessage,
   statusFilter
 }: MeetingReportSectionProps) {
-  const router = useRouter();
   const {
     accessToken,
+    approveMeetingReportActionItem,
     canLoad,
+    dismissMeetingReportActionItem,
     getMeetingReport,
     regenerateMeetingReport,
     reloadReports,
     reports,
     reportsError,
-    reportsStatus
+    reportsStatus,
+    updateMeetingReportActionItem
   } = meetingData;
   const [searchQuery, setSearchQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
@@ -868,6 +898,8 @@ export function MeetingReportSection({
     useState<ReportDetailStatus>("idle");
   const [detailError, setDetailError] = useState<string | null>(null);
   const [regeneratingReportId, setRegeneratingReportId] =
+    useState<string | null>(null);
+  const [mutatingActionItemId, setMutatingActionItemId] =
     useState<string | null>(null);
   const [initialReportId] = useState(readInitialMeetingReportId);
   const [openedInitialReportId, setOpenedInitialReportId] = useState<
@@ -992,11 +1024,44 @@ export function MeetingReportSection({
     ]
   );
 
-  const handleCreateSchedule = useCallback(
-    (item: ParsedActionItemCandidate, report: MeetingReportDetail) => {
-      router.push(buildCalendarDraftHref(item, report));
+  const handleActionItemMutation = useCallback(
+    async (
+      actionItem: MeetingReportActionItem,
+      action: "approve" | "dismiss" | "update",
+      body?: UpdateMeetingReportActionItemInput
+    ) => {
+      if (!selectedReport) return;
+      setMutatingActionItemId(actionItem.id);
+      try {
+        if (action === "approve") {
+          await approveMeetingReportActionItem(selectedReport.id, actionItem.id);
+          onToastMessage("후속 작업을 승인했습니다.");
+        } else if (action === "dismiss") {
+          await dismissMeetingReportActionItem(selectedReport.id, actionItem.id);
+          onToastMessage("후속 작업을 반려했습니다.");
+        } else if (body) {
+          await updateMeetingReportActionItem(
+            selectedReport.id,
+            actionItem.id,
+            body
+          );
+          onToastMessage("후속 작업을 수정했습니다.");
+        }
+        await loadReportDetail(selectedReport.id, { silent: true });
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setMutatingActionItemId(null);
+      }
     },
-    [router]
+    [
+      approveMeetingReportActionItem,
+      dismissMeetingReportActionItem,
+      loadReportDetail,
+      onToastMessage,
+      selectedReport,
+      updateMeetingReportActionItem
+    ]
   );
 
   useEffect(() => {
@@ -1267,15 +1332,24 @@ export function MeetingReportSection({
       <MeetingReportDetailModal
         detailError={detailError}
         detailStatus={detailStatus}
+        mutatingActionItemId={mutatingActionItemId}
         open={Boolean(selectedReportId)}
         regenerating={
           Boolean(selectedReport?.id) &&
           regeneratingReportId === selectedReport?.id
         }
         report={selectedReport}
-        onCreateSchedule={handleCreateSchedule}
+        onApproveActionItem={(actionItem) =>
+          void handleActionItemMutation(actionItem, "approve")
+        }
         onClose={handleCloseReport}
+        onDismissActionItem={(actionItem) =>
+          void handleActionItemMutation(actionItem, "dismiss")
+        }
         onRegenerate={(report) => void handleRegenerateReport(report)}
+        onUpdateActionItem={(actionItem, body) =>
+          void handleActionItemMutation(actionItem, "update", body)
+        }
       />
     </section>
   );
