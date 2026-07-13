@@ -36,9 +36,9 @@ from app.meeting_report_processor import (
     MeetingReportProcessor,
     PermanentStorageError,
     ProviderBusinessError,
+    TranscriptSegment,
     parse_generated_report_json,
     serialize_action_items,
-    TranscriptSegment,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -287,6 +287,9 @@ class PgMeetingReportRepository:
                         INSERT INTO meeting_report_evidence
                           (meeting_report_id, source_type, source_index, transcript_segment_id)
                         VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (
+                          meeting_report_id, source_type, source_index, transcript_segment_id
+                        ) DO NOTHING
                         """,
                         (
                             report_id,
@@ -665,8 +668,8 @@ class OpenAiMeetingReportClient:
             end = getattr(segment, "end", None)
             if (
                 not isinstance(text, str)
-                or not isinstance(start, (int, float))
-                or not isinstance(end, (int, float))
+                or not isinstance(start, int | float)
+                or not isinstance(end, int | float)
             ):
                 raise ProviderBusinessError("OpenAI STT returned invalid segment")
             segments.append(

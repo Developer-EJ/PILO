@@ -437,10 +437,12 @@ def test_runtime_settings_default_meeting_report_model(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/jobs")
     monkeypatch.setenv("S3_RECORDINGS_BUCKET", "recordings")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_STT_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_MEETING_REPORT_MODEL", raising=False)
 
     settings = RuntimeSettings.from_env()
 
+    assert settings.openai_stt_model == "whisper-1"
     assert settings.openai_meeting_report_model == "gpt-5.4-mini"
     assert settings.openai_agent_planner_model == "gpt-5.4-mini"
 
@@ -604,4 +606,38 @@ def test_serialize_action_items_uses_api_shape() -> None:
             "assigneeUserId": None,
             "priority": "MEDIUM",
         }
+    ]
+
+
+def test_parse_generated_report_json_deduplicates_evidence_segments() -> None:
+    report = parse_generated_report_json(
+        json.dumps(
+            {
+                "summary": "요약",
+                "discussionPoints": "논의",
+                "decisions": "결정",
+                "actionItemCandidates": [
+                    {
+                        "title": "작업",
+                        "description": "설명",
+                        "assigneeUserId": None,
+                        "priority": "MEDIUM",
+                    }
+                ],
+                "evidence": [
+                    {"sourceType": "decision", "sourceIndex": 0, "segmentIndexes": [0, 0]},
+                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                    {"sourceType": "action_item", "sourceIndex": 0, "segmentIndexes": [0]},
+                ],
+            }
+        ),
+        "원문",
+        [TranscriptSegment(0, 0, 1_000, "원문")],
+    )
+
+    assert [
+        (item.source_type, item.source_index, item.segment_indexes) for item in report.evidence
+    ] == [
+        ("decision", 0, [0]),
+        ("action_item", 0, [0]),
     ]

@@ -389,7 +389,7 @@ def _parse_evidence(
     if not isinstance(value, list):
         raise ProviderBusinessError("Invalid evidence")
     valid_indexes = {segment.segment_index for segment in segments}
-    references: list[EvidenceReference] = []
+    segment_indexes_by_source: dict[tuple[str, int], list[int]] = {}
     for item in value:
         if not isinstance(item, dict):
             raise ProviderBusinessError("Invalid evidence reference")
@@ -408,7 +408,15 @@ def _parse_evidence(
             raise ProviderBusinessError("Invalid evidence segment")
         if source_type in {"decision", "action_item"} and not segment_indexes:
             raise ProviderBusinessError("Missing required evidence")
-        references.append(EvidenceReference(source_type, source_index, segment_indexes))
+        source = (source_type, source_index)
+        unique_segment_indexes = segment_indexes_by_source.setdefault(source, [])
+        for segment_index in segment_indexes:
+            if segment_index not in unique_segment_indexes:
+                unique_segment_indexes.append(segment_index)
+    references = [
+        EvidenceReference(source_type, source_index, segment_indexes)
+        for (source_type, source_index), segment_indexes in segment_indexes_by_source.items()
+    ]
     required_sources = {("decision", 0)} | {
         ("action_item", index) for index in range(action_item_count)
     }
