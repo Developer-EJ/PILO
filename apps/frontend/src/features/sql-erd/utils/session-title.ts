@@ -21,14 +21,20 @@ export function updateSqlErdSessionSummaryTitle(
   sessions: SqltoerdSessionSummary[],
   updatedSession: SessionTitleUpdate
 ) {
-  return sessions.map((session) =>
-    session.id === updatedSession.id
-      ? {
-          ...session,
-          revision: updatedSession.revision,
-          title: updatedSession.title,
-          updatedAt: updatedSession.updatedAt
-        }
-      : session
-  );
+  return sessions
+    .map((session) =>
+      session.id === updatedSession.id
+        ? {
+            ...session,
+            revision: updatedSession.revision,
+            title: updatedSession.title,
+            updatedAt: updatedSession.updatedAt
+          }
+        : session
+    )
+    .sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) ||
+        right.id.localeCompare(left.id)
+    );
 }

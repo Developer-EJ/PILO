@@ -3523,14 +3523,77 @@ assert.equal(sessionTitleRuntime.getSqlErdSessionTitleUpdate("   "), null);
 assert.deepEqual(
   sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
     [
-      { id: "session-1", revision: 3, title: "기존 제목", updatedAt: "old" },
-      { id: "session-2", revision: 2, title: "다른 제목", updatedAt: "other" }
+      {
+        id: "session-1",
+        revision: 3,
+        title: "기존 제목",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        id: "session-2",
+        revision: 2,
+        title: "다른 제목",
+        updatedAt: "2026-07-13T10:00:00.000Z"
+      }
     ],
-    { id: "session-1", revision: 4, title: "변경된 제목", updatedAt: "new" }
+    {
+      id: "session-1",
+      revision: 4,
+      title: "변경된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    }
   ),
   [
-    { id: "session-1", revision: 4, title: "변경된 제목", updatedAt: "new" },
-    { id: "session-2", revision: 2, title: "다른 제목", updatedAt: "other" }
+    {
+      id: "session-1",
+      revision: 4,
+      title: "변경된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    },
+    {
+      id: "session-2",
+      revision: 2,
+      title: "다른 제목",
+      updatedAt: "2026-07-13T10:00:00.000Z"
+    }
+  ]
+);
+assert.deepEqual(
+  sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
+    [
+      {
+        id: "session-1",
+        revision: 3,
+        title: "기존 제목",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        id: "session-2",
+        revision: 2,
+        title: "다른 제목",
+        updatedAt: "2026-07-13T10:00:00.000Z"
+      }
+    ],
+    {
+      id: "session-2",
+      revision: 3,
+      title: "수정된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    }
+  ),
+  [
+    {
+      id: "session-2",
+      revision: 3,
+      title: "수정된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    },
+    {
+      id: "session-1",
+      revision: 3,
+      title: "기존 제목",
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    }
   ]
 );
 
