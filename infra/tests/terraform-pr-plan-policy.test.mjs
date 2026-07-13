@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const [workflow, iamModule, iamOutputs, devMain, devOutputs, deployChecklist, architecture] = await Promise.all([
+const [workflow, iamModule, iamOutputs, devMain, devOutputs, deployChecklist, architecture, refreshAudit] = await Promise.all([
   readFile(path.join(repoRoot, '.github/workflows/terraform-validate.yml'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/modules/iam/main.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/modules/iam/outputs.tf'), 'utf8'),
@@ -12,7 +12,10 @@ const [workflow, iamModule, iamOutputs, devMain, devOutputs, deployChecklist, ar
   readFile(path.join(repoRoot, 'infra/envs/dev/outputs.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'docs/infra/deploy-checklist.md'), 'utf8'),
   readFile(path.join(repoRoot, 'docs/infra/dev-architecture.md'), 'utf8'),
+  readFile(path.join(repoRoot, 'infra/tests/fixtures/terraform-plan-refresh-actions.json'), 'utf8'),
 ]);
+
+const observedRefreshActions = JSON.parse(refreshAudit).actions;
 
 const planJobStart = workflow.indexOf('\n  plan:');
 assert.notEqual(planJobStart, -1, 'Terraform plan job must exist');
@@ -62,6 +65,10 @@ assert.match(planPolicy, /secretsmanager:GetResourcePolicy/);
 assert.doesNotMatch(planPolicy, /secretsmanager:GetSecretValue/);
 assert.doesNotMatch(planPolicy, /PowerUserAccess|IAMFullAccess/);
 assert.doesNotMatch(planPolicy, /iam:(Create|Put|Delete|Attach|Detach|Pass)/);
+
+for (const action of observedRefreshActions) {
+  assert.match(planPolicy, new RegExp(`"${action}"`), `Plan role must allow audited refresh action: ${action}`);
+}
 
 assert.match(iamOutputs, /output "github_actions_terraform_plan_role_arn"/);
 assert.match(devMain, /terraform_plan_state_bucket_arn/);
