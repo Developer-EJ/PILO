@@ -53,7 +53,7 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
 - room에 연결되지 않은 `board_type=review` Canvas는 Canvas API로 접근할 수 없다.
 - Canvas Agent는 `freeform` 전용이다. Review Canvas Agent 실행은 지원하지 않는다.
 - Review Canvas realtime join/presence는 아직 지원하지 않으며 별도 계약 변경에서 추가한다.
-- MVP에는 tldraw sync, Yjs/CRDT, shape lock, viewer-only role, 복잡한 conflict UI가 없다.
+- MVP에는 tldraw sync, Yjs/CRDT, DB 기반 hard lock, viewer-only role, 복잡한 conflict UI가 없다. Shape 조작 중 사용자 경험을 위한 realtime-only soft lock/preview는 Socket.IO 레이어에서 처리하며 DB schema에는 저장하지 않는다.
 
 ## Canvas 접근 정책
 
@@ -200,7 +200,9 @@ pr_review_relation_edge, group
 `file_node`는 일반 자유형 shape type이다. `pr_review_file_node`와
 `pr_review_relation_edge`는 Review Canvas 전용 시스템 shape다. 일반 Canvas mutation
 API로 두 시스템 shape를 생성하거나 삭제할 수 없으며, PR Review materialization만 생성과
-도메인 metadata 갱신을 담당한다.
+도메인 metadata 갱신을 담당한다. 새 분석 버전을 materialize할 때 기존 file node의
+geometry는 유지하고 relation geometry는 현재 node 위치에서 다시 계산한다. 현재 버전에서
+제외된 PR Review 시스템 shape는 soft delete하며 사용자 shape에는 영향을 주지 않는다.
 
 `pr_review_file_node`의 사용자 mutation은 아래 geometry 필드만 허용한다.
 
@@ -215,6 +217,13 @@ API로 두 시스템 shape를 생성하거나 삭제할 수 없으며, PR Review
 metadata는 기존 값과 같아야 한다. `pr_review_relation_edge`는 endpoint와 relation
 metadata뿐 아니라 geometry도 사용자가 수정할 수 없다. 일반 shape를 시스템 shape로
 변경하는 것도 허용하지 않는다. 위반 요청은 `403 FORBIDDEN`이다.
+
+Review Canvas frontend는 진입 시 room에 연결된 `canvasId`로 저장된 시스템 Shape를
+조회한다. File node 이동은 짧게 debounce한 뒤 단일 Shape 수정 API로 위 geometry만
+저장하고, 요청에는 현재 `revision`을 `baseRevision`으로 포함한다. Relation edge는 사용자
+mutation 대상이 아니므로 node 이동 중에는 클라이언트에서 geometry만 다시 계산한다.
+`409 CONFLICT`가 발생하면 Shape 상세 조회로 최신 revision과 geometry를 다시 받아
+로컬 Shape를 복구한다.
 
 ## Canvas 상세 조회
 
@@ -568,6 +577,10 @@ Client -> Server:
 canvas:join
 canvas:leave
 canvas:presence:update
+canvas:shape:lock:claim
+canvas:shape:lock:release
+canvas:shape:preview
+canvas:shape:preview:clear
 ```
 
 Server -> Client:
@@ -578,6 +591,12 @@ canvas:operation
 canvas:sync:required
 canvas:presence:update
 canvas:presence:leave
+canvas:shape:lock:accepted
+canvas:shape:lock:rejected
+canvas:shape:lock:update
+canvas:shape:lock:release
+canvas:shape:preview
+canvas:shape:preview:clear
 canvas:error
 ```
 
@@ -657,7 +676,7 @@ PATCH /workspaces/{workspaceId}/canvases/{canvasId}/leave
 
 - tldraw sync, Yjs/CRDT
 - 복잡한 conflict UI
-- shape lock
+- DB 기반 hard shape lock
 - public link 공유
 - viewer-only role
 - 대용량 media storage 연동

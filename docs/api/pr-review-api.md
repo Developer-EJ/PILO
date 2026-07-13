@@ -691,7 +691,7 @@ Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
 
 ### `pr_review_file_node`
 
-- stable shape ID: `pr-review-file:{roomFileId}`
+- stable shape ID: `shape:pr-review-file:{roomFileId}`
 - identity: `reviewRoomId`, `roomFileId`
 - 현재 버전 참조: `currentReviewSessionId`, `reviewFileId`
 - PR Review 소유 metadata: file path/status, role, risk, review status, Conflict 상태
@@ -709,8 +709,18 @@ Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
 - endpoint와 relation metadata, edge geometry는 PR Review가 소유한다.
 
 일반 사용자는 시스템 shape를 생성·삭제할 수 없다. File node의 geometry만 변경할 수
-있고 relation edge는 수정할 수 없다. 분석 결과를 실제 shape row로 생성·갱신하는
-Materialization은 별도 단계에서 수행한다.
+있고 relation edge는 수정할 수 없다. 분석 성공 시 PR Review가 graph와 같은 transaction
+안에서 시스템 shape를 생성·갱신한다. 같은 room file은 기존 위치·크기·parent·표시 순서를
+유지하고 새 file node만 deterministic grid 초기 위치를 받는다. 현재 버전에서 사라진
+시스템 shape는 soft delete로 숨기며, 이후 다시 나타나면 마지막 geometry로 복원한다.
+
+Review Canvas frontend는 room 상세의 `canvasId`로 Canvas viewport Shape API를 호출한다.
+저장된 `pr_review_file_node`가 있으면 시스템 Shape를 우선 렌더링하고, Materialization 전
+기존 session처럼 저장 Shape가 없거나 조회에 실패하면 이 endpoint의 graph로 read-only
+layout을 구성한다. File node 이동은 Canvas 단일 Shape 수정 API에 `baseRevision`을 포함해
+저장하며, relation edge geometry는 저장 요청을 만들지 않고 이동한 node 위치를 따라
+클라이언트에서 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
+저장 상태로 복구한다.
 
 ```json
 {
@@ -792,9 +802,11 @@ semantic edge가 없는 기존 session 또는 Flow는 기존 `workflowOrder` 인
 semantic relation은 새 분석 session부터 저장하며 기존 완료 session을 backfill하지 않는다.
 
 Review room은 `pr_review_rooms.canvas_id`로 `board_type=review` Canvas와 연결된다.
-session graph row에는 Canvas shape ID나 geometry를 저장하지 않는다. 현재 Canvas API는
-연결된 Review Canvas의 metadata와 사용자 shape operation만 담당하며, PR Review 시스템
-node와 relation materialization은 아직 수행하지 않는다.
+session graph row에는 Canvas shape ID나 geometry를 저장하지 않는다. 시스템 shape ID는
+room file identity와 relation identity에서 계산하고 geometry는 `canvas_freeform_shapes`가
+소유한다. graph 저장, 시스템 shape materialization, 분석 성공 처리와
+`room.current_session_id` 교체는 하나의 DB transaction이다. materialization이 실패하면
+전체 transaction을 rollback해 기존 current session과 Canvas를 유지한다.
 
 ## Flow 목록 조회
 
@@ -885,6 +897,7 @@ node와 relation materialization은 아직 수행하지 않는다.
     "comment": null,
     "reviewedByUserId": null,
     "reviewedAt": null,
+    "decisionCarriedOver": false,
     "flowMemberships": [
       {
         "reviewFlowFileId": "review_flow_file_uuid",
@@ -897,6 +910,12 @@ node와 relation materialization은 아직 수행하지 않는다.
   }
 }
 ```
+
+새 head 분석에서 같은 room file의 `headBlobSha`가 이전 current session과 같고 원본 판단
+이력이 있으면 상태, comment, 판단자와 판단 시각을 계승한다. 이때
+`decisionCarriedOver=true`이며 새 `file_review_decisions` 행은 만들지 않는다. 사용자가 새
+버전에서 판단을 저장하면 `decisionCarriedOver=false`로 바뀐다. SHA가 다르거나 `null`이면
+`not_reviewed`로 시작한다.
 
 ## Diff View Model
 

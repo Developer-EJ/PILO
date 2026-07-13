@@ -6,7 +6,7 @@ const statusComponent = await readFile(
   "utf8"
 );
 const settingsDialog = await readFile(
-  new URL("../../components/app-settings-dialog.tsx", import.meta.url),
+  new URL("../settings/components/user-settings-dialog.tsx", import.meta.url),
   "utf8"
 );
 const appSidebar = await readFile(
