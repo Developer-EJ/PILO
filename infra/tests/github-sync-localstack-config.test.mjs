@@ -13,14 +13,25 @@ const operationsRunbook = await readFile(path.join(repoRoot, 'docs/infra/github-
 const deployChecklist = await readFile(path.join(repoRoot, 'docs/infra/deploy-checklist.md'), 'utf8');
 const architecture = await readFile(path.join(repoRoot, 'docs/infra/dev-architecture.md'), 'utf8');
 const observabilityModule = await readFile(path.join(repoRoot, 'infra/modules/github-sync-observability/main.tf'), 'utf8');
+const localStackWorkflow = await readFile(path.join(repoRoot, '.github/workflows/infra-localstack-integration.yml'), 'utf8');
 
 assert.match(operationsRunbook, /RUN_LOCALSTACK_INTEGRATION=1/);
 assert.match(operationsRunbook, /Docker/);
 assert.match(operationsRunbook, /PowerShell/);
-assert.match(deployChecklist, /workflow path filter.*qualifying main push.*main branch.*workflow_dispatch/s);
-assert.match(architecture, /workflow path filter.*qualifying main push.*main branch.*workflow_dispatch/s);
+assert.match(operationsRunbook, /Infra LocalStack Integration/);
+assert.doesNotMatch(operationsRunbook, /intentionally not wired into a common test runner or CI/);
+assert.match(deployChecklist, /AWS_TERRAFORM_PLAN_ROLE_ARN/);
+assert.match(deployChecklist, /동일 저장소 PR/);
+assert.match(architecture, /AWS_TERRAFORM_PLAN_ROLE_ARN/);
+assert.match(architecture, /동일 저장소 PR/);
 assert.match(architecture, /pilo-dev-github-sync-jobs/);
 assert.match(architecture, /pilo-dev-github-sync-jobs-dlq/);
+assert.match(localStackWorkflow, /runs-on:\s*windows-2025/);
+assert.match(localStackWorkflow, /RUN_LOCALSTACK_INTEGRATION:\s*"1"/);
+assert.match(localStackWorkflow, /docker version/);
+assert.match(localStackWorkflow, /\.Server\.OsType/);
+assert.match(localStackWorkflow, /Get-Command aws/);
+assert.match(localStackWorkflow, /Get-Command powershell\.exe/);
 
 for (const [alarm, queueName, threshold] of [
   ['webhook_warning', 'github-webhooks', '60'],
