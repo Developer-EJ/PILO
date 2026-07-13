@@ -6313,6 +6313,13 @@ const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
   }
 );
 assert.equal(layoutWithCreatedFrame.annotations.frames[0].title, "Billing");
+assert.equal(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+    linksToAdd: [{ id: "link.users.orders", kind: "table_link", fromTableId: "table.users", toTableId: "table.orders", label: "owns" }],
+    linksById: { "link.users.orders": { label: "ignored-before-add" } }
+  }).annotations.links[0].label,
+  "owns"
+);
 assert.deepEqual(
   modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
     deleteNoteIds: ["note.users"]

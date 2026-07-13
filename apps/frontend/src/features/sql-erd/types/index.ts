@@ -104,6 +104,9 @@ export type SqltoerdCanvasFrame = {
 
 export type SqltoerdLayoutPatch = {
   tablePositions?: SqltoerdTableLayout[];
+  linksToAdd?: SqltoerdAnnotationLink[];
+  linksById?: Record<string, { label?: string }>;
+  deleteLinkIds?: readonly string[];
   notesToAdd?: SqltoerdCanvasNote[];
   framesToAdd?: SqltoerdCanvasFrame[];
   notesById?: Record<string, Partial<Omit<SqltoerdCanvasNote, "id">>>;

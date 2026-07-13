@@ -170,12 +170,17 @@ export function applySqltoerdLayoutPatch(
 ): SqltoerdLayoutJsonV1 {
   const notesById = patch.notesById ?? {};
   const framesById = patch.framesById ?? {};
+  const linksById = patch.linksById ?? {};
+  const deletedLinkIds = new Set(patch.deleteLinkIds ?? []);
   const deletedNoteIds = new Set(patch.deleteNoteIds ?? []);
   const deletedFrameIds = new Set(patch.deleteFrameIds ?? []);
   const positionsByTableId = new Map(
     (patch.tablePositions ?? []).map((position) => [position.tableId, position])
   );
   const hasAnnotationPatch =
+    Object.keys(linksById).length > 0 ||
+    deletedLinkIds.size > 0 ||
+    (patch.linksToAdd?.length ?? 0) > 0 ||
     Object.keys(notesById).length > 0 ||
     Object.keys(framesById).length > 0 ||
     deletedNoteIds.size > 0 ||
@@ -193,6 +198,10 @@ export function applySqltoerdLayoutPatch(
     }),
     ...(annotations ? { annotations: {
             ...annotations,
+            links: annotations.links
+              .filter((link) => !deletedLinkIds.has(link.id))
+              .map((link) => ({ ...link, ...linksById[link.id] }))
+              .concat(patch.linksToAdd ?? []),
             notes: (annotations.notes ?? [])
               .filter((note) => !deletedNoteIds.has(note.id))
               .map((note) => ({ ...note, ...notesById[note.id] }))

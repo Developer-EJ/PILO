@@ -1452,7 +1452,7 @@ type SqlErdAnnotationConnectorDrag =
 type SqlErdColumnAnnotationInteractionSyncProps = {
   layoutJson: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
-  onLayoutChange: (layoutJson: SqltoerdLayoutJsonV1) => void;
+  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
 };
 
 function getSqlErdAnnotationSelectionUpdates(
@@ -1642,7 +1642,7 @@ function getColumnAnnotationBlockMessage(
 function SqlErdAnnotationInteractionSync({
   layoutJson,
   modelJson,
-  onLayoutChange
+  onLayoutPatch
 }: SqlErdColumnAnnotationInteractionSyncProps) {
   const editor = useEditor();
   const [drag, setDrag] = useState<SqlErdAnnotationConnectorDrag | null>(
@@ -1653,7 +1653,7 @@ function SqlErdAnnotationInteractionSync({
   const layoutJsonRef = useRef(layoutJson);
   const messageTimeoutRef = useRef<number | null>(null);
   const modelJsonRef = useRef(modelJson);
-  const onLayoutChangeRef = useRef(onLayoutChange);
+  const onLayoutPatchRef = useRef(onLayoutPatch);
   const selectionSyncGuardRef = useRef(false);
 
   useEffect(() => {
@@ -1665,8 +1665,8 @@ function SqlErdAnnotationInteractionSync({
   }, [modelJson]);
 
   useEffect(() => {
-    onLayoutChangeRef.current = onLayoutChange;
-  }, [onLayoutChange]);
+    onLayoutPatchRef.current = onLayoutPatch;
+  }, [onLayoutPatch]);
 
   useEffect(() => {
     function showMessage(nextMessage: string) {
@@ -1682,13 +1682,8 @@ function SqlErdAnnotationInteractionSync({
       }, 2600);
     }
 
-    function publishLayout(nextLayoutJson: SqltoerdLayoutJsonV1) {
-      if (areSqltoerdLayoutsEqual(layoutJsonRef.current, nextLayoutJson)) {
-        return;
-      }
-
-      layoutJsonRef.current = nextLayoutJson;
-      onLayoutChangeRef.current(nextLayoutJson);
+    function publishPatch(patch: SqltoerdLayoutPatch) {
+      onLayoutPatchRef.current(patch);
     }
 
     function startAnnotationDrag(
@@ -1839,7 +1834,7 @@ function SqlErdAnnotationInteractionSync({
         );
       }
 
-      publishLayout(result.layoutJson);
+      publishPatch({ linksToAdd: [annotation] });
 
       window.requestAnimationFrame(() => {
         selectSqlErdAnnotationShape(
@@ -1863,9 +1858,7 @@ function SqlErdAnnotationInteractionSync({
         editor.run(() => editor.deleteShapes([shapeId]), { history: "ignore" });
       }
 
-      publishLayout(
-        removeSqltoerdAnnotation(layoutJsonRef.current, annotationId)
-      );
+      publishPatch({ deleteLinkIds: [annotationId] });
     }
 
     function isEditableKeyboardTarget(target: EventTarget | null) {
@@ -1910,13 +1903,7 @@ function SqlErdAnnotationInteractionSync({
         return;
       }
 
-      publishLayout(
-        updateSqltoerdAnnotationLabel(
-          layoutJsonRef.current,
-          detail.annotationId,
-          detail.label
-        )
-      );
+      publishPatch({ linksById: { [detail.annotationId]: { label: detail.label } } });
     }
 
     function handleDelete(event: Event) {
@@ -2439,10 +2426,10 @@ export function SqlErdCanvas({
         <SqlErdSelectedColumnSync selectedSqlErdObject={selectedSqlErdObject} />
         {onLayoutChange || onLayoutPatch ? (
           <>
-            {onLayoutChange ? <SqlErdAnnotationInteractionSync
+            {onLayoutPatch ? <SqlErdAnnotationInteractionSync
               layoutJson={layoutJson}
               modelJson={modelJson}
-              onLayoutChange={onLayoutChange}
+              onLayoutPatch={onLayoutPatch}
             /> : null}
             {onLayoutPatch ? <SqlErdLayoutSync
               layoutJson={layoutJson}
