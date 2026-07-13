@@ -218,6 +218,13 @@ metadata는 기존 값과 같아야 한다. `pr_review_relation_edge`는 endpoin
 metadata뿐 아니라 geometry도 사용자가 수정할 수 없다. 일반 shape를 시스템 shape로
 변경하는 것도 허용하지 않는다. 위반 요청은 `403 FORBIDDEN`이다.
 
+Review Canvas frontend는 진입 시 room에 연결된 `canvasId`로 저장된 시스템 Shape를
+조회한다. File node 이동은 짧게 debounce한 뒤 단일 Shape 수정 API로 위 geometry만
+저장하고, 요청에는 현재 `revision`을 `baseRevision`으로 포함한다. Relation edge는 사용자
+mutation 대상이 아니므로 node 이동 중에는 클라이언트에서 geometry만 다시 계산한다.
+`409 CONFLICT`가 발생하면 Shape 상세 조회로 최신 revision과 geometry를 다시 받아
+로컬 Shape를 복구한다.
+
 ## Canvas 상세 조회
 
 Canvas 상세 조회는 canvas metadata와 저장된 viewport를 반환한다. 대용량 canvas에서

@@ -714,6 +714,14 @@ Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
 유지하고 새 file node만 deterministic grid 초기 위치를 받는다. 현재 버전에서 사라진
 시스템 shape는 soft delete로 숨기며, 이후 다시 나타나면 마지막 geometry로 복원한다.
 
+Review Canvas frontend는 room 상세의 `canvasId`로 Canvas viewport Shape API를 호출한다.
+저장된 `pr_review_file_node`가 있으면 시스템 Shape를 우선 렌더링하고, Materialization 전
+기존 session처럼 저장 Shape가 없거나 조회에 실패하면 이 endpoint의 graph로 read-only
+layout을 구성한다. File node 이동은 Canvas 단일 Shape 수정 API에 `baseRevision`을 포함해
+저장하며, relation edge geometry는 저장 요청을 만들지 않고 이동한 node 위치를 따라
+클라이언트에서 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
+저장 상태로 복구한다.
+
 ```json
 {
   "reviewSessionId": "review_session_uuid",
