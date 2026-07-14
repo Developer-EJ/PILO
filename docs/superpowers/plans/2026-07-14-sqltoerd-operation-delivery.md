@@ -20,7 +20,7 @@
 ### Task 1: Write protocol과 durable storage migration
 
 **Files:**
-- Create: `db/migrations/059_create_sql_erd_operation_delivery.sql`
+- Create: `db/migrations/061_create_sql_erd_operation_delivery.sql`
 - Modify: `db/README.md`
 - Test: `apps/app-server/scripts/sql-erd/operation-delivery.test.mjs`
 

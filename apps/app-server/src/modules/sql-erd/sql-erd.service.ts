@@ -211,32 +211,28 @@ export class SqlErdService {
 
     const validSessionId = validateSqlErdSessionId(sessionId);
     const input = validateListSqlErdOperationsQuery(query);
-    const session = await this.findActiveSessionById(workspaceId, validSessionId);
-    if (!session) {
-      throw notFound("sqltoerd session not found");
-    }
-
-    const rows = await this.database.query<SqlErdOperationRow>(
-      `
-        ${SQL_ERD_OPERATION_SELECT}
-        WHERE workspace_id = $1
-          AND session_id = $2
-          AND op_seq > $3
-        ORDER BY op_seq ASC
-        LIMIT $4
-      `,
-      [workspaceId, validSessionId, input.afterSeq, input.limit + 1]
-    );
-    const hasNextPage = rows.length > input.limit;
-    const pageRows = rows.slice(0, input.limit);
-    const lastRow = pageRows.at(-1);
-
-    return {
-      items: pageRows.map(mapSqlErdOperation),
-      latestOpSeq: Number(session.latest_op_seq),
-      nextAfterSeq:
-        hasNextPage && lastRow ? Number(lastRow.op_seq) : null
-    };
+    return this.database.transaction(async (transaction) => {
+      // A row lock prevents a writer from committing a higher sequence between
+      // the session watermark read and the operation page query.
+      const session = await this.findActiveSessionById(
+        workspaceId,
+        validSessionId,
+        transaction,
+        true
+      );
+      if (!session) throw notFound("sqltoerd session not found");
+      const rows = await transaction.query<SqlErdOperationRow>(
+        `${SQL_ERD_OPERATION_SELECT} WHERE workspace_id = $1 AND session_id = $2 AND op_seq > $3 ORDER BY op_seq ASC LIMIT $4`,
+        [workspaceId, validSessionId, input.afterSeq, input.limit + 1]
+      );
+      const pageRows = rows.slice(0, input.limit);
+      const lastRow = pageRows.at(-1);
+      return {
+        items: pageRows.map(mapSqlErdOperation),
+        latestOpSeq: Number(session.latest_op_seq),
+        nextAfterSeq: rows.length > input.limit && lastRow ? Number(lastRow.op_seq) : null
+      };
+    });
   }
 
   async createOperation(

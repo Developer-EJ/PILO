@@ -7,9 +7,11 @@ export const SQL_ERD_OPERATION_REDIS_CHANNEL = "sql-erd:operations";
 const CLAIM_TIMEOUT_SECONDS = 60;
 const SWEEP_INTERVAL_MS = 1_000;
 const BATCH_SIZE = 50;
+const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 
 interface OutboxClaim {
   claim_token: string;
+  attempt_count: number | string;
   id: string;
   payload: Record<string, unknown>;
 }
@@ -64,10 +66,14 @@ export class SqlErdOperationPublisherService implements OnModuleInit, OnModuleDe
         [claim.id, claim.claim_token]
       );
     } catch (error) {
+      const delayMs = RETRY_DELAYS_MS[Math.min(Number(claim.attempt_count) - 1, RETRY_DELAYS_MS.length - 1)];
+      if (Number(claim.attempt_count) >= 5) {
+        this.logger.warn(`SQLtoERD outbox publish remains unavailable operation_outbox_id=${claim.id} attempts=${claim.attempt_count}`);
+      }
       await this.database.execute(
-        `UPDATE sql_erd_session_operation_outbox SET status = 'pending', next_attempt_at = now() + INTERVAL '1 second', claim_token = NULL, claimed_at = NULL, error_code = 'SQL_ERD_OPERATION_PUBLISH_FAILED', error_message = $2
-         WHERE id = $1 AND status = 'publishing' AND claim_token = $3`,
-        [claim.id, error instanceof Error ? error.message.slice(0, 1000) : "publish failed", claim.claim_token]
+        `UPDATE sql_erd_session_operation_outbox SET status = 'pending', next_attempt_at = $2, claim_token = NULL, claimed_at = NULL, error_code = 'SQL_ERD_OPERATION_PUBLISH_FAILED', error_message = $3
+         WHERE id = $1 AND status = 'publishing' AND claim_token = $4`,
+        [claim.id, new Date(Date.now() + delayMs), error instanceof Error ? error.message.slice(0, 1000) : "publish failed", claim.claim_token]
       );
     }
   }
@@ -84,7 +90,7 @@ export class SqlErdOperationPublisherService implements OnModuleInit, OnModuleDe
        SET status = 'publishing', attempt_count = attempt_count + 1, claim_token = $3, claimed_at = now()
        FROM candidate, sql_erd_session_operations AS operation
        WHERE outbox.id = candidate.id AND operation.id = outbox.operation_id
-       RETURNING outbox.id, outbox.claim_token, jsonb_build_object(
+       RETURNING outbox.id, outbox.claim_token, outbox.attempt_count, jsonb_build_object(
          'id', operation.id, 'workspaceId', operation.workspace_id, 'sessionId', operation.session_id,
          'actorUserId', operation.actor_user_id, 'type', operation.operation_type, 'opSeq', operation.op_seq,
          'clientOperationId', operation.client_operation_id, 'baseRevision', operation.base_revision,

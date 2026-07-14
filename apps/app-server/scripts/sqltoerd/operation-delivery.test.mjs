@@ -13,13 +13,13 @@ const migrationFilenames = await readdir(
 );
 
 assert.ok(
-  migrationFilenames.includes("059_create_sql_erd_operation_delivery.sql"),
+  migrationFilenames.includes("061_create_sql_erd_operation_delivery.sql"),
   "SQLtoERD operation delivery migration must exist"
 );
 
 const migration = await readFile(
   new URL(
-    "../../../../db/migrations/059_create_sql_erd_operation_delivery.sql",
+    "../../../../db/migrations/061_create_sql_erd_operation_delivery.sql",
     import.meta.url
   ),
   "utf8"
