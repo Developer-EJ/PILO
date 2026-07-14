@@ -101,7 +101,10 @@ class AgentProcessResult:
 
 class AgentGroundedAnswerProcessor:
     """Keeps transcript text in-memory: only App Server internal HTTPS carries it."""
-    def __init__(self, handoff_client: object, api_key: str, model: str, timeout_seconds: float) -> None:
+
+    def __init__(
+        self, handoff_client: object, api_key: str, model: str, timeout_seconds: float
+    ) -> None:
         self.handoff_client = handoff_client
         self.api_key = api_key
         self.model = model
@@ -129,13 +132,44 @@ class AgentGroundedAnswerProcessor:
 
     def _answer(self, prompt: str, sources: list[object]) -> tuple[str, list[str]]:
         from openai import OpenAI
+
         safe_sources = [source for source in sources if isinstance(source, dict)][:5]
         source_text = json.dumps(safe_sources, ensure_ascii=False)
         try:
             response = OpenAI(api_key=self.api_key, timeout=self.timeout_seconds).responses.create(
                 model=self.model,
-                input=[{"role": "system", "content": "Answer in Korean using only supplied meeting transcript sources. Return JSON with answer and citations (sourceId array). Do not invent citations."}, {"role": "user", "content": json.dumps({"question": prompt, "sources": source_text}, ensure_ascii=False)}],
-                text={"format": {"type": "json_schema", "name": "grounded_meeting_answer", "strict": True, "schema": {"type": "object", "additionalProperties": False, "required": ["answer", "citations"], "properties": {"answer": {"type": "string"}, "citations": {"type": "array", "items": {"type": "string"}}}}}},
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Answer in Korean using only supplied meeting transcript sources. "
+                            "Return JSON with answer and citations (sourceId array). "
+                            "Do not invent citations."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"question": prompt, "sources": source_text}, ensure_ascii=False
+                        ),
+                    },
+                ],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "grounded_meeting_answer",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["answer", "citations"],
+                            "properties": {
+                                "answer": {"type": "string"},
+                                "citations": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
+                    }
+                },
             )
         except _openai_retryable_errors() as error:
             raise InfrastructureError("OpenAI grounded answer retryable failure") from error

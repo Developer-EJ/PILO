@@ -21,6 +21,8 @@ from app.meeting_report_runtime import (
     DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
     DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
     DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
+    DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK,
+    DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_MODEL,
     DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
     DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
     DEFAULT_WAIT_TIME_SECONDS,
@@ -29,6 +31,7 @@ from app.meeting_report_runtime import (
     OpenAiMeetingReportClient,
     PgAgentRunRepository,
     PgMeetingReportRepository,
+    PgMeetingTranscriptEmbeddingRepository,
     S3RecordingStorage,
     SqsAiJobWorker,
     _database_url,
@@ -37,6 +40,10 @@ from app.meeting_report_runtime import (
     _positive_int_env,
     _positive_ms_env,
     _require_env,
+)
+from app.meeting_transcript_embedding_processor import (
+    MeetingTranscriptEmbeddingProcessor,
+    OpenAiTranscriptEmbedder,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -59,6 +66,8 @@ class SharedAiWorkerSettings:
     wait_time_seconds: int
     visibility_timeout_seconds: int
     canvas_embedding_jobs_per_tick: int
+    openai_meeting_transcript_embedding_model: str
+    meeting_transcript_embedding_jobs_per_tick: int
     legacy_agent_drain_enabled: bool
     legacy_meeting_drain_enabled: bool
     legacy_meeting_recordings_bucket: str | None
@@ -91,12 +100,8 @@ class SharedAiWorkerSettings:
                 "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
             ),
-            agent_execution_handoff_base_url=(
-                _optional_env("AGENT_EXECUTION_HANDOFF_BASE_URL")
-            ),
-            agent_execution_handoff_token=(
-                _optional_env("AGENT_EXECUTION_HANDOFF_TOKEN")
-            ),
+            agent_execution_handoff_base_url=(_optional_env("AGENT_EXECUTION_HANDOFF_BASE_URL")),
+            agent_execution_handoff_token=(_optional_env("AGENT_EXECUTION_HANDOFF_TOKEN")),
             agent_execution_handoff_timeout_seconds=_positive_int_env(
                 "AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS",
                 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
@@ -116,6 +121,14 @@ class SharedAiWorkerSettings:
             canvas_embedding_jobs_per_tick=_positive_int_env(
                 "CANVAS_EMBEDDING_JOBS_PER_TICK",
                 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
+            ),
+            openai_meeting_transcript_embedding_model=_env(
+                "OPENAI_MEETING_TRANSCRIPT_EMBEDDING_MODEL",
+                DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_MODEL,
+            ),
+            meeting_transcript_embedding_jobs_per_tick=_positive_int_env(
+                "MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK",
+                DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK,
             ),
             legacy_agent_drain_enabled=legacy_agent_drain_enabled,
             legacy_meeting_drain_enabled=legacy_meeting_drain_enabled,
@@ -181,7 +194,10 @@ def create_shared_ai_worker(
         resolved_settings.agent_execution_handoff_base_url is not None
         or resolved_settings.agent_execution_handoff_token is not None
     ):
-        if resolved_settings.agent_execution_handoff_base_url is None or resolved_settings.agent_execution_handoff_token is None:
+        if (
+            resolved_settings.agent_execution_handoff_base_url is None
+            or resolved_settings.agent_execution_handoff_token is None
+        ):
             raise RuntimeError("Agent execution handoff configuration is incomplete")
         agent_run_repository = PgAgentRunRepository(
             resolved_settings.database_url,
@@ -205,6 +221,17 @@ def create_shared_ai_worker(
     canvas_embedding_processor = CanvasEmbeddingProcessor(
         canvas_agent_repository,
         canvas_embedder,
+    )
+    meeting_transcript_embedding_repository = PgMeetingTranscriptEmbeddingRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
+    meeting_transcript_embedding_processor = MeetingTranscriptEmbeddingProcessor(
+        meeting_transcript_embedding_repository,
+        OpenAiTranscriptEmbedder(
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_meeting_transcript_embedding_model,
+        ),
     )
     legacy_meeting_report_processor = None
     if resolved_settings.legacy_meeting_drain_enabled:
@@ -232,8 +259,10 @@ def create_shared_ai_worker(
         dispatcher,
         boto3.client("sqs", **boto_kwargs),
         canvas_embedding_processor=canvas_embedding_processor,
+        meeting_transcript_embedding_processor=meeting_transcript_embedding_processor,
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
+        agent_grounded_answer_retry_exhaustion_recovery=agent_run_repository,
         canvas_agent_retry_exhaustion_recovery=canvas_agent_repository,
     )
 

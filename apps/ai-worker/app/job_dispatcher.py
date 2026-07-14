@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.agent_processor import (
-    AGENT_RUN_REQUESTED_JOB_TYPE,
     AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
+    AGENT_RUN_REQUESTED_JOB_TYPE,
     AgentProcessResult,
 )
 from app.canvas_agent.types import CANVAS_AGENT_JOB_TYPE, CanvasAgentProcessResult
@@ -133,9 +133,18 @@ class JobDispatcher:
 
     def _process_grounded_answer(self, payload: dict[str, object]) -> JobProcessResult:
         if self.grounded_answer_processor is None:
-            return JobProcessResult(delete_message=False, reason="grounded_answer_processor_unavailable", job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE)
+            return JobProcessResult(
+                delete_message=False,
+                reason="grounded_answer_processor_unavailable",
+                job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
+            )
         result = self.grounded_answer_processor.process_payload(payload)
-        return JobProcessResult(delete_message=result.delete_message, reason=result.reason, job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE, resource_id=result.run_id)
+        return JobProcessResult(
+            delete_message=result.delete_message,
+            reason=result.reason,
+            job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
+            resource_id=result.run_id,
+        )
 
     def _process_canvas_agent(self, payload: dict[str, object]) -> JobProcessResult:
         if self.canvas_agent_processor is None:
