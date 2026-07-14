@@ -10,6 +10,9 @@ const {
 const {
   MeetingReportInternalController
 } = require("../../dist/modules/meeting/meeting-report-internal.controller.js");
+const {
+  MeetingRecordingRetentionService
+} = require("../../dist/modules/meeting/meeting-recording-retention.service.js");
 const { badRequest } = require("../../dist/common/api-error.js");
 const meetingStateRealtimePublisher = await readFile(
   new URL(
@@ -2926,4 +2929,161 @@ async function assertError(action, messagePattern) {
     database.queries.some(({ text }) => /UPDATE meeting_reports/.test(text)),
     false
   );
+}
+
+class RetentionDatabase {
+  constructor({ dueJobs = [], claim = null, finalized = true } = {}) {
+    this.dueJobs = dueJobs;
+    this.claim = claim;
+    this.finalized = finalized;
+    this.calls = [];
+  }
+
+  async query(text, values = []) {
+    this.calls.push({ method: "query", text, values });
+    return this.dueJobs;
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    return { rowCount: 1 };
+  }
+
+  async transaction(callback) {
+    let finalizedRecording = false;
+    return callback({
+      queryOne: async (text, values = []) => {
+        this.calls.push({ method: "transaction.queryOne", text, values });
+        if (text.includes("WITH candidate")) return this.claim;
+        if (text.includes("UPDATE meeting_recordings")) {
+          finalizedRecording = true;
+          return this.finalized ? { id: recordingId } : null;
+        }
+        if (text.includes("SET status = 'completed'")) {
+          return finalizedRecording && this.finalized ? { id: this.claim?.id } : null;
+        }
+        return null;
+      }
+    });
+  }
+}
+
+class FakeRetentionS3Client {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.commands = [];
+    this.destroyCalls = 0;
+  }
+
+  async send(command) {
+    this.commands.push(command);
+    if (this.shouldFail) throw new Error("S3 unavailable");
+  }
+
+  destroy() {
+    this.destroyCalls += 1;
+  }
+}
+
+class TestMeetingRecordingRetentionService extends MeetingRecordingRetentionService {
+  constructor(database, client) {
+    super(database);
+    this.client = client;
+    this.configs = [];
+  }
+
+  createS3Client(config) {
+    this.configs.push(config);
+    return this.client;
+  }
+}
+
+{
+  const originalEnv = {
+    AWS_REGION: process.env.AWS_REGION,
+    S3_UPLOADS_BUCKET: process.env.S3_UPLOADS_BUCKET,
+    S3_ENDPOINT: process.env.S3_ENDPOINT
+  };
+  process.env.AWS_REGION = "ap-northeast-2";
+  process.env.S3_UPLOADS_BUCKET = "pilo-test-uploads";
+  process.env.S3_ENDPOINT = "http://localhost:4566";
+
+  const purgeClaim = {
+    id: "13131313-1313-1313-1313-131313131313",
+    workspace_id: workspaceId,
+    meeting_id: meetingId,
+    recording_id: recordingId,
+    audio_file_key: "recordings/meetings/audio.mp3",
+    attempt_count: 1,
+    claim_token: "14141414-1414-1414-1414-141414141414"
+  };
+  const database = new RetentionDatabase({
+    dueJobs: [{ id: purgeClaim.id }],
+    claim: purgeClaim
+  });
+  const client = new FakeRetentionS3Client();
+  const service = new TestMeetingRecordingRetentionService(database, client);
+
+  await service.purgeDueRecordings();
+
+  const seed = database.calls.find(
+    ({ method, text }) => method === "execute" && text.includes("INSERT INTO meeting_recording_purge_jobs")
+  );
+  assert.match(seed.text, /meeting\.ended_at <= now\(\) - \(\$1 \* INTERVAL '1 day'\)/);
+  assert.match(seed.text, /recording\.audio_deleted_at IS NULL/);
+  assert.match(seed.text, /meeting_reports AS report/);
+  assert.match(seed.text, /meeting_report_outbox AS outbox/);
+  assert.deepEqual(seed.values, [30]);
+  const claimQuery = database.calls.find(
+    ({ text }) => text.includes("WITH candidate")
+  );
+  assert.match(claimQuery.text, /FOR UPDATE SKIP LOCKED/);
+  assert.equal(client.commands.length, 1);
+  assert.equal(client.commands[0].constructor.name, "DeleteObjectCommand");
+  assert.deepEqual(client.commands[0].input, {
+    Bucket: "pilo-test-uploads",
+    Key: purgeClaim.audio_file_key
+  });
+  assert.deepEqual(service.configs, [{
+    awsRegion: "ap-northeast-2",
+    bucket: "pilo-test-uploads",
+    endpoint: "http://localhost:4566"
+  }]);
+  const recordingUpdate = database.calls.find(
+    ({ text }) => text.includes("audio_deleted_at = COALESCE(audio_deleted_at, now())")
+  );
+  assert.match(recordingUpdate.text, /audio_file_key = NULL/);
+  assert.match(recordingUpdate.text, /audio_file_url = NULL/);
+  assert.deepEqual(recordingUpdate.values, [recordingId, purgeClaim.audio_file_key]);
+  assert.equal(
+    database.calls.some(({ text }) => /DELETE FROM meeting_reports|DELETE FROM meeting_report/.test(text)),
+    false
+  );
+  service.onModuleDestroy();
+  assert.equal(client.destroyCalls, 1);
+
+  const retryDatabase = new RetentionDatabase({
+    dueJobs: [{ id: purgeClaim.id }],
+    claim: purgeClaim
+  });
+  const failingService = new TestMeetingRecordingRetentionService(
+    retryDatabase,
+    new FakeRetentionS3Client({ shouldFail: true })
+  );
+  await failingService.purgeDueRecordings();
+  const retry = retryDatabase.calls.find(
+    ({ method, text }) => method === "execute" && text.includes("next_attempt_at = $3")
+  );
+  assert.match(retry.text, /error_code = \$4/);
+  assert.deepEqual(retry.values.slice(0, 2), [purgeClaim.id, purgeClaim.claim_token]);
+  assert.ok(retry.values[2] instanceof Date);
+  assert.equal(retry.values[3], "S3_DELETE_FAILED");
+  failingService.onModuleDestroy();
+
+  if (originalEnv.AWS_REGION === undefined) delete process.env.AWS_REGION;
+  else process.env.AWS_REGION = originalEnv.AWS_REGION;
+  if (originalEnv.S3_UPLOADS_BUCKET === undefined) delete process.env.S3_UPLOADS_BUCKET;
+  else process.env.S3_UPLOADS_BUCKET = originalEnv.S3_UPLOADS_BUCKET;
+  if (originalEnv.S3_ENDPOINT === undefined) delete process.env.S3_ENDPOINT;
+  else process.env.S3_ENDPOINT = originalEnv.S3_ENDPOINT;
 }
