@@ -899,3 +899,20 @@ plural endpoint는 현재 사용할 수 있으며, 신규 consumer는 plural end
 - PNG/SVG export API
 - BigQuery CTE lineage 저장
 - inline edit/Add column에 따른 model-to-SQL 재생성 저장
+## Realtime durable operation protocol
+
+세션의 `writeProtocol`은 durable write 경로를 구분한다. 기존 세션은 `snapshot`으로 전체 `PATCH` autosave를 유지한다. `operations_v1`으로 활성화된 세션은 layout·annotation 변경을 operation API로만 저장하며 legacy `PATCH`는 `409 SQL_ERD_WRITE_PROTOCOL_MISMATCH`로 거부된다. 두 경로를 같은 세션에서 동시에 허용하지 않는다.
+
+```http
+POST /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/operations
+```
+
+요청은 `clientOperationId`, `baseRevision`, `type: "layout_patch"`, `patch`를 포함한다. patch는 collection별 `upsert`와 `deleteIds`를 명확히 구분하며, `tableLayouts`, annotation의 `links/notes/frames/texts/strokes`, viewport set/delete를 지원한다. 서버는 session row lock 아래 최신 layout에 stale patch를 병합하고 revision, op sequence, operation log, outbox intent를 한 transaction으로 기록한다. 같은 `(sessionId, actorUserId, clientOperationId)` 재시도는 기존 operation을 반환한다.
+
+```http
+GET /api/v1/workspaces/{workspaceId}/sql-erd-sessions/{sessionId}/operations?afterSeq=42&limit=100
+```
+
+Catch-up 응답은 순번 오름차순 `items`, `latestOpSeq`, `nextAfterSeq`를 반환한다. Redis/Socket.IO delivery는 at-least-once이므로 클라이언트는 `opSeq`와 operation id로 중복 제거하고, sequence gap은 catch-up으로 복구한다. outbox publisher는 claim token을 사용하며 publishing row는 60초 후 reclaim되어 publish 실패가 영구 누락으로 남지 않는다.
+
+실제 `operations_v1` 전환은 operation frontend, pending autosave 완료, source lock 충돌 없음, baseline/sequence 생성, 오래된 탭의 reload/read-only 안내가 준비된 후 별도 API에서 수행한다. source snapshot/lease와 metadata writer는 이 단계의 범위가 아니다.

@@ -61,7 +61,11 @@ const deletedAt = new Date("2026-07-07T08:10:00.000Z");
 
 assert.match(appModule, /SqlErdModule/);
 assert.match(sqlErdModule, /controllers: \[SqlErdSessionController\]/);
-assert.match(sqlErdModule, /providers: \[SqlErdService\]/);
+assert.match(sqlErdModule, /SqlErdOperationPublisherService/);
+assert.match(
+  sqlErdModule,
+  /providers: \[SqlErdOperationPublisherService, SqlErdService\]/
+);
 assert.match(sqlErdModule, /WorkspaceModule/);
 assert.match(sqlErdController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(sqlErdController, /@UseGuards\(AuthGuard\)/);
