@@ -368,6 +368,7 @@ assert.match(headerMeetingStatusStore, /connectionQuality: "unknown"/);
 assert.match(headerMeetingStatusStore, /hasConnectionSession: false/);
 
 assert.match(meetingPanel, /type EntryAction = "start" \| "join" \| "reconnect"/);
+assert.match(meetingPanel, /liveKitRoom\.status === "idle"/);
 assert.match(meetingPanel, /function handleReconnect/);
 assert.match(meetingPanel, /setPrejoinAction\("reconnect"\)/);
 assert.match(meetingPanel, /action !== "reconnect"/);

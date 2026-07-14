@@ -443,7 +443,9 @@ export function MeetingPanel() {
   const shouldLeaveMeeting = isCurrentUserActive;
   const canReconnect =
     isCurrentUserActive &&
-    (liveKitRoom.status === "disconnected" || liveKitRoom.status === "error");
+    (liveKitRoom.status === "idle" ||
+      liveKitRoom.status === "disconnected" ||
+      liveKitRoom.status === "error");
   const isActionPending = actionStatus !== "idle";
   const isInitialLoading =
     meetingRoomsStatus === "loading" ||
