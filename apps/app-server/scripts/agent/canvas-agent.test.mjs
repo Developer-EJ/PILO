@@ -14,6 +14,9 @@ const { CanvasAgentService } = require(
 const { buildCanvasAgentShapeSearchTerms } = require(
   "../../dist/modules/canvas/agent/canvas-agent.repository.js"
 );
+const { validateCanvasAgentRunRequest } = require(
+  "../../dist/modules/canvas/agent/canvas-agent.validation.js"
+);
 
 function shape(id, overrides = {}) {
   return {
@@ -168,6 +171,26 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const plan = deterministicPlan("기능 목록");
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /기능 설명 모드/);
+  assert.match(plan.input.summary, /파일\/폴더 드롭/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
+  const plan = deterministicPlan("뭐 할 수 있어?");
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /기능 설명 모드/);
+  assert.match(plan.input.summary, /펜은 어디 있어/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
   const plan = deterministicPlan("파일/폴더 드롭", [], true);
 
   assert.equal(plan.actionName, "finish");
@@ -267,6 +290,29 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
   assert.ok(terms.includes("note"));
   assert.ok(terms.includes("sticky-note"));
   assert.equal(terms.includes("위치"), false);
+}
+
+{
+  const values = validateCanvasAgentRunRequest({
+    prompt: "다시해",
+    conversationContext: {
+      messages: [
+        { role: "user", content: "모던한 로그인 페이지 초안 그려줘" },
+        { role: "assistant", content: "디자인 초안을 만들었어요." },
+      ],
+      lastTask: {
+        draftId: "draft-1",
+        draftTitle: "로그인 페이지 초안",
+        prompt: "모던한 로그인 페이지 초안 그려줘",
+        status: "draft_ready",
+        summary: "디자인 초안을 만들었어요.",
+      },
+    },
+  });
+
+  assert.equal(values.context.conversationContext.messages.length, 2);
+  assert.equal(values.context.conversationContext.lastTask.prompt, "모던한 로그인 페이지 초안 그려줘");
+  assert.equal(values.context.conversationContext.lastTask.draftId, "draft-1");
 }
 
 {
