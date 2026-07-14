@@ -650,6 +650,13 @@ export function PrReviewPanel({
     replaceReviewSessionRoute(session.id);
   }
 
+  function activateReviewSessionWithLatestPullRequest(session: PrReviewSession) {
+    void apiClient
+      .getPullRequest(workspaceId, session.pullRequestId)
+      .then((pullRequest) => activateReviewSession(session, pullRequest))
+      .catch(() => activateReviewSession(session, activeReviewPullRequest));
+  }
+
   function leaveReviewSession() {
     retryAbortControllerRef.current?.abort();
     setActiveReviewSession(null);
@@ -758,9 +765,7 @@ export function PrReviewPanel({
             backLabel={backToSelectionLabel}
             onBackToSelection={leaveReviewSession}
             onGoToGithub={goToGithubPage}
-            onReviewSessionCreated={(session) =>
-              activateReviewSession(session, activeReviewPullRequest)
-            }
+            onReviewSessionCreated={activateReviewSessionWithLatestPullRequest}
             pullRequest={activeReviewPullRequest}
             realtimeIdentity={realtimeIdentity}
             session={activeReviewSession}
