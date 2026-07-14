@@ -252,7 +252,7 @@ function buildRelationShape(input: {
   to: PrReviewCanvasMaterializedShape;
 }): PrReviewCanvasMaterializedShape {
   const geometry = buildRelationGeometry(
-    input.routePoints,
+    input.routePoints ?? getExistingRelationRoutePoints(input.existing),
     input.from.values,
     input.to.values
   );
@@ -313,27 +313,21 @@ async function safelyBuildInitialGraphLayout(
   relations: PrReviewCanvasMaterializationRelation[]
 ) {
   try {
-    const reviewOrderRelations = relations.filter(
-      (relation) => relation.relationType === "review_order"
-    );
-    // Review order defines the primary reading flow. Semantic relations remain
-    // visible as supporting edges without rearranging the entire graph.
-    const layoutRelations =
-      reviewOrderRelations.length > 0 ? reviewOrderRelations : relations;
-
     return await buildPrReviewCanvasGraphLayout({
       files: files.map((file) => ({
         roomFileId: file.roomFileId,
+        flowId: file.flowId,
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
         flowSortOrder: file.flowSortOrder,
         workflowOrder: file.workflowOrder,
         filePath: file.filePath
       })),
-      relations: layoutRelations.map((relation) => ({
+      relations: relations.map((relation) => ({
         id: getPrReviewRelationShapeId(reviewRoomId, relation),
         fromRoomFileId: relation.fromRoomFileId,
-        toRoomFileId: relation.toRoomFileId
+        toRoomFileId: relation.toRoomFileId,
+        isReviewOrder: relation.relationType === "review_order"
       }))
     });
   } catch {
@@ -505,6 +499,36 @@ function getExistingFileGeometry(shape: CanvasShapeRow): ShapeGeometry {
   };
 }
 
+function getExistingRelationRoutePoints(
+  shape: CanvasShapeRow | undefined
+): PrReviewCanvasRoutePoint[] | undefined {
+  if (!shape || !isRecord(shape.raw_shape) || !isRecord(shape.raw_shape.props)) {
+    return undefined;
+  }
+
+  const routePoints = shape.raw_shape.props.routePoints;
+  if (!Array.isArray(routePoints) || routePoints.length < 2) {
+    return undefined;
+  }
+
+  const x = Number(shape.x);
+  const y = Number(shape.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return undefined;
+  }
+
+  const absoluteRoutePoints = routePoints.flatMap((point) => {
+    if (!isRecord(point) || !isFiniteNumber(point.x) || !isFiniteNumber(point.y)) {
+      return [];
+    }
+    return [{ x: x + point.x, y: y + point.y }];
+  });
+
+  return absoluteRoutePoints.length === routePoints.length
+    ? absoluteRoutePoints
+    : undefined;
+}
+
 function getAnchors(
   from: CompleteShapeWriteValues,
   to: CompleteShapeWriteValues
@@ -610,6 +634,10 @@ function overlaps(left: ShapeBounds, right: ShapeBounds): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 interface ShapeGeometry {
