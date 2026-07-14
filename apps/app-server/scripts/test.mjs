@@ -556,3 +556,4 @@ await import("./github-integration/test.mjs");
 await import("./pr-review/test.mjs");
 await import("./board/test.mjs");
 await import("./sqltoerd/test.mjs");
+await import("./sqltoerd/operation-delivery.test.mjs");
