@@ -5219,7 +5219,7 @@ export class PrReviewService {
         ]
       ]
     );
-    const materialization = buildPrReviewCanvasMaterialization({
+    const materialization = await buildPrReviewCanvasMaterialization({
       reviewRoomId: roomId,
       reviewSessionId: sessionId,
       files,

@@ -1,5 +1,6 @@
 "use client";
 
+import { type MouseEvent, useState } from "react";
 import {
   HTMLContainer,
   Polyline2d,
@@ -8,6 +9,8 @@ import {
   ShapeUtil,
   T,
   Vec,
+  useEditor,
+  useValue,
   type TLBaseShape,
   type TLShape
 } from "tldraw";
@@ -63,7 +66,13 @@ export type PrReviewFlowEdgeShapeProps = {
   kind: "review_order" | "semantic";
 };
 
+export type PrReviewEdgeRoutePoint = {
+  x: number;
+  y: number;
+};
+
 export type PrReviewRelationEdgeShapeProps = PrReviewFlowEdgeShapeProps & {
+  routePoints: PrReviewEdgeRoutePoint[];
   reviewRoomId: string;
   currentReviewSessionId: string;
   fromRoomFileId: string;
@@ -244,14 +253,129 @@ const conflictBadgeClasses: Record<
 function getEdgePathData(
   shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
 ) {
+  return getEdgeRoutePoints(shape)
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+}
+
+function getEdgeRoutePoints(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
+): PrReviewEdgeRoutePoint[] {
+  if (
+    isPrReviewRelationEdgeShapeValue(shape) &&
+    shape.props.routePoints.length >= 2
+  ) {
+    return shape.props.routePoints;
+  }
+
   const { startX, startY, endX, endY } = shape.props;
   if (startX === endX || startY === endY) {
-    return `M ${startX} ${startY} L ${endX} ${endY}`;
+    return [
+      { x: startX, y: startY },
+      { x: endX, y: endY }
+    ];
   }
 
   const midX = startX + (endX - startX) / 2;
+  return [
+    { x: startX, y: startY },
+    { x: midX, y: startY },
+    { x: midX, y: endY },
+    { x: endX, y: endY }
+  ];
+}
 
-  return `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
+function isPrReviewRelationEdgeShapeValue(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
+): shape is PrReviewRelationEdgeShape {
+  return shape.type === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
+}
+
+function isPrReviewRelationEdgeShape(
+  shape: TLShape | null | undefined
+): shape is PrReviewRelationEdgeShape {
+  return shape?.type === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
+}
+
+function useRelationEndpointHighlight(roomFileId: string | null) {
+  const editor = useEditor();
+  return useValue(
+    `pr-review-relation-endpoint-${roomFileId ?? "none"}`,
+    () => {
+      if (!roomFileId) return "none" as const;
+      const selected = editor.getOnlySelectedShape();
+      if (!isPrReviewRelationEdgeShape(selected)) return "none" as const;
+      if (selected.props.fromRoomFileId === roomFileId) return "from" as const;
+      if (selected.props.toRoomFileId === roomFileId) return "to" as const;
+      return "none" as const;
+    },
+    [editor, roomFileId]
+  );
+}
+
+function getRelationTypeLabel(
+  relationType: PrReviewRelationEdgeShapeProps["relationType"]
+) {
+  const labels: Record<PrReviewRelationEdgeShapeProps["relationType"], string> = {
+    review_order: "추천 리뷰 경로",
+    depends_on: "의존 관계",
+    tests: "테스트 관계",
+    uses_api: "API 사용",
+    passes_data_to: "데이터 전달",
+    supports: "지원 변경"
+  };
+  return labels[relationType];
+}
+
+function getRelationSourceLabel(
+  source: PrReviewRelationEdgeShapeProps["source"]
+) {
+  const labels: Record<PrReviewRelationEdgeShapeProps["source"], string> = {
+    rule: "규칙 기반",
+    ai: "AI 보강",
+    hybrid: "규칙·AI 보강",
+    fallback: "기본 경로"
+  };
+  return labels[source];
+}
+
+function getConfidenceLabel(confidence: number) {
+  if (confidence >= 85) return "근거 강함";
+  if (confidence >= 70) return "근거 보통";
+  return "근거 제한적";
+}
+
+function getEdgeVisualStyle(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape,
+  isHovered: boolean,
+  isSelected: boolean
+) {
+  const emphasis = isSelected ? 1 : isHovered ? 0.9 : 0.72;
+  if (!isPrReviewRelationEdgeShapeValue(shape)) {
+    return {
+      stroke: `rgba(37, 99, 235, ${emphasis})`,
+      strokeDasharray: undefined,
+      strokeWidth: isSelected ? 4 : isHovered ? 3.5 : 3
+    };
+  }
+
+  const relationStyles: Record<
+    PrReviewRelationEdgeShapeProps["relationType"],
+    { stroke: string; strokeDasharray?: string }
+  > = {
+    review_order: { stroke: "37, 99, 235" },
+    depends_on: { stroke: "109, 40, 217", strokeDasharray: "10 6" },
+    tests: { stroke: "5, 150, 105", strokeDasharray: "5 5" },
+    uses_api: { stroke: "8, 145, 178", strokeDasharray: "12 6" },
+    passes_data_to: { stroke: "217, 119, 6", strokeDasharray: "3 5" },
+    supports: { stroke: "71, 85, 105", strokeDasharray: "2 6" }
+  };
+  const style = relationStyles[shape.props.relationType];
+  return {
+    stroke: `rgba(${style.stroke}, ${emphasis})`,
+    strokeDasharray: style.strokeDasharray,
+    strokeWidth: isSelected ? 4 : isHovered ? 3 : 2
+  };
 }
 
 export function isPrReviewFileNodeShape(
@@ -263,6 +387,9 @@ export function isPrReviewFileNodeShape(
 function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
   const conflictState =
     shape.props.conflictState === "none" ? null : shape.props.conflictState;
+  const relationEndpointHighlight = useRelationEndpointHighlight(
+    shape.props.roomFileId
+  );
 
   return (
     <HTMLContainer
@@ -274,7 +401,12 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
           "flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
           conflictState
             ? conflictNodeClasses[conflictState]
-            : riskNodeClasses[shape.props.riskLevel]
+            : riskNodeClasses[shape.props.riskLevel],
+          relationEndpointHighlight === "from"
+            ? "ring-2 ring-violet-400 ring-offset-2"
+            : relationEndpointHighlight === "to"
+              ? "ring-2 ring-cyan-400 ring-offset-2"
+              : undefined
         )}
       >
         <div className="flex min-w-0 items-start gap-3">
@@ -334,39 +466,95 @@ function PrReviewFlowEdge({
 }: {
   shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape;
 }) {
+  const editor = useEditor();
+  const [isHovered, setIsHovered] = useState(false);
+  const isSelected = useValue(
+    `pr-review-edge-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
   const path = getEdgePathData(shape);
+  const isRelation = isPrReviewRelationEdgeShapeValue(shape);
+  const visualStyle = getEdgeVisualStyle(shape, isHovered, isSelected);
   const arrowSize = 7;
-  const { endX, endY, startX, startY } = shape.props;
-  const horizontalDirection = endX >= startX ? 1 : -1;
-  const verticalDirection = endY === startY ? 0 : endY > startY ? 1 : -1;
+  const routePoints = getEdgeRoutePoints(shape);
+  const endpoint = routePoints[routePoints.length - 1];
+  const previousPoint = routePoints[routePoints.length - 2];
+  const horizontalDirection = endpoint.x >= previousPoint.x ? 1 : -1;
+  const verticalDirection =
+    endpoint.y === previousPoint.y ? 0 : endpoint.y > previousPoint.y ? 1 : -1;
   const arrowPoints =
     verticalDirection === 0
-      ? `${endX},${endY} ${endX - arrowSize * horizontalDirection},${endY - arrowSize} ${endX - arrowSize * horizontalDirection},${endY + arrowSize}`
-      : `${endX},${endY} ${endX - arrowSize},${endY - arrowSize * verticalDirection} ${endX + arrowSize},${endY - arrowSize * verticalDirection}`;
+      ? `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y - arrowSize} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y + arrowSize}`
+      : `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize},${endpoint.y - arrowSize * verticalDirection} ${endpoint.x + arrowSize},${endpoint.y - arrowSize * verticalDirection}`;
+  const detailPoint = routePoints[Math.floor(routePoints.length / 2)];
+  const hoverSummary = isRelation
+    ? `${getRelationTypeLabel(shape.props.relationType)} · ${shape.props.reason}`
+    : shape.props.reason;
+
+  function handleClick(event: MouseEvent<SVGPathElement>) {
+    event.stopPropagation();
+    editor.select(shape.id);
+  }
 
   return (
-    <SVGContainer style={{ overflow: "visible" }}>
+    <SVGContainer
+      style={{
+        height: shape.props.h,
+        overflow: "visible",
+        pointerEvents: "auto",
+        width: shape.props.w
+      }}
+    >
       <path
         d={path}
         fill="none"
-        stroke={
-          shape.props.kind === "review_order"
-            ? "rgba(37, 99, 235, 0.78)"
-            : "rgba(71, 85, 105, 0.52)"
-        }
-        strokeDasharray={shape.props.kind === "semantic" ? "8 7" : undefined}
+        onClick={handleClick}
+        onPointerEnter={() => setIsHovered(true)}
+        onPointerLeave={() => setIsHovered(false)}
+        pointerEvents="stroke"
+        stroke="transparent"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={shape.props.kind === "review_order" ? "3" : "2"}
-      />
+        strokeWidth={16}
+      >
+        <title>{hoverSummary}</title>
+      </path>
+      <path
+        d={path}
+        fill="none"
+        pointerEvents="none"
+        stroke={visualStyle.stroke}
+        strokeDasharray={visualStyle.strokeDasharray}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={visualStyle.strokeWidth}
+      >
+        <title>{hoverSummary}</title>
+      </path>
       <polygon
-        fill={
-          shape.props.kind === "review_order"
-            ? "rgba(37, 99, 235, 0.78)"
-            : "rgba(71, 85, 105, 0.58)"
-        }
+        fill={visualStyle.stroke}
+        pointerEvents="none"
         points={arrowPoints}
       />
+      {isRelation && isSelected ? (
+        <foreignObject
+          height={72}
+          pointerEvents="none"
+          width={248}
+          x={detailPoint.x - 124}
+          y={detailPoint.y + 12}
+        >
+          <div className="rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-sm">
+            <p className="font-semibold text-slate-900">
+              {getRelationTypeLabel(shape.props.relationType)} · {getRelationSourceLabel(shape.props.source)} · {getConfidenceLabel(shape.props.confidence)}
+            </p>
+            <p className="mt-1 line-clamp-2 leading-4 text-slate-600">
+              {shape.props.reason}
+            </p>
+          </div>
+        </foreignObject>
+      ) : null}
     </SVGContainer>
   );
 }
@@ -634,6 +822,7 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
     startY: T.number,
     endX: T.number,
     endY: T.number,
+    routePoints: T.arrayOf(T.object({ x: T.number, y: T.number })),
     fromReviewFileId: T.string,
     toReviewFileId: T.string,
     flowId: T.string,
@@ -679,6 +868,7 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
       startY: 0,
       endX: 1,
       endY: 1,
+      routePoints: [],
       fromReviewFileId: "",
       toReviewFileId: "",
       flowId: "",
@@ -695,22 +885,8 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
   }
 
   override getGeometry(shape: PrReviewRelationEdgeShape) {
-    const { startX, startY, endX, endY } = shape.props;
-    if (startX === endX || startY === endY) {
-      return new Polyline2d({
-        points: [new Vec(startX, startY), new Vec(endX, endY)]
-      });
-    }
-
-    const midX = startX + (endX - startX) / 2;
-
     return new Polyline2d({
-      points: [
-        new Vec(startX, startY),
-        new Vec(midX, startY),
-        new Vec(midX, endY),
-        new Vec(endX, endY)
-      ]
+      points: getEdgeRoutePoints(shape).map((point) => new Vec(point.x, point.y))
     });
   }
 

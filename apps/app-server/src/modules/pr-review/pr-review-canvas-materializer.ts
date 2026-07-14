@@ -14,6 +14,10 @@ import type {
   PrReviewRelationSource,
   PrReviewRelationType
 } from "./types";
+import {
+  buildPrReviewCanvasGraphLayout,
+  type PrReviewCanvasRoutePoint
+} from "./pr-review-canvas-layout";
 
 export interface PrReviewCanvasMaterializationFile {
   reviewFileId: string;
@@ -64,27 +68,42 @@ const INDEX_DIGITS =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const INDEX_DIGIT_WIDTH = 10;
 
-export function buildPrReviewCanvasMaterialization(input: {
+export async function buildPrReviewCanvasMaterialization(input: {
   reviewRoomId: string;
   reviewSessionId: string;
   files: PrReviewCanvasMaterializationFile[];
   relations: PrReviewCanvasMaterializationRelation[];
   existingShapes: CanvasShapeRow[];
-}): PrReviewCanvasMaterializationResult {
+}): Promise<PrReviewCanvasMaterializationResult> {
   const existingById = new Map(
     input.existingShapes.map((shape) => [shape.id, shape])
   );
+  const sortedFiles = [...input.files].sort(compareFiles);
+  const sortedRelations = deduplicateRelations(input.relations).sort(compareRelations);
+  const hasExistingFileNode = input.existingShapes.some(
+    (shape) => shape.shape_type === PR_REVIEW_FILE_NODE_SHAPE_TYPE
+  );
+  const graphLayout = hasExistingFileNode
+    ? null
+    : await safelyBuildInitialGraphLayout(
+        input.reviewRoomId,
+        sortedFiles,
+        sortedRelations
+      );
   const occupied = input.existingShapes
     .filter((shape) => shape.shape_type === PR_REVIEW_FILE_NODE_SHAPE_TYPE)
     .map(toBounds);
-  const fileShapes = [...input.files]
-    .sort(compareFiles)
+  const fileShapes = sortedFiles
     .map((file, index) => {
       const id = getPrReviewFileShapeId(file.roomFileId);
       const existing = existingById.get(id);
       const geometry = existing
         ? getExistingFileGeometry(existing)
-        : allocateInitialGeometry(index, occupied);
+        : getInitialFileGeometry(
+            graphLayout?.nodeGeometryByRoomFileId.get(file.roomFileId),
+            index,
+            occupied
+          );
 
       if (!existing) {
         occupied.push(toGeometryBounds(geometry));
@@ -103,8 +122,7 @@ export function buildPrReviewCanvasMaterialization(input: {
   const fileShapeByRoomFileId = new Map(
     fileShapes.map((shape) => [getRoomFileId(shape), shape])
   );
-  const relationShapes = deduplicateRelations(input.relations)
-    .sort(compareRelations)
+  const relationShapes = sortedRelations
     .flatMap((relation, index) => {
       const from = fileShapeByRoomFileId.get(relation.fromRoomFileId);
       const to = fileShapeByRoomFileId.get(relation.toRoomFileId);
@@ -120,6 +138,7 @@ export function buildPrReviewCanvasMaterialization(input: {
           id,
           index,
           relation,
+          routePoints: graphLayout?.routePointsByRelationId.get(id),
           reviewRoomId: input.reviewRoomId,
           reviewSessionId: input.reviewSessionId,
           to
@@ -227,25 +246,27 @@ function buildRelationShape(input: {
   id: string;
   index: number;
   relation: PrReviewCanvasMaterializationRelation;
+  routePoints: PrReviewCanvasRoutePoint[] | undefined;
   reviewRoomId: string;
   reviewSessionId: string;
   to: PrReviewCanvasMaterializedShape;
 }): PrReviewCanvasMaterializedShape {
-  const anchors = getAnchors(input.from.values, input.to.values);
-  const x = Math.min(anchors.startX, anchors.endX);
-  const y = Math.min(anchors.startY, anchors.endY);
-  const width = Math.max(1, Math.abs(anchors.endX - anchors.startX));
-  const height = Math.max(1, Math.abs(anchors.endY - anchors.startY));
+  const geometry = buildRelationGeometry(
+    input.routePoints,
+    input.from.values,
+    input.to.values
+  );
   const zIndex = input.existing
     ? Number(input.existing.z_index)
     : input.index;
   const props = {
-    w: width,
-    h: height,
-    startX: anchors.startX - x,
-    startY: anchors.startY - y,
-    endX: anchors.endX - x,
-    endY: anchors.endY - y,
+    w: geometry.width,
+    h: geometry.height,
+    startX: geometry.startX,
+    startY: geometry.startY,
+    endX: geometry.endX,
+    endY: geometry.endY,
+    routePoints: geometry.routePoints,
     fromReviewFileId: input.relation.fromReviewFileId,
     toReviewFileId: input.relation.toReviewFileId,
     flowId: input.relation.flowId,
@@ -267,10 +288,10 @@ function buildRelationShape(input: {
     shapeType: PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
     title: null,
     textContent: input.relation.reason,
-    x,
-    y,
-    width,
-    height,
+    x: geometry.x,
+    y: geometry.y,
+    width: geometry.width,
+    height: geometry.height,
     rotation: 0,
     zIndex,
     rawShape: buildRawShape({
@@ -279,11 +300,116 @@ function buildRelationShape(input: {
       parentShapeId: null,
       props,
       shapeType: PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
-      values: { x, y, rotation: 0, zIndex }
+      values: { x: geometry.x, y: geometry.y, rotation: 0, zIndex }
     })
   };
 
   return { id: input.id, values };
+}
+
+async function safelyBuildInitialGraphLayout(
+  reviewRoomId: string,
+  files: PrReviewCanvasMaterializationFile[],
+  relations: PrReviewCanvasMaterializationRelation[]
+) {
+  try {
+    return await buildPrReviewCanvasGraphLayout({
+      files: files.map((file) => ({
+        roomFileId: file.roomFileId,
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+        flowSortOrder: file.flowSortOrder,
+        workflowOrder: file.workflowOrder,
+        filePath: file.filePath
+      })),
+      relations: relations.map((relation) => ({
+        id: getPrReviewRelationShapeId(reviewRoomId, relation),
+        fromRoomFileId: relation.fromRoomFileId,
+        toRoomFileId: relation.toRoomFileId
+      }))
+    });
+  } catch {
+    return null;
+  }
+}
+
+function getInitialFileGeometry(
+  layoutGeometry: { x: number; y: number } | undefined,
+  index: number,
+  occupied: ShapeBounds[]
+): ShapeGeometry {
+  if (layoutGeometry) {
+    return {
+      x: layoutGeometry.x,
+      y: layoutGeometry.y,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT
+    };
+  }
+
+  return allocateInitialGeometry(index, occupied);
+}
+
+function buildRelationGeometry(
+  routePoints: PrReviewCanvasRoutePoint[] | undefined,
+  from: CompleteShapeWriteValues,
+  to: CompleteShapeWriteValues
+) {
+  const anchors = getAnchors(from, to);
+  const absoluteRoutePoints = normalizeRoutePoints(
+    routePoints,
+    anchors.startX,
+    anchors.startY,
+    anchors.endX,
+    anchors.endY
+  );
+  const x = Math.min(...absoluteRoutePoints.map((point) => point.x));
+  const y = Math.min(...absoluteRoutePoints.map((point) => point.y));
+  const relativeRoutePoints = absoluteRoutePoints.map((point) => ({
+    x: point.x - x,
+    y: point.y - y
+  }));
+  const start = relativeRoutePoints[0];
+  const end = relativeRoutePoints[relativeRoutePoints.length - 1];
+
+  return {
+    x,
+    y,
+    width: Math.max(1, ...relativeRoutePoints.map((point) => point.x)),
+    height: Math.max(1, ...relativeRoutePoints.map((point) => point.y)),
+    startX: start.x,
+    startY: start.y,
+    endX: end.x,
+    endY: end.y,
+    routePoints: relativeRoutePoints
+  };
+}
+
+function normalizeRoutePoints(
+  routePoints: PrReviewCanvasRoutePoint[] | undefined,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number
+): PrReviewCanvasRoutePoint[] {
+  if (routePoints && routePoints.length >= 2) {
+    return routePoints;
+  }
+
+  if (startX === endX || startY === endY) {
+    return [
+      { x: startX, y: startY },
+      { x: endX, y: endY }
+    ];
+  }
+
+  const midX = startX + (endX - startX) / 2;
+  return [
+    { x: startX, y: startY },
+    { x: midX, y: startY },
+    { x: midX, y: endY },
+    { x: endX, y: endY }
+  ];
 }
 
 function buildRawShape(input: {

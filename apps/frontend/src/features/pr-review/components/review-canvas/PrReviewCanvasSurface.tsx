@@ -589,6 +589,13 @@ function buildStoredPrReviewCanvasShapes(
   );
 
   return systemShapes.map((shape, shapeIndex) => {
+    const props = { ...(shape.rawShape.props as Record<string, unknown>) };
+    if (
+      shape.shapeType === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE &&
+      !Array.isArray(props.routePoints)
+    ) {
+      props.routePoints = [];
+    }
     const partial: TLShapePartial = {
       id: shape.id as TLShapeId,
       type: shape.shapeType,
@@ -596,7 +603,7 @@ function buildStoredPrReviewCanvasShapes(
       y: shape.y,
       rotation: shape.rotation,
       index: indexes[shapeIndex] as TLShape["index"],
-      props: { ...(shape.rawShape.props as Record<string, unknown>) }
+      props
     } as TLShapePartial;
 
     if (shape.parentShapeId?.startsWith("shape:")) {
@@ -752,7 +759,8 @@ function updatePrReviewRelationGeometry(
           startX: geometry.startX,
           startY: geometry.startY,
           endX: geometry.endX,
-          endY: geometry.endY
+          endY: geometry.endY,
+          routePoints: geometry.routePoints
         }
       } satisfies TLShapePartial<PrReviewRelationEdgeShape>
     ];

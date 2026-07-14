@@ -128,7 +128,13 @@ assert.deepEqual(
     startX: 0,
     startY: 0,
     endX: 200,
-    endY: 40
+    endY: 40,
+    routePoints: [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 40 },
+      { x: 200, y: 40 }
+    ]
   }
 );
 
