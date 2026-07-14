@@ -24,7 +24,7 @@ SQL 원문은 처음부터 CRDT로 병합하지 않는다. Phase 1에서는 한 
 - 접속자, cursor, selection, 현재 도구의 비영속 presence
 - table layout과 모든 annotation(`links`, `notes`, `frames`, `texts`, `strokes`)의 영속 operation 동기화
 - 재연결, 늦은 join, operation 누락에 대한 catch-up 및 canonical snapshot 복구
-- SQL 원문/모델 재생성에 대한 단일 편집자 lease 잠금
+- SQL 원문/모델 재생성에 대한 단일 편집자 lease 잠금과 lock 동안의 layout/annotation 변경 제한
 
 ### 제외
 
@@ -58,7 +58,7 @@ WHERE s.id = $1
 
 ## 이벤트 계약
 
-Socket은 실시간 전달만 담당한다. 영속 변경은 client가 먼저 App Server에 요청하고, App Server가 DB transaction을 완료한 뒤 Redis로 publish한다. realtime-server는 그 이벤트를 room에 broadcast한다.
+Socket은 실시간 전달만 담당한다. 영속 변경은 client가 먼저 App Server에 요청하고, App Server는 session 변경·operation 기록·outbox intent를 하나의 DB transaction으로 저장한다. commit 뒤 outbox publisher가 Redis로 publish하고 realtime-server는 그 이벤트를 room에 broadcast한다.
 
 | 방향 | 이벤트 | 용도 | 영속 여부 |
 | --- | --- | --- | --- |
@@ -93,7 +93,11 @@ Socket은 실시간 전달만 담당한다. 영속 변경은 client가 먼저 Ap
 | `payload_json` | 검증·적용된 canonical operation payload |
 | `created_at` | 발생 시각 |
 
-`(session_id, op_seq)`는 unique여야 하며, `(session_id, op_seq)` index와 Workspace membership/RLS 규칙을 함께 둔다. sequence 발급, session update, operation insert, Redis publish 대상 생성은 하나의 App Server transaction에서 수행한다.
+`(session_id, op_seq)`는 unique여야 하며, `(session_id, op_seq)` index와 Workspace membership/RLS 규칙을 함께 둔다. sequence 발급, session update, operation insert, Redis publish 대상 outbox row 생성은 하나의 App Server transaction에서 수행한다.
+
+`sql_erd_session_operation_outbox`는 operation 하나당 하나의 row를 갖는다. `pending`, `publishing`, `delivered` 상태, claim token, attempt count, next attempt time, 마지막 오류를 저장한다. publisher는 commit 뒤 즉시 한 번 publish를 시도하고, 모든 App Server instance가 1초 sweep에서 `FOR UPDATE SKIP LOCKED`로 due row 하나만 claim한다. 실패는 1·2·4·8·16초 뒤 재시도하고 이후 30초 간격으로 계속 재시도한다. 다섯 번째 실패부터는 alert를 발생시키되 operation을 폐기하지 않는다.
+
+Redis `PUBLISH`가 성공하면 outbox를 `delivered`로 표시한다. Redis 전달은 at-least-once이므로 realtime-server와 client는 `operationId`와 `opSeq`로 중복을 제거한다. Redis subscriber가 일시적으로 없거나 socket event를 놓쳐도 operation log는 남아 있으므로, 그 사실만으로 operation을 실패 처리하지 않는다.
 
 ### mutation API 제안
 
@@ -121,12 +125,14 @@ type SubmitSqlErdOperationRequest = {
         sourceFormat: "sql";
         sqlDialect: "auto" | "postgresql" | "mysql" | "sqlite";
         modelJson: SqltoerdModelJsonV1;
-        layoutJson: SqltoerdLayoutJsonV1;
+        newTableLayoutsById: Record<string, SqltoerdTableLayout>;
       };
 };
 ```
 
 `SqlErdLayoutPatch`는 현재 layout 전체를 다시 보내지 않는다. `tableLayoutsById`, `notesById`, `framesById`, `textsById`, `strokesById`와 각각의 `delete...Ids`를 명확히 구분한다. 빈 문자열·빈 배열·삭제를 같은 의미로 해석하지 않는다.
+
+realtime가 활성화된 session은 plural·singular의 기존 전체 `PATCH`를 server에서 `409 SQL_ERD_REALTIME_OPERATION_REQUIRED`로 거부한다. 이 판단은 client feature flag가 아니라 session의 server-side realtime 상태를 기준으로 한다. realtime가 비활성인 session만 기존 full PATCH compatibility 경로를 사용할 수 있다. source 변경은 source lock이 확인된 `source_snapshot` operation으로만 처리한다.
 
 서버는 최신 canonical layout에 patch를 적용해 검증한 결과만 저장하고, 같은 `clientOperationId` 재시도에는 처음 저장한 결과를 돌려준다. 서로 다른 entity의 patch는 server `op_seq` 순서로 병합한다. 같은 entity를 동시에 바꾼 경우에는 더 늦게 확정된 operation이 이기며, client는 상대의 operation을 자신의 최신 상태에 다시 적용한다.
 
@@ -137,18 +143,21 @@ join 응답은 `latestOpSeq`와 현재 snapshot revision을 제공한다. client
 - sequence가 연속되면 순서대로 local state에 적용한다.
 - operation 보존 기간을 지나거나 sequence gap이 있으면 server는 `sql-erd:sync:required`를 보내고 client는 session detail GET으로 canonical snapshot을 다시 읽는다.
 - 자신의 `clientOperationId`가 echo된 경우 client는 optimistic 변경을 다시 적용하지 않고 revision/opSeq만 확정한다.
+- socket이 연결된 동안에도 client는 10초마다 `GET .../operations?afterSeq={lastAppliedOpSeq}`를 실행한다. 따라서 Redis publish 또는 socket event 하나가 유실돼도 다음 poll에서 log를 따라잡는다.
 
 ## SQL 원문 동시 편집 정책
 
 SQL 원문, `Regenerate SQL`, SQL diff Apply는 한 session에서 동시에 병합하지 않는다. 이런 변경은 `source_snapshot`이고 model과 layout에 연쇄 영향을 주므로 Phase 1에서는 아래 lease 정책을 사용한다.
 
 1. source 편집 시작 시 App Server의 source-lock endpoint로 30초 lease를 claim한다.
-2. lock holder는 10초마다 renew한다. disconnect 또는 만료 뒤 다른 사용자가 claim할 수 있다.
-3. source write endpoint는 DB의 유효 lock owner를 확인한다. realtime-server만 lock을 알고 있는 구조는 허용하지 않는다.
-4. lock이 없는 사용자는 source editor와 SQL Apply를 read-only로 보고, holder의 이름과 만료 상태를 표시한다.
-5. holder의 source save/reparse가 성공하면 App Server는 canonical `source_snapshot` operation을 publish한다. 다른 client는 편집 중인 local source를 갖지 않으므로 snapshot으로 교체한다.
+2. lock claim transaction은 session row를 직렬화하고 `lockedLayoutOpSeq`를 기록한다. lock이 살아 있는 동안에는 holder를 포함한 모든 사용자의 영속 `layout_patch`를 `409 SQL_ERD_SOURCE_LOCK_ACTIVE`로 거부한다. pan/zoom과 presence는 계속 가능하다.
+3. lock holder는 10초마다 renew한다. disconnect 또는 만료 뒤 다른 사용자가 claim할 수 있다.
+4. source write endpoint는 DB의 유효 lock owner와 `lockedLayoutOpSeq`를 확인한다. realtime-server만 lock을 알고 있는 구조는 허용하지 않는다.
+5. lock이 없는 사용자는 source editor와 SQL Apply를 read-only로 보고, holder의 이름과 만료 상태를 표시한다. layout/annotation mutation UI도 lock이 끝날 때까지 disabled로 표시한다.
+6. `source_snapshot` 요청은 전체 `layoutJson`을 받지 않는다. server는 lock claim 시점의 안정된 최신 layout을 기준으로 기존 table 위치와 모든 annotation을 보존하고, 더 이상 model에 없는 table layout만 제거하며 `newTableLayoutsById`로 새 table 위치만 추가한다.
+7. holder의 source save/reparse가 성공하면 App Server는 이 canonical 결과를 `source_snapshot` operation으로 publish한다. 다른 client는 편집 중인 local source를 갖지 않으므로 snapshot으로 교체한다.
 
-source lock은 `sql_erd_session_source_locks(session_id primary key, owner_user_id, lease_id, expires_at, updated_at)`처럼 App Server가 검증 가능한 DB 상태로 둔다. realtime-server는 변경 알림만 broadcast한다. Redis가 잠금의 유일한 source of truth가 되면 App Server의 REST write 권한을 안전하게 검증할 수 없다.
+source lock은 `sql_erd_session_source_locks(session_id primary key, owner_user_id, lease_id, locked_layout_op_seq, expires_at, updated_at)`처럼 App Server가 검증 가능한 DB 상태로 둔다. realtime-server는 변경 알림만 broadcast한다. Redis가 잠금의 유일한 source of truth가 되면 App Server의 REST write 권한을 안전하게 검증할 수 없다.
 
 CRDT/Yjs와 character-level merge는 source lock rollout의 안정성, 사용성, conflict telemetry를 확인한 뒤 별도 Epic으로 검토한다.
 
@@ -163,10 +172,10 @@ CRDT/Yjs와 character-level merge는 source lock rollout의 안정성, 사용성
 
 | 순서 | 후속 Issue | 구현 범위 | 필수 리뷰 |
 | --- | --- | --- | --- |
-| 1 | SQLtoERD realtime room·presence | session access, room join/leave, cursor·selection presence | 세인, 진호, 동현 |
-| 2 | SQLtoERD durable operation 계약 | DB operation log, API 문서, submit/catch-up endpoint, Redis publish | 세인, 은재, 진호 |
-| 3 | SQLtoERD layout·annotation 동기화 | frontend optimistic patch, remote apply, reconnect recovery | 세인, 진호 |
-| 4 | SQLtoERD source lease lock | DB lock, source read-only UX, snapshot broadcast | 세인, 은재, 진호 |
+| 1 | SQLtoERD realtime room·presence | session access, room join/leave, frontend cursor·selection presence | 세인, 진호, 동현 |
+| 2 | SQLtoERD durable operation·delivery 계약 | DB operation/outbox, API 문서, submit/catch-up, Redis publish·중복 제거 | 세인, 은재, 진호 |
+| 3 | SQLtoERD layout·annotation 동기화 | frontend optimistic patch, remote apply, 10초 catch-up, reconnect recovery | 세인, 진호 |
+| 4 | SQLtoERD source lease lock·rollout | layout mutation 제한, source snapshot reconcile, read-only UX, rollout/E2E | 세인, 은재, 진호 |
 
 1단계는 presence만 제공하므로 사용자 데이터의 동시 저장을 해결하지 않는다. 2~4단계를 모두 완료하기 전에는 기존 `revision` 충돌 UX를 유지한다.
 
