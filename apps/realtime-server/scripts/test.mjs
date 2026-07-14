@@ -19,6 +19,10 @@ const canvasAccess = await readFile(
   new URL("../src/canvas/canvas-access.service.ts", import.meta.url),
   "utf8"
 );
+const canvasRoom = await readFile(
+  new URL("../src/canvas/canvas-room.service.ts", import.meta.url),
+  "utf8"
+);
 const canvasPresence = await readFile(
   new URL("../src/canvas/canvas-presence.service.ts", import.meta.url),
   "utf8"
@@ -68,7 +72,11 @@ assert.match(sessionService, /revoked_at IS NULL/);
 
 assert.match(canvasAccess, /JOIN workspace_members wm/);
 assert.match(canvasAccess, /c\.board_type = 'freeform'/);
+assert.match(canvasAccess, /c\.board_type = 'review'/);
+assert.match(canvasAccess, /review_room\.status IN \('active', 'completed'\)/);
 assert.match(canvasAccess, /wm\.user_id = \$3/);
+assert.match(canvasRoom, /getCanvasRoomAccess/);
+assert.match(canvasRoom, /readOnly: access\.readOnly/);
 
 assert.match(socketServer, /validateSessionToken/);
 assert.match(socketServer, /canvasClientEvents\.join/);
@@ -99,15 +107,22 @@ assert.match(socketServer, /redisAdapter\?\.stateClient/);
 assert.match(socketServer, /await shapePreviewService\.updatePreview/);
 assert.match(socketServer, /await shapePreviewService\.clearRoomPreview/);
 assert.match(socketServer, /shapePreviewService\.clearSocket/);
+assert.match(socketServer, /assertCanvasRoomWritable/);
+assert.match(socketServer, /canvas room is read-only/);
 assert.match(socketServer, /redisAdapter\.subscribe/);
 assert.match(socketServer, /MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events"/);
+assert.match(socketServer, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(socketServer, /meetingClientEvents\.subscribe/);
 assert.match(socketServer, /meetingServerEvents\.reportUpdated/);
+assert.match(socketServer, /meetingServerEvents\.stateUpdated/);
 assert.match(socketServer, /createMeetingRoomName/);
 assert.match(meetingAccess, /FROM workspace_members/);
 assert.match(meetingAccess, /workspace_id = \$1/);
 assert.match(meetingEvents, /meeting:subscribe/);
 assert.match(meetingEvents, /meeting:report:updated/);
+assert.match(meetingEvents, /meeting:state:updated/);
+assert.match(meetingEvents, /isMeetingStateRedisEvent/);
+assert.match(meetingEvents, /recording_failed/);
 
 assert.match(canvasPresence, /clearRoomPresence/);
 assert.match(canvasPresence, /clearSocket/);
@@ -137,3 +152,5 @@ assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);
 assert.match(redisPubSub, /PX: options\.px/);
 assert.match(redisPubSub, /subscribe\(channel/);
+
+await import("./canvas-access.test.mjs");

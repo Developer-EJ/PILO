@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { history, undoDepth } from "@codemirror/commands";
-import { MySQL, PostgreSQL } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLite } from "@codemirror/lang-sql";
 import { Compartment, EditorState } from "@codemirror/state";
 import ts from "typescript";
 
@@ -41,6 +41,7 @@ async function compileSqlErdRuntimeModules() {
     outputDir,
     "session-list-state.mjs"
   );
+  const sessionTitleOutputPath = join(outputDir, "session-title.mjs");
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const sqlEditStateOutputPath = join(outputDir, "sql-edit-state.mjs");
   const statusCopyOutputPath = join(outputDir, "status-copy.mjs");
@@ -51,11 +52,30 @@ async function compileSqlErdRuntimeModules() {
   const tablePinOutputPath = join(outputDir, "table-pin.mjs");
   const foreignKeyAddOutputPath = join(outputDir, "foreign-key-add.mjs");
   const relationIdOutputPath = join(outputDir, "relation-id.mjs");
+  const tableCardLayoutOutputPath = join(outputDir, "table-card-layout.mjs");
+  const autoLayoutOutputPath = join(outputDir, "auto-layout.mjs");
 
   try {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/model.ts",
       modelOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/table-card-layout.ts",
+      tableCardLayoutOutputPath,
+      [[/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"']]
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/auto-layout.ts",
+      autoLayoutOutputPath,
+      [
+        [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/table-card-layout"/g,
+          'from "./table-card-layout.mjs"'
+        ]
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/model-to-sql.ts",
@@ -72,6 +92,10 @@ async function compileSqlErdRuntimeModules() {
           'from "./ddl-parser.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/utils\/foreign-key-add"/g,
+          'from "./foreign-key-add.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/utils\/model"/g,
           'from "./model.mjs"'
         ],
@@ -84,7 +108,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/inspector.ts",
       inspectorOutputPath,
-      [[/from "\.\/model"/g, 'from "./model.mjs"']]
+      [
+        [/from "\.\/foreign-key-add"/g, 'from "./foreign-key-add.mjs"'],
+        [/from "\.\/model"/g, 'from "./model.mjs"']
+      ]
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-map.ts",
@@ -122,7 +149,10 @@ async function compileSqlErdRuntimeModules() {
           /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
           'from "./ddl-parser.mjs"'
         ],
-        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+        [
+          /from "@\/features\/sql-erd\/utils\/auto-layout"/g,
+          'from "./auto-layout.mjs"'
+        ]
       ]
     );
     await compileTypeScriptModule(
@@ -133,7 +163,10 @@ async function compileSqlErdRuntimeModules() {
           /from "@\/features\/sql-erd\/utils\/ddl-parser"/g,
           'from "./ddl-parser.mjs"'
         ],
-        [/from "@\/features\/sql-erd\/utils\/model"/g, 'from "./model.mjs"']
+        [
+          /from "@\/features\/sql-erd\/utils\/auto-layout"/g,
+          'from "./auto-layout.mjs"'
+        ]
       ]
     );
     await compileTypeScriptModule(
@@ -151,6 +184,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-list-state.ts",
       sessionListStateOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/session-title.ts",
+      sessionTitleOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/session-state.ts",
@@ -193,6 +230,10 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/utils\/model"/g,
           'from "./model-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/table-card-layout"/g,
+          'from "./table-card-layout.mjs"'
         ]
       ]
     );
@@ -203,6 +244,14 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-annotation-shape"/g,
           'from "./annotation-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-frame-shape"/g,
+          'from "./frame-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-note-shape"/g,
+          'from "./note-shape-stub.mjs"'
         ],
         [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
@@ -223,6 +272,10 @@ async function compileSqlErdRuntimeModules() {
       foreignKeyAddOutputPath,
       [
         [/from "@\/features\/sql-erd\/types"/g, 'from "./types-stub.mjs"'],
+        [
+          /from "@\/features\/sql-erd\/utils\/model"/g,
+          'from "./model.mjs"'
+        ],
         [
           /from "@\/features\/sql-erd\/utils\/relation-id"/g,
           'from "./relation-id.mjs"'
@@ -253,6 +306,14 @@ async function compileSqlErdRuntimeModules() {
       "export function isSqlErdAnnotationShape(shape) { return shape?.type === 'sqltoerd_annotation'; }\n"
     );
     await writeFile(
+      join(outputDir, "frame-shape-stub.mjs"),
+      "export function isSqlErdFrameShape(shape) { return shape?.type === 'sqltoerd_frame'; }\n"
+    );
+    await writeFile(
+      join(outputDir, "note-shape-stub.mjs"),
+      "export function isSqlErdNoteShape(shape) { return shape?.type === 'sqltoerd_note'; }\n"
+    );
+    await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
       "export function isSqlErdTableShape(shape) { return shape?.type === 'sqltoerd_table'; }\n"
     );
@@ -279,6 +340,7 @@ async function compileSqlErdRuntimeModules() {
       apiClientRuntime,
       sessionNavigationRuntime,
       sessionListStateRuntime,
+      sessionTitleRuntime,
       sessionStateRuntime,
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
@@ -287,7 +349,8 @@ async function compileSqlErdRuntimeModules() {
       tableShapeRuntime,
       canvasSelectionRuntime,
       tablePinRuntime,
-      foreignKeyAddRuntime
+      foreignKeyAddRuntime,
+      autoLayoutRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
@@ -302,6 +365,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(apiClientOutputPath)),
       import(pathToFileHref(sessionNavigationOutputPath)),
       import(pathToFileHref(sessionListStateOutputPath)),
+      import(pathToFileHref(sessionTitleOutputPath)),
       import(pathToFileHref(sessionStateOutputPath)),
       import(pathToFileHref(sqlEditStateOutputPath)),
       import(pathToFileHref(sqlEditorDialectOutputPath)),
@@ -310,7 +374,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(tableShapeOutputPath)),
       import(pathToFileHref(canvasSelectionOutputPath)),
       import(pathToFileHref(tablePinOutputPath)),
-      import(pathToFileHref(foreignKeyAddOutputPath))
+      import(pathToFileHref(foreignKeyAddOutputPath)),
+      import(pathToFileHref(autoLayoutOutputPath))
     ]);
 
     return {
@@ -329,13 +394,15 @@ async function compileSqlErdRuntimeModules() {
       relationShapeRuntime,
       sessionListStateRuntime,
       sessionNavigationRuntime,
+      sessionTitleRuntime,
       sessionStateRuntime,
       sqlEditStateRuntime,
       sqlEditorDialectRuntime,
       statusCopyRuntime,
       tableShapeRuntime,
       tablePinRuntime,
-      foreignKeyAddRuntime
+      foreignKeyAddRuntime,
+      autoLayoutRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -625,6 +692,7 @@ const [
   generateSessionUtils,
   layoutAutosaveUtils,
   tablePinUtils,
+  autoLayoutUtils,
   statusCopyUtils,
   sqlDiffApplyUtils,
   canvasSurface,
@@ -632,6 +700,8 @@ const [
   tableShape,
   relationShape,
   annotationShape,
+  frameShape,
+  noteShape,
   ddlParserUtils,
   sqlEditorDialectUtils,
   sqlSourceDecorationUtils,
@@ -659,6 +729,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/utils/generate-session.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/layout-autosave.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/table-pin.ts"),
+    readSqlErdFile("../../src/features/sql-erd/utils/auto-layout.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/status-copy.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-diff-apply.ts"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas.tsx"),
@@ -666,6 +737,8 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-table-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-relation-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-annotation-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-source-decoration.ts"),
@@ -677,6 +750,7 @@ const {
   apiClientRuntime,
   sessionListStateRuntime,
   sessionNavigationRuntime,
+  sessionTitleRuntime,
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
@@ -695,7 +769,8 @@ const {
   statusCopyRuntime,
   tableShapeRuntime,
   tablePinRuntime,
-  foreignKeyAddRuntime
+  foreignKeyAddRuntime,
+  autoLayoutRuntime
 } = await compileSqlErdRuntimeModules();
 
 const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
@@ -753,6 +828,197 @@ assert.equal(
   null
 );
 const runtimeModel = createRuntimeTestModel();
+
+const runtimeDynamicBadgeWidthModel = structuredClone(runtimeModel);
+const runtimeDynamicBadgeColumn =
+  runtimeDynamicBadgeWidthModel.schema.tables[0].columns[0];
+runtimeDynamicBadgeColumn.foreignKey = true;
+runtimeDynamicBadgeColumn.unique = true;
+const runtimeDynamicBadgeTable =
+  runtimeDynamicBadgeWidthModel.schema.tables[0];
+const runtimeDynamicBadgeCardSize = tableShapeRuntime.getSqlErdTableShapeSize(
+  runtimeDynamicBadgeTable
+);
+const runtimeDynamicBadgeAutoLayoutSize =
+  autoLayoutRuntime
+    .createSqltoerdAutoLayoutTableSizes(runtimeDynamicBadgeWidthModel, {
+      version: 1,
+      tableLayouts: []
+    })
+    .find((tableSize) => tableSize.tableId === runtimeDynamicBadgeTable.id);
+
+assert.ok(runtimeDynamicBadgeAutoLayoutSize);
+assert.equal(
+  runtimeDynamicBadgeAutoLayoutSize.width,
+  runtimeDynamicBadgeCardSize.w
+);
+assert.equal(
+  runtimeDynamicBadgeAutoLayoutSize.height,
+  runtimeDynamicBadgeCardSize.h
+);
+
+const runtimeMinimumZoomCamera =
+  autoLayoutRuntime.getSqltoerdMinimumZoomCamera(
+    { x: 10, y: 20, w: 2000, h: 1000 },
+    { width: 1000, height: 700 },
+    0.45
+  );
+
+assert.deepEqual(runtimeMinimumZoomCamera, {
+  x: 101.11111111111111,
+  y: 257.77777777777777,
+  z: 0.45
+});
+
+const runtimeAutoLayoutInput = {
+  layoutJson: {
+    version: 1,
+    tableLayouts: [
+      { tableId: "table.users", x: 960, y: 640, width: 320 },
+      { tableId: "table.orders", x: 80, y: 40, width: 320 }
+    ],
+    annotations: {
+      version: 1,
+      links: [
+        {
+          id: "annotation.orders.users",
+          kind: "column_link",
+          fromTableId: "table.orders",
+          fromColumnId: "user_id",
+          toTableId: "table.users",
+          toColumnId: "id",
+          label: "owner"
+        },
+        {
+          id: "annotation.orders.removed",
+          kind: "table_link",
+          fromTableId: "table.orders",
+          toTableId: "table.removed",
+          label: "legacy note"
+        }
+      ],
+      notes: [{ id: "note.orders", x: 30, y: 40, width: 240, height: 160, text: "keep" }],
+      frames: [{ id: "frame.orders", x: 10, y: 20, width: 640, height: 420, title: "Orders", color: "blue", isLocked: false }]
+    }
+  },
+  modelJson: runtimeModel,
+  tableSizes: [
+    { tableId: "table.users", height: 160, width: 320 },
+    { tableId: "table.orders", height: 160, width: 320 }
+  ]
+};
+const runtimeAutoLayout = autoLayoutRuntime.createSqltoerdAutoLayout(
+  runtimeAutoLayoutInput
+);
+const runtimeRepeatedAutoLayout = autoLayoutRuntime.createSqltoerdAutoLayout(
+  runtimeAutoLayoutInput
+);
+
+assert.deepEqual(runtimeAutoLayout, runtimeRepeatedAutoLayout);
+assert.deepEqual(
+  runtimeAutoLayout.annotations,
+  runtimeAutoLayoutInput.layoutJson.annotations
+);
+assert.notDeepEqual(
+  runtimeAutoLayout.tableLayouts.map(({ tableId, x, y }) => ({ tableId, x, y })),
+  runtimeAutoLayoutInput.layoutJson.tableLayouts.map(({ tableId, x, y }) => ({
+    tableId,
+    x,
+    y
+  }))
+);
+
+const runtimeIncrementalAutoLayoutModel = structuredClone(runtimeModel);
+runtimeIncrementalAutoLayoutModel.schema.tables.push({
+  id: "table.order_items",
+  name: "order_items",
+  schemaName: null,
+  columns: [
+    createRuntimeTestColumn("id", "id", { primaryKey: true }),
+    createRuntimeTestColumn("order_id", "order_id", { foreignKey: true })
+  ],
+  constraints: [],
+  comment: null
+});
+runtimeIncrementalAutoLayoutModel.schema.relations.push({
+  id: "relation.order_items.order_id.orders.id",
+  kind: "foreign_key",
+  fromTableId: "table.order_items",
+  fromColumnIds: ["order_id"],
+  toTableId: "table.orders",
+  toColumnIds: ["id"],
+  constraintName: null
+});
+const runtimeIncrementalAutoLayout =
+  autoLayoutRuntime.createSqltoerdIncrementalLayout({
+    layoutJson: runtimeAutoLayoutInput.layoutJson,
+    modelJson: runtimeIncrementalAutoLayoutModel,
+    tableSizes: [
+      { tableId: "table.users", height: 160, width: 320 },
+      { tableId: "table.orders", height: 160, width: 320 },
+      { tableId: "table.order_items", height: 160, width: 320 }
+    ]
+  });
+
+assert.deepEqual(
+  runtimeIncrementalAutoLayout.tableLayouts.filter(
+    (tableLayout) => tableLayout.tableId !== "table.order_items"
+  ),
+  runtimeAutoLayoutInput.layoutJson.tableLayouts
+);
+assert.ok(
+  runtimeIncrementalAutoLayout.tableLayouts.some(
+    (tableLayout) => tableLayout.tableId === "table.order_items"
+  )
+);
+assert.deepEqual(
+  runtimeIncrementalAutoLayout.annotations,
+  {
+    version: 1,
+    links: [runtimeAutoLayoutInput.layoutJson.annotations.links[0]],
+    notes: runtimeAutoLayoutInput.layoutJson.annotations.notes,
+    frames: runtimeAutoLayoutInput.layoutJson.annotations.frames
+  }
+);
+
+const runtimeIncrementalParentLayoutModel = structuredClone(runtimeModel);
+runtimeIncrementalParentLayoutModel.schema.tables.push({
+  id: "table.accounts",
+  name: "accounts",
+  schemaName: null,
+  columns: [createRuntimeTestColumn("id", "id", { primaryKey: true })],
+  constraints: [],
+  comment: null
+});
+runtimeIncrementalParentLayoutModel.schema.relations.push({
+  id: "relation.users.account_id.accounts.id",
+  kind: "foreign_key",
+  fromTableId: "table.users",
+  fromColumnIds: ["manager_id"],
+  toTableId: "table.accounts",
+  toColumnIds: ["id"],
+  constraintName: null
+});
+const runtimeIncrementalParentLayout =
+  autoLayoutRuntime.createSqltoerdIncrementalLayout({
+    layoutJson: runtimeAutoLayoutInput.layoutJson,
+    modelJson: runtimeIncrementalParentLayoutModel,
+    tableSizes: [
+      { tableId: "table.users", height: 160, width: 320 },
+      { tableId: "table.orders", height: 160, width: 320 },
+      { tableId: "table.accounts", height: 160, width: 320 }
+    ]
+  });
+const runtimeUsersLayout = runtimeIncrementalParentLayout.tableLayouts.find(
+  (tableLayout) => tableLayout.tableId === "table.users"
+);
+const runtimeAccountsLayout = runtimeIncrementalParentLayout.tableLayouts.find(
+  (tableLayout) => tableLayout.tableId === "table.accounts"
+);
+
+assert.ok(runtimeUsersLayout);
+assert.ok(runtimeAccountsLayout);
+assert.ok(runtimeAccountsLayout.x < runtimeUsersLayout.x);
 
 const foreignKeyAddCandidate = foreignKeyAddRuntime.createSqlErdForeignKeyAddCandidate({
   fromColumnId: "id",
@@ -1376,6 +1642,10 @@ assert.equal(
 assert.equal(
   sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("mysql"),
   MySQL
+);
+assert.equal(
+  sqlEditorDialectRuntime.getSqlSourceEditorCodeMirrorDialect("sqlite"),
+  SQLite
 );
 const runtimeDialectCompartment = new Compartment();
 let runtimeDialectEditorState = EditorState.create({
@@ -2064,7 +2334,7 @@ assert.equal(
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("UNSUPPORTED_DIALECT"),
-  "This SQL dialect is not supported yet. Choose PostgreSQL or MySQL."
+  "This SQL dialect is not supported yet. Choose PostgreSQL, MySQL, or SQLite."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("NO_CREATE_TABLE"),
@@ -3140,6 +3410,11 @@ const parsedSourceSnapshot = {
   },
   modelJson: createRuntimeTestModel(),
   revision: 20,
+  settingsJson: {
+    sqltoerdRelationNotes: {
+      "relation.orders.user_id.users.id": "order owner"
+    }
+  },
   sourceText: "CREATE TABLE parsed_source (id BIGINT PRIMARY KEY);"
 };
 const currentSourceAutosaveSession = {
@@ -3160,13 +3435,10 @@ assert.deepEqual(sourceAutosaveRequest.payload, {
   dialect: "mysql",
   layoutJson: autosaveLayoutJson,
   modelJson: parsedSourceSnapshot.modelJson,
+  settingsJson: parsedSourceSnapshot.settingsJson,
   sourceText: parsedSourceSnapshot.sourceText
 });
 assert.equal(Object.hasOwn(sourceAutosaveRequest.payload, "title"), false);
-assert.equal(
-  Object.hasOwn(sourceAutosaveRequest.payload, "settingsJson"),
-  false
-);
 
 const mismatchedSourceAutosaveRequest =
   layoutAutosaveRuntime.createSqlErdSourceAutosaveRequest(
@@ -3257,6 +3529,96 @@ assert.deepEqual(
     "session-1"
   ),
   [{ id: "session-2" }]
+);
+
+assert.equal(
+  sessionTitleRuntime.getSqlErdCreateSessionTitle("  주문 도메인 ERD  "),
+  "주문 도메인 ERD"
+);
+assert.equal(
+  sessionTitleRuntime.getSqlErdCreateSessionTitle("   "),
+  undefined
+);
+assert.equal(
+  sessionTitleRuntime.getSqlErdSessionTitleUpdate("  주문 도메인 ERD  "),
+  "주문 도메인 ERD"
+);
+assert.equal(sessionTitleRuntime.getSqlErdSessionTitleUpdate("   "), null);
+assert.deepEqual(
+  sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
+    [
+      {
+        id: "session-1",
+        revision: 3,
+        title: "기존 제목",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        id: "session-2",
+        revision: 2,
+        title: "다른 제목",
+        updatedAt: "2026-07-13T10:00:00.000Z"
+      }
+    ],
+    {
+      id: "session-1",
+      revision: 4,
+      title: "변경된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    }
+  ),
+  [
+    {
+      id: "session-1",
+      revision: 4,
+      title: "변경된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    },
+    {
+      id: "session-2",
+      revision: 2,
+      title: "다른 제목",
+      updatedAt: "2026-07-13T10:00:00.000Z"
+    }
+  ]
+);
+assert.deepEqual(
+  sessionTitleRuntime.updateSqlErdSessionSummaryTitle(
+    [
+      {
+        id: "session-1",
+        revision: 3,
+        title: "기존 제목",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      {
+        id: "session-2",
+        revision: 2,
+        title: "다른 제목",
+        updatedAt: "2026-07-13T10:00:00.000Z"
+      }
+    ],
+    {
+      id: "session-2",
+      revision: 3,
+      title: "수정된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    }
+  ),
+  [
+    {
+      id: "session-2",
+      revision: 3,
+      title: "수정된 제목",
+      updatedAt: "2026-07-14T11:00:00.000Z"
+    },
+    {
+      id: "session-1",
+      revision: 3,
+      title: "기존 제목",
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    }
+  ]
 );
 
 const listSqlErdSessionRequests = [];
@@ -3899,6 +4261,80 @@ assert.equal(
   "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
 );
 
+const sqliteSourceText = `CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  owner_id INTEGER REFERENCES users(id),
+  title TEXT,
+  status TEXT DEFAULT 'draft',
+  CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)
+) STRICT;`;
+const sqliteParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "sqlite",
+  sourceText: sqliteSourceText
+});
+
+assert.equal(sqliteParseResult.ok, true);
+assert.equal(sqliteParseResult.resolvedDialect, "sqlite");
+assert.deepEqual(
+  sqliteParseResult.modelJson.schema.tables.map((table) => table.id),
+  ["table.users", "table.posts"]
+);
+assert.equal(sqliteParseResult.modelJson.schema.tables[0].columns[0].primaryKey, true);
+assert.equal(sqliteParseResult.modelJson.schema.tables[0].columns[0].nullable, false);
+assert.equal(sqliteParseResult.modelJson.schema.tables[0].columns[1].unique, true);
+assert.equal(sqliteParseResult.modelJson.schema.tables[1].columns[1].foreignKey, true);
+assert.equal(sqliteParseResult.modelJson.schema.tables[1].columns[2].foreignKey, true);
+assert.equal(
+  sqliteParseResult.modelJson.schema.tables[1].columns[4].defaultValue,
+  "'draft'"
+);
+assert.deepEqual(sqliteParseResult.modelJson.schema.relations, [
+  {
+    id: "relation.posts.owner_id.users.id",
+    kind: "foreign_key",
+    fromTableId: "table.posts",
+    fromColumnIds: ["column.posts.owner_id"],
+    toTableId: "table.users",
+    toColumnIds: ["column.users.id"],
+    constraintName: null
+  },
+  {
+    id: "relation.posts.user_id.users.id",
+    kind: "foreign_key",
+    fromTableId: "table.posts",
+    fromColumnIds: ["column.posts.user_id"],
+    toTableId: "table.users",
+    toColumnIds: ["column.users.id"],
+    constraintName: "fk_posts_user"
+  }
+]);
+assert.equal(sqliteParseResult.sourceMap.dialect, "sqlite");
+assert.equal(
+  sqliteSourceText.slice(
+    sqliteParseResult.sourceMap.relationsById[
+      "relation.posts.user_id.users.id"
+    ].constraintRange.from,
+    sqliteParseResult.sourceMap.relationsById[
+      "relation.posts.user_id.users.id"
+    ].constraintRange.to
+  ),
+  "CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
+
+const autoSqliteParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: sqliteSourceText
+});
+
+assert.equal(autoSqliteParseResult.ok, true);
+assert.equal(autoSqliteParseResult.resolvedDialect, "sqlite");
+
 const generatedMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "mysql",
   modelJson: mysqlParseResult.modelJson
@@ -3916,6 +4352,23 @@ const generatedMySqlParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
 });
 assert.equal(generatedMySqlParseResult.ok, true);
 assert.equal(generatedMySqlParseResult.modelJson.schema.relations.length, 1);
+const generatedSqlite = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "sqlite",
+  modelJson: sqliteParseResult.modelJson
+});
+assert.match(generatedSqlite.sql, /CREATE TABLE "users"/);
+assert.match(
+  generatedSqlite.sql,
+  /CONSTRAINT "fk_posts_user" FOREIGN KEY \("user_id"\) REFERENCES "users" \("id"\)/
+);
+assert.doesNotMatch(generatedSqlite.sql, /ALTER TABLE/);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "sqlite",
+    sourceText: generatedSqlite.sql
+  }).ok,
+  true
+);
 const modelSqlPreviewSession = {
   id: "session.model-sql-preview",
   revision: 7,
@@ -3977,6 +4430,58 @@ assert.equal(
   }),
   false
 );
+assert.equal(
+  sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(modelSqlPreview, {
+    ...modelSqlPreviewSession,
+    settingsJson: { sqltoerdRelationNotes: { "relation.orders.user_id.users.id": "owner" } }
+  }),
+  false
+);
+const modelSqlPreviewTargetLayout = {
+  ...modelSqlPreviewSession.layoutJson,
+  annotations: { version: 1, links: [] }
+};
+const modelSqlPreviewTargetSettings = {
+  sqltoerdRelationNotes: {
+    "relation.orders.user_id.users.id": "order owner"
+  }
+};
+const modelSqlPreviewWithTargetState =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    layoutJson: modelSqlPreviewTargetLayout,
+    modelJson: modelSqlPreviewSession.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession,
+    settingsJson: modelSqlPreviewTargetSettings
+  });
+assert.deepEqual(
+  modelSqlPreviewWithTargetState.layoutJson,
+  modelSqlPreviewTargetLayout
+);
+assert.deepEqual(
+  modelSqlPreviewWithTargetState.settingsJson,
+  modelSqlPreviewTargetSettings
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    modelSqlPreviewWithTargetState
+  ).snapshot.settingsJson,
+  modelSqlPreviewTargetSettings
+);
+const modelSqlPreviewWithoutRelationNote =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: {
+      ...modelSqlPreviewSession.modelJson,
+      schema: {
+        ...modelSqlPreviewSession.modelJson.schema,
+        relations: []
+      }
+    },
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession,
+    settingsJson: modelSqlPreviewTargetSettings
+  });
+assert.deepEqual(modelSqlPreviewWithoutRelationNote.settingsJson, {});
 const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
   ...modelSqlPreview,
   generatedSourceText: "CREATE TABLE users ("
@@ -4018,6 +4523,20 @@ assert.equal(
     sourceText: childFirstMySql.sql
   }).modelJson.schema.relations.length,
   1
+);
+assert.throws(
+  () =>
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect: "sqlite",
+      modelJson: {
+        ...mysqlParseResult.modelJson,
+        schema: {
+          ...mysqlParseResult.modelJson.schema,
+          tables: [...mysqlParseResult.modelJson.schema.tables].reverse()
+        }
+      }
+    }),
+  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
 );
 const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "postgresql",
@@ -4143,6 +4662,37 @@ assert.equal(
     sourceText: generatedCyclicPostgreSql.sql
   }).modelJson.schema.relations.length,
   2
+);
+assert.throws(
+  () =>
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect: "sqlite",
+      modelJson: cyclicModel
+    }),
+  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+);
+const blockedSqlitePreview = sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+  modelJson: cyclicModel,
+  resolvedDialect: "sqlite",
+  session: {
+    ...modelSqlPreviewSession,
+    dialect: "sqlite",
+    modelJson: cyclicModel,
+    sourceText: "CREATE TABLE current_snapshot (id INTEGER PRIMARY KEY);"
+  }
+});
+assert.equal(blockedSqlitePreview.generationBlocked, true);
+assert.equal(blockedSqlitePreview.hasChanges, false);
+assert.match(
+  blockedSqlitePreview.warnings.join(" "),
+  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(blockedSqlitePreview),
+  {
+    error: blockedSqlitePreview.warnings[0],
+    ok: false
+  }
 );
 
 const mysqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
@@ -4519,6 +5069,66 @@ assert.deepEqual(
     validColumnAnnotation.id
   ).annotations.links,
   []
+);
+
+assert.equal(
+  typeof foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate,
+  "function"
+);
+const annotationForeignKeyConversion =
+  foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate({
+    annotationId: validColumnAnnotation.id,
+    dialect: "postgresql",
+    layoutJson: validColumnAnnotationResult.layoutJson,
+    modelJson: runtimeModel,
+    settingsJson: {},
+    labelDisposition: "preserve_as_relation_note"
+  });
+assert.equal(annotationForeignKeyConversion.ok, true);
+assert.deepEqual(
+  annotationForeignKeyConversion.layoutJson.annotations.links,
+  []
+);
+assert.equal(
+  annotationForeignKeyConversion.modelJson.schema.relations.some(
+    (relation) =>
+      relation.fromTableId === validColumnAnnotation.fromTableId &&
+      relation.fromColumnIds[0] === validColumnAnnotation.fromColumnId &&
+      relation.toTableId === validColumnAnnotation.toTableId &&
+      relation.toColumnIds[0] === validColumnAnnotation.toColumnId
+  ),
+  true
+);
+assert.deepEqual(annotationForeignKeyConversion.settingsJson, {
+  sqltoerdRelationNotes: {
+    [annotationForeignKeyConversion.relation.id]: "same business key"
+  }
+});
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate({
+    annotationId: validTableAnnotation.id,
+    dialect: "postgresql",
+    layoutJson: validTableAnnotationResult.layoutJson,
+    modelJson: runtimeModel,
+    settingsJson: {},
+    labelDisposition: "discard"
+  }),
+  { ok: false, reason: "annotation_not_column_link" }
+);
+assert.deepEqual(
+  foreignKeyAddRuntime.createSqlErdAnnotationForeignKeyConversionCandidate({
+    annotationId: fkConflictAnnotation.id,
+    dialect: "postgresql",
+    layoutJson: {
+      version: 1,
+      tableLayouts: annotationBaseLayout.tableLayouts,
+      annotations: { version: 1, links: [fkConflictAnnotation] }
+    },
+    modelJson: runtimeModel,
+    settingsJson: {},
+    labelDisposition: "discard"
+  }),
+  { ok: false, reason: "duplicate_relation" }
 );
 
 const stackedRelationLayout = relationShapeRuntime.getSqlErdRelationShapeLayout(
@@ -4979,7 +5589,10 @@ assert.match(
 assert.match(types, /export const SQLTOERD_MODEL_JSON_VERSION = 1/);
 assert.match(types, /export const SQLTOERD_LAYOUT_JSON_VERSION = 1/);
 assert.match(types, /export type SqltoerdSourceFormat = "sql"/);
-assert.match(types, /export type SqltoerdDialect = "auto" \| "postgresql" \| "mysql"/);
+assert.match(
+  types,
+  /export type SqltoerdDialect = "auto" \| "postgresql" \| "mysql" \| "sqlite"/
+);
 assert.match(types, /kind: "foreign_key"/);
 assert.match(types, /kind: "primary_key" \| "unique"/);
 assert.match(types, /export type SqlErdSelection/);
@@ -5057,6 +5670,13 @@ assert.doesNotMatch(homeDashboardData, /getActiveSession/);
 assert.match(sessionList, /listSessions/);
 assert.match(sessionList, /buildSqlErdSessionHref/);
 assert.match(sessionList, /createSession/);
+assert.match(sessionList, /getSqlErdCreateSessionTitle/);
+assert.match(sessionList, /getSqlErdSessionTitleUpdate/);
+assert.match(sessionList, /updateSqlErdSessionSummaryTitle/);
+assert.match(sessionList, /updateSession/);
+assert.match(sessionList, /baseRevision: session\.revision/);
+assert.match(sessionList, /DialogTitle>새 ERD 만들기/);
+assert.match(sessionList, /제목 수정/);
 assert.match(sessionList, /deleteSession/);
 assert.match(sessionList, /nextCursor/);
 assert.match(sessionList, /더 보기/);
@@ -5088,9 +5708,15 @@ assert.match(sqlDiffApplyUtils, /applySqlErdNormalizedSqlPreview/);
 assert.match(sqlDiffApplyUtils, /recordSqlErdModelSqlHistory/);
 assert.match(sqlDiffApplyUtils, /undoSqlErdModelSqlHistory/);
 assert.match(sqlDiffApplyUtils, /redoSqlErdModelSqlHistory/);
+assert.match(sqlDiffApplyUtils, /layoutJson: layoutJson \?\? session\.layoutJson/);
+assert.match(sqlDiffApplyUtils, /retainSqltoerdRelationNotesForModel/);
 assert.match(panel, /NormalizedSqlPreviewDialog/);
 assert.match(panel, /normalized_sql_applied/);
 assert.match(panel, /Regenerate SQL/);
+assert.match(panel, /handlePreviewAnnotationForeignKeyConversion/);
+assert.match(panel, /onConvertAnnotationToForeignKey/);
+assert.match(inspectorUtils, /relationNote/);
+assert.match(inspectorUtils, /getSqltoerdRelationNote/);
 assert.match(
   sessionStateUtils,
   /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/
@@ -5108,11 +5734,13 @@ assert.match(sessionStateUtils, /status === 400 \|\| status === 413/);
 
 assert.match(generateSessionUtils, /createSqlErdGenerateWorkspaceRequest/);
 assert.match(generateSessionUtils, /parseSqlDdlToErdModel/);
-assert.match(generateSessionUtils, /createSqltoerdLayoutForModel/);
+assert.match(generateSessionUtils, /createSqltoerdIncrementalLayout/);
 assert.match(generateSessionUtils, /kind: "create"/);
 assert.match(generateSessionUtils, /kind: "update"/);
 assert.match(generateSessionUtils, /baseRevision: session\.revision/);
 assert.match(generateSessionUtils, /sourceMap: parseResult\.sourceMap/);
+assert.match(autoLayoutUtils, /createSqltoerdAutoLayout/);
+assert.match(autoLayoutUtils, /createSqltoerdIncrementalLayout/);
 
 assert.match(sqlSourceDecorationUtils, /Decoration\.mark/);
 assert.match(sqlSourceDecorationUtils, /EditorView\.decorations\.of/);
@@ -5431,8 +6059,9 @@ assert.match(canvasSurface, /syncSqlErdAnnotationShapes/);
 assert.match(canvasSurface, /addSqltoerdColumnAnnotation/);
 assert.match(canvasSurface, /addSqltoerdTableAnnotation/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_CONNECT_START_EVENT/);
-assert.match(canvasSurface, /updateSqltoerdAnnotationLabel/);
-assert.match(canvasSurface, /removeSqltoerdAnnotation/);
+assert.match(canvasSurface, /linksToAdd/);
+assert.match(canvasSurface, /linksById/);
+assert.match(canvasSurface, /deleteLinkIds/);
 assert.match(canvasSurface, /event\.key === "Delete"/);
 assert.match(canvasSurface, /event\.key === "Backspace"/);
 assert.match(canvasSurface, /window\.addEventListener\("keydown", handleKeyDown, true\)/);
@@ -5452,7 +6081,8 @@ assert.match(canvasSurface, /history: "ignore"/);
 assert.match(canvasSurface, /SqlErdSelectionSync/);
 assert.match(canvasSurface, /SqlErdSelectedColumnSync/);
 assert.match(canvasSurface, /SqlErdLayoutSync/);
-assert.match(canvasSurface, /onLayoutChange/);
+assert.match(canvasSurface, /onLayoutPatch/);
+assert.doesNotMatch(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
@@ -5466,6 +6096,10 @@ assert.match(canvasSurface, /SqlErdAnnotationShapeUtil/);
 assert.match(canvasSurface, /getSqlErdTableShapeId/);
 assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
+assert.match(canvasSurface, /createSqltoerdAutoLayout/);
+assert.match(canvasSurface, /markHistoryStoppingPoint\("sqltoerd auto layout"\)/);
+assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
+assert.match(canvasSurface, /SQLTOERD_MINIMUM_READABLE_ZOOM/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
 assert.match(
   canvasSurface,
@@ -5490,8 +6124,8 @@ assert.match(tableShape, /nullable/);
 assert.match(tableShape, /getSqlErdTableBadgeColumnWidth/);
 assert.match(tableShape, /badgeColumnWidth/);
 assert.match(tableShape, /minWidth/);
-assert.match(tableShape, /ROW_CONTENT_SAFETY_PADDING/);
-assert.match(tableShape, /ROW_COLUMN_GAP \* 2/);
+assert.match(tableShape, /getSqltoerdTableCardSize/);
+assert.match(tableShape, /SQLTOERD_ROW_COLUMN_GAP as ROW_COLUMN_GAP/);
 assert.match(tableShape, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(tableShape, /selectSqlErdColumn/);
 assert.match(tableShape, /data-sqltoerd-table-header/);
@@ -5596,6 +6230,28 @@ assert.doesNotMatch(
   /\(startPoint\.x \+ endPoint\.x\) \/ 2/
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
+assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(
+  canvasSurface,
+  /function deleteNote\(noteId: string\)[\s\S]*?deleteNoteIds/
+);
+assert.match(
+  canvasSurface,
+  /isSqlErdNoteShape\(selectedShape\)[\s\S]*?deleteNote\(selectedShape\.props\.noteId\)/
+);
+assert.match(
+  canvasSurface,
+  /const frameShape = editor\.getShape\(getSqlErdFrameShapeId\(frameId\)\);[\s\S]*?isSqlErdFrameShape\(frameShape\)[\s\S]*?editor\.updateShapes\(\[[\s\S]*?props: \{ \.\.\.frameShape\.props, \.\.\.patch \}/
+);
+assert.match(
+  canvasSurface,
+  /const frame = layoutJsonRef\.current\.annotations\?\.frames\?\.find\([\s\S]*?if \(!frame \|\| frame\.isLocked\) \{[\s\S]*?return;/
+);
+assert.match(
+  canvasSurface,
+  /isSqlErdFrameShape\(selectedShape\)[\s\S]*?selectedShape\.props\.isLocked/
+);
 assert.match(relationShape, /hideSelectionBoundsBg/);
 assert.match(relationShape, /hideSelectionBoundsFg/);
 assert.match(canvasSurface, /fromColumnIds: relation\.fromColumnIds/);
@@ -5631,3 +6287,99 @@ assert.match(apiClient, /sql-erd-sessions/);
 assert.doesNotMatch(apiClient, /sql-erd-session`/);
 assert.match(apiClient, /Authorization: `Bearer \$\{accessToken\}`/);
 assert.match(apiClient, /credentials: "same-origin"/);
+assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
+assert.doesNotMatch(apiSpec, /^- Group box$/m);
+assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
+assert.match(apiSpec, /`links`, `notes`, `frames` 전체에서 중복될 수 없다/);
+
+assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
+const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
+  {
+    version: 1,
+    tableLayouts: [{ tableId: "table.users", x: 10, y: 20 }],
+    annotations: {
+      version: 1,
+      links: [],
+      notes: [
+        {
+          id: "note.users",
+          x: 40,
+          y: 60,
+          width: 240,
+          height: 160,
+          text: "before"
+        }
+      ],
+      frames: []
+    }
+  },
+  {
+    tablePositions: [{ tableId: "table.users", x: 100, y: 200 }],
+    notesById: { "note.users": { text: "" } }
+  }
+);
+assert.deepEqual(patchedLayout.tableLayouts, [
+  { tableId: "table.users", x: 100, y: 200 }
+]);
+assert.equal(patchedLayout.annotations.notes[0].text, "");
+assert.equal(
+  "annotations" in modelRuntime.applySqltoerdLayoutPatch(
+    { version: 1, tableLayouts: [{ tableId: "table.users", x: 0, y: 0 }] },
+    { tablePositions: [{ tableId: "table.users", x: 5, y: 6 }] }
+  ),
+  false
+);
+const layoutWithCreatedFrame = modelRuntime.applySqltoerdLayoutPatch(
+  patchedLayout,
+  {
+    framesToAdd: [{
+      id: "frame.billing",
+      x: 10,
+      y: 20,
+      width: 640,
+      height: 420,
+      title: "Billing",
+      color: "blue",
+      isLocked: true
+    }]
+  }
+);
+assert.equal(layoutWithCreatedFrame.annotations.frames[0].title, "Billing");
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    layoutWithCreatedFrame,
+    modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+      notesById: { "note.users": { text: "after" } }
+    })
+  ),
+  false
+);
+assert.equal(
+  modelRuntime.areSqltoerdLayoutsEqual(
+    layoutWithCreatedFrame,
+    modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+      framesById: { "frame.billing": { isLocked: false } }
+    })
+  ),
+  false
+);
+assert.equal(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+    linksToAdd: [{ id: "link.users.orders", kind: "table_link", fromTableId: "table.users", toTableId: "table.orders", label: "owns" }],
+    linksById: { "link.users.orders": { label: "ignored-before-add" } }
+  }).annotations.links[0].label,
+  "owns"
+);
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedFrame, {
+    deleteNoteIds: ["note.users"]
+  }).annotations.notes,
+  []
+);
+
+assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
+assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
+assert.match(canvasSurface, /data-sqltoerd-add-note/);
+assert.match(canvasSurface, /data-sqltoerd-add-frame/);
+assert.match(canvasSurface, /onLayoutPatch\(\{ tablePositions: nextLayoutJson\.tableLayouts \}\)/);
+assert.doesNotMatch(canvasSurface, /onLayoutChange/);

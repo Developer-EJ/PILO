@@ -61,6 +61,12 @@ variable "github_sync_operator_user_name" {
   default     = ""
 }
 
+variable "team_administrator_user_names" {
+  description = "IAM user names to create with direct AdministratorAccess for team operations."
+  type        = set(string)
+  default     = []
+}
+
 variable "github_sync_operator_dlq_arns" {
   description = "GitHub Sync dead-letter queue ARNs available to the operator."
   type        = list(string)
@@ -79,6 +85,16 @@ variable "secrets_manager_arns" {
 
 variable "cloudfront_distribution" {
   type = string
+}
+
+variable "terraform_plan_state_bucket_arn" {
+  description = "S3 bucket ARN for the remote Terraform state that GitHub Actions plan jobs may read."
+  type        = string
+}
+
+variable "terraform_plan_state_key" {
+  description = "Remote Terraform state object key used by GitHub Actions plan jobs."
+  type        = string
 }
 
 variable "github_oidc_thumbprints" {

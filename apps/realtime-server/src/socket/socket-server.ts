@@ -11,6 +11,7 @@ import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-
 import {
   createCanvasAccessService,
   type CanvasAccessContext,
+  type CanvasRoomAccess,
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
@@ -19,6 +20,7 @@ import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import {
   isMeetingReportRedisEvent,
+  isMeetingStateRedisEvent,
   meetingClientEvents,
   meetingServerEvents
 } from "../meeting/meeting-socket-events";
@@ -54,11 +56,13 @@ type AuthedSocket = Socket & {
     auth: CanvasAccessContext & {
       displayName?: string;
     };
+    canvasRoomAccess: Map<string, CanvasRoomAccess>;
   };
 };
 
 const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
 const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
+const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -347,6 +351,23 @@ function emitCanvasError(socket: Socket, message: string) {
   );
 }
 
+function assertCanvasRoomWritable(
+  socket: AuthedSocket,
+  roomName: string,
+): boolean {
+  const access = socket.data.canvasRoomAccess.get(roomName);
+
+  if (access && !access.readOnly) {
+    return true;
+  }
+
+  socket.emit(
+    canvasServerEvents.error,
+    createSocketErrorPayload("forbidden", "canvas room is read-only"),
+  );
+  return false;
+}
+
 function readMeetingWorkspaceId(payload: unknown): string | null {
   if (!isRecord(payload)) return null;
   return readRequiredString(payload, "workspaceId");
@@ -371,6 +392,10 @@ export async function createRealtimeSocketServer({
     ? await createSocketIoRedisAdapter(config.redisUrl)
     : null;
   const database = createRealtimeDatabase({
+    databaseApplicationName: config.databaseApplicationName,
+    databasePoolConnectionTimeoutMs: config.databasePoolConnectionTimeoutMs,
+    databasePoolIdleTimeoutMs: config.databasePoolIdleTimeoutMs,
+    databasePoolMax: config.databasePoolMax,
     databaseSsl: config.databaseSsl,
     databaseUrl: config.databaseUrl,
   });
@@ -428,6 +453,20 @@ export async function createRealtimeSocketServer({
         io.to(createMeetingRoomName(workspaceId)).emit(meetingServerEvents.reportUpdated, event);
       })
     : null;
+  const unsubscribeMeetingStates = redisAdapter
+    ? await redisAdapter.subscribe(MEETING_STATE_REDIS_CHANNEL, payload => {
+        if (!isMeetingStateRedisEvent(payload)) {
+          console.error("Meeting state Redis payload is invalid", payload);
+          return;
+        }
+
+        const { workspaceId, ...event } = payload;
+        io.to(createMeetingRoomName(workspaceId)).emit(
+          meetingServerEvents.stateUpdated,
+          event
+        );
+      })
+    : null;
   const unsubscribeBoardInvalidations = redisAdapter
     ? await redisAdapter.subscribe(BOARD_INVALIDATION_REDIS_CHANNEL, (payload) => {
         if (!boardInvalidationFanOut.fanOut(payload)) {
@@ -459,6 +498,7 @@ export async function createRealtimeSocketServer({
           ...authContext,
           userId: session.userId,
         };
+        (socket as AuthedSocket).data.canvasRoomAccess = new Map();
         next();
       })
       .catch(next);
@@ -489,6 +529,7 @@ export async function createRealtimeSocketServer({
       }
 
       await socket.join(result.roomName);
+      authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
       socket.emit(canvasServerEvents.joined, result.payload);
     });
 
@@ -546,6 +587,7 @@ export async function createRealtimeSocketServer({
       );
 
       await socket.leave(roomName);
+      authedSocket.data.canvasRoomAccess.delete(roomName);
 
       if (leavePayload) {
         socket.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);
@@ -624,6 +666,10 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
       const result = await shapeLockService.claimLocks(
         socket.id,
         authedSocket.data.auth.userId ?? socket.id,
@@ -664,6 +710,10 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
       const lockReleasePayload = await shapeLockService.clearRoomLocks(
         socket.id,
         authedSocket.data.auth.userId ?? socket.id,
@@ -694,6 +744,10 @@ export async function createRealtimeSocketServer({
             "join canvas room before sending shape previews",
           ),
         );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
         return;
       }
 
@@ -730,6 +784,10 @@ export async function createRealtimeSocketServer({
             "join canvas room before clearing shape previews",
           ),
         );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
         return;
       }
 
@@ -780,6 +838,7 @@ export async function createRealtimeSocketServer({
     async close() {
       await unsubscribeCanvasOperations?.();
       await unsubscribeMeetingReports?.();
+      await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();
       await io.close();
       await redisAdapter?.close();

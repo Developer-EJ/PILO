@@ -18,8 +18,9 @@ CloudWatch uses `/ecs/${name_prefix}/github-sync-worker` and existing SQS/ECS me
 | operation logs | `RetryCount` | 5 | 20 | Retries are concentrated in five minutes. |
 | operation logs | `TerminalFailureCount` | 1 | 5 | Terminal failures occurred in five minutes. |
 | operation logs | `RateLimitRemaining` | 100 | 0 | GitHub GraphQL quota is low or exhausted. |
+| operation logs | `DatabasePoolExhaustedCount` | 1 | - | The worker could not acquire a Supabase session-pool connection. |
 
-`RetryCount` is produced by `github_sync_retry`. `TerminalFailureCount` is produced by `github_sync_terminal_failure` and `github_sync_rate_limit_terminal_failure`. `RateLimitRemaining` is produced by numeric `github_sync_rate_limit_observed` events from successful GraphQL responses, so it is a pre-exhaustion signal rather than only a terminal-failure signal. Critical requires immediate human investigation; Warning requires trend and worker-health confirmation.
+`RetryCount` is produced by `github_sync_retry`. `TerminalFailureCount` is produced by `github_sync_terminal_failure` and `github_sync_rate_limit_terminal_failure`. `RateLimitRemaining` is produced by numeric `github_sync_rate_limit_observed` events from successful GraphQL responses, so it is a pre-exhaustion signal rather than only a terminal-failure signal. `DatabasePoolExhaustedCount` is produced only when the worker classifies a database error as `EMAXCONNSESSION`. Critical requires immediate human investigation; Warning requires trend and worker-health confirmation.
 
 Consider a separate event worker or autoscaling only after worker health is confirmed and either of these is true:
 
@@ -34,8 +35,9 @@ The worker writes one raw JSON event per stdout line so CloudWatch JSON filters 
 - `github_sync_terminal_failure`
 - `github_sync_rate_limit_terminal_failure`
 - `github_sync_rate_limit_observed`
+- `github_sync_worker_poll_retry`
 
-Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`.
+Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`. A failed worker poll emits `github_sync_worker_poll_retry` with `target: "worker_poll"`, bounded backoff, and a safe `failureKind`; it never includes the underlying database error text.
 
 Never log access tokens, webhook payloads, provider raw errors, or secrets. Use event identifiers and DB state for investigation; do not add credentials or payloads to logs or incident evidence.
 
@@ -56,6 +58,26 @@ Do not change queue behavior during redrive: webhook visibility remains 120 seco
 ### Worker stopped
 
 For `RunningTaskCount` Warning or Critical, inspect ECS service events and task stopped reasons. Correct image, task-role, network, or secret injection issues, then confirm at least one worker task is running. Do not classify backlog as a scaling issue before worker health is confirmed.
+
+### Database pool exhausted
+
+At `DatabasePoolExhaustedCount` Warning, do not restart or scale the worker first. Confirm App Server, Realtime, and GitHub sync worker task counts; then inspect the Supabase session-pool count and safe connection metadata such as `application_name`. The worker retries the failed poll with bounded backoff, so wait for the metric to stop increasing before validating queue drain. Do not expose database URLs, passwords, or raw database errors in the incident record.
+
+## DB connection budget
+
+The dev Supabase session pool has 15 sessions. Reserve 3 sessions for operator access and transient platform activity; application services may use at most 12.
+
+| Service | task count | task connection cap | budgeted connections |
+| --- | ---: | ---: | ---: |
+| App Server | 1 | 2 | 2 |
+| GitHub sync worker | 1 | 1 | 1 |
+| Realtime | 1 | 1 | 1 |
+| Shared AI worker | 1 | 3 persistent connections | 3 |
+| Agent worker | 1 | 1 persistent connection | 1 |
+| Meeting worker | 1 | 1 persistent connection | 1 |
+| **Total** |  |  | **9** |
+
+The shared AI worker replacement is the largest single-service overlap: 9 + 3 = 12, which stays within the application budget. Deploy DB-using ECS services one at a time; concurrent replacements can exceed the 12-session budget even when each task follows its individual cap.
 
 ### Failed queue publish
 
@@ -81,6 +103,32 @@ After deployment or worker changes, collect evidence for both dev flows:
 2. Cause one safe retryable failure. Confirm `github_sync_retry`, `retryAfterSeconds`, CloudWatch `RetryCount`, queue age/backlog, and that the DB run/job did not incorrectly become terminal before retry.
 
 Do not use a real credential revoke, actual rate-limit exhaustion, or a bulk dev/production DLQ redrive as a smoke test. In both flows, retain logs, CloudWatch observations, and DB-state evidence without access tokens, webhook payloads, provider raw errors, or secrets.
+
+## LocalStack queue configuration verification
+
+After starting LocalStack through Docker Compose or running `infra/scripts/create-local-sqs-queues.ps1`, verify both GitHub queues before testing a worker flow. `pilo-dev-github-webhooks` must have `VisibilityTimeout` `120` and `pilo-dev-github-sync-jobs` must have `VisibilityTimeout` `900`. Both queues must have a `RedrivePolicy` that targets their matching `-dlq` queue with `maxReceiveCount` `3`.
+
+```bash
+awslocal sqs get-queue-attributes --queue-url "$(awslocal sqs get-queue-url --queue-name pilo-dev-github-webhooks --query QueueUrl --output text)" --attribute-names VisibilityTimeout RedrivePolicy
+awslocal sqs get-queue-attributes --queue-url "$(awslocal sqs get-queue-url --queue-name pilo-dev-github-sync-jobs --query QueueUrl --output text)" --attribute-names VisibilityTimeout RedrivePolicy
+```
+
+For a PowerShell-created LocalStack instance, replace `awslocal sqs` with `aws --endpoint-url $env:SQS_ENDPOINT sqs` and use the same queue names and attributes. Do not change these attributes while redriving a DLQ.
+
+### Isolated LocalStack integration test
+
+`Infra LocalStack Integration` workflow runs `infra/tests/github-sync-localstack-config.test.mjs` on the GitHub-hosted `ubuntu-latest` runner when the GitHub queue setup paths, this runbook, or the workflow changes. GitHub-hosted Windows runners do not provide a Docker daemon for LocalStack containers, so CI uses Docker Linux container mode and `pwsh` (PowerShell 7) to execute the same PowerShell queue setup script. Before the test, it verifies Docker availability, Docker Linux mode, AWS CLI, and `pwsh`. It starts separate disposable `localstack/localstack:3` containers with anonymous port mappings, runs the shell and PowerShell setup paths independently, and removes the containers afterward. It never uses the `pilo_localstack_data` Docker volume or an AWS account.
+
+For manual Windows execution, Docker Desktop must be running and able to pull `localstack/localstack:3`; Node.js, Windows PowerShell, and AWS CLI must be available. On Linux/macOS, the same test uses `pwsh`. The test supplies only a LocalStack endpoint and test credentials to the PowerShell setup path; it does not use AWS account credentials or an AWS endpoint.
+
+Run it manually from the repository root:
+
+```powershell
+$env:RUN_LOCALSTACK_INTEGRATION=1
+node infra/tests/github-sync-localstack-config.test.mjs
+```
+
+The test verifies `VisibilityTimeout`, `RedrivePolicy`, matching DLQ ARN, and `maxReceiveCount` `3` for both `pilo-dev-github-webhooks` and `pilo-dev-github-sync-jobs` after each setup path.
 
 ## Cost scope
 

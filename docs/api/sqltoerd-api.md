@@ -43,8 +43,6 @@ API가 담당하는 범위:
 - model-to-SQL 재생성
 - BigQuery CTE lineage
 - Prisma/DBML/Mermaid/PlantUML/SQLAlchemy/Sequelize source 저장
-- Sticky note
-- Group box
 - Manual arrow
 - URL 공유
 - 실시간 협업
@@ -119,6 +117,7 @@ sql
 auto
 postgresql
 mysql
+sqlite
 ```
 
 서버는 dialect 자동 감지를 수행하지 않는다. client가 감지한 값 또는 사용자가 선택한
@@ -202,6 +201,28 @@ type SqltoerdLayoutJsonV1 = {
 type SqltoerdAnnotationsV1 = {
   version: 1;
   links: SqltoerdAnnotationLink[];
+  notes?: SqltoerdCanvasNote[];
+  frames?: SqltoerdCanvasFrame[];
+};
+
+type SqltoerdCanvasNote = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+};
+
+type SqltoerdCanvasFrame = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  color: "slate" | "blue" | "green" | "amber" | "rose";
+  isLocked: boolean;
 };
 
 type SqltoerdAnnotationLink =
@@ -227,9 +248,15 @@ type SqltoerdColumnAnnotationLink = {
 };
 ```
 
-`annotations`는 SQL에 반영되지 않는 Canvas 설명 관계 전용 영역이다. 실제 FK는
+`annotations`는 SQL에 반영되지 않는 Canvas annotation 영역이다. 실제 FK는
 `modelJson.schema.relations`에만 저장하고 annotation link를 `ErdRelation`으로
-취급하지 않는다.
+취급하지 않는다. `notes`는 Sticky note, `frames`는 Group box 용도의 시각 요소다.
+
+`annotations.notes`와 `annotations.frames`는 SQL, FK, table/relation count를 바꾸지
+않는 독립적인 시각 annotation이다. 각각 최대 100개이며 id는 `links`, `notes`,
+`frames` 전체에서 중복될 수 없다. 좌표와 크기는 finite number이고 크기는 0보다
+커야 한다. note text는 최대 2,000자, frame title은 최대 200자이며 frame color는
+`slate`, `blue`, `green`, `amber`, `rose`만 허용한다.
 
 #### Annotation Version과 하위 호환
 
@@ -274,7 +301,7 @@ type SqltoerdColumnAnnotationLink = {
 - `viewport.zoom`은 0보다 커야 한다.
 - `layoutJson.annotations.version`은 `1`만 허용한다.
 - `layoutJson.annotations.links`는 최대 300개다.
-- annotation `id`는 전체 link 배열에서 중복될 수 없다.
+- annotation `id`는 `links`, `notes`, `frames` 전체에서 중복될 수 없다.
 - annotation의 table/column endpoint는 `modelJson`에 존재하는 id를 참조해야 한다.
 - annotation endpoint는 방향이 없는 관계로 취급하며 정방향과 역방향을 중복으로
   저장할 수 없다.
@@ -309,7 +336,7 @@ type SqltoerdWorkspaceSessionSummary = {
   workspaceId: string;
   title: string;
   sourceFormat: "sql";
-  dialect: "auto" | "postgresql" | "mysql";
+  dialect: "auto" | "postgresql" | "mysql" | "sqlite";
   tableCount: number;
   relationCount: number;
   revision: number;
@@ -362,6 +389,28 @@ type SqltoerdWorkspaceSessionSummary = {
 
 `settingsJson`은 선택값으로 받을 수 있으나, theme 전환이나 panel preference
 저장은 이번 multi-session 계약의 수용 기준으로 삼지 않는다.
+
+### `settingsJson.sqltoerdRelationNotes`
+
+설명 관계(`column_link`)를 실제 FK로 전환할 때 사용자가 기존 label 보관을
+선택하면, label은 SQL 문이나 FK constraint name이 아니라 아래 relation note map에
+저장한다.
+
+```ts
+type SqltoerdRelationNotes = Record<string, string>;
+
+type SqltoerdSettingsJson = {
+  sqltoerdRelationNotes?: SqltoerdRelationNotes;
+  [key: string]: unknown;
+};
+```
+
+- key는 현재 `modelJson.schema.relations`에 존재하는 stable FK relation id다.
+- value는 전환 전 설명 관계 label이며, 기존 annotation label 제한(최대 200자)을
+  따른다.
+- relation note는 FK SQL, relation count, FK cardinality를 변경하지 않는다.
+- 사용자가 label 폐기를 선택하거나 대상 FK가 없어지면 relation note를 저장하거나
+  표시하지 않는다.
 
 ## Session 목록 조회
 
@@ -668,7 +717,7 @@ plural endpoint는 현재 사용할 수 있으며, 신규 consumer는 plural end
 | request body | UTF-8 기준 2 MiB | 초과 시 `413 Payload Too Large` |
 | `title` | 1자 이상 120자 이하 | 위반 시 `400 Bad Request` |
 | `sourceFormat` | `sql` | 위반 시 `400 Bad Request` |
-| `dialect` | `auto`, `postgresql`, `mysql` | 위반 시 `400 Bad Request` |
+| `dialect` | `auto`, `postgresql`, `mysql`, `sqlite` | 위반 시 `400 Bad Request` |
 | `sourceText` | UTF-8 기준 1 MiB | 초과 시 `413 Payload Too Large` |
 | `modelJson` | JSON object | 위반 시 `400 Bad Request` |
 | `layoutJson` | JSON object | 위반 시 `400 Bad Request` |

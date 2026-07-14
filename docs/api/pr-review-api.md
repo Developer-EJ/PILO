@@ -130,6 +130,10 @@ POST /api/v1/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/revie
 `201 Created`를 반환한다. room이나 같은 head revision이 이미 있으면 재사용하며, 새 revision을
 만들지 않은 경우 `200 OK`를 반환한다.
 
+GitHub Integration이 동기화한 PR 상태가 `closed`이거나 `merged_at`, `github_closed_at`이
+기록된 경우 새 room 또는 revision을 만들지 않고 `409 Conflict`를 반환한다. 이 endpoint는
+GitHub에 PR 상태를 직접 재조회하지 않고 동기화된 `github_pull_requests` read model을 사용한다.
+
 ```json
 {
   "room": {
@@ -160,7 +164,8 @@ POST /api/v1/workspaces/{workspaceId}/github/pull-requests/{pullRequestId}/revie
 - `GET /review-rooms/{reviewRoomId}`는 현재 성공 revision과 분석 중 revision ID를 함께 반환한다.
 - `GET /review-rooms/{reviewRoomId}/revisions`는 최신 생성 순 revision 이력을 반환한다.
 - `POST /review-rooms/{reviewRoomId}/revisions`는 현재 GitHub head를 분석한 revision을 생성하거나
-  이미 존재하는 `failed`가 아닌 revision을 반환한다. 완료 room에서는 `409`를 반환한다.
+  이미 존재하는 `failed`가 아닌 revision을 반환한다. 완료 room 또는 동기화된 PR이 종료된
+  상태에서는 `409`를 반환한다.
 
 ## Review Session 생성 호환 endpoint
 
@@ -532,9 +537,10 @@ App Server가 session을 해당 안전한 `failed` reason code로 전환한 뒤 
 
 PR Review 전용 Worker는 Responses API의 strict JSON schema `pr_review_analysis`를 사용한다.
 모델은 `OPENAI_PR_REVIEW_MODEL`을 사용하고, 값이 없으면 `gpt-5.1-mini`를 사용한다. Worker의
-provider timeout은 `OPENAI_PR_REVIEW_TIMEOUT_MS`로 설정하며 기본값은 60초다. PR Review 전용
-worker runtime은 `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`, `PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL`,
-`PR_REVIEW_ANALYSIS_WORKER_TOKEN`을 별도로 사용한다. 이 분석 계약은
+provider timeout은 `OPENAI_PR_REVIEW_TIMEOUT_MS`로 설정하며 기본값은 180초다. OpenAI SDK의
+내부 재시도는 사용하지 않고, timeout·rate limit·provider 5xx 재시도는 SQS receive 경계에서만
+수행한다. PR Review 전용 worker runtime은 `SQS_PR_REVIEW_ANALYSIS_QUEUE_URL`,
+`PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL`, `PR_REVIEW_ANALYSIS_WORKER_TOKEN`을 별도로 사용한다. 이 분석 계약은
 기존 동기 PR 분석의 모델·prompt 목적·출력 구조를 유지한 것이며, conflict suggestion의 모델,
 prompt, 동기 호출 방식은 변경하지 않는다.
 
@@ -713,6 +719,14 @@ Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
 안에서 시스템 shape를 생성·갱신한다. 같은 room file은 기존 위치·크기·parent·표시 순서를
 유지하고 새 file node만 deterministic grid 초기 위치를 받는다. 현재 버전에서 사라진
 시스템 shape는 soft delete로 숨기며, 이후 다시 나타나면 마지막 geometry로 복원한다.
+
+Review Canvas frontend는 room 상세의 `canvasId`로 Canvas viewport Shape API를 호출한다.
+저장된 `pr_review_file_node`가 있으면 시스템 Shape를 우선 렌더링하고, Materialization 전
+기존 session처럼 저장 Shape가 없거나 조회에 실패하면 이 endpoint의 graph로 read-only
+layout을 구성한다. File node 이동은 Canvas 단일 Shape 수정 API에 `baseRevision`을 포함해
+저장하며, relation edge geometry는 저장 요청을 만들지 않고 이동한 node 위치를 따라
+클라이언트에서 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
+저장 상태로 복구한다.
 
 ```json
 {

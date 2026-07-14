@@ -1,20 +1,29 @@
 import type {
+  SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1,
-  SqltoerdResolvedDialect
+  SqltoerdResolvedDialect,
+  SqltoerdSettingsJson
 } from "@/features/sql-erd/types";
 import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
+import { retainSqltoerdRelationNotesForModel } from "@/features/sql-erd/utils/foreign-key-add";
 import { createSqltoerdLayoutForModel } from "@/features/sql-erd/utils/model";
-import { generateSqlDdlFromErdModel } from "@/features/sql-erd/utils/model-to-sql";
+import {
+  generateSqlDdlFromErdModel,
+  SqltoerdModelToSqlGenerationError
+} from "@/features/sql-erd/utils/model-to-sql";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
 
 const SQL_ERD_MODEL_SQL_HISTORY_LIMIT = 20;
 
 export type SqlErdNormalizedSqlPreview = {
   baseSnapshot: SqlErdViewSession;
+  generationBlocked: boolean;
   generatedSourceText: string;
   hasChanges: boolean;
+  layoutJson: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
   resolvedDialect: SqltoerdResolvedDialect;
+  settingsJson: SqltoerdSettingsJson;
   warnings: string[];
 };
 
@@ -44,27 +53,58 @@ export type SqlErdSqlDiffLine = {
 };
 
 export function createSqlErdNormalizedSqlPreview({
+  layoutJson,
   modelJson,
   resolvedDialect,
-  session
+  session,
+  settingsJson
 }: {
+  layoutJson?: SqltoerdLayoutJsonV1;
   modelJson: SqltoerdModelJsonV1;
   resolvedDialect: SqltoerdResolvedDialect;
   session: SqlErdViewSession;
+  settingsJson?: SqltoerdSettingsJson;
 }): SqlErdNormalizedSqlPreview {
-  const generated = generateSqlDdlFromErdModel({
-    dialect: resolvedDialect,
-    modelJson
-  });
+  try {
+    const generated = generateSqlDdlFromErdModel({
+      dialect: resolvedDialect,
+      modelJson
+    });
 
-  return {
-    baseSnapshot: session,
-    generatedSourceText: generated.sql,
-    hasChanges: generated.sql !== session.sourceText,
-    modelJson,
-    resolvedDialect,
-    warnings: generated.warnings
-  };
+    return {
+      baseSnapshot: session,
+      generationBlocked: false,
+      generatedSourceText: generated.sql,
+      hasChanges: generated.sql !== session.sourceText,
+      layoutJson: layoutJson ?? session.layoutJson,
+      modelJson,
+      resolvedDialect,
+      settingsJson: retainSqltoerdRelationNotesForModel(
+        settingsJson ?? session.settingsJson,
+        modelJson
+      ),
+      warnings: generated.warnings
+    };
+  } catch (error) {
+    if (!(error instanceof SqltoerdModelToSqlGenerationError)) {
+      throw error;
+    }
+
+    return {
+      baseSnapshot: session,
+      generationBlocked: true,
+      generatedSourceText: session.sourceText,
+      hasChanges: false,
+      layoutJson: layoutJson ?? session.layoutJson,
+      modelJson,
+      resolvedDialect,
+      settingsJson: retainSqltoerdRelationNotesForModel(
+        settingsJson ?? session.settingsJson,
+        modelJson
+      ),
+      warnings: [error.message]
+    };
+  }
 }
 
 export function createSqlErdSqlLineDiff(
@@ -114,6 +154,15 @@ export function createSqlErdSqlLineDiff(
 export function applySqlErdNormalizedSqlPreview(
   preview: SqlErdNormalizedSqlPreview
 ): SqlErdModelSqlApplyResult {
+  if (preview.generationBlocked) {
+    return {
+      error:
+        preview.warnings[0] ??
+        "SQL regeneration is unavailable for the current ERD model.",
+      ok: false
+    };
+  }
+
   const parseResult = parseSqlDdlToErdModel({
     dialect: preview.resolvedDialect,
     sourceMapModelJson: preview.modelJson,
@@ -134,9 +183,10 @@ export function applySqlErdNormalizedSqlPreview(
       dialect: preview.resolvedDialect,
       layoutJson: createSqltoerdLayoutForModel(
         parseResult.modelJson,
-        preview.baseSnapshot.layoutJson
+        preview.layoutJson
       ),
       modelJson: parseResult.modelJson,
+      settingsJson: preview.settingsJson,
       sourceText: preview.generatedSourceText
     }
   };
@@ -159,7 +209,8 @@ export function isSqlErdViewSessionCurrent(
     base.dialect === session.dialect &&
     base.sourceText === session.sourceText &&
     JSON.stringify(base.modelJson) === JSON.stringify(session.modelJson) &&
-    JSON.stringify(base.layoutJson) === JSON.stringify(session.layoutJson)
+    JSON.stringify(base.layoutJson) === JSON.stringify(session.layoutJson) &&
+    JSON.stringify(base.settingsJson) === JSON.stringify(session.settingsJson)
   );
 }
 

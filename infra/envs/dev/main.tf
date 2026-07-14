@@ -133,10 +133,13 @@ module "iam" {
   github_sync_worker_queue_arns      = module.sqs.github_sync_worker_queue_arns
   github_webhooks_queue_arn          = module.sqs.github_webhooks_queue_arn
   github_sync_operator_user_name     = "pilo-juhyung-github-ops"
+  team_administrator_user_names      = ["pilo-donghyun", "pilo-sein", "pilo-jinho"]
   github_sync_operator_dlq_arns      = module.sqs.github_sync_worker_dlq_arns
   github_sync_operator_log_group_arn = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/github-sync-worker"
   secrets_manager_arns               = concat(module.secrets.secret_arns, [module.rds.master_user_secret_arn])
   cloudfront_distribution            = module.cloudfront.distribution_arn
+  terraform_plan_state_bucket_arn    = "arn:aws:s3:::${module.terraform_state.state_bucket_name}"
+  terraform_plan_state_key           = "infra/dev/terraform.tfstate"
 }
 
 module "rds" {
@@ -195,24 +198,28 @@ module "ecs" {
       task_role_arn      = module.iam.app_server_task_role_arn
       target_group_arn   = module.alb.app_target_group_arn
       environment = {
-        APP_ENV                          = var.environment
-        AWS_REGION                       = var.aws_region
-        PORT                             = tostring(var.app_server_port)
-        DATABASE_SSL                     = "true"
-        S3_UPLOADS_BUCKET                = module.s3.uploads_bucket_name
-        SQS_AI_JOBS_QUEUE_URL            = module.sqs.ai_jobs_queue_url
-        SQS_AGENT_JOBS_QUEUE_URL         = module.sqs.agent_jobs_queue_url
-        SQS_MEETING_JOBS_QUEUE_URL       = module.sqs.meeting_jobs_queue_url
-        SQS_PR_REVIEW_ANALYSIS_QUEUE_URL = module.sqs.pr_review_analysis_queue_url
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL    = module.sqs.github_webhooks_queue_url
-        SQS_GITHUB_SYNC_JOBS_QUEUE_URL   = module.sqs.github_sync_jobs_queue_url
-        FRONTEND_URL                     = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
-        API_PUBLIC_ORIGIN                = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        API_BASE_PATH                    = "/api/v1"
-        LIVEKIT_RECORDING_MODE           = "room_audio_only"
-        LIVEKIT_EGRESS_S3_PREFIX         = "recordings/meetings"
-        OPENAI_PR_REVIEW_MODEL           = "gpt-5.5"
-        OPENAI_PR_REVIEW_TIMEOUT_MS      = "45000"
+        APP_ENV                             = var.environment
+        AWS_REGION                          = var.aws_region
+        PORT                                = tostring(var.app_server_port)
+        DATABASE_SSL                        = "true"
+        DATABASE_POOL_MAX                   = "2"
+        DATABASE_POOL_IDLE_TIMEOUT_MS       = "10000"
+        DATABASE_POOL_CONNECTION_TIMEOUT_MS = "5000"
+        DATABASE_APPLICATION_NAME           = "pilo-dev-app-server"
+        S3_UPLOADS_BUCKET                   = module.s3.uploads_bucket_name
+        SQS_AI_JOBS_QUEUE_URL               = module.sqs.ai_jobs_queue_url
+        SQS_AGENT_JOBS_QUEUE_URL            = module.sqs.agent_jobs_queue_url
+        SQS_MEETING_JOBS_QUEUE_URL          = module.sqs.meeting_jobs_queue_url
+        SQS_PR_REVIEW_ANALYSIS_QUEUE_URL    = module.sqs.pr_review_analysis_queue_url
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL       = module.sqs.github_webhooks_queue_url
+        SQS_GITHUB_SYNC_JOBS_QUEUE_URL      = module.sqs.github_sync_jobs_queue_url
+        FRONTEND_URL                        = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
+        API_PUBLIC_ORIGIN                   = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        API_BASE_PATH                       = "/api/v1"
+        LIVEKIT_RECORDING_MODE              = "room_audio_only"
+        LIVEKIT_EGRESS_S3_PREFIX            = "recordings/meetings"
+        OPENAI_PR_REVIEW_MODEL              = "gpt-5.5"
+        OPENAI_PR_REVIEW_TIMEOUT_MS         = "45000"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
@@ -227,11 +234,15 @@ module "ecs" {
       task_role_arn      = module.iam.realtime_server_task_role_arn
       target_group_arn   = module.alb.realtime_target_group_arn
       environment = {
-        APP_ENV               = var.environment
-        AWS_REGION            = var.aws_region
-        PORT                  = tostring(var.realtime_server_port)
-        DATABASE_SSL          = "true"
-        SOCKET_IO_CORS_ORIGIN = local.frontend_domain == "" ? "*" : "https://${local.frontend_domain}"
+        APP_ENV                             = var.environment
+        AWS_REGION                          = var.aws_region
+        PORT                                = tostring(var.realtime_server_port)
+        DATABASE_SSL                        = "true"
+        DATABASE_POOL_MAX                   = "1"
+        DATABASE_POOL_IDLE_TIMEOUT_MS       = "10000"
+        DATABASE_POOL_CONNECTION_TIMEOUT_MS = "5000"
+        DATABASE_APPLICATION_NAME           = "pilo-dev-realtime-server"
+        SOCKET_IO_CORS_ORIGIN               = local.frontend_domain == "" ? "*" : "https://${local.frontend_domain}"
       }
       secrets = module.secrets.realtime_server_ecs_secrets
     }
@@ -339,7 +350,7 @@ module "ecs" {
         PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         PR_REVIEW_ANALYSIS_HANDOFF_TIMEOUT_SECONDS = "10"
         OPENAI_PR_REVIEW_MODEL                     = "gpt-5.5"
-        OPENAI_PR_REVIEW_TIMEOUT_MS                = "60000"
+        OPENAI_PR_REVIEW_TIMEOUT_MS                = "180000"
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS   = "900"
       }
       secrets = module.secrets.pr_review_ai_worker_ecs_secrets
@@ -356,12 +367,16 @@ module "ecs" {
       task_role_arn      = module.iam.github_sync_worker_task_role_arn
       target_group_arn   = null
       environment = {
-        APP_ENV                        = var.environment
-        AWS_REGION                     = var.aws_region
-        DATABASE_SSL                   = "true"
-        API_PUBLIC_ORIGIN              = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
-        SQS_GITHUB_WEBHOOKS_QUEUE_URL  = module.sqs.github_webhooks_queue_url
-        SQS_GITHUB_SYNC_JOBS_QUEUE_URL = module.sqs.github_sync_jobs_queue_url
+        APP_ENV                             = var.environment
+        AWS_REGION                          = var.aws_region
+        DATABASE_SSL                        = "true"
+        DATABASE_POOL_MAX                   = "1"
+        DATABASE_POOL_IDLE_TIMEOUT_MS       = "10000"
+        DATABASE_POOL_CONNECTION_TIMEOUT_MS = "5000"
+        DATABASE_APPLICATION_NAME           = "pilo-dev-github-sync-worker"
+        API_PUBLIC_ORIGIN                   = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        SQS_GITHUB_WEBHOOKS_QUEUE_URL       = module.sqs.github_webhooks_queue_url
+        SQS_GITHUB_SYNC_JOBS_QUEUE_URL      = module.sqs.github_sync_jobs_queue_url
       }
       secrets = module.secrets.github_sync_worker_ecs_secrets
     }

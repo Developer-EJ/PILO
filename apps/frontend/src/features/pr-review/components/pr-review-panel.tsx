@@ -43,7 +43,9 @@ import {
   PrReviewApiError
 } from "@/features/pr-review/api/client";
 import { PrReviewAnalysisStatus } from "@/features/pr-review/components/pr-review-analysis-status";
+import { PrReviewCanvasErrorBoundary } from "@/features/pr-review/components/review-canvas/PrReviewCanvasErrorBoundary";
 import { PrReviewCanvasShell } from "@/features/pr-review/components/review-canvas/PrReviewCanvasShell";
+import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
 import type {
   PrReviewPaginationMeta,
   PrReviewPullRequest,
@@ -52,6 +54,7 @@ import type {
   PrReviewRepository,
   PrReviewSession
 } from "@/features/pr-review/types";
+import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 type DetailStatus = "idle" | "loading" | "ready" | "error";
@@ -113,15 +116,10 @@ function isAbortError(error: unknown) {
 }
 
 function getErrorMessage(error: unknown) {
-  if (error instanceof PrReviewApiError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "PR Review 정보를 불러오지 못했습니다.";
+  return getPrReviewErrorMessage(
+    error,
+    "PR Review 정보를 불러오지 못했습니다."
+  );
 }
 
 function formatNumber(value: number) {
@@ -189,6 +187,26 @@ export function PrReviewPanel() {
         accessToken
       }),
     [accessToken]
+  );
+  const realtimeIdentity = useMemo<CanvasRealtimeIdentity>(
+    () => ({
+      authToken: accessToken,
+      currentUser: authSession
+        ? {
+            userId: authSession.user.id,
+            displayName:
+              authSession.user.name ?? authSession.user.email ?? "PILO",
+            avatarUrl: authSession.user.avatarUrl
+          }
+        : null
+    }),
+    [
+      accessToken,
+      authSession?.user.avatarUrl,
+      authSession?.user.email,
+      authSession?.user.id,
+      authSession?.user.name
+    ]
   );
 
   const [repositoryStatus, setRepositoryStatus] =
@@ -697,17 +715,23 @@ export function PrReviewPanel() {
           session={activeReviewSession}
         />
       ) : activeReviewSession ? (
-        <PrReviewCanvasShell
-          apiClient={apiClient}
+        <PrReviewCanvasErrorBoundary
+          key={activeReviewSession.id}
           onBackToSelection={leaveReviewSession}
-          onGoToGithub={goToGithubPage}
-          onReviewSessionCreated={(session) =>
-            activateReviewSession(session, activeReviewPullRequest)
-          }
-          pullRequest={activeReviewPullRequest}
-          session={activeReviewSession}
-          workspaceId={workspaceId}
-        />
+        >
+          <PrReviewCanvasShell
+            apiClient={apiClient}
+            onBackToSelection={leaveReviewSession}
+            onGoToGithub={goToGithubPage}
+            onReviewSessionCreated={(session) =>
+              activateReviewSession(session, activeReviewPullRequest)
+            }
+            pullRequest={activeReviewPullRequest}
+            realtimeIdentity={realtimeIdentity}
+            session={activeReviewSession}
+            workspaceId={workspaceId}
+          />
+        </PrReviewCanvasErrorBoundary>
       ) : null}
 
       {!activeReviewSession ? (
