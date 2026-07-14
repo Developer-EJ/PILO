@@ -86,10 +86,22 @@ SQLtoERD 편집 화면은 REST session API와 별도로 Socket.IO presence room�
   workspaceId: string;
   sessionId: string;
   cursor: { x: number; y: number } | null;
-  selectedShapeIds: string[]; // max 100
+  selectedObjects: SqltoerdPresenceSelectedObject[]; // max 100
   tool: "select" | "note" | "frame" | "text" | "draw" | "eraser";
+  editingMode: "draw" | "move" | "resize" | "relation" | "sql" | null;
+  sentAt: string; // ISO 8601
+};
+
+type SqltoerdPresenceSelectedObject = {
+  type: "table" | "relation" | "annotation" | "note" | "frame" | "text" | "stroke";
+  id: string;
 };
 ```
+
+Client는 cursor를 tldraw page 좌표로 전송한다. pointer 이동은 `socket.volatile.emit()`
+으로 최대 80ms마다 전송하며, 마지막 전송 좌표에서 1.5 page 단위 이상 움직였을 때만
+전송한다. 5초 heartbeat와 15초 stale timeout을 사용하며, canvas를 벗어나면
+`cursor: null`을 전송한다.
 
 ### Server events
 
@@ -118,13 +130,21 @@ type SqltoerdPresenceState = {
   workspaceId: string;
   sessionId: string;
   userId: string;
-  displayName?: string;
+  displayName: string;
   cursor: { x: number; y: number } | null;
-  selectedShapeIds: string[];
+  selectedObjects: SqltoerdPresenceSelectedObject[];
   tool: "select" | "note" | "frame" | "text" | "draw" | "eraser";
+  editingMode: "draw" | "move" | "resize" | "relation" | "sql" | null;
+  sentAt: string;
   updatedAt: string;
 };
 ```
+
+`userId`와 `displayName`은 Socket.IO handshake payload를 신뢰하지 않는다. realtime
+server는 bearer session 검증 뒤 `users`와 `user_settings`에서 읽은 사용자 정보를
+사용해 채운다. 수신자는 page 좌표를 자신의 viewport 기준 screen 좌표로 변환하며,
+cursor는 requestAnimationFrame 보간으로 표시할 수 있다. `editingMode: "sql"`은
+SQL source panel이 열린 상태를 뜻한다.
 
 ## 데이터 규칙
 

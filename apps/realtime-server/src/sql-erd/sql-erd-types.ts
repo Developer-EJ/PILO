@@ -16,6 +16,26 @@ export type SqlErdPresenceTool =
   | "select"
   | "text";
 
+export type SqlErdPresenceEditingMode =
+  | "draw"
+  | "move"
+  | "relation"
+  | "resize"
+  | "sql"
+  | null;
+
+export type SqlErdPresenceSelectedObject = {
+  id: string;
+  type:
+    | "annotation"
+    | "frame"
+    | "note"
+    | "relation"
+    | "stroke"
+    | "table"
+    | "text";
+};
+
 export type SqlErdRoomRef = {
   sessionId: string;
   workspaceId: string;
@@ -25,17 +45,23 @@ export type SqlErdJoinPayload = SqlErdRoomRef;
 
 export type SqlErdPresenceUpdatePayload = SqlErdRoomRef & {
   cursor: SqlErdPresencePoint | null;
-  selectedShapeIds: string[];
+  editingMode: SqlErdPresenceEditingMode;
+  selectedObjects: SqlErdPresenceSelectedObject[];
+  sentAt: string;
   tool: SqlErdPresenceTool;
 };
 
 export type SqlErdPresenceUser = {
-  displayName?: string;
+  displayName: string;
   userId: string;
 };
 
-export type SqlErdPresenceState = SqlErdPresenceUpdatePayload & {
-  displayName?: string;
+export type SqlErdPresenceState = Omit<
+  SqlErdPresenceUpdatePayload,
+  "sentAt"
+> & {
+  displayName: string;
+  sentAt: string;
   updatedAt: string;
   userId: string;
 };

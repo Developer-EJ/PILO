@@ -1764,6 +1764,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinNavigationRequestId={tablePinState.navigationRequestId}
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
+          isSqlSourceOpen={isSourceOpen}
           selectedSqlErdObject={selectedSqlErdObject}
           sessionId={sessionId}
         />
@@ -2528,6 +2529,7 @@ type CanvasShellProps = {
   pinNavigationRequestId: number;
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
+  isSqlSourceOpen: boolean;
   selectedSqlErdObject: SqlErdSelection;
   sessionId: string;
 };
@@ -2543,6 +2545,7 @@ function CanvasShell({
   pinNavigationRequestId,
   pinnedTableId,
   realtimeConfig,
+  isSqlSourceOpen,
   selectedSqlErdObject,
   sessionId
 }: CanvasShellProps) {
@@ -2557,6 +2560,7 @@ function CanvasShell({
         pinNavigationRequestId={pinNavigationRequestId}
         pinnedTableId={pinnedTableId}
         realtimeConfig={realtimeConfig}
+        isSqlSourceOpen={isSqlSourceOpen}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
       />

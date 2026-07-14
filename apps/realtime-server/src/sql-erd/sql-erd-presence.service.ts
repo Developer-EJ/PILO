@@ -99,9 +99,11 @@ export function createSqlErdPresenceService(): SqlErdPresenceService {
     updatePresence(socketId, user, payload) {
       const state: StoredPresence = {
         cursor: payload.cursor,
-        ...(user.displayName ? { displayName: user.displayName } : {}),
-        selectedShapeIds: payload.selectedShapeIds,
+        displayName: user.displayName,
+        editingMode: payload.editingMode,
+        selectedObjects: payload.selectedObjects,
         sessionId: payload.sessionId,
+        sentAt: payload.sentAt,
         socketId,
         tool: payload.tool,
         updatedAt: new Date().toISOString(),

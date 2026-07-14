@@ -158,6 +158,7 @@ type SqlErdCanvasProps = {
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
   realtimeConfig?: SqlErdRealtimeConfig | null;
+  isSqlSourceOpen?: boolean;
   sessionId?: string | null;
   selectedSqlErdObject?: SqlErdSelection;
 };
@@ -2537,6 +2538,7 @@ export function SqlErdCanvas({
   pinNavigationRequestId = 0,
   pinnedTableId = null,
   realtimeConfig = null,
+  isSqlSourceOpen = false,
   sessionId = null,
   selectedSqlErdObject = { type: "none" }
 }: SqlErdCanvasProps) {
@@ -3118,6 +3120,7 @@ export function SqlErdCanvas({
         {sqlErdPresence.enabled ? (
           <SqlErdRealtimeBridge
             currentUserId={sqlErdPresence.currentUserId}
+            isSqlSourceOpen={isSqlSourceOpen}
             remotePresence={sqlErdPresence.remotePresence}
             tool={tool}
             updatePresence={sqlErdPresence.updatePresence}

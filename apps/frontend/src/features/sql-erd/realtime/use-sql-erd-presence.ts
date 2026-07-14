@@ -8,6 +8,9 @@ import {
   type SqlErdRealtimeSocket,
 } from "./sql-erd-realtime-client";
 import type {
+  SqlErdPresenceEditingMode,
+  SqlErdPresencePoint,
+  SqlErdPresenceSelectedObject,
   SqlErdPresenceTool,
   SqlErdRealtimeConfig,
   SqlErdRemotePresenceState,
@@ -15,11 +18,14 @@ import type {
 
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
-const PRESENCE_HEARTBEAT_MS = 10_000;
+const PRESENCE_HEARTBEAT_MS = 5_000;
 const PRESENCE_UPDATE_MIN_INTERVAL_MS = 80;
 
 type LocalPresencePatch = Partial<
-  Pick<SqlErdRemotePresenceState, "cursor" | "selectedShapeIds" | "tool">
+  Pick<
+    SqlErdRemotePresenceState,
+    "cursor" | "editingMode" | "selectedObjects" | "tool"
+  >
 >;
 
 export type SqlErdPresenceController = {
@@ -57,6 +63,21 @@ function isFreshPresence(presence: SqlErdRemotePresenceState) {
   return Date.parse(presence.updatedAt) >= Date.now() - STALE_PRESENCE_TIMEOUT_MS;
 }
 
+function hasCursorMovedEnough(
+  previousCursor: SqlErdPresencePoint | null,
+  nextCursor: SqlErdPresencePoint | null,
+) {
+  if (!nextCursor) return previousCursor !== null;
+  if (!previousCursor) return true;
+
+  return (
+    Math.hypot(
+      nextCursor.x - previousCursor.x,
+      nextCursor.y - previousCursor.y,
+    ) >= 1.5
+  );
+}
+
 function upsertPresence(
   currentPresence: SqlErdRemotePresenceState[],
   nextPresence: SqlErdRemotePresenceState,
@@ -80,8 +101,15 @@ export function useSqlErdPresence(
   const pendingPresenceUpdateRef = useRef<number | null>(null);
   const localPresenceRef = useRef<LocalPresencePatch>({
     cursor: null,
-    selectedShapeIds: [],
+    editingMode: null,
+    selectedObjects: [],
     tool: "select",
+  });
+  const lastSentPresenceRef = useRef({
+    cursor: null as SqlErdPresencePoint | null,
+    editingMode: null as SqlErdPresenceEditingMode,
+    selectedObjects: [] as SqlErdPresenceSelectedObject[],
+    tool: "select" as SqlErdPresenceTool,
   });
   const usableConfig = useMemo(
     () => (isUsableRealtimeConfig(config) ? config : null),
@@ -104,15 +132,28 @@ export function useSqlErdPresence(
 
     if (!socket?.connected || !joinedRef.current) return false;
 
-    socket.emit("sql-erd:presence:update", {
+    socket.volatile.emit("sql-erd:presence:update", {
       ...room,
       cursor: localPresence.cursor ?? null,
-      selectedShapeIds: Array.from(
-        new Set(localPresence.selectedShapeIds ?? []),
+      editingMode: localPresence.editingMode ?? null,
+      selectedObjects: Array.from(
+        new Map(
+          (localPresence.selectedObjects ?? []).map((selectedObject) => [
+            `${selectedObject.type}:${selectedObject.id}`,
+            selectedObject,
+          ]),
+        ).values(),
       ).slice(0, 100),
       tool: localPresence.tool ?? "select",
+      sentAt: new Date().toISOString(),
     });
     lastPresenceSentAtRef.current = Date.now();
+    lastSentPresenceRef.current = {
+      cursor: localPresence.cursor ?? null,
+      editingMode: localPresence.editingMode ?? null,
+      selectedObjects: localPresence.selectedObjects ?? [],
+      tool: localPresence.tool ?? "select",
+    };
     return true;
   }, []);
 
@@ -146,7 +187,14 @@ export function useSqlErdPresence(
     const userId = usableConfig.currentUser.userId;
     localPresenceRef.current = {
       cursor: null,
-      selectedShapeIds: [],
+      editingMode: null,
+      selectedObjects: [],
+      tool: "select",
+    };
+    lastSentPresenceRef.current = {
+      cursor: null,
+      editingMode: null,
+      selectedObjects: [],
       tool: "select",
     };
     lastPresenceSentAtRef.current = 0;
@@ -229,10 +277,21 @@ export function useSqlErdPresence(
       ...patch,
     } as {
       cursor: SqlErdRemotePresenceState["cursor"];
-      selectedShapeIds: string[];
+      editingMode: SqlErdPresenceEditingMode;
+      selectedObjects: SqlErdPresenceSelectedObject[];
       tool: SqlErdPresenceTool;
     };
     localPresenceRef.current = nextPresence;
+
+    const isCursorOnlyUpdate =
+      Object.keys(patch).length === 1 && Object.hasOwn(patch, "cursor");
+
+    if (
+      isCursorOnlyUpdate &&
+      !hasCursorMovedEnough(lastSentPresenceRef.current.cursor, nextPresence.cursor)
+    ) {
+      return;
+    }
 
     const elapsed = Date.now() - lastPresenceSentAtRef.current;
 

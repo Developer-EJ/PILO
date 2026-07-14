@@ -26,10 +26,32 @@ export type SqlErdPresenceTool =
   | "select"
   | "text";
 
+export type SqlErdPresenceEditingMode =
+  | "draw"
+  | "move"
+  | "relation"
+  | "resize"
+  | "sql"
+  | null;
+
+export type SqlErdPresenceSelectedObject = {
+  id: string;
+  type:
+    | "annotation"
+    | "frame"
+    | "note"
+    | "relation"
+    | "stroke"
+    | "table"
+    | "text";
+};
+
 export type SqlErdRemotePresenceState = {
   cursor: SqlErdPresencePoint | null;
-  displayName?: string;
-  selectedShapeIds: string[];
+  displayName: string;
+  editingMode: SqlErdPresenceEditingMode;
+  selectedObjects: SqlErdPresenceSelectedObject[];
+  sentAt: string;
   sessionId: string;
   tool: SqlErdPresenceTool;
   updatedAt: string;
@@ -71,8 +93,10 @@ export type SqlErdClientToServerEvents = {
   "sql-erd:leave": (payload: { sessionId: string; workspaceId: string }) => void;
   "sql-erd:presence:update": (payload: {
     cursor: SqlErdPresencePoint | null;
-    selectedShapeIds: string[];
+    editingMode: SqlErdPresenceEditingMode;
+    selectedObjects: SqlErdPresenceSelectedObject[];
     sessionId: string;
+    sentAt: string;
     tool: SqlErdPresenceTool;
     workspaceId: string;
   }) => void;

@@ -36,17 +36,21 @@ const canvas = await readFile(
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
-assert.match(types, /selectedShapeIds: string\[\]/);
+assert.match(types, /selectedObjects: SqlErdPresenceSelectedObject\[\]/);
+assert.match(types, /editingMode: SqlErdPresenceEditingMode/);
+assert.match(types, /sentAt: string/);
 assert.match(client, /socket\.io-client/);
 assert.match(presenceHook, /"sql-erd:joined"/);
 assert.match(presenceHook, /"sql-erd:presence:leave"/);
-assert.match(presenceHook, /socket\.emit\("sql-erd:presence:update"/);
+assert.match(presenceHook, /socket\.volatile\.emit\("sql-erd:presence:update"/);
 assert.match(presenceHook, /localPresenceRef\.current/);
-assert.match(presenceHook, /PRESENCE_HEARTBEAT_MS = 10_000/);
+assert.match(presenceHook, /PRESENCE_HEARTBEAT_MS = 5_000/);
 assert.match(presenceHook, /PRESENCE_UPDATE_MIN_INTERVAL_MS = 80/);
+assert.match(presenceHook, /hasCursorMovedEnough/);
 assert.match(bridge, /useEditor/);
 assert.match(bridge, /getSelectedShapeIds/);
 assert.match(bridge, /pointer-events-none/);
+assert.match(bridge, /requestAnimationFrame/);
 assert.match(canvas, /useSqlErdPresence/);
 assert.match(canvas, /SqlErdRealtimeBridge/);
 

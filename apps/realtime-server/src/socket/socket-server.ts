@@ -44,7 +44,9 @@ import type {
   CanvasShapePreviewPayload,
 } from "../canvas/canvas-types";
 import type {
+  SqlErdPresenceEditingMode,
   SqlErdPresencePoint,
+  SqlErdPresenceSelectedObject,
   SqlErdPresenceTool,
   SqlErdPresenceState,
   SqlErdPresenceUpdatePayload,
@@ -77,7 +79,7 @@ export type RealtimeSocketServerOptions = {
 type AuthedSocket = Socket & {
   data: {
     auth: CanvasAccessContext & {
-      displayName?: string;
+      displayName: string;
     };
     canvasRoomAccess: Map<string, CanvasRoomAccess>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
@@ -148,6 +150,37 @@ function isSqlErdPresenceTool(value: unknown): value is SqlErdPresenceTool {
   );
 }
 
+function isSqlErdPresenceEditingMode(
+  value: unknown,
+): value is SqlErdPresenceEditingMode {
+  return (
+    value === null ||
+    value === "draw" ||
+    value === "move" ||
+    value === "relation" ||
+    value === "resize" ||
+    value === "sql"
+  );
+}
+
+function isSqlErdPresenceSelectedObject(
+  value: unknown,
+): value is SqlErdPresenceSelectedObject {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    value.id.length <= 256 &&
+    (value.type === "annotation" ||
+      value.type === "frame" ||
+      value.type === "note" ||
+      value.type === "relation" ||
+      value.type === "stroke" ||
+      value.type === "table" ||
+      value.type === "text")
+  );
+}
+
 function readSqlErdPresenceUpdatePayload(
   payload: unknown,
 ): SqlErdPresenceUpdatePayload | null {
@@ -156,16 +189,17 @@ function readSqlErdPresenceUpdatePayload(
   if (!room || !isRecord(payload)) return null;
 
   const cursor = payload.cursor;
-  const selectedShapeIds = payload.selectedShapeIds;
+  const selectedObjects = payload.selectedObjects;
+  const sentAt = payload.sentAt;
 
   if (cursor !== null && !isSqlErdPresencePoint(cursor)) return null;
   if (
-    !Array.isArray(selectedShapeIds) ||
-    selectedShapeIds.length > 100 ||
-    !selectedShapeIds.every(
-      (shapeId) => typeof shapeId === "string" && shapeId.length <= 200,
-    ) ||
-    !isSqlErdPresenceTool(payload.tool)
+    !Array.isArray(selectedObjects) ||
+    selectedObjects.length > 100 ||
+    !selectedObjects.every(isSqlErdPresenceSelectedObject) ||
+    !isSqlErdPresenceEditingMode(payload.editingMode) ||
+    !isSqlErdPresenceTool(payload.tool) ||
+    !isIsoDateString(sentAt)
   ) {
     return null;
   }
@@ -173,7 +207,16 @@ function readSqlErdPresenceUpdatePayload(
   return {
     ...room,
     cursor,
-    selectedShapeIds: Array.from(new Set(selectedShapeIds)),
+    editingMode: payload.editingMode,
+    selectedObjects: Array.from(
+      new Map(
+        selectedObjects.map((selectedObject) => [
+          `${selectedObject.type}:${selectedObject.id}`,
+          { id: selectedObject.id.trim(), type: selectedObject.type },
+        ]),
+      ).values(),
+    ),
+    sentAt,
     tool: payload.tool,
   };
 }
@@ -452,10 +495,13 @@ function isSqlErdPresenceState(
     typeof value.sessionId === "string" &&
     typeof value.workspaceId === "string" &&
     typeof value.userId === "string" &&
+    typeof value.displayName === "string" &&
     (value.cursor === null || isSqlErdPresencePoint(value.cursor)) &&
-    Array.isArray(value.selectedShapeIds) &&
-    value.selectedShapeIds.every((shapeId) => typeof shapeId === "string") &&
+    Array.isArray(value.selectedObjects) &&
+    value.selectedObjects.every(isSqlErdPresenceSelectedObject) &&
+    isSqlErdPresenceEditingMode(value.editingMode) &&
     isSqlErdPresenceTool(value.tool) &&
+    isIsoDateString(value.sentAt) &&
     typeof value.updatedAt === "string"
   );
 }
@@ -649,6 +695,7 @@ export async function createRealtimeSocketServer({
 
         (socket as AuthedSocket).data.auth = {
           ...authContext,
+          displayName: session.displayName,
           userId: session.userId,
         };
         (socket as AuthedSocket).data.canvasRoomAccess = new Map();
