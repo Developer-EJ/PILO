@@ -202,7 +202,8 @@ pr_review_relation_edge, group
 `pr_review_relation_edge`는 Review Canvas 전용 시스템 shape다. 일반 Canvas mutation
 API로 두 시스템 shape를 생성하거나 삭제할 수 없으며, PR Review materialization만 생성과
 도메인 metadata 갱신을 담당한다. 새 분석 버전을 materialize할 때 기존 file node의
-geometry는 유지하고 relation geometry는 현재 node 위치에서 다시 계산한다. 현재 버전에서
+geometry는 유지하고 relation geometry는 현재 node 위치에서 다시 계산한다. 최초 Review Canvas
+materialization은 PR Review가 저장한 `routePoints`를 사용해 orthogonal edge를 렌더링한다. 현재 버전에서
 제외된 PR Review 시스템 shape는 soft delete하며 사용자 shape에는 영향을 주지 않는다.
 
 `pr_review_file_node`의 사용자 mutation은 아래 geometry 필드만 허용한다.
@@ -222,7 +223,7 @@ metadata뿐 아니라 geometry도 사용자가 수정할 수 없다. 일반 shap
 Review Canvas frontend는 진입 시 room에 연결된 `canvasId`로 저장된 시스템 Shape를
 조회한다. File node 이동은 짧게 debounce한 뒤 단일 Shape 수정 API로 위 geometry만
 저장하고, 요청에는 현재 `revision`을 `baseRevision`으로 포함한다. Relation edge는 사용자
-mutation 대상이 아니므로 node 이동 중에는 클라이언트에서 geometry만 다시 계산한다.
+mutation 대상이 아니므로 node 이동 중에는 클라이언트에서 geometry와 기본 orthogonal route만 다시 계산한다.
 `409 CONFLICT`가 발생하면 Shape 상세 조회로 최신 revision과 geometry를 다시 받아
 로컬 Shape를 복구한다.
 

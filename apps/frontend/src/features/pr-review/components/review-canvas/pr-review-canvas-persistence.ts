@@ -34,6 +34,7 @@ export type PrReviewRelationEdgeGeometry = {
   startY: number;
   endX: number;
   endY: number;
+  routePoints: Array<{ x: number; y: number }>;
 };
 
 export function isPrReviewCanvasSystemShape(shape: PrReviewCanvasShape) {
@@ -200,6 +201,18 @@ export function buildPrReviewRelationEdgeGeometry(
 
   const x = Math.min(startX, endX);
   const y = Math.min(startY, endY);
+  const routePoints =
+    startX === endX || startY === endY
+      ? [
+          { x: startX - x, y: startY - y },
+          { x: endX - x, y: endY - y }
+        ]
+      : [
+          { x: startX - x, y: startY - y },
+          { x: startX + (endX - startX) / 2 - x, y: startY - y },
+          { x: startX + (endX - startX) / 2 - x, y: endY - y },
+          { x: endX - x, y: endY - y }
+        ];
 
   return {
     x,
@@ -209,7 +222,8 @@ export function buildPrReviewRelationEdgeGeometry(
     startX: startX - x,
     startY: startY - y,
     endX: endX - x,
-    endY: endY - y
+    endY: endY - y,
+    routePoints
   };
 }
 
