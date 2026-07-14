@@ -37,6 +37,20 @@ export interface NormalizedListSqlErdOperationsInput {
   limit: number;
 }
 
+export interface NormalizedSqlErdSourcePublishInput {
+  baseRevision: number;
+  clientOperationId: string;
+  dialect: SqlErdDialect;
+  leaseId: string;
+  modelJson: SqlErdJsonObject;
+  sourceFormat: SqlErdSourceFormat;
+  sourceText: string;
+}
+
+export interface NormalizedSqlErdSourceSnapshotBatchInput {
+  ids: string[];
+}
+
 export interface NormalizedCreateSqlErdSessionInput {
   title: string;
   sourceFormat: SqlErdSourceFormat;
@@ -211,6 +225,8 @@ export type UpdateSqlErdSessionRequest = Record<string, unknown>;
 export type ListSqlErdSessionsQuery = Record<string, unknown>;
 export type CreateSqlErdOperationRequest = Record<string, unknown>;
 export type ListSqlErdOperationsQuery = Record<string, unknown>;
+export type SourcePublishRequest = Record<string, unknown>;
+export type SourceSnapshotBatchQuery = Record<string, unknown>;
 
 export interface DeleteSqlErdSessionQuery {
   baseRevision?: unknown;
