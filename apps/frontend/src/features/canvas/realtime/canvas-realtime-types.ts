@@ -61,8 +61,10 @@ export type CanvasJoinedPayload = {
   workspaceId: string;
   canvasId: string;
   latestOpSeq: number;
+  previews: CanvasShapePreviewEventPayload[];
   syncRequired: boolean;
   presence: CanvasRemotePresenceState[];
+  shapeLocks: CanvasShapeLockState[];
 };
 
 export type CanvasPresenceUpdatePayload = {

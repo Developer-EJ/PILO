@@ -52,7 +52,9 @@ export type CanvasJoinPayload = CanvasRoomRef & {
 
 export type CanvasJoinedPayload = CanvasRoomRef & {
   latestOpSeq: number;
+  previews: CanvasShapePreviewEventPayload[];
   presence: CanvasPresenceState[];
+  shapeLocks: CanvasShapeLockState[];
   syncRequired: boolean;
 };
 

@@ -15,6 +15,7 @@ import {
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
+import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import {
   isMeetingReportRedisEvent,
@@ -382,10 +383,17 @@ export async function createRealtimeSocketServer({
   const accessService = createCanvasAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
-  const shapeLockService = createCanvasShapeLockService();
+  const shapeLockService = createCanvasShapeLockService({
+    redisClient: redisAdapter?.stateClient ?? null,
+  });
+  const shapePreviewService = createCanvasShapePreviewService({
+    redisClient: redisAdapter?.stateClient ?? null,
+  });
   const roomService = createCanvasRoomService({
     accessService,
     presenceService,
+    shapeLockService,
+    shapePreviewService,
   });
   const meetingAccessService = createMeetingAccessService(database);
   const boardRoomService = createBoardRoomService({
@@ -526,7 +534,12 @@ export async function createRealtimeSocketServer({
 
       const roomName = createCanvasRoomName(room);
       const leavePayload = presenceService.clearRoomPresence(socket.id, room);
-      const lockReleasePayload = shapeLockService.clearRoomLocks(
+      const lockReleasePayload = await shapeLockService.clearRoomLocks(
+        socket.id,
+        authedSocket.data.auth.userId ?? socket.id,
+        room,
+      );
+      const previewClearPayload = await shapePreviewService.clearRoomPreview(
         socket.id,
         authedSocket.data.auth.userId ?? socket.id,
         room,
@@ -542,12 +555,12 @@ export async function createRealtimeSocketServer({
         socket
           .to(roomName)
           .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
-        socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, {
-          canvasId: room.canvasId,
-          actorUserId: lockReleasePayload.ownerUserId,
-          shapeIds: lockReleasePayload.shapeIds,
-          workspaceId: room.workspaceId,
-        });
+      }
+
+      if (previewClearPayload) {
+        socket
+          .to(roomName)
+          .emit(canvasServerEvents.shapePreviewClear, previewClearPayload);
       }
     });
 
@@ -590,7 +603,7 @@ export async function createRealtimeSocketServer({
       socket.to(roomName).emit(canvasServerEvents.presenceUpdate, presence);
     });
 
-    socket.on(canvasClientEvents.shapeLockClaim, (payload) => {
+    socket.on(canvasClientEvents.shapeLockClaim, async (payload) => {
       const claimPayload = readShapeLockClaimPayload(payload);
 
       if (!claimPayload) {
@@ -611,7 +624,7 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      const result = shapeLockService.claimLocks(
+      const result = await shapeLockService.claimLocks(
         socket.id,
         authedSocket.data.auth.userId ?? socket.id,
         claimPayload,
@@ -630,7 +643,7 @@ export async function createRealtimeSocketServer({
       }
     });
 
-    socket.on(canvasClientEvents.shapeLockRelease, (payload) => {
+    socket.on(canvasClientEvents.shapeLockRelease, async (payload) => {
       const releasePayload = readShapeLockReleasePayload(payload);
 
       if (!releasePayload) {
@@ -651,7 +664,7 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      const lockReleasePayload = shapeLockService.clearRoomLocks(
+      const lockReleasePayload = await shapeLockService.clearRoomLocks(
         socket.id,
         authedSocket.data.auth.userId ?? socket.id,
         releasePayload,
@@ -663,7 +676,7 @@ export async function createRealtimeSocketServer({
       io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
     });
 
-    socket.on(canvasClientEvents.shapePreview, (payload) => {
+    socket.on(canvasClientEvents.shapePreview, async (payload) => {
       const previewPayload = readShapePreviewPayload(payload);
 
       if (!previewPayload) {
@@ -684,14 +697,22 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      socket.to(roomName).emit(canvasServerEvents.shapePreview, {
+      const previewEvent = {
         ...previewPayload,
         actorUserId: authedSocket.data.auth.userId ?? socket.id,
         sentAt: new Date().toISOString(),
-      });
+      };
+
+      await shapePreviewService.updatePreview(
+        socket.id,
+        previewEvent.actorUserId,
+        previewEvent,
+      );
+
+      socket.to(roomName).emit(canvasServerEvents.shapePreview, previewEvent);
     });
 
-    socket.on(canvasClientEvents.shapePreviewClear, (payload) => {
+    socket.on(canvasClientEvents.shapePreviewClear, async (payload) => {
       const clearPayload = readShapePreviewClearPayload(payload);
 
       if (!clearPayload) {
@@ -712,35 +733,46 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, {
-        ...clearPayload,
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-      });
+      const clearEvent = await shapePreviewService.clearRoomPreview(
+        socket.id,
+        authedSocket.data.auth.userId ?? socket.id,
+        clearPayload,
+        clearPayload.shapeIds,
+      );
+
+      if (!clearEvent) return;
+
+      socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, clearEvent);
     });
 
     socket.on("disconnect", () => {
-      const leaveEvents = presenceService.clearSocket(socket.id);
-      const lockReleaseEvents = shapeLockService.clearSocket(socket.id);
+      void (async () => {
+        const leaveEvents = presenceService.clearSocket(socket.id);
+        const [lockReleaseEvents, previewClearEvents] = await Promise.all([
+          shapeLockService.clearSocket(socket.id),
+          shapePreviewService.clearSocket(socket.id),
+        ]);
 
-      for (const leavePayload of leaveEvents) {
-        socket
-          .to(createCanvasRoomName(leavePayload))
-          .emit(canvasServerEvents.presenceLeave, leavePayload);
-      }
+        for (const leavePayload of leaveEvents) {
+          socket
+            .to(createCanvasRoomName(leavePayload))
+            .emit(canvasServerEvents.presenceLeave, leavePayload);
+        }
 
-      for (const lockReleasePayload of lockReleaseEvents) {
-        const roomName = createCanvasRoomName(lockReleasePayload);
+        for (const lockReleasePayload of lockReleaseEvents) {
+          socket
+            .to(createCanvasRoomName(lockReleasePayload))
+            .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
+        }
 
-        socket
-          .to(roomName)
-          .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
-        socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, {
-          canvasId: lockReleasePayload.canvasId,
-          actorUserId: lockReleasePayload.ownerUserId,
-          shapeIds: lockReleasePayload.shapeIds,
-          workspaceId: lockReleasePayload.workspaceId,
-        });
-      }
+        for (const previewClearPayload of previewClearEvents) {
+          socket
+            .to(createCanvasRoomName(previewClearPayload))
+            .emit(canvasServerEvents.shapePreviewClear, previewClearPayload);
+        }
+      })().catch((error) => {
+        console.error("Canvas socket disconnect cleanup failed", error);
+      });
     });
   });
 

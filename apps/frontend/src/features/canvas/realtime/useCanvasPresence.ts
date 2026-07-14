@@ -685,8 +685,12 @@ export function useCanvasPresence(
           currentUserId,
         ),
       );
-      setRemoteShapeLocks([]);
-      setRemoteShapePreviews([]);
+      setRemoteShapeLocks(upsertShapeLocks([], payload.shapeLocks));
+      setRemoteShapePreviews(
+        payload.previews.filter(
+          (preview) => preview.actorUserId !== currentUserId,
+        ),
+      );
     });
     realtimeSocket.on("canvas:operation", (payload) => {
       if (
