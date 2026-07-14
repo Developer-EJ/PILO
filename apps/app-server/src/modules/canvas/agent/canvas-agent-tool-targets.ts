@@ -318,7 +318,11 @@ const TOOL_EXPLAIN_TERMS = [
 ];
 
 const CANVAS_AGENT_TOOL_HELP_OVERVIEW =
-  "기능 설명 모드에서는 메모, 도형, 펜, 지우개, 색상, 휴지통처럼 캔버스 툴바에 있는 기능의 위치와 사용법을 물어볼 수 있어요. 예를 들면 “펜은 어디 있어?”, “도형은?”, “지우개 기능 설명해줘”처럼 물어보면 돼요.";
+  [
+    "기능 설명 모드에서는 아래 기능의 위치와 사용법을 물어볼 수 있어요.",
+    ...CANVAS_AGENT_TOOL_TARGETS.map((tool, index) => `${index + 1}. ${tool.label}`),
+    "예를 들면 “펜은 어디 있어?”, “도형은?”, “지우개 기능 설명해줘”처럼 물어보면 돼요."
+  ].join("\n");
 
 function normalizeToolAliasFollowUp(value: string) {
   return value
@@ -336,7 +340,8 @@ function isToolAliasFollowUp(prompt: string, tool: CanvasAgentToolTarget) {
 export function readCanvasAgentToolHelpOverview(prompt: string): string | null {
   const normalized = normalizeToolAliasFollowUp(prompt);
   if (!normalized) return null;
-  return ["기능", "도움", "도움말", "사용법"].includes(normalized)
+  return ["기능", "기능목록", "기능리스트", "목록", "리스트", "도움", "도움말", "사용법"].includes(normalized)
+    || /^(무슨기능|어떤기능|뭐할수|무엇을할수|할수있는것|사용가능한기능)/u.test(normalized)
     ? CANVAS_AGENT_TOOL_HELP_OVERVIEW
     : null;
 }

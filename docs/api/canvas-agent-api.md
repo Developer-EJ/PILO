@@ -289,9 +289,12 @@ arrow payload, and `CanvasService.syncShapesBatch` call.
 ## Deterministic toolbar-help route
 
 Before AI Worker planning, App Server may route built-in Canvas toolbar/help
-requests by keyword only when `toolHelpMode` is `true`. Normal Canvas AI chat
-does not use App Server keyword matching for shape search, selection,
-organization, drafts, or code generation.
+requests by keyword. Tool location/explanation matching only runs when
+`toolHelpMode` is `true`, but broad capability prompts such as `기능`,
+`기능 목록`, or `뭐 할 수 있어?` may return the Canvas tool overview directly
+without AI Worker planning. Normal Canvas AI chat does not use App Server
+keyword matching for shape search, selection, organization, drafts, or code
+generation.
 
 | Intent | Keywords and examples | Action |
 | --- | --- | --- |

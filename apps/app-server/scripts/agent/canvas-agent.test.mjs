@@ -168,6 +168,26 @@ function deterministicPlan(prompt, selectedShapeIds = [], toolHelpMode = false) 
 }
 
 {
+  const plan = deterministicPlan("기능 목록");
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /기능 설명 모드/);
+  assert.match(plan.input.summary, /파일\/폴더 드롭/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
+  const plan = deterministicPlan("뭐 할 수 있어?");
+
+  assert.equal(plan.actionName, "finish");
+  assert.match(plan.input.summary, /기능 설명 모드/);
+  assert.match(plan.input.summary, /펜은 어디 있어/);
+  assert.equal(plan.input.suppressProgress, true);
+  assert.equal(plan.showProgress, false);
+}
+
+{
   const plan = deterministicPlan("파일/폴더 드롭", [], true);
 
   assert.equal(plan.actionName, "finish");

@@ -343,6 +343,19 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
         message: toolResolution.tool.message
       };
     }
+
+    const capabilityOverview = !toolHelpMode
+      ? readCanvasAgentToolHelpOverview(normalized)
+      : null;
+    if (capabilityOverview) {
+      return {
+        actionName: "finish",
+        input: { summary: capabilityOverview, suppressProgress: true },
+        message: capabilityOverview,
+        showProgress: false
+      };
+    }
+
     if (!toolHelpMode && selectedShapeIds.length === 2 && this.isConnectPrompt(normalized)) {
       const connectionKind = this.isLineConnectPrompt(normalized) ? "line" : "arrow";
       const message = connectionKind === "line"
