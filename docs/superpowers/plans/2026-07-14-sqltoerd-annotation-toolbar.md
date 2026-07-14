@@ -50,7 +50,7 @@
 - [x] **Step 1:** Review the final diff against `origin/dev` and confirm it is limited to the declared SQLtoERD frontend scope and work records.
 - [x] **Step 2:** Re-run `node scripts/sql-erd/test.mjs`, `npm.cmd run format:check`, `npm.cmd run lint`, and `git diff --check` after all commits.
 - [x] **Step 3:** Record completed automated verification and any unavailable manual check truthfully in this plan, then commit it with `docs: SQLtoERD annotation 도구 모음 검증 기록 (#969)`.
-- [ ] **Step 4:** Push `feat/969-sqltoerd-annotation-toolbar` and create a ready PR to `dev` with `Closes #969`.
+- [x] **Step 4:** Push `feat/969-sqltoerd-annotation-toolbar` and create a ready PR to `dev` with `Closes #969`.
 
 ## Verification result
 
