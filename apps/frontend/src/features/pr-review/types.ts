@@ -208,6 +208,13 @@ export type PrReviewRoomList = {
   rooms: PrReviewRoom[];
 };
 
+export type PrReviewRoomStart = {
+  room: PrReviewRoom;
+  revision: PrReviewSession;
+  roomCreated: boolean;
+  revisionCreated: boolean;
+};
+
 export type PrReviewRoomCanvas = Pick<
   PrReviewRoom,
   "id" | "canvasId" | "currentReviewSessionId" | "status"
