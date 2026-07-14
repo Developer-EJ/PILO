@@ -2444,7 +2444,7 @@ async function assertError(action, messagePattern) {
           assert.match(text, /JOIN meeting_recordings/);
           assert.match(text, /meetings\.workspace_id = \$1/);
           assert.match(text, /meeting_reports\.id = \$2/);
-          assert.match(text, /FOR UPDATE OF meeting_reports/);
+          assert.match(text, /FOR UPDATE OF meeting_reports, meeting_recordings/);
           assert.deepEqual(values, [workspaceId, reportId]);
           return meetingReportRegenerationRow();
         },
@@ -2932,10 +2932,11 @@ async function assertError(action, messagePattern) {
 }
 
 class RetentionDatabase {
-  constructor({ dueJobs = [], claim = null, finalized = true } = {}) {
+  constructor({ dueJobs = [], claim = null, finalized = true, hasActiveReport = false } = {}) {
     this.dueJobs = dueJobs;
     this.claim = claim;
     this.finalized = finalized;
+    this.hasActiveReport = hasActiveReport;
     this.calls = [];
   }
 
@@ -2955,6 +2956,19 @@ class RetentionDatabase {
       queryOne: async (text, values = []) => {
         this.calls.push({ method: "transaction.queryOne", text, values });
         if (text.includes("WITH candidate")) return this.claim;
+        if (text.includes("SELECT id, audio_file_key, audio_deleted_at")) {
+          return this.finalized
+            ? {
+                id: recordingId,
+                audio_file_key: this.claim?.audio_file_key ?? null,
+                audio_deleted_at: null
+              }
+            : null;
+        }
+        if (text.includes("FROM meeting_reports")) {
+          return this.hasActiveReport ? { id: reportId } : null;
+        }
+        if (text.includes("FROM meeting_report_outbox")) return null;
         if (text.includes("UPDATE meeting_recordings")) {
           finalizedRecording = true;
           return this.finalized ? { id: recordingId } : null;
@@ -3038,6 +3052,18 @@ class TestMeetingRecordingRetentionService extends MeetingRecordingRetentionServ
     ({ text }) => text.includes("WITH candidate")
   );
   assert.match(claimQuery.text, /FOR UPDATE SKIP LOCKED/);
+  const lockedRecording = database.calls.find(
+    ({ text }) => text.includes("SELECT id, audio_file_key, audio_deleted_at")
+  );
+  assert.match(lockedRecording.text, /FOR UPDATE/);
+  assert.equal(
+    database.calls.some(({ text }) => text.includes("FROM meeting_reports") && text.includes("TRANSCRIBING")),
+    true
+  );
+  assert.equal(
+    database.calls.some(({ text }) => text.includes("FROM meeting_report_outbox") && text.includes("publishing")),
+    true
+  );
   assert.equal(client.commands.length, 1);
   assert.equal(client.commands[0].constructor.name, "DeleteObjectCommand");
   assert.deepEqual(client.commands[0].input, {
@@ -3079,6 +3105,22 @@ class TestMeetingRecordingRetentionService extends MeetingRecordingRetentionServ
   assert.ok(retry.values[2] instanceof Date);
   assert.equal(retry.values[3], "S3_DELETE_FAILED");
   failingService.onModuleDestroy();
+
+  const blockedDatabase = new RetentionDatabase({
+    dueJobs: [{ id: purgeClaim.id }],
+    claim: purgeClaim,
+    hasActiveReport: true
+  });
+  const blockedClient = new FakeRetentionS3Client();
+  const blockedService = new TestMeetingRecordingRetentionService(blockedDatabase, blockedClient);
+  await blockedService.purgeDueRecordings();
+  assert.equal(blockedClient.commands.length, 0);
+  const deferred = blockedDatabase.calls.find(
+    ({ method, text }) => method === "execute" && text.includes("RETENTION_BLOCKED_BY_ACTIVE_REPORT")
+  );
+  assert.match(deferred.text, /status = 'pending'/);
+  assert.deepEqual(deferred.values, [purgeClaim.id, purgeClaim.claim_token]);
+  blockedService.onModuleDestroy();
 
   if (originalEnv.AWS_REGION === undefined) delete process.env.AWS_REGION;
   else process.env.AWS_REGION = originalEnv.AWS_REGION;

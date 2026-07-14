@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { DatabaseService } from "../../database/database.service";
+import { DatabaseService, DatabaseTransaction } from "../../database/database.service";
 
 const RETENTION_DAYS = 30;
 const SWEEP_INTERVAL_MS = 60 * 60 * 1_000;
@@ -33,6 +33,8 @@ interface MeetingRecordingPurgeClaim {
   attempt_count: number | string;
   claim_token: string;
 }
+
+type PurgeAttemptResult = "completed" | "blocked" | "s3_failed" | "finalize_failed";
 
 type RecordingRetentionS3Client = Pick<S3Client, "send"> &
   Partial<Pick<S3Client, "destroy">>;
@@ -132,57 +134,88 @@ export class MeetingRecordingRetentionService implements OnModuleInit, OnModuleD
     );
 
     try {
-      const config = this.getConfig();
-      await this.getS3Client(config).send(
-        new DeleteObjectCommand({
-          Bucket: config.bucket,
-          Key: claim.audio_file_key
-        })
-      );
-    } catch {
-      await this.failOrRetry(claim, "S3_DELETE_FAILED", "Meeting recording audio delete failed");
-      return;
-    }
+      const result = await this.database.transaction(async transaction => {
+        const recording = await transaction.queryOne<{
+          id: string;
+          audio_file_key: string | null;
+          audio_deleted_at: Date | string | null;
+        }>(
+          `SELECT id, audio_file_key, audio_deleted_at
+           FROM meeting_recordings
+           WHERE id = $1
+             AND status = 'COMPLETED'
+           FOR UPDATE`,
+          [claim.recording_id]
+        );
+        if (!recording) return "finalize_failed" as const;
 
-    try {
-      const completed = await this.database.transaction(async transaction => {
-        const recording = await transaction.queryOne<{ id: string }>(
+        if (recording.audio_file_key === null && recording.audio_deleted_at !== null) {
+          return await this.completePurgeJob(transaction, claim)
+            ? "completed" as const
+            : "finalize_failed" as const;
+        }
+        if (recording.audio_file_key !== claim.audio_file_key) return "finalize_failed" as const;
+
+        const activeReport = await transaction.queryOne<{ id: string }>(
+          `SELECT id
+           FROM meeting_reports
+           WHERE recording_id = $1
+             AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
+           LIMIT 1`,
+          [claim.recording_id]
+        );
+        const activeOutbox = await transaction.queryOne<{ id: string }>(
+          `SELECT id
+           FROM meeting_report_outbox
+           WHERE recording_id = $1
+             AND status IN ('pending', 'publishing')
+           LIMIT 1`,
+          [claim.recording_id]
+        );
+        if (activeReport || activeOutbox) return "blocked" as const;
+
+        try {
+          const config = this.getConfig();
+          await this.getS3Client(config).send(
+            new DeleteObjectCommand({
+              Bucket: config.bucket,
+              Key: claim.audio_file_key
+            })
+          );
+        } catch {
+          return "s3_failed" as const;
+        }
+
+        const deleted = await transaction.queryOne<{ id: string }>(
           `UPDATE meeting_recordings
            SET audio_file_key = NULL,
                audio_file_url = NULL,
                audio_deleted_at = COALESCE(audio_deleted_at, now()),
                updated_at = now()
            WHERE id = $1
-             AND (
-               audio_file_key = $2
-               OR (audio_file_key IS NULL AND audio_deleted_at IS NOT NULL)
-             )
+             AND audio_file_key = $2
            RETURNING id`,
           [claim.recording_id, claim.audio_file_key]
         );
-        if (!recording) return false;
+        if (!deleted) return "finalize_failed" as const;
 
-        const job = await transaction.queryOne<{ id: string }>(
-          `UPDATE meeting_recording_purge_jobs
-           SET status = 'completed',
-               claim_token = NULL,
-               claimed_at = NULL,
-               deleted_at = now(),
-               error_code = NULL,
-               error_message = NULL
-           WHERE id = $1
-             AND status = 'processing'
-             AND claim_token = $2
-           RETURNING id`,
-          [claim.id, claim.claim_token]
-        );
-        return Boolean(job);
+        return await this.completePurgeJob(transaction, claim)
+          ? "completed" as const
+          : "finalize_failed" as const;
       });
 
-      if (completed) {
+      if (result === "completed") {
         this.logger.log(
           `Meeting recording retention event=completed purge_job_id=${claim.id} workspace_id=${claim.workspace_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${claim.attempt_count}`
         );
+        return;
+      }
+      if (result === "blocked") {
+        await this.deferForActiveReport(claim);
+        return;
+      }
+      if (result === "s3_failed") {
+        await this.failOrRetry(claim, "S3_DELETE_FAILED", "Meeting recording audio delete failed");
         return;
       }
     } catch {
@@ -198,6 +231,46 @@ export class MeetingRecordingRetentionService implements OnModuleInit, OnModuleD
       claim,
       "RETENTION_FINALIZE_FAILED",
       "Meeting recording audio delete could not be finalized"
+    );
+  }
+
+  private async completePurgeJob(
+    transaction: DatabaseTransaction,
+    claim: MeetingRecordingPurgeClaim
+  ): Promise<boolean> {
+    const job = await transaction.queryOne<{ id: string }>(
+      `UPDATE meeting_recording_purge_jobs
+       SET status = 'completed',
+           claim_token = NULL,
+           claimed_at = NULL,
+           deleted_at = now(),
+           error_code = NULL,
+           error_message = NULL
+       WHERE id = $1
+         AND status = 'processing'
+         AND claim_token = $2
+       RETURNING id`,
+      [claim.id, claim.claim_token]
+    );
+    return Boolean(job);
+  }
+
+  private async deferForActiveReport(claim: MeetingRecordingPurgeClaim): Promise<void> {
+    const result = await this.database.execute(
+      `UPDATE meeting_recording_purge_jobs
+       SET status = 'pending',
+           next_attempt_at = now() + INTERVAL '1 hour',
+           claim_token = NULL,
+           claimed_at = NULL,
+           error_code = 'RETENTION_BLOCKED_BY_ACTIVE_REPORT',
+           error_message = 'Meeting recording audio is referenced by active report processing'
+       WHERE id = $1 AND status = 'processing' AND claim_token = $2`,
+      [claim.id, claim.claim_token]
+    );
+    if (!result.rowCount) return;
+
+    this.logger.log(
+      `Meeting recording retention event=deferred_active_report purge_job_id=${claim.id} workspace_id=${claim.workspace_id} meeting_id=${claim.meeting_id} recording_id=${claim.recording_id} attempt_count=${claim.attempt_count}`
     );
   }
 
