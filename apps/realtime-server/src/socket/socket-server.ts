@@ -30,6 +30,7 @@ import {
   sqlErdClientEvents,
   sqlErdServerEvents,
 } from "../sql-erd/sql-erd-socket-events";
+import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import {
   isMeetingReportRedisEvent,
@@ -97,6 +98,7 @@ type AuthedSocket = Socket & {
 };
 
 const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
+const SQL_ERD_OPERATION_REDIS_CHANNEL = "sql-erd:operations";
 const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
@@ -666,6 +668,15 @@ export async function createRealtimeSocketServer({
         );
       })
     : null;
+  const unsubscribeSqlErdOperations = redisAdapter
+    ? await redisAdapter.subscribe(SQL_ERD_OPERATION_REDIS_CHANNEL, (payload) => {
+        if (!relaySqlErdOperation(payload, (roomName, event, operation) => {
+          io.to(roomName).emit(event, operation);
+        })) {
+          console.error("SQLtoERD operation Redis payload is invalid", payload);
+        }
+      })
+    : null;
   const unsubscribeMeetingReports = redisAdapter
     ? await redisAdapter.subscribe(MEETING_REPORT_REDIS_CHANNEL, payload => {
         if (!isMeetingReportRedisEvent(payload)) {
@@ -1176,6 +1187,7 @@ export async function createRealtimeSocketServer({
   return {
     async close() {
       await unsubscribeCanvasOperations?.();
+      await unsubscribeSqlErdOperations?.();
       await unsubscribeMeetingReports?.();
       await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();

@@ -343,6 +343,19 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
         message: toolResolution.tool.message
       };
     }
+
+    const capabilityOverview = !toolHelpMode
+      ? readCanvasAgentToolHelpOverview(normalized)
+      : null;
+    if (capabilityOverview) {
+      return {
+        actionName: "finish",
+        input: { summary: capabilityOverview, suppressProgress: true },
+        message: capabilityOverview,
+        showProgress: false
+      };
+    }
+
     if (!toolHelpMode && selectedShapeIds.length === 2 && this.isConnectPrompt(normalized)) {
       const connectionKind = this.isLineConnectPrompt(normalized) ? "line" : "arrow";
       const message = connectionKind === "line"
@@ -472,6 +485,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
   private normalizeContext(context: Record<string, unknown>) {
     return {
+      conversationContext: this.readContextConversation(context.conversationContext),
       presentationMode: context.presentationMode === "background" ? "background" as const : "interactive" as const,
       selectedShapeIds: Array.isArray(context.selectedShapeIds)
         ? context.selectedShapeIds.filter((item): item is string => typeof item === "string")
@@ -532,6 +546,27 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     return ["x", "y", "width", "height"].every((key) => typeof payload[key] === "number")
       ? payload as { x: number; y: number; width: number; height: number }
       : null;
+  }
+
+  private readContextConversation(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const payload = value as Record<string, unknown>;
+    return {
+      messages: Array.isArray(payload.messages)
+        ? payload.messages
+            .filter((item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === "object" && !Array.isArray(item)
+            )
+            .map((item) => ({
+              role: item.role === "assistant" ? "assistant" as const : "user" as const,
+              content: typeof item.content === "string" ? item.content : ""
+            }))
+            .filter((item) => item.content)
+        : [],
+      lastTask: payload.lastTask && typeof payload.lastTask === "object" && !Array.isArray(payload.lastTask)
+        ? payload.lastTask
+        : null
+    };
   }
 
   private iso(value: Date | string): string {

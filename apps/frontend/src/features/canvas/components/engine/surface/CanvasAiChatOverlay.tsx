@@ -2,7 +2,11 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, SendHorizontal, X } from "lucide-react";
-import type { CanvasAgentDraft } from "@/features/canvas/api/canvas-agent-types";
+import { canvasAgentToolTargets } from "@/features/canvas/agent/canvas-agent-tool-targets";
+import type {
+  CanvasAgentConversationMessage,
+  CanvasAgentDraft,
+} from "@/features/canvas/api/canvas-agent-types";
 
 export type CanvasAiChatAnchor = {
   x: number;
@@ -18,7 +22,13 @@ type CanvasAiChatOverlayProps = {
   onApplyDraft: () => void;
   onClose: () => void;
   onDiscardDraft: () => void;
-  onSubmit: (message: string, options?: { toolHelpMode?: boolean }) => void;
+  onSubmit: (
+    message: string,
+    options?: {
+      conversationContext?: { messages: CanvasAgentConversationMessage[] };
+      toolHelpMode?: boolean;
+    },
+  ) => void;
   statusMessage: string | null;
 };
 
@@ -26,6 +36,47 @@ type CanvasAiMessage = {
   content: string;
   role: "assistant" | "user";
 };
+
+const defaultAssistantIntroMessage =
+  "캔버스에 관한 작업을 도와드릴게요. 저는 C를 누르면 캔버스 어디서든 부를 수 있어요.";
+
+const toolHelpAssistantIntroMessage = `기능 설명 모드예요. 지금 설명할 수 있는 기능은 아래와 같아요.
+${canvasAgentToolTargets
+  .map((tool, index) => `${index + 1}. ${tool.label}`)
+  .join("\n")}
+궁금한 기능 이름이나 위치를 물어봐 주세요.`;
+
+function replaceIntroMessage(
+  messages: CanvasAiMessage[],
+  nextIntroMessage: string,
+) {
+  const [firstMessage, ...restMessages] = messages;
+  if (firstMessage?.role !== "assistant") {
+    return [{ content: nextIntroMessage, role: "assistant" as const }, ...messages];
+  }
+
+  return [
+    {
+      ...firstMessage,
+      content: nextIntroMessage,
+    },
+    ...restMessages,
+  ];
+}
+
+function toConversationMessages(messages: CanvasAiMessage[]): CanvasAgentConversationMessage[] {
+  return messages
+    .filter((message, index) => {
+      if (index !== 0 || message.role !== "assistant") return true;
+      return message.content !== defaultAssistantIntroMessage
+        && message.content !== toolHelpAssistantIntroMessage;
+    })
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+    .slice(-10);
+}
 
 export function CanvasAiChatOverlay({
   anchor,
@@ -43,8 +94,7 @@ export function CanvasAiChatOverlay({
   const [isToolHelpMode, setIsToolHelpMode] = useState(false);
   const [messages, setMessages] = useState<CanvasAiMessage[]>([
     {
-      content:
-        "캔버스에 관한 작업을 도와드릴게요. 저는 C를 누르면 캔버스 어디서든 부를 수 있어요.",
+      content: defaultAssistantIntroMessage,
       role: "assistant",
     },
   ]);
@@ -94,8 +144,24 @@ export function CanvasAiChatOverlay({
       { content: message, role: "user" },
     ]);
     lastAssistantFeedbackRef.current = null;
-    onSubmit(message, { toolHelpMode: isToolHelpMode });
+    onSubmit(message, {
+      conversationContext: { messages: toConversationMessages(messages) },
+      toolHelpMode: isToolHelpMode,
+    });
     setInput("");
+  }
+
+  function toggleToolHelpMode() {
+    setIsToolHelpMode((currentMode) => {
+      const nextMode = !currentMode;
+      setMessages((currentMessages) =>
+        replaceIntroMessage(
+          currentMessages,
+          nextMode ? toolHelpAssistantIntroMessage : defaultAssistantIntroMessage,
+        )
+      );
+      return nextMode;
+    });
   }
 
   const panelStyle = anchor
@@ -144,7 +210,7 @@ export function CanvasAiChatOverlay({
                     ? "rounded-full bg-slate-950 px-3 py-1 text-xs font-semibold text-cyan-100 shadow-sm"
                     : "rounded-full border border-cyan-200 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-950"
                 }
-                onClick={() => setIsToolHelpMode((current) => !current)}
+                onClick={toggleToolHelpMode}
                 type="button"
               >
                 기능 설명
@@ -169,7 +235,7 @@ export function CanvasAiChatOverlay({
                 key={`${message.role}-${index}`}
                 className={
                   message.role === "assistant"
-                    ? "w-fit max-w-[90%] rounded-xl rounded-tl-sm bg-slate-100 px-3 py-2"
+                    ? "w-fit max-w-[90%] whitespace-pre-line rounded-xl rounded-tl-sm bg-slate-100 px-3 py-2"
                     : "ml-auto w-fit max-w-[90%] rounded-xl rounded-tr-sm bg-cyan-600 px-3 py-2 text-white"
                 }
               >

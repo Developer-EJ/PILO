@@ -52,7 +52,8 @@ Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
 For a shape-finding request, Canvas Agent uses this bounded cost-saving route:
 
 ```text
-local shape-search prototype embedding classifier
+Canvas-local text search over current shape title/text/type
+  -> local shape-search prototype embedding classifier
   -> Canvas-only pgvector shape search when the prompt is clearly looking for an existing shape
   -> Canvas-only pgvector search for each side when the prompt clearly connects two existing shapes
   -> GPT Planner when the prompt is not a shape search, retrieval is absent, or the result is ambiguous
@@ -60,6 +61,11 @@ local shape-search prototype embedding classifier
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
   It never embeds full `raw_shape`, layout, bindings, styles, or provider data.
+- Before embedding, explicit find/connect requests may use bounded DB text
+  search against the current canvas' non-deleted shapes. This lets newly
+  created or not-yet-embedded shapes be found without waiting for the embedding
+  worker, and avoids an LLM/embedding call when the current canvas text is
+  already an exact enough match.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
 - The first-pass shape-search classifier uses fixed local prototype examples.
@@ -283,9 +289,12 @@ arrow payload, and `CanvasService.syncShapesBatch` call.
 ## Deterministic toolbar-help route
 
 Before AI Worker planning, App Server may route built-in Canvas toolbar/help
-requests by keyword only when `toolHelpMode` is `true`. Normal Canvas AI chat
-does not use App Server keyword matching for shape search, selection,
-organization, drafts, or code generation.
+requests by keyword. Tool location/explanation matching only runs when
+`toolHelpMode` is `true`, but broad capability prompts such as `기능`,
+`기능 목록`, or `뭐 할 수 있어?` may return the Canvas tool overview directly
+without AI Worker planning. Normal Canvas AI chat does not use App Server
+keyword matching for shape search, selection, organization, drafts, or code
+generation.
 
 | Intent | Keywords and examples | Action |
 | --- | --- | --- |
@@ -390,6 +399,19 @@ Request:
   },
   "presentationMode": "interactive",
   "toolHelpMode": false,
+  "conversationContext": {
+    "messages": [
+      { "role": "user", "content": "모던한 로그인 페이지 초안 그려줘" },
+      { "role": "assistant", "content": "디자인 초안을 만들었어요." }
+    ],
+    "lastTask": {
+      "prompt": "모던한 로그인 페이지 초안 그려줘",
+      "status": "draft_ready",
+      "summary": "디자인 초안을 만들었어요.",
+      "draftId": "canvas_agent_draft_uuid",
+      "draftTitle": "로그인 페이지 초안"
+    }
+  },
   "clientRequestId": "canvas-ai-20260710-0001"
 }
 ```
@@ -401,6 +423,7 @@ Request:
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
 | `presentationMode` | No | `interactive` shows requester-only progress, pointer, and `toolSteps` playback on the Canvas surface. `background` creates the run/draft without Canvas pointer playback. Defaults to `interactive`. |
 | `toolHelpMode` | No | When `true`, route the prompt to the built-in Canvas toolbar/help dictionary instead of Canvas content search or planner routing. Defaults to `false`. |
+| `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run/draft for retry or revision prompts. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
 Server rules:
@@ -410,6 +433,9 @@ Server rules:
 - Built-in tool/help matching is only deterministic when `toolHelpMode` is
   `true`. Normal Canvas AI chat requests continue through Canvas content
   search, semantic routing, or planner routing.
+- `conversationContext` is advisory context only. The current `prompt` remains
+  authoritative, and the server stores the context inside the run `context_json`
+  without requiring a DB schema change.
 - Repeating the same requester, Canvas, and `clientRequestId` returns the
   existing run and does not enqueue another job.
 - Reusing a `clientRequestId` with different request content returns

@@ -93,6 +93,7 @@ import {
   PILO_FRAME_COLLAPSED_META_KEY,
   getPiloFrameExpandedSize,
   getPiloChildShapeCount,
+  isPiloFrameCollapsed,
 } from "../../../utils/canvas-collapse";
 
 export type { PiloCanvasFreeformShape } from "../types";
@@ -194,6 +195,9 @@ const PILO_COLLAPSED_FRAME_SIZE = 144;
 const CANVAS_AI_CHAT_HOLD_MS = 500;
 const CANVAS_SHAPE_LOCK_RELEASE_GRACE_MS = 1_500;
 const CANVAS_COLLABORATION_NOTICE_MS = 4_000;
+const CANVAS_PENDING_PREVIEW_GROUP_TTL_MS = 30_000;
+const CANVAS_PENDING_PREVIEW_HEARTBEAT_MS = 1_500;
+const CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS = 8_000;
 const CANVAS_COLLABORATION_GUARD_MESSAGE =
   "다른 사용자가 이 shape를 조작 중이라 삭제/지우개 같은 위험한 작업은 잠시 막았어요.";
 const connectionTools = new Set<PiloCanvasTool>(["arrow", "line"]);
@@ -209,6 +213,14 @@ const localInteractionStateIdle: PiloCanvasLocalInteractionState = {
   isFocused: false,
   protectedShapeIds: [],
   selectedShapeIds: [],
+};
+
+type PendingRealtimePreviewGroup = {
+  createdAt: number;
+  expiresAt: number;
+  id: string;
+  shapeIds: Set<string>;
+  snapshots: Map<string, PiloCanvasFreeformShape>;
 };
 
 function getRestorableToolId(toolId: string) {
@@ -262,6 +274,146 @@ function uniquePendingArrowBindings(bindings: PiloArrowBindingSnapshot[]) {
 
 function getFreeformShapeId(shape: PiloCanvasFreeformShape | TLShape) {
   return typeof shape.id === "string" ? shape.id : null;
+}
+
+function cloneFreeformShape(shape: PiloCanvasFreeformShape) {
+  return JSON.parse(JSON.stringify(shape)) as PiloCanvasFreeformShape;
+}
+
+function buildFreeformShapeMapFromShapes(shapes: PiloCanvasFreeformShape[]) {
+  const shapeMap = new Map<string, PiloCanvasFreeformShape>();
+
+  shapes.forEach((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    if (shapeId) {
+      shapeMap.set(shapeId, shape);
+    }
+  });
+
+  return shapeMap;
+}
+
+function hasGroupedFreeformShapes(shapes: PiloCanvasFreeformShape[]) {
+  if (shapes.length < 2) return false;
+
+  const shapeIds = new Set<string>(
+    shapes.flatMap((shape) => {
+      const shapeId = getFreeformShapeId(shape);
+
+      return shapeId ? [shapeId] : [];
+    }),
+  );
+
+  return shapes.some((shape) => {
+    if (shape.type === "frame") return true;
+
+    const parentId = typeof shape.parentId === "string" ? shape.parentId : null;
+
+    return Boolean(parentId && shapeIds.has(parentId));
+  });
+}
+
+function refreshPendingPreviewGroupSnapshots({
+  groups,
+  now,
+  shapes,
+}: {
+  groups: Map<string, PendingRealtimePreviewGroup>;
+  now: number;
+  shapes: PiloCanvasFreeformShape[];
+}) {
+  const currentShapesById = buildFreeformShapeMapFromShapes(shapes);
+
+  groups.forEach((group, groupId) => {
+    if (group.expiresAt <= now) {
+      groups.delete(groupId);
+      return;
+    }
+
+    group.shapeIds.forEach((shapeId) => {
+      const currentShape = currentShapesById.get(shapeId);
+
+      if (currentShape) {
+        group.snapshots.set(shapeId, cloneFreeformShape(currentShape));
+      }
+    });
+  });
+
+  return currentShapesById;
+}
+
+function isShapeHiddenByCollapsedAncestor({
+  currentShapesById,
+  shape,
+  snapshots,
+}: {
+  currentShapesById: Map<string, PiloCanvasFreeformShape>;
+  shape: PiloCanvasFreeformShape;
+  snapshots: Map<string, PiloCanvasFreeformShape>;
+}) {
+  let parentId = typeof shape.parentId === "string" ? shape.parentId : null;
+  const visitedParentIds = new Set<string>();
+
+  while (parentId) {
+    if (visitedParentIds.has(parentId)) return false;
+    visitedParentIds.add(parentId);
+
+    const parentShape = currentShapesById.get(parentId) ?? snapshots.get(parentId);
+
+    if (!parentShape) return false;
+    if (isPiloFrameCollapsed(parentShape)) return true;
+
+    parentId =
+      typeof parentShape.parentId === "string" ? parentShape.parentId : null;
+  }
+
+  return false;
+}
+
+function collectPendingPreviewGroupShapeIds(
+  groups: Map<string, PendingRealtimePreviewGroup>,
+) {
+  const shapeIds = new Set<string>();
+
+  groups.forEach((group) => {
+    group.shapeIds.forEach((shapeId) => shapeIds.add(shapeId));
+  });
+
+  return shapeIds;
+}
+
+function collectPendingPreviewGroupShapes({
+  currentShapesById,
+  groups,
+}: {
+  currentShapesById: Map<string, PiloCanvasFreeformShape>;
+  groups: Map<string, PendingRealtimePreviewGroup>;
+}) {
+  const previewShapesById = new Map<string, PiloCanvasFreeformShape>();
+
+  groups.forEach((group) => {
+    group.shapeIds.forEach((shapeId) => {
+      const currentShape = currentShapesById.get(shapeId);
+      const snapshot = currentShape ?? group.snapshots.get(shapeId);
+
+      if (!snapshot) return;
+      if (
+        !currentShape &&
+        isShapeHiddenByCollapsedAncestor({
+          currentShapesById,
+          shape: snapshot,
+          snapshots: group.snapshots,
+        })
+      ) {
+        return;
+      }
+
+      previewShapesById.set(shapeId, snapshot);
+    });
+  });
+
+  return Array.from(previewShapesById.values());
 }
 
 function serializeFreeformShape(shape: PiloCanvasFreeformShape) {
@@ -887,6 +1039,9 @@ export function PiloTldrawCanvas({
   );
   const localPreviewShapeIdsRef = useRef<string[]>([]);
   const localPreviewPhaseRef = useRef<CanvasShapePreviewPhase | null>(null);
+  const pendingRealtimePreviewGroupsRef = useRef(
+    new Map<string, PendingRealtimePreviewGroup>(),
+  );
   const remotePreviewOriginalShapesRef = useRef(
     new Map<string, PiloCanvasFreeformShape>(),
   );
@@ -1007,15 +1162,86 @@ export function PiloTldrawCanvas({
     [],
   );
 
+  const registerPendingRealtimePreviewGroup = useCallback(
+    (shapes: PiloCanvasFreeformShape[], reason: string) => {
+      const groupShapes = shapes.filter((shape) => getFreeformShapeId(shape));
+
+      if (!groupShapes.length) return;
+
+      const shapeIds = new Set(
+        groupShapes.flatMap((shape) => {
+          const shapeId = getFreeformShapeId(shape);
+
+          return shapeId ? [shapeId] : [];
+        }),
+      );
+      const pendingGroups = pendingRealtimePreviewGroupsRef.current;
+      const existingGroup = Array.from(pendingGroups.values()).find((group) =>
+        Array.from(shapeIds).every((shapeId) => group.shapeIds.has(shapeId)),
+      );
+      const now = Date.now();
+      const snapshots = new Map<string, PiloCanvasFreeformShape>();
+
+      groupShapes.forEach((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        if (shapeId) {
+          snapshots.set(shapeId, cloneFreeformShape(shape));
+        }
+      });
+
+      if (existingGroup) {
+        snapshots.forEach((snapshot, shapeId) => {
+          existingGroup.snapshots.set(shapeId, snapshot);
+        });
+        existingGroup.expiresAt = Math.max(
+          existingGroup.expiresAt,
+          now + CANVAS_PENDING_PREVIEW_GROUP_TTL_MS,
+        );
+        return;
+      }
+
+      pendingGroups.set(`${reason}:${now}:${pendingGroups.size}`, {
+        createdAt: now,
+        expiresAt: now + CANVAS_PENDING_PREVIEW_GROUP_TTL_MS,
+        id: `${reason}:${now}:${pendingGroups.size}`,
+        shapeIds,
+        snapshots,
+      });
+    },
+    [],
+  );
+
   const handleRealtimePreviewDraftChange = useCallback(
     (shapes: PiloCanvasFreeformShape[]) => {
       const previousShapes = freeformShapesRef.current;
+      const createdShapeIds = getCreatedFreeformShapeIds({
+        nextShapes: shapes,
+        previousShapes,
+      });
+      const createdShapeIdSet = new Set(createdShapeIds);
+      const createdShapes = shapes.filter((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        return shapeId ? createdShapeIdSet.has(shapeId) : false;
+      });
+
+      if (hasGroupedFreeformShapes(createdShapes)) {
+        registerPendingRealtimePreviewGroup(createdShapes, "created-group");
+      }
+
+      const currentShapesById = refreshPendingPreviewGroupSnapshots({
+        groups: pendingRealtimePreviewGroupsRef.current,
+        now: Date.now(),
+        shapes,
+      });
+      const pendingPreviewShapeIds = collectPendingPreviewGroupShapeIds(
+        pendingRealtimePreviewGroupsRef.current,
+      );
       const previewShapeIds = new Set([
         ...localPreviewShapeIdsRef.current,
-        ...getCreatedFreeformShapeIds({
-          nextShapes: shapes,
-          previousShapes,
-        }),
+        ...createdShapeIds,
+        ...pendingPreviewShapeIds,
       ]);
       const phase = localPreviewPhaseRef.current;
       const deletedShapeIds = getDeletedPreviewShapeIds({
@@ -1028,11 +1254,26 @@ export function PiloTldrawCanvas({
         return;
       }
 
-      const previewShapes = shapes.filter((shape) => {
+      const previewShapesById = new Map<string, PiloCanvasFreeformShape>();
+
+      shapes.forEach((shape) => {
         const shapeId = getFreeformShapeId(shape);
 
-        return shapeId ? previewShapeIds.has(shapeId) : false;
+        if (shapeId && previewShapeIds.has(shapeId)) {
+          previewShapesById.set(shapeId, shape);
+        }
       });
+      collectPendingPreviewGroupShapes({
+        currentShapesById,
+        groups: pendingRealtimePreviewGroupsRef.current,
+      }).forEach((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        if (shapeId) {
+          previewShapesById.set(shapeId, shape);
+        }
+      });
+      const previewShapes = Array.from(previewShapesById.values());
 
       if (!previewShapes.length && !deletedShapeIds.length) return;
 
@@ -1042,7 +1283,7 @@ export function PiloTldrawCanvas({
         deletedShapeIds,
       );
     },
-    [presence],
+    [presence, registerPendingRealtimePreviewGroup],
   );
 
   const handleLocalInteractionChange = useCallback(
@@ -1105,6 +1346,26 @@ export function PiloTldrawCanvas({
     },
     [handleRealtimePreviewDraftChange, onFreeformShapesDraftChange],
   );
+
+  useEffect(() => {
+    if (!presence?.enabled) return;
+
+    const heartbeatTimer = window.setInterval(() => {
+      if (!pendingRealtimePreviewGroupsRef.current.size) return;
+
+      const editor = editorRef.current;
+
+      if (!editor) return;
+
+      const shapes = editor
+        .getCurrentPageShapes()
+        .map((shape) => withSerializedArrowBindings(editor, shape));
+
+      handleRealtimePreviewDraftChange(shapes);
+    }, CANVAS_PENDING_PREVIEW_HEARTBEAT_MS);
+
+    return () => window.clearInterval(heartbeatTimer);
+  }, [handleRealtimePreviewDraftChange, presence?.enabled]);
 
   useEffect(() => {
     remoteLockedShapeIdsRef.current = remoteLockedShapeIds;
@@ -2253,8 +2514,18 @@ function CanvasRealtimePreviewApplier({
   previews: CanvasShapePreviewEventPayload[];
 }) {
   const editor = useEditor();
+  const [previewDeleteCleanupVersion, setPreviewDeleteCleanupVersion] =
+    useState(0);
+  const previewDeleteGraceSinceRef = useRef(new Map<string, number>());
+  const previewDeleteCleanupTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (previewDeleteCleanupTimerRef.current) {
+      clearTimeout(previewDeleteCleanupTimerRef.current);
+      previewDeleteCleanupTimerRef.current = null;
+    }
+
     const activePreviewShapeIds = new Set<string>();
     const previewShapesById = new Map<string, PiloCanvasFreeformShape>();
     const previewDeletedShapeIds = new Set<string>();
@@ -2291,10 +2562,54 @@ function CanvasRealtimePreviewApplier({
     const shapeIdsToRestore = Array.from(previousPreviewShapeIds).filter(
       (shapeId) => !activePreviewShapeIds.has(shapeId),
     );
+    const now = Date.now();
     const shapeIdsToDelete = shapeIdsToRestore.filter(
-      (shapeId) =>
-        !committedShapesById.has(shapeId) && !originalShapesRef.current.has(shapeId),
+      (shapeId) => {
+        if (
+          committedShapesById.has(shapeId) ||
+          originalShapesRef.current.has(shapeId)
+        ) {
+          previewDeleteGraceSinceRef.current.delete(shapeId);
+          return false;
+        }
+
+        if (!editor.getShape(shapeId as TLShapeId)) {
+          previewDeleteGraceSinceRef.current.delete(shapeId);
+          return false;
+        }
+
+        const graceSince =
+          previewDeleteGraceSinceRef.current.get(shapeId) ?? now;
+
+        previewDeleteGraceSinceRef.current.set(shapeId, graceSince);
+
+        return now - graceSince >= CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS;
+      },
     );
+    activePreviewShapeIds.forEach((shapeId) => {
+      previewDeleteGraceSinceRef.current.delete(shapeId);
+    });
+    shapeIdsToDelete.forEach((shapeId) => {
+      previewDeleteGraceSinceRef.current.delete(shapeId);
+    });
+    const pendingDeleteGraceShapeIds = shapeIdsToRestore.filter((shapeId) =>
+      previewDeleteGraceSinceRef.current.has(shapeId),
+    );
+
+    if (pendingDeleteGraceShapeIds.length) {
+      previewDeleteCleanupTimerRef.current = setTimeout(() => {
+        previewDeleteCleanupTimerRef.current = null;
+        setPreviewDeleteCleanupVersion((version) => version + 1);
+      }, CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS);
+    }
+    const trackedPreviewShapeIds = new Set([
+      ...activePreviewShapeIds,
+      ...pendingDeleteGraceShapeIds,
+    ]);
+
+    shapeIdsToDelete.forEach((shapeId) => {
+      trackedPreviewShapeIds.delete(shapeId);
+    });
     const shapesToRestore = shapeIdsToRestore.flatMap((shapeId) => {
       const committedShape = committedShapesById.get(shapeId);
 
@@ -2358,7 +2673,7 @@ function CanvasRealtimePreviewApplier({
       shapesToPreview.length ||
       shapesToCreate.length
     ) {
-      previewShapeIdsRef.current = activePreviewShapeIds;
+      previewShapeIdsRef.current = trackedPreviewShapeIds;
 
       editor.store.mergeRemoteChanges(() => {
         editor.run(
@@ -2402,12 +2717,24 @@ function CanvasRealtimePreviewApplier({
       !shapesToPreview.length &&
       !shapesToCreate.length
     ) {
-      previewShapeIdsRef.current = activePreviewShapeIds;
+      previewShapeIdsRef.current = trackedPreviewShapeIds;
     }
-  }, [committedShapes, editor, originalShapesRef, previewShapeIdsRef, previews]);
+  }, [
+    committedShapes,
+    editor,
+    originalShapesRef,
+    previewDeleteCleanupVersion,
+    previewShapeIdsRef,
+    previews,
+  ]);
 
   useEffect(
     () => () => {
+      if (previewDeleteCleanupTimerRef.current) {
+        clearTimeout(previewDeleteCleanupTimerRef.current);
+        previewDeleteCleanupTimerRef.current = null;
+      }
+
       const shapesToRestore = Array.from(originalShapesRef.current.values());
 
       if (shapesToRestore.length) {
