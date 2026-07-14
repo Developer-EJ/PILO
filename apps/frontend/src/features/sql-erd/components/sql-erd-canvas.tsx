@@ -2153,6 +2153,21 @@ function SqlErdCanvasAnnotationSync({
     }
     function handleFrameChange(event: Event) {
       const { frameId, patch } = (event as CustomEvent<SqlErdFrameChangeEventDetail>).detail;
+
+      const frameShape = editor.getShape(getSqlErdFrameShapeId(frameId));
+
+      if (isSqlErdFrameShape(frameShape)) {
+        editor.run(() => {
+          editor.updateShapes([
+            {
+              id: frameShape.id,
+              type: SQLTOERD_FRAME_SHAPE_TYPE,
+              props: { ...frameShape.props, ...patch }
+            }
+          ]);
+        }, { history: "ignore" });
+      }
+
       onLayoutPatchRef.current({ framesById: { [frameId]: patch } });
     }
     function deleteFrame(frameId: string) {

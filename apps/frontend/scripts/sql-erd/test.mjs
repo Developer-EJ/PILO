@@ -6242,6 +6242,10 @@ assert.match(
 );
 assert.match(
   canvasSurface,
+  /const frameShape = editor\.getShape\(getSqlErdFrameShapeId\(frameId\)\);[\s\S]*?isSqlErdFrameShape\(frameShape\)[\s\S]*?editor\.updateShapes\(\[[\s\S]*?props: \{ \.\.\.frameShape\.props, \.\.\.patch \}/
+);
+assert.match(
+  canvasSurface,
   /const frame = layoutJsonRef\.current\.annotations\?\.frames\?\.find\([\s\S]*?if \(!frame \|\| frame\.isLocked\) \{[\s\S]*?return;/
 );
 assert.match(
