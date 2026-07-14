@@ -12,11 +12,10 @@ Repository ProjectV2 discovery successfully persists explicit repository links, 
 
 ## Design
 
-Keep the existing `EXISTS` query structure and qualify every outer ProjectV2 column with the existing `gp` alias. Alias the count query's `github_projects_v2` table as `gp` so the same filter builder is valid for both count and data queries. Qualify list ordering columns for consistency.
+Keep the existing `EXISTS` query structure and qualify every outer ProjectV2 column with the existing `gp` alias. Alias the count query's `github_projects_v2` table as `gp` so the same filter builder is valid for both count and data queries. Preserve the existing list ordering because it is unrelated to the correlation bug.
 
 This is intentionally a local query correction. It does not change GitHub authentication, discovery token selection, API contracts, migrations, or shared app-server infrastructure.
 
 ## Verification
 
 Extend `repository-scoped-project-v2.test.mjs` to assert that the count query and both correlated subqueries use the `gp` alias. Run the focused domain test before and after the production change to demonstrate RED/GREEN behavior, then run the app-server build and GitHub Integration domain runner.
-

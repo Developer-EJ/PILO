@@ -27,7 +27,7 @@ Steps:
 
 1. Alias the count query table as `gp`.
 2. Qualify the filter builder's outer ProjectV2 columns with `gp`.
-3. Qualify the list ordering columns with `gp`.
+3. Preserve the existing list ordering to avoid an unrelated SQL contract change.
 4. Run the focused test and confirm it passes.
 
 ## Task 3: Verify scope and regressions
@@ -36,4 +36,3 @@ Steps:
 2. Run the GitHub Integration domain test runner.
 3. Review the diff for API, schema, common-area, and unrelated-domain changes.
 4. Run the required read-only `fast_reviewer` pass and address any material finding.
-
