@@ -203,10 +203,10 @@ def _segment_from_value(value: object) -> TranscriptSourceSegment:
             str(value["text"]),
         )
     return TranscriptSourceSegment(
-        int(getattr(value, "segment_index")),
-        int(getattr(value, "started_at_ms")),
-        int(getattr(value, "ended_at_ms")),
-        str(getattr(value, "text")),
+        int(value.segment_index),
+        int(value.started_at_ms),
+        int(value.ended_at_ms),
+        str(value.text),
     )
 
 

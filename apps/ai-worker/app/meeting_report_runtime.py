@@ -326,6 +326,21 @@ class PgMeetingReportRepository:
                             segment_ids[segment_index],
                         ),
                     )
+            current_transcript_hash = transcript_segments_hash(report.transcript_segments)
+            self.connection.execute(
+                """
+                UPDATE meeting_report_transcript_embedding_jobs
+                SET status = 'superseded', completed_at = now(), locked_at = NULL
+                WHERE meeting_report_id = %s
+                  AND transcript_hash <> %s
+                  AND status IN ('pending', 'processing')
+                """,
+                (report_id, current_transcript_hash),
+            )
+            self.connection.execute(
+                "DELETE FROM meeting_report_transcript_chunks WHERE meeting_report_id = %s",
+                (report_id,),
+            )
             self.connection.execute(
                 """
                 INSERT INTO meeting_report_transcript_embedding_jobs (
@@ -335,7 +350,7 @@ class PgMeetingReportRepository:
                 VALUES (%s, %s)
                 ON CONFLICT (meeting_report_id, transcript_hash) DO NOTHING
                 """,
-                (report_id, transcript_segments_hash(report.transcript_segments)),
+                (report_id, current_transcript_hash),
             )
 
 
@@ -425,7 +440,7 @@ class PgMeetingTranscriptEmbeddingRepository:
         report_id = str(job["meeting_report_id"])
         expected_hash = str(job["transcript_hash"])
         with self.connection.transaction():
-            row = self.connection.execute(
+            rows = self.connection.execute(
                 """
                 SELECT segment_index, started_at_ms, ended_at_ms, text
                 FROM meeting_report_transcript_segments

@@ -743,6 +743,20 @@ def test_completed_report_materializes_pending_action_items() -> None:
         "meeting_report job processor를 구현한다.",
         "HIGH",
     )
+    assert any(
+        "UPDATE meeting_report_transcript_embedding_jobs" in query
+        and "status = 'superseded'" in query
+        for query, _values in connection.calls
+    )
+    assert any(
+        "DELETE FROM meeting_report_transcript_chunks" in query
+        for query, _values in connection.calls
+    )
+    assert any(
+        "INSERT INTO meeting_report_transcript_embedding_jobs" in query
+        and "ON CONFLICT (meeting_report_id, transcript_hash) DO NOTHING" in query
+        for query, _values in connection.calls
+    )
 
 
 def test_parse_generated_report_json_deduplicates_evidence_segments() -> None:
