@@ -5,7 +5,11 @@ import {
 } from "./sql-erd.validation";
 import {
   NormalizedSqlErdSourcePublishInput,
+  NormalizedSqlErdSourceLockInput,
   NormalizedSqlErdSourceSnapshotBatchInput,
+  AcquireSqlErdSourceLockRequest,
+  ReleaseSqlErdSourceLockRequest,
+  RenewSqlErdSourceLockRequest,
   SqlErdJsonObject,
   SourcePublishRequest,
   SourceSnapshotBatchQuery
@@ -23,6 +27,24 @@ const SOURCE_PUBLISH_FIELDS = new Set([
 const MAX_BATCH_QUERY_LENGTH = 2_048;
 const MAX_BATCH_SNAPSHOT_IDS = 3;
 const MAX_CLIENT_OPERATION_ID_LENGTH = 128;
+
+export function validateAcquireSqlErdSourceLockRequest(
+  body: AcquireSqlErdSourceLockRequest
+): NormalizedSqlErdSourceLockInput {
+  return validateSourceLockRequest(body);
+}
+
+export function validateRenewSqlErdSourceLockRequest(
+  body: RenewSqlErdSourceLockRequest
+): NormalizedSqlErdSourceLockInput {
+  return validateSourceLockRequest(body);
+}
+
+export function validateReleaseSqlErdSourceLockRequest(
+  body: ReleaseSqlErdSourceLockRequest
+): NormalizedSqlErdSourceLockInput {
+  return validateSourceLockRequest(body);
+}
 
 export function validateSqlErdSourcePublishRequest(
   body: SourcePublishRequest
@@ -76,6 +98,17 @@ function readObject(value: unknown, field: string): SqlErdJsonObject {
     throw badRequest(`${field} must be an object`);
   }
   return value as SqlErdJsonObject;
+}
+
+function validateSourceLockRequest(
+  body:
+    | AcquireSqlErdSourceLockRequest
+    | RenewSqlErdSourceLockRequest
+    | ReleaseSqlErdSourceLockRequest
+): NormalizedSqlErdSourceLockInput {
+  const draft = readObject(body, "Request body");
+  assertAllowedFields(draft, new Set(["leaseId"]), "Request body");
+  return { leaseId: validateSqlErdSessionId(draft.leaseId) };
 }
 
 function assertAllowedFields(

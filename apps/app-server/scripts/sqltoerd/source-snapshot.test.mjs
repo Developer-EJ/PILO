@@ -13,6 +13,7 @@ const {
 const {
   rebaseSqlErdSourceLayout
 } = require("../../dist/modules/sql-erd/sql-erd-source-rebase.js");
+const { SqlErdService } = require("../../dist/modules/sql-erd/sql-erd.service.js");
 
 const migrationDirectory = new URL("../../../../db/migrations/", import.meta.url);
 const migrationFilenames = await readdir(migrationDirectory);
@@ -177,3 +178,205 @@ assert.deepEqual(rebased.summary, {
   removedAnnotationLinkIds: ["link.remove"],
   removedTableLayoutIds: ["table.removed"]
 });
+
+class SourceSnapshotDatabase {
+  constructor() {
+    this.lock = null;
+    this.operation = null;
+    this.outboxOperationId = null;
+    this.snapshot = null;
+    this.session = {
+      id: sessionId,
+      workspace_id: "55555555-5555-4555-8555-555555555555",
+      title: "Source publish",
+      source_format: "sql",
+      dialect: "postgresql",
+      source_text: "CREATE TABLE users ();",
+      model_json: {
+        version: 1,
+        schema: { relations: [], tables: [table("table.users", "users")] }
+      },
+      layout_json: {
+        version: 1,
+        tableLayouts: [{ tableId: "table.users", x: 80, y: 80 }]
+      },
+      settings_json: {},
+      table_count: 1,
+      relation_count: 0,
+      revision: 2,
+      write_protocol: "operations_v1",
+      latest_op_seq: 0,
+      created_by: "66666666-6666-4666-8666-666666666666",
+      updated_by: "66666666-6666-4666-8666-666666666666",
+      created_at: new Date("2026-07-15T00:00:00.000Z"),
+      updated_at: new Date("2026-07-15T00:00:00.000Z"),
+      deleted_at: null
+    };
+  }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+
+  async query() {
+    return [];
+  }
+
+  async execute(text, values = []) {
+    if (text.includes("INSERT INTO sql_erd_session_operation_outbox")) {
+      this.outboxOperationId = values[0];
+    }
+    if (text.includes("DELETE FROM sql_erd_session_source_locks")) {
+      this.lock = null;
+    }
+    if (text.includes("UPDATE sql_erd_session_source_locks") && this.lock) {
+      this.lock.source_base_revision = values.at(-1);
+    }
+    return { rowCount: 1, rows: [] };
+  }
+
+  async queryOne(text, values = []) {
+    if (text.includes("FROM sql_erd_sessions")) return this.session;
+    if (text.includes("FROM sql_erd_session_source_locks")) return this.lock;
+    if (text.includes("INSERT INTO sql_erd_session_source_locks")) {
+      this.lock = {
+        workspace_id: values[0],
+        session_id: values[1],
+        lease_id: values[2],
+        actor_user_id: values[3],
+        source_base_revision: values[4],
+        expires_at: new Date(Date.now() + 30_000),
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+      return this.lock;
+    }
+    if (text.includes("UPDATE sql_erd_sessions")) {
+      this.session = {
+        ...this.session,
+        source_format: values[2],
+        dialect: values[3],
+        source_text: values[4],
+        model_json: JSON.parse(values[5]),
+        layout_json: JSON.parse(values[6]),
+        table_count: values[7],
+        relation_count: values[8],
+        updated_by: values[9],
+        revision: Number(this.session.revision) + 1,
+        latest_op_seq: Number(this.session.latest_op_seq) + 1
+      };
+      return this.session;
+    }
+    if (text.includes("INSERT INTO sql_erd_session_source_snapshots")) {
+      this.snapshot = {
+        id: "77777777-7777-4777-8777-777777777777",
+        workspace_id: values[0],
+        session_id: values[1],
+        source_format: values[2],
+        dialect: values[3],
+        source_text: values[4],
+        model_json: JSON.parse(values[5]),
+        layout_json: JSON.parse(values[6]),
+        table_count: values[7],
+        relation_count: values[8],
+        base_revision: values[9],
+        result_revision: values[10],
+        created_by: values[11],
+        created_at: new Date("2026-07-15T00:01:00.000Z")
+      };
+      return this.snapshot;
+    }
+    if (text.includes("FROM sql_erd_session_source_snapshots")) return this.snapshot;
+    if (text.includes("FROM sql_erd_session_operations")) return this.operation;
+    if (text.includes("INSERT INTO sql_erd_session_operations")) {
+      this.operation = {
+        id: "88888888-8888-4888-8888-888888888888",
+        workspace_id: values[0],
+        session_id: values[1],
+        actor_user_id: values[2],
+        operation_type: "source_snapshot",
+        op_seq: values[3],
+        client_operation_id: values[4],
+        base_revision: values[5],
+        applied_on_revision: values[6],
+        result_revision: values[7],
+        payload: JSON.parse(values[8]),
+        source_snapshot_id: values[9],
+        request_fingerprint: values[10],
+        created_at: new Date("2026-07-15T00:01:00.000Z")
+      };
+      return this.operation;
+    }
+    return null;
+  }
+}
+
+const sourceWorkspaceId = "55555555-5555-4555-8555-555555555555";
+const sourceUserId = "66666666-6666-4666-8666-666666666666";
+const sourceLeaseId = "99999999-9999-4999-8999-999999999999";
+const sourceDatabase = new SourceSnapshotDatabase();
+const sourceService = new SqlErdService(sourceDatabase, {
+  async assertWorkspaceAccess() {
+    return { id: sourceWorkspaceId };
+  }
+});
+
+const acquiredLock = await sourceService.acquireSourceLock(
+  sourceUserId,
+  sourceWorkspaceId,
+  sessionId,
+  { leaseId: sourceLeaseId }
+);
+assert.equal(acquiredLock.leaseId, sourceLeaseId);
+assert.equal(acquiredLock.sourceBaseRevision, 2);
+
+const sourcePublish = await sourceService.publishSourceSnapshot(
+  sourceUserId,
+  sourceWorkspaceId,
+  sessionId,
+  {
+    baseRevision: 2,
+    clientOperationId: "source-publish-1",
+    dialect: "postgresql",
+    leaseId: sourceLeaseId,
+    modelJson: nextModel,
+    sourceFormat: "sql",
+    sourceText: "CREATE TABLE users (); CREATE TABLE orders (); CREATE TABLE projects ();"
+  }
+);
+assert.equal(sourcePublish.operation.type, "source_snapshot");
+assert.equal(sourcePublish.snapshot.id, "77777777-7777-4777-8777-777777777777");
+assert.equal(sourcePublish.revision, 3);
+assert.equal(sourceDatabase.outboxOperationId, sourcePublish.operation.id);
+assert.equal(sourceDatabase.lock.source_base_revision, 3);
+
+const retry = await sourceService.publishSourceSnapshot(
+  sourceUserId,
+  sourceWorkspaceId,
+  sessionId,
+  {
+    baseRevision: 2,
+    clientOperationId: "source-publish-1",
+    dialect: "postgresql",
+    leaseId: sourceLeaseId,
+    modelJson: nextModel,
+    sourceFormat: "sql",
+    sourceText: "CREATE TABLE users (); CREATE TABLE orders (); CREATE TABLE projects ();"
+  }
+);
+assert.equal(retry.operation.id, sourcePublish.operation.id);
+assert.equal(sourceDatabase.session.revision, 3);
+
+await assert.rejects(
+  () =>
+    sourceService.publishSourceSnapshot(sourceUserId, sourceWorkspaceId, sessionId, {
+      baseRevision: 3,
+      clientOperationId: "source-publish-1",
+      dialect: "postgresql",
+      leaseId: sourceLeaseId,
+      modelJson: nextModel,
+      sourceFormat: "sql",
+      sourceText: "changed input"
+    }),
+  (error) => error.getStatus() === 409 && error.getResponse().error.code === "CONFLICT"
+);

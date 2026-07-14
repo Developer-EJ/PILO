@@ -51,11 +51,12 @@ Each field has the existing SQLtoERD component limits:
 
 Snapshot rows are append-only. External clients receive them only through a
 workspace/session-authorized read API; no update or delete API exists. RLS has
-no direct client policy, and a database trigger rejects every snapshot `UPDATE`
-and direct `DELETE`. Snapshot rows remain for as long as the operation log that
-refers to them remains; this phase introduces no compaction or retention
-deletion job. A future compaction flow requires a separate privileged deletion
-procedure.
+no direct client policy, and a database trigger rejects every snapshot `UPDATE`.
+The operation FK prevents deletion while a saved operation refers to the row;
+the existing session/workspace cascade remains available for parent cleanup.
+This phase introduces no compaction or retention deletion job. A future
+compaction flow requires a separate privileged procedure that first handles
+the referring operations.
 
 ## Operation reference model
 
@@ -110,7 +111,8 @@ Create one SQLtoERD source-lock row per session with `workspace_id`,
   otherwise return `409`. Release is idempotent only for a missing or expired
   matching lease; a mismatched active lease returns a generic conflict without
   revealing the holder.
-- A competing active acquire returns `409 SQL_ERD_SOURCE_LOCKED`.
+- A competing active acquire returns a generic `409 CONFLICT`; it does not
+  disclose the holder.
 - Layout operations do not require this lease and remain writable.
 
 No presence state is persisted in this table. It is solely the durable source
@@ -173,8 +175,8 @@ uses those IDs and never guesses renamed entities.
 A layout operation committed before source publish is part of the rebase input.
 A layout operation committed after source publish validates against the new
 model. A syntactically valid operation targeting an entity removed by the new
-model fails with `409 SQL_ERD_OPERATION_TARGET_INVALID` rather than silently
-dropping its command.
+model fails validation rather than silently dropping its command. A dedicated
+operation-target error code is a later operation-runtime concern.
 
 ## Snapshot read and replay
 
