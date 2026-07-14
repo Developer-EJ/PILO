@@ -383,8 +383,8 @@ export class SqlErdService {
         workspaceId,
         validSessionId
       );
-      const existingLock = await this.findSourceLock(transaction, workspaceId, validSessionId);
-      if (existingLock && !this.isExpiredSourceLock(existingLock)) {
+      const existingLock = await this.findActiveSourceLock(transaction, workspaceId, validSessionId);
+      if (existingLock) {
         if (
           existingLock.actor_user_id === currentUserId &&
           existingLock.lease_id === input.leaseId
@@ -393,12 +393,11 @@ export class SqlErdService {
         }
         throw conflict("sqltoerd source lock is unavailable");
       }
-      if (existingLock) {
-        await transaction.execute(
-          `DELETE FROM sql_erd_session_source_locks WHERE session_id = $1`,
-          [validSessionId]
-        );
-      }
+      await transaction.execute(
+        `DELETE FROM sql_erd_session_source_locks
+         WHERE workspace_id = $1 AND session_id = $2 AND expires_at <= now()`,
+        [workspaceId, validSessionId]
+      );
 
       const lock = await transaction.queryOne<SqlErdSourceLockRow>(
         `
@@ -471,15 +470,18 @@ export class SqlErdService {
 
     await this.database.transaction(async (transaction) => {
       await this.requireOperationsSession(transaction, workspaceId, validSessionId);
-      const existingLock = await this.findSourceLock(transaction, workspaceId, validSessionId);
-      if (!existingLock) return;
-      const ownsMatchingLease =
-        existingLock.actor_user_id === currentUserId && existingLock.lease_id === input.leaseId;
-      if (!ownsMatchingLease && !this.isExpiredSourceLock(existingLock)) {
+      const activeLock = await this.findActiveSourceLock(transaction, workspaceId, validSessionId);
+      if (activeLock && (activeLock.actor_user_id !== currentUserId || activeLock.lease_id !== input.leaseId)) {
         throw conflict("sqltoerd source lock is unavailable");
       }
-      if (!ownsMatchingLease) {
-        throw conflict("sqltoerd source lock is unavailable");
+      if (!activeLock) {
+        await transaction.execute(
+          `DELETE FROM sql_erd_session_source_locks
+           WHERE workspace_id = $1 AND session_id = $2 AND actor_user_id = $3
+             AND lease_id = $4 AND expires_at <= now()`,
+          [workspaceId, validSessionId, currentUserId, input.leaseId]
+        );
+        return;
       }
       await transaction.execute(
         `
@@ -488,6 +490,7 @@ export class SqlErdService {
             AND session_id = $2
             AND actor_user_id = $3
             AND lease_id = $4
+            AND expires_at > now()
         `,
         [workspaceId, validSessionId, currentUserId, input.leaseId]
       );
@@ -526,13 +529,14 @@ export class SqlErdService {
           );
         }
 
-        const sourceLock = await this.findSourceLock(transaction, workspaceId, validSessionId);
-        if (
-          !sourceLock ||
-          this.isExpiredSourceLock(sourceLock) ||
-          sourceLock.actor_user_id !== currentUserId ||
-          sourceLock.lease_id !== input.leaseId
-        ) {
+        const sourceLock = await this.findOwnedActiveSourceLock(
+          transaction,
+          workspaceId,
+          validSessionId,
+          currentUserId,
+          input.leaseId
+        );
+        if (!sourceLock) {
           throw conflict("sqltoerd source lock is unavailable");
         }
         if (Number(sourceLock.source_base_revision) !== input.baseRevision) {
@@ -949,7 +953,7 @@ export class SqlErdService {
     return session;
   }
 
-  private findSourceLock(
+  private findActiveSourceLock(
     transaction: DatabaseTransaction,
     workspaceId: string,
     sessionId: string
@@ -959,15 +963,31 @@ export class SqlErdService {
         SELECT workspace_id, session_id, lease_id, actor_user_id, source_base_revision,
           expires_at, created_at, updated_at
         FROM sql_erd_session_source_locks
-        WHERE workspace_id = $1 AND session_id = $2
+        WHERE workspace_id = $1 AND session_id = $2 AND expires_at > now()
         FOR UPDATE
       `,
       [workspaceId, sessionId]
     );
   }
 
-  private isExpiredSourceLock(lock: SqlErdSourceLockRow): boolean {
-    return new Date(lock.expires_at).getTime() <= Date.now();
+  private findOwnedActiveSourceLock(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    sessionId: string,
+    actorUserId: string,
+    leaseId: string
+  ): Promise<SqlErdSourceLockRow | null> {
+    return transaction.queryOne<SqlErdSourceLockRow>(
+      `
+        SELECT workspace_id, session_id, lease_id, actor_user_id, source_base_revision,
+          expires_at, created_at, updated_at
+        FROM sql_erd_session_source_locks
+        WHERE workspace_id = $1 AND session_id = $2 AND actor_user_id = $3
+          AND lease_id = $4 AND expires_at > now()
+        FOR UPDATE
+      `,
+      [workspaceId, sessionId, actorUserId, leaseId]
+    );
   }
 
   private async assertSourceSnapshotSessionExists(

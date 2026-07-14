@@ -33,6 +33,10 @@ const migration = await readFile(
   ),
   "utf8"
 );
+const sourceLockService = await readFile(
+  new URL("../../src/modules/sql-erd/sql-erd.service.ts", import.meta.url),
+  "utf8"
+);
 
 assert.match(migration, /CREATE TABLE public\.sql_erd_session_source_snapshots/);
 assert.match(migration, /UNIQUE \(workspace_id, session_id, id\)/);
@@ -45,6 +49,8 @@ assert.match(migration, /source_snapshot_id IS NOT NULL/);
 assert.match(migration, /prevent_sql_erd_source_snapshot_mutation/);
 assert.match(migration, /octet_length\(source_text\)/);
 assert.match(migration, /3 \* 1024 \* 1024/);
+assert.match(sourceLockService, /expires_at > now\(\)/);
+assert.doesNotMatch(sourceLockService, /Date\.now\(\).*source.*lock/is);
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
 const sourcePublishRequest = {
