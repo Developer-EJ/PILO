@@ -155,6 +155,11 @@ export type PrReviewGithubSubmitStatus =
   | "submitted"
   | "failed";
 
+export type PrReviewSessionVersionState =
+  | "current"
+  | "stale"
+  | "unavailable";
+
 export type PrReviewSession = {
   id: string;
   reviewRoomId: string;

@@ -24,6 +24,7 @@ import type {
 
 type PrReviewAnalysisStatusProps = {
   backLabel: string;
+  delayMessage: string | null;
   isDelayed: boolean;
   isRetrying: boolean;
   onBackToSelection: () => void;
@@ -36,6 +37,7 @@ type PrReviewAnalysisStatusProps = {
 
 export function PrReviewAnalysisStatus({
   backLabel,
+  delayMessage,
   isDelayed,
   isRetrying,
   onBackToSelection,
@@ -98,6 +100,7 @@ export function PrReviewAnalysisStatus({
             <div
               aria-live="polite"
               className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-950"
+              title={delayMessage ?? undefined}
             >
               분석 시간이 예상보다 길어지고 있습니다. 실패로 처리하지 않고 계속 상태를 확인합니다.
             </div>

@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
+import { isPrReviewSessionVersionStale } from "@/features/pr-review/pr-review-session-version";
 import type {
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
@@ -100,13 +101,6 @@ function getGuardKind(message: string): GuardKind {
   }
 
   return "generic";
-}
-
-function isKnownStaleSession(
-  session: PrReviewSession,
-  pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null
-) {
-  return Boolean(pullRequest?.headSha && pullRequest.headSha !== session.headSha);
 }
 
 function buildDefaultReviewBody(result: PrReviewSessionResult) {
@@ -201,7 +195,7 @@ export function PrReviewSubmitReviewModal({
   const [submission, setSubmission] = useState<PrReviewSubmission | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
 
-  const knownStaleSession = isKnownStaleSession(session, pullRequest);
+  const knownStaleSession = isPrReviewSessionVersionStale(session, pullRequest);
   const countItems = useMemo(() => (result ? getCountItems(result) : []), [result]);
   const canSubmit =
     loadStatus === "ready" &&
