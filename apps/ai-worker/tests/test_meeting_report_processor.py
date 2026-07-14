@@ -719,8 +719,7 @@ def test_serialize_action_items_uses_api_shape() -> None:
     ]
 
 
-def test_completed_report_materializes_pending_action_items_and_requeues_terminal_embedding_job(
-) -> None:
+def test_completed_report_requeues_terminal_embedding_job() -> None:
     report = FakeAiClient().generate_report(
         "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.",
         [TranscriptSegment(0, 0, 1_000, "진호: 회의록 조회 API와 worker 처리 방향을 정리합니다.")],

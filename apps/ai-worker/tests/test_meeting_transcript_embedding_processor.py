@@ -37,9 +37,10 @@ def test_openai_transcript_embedder_requests_1536_dimension_float_embeddings() -
     embedder.client = SimpleNamespace(embeddings=FakeEmbeddings())
     embedder.model_name = "text-embedding-3-small"
 
-    assert embedder.embed_passage("  회의록\n  근거  ") == [
-        0.1
-    ] * OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS
+    assert (
+        embedder.embed_passage("  회의록\n  근거  ")
+        == [0.1] * OPENAI_TRANSCRIPT_EMBEDDING_DIMENSIONS
+    )
     assert created == {
         "input": "회의록 근거",
         "model": "text-embedding-3-small",
