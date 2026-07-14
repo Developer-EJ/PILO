@@ -37,6 +37,7 @@ export type CanvasOperationCatchupState = {
 export type CanvasPresenceController = {
   enabled: boolean;
   currentUserId: string | null;
+  lastRejectedShapeLock: { rejectedAt: number; shapeIds: string[] } | null;
   operationSync: CanvasOperationCatchupState;
   ownedShapeLocks: CanvasShapeLockState[];
   remotePresence: CanvasRemotePresenceState[];
@@ -363,6 +364,10 @@ export function useCanvasPresence(
   const [remoteShapePreviews, setRemoteShapePreviews] = useState<
     CanvasShapePreviewEventPayload[]
   >([]);
+  const [lastRejectedShapeLock, setLastRejectedShapeLock] = useState<{
+    rejectedAt: number;
+    shapeIds: string[];
+  } | null>(null);
   const [operationSync, setOperationSync] = useState<CanvasOperationCatchupState>(
     initialOperationSyncState,
   );
@@ -614,6 +619,7 @@ export function useCanvasPresence(
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
+      setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
       return;
     }
@@ -628,6 +634,7 @@ export function useCanvasPresence(
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
+      setLastRejectedShapeLock(null);
       return;
     }
 
@@ -646,6 +653,7 @@ export function useCanvasPresence(
       activeCatchUpAbortRef.current?.abort();
       activeCatchUpAbortRef.current = null;
       liveOperationBufferRef.current = [];
+      setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
     }
 
@@ -671,6 +679,7 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
+      setLastRejectedShapeLock(null);
     });
     realtimeSocket.on("canvas:joined", (payload) => {
       if (
@@ -779,6 +788,10 @@ export function useCanvasPresence(
       setRemoteShapeLocks((currentLocks) =>
         upsertShapeLocks(currentLocks, payload.locks),
       );
+      setLastRejectedShapeLock({
+        rejectedAt: Date.now(),
+        shapeIds: payload.shapeIds,
+      });
       setOwnedShapeLocks((currentLocks) =>
         currentUserId === null
           ? []
@@ -864,6 +877,7 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
+      setLastRejectedShapeLock(null);
     };
   }, [
     reconcileJoinState,
@@ -1018,6 +1032,7 @@ export function useCanvasPresence(
       clearShapePreview,
       enabled,
       currentUserId,
+      lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks:
         currentUserId === null
@@ -1045,6 +1060,7 @@ export function useCanvasPresence(
       clearShapePreview,
       currentUserId,
       enabled,
+      lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks,
       releaseShapeLocks,
