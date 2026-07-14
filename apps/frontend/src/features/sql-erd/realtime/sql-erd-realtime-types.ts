@@ -66,7 +66,7 @@ export type SqlErdJoinedPayload = {
   workspaceId: string;
 };
 
-export type SqlErdOperationPayload = {
+type SqlErdOperationBasePayload = {
   actorUserId: string;
   appliedOnRevision: number;
   baseRevision: number;
@@ -77,11 +77,18 @@ export type SqlErdOperationPayload = {
   rebased: boolean;
   resultRevision: number;
   sessionId: string;
-  type: "layout_patch" | "source_snapshot";
   workspaceId: string;
-  patch?: Record<string, unknown>;
-  sourceSnapshotId?: string;
 };
+
+export type SqlErdOperationPayload =
+  | (SqlErdOperationBasePayload & {
+      patch: Record<string, unknown>;
+      type: "layout_patch";
+    })
+  | (SqlErdOperationBasePayload & {
+      sourceSnapshotId: string;
+      type: "source_snapshot";
+    });
 
 export type SqlErdPresenceLeavePayload = {
   sessionId: string;

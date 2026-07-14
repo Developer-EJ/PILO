@@ -15,9 +15,27 @@ const client = await readFile(
   ),
   "utf8",
 );
+const apiClient = await readFile(
+  new URL("../src/features/sql-erd/api/client.ts", import.meta.url),
+  "utf8",
+);
 const presenceHook = await readFile(
   new URL(
     "../src/features/sql-erd/realtime/use-sql-erd-presence.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const operationHook = await readFile(
+  new URL(
+    "../src/features/sql-erd/realtime/use-sql-erd-operation-sync.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const sourceLockHook = await readFile(
+  new URL(
+    "../src/features/sql-erd/realtime/use-sql-erd-source-lock.ts",
     import.meta.url,
   ),
   "utf8",
@@ -47,6 +65,20 @@ assert.match(presenceHook, /localPresenceRef\.current/);
 assert.match(presenceHook, /PRESENCE_HEARTBEAT_MS = 5_000/);
 assert.match(presenceHook, /PRESENCE_UPDATE_MIN_INTERVAL_MS = 80/);
 assert.match(presenceHook, /hasCursorMovedEnough/);
+assert.match(types, /"sql-erd:operation"/);
+assert.match(operationHook, /useSqlErdOperationSync/);
+assert.match(operationHook, /lastSeenOpSeqRef/);
+assert.match(operationHook, /liveOperationBufferRef/);
+assert.match(operationHook, /catchUpOperations/);
+assert.match(operationHook, /sql-erd:operation/);
+assert.match(sourceLockHook, /SOURCE_LOCK_RENEW_INTERVAL_MS = 10_000/);
+assert.match(sourceLockHook, /acquireSourceLock/);
+assert.match(sourceLockHook, /renewSourceLock/);
+assert.match(sourceLockHook, /releaseSourceLock/);
+assert.match(apiClient, /listOperations/);
+assert.match(apiClient, /listSourceSnapshots/);
+assert.match(apiClient, /acquireSourceLock/);
+assert.match(apiClient, /publishSourceSnapshot/);
 assert.match(bridge, /useEditor/);
 assert.match(bridge, /getSelectedShapeIds/);
 assert.match(bridge, /pointer-events-none/);
