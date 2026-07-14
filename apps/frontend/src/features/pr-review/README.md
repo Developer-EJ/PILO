@@ -4,6 +4,12 @@ Owner: 은재
 
 API contract: `docs/api/pr-review-api.md`
 
+## Review Session Lifecycle
+
+- A review session belongs to one pull request head SHA and keeps the review decision state for that version.
+- When a newer commit is pushed, users start a new review session instead of submitting a decision for a stale version.
+- The submit modal summarizes file decisions and highlights any follow-up that blocks a merge decision.
+
 PR review session, review canvas, diff viewer, file decision, GitHub Review 제출 UI와
 관련된 frontend feature code를 둔다.
 

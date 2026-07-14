@@ -73,9 +73,9 @@ const submitOptions: Array<{
 
 const statusLabels = {
   approved: "Approved",
-  discussion_needed: "Discuss",
-  not_reviewed: "Not reviewed",
-  unknown: "Unknown"
+  discussion_needed: "Discuss before merge",
+  not_reviewed: "Not reviewed yet",
+  unknown: "Requires owner input"
 };
 
 function formatNumber(value: number) {
@@ -110,21 +110,43 @@ function isKnownStaleSession(
 }
 
 function buildDefaultReviewBody(result: PrReviewSessionResult) {
+  const decisionSummary = [
+    `Approved ${result.counts.approved}`,
+    `Discuss ${result.counts.discussionNeeded}`,
+    `Unknown ${result.counts.unknown}`,
+    `Not reviewed ${result.counts.notReviewed}`
+  ].join(" / ");
+  const followUp =
+    result.counts.discussionNeeded + result.counts.unknown > 0
+      ? "Resolve discussion and unknown decisions before merging."
+      : "No follow-up decision is required before merging.";
   const lines = [
     "## PILO PR Review",
     "",
     result.reviewResultSummary,
     "",
+    "### Decision summary",
+    decisionSummary,
+    "",
+    "### Follow-up",
+    followUp,
+    "",
     "### File decisions"
   ];
 
+  appendFileDecisions(lines, result);
+  return lines.join("\n");
+}
+
+function appendFileDecisions(
+  lines: string[],
+  result: PrReviewSessionResult
+) {
   for (const file of result.fileReviewResults) {
     const status = statusLabels[file.status];
     const comment = file.comment ? ` - ${file.comment}` : "";
     lines.push(`- ${status}: ${file.filePath}${comment}`);
   }
-
-  return lines.join("\n");
 }
 
 function getCountItems(result: PrReviewSessionResult) {
