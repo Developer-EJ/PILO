@@ -338,6 +338,7 @@ export type PrReviewFile = {
   comment: string | null;
   reviewedByUserId: string | null;
   reviewedAt: string | null;
+  decisionVersion: number;
   decisionCarriedOver: boolean;
   flowMemberships: PrReviewFileFlowMembership[];
   latestDecision: PrReviewLatestDecision | null;
@@ -525,6 +526,7 @@ export type PrReviewConflictsApplyResult = {
 export type UpdatePrReviewFileDecisionInput = {
   status: PrReviewFileDecisionStatus;
   comment: string | null;
+  expectedDecisionVersion: number;
 };
 
 export type PrReviewStatusCounts = {

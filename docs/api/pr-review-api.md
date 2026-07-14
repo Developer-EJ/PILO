@@ -903,6 +903,7 @@ room file identity와 relation identity에서 계산하고 geometry는 `canvas_f
     "comment": null,
     "reviewedByUserId": null,
     "reviewedAt": null,
+    "decisionVersion": 0,
     "decisionCarriedOver": false,
     "flowMemberships": [
       {
@@ -1325,14 +1326,41 @@ POST /api/v1/workspaces/{workspaceId}/github/review-files/{reviewFileId}/conflic
 ```json
 {
   "status": "discussion_needed",
-  "comment": "Need to confirm empty state behavior."
+  "comment": "Need to confirm empty state behavior.",
+  "expectedDecisionVersion": 0
 }
 ```
 
-서버는 `review_files.current_status/comment`를 갱신하고
-`file_review_decisions` row를 추가한다.
+서버는 `expectedDecisionVersion`이 현재 `review_files.decision_version`과 일치할 때만
+`review_files.current_status/comment`를 갱신하고 `decision_version`을 1 증가시킨 뒤
+`file_review_decisions` row를 추가한다. 현재 저장된 status/comment와 요청 내용이 완전히
+같으면 버전이 달라도 이미 반영된 요청으로 간주하고 새 history row를 만들지 않는다.
 
 PATCH response는 Review File 상세 조회와 같은 payload를 반환한다.
+
+다른 판단이 먼저 저장되어 버전이 달라졌다면 기존 판단을 덮어쓰지 않고 `409 Conflict`를
+반환한다.
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "REVIEW_DECISION_CHANGED",
+    "message": "Another reviewer saved a decision first",
+    "latestDecision": {
+      "decisionVersion": 1,
+      "currentStatus": "approved",
+      "comment": "문제 없음",
+      "reviewedByUserId": "user_2",
+      "reviewedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}
+```
+
+클라이언트는 이 응답을 받으면 최신 Review File을 다시 조회한다. 최신 저장값은 화면에
+반영하되 사용자가 작성 중이던 status/comment 초안은 유지하고, 다른 리뷰어의 판단을
+불러왔다는 짧은 안내를 표시한다.
 
 Decision history response:
 
