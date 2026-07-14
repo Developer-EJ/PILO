@@ -1087,6 +1087,39 @@ function areSqlErdCanvasShapesApplied(
   );
 }
 
+function isPointNearSqlErdStroke(
+  point: { x: number; y: number },
+  shape: SqlErdStrokeShape,
+  margin: number
+) {
+  const threshold = shape.props.size / 2 + margin;
+  const thresholdSquared = threshold * threshold;
+
+  return shape.props.points.some((start, index, points) => {
+    if (index === 0) {
+      return false;
+    }
+
+    const end = points[index - 1];
+    const startX = shape.x + start.x;
+    const startY = shape.y + start.y;
+    const endX = shape.x + end.x;
+    const endY = shape.y + end.y;
+    const deltaX = endX - startX;
+    const deltaY = endY - startY;
+    const segmentLengthSquared = deltaX * deltaX + deltaY * deltaY;
+    const t = segmentLengthSquared === 0
+      ? 0
+      : Math.max(0, Math.min(1, ((point.x - startX) * deltaX + (point.y - startY) * deltaY) / segmentLengthSquared));
+    const closestX = startX + deltaX * t;
+    const closestY = startY + deltaY * t;
+    const distanceX = point.x - closestX;
+    const distanceY = point.y - closestY;
+
+    return distanceX * distanceX + distanceY * distanceY <= thresholdSquared;
+  });
+}
+
 function SqlErdCanvasShapeSync({
   canvasContentKey,
   shapes
@@ -2746,8 +2779,9 @@ export function SqlErdCanvas({
     (editor: Editor, point: { x: number; y: number }) => {
       const margin = editor.options.hitTestMargin / editor.getZoomLevel();
       const strokeShapes = editor
-        .getShapesAtPoint(point, { hitInside: false, margin })
-        .filter(isSqlErdStrokeShape);
+        .getCurrentPageShapes()
+        .filter(isSqlErdStrokeShape)
+        .filter((shape) => isPointNearSqlErdStroke(point, shape, margin));
 
       if (!strokeShapes.length || !onLayoutPatch) {
         return;

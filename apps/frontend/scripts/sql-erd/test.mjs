@@ -6489,6 +6489,8 @@ assert.match(canvasSurface, /textsToAdd/);
 assert.match(canvasSurface, /strokesToAdd/);
 assert.match(canvasSurface, /deleteStrokeIds/);
 assert.match(canvasSurface, /isSqlErdStrokeShape/);
+assert.match(canvasSurface, /isPointNearSqlErdStroke/);
+assert.match(canvasSurface, /getCurrentPageShapes\(\)/);
 assert.match(canvasSurface, /onDoubleClickCapture/);
 assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(
