@@ -77,8 +77,8 @@ const firstInput = {
   relations: [relation(), relation()],
   existingShapes: []
 };
-const first = buildPrReviewCanvasMaterialization(firstInput);
-const repeated = buildPrReviewCanvasMaterialization(firstInput);
+const first = await buildPrReviewCanvasMaterialization(firstInput);
+const repeated = await buildPrReviewCanvasMaterialization(firstInput);
 
 assert.deepEqual(repeated, first);
 assert.equal(first.shapes.length, 3, "duplicate relations must be materialized once");
@@ -102,6 +102,11 @@ assert.notDeepEqual(
   [firstFileShape.values.x, firstFileShape.values.y],
   [secondFileShape.values.x, secondFileShape.values.y]
 );
+const firstRelationShape = first.shapes.find(
+  (shape) => shape.values.shapeType === "pr_review_relation_edge"
+);
+assert.ok(firstRelationShape);
+assert.ok(firstRelationShape.values.rawShape.props.routePoints.length >= 2);
 
 const movedRawShape = {
   ...firstFileShape.values.rawShape,
@@ -125,7 +130,7 @@ const movedExisting = asStoredShape(firstFileShape, {
   raw_shape: movedRawShape,
   deleted_at: "2026-07-13T01:00:00.000Z"
 });
-const next = buildPrReviewCanvasMaterialization({
+const next = await buildPrReviewCanvasMaterialization({
   reviewRoomId: ROOM_ID,
   reviewSessionId: NEXT_SESSION_ID,
   files: [
@@ -199,10 +204,10 @@ const invalidLegacyIndex = asStoredShape(nextRelationShape, {
     index: "a10"
   }
 });
-const repaired = buildPrReviewCanvasMaterialization({
+const repaired = (await buildPrReviewCanvasMaterialization({
   ...firstInput,
   existingShapes: [invalidLegacyIndex]
-}).shapes.find((shape) => shape.id === invalidLegacyIndex.id);
+})).shapes.find((shape) => shape.id === invalidLegacyIndex.id);
 assert.ok(repaired);
 assert.notEqual(repaired.values.rawShape.index, "a10");
 assert.equal(repaired.values.rawShape.index, getPrReviewCanvasShapeIndex(0));

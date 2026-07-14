@@ -715,11 +715,17 @@ Review room의 Canvas에는 다음 시스템 shape 계약을 사용한다.
 - identity: `reviewRoomId`, `currentReviewSessionId`, `fromRoomFileId`, `toRoomFileId`
 - relation metadata: `relationType`, `source`, `confidence`, `reason`
 - endpoint와 relation metadata, edge geometry는 PR Review가 소유한다.
+- edge geometry는 `startX`, `startY`, `endX`, `endY`와 순서가 있는
+  `routePoints: [{ x, y }, ...]`로 표현한다. point는 edge shape 좌상단 기준 상대 좌표다.
+- 새 Review Canvas의 최초 materialization은 App Server의 ELK layered layout으로 file node
+  좌표와 orthogonal route를 계산한다. ELK 오류 또는 timeout이면 기존 deterministic grid와
+  기본 꺾은선 route로 fallback한다.
 
 일반 사용자는 시스템 shape를 생성·삭제할 수 없다. File node의 geometry만 변경할 수
 있고 relation edge는 수정할 수 없다. 분석 성공 시 PR Review가 graph와 같은 transaction
 안에서 시스템 shape를 생성·갱신한다. 같은 room file은 기존 위치·크기·parent·표시 순서를
-유지하고 새 file node만 deterministic grid 초기 위치를 받는다. 현재 버전에서 사라진
+유지하고, 저장된 file node가 없는 최초 Canvas에서만 ELK 자동 배치를 적용한다. 이후 새 file
+node는 기존 deterministic grid 초기 위치를 받는다. 현재 버전에서 사라진
 시스템 shape는 soft delete로 숨기며, 이후 다시 나타나면 마지막 geometry로 복원한다.
 
 Review Canvas frontend는 room 상세의 `canvasId`로 Canvas viewport Shape API를 호출한다.
@@ -727,7 +733,7 @@ Review Canvas frontend는 room 상세의 `canvasId`로 Canvas viewport Shape API
 기존 session처럼 저장 Shape가 없거나 조회에 실패하면 이 endpoint의 graph로 read-only
 layout을 구성한다. File node 이동은 Canvas 단일 Shape 수정 API에 `baseRevision`을 포함해
 저장하며, relation edge geometry는 저장 요청을 만들지 않고 이동한 node 위치를 따라
-클라이언트에서 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
+클라이언트에서 기본 orthogonal route로 다시 계산한다. `409 CONFLICT` 응답 시 최신 Shape를 다시 조회해 화면을
 저장 상태로 복구한다.
 
 ```json
