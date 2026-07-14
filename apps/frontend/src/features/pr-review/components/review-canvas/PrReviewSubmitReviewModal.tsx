@@ -72,10 +72,10 @@ const submitOptions: Array<{
 ];
 
 const statusLabels = {
-  approved: "Approved",
-  discussion_needed: "Discuss",
-  not_reviewed: "Not reviewed",
-  unknown: "Unknown"
+  approved: "Ready to merge",
+  discussion_needed: "Needs discussion",
+  not_reviewed: "Decision required",
+  unknown: "Needs investigation"
 };
 
 function formatNumber(value: number) {
@@ -115,6 +115,7 @@ function buildDefaultReviewBody(result: PrReviewSessionResult) {
     "",
     result.reviewResultSummary,
     "",
+    ...getReviewReadinessSection(result),
     "### File decisions"
   ];
 
@@ -125,6 +126,14 @@ function buildDefaultReviewBody(result: PrReviewSessionResult) {
   }
 
   return lines.join("\n");
+}
+
+function getReviewReadinessSection(result: PrReviewSessionResult) {
+  const readiness = result.readyToSubmit
+    ? "All changed files have a saved review decision."
+    : `${result.counts.notReviewed} changed file(s) still need a review decision.`;
+
+  return ["### Review readiness", readiness, ""];
 }
 
 function getCountItems(result: PrReviewSessionResult) {
