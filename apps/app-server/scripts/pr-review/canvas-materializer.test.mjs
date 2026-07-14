@@ -108,6 +108,45 @@ const firstRelationShape = first.shapes.find(
 assert.ok(firstRelationShape);
 assert.ok(firstRelationShape.values.rawShape.props.routePoints.length >= 2);
 
+const persistedRoutePoints = [
+  { x: 0, y: 20 },
+  { x: 0, y: 0 },
+  { x: 260, y: 0 },
+  { x: 260, y: 20 }
+];
+const persistedRelation = asStoredShape(firstRelationShape, {
+  width: 260,
+  height: 20,
+  raw_shape: {
+    ...firstRelationShape.values.rawShape,
+    props: {
+      ...firstRelationShape.values.rawShape.props,
+      routePoints: persistedRoutePoints,
+      startX: 0,
+      startY: 20,
+      endX: 260,
+      endY: 20
+    }
+  }
+});
+const rematerialized = await buildPrReviewCanvasMaterialization({
+  ...firstInput,
+  existingShapes: [
+    asStoredShape(firstFileShape),
+    asStoredShape(secondFileShape),
+    persistedRelation
+  ]
+});
+const preservedRelation = rematerialized.shapes.find(
+  (shape) => shape.id === persistedRelation.id
+);
+assert.ok(preservedRelation);
+assert.deepEqual(
+  preservedRelation.values.rawShape.props.routePoints,
+  persistedRoutePoints,
+  "stored relation routes must survive later materialization"
+);
+
 const reviewOrderRelation = relation({
   relationType: "review_order",
   source: "fallback",
@@ -137,6 +176,77 @@ assert.deepEqual(
   getFileGeometry(reviewOrderWithSemanticSupport, "room-file-2"),
   getFileGeometry(reviewOrderOnly, "room-file-2"),
   "semantic relations must not change the primary review-order layout"
+);
+
+const flowOneFirst = file(1, { workflowOrder: 1 });
+const flowOneSecond = file(2, { workflowOrder: 2 });
+const flowOneThird = file(3, { workflowOrder: 3 });
+const flowTwoFirst = file(4, {
+  flowId: "flow-2",
+  flowSortOrder: 2,
+  workflowOrder: 1
+});
+const flowTwoSecond = file(5, {
+  flowId: "flow-2",
+  flowSortOrder: 2,
+  workflowOrder: 2
+});
+const adjacentOrder = relation({
+  relationType: "review_order",
+  source: "fallback",
+  reason: "Review the next file",
+  fromReviewFileId: flowOneFirst.reviewFileId,
+  toReviewFileId: flowOneSecond.reviewFileId,
+  fromRoomFileId: flowOneFirst.roomFileId,
+  toRoomFileId: flowOneSecond.roomFileId
+});
+const sameFlowSemantic = relation({
+  relationType: "depends_on",
+  source: "rule",
+  reason: "Supporting dependency",
+  fromReviewFileId: flowOneFirst.reviewFileId,
+  toReviewFileId: flowOneThird.reviewFileId,
+  fromRoomFileId: flowOneFirst.roomFileId,
+  toRoomFileId: flowOneThird.roomFileId
+});
+const secondFlowOrder = relation({
+  relationType: "review_order",
+  source: "fallback",
+  reason: "Review the next file",
+  flowId: "flow-2",
+  fromReviewFileId: flowTwoFirst.reviewFileId,
+  toReviewFileId: flowTwoSecond.reviewFileId,
+  fromRoomFileId: flowTwoFirst.roomFileId,
+  toRoomFileId: flowTwoSecond.roomFileId
+});
+const flowLayout = await buildPrReviewCanvasMaterialization({
+  reviewRoomId: ROOM_ID,
+  reviewSessionId: SESSION_ID,
+  files: [flowOneThird, flowTwoSecond, flowOneFirst, flowTwoFirst, flowOneSecond],
+  relations: [sameFlowSemantic, adjacentOrder, secondFlowOrder],
+  existingShapes: []
+});
+const flowOneFirstGeometry = getFileGeometry(flowLayout, flowOneFirst.roomFileId);
+const flowOneSecondGeometry = getFileGeometry(flowLayout, flowOneSecond.roomFileId);
+const flowOneThirdGeometry = getFileGeometry(flowLayout, flowOneThird.roomFileId);
+const flowTwoFirstGeometry = getFileGeometry(flowLayout, flowTwoFirst.roomFileId);
+assert.equal(flowOneFirstGeometry[1], flowOneSecondGeometry[1]);
+assert.equal(flowOneSecondGeometry[1], flowOneThirdGeometry[1]);
+assert.ok(flowOneFirstGeometry[0] < flowOneSecondGeometry[0]);
+assert.ok(flowOneSecondGeometry[0] < flowOneThirdGeometry[0]);
+assert.ok(flowTwoFirstGeometry[1] > flowOneFirstGeometry[1]);
+
+const getRoutePoints = (relationToFind) => {
+  const shape = flowLayout.shapes.find(
+    (candidate) => candidate.id === getPrReviewRelationShapeId(ROOM_ID, relationToFind)
+  );
+  return shape.values.rawShape.props.routePoints;
+};
+assert.equal(getRoutePoints(adjacentOrder).length, 2);
+assert.equal(getRoutePoints(sameFlowSemantic).length, 4);
+assert.ok(
+  getRoutePoints(sameFlowSemantic)[1].y < flowOneFirstGeometry[1],
+  "semantic edges must use the empty space above their flow"
 );
 
 const movedRawShape = {
