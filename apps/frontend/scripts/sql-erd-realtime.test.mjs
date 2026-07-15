@@ -418,4 +418,59 @@ assert.equal(
   }
 }
 
+{
+  const { client, hook, outputDir } = await loadOperationSyncHookRuntime();
+  const catchUpAfterSequences = [];
+  let resolveCatchUp;
+
+  try {
+    hook.useSqlErdOperationSync(
+      {
+        authToken: "token",
+        currentUser: { displayName: "Se-in", userId: "user-1" },
+        enabled: true,
+        sessionId: "session-1",
+        workspaceId: "workspace-1"
+      },
+      {
+        applyOperations: () => {},
+        catchUpOperations: async (afterSeq) => {
+          catchUpAfterSequences.push(afterSeq);
+          return new Promise((resolve) => {
+            resolveCatchUp = resolve;
+          });
+        },
+        initialLatestOpSeq: 4,
+        writeProtocol: "operations_v1"
+      }
+    );
+
+    client.emitServerEvent("sql-erd:joined", {
+      latestOpSeq: 5,
+      presence: [],
+      sessionId: "session-1",
+      workspaceId: "workspace-1"
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    client.emitServerEvent("sql-erd:operation", {
+      id: "operation-5",
+      opSeq: 5,
+      sessionId: "session-1",
+      workspaceId: "workspace-1"
+    });
+    resolveCatchUp({
+      items: [{ id: "operation-5", opSeq: 5 }],
+      latestOpSeq: 5,
+      nextAfterSeq: null
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(catchUpAfterSequences, [4]);
+  } finally {
+    await rm(outputDir, { force: true, recursive: true });
+  }
+}
+
 console.log("SQLtoERD realtime frontend tests passed");
