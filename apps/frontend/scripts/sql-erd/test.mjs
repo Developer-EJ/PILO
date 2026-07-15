@@ -4669,6 +4669,10 @@ assert.equal(modelSqlPreview.baseSnapshot, modelSqlPreviewSession);
 assert.match(modelSqlPreview.generatedSourceText, /CREATE TABLE `users`/);
 assert.equal(modelSqlPreview.hasChanges, true);
 assert.ok(modelSqlPreview.warnings.length > 0);
+assert.match(
+  modelSqlPreview.warnings.join(" "),
+  /정규화된 CREATE TABLE 및 FOREIGN KEY 구문으로 SQL을 재생성합니다/
+);
 assert.deepEqual(
   sqlDiffApplyRuntime.createSqlErdSqlLineDiff(
     "CREATE TABLE users (\n  id BIGINT\n);",
@@ -4810,7 +4814,7 @@ assert.throws(
         }
       }
     }),
-  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+  /지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다/
 );
 const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "postgresql",
@@ -4943,7 +4947,7 @@ assert.throws(
       dialect: "sqlite",
       modelJson: cyclicModel
     }),
-  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+  /지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다/
 );
 const blockedSqlitePreview = sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
   modelJson: cyclicModel,
@@ -4959,7 +4963,7 @@ assert.equal(blockedSqlitePreview.generationBlocked, true);
 assert.equal(blockedSqlitePreview.hasChanges, false);
 assert.match(
   blockedSqlitePreview.warnings.join(" "),
-  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+  /지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다/
 );
 assert.deepEqual(
   sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(blockedSqlitePreview),
@@ -5987,6 +5991,17 @@ assert.match(sqlDiffApplyUtils, /retainSqltoerdRelationNotesForModel/);
 assert.match(panel, /NormalizedSqlPreviewDialog/);
 assert.match(panel, /normalized_sql_applied/);
 assert.match(panel, /Regenerate SQL/);
+assert.match(panel, /SQL 변경 적용/);
+assert.match(panel, /현재 SQL을 교체하기 전에 생성된 SQL을 검토하세요/);
+assert.match(panel, /SQL 재생성 불가/);
+assert.match(panel, /생성된 SQL이 현재 SQL과 같습니다/);
+assert.match(panel, />\s*취소\s*</);
+assert.match(panel, /적용 중/);
+assert.match(panel, /SQL을 적용하는 동안 세션이 변경되었습니다/);
+assert.match(panel, /미리보기 화면이 열린 동안 세션이 변경되었습니다/);
+assert.doesNotMatch(panel, /Review the generated SQL before replacing the current source/);
+assert.doesNotMatch(panel, /The generated SQL matches the current source/);
+assert.doesNotMatch(panel, /The session changed while SQL was being applied/);
 assert.match(panel, /handlePreviewAnnotationForeignKeyConversion/);
 assert.match(panel, /onConvertAnnotationToForeignKey/);
 assert.match(inspectorUtils, /relationNote/);
@@ -6241,8 +6256,10 @@ assert.match(panel, /languageCompartment\.of/);
 assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
-assert.match(panel, /isDialectSelectDisabled=\{!isSessionReady\}/);
-assert.match(panel, /isSourceTextReadOnly=\{!isSessionReady\}/);
+assert.match(panel, /isDialectSelectDisabled=\{/);
+assert.match(panel, /!sourceLock\.canEdit/);
+assert.match(panel, /isSourceTextReadOnly=\{/);
+assert.match(panel, /sqlErdViewSession\.writeProtocol === "operations_v1"/);
 assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
 assert.doesNotMatch(panel, /setSqlErdViewSession/);

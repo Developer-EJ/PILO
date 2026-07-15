@@ -21,7 +21,7 @@ export class SqltoerdModelToSqlGenerationError extends Error {
 
   constructor(readonly relationIds: string[]) {
     super(
-      "SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE. Reorder the tables or edit the SQL source directly."
+      "지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다. 테이블 순서를 조정하거나 SQL 원문을 직접 수정하세요."
     );
     this.name = "SqltoerdModelToSqlGenerationError";
   }
@@ -64,7 +64,7 @@ export function generateSqlDdlFromErdModel(
   return {
     sql: [...createStatements, ...alterStatements].join("\n\n"),
     warnings: [
-      "The generator emits normalized CREATE TABLE and FOREIGN KEY statements; source formatting, comments, and unsupported statements are not preserved."
+      "정규화된 CREATE TABLE 및 FOREIGN KEY 구문으로 SQL을 재생성합니다. 기존 SQL의 서식, 주석, 지원하지 않는 구문은 보존되지 않을 수 있습니다."
     ]
   };
 }

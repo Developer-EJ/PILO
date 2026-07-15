@@ -158,7 +158,7 @@ export function applySqlErdNormalizedSqlPreview(
     return {
       error:
         preview.warnings[0] ??
-        "SQL regeneration is unavailable for the current ERD model.",
+        "현재 ERD model에서는 SQL을 재생성할 수 없습니다.",
       ok: false
     };
   }
