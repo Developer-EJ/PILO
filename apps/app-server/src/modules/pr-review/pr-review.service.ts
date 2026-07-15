@@ -425,7 +425,19 @@ export interface PrReviewConflictDraftResolutionState {
   resolutionChoices: Record<string, PrReviewConflictSuggestionDraftSource>;
   acceptedAiResolvedTexts: Record<string, string>;
   manualResolvedTexts: Record<string, string>;
+  suggestion: PrReviewConflictDraftSuggestionState | null;
   isCustomized: boolean;
+}
+
+export interface PrReviewConflictDraftSuggestionState {
+  status: "suggested" | "invalid";
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedHunks: Array<{
+    hunkId: string;
+    resolvedText: string;
+  }>;
+  validationMessages: string[];
 }
 
 interface PrReviewConflictDraftRow extends QueryResultRow {
@@ -6002,10 +6014,15 @@ export class PrReviewService {
     const manualResolvedTexts = this.readConflictDraftTextMap(
       value.manualResolvedTexts
     );
+    const suggestion =
+      value.suggestion === undefined || value.suggestion === null
+        ? null
+        : this.readConflictDraftSuggestionState(value.suggestion);
     if (
       !resolutionChoices ||
       !acceptedAiResolvedTexts ||
-      !manualResolvedTexts
+      !manualResolvedTexts ||
+      (value.suggestion !== undefined && value.suggestion !== null && !suggestion)
     ) {
       return null;
     }
@@ -6014,6 +6031,7 @@ export class PrReviewService {
       resolutionChoices,
       acceptedAiResolvedTexts,
       manualResolvedTexts,
+      suggestion,
       isCustomized: value.isCustomized
     };
     return JSON.stringify(state).length <= MAX_CONFLICT_APPLY_CONTENT_CHARS
@@ -6068,11 +6086,65 @@ export class PrReviewService {
     return Object.fromEntries(entries) as Record<string, string>;
   }
 
+  private readConflictDraftSuggestionState(
+    value: unknown
+  ): PrReviewConflictDraftSuggestionState | null {
+    if (!isRecord(value)) return null;
+
+    if (
+      (value.status !== "suggested" && value.status !== "invalid") ||
+      typeof value.aiSummary !== "string" ||
+      typeof value.aiSuggestion !== "string" ||
+      !Array.isArray(value.resolvedHunks) ||
+      !Array.isArray(value.validationMessages)
+    ) {
+      return null;
+    }
+
+    const resolvedHunks = value.resolvedHunks.map((hunk) => {
+      if (
+        !isRecord(hunk) ||
+        typeof hunk.hunkId !== "string" ||
+        !hunk.hunkId.trim() ||
+        hunk.hunkId.length > 255 ||
+        typeof hunk.resolvedText !== "string" ||
+        hunk.resolvedText.length > MAX_CONFLICT_APPLY_CONTENT_CHARS
+      ) {
+        return null;
+      }
+      return { hunkId: hunk.hunkId, resolvedText: hunk.resolvedText };
+    });
+    if (
+      resolvedHunks.some((hunk) => hunk === null) ||
+      new Set(resolvedHunks.map((hunk) => hunk?.hunkId)).size !==
+        resolvedHunks.length ||
+      value.validationMessages.some(
+        (message) =>
+          typeof message !== "string" ||
+          message.length > MAX_CONFLICT_APPLY_CONTENT_CHARS
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      status: value.status,
+      aiSummary: value.aiSummary,
+      aiSuggestion: value.aiSuggestion,
+      resolvedHunks: resolvedHunks as Array<{
+        hunkId: string;
+        resolvedText: string;
+      }>,
+      validationMessages: value.validationMessages
+    };
+  }
+
   private createLegacyConflictDraftResolutionState(): PrReviewConflictDraftResolutionState {
     return {
       resolutionChoices: {},
       acceptedAiResolvedTexts: {},
       manualResolvedTexts: {},
+      suggestion: null,
       isCustomized: true
     };
   }

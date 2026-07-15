@@ -216,6 +216,8 @@ assert.match(
 assert.match(prReviewService, /applyReviewSessionConflictResolutions/);
 assert.match(prReviewService, /updateReviewFileConflictDraft/);
 assert.match(prReviewService, /pr_review_conflict_drafts/);
+assert.match(prReviewService, /PrReviewConflictDraftSuggestionState/);
+assert.match(prReviewService, /readConflictDraftSuggestionState/);
 assert.match(prReviewService, /Review session conflict file set is stale/);
 assert.match(
   prReviewApi,

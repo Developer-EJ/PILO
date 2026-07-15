@@ -17,6 +17,7 @@ assert.match(
 assert.match(events, /isPrReviewConflictDraftRedisEvent/);
 assert.match(events, /resolutionState/);
 assert.match(events, /isPrReviewConflictDraftResolutionState/);
+assert.match(events, /isPrReviewConflictDraftSuggestion/);
 assert.match(events, /isPrReviewConflictDraftLockPayload/);
 assert.match(socketServer, /unsubscribePrReviewConflictDrafts/);
 assert.match(socketServer, /PR_REVIEW_CONFLICT_DRAFT_LOCK_CLAIM_EVENT/);
