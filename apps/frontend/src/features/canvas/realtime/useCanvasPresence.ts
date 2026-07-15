@@ -8,15 +8,17 @@ import {
   type CanvasRealtimeSocket,
 } from "@/shared/canvas-realtime/canvas-realtime-client";
 import type {
-  CanvasOperationsCatchupPayload,
   CanvasJoinedPayload,
+  CanvasLoadedViewportBounds,
+  CanvasOperationsCatchupPayload,
   CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
-  CanvasShapeOperationPayload,
+  CanvasRoomLoadedRegion,
   CanvasShapeLockState,
+  CanvasShapeOperationPayload,
   CanvasShapePreviewEventPayload,
   CanvasShapePreviewPhase,
   CanvasSyncRequiredPayload,
@@ -40,11 +42,13 @@ export type CanvasPresenceController = {
   lastRejectedShapeLock: { rejectedAt: number; shapeIds: string[] } | null;
   operationSync: CanvasOperationCatchupState;
   ownedShapeLocks: CanvasShapeLockState[];
+  roomLoadedRegions: CanvasRoomLoadedRegion[];
   remotePresence: CanvasRemotePresenceState[];
   remoteShapeLocks: CanvasShapeLockState[];
   remoteShapePreviews: CanvasShapePreviewEventPayload[];
   claimShapeLocks: (shapeIds: string[]) => void;
   releaseShapeLocks: (shapeIds?: string[]) => void;
+  reportLoadedViewport: (bounds: CanvasLoadedViewportBounds) => void;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
@@ -364,6 +368,9 @@ export function useCanvasPresence(
   const [remoteShapePreviews, setRemoteShapePreviews] = useState<
     CanvasShapePreviewEventPayload[]
   >([]);
+  const [roomLoadedRegions, setRoomLoadedRegions] = useState<
+    CanvasRoomLoadedRegion[]
+  >([]);
   const [lastRejectedShapeLock, setLastRejectedShapeLock] = useState<{
     rejectedAt: number;
     shapeIds: string[];
@@ -619,6 +626,7 @@ export function useCanvasPresence(
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
       setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
       return;
@@ -634,6 +642,7 @@ export function useCanvasPresence(
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
       setLastRejectedShapeLock(null);
       return;
     }
@@ -679,6 +688,7 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
       setLastRejectedShapeLock(null);
     });
     realtimeSocket.on("canvas:joined", (payload) => {
@@ -712,6 +722,7 @@ export function useCanvasPresence(
           (preview) => preview.actorUserId !== currentUserId,
         ),
       );
+      setRoomLoadedRegions(payload.loadedRegions);
     });
     realtimeSocket.on("canvas:operation", (payload) => {
       if (
@@ -854,6 +865,13 @@ export function useCanvasPresence(
         ),
       );
     });
+    realtimeSocket.on("canvas:room:loaded-regions:update", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRoomLoadedRegions(payload.loadedRegions);
+    });
     realtimeSocket.on("canvas:error", (payload) => {
       console.warn("Canvas realtime socket error.", payload);
     });
@@ -877,6 +895,7 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
       setLastRejectedShapeLock(null);
     };
   }, [
@@ -977,6 +996,20 @@ export function useCanvasPresence(
     });
   }, []);
 
+  const reportLoadedViewport = useCallback((bounds: CanvasLoadedViewportBounds) => {
+    const socket = socketRef.current;
+    const room = roomRef.current;
+
+    if (!socket?.connected || !joinedRef.current) {
+      return;
+    }
+
+    socket.emit("canvas:viewport:loaded", {
+      ...room,
+      bounds,
+    });
+  }, []);
+
   const clearShapePreview = useCallback((shapeIds: string[]) => {
     const socket = socketRef.current;
     const room = roomRef.current;
@@ -1041,6 +1074,8 @@ export function useCanvasPresence(
               (lock) => lock.ownerUserId === currentUserId,
             ),
       releaseShapeLocks,
+      reportLoadedViewport,
+      roomLoadedRegions,
       remotePresence:
         currentUserId === null
           ? remotePresence
@@ -1064,6 +1099,8 @@ export function useCanvasPresence(
       operationSync,
       ownedShapeLocks,
       releaseShapeLocks,
+      reportLoadedViewport,
+      roomLoadedRegions,
       remotePresence,
       remoteShapeLocks,
       remoteShapePreviews,

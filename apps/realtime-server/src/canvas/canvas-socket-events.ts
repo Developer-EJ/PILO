@@ -6,6 +6,7 @@ export const canvasClientEvents = {
   shapeLockRelease: "canvas:shape:lock:release",
   shapePreview: "canvas:shape:preview",
   shapePreviewClear: "canvas:shape:preview:clear",
+  viewportLoaded: "canvas:viewport:loaded",
 } as const;
 
 export const canvasServerEvents = {
@@ -20,5 +21,6 @@ export const canvasServerEvents = {
   shapeLockUpdate: "canvas:shape:lock:update",
   shapePreview: "canvas:shape:preview",
   shapePreviewClear: "canvas:shape:preview:clear",
+  loadedRegionsUpdate: "canvas:room:loaded-regions:update",
   syncRequired: "canvas:sync:required",
 } as const;

@@ -22,6 +22,23 @@ export type CanvasPresenceViewport = {
   zoom: number;
 };
 
+export type CanvasLoadedViewportBounds = {
+  height: number;
+  margin: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+export type CanvasRoomLoadedRegion = {
+  bottom: number;
+  id: string;
+  left: number;
+  loadedAt: string;
+  right: number;
+  top: number;
+};
+
 export type CanvasPresenceEditingMode =
   | "code"
   | "draw"
@@ -52,6 +69,7 @@ export type CanvasJoinPayload = CanvasRoomRef & {
 
 export type CanvasJoinedPayload = CanvasRoomRef & {
   latestOpSeq: number;
+  loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
   presence: CanvasPresenceState[];
   readOnly: boolean;
@@ -133,4 +151,12 @@ export type CanvasShapePreviewClearPayload = CanvasRoomRef & {
 
 export type CanvasShapePreviewClearRequestPayload = CanvasRoomRef & {
   shapeIds: string[];
+};
+
+export type CanvasViewportLoadedPayload = CanvasRoomRef & {
+  bounds: CanvasLoadedViewportBounds;
+};
+
+export type CanvasRoomLoadedRegionsUpdatedPayload = CanvasRoomRef & {
+  loadedRegions: CanvasRoomLoadedRegion[];
 };

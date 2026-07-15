@@ -658,6 +658,7 @@ function PiloCanvasRuntimeInner({
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,
+    onViewportShapesLoaded: canvasPresence.reportLoadedViewport,
     deletedShapeIdsRef,
     unloadedShapeIdsRef,
     viewportShapeLoadRequestSeqRef,

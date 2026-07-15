@@ -51,6 +51,23 @@ export type CanvasPresenceViewport = {
   zoom: number;
 };
 
+export type CanvasLoadedViewportBounds = {
+  height: number;
+  margin: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+export type CanvasRoomLoadedRegion = {
+  bottom: number;
+  id: string;
+  left: number;
+  loadedAt: string;
+  right: number;
+  top: number;
+};
+
 export type CanvasPresenceEditingMode =
   | "code"
   | "draw"
@@ -83,6 +100,7 @@ export type CanvasJoinedPayload = {
   workspaceId: string;
   canvasId: string;
   latestOpSeq: number;
+  loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
   readOnly: boolean;
   syncRequired: boolean;
@@ -180,6 +198,18 @@ export type CanvasShapePreviewClearRequestPayload = {
   shapeIds: string[];
 };
 
+export type CanvasViewportLoadedPayload = {
+  workspaceId: string;
+  canvasId: string;
+  bounds: CanvasLoadedViewportBounds;
+};
+
+export type CanvasRoomLoadedRegionsUpdatedPayload = {
+  workspaceId: string;
+  canvasId: string;
+  loadedRegions: CanvasRoomLoadedRegion[];
+};
+
 export type CanvasRealtimeErrorPayload = {
   code: string;
   message: string;
@@ -214,6 +244,9 @@ export type CanvasServerToClientEvents = {
   "canvas:shape:preview:clear": (
     payload: CanvasShapePreviewClearPayload,
   ) => void;
+  "canvas:room:loaded-regions:update": (
+    payload: CanvasRoomLoadedRegionsUpdatedPayload,
+  ) => void;
   "canvas:error": (payload: CanvasRealtimeErrorPayload) => void;
 };
 
@@ -229,4 +262,5 @@ export type CanvasClientToServerEvents = {
   "canvas:shape:preview:clear": (
     payload: CanvasShapePreviewClearRequestPayload,
   ) => void;
+  "canvas:viewport:loaded": (payload: CanvasViewportLoadedPayload) => void;
 };

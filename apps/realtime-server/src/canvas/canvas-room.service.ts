@@ -6,6 +6,7 @@ import type {
 } from "./canvas-access.service";
 import type { CanvasJoinedPayload, CanvasJoinPayload } from "./canvas-types";
 import type { CanvasPresenceService } from "./canvas-presence.service";
+import type { CanvasRoomStateService } from "./canvas-room-state.service";
 import type { CanvasShapeLockService } from "./canvas-shape-lock.service";
 import type { CanvasShapePreviewService } from "./canvas-shape-preview.service";
 
@@ -31,11 +32,13 @@ export type CanvasRoomService = {
 export function createCanvasRoomService({
   accessService,
   presenceService,
+  roomStateService,
   shapeLockService,
   shapePreviewService,
 }: {
   accessService: CanvasAccessService;
   presenceService: CanvasPresenceService;
+  roomStateService: CanvasRoomStateService;
   shapeLockService: CanvasShapeLockService;
   shapePreviewService: CanvasShapePreviewService;
 }): CanvasRoomService {
@@ -55,6 +58,7 @@ export function createCanvasRoomService({
         payload: {
           canvasId: payload.canvasId,
           latestOpSeq,
+          loadedRegions: roomStateService.getLoadedRegions(payload),
           previews: await shapePreviewService.getRoomPreviews(payload),
           presence: presenceService.getPresence(payload),
           readOnly: access.readOnly,

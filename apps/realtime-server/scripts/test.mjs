@@ -23,6 +23,10 @@ const canvasRoom = await readFile(
   new URL("../src/canvas/canvas-room.service.ts", import.meta.url),
   "utf8"
 );
+const canvasRoomState = await readFile(
+  new URL("../src/canvas/canvas-room-state.service.ts", import.meta.url),
+  "utf8"
+);
 const canvasPresence = await readFile(
   new URL("../src/canvas/canvas-presence.service.ts", import.meta.url),
   "utf8"
@@ -99,12 +103,15 @@ assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
 assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeCommit/);
 assert.match(socketServer, /canvasClientEvents\.shapePreview/);
 assert.match(socketServer, /canvasClientEvents\.shapePreviewClear/);
+assert.match(socketServer, /canvasClientEvents\.viewportLoaded/);
+assert.match(socketServer, /canvasServerEvents\.loadedRegionsUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockAccepted/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
 assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
+assert.match(socketServer, /createCanvasRoomStateService/);
 assert.doesNotMatch(socketServer, /createCanvasShapeCommitService/);
 assert.doesNotMatch(socketServer, /clearCommitShapePreview/);
 assert.doesNotMatch(socketServer, /getShapeCommitBlockedByLocks/);
@@ -156,6 +163,10 @@ assert.match(canvasShapePreview, /getRoomPreviews/);
 assert.match(canvasShapePreview, /updatePreview/);
 assert.match(canvasShapePreview, /clearRoomPreview/);
 assert.match(canvasShapePreview, /clearSocket/);
+assert.match(canvasRoomState, /MAX_ROOM_LOADED_REGIONS = 64/);
+assert.match(canvasRoomState, /recordLoadedViewport/);
+assert.match(canvasRoomState, /getLoadedRegions/);
+assert.match(canvasRoom, /loadedRegions: roomStateService\.getLoadedRegions/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);

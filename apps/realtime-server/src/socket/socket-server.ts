@@ -18,6 +18,7 @@ import {
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
+import { createCanvasRoomStateService } from "../canvas/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
@@ -60,6 +61,7 @@ import type {
   CanvasPresencePoint,
   CanvasPresenceUpdatePayload,
   CanvasRoomRef,
+  CanvasViewportLoadedPayload,
   CanvasShapeLockClaimPayload,
   CanvasShapeLockReleasePayload,
   CanvasShapeOperationPayload,
@@ -547,6 +549,39 @@ function readShapePreviewClearPayload(
   };
 }
 
+function readViewportLoadedPayload(
+  payload: unknown,
+): CanvasViewportLoadedPayload | null {
+  const room = readRoomRef(payload);
+
+  if (!room || !isRecord(payload) || !isRecord(payload.bounds)) return null;
+
+  const { height, margin, width, x, y } = payload.bounds;
+
+  if (
+    typeof height !== "number" ||
+    typeof margin !== "number" ||
+    typeof width !== "number" ||
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    !Number.isFinite(height) ||
+    !Number.isFinite(margin) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    height <= 0 ||
+    width <= 0 ||
+    margin < 0
+  ) {
+    return null;
+  }
+
+  return {
+    ...room,
+    bounds: { height, margin, width, x, y },
+  };
+}
+
 function emitCanvasError(socket: Socket, message: string) {
   socket.emit(
     canvasServerEvents.error,
@@ -737,6 +772,7 @@ export async function createRealtimeSocketServer({
   const sqlErdAccessService = createSqlErdAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
+  const roomStateService = createCanvasRoomStateService();
   const sqlErdPresenceService = createSqlErdPresenceService();
   const shapeLockService = createCanvasShapeLockService({
     redisClient: redisAdapter?.stateClient ?? null,
@@ -747,6 +783,7 @@ export async function createRealtimeSocketServer({
   const roomService = createCanvasRoomService({
     accessService,
     presenceService,
+    roomStateService,
     shapeLockService,
     shapePreviewService,
   });
@@ -1276,6 +1313,39 @@ export async function createRealtimeSocketServer({
       if (!lockReleasePayload) return;
 
       io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
+    });
+
+    socket.on(canvasClientEvents.viewportLoaded, (payload) => {
+      const loadedPayload = readViewportLoadedPayload(payload);
+
+      if (!loadedPayload) {
+        emitCanvasError(socket, "canvas:viewport:loaded payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(loadedPayload);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before reporting loaded viewport",
+          ),
+        );
+        return;
+      }
+
+      const loadedRegions = roomStateService.recordLoadedViewport(
+        loadedPayload,
+        loadedPayload.bounds,
+      );
+
+      io.to(roomName).emit(canvasServerEvents.loadedRegionsUpdate, {
+        canvasId: loadedPayload.canvasId,
+        loadedRegions,
+        workspaceId: loadedPayload.workspaceId,
+      });
     });
 
     socket.on(canvasClientEvents.shapePreview, async (payload) => {

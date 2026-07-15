@@ -678,6 +678,7 @@ canvas:shape:lock:claim
 canvas:shape:lock:release
 canvas:shape:preview
 canvas:shape:preview:clear
+canvas:viewport:loaded
 ```
 
 Server -> Client:
@@ -694,6 +695,7 @@ canvas:shape:lock:update
 canvas:shape:lock:release
 canvas:shape:preview
 canvas:shape:preview:clear
+canvas:room:loaded-regions:update
 canvas:error
 ```
 
@@ -714,6 +716,13 @@ Socket.IO는 presence, lock, preview, operation 전달과 catch-up 유도만 담
 realtime-server는 `canvas_freeform_shapes`나 `canvas_shape_operations`를 직접 쓰지 않는다.
 최종 DB transaction, revision/opSeq, operation log, activity log 작성 책임은 App Server가
 계속 가진다.
+
+`canvas:viewport:loaded`는 classic Canvas room-level lazy loading의 관측 이벤트다.
+클라이언트가 App Server shape viewport 조회를 성공적으로 끝낸 뒤, 조회 bounds를
+realtime-server에 보고한다. realtime-server는 room 단위 `loadedRegions`를 메모리에
+누적하고 `canvas:room:loaded-regions:update`로 같은 room에 공유한다. 이 단계에서
+`loadedRegions`는 삭제 판단에 쓰지 않는다. shape가 roomState에 없다는 사실은
+삭제가 아니라 아직 로딩되지 않았을 가능성으로 본다.
 
 ## tldraw_sync Multiplayer Room 계약
 

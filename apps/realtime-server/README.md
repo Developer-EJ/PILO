@@ -48,11 +48,16 @@ Common realtime code belongs in `socket/`, `redis/`, `auth/`, `database/`, or
 Domain behavior belongs in `src/<domain>/`. Board room naming, Board access
 rules, and Board invalidation contracts stay in `src/board/` and
 `src/socket/board/`. Canvas room naming, Canvas access rules, cursor presence
-payloads, and Canvas operation broadcast contracts stay in `src/canvas/`.
+payloads, room-level loaded region state, and Canvas operation broadcast
+contracts stay in `src/canvas/`.
 
 Do not store cursor position or selection in PostgreSQL. Presence is realtime
 state only. Canvas shape state and operation catch-up remain App Server/API/DB
 responsibilities.
+
+Classic Canvas room loaded regions are realtime room state. They indicate which
+viewport bounds connected clients have already loaded, but absence from this
+state is never treated as deletion.
 
 For `tldraw_sync` Canvas, realtime-server owns the multiplayer room lifecycle.
 The room key and validation contract are documented in `src/canvas/README.md`;
