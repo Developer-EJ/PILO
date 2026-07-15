@@ -271,6 +271,25 @@ try {
     verifySqlErdOperationsV1CutoverRecovery({
       artifactPath,
       manifest,
+      decryptToPath: async ({ outputPath }) => {
+        const plaintext = Buffer.from(
+          `${sessionIds
+            .map((id) => JSON.stringify(createRecoverableSessionRow(id)))
+            .join("\n")}\n`,
+          "utf8"
+        );
+        const titleOffset = plaintext.indexOf(Buffer.from("Recoverable ERD"));
+        plaintext[titleOffset] = 0xc3;
+        await writeFile(outputPath, plaintext);
+      }
+    }),
+    /valid UTF-8/i
+  );
+
+  await assert.rejects(
+    verifySqlErdOperationsV1CutoverRecovery({
+      artifactPath,
+      manifest,
       decryptToPath: async () => {
         throw new Error("age command failed");
       },

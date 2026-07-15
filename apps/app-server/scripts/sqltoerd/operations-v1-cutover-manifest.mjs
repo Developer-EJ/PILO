@@ -223,8 +223,14 @@ async function validateRecoveredExport({
   expectedSessionIds,
   expectedSessionVersions,
 }) {
-  const plaintext = await readFile(plaintextPath);
-  const lines = plaintext.toString("utf8").split(/\r?\n/);
+  const plaintextBytes = await readFile(plaintextPath);
+  let plaintext;
+  try {
+    plaintext = new TextDecoder("utf-8", { fatal: true }).decode(plaintextBytes);
+  } catch {
+    throw new Error("decrypted export must be valid UTF-8");
+  }
+  const lines = plaintext.split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
   if (lines.length === 0)
     throw new Error("decrypted export must contain at least one session row");

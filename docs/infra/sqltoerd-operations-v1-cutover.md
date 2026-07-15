@@ -33,9 +33,10 @@ WHERE write_protocol = 'snapshot'
 ORDER BY id;
 ```
 
-Supabase SQL Editor의 CSV/JSON download는 wrapper를 추가할 수 있으므로 그대로 사용하지 않는다. 표준 PostgreSQL 접속 환경 변수(`PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`)를 안전한 운영 shell에 설정한 뒤, 다음 명령으로 header 없는 raw NDJSON을 만든다.
+Supabase SQL Editor의 CSV/JSON download는 wrapper를 추가할 수 있으므로 그대로 사용하지 않는다. 표준 PostgreSQL 접속 환경 변수(`PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`)와 `PGCLIENTENCODING=UTF8`을 안전한 운영 shell에 설정한 뒤, 다음 명령으로 header 없는 raw UTF-8 NDJSON을 만든다.
 
 ```powershell
+$env:PGCLIENTENCODING = "UTF8"
 psql --no-align --tuples-only --output snapshot-sessions.ndjson `
   --command "SELECT to_jsonb(session)::text FROM public.sql_erd_sessions AS session WHERE write_protocol = 'snapshot' AND deleted_at IS NULL ORDER BY id;"
 ```
