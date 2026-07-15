@@ -827,7 +827,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         if (!isCurrent || parseResult.cancelled) {
           if (!parseResult.cancelled) {
             setNormalizedSqlApplyError(
-              "The session changed while SQL was being applied. Create a new preview and try again."
+              "SQL을 적용하는 동안 세션이 변경되었습니다. 새 미리보기를 만든 뒤 다시 시도하세요."
             );
           }
           setIsNormalizedSqlApplying(false);
@@ -1102,7 +1102,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       )
     ) {
       setNormalizedSqlApplyError(
-        "The session changed while the preview was open. Create a new preview before applying it."
+        "미리보기 화면이 열린 동안 세션이 변경되었습니다. 적용하기 전에 새 미리보기를 만드세요."
       );
       return;
     }
@@ -2173,13 +2173,13 @@ function NormalizedSqlPreviewDialog({
         <DialogHeader>
           <DialogTitle>
             {preview?.generationBlocked
-              ? "SQL regeneration unavailable"
-              : "Apply SQL changes"}
+              ? "SQL 재생성 불가"
+              : "SQL 변경 적용"}
           </DialogTitle>
           <DialogDescription>
             {preview?.generationBlocked
-              ? "This ERD cannot be regenerated as SQLite DDL without an unsupported ALTER TABLE FOREIGN KEY statement."
-              : "Review the generated SQL before replacing the current source."}
+              ? "지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다."
+              : "현재 SQL을 교체하기 전에 생성된 SQL을 검토하세요."}
           </DialogDescription>
         </DialogHeader>
         {preview && !preview.generationBlocked ? (
@@ -2197,7 +2197,7 @@ function NormalizedSqlPreviewDialog({
         ) : null}
         {preview && !preview.hasChanges ? (
           <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            The generated SQL matches the current source.
+            생성된 SQL이 현재 SQL과 같습니다.
           </p>
         ) : null}
         {error ? (
@@ -2212,7 +2212,7 @@ function NormalizedSqlPreviewDialog({
             onClick={() => onOpenChange(false)}
             type="button"
           >
-            Cancel
+            취소
           </button>
           <button
             className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:pointer-events-none disabled:opacity-50"
@@ -2220,7 +2220,7 @@ function NormalizedSqlPreviewDialog({
             onClick={onApply}
             type="button"
           >
-            {isApplying ? "Applying" : "Apply SQL changes"}
+            {isApplying ? "적용 중" : "SQL 변경 적용"}
           </button>
         </div>
       </DialogContent>
