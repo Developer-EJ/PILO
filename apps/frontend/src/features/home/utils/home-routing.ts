@@ -1,7 +1,3 @@
-export function buildMeetingReportHref(reportId: string) {
-  const searchParams = new URLSearchParams({
-    reportId
-  });
-
-  return `/meeting?${searchParams.toString()}#report`;
+export function buildMeetingReportHref(_reportId: string) {
+  return "/report";
 }
