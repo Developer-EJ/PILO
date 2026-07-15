@@ -62,6 +62,7 @@ import {
   SqlErdSessionPayload,
   SqlErdSessionRow,
   SqlErdSessionSummaryRow,
+  SqlErdWriteProtocol,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 import {
@@ -129,6 +130,13 @@ const JSON_SIZE_CONSTRAINTS = new Set([
 ]);
 const SOURCE_LOCK_TTL_SECONDS = 30;
 export const MAX_SQL_ERD_SOURCE_SNAPSHOT_BATCH_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+export function resolveNewSqlErdWriteProtocol(): SqlErdWriteProtocol {
+  return process.env.SQL_ERD_OPERATIONS_V1_ENABLED === "true"
+    ? "operations_v1"
+    : "snapshot";
+}
+
 const SQL_ERD_OPERATION_SELECT = `
   SELECT
     id,
@@ -754,6 +762,8 @@ export class SqlErdService {
             table_count,
             relation_count,
             revision,
+            write_protocol,
+            latest_op_seq,
             created_by,
             updated_by
           )
@@ -770,7 +780,9 @@ export class SqlErdService {
             $10,
             1,
             $11,
-            $11
+            $12,
+            $13,
+            $13
           )
           RETURNING
             id,
@@ -804,6 +816,8 @@ export class SqlErdService {
         JSON.stringify(input.settingsJson),
         input.tableCount,
         input.relationCount,
+        resolveNewSqlErdWriteProtocol(),
+        0,
         currentUserId
       ]
     );

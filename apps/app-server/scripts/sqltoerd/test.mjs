@@ -845,6 +845,8 @@ await assertRouteBodyLimit(
           JSON.stringify({}),
           2,
           1,
+          "snapshot",
+          0,
           currentUserId
         ]);
         return sessionRow({
@@ -870,6 +872,8 @@ await assertRouteBodyLimit(
   assert.equal(session.sourceText, sourceText);
   assert.equal(session.tableCount, 2);
   assert.equal(session.relationCount, 1);
+  assert.equal(session.revision, 1);
+  assert.equal(session.latestOpSeq, 0);
   assert.deepEqual(session.layoutJson, requestLayoutJson);
   assert.equal(session.createdBy, currentUserId);
   assert.equal(session.updatedBy, currentUserId);
@@ -1019,6 +1023,8 @@ await assertRouteBodyLimit(
           JSON.stringify({}),
           2,
           1,
+          "snapshot",
+          0,
           currentUserId
         ]);
         return sessionRow();
@@ -1034,12 +1040,76 @@ await assertRouteBodyLimit(
   });
 
   assert.equal(session.id, sessionId);
+  assert.equal(session.revision, 1);
+  assert.equal(session.latestOpSeq, 0);
   assert.equal(database.transactions.length, 1);
   assert.equal(
     database.queries.some((query) => /FROM sql_erd_sessions/.test(query.text)),
     false
   );
   assert.equal(database.queries.every((query) => query.transaction), true);
+}
+
+{
+  const previousFlag = process.env.SQL_ERD_OPERATIONS_V1_ENABLED;
+
+  try {
+    for (const [flag, writeProtocol] of [
+      ["false", "snapshot"],
+      ["true", "operations_v1"]
+    ]) {
+      process.env.SQL_ERD_OPERATIONS_V1_ENABLED = flag;
+
+      const createDatabase = new FakeDatabase({
+        queryOneRows: [
+          workspaceLockRow(),
+          null,
+          (text, values) => {
+            assert.match(text, /INSERT INTO sql_erd_sessions/);
+            assert.deepEqual(values.slice(-3), [writeProtocol, 0, currentUserId]);
+            return sessionRow({ write_protocol: writeProtocol });
+          }
+        ]
+      });
+      const { service: createService } = createSubject(createDatabase);
+      const created = await createService.createSession(currentUserId, workspaceId, {
+        modelJson: modelJson(),
+        layoutJson: layoutJson()
+      });
+
+      assert.equal(created.revision, 1);
+      assert.equal(created.latestOpSeq, 0);
+
+      const pluralDatabase = new FakeDatabase({
+        queryOneRows: [
+          workspaceLockRow(),
+          (text, values) => {
+            assert.match(text, /INSERT INTO sql_erd_sessions/);
+            assert.deepEqual(values.slice(-3), [writeProtocol, 0, currentUserId]);
+            return sessionRow({ write_protocol: writeProtocol });
+          }
+        ]
+      });
+      const { service: pluralService } = createSubject(pluralDatabase);
+      const plural = await pluralService.createPluralSession(
+        currentUserId,
+        workspaceId,
+        {
+          modelJson: modelJson(),
+          layoutJson: layoutJson()
+        }
+      );
+
+      assert.equal(plural.revision, 1);
+      assert.equal(plural.latestOpSeq, 0);
+    }
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.SQL_ERD_OPERATIONS_V1_ENABLED;
+    } else {
+      process.env.SQL_ERD_OPERATIONS_V1_ENABLED = previousFlag;
+    }
+  }
 }
 
 {
