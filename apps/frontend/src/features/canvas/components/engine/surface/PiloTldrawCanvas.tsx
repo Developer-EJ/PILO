@@ -175,6 +175,7 @@ type PiloTldrawCanvasProps = {
   onViewChange: (viewSetting: PiloCanvasViewSetting) => void;
   onFrameChildShapesUnload: (shapes: PiloCanvasFreeformShape[]) => void;
   onFrameChildrenRequest: (frameId: string) => void;
+  getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[];
   onViewportBoundsChange: (bounds: PiloCanvasViewportBounds) => void;
   onShapeDetailRequest: (request: PiloCanvasShapeDetailRequest) => void;
   onHistoryStateChange: (state: PiloCanvasHistoryState) => void;
@@ -577,11 +578,15 @@ function syncFreeformShapesIncrementally(
   shapes: PiloCanvasFreeformShape[],
   pendingArrowBindingsRef: MutableRefObject<PiloArrowBindingSnapshot[]>,
   piloDefaultArrowKindHydrationGuardRef: MutableRefObject<boolean>,
+  getPreservedFreeformShapeSnapshots?: () => PiloCanvasFreeformShape[],
 ) {
   editor.store.mergeRemoteChanges(() => {
     editor.run(
       () => {
         const incomingShapeMap = new Map<string, PiloCanvasFreeformShape>();
+        const preservedShapeMap = buildFreeformShapeMapFromShapes(
+          getPreservedFreeformShapeSnapshots?.() ?? [],
+        );
         const currentShapeMap = new Map<string, TLShape>();
         const shapeIdsToDelete: TLShapeId[] = [];
         const shapesToCreate: PiloCanvasFreeformShape[] = [];
@@ -600,6 +605,16 @@ function syncFreeformShapesIncrementally(
           currentShapeMap.set(String(shape.id), shape);
 
           if (!incomingShapeMap.has(String(shape.id))) {
+            if (
+              shouldPreserveMissingFrameChildShape({
+                incomingShapeMap,
+                preservedShapeMap,
+                shapeId: String(shape.id),
+              })
+            ) {
+              return;
+            }
+
             shapeIdsToDelete.push(shape.id as TLShapeId);
           }
         });
@@ -928,6 +943,33 @@ function getCreatedFreeformShapeIds({
   });
 }
 
+function shouldPreserveMissingFrameChildShape({
+  incomingShapeMap,
+  preservedShapeMap,
+  shapeId,
+}: {
+  incomingShapeMap: Map<string, PiloCanvasFreeformShape>;
+  preservedShapeMap: Map<string, PiloCanvasFreeformShape>;
+  shapeId: string;
+}) {
+  const preservedShape = preservedShapeMap.get(shapeId);
+  const parentId =
+    preservedShape && typeof preservedShape.parentId === "string"
+      ? preservedShape.parentId
+      : null;
+
+  if (!preservedShape || !parentId?.startsWith("shape:")) return false;
+  if (!incomingShapeMap.has(parentId) && !preservedShapeMap.has(parentId)) {
+    return false;
+  }
+
+  return !isShapeHiddenByCollapsedAncestor({
+    currentShapesById: incomingShapeMap,
+    shape: preservedShape,
+    snapshots: preservedShapeMap,
+  });
+}
+
 function scheduleShapeLockRelease({
   pendingShapeIds,
   presence,
@@ -1042,6 +1084,7 @@ export function PiloTldrawCanvas({
   onViewChange,
   onFrameChildShapesUnload,
   onFrameChildrenRequest,
+  getPreservedFreeformShapeSnapshots,
   onViewportBoundsChange,
   onShapeDetailRequest,
   onHistoryStateChange,
@@ -1515,6 +1558,7 @@ export function PiloTldrawCanvas({
         freeformShapesRef.current,
         pendingArrowBindingsRef,
         piloDefaultArrowKindHydrationGuardRef,
+        getPreservedFreeformShapeSnapshots,
       );
     } else {
       resetFreeformShapes(
@@ -1526,7 +1570,7 @@ export function PiloTldrawCanvas({
     }
 
     lastHydratedSeedKeyRef.current = seedKey;
-  }, [hydrationVersion, seedKey]);
+  }, [getPreservedFreeformShapeSnapshots, hydrationVersion, seedKey]);
 
   useEffect(() => {
     const editor = editorRef.current;
