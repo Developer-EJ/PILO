@@ -48,7 +48,10 @@ export type CanvasPresenceController = {
   remoteShapePreviews: CanvasShapePreviewEventPayload[];
   claimShapeLocks: (shapeIds: string[]) => void;
   releaseShapeLocks: (shapeIds?: string[]) => void;
-  reportLoadedViewport: (bounds: CanvasLoadedViewportBounds) => void;
+  reportLoadedViewport: (
+    bounds: CanvasLoadedViewportBounds,
+    shapes?: Record<string, unknown>[],
+  ) => void;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
@@ -70,6 +73,7 @@ export type CanvasPresenceOptions = {
     afterSeq: number,
     signal?: AbortSignal,
   ) => Promise<CanvasOperationsCatchupPayload>;
+  hydrateShapes?: (shapes: Record<string, unknown>[]) => void;
 };
 
 const initialOperationSyncState: CanvasOperationCatchupState = {
@@ -384,6 +388,7 @@ export function useCanvasPresence(
   const lastSeenOpSeqRef = useRef(0);
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
+  const hydrateShapesRef = useRef(options.hydrateShapes);
   const activeCatchUpAbortRef = useRef<AbortController | null>(null);
   const liveOperationBufferRef = useRef<CanvasShapeOperationPayload[]>([]);
   const runCatchUpRef = useRef<(afterSeq: number) => void>(() => {});
@@ -394,7 +399,12 @@ export function useCanvasPresence(
   useEffect(() => {
     applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
-  }, [options.applyOperations, options.catchUpOperations]);
+    hydrateShapesRef.current = options.hydrateShapes;
+  }, [
+    options.applyOperations,
+    options.catchUpOperations,
+    options.hydrateShapes,
+  ]);
 
   const applyContiguousOperations = useCallback(
     (operations: CanvasShapeOperationPayload[], afterSeq: number) => {
@@ -723,6 +733,9 @@ export function useCanvasPresence(
         ),
       );
       setRoomLoadedRegions(payload.loadedRegions);
+      if (payload.roomShapes.length) {
+        hydrateShapesRef.current?.(payload.roomShapes);
+      }
     });
     realtimeSocket.on("canvas:operation", (payload) => {
       if (
@@ -872,6 +885,16 @@ export function useCanvasPresence(
 
       setRoomLoadedRegions(payload.loadedRegions);
     });
+    realtimeSocket.on("canvas:room:shapes:hydrate", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRoomLoadedRegions(payload.loadedRegions);
+      if (payload.shapes.length) {
+        hydrateShapesRef.current?.(payload.shapes);
+      }
+    });
     realtimeSocket.on("canvas:error", (payload) => {
       console.warn("Canvas realtime socket error.", payload);
     });
@@ -996,19 +1019,23 @@ export function useCanvasPresence(
     });
   }, []);
 
-  const reportLoadedViewport = useCallback((bounds: CanvasLoadedViewportBounds) => {
-    const socket = socketRef.current;
-    const room = roomRef.current;
+  const reportLoadedViewport = useCallback(
+    (bounds: CanvasLoadedViewportBounds, shapes: Record<string, unknown>[] = []) => {
+      const socket = socketRef.current;
+      const room = roomRef.current;
 
-    if (!socket?.connected || !joinedRef.current) {
-      return;
-    }
+      if (!socket?.connected || !joinedRef.current) {
+        return;
+      }
 
-    socket.emit("canvas:viewport:loaded", {
-      ...room,
-      bounds,
-    });
-  }, []);
+      socket.emit("canvas:viewport:loaded", {
+        ...room,
+        bounds,
+        shapes,
+      });
+    },
+    [],
+  );
 
   const clearShapePreview = useCallback((shapeIds: string[]) => {
     const socket = socketRef.current;

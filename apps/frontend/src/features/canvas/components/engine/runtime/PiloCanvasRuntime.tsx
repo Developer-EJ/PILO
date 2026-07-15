@@ -234,6 +234,28 @@ function getShapeSyncErrorNoticeMessage(error: unknown) {
   return "Canvas 변경사항 저장 중 오류가 발생했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
 }
 
+function doesShapeIntersectViewport(
+  shape: PiloCanvasFreeformShape,
+  viewport: PiloCanvasViewportBounds | null,
+) {
+  if (!viewport) return false;
+
+  const shapeRecord = shape as Record<string, unknown>;
+  const shapeX = typeof shape.x === "number" ? shape.x : 0;
+  const shapeY = typeof shape.y === "number" ? shape.y : 0;
+  const shapeWidth =
+    typeof shapeRecord.width === "number" ? shapeRecord.width : 0;
+  const shapeHeight =
+    typeof shapeRecord.height === "number" ? shapeRecord.height : 0;
+
+  return (
+    shapeX + shapeWidth >= viewport.x &&
+    shapeX <= viewport.x + viewport.width &&
+    shapeY + shapeHeight >= viewport.y &&
+    shapeY <= viewport.y + viewport.height
+  );
+}
+
 export function PiloCanvasRuntime({
   ...props
 }: PiloCanvasRuntimeProps) {
@@ -547,9 +569,16 @@ function PiloCanvasRuntimeInner({
     },
     [board.id, board.workspaceId, queryClient, showCanvasSyncNotice],
   );
+  const hydrateRoomShapesRef = useRef<
+    (shapes: Record<string, unknown>[]) => void
+  >(() => {});
+  const hydrateRoomShapes = useCallback((shapes: Record<string, unknown>[]) => {
+    hydrateRoomShapesRef.current(shapes);
+  }, []);
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
+    hydrateShapes: hydrateRoomShapes,
   });
 
   useEffect(() => {
@@ -635,6 +664,35 @@ function PiloCanvasRuntimeInner({
     deletedShapeIdsRef,
     unloadedShapeIdsRef,
   });
+
+  useEffect(() => {
+    hydrateRoomShapesRef.current = (rawShapes: Record<string, unknown>[]) => {
+      const hydratedShapes = normalizeCanvasFreeformShapes(
+        rawShapes,
+      ) as PiloCanvasFreeformShape[];
+      const nextShapes = hydratedShapes.filter((shape) => {
+        if (typeof shape.id !== "string") return true;
+        return !deletedShapeIdsRef.current.has(shape.id);
+      });
+
+      if (!nextShapes.length) return;
+
+      nextShapes.forEach((shape) => {
+        if (typeof shape.id !== "string") return;
+
+        unloadedShapeIdsRef.current.delete(shape.id);
+        shapeDetailCacheRef.current.set(shape.id, shape);
+      });
+
+      const visibleShapes = nextShapes.filter((shape) =>
+        doesShapeIntersectViewport(shape, latestViewportBoundsRef.current),
+      );
+
+      if (visibleShapes.length) {
+        mergeLoadedFreeformShapes(visibleShapes);
+      }
+    };
+  }, [mergeLoadedFreeformShapes]);
 
   const persistViewSetting = useCanvasViewSettingPersistence({
     board,

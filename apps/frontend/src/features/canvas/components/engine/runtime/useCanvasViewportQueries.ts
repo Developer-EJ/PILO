@@ -51,7 +51,7 @@ type UseCanvasViewportQueriesOptions = {
     width: number;
     x: number;
     y: number;
-  }) => void;
+  }, shapes: PiloCanvasFreeformShape[]) => void;
   deletedShapeIdsRef: RuntimeRef<Set<string>>;
   unloadedShapeIdsRef: RuntimeRef<Set<string>>;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
@@ -340,7 +340,7 @@ export function useCanvasViewportQueries({
             onViewportShapesLoaded?.({
               ...latestBounds,
               margin: DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
-            });
+            }, nextLoadedShapes);
 
             mergeLoadedFreeformShapes(nextLoadedShapes);
             nextLoadedShapes.forEach((shape) => {

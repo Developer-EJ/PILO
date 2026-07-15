@@ -103,6 +103,7 @@ export type CanvasJoinedPayload = {
   loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
   readOnly: boolean;
+  roomShapes: Record<string, unknown>[];
   syncRequired: boolean;
   presence: CanvasRemotePresenceState[];
   shapeLocks: CanvasShapeLockState[];
@@ -202,12 +203,20 @@ export type CanvasViewportLoadedPayload = {
   workspaceId: string;
   canvasId: string;
   bounds: CanvasLoadedViewportBounds;
+  shapes: Record<string, unknown>[];
 };
 
 export type CanvasRoomLoadedRegionsUpdatedPayload = {
   workspaceId: string;
   canvasId: string;
   loadedRegions: CanvasRoomLoadedRegion[];
+};
+
+export type CanvasRoomShapesHydratePayload = {
+  workspaceId: string;
+  canvasId: string;
+  loadedRegions: CanvasRoomLoadedRegion[];
+  shapes: Record<string, unknown>[];
 };
 
 export type CanvasRealtimeErrorPayload = {
@@ -246,6 +255,9 @@ export type CanvasServerToClientEvents = {
   ) => void;
   "canvas:room:loaded-regions:update": (
     payload: CanvasRoomLoadedRegionsUpdatedPayload,
+  ) => void;
+  "canvas:room:shapes:hydrate": (
+    payload: CanvasRoomShapesHydratePayload,
   ) => void;
   "canvas:error": (payload: CanvasRealtimeErrorPayload) => void;
 };

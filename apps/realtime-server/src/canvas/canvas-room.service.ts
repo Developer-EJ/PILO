@@ -62,6 +62,7 @@ export function createCanvasRoomService({
           previews: await shapePreviewService.getRoomPreviews(payload),
           presence: presenceService.getPresence(payload),
           readOnly: access.readOnly,
+          roomShapes: roomStateService.getCachedShapes(payload),
           shapeLocks: await shapeLockService.getRoomLocks(payload),
           syncRequired: (payload.lastSeenOpSeq ?? 0) < latestOpSeq,
           workspaceId: payload.workspaceId,

@@ -73,6 +73,7 @@ export type CanvasJoinedPayload = CanvasRoomRef & {
   previews: CanvasShapePreviewEventPayload[];
   presence: CanvasPresenceState[];
   readOnly: boolean;
+  roomShapes: Record<string, unknown>[];
   shapeLocks: CanvasShapeLockState[];
   syncRequired: boolean;
 };
@@ -155,8 +156,14 @@ export type CanvasShapePreviewClearRequestPayload = CanvasRoomRef & {
 
 export type CanvasViewportLoadedPayload = CanvasRoomRef & {
   bounds: CanvasLoadedViewportBounds;
+  shapes: Record<string, unknown>[];
 };
 
 export type CanvasRoomLoadedRegionsUpdatedPayload = CanvasRoomRef & {
   loadedRegions: CanvasRoomLoadedRegion[];
+};
+
+export type CanvasRoomShapesHydratePayload = CanvasRoomRef & {
+  loadedRegions: CanvasRoomLoadedRegion[];
+  shapes: Record<string, unknown>[];
 };

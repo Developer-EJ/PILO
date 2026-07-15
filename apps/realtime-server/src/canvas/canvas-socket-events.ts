@@ -21,6 +21,7 @@ export const canvasServerEvents = {
   shapeLockUpdate: "canvas:shape:lock:update",
   shapePreview: "canvas:shape:preview",
   shapePreviewClear: "canvas:shape:preview:clear",
+  shapesHydrate: "canvas:room:shapes:hydrate",
   loadedRegionsUpdate: "canvas:room:loaded-regions:update",
   syncRequired: "canvas:sync:required",
 } as const;

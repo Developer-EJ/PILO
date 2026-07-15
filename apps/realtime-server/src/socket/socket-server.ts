@@ -557,6 +557,7 @@ function readViewportLoadedPayload(
   if (!room || !isRecord(payload) || !isRecord(payload.bounds)) return null;
 
   const { height, margin, width, x, y } = payload.bounds;
+  const shapes = payload.shapes;
 
   if (
     typeof height !== "number" ||
@@ -575,10 +576,14 @@ function readViewportLoadedPayload(
   ) {
     return null;
   }
+  if (!Array.isArray(shapes) || !shapes.every(isRecord)) {
+    return null;
+  }
 
   return {
     ...room,
     bounds: { height, margin, width, x, y },
+    shapes,
   };
 }
 
@@ -1339,11 +1344,13 @@ export async function createRealtimeSocketServer({
       const loadedRegions = roomStateService.recordLoadedViewport(
         loadedPayload,
         loadedPayload.bounds,
+        loadedPayload.shapes,
       );
 
-      io.to(roomName).emit(canvasServerEvents.loadedRegionsUpdate, {
+      io.to(roomName).emit(canvasServerEvents.shapesHydrate, {
         canvasId: loadedPayload.canvasId,
         loadedRegions,
+        shapes: loadedPayload.shapes,
         workspaceId: loadedPayload.workspaceId,
       });
     });
