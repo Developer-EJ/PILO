@@ -20,6 +20,10 @@ assert.ok(
   migrationFilenames.includes("061_create_sql_erd_operation_delivery.sql"),
   "SQLtoERD operation delivery migration must exist"
 );
+assert.ok(
+  migrationFilenames.includes("069_create_sql_erd_session_creation_audit.sql"),
+  "SQLtoERD session creation audit migration must exist"
+);
 
 const migration = await readFile(
   new URL(
@@ -30,6 +34,13 @@ const migration = await readFile(
 );
 const apiDocument = await readFile(
   new URL("../../../../docs/api/sqltoerd-api.md", import.meta.url),
+  "utf8"
+);
+const sessionCreationAuditMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/069_create_sql_erd_session_creation_audit.sql",
+    import.meta.url
+  ),
   "utf8"
 );
 
@@ -55,6 +66,24 @@ assert.match(
 assert.match(
   migration,
   /ALTER TABLE public\.sql_erd_session_operation_outbox ENABLE ROW LEVEL SECURITY/
+);
+assert.match(
+  sessionCreationAuditMigration,
+  /CREATE TABLE public\.sql_erd_session_creation_audit/
+);
+assert.match(sessionCreationAuditMigration, /session_id UUID NOT NULL UNIQUE/);
+assert.match(sessionCreationAuditMigration, /session_created_at TIMESTAMPTZ NOT NULL/);
+assert.match(
+  sessionCreationAuditMigration,
+  /CREATE FUNCTION public\.capture_sql_erd_session_creation_audit\(\)/
+);
+assert.match(
+  sessionCreationAuditMigration,
+  /CREATE TRIGGER trg_sql_erd_sessions_capture_creation_audit\s+AFTER INSERT ON public\.sql_erd_sessions/s
+);
+assert.match(
+  sessionCreationAuditMigration,
+  /ALTER TABLE public\.sql_erd_session_creation_audit ENABLE ROW LEVEL SECURITY/
 );
 assert.match(
   apiDocument,
@@ -86,6 +115,8 @@ assert.match(
   /`SQL_ERD_OPERATIONS_V1_ENABLED=true` creates a new session with\s+`operations_v1`/i
 );
 assert.match(apiDocument, /database column default remains `snapshot`/i);
+assert.match(apiDocument, /sql_erd_session_creation_audit/);
+assert.match(apiDocument, /session_created_at >= :cutover_started_at/);
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";

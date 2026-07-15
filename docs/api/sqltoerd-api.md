@@ -1032,18 +1032,19 @@ On `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client pauses autosave and persistence
 ### Cutover monitoring
 
 With `SQL_ERD_OPERATIONS_V1_ENABLED=true`, the App Server writes an error-level
-JSON log with event `SQL_ERD_OPERATIONS_V1_SNAPSHOT_CREATION_DETECTED` if an
-inserted session is returned with any protocol other than `operations_v1`. Alert
-on that event. During cutover, use this query to detect a missed creation route
-or database-default fallback (set `:cutover_started_at` to the flag-on time):
+JSON log with event `SQL_ERD_OPERATIONS_V1_SNAPSHOT_CREATION_DETECTED` if its
+own create path receives a protocol other than `operations_v1`. In addition,
+the database `AFTER INSERT` trigger records every `sql_erd_sessions` creation in
+`sql_erd_session_creation_audit`, including direct SQL and omitted-protocol
+paths that use the database default. Alert on the App Server event and run this
+cutover query (set `:cutover_started_at` to the flag-on time):
 
 ```sql
-SELECT id, workspace_id, created_at, write_protocol
-FROM sql_erd_sessions
-WHERE created_at >= :cutover_started_at
+SELECT session_id, workspace_id, session_created_at, observed_at, write_protocol
+FROM sql_erd_session_creation_audit
+WHERE session_created_at >= :cutover_started_at
   AND write_protocol = 'snapshot'
-  AND deleted_at IS NULL
-ORDER BY created_at DESC;
+ORDER BY session_created_at DESC;
 ```
 
 `sql-erd:operation` carries the `operation` object itself, not the HTTP write-response envelope. The App Server commits the session, operation, and outbox record in one DB transaction; the outbox then broadcasts the saved operation through Redis/Socket.IO. Delivery is at-least-once, so clients deduplicate by `id` or `opSeq` and use GET catch-up when a sequence gap is detected.
