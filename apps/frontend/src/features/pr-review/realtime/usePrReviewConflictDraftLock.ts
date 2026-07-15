@@ -74,27 +74,50 @@ export function usePrReviewConflictDraftLock({
 
   const releaseEdit = useCallback(() => {
     const socket = socketRef.current;
-    if (!socket || !canvasId || !conflictFileId || !isEditing) return;
+    if (!isEditing) return;
+
+    // Let the editor return to read-only even when the server-side lock expired.
+    setLock(null);
+    setIsEditClaimPending(false);
+    if (!socket || !canvasId || !conflictFileId) return;
+
     socket.emit("pr-review:conflict-draft:lock:release", {
       workspaceId,
       canvasId,
       reviewSessionId,
       reviewFileId: conflictFileId
     });
-    setIsEditClaimPending(false);
   }, [canvasId, conflictFileId, isEditing, reviewSessionId, workspaceId]);
 
-  const startEdit = useCallback(() => {
+  const emitEditClaim = useCallback(() => {
     const socket = socketRef.current;
-    if (!socket || !canvasId || !conflictFileId || !currentUserId || lock) return;
-    setIsEditClaimPending(true);
+    if (!socket || !canvasId || !conflictFileId || !currentUserId) {
+      return false;
+    }
+
     socket.emit("pr-review:conflict-draft:lock:claim", {
       workspaceId,
       canvasId,
       reviewSessionId,
       reviewFileId: conflictFileId
     });
-  }, [canvasId, conflictFileId, currentUserId, lock, reviewSessionId, workspaceId]);
+    return true;
+  }, [canvasId, conflictFileId, currentUserId, reviewSessionId, workspaceId]);
+
+  const startEdit = useCallback(() => {
+    if (lock) return;
+
+    setIsEditClaimPending(true);
+    if (!emitEditClaim()) {
+      setIsEditClaimPending(false);
+    }
+  }, [emitEditClaim, lock]);
+
+  const renewEdit = useCallback(() => {
+    if (!isEditing) return;
+
+    void emitEditClaim();
+  }, [emitEditClaim, isEditing]);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +137,7 @@ export function usePrReviewConflictDraftLock({
   useEffect(() => {
     if (!canvasId || !realtimeIdentity.authToken || !realtimeIdentity.currentUser) {
       setIsRealtimeReady(false);
+      setLock(null);
       return;
     }
 
@@ -208,6 +232,7 @@ export function usePrReviewConflictDraftLock({
       socketRef.current = null;
       setIsRealtimeReady(false);
       setIsEditClaimPending(false);
+      setLock(null);
     };
   }, [
     canvasId,
@@ -225,12 +250,12 @@ export function usePrReviewConflictDraftLock({
       heartbeatRef.current = null;
       return;
     }
-    heartbeatRef.current = window.setInterval(startEdit, 3_000);
+    heartbeatRef.current = window.setInterval(renewEdit, 3_000);
     return () => {
       if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
       heartbeatRef.current = null;
     };
-  }, [isEditing, startEdit]);
+  }, [isEditing, renewEdit]);
 
   useEffect(() => () => releaseEdit(), [releaseEdit]);
 

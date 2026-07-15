@@ -1,5 +1,6 @@
 import type {
   CreatePrReviewConflictSuggestionInput,
+  PrReviewConflictDraftSuggestion,
   PrReviewConflictFile,
   PrReviewConflictHunk,
   PrReviewConflictSuggestion
@@ -139,14 +140,14 @@ export function updatePrReviewConflictSuggestion(
 ): PrReviewConflictDraft {
   return {
     ...draft,
-    suggestion
+    suggestion: toPrReviewConflictDraftSuggestion(suggestion)
   };
 }
 
 export function applyAllPrReviewConflictSuggestion(
   file: PrReviewConflictFile,
   draft: PrReviewConflictDraft,
-  suggestion: PrReviewConflictSuggestion
+  suggestion: PrReviewConflictDraftSuggestion
 ): PrReviewConflictDraft {
   const acceptedAiResolvedTexts = Object.fromEntries(
     suggestion.resolvedHunks.map((hunk) => [hunk.hunkId, hunk.resolvedText])
@@ -168,6 +169,18 @@ export function applyAllPrReviewConflictSuggestion(
       manualResolvedTexts: draft.manualResolvedTexts
     }),
     isCustomized: false
+  };
+}
+
+function toPrReviewConflictDraftSuggestion(
+  suggestion: PrReviewConflictSuggestion
+): PrReviewConflictDraftSuggestion {
+  return {
+    status: suggestion.status,
+    aiSummary: suggestion.aiSummary,
+    aiSuggestion: suggestion.aiSuggestion,
+    resolvedHunks: suggestion.resolvedHunks,
+    validationMessages: suggestion.validationMessages
   };
 }
 

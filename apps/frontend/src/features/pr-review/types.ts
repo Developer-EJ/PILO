@@ -524,6 +524,14 @@ export type PrReviewConflictResolvedHunk = {
   resolvedText: string;
 };
 
+export type PrReviewConflictDraftSuggestion = {
+  status: PrReviewConflictSuggestionStatus;
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedHunks: PrReviewConflictResolvedHunk[];
+  validationMessages: string[];
+};
+
 export type PrReviewConflictDraftSource =
   | "ai"
   | "pr"
@@ -535,6 +543,7 @@ export type PrReviewConflictDraftResolutionState = {
   resolutionChoices: Record<string, PrReviewConflictDraftSource>;
   acceptedAiResolvedTexts: Record<string, string>;
   manualResolvedTexts: Record<string, string>;
+  suggestion: PrReviewConflictDraftSuggestion | null;
   isCustomized: boolean;
 };
 

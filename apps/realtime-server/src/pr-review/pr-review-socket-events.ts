@@ -66,7 +66,19 @@ type PrReviewConflictDraftResolutionState = {
   resolutionChoices: Record<string, PrReviewConflictDraftResolutionChoice>;
   acceptedAiResolvedTexts: Record<string, string>;
   manualResolvedTexts: Record<string, string>;
+  suggestion?: PrReviewConflictDraftSuggestion | null;
   isCustomized: boolean;
+};
+
+type PrReviewConflictDraftSuggestion = {
+  status: "suggested" | "invalid";
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedHunks: Array<{
+    hunkId: string;
+    resolvedText: string;
+  }>;
+  validationMessages: string[];
 };
 
 export type PrReviewConflictDraftInvalidatedEvent = {
@@ -177,7 +189,30 @@ function isPrReviewConflictDraftResolutionState(
     isStringRecord(value.resolutionChoices, isConflictDraftResolutionChoice) &&
     isStringRecord(value.acceptedAiResolvedTexts, (entry) => typeof entry === "string") &&
     isStringRecord(value.manualResolvedTexts, (entry) => typeof entry === "string") &&
+    (value.suggestion === undefined ||
+      value.suggestion === null ||
+      isPrReviewConflictDraftSuggestion(value.suggestion)) &&
     typeof value.isCustomized === "boolean"
+  );
+}
+
+function isPrReviewConflictDraftSuggestion(
+  value: unknown,
+): value is PrReviewConflictDraftSuggestion {
+  return (
+    isRecord(value) &&
+    (value.status === "suggested" || value.status === "invalid") &&
+    typeof value.aiSummary === "string" &&
+    typeof value.aiSuggestion === "string" &&
+    Array.isArray(value.resolvedHunks) &&
+    value.resolvedHunks.every(
+      (hunk) =>
+        isRecord(hunk) &&
+        isNonEmptyString(hunk.hunkId) &&
+        typeof hunk.resolvedText === "string",
+    ) &&
+    Array.isArray(value.validationMessages) &&
+    value.validationMessages.every((message) => typeof message === "string")
   );
 }
 
