@@ -3279,7 +3279,7 @@ export class MeetingService {
           )
         ),
         active_participant AS (
-          SELECT *
+          SELECT meeting_participants.*
           FROM meeting_participants
           CROSS JOIN participant_lock
           WHERE meeting_id = $1::uuid

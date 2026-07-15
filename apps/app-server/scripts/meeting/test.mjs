@@ -39,6 +39,10 @@ assert.match(meetingStateRealtimePublisher, /publishStateUpdatedSafely/);
 assert.match(meetingStateRealtimePublisher, /recording_started/);
 assert.match(meetingStateRealtimePublisher, /recording_failed/);
 assert.match(meetingServiceSource, /WITH active_participant AS/);
+assert.match(
+  meetingServiceSource,
+  /active_participant AS \(\s+SELECT meeting_participants\.\*/s
+);
 assert.match(meetingServiceSource, /ON CONFLICT DO NOTHING/);
 assert.match(meetingServiceSource, /pg_advisory_xact_lock/);
 assert.match(meetingServiceSource, /legacy_participant AS/);
