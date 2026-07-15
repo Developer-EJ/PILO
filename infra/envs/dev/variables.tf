@@ -10,6 +10,12 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "sql_erd_operations_v1_enabled" {
+  description = "Whether newly created SQLtoERD sessions use the operations_v1 write protocol."
+  type        = bool
+  default     = false
+}
+
 variable "aws_region" {
   description = "AWS region for dev resources."
   type        = string

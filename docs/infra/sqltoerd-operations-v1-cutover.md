@@ -10,9 +10,37 @@
 - `061_create_sql_erd_operation_delivery.sql`, `063_create_sql_erd_source_snapshots_and_locks.sql`, `069_create_sql_erd_session_creation_audit.sql`이 대상 DB에 적용되어 있어야 한다.
 - export artifact, manifest, 복호화 key는 Git, PR, issue, application log에 남기지 않는다.
 
+## dev staging 검증과 flag 리허설
+
+현재 저장소가 관리하는 배포 환경은 `infra/envs/dev`와 `pilo-dev-*` 리소스다. 이 환경을 staging으로 사용해 아래 리허설을 완료한 뒤 production cutover를 승인한다. GitHub repository variable `TF_PLAN_SQL_ERD_OPERATIONS_V1_ENABLED`는 Terraform plan 입력일 뿐 실행 중인 ECS task를 변경하지 않는다. 실제 전환은 같은 값을 `TF_VAR_sql_erd_operations_v1_enabled`로 지정한 Terraform plan/apply와 ECS service 안정화까지 완료해야 한다.
+
+flag 전환 순서는 **false → true → false → true**다.
+
+1. `false`: 최신 `main` 코드를 배포하고 `TF_PLAN_SQL_ERD_OPERATIONS_V1_ENABLED=false`와 `TF_VAR_sql_erd_operations_v1_enabled=false`로 Terraform을 적용한다. 새 session을 만들어 `writeProtocol: "snapshot"`인지 확인한다.
+2. `true`: 두 값을 `true`로 맞춰 plan/apply하고 App Server service가 stable인지 확인한다. 새 session의 `writeProtocol: "operations_v1"`, `revision: 1`, `latestOpSeq: 0`을 확인한 뒤 아래 E2E를 수행한다.
+3. rollback `false`: E2E 중단 조건이 없어도 한 번은 두 값을 `false`로 되돌려 plan/apply한다. rollback은 신규 session의 protocol 선택만 `snapshot`으로 되돌린다. 이미 생성된 `operations_v1` session을 `snapshot`으로 바꾸지 않으므로, 기존 operations session이 계속 operation/source lock 경로로 동작하는지도 확인한다.
+4. 최종 `true`: rollback 검증이 끝나면 두 값을 다시 `true`로 적용한다. 새 session이 `operations_v1`으로 생성되고 creation audit에 cutover 이후 `snapshot` 생성이 없는지 확인한다.
+
+각 단계에는 commit SHA, flag 값, ECS task definition revision, 시작·종료 시각, 생성 결과 protocol, 담당자만 기록한다. auth token, cookie, sourceText, operation payload, lease ID는 기록하지 않는다. App Server 5xx, Realtime 연결 실패, operation gap 미복구, source publish 유실, `SQL_ERD_OPERATIONS_V1_SNAPSHOT_CREATION_DETECTED` 중 하나라도 발생하면 신규 session 생성을 중단하고 flag를 `false`로 되돌린다.
+
+### 두 브라우저 E2E
+
+서로 다른 Workspace member 계정 A와 B를 별도 browser profile에서 열고 같은 신규 `operations_v1` session에 접속한다. 자동 회귀 테스트를 먼저 통과한 뒤 아래를 순서대로 확인한다.
+
+- **Presence:** A의 remote cursor·선택이 B에, B의 remote cursor·선택이 A에 표시되고 퇴장 시 제거된다.
+- **동시 layout:** A와 B가 서로 다른 table·note·frame·text·stroke를 거의 동시에 변경한다. 두 화면과 새로고침 결과에 양쪽 변경이 모두 남고, 한쪽의 오래된 전체 layout이 상대 변경을 덮어쓰지 않아야 한다.
+- **중복 operation:** 동일한 `clientOperationId`와 동일 payload로 operation POST를 재전송한다. 두 응답의 operation `id`와 `opSeq`가 같고 화면에는 변경이 한 번만 반영되어야 한다.
+- **sequence gap/reconnect:** B에서 Socket.IO 연결만 차단한 상태로 A가 operation을 두 개 이상 저장한다. Socket.IO를 다시 허용하면 B가 HTTP catch-up으로 누락 순번을 오름차순 적용해야 한다. 100개 초과 pagination은 frontend 자동 회귀 테스트로 별도 확인한다.
+- **source lock:** A가 Source를 열어 lock을 얻고 Network 기록에서 약 10초 간격 renew를 확인한다. B의 SQL editor와 dialect는 read-only이고 B의 직접 publish 요청도 `409 CONFLICT`여야 한다. A가 Source를 닫으면 release 뒤 B가 재획득해야 한다. A의 연결을 release 없이 끊은 경우에는 30초 TTL 만료 뒤 B가 획득해야 한다.
+- **source publish 동시성:** A가 source publish를 실행하는 동안 B가 table 또는 annotation layout operation을 저장한다. 상대 browser가 `source_snapshot`을 적용한 뒤에도 B의 layout 변경과 snapshot의 source/model 변경이 모두 남아야 한다.
+- **metadata/delete:** title metadata PATCH는 `operations_v1`에서도 성공하고 reload 뒤 제목이 유지되어야 한다. session soft delete도 protocol과 무관하게 성공하며, 삭제 뒤 목록·상세 API에서 활성 session으로 반환되지 않아야 한다.
+- **legacy mismatch:** `operations_v1` session에 legacy full PATCH를 보내 `409 SQL_ERD_WRITE_PROTOCOL_MISMATCH`를 확인한다. frontend 자동 회귀 테스트에서는 이 응답 뒤 autosave retry 중단, persistence 차단, reload/read-only 안내를 확인한다. 별도의 구버전 배포 artifact가 없다면 수동 staging에서는 서버 응답까지만 확인하고 그 제한을 결과에 기록한다.
+
+모든 항목은 브라우저에서 보였다는 사실만 기록하지 않고, 최종 session detail의 `revision`·`latestOpSeq`, operation catch-up 결과, 새로고침 후 source/model/layout을 함께 대조한다. 실패 항목이 있으면 이 cutover Issue에 재현 절차만 남기고 sourceText나 인증 정보는 첨부하지 않으며, 별도 버그 Issue/PR로 수정한 뒤 전체 E2E를 처음부터 다시 수행한다.
+
 ## 전환 순서
 
-1. staging에서 동일 Workspace member 두 명으로 operation, duplicate event, sequence gap/reconnect, source lock renew/publish를 확인한다.
+1. 위 dev staging flag 리허설과 두 브라우저 E2E를 완료한다.
 2. maintenance window를 공지하고 기존 SQLtoERD 탭을 종료하도록 안내한다.
 3. App Server를 `SQL_ERD_OPERATIONS_V1_ENABLED=true`로 배포한다. 이 flag는 **신규 session 생성 시** protocol만 고르며, 기존 row를 변경하지 않는다.
 4. 아래 대상 SQL로 활성 snapshot session 목록을 export한다. 대상은 반드시 `write_protocol = 'snapshot' AND deleted_at IS NULL`이다.

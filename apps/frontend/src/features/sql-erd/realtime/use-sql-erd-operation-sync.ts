@@ -128,7 +128,10 @@ export function useSqlErdOperationSync(
       bufferedOperations: liveOperationBufferRef.current,
       lastSeenOpSeq: lastSeenOpSeqRef.current
     });
-    if (!operations.length) return;
+    if (!operations.length) {
+      liveOperationBufferRef.current = nextState.bufferedOperations;
+      return;
+    }
 
     await applyOperationsRef.current(operations);
     liveOperationBufferRef.current = nextState.bufferedOperations;

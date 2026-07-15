@@ -220,6 +220,7 @@ module "ecs" {
         LIVEKIT_EGRESS_S3_PREFIX            = "recordings/meetings"
         OPENAI_PR_REVIEW_MODEL              = "gpt-5.5"
         OPENAI_PR_REVIEW_TIMEOUT_MS         = "45000"
+        SQL_ERD_OPERATIONS_V1_ENABLED       = tostring(var.sql_erd_operations_v1_enabled)
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
