@@ -938,12 +938,14 @@ assert.match(piloTldrawCanvas, /window\.addEventListener\("pointermove"/);
 assert.match(piloTldrawCanvas, /closest\("\.canvas-trash-drop-zone"\)/);
 assert.match(piloTldrawCanvas, /window\.addEventListener\("pointerup"/);
 assert.match(piloTldrawCanvas, /window\.requestAnimationFrame\(\(\) => \{/);
-assert.match(piloTldrawCanvas, /collectRemoteLockedShapeIds/);
+assert.match(piloTldrawCanvas, /collectRemoteBusyShapeIds/);
+assert.match(piloTldrawCanvas, /collectRemoteSelectedShapeIds/);
 assert.match(piloTldrawCanvas, /filterUnlockedShapeIds/);
-assert.doesNotMatch(piloTldrawCanvas, /entry\.selectedShapeIds\.forEach\(\(shapeId\)/);
+assert.match(piloTldrawCanvas, /entry\.selectedShapeIds\.forEach\(\(shapeId\)/);
 assert.match(piloTldrawCanvas, /presence\?\.remoteShapePreviews\.forEach/);
 assert.match(piloTldrawCanvas, /CANVAS_COLLABORATION_GUARD_MESSAGE/);
 assert.match(piloTldrawCanvas, /showCollaborationNotice/);
+assert.match(piloTldrawCanvas, /getShapeInteractionLockIds/);
 assert.match(piloTldrawCanvas, /requestedShapeLockIdsRef\.current = nextLockShapeIds/);
 assert.match(piloTldrawCanvas, /localPreviewShapeIdsRef\.current = nextShapeIds/);
 assert.match(piloTldrawCanvas, /CANVAS_PENDING_PREVIEW_GROUP_TTL_MS = 30_000/);
@@ -954,8 +956,12 @@ assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup/);
 assert.match(piloTldrawCanvas, /collectPendingPreviewGroupShapes/);
 assert.match(piloTldrawCanvas, /isShapeHiddenByCollapsedAncestor/);
 assert.match(piloTldrawCanvas, /previewDeleteGraceSinceRef/);
-assert.match(piloTldrawCanvas, /remoteLockedShapeIdsRef/);
-assert.match(piloTldrawCanvas, /deleteSelectedShapes\(editor, remoteLockedShapeIdsRef\.current\)/);
+assert.match(piloTldrawCanvas, /remoteBusyShapeIdsRef/);
+assert.match(piloTldrawCanvas, /remoteDeleteBlockedShapeIdsRef/);
+assert.match(
+  piloTldrawCanvas,
+  /deleteSelectedShapes\(editor, remoteDeleteBlockedShapeIdsRef\.current\)/,
+);
 assert.match(piloTldrawCanvas, /isPiloErasableShape/);
 assert.match(piloTldrawCanvas, /shape\.type === "draw" \|\| shape\.type === "highlight"/);
 assert.match(piloTldrawCanvas, /activatePiloEraserWithShortcut/);
