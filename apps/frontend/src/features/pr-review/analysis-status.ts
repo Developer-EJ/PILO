@@ -5,7 +5,7 @@ import type {
 } from "@/features/pr-review/types";
 
 export const PR_REVIEW_ANALYSIS_POLL_INTERVAL_MS = 2_000;
-export const PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 5 * 60 * 1_000;
+export const PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 3 * 60 * 1_000;
 
 export function shouldPollPrReviewAnalysis(status: PrReviewSessionStatus) {
   return status === "analyzing";
@@ -24,6 +24,14 @@ export function isPrReviewAnalysisDelayed(
     Number.isFinite(startedAtMs) &&
     nowMs - startedAtMs >= PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS
   );
+}
+
+export function getPrReviewAnalysisDelayMessage(
+  session: Pick<PrReviewSession, "createdAt" | "status">
+) {
+  return isPrReviewAnalysisDelayed(session)
+    ? "Analysis is taking longer than expected. The latest status will keep refreshing."
+    : null;
 }
 
 export function getPrReviewAnalysisRetryLabel(

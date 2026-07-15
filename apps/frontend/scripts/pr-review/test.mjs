@@ -32,6 +32,13 @@ const prReviewAnalysisStatus = await readFile(
   new URL("../../src/features/pr-review/analysis-status.ts", import.meta.url),
   "utf8"
 );
+const prReviewSessionVersion = await readFile(
+  new URL(
+    "../../src/features/pr-review/pr-review-session-version.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewAnalysisStatusComponent = await readFile(
   new URL(
     "../../src/features/pr-review/components/pr-review-analysis-status.tsx",
@@ -176,6 +183,7 @@ const prReviewShapeUtils = await readFile(
 assert.match(prReviewTypes, /export type PrReviewRepository/);
 assert.match(prReviewTypes, /export type PrReviewPullRequest/);
 assert.match(prReviewTypes, /export type PrReviewSession/);
+assert.match(prReviewTypes, /export type PrReviewSessionVersionState/);
 assert.match(prReviewTypes, /export type PrReviewRoom =/);
 assert.match(prReviewTypes, /analyzingReviewSessionId: string \| null/);
 assert.match(prReviewTypes, /export type PrReviewRoomList =/);
@@ -319,13 +327,19 @@ assert.match(prReviewPanel, /Skeleton/);
 assert.match(prReviewPanel, /isStartingReview/);
 assert.doesNotMatch(prReviewPanel, /features\/github-integration/);
 assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_POLL_INTERVAL_MS = 2_000/);
-assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 5 \* 60 \* 1_000/);
+assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 3 \* 60 \* 1_000/);
 assert.match(prReviewAnalysisStatus, /shouldPollPrReviewAnalysis/);
 assert.match(prReviewAnalysisStatus, /isPrReviewAnalysisDelayed/);
+assert.match(prReviewAnalysisStatus, /getPrReviewAnalysisDelayMessage/);
+assert.match(prReviewSessionVersion, /getPrReviewSessionVersionState/);
+assert.match(prReviewSessionVersion, /isPrReviewSessionVersionStale/);
 assert.match(prReviewAnalysisStatusComponent, /PR 분석 중/);
 assert.match(prReviewAnalysisStatusComponent, /분석 시간이 예상보다 길어지고 있습니다/);
 assert.match(prReviewAnalysisStatusComponent, /pollingError/);
 assert.match(prReviewAnalysisStatusComponent, /getPrReviewAnalysisRetryLabel/);
+assert.match(prReviewAnalysisStatusComponent, /delayMessage/);
+assert.match(prReviewPanel, /getPrReviewAnalysisDelayMessage/);
+assert.match(prReviewPanel, /delayMessage=\{getPrReviewAnalysisDelayMessage/);
 assert.match(prReviewPanel, /분석 상태를 확인하지 못했습니다/);
 assert.match(prReviewCanvasShell, /getReviewSessionSummary/);
 assert.match(prReviewCanvasShell, /getReviewSessionCanvas/);
@@ -348,6 +362,7 @@ assert.match(prReviewCanvasShell, /해결 준비/);
 assert.match(prReviewCanvasShell, /pilo-github-oauth-reconnect/);
 assert.match(prReviewCanvasShell, /PrReviewSubmitReviewModal/);
 assert.match(prReviewCanvasShell, /setIsSubmitReviewModalOpen/);
+assert.match(prReviewSubmitReviewModal, /isPrReviewSessionVersionStale/);
 assert.match(prReviewCanvasShell, /createNewReviewSession/);
 assert.match(prReviewCanvasShell, /onGoToGithub/);
 assert.match(prReviewCanvasShell, /onReviewSessionCreated/);
@@ -384,6 +399,7 @@ assert.match(prReviewCanvasShell, /CONFLICT_STATUS_POLL_MAX_ATTEMPTS/);
 assert.match(prReviewCanvasShell, /window\.setInterval/);
 assert.doesNotMatch(prReviewCanvasShell, /Review all files before merge/);
 assert.match(prReviewCanvasShell, /expectedHeadSha/);
+assert.match(prReviewCanvasShell, /isPrReviewSessionVersionStale/);
 assert.match(prReviewCanvasShell, /confirm: true/);
 assert.match(prReviewCanvasShell, /Merge pull request\?/);
 assert.match(prReviewCanvasShell, /Branch protection and required checks/);

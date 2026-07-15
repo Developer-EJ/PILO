@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { createPrReviewApiClient } from "@/features/pr-review/api/client";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
+import { isPrReviewSessionVersionStale } from "@/features/pr-review/pr-review-session-version";
 import type {
   PrReviewPullRequest,
   PrReviewPullRequestDetail,
@@ -72,10 +73,10 @@ const submitOptions: Array<{
 ];
 
 const statusLabels = {
-  approved: "Ready to merge",
-  discussion_needed: "Needs discussion",
-  not_reviewed: "Decision required",
-  unknown: "Needs investigation"
+  approved: "Approved",
+  discussion_needed: "Discuss before merge",
+  not_reviewed: "Not reviewed yet",
+  unknown: "Requires owner input"
 };
 
 function formatNumber(value: number) {
@@ -102,38 +103,44 @@ function getGuardKind(message: string): GuardKind {
   return "generic";
 }
 
-function isKnownStaleSession(
-  session: PrReviewSession,
-  pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null
-) {
-  return Boolean(pullRequest?.headSha && pullRequest.headSha !== session.headSha);
-}
-
 function buildDefaultReviewBody(result: PrReviewSessionResult) {
+  const decisionSummary = [
+    `Approved ${result.counts.approved}`,
+    `Discuss ${result.counts.discussionNeeded}`,
+    `Unknown ${result.counts.unknown}`,
+    `Not reviewed ${result.counts.notReviewed}`
+  ].join(" / ");
+  const followUp =
+    result.counts.discussionNeeded + result.counts.unknown > 0
+      ? "Resolve discussion and unknown decisions before merging."
+      : "No follow-up decision is required before merging.";
   const lines = [
     "## PILO PR Review",
     "",
     result.reviewResultSummary,
     "",
-    ...getReviewReadinessSection(result),
+    "### Decision summary",
+    decisionSummary,
+    "",
+    "### Follow-up",
+    followUp,
+    "",
     "### File decisions"
   ];
 
+  appendFileDecisions(lines, result);
+  return lines.join("\n");
+}
+
+function appendFileDecisions(
+  lines: string[],
+  result: PrReviewSessionResult
+) {
   for (const file of result.fileReviewResults) {
     const status = statusLabels[file.status];
     const comment = file.comment ? ` - ${file.comment}` : "";
     lines.push(`- ${status}: ${file.filePath}${comment}`);
   }
-
-  return lines.join("\n");
-}
-
-function getReviewReadinessSection(result: PrReviewSessionResult) {
-  const readiness = result.readyToSubmit
-    ? "All changed files have a saved review decision."
-    : `${result.counts.notReviewed} changed file(s) still need a review decision.`;
-
-  return ["### Review readiness", readiness, ""];
 }
 
 function getCountItems(result: PrReviewSessionResult) {
@@ -188,7 +195,7 @@ export function PrReviewSubmitReviewModal({
   const [submission, setSubmission] = useState<PrReviewSubmission | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
 
-  const knownStaleSession = isKnownStaleSession(session, pullRequest);
+  const knownStaleSession = isPrReviewSessionVersionStale(session, pullRequest);
   const countItems = useMemo(() => (result ? getCountItems(result) : []), [result]);
   const canSubmit =
     loadStatus === "ready" &&

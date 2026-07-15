@@ -49,6 +49,7 @@ import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-ca
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
+import { isPrReviewSessionVersionStale } from "@/features/pr-review/pr-review-session-version";
 import {
   applyDecisionUpdateToCanvas,
   applyDecisionUpdateToSummary
@@ -842,8 +843,9 @@ export function PrReviewCanvasShell({
                 )}개 파일의 해결안을 더 준비해 주세요.`
               : null;
   const reviewSubmitted = (summary?.status ?? session.status) === "submitted";
-  const isReviewVersionStale = Boolean(
-    latestPullRequest?.headSha && latestPullRequest.headSha !== session.headSha
+  const isReviewVersionStale = isPrReviewSessionVersionStale(
+    session,
+    latestPullRequest
   );
   const isPullRequestClosed = latestPullRequest?.state === "closed";
   const isReviewReadOnly = isReviewVersionStale || isPullRequestClosed;

@@ -33,6 +33,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthSession } from "@/features/auth";
 import {
+  getPrReviewAnalysisDelayMessage,
   isPrReviewAnalysisDelayed,
   PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS,
   PR_REVIEW_ANALYSIS_POLL_INTERVAL_MS,
@@ -745,6 +746,7 @@ export function PrReviewPanel({
       activeReviewSession?.status === "failed" ? (
         <PrReviewAnalysisStatus
           backLabel={backToSelectionLabel}
+          delayMessage={getPrReviewAnalysisDelayMessage(activeReviewSession)}
           isDelayed={isAnalysisDelayed}
           isRetrying={isRetryingReview}
           onBackToSelection={leaveReviewSession}
