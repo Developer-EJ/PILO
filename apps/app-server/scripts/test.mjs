@@ -66,6 +66,9 @@ const canvasShapeHash = await readSource(
 const canvasOperationPublisher = await readSource(
   "../src/modules/canvas/canvas-operation-publisher.service.ts"
 );
+const canvasAgentRepository = await readSource(
+  "../src/modules/canvas/agent/canvas-agent.repository.ts"
+);
 const meetingController = await readSource(
   "../src/modules/meeting/meeting.controller.ts"
 );
@@ -459,6 +462,9 @@ assert.match(canvasShapeHashMigration, /idx_canvas_freeform_shapes_order_active/
 assert.match(canvasOperationPublisher, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
 assert.match(canvasOperationPublisher, /REDIS_URL/);
 assert.match(canvasOperationPublisher, /publishOperation/);
+assert.match(canvasAgentRepository, /async discardDraft/);
+assert.match(canvasAgentRepository, /DELETE FROM canvas_agent_drafts/);
+assert.doesNotMatch(canvasAgentRepository, /SET status = 'discarded'/);
 assert.match(canvasShapeOperationMigration, /ALTER TABLE public\.canvas/);
 assert.match(canvasShapeOperationMigration, /latest_op_seq/);
 assert.match(canvasShapeOperationMigration, /CREATE TABLE public\.canvas_shape_operations/);

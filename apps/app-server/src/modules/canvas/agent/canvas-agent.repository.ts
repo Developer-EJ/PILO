@@ -539,11 +539,20 @@ export class CanvasAgentRepository {
   async discardDraft(draftId: string): Promise<CanvasAgentDraftRow | null> {
     return this.database.queryOne<CanvasAgentDraftRow>(
       `
-        UPDATE canvas_agent_drafts
-        SET status = 'discarded'
+        DELETE FROM canvas_agent_drafts
         WHERE id = $1
           AND status = 'preview'
-        RETURNING *
+        RETURNING
+          id,
+          run_id,
+          canvas_id,
+          created_by_user_id,
+          'discarded'::text AS status,
+          draft_spec_json,
+          applied_shape_ids,
+          created_at,
+          applied_at,
+          expires_at
       `,
       [draftId]
     );

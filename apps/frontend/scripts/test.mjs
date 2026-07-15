@@ -210,6 +210,13 @@ const piloCanvasStateReporter = await readFile(
   ),
   "utf8"
 );
+const canvasAgentToolStepPlayback = await readFile(
+  new URL(
+    "../src/features/canvas/components/engine/surface/canvas-agent-tool-step-playback.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCanvasArrowBindings = await readFile(
   new URL(
     "../src/features/canvas/components/engine/surface/pilo-canvas-arrow-bindings.ts",
@@ -783,6 +790,10 @@ assert.match(piloTldrawCanvas, /syncFreeformShapesIncrementally/);
 assert.match(piloTldrawCanvas, /shouldPreserveMissingFrameChildShape/);
 assert.match(piloTldrawCanvas, /getPreservedFreeformShapeSnapshots/);
 assert.match(piloTldrawCanvas, /editor\.updateShapes\(shapesToUpdate/);
+assert.match(canvasAgentToolStepPlayback, /playbackState/);
+assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
+assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
+assert.match(canvasAgentToolStepPlayback, /new Set<string>\(\)/);
 assert.match(piloTldrawCanvas, /removeStaleSerializedArrowBindings/);
 assert.match(piloTldrawCanvas, /editor\.getContainer\(\)/);
 assert.match(piloTldrawCanvas, /editor\.screenToPage/);
