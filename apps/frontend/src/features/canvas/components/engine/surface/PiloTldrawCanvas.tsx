@@ -1914,7 +1914,7 @@ export function PiloTldrawCanvas({
         deactivatePiloEraser(editor);
         placementRequestRef.current = null;
         returnToSelectAfterPlacementRef.current =
-          tool !== "select" && !connectionTools.has(tool);
+          tool !== "select" && tool !== "text" && !connectionTools.has(tool);
         editor.cancel();
         editor.updateInstanceState({ isToolLocked: false });
         editor.setCurrentTool(tool === "select" ? "select.idle" : tool);
@@ -2371,7 +2371,7 @@ export function PiloTldrawCanvas({
     if (
       event.target instanceof Element &&
       event.target.closest(
-        ".pilo-frame-toolbar, .tl-frame-heading, .tl-frame-heading-hit-area, .tl-frame-label, .tl-frame-name-input, .pilo-code-block input, .pilo-code-block select, .pilo-code-mirror",
+        ".pilo-frame-toolbar, .pilo-code-block input, .pilo-code-block select, .pilo-code-mirror",
       )
     ) {
       return;
@@ -2409,7 +2409,11 @@ export function PiloTldrawCanvas({
     // Frame and shape detail selection are select-tool affordances. Let an
     // active drawing tool receive its first click so an arrow can start from
     // a frame instead of the frame stealing that click.
-    if (editor.getCurrentToolId() !== "select") {
+    const currentToolId = editor.getCurrentToolId();
+    const isSelectTool =
+      currentToolId === "select" || currentToolId.startsWith("select.");
+
+    if (!isSelectTool) {
       if (isInsideRemoteLockedShape) {
         event.preventDefault();
         event.stopPropagation();
