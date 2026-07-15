@@ -27,6 +27,10 @@ export function mapCanvas(
     workspaceId: canvas.workspace_id,
     title: canvas.title,
     boardType: canvas.board_type,
+    engineType: canvas.engine_type ?? "classic",
+    engineVersion:
+      canvas.engine_version === undefined ? 1 : Number(canvas.engine_version),
+    sourceCanvasId: canvas.source_canvas_id ?? null,
     zoom,
     viewportX,
     viewportY,

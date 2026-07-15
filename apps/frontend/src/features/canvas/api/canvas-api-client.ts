@@ -186,6 +186,18 @@ export function createCanvasApiClient({
       );
     },
 
+    async convertBoardEngine(
+      boardId: string,
+      body: unknown,
+      { workspaceId }: { workspaceId: string },
+    ) {
+      return requestCanvasJson(
+        `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}/engine-conversions`,
+        withJsonBody(body, { method: "POST" }),
+        requestOptions,
+      );
+    },
+
     async getBoardDetail(boardId: string, { workspaceId }: { workspaceId: string }) {
       const path = `/workspaces/${encodeURIComponent(workspaceId)}/canvases/${encodeURIComponent(boardId)}`;
       const board = await requestCanvasJson(path, undefined, requestOptions);

@@ -18,6 +18,11 @@ PR Review의 분석 결과, file decision, 위험도, Flow와 relation 원본, G
 ## 데이터 규칙
 
 - `canvas` 테이블은 canvas metadata와 viewport 값을 저장한다.
+- `canvas.engine_type`은 Canvas 동작 엔진을 구분한다. `classic`은 기존 API
+  batch/operation log 기반 Canvas이고, `tldraw_sync`는 별도 sync document
+  기반 Canvas다.
+- `canvas.source_canvas_id`는 기존 Canvas에서 새 엔진 Canvas를 시작한 경우 원본
+  Canvas를 가리킨다. 기본 전환은 기존 shape를 복사하지 않는다.
 - `canvas.latest_op_seq`는 해당 canvas에서 마지막으로 확정된 shape operation 순번이다.
 - `canvas_freeform_shapes` 테이블은 사용자가 만든 shape data를 저장한다.
 - `canvas_freeform_shapes.parent_shape_id`는 Frame 내부 shape lazy loading을 위한
@@ -135,6 +140,7 @@ Canvas는 ID를 알고 있어도 조회할 수 없다.
 | --- | --- | --- |
 | `GET` | `/workspaces/{workspaceId}/canvases` | Workspace canvas 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases` | Canvas 생성 |
+| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/engine-conversions` | 기존 Canvas를 보존하고 새 engine Canvas 생성 |
 | `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}` | Canvas metadata와 저장된 viewport 조회 |
 | `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Viewport bounds 기준 shape summary 조회 |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/shapes` | Shape 생성 |
@@ -151,11 +157,26 @@ Canvas는 ID를 알고 있어도 조회할 수 없다.
 
 ```json
 {
-  "title": "Untitled canvas"
+  "title": "Untitled canvas",
+  "engineType": "classic"
 }
 ```
 
-서버는 별도 확장이 생기기 전까지 `boardType`을 `freeform`으로 저장한다.
+서버는 `boardType`을 `freeform`으로 저장한다. `engineType`은 선택값이며 생략하면
+`classic`이다. 지원 값은 `classic`, `tldraw_sync`다.
+
+## Canvas engine 전환
+
+```json
+{
+  "targetEngineType": "tldraw_sync",
+  "copyShapes": false
+}
+```
+
+전환 API는 기존 Canvas row를 직접 변경하지 않는다. 서버는 기존 Canvas를
+`sourceCanvasId`로 참조하는 새 Canvas를 만들고, 새 Canvas는 비어 있는 상태로
+시작한다. 현재 `copyShapes: true`는 지원하지 않는다.
 
 ## Shape Payload
 
@@ -246,6 +267,9 @@ viewport bounds를 계산한 뒤 shape summary 조회 API를 호출한다.
   "workspaceId": "workspace id",
   "title": "Untitled canvas",
   "boardType": "freeform",
+  "engineType": "classic",
+  "engineVersion": 1,
+  "sourceCanvasId": null,
   "zoom": 1,
   "viewportX": 0,
   "viewportY": 0,

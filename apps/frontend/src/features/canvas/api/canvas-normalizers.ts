@@ -185,6 +185,9 @@ export function createMockCanvasBoardDetail(
     workspaceId,
     title: "PILO Canvas",
     boardType: "freeform",
+    engineType: "classic",
+    engineVersion: 1,
+    sourceCanvasId: null,
     zoom: 0.8,
     viewportX: 0,
     viewportY: 0,
@@ -202,6 +205,9 @@ export function toBoardSummary(board: CanvasBoardDetail): CanvasBoardSummary {
     workspaceId: board.workspaceId,
     title: board.title,
     boardType: board.boardType,
+    engineType: board.engineType,
+    engineVersion: board.engineVersion,
+    sourceCanvasId: board.sourceCanvasId,
     zoom: board.zoom,
     viewportX: board.viewportX,
     viewportY: board.viewportY,
@@ -238,6 +244,18 @@ export function normalizeCanvasBoardDetail(
       typeof rawBoard.boardType === "string"
         ? rawBoard.boardType
         : fallback.boardType,
+    engineType:
+      typeof rawBoard.engineType === "string"
+        ? rawBoard.engineType
+        : fallback.engineType,
+    engineVersion:
+      typeof rawBoard.engineVersion === "number"
+        ? rawBoard.engineVersion
+        : fallback.engineVersion,
+    sourceCanvasId:
+      typeof rawBoard.sourceCanvasId === "string"
+        ? rawBoard.sourceCanvasId
+        : null,
     zoom: typeof rawBoard.zoom === "number" ? rawBoard.zoom : fallback.zoom,
     viewportX:
       typeof rawBoard.viewportX === "number"

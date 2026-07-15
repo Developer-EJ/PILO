@@ -2,6 +2,7 @@ import { badRequest } from "../../common/api-error";
 import {
   CanvasShapeBatchOperationValues,
   CompleteShapeWriteValues,
+  ConvertCanvasEngineRequest,
   CreateCanvasShapeRequest,
   CreateCanvasRequest,
   ListCanvasOperationsQuery,
@@ -19,6 +20,7 @@ import {
 } from "./canvas-review-shape-policy";
 
 const MAX_CANVAS_TITLE_LENGTH = 120;
+const ALLOWED_CANVAS_ENGINE_TYPES = new Set(["classic", "tldraw_sync"]);
 export const MAX_CANVAS_SHAPE_BATCH_OPERATIONS = 100;
 const ALLOWED_SHAPE_TYPES = new Set([
   "sticky-note",
@@ -49,6 +51,40 @@ export function validateCanvasTitle(value: CreateCanvasRequest["title"]): string
   }
 
   return title || "Untitled canvas";
+}
+
+export function validateCanvasEngineType(
+  value: CreateCanvasRequest["engineType"] | ConvertCanvasEngineRequest["targetEngineType"],
+  fallback = "classic"
+): string {
+  const engineType = typeof value === "string" ? value.trim() : fallback;
+
+  if (!ALLOWED_CANVAS_ENGINE_TYPES.has(engineType)) {
+    throw badRequest("Canvas engineType is invalid");
+  }
+
+  return engineType;
+}
+
+export function validateCanvasEngineConversion(
+  input: ConvertCanvasEngineRequest
+): {
+  copyShapes: boolean;
+  targetEngineType: string;
+} {
+  if (!isRecord(input)) {
+    throw badRequest("Canvas engine conversion body is required");
+  }
+
+  const targetEngineType = validateCanvasEngineType(input.targetEngineType);
+  const copyShapes =
+    input.copyShapes === undefined ? false : input.copyShapes === true;
+
+  if (copyShapes) {
+    throw badRequest("Canvas engine conversion shape copy is not supported yet");
+  }
+
+  return { copyShapes, targetEngineType };
 }
 
 export function validateShapeId(value: unknown): string {

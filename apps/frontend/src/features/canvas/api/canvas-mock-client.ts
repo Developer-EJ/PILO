@@ -33,6 +33,7 @@ function writeMockBoards(workspaceId: string, boards: CanvasBoardDetail[]) {
 function createMockBlankBoard(
   workspaceId: string,
   title: unknown,
+  engineType = "classic",
 ): CanvasBoardDetail {
   const now = new Date().toISOString();
   const normalizedTitle = typeof title === "string" ? title.trim() : "";
@@ -42,6 +43,9 @@ function createMockBlankBoard(
     workspaceId,
     title: normalizedTitle || "Untitled canvas",
     boardType: "freeform",
+    engineType,
+    engineVersion: 1,
+    sourceCanvasId: null,
     zoom: 0.8,
     viewportX: 0,
     viewportY: 0,
@@ -65,15 +69,44 @@ export function createMockCanvasClient() {
     async createBoard(
       workspaceId: string,
       body: {
+        engineType?: string;
         title?: string;
       } = {},
     ) {
       const boards = readMockBoards(workspaceId);
-      const board = createMockBlankBoard(workspaceId, body.title);
+      const board = createMockBlankBoard(
+        workspaceId,
+        body.title,
+        body.engineType,
+      );
 
       writeMockBoards(workspaceId, [board, ...boards]);
 
       return toBoardSummary(board);
+    },
+
+    async convertBoardEngine(
+      boardId: string,
+      body: { copyShapes?: boolean; targetEngineType?: string } = {},
+      { workspaceId }: { workspaceId?: string } = {},
+    ) {
+      const defaultBoard = createMockCanvasBoardDetail(workspaceId);
+      const boards = readMockBoards(defaultBoard.workspaceId);
+      const sourceBoard =
+        boards.find((board) => board.id === boardId) ?? defaultBoard;
+      const targetEngineType = body.targetEngineType ?? "tldraw_sync";
+      const convertedBoard = {
+        ...createMockBlankBoard(
+          defaultBoard.workspaceId,
+          `${sourceBoard.title} 실시간`,
+          targetEngineType,
+        ),
+        sourceCanvasId: sourceBoard.id,
+      };
+
+      writeMockBoards(defaultBoard.workspaceId, [convertedBoard, ...boards]);
+
+      return toBoardSummary(convertedBoard);
     },
 
     async getBoardDetail(

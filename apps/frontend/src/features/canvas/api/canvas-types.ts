@@ -30,6 +30,9 @@ export type CanvasBoardDetail = {
   workspaceId: string;
   title: string;
   boardType: "freeform" | string;
+  engineType: "classic" | "tldraw_sync" | string;
+  engineVersion: number;
+  sourceCanvasId: string | null;
   zoom: number;
   viewportX: number;
   viewportY: number;

@@ -33,6 +33,8 @@ import {
 } from "./canvas-shape.mapper";
 import {
   validateCanvasTitle,
+  validateCanvasEngineConversion,
+  validateCanvasEngineType,
   validateShapeBatchOperations,
   validateShapeCreate,
   validateShapeId,
@@ -46,6 +48,7 @@ import {
 import {
   CanvasBoardDetailPayload,
   CanvasBoardPayload,
+  ConvertCanvasEngineRequest,
   CanvasLatestOperationSeqRow,
   CanvasLeavePayload,
   CanvasOperationsCatchupPayload,
@@ -183,6 +186,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           c.workspace_id,
           c.title,
           c.board_type,
+          c.engine_type,
+          c.engine_version,
+          c.source_canvas_id,
           c.zoom,
           c.viewport_x,
           c.viewport_y,
@@ -211,22 +217,33 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
     const title = validateCanvasTitle(input.title);
+    const engineType = validateCanvasEngineType(input.engineType);
     const canvas = await this.database.queryOne<CanvasRow>(
       `
-        INSERT INTO canvas (workspace_id, title, board_type, created_by)
-        VALUES ($1, $2, 'freeform', $3)
+        INSERT INTO canvas (
+          workspace_id,
+          title,
+          board_type,
+          engine_type,
+          engine_version,
+          created_by
+        )
+        VALUES ($1, $2, 'freeform', $3, 1, $4)
         RETURNING
           id,
           workspace_id,
           title,
           board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
           zoom,
           viewport_x,
           viewport_y,
           updated_at,
           0::int AS shape_count
       `,
-      [workspaceId, title, currentUserId]
+      [workspaceId, title, engineType, currentUserId]
     );
 
     if (!canvas) {
@@ -234,6 +251,68 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
     }
 
     return mapCanvas(canvas);
+  }
+
+  async convertCanvasEngine(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: ConvertCanvasEngineRequest
+  ): Promise<CanvasBoardPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const sourceCanvas = await this.findCanvas(workspaceId, canvasId, "write");
+    if (!sourceCanvas) {
+      throw notFound("Canvas not found");
+    }
+
+    const { targetEngineType } = validateCanvasEngineConversion(input);
+    const sourceEngineType = sourceCanvas.engine_type ?? "classic";
+
+    if (targetEngineType === sourceEngineType) {
+      throw badRequest("Canvas already uses the requested engineType");
+    }
+
+    const convertedCanvas = await this.database.queryOne<CanvasRow>(
+      `
+        INSERT INTO canvas (
+          workspace_id,
+          title,
+          board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
+          created_by
+        )
+        VALUES ($1, $2, 'freeform', $3, 1, $4, $5)
+        RETURNING
+          id,
+          workspace_id,
+          title,
+          board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
+          zoom,
+          viewport_x,
+          viewport_y,
+          updated_at,
+          0::int AS shape_count
+      `,
+      [
+        workspaceId,
+        `${sourceCanvas.title} 실시간`,
+        targetEngineType,
+        sourceCanvas.id,
+        currentUserId
+      ]
+    );
+
+    if (!convertedCanvas) {
+      throw badRequest("Canvas engine conversion could not be created");
+    }
+
+    return mapCanvas(convertedCanvas);
   }
 
   async getCanvas(
@@ -1154,6 +1233,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           workspace_id,
           title,
           board_type,
+          engine_type,
+          engine_version,
+          source_canvas_id,
           zoom,
           viewport_x,
           viewport_y,
@@ -1869,6 +1951,9 @@ export class CanvasService implements OnModuleDestroy, OnModuleInit {
           c.workspace_id,
           c.title,
           c.board_type,
+          c.engine_type,
+          c.engine_version,
+          c.source_canvas_id,
           c.zoom,
           c.viewport_x,
           c.viewport_y,

@@ -36,6 +36,7 @@ import {
   CanvasShapeSummaryPayload,
   CanvasUserStatePayload,
   CanvasViewSettingPayload,
+  ConvertCanvasEngineRequest,
   CreateCanvasRequest,
   CreateCanvasShapeRequest,
   DeleteCanvasShapeRequest,
@@ -164,6 +165,23 @@ export class CanvasController {
     const canvas = await this.canvasService.createCanvas(
       currentUserId,
       workspaceId,
+      body
+    );
+
+    return apiResponse(canvas);
+  }
+
+  @Post("canvases/:canvasId/engine-conversions")
+  async convertCanvasEngine(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("canvasId") canvasId: string,
+    @Body() body: ConvertCanvasEngineRequest
+  ): Promise<ApiSuccessResponse<CanvasBoardPayload>> {
+    const canvas = await this.canvasService.convertCanvasEngine(
+      currentUserId,
+      workspaceId,
+      canvasId,
       body
     );
 
