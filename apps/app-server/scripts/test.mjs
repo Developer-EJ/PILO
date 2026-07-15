@@ -183,7 +183,10 @@ assert.match(main, /enableCors/);
 assert.match(main, /credentials: true/);
 assert.match(main, /FRONTEND_URL/);
 assert.match(main, /methods: \["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"\]/);
-assert.match(main, /allowedHeaders: \["Authorization", "Content-Type", "Accept"\]/);
+assert.match(
+  main,
+  /allowedHeaders: \["Authorization", "Content-Type", "Accept", "Idempotency-Key"\]/
+);
 assert.match(controller, /@Get\("health"\)/);
 assert.match(service, /pilo-app-server/);
 assert.match(service, /status: "ok"/);
