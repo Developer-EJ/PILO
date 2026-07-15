@@ -66,6 +66,7 @@ export function registerWorkspacePresenceSocketHandlers({
   const authedSocket = socket as WorkspacePresenceSocket;
   const generationByWorkspace = new Map<string, number>();
   const joinedGenerationByWorkspace = new Map<string, number>();
+  const membershipOperationByWorkspace = new Map<string, Promise<unknown>>();
   let disconnected = false;
 
   function nextGeneration(workspaceId: string) {
@@ -80,6 +81,25 @@ export function registerWorkspacePresenceSocketHandlers({
       socket.connected &&
       generationByWorkspace.get(workspaceId) === generation
     );
+  }
+
+  function runMembershipOperation<T>(
+    workspaceId: string,
+    operation: () => Promise<T>,
+  ) {
+    const previous = membershipOperationByWorkspace.get(workspaceId);
+    const current = previous
+      ? previous.catch(() => undefined).then(operation)
+      : operation();
+    membershipOperationByWorkspace.set(workspaceId, current);
+    void current
+      .finally(() => {
+        if (membershipOperationByWorkspace.get(workspaceId) === current) {
+          membershipOperationByWorkspace.delete(workspaceId);
+        }
+      })
+      .catch(() => undefined);
+    return current;
   }
 
   socket.on(workspacePresenceClientEvents.join, async (payload) => {
@@ -106,31 +126,34 @@ export function registerWorkspacePresenceSocketHandlers({
       return;
     }
 
-    const roomName = createWorkspacePresenceRoomName(room.workspaceId);
-    await socket.join(roomName);
-    if (!isCurrentJoin(room.workspaceId, generation)) {
-      if (
-        joinedGenerationByWorkspace.get(room.workspaceId) !==
-        generationByWorkspace.get(room.workspaceId)
-      ) {
-        await socket.leave(roomName);
+    await runMembershipOperation(room.workspaceId, async () => {
+      if (!isCurrentJoin(room.workspaceId, generation)) return;
+      const roomName = createWorkspacePresenceRoomName(room.workspaceId);
+      await socket.join(roomName);
+      if (!isCurrentJoin(room.workspaceId, generation)) {
+        if (
+          joinedGenerationByWorkspace.get(room.workspaceId) !==
+          generationByWorkspace.get(room.workspaceId)
+        ) {
+          await socket.leave(roomName);
+        }
+        return;
       }
-      return;
-    }
-    const presence = service.joinSocket(
-      socket.id,
-      {
-        displayName: authedSocket.data.auth.displayName,
-        userId: authedSocket.data.auth.userId,
-      },
-      room.workspaceId,
-    );
-    joinedGenerationByWorkspace.set(room.workspaceId, generation);
-    socket.emit(workspacePresenceServerEvents.joined, {
-      ...room,
-      presence: service.getWorkspacePresence(room.workspaceId),
+      const presence = service.joinSocket(
+        socket.id,
+        {
+          displayName: authedSocket.data.auth.displayName,
+          userId: authedSocket.data.auth.userId,
+        },
+        room.workspaceId,
+      );
+      joinedGenerationByWorkspace.set(room.workspaceId, generation);
+      socket.emit(workspacePresenceServerEvents.joined, {
+        ...room,
+        presence: service.getWorkspacePresence(room.workspaceId),
+      });
+      socket.to(roomName).emit(workspacePresenceServerEvents.update, presence);
     });
-    socket.to(roomName).emit(workspacePresenceServerEvents.update, presence);
   });
 
   socket.on(workspacePresenceClientEvents.leave, async (payload) => {
@@ -142,11 +165,14 @@ export function registerWorkspacePresenceSocketHandlers({
     const generation = nextGeneration(room.workspaceId);
     joinedGenerationByWorkspace.delete(room.workspaceId);
 
-    const result = service.leaveSocket(socket.id, room.workspaceId);
-    await socket.leave(createWorkspacePresenceRoomName(room.workspaceId));
-    if (result && generationByWorkspace.get(room.workspaceId) === generation) {
-      emitClearResult(io, result);
-    }
+    await runMembershipOperation(room.workspaceId, async () => {
+      if (generationByWorkspace.get(room.workspaceId) !== generation) return;
+      const result = service.leaveSocket(socket.id, room.workspaceId);
+      await socket.leave(createWorkspacePresenceRoomName(room.workspaceId));
+      if (result && generationByWorkspace.get(room.workspaceId) === generation) {
+        emitClearResult(io, result);
+      }
+    });
   });
 
   socket.on(workspacePresenceClientEvents.update, (payload) => {

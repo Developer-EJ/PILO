@@ -15,7 +15,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function createHarness({ allowed = true, canJoinWorkspace, join } = {}) {
+function createHarness({ allowed = true, canJoinWorkspace, join, leave } = {}) {
   const handlers = new Map();
   const emitted = [];
   const joinCalls = [];
@@ -28,9 +28,12 @@ function createHarness({ allowed = true, canJoinWorkspace, join } = {}) {
     join: async (roomName) => {
       joinCalls.push(roomName);
       if (join) await join(roomName);
+      socket.rooms.add(roomName);
     },
     leave: async (roomName) => {
       leaveCalls.push(roomName);
+      if (leave) await leave(roomName);
+      socket.rooms.delete(roomName);
     },
     rooms: new Set(),
     on(event, handler) {
@@ -182,4 +185,34 @@ test("background 새 탭 join은 기존 foreground 대표 상태를 broadcast한
   );
   assert.equal(update?.payload.focused, true);
   assert.equal(update?.payload.location?.page, "home");
+});
+
+test("이전 leave 완료가 성공한 재join의 room membership을 제거하지 않는다", async () => {
+  const socketLeave = deferred();
+  let deferNextLeave = true;
+  const harness = createHarness({
+    leave: () => {
+      if (!deferNextLeave) return;
+      deferNextLeave = false;
+      return socketLeave.promise;
+    },
+  });
+  const roomName = `workspace:${workspaceId}:presence`;
+  await harness.handlers.get(workspacePresenceClientEvents.join)({ workspaceId });
+
+  const oldLeave = harness.handlers.get(workspacePresenceClientEvents.leave)({
+    workspaceId,
+  });
+  await Promise.resolve();
+  const rejoin = harness.handlers.get(workspacePresenceClientEvents.join)({
+    workspaceId,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  socketLeave.resolve();
+  await Promise.all([oldLeave, rejoin]);
+
+  assert.equal(harness.socket.rooms.has(roomName), true);
+  assert.equal(harness.service.getWorkspacePresence(workspaceId).length, 1);
 });
