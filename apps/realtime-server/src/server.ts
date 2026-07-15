@@ -31,6 +31,13 @@ async function bootstrap() {
           service: "pilo-realtime-server",
           status: "ok",
           scope: config.scope,
+          sync: {
+            canvas: {
+              endpoint: "/sync/canvas",
+              engine: "tldraw_sync",
+              ...tldrawSyncRoomService.getStats(),
+            },
+          },
         }),
       );
       return;

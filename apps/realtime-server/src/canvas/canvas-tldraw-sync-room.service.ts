@@ -16,6 +16,7 @@ import type { CanvasRoomRef } from "./canvas-types";
 
 const CANVAS_TLDRAW_SYNC_PROVIDER_TYPE = "tldraw_sync";
 const CANVAS_TLDRAW_SYNC_PERSIST_DEBOUNCE_MS = 1_000;
+const CANVAS_TLDRAW_SYNC_MAX_SNAPSHOT_BYTES = 2_000_000;
 
 type CanvasTldrawSyncRoomServiceOptions = {
   database: RealtimeDatabase;
@@ -23,6 +24,11 @@ type CanvasTldrawSyncRoomServiceOptions = {
 
 type CanvasTldrawSyncRoomService = {
   close: () => Promise<void>;
+  getStats: () => {
+    activeSessionCount: number;
+    pendingPersistCount: number;
+    roomCount: number;
+  };
   handleConnection: (
     websocket: WebSocket,
     request: IncomingMessage,
@@ -72,7 +78,7 @@ export function createCanvasTldrawSyncRoomService({
   }
 
   async function persistRoomSnapshot(activeRoom: ActiveRoom) {
-    const snapshot = activeRoom.room.getCurrentSnapshot();
+    const snapshot = serializeRoomSnapshot(activeRoom.room.getCurrentSnapshot());
 
     await database.execute(
       `
@@ -96,7 +102,7 @@ export function createCanvasTldrawSyncRoomService({
         activeRoom.roomRef.workspaceId,
         activeRoom.roomRef.canvasId,
         CANVAS_TLDRAW_SYNC_PROVIDER_TYPE,
-        JSON.stringify(snapshot),
+        snapshot,
       ],
     );
   }
@@ -201,6 +207,23 @@ export function createCanvasTldrawSyncRoomService({
 
       await Promise.all(closePromises);
     },
+    getStats() {
+      let activeSessionCount = 0;
+      let pendingPersistCount = 0;
+
+      for (const activeRoom of rooms.values()) {
+        activeSessionCount += activeRoom.room.getNumActiveSessions();
+        if (activeRoom.persistTimer) {
+          pendingPersistCount += 1;
+        }
+      }
+
+      return {
+        activeSessionCount,
+        pendingPersistCount,
+        roomCount: rooms.size,
+      };
+    },
     async handleConnection(websocket, request) {
       const url = new URL(
         request.url ?? "/",
@@ -268,4 +291,14 @@ function isRoomSnapshot(value: unknown): value is RoomSnapshot {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function serializeRoomSnapshot(snapshot: RoomSnapshot) {
+  const serialized = JSON.stringify(snapshot);
+
+  if (serialized.length > CANVAS_TLDRAW_SYNC_MAX_SNAPSHOT_BYTES) {
+    throw new Error("Canvas tldraw sync snapshot is too large");
+  }
+
+  return serialized;
 }
