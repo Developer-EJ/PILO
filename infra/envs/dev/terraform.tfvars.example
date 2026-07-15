@@ -2,6 +2,9 @@ project_name = "pilo"
 environment  = "dev"
 aws_region   = "ap-northeast-2"
 
+# Keep false through the pre-cutover deployment and rollback rehearsal.
+sql_erd_operations_v1_enabled = false
+
 # Fill these when Route53 is ready.
 create_dns_records    = false
 domain_name           = "pilo.example.com"
