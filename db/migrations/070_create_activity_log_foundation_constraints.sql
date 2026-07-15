@@ -6,10 +6,7 @@ ALTER TABLE public.activity_logs
   ADD CONSTRAINT activity_logs_dedupe_key_max_length_check
     CHECK (length(dedupe_key) <= 512) NOT VALID,
   ADD CONSTRAINT activity_logs_actor_type_check
-    CHECK (
-      actor_type IN ('user', 'agent', 'system', 'integration')
-      AND (actor_type <> 'user' OR actor_user_id IS NOT NULL)
-    ) NOT VALID,
+    CHECK (actor_type IN ('user', 'agent', 'system', 'integration')) NOT VALID,
   ADD CONSTRAINT activity_logs_metadata_envelope_check
     CHECK (
       jsonb_typeof(metadata) = 'object'
@@ -18,6 +15,26 @@ ALTER TABLE public.activity_logs
       AND length(btrim(metadata ->> 'summary')) BETWEEN 1 AND 500
       AND jsonb_typeof(metadata -> 'data') = 'object'
     ) NOT VALID;
+
+-- Existing rows predate the v1 metadata envelope. Preserve their original JSON
+-- under data.legacyMetadata before validation so account deletion can safely
+-- anonymize actor_user_id through its ON DELETE SET NULL foreign key.
+UPDATE public.activity_logs
+SET metadata = jsonb_build_object(
+  'version', 1,
+  'summary', '기존 활동 로그입니다.',
+  'data', jsonb_build_object('legacyMetadata', metadata)
+)
+WHERE NOT (
+  jsonb_typeof(metadata) = 'object'
+  AND metadata @> '{"version": 1}'::jsonb
+  AND jsonb_typeof(metadata -> 'summary') = 'string'
+  AND length(btrim(metadata ->> 'summary')) BETWEEN 1 AND 500
+  AND jsonb_typeof(metadata -> 'data') = 'object'
+);
+
+ALTER TABLE public.activity_logs
+  VALIDATE CONSTRAINT activity_logs_metadata_envelope_check;
 
 CREATE OR REPLACE FUNCTION public.prevent_activity_log_mutation()
 RETURNS trigger

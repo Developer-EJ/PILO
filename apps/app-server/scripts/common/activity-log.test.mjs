@@ -7,7 +7,7 @@ const { ActivityLogService } = await import(
 
 const migration = await readFile(
   new URL(
-    "../../../../db/migrations/069_create_activity_log_foundation_constraints.sql",
+    "../../../../db/migrations/070_create_activity_log_foundation_constraints.sql",
     import.meta.url
   ),
   "utf8"
@@ -70,9 +70,18 @@ assert.equal(executed.length, 1);
 assert.match(migration, /activity_logs_dedupe_key_max_length_check/);
 assert.match(migration, /length\(dedupe_key\) <= 512/);
 assert.match(migration, /activity_logs_actor_type_check/);
-assert.match(migration, /actor_type <> 'user' OR actor_user_id IS NOT NULL/);
+assert.doesNotMatch(
+  migration,
+  /actor_type <> 'user' OR actor_user_id IS NOT NULL/
+);
 assert.match(migration, /activity_logs_metadata_envelope_check/);
 assert.match(migration, /jsonb_typeof\(metadata -> 'data'\) = 'object'/);
+assert.match(migration, /UPDATE public\.activity_logs/);
+assert.match(migration, /'legacyMetadata', metadata/);
+assert.match(
+  migration,
+  /VALIDATE CONSTRAINT activity_logs_metadata_envelope_check/
+);
 assert.match(migration, /NOT VALID/);
 assert.match(migration, /CREATE TRIGGER trg_activity_logs_prevent_mutation/);
 assert.match(migration, /TG_OP = 'DELETE'/);
