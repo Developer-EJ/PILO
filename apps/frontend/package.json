@@ -10,7 +10,7 @@
     "format:check": "node scripts/check-format.mjs",
     "lint": "tsc --noEmit",
     "test": "node scripts/test.mjs && npm run test:workspace-presence",
-    "test:workspace-presence": "node src/shared/workspace-presence/workspace-presence-reducer.test.mjs && node src/shared/workspace-presence/workspace-location-registry.test.mjs"
+    "test:workspace-presence": "node src/shared/workspace-presence/workspace-presence-reducer.test.mjs && node src/shared/workspace-presence/workspace-location-registry.test.mjs && node src/features/workspace-presence/workspace-member-avatars.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -47,6 +47,7 @@
     "react-dom": "^19.2.7",
     "shadcn": "^4.13.0",
     "socket.io-client": "^4.8.3",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.2",
     "tldraw": "^5.1.1",

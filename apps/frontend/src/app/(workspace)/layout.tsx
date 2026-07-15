@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { MainShell } from "@/components/main-shell";
+import { Toaster } from "@/components/ui/sonner";
 import { AgentChatWidget } from "@/features/agent/components/agent-chat-widget";
 import { AuthGate } from "@/features/auth";
 import { MeetingRuntimeProvider } from "@/features/meeting/runtime/meeting-runtime-provider";
@@ -15,6 +16,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
           <MeetingRuntimeProvider>
             <MainShell>{children}</MainShell>
             <AgentChatWidget />
+            <Toaster />
           </MeetingRuntimeProvider>
         </WorkspacePresenceProvider>
       </RealtimeProvider>
