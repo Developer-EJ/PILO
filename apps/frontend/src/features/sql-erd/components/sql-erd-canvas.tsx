@@ -126,7 +126,6 @@ import {
   getTableLayout,
   inferSqlErdRelationCardinality,
   updateSqltoerdLayoutWithTablePositions,
-  type SqltoerdTablePosition
 } from "@/features/sql-erd/utils/model";
 import {
   createSqltoerdAutoLayout,
@@ -135,6 +134,7 @@ import {
 } from "@/features/sql-erd/utils/auto-layout";
 import {
   applySqlErdCanvasIncrementalShapeSync,
+  createSqlErdTablePositionChangeBuffer,
   createSqlErdCanvasContentKey,
   createSqlErdCanvasContentSyncState,
   createSqlErdCanvasIncrementalShapeSyncPlan,
@@ -837,14 +837,16 @@ function applySqlErdCanvasShapes(editor: Editor, shapes: TLShapePartial[]) {
         : shape
     );
 
-  applySqlErdCanvasIncrementalShapeSync({
-    currentShapes: currentSqlErdShapes,
-    editor,
-    nextShapes: shapes,
-    onAfterSync: () => {
-      sendSqlErdCanvasBackgroundShapesToBack(editor, shapes);
-    },
-    shapesToUpdate: updates
+  editor.store.mergeRemoteChanges(() => {
+    applySqlErdCanvasIncrementalShapeSync({
+      currentShapes: currentSqlErdShapes,
+      editor,
+      nextShapes: shapes,
+      onAfterSync: () => {
+        sendSqlErdCanvasBackgroundShapesToBack(editor, shapes);
+      },
+      shapesToUpdate: updates
+    });
   });
 }
 
@@ -2161,19 +2163,6 @@ function SqlErdAnnotationInteractionSync({
   );
 }
 
-function getSqlErdTablePositionsFromEditor(
-  editor: Editor
-): SqltoerdTablePosition[] {
-  return editor
-    .getCurrentPageShapes()
-    .filter(isSqlErdTableShape)
-    .map((shape) => ({
-      tableId: shape.props.tableId,
-      x: shape.x,
-      y: shape.y
-    }));
-}
-
 function getSqlErdTableSizesFromEditor(
   editor: Editor
 ): SqltoerdAutoLayoutTableSize[] {
@@ -2185,6 +2174,22 @@ function getSqlErdTableSizesFromEditor(
       tableId: shape.props.tableId,
       width: shape.props.w
     }));
+}
+
+function getSqlErdTablePositionFromEditor(
+  editor: Editor,
+  tableId: string
+) {
+  const shape = editor
+    .getCurrentPageShapes()
+    .find(
+      (candidate): candidate is SqlErdTableShape =>
+        isSqlErdTableShape(candidate) && candidate.props.tableId === tableId
+    );
+
+  return shape
+    ? { tableId: shape.props.tableId, x: shape.x, y: shape.y }
+    : null;
 }
 
 function applySqlErdAutoLayout({
@@ -2237,8 +2242,10 @@ function applySqlErdAutoLayout({
   }
 
   editor.markHistoryStoppingPoint("sqltoerd auto layout");
-  editor.run(() => {
-    editor.updateShapes(updates);
+  editor.store.mergeRemoteChanges(() => {
+    editor.run(() => {
+      editor.updateShapes(updates);
+    });
   });
   editor.markHistoryStoppingPoint("sqltoerd auto layout");
 
@@ -2457,70 +2464,55 @@ function SqlErdCanvasAnnotationSync({
 }
 
 type SqlErdLayoutSyncProps = {
-  layoutJson: SqltoerdLayoutJsonV1;
-  modelJson: SqltoerdModelJsonV1;
   onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
 };
 
-function SqlErdLayoutSync({
-  layoutJson,
-  modelJson,
-  onLayoutPatch
-}: SqlErdLayoutSyncProps) {
+function SqlErdLayoutSync({ onLayoutPatch }: SqlErdLayoutSyncProps) {
   const editor = useEditor();
-  const layoutJsonRef = useRef(layoutJson);
-  const modelJsonRef = useRef(modelJson);
   const onLayoutPatchRef = useRef(onLayoutPatch);
-
-  useEffect(() => {
-    layoutJsonRef.current = layoutJson;
-  }, [layoutJson]);
-
-  useEffect(() => {
-    modelJsonRef.current = modelJson;
-  }, [modelJson]);
 
   useEffect(() => {
     onLayoutPatchRef.current = onLayoutPatch;
   }, [onLayoutPatch]);
 
   useEffect(() => {
-    let hasPendingLayoutSync = false;
+    const tablePositionChanges = createSqlErdTablePositionChangeBuffer(
+      (shape): shape is SqlErdTableShape =>
+        isSqlErdTableShape(shape as TLShape | null | undefined)
+    );
 
-    function syncLayoutFromEditor() {
-      const nextLayoutJson = updateSqltoerdLayoutWithTablePositions(
-        modelJsonRef.current,
-        layoutJsonRef.current,
-        getSqlErdTablePositionsFromEditor(editor)
-      );
+    function flushPendingLayoutSync() {
+      window.requestAnimationFrame(() => {
+        const tablePositions = tablePositionChanges.flush((tableId) =>
+          getSqlErdTablePositionFromEditor(editor, tableId)
+        );
 
-      if (areSqltoerdLayoutsEqual(layoutJsonRef.current, nextLayoutJson)) {
-        return;
-      }
+        if (!tablePositions.length) {
+          return;
+        }
 
-      layoutJsonRef.current = nextLayoutJson;
-      onLayoutPatchRef.current({
-        tablePositions: getSqlErdTablePositionsFromEditor(editor)
+        onLayoutPatchRef.current({ tablePositions });
       });
     }
 
-    function flushPendingLayoutSync() {
-      if (!hasPendingLayoutSync) return;
-
-      hasPendingLayoutSync = false;
-      window.requestAnimationFrame(syncLayoutFromEditor);
+    function cancelPendingLayoutSync() {
+      window.requestAnimationFrame(() => {
+        tablePositionChanges.cancel();
+      });
     }
 
-    const removeStoreListener = editor.store.listen(() => {
-      hasPendingLayoutSync = true;
+    const removeStoreListener = editor.store.listen((entry) => {
+      tablePositionChanges.record(entry);
     }, {
       scope: "document",
       source: "user"
     });
     window.addEventListener("pointerup", flushPendingLayoutSync);
+    window.addEventListener("pointercancel", cancelPendingLayoutSync);
 
     return () => {
       window.removeEventListener("pointerup", flushPendingLayoutSync);
+      window.removeEventListener("pointercancel", cancelPendingLayoutSync);
       removeStoreListener();
     };
   }, [editor]);
@@ -3146,8 +3138,6 @@ export function SqlErdCanvas({
               onLayoutPatch={onLayoutPatch}
             />
             <SqlErdLayoutSync
-              layoutJson={layoutJson}
-              modelJson={modelJson}
               onLayoutPatch={onLayoutPatch}
             />
             <SqlErdCanvasAnnotationSync

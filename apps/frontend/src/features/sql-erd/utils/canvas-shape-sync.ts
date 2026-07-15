@@ -1,4 +1,60 @@
-import type { SqltoerdModelJsonV1 } from "@/features/sql-erd/types";
+import type {
+  SqltoerdModelJsonV1,
+  SqltoerdTableLayout
+} from "@/features/sql-erd/types";
+
+type SqlErdPositionedTableShape = {
+  props: { tableId: string };
+  x: number;
+  y: number;
+};
+
+type SqlErdTablePositionChangeEntry = {
+  changes: {
+    updated: Record<string, readonly [unknown, unknown]>;
+  };
+  source: "remote" | "user";
+};
+
+export function createSqlErdTablePositionChangeBuffer<
+  TableShape extends SqlErdPositionedTableShape
+>(isTableShape: (shape: unknown) => shape is TableShape) {
+  const changedTableIds = new Set<string>();
+
+  return {
+    cancel() {
+      changedTableIds.clear();
+    },
+    flush(
+      resolvePosition: (tableId: string) => SqltoerdTableLayout | null
+    ) {
+      const positions = [...changedTableIds].flatMap((tableId) => {
+        const position = resolvePosition(tableId);
+        return position ? [position] : [];
+      });
+      changedTableIds.clear();
+      return positions;
+    },
+    record(entry: SqlErdTablePositionChangeEntry) {
+      if (entry.source !== "user") {
+        return;
+      }
+
+      Object.values(entry.changes.updated).forEach(([before, after]) => {
+        if (
+          !isTableShape(before) ||
+          !isTableShape(after) ||
+          before.props.tableId !== after.props.tableId ||
+          (before.x === after.x && before.y === after.y)
+        ) {
+          return;
+        }
+
+        changedTableIds.add(after.props.tableId);
+      });
+    }
+  };
+}
 
 export type SqlErdCanvasShapeIdentity = {
   id: string;
