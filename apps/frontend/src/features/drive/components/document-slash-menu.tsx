@@ -69,6 +69,10 @@ export function DocumentSlashMenu({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) {
+              return;
+            }
+
             if (event.key === "ArrowDown" && filteredCommands.length > 0) {
               event.preventDefault();
               onActiveIndexChange((activeIndex + 1) % filteredCommands.length);

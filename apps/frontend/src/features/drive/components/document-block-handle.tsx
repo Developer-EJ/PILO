@@ -73,14 +73,13 @@ export function DocumentBlockHandle({ editor }: { editor: Editor | null }) {
       return;
     }
 
-    if (isMenuOpen) {
-      editor.commands.lockDragHandle();
-      return () => {
-        editor.commands.unlockDragHandle();
-      };
-    }
+    editor.commands.setMeta("lockDragHandle", isMenuOpen);
 
-    editor.commands.unlockDragHandle();
+    return () => {
+      if (!editor.isDestroyed) {
+        editor.commands.setMeta("lockDragHandle", false);
+      }
+    };
   }, [editor, isMenuOpen]);
 
   if (!editor || !editor.isEditable) {
