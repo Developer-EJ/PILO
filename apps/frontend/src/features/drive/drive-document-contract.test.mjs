@@ -25,5 +25,13 @@ assert.match(editor, /expectedVersion/);
 assert.match(editor, /immediatelyRender: false/);
 assert.match(panel, /documentId/);
 assert.match(panel, /DriveDocumentEditor/);
+assert.match(panel, /function MoveItemSheet\(/);
+assert.match(panel, /onOpenMove/);
+assert.match(
+  panel,
+  /await driveClient\.updateItem\(workspaceId, moveItem\.id, \{ parentId \}\)/
+);
+assert.match(panel, /destinationParentId: string \| null/);
+assert.match(panel, /isDestinationReady: boolean/);
 
 console.log("Drive document contract tests passed.");
