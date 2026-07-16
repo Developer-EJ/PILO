@@ -109,9 +109,13 @@ assert.match(socketServer, /createSocketIoRedisAdapter/);
 assert.match(socketServer, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
 assert.match(socketServer, /isCanvasShapeOperationPayload/);
 assert.match(socketServer, /canvasServerEvents\.operation/);
-assert.match(socketServer, /canvasClientEvents\.shapeLockClaim/);
-assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
+assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeLockClaim/);
+assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeLockRelease/);
 assert.match(socketServer, /canvasClientEvents\.shapePatch/);
+assert.match(
+  socketServer,
+  /shapePreviewService\s*\.clearRoomPreview\(\s*socket\.id,\s*actorUserId,\s*patchPayload,\s*patchedShapeIds,/,
+);
 assert.match(socketServer, /canvasClientEvents\.historyUndo/);
 assert.match(socketServer, /canvasClientEvents\.historyRedo/);
 assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeCommit/);
@@ -122,11 +126,18 @@ assert.match(socketServer, /readLoadedViewportBounds/);
 assert.match(socketServer, /initialViewportBounds/);
 assert.match(socketServer, /canvasServerEvents\.shapesHydrate/);
 assert.match(socketServer, /canvasServerEvents\.shapePatch/);
+assert.match(socketServer, /io\.to\(roomName\)\.emit\(canvasServerEvents\.shapePatch/);
+assert.match(socketServer, /historySeq: historyState\.historySeq/);
+assert.match(socketServer, /canUndo: historyState\.canUndo/);
+assert.match(socketServer, /canRedo: historyState\.canRedo/);
 assert.match(socketServer, /canvasServerEvents\.checkpoint/);
-assert.match(socketServer, /actorUserId: authedSocket\.data\.auth\.userId \?\? socket\.id/);
-assert.match(socketServer, /canvasServerEvents\.shapeLockAccepted/);
-assert.match(socketServer, /canvasServerEvents\.shapeLockRejected/);
-assert.match(socketServer, /canvasServerEvents\.shapeLockUpdate/);
+assert.match(
+  socketServer,
+  /const actorUserId = authedSocket\.data\.auth\.userId \?\? socket\.id/,
+);
+assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockAccepted/);
+assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockRejected/);
+assert.doesNotMatch(socketServer, /canvasServerEvents\.shapeLockUpdate/);
 assert.match(socketServer, /canvasServerEvents\.shapePreview/);
 assert.match(socketServer, /canvasServerEvents\.shapePreviewClear/);
 assert.match(socketServer, /createCanvasShapePreviewService/);
@@ -201,6 +212,8 @@ assert.match(canvasRoomState, /mergeLoadedRegions/);
 assert.match(canvasRoomState, /doRegionsOverlap/);
 assert.match(canvasRoomState, /recordLoadedViewport/);
 assert.match(canvasRoomState, /applyShapePatch/);
+assert.match(canvasRoomState, /!options\.markDirty && tombstones\.has\(shapeId\)/);
+assert.match(canvasRoomState, /if \(options\.markDirty\) \{\s*[\r\n]+\s*tombstones\.delete\(shapeId\);/);
 assert.match(canvasRoomState, /getLoadedRegions/);
 assert.match(canvasRoomState, /getCachedShapes/);
 assert.match(canvasRoomState, /getDirtyShapeIds/);
@@ -234,7 +247,12 @@ assert.match(canvasRoom, /checkpointVersion: checkpointState\.checkpointVersion/
 assert.match(canvasRoom, /historySeq: historyState\.historySeq/);
 assert.match(canvasRoomCheckpoint, /checkpointVersion: checkpointState\.checkpointVersion/);
 assert.match(canvasRoomCheckpoint, /historySeq: checkpointState\.historySeq/);
-assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_DELAY_MS = 3_000/);
+assert.match(
+  canvasRoomCheckpoint,
+  /CANVAS_CHECKPOINT_INTERVAL_MS = 5 \* 60 \* 1_000/
+);
+assert.match(canvasRoomCheckpoint, /SPLITTABLE_CHECKPOINT_STATUSES/);
+assert.match(canvasRoomCheckpoint, /if \(timersByRoom\.has\(roomKey\)\) return/);
 assert.match(canvasRoomCheckpoint, /flushCheckpointNow/);
 assert.match(canvasRoomCheckpoint, /await Promise\.all\(Array\.from\(roomsByKey\.keys\(\), flushCheckpoint\)\)/);
 assert.match(canvasRoomCheckpoint, /\/shapes\/batch/);
@@ -243,7 +261,9 @@ assert.match(canvasRoomCheckpoint, /onCheckpointStatus/);
 assert.match(canvasRoomCheckpoint, /"saving"/);
 assert.match(canvasRoomCheckpoint, /"delayed"/);
 assert.match(canvasRoomCheckpoint, /"saved"/);
-assert.match(canvasRoomCheckpoint, /markCheckpointSucceeded\(room, operations, responseBody\)/);
+assert.match(canvasRoomCheckpoint, /persistOperations/);
+assert.match(canvasRoomCheckpoint, /runningCheckpointsByRoom/);
+assert.match(canvasRoomCheckpoint, /advanceCheckpoint/);
 assert.match(redisPubSub, /createAdapter/);
 assert.match(redisPubSub, /stateClient/);
 assert.match(redisPubSub, /NX: true/);
@@ -263,3 +283,9 @@ await import("../src/chat/chat-events.test.mjs");
 await import("../src/chat/chat-membership-revocation.test.mjs");
 await import("../src/chat/chat-subscription-work.test.mjs");
 await import("../src/chat/chat-socket-lifecycle.test.mjs");
+await import("../src/documents/document-access.service.test.mjs");
+await import("../src/documents/document-app-server-client.test.mjs");
+await import("../src/documents/document-checkpoint.service.test.mjs");
+await import("../src/documents/document-hocuspocus.service.test.mjs");
+await import("../src/documents/document-hocuspocus-transport.test.mjs");
+await import("../src/documents/document-route-contract.test.mjs");

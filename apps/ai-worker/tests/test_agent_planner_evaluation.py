@@ -234,15 +234,29 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 40
+    assert len(suite.cases) == 47
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
         "update_calendar_event",
+        "start_meeting_in_room",
+        "join_meeting",
+        "leave_meeting",
+        "start_meeting_recording",
+        "end_meeting_recording",
+        "list_meeting_rooms",
+        "get_active_meeting",
+        "get_meeting_participants",
         "list_meeting_reports",
         "get_meeting_report",
         "summarize_meeting_report",
         "search_meeting_transcript",
+        "find_action_items",
+        "get_meeting_decision_evidence",
+        "update_meeting_report_action_item",
+        "dismiss_meeting_report_action_item",
+        "approve_meeting_report_action_item",
+        "regenerate_meeting_report",
         "search_board_issues",
         "move_board_issue_status",
         "get_board_issue_context",
@@ -251,6 +265,7 @@ def test_fixed_korean_suite_loads() -> None:
         "get_board_briefing",
         "assign_board_issue_safely",
         "diagnose_board_freshness",
+        "generate_sql_erd",
     }
     expectations = {case.case_id: case.expectation for case in suite.cases}
     assert expectations["calendar_today"].input_contains == {
@@ -277,3 +292,13 @@ def test_fixed_korean_suite_loads() -> None:
         "calendar_event_time_or_all_day",
     )
     assert expectations["calendar_create_recurrence"].status == "unsupported"
+    assert expectations["meeting_rooms"].tool_name == "list_meeting_rooms"
+    assert expectations["meeting_active"].tool_name == "get_active_meeting"
+    assert expectations["meeting_participants"].input_contains == {
+        "meetingId": "123e4567-e89b-12d3-a456-426614174000",
+    }
+    assert expectations["meeting_recording_missing_id"].missing_fields == ("meetingId",)
+    assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
+    assert expectations["sql_erd_generate"].requires_confirmation is None
+    assert expectations["sql_erd_missing_entities"].status == "needs_clarification"
+    assert expectations["sql_erd_database_execution"].status == "unsupported"

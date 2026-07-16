@@ -82,8 +82,6 @@ import type {
   CanvasRoomShapePatchPayload,
   CanvasRoomRef,
   CanvasViewportLoadedPayload,
-  CanvasShapeLockClaimPayload,
-  CanvasShapeLockReleasePayload,
   CanvasShapeOperationPayload,
   CanvasShapePreviewClearRequestPayload,
   CanvasShapePreviewPayload,
@@ -498,41 +496,6 @@ function readShapeIdList(value: unknown): string[] | null {
 
 function readShapeIds(payload: Record<string, unknown>): string[] | null {
   return readShapeIdList(payload.shapeIds);
-}
-
-function readShapeLockClaimPayload(
-  payload: unknown,
-): CanvasShapeLockClaimPayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const shapeIds = readShapeIds(payload);
-
-  if (!shapeIds?.length) return null;
-
-  return {
-    ...room,
-    shapeIds,
-  };
-}
-
-function readShapeLockReleasePayload(
-  payload: unknown,
-): CanvasShapeLockReleasePayload | null {
-  const room = readRoomRef(payload);
-
-  if (!room || !isRecord(payload)) return null;
-
-  const shapeIds =
-    payload.shapeIds === undefined ? undefined : readShapeIds(payload);
-
-  if (payload.shapeIds !== undefined && !shapeIds) return null;
-
-  return {
-    ...room,
-    ...(shapeIds ? { shapeIds } : {}),
-  };
 }
 
 function isShapePreviewPhase(
@@ -1116,13 +1079,27 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      await roomCheckpointService.flushCheckpointNow(
+        joinPayload,
+        authedSocket.data.auth.token,
+      );
+      const checkpointState =
+        roomStateService.getCheckpointState(joinPayload);
+      const joinedPayload = {
+        ...result.payload,
+        checkpointHistorySeq: checkpointState.checkpointHistorySeq,
+        checkpointVersion: checkpointState.checkpointVersion,
+        historySeq: checkpointState.historySeq,
+        roomShapes: roomStateService.getCachedShapes(joinPayload),
+      };
+
       await socket.join(result.roomName);
       authedSocket.data.canvasRoomAccess.set(result.roomName, result.access);
       authedSocket.data.canvasRoomsByName.set(result.roomName, {
         canvasId: joinPayload.canvasId,
         workspaceId: joinPayload.workspaceId,
       });
-      socket.emit(canvasServerEvents.joined, result.payload);
+      socket.emit(canvasServerEvents.joined, joinedPayload);
     });
 
     socket.on(sqlErdClientEvents.join, async (payload) => {
@@ -1270,9 +1247,6 @@ export async function createRealtimeSocketServer({
       }
 
       if (lockReleasePayload) {
-        socket
-          .to(roomName)
-          .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
         emitConflictDraftLockReleases(io, lockReleasePayload);
       }
 
@@ -1415,87 +1389,6 @@ export async function createRealtimeSocketServer({
       socket.to(roomName).emit(pageCursorServerEvents.update, presence);
     });
 
-    socket.on(canvasClientEvents.shapeLockClaim, async (payload) => {
-      const claimPayload = readShapeLockClaimPayload(payload);
-
-      if (!claimPayload) {
-        emitCanvasError(socket, "canvas:shape:lock:claim payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(claimPayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before claiming shape locks",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const result = await shapeLockService.claimLocks(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
-        claimPayload,
-        claimPayload.shapeIds,
-      );
-
-      if (result.accepted.locks.length) {
-        socket.emit(canvasServerEvents.shapeLockAccepted, result.accepted);
-        socket
-          .to(roomName)
-          .emit(canvasServerEvents.shapeLockUpdate, result.accepted);
-      }
-
-      if (result.rejected.shapeIds.length) {
-        socket.emit(canvasServerEvents.shapeLockRejected, result.rejected);
-      }
-    });
-
-    socket.on(canvasClientEvents.shapeLockRelease, async (payload) => {
-      const releasePayload = readShapeLockReleasePayload(payload);
-
-      if (!releasePayload) {
-        emitCanvasError(socket, "canvas:shape:lock:release payload is invalid");
-        return;
-      }
-
-      const roomName = createCanvasRoomName(releasePayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          canvasServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join canvas room before releasing shape locks",
-          ),
-        );
-        return;
-      }
-
-      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-        return;
-      }
-
-      const lockReleasePayload = await shapeLockService.clearRoomLocks(
-        socket.id,
-        authedSocket.data.auth.userId ?? socket.id,
-        releasePayload,
-        releasePayload.shapeIds,
-      );
-
-      if (!lockReleasePayload) return;
-
-      io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
-    });
-
     socket.on(canvasClientEvents.viewportLoaded, (payload) => {
       const loadedPayload = readViewportLoadedPayload(payload);
 
@@ -1556,18 +1449,50 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      roomStateService.applyShapePatch(patchPayload, patchPayload, {
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
-      });
+      const actorUserId = authedSocket.data.auth.userId ?? socket.id;
+      const historyState = roomStateService.applyShapePatch(
+        patchPayload,
+        patchPayload,
+        {
+          actorUserId,
+        },
+      );
+      const patchedShapeIds = [
+        ...patchPayload.deletedShapeIds,
+        ...patchPayload.upsertShapes.flatMap((shape) =>
+          typeof shape.id === "string" ? [shape.id] : [],
+        ),
+      ];
       roomCheckpointService.scheduleCheckpoint(
         patchPayload,
         authedSocket.data.auth.token,
       );
-      socket.to(roomName).emit(canvasServerEvents.shapePatch, {
+      io.to(roomName).emit(canvasServerEvents.shapePatch, {
         ...patchPayload,
-        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        actorUserId,
+        canRedo: historyState.canRedo,
+        canUndo: historyState.canUndo,
+        historySeq: historyState.historySeq,
         sentAt: new Date().toISOString(),
       });
+      void shapePreviewService
+        .clearRoomPreview(
+          socket.id,
+          actorUserId,
+          patchPayload,
+          patchedShapeIds,
+        )
+        .then((previewClearPayload) => {
+          if (!previewClearPayload) return;
+
+          io.to(roomName).emit(
+            canvasServerEvents.shapePreviewClear,
+            previewClearPayload,
+          );
+        })
+        .catch((error: unknown) => {
+          console.warn("Canvas committed shape preview cleanup failed.", error);
+        });
     });
 
     socket.on(canvasClientEvents.historyUndo, (payload) => {
@@ -1846,9 +1771,6 @@ export async function createRealtimeSocketServer({
         }
 
         for (const lockReleasePayload of lockReleaseEvents) {
-          socket
-            .to(createCanvasRoomName(lockReleasePayload))
-            .emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
           emitConflictDraftLockReleases(io, lockReleasePayload);
         }
 

@@ -23,16 +23,23 @@
   - [x] 자동 저장 상태와 새로고침 복구
   - [x] frontend lint/test
   - [x] PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 생성
-- [x] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166), PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
+- [x] **문서 lifecycle API와 Activity Log**: Issue [#1166](https://github.com/Developer-EJ/PILO/issues/1166), PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 병합 완료
   - [x] rename/move/delete의 Activity Log와 문서 aggregate soft delete 구현
   - [x] API 계약과 전체 app-server 검증
-  - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 생성
-- [x] **Drive 이동 UI**: Issue [#1170](https://github.com/Developer-EJ/PILO/issues/1170), PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 생성
+  - [x] PR [#1169](https://github.com/Developer-EJ/PILO/pull/1169) 병합 완료
+- [x] **Drive 이동 UI**: Issue [#1170](https://github.com/Developer-EJ/PILO/issues/1170), PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 병합 완료
   - [x] 폴더/파일/문서 이동 목적지 탐색과 `PATCH` 호출
   - [x] focused test, frontend format/lint/test
   - [ ] 인증된 dev 환경 수동 QA
-  - [x] PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 생성
-- [ ] **후속 작업**: Yjs realtime, 파일 첨부/PDF viewer
+  - [x] PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 병합 완료
+- [x] **파일 첨부와 PDF viewer 기반**: Issue [#1179](https://github.com/Developer-EJ/PILO/issues/1179), Issue [#1195](https://github.com/Developer-EJ/PILO/issues/1195)
+  - [x] Drive file attachment 검증과 PDF inline preview API
+  - [x] frontend attachment picker, PDF inline viewer, 다운로드와 unavailable 상태
+  - [ ] 인증된 dev 환경에서 PDF/non-PDF 첨부 수동 QA
+- [ ] **후속 작업**: Yjs realtime collaboration
+
+> 아래 작업 1~5는 최초 기반 구현 계획이다. 현재 진행 상태는 이 상단 현황을 기준으로
+> 추적하며, 자동 검증은 각 PR에서 완료했고 인증된 dev 환경 수동 QA만 남아 있다.
 
 ## 공통 제약
 
@@ -129,3 +136,22 @@
 - [ ] `git diff --check`, `apps/app-server`의 `npm test`, `apps/frontend`의 `npm test`를 실행한다.
 - [ ] owner/member로 nested folder 문서 생성, 목록/열기, rename, root 이동, delete를 수동 QA하고 S3 upload object가 생기지 않았는지, 각 mutation당 정확히 한 개의 Activity Log가 남았는지 확인한다.
 - [ ] 체크된 작업 단위마다 repository convention에 맞춰 commit하고 하나의 focused PR을 연다. Tiptap/Yjs, PDF, realtime, RAG, MeetingReport 변경은 넣지 않는다.
+- [x] **문서 편집 화면 개선**: Issue [#1184](https://github.com/Developer-EJ/PILO/issues/1184)
+  - [x] 카드형 프레임 제거, 중앙 문서 컬럼과 borderless command strip 적용
+  - [x] 제목/저장 상태/저장 버튼을 문서 페이지 헤더로 통합
+  - [x] 빈 문서 placeholder와 반응형 loading/error 상태 적용
+  - [x] 기존 자동 저장, 충돌 감지, reload 흐름 유지
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
+  - [ ] 다음 interaction 작업: 없음
+- [x] **문서 편집 보조 인터랙션 추가**: Issue [#1205](https://github.com/Developer-EJ/PILO/issues/1205)
+  - [x] 선택 텍스트 bubble menu로 굵게, 기울임, 취소선, 인라인 코드 적용
+  - [x] Hover block handle로 위/아래 이동, 복제, 삭제
+  - [x] 문서 제목 클릭 후 inline rename, 기존 Drive item update API로 저장
+  - [x] 기존 파일 첨부와 문서 snapshot 자동 저장 흐름 유지
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
+- [x] **Slash command와 문서 작성 영역 개선**: Issue [#1200](https://github.com/Developer-EJ/PILO/issues/1200)
+  - [x] 빈 문단에서 `/` 입력 시 기본 블록과 Drive 파일 첨부를 선택하는 메뉴 표시
+  - [x] 방향키, Enter, Escape 및 클릭으로 메뉴 조작
+  - [x] 기존 Tiptap 명령으로 문단, 제목, 목록, 인용, 코드 블록, 구분선 전환
+  - [x] 문서 작성 영역 최대 너비를 60rem으로 확장
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA

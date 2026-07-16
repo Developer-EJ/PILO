@@ -15,6 +15,7 @@ const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const CONFIRMATION_ID = "44444444-4444-4444-4444-444444444444";
 const STEP_ID = "55555555-5555-5555-5555-555555555555";
+const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
 
 function createPlan(toolName = "create_calendar_event") {
   return {
@@ -83,6 +84,36 @@ function createUpdatePlan() {
   };
 }
 
+function createChoicePlan() {
+  return {
+    kind: "choice",
+    toolName: "contextual_schema_fixture",
+    summary: "Choose where to create the schema",
+    target: {
+      domain: "sql_erd"
+    },
+    call: {
+      action: "generate_schema"
+    },
+    choices: [
+      {
+        id: "new_session",
+        label: "Create new session",
+        input: {
+          mode: "new_session"
+        }
+      },
+      {
+        id: "replace_schema",
+        label: "Replace current schema",
+        input: {
+          mode: "replace_schema"
+        }
+      }
+    ]
+  };
+}
+
 function createRun(overrides = {}) {
   return {
     id: RUN_ID,
@@ -91,6 +122,7 @@ function createRun(overrides = {}) {
     status: "waiting_confirmation",
     message: null,
     completed_at: null,
+    request_context_json: null,
     ...overrides
   };
 }
@@ -111,6 +143,7 @@ function createConfirmation(overrides = {}) {
     rejected_by_user_id: null,
     approved_at: null,
     rejected_at: null,
+    selected_choice_id: null,
     created_at: now,
     updated_at: now,
     ...overrides
@@ -181,6 +214,36 @@ class FakeAgentLoggingService {
     };
   }
 
+  async completeToolStepAndAdvance(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "completeToolStepAndAdvance",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    const queuedNextPlannerTurn = this.state.toolCallLimitReached !== true;
+    run.status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    run.message = queuedNextPlannerTurn
+      ? "다음 작업을 확인하고 있습니다."
+      : input.waitingMessage;
+
+    return {
+      step: {
+        id: input.stepId,
+        runId: input.runId,
+        status: "completed"
+      },
+      run: {
+        id: run.id,
+        status: run.status,
+        message: run.message
+      },
+      queuedNextPlannerTurn
+    };
+  }
+
   async failStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "failStep",
@@ -196,23 +259,34 @@ class FakeAgentLoggingService {
     };
   }
 
-  async completeRun(currentUserId, workspaceId, input) {
+  async queueNextPlannerTurn(currentUserId, workspaceId, input) {
     this.calls.push({
-      method: "completeRun",
+      method: "queueNextPlannerTurn",
       currentUserId,
       workspaceId,
       input
     });
 
+    if (this.state.queueNextPlannerTurn === false) {
+      return null;
+    }
     const run = this.state.runs.find((candidate) => candidate.id === input.runId);
-    run.status = "completed";
-    run.message = input.message;
+    run.status = "planning";
+    run.message = "다음 작업을 계획하고 있습니다.";
 
     return {
       id: run.id,
       status: run.status,
       message: run.message
     };
+  }
+
+  async waitForUserInput(currentUserId, workspaceId, input) {
+    this.calls.push({ method: "waitForUserInput", currentUserId, workspaceId, input });
+    const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    run.status = "waiting_user_input";
+    run.message = input.message;
+    return { id: run.id, status: run.status, message: run.message };
   }
 
   async failRun(currentUserId, workspaceId, input) {
@@ -271,9 +345,14 @@ class FakeAgentToolRegistryService {
       },
       ...(this.state.buildConfirmationInput
         ? {
-            buildConfirmationInput: (plan) => {
-              this.calls.push({ method: "buildConfirmationInput", name, plan });
-              return this.state.buildConfirmationInput(plan);
+            buildConfirmationInput: (plan, selectedChoiceId) => {
+              this.calls.push({
+                method: "buildConfirmationInput",
+                name,
+                plan,
+                selectedChoiceId
+              });
+              return this.state.buildConfirmationInput(plan, selectedChoiceId);
             },
             validateConfirmationInput: (input) => {
               this.calls.push({
@@ -322,6 +401,18 @@ class FakeAgentToolRegistryService {
         };
       }
     };
+  }
+}
+
+class FakeAgentOutboxPublisherService {
+  constructor(error = null) {
+    this.calls = [];
+    this.error = error;
+  }
+
+  async publishCreatedRun(runId) {
+    this.calls.push(runId);
+    if (this.error) throw this.error;
   }
 }
 
@@ -433,7 +524,8 @@ class FakeTransaction {
     return {
       ...confirmation,
       run_status: run.status,
-      run_message: run.message
+      run_message: run.message,
+      run_request_context_json: run.request_context_json ?? null
     };
   }
 
@@ -470,6 +562,7 @@ class FakeTransaction {
       rejected_by_user_id: null,
       approved_at: null,
       rejected_at: null,
+      selected_choice_id: null,
       created_at: now,
       updated_at: now
     };
@@ -499,7 +592,7 @@ class FakeTransaction {
     };
   }
 
-  updateConfirmation(text, [confirmationId, userId]) {
+  updateConfirmation(text, [confirmationId, userId, selectedChoiceId]) {
     const confirmation = this.state.confirmations.find(
       (candidate) => candidate.id === confirmationId
     );
@@ -512,6 +605,7 @@ class FakeTransaction {
       confirmation.status = "approved";
       confirmation.approved_by_user_id = userId;
       confirmation.approved_at = new Date("2026-07-08T00:03:00.000Z");
+      confirmation.selected_choice_id = selectedChoiceId ?? null;
     } else if (text.includes("status = 'rejected'")) {
       confirmation.status = "rejected";
       confirmation.rejected_by_user_id = userId;
@@ -529,17 +623,22 @@ function createService(state) {
   const database = new FakeDatabaseService(state);
   const loggingService = new FakeAgentLoggingService(state);
   const toolRegistryService = new FakeAgentToolRegistryService(state);
+  const outboxPublisherService = new FakeAgentOutboxPublisherService(
+    state.publisherError ?? null
+  );
 
   return {
     service: new AgentConfirmationService(
       database,
       workspaceService,
       loggingService,
-      toolRegistryService
+      toolRegistryService,
+      outboxPublisherService
     ),
     workspaceService,
     loggingService,
-    toolRegistryService
+    toolRegistryService,
+    outboxPublisherService
   };
 }
 
@@ -598,11 +697,23 @@ function errorMessage(error) {
 
 {
   const state = {
-    runs: [createRun()],
+    runs: [
+      createRun({
+        request_context_json: {
+          surface: "sql_erd",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      })
+    ],
     confirmations: [createConfirmation()]
   };
-  const { service, workspaceService, loggingService, toolRegistryService } =
-    createService(state);
+  const {
+    service,
+    workspaceService,
+    loggingService,
+    toolRegistryService,
+    outboxPublisherService
+  } = createService(state);
   const result = await service.approveConfirmation(
     USER_ID,
     WORKSPACE_ID,
@@ -611,16 +722,18 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "planning");
   assert.equal(result.run.confirmation.status, "approved");
   assert.equal(result.run.confirmation.approvedAt, "2026-07-08T00:03:00.000Z");
+  assert.equal(result.run.confirmation.selectedChoiceId, null);
   assert.equal(state.confirmations[0].approved_by_user_id, USER_ID);
-  assert.equal(state.runs[0].message, "승인된 작업을 완료했습니다.");
+  assert.equal(state.runs[0].message, "다음 작업을 확인하고 있습니다.");
   assert.equal(workspaceService.calls.length, 1);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["createToolExecutionClaim", "completeStep", "completeRun"]
+    ["createToolExecutionClaim", "completeToolStepAndAdvance"]
   );
+  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     ["getDefinition", "validateInput", "execute"]
@@ -639,7 +752,212 @@ function errorMessage(error) {
     "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
     false
   );
-  assert.match(loggingService.calls[2].input.finalAnswer, /관련 리소스 1개/);
+  assert.equal(loggingService.calls[1].input.riskLevel, "medium");
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    toolCallLimitReached: true
+  };
+  const { service, loggingService, outboxPublisherService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["createToolExecutionClaim", "completeToolStepAndAdvance"]
+  );
+  assert.deepEqual(outboxPublisherService.calls, []);
+}
+
+{
+  const state = {
+    runs: [createRun()],
+    confirmations: [createConfirmation()],
+    publisherError: new Error("SQS publish failed")
+  };
+  const { service, loggingService, outboxPublisherService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+
+  assert.equal(result.run.status, "planning");
+  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["createToolExecutionClaim", "completeToolStepAndAdvance"]
+  );
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "failStep" || call.method === "failRun"
+    ),
+    false
+  );
+}
+
+{
+  const choicePlan = createChoicePlan();
+  choicePlan.choices[1].id = choicePlan.choices[0].id;
+  const state = {
+    runs: [createRun({ status: "planning" })],
+    confirmations: []
+  };
+  const { service } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.createConfirmation(USER_ID, WORKSPACE_ID, {
+        runId: RUN_ID,
+        toolName: "contextual_schema_fixture",
+        riskLevel: "medium",
+        summary: choicePlan.summary,
+        plan: choicePlan
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(
+        errorMessage(error),
+        "Confirmation plan choices are not executable"
+      );
+      return true;
+    }
+  );
+  assert.equal(state.confirmations.length, 0);
+}
+
+{
+  const choicePlan = createChoicePlan();
+  choicePlan.choices[0].id = "가".repeat(43);
+  const state = {
+    runs: [createRun({ status: "planning" })],
+    confirmations: []
+  };
+  const { service } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.createConfirmation(USER_ID, WORKSPACE_ID, {
+        runId: RUN_ID,
+        toolName: "contextual_schema_fixture",
+        riskLevel: "medium",
+        summary: choicePlan.summary,
+        plan: choicePlan
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(
+        errorMessage(error),
+        "Confirmation plan choices are not executable"
+      );
+      return true;
+    }
+  );
+  assert.equal(state.confirmations.length, 0);
+}
+
+{
+  const choicePlan = createChoicePlan();
+  const state = {
+    definitionExecutionMode: "contextual",
+    buildConfirmationInput: (plan, selectedChoiceId) =>
+      plan.choices.find((choice) => choice.id === selectedChoiceId).input,
+    runs: [
+      createRun({
+        request_context_json: {
+          surface: "sql_erd",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      })
+    ],
+    confirmations: [
+      createConfirmation({
+        tool_name: "contextual_schema_fixture",
+        summary: choicePlan.summary,
+        plan_json: choicePlan
+      })
+    ]
+  };
+  const { service, toolRegistryService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    { choiceId: "replace_schema" }
+  );
+
+  assert.equal(result.run.status, "planning");
+  assert.equal(result.run.confirmation.selectedChoiceId, "replace_schema");
+  assert.equal(state.confirmations[0].selected_choice_id, "replace_schema");
+  assert.equal(
+    toolRegistryService.calls.find(
+      (call) => call.method === "buildConfirmationInput"
+    ).selectedChoiceId,
+    "replace_schema"
+  );
+  assert.deepEqual(
+    toolRegistryService.calls.find((call) => call.method === "execute").input,
+    { mode: "replace_schema" }
+  );
+  assert.deepEqual(
+    toolRegistryService.calls.find((call) => call.method === "execute").context
+      .requestContext,
+    {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    }
+  );
+}
+
+for (const body of [undefined, {}, { choiceId: "unknown" }]) {
+  const choicePlan = createChoicePlan();
+  const state = {
+    definitionExecutionMode: "contextual",
+    buildConfirmationInput: (plan, selectedChoiceId) =>
+      plan.choices.find((choice) => choice.id === selectedChoiceId)?.input,
+    runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "contextual_schema_fixture",
+        summary: choicePlan.summary,
+        plan_json: choicePlan
+      })
+    ]
+  };
+  const { service } = createService(state);
+
+  await assert.rejects(
+    () =>
+      service.approveConfirmation(
+        USER_ID,
+        WORKSPACE_ID,
+        RUN_ID,
+        CONFIRMATION_ID,
+        body
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorMessage(error), "choiceId must select an available choice");
+      return true;
+    }
+  );
+  assert.equal(state.confirmations[0].status, "pending");
+  assert.equal(state.confirmations[0].selected_choice_id, null);
 }
 
 {
@@ -663,7 +981,7 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "planning");
   assert.equal(result.run.confirmation.status, "approved");
   assert.deepEqual(toolRegistryService.calls[2].input, {
     eventId: "77",
@@ -950,7 +1268,7 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "planning");
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     [

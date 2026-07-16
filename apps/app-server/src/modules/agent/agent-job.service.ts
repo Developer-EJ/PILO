@@ -4,10 +4,11 @@ import { agentJobUnavailable } from "./agent-api-error";
 import type {
   AgentRiskLevel,
   AgentToolExecutionMode,
-  AgentToolInputSchema
+  AgentToolInputSchema,
+  AgentRunRequestContext
 } from "./types/agent-tool.types";
 
-export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1";
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v4";
 
 export interface AgentToolSchemaSnapshotItem {
   name: string;
@@ -22,6 +23,8 @@ export interface AgentRunRequestedJobPayload {
   runId: string;
   workspaceId: string;
   requestedByUserId: string;
+  requestContext: AgentRunRequestContext;
+  turnSequence: number;
   toolSchemaVersion: string;
   tools: AgentToolSchemaSnapshotItem[];
 }

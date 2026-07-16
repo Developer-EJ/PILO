@@ -1,26 +1,49 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import {
+  didAgentRunAcceptInput,
+  getLatestAgentRunMessageSequence
+} from "./run-input-recovery.ts";
+import { readAgentRequestContext } from "./request-context.ts";
+import { getAgentResourceLinks } from "./resource-links.ts";
+
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
 }
 
-const [agentTypes, agentApiClient, agentConfirmationCard, agentChatWidget] =
+const [
+  agentTypes,
+  agentApiClient,
+  agentConfirmationCard,
+  agentChatWidget,
+  agentResourceLinks
+] =
   await Promise.all([
     readFeatureFile("./types.ts"),
     readFeatureFile("./api/client.ts"),
     readFeatureFile("./components/agent-confirmation-card.tsx"),
-    readFeatureFile("./components/agent-chat-widget.tsx")
+    readFeatureFile("./components/agent-chat-widget.tsx"),
+    readFeatureFile("./components/agent-resource-links.tsx")
   ]);
 
 assert.match(agentTypes, /export type AgentRunStatus/);
 assert.match(agentTypes, /"planning"/);
+assert.match(agentTypes, /"waiting_user_input"/);
 assert.match(agentTypes, /"waiting_confirmation"/);
 assert.match(agentTypes, /"completed"/);
 assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
+assert.match(agentTypes, /export type SubmitAgentRunInput/);
+assert.match(agentTypes, /export type AgentRunMessage/);
+assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
 assert.match(agentTypes, /export type AgentRunDetailPayload/);
 assert.match(agentTypes, /export type AgentConfirmationActionPayload/);
+assert.match(agentTypes, /export type AgentRunRequestContext/);
+assert.match(agentTypes, /resourceId\?: string \| null/);
+assert.match(agentTypes, /resourceType\?: string \| null/);
+assert.match(agentTypes, /kind: "choice"/);
+assert.match(agentTypes, /selectedChoiceId: string \| null/);
 
 assert.match(agentApiClient, /createAgentApiClient/);
 assert.match(agentApiClient, /AgentApiError/);
@@ -32,6 +55,9 @@ assert.match(agentApiClient, /cache: "no-store"/);
 assert.match(agentApiClient, /success === true/);
 assert.match(agentApiClient, /createRun/);
 assert.match(agentApiClient, /getRun/);
+assert.match(agentApiClient, /submitRunInput/);
+assert.match(agentApiClient, /agentRunInputsPath/);
+assert.match(agentApiClient, /\/inputs/);
 assert.match(agentApiClient, /approveConfirmation/);
 assert.match(agentApiClient, /rejectConfirmation/);
 assert.match(agentApiClient, /\/agent\/runs/);
@@ -40,10 +66,10 @@ assert.match(agentApiClient, /method: "GET"/);
 assert.match(agentApiClient, /\/confirmations\/\$\{encodeURIComponent/);
 assert.match(agentApiClient, /"approve"/);
 assert.match(agentApiClient, /"reject"/);
-assert.doesNotMatch(
+assert.match(
   agentApiClient,
-  /approveConfirmation[\s\S]*withJsonBody/,
-  "approve confirmation should not send request body"
+  /approveConfirmation[\s\S]*withJsonBody\(body/,
+  "choice confirmation should send only the selected choice"
 );
 assert.doesNotMatch(
   agentApiClient,
@@ -57,10 +83,20 @@ assert.match(agentConfirmationCard, /expiresAtMs <= nowMs/);
 assert.match(agentConfirmationCard, /onApprove/);
 assert.match(agentConfirmationCard, /onReject/);
 assert.match(agentConfirmationCard, /plan\?\.summary/);
-assert.match(agentConfirmationCard, /plan\.toolName/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.before\)/);
 assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.after\)/);
-assert.match(agentConfirmationCard, /renderObjectSummary\(plan\.call\)/);
+assert.match(agentConfirmationCard, /plan\.kind === "choice"/);
+assert.match(agentConfirmationCard, /selectedChoiceId/);
+assert.match(agentConfirmationCard, /aria-pressed/);
+assert.match(agentConfirmationCard, /작업 대상/);
+assert.match(agentConfirmationCard, /pending: "선택 대기"/);
+assert.match(agentConfirmationCard, /approved: "승인됨"/);
+assert.match(agentConfirmationCard, /rejected: "거절됨"/);
+assert.match(agentConfirmationCard, /expired: "만료됨"/);
+assert.doesNotMatch(agentConfirmationCard, /riskLevelLabels/);
+assert.doesNotMatch(agentConfirmationCard, />Tool</);
+assert.doesNotMatch(agentConfirmationCard, /실행 호출 정보/);
+assert.doesNotMatch(agentConfirmationCard, /renderObjectSummary\(plan\.call\)/);
 assert.doesNotMatch(agentConfirmationCard, /<input/);
 assert.doesNotMatch(agentConfirmationCard, /<textarea/);
 
@@ -68,11 +104,21 @@ assert.match(agentChatWidget, /useAuthSession/);
 assert.match(agentChatWidget, /activeWorkspaceId/);
 assert.match(agentChatWidget, /createAgentApiClient/);
 assert.match(agentChatWidget, /createRun/);
+assert.match(agentChatWidget, /readAgentRequestContext/);
+assert.match(agentChatWidget, /requestContext/);
 assert.match(agentChatWidget, /getRun/);
 assert.match(agentChatWidget, /approveConfirmation/);
 assert.match(agentChatWidget, /rejectConfirmation/);
 assert.match(agentChatWidget, /AgentConfirmationCard/);
+assert.match(agentChatWidget, /AgentResourceLinks/);
+assert.match(agentChatWidget, /GroundedCitationList/);
+assert.match(agentChatWidget, /getGroundedCitations/);
+assert.match(agentChatWidget, /sourceType === "transcript"/);
+assert.match(agentChatWidget, /회의 발언/);
+assert.match(agentChatWidget, /실제 활동/);
+assert.match(agentChatWidget, /citationSources/);
 assert.match(agentChatWidget, /handleConfirmationAction/);
+assert.match(agentChatWidget, /choiceId/);
 assert.match(agentChatWidget, /CONFIRMATION_EXPIRED/);
 assert.match(agentChatWidget, /CONFIRMATION_NOT_PENDING/);
 assert.match(agentChatWidget, /hasActiveAgentRequest/);
@@ -80,10 +126,28 @@ assert.match(
   agentChatWidget,
   /confirmationAction \|\|\s+isBusy \|\|\s+activeRunAbortControllerRef\.current !== null/
 );
-assert.match(agentChatWidget, /disabled=\{\s*!workspaceId[\s\S]*hasActiveAgentRequest/);
+assert.match(
+  agentChatWidget,
+  /disabled=\{\s*!accessToken\?\.trim\(\) \|\| hasActiveAgentRequest/
+);
 assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
 assert.match(agentChatWidget, /waiting_confirmation/);
+assert.match(agentChatWidget, /waiting_user_input/);
+assert.match(agentChatWidget, /submitRunInput/);
+assert.match(agentChatWidget, /appendRunInput/);
+assert.match(agentChatWidget, /latestAssistantMessage/);
+assert.match(agentChatWidget, /같은 요청을 이어서 처리합니다/);
+assert.match(agentChatWidget, /enqueueMeetingConnectionAction/);
+assert.match(agentChatWidget, /clientAction/);
+assert.match(agentChatWidget, /connect_meeting/);
+assert.match(agentChatWidget, /router\.push\("\/meeting"\)/);
+assert.match(agentChatWidget, /workspaceId: run\.workspaceId/);
+assert.match(agentChatWidget, /currentRun\.workspaceId/);
+assert.match(agentChatWidget, /submitRunInput\(\s*run\.workspaceId/);
+assert.match(agentChatWidget, /getRun\(\s*run\.workspaceId/);
+assert.match(agentChatWidget, /inputWasAccepted/);
+assert.match(agentChatWidget, /refreshRun\.status !== "waiting_user_input"/);
 assert.match(agentChatWidget, /completed/);
 assert.match(agentChatWidget, /failed/);
 assert.match(agentChatWidget, /cancelled/);
@@ -107,3 +171,154 @@ assert.match(agentChatWidget, /event\.shiftKey/);
 assert.match(agentChatWidget, /event\.nativeEvent\.isComposing/);
 assert.doesNotMatch(agentChatWidget, /createMockAssistantReply/);
 assert.doesNotMatch(agentChatWidget, /Mockup/);
+
+assert.match(agentResourceLinks, /getAgentResourceLinks/);
+assert.match(agentResourceLinks, /<Link/);
+
+const previousMessages = [
+  {
+    id: "assistant-1",
+    sequence: 1,
+    role: "assistant",
+    content: "몇 시인가요?",
+    createdAt: "2026-07-16T00:00:00.000Z"
+  }
+];
+const acceptedMessages = [
+  ...previousMessages,
+  {
+    id: "user-2",
+    sequence: 2,
+    role: "user",
+    content: "오후 3시",
+    createdAt: "2026-07-16T00:00:01.000Z"
+  },
+  {
+    id: "assistant-3",
+    sequence: 3,
+    role: "assistant",
+    content: "종료 시간도 알려주세요.",
+    createdAt: "2026-07-16T00:00:02.000Z"
+  }
+];
+
+assert.equal(getLatestAgentRunMessageSequence(previousMessages), 1);
+assert.equal(didAgentRunAcceptInput(acceptedMessages, 1, "오후 3시"), true);
+assert.equal(didAgentRunAcceptInput(previousMessages, 1, "오후 3시"), false);
+
+const sqlErdSessionId = "77777777-7777-4777-8777-777777777777";
+const expectedSqlErdContext = {
+  surface: "sql_erd",
+  sessionId: sqlErdSessionId
+};
+
+assert.deepEqual(
+  readAgentRequestContext(
+    "/sql-erd/session",
+    `sessionId=${sqlErdSessionId}`
+  ),
+  expectedSqlErdContext
+);
+assert.deepEqual(
+  readAgentRequestContext(
+    "/sql-erd/session/",
+    `sessionId=${sqlErdSessionId}`
+  ),
+  expectedSqlErdContext
+);
+assert.equal(
+  readAgentRequestContext(
+    "/sql-erd/session/extra/",
+    `sessionId=${sqlErdSessionId}`
+  ),
+  null
+);
+assert.equal(
+  readAgentRequestContext("/sql-erd/session/", "sessionId=not-a-uuid"),
+  null
+);
+
+const resourceSessionId = "88888888-8888-4888-8888-888888888888";
+const validResourceRef = {
+  domain: "sqltoerd",
+  resourceType: "session",
+  resourceId: resourceSessionId,
+  label: "주문 관리",
+  url: `/sql-erd/session?sessionId=${resourceSessionId}`
+};
+const completedRun = {
+  status: "completed",
+  steps: [
+    {
+      id: "step-1",
+      status: "completed",
+      resourceRefs: [validResourceRef, validResourceRef]
+    }
+  ]
+};
+
+assert.deepEqual(getAgentResourceLinks(completedRun), [
+  {
+    href: `/sql-erd/session?sessionId=${resourceSessionId}`,
+    key: `sqltoerd:session:${resourceSessionId}`,
+    label: "ERD 및 DDL 열기"
+  }
+]);
+assert.deepEqual(
+  getAgentResourceLinks({ ...completedRun, status: "running" }),
+  []
+);
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [
+      {
+        ...completedRun.steps[0],
+        status: "running"
+      }
+    ]
+  }),
+  []
+);
+
+for (const invalidUrl of [
+  `https://evil.example/sql-erd/session?sessionId=${resourceSessionId}`,
+  `//evil.example/sql-erd/session?sessionId=${resourceSessionId}`,
+  `javascript:alert(1)`,
+  `/sql-erd/session?sessionId=${resourceSessionId}#danger`,
+  `/sql-erd/session?sessionId=${resourceSessionId}&next=https://evil.example`,
+  `/sql-erd/session?sessionId=99999999-9999-4999-8999-999999999999`,
+  `/sql-erd/other?sessionId=${resourceSessionId}`,
+  `\\evil.example\sql-erd\session?sessionId=${resourceSessionId}`
+]) {
+  assert.deepEqual(
+    getAgentResourceLinks({
+      ...completedRun,
+      steps: [
+        {
+          ...completedRun.steps[0],
+          resourceRefs: [{ ...validResourceRef, url: invalidUrl }]
+        }
+      ]
+    }),
+    [],
+    `unsafe SQLtoERD resource URL should be rejected: ${invalidUrl}`
+  );
+}
+
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [
+      {
+        ...completedRun.steps[0],
+        resourceRefs: [
+          { ...validResourceRef, domain: "calendar" },
+          { ...validResourceRef, resourceType: "table" },
+          { ...validResourceRef, resourceId: "not-a-uuid" }
+        ]
+      }
+    ]
+  }),
+  []
+);

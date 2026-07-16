@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronsUpDown,
   ChevronRight,
@@ -48,11 +48,19 @@ import {
   useSidebar
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
-import { GithubSettingsStatus } from "@/features/github-integration/components/github-settings-status";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
+import { GithubPanel } from "@/features/github-integration/components/github-panel";
+import {
+  GITHUB_SETTINGS_QUERY_KEY,
+  GITHUB_SETTINGS_QUERY_VALUE,
+  isGithubSettingsEntry
+} from "@/features/github-integration/utils/github-settings-entry";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
-import { SettingsDialog } from "@/features/settings/components/user-settings-dialog";
+import {
+  SettingsDialog,
+  type SettingsDialogSectionId
+} from "@/features/settings/components/user-settings-dialog";
 import { cn } from "@/lib/utils";
 
 export type AppSidebarItem = Pick<
@@ -87,6 +95,7 @@ export function AppSidebar({
   const { isMobile, setOpenMobile } = useSidebar();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const authSession = useAuthSession();
   const meetingRuntime = useMeetingRuntime();
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState(0);
@@ -103,6 +112,8 @@ export function AppSidebar({
     "idle" | "logging-out" | "switching-workspace"
   >("idle");
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] =
+    useState<SettingsDialogSectionId>("general");
   const [previewActiveWorkspaceId, setPreviewActiveWorkspaceId] = useState<
     string | null
   >(null);
@@ -156,6 +167,7 @@ export function AppSidebar({
       }
     : currentUser;
   const selectedItem = items.find((item) => item.id === selectedItemId);
+  const isGithubSettingsMarkerPresent = isGithubSettingsEntry(searchParams);
 
   useEffect(() => {
     setOpenMenuIds((currentOpenMenuIds) => ({
@@ -170,6 +182,15 @@ export function AppSidebar({
       );
     setActiveSubItemHref(matchingSubItem?.href ?? selectedItem?.href);
   }, [pathname, selectedItem?.href, selectedItem?.items, selectedItemId]);
+
+  useEffect(() => {
+    if (!isGithubSettingsMarkerPresent) {
+      return;
+    }
+
+    setSettingsInitialSection("github");
+    setIsSettingsDialogOpen(true);
+  }, [isGithubSettingsMarkerPresent]);
 
   const handleSelectItem = (
     itemId: string,
@@ -249,12 +270,28 @@ export function AppSidebar({
   };
 
   const openSettings = () => {
+    setSettingsInitialSection("general");
     setIsSettingsDialogOpen(true);
   };
 
-  const handleManageGithub = () => {
-    setIsSettingsDialogOpen(false);
-    router.push("/github");
+  const handleSettingsDialogOpenChange = (open: boolean) => {
+    setIsSettingsDialogOpen(open);
+
+    if (open || !isGithubSettingsMarkerPresent) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    if (
+      nextSearchParams.get(GITHUB_SETTINGS_QUERY_KEY) !==
+      GITHUB_SETTINGS_QUERY_VALUE
+    ) {
+      return;
+    }
+
+    nextSearchParams.delete(GITHUB_SETTINGS_QUERY_KEY);
+    const nextQuery = nextSearchParams.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
   };
   return (
     <>
@@ -564,15 +601,11 @@ export function AppSidebar({
         avatarUrl={displayUser.avatarUrl}
         canManageWorkspace={activeWorkspace.role === "owner"}
         email={displayUser.email}
+        initialSection={settingsInitialSection}
         joinedAt={displayUser.createdAt}
-        githubContent={
-          <GithubSettingsStatus
-            canManageWorkspace={activeWorkspace.role === "owner"}
-            onManage={handleManageGithub}
-          />
-        }
+        githubContent={<GithubPanel />}
         name={displayUser.name}
-        onOpenChange={setIsSettingsDialogOpen}
+        onOpenChange={handleSettingsDialogOpenChange}
         open={isSettingsDialogOpen}
       />
     </>

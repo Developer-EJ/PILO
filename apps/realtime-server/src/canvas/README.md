@@ -21,6 +21,11 @@ This module owns Canvas Socket.IO rooms and presence delivery.
   fails so the frontend can fall back to its normal viewport lazy loading.
 - Flush dirty classic Canvas room checkpoints on explicit leave, unexpected
   socket disconnect, and graceful server shutdown.
+- Flush pending dirty roomState before admitting a newly joined socket, and
+  checkpoint active dirty rooms at most once every five minutes without
+  resetting the timer for every shape patch.
+- Isolate data-level 4xx failures so one invalid shape operation does not block
+  other dirty shapes from being checkpointed.
 - Expose classic Canvas roomState health counters (`roomCount`,
   `cachedShapeCount`, `dirtyShapeCount`, `deletedTombstoneCount`,
   `loadedRegionCount`, and history counts) from realtime-server health output.
@@ -36,6 +41,8 @@ This module owns Canvas Socket.IO rooms and presence delivery.
 - Persisting `editingShapeId` or `editingMode`; edit intent is realtime-only.
 - Treating absence from the room cache as deletion. Deletion requires an
   explicit delete patch/tombstone.
+- Letting viewport/API hydrate upserts clear delete tombstones. Only a dirty
+  user edit patch, undo, or redo may intentionally recreate a tombstoned shape.
 - Evicting dirty roomState shapes before they are checkpointed. Cache eviction
   may remove clean hydrated shapes, but pending local changes must stay until
   App Server confirms the checkpoint.

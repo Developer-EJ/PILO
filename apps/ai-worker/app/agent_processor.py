@@ -13,11 +13,20 @@ from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
 AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE = "agent_grounded_answer_requested"
-AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1"
+AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v4"
+AGENT_PLANNER_TURN_LIMIT_MESSAGE = (
+    "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. "
+    "다음 요청에서 계속 진행할 내용을 알려주세요."
+)
 TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
-PLANNER_STATUSES = {"tool_candidate", "needs_clarification", "unsupported"}
+PLANNER_STATUSES = {
+    "tool_candidate",
+    "needs_clarification",
+    "completed",
+    "unsupported",
+}
 TOOL_RISK_LEVELS = {"low", "medium", "high"}
-TOOL_EXECUTION_MODES = {"auto", "confirmation_required"}
+TOOL_EXECUTION_MODES = {"auto", "confirmation_required", "contextual"}
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
@@ -39,7 +48,9 @@ class AgentRunJob:
     workspace_id: str
     requested_by_user_id: str
     tool_schema_version: str
+    turn_sequence: int
     tools: tuple[AgentToolSchema, ...]
+    request_context: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +70,8 @@ class AgentRunContext:
     status: str
     prompt: str
     timezone: str
+    planner_turn_count: int = 0
+    planning_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,7 @@ class AgentPlanningRequest:
     current_date: str
     tool_schema_version: str
     tools: tuple[AgentToolSchema, ...]
+    planning_context: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,7 +92,7 @@ class AgentPlannerDecision:
     final_answer_draft: str | None
     tool_name: str | None
     tool_input: dict[str, object]
-    requires_confirmation: bool
+    requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
 
@@ -100,7 +114,7 @@ class AgentProcessResult:
 
 
 class AgentGroundedAnswerProcessor:
-    """Keeps transcript text in-memory: only App Server internal HTTPS carries it."""
+    """Keeps bounded Meeting evidence in-memory: only App Server internal HTTPS carries it."""
 
     def __init__(
         self, handoff_client: object, api_key: str, model: str, timeout_seconds: float
@@ -142,7 +156,11 @@ class AgentGroundedAnswerProcessor:
                     {
                         "role": "system",
                         "content": (
-                            "Answer in Korean using only supplied meeting transcript sources. "
+                            "Answer in Korean using only supplied Meeting evidence sources. "
+                            "Sources have sourceType transcript (spoken content) or activity "
+                            "(an actual committed user action). Distinguish the source type in "
+                            "the answer when it affects the claim; do not present activity "
+                            "as speech. "
                             "Return JSON with answer and citations (sourceId array). "
                             "Do not invent citations."
                         ),
@@ -238,6 +256,8 @@ class AgentRunRepository(Protocol):
         message: str,
     ) -> None: ...
 
+    def wait_for_user_input(self, run_id: str, message: str) -> bool: ...
+
 
 class AgentPlannerClient(Protocol):
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision: ...
@@ -264,7 +284,9 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         workspace_id=_require_uuid_string(payload, "workspaceId"),
         requested_by_user_id=_require_uuid_string(payload, "requestedByUserId"),
         tool_schema_version=_require_non_empty_string(payload, "toolSchemaVersion"),
+        turn_sequence=_optional_positive_int(payload, "turnSequence", default=1),
         tools=_parse_tool_schema_snapshot(payload.get("tools")),
+        request_context=_parse_request_context(payload.get("requestContext")),
     )
 
 
@@ -327,6 +349,13 @@ class AgentRunProcessor:
                     reason="agent_run_waiting_confirmation",
                 )
 
+            if status == "waiting_user_input":
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason="agent_run_waiting_user_input",
+                )
+
             if status == "running":
                 return self._handoff_execution(job, retried=True)
 
@@ -335,6 +364,21 @@ class AgentRunProcessor:
                     job,
                     delete_message=True,
                     reason="agent_run_unsupported_status",
+                )
+
+            if context.planner_turn_count >= 5:
+                waiting = self.repository.wait_for_user_input(
+                    job.run_id,
+                    AGENT_PLANNER_TURN_LIMIT_MESSAGE,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason=(
+                        "agent_planner_turn_limit_reached"
+                        if waiting
+                        else "agent_run_no_longer_planning"
+                    ),
                 )
 
             return self._plan_run(job, context)
@@ -354,6 +398,7 @@ class AgentRunProcessor:
                     current_date=current_date,
                     tool_schema_version=job.tool_schema_version,
                     tools=job.tools,
+                    planning_context=context.planning_context,
                 )
             )
             normalized = normalize_agent_planner_decision(
@@ -361,6 +406,7 @@ class AgentRunProcessor:
                 job,
                 prompt=context.prompt,
                 current_date=current_date,
+                planning_context=context.planning_context,
             )
             planner_step_completed = self.repository.complete_planner_step(
                 job.run_id,
@@ -380,6 +426,19 @@ class AgentRunProcessor:
                     normalized.risk_level,
                 )
                 return self._handoff_execution(job, retried=False)
+
+            if normalized.status == "needs_clarification":
+                waiting = self.repository.wait_for_user_input(
+                    job.run_id,
+                    normalized.final_answer,
+                )
+                return self._result(
+                    job,
+                    delete_message=True,
+                    reason=(
+                        "agent_waiting_user_input" if waiting else "agent_run_no_longer_planning"
+                    ),
+                )
 
             self.repository.complete_run(
                 job.run_id,
@@ -476,6 +535,36 @@ def _require_non_empty_string(payload: dict[str, object], key: str) -> str:
     return value.strip()
 
 
+def _parse_request_context(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"surface", "sessionId"}:
+        raise ValueError("Invalid requestContext")
+
+    surface = value.get("surface")
+    session_id = value.get("sessionId")
+    if surface != "sql_erd" or not isinstance(session_id, str):
+        raise ValueError("Invalid requestContext")
+    try:
+        UUID(session_id)
+    except (ValueError, AttributeError, TypeError) as error:
+        raise ValueError("Invalid requestContext") from error
+
+    return {"surface": "sql_erd", "sessionId": session_id}
+
+
+def _optional_positive_int(
+    payload: dict[str, object],
+    key: str,
+    *,
+    default: int,
+) -> int:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > 2_147_483_647:
+        raise ValueError(f"Invalid {key}")
+    return value
+
+
 def _parse_tool_schema_snapshot(value: object) -> tuple[AgentToolSchema, ...]:
     if not isinstance(value, list):
         raise ValueError("Invalid tools")
@@ -526,6 +615,7 @@ def normalize_agent_planner_decision(
     job: AgentRunJob,
     prompt: str = "",
     current_date: str | None = None,
+    planning_context: str = "",
 ) -> NormalizedPlannerDecision:
     decision = _normalize_calendar_relative_date_query(
         decision,
@@ -586,7 +676,18 @@ def normalize_agent_planner_decision(
         elif status == "tool_candidate" and missing_fields:
             status = "needs_clarification"
             message = "요청을 처리할 정보가 부족합니다."
-            final_answer = _clarification_answer(missing_fields)
+            final_answer = _clarification_answer(missing_fields, tool.name)
+
+    completed_sql_erd_action = _completed_sql_erd_action(planning_context)
+    if completed_sql_erd_action:
+        status = "completed"
+        missing_fields = ()
+        unsupported_reason = None
+        if completed_sql_erd_action == "replaced":
+            final_answer = "현재 SQLtoERD 세션의 스키마를 교체했습니다."
+        else:
+            final_answer = "새 SQLtoERD 세션을 생성했습니다."
+        message = final_answer
 
     output_summary: dict[str, object] = {
         "status": status,
@@ -597,7 +698,11 @@ def normalize_agent_planner_decision(
     risk_level: str | None = None
 
     if status == "tool_candidate" and tool is not None:
-        requires_confirmation = tool.execution_mode == "confirmation_required"
+        requires_confirmation = (
+            None
+            if tool.execution_mode == "contextual"
+            else tool.execution_mode == "confirmation_required"
+        )
         risk_level = tool.risk_level
         output_summary.update(
             {
@@ -614,7 +719,7 @@ def normalize_agent_planner_decision(
     elif status == "needs_clarification":
         output_summary["missingFields"] = list(missing_fields)
         final_answer = final_answer or "요청을 처리하려면 추가 정보가 필요합니다."
-    else:
+    elif status == "unsupported":
         output_summary["unsupportedReason"] = unsupported_reason or "unknown_intent"
         final_answer = final_answer or "현재 Agent 1차 범위에서 지원하지 않는 요청입니다."
 
@@ -639,10 +744,36 @@ def _missing_required_tool_input_fields(
     for field in required:
         if not isinstance(field, str) or not field:
             continue
-        value = input_value.get(field)
-        if value is None or value == "" or value == {}:
+        if field not in input_value:
             missing.append(field)
+            continue
+        value = input_value[field]
+        property_schema = _tool_input_property_schema(tool, field)
+        if value is None:
+            allowed_types = property_schema.get("type")
+            if allowed_types == "null" or (
+                isinstance(allowed_types, list) and "null" in allowed_types
+            ):
+                continue
+            missing.append(field)
+        elif value == "" or value == {}:
+            missing.append(field)
+        elif isinstance(value, list):
+            min_items = property_schema.get("minItems")
+            if isinstance(min_items, int) and len(value) < min_items:
+                missing.append(field)
     return tuple(missing)
+
+
+def _tool_input_property_schema(
+    tool: AgentToolSchema,
+    field: str,
+) -> dict[str, object]:
+    properties = tool.input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+    schema = properties.get(field)
+    return schema if isinstance(schema, dict) else {}
 
 
 def _missing_calendar_update_fields(
@@ -783,7 +914,13 @@ def _next_weekday(base_date: date, weekday: int) -> date:
     return base_date + timedelta(days=offset or 7)
 
 
-def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
+def _clarification_answer(
+    missing_fields: tuple[str, ...],
+    tool_name: str | None = None,
+) -> str:
+    if tool_name == "generate_sql_erd":
+        return "ERD에 포함할 핵심 테이블과 각 테이블의 주요 데이터 관계를 알려주세요."
+
     labels = {
         "eventId": "수정할 일정",
         "changes": "변경할 내용",
@@ -799,6 +936,24 @@ def _clarification_answer(missing_fields: tuple[str, ...]) -> str:
     if not fields:
         return "요청을 처리하려면 추가 정보가 필요합니다."
     return f"요청을 처리하려면 {', '.join(fields)} 정보를 알려주세요."
+
+
+def _completed_sql_erd_action(planning_context: str) -> str | None:
+    prefix = "tool generate_sql_erd: "
+
+    for line in reversed(planning_context.splitlines()):
+        if not line.startswith(prefix):
+            continue
+
+        try:
+            output = json.loads(line[len(prefix) :])
+        except (TypeError, ValueError):
+            continue
+
+        if isinstance(output, dict) and output.get("action") in {"created", "replaced"}:
+            return str(output["action"])
+
+    return None
 
 
 class OpenAiAgentPlannerClient:
@@ -883,7 +1038,7 @@ def _agent_planner_system_prompt() -> str:
         "Choose only tools from the provided tool list. "
         "If no provided tool can handle the request, return unsupported. "
         "High-risk or excluded actions such as delete, PR review submission, "
-        "meeting recording control, label, milestone, or due date changes "
+        "label, milestone, or due date changes "
         "must be unsupported. "
         "Board assignee changes are allowed only when the provided tool list contains "
         "assign_board_issue_safely; otherwise they must be unsupported. "
@@ -896,6 +1051,10 @@ def _agent_planner_system_prompt() -> str:
         "For a broad MeetingReport request without a report ID, use list_meeting_reports "
         "with limit 1 to return the latest report. A specific MeetingReport detail or "
         "summary request without a valid report ID must be unsupported. "
+        "For Meeting control, use list_meeting_rooms or get_active_meeting first when IDs are "
+        "unknown. Never invent meetingRoomId, meetingId, or recordingId. end_meeting_recording "
+        "accepts meetingId only and resolves the current recording on the server. Include "
+        "recordingConsent only after the user explicitly accepts the stated policy version. "
         "Calendar list_calendar_events supports only a date range; title, keyword, participant, "
         "or current-time filters are not supported and must be unsupported rather than ignored. "
         "Calendar recurrence is not supported and must be unsupported rather than converted to a "
@@ -905,6 +1064,15 @@ def _agent_planner_system_prompt() -> str:
         "Calendar default can apply; never set endTime equal to startTime. "
         "When the user supplies a positive integer Calendar event ID with changes, use it and let "
         "the App Server verify that the event exists in the Workspace. "
+        "Use generate_sql_erd when the user asks to generate an ERD, database schema, or SQL DDL "
+        "from natural-language requirements. Its input must be one complete SqlErdSchemaSpecV1 "
+        "object matching the provided schema; never return raw DDL as tool input. Always include "
+        "unsupportedFeatures and list requested features the generator cannot represent instead "
+        "of silently omitting them. Actual database execution is not supported: a request only to "
+        "execute, deploy, or apply SQL to a database must be unsupported. Never include "
+        "targetMode, sessionId, workspaceId, userId, or currentUserId in generate_sql_erd input; "
+        "the App Server "
+        "resolves context and, when needed, asks the user whether to create or replace a session. "
         "Normalize relative dates using the provided timezone and currentDate. For Korean week "
         "phrases, '이번 주말' means the nearest Saturday-Sunday that is not fully past: include "
         "the current Saturday, but on Sunday use the following weekend. '다음 주 월요일' means "
@@ -913,6 +1081,12 @@ def _agent_planner_system_prompt() -> str:
         "currentDate 2026-07-12, use 2026-07-18 through 2026-07-19 for '이번 주말', 2026-07-13 "
         "for '다음 주 월요일', and 2026-07-21 for '다다음 주 화요일'. "
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
+        "When planningContext contains completed tool results, use them to answer the user's "
+        "original request. If the request is satisfied, return completed instead of "
+        "repeating a tool. "
+        "When planningContext contains a completed generate_sql_erd result with "
+        "action=replaced, treat it as a successful schema replacement. Its title is the "
+        "existing session title and is not evidence that an older schema was generated. "
         "Write message and finalAnswerDraft in Korean. "
         "Put the selected tool input object into inputJson as a compact JSON string. "
         "Use null inputJson when there is no tool input. "
@@ -940,6 +1114,7 @@ def _agent_planner_user_prompt(request: AgentPlanningRequest) -> str:
             "toolSchemaVersion": request.tool_schema_version,
             "tools": tools,
             "prompt": request.prompt,
+            "planningContext": request.planning_context,
         },
         ensure_ascii=False,
     )
@@ -962,7 +1137,12 @@ def _agent_planner_schema() -> dict[str, object]:
         "properties": {
             "status": {
                 "type": "string",
-                "enum": ["tool_candidate", "needs_clarification", "unsupported"],
+                "enum": [
+                    "tool_candidate",
+                    "needs_clarification",
+                    "completed",
+                    "unsupported",
+                ],
             },
             "message": {"type": "string"},
             "finalAnswerDraft": {"type": ["string", "null"]},

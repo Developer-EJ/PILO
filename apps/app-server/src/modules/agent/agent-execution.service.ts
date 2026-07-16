@@ -15,6 +15,7 @@ import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
+import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -25,7 +26,9 @@ import type {
   AgentToolDefinition,
   AgentToolClarificationResult,
   AgentToolExecutionMode,
-  AgentToolExecutionResult
+  AgentToolExecutionResult,
+  AgentRunRequestContext,
+  AgentToolPreparationResult
 } from "./types/agent-tool.types";
 
 export type AgentExecutionResult =
@@ -36,6 +39,10 @@ export type AgentExecutionResult =
   | {
       status: "waiting_confirmation";
       confirmation: AgentConfirmationPayload;
+    }
+  | {
+      status: "waiting_user_input";
+      run: AgentRunPayload;
     }
   | {
       status: "failed";
@@ -56,6 +63,7 @@ interface AgentExecutionRunRow extends AgentRunRow {
   workspace_id: string;
   requested_by_user_id: string;
   timezone: string;
+  request_context_json: AgentRunRequestContext;
 }
 
 interface AgentPlannerStepRow extends QueryResultRow {
@@ -68,11 +76,11 @@ interface PlannedToolCandidate {
   input: AgentJsonObject;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
-  requiresConfirmation: boolean;
+  requiresConfirmation: boolean | null;
 }
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
-const EXECUTION_MODES = ["auto", "confirmation_required"] as const;
+const EXECUTION_MODES = ["auto", "confirmation_required", "contextual"] as const;
 const FORBIDDEN_JSON_KEY_PARTS = [
   "authorization",
   "cookie",
@@ -95,13 +103,21 @@ export class AgentExecutionService {
     private readonly agentConfirmationService: AgentConfirmationService,
     private readonly agentToolRegistryService: AgentToolRegistryService,
     private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
-    private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService
+    private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
     const run = await this.database.queryOne<AgentExecutionRunRow>(
       `
-        SELECT id, workspace_id, requested_by_user_id, status, prompt, timezone
+        SELECT
+          id,
+          workspace_id,
+          requested_by_user_id,
+          status,
+          prompt,
+          timezone,
+          request_context_json
         FROM agent_runs
         WHERE id = $1
       `,
@@ -118,7 +134,8 @@ export class AgentExecutionService {
       run.id,
       {
         prompt: run.prompt,
-        timezone: run.timezone
+        timezone: run.timezone,
+        requestContext: run.request_context_json
       }
     );
   }
@@ -127,7 +144,11 @@ export class AgentExecutionService {
     currentUserId: string,
     workspaceId: string,
     runId: string,
-    context: { prompt?: string; timezone?: string } = {}
+    context: {
+      prompt?: string;
+      timezone?: string;
+      requestContext?: AgentRunRequestContext;
+    } = {}
   ): Promise<AgentExecutionResult> {
     const plannerStep = await this.findReadyPlannerStep(
       currentUserId,
@@ -152,7 +173,8 @@ export class AgentExecutionService {
     return this.executePlannerOutput(currentUserId, workspaceId, runId, {
       plannerOutput: plannerStep.output_json,
       prompt: context.prompt,
-      timezone: context.timezone
+      timezone: context.timezone,
+      requestContext: context.requestContext
     });
   }
 
@@ -164,6 +186,7 @@ export class AgentExecutionService {
       plannerOutput: AgentJsonObject;
       prompt?: string;
       timezone?: string;
+      requestContext?: AgentRunRequestContext;
     }
   ): Promise<AgentExecutionResult> {
     const candidate = this.parsePlannerOutput(input.plannerOutput);
@@ -206,6 +229,25 @@ export class AgentExecutionService {
       return validatedInput.result;
     }
 
+    const requestContext =
+      input.requestContext === undefined
+        ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
+        : input.requestContext;
+
+    if (definition.executionMode === "contextual") {
+      return this.executeContextualTool(
+        currentUserId,
+        workspaceId,
+        runId,
+        definition,
+        validatedInput.input,
+        candidate.input,
+        requestContext,
+        input.prompt,
+        input.timezone
+      );
+    }
+
     if (definition.executionMode === "confirmation_required") {
       return this.createConfirmation(
         currentUserId,
@@ -214,6 +256,7 @@ export class AgentExecutionService {
         definition,
         validatedInput.input,
         candidate.input,
+        requestContext,
         input.prompt,
         input.timezone
       );
@@ -226,6 +269,7 @@ export class AgentExecutionService {
       definition,
       validatedInput.input,
       candidate.input,
+      requestContext,
       input.prompt,
       input.timezone
     );
@@ -260,6 +304,31 @@ export class AgentExecutionService {
     return this.findLatestPlannerStep(runId);
   }
 
+  private async findRunRequestContext(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<AgentRunRequestContext> {
+    const run = await this.database.queryOne<{
+      request_context_json: AgentRunRequestContext;
+    }>(
+      `
+        SELECT request_context_json
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+
+    if (!run) {
+      throw notFound("Agent run not found");
+    }
+
+    return run.request_context_json ?? null;
+  }
+
   private async findLatestPlannerStep(
     runId: string
   ): Promise<AgentPlannerStepRow | null> {
@@ -291,10 +360,12 @@ export class AgentExecutionService {
           FROM agent_steps
           WHERE run_id = $1
             AND step_type = 'tool'
+            AND status = 'running'
         ) OR EXISTS (
           SELECT 1
           FROM agent_confirmations
           WHERE run_id = $1
+            AND status = 'pending'
         ) AS started
       `,
       [runId]
@@ -311,9 +382,9 @@ export class AgentExecutionService {
     const toolName = this.readNonEmptyString(output.toolName, "toolName");
     const riskLevel = this.readRiskLevel(output.riskLevel);
     const executionMode = this.readExecutionMode(output.executionMode);
-    const requiresConfirmation = this.readBoolean(
+    const requiresConfirmation = this.readConfirmationRequirement(
       output.requiresConfirmation,
-      "requiresConfirmation"
+      executionMode
     );
     const toolInputValidation = this.readNonEmptyString(
       output.toolInputValidation,
@@ -322,10 +393,6 @@ export class AgentExecutionService {
 
     if (toolInputValidation !== "app_server_required") {
       throw badRequest("Agent planner output requires App Server validation");
-    }
-
-    if ((executionMode === "confirmation_required") !== requiresConfirmation) {
-      throw badRequest("Agent planner confirmation metadata is inconsistent");
     }
 
     return {
@@ -384,6 +451,119 @@ export class AgentExecutionService {
     }
   }
 
+  private async executeContextualTool(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    definition: AgentToolDefinition<unknown>,
+    input: unknown,
+    plannerInput: AgentJsonObject,
+    requestContext: AgentRunRequestContext,
+    prompt?: string,
+    timezone?: string
+  ): Promise<AgentExecutionResult> {
+    if (!definition.prepareExecution) {
+      return this.failRun(currentUserId, workspaceId, runId, {
+        errorCode: "AGENT_TOOL_PREPARATION_UNAVAILABLE",
+        errorMessage: "Contextual Agent tool preparation is not available",
+        message: "Agent 도구 실행 방법을 결정하지 못했습니다."
+      });
+    }
+
+    try {
+      const preparation: AgentToolPreparationResult =
+        await definition.prepareExecution(
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext
+          },
+          input
+        );
+
+      if (this.isClarificationResult(preparation)) {
+        return this.completeClarification(
+          currentUserId,
+          workspaceId,
+          runId,
+          definition,
+          plannerInput,
+          preparation,
+          prompt,
+          timezone
+        );
+      }
+
+      if (preparation.kind === "confirmation") {
+        return this.createConfirmationFromPlan(
+          currentUserId,
+          workspaceId,
+          runId,
+          definition,
+          preparation.plan
+        );
+      }
+
+      if (preparation.kind !== "execute") {
+        throw badRequest("Agent tool preparation result is invalid");
+      }
+
+      return this.executeAutoTool(
+        currentUserId,
+        workspaceId,
+        runId,
+        definition,
+        input,
+        plannerInput,
+        requestContext,
+        prompt,
+        timezone
+      );
+    } catch (error) {
+      if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
+        return {
+          status: "skipped",
+          reason: "already_started"
+        };
+      }
+
+      return this.failRun(currentUserId, workspaceId, runId, {
+        errorCode: "AGENT_TOOL_PREPARATION_FAILED",
+        errorMessage: this.toSafeErrorMessage(
+          error,
+          "Contextual Agent tool preparation failed"
+        ),
+        message: "Agent 도구 실행 방법을 결정하지 못했습니다."
+      });
+    }
+  }
+
+  private async createConfirmationFromPlan(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    definition: AgentToolDefinition<unknown>,
+    plan: AgentConfirmationPlan
+  ): Promise<AgentExecutionResult> {
+    const confirmation = await this.agentConfirmationService.createConfirmation(
+      currentUserId,
+      workspaceId,
+      {
+        runId,
+        toolName: definition.name,
+        riskLevel: definition.riskLevel,
+        summary: plan.summary,
+        plan
+      }
+    );
+
+    return {
+      status: "waiting_confirmation",
+      confirmation
+    };
+  }
+
   private async createConfirmation(
     currentUserId: string,
     workspaceId: string,
@@ -391,6 +571,7 @@ export class AgentExecutionService {
     definition: AgentToolDefinition<unknown>,
     input: unknown,
     plannerInput: AgentJsonObject,
+    requestContext: AgentRunRequestContext,
     prompt?: string,
     timezone?: string
   ): Promise<AgentExecutionResult> {
@@ -407,7 +588,8 @@ export class AgentExecutionService {
         {
           currentUserId,
           workspaceId,
-          runId
+          runId,
+          requestContext
         },
         input
       );
@@ -493,32 +675,33 @@ export class AgentExecutionService {
 
     const outputSummary = this.sanitizeJsonObject(clarification.outputSummary);
     const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
-    await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
-      runId,
-      stepId: step.id,
-      outputSummary,
-      resourceRefs
-    });
-    const run = await this.agentLoggingService.completeRun(
+    const answer =
+      typeof outputSummary.question === "string" && outputSummary.question.trim()
+        ? outputSummary.question.trim()
+        : buildAgentReadResultAnswer({
+            toolName: definition.name,
+            outputSummary,
+            resourceRefs,
+            prompt,
+            timezone
+          });
+    const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
       currentUserId,
       workspaceId,
       {
         runId,
+        stepId: step.id,
+        outputSummary,
+        resourceRefs,
         riskLevel: definition.riskLevel,
-        finalAnswer: buildAgentReadResultAnswer({
-          toolName: definition.name,
-          outputSummary,
-          resourceRefs,
-          prompt,
-          timezone
-        }),
-        message: "요청을 실행하려면 추가 정보가 필요합니다."
+        waitingMessage: answer,
+        waitForUserInput: true
       }
     );
 
     return {
-      status: "completed",
-      run
+      status: "waiting_user_input",
+      run: advanced.run
     };
   }
 
@@ -529,6 +712,7 @@ export class AgentExecutionService {
     definition: AgentToolDefinition<unknown>,
     validatedInput: unknown,
     plannerInput: AgentJsonObject,
+    requestContext: AgentRunRequestContext,
     prompt?: string,
     timezone?: string
   ): Promise<AgentExecutionResult> {
@@ -559,7 +743,8 @@ export class AgentExecutionService {
         {
           currentUserId,
           workspaceId,
-          runId
+          runId,
+          requestContext
         },
         validatedInput
       );
@@ -568,37 +753,35 @@ export class AgentExecutionService {
 
       if (definition.requiresGroundedAnswer) {
         await this.agentGroundedAnswerService.completeToolAndQueue({ currentUserId, workspaceId, runId, stepId: step.id, outputSummary, resourceRefs });
-        await this.agentGroundedAnswerOutboxPublisherService.publish(runId);
+        await this.agentGroundedAnswerOutboxPublisherService
+          .publish(runId)
+          .catch(() => undefined);
         return { status: "skipped", reason: "already_started" };
       }
 
-      await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        outputSummary,
-        resourceRefs
-      });
-
-      const run = await this.agentLoggingService.completeRun(
+      const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
         workspaceId,
         {
           runId,
+          stepId: step.id,
+          outputSummary,
+          resourceRefs,
           riskLevel: definition.riskLevel,
-          finalAnswer: buildAgentReadResultAnswer({
-            toolName: definition.name,
-            outputSummary,
-            resourceRefs,
-            prompt,
-            timezone
-          }),
-          message: "요청을 완료했습니다."
+          waitingMessage:
+            "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
         }
       );
+      if (advanced.queuedNextPlannerTurn) {
+        await this.agentOutboxPublisherService
+          .publishCreatedRun(runId)
+          .catch(() => undefined);
+        return { status: "skipped", reason: "already_started" };
+      }
 
       return {
-        status: "completed",
-        run
+        status: "waiting_user_input",
+        run: advanced.run
       };
     } catch (error) {
       const safeMessage = this.toSafeErrorMessage(
@@ -606,12 +789,19 @@ export class AgentExecutionService {
         "Agent tool execution failed"
       );
 
-      await this.agentLoggingService.failStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-        errorMessage: safeMessage
-      });
+      const failedStep = await this.agentLoggingService.failStep(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          stepId: step.id,
+          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+          errorMessage: safeMessage
+        }
+      );
+      if (failedStep.status === "completed") {
+        return { status: "skipped", reason: "already_started" };
+      }
 
       const run = await this.agentLoggingService.failRun(
         currentUserId,
@@ -643,7 +833,10 @@ export class AgentExecutionService {
   }
 
   private isClarificationResult(
-    input: AgentToolClarificationResult | AgentConfirmationPlan
+    input:
+      | AgentToolClarificationResult
+      | AgentConfirmationPlan
+      | AgentToolPreparationResult
   ): input is AgentToolClarificationResult {
     return "kind" in input && input.kind === "needs_clarification";
   }
@@ -795,6 +988,31 @@ export class AgentExecutionService {
     }
 
     return value;
+  }
+
+  private readConfirmationRequirement(
+    value: unknown,
+    executionMode: AgentToolExecutionMode
+  ): boolean | null {
+    if (executionMode === "contextual") {
+      if (value !== null) {
+        throw badRequest("Agent planner confirmation metadata is inconsistent");
+      }
+
+      return null;
+    }
+
+    const requiresConfirmation = this.readBoolean(
+      value,
+      "requiresConfirmation"
+    );
+    if (
+      (executionMode === "confirmation_required") !== requiresConfirmation
+    ) {
+      throw badRequest("Agent planner confirmation metadata is inconsistent");
+    }
+
+    return requiresConfirmation;
   }
 
   private readRiskLevel(value: unknown): AgentRiskLevel {

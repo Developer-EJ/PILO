@@ -6,6 +6,7 @@ import { GithubProjectV2WriteService } from "../github-integration/github-projec
 import { WorkspaceService } from "../workspace/workspace.service";
 import { rethrowBoardGithubWriteError } from "./board-github-write-error";
 import { buildPiloIssueCreatedActivityLog } from "./board-activity-log";
+import { assertBoardIssueCreateTarget } from "./board-issue-create-target";
 import {
   BoardIssueCreateOperationService,
   type BoardIssueCreateAttempt
@@ -61,7 +62,7 @@ export class BoardIssueCreateService {
       throw notFound("Board or target column not found");
     }
 
-    this.assertGithubCreateTarget(target);
+    assertBoardIssueCreateTarget(target);
 
     const claim = await this.operationService.claimOperation({
       actorUserId: currentUserId,
@@ -118,6 +119,33 @@ export class BoardIssueCreateService {
       await this.operationService.markRetryableSafely(attempt, error);
       throw error;
     }
+  }
+
+  /**
+   * Checks the same user-controlled Board issue input and target metadata as
+   * createBoardIssue, without creating an operation or contacting GitHub.
+   */
+  async validateBoardIssueCreateInput(
+    currentUserId: string,
+    workspaceId: string,
+    boardId: string,
+    body: unknown
+  ): Promise<void> {
+    const normalizedBoardId = this.readBoardId(boardId);
+    const input = this.normalizeIssueCreateInput(body);
+
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const target = await this.boardIssueCreateQueries.findIssueCreateTarget(
+      workspaceId,
+      normalizedBoardId,
+      input.columnId
+    );
+    if (!target) {
+      throw notFound("Board or target column not found");
+    }
+
+    assertBoardIssueCreateTarget(target);
   }
 
   private async persistCachesAndComplete(
@@ -265,7 +293,7 @@ export class BoardIssueCreateService {
     input: NormalizedIssueCreateInput
   ) {
     try {
-      return await this.githubIssueWriteService.createIssue({
+      return await this.githubIssueWriteService.createIssueWithProjectOAuth({
         body: input.body,
         currentUserId,
         owner: target.repository_owner_login,
@@ -381,39 +409,6 @@ export class BoardIssueCreateService {
     }
 
     return String(parsed);
-  }
-
-  private assertGithubCreateTarget(
-    target: BoardIssueCreateTargetRow
-  ): asserts target is BoardIssueCreateTargetRow & {
-    github_field_node_id: string;
-    github_project_node_id: string;
-    project_v2_id: string;
-    repository_id: string;
-    repository_name: string;
-    repository_owner_login: string;
-    status_field_id: string;
-  } {
-    if (
-      !target.repository_id ||
-      !target.repository_owner_login ||
-      !target.repository_name
-    ) {
-      throw badRequest("Board is missing GitHub repository metadata");
-    }
-
-    if (
-      !target.project_v2_id ||
-      !target.github_project_node_id ||
-      !target.status_field_id ||
-      !target.github_field_node_id
-    ) {
-      throw badRequest("Board is missing GitHub ProjectV2 status metadata");
-    }
-
-    if (target.target_status_option_id && !target.target_status_option_github_id) {
-      throw badRequest("Board column is missing GitHub Status option metadata");
-    }
   }
 
   private mapBoardIssue(row: BoardIssueCreateIssueRow): BoardIssueCardPayload {

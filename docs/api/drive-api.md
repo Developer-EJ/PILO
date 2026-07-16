@@ -14,12 +14,13 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 - 현재 폴더의 폴더/문서/파일 목록 조회
 - 빈 네이티브 문서 생성
 - S3 presigned URL 기반 파일 업로드
-- S3 presigned URL 기반 파일 다운로드
+- S3 presigned URL 기반 파일 다운로드와 PDF 앱 내 미리보기 URL 발급
 - 폴더/문서/파일 이름 변경과 이동
 - 폴더/문서/파일 soft delete
 
-파일 미리보기, 검색, 복구, public link share, 문서 공동 편집과 장기 버전 관리는
-이 문서의 MVP 범위가 아니다. 문서 본문은 최신 snapshot 조회와 자동 저장만 지원한다.
+검색, 복구, public link share, 문서별 권한과 장기 버전 관리 UI는 이 문서의 MVP 범위가
+아니다. native 문서는 `/sync/documents` Yjs WebSocket room에서 Workspace 멤버끼리 동시 편집하며,
+병합된 본문은 최신 snapshot 조회와 자동 저장으로 보존한다. 파일 미리보기는 ready PDF만 지원한다.
 
 ## 데이터 규칙
 
@@ -69,6 +70,7 @@ Frontend 화면 이름은 `파일`로 둔다. Backend 도메인 이름과 API pa
 | `POST` | `/workspaces/{workspaceId}/drive/files/upload-url` | 파일 metadata 생성과 presigned upload URL 발급 |
 | `POST` | `/workspaces/{workspaceId}/drive/files/{fileId}/complete` | S3 업로드 완료 확인과 파일 ready 전환 |
 | `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/download-url` | 파일 다운로드용 presigned URL 발급 |
+| `GET` | `/workspaces/{workspaceId}/drive/files/{fileId}/preview-url` | PDF 앱 내 미리보기용 presigned URL 발급 |
 | `PATCH` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 이름 변경 또는 이동 |
 | `DELETE` | `/workspaces/{workspaceId}/drive/items/{itemId}` | 폴더/문서/파일 soft delete |
 
@@ -418,9 +420,30 @@ Request:
 - `yjsState`는 유효한 base64이고 디코딩 후 `1 MiB` 이하여야 한다.
 - `contentJson`은 최상위 `type: "doc"` Tiptap JSON object이고 직렬화 후 `512 KiB` 이하여야 한다.
 - 새 snapshot insert, `documents.current_version`/`latest_snapshot_id` 갱신, Drive item의
-  `updatedByUser` 갱신, `document_content_updated` Activity Log append를 하나의 transaction으로 처리한다.
+  `updatedByUser` 갱신과 Activity Log append를 하나의 transaction으로 처리한다.
 - Activity Log에는 새 버전과 짧은 사실 summary만 저장하며, 문서 본문, block JSON, Yjs 상태,
   변경 전후 diff는 저장하지 않는다.
+- `driveFileAttachment` block은 `{ "type": "driveFileAttachment", "attrs": { "driveItemId": "uuid" } }`
+  shape만 허용한다. `driveItemId`는 같은 Workspace의 삭제되지 않은 `ready` file이어야 한다.
+- attachment 변화가 있는 snapshot 저장은 변경된 각 file에 대해 `document_attachment_updated`
+  Activity Log만 남긴다. 같은 저장에서 generic `document_content_updated`를 중복으로 남기지 않는다.
+
+## 문서 Realtime 연결
+
+```text
+wss://{realtime-origin}/sync/documents
+```
+
+- Hocuspocus의 표준 Yjs sync/awareness protocol을 사용한다. 별도의 JSON mutation protocol을 만들지 않는다.
+- provider의 document name은 `workspace:{workspaceId}:document:{documentId}:yjs` 형식이며, bearer token은 Hocuspocus 인증 메시지로 보낸다. URL query에 access token을 넣지 않는다.
+- realtime-server는 Hocuspocus 인증 hook에서 bearer session, Workspace membership, 삭제되지 않은 `document` Drive item을 검증한다.
+- Workspace `owner`, `member`는 연결과 편집이 가능하다. 인증되지 않았거나 권한이 없거나 삭제된 문서는 연결을 거부한다.
+- realtime-server는 room을 만들 때 기존 문서 조회 API로 최신 snapshot을 복원하고, Hocuspocus `onStoreDocument`의 `1초` debounce와 room mutex를 이용해 최신 병합 상태를 기존 snapshot 저장 API에 checkpoint한다. raw Yjs update는 1차 MVP에서 `document_yjs_updates`에 저장하지 않는다.
+- checkpoint 호출에는 Hocuspocus 인증 context의 bearer token을 메모리에서만 사용한다. token은 DB, Activity Log, metadata에 저장하지 않는다.
+- realtime URL과 bearer token이 설정된 browser는 Yjs sync/awareness만 수행하며 snapshot 저장 API를 직접 호출하지 않는다. realtime transport를 설정하지 않은 로컬/장애 fallback에서만 browser가 기존 `1초` debounce autosave와 unmount flush를 수행한다.
+- server checkpoint가 `409 CONFLICT`이면 최신 snapshot을 room Y.Doc에 병합하고 한 번만 재시도한다. 두 번째 충돌이나 네트워크 오류는 Hocuspocus 저장 실패로 남기며 browser가 저장 경쟁에 참여하지 않는다.
+- 마지막 연결이 종료되면 `unloadImmediately`가 보류 checkpoint를 즉시 실행하고, realtime-server 종료 시에도 pending checkpoint를 flush한다. 마지막 checkpoint 뒤 최대 `1초`의 편집은 유실될 수 있다.
+- document room은 현재 realtime-server process 메모리에 있다. multiple realtime task 배포 전에는 한 task로 운영하거나 load balancer가 `/sync/documents` WebSocket을 sticky routing해야 한다.
 
 ## Upload URL 발급
 
@@ -599,6 +622,39 @@ GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/download-url
 - 다운로드 응답은 원본 파일명을 `Content-Disposition` filename으로 사용할 수 있게
   발급한다.
 
+## PDF 미리보기 URL 발급
+
+```http
+GET /api/v1/workspaces/{workspaceId}/drive/files/{fileId}/preview-url
+```
+
+응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "file": {
+      "id": "drive_item_uuid",
+      "itemType": "file",
+      "name": "PILO 기획서.pdf",
+      "mimeType": "application/pdf",
+      "uploadStatus": "ready"
+    },
+    "previewUrl": "https://s3-presigned-inline-preview-url",
+    "expiresAt": "2026-07-16T00:11:00.000Z"
+  }
+}
+```
+
+서버 규칙:
+
+- `fileId`는 같은 Workspace의 활성 `ready` file이며 MIME type이 정확히
+  `application/pdf`여야 한다.
+- presigned URL은 `Content-Disposition: inline`과 PDF content type으로 발급한다.
+- bucket name, S3 object key는 응답에 포함하지 않는다.
+- URL 기본 만료 시간은 `10분`이며, 미리보기 요청은 Activity Log를 남기지 않는다.
+
 ## 이름 변경 및 이동
 
 ```http
@@ -687,6 +743,7 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | 문서 저장 expectedVersion | `0` 이상의 정수이며 현재 버전과 일치해야 함 |
 | 문서 snapshot Yjs 상태 | 유효한 base64, 디코딩 후 최대 `1048576` bytes |
 | 문서 snapshot JSON | 최상위 `type: "doc"` object, 최대 `524288` bytes |
+| 문서 파일 첨부 | `driveFileAttachment.attrs.driveItemId`는 같은 Workspace의 활성 `ready` file |
 
 ## 오류
 
@@ -694,9 +751,9 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 | --- | --- | --- |
 | bearer session 없음 또는 만료 | `401` | `UNAUTHORIZED` |
 | Workspace 접근 권한 없음 | `403` | `FORBIDDEN` |
-| parent, item, file, upload 없음 | `404` | `NOT_FOUND` |
+| parent, item, file, upload 없음 또는 PDF 미리보기 대상이 아님 | `404` | `NOT_FOUND` |
 | 이름, 크기, MIME type, upload 상태, item update body가 잘못됨 | `400` | `BAD_REQUEST` |
-| 문서 저장 요청이 잘못됨 | `400` | `BAD_REQUEST` |
+| 문서 저장 요청 또는 첨부 file 참조가 잘못됨 | `400` | `BAD_REQUEST` |
 | 같은 parent에 같은 이름의 활성 item이 있음 | `400` | `BAD_REQUEST` |
 | 문서 저장 시 최신 버전과 다름 | `409` | `CONFLICT` |
 | S3 object 확인 또는 presigned URL 발급 실패 | `502` | `BAD_GATEWAY` |
@@ -704,7 +761,7 @@ DELETE /api/v1/workspaces/{workspaceId}/drive/items/{itemId}
 ## MVP 제외
 
 - 전체 또는 현재 폴더 검색
-- 파일 미리보기
+- PDF 이외 파일 미리보기
 - 문서 공동 편집
 - 파일 버전 관리
 - 휴지통 복구

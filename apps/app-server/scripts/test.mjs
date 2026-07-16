@@ -613,3 +613,11 @@ await import("./user/account-deletion-revocation.test.mjs");
 if (process.env.CHAT_POSTGRES_TEST_URL) {
   await import("./chat/postgres.test.mjs");
 }
+await import("./sqltoerd/schema-generator.test.mjs");
+if (process.env.DATABASE_URL) {
+  await import("./sqltoerd/schema-generator-postgres.test.mjs");
+}
+if (process.env.MYSQL_TEST_URL) {
+  await import("./sqltoerd/schema-generator-mysql.test.mjs");
+}
+await import("./sqltoerd/schema-mutation.test.mjs");

@@ -1,6 +1,364 @@
-.editor :global(.tiptap) {
-  min-height: 28rem;
+.documentPage {
+  width: 100%;
+  max-width: 60rem;
+  margin-inline: auto;
+  padding: 0 clamp(1rem, 4vw, 2rem) 4rem;
+}
+
+.documentHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+
+.documentStateHeader {
+  padding-bottom: 1.25rem;
+}
+
+.documentTitleGroup {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.documentTitle {
+  overflow-wrap: anywhere;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.documentTitleButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  overflow-wrap: anywhere;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.documentTitleButton:hover {
+  color: var(--muted-foreground);
+  cursor: text;
+}
+
+.inlineTitleEditor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.inlineTitleInput {
+  height: auto;
+  flex: 1 1 14rem;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.inlineTitleError {
+  width: 100%;
+  color: var(--destructive);
+  font-size: 0.75rem;
+}
+
+.documentStatus {
+  min-height: 1.25rem;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.documentActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.inlineAlert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--destructive) 20%, transparent);
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  padding: 0.5rem 0.75rem;
+  color: var(--destructive);
+  font-size: 0.875rem;
+}
+
+.editorSurface {
+  margin-top: 1rem;
+}
+
+.commandStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.375rem 0;
+}
+
+.editor {
+  display: block;
+}
+
+.emptyEditor :global(.tiptap p:first-child::before) {
+  color: var(--muted-foreground);
+  content: "입력하려면 /";
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.slashMenu {
+  position: fixed;
+  z-index: 60;
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: min(24rem, calc(100vh - 2rem));
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--popover);
+  padding: 0.25rem;
+  box-shadow: 0 12px 30px color-mix(in srgb, black 16%, transparent);
+}
+
+.bubbleMenu {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--popover);
+  padding: 0.25rem;
+  box-shadow: 0 12px 30px color-mix(in srgb, black 16%, transparent);
+}
+
+.blockHandle {
+  display: flex;
+  align-items: center;
+}
+
+.slashMenuOption,
+.slashMenuOptionActive {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  padding: 0.5rem;
+  color: inherit;
+  text-align: left;
+}
+
+.slashMenuOption {
+  cursor: pointer;
+}
+
+.slashMenuOption:hover,
+.slashMenuOptionActive {
+  background: var(--muted);
+}
+
+.slashMenuSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.375rem 0.5rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.slashMenuSearch input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
   outline: none;
+}
+
+.slashMenuEmpty {
+  margin: 0;
+  padding: 0.75rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.slashMenuIcon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
+}
+
+.slashMenuCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.slashMenuLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.slashMenuDescription {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileAttachment {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+}
+
+.fileAttachmentIcon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--muted-foreground);
+}
+
+.fileAttachmentDetails {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.fileAttachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.fileAttachmentMeta,
+.fileAttachmentMuted,
+.fileAttachmentUnavailable {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.fileAttachmentUnavailable {
+  color: var(--destructive);
+}
+
+.fileAttachmentActions {
+  display: flex;
+  flex: none;
+  gap: 0.125rem;
+}
+
+.pdfPreviewSurface {
+  display: flex;
+  min-height: min(38rem, calc(100vh - 15rem));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--muted);
+}
+
+.pdfPreviewFrame {
+  width: 100%;
+  min-height: min(38rem, calc(100vh - 15rem));
+  border: 0;
+  background: white;
+}
+
+.pdfPreviewState {
+  display: flex;
+  width: 100%;
+  min-height: min(38rem, calc(100vh - 15rem));
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.loadingState,
+.errorState {
+  display: flex;
+  min-height: 16rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.errorState {
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.editor :global(.tiptap) {
+  min-height: 20rem;
+  padding: 1.5rem 1rem 1.5rem 2rem;
+  outline: none;
+}
+
+.editor :global(.collaboration-carets__caret) {
+  position: relative;
+  margin-right: -1px;
+  margin-left: -1px;
+  border-right: 1px solid;
+  border-left: 1px solid;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.editor :global(.collaboration-carets__label) {
+  position: absolute;
+  top: -1.5em;
+  left: -1px;
+  border-radius: 0.1875rem 0.1875rem 0.1875rem 0;
+  padding: 0.1rem 0.3rem;
+  color: white;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 600;
+  line-height: normal;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
 }
 
 .editor :global(.tiptap > * + *) {

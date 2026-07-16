@@ -26,7 +26,7 @@ assert.equal(
 );
 
 const migration = await readFile(
-  new URL("../../../../db/migrations/074_create_workspace_chat.sql", import.meta.url),
+  new URL("../../../../db/migrations/082_create_workspace_chat.sql", import.meta.url),
   "utf8"
 );
 const pool = new Pool({ connectionString, max: 4 });
