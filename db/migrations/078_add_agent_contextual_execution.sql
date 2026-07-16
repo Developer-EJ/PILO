@@ -20,12 +20,15 @@ ALTER TABLE public.agent_runs
   ADD CONSTRAINT agent_runs_request_context_shape_check
   CHECK (
     request_context_json IS NULL
-    OR ((
-      jsonb_object_length(request_context_json) = 2
-      AND request_context_json->>'surface' = 'sql_erd'
-      AND request_context_json->>'sessionId' ~*
-        '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-    ) IS TRUE)
+    OR ((CASE
+      WHEN jsonb_typeof(request_context_json) = 'object' THEN
+        request_context_json ?& ARRAY['surface', 'sessionId']
+        AND (request_context_json - 'surface' - 'sessionId') = '{}'::jsonb
+        AND request_context_json->>'surface' = 'sql_erd'
+        AND request_context_json->>'sessionId' ~*
+          '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      ELSE FALSE
+    END) IS TRUE)
   );
 
 ALTER TABLE public.agent_confirmations
