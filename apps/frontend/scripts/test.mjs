@@ -243,6 +243,13 @@ const canvasRemoteCursorOverlay = await readFile(
   new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
   "utf8"
 );
+const canvasRemoteCursorStore = await readFile(
+  new URL(
+    "../src/shared/canvas-realtime/canvas-remote-cursor-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRealtimeCss = await readFile(
   new URL("../src/shared/canvas-realtime/canvas-realtime.css", import.meta.url),
   "utf8"
@@ -792,16 +799,23 @@ assert.match(canvasRemoteOperations, /intersectsViewport/);
 assert.match(canvasRemoteOperations, /isPiloFrameCollapsed/);
 assert.match(canvasRemoteOperations, /getPiloChildShapeCount/);
 assert.match(canvasRemoteOperations, /expandedFrameIds/);
+assert.match(canvasRemoteOperations, /applyCanvasRoomShapePatch/);
+assert.match(canvasRemoteOperations, /loadedShapeIds/);
 assert.match(canvasRemoteOperations, /unloadedShapeIds/);
-assert.match(canvasRemoteOperations, /collectDescendantShapeIds/);
+assert.match(canvasRemoteOperations, /collectCanvasFrameDescendantShapeIds/);
 assert.match(canvasRemoteOperations, /function isShapeParentId/);
 assert.match(canvasRemoteOperations, /parentId\.startsWith\("shape:"\)/);
 assert.match(canvasRemoteOperations, /shapeDetailCache\.get\(parentId\)/);
 assert.match(canvasRemoteOperations, /parentId/);
 assert.match(canvasRuntime, /pendingRemoteFrameChildrenRequestRef/);
 assert.match(canvasRuntime, /result\.expandedFrameIds/);
+assert.match(canvasRuntime, /result\.loadedShapeIds/);
 assert.match(canvasRuntime, /result\.unloadedShapeIds/);
 assert.match(canvasRuntime, /loadFrameChildren\(frameId\)/);
+assert.match(canvasRuntime, /applyCanvasRoomShapePatch/);
+assert.match(canvasRuntime, /deferredRoomFrameShapesRef/);
+assert.match(canvasRuntime, /isRemoteFrameCollapseProtected/);
+assert.match(canvasRuntime, /flushDeferredRoomFrameShapes/);
 assert.match(canvasRuntime, /getPreservedFreeformShapeSnapshots/);
 assert.match(canvasViewportQueries, /pendingFrameChildrenReloadRef/);
 assert.match(piloTldrawCanvas, /CanvasPresenceReporter/);
@@ -918,18 +932,28 @@ assert.match(canvasPresenceHook, /payload\.loadedRegions/);
 assert.match(canvasPresenceHook, /payload\.roomShapes/);
 assert.match(canvasPresenceHook, /canvas:room:shapes:hydrate/);
 assert.match(canvasPresenceHook, /canvas:room:shape:patch/);
+assert.match(
+  canvasPresenceHook,
+  /removeShapePreviewIds\(\{\s*actorUserId: payload\.actorUserId,\s*previews: currentPreviews,\s*shapeIds: patchedShapeIds,/,
+);
 assert.match(canvasPresenceHook, /canvas:room:checkpoint/);
 assert.match(canvasPresenceHook, /ownedShapeLocks: CanvasShapeLockState\[\]/);
 assert.match(canvasPresenceHook, /const joinedShapeLocks = upsertShapeLocks\(\[\], payload\.shapeLocks\)/);
 assert.match(canvasPresenceHook, /setOwnedShapeLocks/);
 assert.match(canvasPresenceHook, /sentAt: new Date\(\)\.toISOString\(\)/);
 assert.match(canvasPresenceHook, /userId !== currentUserId/);
+assert.match(canvasPresenceHook, /remoteCursorStore\.upsert\(presence\)/);
+assert.match(canvasPresenceHook, /remoteInteractionPresenceRef/);
 assert.match(canvasRemoteCursorOverlay, /pageToScreen/);
 assert.match(canvasRemoteCursorOverlay, /getBoundingClientRect/);
 assert.match(canvasRemoteCursorOverlay, /getShapePageBounds/);
 assert.match(canvasRemoteCursorOverlay, /canvas-remote-selection-outline/);
 assert.match(canvasRemoteCursorOverlay, /getStableCursorColor/);
-assert.match(canvasRemoteCursorOverlay, /entry\.cursor === null/);
+assert.match(canvasRemoteCursorOverlay, /useSyncExternalStore/);
+assert.match(canvasRemoteCursorOverlay, /requestAnimationFrame/);
+assert.match(canvasRemoteCursorOverlay, /ResizeObserver/);
+assert.match(canvasRemoteCursorStore, /createCanvasRemoteCursorStore/);
+assert.match(canvasRemoteCursorStore, /isSameCursorEntry/);
 assert.match(canvasRealtimeCss, /canvas-remote-cursor-layer/);
 assert.match(canvasRealtimeCss, /canvas-remote-selection-outline/);
 assert.match(canvasRemotePresenceContext, /CanvasRemotePresenceProvider/);
@@ -1456,6 +1480,127 @@ function buildScenarioPersistableShapes(state) {
   return Array.from(nextShapeMap.values());
 }
 
+function createScenarioFrame(id, collapsed, childShapeCount = 1) {
+  return {
+    id,
+    type: "frame",
+    x: 0,
+    y: 0,
+    props: {
+      h: collapsed ? 144 : 600,
+      w: collapsed ? 144 : 800
+    },
+    meta: {
+      piloChildShapeCount: childShapeCount,
+      piloFrameCollapsed: collapsed
+    }
+  };
+}
+
+function collectScenarioDescendantIds(shapes, frameId) {
+  const descendantIds = new Set();
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    shapes.forEach((shape) => {
+      if (
+        descendantIds.has(shape.id) ||
+        (shape.parentId !== frameId && !descendantIds.has(shape.parentId))
+      ) {
+        return;
+      }
+
+      descendantIds.add(shape.id);
+      changed = true;
+    });
+  }
+
+  return descendantIds;
+}
+
+function applyScenarioRoomFramePatch(state, incomingShapes) {
+  const incomingShapeMap = shapeMap(incomingShapes);
+  const orderedShapes = [
+    ...incomingShapes.filter((shape) => shape.type === "frame"),
+    ...incomingShapes.filter((shape) => shape.type !== "frame")
+  ];
+
+  orderedShapes.forEach((incomingShape) => {
+    const currentShape = state.shapes.find((shape) => shape.id === incomingShape.id);
+    const previousShape = currentShape ?? state.cache.get(incomingShape.id);
+    const isCollapsedFrame =
+      incomingShape.type === "frame" &&
+      incomingShape.meta?.piloFrameCollapsed === true;
+    const wasCollapsedFrame =
+      previousShape?.type === "frame" &&
+      previousShape.meta?.piloFrameCollapsed === true;
+
+    state.cache.set(incomingShape.id, incomingShape);
+
+    if (incomingShape.parentId) {
+      const visibleParent = state.shapes.find(
+        (shape) => shape.id === incomingShape.parentId
+      );
+      const incomingParent = incomingShapeMap.get(incomingShape.parentId);
+      const parent = visibleParent ?? incomingParent ?? state.cache.get(incomingShape.parentId);
+
+      if (
+        !visibleParent ||
+        !parent ||
+        parent.meta?.piloFrameCollapsed === true
+      ) {
+        state.unloadedShapeIds.add(incomingShape.id);
+        state.shapes = state.shapes.filter((shape) => shape.id !== incomingShape.id);
+        return;
+      }
+    }
+
+    state.shapes = currentShape
+      ? state.shapes.map((shape) =>
+          shape.id === incomingShape.id ? incomingShape : shape
+        )
+      : [...state.shapes, incomingShape];
+    state.unloadedShapeIds.delete(incomingShape.id);
+
+    if (
+      incomingShape.type === "frame" &&
+      !isCollapsedFrame &&
+      (wasCollapsedFrame ||
+        (!currentShape && incomingShape.meta?.piloChildShapeCount > 0))
+    ) {
+      state.pendingFrameIds.add(incomingShape.id);
+    }
+
+    if (!isCollapsedFrame) return;
+
+    const descendantIds = collectScenarioDescendantIds(
+      state.shapes,
+      incomingShape.id
+    );
+    state.shapes.forEach((shape) => {
+      if (!descendantIds.has(shape.id)) return;
+
+      state.cache.set(shape.id, shape);
+      state.unloadedShapeIds.add(shape.id);
+    });
+    state.shapes = state.shapes.filter(
+      (shape) => !descendantIds.has(shape.id)
+    );
+  });
+}
+
+function restoreScenarioFrameChildren(state, frameId) {
+  const cachedChildren = Array.from(state.cache.values()).filter(
+    (shape) => shape.parentId === frameId && !state.deletedShapeIds.has(shape.id)
+  );
+
+  mergeScenarioLoadedShapes(state, cachedChildren);
+  cachedChildren.forEach((shape) => {
+    state.unloadedShapeIds.delete(shape.id);
+  });
+}
+
 function canvasApiError(status) {
   return Object.assign(new Error(`Canvas API ${status}`), { status });
 }
@@ -1569,6 +1714,92 @@ async function runScenarioBatchFallback(operations, runBatch) {
   assert.deepEqual(state.shapes, []);
   assert.equal(state.deletedShapeIds.has("shape:1"), true);
   assert.equal(state.cache.has("shape:1"), false);
+}
+
+{
+  const frameId = "shape:frame";
+  const child = {
+    ...createScenarioShape("shape:child", 1),
+    parentId: frameId
+  };
+  const state = {
+    cache: new Map(),
+    deletedShapeIds: new Set(),
+    pendingFrameIds: new Set(),
+    shapes: [createScenarioFrame(frameId, false), child],
+    unloadedShapeIds: new Set()
+  };
+
+  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, true)]);
+
+  assert.deepEqual(
+    state.shapes.map((shape) => shape.id),
+    [frameId]
+  );
+  assert.equal(state.cache.get(child.id)?.x, 1);
+  assert.equal(state.unloadedShapeIds.has(child.id), true);
+  assert.equal(state.deletedShapeIds.has(child.id), false);
+
+  applyScenarioRoomFramePatch(state, [
+    {
+      ...child,
+      x: 2
+    }
+  ]);
+  assert.equal(state.cache.get(child.id)?.x, 2);
+  assert.deepEqual(
+    state.shapes.map((shape) => shape.id),
+    [frameId]
+  );
+
+  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, false)]);
+  assert.equal(state.pendingFrameIds.has(frameId), true);
+
+  restoreScenarioFrameChildren(state, frameId);
+  assert.equal(
+    state.shapes.find((shape) => shape.id === child.id)?.x,
+    2
+  );
+  assert.equal(state.unloadedShapeIds.has(child.id), false);
+}
+
+{
+  const frameId = "shape:cold-frame";
+  const state = {
+    cache: new Map([[frameId, createScenarioFrame(frameId, true)]]),
+    deletedShapeIds: new Set(),
+    pendingFrameIds: new Set(),
+    shapes: [createScenarioFrame(frameId, true)],
+    unloadedShapeIds: new Set()
+  };
+
+  applyScenarioRoomFramePatch(state, [createScenarioFrame(frameId, false, 2)]);
+
+  assert.equal(state.pendingFrameIds.has(frameId), true);
+  assert.equal(
+    Array.from(state.cache.values()).some((shape) => shape.parentId === frameId),
+    false
+  );
+}
+
+{
+  const frameId = "shape:expanded-frame";
+  const state = {
+    cache: new Map(),
+    deletedShapeIds: new Set(),
+    pendingFrameIds: new Set(),
+    shapes: [createScenarioFrame(frameId, false, 2)],
+    unloadedShapeIds: new Set()
+  };
+
+  applyScenarioRoomFramePatch(state, [
+    {
+      ...createScenarioFrame(frameId, false, 2),
+      x: 120
+    }
+  ]);
+
+  assert.equal(state.pendingFrameIds.has(frameId), false);
 }
 
 {

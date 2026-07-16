@@ -112,6 +112,10 @@ assert.match(socketServer, /canvasServerEvents\.operation/);
 assert.match(socketServer, /canvasClientEvents\.shapeLockClaim/);
 assert.match(socketServer, /canvasClientEvents\.shapeLockRelease/);
 assert.match(socketServer, /canvasClientEvents\.shapePatch/);
+assert.match(
+  socketServer,
+  /shapePreviewService\s*\.clearRoomPreview\(\s*socket\.id,\s*authedSocket\.data\.auth\.userId \?\? socket\.id,\s*patchPayload,\s*patchedShapeIds,/,
+);
 assert.match(socketServer, /canvasClientEvents\.historyUndo/);
 assert.match(socketServer, /canvasClientEvents\.historyRedo/);
 assert.doesNotMatch(socketServer, /canvasClientEvents\.shapeCommit/);
@@ -268,3 +272,7 @@ await import("./pr-review-room-events.test.mjs");
 await import("./pr-review-conflict-draft-events.test.mjs");
 await import("./page-cursor.test.mjs");
 await import("./github-source/test.mjs");
+await import("../src/documents/document-access.service.test.mjs");
+await import("../src/documents/document-hocuspocus.service.test.mjs");
+await import("../src/documents/document-hocuspocus-transport.test.mjs");
+await import("../src/documents/document-route-contract.test.mjs");

@@ -52,6 +52,19 @@ assert.match(
   contextualExecutionMigration,
   /agent_runs_request_context_shape_check[\s\S]*\) IS TRUE\)/
 );
+assert.doesNotMatch(
+  contextualExecutionMigration,
+  /jsonb_object_length/,
+  "context validation must use PostgreSQL-supported JSONB operators"
+);
+assert.match(
+  contextualExecutionMigration,
+  /request_context_json \?& ARRAY\['surface', 'sessionId'\]/
+);
+assert.match(
+  contextualExecutionMigration,
+  /request_context_json - 'surface' - 'sessionId'\) = '\{\}'::jsonb/
+);
 function createStoredRun(overrides = {}) {
   return {
     id: RUN_ID,
