@@ -31,6 +31,10 @@ export interface AgentRunCreateInput {
   clientRequestId?: string | null;
 }
 
+export interface AgentRunInput {
+  message: string;
+}
+
 export interface AgentRunApiPayload {
   id: string;
   workspaceId: string;
@@ -186,10 +190,12 @@ const DEFAULT_TIMEZONE = "Asia/Seoul";
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
 const MAX_PROMPT_BYTES = 32768;
+const MAX_RUN_INPUT_BYTES = 4000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
 const MAX_TIMEZONE_LENGTH = 64;
 const AGENT_RUN_STATUSES: AgentRunStatus[] = [
   "planning",
+  "waiting_user_input",
   "waiting_confirmation",
   "running",
   "completed",
@@ -247,6 +253,75 @@ export class AgentService {
       },
       created: result.created
     };
+  }
+
+  async submitRunInput(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    body: unknown
+  ): Promise<AgentRunDetailPayload> {
+    const input = this.normalizeRunInput(body);
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const accepted = await this.database.transaction(async (transaction) => {
+      const run = await transaction.queryOne<AgentRunRow>(
+        `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+          FOR UPDATE
+        `,
+        [runId, workspaceId, currentUserId]
+      );
+      if (!run) throw notFound("Agent run not found");
+      if (run.status !== "waiting_user_input") {
+        throw badRequest("Agent run is not waiting for user input");
+      }
+      const stillWaiting = await transaction.queryOne<{ id: string }>(
+        `SELECT id FROM agent_runs WHERE id = $1 AND updated_at > now() - INTERVAL '24 hours'`,
+        [runId]
+      );
+      if (!stillWaiting) {
+        await transaction.execute(
+          `UPDATE agent_runs SET status = 'cancelled', message = '추가 정보 입력 대기 시간이 만료되었습니다.', completed_at = now(), updated_at = now() WHERE id = $1`,
+          [runId]
+        );
+        throw badRequest("Agent run input wait has expired");
+      }
+      const next = await transaction.queryOne<{ sequence: number | string }>(
+        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+        [runId]
+      );
+      await transaction.execute(
+        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'user', $3)`,
+        [runId, Number(next?.sequence ?? 1), input.message]
+      );
+      await transaction.execute(
+        `
+          UPDATE agent_runs
+          SET status = 'planning', message = '추가 정보를 반영하고 있습니다.', final_answer = NULL,
+              error_code = NULL, error_message = NULL, completed_at = NULL, updated_at = now()
+          WHERE id = $1
+        `,
+        [runId]
+      );
+      await transaction.execute(
+        `
+          UPDATE agent_run_outbox
+          SET status = 'pending', attempt_count = 0, next_attempt_at = now(),
+              claim_token = NULL, claimed_at = NULL, delivered_at = NULL,
+              error_code = NULL, error_message = NULL
+          WHERE run_id = $1
+        `,
+        [runId]
+      );
+      return true;
+    });
+    if (accepted) await this.agentOutboxPublisherService.publishCreatedRun(runId);
+    return this.getRun(currentUserId, workspaceId, runId);
   }
 
   private async createStoredRun(
@@ -475,6 +550,21 @@ export class AgentService {
 
       await transaction.execute(
         `
+          UPDATE agent_runs
+          SET status = 'cancelled',
+              message = '추가 정보 입력 대기 시간이 만료되었습니다.',
+              completed_at = now(),
+              updated_at = now()
+          WHERE workspace_id = $1
+            AND requested_by_user_id = $2
+            AND status = 'waiting_user_input'
+            AND updated_at <= now() - INTERVAL '24 hours'
+        `,
+        [workspaceId, currentUserId]
+      );
+
+      await transaction.execute(
+        `
           WITH expired_runs AS (
             SELECT id
             FROM agent_runs
@@ -514,6 +604,14 @@ export class AgentService {
         MAX_CLIENT_REQUEST_ID_BYTES
       )
     };
+  }
+
+  private normalizeRunInput(body: unknown): AgentRunInput {
+    if (!this.isPlainObject(body)) throw badRequest("Request body must be an object");
+    if (Object.keys(body).some((key) => key !== "message")) {
+      throw badRequest("Only message may be provided");
+    }
+    return { message: this.readRequiredText(body.message, "message", MAX_RUN_INPUT_BYTES) };
   }
 
   private normalizePagination(query: AgentRunListQuery): NormalizedPagination {

@@ -196,23 +196,34 @@ class FakeAgentLoggingService {
     };
   }
 
-  async completeRun(currentUserId, workspaceId, input) {
+  async queueNextPlannerTurn(currentUserId, workspaceId, input) {
     this.calls.push({
-      method: "completeRun",
+      method: "queueNextPlannerTurn",
       currentUserId,
       workspaceId,
       input
     });
 
+    if (this.state.queueNextPlannerTurn === false) {
+      return null;
+    }
     const run = this.state.runs.find((candidate) => candidate.id === input.runId);
-    run.status = "completed";
-    run.message = input.message;
+    run.status = "planning";
+    run.message = "다음 작업을 계획하고 있습니다.";
 
     return {
       id: run.id,
       status: run.status,
       message: run.message
     };
+  }
+
+  async waitForUserInput(currentUserId, workspaceId, input) {
+    this.calls.push({ method: "waitForUserInput", currentUserId, workspaceId, input });
+    const run = this.state.runs.find((candidate) => candidate.id === input.runId);
+    run.status = "waiting_user_input";
+    run.message = input.message;
+    return { id: run.id, status: run.status, message: run.message };
   }
 
   async failRun(currentUserId, workspaceId, input) {
@@ -322,6 +333,16 @@ class FakeAgentToolRegistryService {
         };
       }
     };
+  }
+}
+
+class FakeAgentOutboxPublisherService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async publishCreatedRun(runId) {
+    this.calls.push(runId);
   }
 }
 
@@ -529,17 +550,20 @@ function createService(state) {
   const database = new FakeDatabaseService(state);
   const loggingService = new FakeAgentLoggingService(state);
   const toolRegistryService = new FakeAgentToolRegistryService(state);
+  const outboxPublisherService = new FakeAgentOutboxPublisherService();
 
   return {
     service: new AgentConfirmationService(
       database,
       workspaceService,
       loggingService,
-      toolRegistryService
+      toolRegistryService,
+      outboxPublisherService
     ),
     workspaceService,
     loggingService,
-    toolRegistryService
+    toolRegistryService,
+    outboxPublisherService
   };
 }
 
@@ -601,8 +625,13 @@ function errorMessage(error) {
     runs: [createRun()],
     confirmations: [createConfirmation()]
   };
-  const { service, workspaceService, loggingService, toolRegistryService } =
-    createService(state);
+  const {
+    service,
+    workspaceService,
+    loggingService,
+    toolRegistryService,
+    outboxPublisherService
+  } = createService(state);
   const result = await service.approveConfirmation(
     USER_ID,
     WORKSPACE_ID,
@@ -611,16 +640,17 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "planning");
   assert.equal(result.run.confirmation.status, "approved");
   assert.equal(result.run.confirmation.approvedAt, "2026-07-08T00:03:00.000Z");
   assert.equal(state.confirmations[0].approved_by_user_id, USER_ID);
-  assert.equal(state.runs[0].message, "승인된 작업을 완료했습니다.");
+  assert.equal(state.runs[0].message, "다음 작업을 계획하고 있습니다.");
   assert.equal(workspaceService.calls.length, 1);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["createToolExecutionClaim", "completeStep", "completeRun"]
+    ["createToolExecutionClaim", "completeStep", "queueNextPlannerTurn"]
   );
+  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     ["getDefinition", "validateInput", "execute"]
@@ -639,7 +669,7 @@ function errorMessage(error) {
     "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
     false
   );
-  assert.match(loggingService.calls[2].input.finalAnswer, /관련 리소스 1개/);
+  assert.equal(loggingService.calls[2].input.riskLevel, "medium");
 }
 
 {
@@ -663,7 +693,7 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "planning");
   assert.equal(result.run.confirmation.status, "approved");
   assert.deepEqual(toolRegistryService.calls[2].input, {
     eventId: "77",
@@ -950,7 +980,7 @@ function errorMessage(error) {
     undefined
   );
 
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.status, "planning");
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
     [

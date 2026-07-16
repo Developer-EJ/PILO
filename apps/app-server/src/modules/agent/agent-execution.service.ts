@@ -15,6 +15,7 @@ import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
+import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -36,6 +37,10 @@ export type AgentExecutionResult =
   | {
       status: "waiting_confirmation";
       confirmation: AgentConfirmationPayload;
+    }
+  | {
+      status: "waiting_user_input";
+      run: AgentRunPayload;
     }
   | {
       status: "failed";
@@ -95,7 +100,8 @@ export class AgentExecutionService {
     private readonly agentConfirmationService: AgentConfirmationService,
     private readonly agentToolRegistryService: AgentToolRegistryService,
     private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
-    private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService
+    private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -291,10 +297,12 @@ export class AgentExecutionService {
           FROM agent_steps
           WHERE run_id = $1
             AND step_type = 'tool'
+            AND status = 'running'
         ) OR EXISTS (
           SELECT 1
           FROM agent_confirmations
           WHERE run_id = $1
+            AND status = 'pending'
         ) AS started
       `,
       [runId]
@@ -499,25 +507,28 @@ export class AgentExecutionService {
       outputSummary,
       resourceRefs
     });
-    const run = await this.agentLoggingService.completeRun(
+    const answer =
+      typeof outputSummary.question === "string" && outputSummary.question.trim()
+        ? outputSummary.question.trim()
+        : buildAgentReadResultAnswer({
+            toolName: definition.name,
+            outputSummary,
+            resourceRefs,
+            prompt,
+            timezone
+          });
+    const run = await this.agentLoggingService.waitForUserInput(
       currentUserId,
       workspaceId,
       {
         runId,
         riskLevel: definition.riskLevel,
-        finalAnswer: buildAgentReadResultAnswer({
-          toolName: definition.name,
-          outputSummary,
-          resourceRefs,
-          prompt,
-          timezone
-        }),
-        message: "요청을 실행하려면 추가 정보가 필요합니다."
+        message: answer
       }
     );
 
     return {
-      status: "completed",
+      status: "waiting_user_input",
       run
     };
   }
@@ -579,25 +590,28 @@ export class AgentExecutionService {
         resourceRefs
       });
 
-      const run = await this.agentLoggingService.completeRun(
+      const queued = await this.agentLoggingService.queueNextPlannerTurn(
+        currentUserId,
+        workspaceId,
+        { runId, riskLevel: definition.riskLevel }
+      );
+      if (queued) {
+        await this.agentOutboxPublisherService.publishCreatedRun(runId);
+        return { status: "skipped", reason: "already_started" };
+      }
+
+      const run = await this.agentLoggingService.waitForUserInput(
         currentUserId,
         workspaceId,
         {
           runId,
           riskLevel: definition.riskLevel,
-          finalAnswer: buildAgentReadResultAnswer({
-            toolName: definition.name,
-            outputSummary,
-            resourceRefs,
-            prompt,
-            timezone
-          }),
-          message: "요청을 완료했습니다."
+          message: "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요."
         }
       );
 
       return {
-        status: "completed",
+        status: "waiting_user_input",
         run
       };
     } catch (error) {

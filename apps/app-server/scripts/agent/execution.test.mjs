@@ -205,6 +205,50 @@ class FakeAgentLoggingService {
     };
   }
 
+  async queueNextPlannerTurn(currentUserId, workspaceId, input) {
+    this.calls.push({ method: "queueNextPlannerTurn", currentUserId, workspaceId, input });
+    return {
+      id: input.runId,
+      workspaceId,
+      requestedByUserId: currentUserId,
+      clientRequestId: null,
+      status: "planning",
+      riskLevel: input.riskLevel,
+      prompt: "이번 주 일정 알려줘",
+      timezone: "Asia/Seoul",
+      message: "다음 작업을 확인하고 있습니다.",
+      finalAnswer: null,
+      errorCode: null,
+      errorMessage: null,
+      expiresAt: "2026-08-09T00:00:00.000Z",
+      completedAt: null,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    };
+  }
+
+  async waitForUserInput(currentUserId, workspaceId, input) {
+    this.calls.push({ method: "waitForUserInput", currentUserId, workspaceId, input });
+    return {
+      id: input.runId,
+      workspaceId,
+      requestedByUserId: currentUserId,
+      clientRequestId: null,
+      status: "waiting_user_input",
+      riskLevel: input.riskLevel ?? null,
+      prompt: "이번 주 일정 알려줘",
+      timezone: "Asia/Seoul",
+      message: input.message,
+      finalAnswer: input.message,
+      errorCode: null,
+      errorMessage: null,
+      expiresAt: "2026-08-09T00:00:00.000Z",
+      completedAt: null,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    };
+  }
+
   async failRun(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "failRun",
@@ -232,6 +276,11 @@ class FakeAgentLoggingService {
       updatedAt: "2026-07-10T00:00:00.000Z"
     };
   }
+}
+
+class FakeAgentOutboxPublisherService {
+  constructor() { this.calls = []; }
+  async publishCreatedRun(runId) { this.calls.push(runId); }
 }
 
 class FakeAgentConfirmationService {
@@ -448,6 +497,84 @@ class SmokeCalendarService {
   assert.doesNotMatch(answer, /주간 회의|resourceId|1/);
 }
 
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_meeting_rooms",
+    outputSummary: {
+      count: 2,
+      hasMore: false,
+      rooms: [
+        {
+          roomId: "room-1",
+          name: "기본 회의실",
+          isDefault: true,
+          currentMeeting: {
+            meetingId: "meeting-1",
+            startedAt: "2026-07-10T00:00:00.000Z",
+            activeParticipantCount: 3,
+            durationSec: 3660,
+            recording: { status: "RUNNING" }
+          }
+        },
+        {
+          roomId: "room-2",
+          name: "디자인 회의실",
+          isDefault: false,
+          currentMeeting: null
+        }
+      ]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /회의방 2개/);
+  assert.match(answer, /기본 회의실 · 진행 중 · 3명 참여 · 1시간 1분 경과 · 녹음 중/);
+  assert.match(answer, /디자인 회의실 · 진행 중인 회의 없음/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_active_meeting",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      active: true,
+      meeting: {
+        meetingId: "meeting-1",
+        startedAt: "2026-07-10T00:00:00.000Z"
+      },
+      meetingRoom: {
+        roomId: "room-1",
+        name: "기본 회의실",
+        isDefault: true
+      },
+      durationSec: 300
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /기본 회의실 회의에 참여 중입니다/);
+  assert.match(answer, /진행 시간: 5분/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_participants",
+    outputSummary: {
+      count: 2,
+      hasMore: false,
+      participants: [
+        { name: "진호", isActive: true },
+        { name: "은재", isActive: false }
+      ]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /참여자 2명/);
+  assert.match(answer, /진호 · 참여 중/);
+  assert.match(answer, /은재 · 퇴장/);
+}
+
 class SmokeMeetingService {
   constructor() {
     this.calls = [];
@@ -591,6 +718,7 @@ function createExecutionServiceWithRegistry(
   const database = new FakeDatabaseService(state);
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
+  const outboxPublisherService = new FakeAgentOutboxPublisherService();
 
   return {
     service: new AgentExecutionService(
@@ -598,7 +726,10 @@ function createExecutionServiceWithRegistry(
       workspaceService,
       loggingService,
       confirmationService,
-      registry
+      registry,
+      undefined,
+      undefined,
+      outboxPublisherService
     ),
     confirmationService,
     loggingService,
@@ -632,6 +763,7 @@ function createService({
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const toolRegistryService = new FakeAgentToolRegistryService(registryState);
+  const outboxPublisherService = new FakeAgentOutboxPublisherService();
 
   return {
     service: new AgentExecutionService(
@@ -639,13 +771,17 @@ function createService({
       workspaceService,
       loggingService,
       confirmationService,
-      toolRegistryService
+      toolRegistryService,
+      undefined,
+      undefined,
+      outboxPublisherService
     ),
     workspaceService,
     database,
     loggingService,
     confirmationService,
-    toolRegistryService
+    toolRegistryService,
+    outboxPublisherService
   };
 }
 
@@ -911,13 +1047,13 @@ function formatterMeetingReport(index, overrides = {}) {
   const { service, loggingService, workspaceService } = createService();
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeStep", "queueNextPlannerTurn"]
   );
 }
 
@@ -940,8 +1076,7 @@ function formatterMeetingReport(index, overrides = {}) {
 
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
@@ -952,7 +1087,7 @@ function formatterMeetingReport(index, overrides = {}) {
   );
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeStep", "queueNextPlannerTurn"]
   );
   assert.equal(
     "providerRawResponse" in loggingService.calls[0].input.inputSummary.input,
@@ -971,7 +1106,7 @@ function formatterMeetingReport(index, overrides = {}) {
     "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
     false
   );
-  assert.match(loggingService.calls[2].input.finalAnswer, /관련 리소스 1개/);
+  assert.equal(loggingService.calls[2].method, "queueNextPlannerTurn");
 }
 
 {
@@ -1126,10 +1261,24 @@ function formatterMeetingReport(index, overrides = {}) {
     "list_calendar_events",
     "create_calendar_event",
     "update_calendar_event",
+    "list_meeting_rooms",
+    "get_active_meeting",
+    "get_meeting_participants",
+    "start_meeting_in_room",
+    "join_meeting",
+    "leave_meeting",
+    "start_meeting_recording",
+    "end_meeting_recording",
     "list_meeting_reports",
     "get_meeting_report",
     "summarize_meeting_report",
     "search_meeting_transcript",
+    "find_action_items",
+    "get_meeting_decision_evidence",
+    "update_meeting_report_action_item",
+    "dismiss_meeting_report_action_item",
+    "approve_meeting_report_action_item",
+    "regenerate_meeting_report",
     "search_board_issues",
     "move_board_issue_status",
     "get_board_issue_context",
@@ -1211,13 +1360,13 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(result.run.status, "waiting_user_input");
   assert.match(result.run.finalAnswer, /여러 개/);
   assert.equal(confirmationService.calls.length, 0);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeStep", "waitForUserInput"]
   );
   assert.equal(loggingService.calls[1].input.outputSummary.selection, "multiple");
 }
@@ -1256,7 +1405,7 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(boardService.calls[2], {
     method: "listBoardIssues",
     currentUserId: USER_ID,
@@ -1318,8 +1467,7 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
@@ -1391,13 +1539,10 @@ function formatterMeetingReport(index, overrides = {}) {
   const result = await service.executeReadyRun(RUN_ID);
   const outputSummary = loggingService.calls[1].input.outputSummary;
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.equal(meetingService.calls[0].method, "getReport");
   assert.equal(outputSummary.report.reportId, REPORT_ID);
   assert.equal("transcript" in outputSummary.report, false);
-  assert.match(result.run.finalAnswer, /결정사항: 결정사항/);
-  assert.doesNotMatch(result.run.finalAnswer, /요약:/);
-  assert.doesNotMatch(result.run.finalAnswer, /논의사항:/);
   assert.doesNotMatch(
     JSON.stringify(outputSummary),
     /Agent smoke test must not persist transcript text/
@@ -1425,11 +1570,9 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.equal(boardService.calls[0].method, "getActiveBoardSource");
   assert.equal(boardService.calls[1].method, "listBoards");
   assert.equal(boardService.calls[2].method, "listBoardIssues");
-  assert.match(result.run.finalAnswer, /제품 개발 Board 이슈 1개/);
-  assert.match(result.run.finalAnswer, /#729/);
   assert.equal(loggingService.calls[1].input.outputSummary.issues[0].title, "Board read/search tool adapter");
 }

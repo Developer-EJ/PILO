@@ -90,6 +90,24 @@ def planner_decision(**overrides: object) -> AgentPlannerDecision:
     return AgentPlannerDecision(**values)
 
 
+def test_completed_planner_decision_finishes_multi_tool_run() -> None:
+    job = parse_agent_run_job_payload(agent_payload())
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="completed",
+            message="요청을 완료했습니다.",
+            final_answer_draft="회의 참여 준비를 마쳤습니다.",
+            tool_name=None,
+            tool_input={},
+        ),
+        job,
+    )
+
+    assert normalized.status == "completed"
+    assert normalized.final_answer == "회의 참여 준비를 마쳤습니다."
+    assert "unsupportedReason" not in normalized.output_summary
+
+
 class FakeAgentRunRepository:
     def __init__(
         self,

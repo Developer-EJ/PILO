@@ -507,15 +507,17 @@ function errorMessage(error) {
   const lifecycleCalls = database.calls.filter(
     (call) => call.method === "execute"
   );
-  assert.equal(lifecycleCalls.length, 2);
+  assert.equal(lifecycleCalls.length, 3);
   assert.deepEqual(lifecycleCalls[0].values, [WORKSPACE_ID, USER_ID]);
   assert.match(lifecycleCalls[0].text, /SET status = 'expired'/);
-  assert.deepEqual(lifecycleCalls[1].values, [
+  assert.deepEqual(lifecycleCalls[1].values, [WORKSPACE_ID, USER_ID]);
+  assert.match(lifecycleCalls[1].text, /status = 'waiting_user_input'/);
+  assert.deepEqual(lifecycleCalls[2].values, [
     WORKSPACE_ID,
     USER_ID,
     100
   ]);
-  assert.match(lifecycleCalls[1].text, /DELETE FROM agent_runs/);
+  assert.match(lifecycleCalls[2].text, /DELETE FROM agent_runs/);
 
   const listCalls = database.calls.filter(
     (call) => call.method !== "execute"

@@ -15,6 +15,7 @@ import type {
 
 export type AgentRunStatus =
   | "planning"
+  | "waiting_user_input"
   | "waiting_confirmation"
   | "running"
   | "completed"
@@ -98,6 +99,17 @@ export interface FailAgentRunInput {
 export interface CancelAgentRunInput {
   runId: string;
   message: string;
+}
+
+export interface WaitForAgentUserInput {
+  runId: string;
+  message: string;
+  riskLevel?: AgentRiskLevel | null;
+}
+
+export interface QueueNextAgentPlannerTurnInput {
+  runId: string;
+  riskLevel?: AgentRiskLevel | null;
 }
 
 export interface AgentRunPayload {
@@ -405,6 +417,7 @@ export class AgentLoggingService {
           FROM agent_steps
           WHERE run_id = $1
             AND step_type = 'tool'
+            AND status = 'running'
           LIMIT 1
         `,
         [input.runId]
@@ -429,6 +442,102 @@ export class AgentLoggingService {
         order: Number(nextOrder?.next_order ?? 1),
         inputSummary
       });
+    });
+  }
+
+  async waitForUserInput(
+    currentUserId: string,
+    workspaceId: string,
+    input: WaitForAgentUserInput
+  ): Promise<AgentRunPayload> {
+    const message = this.normalizeRequiredText(input.message, "message");
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const nextSequence = await transaction.queryOne<{ sequence: number | string }>(
+        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+        [input.runId]
+      );
+      await transaction.execute(
+        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+        [input.runId, Number(nextSequence?.sequence ?? 1), message]
+      );
+      const updated = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'waiting_user_input',
+              risk_level = COALESCE($2, risk_level),
+              message = $3,
+              final_answer = $3,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [run.id, input.riskLevel ?? null, message]
+      );
+      if (!updated) throw new Error("Agent run could not wait for user input");
+      return this.mapRun(updated);
+    });
+  }
+
+  /**
+   * A completed tool is not necessarily the end of an Agent run.  Re-open the
+   * same run for one bounded planner turn, and re-arm its existing outbox row.
+   */
+  async queueNextPlannerTurn(
+    currentUserId: string,
+    workspaceId: string,
+    input: QueueNextAgentPlannerTurnInput
+  ): Promise<AgentRunPayload | null> {
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const updated = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'planning',
+              tool_call_count = tool_call_count + 1,
+              risk_level = COALESCE($2, risk_level),
+              message = '다음 작업을 확인하고 있습니다.',
+              final_answer = NULL,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+            AND tool_call_count < 5
+          RETURNING *
+        `,
+        [run.id, input.riskLevel ?? null]
+      );
+      if (!updated) {
+        return null;
+      }
+
+      await transaction.execute(
+        `
+          UPDATE agent_run_outbox
+          SET status = 'pending',
+              attempt_count = 0,
+              next_attempt_at = now(),
+              claim_token = NULL,
+              claimed_at = NULL,
+              delivered_at = NULL,
+              error_code = NULL,
+              error_message = NULL
+          WHERE run_id = $1
+        `,
+        [run.id]
+      );
+      return this.mapRun(updated);
     });
   }
 

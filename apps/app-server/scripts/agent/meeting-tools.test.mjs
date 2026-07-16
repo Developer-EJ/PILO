@@ -17,6 +17,38 @@ const SECOND_REPORT_ID = "77777777-7777-4777-8777-777777777777";
 const THIRD_REPORT_ID = "88888888-8888-4888-8888-888888888888";
 const MEETING_ID = "55555555-5555-5555-8555-555555555555";
 const RECORDING_ID = "66666666-6666-6666-8666-666666666666";
+const MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999991";
+const SECOND_MEETING_ROOM_ID = "99999999-9999-4999-8999-999999999992";
+
+function createMeeting(overrides = {}) {
+  return {
+    id: MEETING_ID,
+    workspaceId: WORKSPACE_ID,
+    roomKey: "MAIN_MEETING_ROOM",
+    livekitRoomName: "meeting-room",
+    createdById: USER_ID,
+    endedById: null,
+    startedAt: new Date(Date.now() - 90_000).toISOString(),
+    endedAt: null,
+    createdAt: "2026-07-08T00:00:00.000Z",
+    updatedAt: "2026-07-08T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function createMeetingRoom(overrides = {}) {
+  return {
+    id: MEETING_ROOM_ID,
+    workspaceId: WORKSPACE_ID,
+    roomKey: "MAIN_MEETING_ROOM",
+    name: "기본 회의실",
+    isDefault: true,
+    createdById: USER_ID,
+    createdAt: "2026-07-08T00:00:00.000Z",
+    updatedAt: "2026-07-08T00:00:00.000Z",
+    ...overrides
+  };
+}
 
 function createReport(overrides = {}) {
   return {
@@ -55,6 +87,148 @@ class FakeMeetingService {
   constructor() {
     this.calls = [];
     this.reports = [createReport()];
+    this.rooms = [
+      createMeetingRoom(),
+      createMeetingRoom({
+        id: SECOND_MEETING_ROOM_ID,
+        roomKey: "ROOM_SECOND",
+        name: "디자인 회의실",
+        isDefault: false
+      })
+    ];
+    this.currentMeetings = new Map([
+      [
+        MEETING_ROOM_ID,
+        {
+          meeting: createMeeting(),
+          currentRecording: {
+            id: RECORDING_ID,
+            meetingId: MEETING_ID,
+            status: "RUNNING",
+            audioFileUrl: null,
+            audioFileKey: null,
+            durationSec: null,
+            fileSizeBytes: null,
+            startedAt: "2026-07-08T00:00:00.000Z",
+            endedAt: null,
+            errorMessage: null
+          },
+          activeParticipantCount: 2
+        }
+      ],
+      [
+        SECOND_MEETING_ROOM_ID,
+        {
+          meeting: null,
+          currentRecording: null,
+          activeParticipantCount: 0
+        }
+      ]
+    ]);
+    this.participants = [
+      {
+        id: "99999999-9999-4999-8999-999999999993",
+        meetingId: MEETING_ID,
+        userId: USER_ID,
+        livekitIdentity: "user-1",
+        joinedAt: "2026-07-08T00:00:00.000Z",
+        leftAt: null,
+        isActive: true,
+        user: {
+          id: USER_ID,
+          name: "진호",
+          avatarUrl: null
+        }
+      }
+    ];
+    this.activeMeeting = {
+      meeting: createMeeting(),
+      meetingRoom: createMeetingRoom()
+    };
+    this.recordingConsentAccepted = true;
+  }
+
+  async listMeetingRooms(currentUserId, workspaceId) {
+    this.calls.push({ method: "listMeetingRooms", currentUserId, workspaceId });
+    return { rooms: this.rooms };
+  }
+
+  async getCurrentMeetingForRoom(currentUserId, workspaceId, meetingRoomId) {
+    this.calls.push({
+      method: "getCurrentMeetingForRoom",
+      currentUserId,
+      workspaceId,
+      meetingRoomId
+    });
+    return this.currentMeetings.get(meetingRoomId);
+  }
+
+  async getCurrentUserActiveMeeting(currentUserId) {
+    this.calls.push({ method: "getCurrentUserActiveMeeting", currentUserId });
+    return this.activeMeeting;
+  }
+
+  async getRecordingConsentStatus(currentUserId, workspaceId) {
+    this.calls.push({ method: "getRecordingConsentStatus", currentUserId, workspaceId });
+    return { accepted: this.recordingConsentAccepted, policyVersion: "v1" };
+  }
+
+  async getMeeting(currentUserId, workspaceId, meetingId) {
+    this.calls.push({ method: "getMeeting", currentUserId, workspaceId, meetingId });
+    return {
+      meeting: createMeeting({ id: meetingId }),
+      currentRecording: this.currentMeetings.get(MEETING_ROOM_ID).currentRecording,
+      recordings: [],
+      reports: [],
+      participantCount: 2,
+      activeParticipantCount: 2,
+      currentUserParticipant: this.participants[0]
+    };
+  }
+
+  async startMeetingInRoom(currentUserId, workspaceId, meetingRoomId, body) {
+    this.calls.push({ method: "startMeetingInRoom", currentUserId, workspaceId, meetingRoomId, body });
+    return { meeting: createMeeting(), participant: this.participants[0], livekit: { token: "must-not-persist" }, currentRecording: null };
+  }
+
+  async joinMeeting(currentUserId, workspaceId, meetingId, body) {
+    this.calls.push({ method: "joinMeeting", currentUserId, workspaceId, meetingId, body });
+    return { meeting: createMeeting({ id: meetingId }), participant: this.participants[0], livekit: { token: "must-not-persist" }, currentRecording: null };
+  }
+
+  async leaveMeeting(currentUserId, workspaceId, meetingId) {
+    this.calls.push({ method: "leaveMeeting", currentUserId, workspaceId, meetingId });
+    this.activeMeeting = { meeting: null, meetingRoom: null };
+    return { participant: { ...this.participants[0], leftAt: new Date().toISOString(), isActive: false }, meetingEnded: false, meeting: createMeeting({ id: meetingId }), currentRecording: null };
+  }
+
+  async startRecording(currentUserId, workspaceId, meetingId) {
+    this.calls.push({ method: "startRecording", currentUserId, workspaceId, meetingId });
+    return { meeting: createMeeting({ id: meetingId }), recording: this.currentMeetings.get(MEETING_ROOM_ID).currentRecording };
+  }
+
+  async getCurrentRecording(currentUserId, workspaceId, meetingId) {
+    this.calls.push({ method: "getCurrentRecording", currentUserId, workspaceId, meetingId });
+    return { recording: this.currentMeetings.get(MEETING_ROOM_ID).currentRecording };
+  }
+
+  async endRecordingAndCreateReport(currentUserId, workspaceId, meetingId, recordingId) {
+    this.calls.push({ method: "endRecordingAndCreateReport", currentUserId, workspaceId, meetingId, recordingId });
+    return {
+      meeting: createMeeting({ id: meetingId }),
+      recording: { ...this.currentMeetings.get(MEETING_ROOM_ID).currentRecording, status: "COMPLETED", endedAt: new Date().toISOString() },
+      report: toSummaryReport(this.reports[0])
+    };
+  }
+
+  async listParticipants(currentUserId, workspaceId, meetingId) {
+    this.calls.push({
+      method: "listParticipants",
+      currentUserId,
+      workspaceId,
+      meetingId
+    });
+    return { participants: this.participants };
   }
 
   async listReports(currentUserId, workspaceId, query) {
@@ -129,10 +303,184 @@ function errorCode(error) {
   const names = registry.listDefinitions().map((definition) => definition.name);
 
   assert.deepEqual(names, [
+    "list_meeting_rooms",
+    "get_active_meeting",
+    "get_meeting_participants",
+    "start_meeting_in_room",
+    "join_meeting",
+    "leave_meeting",
+    "start_meeting_recording",
+    "end_meeting_recording",
     "list_meeting_reports",
     "get_meeting_report",
     "summarize_meeting_report",
-    "search_meeting_transcript"
+    "search_meeting_transcript",
+    "find_action_items",
+    "get_meeting_decision_evidence",
+    "update_meeting_report_action_item",
+    "dismiss_meeting_report_action_item",
+    "approve_meeting_report_action_item",
+    "regenerate_meeting_report"
+  ]);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  const tool = registry.getDefinition("list_meeting_rooms");
+  const result = await tool.execute(context, tool.validateInput({}));
+
+  assert.equal(result.outputSummary.count, 2);
+  assert.equal(result.outputSummary.hasMore, false);
+  assert.deepEqual(result.outputSummary.rooms[0], {
+    roomId: MEETING_ROOM_ID,
+    name: "기본 회의실",
+    isDefault: true,
+    currentMeeting: {
+      meetingId: MEETING_ID,
+      startedAt: meetingService.currentMeetings.get(MEETING_ROOM_ID).meeting.startedAt,
+      activeParticipantCount: 2,
+      durationSec: result.outputSummary.rooms[0].currentMeeting.durationSec,
+      recording: {
+        status: "RUNNING",
+        startedAt: "2026-07-08T00:00:00.000Z"
+      }
+    }
+  });
+  assert.equal(result.outputSummary.rooms[0].currentMeeting.durationSec >= 89, true);
+  assert.equal(result.outputSummary.rooms[1].currentMeeting, null);
+  assert.deepEqual(meetingService.calls.map((call) => call.method), [
+    "listMeetingRooms",
+    "getCurrentMeetingForRoom",
+    "getCurrentMeetingForRoom"
+  ]);
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("start_meeting_in_room");
+  const input = tool.validateInput({ meetingRoomId: SECOND_MEETING_ROOM_ID });
+  const plan = await tool.buildConfirmation(context, input);
+  assert.equal(plan.toolName, "start_meeting_in_room");
+  assert.match(plan.summary, /현재 회의에서 나간 뒤/);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.recordingConsentAccepted = false;
+  const tool = registry.getDefinition("join_meeting");
+  const clarification = await tool.buildConfirmation(
+    context,
+    tool.validateInput({ meetingId: MEETING_ID })
+  );
+  assert.equal(clarification.kind, "needs_clarification");
+  assert.equal(clarification.outputSummary.policyVersion, "v1");
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("join_meeting");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ meetingId: MEETING_ID })
+  );
+  assert.equal(result.outputSummary.clientAction.type, "connect_meeting");
+  assert.equal(result.outputSummary.clientAction.expiresInSec, 20);
+  assert.doesNotMatch(JSON.stringify(result), /must-not-persist/);
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("leave_meeting");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ meetingId: MEETING_ID })
+  );
+  assert.equal(result.status, "left");
+}
+
+{
+  const { registry } = createRegistry();
+  const start = registry.getDefinition("start_meeting_recording");
+  const end = registry.getDefinition("end_meeting_recording");
+  const startResult = await start.execute(
+    context,
+    start.validateInput({ meetingId: MEETING_ID })
+  );
+  const endResult = await end.execute(
+    context,
+    end.validateInput({ meetingId: MEETING_ID })
+  );
+  assert.equal(startResult.status, "recording_started");
+  assert.equal(endResult.status, "recording_ended");
+  assert.equal(endResult.outputSummary.reportId, REPORT_ID);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  const tool = registry.getDefinition("get_active_meeting");
+  const result = await tool.execute(context, tool.validateInput({}));
+
+  assert.equal(result.outputSummary.active, true);
+  assert.deepEqual(result.outputSummary.meetingRoom, {
+    roomId: MEETING_ROOM_ID,
+    name: "기본 회의실",
+    isDefault: true
+  });
+  assert.equal(result.outputSummary.meeting.meetingId, MEETING_ID);
+  assert.equal(result.outputSummary.durationSec >= 89, true);
+  assert.deepEqual(meetingService.calls, [
+    {
+      method: "getCurrentUserActiveMeeting",
+      currentUserId: USER_ID
+    }
+  ]);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.activeMeeting = { meeting: null, meetingRoom: null };
+  const tool = registry.getDefinition("get_active_meeting");
+  const result = await tool.execute(context, tool.validateInput({}));
+
+  assert.deepEqual(result.outputSummary, {
+    active: false,
+    meeting: null,
+    meetingRoom: null,
+    durationSec: null
+  });
+  assert.deepEqual(result.resourceRefs, []);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  const tool = registry.getDefinition("get_meeting_participants");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ meetingId: MEETING_ID })
+  );
+
+  assert.deepEqual(result.outputSummary, {
+    meetingId: MEETING_ID,
+    count: 1,
+    hasMore: false,
+    participants: [
+      {
+        userId: USER_ID,
+        name: "진호",
+        avatarUrl: null,
+        joinedAt: "2026-07-08T00:00:00.000Z",
+        leftAt: null,
+        isActive: true
+      }
+    ]
+  });
+  assert.deepEqual(meetingService.calls, [
+    {
+      method: "listParticipants",
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      meetingId: MEETING_ID
+    }
   ]);
 }
 
@@ -322,6 +670,36 @@ function errorCode(error) {
       assert.equal(error.getStatus(), 400);
       assert.equal(errorCode(error), "BAD_REQUEST");
       assert.match(error.getResponse().error.message, /workspaceId/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("list_meeting_rooms");
+
+  assert.throws(
+    () => tool.validateInput({ workspaceId: WORKSPACE_ID }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /workspaceId/);
+      return true;
+    }
+  );
+}
+
+{
+  const { registry } = createRegistry();
+  const tool = registry.getDefinition("get_meeting_participants");
+
+  assert.throws(
+    () => tool.validateInput({ meetingId: "not-a-uuid" }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorCode(error), "BAD_REQUEST");
+      assert.match(error.getResponse().error.message, /meetingId/);
       return true;
     }
   );

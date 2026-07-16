@@ -395,6 +395,23 @@ class PgMeetingReportRepository:
             )
             if updated.rowcount != 1:
                 return
+            self.connection.execute(
+                "DELETE FROM meeting_report_decision_items WHERE meeting_report_id = %s",
+                (report_id,),
+            )
+            for source_index, decision in enumerate(
+                report.decision_items or [report.decisions.strip()]
+            ):
+                if not decision:
+                    continue
+                self.connection.execute(
+                    """
+                    INSERT INTO meeting_report_decision_items
+                      (meeting_report_id, source_index, text)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (report_id, source_index, decision),
+                )
             for source_index, action_item in enumerate(report.action_item_candidates):
                 self.connection.execute(
                     """
@@ -745,7 +762,14 @@ class PgAgentRunRepository:
     def get_run_context(self, job: AgentRunJob) -> AgentRunContext | None:
         row = self.connection.execute(
             """
-            SELECT id, workspace_id, requested_by_user_id, status, prompt, timezone
+            SELECT
+              id,
+              workspace_id,
+              requested_by_user_id,
+              status,
+              prompt,
+              timezone,
+              planner_turn_count
             FROM agent_runs
             WHERE id = %s
               AND workspace_id = %s
@@ -758,6 +782,37 @@ class PgAgentRunRepository:
         if row is None:
             return None
 
+        message_rows = self.connection.execute(
+            """
+            SELECT role, content
+            FROM agent_run_messages
+            WHERE run_id = %s
+            ORDER BY sequence DESC
+            LIMIT 12
+            """,
+            (job.run_id,),
+        ).fetchall()
+        tool_rows = self.connection.execute(
+            """
+            SELECT tool_name, output_json
+            FROM agent_steps
+            WHERE run_id = %s
+              AND step_type = 'tool'
+              AND status = 'completed'
+            ORDER BY step_order DESC
+            LIMIT 5
+            """,
+            (job.run_id,),
+        ).fetchall()
+        memory: list[str] = []
+        for message in reversed(message_rows):
+            content = str(message["content"]).strip()[:1000]
+            if content:
+                memory.append(f"{message['role']}: {content}")
+        for tool in reversed(tool_rows):
+            output = json.dumps(tool["output_json"], ensure_ascii=False)[:3000]
+            memory.append(f"tool {tool['tool_name']}: {output}")
+
         return AgentRunContext(
             run_id=str(row["id"]),
             workspace_id=str(row["workspace_id"]),
@@ -765,6 +820,8 @@ class PgAgentRunRepository:
             status=str(row["status"]),
             prompt=str(row["prompt"]),
             timezone=str(row["timezone"]),
+            planner_turn_count=int(row["planner_turn_count"]),
+            planning_context="\n".join(memory)[:12000],
         )
 
     def start_planner_step(self, job: AgentRunJob, context: AgentRunContext) -> str:
@@ -776,7 +833,15 @@ class PgAgentRunRepository:
         }
         row = self.connection.execute(
             """
-            WITH next_step AS (
+            WITH claimed_run AS (
+              UPDATE agent_runs
+              SET planner_turn_count = planner_turn_count + 1,
+                  updated_at = now()
+              WHERE id = %s
+                AND status = 'planning'
+                AND planner_turn_count < 5
+              RETURNING id
+            ), next_step AS (
               SELECT COALESCE(MAX(step_order), 0) + 1 AS step_order
               FROM agent_steps
               WHERE run_id = %s
@@ -804,10 +869,10 @@ class PgAgentRunRepository:
               '{}'::jsonb,
               '[]'::jsonb,
               now()
-            FROM next_step
+            FROM next_step, claimed_run
             RETURNING id
             """,
-            (job.run_id, job.run_id, json.dumps(input_summary, ensure_ascii=False)),
+            (job.run_id, job.run_id, job.run_id, json.dumps(input_summary, ensure_ascii=False)),
         ).fetchone()
         if row is None:
             raise InfrastructureError("Could not start Agent planner step")
@@ -929,6 +994,31 @@ class PgAgentRunRepository:
             """,
             (error_code, error_message, message, run_id),
         )
+
+    def wait_for_user_input(self, run_id: str, message: str) -> None:
+        with self.connection.transaction():
+            self.connection.execute(
+                """
+                UPDATE agent_runs
+                SET status = 'waiting_user_input',
+                    message = %s,
+                    final_answer = %s,
+                    completed_at = NULL,
+                    updated_at = now()
+                WHERE id = %s
+                  AND status = 'planning'
+                """,
+                (message, message, run_id),
+            )
+            self.connection.execute(
+                """
+                INSERT INTO agent_run_messages (run_id, sequence, role, content)
+                SELECT %s, COALESCE(MAX(sequence), 0) + 1, 'assistant', %s
+                FROM agent_run_messages
+                WHERE run_id = %s
+                """,
+                (run_id, message, run_id),
+            )
 
     def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
         if not self.try_acquire_run_lock(run_id):
@@ -1902,7 +1992,9 @@ def _meeting_report_system_prompt() -> str:
         "and do not invent facts that are absent from both sources. "
         "When Activity evidence supports a report output, "
         "record that link in activityEvidenceReferences. "
-        "If there is no decision, say so in decisions and omit decision evidence. "
+        "Return decisionItems as ordered, atomic decision strings. decision evidence sourceIndex "
+        "must use the zero-based decisionItems index. If there is no decision, include one item "
+        "that says so and omit decision evidence. "
         "For every action item, include one or more sourceType=action_item evidence "
         "entries using that action item's zero-based sourceIndex and a non-empty "
         "segmentIndexes or activityIndexes array. "
@@ -1942,6 +2034,7 @@ def _meeting_report_schema() -> dict[str, object]:
             "summary",
             "discussionPoints",
             "decisions",
+            "decisionItems",
             "actionItemCandidates",
             "evidence",
             "activityEvidenceReferences",
@@ -1950,6 +2043,11 @@ def _meeting_report_schema() -> dict[str, object]:
             "summary": {"type": "string"},
             "discussionPoints": {"type": "string"},
             "decisions": {"type": "string"},
+            "decisionItems": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"},
+            },
             "actionItemCandidates": {
                 "type": "array",
                 "items": {

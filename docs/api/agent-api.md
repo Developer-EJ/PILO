@@ -5,7 +5,8 @@
 Agent API는 Workspace 안에서 자연어 요청을 Agent run으로 생성하고, AI Worker의
 계획/답변 생성 결과와 App Server의 tool 실행 상태를 조회하는 API다.
 
-1차 Agent MVP는 완전 자율 실행이 아니라 확인 기반 업무 Agent다.
+1차 Agent MVP는 위험한 쓰기만 확인하는 업무 Agent다. 한 run 안에서는 tool 결과를
+이어서 계획하고, 부족한 정보만 사용자에게 질문한다.
 
 - 자연어 채팅 입력
 - 현재 active Workspace 문맥 사용
@@ -83,8 +84,11 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
 
 ## 실행 모델
 
-- 1차는 `one prompt = one agent run`으로 시작한다.
-- true multi-turn memory, 장기 thread, 예약 실행은 1차 범위가 아니다.
+- 하나의 `agent_run` 안에서만 사용자 추가 입력, assistant 질문, bounded tool 결과를 기억한다.
+  다른 run으로는 기억을 자동 승계하지 않는다.
+- planner turn과 tool 실행은 각각 최대 5회다. 한도를 넘기면 실패시키지 않고 다음 요청을
+  받기 위해 `waiting_user_input`으로 전환한다.
+- `waiting_user_input`은 24시간 뒤 `cancelled` 처리한다. 사용자는 새 요청으로 재개한다.
 - read-only 요청은 confirmation 없이 자동 실행할 수 있다.
 - `search_meeting_transcript`는 `query`와 선택 `reportId`만 받고, Workspace 전체의 owner 또는 해당
   회의의 현재·과거 참여자가 접근 가능한 current transcript chunk만 상위 5개 검색한다. 결과가 없으면
@@ -125,6 +129,7 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
 | 값 | 의미 |
 | --- | --- |
 | `planning` | run이 생성됐고 AI Worker가 요청을 해석하거나 tool plan을 만드는 중 |
+| `waiting_user_input` | 추가 정보 또는 최대 실행 횟수 이후의 다음 요청을 기다리는 중 |
 | `waiting_confirmation` | write tool 실행 전 사용자 확인을 기다리는 중 |
 | `running` | 승인된 tool 실행 또는 최종 답변 생성 중 |
 | `completed` | read-only 답변 또는 write 실행 결과가 완료됨 |
@@ -270,6 +275,7 @@ outbox, SQS payload에 저장하지 않는다. final citation은 outbox의 sourc
 | `POST` | `/workspaces/{workspaceId}/agent/runs` | 자연어 prompt로 Agent run 생성 |
 | `GET` | `/workspaces/{workspaceId}/agent/runs` | 현재 Workspace의 Agent run 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/agent/runs/{runId}` | Agent run 상세 조회 |
+| `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/inputs` | `waiting_user_input` run에 추가 입력 전달 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/approve` | confirmation 승인 후 저장된 plan 실행 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/reject` | confirmation 거절 |
 
@@ -520,6 +526,23 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
 
 주요 오류: `401`, `403`, `404`
 
+## 추가 입력 전달
+
+```http
+POST /api/v1/workspaces/{workspaceId}/agent/runs/{runId}/inputs
+```
+
+Request:
+
+```json
+{ "message": "금요일 오후 3시로 해줘" }
+```
+
+- `waiting_user_input` 상태인 본인 run에만 전달할 수 있다.
+- `message`는 trim 후 1~4,000 bytes여야 하며, 다른 field는 허용하지 않는다.
+- 서버는 같은 run의 append-only memory에 저장한 뒤 `planning`으로 되돌리고 기존 outbox를 재발행한다.
+- 24시간이 지나면 run은 `cancelled` 처리되며, 새 run으로 요청해야 한다.
+
 ## Confirmation 승인
 
 ```http
@@ -692,17 +715,23 @@ Status code: `200 OK`
   있으면 Meeting 시작 시각과 현재 시각으로 계산한 `durationSec`을 반환하며, 없으면 `active: false`를 반환한다.
 - `get_meeting_participants`는 UUID `meetingId`가 필요하고, 사용자별 중복 제거된 현재·과거 참여자 요약을
   최대 100명까지 반환한다. LiveKit identity·연결 상태는 반환하지 않는다.
+- `start_meeting_in_room`, `join_meeting`은 confirmation 뒤 기존 MeetingService를 호출하고,
+  LiveKit token 대신 20초 제한의 `connect_meeting` client action만 step output에 저장한다.
+- `leave_meeting`은 명시적 나가기 요청을 자동 실행한다. 마지막 참여자면 Meeting 도메인의 기존
+  녹음 종료·회의 종료·회의록 생성 규칙이 그대로 적용된다.
+- `start_meeting_recording`, `end_meeting_recording`은 confirmation 뒤 실행한다. 녹음 종료 tool은
+  `meetingId`만 받고 서버가 current recording을 다시 조회한다.
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
 - report ID 없는 넓은 조회(예: `지난 회의 결정사항 보여줘`)는 `list_meeting_reports`에 `limit: 1`을
   사용한다. Meeting domain의 `created_at DESC, id ASC` 정렬에 따라 같은 Workspace의 최신 report 하나를
   조회하고, 요청한 범주만 답변에 표시한다.
-- 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. 현재 one prompt = one run에서는 후보
-  선택을 이어갈 수 없으므로 ID 없는 특정 상세 요청은 `unsupported`로 완료한다.
+- 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. ID가 없으면 같은 run의 후속 planner
+  turn에서 목록 조회 결과를 사용하거나 사용자에게 필요한 선택만 요청한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
 - `search_meeting_transcript`는 `query`와 선택적 `reportId`를 받는다. transcript 원문을
   Agent run/step에 저장하지 않고, 권한 있는 source ID만 grounded-answer 경로에 전달한다.
-- 녹음 시작, 녹음 종료, 회의록 재생성 요청은 1차 Agent tool이 아니다.
+- 실패한 회의록 재생성은 `regenerate_meeting_report` confirmation 뒤 요청할 수 있다.
 
 ### Board
 
@@ -781,8 +810,6 @@ Status code: `200 OK`
 - Canvas 자유 편집 자동 생성/수정 (일반 Agent 범위). Canvas 전용 요청은
   `docs/api/canvas-agent-api.md`의 별도 Canvas Agent 계약만 사용하며, Calendar,
   Issue, PR, Meeting 등 외부 도메인 도구에는 접근하지 않는다.
-- Meeting 녹음 시작/종료
-- MeetingReport 재생성 요청
 - Calendar 일정 삭제
 - 자동 rollback
 - 장기 workflow orchestration
