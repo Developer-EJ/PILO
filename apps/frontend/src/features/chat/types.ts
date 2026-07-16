@@ -22,6 +22,8 @@ export type WorkspaceChatMessage = {
 
 export type ChatDelivery = "pending" | "sent" | "failed";
 
+export type ChatSendOutcome = "sent" | "failed";
+
 export type ChatViewMessage = WorkspaceChatMessage & {
   delivery: ChatDelivery;
   failureMessage: string | null;

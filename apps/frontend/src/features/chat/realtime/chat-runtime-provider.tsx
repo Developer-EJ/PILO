@@ -17,6 +17,7 @@ import { useAuthSession } from "@/features/auth";
 import {
   createChatMessage,
   deleteChatMessage,
+  getChatMessageContext,
   getChatSummary,
   listChatMentions,
   listChatMessages,
@@ -25,8 +26,12 @@ import {
 } from "@/features/chat/api/client";
 import type {
   ChatMentionNotification,
+  ChatMessageContext,
+  ChatMessagePage,
+  ChatSendOutcome,
   ChatSummary,
   CreateChatMessageInput,
+  WorkspaceChatMention,
   WorkspaceChatMessage
 } from "@/features/chat/types";
 import { useRealtimeSocket } from "@/shared/realtime/realtime-provider";
@@ -37,13 +42,17 @@ import {
   type ChatState
 } from "./chat-reducer";
 import {
-  CHAT_REFRESH_ERROR_MESSAGE,
+  createOptimisticChatMentions,
   createChatRefreshActions,
   createChatRefreshCoordinator,
+  createChatSendConfirmationTracker,
   createChatSocketLifecycle,
   createLatestRequestRunner,
   createWorkspaceRequestScope,
-  isAbortError
+  getChatRefreshErrorMessages,
+  isAbortError,
+  loadChatMessagesIntoState,
+  resolveTrackedChatSendFailure
 } from "./chat-runtime";
 
 type ChatConnectionState = "connected" | "reconnecting" | "offline";
@@ -55,8 +64,15 @@ export type ChatRuntimeValue = {
   mentions: ChatMentionNotification[];
   connectionState: ChatConnectionState;
   errorMessage: string | null;
+  mentionErrorMessage: string | null;
   refreshSummary(): Promise<void>;
-  sendMessage(input: CreateChatMessageInput): Promise<void>;
+  refreshMentions(): Promise<void>;
+  loadMessagePage(before?: string): Promise<ChatMessagePage | null>;
+  loadMessageContext(messageId: string): Promise<ChatMessageContext | null>;
+  sendMessage(
+    input: CreateChatMessageInput,
+    optimisticMentions?: WorkspaceChatMention[]
+  ): Promise<ChatSendOutcome>;
   retryMessage(clientMessageId: string): Promise<void>;
   removeMessage(messageId: string): Promise<void>;
   markRead(messageId: string): Promise<void>;
@@ -88,9 +104,15 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   const [connectionState, setConnectionState] =
     useState<ChatConnectionState>("offline");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [mentionErrorMessage, setMentionErrorMessage] = useState<
+    string | null
+  >(null);
   const [requestScope] = useState(createWorkspaceRequestScope);
   const [refreshCoordinator] = useState(createChatRefreshCoordinator);
   const [mentionsRequestRunner] = useState(createLatestRequestRunner);
+  const [sendConfirmationTracker] = useState(
+    createChatSendConfirmationTracker
+  );
   const stateRef = useRef(state);
   const activeWorkspaceIdRef = useRef(workspaceId);
   const previousChatRouteRef = useRef(false);
@@ -110,11 +132,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         [channel]: hasError
       };
       refreshErrorsRef.current = nextErrors;
-      setErrorMessage(
-        Object.values(nextErrors).some(Boolean)
-          ? CHAT_REFRESH_ERROR_MESSAGE
-          : null
-      );
+      const messages = getChatRefreshErrorMessages(nextErrors);
+      setErrorMessage(messages.errorMessage);
+      setMentionErrorMessage(messages.mentionErrorMessage);
     },
     []
   );
@@ -254,6 +274,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       mentions: false
     };
     setErrorMessage(null);
+    setMentionErrorMessage(null);
+    sendConfirmationTracker.reset();
 
     if (accessToken && workspaceId) {
       void refreshActions.reconcile();
@@ -272,6 +294,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     refreshCoordinator,
     refreshMentions,
     requestScope,
+    sendConfirmationTracker,
     workspaceId
   ]);
 
@@ -291,6 +314,10 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       onConnectionStateChange: setConnectionState,
       onMessageCreated: (message) => {
         if (message.workspaceId !== workspaceId) return;
+        sendConfirmationTracker.confirm(
+          message,
+          authSession?.user.id ?? ""
+        );
         dispatch({ type: "message-created", message });
         void refreshActions.afterMessageChange();
       },
@@ -310,7 +337,14 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
     lifecycle.start();
     return lifecycle.stop;
-  }, [refreshActions, refreshMentions, socket, workspaceId]);
+  }, [
+    authSession?.user.id,
+    refreshActions,
+    refreshMentions,
+    sendConfirmationTracker,
+    socket,
+    workspaceId
+  ]);
 
   useEffect(() => {
     const handleFocus = () => {
@@ -330,10 +364,15 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   }, [pathname, refreshActions]);
 
   const sendMessage = useCallback(
-    async (input: CreateChatMessageInput) => {
-      if (!accessToken || !workspaceId || !authSession) return;
+    async (
+      input: CreateChatMessageInput,
+      optimisticMentions: WorkspaceChatMention[] = []
+    ): Promise<ChatSendOutcome> => {
+      if (!accessToken || !workspaceId || !authSession) return "failed";
+      sendConfirmationTracker.begin(input.clientMessageId);
       const optimisticMessage = createOptimisticMessage({
         input,
+        optimisticMentions,
         workspaceId,
         author: {
           id: authSession.user.id,
@@ -350,17 +389,28 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           input,
           { signal: getRequestSignal(workspaceId) }
         );
-        if (activeWorkspaceIdRef.current !== workspaceId) return;
+        if (activeWorkspaceIdRef.current !== workspaceId) {
+          sendConfirmationTracker.complete(input.clientMessageId);
+          return "failed";
+        }
         dispatch({ type: "message-created", message });
         await refreshActions.afterMessageChange();
+        sendConfirmationTracker.complete(input.clientMessageId);
+        return "sent";
       } catch (error) {
         if (isAbortError(error) || activeWorkspaceIdRef.current !== workspaceId) {
-          return;
+          sendConfirmationTracker.complete(input.clientMessageId);
+          return "failed";
         }
-        dispatch({
-          type: "message-failed",
+        return resolveTrackedChatSendFailure({
           clientMessageId: input.clientMessageId,
-          failureMessage: getFailureMessage(error)
+          tracker: sendConfirmationTracker,
+          onFailure: () =>
+            dispatch({
+              type: "message-failed",
+              clientMessageId: input.clientMessageId,
+              failureMessage: getFailureMessage(error)
+            })
         });
       }
     },
@@ -369,8 +419,50 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       authSession,
       getRequestSignal,
       refreshActions,
+      sendConfirmationTracker,
       workspaceId
     ]
+  );
+
+  const loadMessagePage = useCallback(
+    async (before?: string) => {
+      if (!accessToken || !workspaceId) return null;
+      const signal = getRequestSignal(workspaceId);
+      if (!signal || signal.aborted) return null;
+
+      return loadChatMessagesIntoState({
+        request: () =>
+          listChatMessages(accessToken, workspaceId, {
+            ...(before ? { before } : {}),
+            signal
+          }),
+        isCurrent: () =>
+          activeWorkspaceIdRef.current === workspaceId && !signal.aborted,
+        onMessages: (messages) =>
+          dispatch({ type: "messages-merged", messages })
+      });
+    },
+    [accessToken, getRequestSignal, workspaceId]
+  );
+
+  const loadMessageContext = useCallback(
+    async (messageId: string) => {
+      if (!accessToken || !workspaceId) return null;
+      const signal = getRequestSignal(workspaceId);
+      if (!signal || signal.aborted) return null;
+
+      return loadChatMessagesIntoState({
+        request: () =>
+          getChatMessageContext(accessToken, workspaceId, messageId, {
+            signal
+          }),
+        isCurrent: () =>
+          activeWorkspaceIdRef.current === workspaceId && !signal.aborted,
+        onMessages: (messages) =>
+          dispatch({ type: "messages-merged", messages })
+      });
+    },
+    [accessToken, getRequestSignal, workspaceId]
   );
 
   const retryMessage = useCallback(
@@ -383,6 +475,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      sendConfirmationTracker.begin(clientMessageId);
       dispatch({ type: "message-retrying", clientMessageId });
       const input: CreateChatMessageInput = {
         clientMessageId,
@@ -396,21 +489,37 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
           input,
           { signal: getRequestSignal(workspaceId) }
         );
-        if (activeWorkspaceIdRef.current !== workspaceId) return;
-        dispatch({ type: "message-created", message: confirmedMessage });
-        await refreshActions.afterMessageChange();
-      } catch (error) {
-        if (isAbortError(error) || activeWorkspaceIdRef.current !== workspaceId) {
+        if (activeWorkspaceIdRef.current !== workspaceId) {
+          sendConfirmationTracker.complete(clientMessageId);
           return;
         }
-        dispatch({
-          type: "message-failed",
+        dispatch({ type: "message-created", message: confirmedMessage });
+        await refreshActions.afterMessageChange();
+        sendConfirmationTracker.complete(clientMessageId);
+      } catch (error) {
+        if (isAbortError(error) || activeWorkspaceIdRef.current !== workspaceId) {
+          sendConfirmationTracker.complete(clientMessageId);
+          return;
+        }
+        resolveTrackedChatSendFailure({
           clientMessageId,
-          failureMessage: getFailureMessage(error)
+          tracker: sendConfirmationTracker,
+          onFailure: () =>
+            dispatch({
+              type: "message-failed",
+              clientMessageId,
+              failureMessage: getFailureMessage(error)
+            })
         });
       }
     },
-    [accessToken, getRequestSignal, refreshActions, workspaceId]
+    [
+      accessToken,
+      getRequestSignal,
+      refreshActions,
+      sendConfirmationTracker,
+      workspaceId
+    ]
   );
 
   const removeMessage = useCallback(
@@ -486,7 +595,11 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       mentions,
       connectionState,
       errorMessage,
+      mentionErrorMessage,
       refreshSummary: refreshActions.reconcile,
+      refreshMentions,
+      loadMessagePage,
+      loadMessageContext,
       sendMessage,
       retryMessage,
       removeMessage,
@@ -496,10 +609,14 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     [
       connectionState,
       errorMessage,
+      loadMessageContext,
+      loadMessagePage,
       markMentionRead,
       markRead,
+      mentionErrorMessage,
       mentions,
       refreshActions,
+      refreshMentions,
       removeMessage,
       retryMessage,
       sendMessage,
@@ -525,10 +642,12 @@ export function useChatRuntime() {
 
 function createOptimisticMessage({
   input,
+  optimisticMentions,
   workspaceId,
   author
 }: {
   input: CreateChatMessageInput;
+  optimisticMentions: WorkspaceChatMention[];
   workspaceId: string;
   author: NonNullable<WorkspaceChatMessage["author"]>;
 }) {
@@ -538,10 +657,10 @@ function createOptimisticMessage({
     clientMessageId: input.clientMessageId,
     content: input.content,
     author,
-    mentions: input.mentionedUserIds.map((userId) => ({
-      userId,
-      displayText: ""
-    })),
+    mentions: createOptimisticChatMentions(
+      input.mentionedUserIds,
+      optimisticMentions
+    ),
     createdAt: new Date().toISOString(),
     deletedAt: null,
     delivery: "pending" as const,

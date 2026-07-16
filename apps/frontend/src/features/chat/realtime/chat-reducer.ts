@@ -5,6 +5,7 @@ import type {
 
 export type ChatState = {
   workspaceId: string;
+  deletedMessageIds: Record<string, string>;
   messagesById: Record<string, ChatViewMessage>;
   messageIdByClientId: Record<string, string>;
   messages: ChatViewMessage[];
@@ -50,6 +51,7 @@ export type ChatStateAction =
 export function createChatState(workspaceId: string): ChatState {
   return {
     workspaceId,
+    deletedMessageIds: {},
     messagesById: {},
     messageIdByClientId: {},
     messages: []
@@ -108,31 +110,47 @@ function addOptimisticMessage(
     return state;
   }
 
-  return buildChatState(state.workspaceId, {
-    ...state.messagesById,
-    [message.id]: message
-  });
+  return buildChatState(
+    state.workspaceId,
+    {
+      ...state.messagesById,
+      [message.id]: message
+    },
+    state.deletedMessageIds
+  );
 }
 
 function addServerMessage(state: ChatState, message: WorkspaceChatMessage) {
+  const canonicalMessage = applyRecordedTombstone(
+    message,
+    state.deletedMessageIds
+  );
   if (
-    message.workspaceId !== state.workspaceId ||
-    state.messagesById[message.id]
+    canonicalMessage.workspaceId !== state.workspaceId ||
+    state.messagesById[canonicalMessage.id]
   ) {
     return state;
   }
 
   const messagesById = { ...state.messagesById };
-  const optimisticId = state.messageIdByClientId[message.clientMessageId];
+  const optimisticId =
+    state.messageIdByClientId[canonicalMessage.clientMessageId];
   if (
     optimisticId &&
-    optimisticId !== message.id &&
-    isMatchingOptimisticMessage(messagesById[optimisticId], message)
+    optimisticId !== canonicalMessage.id &&
+    isMatchingOptimisticMessage(
+      messagesById[optimisticId],
+      canonicalMessage
+    )
   ) {
     delete messagesById[optimisticId];
   }
-  messagesById[message.id] = toSentMessage(message);
-  return buildChatState(state.workspaceId, messagesById);
+  messagesById[canonicalMessage.id] = toSentMessage(canonicalMessage);
+  return buildChatState(
+    state.workspaceId,
+    messagesById,
+    state.deletedMessageIds
+  );
 }
 
 function mergeServerMessages(
@@ -142,7 +160,11 @@ function mergeServerMessages(
   let messagesById = state.messagesById;
   let changed = false;
 
-  for (const message of messages) {
+  for (const incomingMessage of messages) {
+    const message = applyRecordedTombstone(
+      incomingMessage,
+      state.deletedMessageIds
+    );
     if (message.workspaceId !== state.workspaceId) {
       continue;
     }
@@ -172,7 +194,13 @@ function mergeServerMessages(
     changed = true;
   }
 
-  return changed ? buildChatState(state.workspaceId, messagesById) : state;
+  return changed
+    ? buildChatState(
+        state.workspaceId,
+        messagesById,
+        state.deletedMessageIds
+      )
+    : state;
 }
 
 function deleteMessage(
@@ -184,8 +212,17 @@ function deleteMessage(
   }
 
   const currentMessage = state.messagesById[payload.messageId];
-  if (!currentMessage) return state;
+  const recordedDeletedAt = state.deletedMessageIds[payload.messageId];
+  if (!currentMessage && recordedDeletedAt === payload.deletedAt) return state;
+  const deletedMessageIds = {
+    ...state.deletedMessageIds,
+    [payload.messageId]: payload.deletedAt
+  };
+  if (!currentMessage) {
+    return { ...state, deletedMessageIds };
+  }
   if (
+    recordedDeletedAt === payload.deletedAt &&
     currentMessage.content === null &&
     currentMessage.deletedAt === payload.deletedAt &&
     currentMessage.mentions.length === 0
@@ -193,15 +230,19 @@ function deleteMessage(
     return state;
   }
 
-  return buildChatState(state.workspaceId, {
-    ...state.messagesById,
-    [payload.messageId]: {
-      ...currentMessage,
-      content: null,
-      deletedAt: payload.deletedAt,
-      mentions: []
-    }
-  });
+  return buildChatState(
+    state.workspaceId,
+    {
+      ...state.messagesById,
+      [payload.messageId]: {
+        ...currentMessage,
+        content: null,
+        deletedAt: payload.deletedAt,
+        mentions: []
+      }
+    },
+    deletedMessageIds
+  );
 }
 
 function updateDeliveryState(
@@ -223,14 +264,18 @@ function updateDeliveryState(
     return state;
   }
 
-  return buildChatState(state.workspaceId, {
-    ...state.messagesById,
-    [messageId]: {
-      ...currentMessage,
-      delivery,
-      failureMessage
-    }
-  });
+  return buildChatState(
+    state.workspaceId,
+    {
+      ...state.messagesById,
+      [messageId]: {
+        ...currentMessage,
+        delivery,
+        failureMessage
+      }
+    },
+    state.deletedMessageIds
+  );
 }
 
 function toSentMessage(message: WorkspaceChatMessage): ChatViewMessage {
@@ -243,7 +288,8 @@ function toSentMessage(message: WorkspaceChatMessage): ChatViewMessage {
 
 function buildChatState(
   workspaceId: string,
-  messagesById: Record<string, ChatViewMessage>
+  messagesById: Record<string, ChatViewMessage>,
+  deletedMessageIds: Record<string, string>
 ): ChatState {
   const messages = Object.values(messagesById).sort(compareMessages);
   const messageIdByClientId: Record<string, string> = {};
@@ -255,10 +301,26 @@ function buildChatState(
 
   return {
     workspaceId,
+    deletedMessageIds,
     messagesById,
     messageIdByClientId,
     messages
   };
+}
+
+function applyRecordedTombstone(
+  message: WorkspaceChatMessage,
+  deletedMessageIds: Record<string, string>
+): WorkspaceChatMessage {
+  const deletedAt = deletedMessageIds[message.id];
+  return deletedAt
+    ? {
+        ...message,
+        content: null,
+        deletedAt,
+        mentions: []
+      }
+    : message;
 }
 
 function compareMessages(first: ChatViewMessage, second: ChatViewMessage) {

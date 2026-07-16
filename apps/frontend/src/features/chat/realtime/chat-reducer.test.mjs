@@ -341,3 +341,40 @@ function serverMessage({
   assert.deepEqual(state.messagesById, {});
   assert.deepEqual(state.messageIdByClientId, {});
 }
+
+{
+  let state = createChatState("workspace-1");
+  state = reduceChatState(state, {
+    type: "message-deleted",
+    payload: {
+      workspaceId: "workspace-1",
+      messageId: "message-unknown-delete",
+      deletedAt: "2026-07-16T00:30:00.000Z",
+    },
+  });
+
+  assert.equal(
+    state.deletedMessageIds["message-unknown-delete"],
+    "2026-07-16T00:30:00.000Z",
+  );
+  assert.deepEqual(state.messages, []);
+
+  state = reduceChatState(state, {
+    type: "messages-merged",
+    messages: [
+      serverMessage({
+        id: "message-unknown-delete",
+        clientMessageId: "client-unknown-delete",
+      }),
+    ],
+  });
+  assert.equal(state.messages[0].content, null);
+  assert.equal(state.messages[0].deletedAt, "2026-07-16T00:30:00.000Z");
+  assert.deepEqual(state.messages[0].mentions, []);
+
+  state = reduceChatState(state, {
+    type: "workspace-reset",
+    workspaceId: "workspace-2",
+  });
+  assert.deepEqual(state.deletedMessageIds, {});
+}

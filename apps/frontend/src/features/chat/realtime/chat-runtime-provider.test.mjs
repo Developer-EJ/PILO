@@ -2,21 +2,289 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import * as chatRuntime from "./chat-runtime.ts";
+import {
+  createChatState,
+  reduceChatState,
+} from "./chat-reducer.ts";
 
 const {
   CHAT_REFRESH_ERROR_MESSAGE,
+  CHAT_MENTION_REFRESH_ERROR_MESSAGE,
+  createOptimisticChatMentions,
+  createChatSendConfirmationTracker,
   createChatRefreshActions,
   createChatRefreshCoordinator,
   createChatSocketLifecycle,
   createLatestRequestRunner,
   createWorkspaceRequestScope,
+  getChatRefreshErrorMessages,
   isAbortError,
+  loadChatMessagesIntoState,
   loadChatRefresh,
+  resolveTrackedChatSendFailure,
 } = chatRuntime;
 import { chatClientEvents, chatServerEvents } from "./chat-events.ts";
 
 assert.equal(typeof createChatRefreshActions, "function");
 assert.equal(typeof createChatRefreshCoordinator, "function");
+
+{
+  assert.deepEqual(
+    createOptimisticChatMentions(
+      ["user-2", "user-4"],
+      [
+        { userId: "user-2", displayText: "@Sein" },
+        { userId: "user-3", displayText: "@Juhyeong" },
+      ],
+    ),
+    [
+      { userId: "user-2", displayText: "@Sein" },
+      { userId: "user-4", displayText: "" },
+    ],
+  );
+}
+
+{
+  assert.deepEqual(
+    getChatRefreshErrorMessages({
+      deep: false,
+      mentions: true,
+      summary: false,
+    }),
+    {
+      errorMessage: null,
+      mentionErrorMessage: CHAT_MENTION_REFRESH_ERROR_MESSAGE,
+    },
+  );
+  assert.deepEqual(
+    getChatRefreshErrorMessages({
+      deep: true,
+      mentions: false,
+      summary: false,
+    }),
+    {
+      errorMessage: CHAT_REFRESH_ERROR_MESSAGE,
+      mentionErrorMessage: null,
+    },
+  );
+}
+
+{
+  const tracker = createChatSendConfirmationTracker();
+  const untrackedMessage = {
+    ...message({ id: "message-untracked" }),
+    clientMessageId: "client-untracked",
+  };
+  tracker.confirm(untrackedMessage, "user-1");
+  assert.equal(tracker.resolveFailure("client-untracked"), "failed");
+
+  tracker.begin("client-failed");
+  assert.equal(tracker.resolveFailure("client-failed"), "failed");
+
+  tracker.begin("client-confirmed");
+  tracker.confirm(
+    message({ id: "message-confirmed" }),
+    "user-1",
+  );
+  assert.equal(tracker.resolveFailure("client-confirmed"), "failed");
+
+  tracker.begin("client-confirmed");
+  const confirmedMessage = {
+    ...message({ id: "message-confirmed" }),
+    clientMessageId: "client-confirmed",
+  };
+  tracker.confirm(confirmedMessage, "user-1");
+  assert.equal(tracker.resolveFailure("client-confirmed"), "sent");
+
+  tracker.reset();
+  assert.equal(tracker.resolveFailure("client-confirmed"), "failed");
+}
+
+{
+  const tracker = createChatSendConfirmationTracker();
+  const failures = [];
+  const clientMessageId = "client-retry-race";
+  tracker.begin(clientMessageId);
+  tracker.confirm(
+    {
+      ...message({ id: "message-retry-race" }),
+      clientMessageId,
+    },
+    "user-1",
+  );
+
+  assert.equal(
+    resolveTrackedChatSendFailure({
+      clientMessageId,
+      onFailure: () => failures.push("failed"),
+      tracker,
+    }),
+    "sent",
+  );
+  assert.deepEqual(failures, []);
+
+  tracker.begin("client-retry-failed");
+  assert.equal(
+    resolveTrackedChatSendFailure({
+      clientMessageId: "client-retry-failed",
+      onFailure: () => failures.push("failed"),
+      tracker,
+    }),
+    "failed",
+  );
+  assert.deepEqual(failures, ["failed"]);
+
+  tracker.begin("client-workspace-reset");
+  tracker.reset();
+  tracker.confirm(
+    {
+      ...message({ id: "message-workspace-reset" }),
+      clientMessageId: "client-workspace-reset",
+    },
+    "user-1",
+  );
+  assert.equal(
+    tracker.resolveFailure("client-workspace-reset"),
+    "failed",
+  );
+
+  tracker.begin("client-stale-request");
+  tracker.complete("client-stale-request");
+  tracker.confirm(
+    {
+      ...message({ id: "message-stale-request" }),
+      clientMessageId: "client-stale-request",
+    },
+    "user-1",
+  );
+  assert.equal(tracker.resolveFailure("client-stale-request"), "failed");
+}
+
+{
+  const tracker = createChatSendConfirmationTracker();
+  const clientMessageId = "client-late-confirmation";
+  let state = createChatState("workspace-1");
+  state = reduceChatState(state, {
+    type: "optimistic-added",
+    message: {
+      ...message({ id: `pending:${clientMessageId}` }),
+      clientMessageId,
+      delivery: "pending",
+      failureMessage: null,
+    },
+  });
+  tracker.begin(clientMessageId);
+  assert.equal(tracker.resolveFailure(clientMessageId), "failed");
+  state = reduceChatState(state, {
+    type: "message-failed",
+    clientMessageId,
+    failureMessage: "전송하지 못했습니다.",
+  });
+
+  const confirmedMessage = {
+    ...message({ id: "message-late-confirmation" }),
+    clientMessageId,
+  };
+  tracker.confirm(confirmedMessage, "user-1");
+  state = reduceChatState(state, {
+    type: "message-created",
+    message: confirmedMessage,
+  });
+
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].id, "message-late-confirmation");
+  assert.equal(state.messages[0].delivery, "sent");
+}
+
+{
+  let state = createChatState("workspace-1");
+  const page = await loadChatMessagesIntoState({
+    isCurrent: () => true,
+    onMessages: (messages) => {
+      state = reduceChatState(state, { type: "messages-merged", messages });
+    },
+    request: async () => ({
+      items: [message({ id: "older-message" })],
+      nextCursor: null,
+    }),
+  });
+
+  assert.equal(page.items[0].id, "older-message");
+  state = reduceChatState(state, {
+    type: "message-deleted",
+    payload: {
+      workspaceId: "workspace-1",
+      messageId: "older-message",
+      deletedAt: "2026-07-16T00:10:00.000Z",
+    },
+  });
+  assert.equal(state.messages[0].content, null);
+  assert.deepEqual(state.messages[0].mentions, []);
+}
+
+{
+  let state = createChatState("workspace-1");
+  state = reduceChatState(state, {
+    type: "message-deleted",
+    payload: {
+      workspaceId: "workspace-1",
+      messageId: "context-delete-race",
+      deletedAt: "2026-07-16T00:12:00.000Z",
+    },
+  });
+
+  await loadChatMessagesIntoState({
+    isCurrent: () => true,
+    onMessages: (messages) => {
+      state = reduceChatState(state, { type: "messages-merged", messages });
+    },
+    request: async () => ({
+      items: [message({ id: "context-delete-race" })],
+    }),
+  });
+
+  assert.equal(state.messages[0].content, null);
+  assert.equal(state.messages[0].deletedAt, "2026-07-16T00:12:00.000Z");
+}
+
+{
+  let state = createChatState("workspace-1");
+  const context = await loadChatMessagesIntoState({
+    isCurrent: () => true,
+    onMessages: (messages) => {
+      state = reduceChatState(state, { type: "messages-merged", messages });
+    },
+    request: async () => ({ items: [message({ id: "context-message" })] }),
+  });
+
+  assert.equal(context.items[0].id, "context-message");
+  state = reduceChatState(state, {
+    type: "message-deleted",
+    payload: {
+      workspaceId: "workspace-1",
+      messageId: "context-message",
+      deletedAt: "2026-07-16T00:11:00.000Z",
+    },
+  });
+  assert.equal(state.messages[0].content, null);
+}
+
+{
+  let merged = false;
+  const staleResult = await loadChatMessagesIntoState({
+    isCurrent: () => false,
+    onMessages: () => {
+      merged = true;
+    },
+    request: async () => ({
+      items: [message({ id: "old-workspace-message" })],
+      nextCursor: null,
+    }),
+  });
+
+  assert.equal(staleResult, null);
+  assert.equal(merged, false);
+}
 
 function deferred() {
   let resolve;
@@ -473,3 +741,12 @@ assert.match(
   /markMentionRead[\s\S]*mentionsRequestRunner\.invalidate\(\)/,
 );
 assert.match(provider, /errorMessage/);
+assert.match(provider, /loadMessagePage/);
+assert.match(provider, /loadMessageContext/);
+assert.match(
+  provider,
+  /retryMessage[\s\S]*sendConfirmationTracker\.begin\(clientMessageId\)[\s\S]*resolveTrackedChatSendFailure/,
+);
+assert.match(provider, /mentionErrorMessage/);
+assert.match(provider, /refreshMentions/);
+assert.match(provider, /optimisticMentions/);

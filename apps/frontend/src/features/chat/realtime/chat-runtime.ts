@@ -1,6 +1,8 @@
 import type {
   ChatMessagePage,
+  ChatSendOutcome,
   ChatSummary,
+  WorkspaceChatMention,
   WorkspaceChatMessage
 } from "@/features/chat/types";
 import type {
@@ -10,6 +12,22 @@ import type {
 
 export const CHAT_REFRESH_ERROR_MESSAGE =
   "채팅 정보를 새로고침하지 못했습니다. 잠시 후 다시 시도해주세요.";
+export const CHAT_MENTION_REFRESH_ERROR_MESSAGE =
+  "멘션 알림을 새로고침하지 못했습니다. 잠시 후 다시 시도해주세요.";
+
+export function getChatRefreshErrorMessages(errors: {
+  deep: boolean;
+  summary: boolean;
+  mentions: boolean;
+}) {
+  return {
+    errorMessage:
+      errors.deep || errors.summary ? CHAT_REFRESH_ERROR_MESSAGE : null,
+    mentionErrorMessage: errors.mentions
+      ? CHAT_MENTION_REFRESH_ERROR_MESSAGE
+      : null
+  };
+}
 
 type LatestRequestStatus = "success" | "stale" | "aborted" | "error";
 
@@ -363,4 +381,83 @@ export function isAbortError(error: unknown) {
     "name" in error &&
     error.name === "AbortError"
   );
+}
+
+export function createChatSendConfirmationTracker() {
+  const confirmedClientMessageIds = new Set<string>();
+  const pendingClientMessageIds = new Set<string>();
+
+  return {
+    begin(clientMessageId: string) {
+      confirmedClientMessageIds.delete(clientMessageId);
+      pendingClientMessageIds.add(clientMessageId);
+    },
+    complete(clientMessageId: string) {
+      confirmedClientMessageIds.delete(clientMessageId);
+      pendingClientMessageIds.delete(clientMessageId);
+    },
+    confirm(message: WorkspaceChatMessage, currentUserId: string) {
+      if (
+        message.author?.id === currentUserId &&
+        pendingClientMessageIds.has(message.clientMessageId)
+      ) {
+        confirmedClientMessageIds.add(message.clientMessageId);
+      }
+    },
+    reset() {
+      confirmedClientMessageIds.clear();
+      pendingClientMessageIds.clear();
+    },
+    resolveFailure(clientMessageId: string): ChatSendOutcome {
+      pendingClientMessageIds.delete(clientMessageId);
+      const wasConfirmed = confirmedClientMessageIds.delete(clientMessageId);
+      return wasConfirmed ? "sent" : "failed";
+    }
+  };
+}
+
+export function resolveTrackedChatSendFailure({
+  clientMessageId,
+  onFailure,
+  tracker
+}: {
+  clientMessageId: string;
+  onFailure: () => void;
+  tracker: ReturnType<typeof createChatSendConfirmationTracker>;
+}) {
+  const outcome = tracker.resolveFailure(clientMessageId);
+  if (outcome === "failed") onFailure();
+  return outcome;
+}
+
+export function createOptimisticChatMentions(
+  mentionedUserIds: string[],
+  optimisticMentions: WorkspaceChatMention[]
+) {
+  const displayTextByUserId = new Map<string, string>();
+  for (const mention of optimisticMentions) {
+    displayTextByUserId.set(mention.userId, mention.displayText);
+  }
+
+  return [...new Set(mentionedUserIds)].map((userId) => ({
+    userId,
+    displayText: displayTextByUserId.get(userId) ?? ""
+  }));
+}
+
+export async function loadChatMessagesIntoState<
+  T extends { items: WorkspaceChatMessage[] }
+>({
+  isCurrent,
+  onMessages,
+  request
+}: {
+  isCurrent: () => boolean;
+  onMessages: (messages: WorkspaceChatMessage[]) => void;
+  request: () => Promise<T>;
+}): Promise<T | null> {
+  const result = await request();
+  if (!isCurrent()) return null;
+  onMessages(result.items);
+  return result;
 }
