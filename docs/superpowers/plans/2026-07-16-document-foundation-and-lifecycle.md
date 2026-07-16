@@ -22,7 +22,7 @@
   - [x] Tiptap/Yjs 의존성과 최신 snapshot 기반 editor bootstrap
   - [x] 자동 저장 상태와 새로고침 복구
   - [x] frontend lint/test
-  - [ ] PR
+  - [x] PR [#1160](https://github.com/Developer-EJ/PILO/pull/1160) 생성
 - [ ] **후속 작업**: 문서 lifecycle(이름 변경/이동/삭제), `/files` 에디터 UI, Yjs realtime, 파일 첨부/PDF viewer
 
 ## 공통 제약
