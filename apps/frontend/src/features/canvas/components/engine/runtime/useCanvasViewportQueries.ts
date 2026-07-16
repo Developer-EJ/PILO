@@ -45,6 +45,13 @@ type UseCanvasViewportQueriesOptions = {
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   shapeDetailRequestSeqRef: RuntimeRef<number>;
   storageMode: CanvasRuntimeStorageMode;
+  onViewportShapesLoaded?: (bounds: {
+    height: number;
+    margin: number;
+    width: number;
+    x: number;
+    y: number;
+  }, shapes: PiloCanvasFreeformShape[]) => void;
   deletedShapeIdsRef: RuntimeRef<Set<string>>;
   unloadedShapeIdsRef: RuntimeRef<Set<string>>;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
@@ -94,6 +101,7 @@ export function useCanvasViewportQueries({
   shapeDetailCacheRef,
   shapeDetailRequestSeqRef,
   storageMode,
+  onViewportShapesLoaded,
   deletedShapeIdsRef,
   unloadedShapeIdsRef,
   viewportShapeLoadRequestSeqRef,
@@ -329,6 +337,10 @@ export function useCanvasViewportQueries({
                 -MAX_LOADED_VIEWPORT_BOUNDS,
               ),
             };
+            onViewportShapesLoaded?.({
+              ...latestBounds,
+              margin: DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
+            }, nextLoadedShapes);
 
             mergeLoadedFreeformShapes(nextLoadedShapes);
             nextLoadedShapes.forEach((shape) => {
@@ -354,6 +366,7 @@ export function useCanvasViewportQueries({
       latestViewportBoundsRef,
       loadFrameChildren,
       mergeLoadedFreeformShapes,
+      onViewportShapesLoaded,
       queryClient,
       storageMode,
       viewportShapeLoadRequestSeqRef,

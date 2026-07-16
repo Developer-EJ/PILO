@@ -676,9 +676,11 @@ canvas:leave
 canvas:presence:update
 canvas:shape:lock:claim
 canvas:shape:lock:release
-canvas:shape:commit
+canvas:room:shape:patch
+canvas:room:checkpoint
 canvas:shape:preview
 canvas:shape:preview:clear
+canvas:viewport:loaded
 ```
 
 Server -> Client:
@@ -693,8 +695,11 @@ canvas:shape:lock:accepted
 canvas:shape:lock:rejected
 canvas:shape:lock:update
 canvas:shape:lock:release
+canvas:room:shape:patch
 canvas:shape:preview
 canvas:shape:preview:clear
+canvas:room:loaded-regions:update
+canvas:room:shapes:hydrate
 canvas:error
 ```
 
@@ -710,13 +715,42 @@ Canvas는 `false`, completed Review Canvas는 `true`다. read-only room에서도
 `forbidden`으로 거부한다. active room이 접속 중 completed로 전환되는 lifecycle event와
 클라이언트 상태 전환은 PR Review room lifecycle 단계에서 처리한다.
 
-`canvas:shape:commit`은 classic Canvas 전용 서버 조정 저장 경로다. 클라이언트는
-기존 `/shapes/batch`와 같은 operation 배열을 Socket.IO ack 이벤트로 보내고,
-realtime-server는 room 입장 여부, read-write 권한, 다른 사용자의 active shape lock을
-확인한 뒤 연결 사용자의 bearer token으로 App Server `/shapes/batch`를 호출한다.
+classic Canvas에서 realtime roomState가 비활성화된 경우 최종 저장은 클라이언트가
+App Server `/shapes/batch`를 직접 호출한다. realtime roomState가 활성화된 경우
+클라이언트는 shape patch를 realtime-server에 보내고, realtime-server가 checkpoint로
+App Server `/shapes/batch`를 호출한다. realtime-server는
+`canvas_freeform_shapes`나 `canvas_shape_operations`를 직접 쓰지 않는다.
 최종 DB transaction, revision/opSeq, operation log, activity log 작성 책임은 App Server가
-계속 가진다. realtime-server는 `canvas_freeform_shapes`나 `canvas_shape_operations`를
-직접 쓰지 않는다.
+계속 가진다.
+
+`canvas:viewport:loaded`는 classic Canvas room-level lazy loading의 관측 이벤트다.
+클라이언트가 App Server shape viewport 조회를 성공적으로 끝낸 뒤, 조회 bounds를
+조회된 shape snapshot과 함께 realtime-server에 보고한다. realtime-server는 room 단위
+`loadedRegions`와 shape cache를 메모리에 누적하고, `canvas:room:shapes:hydrate`로
+같은 room에 공유한다. 새 사용자가 join하면 `canvas:joined.roomShapes`로 현재 room cache를
+함께 받는다. `loadedRegions`와 room shape cache는 삭제 판단에 쓰지 않는다. shape가
+roomState에 없다는 사실은 삭제가 아니라 아직 로딩되지 않았을 가능성으로 본다.
+겹치는 loaded region은 roomState에서 병합하며, cached shape와 loaded region 수는
+서버 메모리 보호를 위해 상한을 둔다.
+
+`canvas:room:shape:patch`는 DB 저장 전의 roomState patch 이벤트다. 클라이언트는
+로컬 shape diff에서 upsert shape snapshot과 명시적 `deletedShapeIds`를 만들어 보낸다.
+realtime-server는 room shape cache를 갱신하고 삭제는 tombstone으로 기록한 뒤 보낸
+사용자를 제외한 같은 room에 broadcast한다. 삭제는 이 이벤트의 `deletedShapeIds`처럼
+명시적으로 전달된 경우에만 삭제로 본다.
+
+classic Canvas realtime roomState가 활성화된 경우 클라이언트는 매 shape 변경마다
+`/shapes/batch`를 직접 호출하지 않고, realtime-server가 dirty roomState를 짧은
+checkpoint 주기로 묶어 App Server `/shapes/batch`에 저장한다. App Server는 계속
+DB transaction, revision/opSeq, operation log의 owner이며, realtime-server는
+checkpoint 실패 시 dirty 상태를 유지하고 다음 checkpoint에서 재시도한다.
+사용자가 room을 떠나거나 realtime-server가 종료될 때는 남은 dirty checkpoint를 즉시
+flush하려고 시도한다.
+
+`canvas:room:checkpoint`는 checkpoint 저장 상태를 같은 room에 알리는 서버 이벤트다.
+payload는 `status`(`saving`, `saved`, `delayed`), `pendingOperations`, `updatedAt`을
+포함한다. `delayed`는 저장 실패 또는 App Server 일시 오류로 dirty state가 남아 있으며
+다음 checkpoint에서 재시도된다는 뜻이다.
 
 ## tldraw_sync Multiplayer Room 계약
 

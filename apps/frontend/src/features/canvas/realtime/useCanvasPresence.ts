@@ -8,17 +8,20 @@ import {
   type CanvasRealtimeSocket,
 } from "@/shared/canvas-realtime/canvas-realtime-client";
 import type {
-  CanvasOperationsCatchupPayload,
   CanvasJoinedPayload,
+  CanvasLoadedViewportBounds,
+  CanvasOperationsCatchupPayload,
   CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceViewport,
   CanvasRealtimeConfig,
   CanvasRemotePresenceState,
-  CanvasShapeCommitAck,
-  CanvasShapeCommitOperation,
-  CanvasShapeOperationPayload,
+  CanvasRoomCheckpointStatusPayload,
+  CanvasRoomLoadedRegion,
+  CanvasRoomShapePatchPayload,
+  CanvasRoomShapePatchEventPayload,
   CanvasShapeLockState,
+  CanvasShapeOperationPayload,
   CanvasShapePreviewEventPayload,
   CanvasShapePreviewPhase,
   CanvasSyncRequiredPayload,
@@ -27,7 +30,6 @@ import type {
 const STALE_PRESENCE_TIMEOUT_MS = 15_000;
 const STALE_PRESENCE_SWEEP_MS = 2_000;
 const STALE_SHAPE_PREVIEW_TIMEOUT_MS = 5_000;
-const SHAPE_COMMIT_ACK_TIMEOUT_MS = 10_000;
 
 export type CanvasOperationCatchupState = {
   lastSeenOpSeq: number;
@@ -40,17 +42,21 @@ export type CanvasOperationCatchupState = {
 export type CanvasPresenceController = {
   enabled: boolean;
   currentUserId: string | null;
+  checkpointStatus: CanvasRoomCheckpointStatusPayload | null;
   lastRejectedShapeLock: { rejectedAt: number; shapeIds: string[] } | null;
   operationSync: CanvasOperationCatchupState;
   ownedShapeLocks: CanvasShapeLockState[];
+  roomLoadedRegions: CanvasRoomLoadedRegion[];
   remotePresence: CanvasRemotePresenceState[];
   remoteShapeLocks: CanvasShapeLockState[];
   remoteShapePreviews: CanvasShapePreviewEventPayload[];
   claimShapeLocks: (shapeIds: string[]) => void;
-  commitShapeOperations: (
-    operations: CanvasShapeCommitOperation[],
-  ) => Promise<unknown> | null;
   releaseShapeLocks: (shapeIds?: string[]) => void;
+  reportLoadedViewport: (
+    bounds: CanvasLoadedViewportBounds,
+    shapes?: Record<string, unknown>[],
+  ) => void;
+  sendRoomShapePatch: (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => void;
   clearShapePreview: (shapeIds: string[]) => void;
   sendPresenceUpdate: (
     cursor: CanvasPresencePoint | null,
@@ -72,6 +78,8 @@ export type CanvasPresenceOptions = {
     afterSeq: number,
     signal?: AbortSignal,
   ) => Promise<CanvasOperationsCatchupPayload>;
+  hydrateShapes?: (shapes: Record<string, unknown>[]) => void;
+  applyRoomShapePatch?: (patch: CanvasRoomShapePatchEventPayload) => void;
 };
 
 const initialOperationSyncState: CanvasOperationCatchupState = {
@@ -354,20 +362,6 @@ function removeShapePreviewIds({
   });
 }
 
-class CanvasRealtimeCommitError extends Error {
-  body?: unknown;
-  code: string;
-  status?: number;
-
-  constructor(ack: Extract<CanvasShapeCommitAck, { ok: false }>) {
-    super(ack.error.message);
-    this.name = "CanvasRealtimeCommitError";
-    this.body = ack.error.body;
-    this.code = ack.error.code;
-    this.status = ack.error.status;
-  }
-}
-
 export function useCanvasPresence(
   config: CanvasRealtimeConfig | null | undefined,
   options: CanvasPresenceOptions = {},
@@ -384,6 +378,11 @@ export function useCanvasPresence(
   const [remoteShapePreviews, setRemoteShapePreviews] = useState<
     CanvasShapePreviewEventPayload[]
   >([]);
+  const [roomLoadedRegions, setRoomLoadedRegions] = useState<
+    CanvasRoomLoadedRegion[]
+  >([]);
+  const [checkpointStatus, setCheckpointStatus] =
+    useState<CanvasRoomCheckpointStatusPayload | null>(null);
   const [lastRejectedShapeLock, setLastRejectedShapeLock] = useState<{
     rejectedAt: number;
     shapeIds: string[];
@@ -397,6 +396,8 @@ export function useCanvasPresence(
   const lastSeenOpSeqRef = useRef(0);
   const applyOperationsRef = useRef(options.applyOperations);
   const catchUpOperationsRef = useRef(options.catchUpOperations);
+  const hydrateShapesRef = useRef(options.hydrateShapes);
+  const applyRoomShapePatchRef = useRef(options.applyRoomShapePatch);
   const activeCatchUpAbortRef = useRef<AbortController | null>(null);
   const liveOperationBufferRef = useRef<CanvasShapeOperationPayload[]>([]);
   const runCatchUpRef = useRef<(afterSeq: number) => void>(() => {});
@@ -407,7 +408,14 @@ export function useCanvasPresence(
   useEffect(() => {
     applyOperationsRef.current = options.applyOperations;
     catchUpOperationsRef.current = options.catchUpOperations;
-  }, [options.applyOperations, options.catchUpOperations]);
+    hydrateShapesRef.current = options.hydrateShapes;
+    applyRoomShapePatchRef.current = options.applyRoomShapePatch;
+  }, [
+    options.applyRoomShapePatch,
+    options.applyOperations,
+    options.catchUpOperations,
+    options.hydrateShapes,
+  ]);
 
   const applyContiguousOperations = useCallback(
     (operations: CanvasShapeOperationPayload[], afterSeq: number) => {
@@ -639,6 +647,8 @@ export function useCanvasPresence(
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
+      setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
       setOperationSync(initialOperationSyncState);
       return;
@@ -654,6 +664,8 @@ export function useCanvasPresence(
       setRemotePresence([]);
       setRemoteShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
+      setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
       return;
     }
@@ -699,6 +711,8 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
+      setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
     });
     realtimeSocket.on("canvas:joined", (payload) => {
@@ -732,6 +746,10 @@ export function useCanvasPresence(
           (preview) => preview.actorUserId !== currentUserId,
         ),
       );
+      setRoomLoadedRegions(payload.loadedRegions);
+      if (payload.roomShapes.length) {
+        hydrateShapesRef.current?.(payload.roomShapes);
+      }
     });
     realtimeSocket.on("canvas:operation", (payload) => {
       if (
@@ -874,6 +892,40 @@ export function useCanvasPresence(
         ),
       );
     });
+    realtimeSocket.on("canvas:room:loaded-regions:update", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRoomLoadedRegions(payload.loadedRegions);
+    });
+    realtimeSocket.on("canvas:room:shapes:hydrate", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setRoomLoadedRegions(payload.loadedRegions);
+      if (payload.shapes.length) {
+        hydrateShapesRef.current?.(payload.shapes);
+      }
+    });
+    realtimeSocket.on("canvas:room:shape:patch", (payload) => {
+      if (
+        !isSameCanvasRoom(payload, room) ||
+        payload.actorUserId === currentUserId
+      ) {
+        return;
+      }
+
+      applyRoomShapePatchRef.current?.(payload);
+    });
+    realtimeSocket.on("canvas:room:checkpoint", (payload) => {
+      if (!isSameCanvasRoom(payload, room)) {
+        return;
+      }
+
+      setCheckpointStatus(payload);
+    });
     realtimeSocket.on("canvas:error", (payload) => {
       console.warn("Canvas realtime socket error.", payload);
     });
@@ -897,6 +949,8 @@ export function useCanvasPresence(
       setRemoteShapeLocks([]);
       setOwnedShapeLocks([]);
       setRemoteShapePreviews([]);
+      setRoomLoadedRegions([]);
+      setCheckpointStatus(null);
       setLastRejectedShapeLock(null);
     };
   }, [
@@ -978,42 +1032,6 @@ export function useCanvasPresence(
     });
   }, []);
 
-  const commitShapeOperations = useCallback(
-    (operations: CanvasShapeCommitOperation[]) => {
-      const socket = socketRef.current;
-      const room = roomRef.current;
-
-      if (!socket?.connected || !joinedRef.current || !operations.length) {
-        return null;
-      }
-
-      return new Promise<unknown>((resolve, reject) => {
-        const timeout = window.setTimeout(() => {
-          reject(new Error("Canvas realtime shape commit timed out"));
-        }, SHAPE_COMMIT_ACK_TIMEOUT_MS);
-
-        socket.emit(
-          "canvas:shape:commit",
-          {
-            ...room,
-            operations,
-          },
-          (ack) => {
-            window.clearTimeout(timeout);
-
-            if (ack.ok) {
-              resolve(ack.result);
-              return;
-            }
-
-            reject(new CanvasRealtimeCommitError(ack));
-          },
-        );
-      });
-    },
-    [],
-  );
-
   const releaseShapeLocks = useCallback((shapeIds?: string[]) => {
     const socket = socketRef.current;
     const room = roomRef.current;
@@ -1033,6 +1051,24 @@ export function useCanvasPresence(
     });
   }, []);
 
+  const reportLoadedViewport = useCallback(
+    (bounds: CanvasLoadedViewportBounds, shapes: Record<string, unknown>[] = []) => {
+      const socket = socketRef.current;
+      const room = roomRef.current;
+
+      if (!socket?.connected || !joinedRef.current) {
+        return;
+      }
+
+      socket.emit("canvas:viewport:loaded", {
+        ...room,
+        bounds,
+        shapes,
+      });
+    },
+    [],
+  );
+
   const clearShapePreview = useCallback((shapeIds: string[]) => {
     const socket = socketRef.current;
     const room = roomRef.current;
@@ -1049,6 +1085,28 @@ export function useCanvasPresence(
       shapeIds: uniqueShapeIds,
     });
   }, []);
+
+  const sendRoomShapePatch = useCallback(
+    (patch: Omit<CanvasRoomShapePatchPayload, "workspaceId" | "canvasId">) => {
+      const socket = socketRef.current;
+      const room = roomRef.current;
+
+      if (
+        !socket?.connected ||
+        !joinedRef.current ||
+        (!patch.upsertShapes.length && !patch.deletedShapeIds.length)
+      ) {
+        return;
+      }
+
+      socket.emit("canvas:room:shape:patch", {
+        ...room,
+        deletedShapeIds: patch.deletedShapeIds,
+        upsertShapes: patch.upsertShapes,
+      });
+    },
+    [],
+  );
 
   const sendShapePreview = useCallback(
     (
@@ -1086,7 +1144,7 @@ export function useCanvasPresence(
     () => ({
       claimShapeLocks,
       clearShapePreview,
-      commitShapeOperations,
+      checkpointStatus,
       enabled,
       currentUserId,
       lastRejectedShapeLock,
@@ -1098,6 +1156,9 @@ export function useCanvasPresence(
               (lock) => lock.ownerUserId === currentUserId,
             ),
       releaseShapeLocks,
+      reportLoadedViewport,
+      roomLoadedRegions,
+      sendRoomShapePatch,
       remotePresence:
         currentUserId === null
           ? remotePresence
@@ -1115,13 +1176,16 @@ export function useCanvasPresence(
     [
       claimShapeLocks,
       clearShapePreview,
-      commitShapeOperations,
+      checkpointStatus,
       currentUserId,
       enabled,
       lastRejectedShapeLock,
       operationSync,
       ownedShapeLocks,
       releaseShapeLocks,
+      reportLoadedViewport,
+      roomLoadedRegions,
+      sendRoomShapePatch,
       remotePresence,
       remoteShapeLocks,
       remoteShapePreviews,

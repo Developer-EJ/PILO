@@ -12,6 +12,7 @@ export type RealtimeServerConfig = {
   scope: string;
 };
 
+const API_BASE_PATH = "/api/v1";
 const DEFAULT_DATABASE_URL = "postgresql://pilo:pilo@localhost:5432/pilo";
 const DEFAULT_APP_SERVER_URL = "http://localhost:4000";
 const DEFAULT_DATABASE_POOL_MAX = 1;
@@ -37,10 +38,11 @@ export function loadRealtimeServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): RealtimeServerConfig {
   return {
-    appServerUrl:
+    appServerUrl: normalizeAppServerBaseUrl(
       env.APP_SERVER_URL?.trim() ||
-      env.API_PUBLIC_ORIGIN?.trim() ||
-      DEFAULT_APP_SERVER_URL,
+        env.API_PUBLIC_ORIGIN?.trim() ||
+        DEFAULT_APP_SERVER_URL,
+    ),
     corsOrigin: parseCorsOrigin(env.SOCKET_IO_CORS_ORIGIN),
     databaseApplicationName:
       env.DATABASE_APPLICATION_NAME?.trim() || DEFAULT_DATABASE_APPLICATION_NAME,
@@ -65,6 +67,14 @@ export function loadRealtimeServerConfig(
     redisUrl: env.REDIS_URL ?? null,
     scope: env.REALTIME_SCOPE ?? "notifications_status_only",
   };
+}
+
+function normalizeAppServerBaseUrl(appServerUrl: string) {
+  const trimmedUrl = appServerUrl.trim().replace(/\/+$/, "");
+
+  return trimmedUrl.endsWith(API_BASE_PATH)
+    ? trimmedUrl
+    : `${trimmedUrl}${API_BASE_PATH}`;
 }
 
 function parsePositiveInteger(
