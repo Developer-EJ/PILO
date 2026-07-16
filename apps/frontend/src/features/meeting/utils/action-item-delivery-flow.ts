@@ -15,6 +15,28 @@ export function hasPiloIssueDeliverySelection(
   return board?.columns.some((column) => column.id === columnId) ?? false;
 }
 
+export function resolvePiloIssueDeliverySelection(
+  options: {
+    boards: Array<{ id: string; columns: Array<{ id: string }> }>;
+  },
+  preferredBoardId: string,
+  preferredColumnId: string
+): { boardId: string; columnId: string } {
+  if (preferredBoardId || preferredColumnId) {
+    return {
+      boardId: preferredBoardId,
+      columnId: preferredColumnId
+    };
+  }
+
+  const board = options.boards[0];
+
+  return {
+    boardId: board?.id ?? "",
+    columnId: board?.columns[0]?.id ?? ""
+  };
+}
+
 export async function saveThenDeliverActionItem({
   deliver,
   needsSave,

@@ -33,6 +33,18 @@ function hasSelection(boardId, columnId) {
   );
 }
 
+function resolveSelection(boardId, columnId) {
+  assert.equal(
+    typeof deliveryFlow.resolvePiloIssueDeliverySelection,
+    "function"
+  );
+  return deliveryFlow.resolvePiloIssueDeliverySelection(
+    deliveryOptions,
+    boardId,
+    columnId
+  );
+}
+
 test("같은 Board의 실제 Column을 선택하면 Pilo issue 전달을 활성화한다", () => {
   assert.equal(hasSelection("10", "100"), true);
 });
@@ -64,6 +76,27 @@ test("유효한 Board Column이 있으면 Pilo issue 전달을 활성화한다",
     }),
     true
   );
+});
+
+test("새 eligibility 목록에서도 유효한 Pilo issue draft 선택을 유지한다", () => {
+  assert.deepEqual(resolveSelection("10", "101"), {
+    boardId: "10",
+    columnId: "101"
+  });
+});
+
+test("pending 신규 Pilo issue 선택은 첫 유효 대상을 기본값으로 사용한다", () => {
+  assert.deepEqual(resolveSelection("", ""), {
+    boardId: "10",
+    columnId: "100"
+  });
+});
+
+test("Pilo issue draft 선택이 stale이면 기존 선택을 유지해 생성 차단 상태를 보존한다", () => {
+  assert.deepEqual(resolveSelection("30", "300"), {
+    boardId: "30",
+    columnId: "300"
+  });
 });
 
 test("후속 작업 저장이 실패하면 외부 전달을 실행하지 않는다", async () => {
@@ -127,19 +160,47 @@ const reportSectionSource = await readFile(
   "utf8"
 );
 
-test("Pilo issue 대상이 없으면 ProjectV2 동기화 안내를 표시한다", () => {
+function sliceFunctionSource(source, startMarker, endMarker) {
+  const startIndex = source.indexOf(startMarker);
+  const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+
+  assert.notEqual(startIndex, -1, `${startMarker} 함수 시작을 찾을 수 없습니다.`);
+  assert.notEqual(endIndex, -1, `${endMarker} 함수 시작을 찾을 수 없습니다.`);
+
+  return source.slice(startIndex, endIndex);
+}
+
+test("Pilo issue option loader는 캐시와 무관하게 매 호출마다 최신 목록을 요청한다", () => {
+  const loaderSource = sliceFunctionSource(
+    reportSectionSource,
+    "  async function loadIssueDeliveryOptions(",
+    "  async function selectDeliveryType("
+  );
+
+  assert.match(loaderSource, /await onLoadIssueDeliveryOptions\(\)/);
+  assert.doesNotMatch(loaderSource, /\bissueOptions\b/);
+});
+
+test("Pilo issue 대상이 없으면 repository 연결과 ProjectV2 동기화를 안내한다", () => {
   assert.match(
     reportSectionSource,
-    /ProjectV2 Board를 선택하고 동기화한 뒤 다시 시도해주세요\./
+    /GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board를 동기화한 뒤 다시 시도해주세요\./
   );
   assert.match(reportSectionSource, /hasPiloIssueDeliveryTarget/);
 });
 
-test("stale Pilo issue 선택이면 동기화 후 재시도 안내를 표시한다", () => {
+test("stale Pilo issue 선택이면 repository 연결과 ProjectV2 동기화를 안내한다", () => {
   assert.match(reportSectionSource, /hasPiloIssueDeliverySelection/);
   assert.match(
     reportSectionSource,
-    /ProjectV2 Board와 Column을 동기화한 후 다시 시도해주세요\./
+    /GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board와 Column을 동기화한 뒤 다시 시도해주세요\./
+  );
+});
+
+test("DELIVERY_FAILED Pilo issue draft를 다시 열면 최신 eligibility 목록을 다시 불러온다", () => {
+  assert.match(
+    reportSectionSource,
+    /draft\?\.deliveryType === "pilo_issue"[\s\S]{0,800}await loadIssueDeliveryOptions\(\s*draft\.issue\.boardId,\s*draft\.issue\.columnId\s*\)/
   );
 });
 

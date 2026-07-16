@@ -37,7 +37,8 @@ import type {
 } from "@/features/meeting/types";
 import {
   hasPiloIssueDeliverySelection,
-  hasPiloIssueDeliveryTarget
+  hasPiloIssueDeliveryTarget,
+  resolvePiloIssueDeliverySelection
 } from "@/features/meeting/utils/action-item-delivery-flow";
 import { cn } from "@/lib/utils";
 
@@ -481,22 +482,35 @@ function ActionItemReviewCard({
     setShowDelivery(false);
   }, [actionItem]);
 
-  async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
-    setDeliveryType(nextType);
+  async function loadIssueDeliveryOptions(
+    preferredBoardId = selectedBoardId,
+    preferredColumnId = selectedColumnId
+  ) {
     setDeliveryOptionsError(null);
-    if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
+    setIssueOptions(null);
     setLoadingIssueOptions(true);
     try {
       const options = await onLoadIssueDeliveryOptions();
+      const selection = resolvePiloIssueDeliverySelection(
+        options,
+        preferredBoardId,
+        preferredColumnId
+      );
       setIssueOptions(options);
-      const firstBoard = options.boards[0];
-      setSelectedBoardId((current) => current || firstBoard?.id || "");
-      setSelectedColumnId((current) => current || firstBoard?.columns[0]?.id || "");
+      setSelectedBoardId(selection.boardId);
+      setSelectedColumnId(selection.columnId);
     } catch (error) {
       setDeliveryOptionsError(getReportRequestErrorMessage(error));
     } finally {
       setLoadingIssueOptions(false);
     }
+  }
+
+  async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
+    setDeliveryType(nextType);
+    setDeliveryOptionsError(null);
+    if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
+    await loadIssueDeliveryOptions();
   }
 
   function changeBoard(boardId: string) {
@@ -522,9 +536,10 @@ function ActionItemReviewCard({
       setDeliveryType("pilo_issue");
       setDeliveryTitle(draft.issue.title ?? actionItem.title);
       setDeliveryDescription(draft.issue.body ?? actionItem.description);
-      setSelectedBoardId(draft.issue.boardId);
-      setSelectedColumnId(draft.issue.columnId);
-      await selectDeliveryType("pilo_issue");
+      await loadIssueDeliveryOptions(
+        draft.issue.boardId,
+        draft.issue.columnId
+      );
     }
     setShowDelivery(true);
   }
@@ -681,7 +696,7 @@ function ActionItemReviewCard({
                 </p>
               ) : issueOptions && !hasIssueDeliveryTarget ? (
                 <p className="text-xs text-muted-foreground sm:col-span-2">
-                  생성 가능한 대상이 없습니다. ProjectV2 Board를 선택하고 동기화한 뒤 다시 시도해주세요.
+                  생성 가능한 대상이 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board를 동기화한 뒤 다시 시도해주세요.
                 </p>
               ) : (
                 <>
@@ -695,7 +710,7 @@ function ActionItemReviewCard({
                   </select>
                   {hasStaleIssueDeliverySelection ? (
                     <p className="text-xs text-muted-foreground sm:col-span-2">
-                      선택한 Board 또는 Column을 사용할 수 없습니다. ProjectV2 Board와 Column을 동기화한 후 다시 시도해주세요.
+                      선택한 Board 또는 Column을 사용할 수 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board와 Column을 동기화한 뒤 다시 시도해주세요.
                     </p>
                   ) : null}
                 </>
