@@ -150,6 +150,74 @@ try {
   );
   await transitionPublisher.onModuleDestroy();
   assert.equal(replacementClients[0].quitCalls, 1);
+
+  const cancelledConnectGate = deferred();
+  const rotationShutdownClients = [];
+  process.env.REDIS_URL = oldUrl;
+  redis.createClient = ({ url }) => {
+    const client = {
+      destroyCalls: 0,
+      publishCalls: 0,
+      quitCalls: 0,
+      url,
+      on() {
+        return client;
+      },
+      async connect() {
+        return cancelledConnectGate.promise;
+      },
+      async publish() {
+        client.publishCalls += 1;
+      },
+      async quit() {
+        client.quitCalls += 1;
+      },
+      destroy() {
+        client.destroyCalls += 1;
+        cancelledConnectGate.reject(new Error("connect cancelled"));
+      }
+    };
+    rotationShutdownClients.push(client);
+    return client;
+  };
+
+  const rotationShutdownPublisher = new ChatPublisherService();
+  rotationShutdownPublisher.logger = { error() {}, warn() {} };
+  const pendingOldPublish = rotationShutdownPublisher.publish(
+    fakeEvent("message-pending-old-url")
+  );
+  await Promise.resolve();
+  assert.equal(rotationShutdownClients.length, 1);
+
+  process.env.REDIS_URL = replacementUrl;
+  const queuedReplacementPublish = rotationShutdownPublisher.publish(
+    fakeEvent("message-queued-new-url")
+  );
+  await Promise.resolve();
+
+  let rotationShutdownResolved = false;
+  const rotationShutdown = rotationShutdownPublisher.onModuleDestroy().then(() => {
+    rotationShutdownResolved = true;
+  });
+  assert.equal(
+    rotationShutdownClients[0].destroyCalls,
+    1,
+    "shutdown must cancel the current attempt before waiting for URL rotation"
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(
+    rotationShutdownResolved,
+    true,
+    "cancelled URL rotation must not delay shutdown settlement"
+  );
+  await Promise.all([
+    pendingOldPublish,
+    queuedReplacementPublish,
+    rotationShutdown
+  ]);
+  assert.equal(rotationShutdownClients.length, 1);
+  assert.equal(rotationShutdownClients[0].publishCalls, 0);
+  assert.equal(rotationShutdownClients[0].quitCalls, 0);
   process.env.REDIS_URL = "redis://chat-test.invalid:6379";
 
   const shutdownConnectGate = deferred();

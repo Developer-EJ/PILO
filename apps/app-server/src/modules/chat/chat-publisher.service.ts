@@ -39,6 +39,10 @@ export class ChatPublisherService implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
+    const activeAttempt = this.redisConnectionAttempt;
+    if (activeAttempt) {
+      this.destroyConnectionAttempt(activeAttempt);
+    }
 
     await this.withRedisOwnershipTransition(async () => {
       const pendingAttempt = this.redisConnectionAttempt;
