@@ -312,6 +312,42 @@ async function assertBadRequest(action, messagePattern) {
     queryOneRows: [
       calendarRow({
         title: "Existing event",
+        start_date: "2026-07-03",
+        end_date: "2026-07-03",
+        start_time: "14:00:00",
+        end_time: "15:00:00"
+      }),
+      (text, values) => {
+        assert.match(text, /UPDATE calendar_events/);
+        assert.equal(values[7], "2026-07-05");
+        assert.equal(values[8], "14:00");
+        assert.equal(values[9], "15:00");
+        return calendarRow({
+          title: "Existing event",
+          start_date: "2026-07-03",
+          end_date: "2026-07-05",
+          start_time: "14:00:00",
+          end_time: "15:00:00"
+        });
+      }
+    ]
+  });
+  const { service } = createSubject(database);
+
+  const event = await service.updateEvent(currentUserId, workspaceId, "1", {
+    endDate: "2026-07-05"
+  });
+
+  assert.equal(event.endDate, "2026-07-05");
+  assert.equal(event.startTime, "14:00");
+  assert.equal(event.endTime, "15:00");
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      calendarRow({
+        title: "Existing event",
         start_time: "14:00:00",
         end_time: "15:00:00"
       }),

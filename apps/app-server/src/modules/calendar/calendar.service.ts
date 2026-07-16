@@ -518,7 +518,6 @@ export class CalendarService {
       draft.endTime === undefined &&
       (draft.isAllDay !== undefined ||
         draft.startDate !== undefined ||
-        draft.endDate !== undefined ||
         draft.startTime !== undefined)
     );
   }

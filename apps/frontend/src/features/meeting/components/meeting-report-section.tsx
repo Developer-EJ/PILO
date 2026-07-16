@@ -519,7 +519,9 @@ function ActionItemReviewCard({
           description: deliveryDescription.trim() || null,
           isAllDay,
           startDate,
-          endDate: endDate || undefined,
+          // Keep the field optional in the UI while remaining compatible with
+          // app-server versions that still require endDate in delivery input.
+          endDate: endDate || startDate,
           startTime: isAllDay ? null : startTime || null,
           endTime: isAllDay ? null : endTime || null
         }

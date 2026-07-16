@@ -116,8 +116,9 @@ encrypted token은 포함하지 않는다.
 PATCH /api/v1/workspaces/{workspaceId}/calendar/events/{eventId}
 ```
 
-Request body에는 변경할 필드만 보낸다. 시간 관련 값을 변경하고 `isAllDay = false`인 상태에서
-`endTime`이 생략되면 서버가 `startTime + 1시간`으로 정규화한다.
+Request body에는 변경할 필드만 보낸다. `startTime` 또는 `isAllDay`를 변경하고
+`isAllDay = false`인 상태에서 `endTime`이 생략되면 서버가 `startTime + 1시간`으로
+정규화한다. `endDate`만 변경하는 요청은 기존 `endTime`을 유지한다.
 
 ## 일정 삭제
 
