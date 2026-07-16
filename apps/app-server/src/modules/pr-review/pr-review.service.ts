@@ -72,7 +72,8 @@ import {
 import type { CanvasShapeRow } from "../canvas/canvas.types";
 import {
   buildFileReviewDecisionCreatedActivityLog,
-  buildPrReviewSessionCreatedActivityLog
+  buildPrReviewSessionCreatedActivityLog,
+  buildReviewSubmissionTerminalActivityLog
 } from "./pr-review-activity-log";
 import {
   buildPrReviewCanvasMaterialization,
@@ -2898,7 +2899,23 @@ export class PrReviewService {
       );
     } catch (error) {
       const errorMessage = this.getSafeSubmissionErrorMessage(error);
-      await this.updateReviewSubmissionFailure(attempt.id, errorMessage);
+      await this.database.transaction(async (transaction) => {
+        await this.updateReviewSubmissionFailure(
+          transaction,
+          attempt.id,
+          errorMessage
+        );
+        await this.activityLogService.append(
+          transaction,
+          buildReviewSubmissionTerminalActivityLog({
+            currentUserId,
+            workspaceId,
+            reviewSessionId: session.id,
+            submissionId: attempt.id,
+            terminal: "failed"
+          })
+        );
+      });
 
       if (error instanceof ApiError) {
         throw error;
@@ -2919,6 +2936,16 @@ export class PrReviewService {
           }
         );
         await this.markReviewSessionSubmitted(transaction, session.id);
+        await this.activityLogService.append(
+          transaction,
+          buildReviewSubmissionTerminalActivityLog({
+            currentUserId,
+            workspaceId,
+            reviewSessionId: session.id,
+            submissionId: attempt.id,
+            terminal: "submitted"
+          })
+        );
         return updatedSubmission;
       }
     );
@@ -4821,10 +4848,11 @@ export class PrReviewService {
   }
 
   private async updateReviewSubmissionFailure(
+    transaction: DatabaseTransaction,
     submissionId: string,
     errorMessage: string
   ): Promise<void> {
-    const submission = await this.database.queryOne<{ id: string }>(
+    const submission = await transaction.queryOne<{ id: string }>(
       `
         UPDATE review_submissions
         SET github_submit_status = 'failed',
