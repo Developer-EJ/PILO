@@ -1419,7 +1419,9 @@ export async function createRealtimeSocketServer({
         return;
       }
 
-      roomStateService.applyShapePatch(patchPayload, patchPayload);
+      roomStateService.applyShapePatch(patchPayload, patchPayload, {
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+      });
       roomCheckpointService.scheduleCheckpoint(
         patchPayload,
         authedSocket.data.auth.token,

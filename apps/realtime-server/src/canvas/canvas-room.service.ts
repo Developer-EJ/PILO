@@ -52,14 +52,18 @@ export function createCanvasRoomService({
 
       const latestOpSeq = 0;
       const checkpointState = roomStateService.getCheckpointState(payload);
+      const historyState = roomStateService.getHistoryState(payload);
 
       return {
         access,
         joined: true,
         payload: {
+          canRedo: historyState.canRedo,
+          canUndo: historyState.canUndo,
           canvasId: payload.canvasId,
           checkpointHistorySeq: checkpointState.checkpointHistorySeq,
           checkpointVersion: checkpointState.checkpointVersion,
+          historySeq: historyState.historySeq,
           latestOpSeq,
           loadedRegions: roomStateService.getLoadedRegions(payload),
           previews: await shapePreviewService.getRoomPreviews(payload),

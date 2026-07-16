@@ -2,12 +2,15 @@ import { createCanvasRoomName } from "../socket/room-names";
 import type {
   CanvasLoadedViewportBounds,
   CanvasCheckpointSyncOperation,
+  CanvasRoomHistoryAction,
+  CanvasRoomHistoryItem,
   CanvasRoomLoadedRegion,
   CanvasRoomRef,
 } from "./canvas-types";
 
 const MAX_ROOM_LOADED_REGIONS = 64;
 const MAX_ROOM_CACHED_SHAPES = 2_000;
+const MAX_ROOM_HISTORY_ITEMS = 200;
 
 type CachedRoomShape = {
   cachedAt: string;
@@ -21,18 +24,27 @@ export type CanvasRoomCheckpointSnapshot = {
 export type CanvasRoomCheckpointState = {
   checkpointHistorySeq: number | null;
   checkpointVersion: number;
+  historySeq: number;
+};
+
+export type CanvasRoomHistoryState = {
+  canRedo: boolean;
+  canUndo: boolean;
+  historySeq: number;
 };
 
 export type CanvasRoomStateService = {
   applyShapePatch: (
     room: CanvasRoomRef,
     patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] },
+    options?: { actorUserId?: string | null },
   ) => void;
   getCachedShapes: (room: CanvasRoomRef) => Record<string, unknown>[];
   getCheckpointSnapshot: (room: CanvasRoomRef) => CanvasRoomCheckpointSnapshot;
   getCheckpointState: (room: CanvasRoomRef) => CanvasRoomCheckpointState;
   getDeletedTombstones: (room: CanvasRoomRef) => string[];
   getDirtyShapeIds: (room: CanvasRoomRef) => string[];
+  getHistoryState: (room: CanvasRoomRef) => CanvasRoomHistoryState;
   getLoadedRegions: (room: CanvasRoomRef) => CanvasRoomLoadedRegion[];
   recordLoadedViewport: (
     room: CanvasRoomRef,
@@ -127,6 +139,9 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   const checkpointOperationIdsByRoom = new Map<string, Map<string, string>>();
   const checkpointHistorySeqByRoom = new Map<string, number | null>();
   const checkpointVersionByRoom = new Map<string, number>();
+  const historyByRoom = new Map<string, CanvasRoomHistoryItem[]>();
+  const historySeqByRoom = new Map<string, number>();
+  const redoHistoryByRoom = new Map<string, CanvasRoomHistoryItem[]>();
   const shapesByRoom = new Map<string, Map<string, CachedRoomShape>>();
 
   function getRoomShapeCache(roomName: string) {
@@ -174,6 +189,81 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     return typeof shape?.contentHash === "string" && shape.contentHash
       ? shape.contentHash
       : null;
+  }
+
+  function cloneShapeRecord(shape: Record<string, unknown> | null | undefined) {
+    if (!shape) return null;
+
+    try {
+      return JSON.parse(JSON.stringify(shape)) as Record<string, unknown>;
+    } catch {
+      return { ...shape };
+    }
+  }
+
+  function areShapeRecordsEqual(
+    left: Record<string, unknown> | null | undefined,
+    right: Record<string, unknown> | null | undefined,
+  ) {
+    if (!left && !right) return true;
+    if (!left || !right) return false;
+
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return left === right;
+    }
+  }
+
+  function getNextHistorySeq(roomName: string) {
+    const nextSeq = (historySeqByRoom.get(roomName) ?? 0) + 1;
+
+    historySeqByRoom.set(roomName, nextSeq);
+    return nextSeq;
+  }
+
+  function pushRoomHistoryItem(
+    roomName: string,
+    item: Omit<CanvasRoomHistoryItem, "createdAt" | "id" | "seq">,
+  ) {
+    const seq = getNextHistorySeq(roomName);
+    const historyItem: CanvasRoomHistoryItem = {
+      ...item,
+      createdAt: new Date().toISOString(),
+      id: `${roomName}:history:${seq}`,
+      seq,
+    };
+    const history = historyByRoom.get(roomName) ?? [];
+
+    history.push(historyItem);
+    historyByRoom.set(roomName, history.slice(-MAX_ROOM_HISTORY_ITEMS));
+    redoHistoryByRoom.delete(roomName);
+  }
+
+  function recordRoomHistoryChange({
+    action,
+    actorUserId,
+    after,
+    before,
+    roomName,
+    shapeId,
+  }: {
+    action: CanvasRoomHistoryAction;
+    actorUserId: string;
+    after: Record<string, unknown> | null;
+    before: Record<string, unknown> | null;
+    roomName: string;
+    shapeId: string;
+  }) {
+    if (areShapeRecordsEqual(before, after)) return;
+
+    pushRoomHistoryItem(roomName, {
+      action,
+      actorUserId,
+      after: cloneShapeRecord(after),
+      before: cloneShapeRecord(before),
+      shapeId,
+    });
   }
 
   function getRoomCheckpointOperationIds(roomName: string) {
@@ -414,14 +504,33 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   }
 
   return {
-    applyShapePatch(room, patch) {
+    applyShapePatch(room, patch, options = {}) {
       const roomName = createCanvasRoomName(room);
+      const actorUserId = options.actorUserId?.trim() || "unknown";
+      const shapeCache = getRoomShapeCache(roomName);
+
+      patch.upsertShapes.forEach((shape) => {
+        const shapeId = typeof shape.id === "string" ? shape.id.trim() : "";
+
+        if (!shapeId) return;
+
+        const before = cloneShapeRecord(shapeCache.get(shapeId)?.shape);
+        const after = cloneShapeRecord(shape);
+
+        recordRoomHistoryChange({
+          action: before ? "update" : "create",
+          actorUserId,
+          after,
+          before,
+          roomName,
+          shapeId,
+        });
+      });
 
       upsertRoomShapes(roomName, patch.upsertShapes, { markDirty: true });
 
       if (!patch.deletedShapeIds.length) return;
 
-      const shapeCache = getRoomShapeCache(roomName);
       const deletedTombstones = getRoomTombstones(roomName);
       const dirtyShapeIds = getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName);
 
@@ -430,6 +539,15 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
         if (!normalizedShapeId) return;
         const deletedShape = shapeCache.get(normalizedShapeId)?.shape;
+
+        recordRoomHistoryChange({
+          action: "delete",
+          actorUserId,
+          after: null,
+          before: cloneShapeRecord(deletedShape),
+          roomName,
+          shapeId: normalizedShapeId,
+        });
 
         shapeCache.delete(normalizedShapeId);
         deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
@@ -494,6 +612,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       return {
         checkpointHistorySeq: checkpointHistorySeqByRoom.get(roomName) ?? null,
         checkpointVersion: checkpointVersionByRoom.get(roomName) ?? 0,
+        historySeq: historySeqByRoom.get(roomName) ?? 0,
       };
     },
 
@@ -505,6 +624,16 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     getDirtyShapeIds(room) {
       return Array.from(dirtyShapeIdsByRoom.get(createCanvasRoomName(room)) ?? []);
+    },
+
+    getHistoryState(room) {
+      const roomName = createCanvasRoomName(room);
+
+      return {
+        canRedo: Boolean(redoHistoryByRoom.get(roomName)?.length),
+        canUndo: Boolean(historyByRoom.get(roomName)?.length),
+        historySeq: historySeqByRoom.get(roomName) ?? 0,
+      };
     },
 
     getLoadedRegions(room) {
@@ -559,7 +688,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
           roomName,
           (checkpointVersionByRoom.get(roomName) ?? 0) + 1,
         );
-        checkpointHistorySeqByRoom.set(roomName, null);
+        checkpointHistorySeqByRoom.set(
+          roomName,
+          historySeqByRoom.get(roomName) ?? null,
+        );
       }
     },
   };

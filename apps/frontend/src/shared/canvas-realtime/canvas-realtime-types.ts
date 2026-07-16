@@ -68,6 +68,19 @@ export type CanvasRoomLoadedRegion = {
   top: number;
 };
 
+export type CanvasRoomHistoryAction = "create" | "delete" | "update";
+
+export type CanvasRoomHistoryItem = {
+  action: CanvasRoomHistoryAction;
+  actorUserId: string;
+  after: Record<string, unknown> | null;
+  before: Record<string, unknown> | null;
+  createdAt: string;
+  id: string;
+  seq: number;
+  shapeId: string;
+};
+
 export type CanvasPresenceEditingMode =
   | "code"
   | "draw"
@@ -99,8 +112,11 @@ export type CanvasJoinPayload = {
 export type CanvasJoinedPayload = {
   workspaceId: string;
   canvasId: string;
+  canRedo: boolean;
+  canUndo: boolean;
   checkpointHistorySeq: number | null;
   checkpointVersion: number;
+  historySeq: number;
   latestOpSeq: number;
   loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
@@ -238,6 +254,7 @@ export type CanvasRoomCheckpointStatusPayload = {
   canvasId: string;
   checkpointHistorySeq: number | null;
   checkpointVersion: number;
+  historySeq: number;
   pendingOperations: number;
   status: "delayed" | "saved" | "saving";
   updatedAt: string;

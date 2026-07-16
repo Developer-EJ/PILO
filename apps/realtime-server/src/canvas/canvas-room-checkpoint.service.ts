@@ -60,6 +60,7 @@ export function createCanvasRoomCheckpointService({
       ...room,
       checkpointHistorySeq: checkpointState.checkpointHistorySeq,
       checkpointVersion: checkpointState.checkpointVersion,
+      historySeq: checkpointState.historySeq,
       pendingOperations,
       status,
       updatedAt: new Date().toISOString(),
