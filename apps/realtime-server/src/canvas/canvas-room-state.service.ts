@@ -75,6 +75,44 @@ function createLoadedRegion(
   };
 }
 
+function doRegionsOverlap(
+  leftRegion: CanvasRoomLoadedRegion,
+  rightRegion: CanvasRoomLoadedRegion,
+) {
+  return (
+    leftRegion.left <= rightRegion.right &&
+    leftRegion.right >= rightRegion.left &&
+    leftRegion.top <= rightRegion.bottom &&
+    leftRegion.bottom >= rightRegion.top
+  );
+}
+
+function mergeLoadedRegions(
+  regions: CanvasRoomLoadedRegion[],
+  nextRegion: CanvasRoomLoadedRegion,
+) {
+  const mergedRegion = { ...nextRegion };
+  const remainingRegions: CanvasRoomLoadedRegion[] = [];
+
+  regions.forEach((region) => {
+    if (!doRegionsOverlap(region, mergedRegion)) {
+      remainingRegions.push(region);
+      return;
+    }
+
+    mergedRegion.bottom = Math.max(mergedRegion.bottom, region.bottom);
+    mergedRegion.left = Math.min(mergedRegion.left, region.left);
+    mergedRegion.loadedAt =
+      region.loadedAt < mergedRegion.loadedAt ? region.loadedAt : mergedRegion.loadedAt;
+    mergedRegion.right = Math.max(mergedRegion.right, region.right);
+    mergedRegion.top = Math.min(mergedRegion.top, region.top);
+  });
+
+  return [...remainingRegions, mergedRegion]
+    .sort((left, right) => left.loadedAt.localeCompare(right.loadedAt))
+    .slice(-MAX_ROOM_LOADED_REGIONS);
+}
+
 export function createCanvasRoomStateService(): CanvasRoomStateService {
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
   const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
@@ -338,9 +376,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         return currentRegions;
       }
 
-      const nextRegions = [...currentRegions, createLoadedRegion(room, bounds)]
-        .sort((left, right) => left.loadedAt.localeCompare(right.loadedAt))
-        .slice(-MAX_ROOM_LOADED_REGIONS);
+      const nextRegions = mergeLoadedRegions(
+        currentRegions,
+        createLoadedRegion(room, bounds),
+      );
 
       loadedRegionsByRoom.set(roomName, nextRegions);
       return nextRegions;
