@@ -76,6 +76,7 @@ import type { CanvasShapeRow } from "../canvas/canvas.types";
 import {
   buildFileReviewDecisionCreatedActivityLog,
   buildPrReviewConflictResolutionAppliedActivityLog,
+  buildPrReviewPullRequestMergedActivityLog,
   buildPrReviewSessionCreatedActivityLog,
   buildReviewSubmissionTerminalActivityLog
 } from "./pr-review-activity-log";
@@ -2865,22 +2866,34 @@ export class PrReviewService {
         }
       );
 
-    try {
-      await this.database.execute(
+    await this.database.transaction(async (transaction) => {
+      const completedRoom = await transaction.queryOne<{ id: string }>(
         `
           UPDATE pr_review_rooms
           SET status = 'completed',
               completion_reason = 'merged',
               completed_at = COALESCE($2::timestamptz, now())
           WHERE id = $1
+          RETURNING id
         `,
         [session.room_id, mergeResult.mergedAt]
       );
-    } catch {
-      this.logger.warn(
-        `GitHub pull request was merged but review room completion failed for ${session.room_id}`
+      if (!completedRoom) {
+        throw conflictError("PR Review room is no longer active");
+      }
+
+      await this.activityLogService.append(
+        transaction,
+        buildPrReviewPullRequestMergedActivityLog({
+          currentUserId,
+          workspaceId,
+          pullRequestId: session.pull_request_id,
+          reviewSessionId: session.id,
+          mergeMethod: mergeResult.mergeMethod,
+          mergeCommitSha: mergeResult.mergeCommitSha
+        })
       );
-    }
+    });
 
     return {
       reviewSessionId: session.id,
