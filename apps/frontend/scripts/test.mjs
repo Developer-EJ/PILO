@@ -32,7 +32,7 @@ const canvasNormalizers = await readFile(
   "utf8"
 );
 const canvasStorage = await readFile(
-  new URL("../src/features/canvas/utils/canvas-storage.ts", import.meta.url),
+  new URL("../src/features/canvas/persistence/canvas-storage.ts", import.meta.url),
   "utf8"
 );
 const canvasTypes = await readFile(
@@ -99,91 +99,91 @@ const workspaceCreationRoute = await readFile(
 );
 const canvasRuntime = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/PiloCanvasRuntime.tsx",
+    "../src/features/canvas/engine/runtime/ClassicCanvasRuntime.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const canvasRuntimeTypes = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/canvas-runtime-types.ts",
+    "../src/features/canvas/engine/runtime/canvas-runtime-types.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasRuntimeUtils = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/canvas-runtime-utils.ts",
+    "../src/features/canvas/engine/runtime/canvas-runtime-utils.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasRemoteOperations = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/canvas-remote-operations.ts",
+    "../src/features/canvas/engine/runtime/canvas-remote-operations.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasRuntimeHydration = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/useCanvasRuntimeHydration.ts",
+    "../src/features/canvas/engine/runtime/useCanvasRuntimeHydration.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasApiLifecycle = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/useCanvasApiLifecycle.ts",
+    "../src/features/canvas/engine/runtime/useCanvasApiLifecycle.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasShapePersistence = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/useCanvasShapePersistence.ts",
+    "../src/features/canvas/engine/runtime/useCanvasShapePersistence.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasViewSettingPersistence = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/useCanvasViewSettingPersistence.ts",
+    "../src/features/canvas/engine/runtime/useCanvasViewSettingPersistence.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasViewportQueries = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/useCanvasViewportQueries.ts",
+    "../src/features/canvas/engine/runtime/useCanvasViewportQueries.ts",
     import.meta.url
   ),
   "utf8"
 );
 const canvasZoomControls = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/runtime/CanvasZoomControls.tsx",
+    "../src/features/canvas/engine/runtime/CanvasZoomControls.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const canvasWorkspace = await readFile(
-  new URL("../src/features/canvas/components/workspace-canvas.tsx", import.meta.url),
+  new URL("../src/features/canvas/components/screen/WorkspaceCanvas.tsx", import.meta.url),
   "utf8"
 );
 const canvasAiChatOverlay = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/surface/CanvasAiChatOverlay.tsx",
+    "../src/features/canvas/engine/editor/overlays/CanvasAiChatOverlay.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const canvasShapeSync = await readFile(
-  new URL("../src/features/canvas/utils/canvas-shape-sync.ts", import.meta.url),
+  new URL("../src/features/canvas/persistence/canvas-shape-sync.ts", import.meta.url),
   "utf8"
 );
 const canvasCollapse = await readFile(
-  new URL("../src/features/canvas/utils/canvas-collapse.ts", import.meta.url),
+  new URL("../src/features/canvas/engine/shapes/frame/canvas-frame-collapse.ts", import.meta.url),
   "utf8"
 );
 const canvasCss = await readFile(
@@ -197,34 +197,48 @@ const tldrawSurface = await readFile(
 );
 const piloTldrawCanvas = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/surface/PiloTldrawCanvas.tsx",
+    "../src/features/canvas/engine/editor/CanvasEditor.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasStateReporter = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/surface/pilo-canvas-state-reporter.tsx",
+    "../src/features/canvas/engine/editor/reporters/CanvasStateReporter.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasEditorStateReporters = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/reporters/CanvasEditorStateReporters.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const canvasAgentToolStepPlayback = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/surface/canvas-agent-tool-step-playback.ts",
+    "../src/features/canvas/engine/editor/overlays/canvas-agent-tool-step-playback.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasArrowBindings = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/surface/pilo-canvas-arrow-bindings.ts",
+    "../src/features/canvas/engine/editor/canvas-arrow-bindings.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasTypes = await readFile(
-  new URL("../src/features/canvas/components/engine/types.ts", import.meta.url),
+  new URL("../src/features/canvas/engine/canvas-engine-types.ts", import.meta.url),
+  "utf8"
+);
+const canvasEditorContracts = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/canvas-editor-contracts.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const canvasRealtimeTypes = await readFile(
@@ -236,7 +250,7 @@ const canvasRealtimeClient = await readFile(
   "utf8"
 );
 const canvasPresenceHook = await readFile(
-  new URL("../src/features/canvas/realtime/useCanvasPresence.ts", import.meta.url),
+  new URL("../src/features/canvas/collaboration/useCanvasRoom.ts", import.meta.url),
   "utf8"
 );
 const canvasRemoteCursorOverlay = await readFile(
@@ -256,98 +270,98 @@ const canvasRealtimeCss = await readFile(
 );
 const canvasRemotePresenceContext = await readFile(
   new URL(
-    "../src/features/canvas/realtime/CanvasRemotePresenceContext.tsx",
+    "../src/features/canvas/collaboration/CanvasRemotePresenceContext.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasAssets = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/assets/pilo-canvas-assets.ts",
+    "../src/features/canvas/engine/assets/pilo-canvas-assets.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasShapeFactory = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/pilo-canvas-shape-factory.ts",
+    "../src/features/canvas/engine/shapes/pilo-canvas-shape-factory.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasShapeUtils = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/pilo-canvas-shape-utils.ts",
+    "../src/features/canvas/engine/shapes/pilo-canvas-shape-utils.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloFrameShapeUtil = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/frame/PiloFrameShapeUtil.ts",
+    "../src/features/canvas/engine/shapes/frame/PiloFrameShapeUtil.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloFrameSelectionToolbar = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/frame/PiloFrameSelectionToolbar.tsx",
+    "../src/features/canvas/engine/shapes/frame/PiloFrameSelectionToolbar.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCollapsedFrameOverlay = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/surface/PiloCollapsedFrameOverlay.tsx",
+    "../src/features/canvas/engine/editor/overlays/PiloCollapsedFrameOverlay.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCodeBlockShapeUtil = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockShapeUtil.tsx",
+    "../src/features/canvas/engine/shapes/code-block/PiloCodeBlockShapeUtil.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCodeBlockComponent = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockComponent.tsx",
+    "../src/features/canvas/engine/shapes/code-block/PiloCodeBlockComponent.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCodeMirrorEditor = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeMirrorEditor.tsx",
+    "../src/features/canvas/engine/shapes/code-block/PiloCodeMirrorEditor.tsx",
     import.meta.url
   ),
   "utf8"
 );
 const piloCodeBlockShapeTypes = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/shapes/code-block/PiloCodeBlockShapeTypes.ts",
+    "../src/features/canvas/engine/shapes/code-block/PiloCodeBlockShapeTypes.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasPlacement = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/interactions/pilo-canvas-placement.ts",
+    "../src/features/canvas/engine/interactions/pilo-canvas-placement.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasFileImport = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/interactions/pilo-canvas-file-import.ts",
+    "../src/features/canvas/imports/canvas-code-file-import.ts",
     import.meta.url
   ),
   "utf8"
 );
 const piloCanvasGroupToolbar = await readFile(
   new URL(
-    "../src/features/canvas/components/engine/interactions/PiloCanvasGroupToolbar.tsx",
+    "../src/features/canvas/engine/interactions/PiloCanvasGroupToolbar.tsx",
     import.meta.url
   ),
   "utf8"
@@ -813,7 +827,7 @@ assert.doesNotMatch(canvasWorkspace, /label="삽입"/);
 assert.doesNotMatch(canvasWorkspace, /label="스마트가이드"/);
 assert.match(canvasWorkspace, /canvasClient=\{shouldUseCanvasApi \? canvasClient : null\}/);
 assert.match(canvasWorkspace, /storageMode=\{shouldUseCanvasApi \? "api" : "local"\}/);
-assert.match(canvasRuntime, /useCanvasPresence/);
+assert.match(canvasRuntime, /useCanvasRoom/);
 assert.match(canvasRuntime, /canvasClient,\s*[\r\n]\s*latestViewportBoundsRef/);
 assert.doesNotMatch(canvasRuntime, /persistenceCanvasClient/);
 assert.doesNotMatch(canvasRuntime, /commitShapeOperations/);
@@ -1124,7 +1138,7 @@ assert.match(packageJson, /"socket\.io-client"/);
 assert.match(tldrawSurface, /export function TldrawSurface/);
 assert.match(tldrawSurface, /shapeUtils=\{shapeUtils\}/);
 assert.match(tldrawSurface, /onMount=\{onMount\}/);
-assert.doesNotMatch(tldrawSurface, /useCanvasPresence/);
+assert.doesNotMatch(tldrawSurface, /useCanvasRoom/);
 assert.doesNotMatch(tldrawSurface, /RemoteCursorOverlay/);
 assert.doesNotMatch(tldrawSurface, /createCanvasShapeSyncQueue/);
 assert.doesNotMatch(tldrawSurface, /writeCanvasStorage/);
@@ -1135,13 +1149,13 @@ assert.match(piloTldrawCanvas, /CanvasStateReporter/);
 assert.match(piloTldrawCanvas, /initialViewSetting/);
 assert.match(piloTldrawCanvas, /editor\.setCamera/);
 assert.match(piloTldrawCanvas, /CanvasHistoryStateReporter/);
-assert.match(piloTldrawCanvas, /editor\.getCanUndo/);
-assert.match(piloTldrawCanvas, /editor\.getCanRedo/);
+assert.match(canvasEditorStateReporters, /editor\.getCanUndo/);
+assert.match(canvasEditorStateReporters, /editor\.getCanRedo/);
 assert.match(piloTldrawCanvas, /PiloCanvasSnapState/);
 assert.match(piloTldrawCanvas, /CanvasSnapStateReporter/);
-assert.match(piloTldrawCanvas, /editor\.user\.getIsSnapMode/);
+assert.match(canvasEditorStateReporters, /editor\.user\.getIsSnapMode/);
 assert.match(piloTldrawCanvas, /editor\.user\.updateUserPreferences/);
-assert.match(piloTldrawCanvas, /deleteSelection: \(\) => void/);
+assert.match(canvasEditorContracts, /deleteSelection: \(\) => void/);
 assert.match(piloTldrawCanvas, /function isPointerInsideTrashDropZone/);
 assert.match(piloTldrawCanvas, /function updateTrashDropZoneAttraction/);
 assert.match(
@@ -1205,7 +1219,7 @@ assert.match(piloTldrawCanvas, /editor\.getEditingShapeId\(\)/);
 assert.match(piloTldrawCanvas, /editor\.setEditingShape\(editingShapeId\)/);
 assert.match(piloTldrawCanvas, /editor\.setSelectedShapes\(nextSelectedShapeIds\)/);
 assert.match(piloTldrawCanvas, /CanvasLocalInteractionReporter/);
-assert.match(piloTldrawCanvas, /getProtectedLocalShapeIds/);
+assert.match(canvasEditorStateReporters, /getProtectedShapeIds/);
 assert.match(piloTldrawCanvas, /onLocalInteractionStateChange/);
 assert.match(piloTldrawCanvas, /freeformShapesRef\.current/);
 assert.match(piloTldrawCanvas, /pendingArrowBindingsRef/);
@@ -1359,11 +1373,11 @@ assert.match(piloCanvasFileImport, /isProbablyBinary/);
 assert.match(piloCanvasFileImport, /바이너리 파일은 제외했습니다/);
 assert.match(piloCanvasFileImport, /제외 폴더입니다/);
 assert.match(piloTldrawCanvas, /CanvasFileDropImporter/);
-assert.match(piloTldrawCanvas, /createNote: \(\) => void/);
+assert.match(canvasEditorContracts, /createNote: \(\) => void/);
 assert.match(piloTldrawCanvas, /editor\.setCurrentTool\("note"\)/);
 assert.match(canvasWorkspace, /setActiveCanvasTool\("note"\)/);
 assert.match(canvasWorkspace, /active=\{isCanvasToolActive\("note"\)\}/);
-assert.match(piloTldrawCanvas, /setColor: \(color: PiloCanvasColor\) => void/);
+assert.match(canvasEditorContracts, /setColor: \(color: PiloCanvasColor\) => void/);
 assert.match(piloTldrawCanvas, /editor\.setStyleForNextShapes\(DefaultColorStyle, color\)/);
 assert.match(piloTldrawCanvas, /editor\.setStyleForSelectedShapes\(DefaultColorStyle, color\)/);
 assert.match(piloTldrawCanvas, /color === "default"/);
@@ -1383,7 +1397,7 @@ assert.match(piloTldrawCanvas, /canvasAiChatPointerRef\.current/);
 assert.match(piloTldrawCanvas, /function trackCanvasAiChatPointer/);
 assert.match(piloTldrawCanvas, /onPointerMoveCapture=\{handleCanvasPointerMoveCapture\}/);
 assert.match(piloTldrawCanvas, /onPointerUpCapture=\{handleCanvasPointerUpCapture\}/);
-assert.match(piloTldrawCanvas, /openCanvasAiChat: \(anchor: CanvasAiChatAnchor\) => void/);
+assert.match(canvasEditorContracts, /openCanvasAiChat: \(anchor: CanvasAiChatAnchor\) => void/);
 assert.match(piloTldrawCanvas, /function openCanvasAiChatAt\(anchor: CanvasAiChatAnchor\)/);
 assert.match(canvasWorkspace, /agentTarget="toolbar\.canvas_ai"/);
 assert.match(canvasWorkspace, /onClick=\{openCanvasAiChat\}/);
