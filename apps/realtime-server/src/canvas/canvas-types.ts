@@ -22,6 +22,23 @@ export type CanvasPresenceViewport = {
   zoom: number;
 };
 
+export type CanvasLoadedViewportBounds = {
+  height: number;
+  margin: number;
+  width: number;
+  x: number;
+  y: number;
+};
+
+export type CanvasRoomLoadedRegion = {
+  bottom: number;
+  id: string;
+  left: number;
+  loadedAt: string;
+  right: number;
+  top: number;
+};
+
 export type CanvasPresenceEditingMode =
   | "code"
   | "draw"
@@ -52,9 +69,11 @@ export type CanvasJoinPayload = CanvasRoomRef & {
 
 export type CanvasJoinedPayload = CanvasRoomRef & {
   latestOpSeq: number;
+  loadedRegions: CanvasRoomLoadedRegion[];
   previews: CanvasShapePreviewEventPayload[];
   presence: CanvasPresenceState[];
   readOnly: boolean;
+  roomShapes: Record<string, unknown>[];
   shapeLocks: CanvasShapeLockState[];
   syncRequired: boolean;
 };
@@ -85,33 +104,6 @@ export type CanvasShapeOperationPayload = CanvasRoomRef & {
   resultRevision: number;
   shapeId: string;
 };
-
-export type CanvasShapeCommitOperation = {
-  baseRevision?: number | null;
-  clientOperationId: string;
-  payload?: Record<string, unknown>;
-  shapeId: string;
-  type: "create" | "update" | "delete";
-};
-
-export type CanvasShapeCommitPayload = CanvasRoomRef & {
-  operations: CanvasShapeCommitOperation[];
-};
-
-export type CanvasShapeCommitAck =
-  | {
-      ok: true;
-      result: unknown;
-    }
-  | {
-      ok: false;
-      error: {
-        body?: unknown;
-        code: string;
-        message: string;
-        status?: number;
-      };
-    };
 
 export type CanvasShapeLockState = CanvasRoomRef & {
   expiresAt: string;
@@ -161,3 +153,48 @@ export type CanvasShapePreviewClearPayload = CanvasRoomRef & {
 export type CanvasShapePreviewClearRequestPayload = CanvasRoomRef & {
   shapeIds: string[];
 };
+
+export type CanvasViewportLoadedPayload = CanvasRoomRef & {
+  bounds: CanvasLoadedViewportBounds;
+  shapes: Record<string, unknown>[];
+};
+
+export type CanvasRoomLoadedRegionsUpdatedPayload = CanvasRoomRef & {
+  loadedRegions: CanvasRoomLoadedRegion[];
+};
+
+export type CanvasRoomShapesHydratePayload = CanvasRoomRef & {
+  loadedRegions: CanvasRoomLoadedRegion[];
+  shapes: Record<string, unknown>[];
+};
+
+export type CanvasRoomShapePatchPayload = CanvasRoomRef & {
+  deletedShapeIds: string[];
+  upsertShapes: Record<string, unknown>[];
+};
+
+export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
+  actorUserId: string;
+  sentAt: string;
+};
+
+export type CanvasRoomCheckpointStatusPayload = CanvasRoomRef & {
+  pendingOperations: number;
+  status: "delayed" | "saved" | "saving";
+  updatedAt: string;
+};
+
+export type CanvasCheckpointSyncOperation =
+  | {
+      baseRevision: number | null;
+      clientOperationId: string;
+      payload: Record<string, unknown>;
+      shapeId: string;
+      type: "create" | "update";
+    }
+  | {
+      baseRevision: number | null;
+      clientOperationId: string;
+      shapeId: string;
+      type: "delete";
+    };

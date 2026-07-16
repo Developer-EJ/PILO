@@ -36,6 +36,17 @@ const apiDocument = await readFile(
   new URL("../../../../docs/api/sqltoerd-api.md", import.meta.url),
   "utf8"
 );
+const cutoverDocument = await readFile(
+  new URL(
+    "../../../../docs/infra/sqltoerd-operations-v1-cutover.md",
+    import.meta.url
+  ),
+  "utf8"
+);
+const secretsDocument = await readFile(
+  new URL("../../../../docs/infra/secrets.md", import.meta.url),
+  "utf8"
+);
 const sessionCreationAuditMigration = await readFile(
   new URL(
     "../../../../db/migrations/069_create_sql_erd_session_creation_audit.sql",
@@ -117,6 +128,21 @@ assert.match(
 assert.match(apiDocument, /database column default remains `snapshot`/i);
 assert.match(apiDocument, /sql_erd_session_creation_audit/);
 assert.match(apiDocument, /session_created_at >= :cutover_started_at/);
+assert.match(cutoverDocument, /false → true → false → true/);
+assert.match(
+  cutoverDocument,
+  /rollback은 신규 session의 protocol 선택만 `snapshot`으로 되돌린다/i
+);
+assert.match(cutoverDocument, /remote cursor·선택/);
+assert.match(cutoverDocument, /table·note·frame·text·stroke/);
+assert.match(cutoverDocument, /동일한 `clientOperationId`/);
+assert.match(cutoverDocument, /Socket\.IO 연결만 차단/);
+assert.match(cutoverDocument, /30초 TTL/);
+assert.match(cutoverDocument, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
+assert.match(
+  secretsDocument,
+  /`SQL_ERD_OPERATIONS_V1_ENABLED` \| 신규 SQLtoERD session의 write protocol/i
+);
 
 const currentUserId = "11111111-1111-4111-8111-111111111111";
 const workspaceId = "22222222-2222-4222-8222-222222222222";

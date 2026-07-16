@@ -10,6 +10,10 @@ import { createBoardRoomService } from "../board/board-room.service";
 import { createBoardSourceRoomService } from "../board/board-source-room.service";
 import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
 import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
+import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
+import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
+import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
+import { registerGithubSourceSocketHandlers } from "../github-source/github-source-socket-handlers";
 import { canvasClientEvents, canvasServerEvents } from "../canvas/canvas-socket-events";
 import {
   createCanvasAccessService,
@@ -17,12 +21,9 @@ import {
   type CanvasRoomAccess,
 } from "../canvas/canvas-access.service";
 import { createCanvasPresenceService } from "../canvas/canvas-presence.service";
+import { createCanvasRoomCheckpointService } from "../canvas/canvas-room-checkpoint.service";
 import { createCanvasRoomService } from "../canvas/canvas-room.service";
-import {
-  createCanvasShapeCommitService,
-  getShapeCommitBlockedByLocks,
-  readShapeCommitPayload,
-} from "../canvas/canvas-shape-commit.service";
+import { createCanvasRoomStateService } from "../canvas/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/canvas-shape-preview.service";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
@@ -37,6 +38,9 @@ import {
 } from "../sql-erd/sql-erd-socket-events";
 import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
+import { createWorkspacePresenceAccessService } from "../workspace-presence/workspace-presence-access.service";
+import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
+import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
 import {
   isMeetingReportRedisEvent,
   isMeetingStateRedisEvent,
@@ -64,8 +68,9 @@ import type {
   CanvasPresenceEditingMode,
   CanvasPresencePoint,
   CanvasPresenceUpdatePayload,
+  CanvasRoomShapePatchPayload,
   CanvasRoomRef,
-  CanvasShapeCommitAck,
+  CanvasViewportLoadedPayload,
   CanvasShapeLockClaimPayload,
   CanvasShapeLockReleasePayload,
   CanvasShapeOperationPayload,
@@ -137,6 +142,7 @@ const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
+const GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL = "github:source-invalidations";
 
 function createConflictDraftShapeLockId(
   reviewSessionId: string,
@@ -553,6 +559,67 @@ function readShapePreviewClearPayload(
   };
 }
 
+function readViewportLoadedPayload(
+  payload: unknown,
+): CanvasViewportLoadedPayload | null {
+  const room = readRoomRef(payload);
+
+  if (!room || !isRecord(payload) || !isRecord(payload.bounds)) return null;
+
+  const { height, margin, width, x, y } = payload.bounds;
+  const shapes = payload.shapes;
+
+  if (
+    typeof height !== "number" ||
+    typeof margin !== "number" ||
+    typeof width !== "number" ||
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    !Number.isFinite(height) ||
+    !Number.isFinite(margin) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    height <= 0 ||
+    width <= 0 ||
+    margin < 0
+  ) {
+    return null;
+  }
+  if (!Array.isArray(shapes) || !shapes.every(isRecord)) {
+    return null;
+  }
+
+  return {
+    ...room,
+    bounds: { height, margin, width, x, y },
+    shapes,
+  };
+}
+
+function readRoomShapePatchPayload(
+  payload: unknown,
+): CanvasRoomShapePatchPayload | null {
+  const room = readRoomRef(payload);
+
+  if (!room || !isRecord(payload)) return null;
+
+  const upsertShapes = payload.upsertShapes;
+  const deletedShapeIds = readShapeIdList(payload.deletedShapeIds);
+
+  if (!Array.isArray(upsertShapes) || !upsertShapes.every(isRecord)) {
+    return null;
+  }
+  if (!deletedShapeIds) return null;
+  if (!upsertShapes.length && !deletedShapeIds.length) return null;
+
+  return {
+    ...room,
+    deletedShapeIds,
+    upsertShapes,
+  };
+}
+
 function emitCanvasError(socket: Socket, message: string) {
   socket.emit(
     canvasServerEvents.error,
@@ -743,6 +810,7 @@ export async function createRealtimeSocketServer({
   const sqlErdAccessService = createSqlErdAccessService(database);
   const boardAccessService = createBoardAccessService(database);
   const presenceService = createCanvasPresenceService();
+  const roomStateService = createCanvasRoomStateService();
   const sqlErdPresenceService = createSqlErdPresenceService();
   const shapeLockService = createCanvasShapeLockService({
     redisClient: redisAdapter?.stateClient ?? null,
@@ -750,20 +818,31 @@ export async function createRealtimeSocketServer({
   const shapePreviewService = createCanvasShapePreviewService({
     redisClient: redisAdapter?.stateClient ?? null,
   });
-  const shapeCommitService = createCanvasShapeCommitService({
-    appServerUrl: config.appServerUrl,
-  });
   const roomService = createCanvasRoomService({
     accessService,
     presenceService,
+    roomStateService,
     shapeLockService,
     shapePreviewService,
+  });
+  const roomCheckpointService = createCanvasRoomCheckpointService({
+    appServerUrl: config.appServerUrl,
+    onCheckpointStatus(payload) {
+      io.to(createCanvasRoomName(payload)).emit(
+        canvasServerEvents.checkpoint,
+        payload,
+      );
+    },
+    roomStateService,
   });
   const sqlErdRoomService = createSqlErdRoomService({
     accessService: sqlErdAccessService,
     presenceService: sqlErdPresenceService,
   });
   const meetingAccessService = createMeetingAccessService(database);
+  const workspacePresenceAccessService =
+    createWorkspacePresenceAccessService(database);
+  const workspacePresenceService = createWorkspacePresenceService();
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -776,6 +855,15 @@ export async function createRealtimeSocketServer({
     accessService: boardAccessService,
   });
   const boardSourceFanOut = createBoardSourceFanOut({
+    emitToRoom(roomName, event, payload) {
+      io.to(roomName).emit(event, payload);
+    },
+  });
+  const githubSourceAccessService = createGithubSourceAccessService(database);
+  const githubSourceRoomService = createGithubSourceRoomService({
+    accessService: githubSourceAccessService,
+  });
+  const githubSourceFanOut = createGithubSourceFanOut({
     emitToRoom(roomName, event, payload) {
       io.to(roomName).emit(event, payload);
     },
@@ -841,6 +929,16 @@ export async function createRealtimeSocketServer({
         }
       })
     : null;
+  const unsubscribeGithubSourceInvalidations = redisAdapter
+    ? await redisAdapter.subscribe(
+        GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL,
+        (payload) => {
+          if (!githubSourceFanOut.fanOut(payload)) {
+            console.error("GitHub source invalidation Redis payload is invalid");
+          }
+        },
+      )
+    : null;
   const unsubscribePrReviewDecisions = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
         if (!isPrReviewDecisionUpdatedEvent(payload)) {
@@ -899,6 +997,13 @@ export async function createRealtimeSocketServer({
 
   io.on("connection", (socket) => {
     const authedSocket = socket as AuthedSocket;
+
+    registerWorkspacePresenceSocketHandlers({
+      accessService: workspacePresenceAccessService,
+      io,
+      service: workspacePresenceService,
+      socket,
+    });
 
     socket.on(canvasClientEvents.join, async (payload) => {
       const joinPayload = readJoinPayload(payload);
@@ -1058,6 +1163,10 @@ export async function createRealtimeSocketServer({
         room,
       );
 
+      await roomCheckpointService.flushCheckpointNow(
+        room,
+        authedSocket.data.auth.token,
+      );
       await socket.leave(roomName);
       authedSocket.data.canvasRoomAccess.delete(roomName);
 
@@ -1104,6 +1213,11 @@ export async function createRealtimeSocketServer({
     registerBoardSourceSocketHandlers({
       context: authedSocket.data.auth,
       roomService: boardSourceRoomService,
+      socket,
+    });
+    registerGithubSourceSocketHandlers({
+      context: authedSocket.data.auth,
+      roomService: githubSourceRoomService,
       socket,
     });
 
@@ -1287,115 +1401,77 @@ export async function createRealtimeSocketServer({
       io.to(roomName).emit(canvasServerEvents.shapeLockRelease, lockReleasePayload);
     });
 
-    socket.on(
-      canvasClientEvents.shapeCommit,
-      async (payload, callback?: (ack: CanvasShapeCommitAck) => void) => {
-        const commitPayload = readShapeCommitPayload(payload);
+    socket.on(canvasClientEvents.viewportLoaded, (payload) => {
+      const loadedPayload = readViewportLoadedPayload(payload);
 
-        if (!commitPayload) {
-          const ack: CanvasShapeCommitAck = {
-            error: {
-              code: "invalid_payload",
-              message: "canvas:shape:commit payload is invalid",
-            },
-            ok: false,
-          };
-          callback?.(ack);
-          emitCanvasError(socket, ack.error.message);
-          return;
-        }
+      if (!loadedPayload) {
+        emitCanvasError(socket, "canvas:viewport:loaded payload is invalid");
+        return;
+      }
 
-        const roomName = createCanvasRoomName(commitPayload);
+      const roomName = createCanvasRoomName(loadedPayload);
 
-        if (!socket.rooms.has(roomName)) {
-          const ack: CanvasShapeCommitAck = {
-            error: {
-              code: "room_not_joined",
-              message: "join canvas room before committing shape operations",
-            },
-            ok: false,
-          };
-          callback?.(ack);
-          socket.emit(
-            canvasServerEvents.error,
-            createSocketErrorPayload("room_not_joined", ack.error.message),
-          );
-          return;
-        }
-
-        if (!assertCanvasRoomWritable(authedSocket, roomName)) {
-          callback?.({
-            error: {
-              code: "read_only",
-              message: "canvas room is read-only",
-            },
-            ok: false,
-          });
-          return;
-        }
-
-        const actorUserId = authedSocket.data.auth.userId ?? socket.id;
-        const commitShapeIds = Array.from(
-          new Set(
-            commitPayload.operations
-              .map((operation) => operation.shapeId.trim())
-              .filter(Boolean),
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before reporting loaded viewport",
           ),
         );
-        const clearCommitShapePreview = async () => {
-          if (!commitShapeIds.length) return;
+        return;
+      }
 
-          const clearEvent = await shapePreviewService.clearRoomPreview(
-            socket.id,
-            actorUserId,
-            commitPayload,
-            commitShapeIds,
-          );
+      const loadedRegions = roomStateService.recordLoadedViewport(
+        loadedPayload,
+        loadedPayload.bounds,
+        loadedPayload.shapes,
+      );
 
-          if (clearEvent) {
-            socket.to(roomName).emit(canvasServerEvents.shapePreviewClear, clearEvent);
-          }
-        };
-        const blockingLocks = getShapeCommitBlockedByLocks({
-          locks: await shapeLockService.getRoomLocks(commitPayload),
-          operations: commitPayload.operations,
-          ownerUserId: actorUserId,
-        });
+      io.to(roomName).emit(canvasServerEvents.shapesHydrate, {
+        canvasId: loadedPayload.canvasId,
+        loadedRegions,
+        shapes: loadedPayload.shapes,
+        workspaceId: loadedPayload.workspaceId,
+      });
+    });
 
-        if (blockingLocks.length) {
-          await clearCommitShapePreview();
-          callback?.({
-            error: {
-              body: { locks: blockingLocks },
-              code: "shape_locked",
-              message: "shape is locked by another user",
-              status: 409,
-            },
-            ok: false,
-          });
-          return;
-        }
+    socket.on(canvasClientEvents.shapePatch, (payload) => {
+      const patchPayload = readRoomShapePatchPayload(payload);
 
-        try {
-          const ack = await shapeCommitService.commitOperations(
-            authedSocket.data.auth.token,
-            commitPayload,
-          );
-          await clearCommitShapePreview();
-          callback?.(ack);
-        } catch (error) {
-          await clearCommitShapePreview();
-          console.error("Canvas realtime shape commit failed", error);
-          callback?.({
-            error: {
-              code: "internal_error",
-              message: "Canvas realtime shape commit failed",
-            },
-            ok: false,
-          });
-        }
-      },
-    );
+      if (!patchPayload) {
+        emitCanvasError(socket, "canvas:room:shape:patch payload is invalid");
+        return;
+      }
+
+      const roomName = createCanvasRoomName(patchPayload);
+
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          canvasServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join canvas room before sending room shape patch",
+          ),
+        );
+        return;
+      }
+
+      if (!assertCanvasRoomWritable(authedSocket, roomName)) {
+        return;
+      }
+
+      roomStateService.applyShapePatch(patchPayload, patchPayload);
+      roomCheckpointService.scheduleCheckpoint(
+        patchPayload,
+        authedSocket.data.auth.token,
+      );
+      socket.to(roomName).emit(canvasServerEvents.shapePatch, {
+        ...patchPayload,
+        actorUserId: authedSocket.data.auth.userId ?? socket.id,
+        sentAt: new Date().toISOString(),
+      });
+    });
 
     socket.on(canvasClientEvents.shapePreview, async (payload) => {
       const previewPayload = readShapePreviewPayload(payload);
@@ -1597,8 +1673,10 @@ export async function createRealtimeSocketServer({
       await unsubscribeMeetingStates?.();
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
+      await unsubscribeGithubSourceInvalidations?.();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewConflictDrafts?.();
+      await roomCheckpointService.close();
       await io.close();
       await redisAdapter?.close();
       await database.close();

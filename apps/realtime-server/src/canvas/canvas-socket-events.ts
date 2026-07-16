@@ -4,12 +4,14 @@ export const canvasClientEvents = {
   presenceUpdate: "canvas:presence:update",
   shapeLockClaim: "canvas:shape:lock:claim",
   shapeLockRelease: "canvas:shape:lock:release",
-  shapeCommit: "canvas:shape:commit",
+  shapePatch: "canvas:room:shape:patch",
   shapePreview: "canvas:shape:preview",
   shapePreviewClear: "canvas:shape:preview:clear",
+  viewportLoaded: "canvas:viewport:loaded",
 } as const;
 
 export const canvasServerEvents = {
+  checkpoint: "canvas:room:checkpoint",
   error: "canvas:error",
   joined: "canvas:joined",
   operation: "canvas:operation",
@@ -19,7 +21,10 @@ export const canvasServerEvents = {
   shapeLockRejected: "canvas:shape:lock:rejected",
   shapeLockRelease: "canvas:shape:lock:release",
   shapeLockUpdate: "canvas:shape:lock:update",
+  shapePatch: "canvas:room:shape:patch",
   shapePreview: "canvas:shape:preview",
   shapePreviewClear: "canvas:shape:preview:clear",
+  shapesHydrate: "canvas:room:shapes:hydrate",
+  loadedRegionsUpdate: "canvas:room:loaded-regions:update",
   syncRequired: "canvas:sync:required",
 } as const;

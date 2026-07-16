@@ -250,7 +250,14 @@ class SourceSnapshotDatabase {
       this.outboxOperationId = values[0];
     }
     if (text.includes("DELETE FROM sql_erd_session_source_locks")) {
-      this.lock = null;
+      const [, , actorUserId, leaseId] = values;
+      const matchesOwner =
+        !actorUserId ||
+        (this.lock?.actor_user_id === actorUserId && this.lock?.lease_id === leaseId);
+      const matchesExpiry = text.includes("expires_at <= now()")
+        ? this.lock && this.lock.expires_at <= new Date()
+        : this.lock && this.lock.expires_at > new Date();
+      if (matchesOwner && matchesExpiry) this.lock = null;
     }
     if (text.includes("UPDATE sql_erd_session_source_locks") && this.lock) {
       this.lock.source_base_revision = values.at(-1);
@@ -260,7 +267,9 @@ class SourceSnapshotDatabase {
 
   async queryOne(text, values = []) {
     if (text.includes("FROM sql_erd_sessions")) return this.session;
-    if (text.includes("FROM sql_erd_session_source_locks")) return this.lock;
+    if (text.includes("FROM sql_erd_session_source_locks")) {
+      return this.lock?.expires_at > new Date() ? this.lock : null;
+    }
     if (text.includes("INSERT INTO sql_erd_session_source_locks")) {
       this.lock = {
         workspace_id: values[0],
@@ -272,6 +281,21 @@ class SourceSnapshotDatabase {
         created_at: new Date(),
         updated_at: new Date()
       };
+      return this.lock;
+    }
+    if (text.includes("UPDATE sql_erd_session_source_locks")) {
+      const [workspaceId, lockSessionId, actorUserId, ttlSeconds, leaseId] = values;
+      if (
+        this.lock?.workspace_id !== workspaceId ||
+        this.lock?.session_id !== lockSessionId ||
+        this.lock?.actor_user_id !== actorUserId ||
+        this.lock?.lease_id !== leaseId ||
+        this.lock.expires_at <= new Date()
+      ) {
+        return null;
+      }
+      this.lock.expires_at = new Date(Date.now() + Number(ttlSeconds) * 1_000);
+      this.lock.updated_at = new Date();
       return this.lock;
     }
     if (text.includes("UPDATE sql_erd_sessions")) {
@@ -337,6 +361,8 @@ class SourceSnapshotDatabase {
 const sourceWorkspaceId = "55555555-5555-4555-8555-555555555555";
 const sourceUserId = "66666666-6666-4666-8666-666666666666";
 const sourceLeaseId = "99999999-9999-4999-8999-999999999999";
+const competingSourceUserId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const competingSourceLeaseId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const sourceDatabase = new SourceSnapshotDatabase();
 const sourceService = new SqlErdService(sourceDatabase, {
   async assertWorkspaceAccess() {
@@ -352,6 +378,25 @@ const acquiredLock = await sourceService.acquireSourceLock(
 );
 assert.equal(acquiredLock.leaseId, sourceLeaseId);
 assert.equal(acquiredLock.sourceBaseRevision, 2);
+
+await assert.rejects(
+  () =>
+    sourceService.acquireSourceLock(
+      competingSourceUserId,
+      sourceWorkspaceId,
+      sessionId,
+      { leaseId: competingSourceLeaseId }
+    ),
+  (error) => error.getStatus() === 409 && error.getResponse().error.code === "CONFLICT"
+);
+
+const renewedLock = await sourceService.renewSourceLock(
+  sourceUserId,
+  sourceWorkspaceId,
+  sessionId,
+  { leaseId: sourceLeaseId }
+);
+assert.equal(renewedLock.leaseId, sourceLeaseId);
 
 const sourcePublish = await sourceService.publishSourceSnapshot(
   sourceUserId,
@@ -403,3 +448,37 @@ await assert.rejects(
     }),
   (error) => error.getStatus() === 409 && error.getResponse().error.code === "CONFLICT"
 );
+
+await assert.rejects(
+  () =>
+    sourceService.releaseSourceLock(
+      competingSourceUserId,
+      sourceWorkspaceId,
+      sessionId,
+      { leaseId: competingSourceLeaseId }
+    ),
+  (error) => error.getStatus() === 409 && error.getResponse().error.code === "CONFLICT"
+);
+
+await sourceService.releaseSourceLock(sourceUserId, sourceWorkspaceId, sessionId, {
+  leaseId: sourceLeaseId
+});
+assert.equal(sourceDatabase.lock, null);
+
+const competingLock = await sourceService.acquireSourceLock(
+  competingSourceUserId,
+  sourceWorkspaceId,
+  sessionId,
+  { leaseId: competingSourceLeaseId }
+);
+assert.equal(competingLock.leaseId, competingSourceLeaseId);
+
+sourceDatabase.lock.expires_at = new Date(Date.now() - 1_000);
+const takeoverLeaseId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const takeoverLock = await sourceService.acquireSourceLock(
+  sourceUserId,
+  sourceWorkspaceId,
+  sessionId,
+  { leaseId: takeoverLeaseId }
+);
+assert.equal(takeoverLock.leaseId, takeoverLeaseId);

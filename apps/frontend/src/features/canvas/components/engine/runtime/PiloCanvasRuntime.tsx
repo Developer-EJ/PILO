@@ -5,7 +5,7 @@ import {
   QueryClientProvider,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasShapeOperationPayload } from "@/features/canvas/api/canvas-types";
 import {
   isRecord,
@@ -16,7 +16,6 @@ import { useCanvasPresence } from "@/features/canvas/realtime/useCanvasPresence"
 import { normalizeCanvasFreeformShapes } from "../../../utils/canvas-storage";
 import type {
   CanvasShapeSyncConflict,
-  CanvasShapeSyncOperation,
   CanvasShapeSyncQueue,
 } from "../../../utils/canvas-shape-sync";
 import {
@@ -221,12 +220,6 @@ function readConflictLatestFreeformShape(conflict: CanvasShapeSyncConflict) {
   return shape && typeof shape.id === "string" ? shape : null;
 }
 
-function readRealtimeCommitErrorCode(error: unknown) {
-  return isRecord(error) && typeof error.code === "string"
-    ? error.code
-    : null;
-}
-
 function readRealtimeCommitErrorStatus(error: unknown) {
   return isRecord(error) && typeof error.status === "number"
     ? error.status
@@ -234,17 +227,33 @@ function readRealtimeCommitErrorStatus(error: unknown) {
 }
 
 function getShapeSyncErrorNoticeMessage(error: unknown) {
-  const code = readRealtimeCommitErrorCode(error);
-
-  if (code === "shape_locked") {
-    return "다른 사용자가 작업 중인 도형이라 반영하지 못했어요. 잠시 뒤 다시 시도해 주세요.";
-  }
-
   if (readRealtimeCommitErrorStatus(error) === 409) {
     return "다른 사용자가 먼저 수정해서 최신 상태로 갱신했어요.";
   }
 
   return "Canvas 변경사항 저장 중 오류가 발생했어요. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
+}
+
+function doesShapeIntersectViewport(
+  shape: PiloCanvasFreeformShape,
+  viewport: PiloCanvasViewportBounds | null,
+) {
+  if (!viewport) return false;
+
+  const shapeRecord = shape as Record<string, unknown>;
+  const shapeX = typeof shape.x === "number" ? shape.x : 0;
+  const shapeY = typeof shape.y === "number" ? shape.y : 0;
+  const shapeWidth =
+    typeof shapeRecord.width === "number" ? shapeRecord.width : 0;
+  const shapeHeight =
+    typeof shapeRecord.height === "number" ? shapeRecord.height : 0;
+
+  return (
+    shapeX + shapeWidth >= viewport.x &&
+    shapeX <= viewport.x + viewport.width &&
+    shapeY + shapeHeight >= viewport.y &&
+    shapeY <= viewport.y + viewport.height
+  );
 }
 
 export function PiloCanvasRuntime({
@@ -560,58 +569,54 @@ function PiloCanvasRuntimeInner({
     },
     [board.id, board.workspaceId, queryClient, showCanvasSyncNotice],
   );
+  const hydrateRoomShapesRef = useRef<
+    (shapes: Record<string, unknown>[]) => void
+  >(() => {});
+  const hydrateRoomShapes = useCallback((shapes: Record<string, unknown>[]) => {
+    hydrateRoomShapesRef.current(shapes);
+  }, []);
+  const applyRoomShapePatch = useCallback(
+    (patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] }) => {
+      patch.deletedShapeIds.forEach((shapeId) => {
+        markShapeDeleted(shapeId);
+      });
+
+      if (patch.deletedShapeIds.length) {
+        setFreeformShapes((currentShapes) => {
+          const deletedShapeIds = new Set(patch.deletedShapeIds);
+          const nextShapes = currentShapes.filter((shape) => {
+            const shapeId = getFreeformShapeId(shape);
+
+            return !shapeId || !deletedShapeIds.has(shapeId);
+          });
+
+          freeformShapesRef.current = nextShapes;
+          return nextShapes;
+        });
+        setCanvasHydrationVersion((version) => version + 1);
+      }
+
+      hydrateRoomShapes(patch.upsertShapes);
+    },
+    [hydrateRoomShapes, markShapeDeleted],
+  );
   const canvasPresence = useCanvasPresence(realtime, {
     applyOperations: applyRemoteCanvasOperations,
+    applyRoomShapePatch,
     catchUpOperations: catchUpCanvasOperations,
+    hydrateShapes: hydrateRoomShapes,
   });
-  const persistenceCanvasClient = useMemo<CanvasViewSettingApiClient | null>(() => {
-    if (!canvasClient) {
-      return null;
+
+  useEffect(() => {
+    if (canvasPresence.checkpointStatus?.status !== "delayed") {
+      return;
     }
 
-    return {
-      ...canvasClient,
-      async syncShapesBatch(boardId, body, options) {
-        if (
-          boardId === board.id &&
-          options.workspaceId === board.workspaceId &&
-          isRecord(body) &&
-          Array.isArray(body.operations)
-        ) {
-          const operations = body.operations as CanvasShapeSyncOperation[];
-          const shapeIds = Array.from(
-            new Set(
-              operations
-                .map((operation) => operation.shapeId.trim())
-                .filter(Boolean),
-            ),
-          );
-          const realtimeCommitResult = canvasPresence.commitShapeOperations(
-            operations,
-          );
-
-          if (realtimeCommitResult) {
-            try {
-              return await realtimeCommitResult;
-            } finally {
-              canvasPresence.clearShapePreview(shapeIds);
-            }
-          }
-        }
-
-        if (canvasClient.syncShapesBatch) {
-          return canvasClient.syncShapesBatch(boardId, body, options);
-        }
-
-        throw new Error("Canvas shape batch client is unavailable");
-      },
-    };
-  }, [
-    board.id,
-    board.workspaceId,
-    canvasClient,
-    canvasPresence.commitShapeOperations,
-  ]);
+    showCanvasSyncNotice(
+      "Canvas 변경사항 저장이 지연되고 있어요. 연결이 회복되면 다시 저장을 시도합니다.",
+      "warning",
+    );
+  }, [canvasPresence.checkpointStatus, showCanvasSyncNotice]);
 
   useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
@@ -660,7 +665,7 @@ function PiloCanvasRuntimeInner({
 
   useCanvasApiLifecycle({
     board,
-    canvasClient: persistenceCanvasClient,
+    canvasClient,
     latestViewportBoundsRef,
     pendingShapeDetailRef,
     pendingViewSettingRef,
@@ -680,13 +685,15 @@ function PiloCanvasRuntimeInner({
     persistFreeformShapes,
   } = useCanvasShapePersistence({
     board,
-    canvasClient: persistenceCanvasClient,
+    canvasClient,
     freeformShapesRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteOperations,
+    onRoomShapePatch: canvasPresence.sendRoomShapePatch,
     onShapeSyncConflict: handleShapeSyncConflict,
     onShapeSyncError: handleShapeSyncError,
     pendingLocalShapeVersionsRef,
+    persistThroughRoomState: canvasPresence.enabled,
     remoteShapeRevisionRef,
     setCanvasHydrationVersion,
     setFreeformShapes,
@@ -696,6 +703,35 @@ function PiloCanvasRuntimeInner({
     deletedShapeIdsRef,
     unloadedShapeIdsRef,
   });
+
+  useEffect(() => {
+    hydrateRoomShapesRef.current = (rawShapes: Record<string, unknown>[]) => {
+      const hydratedShapes = normalizeCanvasFreeformShapes(
+        rawShapes,
+      ) as PiloCanvasFreeformShape[];
+      const nextShapes = hydratedShapes.filter((shape) => {
+        if (typeof shape.id !== "string") return true;
+        return !deletedShapeIdsRef.current.has(shape.id);
+      });
+
+      if (!nextShapes.length) return;
+
+      nextShapes.forEach((shape) => {
+        if (typeof shape.id !== "string") return;
+
+        unloadedShapeIdsRef.current.delete(shape.id);
+        shapeDetailCacheRef.current.set(shape.id, shape);
+      });
+
+      const visibleShapes = nextShapes.filter((shape) =>
+        doesShapeIntersectViewport(shape, latestViewportBoundsRef.current),
+      );
+
+      if (visibleShapes.length) {
+        mergeLoadedFreeformShapes(visibleShapes);
+      }
+    };
+  }, [mergeLoadedFreeformShapes]);
 
   const persistViewSetting = useCanvasViewSettingPersistence({
     board,
@@ -719,6 +755,7 @@ function PiloCanvasRuntimeInner({
     shapeDetailCacheRef,
     shapeDetailRequestSeqRef,
     storageMode,
+    onViewportShapesLoaded: canvasPresence.reportLoadedViewport,
     deletedShapeIdsRef,
     unloadedShapeIdsRef,
     viewportShapeLoadRequestSeqRef,
