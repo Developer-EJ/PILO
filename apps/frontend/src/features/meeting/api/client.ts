@@ -553,11 +553,28 @@ export function createMeetingApiClient({
       actionItemId: string,
       body: MeetingReportActionItemDeliveryInput
     ) {
-      return requestMeetingData<MeetingReportActionItemDeliveryResult>(
-        `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/deliveries`,
-        withJsonBody(body, { method: "POST" }),
-        requestOptions
-      );
+      try {
+        return await requestMeetingData<MeetingReportActionItemDeliveryResult>(
+          `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/deliveries`,
+          withJsonBody(body, { method: "POST" }),
+          requestOptions
+        );
+      } catch (error) {
+        if (!(error instanceof MeetingApiError) || error.status !== 404) {
+          throw error;
+        }
+
+        await requestMeetingData<MeetingReportActionItemMutationPayload>(
+          `${meetingReportActionItemPath(workspaceId, reportId, actionItemId)}/approve`,
+          { method: "POST" },
+          requestOptions
+        );
+        return {
+          actionItemId,
+          deliveryType: body.deliveryType,
+          status: "LEGACY_APPROVED"
+        };
+      }
     },
 
     async dismissMeetingReportActionItem(

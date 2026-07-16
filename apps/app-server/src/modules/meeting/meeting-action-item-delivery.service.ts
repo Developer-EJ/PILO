@@ -6,7 +6,6 @@ import { DatabaseService, DatabaseTransaction } from "../../database/database.se
 import { BoardService } from "../board/board.service";
 import { CalendarService } from "../calendar/calendar.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import type { BoardColumnPayload, BoardPayload } from "../board/types";
 
 export type MeetingActionItemDeliveryType = "calendar_event" | "pilo_issue";
 
@@ -205,21 +204,12 @@ export class MeetingActionItemDeliveryService {
     if (!actionItem) {
       throw notFound("Meeting report action item not found");
     }
-    const boards = await this.boardService.listBoards(currentUserId, workspaceId, {
-      limit: 100,
-      page: 1
-    });
-    const options = await Promise.all(
-      boards.data.map(async (board: BoardPayload) => {
-        const columns = await this.boardService.listBoardColumns(
-          currentUserId,
-          workspaceId,
-          board.id
-        );
-        return this.mapIssueDeliveryOption(board, columns);
-      })
-    );
-    return { boards: options };
+    return {
+      boards: await this.boardService.listBoardDeliveryOptions(
+        currentUserId,
+        workspaceId
+      )
+    };
   }
 
   private async prepareDelivery(
@@ -278,6 +268,12 @@ export class MeetingActionItemDeliveryService {
       ) {
         throw badRequest("Action item is not ready for delivery");
       }
+      await this.validateDeliveryDraft(
+        currentUserId,
+        workspaceId,
+        actionItem,
+        delivery?.draft_json ?? draft
+      );
       if (!delivery) {
         if (actionItem.status !== "PENDING") {
           throw badRequest("Action item is not ready for delivery");
@@ -514,15 +510,42 @@ export class MeetingActionItemDeliveryService {
     return "ACTION_ITEM_DELIVERY_FAILED";
   }
 
-  private mapIssueDeliveryOption(
-    board: BoardPayload,
-    columns: BoardColumnPayload[]
-  ): MeetingActionItemIssueDeliveryOption {
-    return {
-      id: board.id,
-      name: board.name,
-      columns: columns.map((column) => ({ id: column.id, name: column.name }))
-    };
+  private async validateDeliveryDraft(
+    currentUserId: string,
+    workspaceId: string,
+    actionItem: ActionItemRow,
+    draft: MeetingActionItemDeliveryInput
+  ): Promise<void> {
+    if (draft.deliveryType === "calendar_event") {
+      if (!draft.calendar) {
+        throw badRequest("calendar delivery input is required");
+      }
+      this.calendarService.validateCreateEventInput({
+        title: draft.calendar.title ?? actionItem.title,
+        description: draft.calendar.description ?? actionItem.description,
+        color: draft.calendar.color,
+        isAllDay: draft.calendar.isAllDay,
+        startDate: draft.calendar.startDate,
+        endDate: draft.calendar.endDate,
+        startTime: draft.calendar.startTime,
+        endTime: draft.calendar.endTime
+      });
+      return;
+    }
+
+    if (!draft.issue) {
+      throw badRequest("issue delivery input is required");
+    }
+    await this.boardService.validateBoardIssueCreateInput(
+      currentUserId,
+      workspaceId,
+      draft.issue.boardId,
+      {
+        columnId: draft.issue.columnId,
+        title: draft.issue.title ?? actionItem.title,
+        body: draft.issue.body ?? actionItem.description
+      }
+    );
   }
 
   private normalizeDeliveryInput(input: unknown): MeetingActionItemDeliveryInput {

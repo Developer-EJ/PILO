@@ -45,6 +45,24 @@ const deliveryAttemptAuditMigration = await readFile(
   ),
   "utf8"
 );
+const deliveryAttemptActorIndexMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/077_add_meeting_action_item_delivery_attempt_actor_index.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingActionItemDeliverySource = await readFile(
+  new URL(
+    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingServiceSource = await readFile(
+  new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
+  "utf8"
+);
 
 assert.match(
   meetingAgentWorkflowMigration,
@@ -80,6 +98,31 @@ assert.match(
   deliveryAttemptAuditMigration,
   /last_attempted_at TIMESTAMPTZ/,
   "Delivery retries must retain when the latest attempt was claimed"
+);
+assert.match(
+  deliveryAttemptActorIndexMigration,
+  /CREATE INDEX IF NOT EXISTS idx_meeting_report_action_item_deliveries_last_attempted_by_user[\s\S]*?\(last_attempted_by_user_id\)[\s\S]*?WHERE last_attempted_by_user_id IS NOT NULL/,
+  "The delivery attempt actor foreign key needs a partial covering index"
+);
+assert.match(
+  meetingActionItemDeliverySource,
+  /await this\.validateDeliveryDraft\([\s\S]*?INSERT INTO meeting_report_action_item_deliveries/,
+  "A user-invalid draft must be validated before a delivery row is created"
+);
+assert.match(
+  meetingActionItemDeliverySource,
+  /listBoardDeliveryOptions\([\s\S]*?workspaceId[\s\S]*?\)/,
+  "Delivery options must use the joined Board and Column read path"
+);
+assert.doesNotMatch(
+  meetingActionItemDeliverySource,
+  /Promise\.all\([\s\S]*?listBoardColumns/,
+  "Delivery options must not issue one Board-column query per Board"
+);
+assert.match(
+  meetingServiceSource,
+  /approveMeetingReportActionItem[\s\S]*?transitionMeetingReportActionItem\([\s\S]*?"APPROVED"/,
+  "The legacy approval endpoint must remain compatible during the delivery rollout"
 );
 
 function createMeeting(overrides = {}) {
@@ -870,6 +913,39 @@ class FakeActionItemDeliveryDatabase {
   }
 }
 
+class FakeInvalidCalendarDeliveryDatabase {
+  constructor() {
+    this.actionItem = {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      title: "Calendar 제목",
+      description: "Calendar 설명",
+      status: "PENDING"
+    };
+    this.insertedDelivery = false;
+  }
+
+  async transaction(callback) {
+    return callback(this);
+  }
+
+  async execute(text) {
+    if (text.includes("SET status = 'DELIVERING'")) {
+      throw new Error("invalid draft must not claim an action item");
+    }
+    return { rows: [] };
+  }
+
+  async queryOne(text) {
+    if (text.includes("SELECT action_items.id")) return { ...this.actionItem };
+    if (text.includes("FROM meeting_report_action_item_deliveries")) return null;
+    if (text.includes("INSERT INTO meeting_report_action_item_deliveries")) {
+      this.insertedDelivery = true;
+      throw new Error("invalid draft must not create a delivery");
+    }
+    throw new Error(`Unhandled invalid-calendar delivery query: ${text}`);
+  }
+}
+
 {
   const database = new FakeActionItemDeliveryDatabase();
   const boardCalls = [];
@@ -878,6 +954,7 @@ class FakeActionItemDeliveryDatabase {
     { async assertWorkspaceAccess() {} },
     {},
     {
+      async validateBoardIssueCreateInput() {},
       async createBoardIssue(userId, workspaceId, boardId, input, idempotencyKey) {
         boardCalls.push({ userId, workspaceId, boardId, input, idempotencyKey });
         return { issue: { id: "42" } };
@@ -915,6 +992,38 @@ class FakeActionItemDeliveryDatabase {
       idempotencyKey: "meeting-action-item:stable-operation"
     }
   ]);
+}
+
+{
+  const database = new FakeInvalidCalendarDeliveryDatabase();
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {
+      validateCreateEventInput(input) {
+        assert.equal(input.startDate, "2026-07-09");
+        assert.equal(input.endDate, "2026-07-08");
+        const error = new Error("endDate must be on or after startDate");
+        error.getStatus = () => 400;
+        throw error;
+      }
+    },
+    {}
+  );
+
+  await assert.rejects(
+    () =>
+      service.deliver(USER_ID, WORKSPACE_ID, REPORT_ID, database.actionItem.id, {
+        deliveryType: "calendar_event",
+        calendar: {
+          isAllDay: true,
+          startDate: "2026-07-09",
+          endDate: "2026-07-08"
+        }
+      }),
+    error => error.getStatus() === 400
+  );
+  assert.equal(database.insertedDelivery, false);
 }
 
 {

@@ -351,7 +351,7 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `GET` | `/workspaces/{workspaceId}/meetings/{meetingId}/reports` | 특정 회의의 MeetingReport 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jobs` | 실패한 회의록 재생성 요청 |
 | `PATCH` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}` | pending 후속 작업 수정 |
-| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve` | legacy 상태-only 승인 차단 (`400`) |
+| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve` | legacy 상태-only 승인 호환 endpoint (deprecated) |
 | `GET` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/delivery-options` | Pilo issue delivery용 Board·Column 선택지 조회 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/deliveries` | Calendar 일정 또는 Pilo issue 하나를 생성하며 후속 작업 승인 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss` | pending 후속 작업 반려 |
@@ -820,7 +820,11 @@ POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{a
 POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss
 ```
 
-`/approve`는 생성물 없는 승인을 막기 위해 항상 `400 BAD_REQUEST`를 반환한다.
+`/approve`는 기존 frontend와 이미 열린 브라우저 탭을 위한 호환 endpoint다. Workspace member가
+`PENDING` item을 `APPROVED`로 전이하며, Calendar 일정이나 Pilo issue는 생성하지 않는다. 새 UI는
+`/deliveries`를 사용한다. 독립 배포 순서에서 `/deliveries`가 아직 없는 구 App Server를 만난 새 UI는
+`404`일 때 이 endpoint로 한 번 fallback하고, 대상 생성 없이 legacy 승인만 완료됐음을 표시한다. 이
+endpoint 제거는 모든 배포 환경의 `/deliveries` 전환이 완료된 다음 release에서만 수행한다.
 `/dismiss`는 Workspace member가 `PENDING` item을 `DISMISSED`로 한 번만 전이하며,
 응답은 `{ actionItem }`이다.
 

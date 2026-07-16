@@ -2534,17 +2534,34 @@ assert.doesNotMatch(meetingServiceSource, /AS references\b/);
 }
 
 {
-  const { service } = createSubject();
-
-  await assertBadRequest(
-    () => service.approveMeetingReportActionItem(
-      currentUserId,
-      workspaceId,
-      reportId,
-      actionItemId
-    ),
-    /requires delivery input/
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        () => meetingReportActionItemRow(),
+        (text, values) => {
+          assert.match(text, /status = 'APPROVED'/);
+          assert.deepEqual(values, [actionItemId, currentUserId]);
+          return { id: actionItemId };
+        },
+        () => meetingReportActionItemRow({
+          status: "APPROVED",
+          approved_by_user_id: currentUserId,
+          approved_at: updatedAt,
+          updated_by_user_id: currentUserId
+        })
+      ]
+    })
   );
+
+  const result = await service.approveMeetingReportActionItem(
+    currentUserId,
+    workspaceId,
+    reportId,
+    actionItemId
+  );
+
+  assert.equal(result.actionItem.status, "APPROVED");
+  assert.equal(result.actionItem.approvedByUserId, currentUserId);
 }
 
 {

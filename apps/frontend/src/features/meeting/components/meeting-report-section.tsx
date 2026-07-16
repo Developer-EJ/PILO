@@ -1383,7 +1383,9 @@ export function MeetingReportSection({
         onToastMessage(
           result.status === "COMPLETED"
             ? "후속 작업을 생성하고 승인했습니다."
-            : "생성에 실패했습니다. 같은 설정으로 다시 시도할 수 있습니다."
+            : result.status === "LEGACY_APPROVED"
+              ? "서버 호환 모드로 기존 승인만 완료했습니다. 대상 생성은 App Server 배포 후 사용할 수 있습니다."
+              : "생성에 실패했습니다. 같은 설정으로 다시 시도할 수 있습니다."
         );
         await loadReportDetail(selectedReport.id, { silent: true });
       } catch (error) {

@@ -169,7 +169,7 @@ export type MeetingReportActionItemDeliveryOptions = {
 export type MeetingReportActionItemDeliveryResult = {
   actionItemId: string;
   deliveryType: "calendar_event" | "pilo_issue";
-  status: "COMPLETED" | "FAILED";
+  status: "COMPLETED" | "FAILED" | "LEGACY_APPROVED";
   calendarEventId?: number;
   piloIssueId?: string;
   errorCode?: string;

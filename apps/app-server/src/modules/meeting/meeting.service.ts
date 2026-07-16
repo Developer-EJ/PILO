@@ -1754,11 +1754,14 @@ export class MeetingService {
     reportId: string,
     actionItemId: string
   ): Promise<MeetingReportActionItemMutationPayload> {
-    void currentUserId;
-    void workspaceId;
-    void reportId;
-    void actionItemId;
-    throw badRequest("Action item approval requires delivery input");
+    const actionItem = await this.transitionMeetingReportActionItem(
+      currentUserId,
+      workspaceId,
+      reportId,
+      actionItemId,
+      "APPROVED"
+    );
+    return { actionItem: this.mapMeetingReportActionItem(actionItem) };
   }
 
   async dismissMeetingReportActionItem(
