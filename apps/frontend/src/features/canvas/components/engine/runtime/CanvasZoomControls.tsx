@@ -76,6 +76,7 @@ export function CanvasZoomControls({
           canvasActions?.deleteSelection();
         }}
       >
+        <span className="canvas-trash-drop-hit-area" aria-hidden="true" />
         <Trash2 />
       </button>
     </div>

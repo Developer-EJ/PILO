@@ -21,7 +21,6 @@ import {
   Columns3,
   Copy,
   Diamond,
-  Download,
   Eraser,
   Group,
   Hand,
@@ -32,27 +31,23 @@ import {
   Maximize2,
   MoreHorizontal,
   MousePointer2,
-  PanelsTopLeft,
   Pencil,
   Redo2,
   RotateCcw,
   Rows3,
   SendToBack,
-  Settings2,
   Slash,
-  SlidersHorizontal,
   Plus,
   Square,
   Star,
   StickyNote,
   Triangle,
-  Trash2,
+  TvMinimalPlay,
   Type,
   Ungroup,
   Undo2,
   Video,
   XSquare,
-  Zap,
 } from "lucide-react";
 import {
   useCallback,
@@ -122,6 +117,7 @@ type ToolButtonProps = {
   agentTarget?: string;
   children: ReactNode;
   disabled?: boolean;
+  nativeTooltip?: boolean;
   onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 };
 
@@ -149,11 +145,18 @@ const canvasColorOptions: {
 }[] = [
   { label: "기본", value: "default", className: "is-default" },
   { label: "검정", value: "black", className: "is-black" },
-  { label: "빨강", value: "red", className: "is-red" },
-  { label: "노랑", value: "yellow", className: "is-yellow" },
-  { label: "초록", value: "green", className: "is-green" },
-  { label: "파랑", value: "blue", className: "is-blue" },
+  { label: "회색", value: "grey", className: "is-grey" },
+  { label: "흰색", value: "white", className: "is-white" },
+  { label: "연보라", value: "light-violet", className: "is-light-violet" },
   { label: "보라", value: "violet", className: "is-violet" },
+  { label: "파랑", value: "blue", className: "is-blue" },
+  { label: "연파랑", value: "light-blue", className: "is-light-blue" },
+  { label: "초록", value: "green", className: "is-green" },
+  { label: "연초록", value: "light-green", className: "is-light-green" },
+  { label: "노랑", value: "yellow", className: "is-yellow" },
+  { label: "주황", value: "orange", className: "is-orange" },
+  { label: "연빨강", value: "light-red", className: "is-light-red" },
+  { label: "빨강", value: "red", className: "is-red" },
 ];
 
 const initialCanvasHistoryState: PiloCanvasHistoryState = {
@@ -212,6 +215,7 @@ function ToolButton({
   agentTarget,
   children,
   disabled,
+  nativeTooltip = false,
   onClick,
 }: ToolButtonProps) {
   return (
@@ -219,7 +223,8 @@ function ToolButton({
       type="button"
       aria-label={label}
       data-canvas-agent-target={agentTarget}
-      data-tooltip={label}
+      data-tooltip={nativeTooltip ? undefined : label}
+      title={nativeTooltip ? label : undefined}
       className={active ? "is-active" : undefined}
       disabled={disabled}
       onClick={onClick}
@@ -308,21 +313,14 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     null,
   );
   const [urlInsertValue, setUrlInsertValue] = useState("");
-  const [isCreatingRealtimeCanvas, setIsCreatingRealtimeCanvas] =
-    useState(false);
   const [isReturningToClassicCanvas, setIsReturningToClassicCanvas] =
-    useState(false);
-  const [isRealtimeCanvasDialogOpen, setIsRealtimeCanvasDialogOpen] =
     useState(false);
   const [openPopover, setOpenPopover] = useState<
     | "actions"
     | "color"
     | "draw"
-    | "export"
     | "insert"
     | "line"
-    | "settings"
-    | "style"
     | null
   >(null);
   const canvasClientMode = resolveCanvasClientMode();
@@ -553,7 +551,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     canvasActions?.setOpacity(canvasOpacityPercent / 100);
   }, [canvasActions, canvasOpacityPercent, isCanvasOpacityMixed]);
 
-  const openCanvasStylePopover = useCallback(() => {
+  const toggleCanvasAppearancePopover = useCallback(() => {
     const styleState: PiloCanvasStyleState | undefined =
       canvasActions?.getStyleState();
 
@@ -567,7 +565,7 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
       setCanvasOpacityPercent(Math.round(styleState.opacity * 100));
     }
 
-    togglePopover("style");
+    togglePopover("color");
   }, [canvasActions]);
 
   const performCanvasSelectionAction = useCallback(
@@ -601,16 +599,15 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     ],
   );
 
-  const toggleCanvasUserPreference = useCallback(
-    (preference: PiloCanvasUserPreference) => {
-      const enabled = !canvasUserPreferences[preference];
-      canvasActions?.setUserPreference(preference, enabled);
-      setCanvasUserPreferences((currentPreferences) => ({
-        ...currentPreferences,
-        [preference]: enabled,
-      }));
+  const setCanvasUserPreference = useCallback(
+    (preference: PiloCanvasUserPreference, enabled: boolean) => {
+      if (!canvasActions) return;
+
+      setCanvasUserPreferences(
+        canvasActions.setUserPreference(preference, enabled),
+      );
     },
-    [canvasActions, canvasUserPreferences],
+    [canvasActions],
   );
 
   const createMemo = useCallback(() => {
@@ -687,12 +684,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     [canvasActions],
   );
 
-  const groupSelectedShapes = useCallback(() => {
-    setOpenPopover("insert");
-    setActiveCanvasTool("select");
-    canvasActions?.groupSelection();
-  }, [canvasActions]);
-
   const openCanvasAiChat = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       const buttonBounds = event.currentTarget.getBoundingClientRect();
@@ -706,70 +697,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     },
     [canvasActions, closePopover],
   );
-
-  const createRealtimeCanvasVersion = useCallback(async () => {
-    if (
-      !shouldUseCanvasApi ||
-      !activeBoard ||
-      activeBoard.engineType === "tldraw_sync" ||
-      isCreatingRealtimeCanvas
-    ) {
-      return;
-    }
-
-    setIsCreatingRealtimeCanvas(true);
-
-    try {
-      const convertedBoard = await canvasClient.convertBoardEngine(
-        activeBoard.id,
-        {
-          copyShapes: false,
-          targetEngineType: "tldraw_sync",
-        },
-        { workspaceId },
-      );
-
-      const convertedBoardId =
-        typeof convertedBoard === "object" &&
-        convertedBoard !== null &&
-        "id" in convertedBoard &&
-        typeof convertedBoard.id === "string"
-          ? convertedBoard.id
-          : null;
-
-      if (!convertedBoardId) {
-        throw new Error("Canvas engine conversion response is invalid");
-      }
-
-      const detail = (await canvasClient.getBoardDetail(convertedBoardId, {
-        workspaceId,
-      })) as CanvasBoardDetail;
-
-      setBoardState({
-        board: detail,
-        source: canvasClientMode,
-        status: "ready",
-      });
-      setIsRealtimeCanvasDialogOpen(false);
-      closePopover();
-      setActiveCanvasTool("select");
-    } catch (error) {
-      console.error("Canvas realtime version creation failed", error);
-      window.alert(
-        "실시간 동시편집 캔버스를 만들지 못했습니다. 다시 시도해 주세요.",
-      );
-    } finally {
-      setIsCreatingRealtimeCanvas(false);
-    }
-  }, [
-    activeBoard,
-    canvasClient,
-    canvasClientMode,
-    closePopover,
-    isCreatingRealtimeCanvas,
-    shouldUseCanvasApi,
-    workspaceId,
-  ]);
 
   const returnToSourceClassicCanvas = useCallback(async () => {
     if (
@@ -928,421 +855,27 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
             </form>
           </DialogContent>
         </Dialog>
-        <Dialog
-          open={isRealtimeCanvasDialogOpen}
-          onOpenChange={(open) => {
-            if (!isCreatingRealtimeCanvas) {
-              setIsRealtimeCanvasDialogOpen(open);
-            }
-          }}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>실시간 동시편집 Canvas를 만들까요?</DialogTitle>
-              <DialogDescription>
-                현재 Canvas는 그대로 보존하고, 같은 Workspace에 빈
-                tldraw sync Canvas를 새로 만듭니다.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="canvas-realtime-version-dialog">
-              <p>
-                새 Canvas에서는 사용자의 조작이 realtime-server의
-                <code>/sync/canvas</code> room을 통해 즉시 공유됩니다.
-              </p>
-              <ul>
-                <li>기존 shape는 복사하지 않습니다.</li>
-                <li>기존 Canvas의 shape와 저장 기록은 유지됩니다.</li>
-                <li>새 Canvas에서 만든 내용은 별도 sync snapshot으로 저장됩니다.</li>
-              </ul>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                disabled={isCreatingRealtimeCanvas}
-                onClick={() => setIsRealtimeCanvasDialogOpen(false)}
-                type="button"
-                variant="outline"
-              >
-                취소
-              </Button>
-              <Button
-                disabled={isCreatingRealtimeCanvas}
-                onClick={createRealtimeCanvasVersion}
-                type="button"
-              >
-                {isCreatingRealtimeCanvas ? "만드는 중..." : "새 실시간 Canvas 만들기"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <nav
-          className="canvas-tool-rail"
-          aria-label="캔버스 도구"
+        <div
+          className="canvas-tool-rail canvas-top-left-controls"
           onPointerDownCapture={markCanvasUiEvent}
           onPointerUpCapture={markCanvasUiEvent}
         >
-          <section className="canvas-tool-section" aria-label="주요 도구">
-            <ToolButton
-              label="선택"
-              agentTarget="toolbar.select"
-              active={isCanvasToolActive("select")}
-              onClick={() => selectCanvasTool("select")}
-            >
-              <MousePointer2 />
-            </ToolButton>
-            <ToolButton
-              label="핸드"
-              active={isCanvasToolActive("hand")}
-              onClick={() => selectCanvasTool("hand")}
-            >
-              <Hand />
-            </ToolButton>
-            <ToolButton
-              label="메모"
-              agentTarget="toolbar.memo"
-              active={isCanvasToolActive("note")}
-              onClick={createMemo}
-            >
-              <StickyNote />
-            </ToolButton>
-            <ToolButton
-              label="프레임"
-              agentTarget="toolbar.frame"
-              active={isCanvasToolActive("frame")}
-              onClick={() => selectCanvasTool("frame")}
-            >
-              <Square />
-            </ToolButton>
-            <ToolButton
-              label="코드블럭"
-              agentTarget="toolbar.code"
-              active={isCanvasToolActive("code")}
-              onClick={createCodeBlock}
-            >
-              <Code2 />
-            </ToolButton>
-            <ToolButton
-              label="텍스트"
-              agentTarget="toolbar.text"
-              active={isCanvasToolActive("text")}
-              onClick={() => selectCanvasTool("text")}
-            >
-              <Type />
-            </ToolButton>
-            <ToolButton
-              label="화살표/선"
-              agentTarget="toolbar.line"
-              active={openPopover === "line"}
-              onClick={() => togglePopover("line")}
-            >
-              <ArrowRight />
-            </ToolButton>
-            <ToolButton
-              label="그리기"
-              agentTarget="toolbar.draw"
-              active={openPopover === "draw"}
-              onClick={() => {
-                togglePopover("draw");
-                canvasActions?.selectDrawingPreset(activeDrawingPreset);
-              }}
-            >
-              <Pencil />
-            </ToolButton>
-            <ToolButton
-              label="색상"
-              agentTarget="toolbar.color"
-              active={openPopover === "color"}
-              onClick={() => togglePopover("color")}
-            >
-              <span className={`canvas-color-swatch ${activeColor.className}`} />
-            </ToolButton>
-            <ToolButton
-              label="스타일"
-              active={openPopover === "style"}
-              onClick={openCanvasStylePopover}
-            >
-              <SlidersHorizontal />
-            </ToolButton>
-            <ToolButton
-              label="더보기"
-              agentTarget="toolbar.more"
-              active={openPopover === "insert"}
-              onClick={() => togglePopover("insert")}
-            >
-              <Plus />
-            </ToolButton>
-            <ToolButton label="화면 맞춤" agentTarget="toolbar.fit" onClick={() => canvasActions?.fit()}>
-              <Maximize2 />
-            </ToolButton>
-          </section>
-
-          {openPopover === "draw" ? (
-            <section
-              className="canvas-tool-popover canvas-draw-popover"
-              aria-label="그리기 도구"
-            >
-              <ToolButton
-                label="펜"
-                agentTarget="toolbar.draw.pen"
-                active={activeDrawingPreset === "pen"}
-                onClick={() => selectDrawingPreset("pen")}
-              >
-                <Pencil />
-              </ToolButton>
-              <ToolButton
-                label="형광펜"
-                agentTarget="toolbar.draw.highlight"
-                active={activeDrawingPreset === "highlight"}
-                onClick={() => selectDrawingPreset("highlight")}
-              >
-                <Highlighter />
-              </ToolButton>
-              <ToolButton
-                label="지우개"
-                agentTarget="toolbar.draw.eraser"
-                active={activeDrawingPreset === "eraser"}
-                onClick={() => selectDrawingPreset("eraser")}
-              >
-                <Eraser />
-              </ToolButton>
-              <ToolButton
-                label="레이저"
-                active={activeCanvasTool === "laser"}
-                onClick={() => selectCanvasTool("laser")}
-              >
-                <Zap />
-              </ToolButton>
-              <div className="canvas-shape-option-grid">
-                {canvasGeoShapeOptions.map((shape) => (
-                  <ToolButton
-                    key={shape.value}
-                    label={shape.label}
-                    active={activeDrawingPreset === shape.value}
-                    onClick={() => selectShapePreset(shape.value)}
-                  >
-                    {shape.icon}
-                  </ToolButton>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {openPopover === "color" ? (
-            <section
-              className="canvas-tool-popover canvas-color-popover"
-              aria-label="색상"
-            >
-              {canvasColorOptions.map((color) => (
-                <ToolButton
-                  key={color.value}
-                  label={color.label}
-                  active={activeCanvasColor === color.value}
-                  onClick={() => selectCanvasColor(color.value)}
-                >
-                  {color.value === "default" ? (
-                    <RotateCcw />
-                  ) : (
-                    <span className={`canvas-color-swatch ${color.className}`} />
-                  )}
-                </ToolButton>
-              ))}
-            </section>
-          ) : null}
-
-          {openPopover === "style" ? (
-            <section
-              className="canvas-tool-popover canvas-settings-popover"
-              aria-label="도형 스타일"
-            >
-              <div className="canvas-popover-group">
-                <strong>채우기</strong>
-                <div className="canvas-segmented-options">
-                  {canvasFillOptions.map((fill) => (
-                    <button
-                      key={fill.value}
-                      type="button"
-                      className={
-                        activeCanvasFill === fill.value ? "is-active" : undefined
-                      }
-                      onClick={() => selectCanvasFill(fill.value)}
-                    >
-                      {fill.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="canvas-popover-group">
-                <strong>테두리</strong>
-                <div className="canvas-segmented-options">
-                  {canvasDashOptions.map((dash) => (
-                    <button
-                      key={dash.value}
-                      type="button"
-                      className={
-                        activeCanvasDash === dash.value ? "is-active" : undefined
-                      }
-                      onClick={() => selectCanvasDash(dash.value)}
-                    >
-                      {dash.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="canvas-popover-group">
-                <strong>크기</strong>
-                <div className="canvas-segmented-options">
-                  {canvasSizeOptions.map((size) => (
-                    <button
-                      key={size.value}
-                      type="button"
-                      className={
-                        activeCanvasSize === size.value ? "is-active" : undefined
-                      }
-                      onClick={() => selectCanvasSize(size.value)}
-                    >
-                      {size.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className="canvas-opacity-control">
-                <span>
-                  <strong>불투명도</strong>
-                  <output>
-                    {isCanvasOpacityMixed ? "혼합" : `${canvasOpacityPercent}%`}
-                  </output>
-                </span>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  step="5"
-                  value={canvasOpacityPercent}
-                  onBlur={commitCanvasOpacity}
-                  onChange={(event) => {
-                    setIsCanvasOpacityMixed(false);
-                    setCanvasOpacityPercent(Number(event.target.value));
-                  }}
-                  onKeyUp={commitCanvasOpacity}
-                  onPointerUp={commitCanvasOpacity}
-                />
-              </label>
-            </section>
-          ) : null}
-
-          {openPopover === "line" ? (
-            <section
-              className="canvas-tool-popover canvas-draw-popover"
-              aria-label="선 도구"
-            >
-              <ToolButton
-                label="화살표"
-                agentTarget="toolbar.line.arrow"
-                active={activeCanvasTool === "arrow"}
-                onClick={() => selectCanvasTool("arrow")}
-              >
-                <ArrowRight />
-              </ToolButton>
-              <ToolButton
-                label="직선"
-                agentTarget="toolbar.line.line"
-                active={activeCanvasTool === "line"}
-                onClick={() => selectCanvasTool("line")}
-              >
-                <Slash />
-              </ToolButton>
-            </section>
-          ) : null}
-
-          {openPopover === "insert" ? (
-            <section
-              className="canvas-tool-popover canvas-draw-popover"
-              aria-label="더보기 도구"
-            >
-              <ToolButton
-                label="Canvas AI"
-                agentTarget="toolbar.canvas_ai"
-                onClick={openCanvasAiChat}
-              >
-                <Bot />
-              </ToolButton>
-              <ToolButton
-                label="액션"
-                onClick={() => setOpenPopover("actions")}
-              >
-                <MoreHorizontal />
-              </ToolButton>
-              <ToolButton
-                label="내보내기"
-                onClick={() => setOpenPopover("export")}
-              >
-                <Download />
-              </ToolButton>
-              <ToolButton
-                label="설정"
-                onClick={() => setOpenPopover("settings")}
-              >
-                <Settings2 />
-              </ToolButton>
-              <ToolButton label="이미지" agentTarget="toolbar.more.image" onClick={() => openMediaFilePicker("image")}>
-                <Image />
-              </ToolButton>
-              <ToolButton label="비디오" agentTarget="toolbar.more.video" onClick={() => openMediaFilePicker("video")}>
-                <Video />
-              </ToolButton>
-              <ToolButton
-                label="북마크"
-                agentTarget="toolbar.more.bookmark"
-                onClick={() => createInsertableShape("bookmark")}
-              >
-                <Bookmark />
-              </ToolButton>
-              <ToolButton
-                label="임베드"
-                agentTarget="toolbar.more.embed"
-                onClick={() => createInsertableShape("embed")}
-              >
-                <PanelsTopLeft />
-              </ToolButton>
-              <ToolButton label="그룹" agentTarget="toolbar.more.group" onClick={groupSelectedShapes}>
-                <Group />
-              </ToolButton>
-              <ToolButton
-                label="실시간 버전"
-                agentTarget="toolbar.more.realtime_canvas"
-                disabled={
-                  !shouldUseCanvasApi ||
-                  activeBoard?.engineType === "tldraw_sync" ||
-                  isCreatingRealtimeCanvas
-                }
-                onClick={() => {
-                  closePopover();
-                  setIsRealtimeCanvasDialogOpen(true);
-                }}
-              >
-                <PanelsTopLeft />
-              </ToolButton>
-              {activeBoard?.engineType === "tldraw_sync" ? (
-                <ToolButton
-                  label="원본 classic Canvas"
-                  agentTarget="toolbar.more.classic_canvas"
-                  disabled={
-                    !shouldUseCanvasApi ||
-                    !activeBoard.sourceCanvasId ||
-                    isReturningToClassicCanvas
-                  }
-                  onClick={returnToSourceClassicCanvas}
-                >
-                  <RotateCcw />
-                </ToolButton>
-              ) : null}
-              <div className="canvas-realtime-version-hint">
-                {activeBoard?.engineType === "tldraw_sync"
-                  ? `현재 Canvas는 tldraw sync 모드입니다. 원본 classic Canvas는 ${RETURN_TO_CLASSIC_CANVAS_SHORTCUT}로도 열 수 있습니다.`
-                  : "실시간 버전은 빈 Canvas로 새로 만들어집니다."}
-              </div>
-            </section>
-          ) : null}
+          <ToolButton
+            label="액션"
+            agentTarget="toolbar.actions"
+            active={openPopover === "actions"}
+            onClick={() => togglePopover("actions")}
+          >
+            <MoreHorizontal />
+          </ToolButton>
+          <ToolButton
+            label="색상·스타일"
+            agentTarget="toolbar.color"
+            active={openPopover === "color"}
+            onClick={toggleCanvasAppearancePopover}
+          >
+            <span className={`canvas-color-swatch ${activeColor.className}`} />
+          </ToolButton>
 
           {openPopover === "actions" ? (
             <section
@@ -1439,23 +972,9 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                 세로 간격 맞춤
               </PopoverMenuButton>
               <div className="canvas-menu-divider" />
-              <PopoverMenuButton
-                icon={<Trash2 />}
-                onClick={() => performCanvasSelectionAction("delete")}
-              >
-                삭제
-              </PopoverMenuButton>
-            </section>
-          ) : null}
-
-          {openPopover === "export" ? (
-            <section
-              className="canvas-tool-popover canvas-settings-popover"
-              aria-label="Canvas 내보내기"
-            >
               <div className="canvas-popover-group">
-                <strong>내보낼 범위</strong>
-                <div className="canvas-segmented-options">
+                <strong>내보내기</strong>
+                <div className="canvas-segmented-options canvas-export-scope-options">
                   <button
                     type="button"
                     className={
@@ -1477,64 +996,402 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
                     전체 Canvas
                   </button>
                 </div>
+                <label className="canvas-setting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={isCanvasExportBackgroundEnabled}
+                    onChange={(event) =>
+                      setIsCanvasExportBackgroundEnabled(event.target.checked)
+                    }
+                  />
+                  <span>배경 포함</span>
+                </label>
+                <div className="canvas-export-actions">
+                  <button type="button" onClick={() => void exportCanvas("png")}>
+                    PNG
+                  </button>
+                  <button type="button" onClick={() => void exportCanvas("svg")}>
+                    SVG
+                  </button>
+                </div>
               </div>
-              <label className="canvas-setting-toggle">
-                <input
-                  type="checkbox"
-                  checked={isCanvasExportBackgroundEnabled}
-                  onChange={(event) =>
-                    setIsCanvasExportBackgroundEnabled(event.target.checked)
-                  }
-                />
-                <span>배경 포함</span>
-              </label>
-              <div className="canvas-export-actions">
-                <button type="button" onClick={() => void exportCanvas("png")}>
-                  PNG
-                </button>
-                <button type="button" onClick={() => void exportCanvas("svg")}>
-                  SVG
-                </button>
+              <div className="canvas-menu-divider" />
+              <div className="canvas-popover-group">
+                <strong>사용자 설정</strong>
+                <label className="canvas-setting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={canvasUserPreferences["paste-at-cursor"]}
+                    onChange={(event) =>
+                      setCanvasUserPreference(
+                        "paste-at-cursor",
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  <span>커서 위치에 복사한 내용 붙여넣기</span>
+                </label>
+                <label className="canvas-setting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={canvasUserPreferences["wrap-text"]}
+                    onChange={(event) =>
+                      setCanvasUserPreference("wrap-text", event.target.checked)
+                    }
+                  />
+                  <span>완전히 감싼 도형만 선택</span>
+                </label>
+                <label className="canvas-setting-toggle">
+                  <input
+                    type="checkbox"
+                    checked={canvasUserPreferences["reduce-motion"]}
+                    onChange={(event) =>
+                      setCanvasUserPreference(
+                        "reduce-motion",
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  <span>모션 줄이기</span>
+                </label>
+                <p className="canvas-settings-note">
+                  이 설정은 현재 사용자의 브라우저에만 적용되며 다른 참여자의
+                  roomState에는 전송되지 않습니다.
+                </p>
               </div>
             </section>
           ) : null}
 
-          {openPopover === "settings" ? (
+          {openPopover === "color" ? (
             <section
-              className="canvas-tool-popover canvas-settings-popover"
-              aria-label="Canvas 설정"
+              className="canvas-tool-popover canvas-appearance-popover"
+              aria-label="색상과 도형 스타일"
             >
-              <strong className="canvas-popover-title">사용자 설정</strong>
-              <label className="canvas-setting-toggle">
+              <div className="canvas-popover-group">
+                <strong>색상</strong>
+                <div className="canvas-color-option-grid">
+                  {canvasColorOptions.map((color) => (
+                    <ToolButton
+                      key={color.value}
+                      label={color.label}
+                      nativeTooltip
+                      active={activeCanvasColor === color.value}
+                      onClick={() => selectCanvasColor(color.value)}
+                    >
+                      {color.value === "default" ? (
+                        <RotateCcw />
+                      ) : (
+                        <span
+                          className={`canvas-color-swatch ${color.className}`}
+                        />
+                      )}
+                    </ToolButton>
+                  ))}
+                </div>
+              </div>
+              <div className="canvas-popover-group">
+                <strong>채우기</strong>
+                <div className="canvas-segmented-options">
+                  {canvasFillOptions.map((fill) => (
+                    <button
+                      key={fill.value}
+                      type="button"
+                      className={
+                        activeCanvasFill === fill.value ? "is-active" : undefined
+                      }
+                      onClick={() => selectCanvasFill(fill.value)}
+                    >
+                      {fill.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="canvas-popover-group">
+                <strong>테두리</strong>
+                <div className="canvas-segmented-options">
+                  {canvasDashOptions.map((dash) => (
+                    <button
+                      key={dash.value}
+                      type="button"
+                      className={
+                        activeCanvasDash === dash.value ? "is-active" : undefined
+                      }
+                      onClick={() => selectCanvasDash(dash.value)}
+                    >
+                      {dash.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="canvas-popover-group">
+                <strong>크기</strong>
+                <div className="canvas-segmented-options">
+                  {canvasSizeOptions.map((size) => (
+                    <button
+                      key={size.value}
+                      type="button"
+                      className={
+                        activeCanvasSize === size.value ? "is-active" : undefined
+                      }
+                      onClick={() => selectCanvasSize(size.value)}
+                    >
+                      {size.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="canvas-opacity-control">
+                <span>
+                  <strong>불투명도</strong>
+                  <output>
+                    {isCanvasOpacityMixed ? "혼합" : `${canvasOpacityPercent}%`}
+                  </output>
+                </span>
                 <input
-                  type="checkbox"
-                  checked={canvasUserPreferences["paste-at-cursor"]}
-                  onChange={() =>
-                    toggleCanvasUserPreference("paste-at-cursor")
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="5"
+                  value={canvasOpacityPercent}
+                  onBlur={commitCanvasOpacity}
+                  onChange={(event) => {
+                    setIsCanvasOpacityMixed(false);
+                    setCanvasOpacityPercent(Number(event.target.value));
+                  }}
+                  onKeyUp={commitCanvasOpacity}
+                  onPointerUp={commitCanvasOpacity}
+                />
+              </label>
+            </section>
+          ) : null}
+        </div>
+
+        <nav
+          className="canvas-tool-rail"
+          aria-label="캔버스 도구"
+          onPointerDownCapture={markCanvasUiEvent}
+          onPointerUpCapture={markCanvasUiEvent}
+        >
+          <section className="canvas-tool-section" aria-label="주요 도구">
+            <ToolButton
+              label="선택"
+              agentTarget="toolbar.select"
+              active={isCanvasToolActive("select")}
+              onClick={() => selectCanvasTool("select")}
+            >
+              <MousePointer2 />
+            </ToolButton>
+            <ToolButton
+              label="핸드"
+              active={isCanvasToolActive("hand")}
+              onClick={() => selectCanvasTool("hand")}
+            >
+              <Hand />
+            </ToolButton>
+            <ToolButton
+              label="메모"
+              agentTarget="toolbar.memo"
+              active={isCanvasToolActive("note")}
+              onClick={createMemo}
+            >
+              <StickyNote />
+            </ToolButton>
+            <ToolButton
+              label="프레임"
+              agentTarget="toolbar.frame"
+              active={isCanvasToolActive("frame")}
+              onClick={() => selectCanvasTool("frame")}
+            >
+              <Square />
+            </ToolButton>
+            <ToolButton
+              label="코드블럭"
+              agentTarget="toolbar.code"
+              active={isCanvasToolActive("code")}
+              onClick={createCodeBlock}
+            >
+              <Code2 />
+            </ToolButton>
+            <ToolButton
+              label="텍스트"
+              agentTarget="toolbar.text"
+              active={isCanvasToolActive("text")}
+              onClick={() => selectCanvasTool("text")}
+            >
+              <Type />
+            </ToolButton>
+            <ToolButton
+              label="화살표/선"
+              agentTarget="toolbar.line"
+              active={openPopover === "line"}
+              onClick={() => togglePopover("line")}
+            >
+              <ArrowRight />
+            </ToolButton>
+            <ToolButton
+              label="그리기"
+              agentTarget="toolbar.draw"
+              active={openPopover === "draw"}
+              onClick={() => {
+                togglePopover("draw");
+                canvasActions?.selectDrawingPreset(activeDrawingPreset);
+              }}
+            >
+              <Pencil />
+            </ToolButton>
+            <ToolButton
+              label="더보기"
+              agentTarget="toolbar.more"
+              active={openPopover === "insert"}
+              onClick={() => togglePopover("insert")}
+            >
+              <Plus />
+            </ToolButton>
+            <ToolButton label="화면 맞춤" agentTarget="toolbar.fit" onClick={() => canvasActions?.fit()}>
+              <Maximize2 />
+            </ToolButton>
+          </section>
+
+          {openPopover === "draw" ? (
+            <section
+              className="canvas-tool-popover canvas-draw-popover"
+              aria-label="그리기 도구"
+            >
+              <ToolButton
+                label="펜"
+                agentTarget="toolbar.draw.pen"
+                nativeTooltip
+                active={activeDrawingPreset === "pen"}
+                onClick={() => selectDrawingPreset("pen")}
+              >
+                <Pencil />
+              </ToolButton>
+              <ToolButton
+                label="형광펜"
+                agentTarget="toolbar.draw.highlight"
+                nativeTooltip
+                active={activeDrawingPreset === "highlight"}
+                onClick={() => selectDrawingPreset("highlight")}
+              >
+                <Highlighter />
+              </ToolButton>
+              <ToolButton
+                label="지우개"
+                agentTarget="toolbar.draw.eraser"
+                nativeTooltip
+                active={activeDrawingPreset === "eraser"}
+                onClick={() => selectDrawingPreset("eraser")}
+              >
+                <Eraser />
+              </ToolButton>
+              <div className="canvas-shape-option-grid">
+                {canvasGeoShapeOptions.map((shape) => (
+                  <ToolButton
+                    key={shape.value}
+                    label={shape.label}
+                    nativeTooltip
+                    active={activeDrawingPreset === shape.value}
+                    onClick={() => selectShapePreset(shape.value)}
+                  >
+                    {shape.icon}
+                  </ToolButton>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {openPopover === "line" ? (
+            <section
+              className="canvas-tool-popover canvas-draw-popover"
+              aria-label="선 도구"
+            >
+              <ToolButton
+                label="화살표"
+                agentTarget="toolbar.line.arrow"
+                nativeTooltip
+                active={activeCanvasTool === "arrow"}
+                onClick={() => selectCanvasTool("arrow")}
+              >
+                <ArrowRight />
+              </ToolButton>
+              <ToolButton
+                label="직선"
+                agentTarget="toolbar.line.line"
+                nativeTooltip
+                active={activeCanvasTool === "line"}
+                onClick={() => selectCanvasTool("line")}
+              >
+                <Slash />
+              </ToolButton>
+            </section>
+          ) : null}
+
+          {openPopover === "insert" ? (
+            <section
+              className="canvas-tool-popover canvas-draw-popover"
+              aria-label="더보기 도구"
+            >
+              <ToolButton
+                label="Canvas AI"
+                agentTarget="toolbar.canvas_ai"
+                nativeTooltip
+                onClick={openCanvasAiChat}
+              >
+                <Bot />
+              </ToolButton>
+              <ToolButton
+                label="이미지"
+                agentTarget="toolbar.more.image"
+                nativeTooltip
+                onClick={() => openMediaFilePicker("image")}
+              >
+                <Image />
+              </ToolButton>
+              <ToolButton
+                label="비디오"
+                agentTarget="toolbar.more.video"
+                nativeTooltip
+                onClick={() => openMediaFilePicker("video")}
+              >
+                <Video />
+              </ToolButton>
+              <ToolButton
+                label="북마크"
+                agentTarget="toolbar.more.bookmark"
+                nativeTooltip
+                onClick={() => createInsertableShape("bookmark")}
+              >
+                <Bookmark />
+              </ToolButton>
+              <ToolButton
+                label="임베드"
+                agentTarget="toolbar.more.embed"
+                nativeTooltip
+                onClick={() => createInsertableShape("embed")}
+              >
+                <TvMinimalPlay />
+              </ToolButton>
+              {activeBoard?.engineType === "tldraw_sync" ? (
+                <ToolButton
+                  label="원본 classic Canvas"
+                  agentTarget="toolbar.more.classic_canvas"
+                  nativeTooltip
+                  disabled={
+                    !shouldUseCanvasApi ||
+                    !activeBoard.sourceCanvasId ||
+                    isReturningToClassicCanvas
                   }
-                />
-                <span>커서 위치에 붙여넣기</span>
-              </label>
-              <label className="canvas-setting-toggle">
-                <input
-                  type="checkbox"
-                  checked={canvasUserPreferences["wrap-text"]}
-                  onChange={() => toggleCanvasUserPreference("wrap-text")}
-                />
-                <span>텍스트 자동 줄바꿈</span>
-              </label>
-              <label className="canvas-setting-toggle">
-                <input
-                  type="checkbox"
-                  checked={canvasUserPreferences["reduce-motion"]}
-                  onChange={() => toggleCanvasUserPreference("reduce-motion")}
-                />
-                <span>모션 줄이기</span>
-              </label>
-              <p className="canvas-settings-note">
-                이 설정은 현재 사용자의 브라우저에만 적용되며 다른 참여자의
-                roomState에는 전송되지 않습니다.
-              </p>
+                  onClick={returnToSourceClassicCanvas}
+                >
+                  <RotateCcw />
+                </ToolButton>
+              ) : null}
+              {activeBoard?.engineType === "tldraw_sync" ? (
+                <div className="canvas-realtime-version-hint">
+                  현재 Canvas는 tldraw sync 모드입니다. 원본 classic Canvas는{" "}
+                  {RETURN_TO_CLASSIC_CANVAS_SHORTCUT}로도 열 수 있습니다.
+                </div>
+              ) : null}
             </section>
           ) : null}
 

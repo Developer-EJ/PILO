@@ -731,6 +731,23 @@ assert.match(canvasWorkspace, /canvasActions\?\.createNote\(\)/);
 assert.doesNotMatch(canvasWorkspace, /createStickyNote/);
 assert.match(canvasWorkspace, /canvasActions\?\.setColor\(color\)/);
 assert.match(canvasWorkspace, /openPopover === "color"/);
+for (const color of [
+  "black",
+  "grey",
+  "white",
+  "light-violet",
+  "violet",
+  "blue",
+  "light-blue",
+  "green",
+  "light-green",
+  "yellow",
+  "orange",
+  "light-red",
+  "red",
+]) {
+  assert.match(canvasWorkspace, new RegExp(`value: "${color}"`));
+}
 assert.match(canvasWorkspace, /<Dialog/);
 assert.match(canvasWorkspace, /<DialogTitle>/);
 assert.match(canvasWorkspace, /<Input/);
@@ -759,18 +776,28 @@ for (const shapePreset of [
   assert.match(canvasWorkspace, new RegExp(`value: "${shapePreset}"`));
 }
 assert.match(canvasWorkspace, /label="핸드"/);
-assert.match(canvasWorkspace, /label="레이저"/);
-assert.match(canvasWorkspace, /openPopover === "style"/);
+assert.doesNotMatch(canvasWorkspace, /openPopover === "style"/);
+assert.match(canvasWorkspace, /label="색상·스타일"/);
+assert.match(canvasWorkspace, /canvas-appearance-popover/);
+assert.match(canvasWorkspace, /canvas-color-option-grid/);
 assert.match(canvasWorkspace, /openPopover === "actions"/);
-assert.match(canvasWorkspace, /openPopover === "export"/);
-assert.match(canvasWorkspace, /openPopover === "settings"/);
+assert.doesNotMatch(canvasWorkspace, /openPopover === "export"/);
+assert.doesNotMatch(canvasWorkspace, /openPopover === "settings"/);
+assert.match(canvasWorkspace, /canvas-top-left-controls/);
+assert.match(canvasWorkspace, /<strong>내보내기<\/strong>/);
+assert.match(canvasWorkspace, /<strong>사용자 설정<\/strong>/);
+assert.match(canvasWorkspace, /TvMinimalPlay/);
+assert.doesNotMatch(canvasWorkspace, /label="실시간 버전"/);
+assert.doesNotMatch(
+  canvasWorkspace,
+  /실시간 버전은 빈 Canvas로 새로 만들어집니다/,
+);
 assert.match(piloTldrawCanvas, /setOpacityForSelectedShapes/);
 assert.match(piloTldrawCanvas, /exportAs\(editor, shapeIds/);
 assert.match(piloTldrawCanvas, /DefaultFillStyle/);
 assert.match(piloTldrawCanvas, /DefaultDashStyle/);
 assert.match(piloTldrawCanvas, /DefaultSizeStyle/);
 assert.match(piloTldrawCanvas, /GeoShapeGeoStyle/);
-assert.match(piloTldrawCanvas, /currentToolId\.includes\("laser"\)\) return null/);
 assert.match(canvasWorkspace, /label="더보기"/);
 assert.match(canvasWorkspace, /aria-label="더보기 도구"/);
 assert.doesNotMatch(canvasWorkspace, /label="삽입"/);

@@ -112,7 +112,6 @@ type CanvasBoardDetail = {
 export type PiloCanvasTool =
   | "select"
   | "hand"
-  | "laser"
   | "note"
   | "draw"
   | "text"
@@ -125,11 +124,18 @@ export type PiloCanvasTool =
 export type PiloCanvasColor =
   | "default"
   | "black"
-  | "red"
-  | "yellow"
-  | "green"
+  | "grey"
+  | "white"
+  | "light-violet"
+  | "violet"
   | "blue"
-  | "violet";
+  | "light-blue"
+  | "green"
+  | "light-green"
+  | "yellow"
+  | "orange"
+  | "light-red"
+  | "red";
 
 export type PiloDrawingPreset =
   | "pen"
@@ -171,8 +177,7 @@ export type PiloCanvasSelectionAction =
   | "align-middle"
   | "align-bottom"
   | "distribute-horizontal"
-  | "distribute-vertical"
-  | "delete";
+  | "distribute-vertical";
 export type PiloCanvasExportFormat = "png" | "svg";
 export type PiloCanvasExportScope = "selection" | "canvas";
 export type PiloCanvasUserPreference =
@@ -217,6 +222,16 @@ function getCanvasExportName(title: string) {
   return title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").trim() || "PILO Canvas";
 }
 
+function getCanvasUserPreferences(
+  editor: Editor,
+): PiloCanvasUserPreferenceState {
+  return {
+    "paste-at-cursor": editor.user.getIsPasteAtCursorMode(),
+    "reduce-motion": editor.user.getAnimationSpeed() === 0,
+    "wrap-text": editor.user.getIsWrapMode(),
+  };
+}
+
 export type PiloCanvasActions = {
   markUiEventAsHandled: (event: PointerEvent<HTMLElement>) => void;
   openCanvasAiChat: (anchor: CanvasAiChatAnchor) => void;
@@ -239,7 +254,7 @@ export type PiloCanvasActions = {
   setUserPreference: (
     preference: PiloCanvasUserPreference,
     enabled: boolean,
-  ) => void;
+  ) => PiloCanvasUserPreferenceState;
   getUserPreferences: () => PiloCanvasUserPreferenceState;
   setSmartGuidesEnabled: (enabled: boolean) => void;
   createNote: () => void;
@@ -1833,7 +1848,6 @@ export function PiloTldrawCanvas({
         returnToSelectAfterPlacementRef.current =
           tool !== "select" &&
           tool !== "hand" &&
-          tool !== "laser" &&
           tool !== "text" &&
           !connectionTools.has(tool);
         editor.cancel();
@@ -2067,9 +2081,6 @@ export function PiloTldrawCanvas({
           case "distribute-vertical":
             editor.distributeShapes(selectedShapeIds, "vertical");
             break;
-          case "delete":
-            deleteSelectedShapes(editor);
-            break;
         }
       },
       async exportCanvas(format, scope, background) {
@@ -2103,13 +2114,11 @@ export function PiloTldrawCanvas({
             });
             break;
         }
+
+        return getCanvasUserPreferences(editor);
       },
       getUserPreferences() {
-        return {
-          "paste-at-cursor": editor.user.getIsPasteAtCursorMode(),
-          "reduce-motion": editor.user.getAnimationSpeed() === 0,
-          "wrap-text": editor.user.getIsWrapMode(),
-        };
+        return getCanvasUserPreferences(editor);
       },
       setSmartGuidesEnabled(enabled) {
         editor.user.updateUserPreferences({ isSnapMode: enabled });
@@ -3381,7 +3390,6 @@ function getCanvasPresenceEditingMode({
     return editingShape && isPiloCodeBlockShape(editingShape) ? "code" : "text";
   }
 
-  if (currentToolId.includes("laser")) return null;
   if (currentToolId.includes("draw")) return "draw";
   if (currentToolId.includes("hand")) return "hand";
   if (currentToolId.includes("resize")) return "resize";
