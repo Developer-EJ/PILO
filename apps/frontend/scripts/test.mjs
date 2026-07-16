@@ -918,6 +918,10 @@ assert.match(canvasPresenceHook, /payload\.loadedRegions/);
 assert.match(canvasPresenceHook, /payload\.roomShapes/);
 assert.match(canvasPresenceHook, /canvas:room:shapes:hydrate/);
 assert.match(canvasPresenceHook, /canvas:room:shape:patch/);
+assert.match(
+  canvasPresenceHook,
+  /removeShapePreviewIds\(\{\s*actorUserId: payload\.actorUserId,\s*previews: currentPreviews,\s*shapeIds: patchedShapeIds,/,
+);
 assert.match(canvasPresenceHook, /canvas:room:checkpoint/);
 assert.match(canvasPresenceHook, /ownedShapeLocks: CanvasShapeLockState\[\]/);
 assert.match(canvasPresenceHook, /const joinedShapeLocks = upsertShapeLocks\(\[\], payload\.shapeLocks\)/);

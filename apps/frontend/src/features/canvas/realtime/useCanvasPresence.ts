@@ -955,6 +955,23 @@ export function useCanvasPresence(
         return;
       }
 
+      const patchedShapeIds = [
+        ...payload.deletedShapeIds,
+        ...payload.upsertShapes.flatMap((shape) => {
+          const shapeId = isRecord(shape) ? shape.id : null;
+
+          return typeof shapeId === "string" ? [shapeId] : [];
+        }),
+      ];
+
+      setRemoteShapePreviews((currentPreviews) =>
+        removeShapePreviewIds({
+          actorUserId: payload.actorUserId,
+          previews: currentPreviews,
+          shapeIds: patchedShapeIds,
+        }),
+      );
+
       if (typeof payload.historySeq === "number") {
         setRoomHistory((currentHistory) => ({
           canRedo: payload.canRedo ?? currentHistory.canRedo,
