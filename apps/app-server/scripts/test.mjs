@@ -603,3 +603,5 @@ await import("./sqltoerd/source-snapshot.test.mjs");
 await import("./sqltoerd/operation-publisher.test.mjs");
 await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
 await import("./chat/schema.test.mjs");
+await import("./chat/service.test.mjs");
+await import("./chat/contract.test.mjs");
