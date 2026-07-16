@@ -142,4 +142,10 @@
   - [x] 빈 문서 placeholder와 반응형 loading/error 상태 적용
   - [x] 기존 자동 저장, 충돌 감지, reload 흐름 유지
   - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
-  - [ ] 다음 interaction 작업: slash menu, bubble menu, block handle, inline rename
+  - [ ] 다음 interaction 작업: bubble menu, block handle, inline rename
+- [x] **Slash command와 문서 작성 영역 개선**: Issue [#1200](https://github.com/Developer-EJ/PILO/issues/1200)
+  - [x] 빈 문단에서 `/` 입력 시 기본 블록과 Drive 파일 첨부를 선택하는 메뉴 표시
+  - [x] 방향키, Enter, Escape 및 클릭으로 메뉴 조작
+  - [x] 기존 Tiptap 명령으로 문단, 제목, 목록, 인용, 코드 블록, 구분선 전환
+  - [x] 문서 작성 영역 최대 너비를 60rem으로 확장
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
