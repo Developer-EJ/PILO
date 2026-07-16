@@ -6,6 +6,8 @@ import { WorkspaceService } from "../workspace/workspace.service";
 const OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings";
 const EMBEDDING_MODEL = "text-embedding-3-small";
 const MAX_RESULTS = 5;
+const DIRECT_REFERENCE_DISTANCE_BOOST = 0.08;
+const SEMANTIC_DUPLICATE_DISTANCE = 0.12;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface MeetingTranscriptSearchInput { query: string; reportId?: string }
@@ -69,10 +71,11 @@ export class MeetingTranscriptRagService {
       ...transcriptRows.map((row) => ({ sourceId: `transcript:${row.id}`, sourceType: "transcript" as const, reportId: row.meeting_report_id, startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), content: row.content.slice(0, 600), directlyReferenced: false, distance: Number(row.distance) })),
       ...activityRows.map((row) => ({ sourceId: `activity:${row.id}`, sourceType: "activity" as const, reportId: row.meeting_report_id, occurredAt: this.toIso(row.occurred_at), action: row.action, summary: row.summary.slice(0, 500), content: row.content.slice(0, 600), directlyReferenced: Boolean(row.directly_referenced), distance: Number(row.distance) }))
     ];
-    return candidates
-      .sort((left, right) => Number(right.directlyReferenced) - Number(left.directlyReferenced) || left.distance - right.distance)
-      .slice(0, MAX_RESULTS)
-      .map(({ distance: _distance, ...source }) => source);
+    const duplicatePairs = await this.findSemanticDuplicatePairs(
+      transcriptRows.map((row) => row.id),
+      activityRows.map((row) => row.id)
+    );
+    return this.selectSources(candidates, duplicatePairs);
   }
 
   async loadAuthorizedSources(currentUserId: string, workspaceId: string, sourceIds: string[]): Promise<MeetingEvidenceSource[]> {
@@ -149,6 +152,78 @@ export class MeetingTranscriptRagService {
   }
 
   private toIso(value: Date | string): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
+
+  private async findSemanticDuplicatePairs(transcriptIds: string[], activityIds: string[]): Promise<Array<{ transcriptId: string; activityId: string }>> {
+    if (transcriptIds.length === 0 || activityIds.length === 0) return [];
+    const rows = await this.database.query<{ transcript_id: string; activity_id: string }>(`
+      SELECT transcript.id AS transcript_id, activity.id AS activity_id
+      FROM meeting_report_transcript_chunks transcript
+      JOIN meeting_report_activity_evidence_chunks activity
+        ON activity.meeting_report_id = transcript.meeting_report_id
+      WHERE transcript.id = ANY($1::uuid[])
+        AND activity.id = ANY($2::uuid[])
+        AND transcript.embedding IS NOT NULL
+        AND activity.embedding IS NOT NULL
+        AND transcript.embedding <=> activity.embedding <= $3
+    `, [transcriptIds, activityIds, SEMANTIC_DUPLICATE_DISTANCE]);
+    return rows.map((row) => ({ transcriptId: row.transcript_id, activityId: row.activity_id }));
+  }
+
+  private selectSources(candidates: CandidateSource[], duplicatePairs: Array<{ transcriptId: string; activityId: string }>): MeetingEvidenceSource[] {
+    const parent = new Map(candidates.map((candidate) => [candidate.sourceId, candidate.sourceId]));
+    const find = (sourceId: string): string => {
+      const root = parent.get(sourceId);
+      if (!root || root === sourceId) return sourceId;
+      const resolved = find(root);
+      parent.set(sourceId, resolved);
+      return resolved;
+    };
+    const union = (left: string, right: string) => {
+      const leftRoot = find(left);
+      const rightRoot = find(right);
+      if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+    };
+    for (const pair of duplicatePairs) {
+      const transcriptSourceId = `transcript:${pair.transcriptId}`;
+      const activitySourceId = `activity:${pair.activityId}`;
+      if (parent.has(transcriptSourceId) && parent.has(activitySourceId)) union(transcriptSourceId, activitySourceId);
+    }
+
+    const groups = new Map<string, CandidateSource[]>();
+    for (const candidate of candidates) {
+      const group = groups.get(find(candidate.sourceId)) ?? [];
+      group.push(candidate);
+      groups.set(find(candidate.sourceId), group);
+    }
+    const compare = (left: CandidateSource, right: CandidateSource) => {
+      const relevanceDifference = this.relevanceScore(left) - this.relevanceScore(right);
+      return relevanceDifference || left.distance - right.distance || left.sourceId.localeCompare(right.sourceId);
+    };
+    const representatives = [...groups.values()].flatMap((group) =>
+      (["transcript", "activity"] as const).flatMap((sourceType) => {
+        const candidatesForType = group.filter((candidate) => candidate.sourceType === sourceType).sort(compare);
+        return candidatesForType.length === 0 ? [] : [candidatesForType[0]];
+      })
+    );
+    const selected: CandidateSource[] = [];
+    for (const sourceType of ["transcript", "activity"] as const) {
+      const bestForType = representatives.filter((candidate) => candidate.sourceType === sourceType).sort(compare)[0];
+      if (bestForType) selected.push(bestForType);
+    }
+    const selectedIds = new Set(selected.map((candidate) => candidate.sourceId));
+    for (const candidate of representatives.sort(compare)) {
+      if (selected.length === MAX_RESULTS) break;
+      if (!selectedIds.has(candidate.sourceId)) {
+        selected.push(candidate);
+        selectedIds.add(candidate.sourceId);
+      }
+    }
+    return selected.map(({ distance: _distance, ...source }) => source);
+  }
+
+  private relevanceScore(candidate: CandidateSource): number {
+    return candidate.distance - (candidate.directlyReferenced ? DIRECT_REFERENCE_DISTANCE_BOOST : 0);
+  }
 
   private async embed(query: string): Promise<number[]> {
     const apiKey = process.env.OPENAI_API_KEY?.trim();
