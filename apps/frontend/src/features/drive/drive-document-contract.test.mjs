@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [client, editor, panel, types] = await Promise.all([
+const [client, editor, panel, types, editorStyles] = await Promise.all([
   readFile(new URL("./api/client.ts", import.meta.url), "utf8"),
   readFile(new URL("./components/document-editor.tsx", import.meta.url), "utf8"),
   readFile(new URL("./components/drive-panel.tsx", import.meta.url), "utf8"),
-  readFile(new URL("./types/index.ts", import.meta.url), "utf8")
+  readFile(new URL("./types/index.ts", import.meta.url), "utf8"),
+  readFile(new URL("./components/document-editor.module.css", import.meta.url), "utf8")
 ]);
 
 assert.match(types, /DriveItemType = "folder" \| "file" \| "document"/);
@@ -23,6 +24,13 @@ assert.match(editor, /Collaboration\.configure/);
 assert.match(editor, /Y\.encodeStateAsUpdate/);
 assert.match(editor, /expectedVersion/);
 assert.match(editor, /immediatelyRender: false/);
+assert.match(editor, /styles\.documentPage/);
+assert.match(editor, /styles\.documentHeader/);
+assert.match(editor, /styles\.commandStrip/);
+assert.match(editor, /styles\.editorSurface/);
+assert.match(editor, /isEditorEmpty/);
+assert.ok(editorStyles.includes("입력하려면 /"));
+assert.doesNotMatch(editor, /rounded-md border bg-background/);
 assert.match(panel, /documentId/);
 assert.match(panel, /DriveDocumentEditor/);
 assert.match(panel, /function MoveItemSheet\(/);
