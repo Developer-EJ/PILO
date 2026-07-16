@@ -165,3 +165,52 @@ const cyclicGraph = prioritizePrReviewSemanticGraph(
 );
 
 assert.deepEqual(cyclicGraph.flows[0].reviewOrder, ["a.ts", "b.ts"]);
+
+const aiOrderWithRelationshipGuard = prioritizePrReviewSemanticGraph(
+  {
+    ...graph({
+      files: [
+        file("controller.ts", "entry"),
+        file("service.ts", "core_logic"),
+        file("readme.md", "support")
+      ],
+      flows: [flow("flow-1", ["controller.ts", "readme.md", "service.ts"])],
+      relations: [
+        relation("flow-1", "controller.ts", "service.ts", "depends_on")
+      ]
+    }),
+    validationStatus: "validated_ai",
+    fallbackReason: null
+  },
+  [
+    { filePath: "controller.ts", riskLevel: "high" },
+    { filePath: "service.ts", riskLevel: "low" },
+    { filePath: "readme.md", riskLevel: "high" }
+  ]
+);
+
+assert.deepEqual(aiOrderWithRelationshipGuard.flows[0].reviewOrder, [
+  "readme.md",
+  "service.ts",
+  "controller.ts"
+]);
+
+const aiOrderWithoutRelationshipOverride = prioritizePrReviewSemanticGraph(
+  {
+    ...graph({
+      files: [file("high.ts", "core_logic"), file("low.ts", "support")],
+      flows: [flow("flow-1", ["low.ts", "high.ts"])]
+    }),
+    validationStatus: "validated_ai",
+    fallbackReason: null
+  },
+  [
+    { filePath: "high.ts", riskLevel: "high" },
+    { filePath: "low.ts", riskLevel: "low" }
+  ]
+);
+
+assert.deepEqual(aiOrderWithoutRelationshipOverride.flows[0].reviewOrder, [
+  "low.ts",
+  "high.ts"
+]);

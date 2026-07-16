@@ -46,24 +46,37 @@ export function prioritizePrReviewSemanticGraph(
   inputs: readonly PrReviewReviewPriorityInput[]
 ): PrReviewValidatedSemanticGraph {
   const priorityByPath = buildPriorityByPath(graph, inputs);
+  const preserveAiReviewOrder = graph.validationStatus === "validated_ai";
   const flows = graph.flows
     .map((flow, originalIndex) => ({
       flow: {
         ...flow,
-        reviewOrder: prioritizeFlow(flow, graph.relations, priorityByPath)
+        reviewOrder: prioritizeFlow(
+          flow,
+          graph.relations,
+          priorityByPath,
+          preserveAiReviewOrder
+        )
       },
       originalIndex
-    }))
-    .sort((left, right) => {
-      const leftFirst = priorityByPath.get(left.flow.reviewOrder[0]);
-      const rightFirst = priorityByPath.get(right.flow.reviewOrder[0]);
-      return comparePriorities(leftFirst, rightFirst) || left.originalIndex - right.originalIndex;
-    })
-    .map(({ flow }) => flow);
+    }));
+
+  const orderedFlows = preserveAiReviewOrder
+    ? flows.map(({ flow }) => flow)
+    : flows
+        .sort((left, right) => {
+          const leftFirst = priorityByPath.get(left.flow.reviewOrder[0]);
+          const rightFirst = priorityByPath.get(right.flow.reviewOrder[0]);
+          return (
+            comparePriorities(leftFirst, rightFirst) ||
+            left.originalIndex - right.originalIndex
+          );
+        })
+        .map(({ flow }) => flow);
 
   return {
     ...graph,
-    flows
+    flows: orderedFlows
   };
 }
 
@@ -94,9 +107,13 @@ function buildPriorityByPath(
 function prioritizeFlow(
   flow: PrReviewValidatedGraphFlow,
   relations: readonly PrReviewValidatedGraphRelation[],
-  priorityByPath: ReadonlyMap<string, FilePriority>
+  priorityByPath: ReadonlyMap<string, FilePriority>,
+  preserveAiReviewOrder: boolean
 ): string[] {
   const remaining = new Set(flow.reviewOrder);
+  const aiOrderByPath = new Map(
+    flow.reviewOrder.map((filePath, index) => [filePath, index])
+  );
   const prerequisitesByPath = new Map(
     flow.reviewOrder.map((filePath) => [filePath, new Set<string>()])
   );
@@ -122,7 +139,11 @@ function prioritizeFlow(
     );
     const candidates = available.length > 0 ? available : [...remaining];
     const next = candidates.sort((left, right) =>
-      comparePriorities(priorityByPath.get(left), priorityByPath.get(right))
+      preserveAiReviewOrder
+        ? (aiOrderByPath.get(left) ?? Number.MAX_SAFE_INTEGER) -
+            (aiOrderByPath.get(right) ?? Number.MAX_SAFE_INTEGER) ||
+          comparePriorities(priorityByPath.get(left), priorityByPath.get(right))
+        : comparePriorities(priorityByPath.get(left), priorityByPath.get(right))
     )[0];
 
     reviewOrder.push(next);
