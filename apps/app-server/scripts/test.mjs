@@ -607,6 +607,9 @@ await import("./chat/idempotency.test.mjs");
 await import("./chat/service.test.mjs");
 await import("./chat/contract.test.mjs");
 await import("./chat/publisher.test.mjs");
+await import("./workspace/membership-revocation.test.mjs");
+await import("./workspace/membership-revocation-publisher.test.mjs");
+await import("./user/account-deletion-revocation.test.mjs");
 if (process.env.CHAT_POSTGRES_TEST_URL) {
   await import("./chat/postgres.test.mjs");
 }

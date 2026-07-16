@@ -157,6 +157,7 @@ export function registerChatSocketHandlers({
         if (!isCurrentOperation(room.workspaceId, generation)) return;
         if (!cleanupSucceeded) {
           emitInternalError(socket);
+          socket.disconnect(true);
           return;
         }
         socket.emit(

@@ -12,7 +12,12 @@ import { registerBoardSocketHandlers } from "../board/board-socket-handlers";
 import { registerBoardSourceSocketHandlers } from "../board/board-source-socket-handlers";
 import { createChatAccessService } from "../chat/chat-access.service";
 import { createChatFanOut } from "../chat/chat-fan-out";
+import {
+  createChatMembershipRevocationHandler,
+  WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
+} from "../chat/chat-membership-revocation";
 import { registerChatSocketHandlers } from "../chat/chat-socket-handlers";
+import { createChatSubscriptionWorkQueue } from "../chat/chat-subscription-work";
 import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
 import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
 import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
@@ -881,7 +886,14 @@ export async function createRealtimeSocketServer({
     createWorkspacePresenceAccessService(database);
   const workspacePresenceService = createWorkspacePresenceService();
   const chatAccessService = createChatAccessService(database);
-  const chatFanOut = createChatFanOut({ io });
+  const chatFanOut = createChatFanOut({ database, io });
+  const chatMembershipRevocationHandler =
+    createChatMembershipRevocationHandler({ io });
+  const chatSubscriptionWork = createChatSubscriptionWorkQueue({
+    onRejected() {
+      console.error("Chat Redis subscription work failed");
+    },
+  });
   const boardRoomService = createBoardRoomService({
     accessService: boardAccessService,
   });
@@ -980,10 +992,24 @@ export async function createRealtimeSocketServer({
     : null;
   const unsubscribeChatEvents = redisAdapter
     ? await redisAdapter.subscribe(CHAT_REDIS_CHANNEL, (payload) => {
-        if (!chatFanOut.fanOut(payload)) {
-          console.error("Chat Redis payload is invalid");
-        }
+        chatSubscriptionWork.enqueueChatEvent(async () => {
+          if (!(await chatFanOut.fanOut(payload))) {
+            console.error("Chat Redis payload or access recheck failed");
+          }
+        });
       })
+    : null;
+  const unsubscribeWorkspaceMembershipRevocations = redisAdapter
+    ? await redisAdapter.subscribe(
+        WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
+        (payload) => {
+          chatSubscriptionWork.trackRevocation(async () => {
+            if (!(await chatMembershipRevocationHandler.handle(payload))) {
+              console.error("Workspace membership revocation handling failed");
+            }
+          });
+        },
+      )
     : null;
   const unsubscribePrReviewDecisions = redisAdapter
     ? await redisAdapter.subscribe(PR_REVIEW_DECISION_REDIS_CHANNEL, (payload) => {
@@ -1847,6 +1873,8 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
       await unsubscribeChatEvents?.();
+      await unsubscribeWorkspaceMembershipRevocations?.();
+      await chatSubscriptionWork.drain();
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewRoomDeleted?.();
       await unsubscribePrReviewConflictDrafts?.();

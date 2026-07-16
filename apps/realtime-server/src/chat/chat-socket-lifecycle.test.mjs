@@ -37,11 +37,16 @@ function createHarness({
   const handlers = new Map();
   const joinCalls = [];
   const leaveCalls = [];
+  const disconnectCalls = [];
   const socket = {
     connected: true,
     data: { auth },
     id: "socket-1",
     rooms: new Set(),
+    disconnect(close) {
+      disconnectCalls.push(close);
+      socket.connected = false;
+    },
     async join(roomName) {
       joinCalls.push(roomName);
       if (join) await join(roomName);
@@ -78,6 +83,7 @@ function createHarness({
     handlers,
     joinCalls,
     leaveCalls,
+    disconnectCalls,
     socket,
   };
 }
@@ -428,7 +434,7 @@ test("disconnect cleanup은 첫 leave 실패 후에도 두 번째 room을 시도
   assert.equal(harness.socket.rooms.has(userRoom), false);
 });
 
-test("forbidden cleanup adapter 실패는 양쪽 leave 뒤 internal_error를 보낸다", async () => {
+test("forbidden cleanup adapter 실패는 양쪽 leave 뒤 강제 disconnect한다", async () => {
   const generalRoom = createChatRoomName(workspaceId);
   const userRoom = createChatUserRoomName(workspaceId, "user-1");
   let accessCount = 0;
@@ -453,6 +459,7 @@ test("forbidden cleanup adapter 실패는 양쪽 leave 뒤 internal_error를 보
 
   assert.deepEqual(harness.leaveCalls.slice(-2), [generalRoom, userRoom]);
   assert.equal(harness.emitted.at(-1)?.payload.code, "internal_error");
+  assert.deepEqual(harness.disconnectCalls, [true]);
 });
 
 test("current access failure는 cleanup 뒤 internal_error를 보내고 reject하지 않는다", async () => {

@@ -1,6 +1,6 @@
-const MAX_IDENTIFIER_LENGTH = 256;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { isUuid } from "./chat-identifiers";
+
+const MAX_CLIENT_MESSAGE_ID_LENGTH = 128;
 
 export type WorkspaceChatMessage = {
   id: string;
@@ -50,11 +50,11 @@ function hasExactKeys(
   );
 }
 
-function isIdentifier(value: unknown): value is string {
+function isClientMessageId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     Boolean(value.trim()) &&
-    value.length <= MAX_IDENTIFIER_LENGTH
+    value.length <= MAX_CLIENT_MESSAGE_ID_LENGTH
   );
 }
 
@@ -76,7 +76,7 @@ function isChatAuthor(value: unknown): value is NonNullable<WorkspaceChatMessage
   }
 
   return (
-    isIdentifier(value.id) &&
+    isUuid(value.id) &&
     typeof value.displayName === "string" &&
     isNullableString(value.avatarUrl)
   );
@@ -89,7 +89,7 @@ function isChatMention(
     return false;
   }
 
-  return isIdentifier(value.userId) && typeof value.displayText === "string";
+  return isUuid(value.userId) && typeof value.displayText === "string";
 }
 
 function isWorkspaceChatMessage(
@@ -113,9 +113,9 @@ function isWorkspaceChatMessage(
   }
 
   return (
-    isIdentifier(value.id) &&
+    isUuid(value.id) &&
     value.workspaceId === workspaceId &&
-    isIdentifier(value.clientMessageId) &&
+    isClientMessageId(value.clientMessageId) &&
     isNullableString(value.content) &&
     (value.author === null || isChatAuthor(value.author)) &&
     Array.isArray(value.mentions) &&
@@ -134,14 +134,14 @@ export function readChatRoomRef(
 
   if (typeof payload.workspaceId !== "string") return null;
   const workspaceId = payload.workspaceId.trim();
-  if (!UUID_PATTERN.test(workspaceId)) return null;
+  if (!isUuid(workspaceId)) return null;
   return { workspaceId };
 }
 
 export function isChatRedisEvent(
   value: unknown,
 ): value is ChatRedisEventV1 {
-  if (!isRecord(value) || value.version !== 1 || !isIdentifier(value.workspaceId)) {
+  if (!isRecord(value) || value.version !== 1 || !isUuid(value.workspaceId)) {
     return false;
   }
 
@@ -158,7 +158,7 @@ export function isChatRedisEvent(
       isIsoDateString(value.occurredAt) &&
       isWorkspaceChatMessage(value.message, value.workspaceId) &&
       Array.isArray(value.mentionedUserIds) &&
-      value.mentionedUserIds.every(isIdentifier)
+      value.mentionedUserIds.every(isUuid)
     );
   }
 
@@ -173,7 +173,7 @@ export function isChatRedisEvent(
         "deletedAt",
       ]) &&
       isIsoDateString(value.occurredAt) &&
-      isIdentifier(value.messageId) &&
+      isUuid(value.messageId) &&
       isIsoDateString(value.deletedAt)
     );
   }

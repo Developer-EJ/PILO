@@ -260,4 +260,6 @@ await import("./pr-review-conflict-draft-events.test.mjs");
 await import("./page-cursor.test.mjs");
 await import("./github-source/test.mjs");
 await import("../src/chat/chat-events.test.mjs");
+await import("../src/chat/chat-membership-revocation.test.mjs");
+await import("../src/chat/chat-subscription-work.test.mjs");
 await import("../src/chat/chat-socket-lifecycle.test.mjs");

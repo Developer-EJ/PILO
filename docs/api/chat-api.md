@@ -377,6 +377,44 @@ Redis channel은 `chat:events`다. Event envelope는 `version: 1`, `type`, `work
 `occurredAt`, type별 payload를 포함한다. Realtime Server는 version과 payload를 검증한
 뒤에만 emit한다.
 
+Workspace membership 제거를 전달하는 별도 internal Redis channel은
+`workspace:membership-revocations`다. App Server는 membership 제거 transaction이
+commit된 뒤에만 다음 exact V1 event를 발행한다.
+
+```ts
+type WorkspaceMembershipRevokedEventV1 = {
+  version: 1;
+  type: "membership.revoked";
+  workspaceId: string;
+  userId: string;
+  occurredAt: string;
+};
+```
+
+Realtime Server는 exact key, UUID `workspaceId`/`userId`, canonical ISO timestamp를
+검증한 event만 처리한다. 유효한 event를 받으면 target user room의 모든 socket을
+Workspace Chat room과 target user room에서 제거한다. target room의 socket identity가
+event user와 다르거나 어느 room의 leave라도 실패하면 `disconnect(true)`로 강제
+종료한다. 각 Realtime instance는 Redis event를 독립적으로 구독하고 자기 node의 local
+socket registry만 처리한다. Redis adapter를 통한 cluster-wide room emit/leave는 하지
+않으므로 여러 instance가 같은 event를 받아도 socket별 전달과 퇴출은 한 번만 수행된다.
+
+`chat:events`의 message 생성·삭제를 emit하기 직전에는 Redis 회수 event 수신 여부와
+독립적으로 다음 access recheck를 수행한다.
+
+- local Workspace Chat room socket을 조회하고 authenticated UUID user id를 unique하게 모은다.
+- 해당 Workspace의 `workspace_members`를 한 번의 batch query로 조회한다.
+- membership이 없어진 socket은 두 Chat room에서 제거하고, leave 실패 시 강제 종료한다.
+- socket 조회 또는 membership query가 실패하면 해당 Chat event 전체를 emit하지 않는다.
+- leave 실패 후 강제 종료까지 실패해 안전한 퇴출을 보장할 수 없으면 event 전체를 emit하지 않는다.
+- general room batch에서 현재 member로 확인되고 같은 local target user room에도 속한
+  socket에만 mention을 직접 emit한다.
+- Chat Redis event는 node별 serial queue로 순서를 보존한다. 종료 시 Chat/revocation
+  subscription을 해제한 뒤 in-flight work를 모두 drain하고 Socket.IO와 DB를 닫는다.
+
+따라서 membership-revocation Redis delivery는 빠른 퇴출 경로지만 유일한 authorization
+경계가 아니다.
+
 Socket error code:
 
 - `invalid_payload`
@@ -404,6 +442,11 @@ Socket error code:
 | Socket disconnect | 연결 상태 표시, REST write 유지, reconnect 후 summary/history catch-up |
 | invalid mention member | draft 유지, member list refresh, safe validation message |
 | membership removed | composer disable, Chat rooms leave, auth Workspace session refresh |
+| server membership revocation | post-commit event로 모든 Chat tab을 즉시 퇴출하고, 누락 시에도 다음 fan-out recheck에서 퇴출 |
+| membership revocation room leave failure | 해당 socket을 `disconnect(true)`로 강제 종료 |
+| membership revocation leave/disconnect failure | 안전한 퇴출 실패로 처리하고 해당 revocation handling을 실패로 기록 |
+| fan-out socket discovery/membership query failure | message/delete/mention event를 emit하지 않음 |
+| fan-out unauthorized socket leave/disconnect failure | 해당 Chat event 전체를 emit하지 않음 |
 | stale read update | current server cursor 반환, cursor rollback 금지 |
 | duplicate Socket event | reducer가 message id와 deletion state로 idempotent 처리 |
 | deleted mention target | 안내 후 mention read, deleted message는 list/count 제외 |
@@ -412,6 +455,8 @@ Socket error code:
 
 - 모든 message, read, mention query는 `workspace_id`를 조건에 포함한다.
 - mention target room은 target user socket만 join한다.
+- Chat Redis persisted id는 UUID를 요구하고 `clientMessageId`만 `1..128` generic identifier를 허용한다.
+- 모든 Chat fan-out은 현재 Workspace membership batch recheck를 통과한 socket만 수신한다.
 - message content를 `dangerouslySetInnerHTML`로 렌더링하지 않는다.
 - URL linkification은 `http`와 `https` scheme만 허용한다.
 - error response와 log에는 bearer token 또는 secret을 포함하지 않는다.
