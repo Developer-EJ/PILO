@@ -10,6 +10,7 @@ import {
   DatabaseService,
   type DatabaseTransaction
 } from "../../database/database.service";
+import { ActivityLogService } from "../../common/activity-log.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import {
   parseUnifiedDiffPatch,
@@ -69,6 +70,7 @@ import {
   PR_REVIEW_RELATION_EDGE_SHAPE_TYPE
 } from "../canvas/canvas-review-shape-policy";
 import type { CanvasShapeRow } from "../canvas/canvas.types";
+import { buildPrReviewSessionCreatedActivityLog } from "./pr-review-activity-log";
 import {
   buildPrReviewCanvasMaterialization,
   type PrReviewCanvasMaterializationFile,
@@ -1062,6 +1064,7 @@ export class PrReviewService {
     private readonly githubDependency: PrReviewGithubDependencyService,
     private readonly analysisService: PrReviewAnalysisService,
     private readonly analysisJobPublisher: PrReviewAnalysisJobPublisherService,
+    private readonly activityLogService: ActivityLogService,
     private readonly decisionRealtimePublisher?: PrReviewDecisionRealtimePublisherService,
     private readonly conflictDraftRealtimePublisher?: PrReviewConflictDraftRealtimePublisherService,
     private readonly roomRealtimePublisher?: PrReviewRoomRealtimePublisherService
@@ -1169,6 +1172,15 @@ export class PrReviewService {
           workspaceId,
           headSha: detail.headSha
         });
+        await this.activityLogService.append(
+          transaction,
+          buildPrReviewSessionCreatedActivityLog({
+            currentUserId,
+            workspaceId,
+            pullRequestId,
+            reviewSessionId: session.id
+          })
+        );
 
         return { session, jobId: job.id, roomCreated };
       });
@@ -3027,6 +3039,15 @@ export class PrReviewService {
           workspaceId: input.workspaceId,
           headSha: input.headShaAfter
         });
+        await this.activityLogService.append(
+          transaction,
+          buildPrReviewSessionCreatedActivityLog({
+            currentUserId: input.currentUserId,
+            workspaceId: input.workspaceId,
+            pullRequestId: input.previousSession.pull_request_id,
+            reviewSessionId: session.id
+          })
+        );
         return { session, jobId: job.id };
       });
       await this.analysisJobPublisher.publishCreatedJob(created.jobId);

@@ -118,12 +118,17 @@ class FakeReviewDatabase {
       state: "open",
       github_closed_at: null,
       merged_at: null
-    }
+    },
+    { concurrentSession = null, failSessionInsertWithUnique = false } = {}
   ) {
     this.session = null;
     this.room = null;
     this.jobs = [];
     this.pullRequest = pullRequest;
+    this.concurrentSession = concurrentSession;
+    this.failSessionInsertWithUnique = failSessionInsertWithUnique;
+    this.reusableLookupCount = 0;
+    this.transactions = [];
   }
 
   async queryOne(text, values = []) {
@@ -137,13 +142,17 @@ class FakeReviewDatabase {
       text.includes("review_session.head_sha = $3") &&
       text.includes("review_session.status <> 'failed'")
     ) {
+      this.reusableLookupCount += 1;
+      if (this.reusableLookupCount > 1 && this.concurrentSession) {
+        return { id: this.concurrentSession.id };
+      }
       return null;
     }
     if (
       text.includes("FROM pr_review_sessions AS review_session") &&
       text.includes("review_session.id = $2")
     ) {
-      return this.session;
+      return this.session ?? this.concurrentSession;
     }
     throw new Error(`Unhandled review query: ${text}`);
   }
@@ -156,7 +165,13 @@ class FakeReviewDatabase {
   }
 
   async transaction(callback) {
-    return callback({
+    const snapshot = {
+      session: this.session,
+      room: this.room,
+      jobs: [...this.jobs]
+    };
+    const transaction = {
+      events: [],
       queryOne: async (text, values = []) => {
         if (text.includes("FROM github_pull_requests")) {
           return { id: values[1], ...this.pullRequest };
@@ -177,6 +192,12 @@ class FakeReviewDatabase {
           return this.room;
         }
         if (text.includes("INSERT INTO pr_review_sessions")) {
+          transaction.events.push("session");
+          if (this.failSessionInsertWithUnique) {
+            const error = new Error("duplicate review revision");
+            error.code = "23505";
+            throw error;
+          }
           this.session = {
             id: payload.reviewSessionId,
             room_id: values[0],
@@ -200,6 +221,7 @@ class FakeReviewDatabase {
           return this.session;
         }
         if (text.includes("INSERT INTO pr_review_analysis_jobs")) {
+          transaction.events.push("job");
           this.jobs.push({
             review_session_id: values[0],
             workspace_id: values[1],
@@ -210,7 +232,17 @@ class FakeReviewDatabase {
         throw new Error(`Unhandled review transaction query: ${text}`);
       },
       execute: async () => ({ rows: [] })
-    });
+    };
+    this.transactions.push(transaction);
+
+    try {
+      return await callback(transaction);
+    } catch (error) {
+      this.session = snapshot.session;
+      this.room = snapshot.room;
+      this.jobs = snapshot.jobs;
+      throw error;
+    }
   }
 }
 
@@ -272,6 +304,19 @@ class FakeReviewPublisher {
 
   async publishCreatedJob(jobId) {
     this.calls.push(jobId);
+  }
+}
+
+class FakeActivityLogService {
+  constructor({ shouldFail = false } = {}) {
+    this.shouldFail = shouldFail;
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ transaction, input });
+    transaction.events.push("activity");
+    if (this.shouldFail) throw new Error("activity append failed");
   }
 }
 
@@ -373,12 +418,14 @@ try {
     const database = new FakeReviewDatabase();
     const github = new FakeGithubDependency();
     const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService();
     const service = new PrReviewService(
       database,
       new FakeWorkspaceService(),
       github,
       new FakeAnalysisService(),
-      publisher
+      publisher,
+      activityLog
     );
     const pullRequestId = "66666666-6666-6666-6666-666666666666";
     const userId = "11111111-1111-1111-1111-111111111111";
@@ -401,6 +448,21 @@ try {
     ]);
     assert.deepEqual(publisher.calls, [payload.jobId]);
     assert.equal(github.detailCalls, 1);
+    assert.equal(activityLog.calls.length, 1);
+    assert.strictEqual(activityLog.calls[0].transaction, database.transactions[0]);
+    assert.deepEqual(database.transactions[0].events, ["session", "job", "activity"]);
+    assert.deepEqual(activityLog.calls[0].input, {
+      workspaceId: payload.workspaceId,
+      actor: { type: "user", userId },
+      action: "pr_review_session_created",
+      target: { type: "pr_review_session", id: payload.reviewSessionId },
+      dedupeKey: `pr-review:pr_review_session_created:${payload.reviewSessionId}:created`,
+      metadata: {
+        version: 1,
+        summary: "새 PR Review revision을 시작했습니다.",
+        data: { pullRequestId }
+      }
+    });
 
     const duplicate = await service.createReviewSession(
       userId,
@@ -412,6 +474,106 @@ try {
     assert.deepEqual(publisher.calls, [payload.jobId]);
     assert.equal(github.detailCalls, 1);
     assert.equal(github.conflictCalls, 1);
+    assert.equal(activityLog.calls.length, 1);
+  }
+
+  {
+    const database = new FakeReviewDatabase();
+    const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService({ shouldFail: true });
+    const service = new PrReviewService(
+      database,
+      new FakeWorkspaceService(),
+      new FakeGithubDependency(),
+      new FakeAnalysisService(),
+      publisher,
+      activityLog
+    );
+
+    await assert.rejects(
+      service.createReviewSession(
+        "11111111-1111-1111-1111-111111111111",
+        payload.workspaceId,
+        "66666666-6666-6666-6666-666666666666"
+      ),
+      /activity append failed/
+    );
+    assert.equal(database.session, null);
+    assert.equal(database.room, null);
+    assert.deepEqual(database.jobs, []);
+    assert.deepEqual(publisher.calls, []);
+  }
+
+  {
+    const database = new FakeReviewDatabase();
+    const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService();
+    const service = new PrReviewService(
+      database,
+      new FakeWorkspaceService(),
+      new FakeGithubDependency(),
+      new FakeAnalysisService(),
+      publisher,
+      activityLog
+    );
+    const pullRequestId = "66666666-6666-6666-6666-666666666666";
+    const userId = "11111111-1111-1111-1111-111111111111";
+
+    await service.createSuccessorReviewRevisionAfterConflictApply({
+      currentUserId: userId,
+      workspaceId: payload.workspaceId,
+      previousSession: {
+        room_id: "88888888-8888-4888-8888-888888888888",
+        pull_request_id: pullRequestId,
+        head_sha: "previous-head-sha"
+      },
+      headShaAfter: payload.headSha,
+      conflictStatus: "clean",
+      conflictCheckedAt: "2026-07-11T00:00:00.000Z"
+    });
+
+    assert.deepEqual(database.transactions[0].events, ["session", "job", "activity"]);
+    assert.equal(activityLog.calls.length, 1);
+    assert.equal(activityLog.calls[0].input.action, "pr_review_session_created");
+    assert.deepEqual(activityLog.calls[0].input.metadata.data, { pullRequestId });
+    assert.deepEqual(publisher.calls, [payload.jobId]);
+  }
+
+  {
+    const concurrentSession = {
+      id: payload.reviewSessionId,
+      room_id: "88888888-8888-4888-8888-888888888888"
+    };
+    const database = new FakeReviewDatabase(
+      undefined,
+      { concurrentSession, failSessionInsertWithUnique: true }
+    );
+    const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService();
+    const service = new PrReviewService(
+      database,
+      new FakeWorkspaceService(),
+      new FakeGithubDependency(),
+      new FakeAnalysisService(),
+      publisher,
+      activityLog
+    );
+
+    await service.createSuccessorReviewRevisionAfterConflictApply({
+      currentUserId: "11111111-1111-1111-1111-111111111111",
+      workspaceId: payload.workspaceId,
+      previousSession: {
+        room_id: concurrentSession.room_id,
+        pull_request_id: "66666666-6666-6666-6666-666666666666",
+        head_sha: "previous-head-sha"
+      },
+      headShaAfter: payload.headSha,
+      conflictStatus: "clean",
+      conflictCheckedAt: null
+    });
+
+    assert.deepEqual(activityLog.calls, []);
+    assert.deepEqual(publisher.calls, []);
   }
 
   {
@@ -422,12 +584,14 @@ try {
     });
     const github = new FakeGithubDependency();
     const publisher = new FakeReviewPublisher();
+    const activityLog = new FakeActivityLogService();
     const service = new PrReviewService(
       database,
       new FakeWorkspaceService(),
       github,
       new FakeAnalysisService(),
-      publisher
+      publisher,
+      activityLog
     );
 
     await assert.rejects(
@@ -444,6 +608,7 @@ try {
     assert.equal(github.detailCalls, 0);
     assert.equal(github.conflictCalls, 0);
     assert.deepEqual(publisher.calls, []);
+    assert.deepEqual(activityLog.calls, []);
   }
 } finally {
   for (const [key, value] of Object.entries(originalEnv)) {

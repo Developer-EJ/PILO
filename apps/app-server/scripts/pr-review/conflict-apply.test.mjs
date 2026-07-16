@@ -399,6 +399,9 @@ function createService(database, githubDependency) {
     {},
     {
       async publishCreatedJob() {}
+    },
+    {
+      async append() {}
     }
   );
 }
