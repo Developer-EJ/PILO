@@ -11,6 +11,10 @@ const [client, editor, panel, types] = await Promise.all([
 assert.match(types, /DriveItemType = "folder" \| "file" \| "document"/);
 assert.match(types, /DocumentBootstrapPayload/);
 assert.match(types, /SaveDocumentSnapshotInput/);
+assert.match(
+  types,
+  /UpdateDriveItemInput =\s*\| \{ name: string \}\s*\| \{ parentId: string \| null \}/
+);
 assert.match(client, /async createDocument\(/);
 assert.match(client, /async getDocument\(/);
 assert.match(client, /async saveDocumentSnapshot\(/);
