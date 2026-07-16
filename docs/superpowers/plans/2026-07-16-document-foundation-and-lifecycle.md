@@ -32,9 +32,10 @@
   - [x] focused test, frontend format/lint/test
   - [ ] 인증된 dev 환경 수동 QA
   - [x] PR [#1175](https://github.com/Developer-EJ/PILO/pull/1175) 병합 완료
-- [ ] **파일 첨부와 PDF viewer 기반**: Issue [#1179](https://github.com/Developer-EJ/PILO/issues/1179) 진행 중
+- [x] **파일 첨부와 PDF viewer 기반**: Issue [#1179](https://github.com/Developer-EJ/PILO/issues/1179), Issue [#1195](https://github.com/Developer-EJ/PILO/issues/1195)
   - [x] Drive file attachment 검증과 PDF inline preview API
-  - [ ] 후속 frontend attachment picker와 PDF viewer
+  - [x] frontend attachment picker, PDF inline viewer, 다운로드와 unavailable 상태
+  - [ ] 인증된 dev 환경에서 PDF/non-PDF 첨부 수동 QA
 - [ ] **후속 작업**: Yjs realtime collaboration
 
 > 아래 작업 1~5는 최초 기반 구현 계획이다. 현재 진행 상태는 이 상단 현황을 기준으로
@@ -141,4 +142,10 @@
   - [x] 빈 문서 placeholder와 반응형 loading/error 상태 적용
   - [x] 기존 자동 저장, 충돌 감지, reload 흐름 유지
   - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
-  - [ ] 다음 interaction 작업: slash menu, bubble menu, block handle, inline rename
+  - [ ] 다음 interaction 작업: bubble menu, block handle, inline rename
+- [x] **Slash command와 문서 작성 영역 개선**: Issue [#1200](https://github.com/Developer-EJ/PILO/issues/1200)
+  - [x] 빈 문단에서 `/` 입력 시 기본 블록과 Drive 파일 첨부를 선택하는 메뉴 표시
+  - [x] 방향키, Enter, Escape 및 클릭으로 메뉴 조작
+  - [x] 기존 Tiptap 명령으로 문단, 제목, 목록, 인용, 코드 블록, 구분선 전환
+  - [x] 문서 작성 영역 최대 너비를 60rem으로 확장
+  - [ ] 인증된 dev 환경에서 desktop/mobile 수동 QA
