@@ -819,6 +819,12 @@ export async function createRealtimeSocketServer({
   });
   const roomCheckpointService = createCanvasRoomCheckpointService({
     appServerUrl: config.appServerUrl,
+    onCheckpointStatus(payload) {
+      io.to(createCanvasRoomName(payload)).emit(
+        canvasServerEvents.checkpoint,
+        payload,
+      );
+    },
     roomStateService,
   });
   const sqlErdRoomService = createSqlErdRoomService({

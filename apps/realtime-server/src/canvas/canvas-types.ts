@@ -178,6 +178,12 @@ export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
   sentAt: string;
 };
 
+export type CanvasRoomCheckpointStatusPayload = CanvasRoomRef & {
+  pendingOperations: number;
+  status: "delayed" | "saved" | "saving";
+  updatedAt: string;
+};
+
 export type CanvasCheckpointSyncOperation =
   | {
       baseRevision: number | null;

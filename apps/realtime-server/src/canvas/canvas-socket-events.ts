@@ -11,6 +11,7 @@ export const canvasClientEvents = {
 } as const;
 
 export const canvasServerEvents = {
+  checkpoint: "canvas:room:checkpoint",
   error: "canvas:error",
   joined: "canvas:joined",
   operation: "canvas:operation",

@@ -1,4 +1,7 @@
-import type { CanvasRoomRef } from "./canvas-types";
+import type {
+  CanvasRoomCheckpointStatusPayload,
+  CanvasRoomRef,
+} from "./canvas-types";
 import type {
   CanvasRoomCheckpointSnapshot,
   CanvasRoomStateService,
@@ -15,6 +18,7 @@ export type CanvasRoomCheckpointService = {
 
 export type CanvasRoomCheckpointServiceOptions = {
   appServerUrl: string;
+  onCheckpointStatus?: (payload: CanvasRoomCheckpointStatusPayload) => void;
   roomStateService: CanvasRoomStateService;
 };
 
@@ -36,6 +40,7 @@ function shouldCheckpoint(snapshot: CanvasRoomCheckpointSnapshot) {
 
 export function createCanvasRoomCheckpointService({
   appServerUrl,
+  onCheckpointStatus,
   roomStateService,
 }: CanvasRoomCheckpointServiceOptions): CanvasRoomCheckpointService {
   const timersByRoom = new Map<string, ReturnType<typeof setTimeout>>();
@@ -43,6 +48,19 @@ export function createCanvasRoomCheckpointService({
   const roomsByKey = new Map<string, CanvasRoomRef>();
   const runningRooms = new Set<string>();
   let isClosing = false;
+
+  function emitCheckpointStatus(
+    room: CanvasRoomRef,
+    status: CanvasRoomCheckpointStatusPayload["status"],
+    pendingOperations: number,
+  ) {
+    onCheckpointStatus?.({
+      ...room,
+      pendingOperations,
+      status,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   async function flushCheckpoint(roomKey: string) {
     if (runningRooms.has(roomKey)) return;
@@ -64,6 +82,8 @@ export function createCanvasRoomCheckpointService({
     )}/canvases/${encodeURIComponent(room.canvasId)}/shapes/batch`;
 
     try {
+      emitCheckpointStatus(room, "saving", operations.length);
+
       const response = await fetch(`${appServerUrl}${path}`, {
         body: JSON.stringify({ operations }),
         headers: {
@@ -82,12 +102,19 @@ export function createCanvasRoomCheckpointService({
           status: response.status,
           workspaceId: room.workspaceId,
         });
+        emitCheckpointStatus(room, "delayed", operations.length);
         return;
       }
 
       roomStateService.markCheckpointSucceeded(room, operations);
+      emitCheckpointStatus(
+        room,
+        "saved",
+        roomStateService.getCheckpointSnapshot(room).operations.length,
+      );
     } catch (error) {
       console.warn("Canvas room checkpoint failed.", error);
+      emitCheckpointStatus(room, "delayed", operations.length);
     } finally {
       runningRooms.delete(roomKey);
 

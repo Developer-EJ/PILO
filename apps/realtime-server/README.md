@@ -59,6 +59,12 @@ Classic Canvas room loaded regions are realtime room state. They indicate which
 viewport bounds connected clients have already loaded, but absence from this
 state is never treated as deletion.
 
+Classic Canvas checkpoint persistence is also room state orchestration:
+realtime-server batches dirty room shapes and calls the existing App Server
+`/shapes/batch` boundary. It emits `canvas:room:checkpoint` with
+`saving`/`saved`/`delayed` status so clients can show save-delay UX without
+treating a transient checkpoint failure as lost work.
+
 For `tldraw_sync` Canvas, realtime-server owns the multiplayer room lifecycle.
 The room key and validation contract are documented in `src/canvas/README.md`;
 recoverable room snapshots are persisted to the same `canvas_sync_documents`

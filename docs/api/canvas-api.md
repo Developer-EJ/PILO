@@ -677,6 +677,7 @@ canvas:presence:update
 canvas:shape:lock:claim
 canvas:shape:lock:release
 canvas:room:shape:patch
+canvas:room:checkpoint
 canvas:shape:preview
 canvas:shape:preview:clear
 canvas:viewport:loaded
@@ -714,9 +715,11 @@ Canvas는 `false`, completed Review Canvas는 `true`다. read-only room에서도
 `forbidden`으로 거부한다. active room이 접속 중 completed로 전환되는 lifecycle event와
 클라이언트 상태 전환은 PR Review room lifecycle 단계에서 처리한다.
 
-classic Canvas의 최종 저장은 클라이언트가 App Server `/shapes/batch`를 직접 호출한다.
-Socket.IO는 presence, lock, preview, operation 전달과 catch-up 유도만 담당하며,
-realtime-server는 `canvas_freeform_shapes`나 `canvas_shape_operations`를 직접 쓰지 않는다.
+classic Canvas에서 realtime roomState가 비활성화된 경우 최종 저장은 클라이언트가
+App Server `/shapes/batch`를 직접 호출한다. realtime roomState가 활성화된 경우
+클라이언트는 shape patch를 realtime-server에 보내고, realtime-server가 checkpoint로
+App Server `/shapes/batch`를 호출한다. realtime-server는
+`canvas_freeform_shapes`나 `canvas_shape_operations`를 직접 쓰지 않는다.
 최종 DB transaction, revision/opSeq, operation log, activity log 작성 책임은 App Server가
 계속 가진다.
 
@@ -743,6 +746,11 @@ DB transaction, revision/opSeq, operation log의 owner이며, realtime-server는
 checkpoint 실패 시 dirty 상태를 유지하고 다음 checkpoint에서 재시도한다.
 사용자가 room을 떠나거나 realtime-server가 종료될 때는 남은 dirty checkpoint를 즉시
 flush하려고 시도한다.
+
+`canvas:room:checkpoint`는 checkpoint 저장 상태를 같은 room에 알리는 서버 이벤트다.
+payload는 `status`(`saving`, `saved`, `delayed`), `pendingOperations`, `updatedAt`을
+포함한다. `delayed`는 저장 실패 또는 App Server 일시 오류로 dirty state가 남아 있으며
+다음 checkpoint에서 재시도된다는 뜻이다.
 
 ## tldraw_sync Multiplayer Room 계약
 

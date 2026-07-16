@@ -608,6 +608,17 @@ function PiloCanvasRuntimeInner({
   });
 
   useEffect(() => {
+    if (canvasPresence.checkpointStatus?.status !== "delayed") {
+      return;
+    }
+
+    showCanvasSyncNotice(
+      "Canvas 변경사항 저장이 지연되고 있어요. 연결이 회복되면 다시 저장을 시도합니다.",
+      "warning",
+    );
+  }, [canvasPresence.checkpointStatus, showCanvasSyncNotice]);
+
+  useEffect(() => {
     deferredRemoteOperationsRef.current.clear();
     remoteShapeRevisionRef.current.clear();
     deletedShapeIdsRef.current.clear();

@@ -231,6 +231,14 @@ export type CanvasRoomShapePatchEventPayload = CanvasRoomShapePatchPayload & {
   sentAt: string;
 };
 
+export type CanvasRoomCheckpointStatusPayload = {
+  workspaceId: string;
+  canvasId: string;
+  pendingOperations: number;
+  status: "delayed" | "saved" | "saving";
+  updatedAt: string;
+};
+
 export type CanvasRealtimeErrorPayload = {
   code: string;
   message: string;
@@ -273,6 +281,9 @@ export type CanvasServerToClientEvents = {
   ) => void;
   "canvas:room:shape:patch": (
     payload: CanvasRoomShapePatchEventPayload,
+  ) => void;
+  "canvas:room:checkpoint": (
+    payload: CanvasRoomCheckpointStatusPayload,
   ) => void;
   "canvas:error": (payload: CanvasRealtimeErrorPayload) => void;
 };
