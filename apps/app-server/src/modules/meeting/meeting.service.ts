@@ -503,6 +503,36 @@ export interface MeetingReportActionItemPayload {
   updatedAt: string;
 }
 
+export interface MeetingAgentMeetingSearchQuery {
+  roomName?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface MeetingAgentMeetingSearchPayload {
+  meeting: MeetingPayload;
+  roomName: string;
+}
+
+export interface MeetingAgentActionItemSearchQuery {
+  reportId?: string;
+  assigneeUserId?: string;
+  status?: "PENDING" | "DELIVERING" | "DELIVERY_FAILED" | "APPROVED" | "DISMISSED";
+  title?: string;
+  limit?: number;
+}
+
+export interface MeetingAgentActionItemSearchPayload {
+  id: string;
+  reportId: string;
+  sourceIndex: number;
+  title: string;
+  status: "PENDING" | "DELIVERING" | "DELIVERY_FAILED" | "APPROVED" | "DISMISSED";
+  assignee: MeetingReportActionItemAssigneePayload | null;
+  reportCreatedAt: string;
+}
+
 export interface MeetingReportActionItemAssigneePayload {
   userId: string;
   name: string | null;
@@ -1664,6 +1694,159 @@ export class MeetingService {
     };
   }
 
+  async listMeetingsForAgent(
+    currentUserId: string,
+    workspaceId: string,
+    query: MeetingAgentMeetingSearchQuery
+  ): Promise<{ meetings: MeetingAgentMeetingSearchPayload[] }> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const limit = this.agentResolutionLimit(query.limit);
+    const normalizedRoomName = query.roomName
+      ? this.normalizeAgentResolutionText(query.roomName)
+      : null;
+    const values: unknown[] = [workspaceId];
+    const roomNameCondition =
+      normalizedRoomName === null
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(meeting_rooms.name), '\\s+', ' ', 'g')) = $${values.push(normalizedRoomName)}`;
+    const fromCondition = query.from
+      ? `AND meetings.started_at >= $${values.push(query.from)}::timestamptz`
+      : "";
+    const toCondition = query.to
+      ? `AND meetings.started_at < $${values.push(query.to)}::timestamptz`
+      : "";
+    const rows = await this.database.query<
+      MeetingRow & { meeting_room_name: string }
+    >(
+      `
+        SELECT
+          meetings.id,
+          meetings.workspace_id,
+          meetings.room_key,
+          meetings.livekit_room_name,
+          meetings.created_by_id,
+          meetings.ended_by_id,
+          meetings.started_at,
+          meetings.ended_at,
+          meetings.created_at,
+          meetings.updated_at,
+          meeting_rooms.name AS meeting_room_name
+        FROM meetings
+        JOIN meeting_rooms
+          ON meeting_rooms.workspace_id = meetings.workspace_id
+          AND meeting_rooms.room_key = meetings.room_key
+        WHERE meetings.workspace_id = $1
+          ${roomNameCondition}
+          ${fromCondition}
+          ${toCondition}
+        ORDER BY meetings.started_at DESC, meetings.id ASC
+        LIMIT $${values.push(limit)}
+      `,
+      values
+    );
+    return {
+      meetings: rows.map((row) => ({
+        meeting: this.mapMeeting(row),
+        roomName: row.meeting_room_name
+      }))
+    };
+  }
+
+  async listActionItemsForAgent(
+    currentUserId: string,
+    workspaceId: string,
+    query: MeetingAgentActionItemSearchQuery
+  ): Promise<{ actionItems: MeetingAgentActionItemSearchPayload[] }> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (
+      (query.reportId !== undefined && !UUID_PATTERN.test(query.reportId)) ||
+      (query.assigneeUserId !== undefined && !UUID_PATTERN.test(query.assigneeUserId))
+    ) {
+      return { actionItems: [] };
+    }
+
+    const limit = this.agentResolutionLimit(query.limit);
+    const values: unknown[] = [workspaceId];
+    const reportCondition =
+      query.reportId === undefined
+        ? ""
+        : `AND action_items.meeting_report_id = $${values.push(query.reportId)}::uuid`;
+    const assigneeCondition =
+      query.assigneeUserId === undefined
+        ? ""
+        : `AND action_items.assignee_user_id = $${values.push(query.assigneeUserId)}::uuid`;
+    const statusCondition =
+      query.status === undefined
+        ? ""
+        : `AND action_items.status = $${values.push(query.status)}`;
+    const title = query.title
+      ? this.normalizeAgentResolutionText(query.title)
+      : null;
+    const titleCondition =
+      title === null
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(action_items.title), '\\s+', ' ', 'g')) = $${values.push(title)}`;
+    const rows = await this.database.query<
+      QueryResultRow & {
+        id: string;
+        meeting_report_id: string;
+        source_index: number | string;
+        title: string;
+        status: MeetingAgentActionItemSearchPayload["status"];
+        assignee_user_id: string | null;
+        assignee_name: string | null;
+        assignee_avatar_url: string | null;
+        report_created_at: Date | string;
+      }
+    >(
+      `
+        SELECT
+          action_items.id,
+          action_items.meeting_report_id,
+          action_items.source_index,
+          action_items.title,
+          action_items.status,
+          action_items.assignee_user_id,
+          users.name AS assignee_name,
+          users.avatar_url AS assignee_avatar_url,
+          meeting_reports.created_at AS report_created_at
+        FROM meeting_report_action_items AS action_items
+        JOIN meeting_reports
+          ON meeting_reports.id = action_items.meeting_report_id
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN users
+          ON users.id = action_items.assignee_user_id
+        WHERE meetings.workspace_id = $1
+          ${reportCondition}
+          ${assigneeCondition}
+          ${statusCondition}
+          ${titleCondition}
+        ORDER BY meeting_reports.created_at DESC, action_items.source_index ASC, action_items.id ASC
+        LIMIT $${values.push(limit)}
+      `,
+      values
+    );
+    return {
+      actionItems: rows.map((row) => ({
+        id: row.id,
+        reportId: row.meeting_report_id,
+        sourceIndex: Number(row.source_index),
+        title: row.title,
+        status: row.status,
+        assignee:
+          row.assignee_user_id === null
+            ? null
+            : {
+                userId: row.assignee_user_id,
+                name: row.assignee_name,
+                avatarUrl: row.assignee_avatar_url
+              },
+        reportCreatedAt: this.toIsoString(row.report_created_at)
+      }))
+    };
+  }
+
   async getReport(
     currentUserId: string,
     workspaceId: string,
@@ -1859,6 +2042,17 @@ export class MeetingService {
         errorMessage: null
       }
     };
+  }
+
+  private agentResolutionLimit(value: number | undefined): number {
+    if (!Number.isInteger(value) || value === undefined) {
+      return 4;
+    }
+    return Math.min(Math.max(value, 1), 20);
+  }
+
+  private normalizeAgentResolutionText(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
   }
 
   async getMeetingReportDecisionItem(
