@@ -237,6 +237,8 @@ assert.match(apiDocument, /not written to the database/);
 assert.match(apiDocument, /position captured before the preview/);
 assert.match(apiDocument, /actorUserId, tableId, dragId/);
 assert.match(apiDocument, /late preview packets/);
+assert.match(apiDocument, /enabled only for `operations_v1` sessions/i);
+assert.match(apiDocument, /auto layout.*do not emit.*preview/is);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
@@ -285,6 +287,14 @@ assert.match(panel, /recordCommittedTableMove\(operationResult\.operation\)/);
 assert.match(
   panel,
   /areSqltoerdLayoutsEqual\(previousLayoutJson, nextLayoutJson\)/
+);
+assert.match(
+  panel,
+  /enableTableMovePreview=\{isSqlErdTableMovePreviewEnabled\(\s*sqlErdViewSession\.writeProtocol\s*\)\}/
+);
+assert.match(
+  canvas,
+  /enableTableMovePreview\s*\?\s*sqlErdPresence\.sendTableMovePreview\s*:\s*undefined/
 );
 assert.equal(
   [...canvas.matchAll(/window\.addEventListener\("pointerup", flushPendingLayoutSync\)/g)].length,
@@ -342,6 +352,11 @@ assert.equal(
       preview.shouldClearSqlErdTableMovePreviewAfterDrop(true),
       false
     );
+    assert.equal(
+      preview.isSqlErdTableMovePreviewEnabled("operations_v1"),
+      true
+    );
+    assert.equal(preview.isSqlErdTableMovePreviewEnabled("snapshot"), false);
 
     const firstPreview = {
       actorUserId: "user-se-in",

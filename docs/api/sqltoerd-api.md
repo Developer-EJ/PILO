@@ -465,6 +465,12 @@ Server validates the payload and joined room, replaces `actorUserId` and
 `sentAt` with authenticated server values, and relays only to the same
 Workspace/session room. Preview events are not written to the database,
 operation log, outbox, or Activity Log, and are not replayed to late joiners.
+Table move preview is enabled only for `operations_v1` sessions, where the
+matching durable operation can prove completion. A legacy `snapshot` session
+continues to share cursor and presence updates but does not emit table move
+preview events. Auto layout changes suppressed from per-table drag persistence
+also do not emit table move preview events; they are shared only through the
+single durable layout update created by auto layout.
 
 The final table position is still committed through the existing
 `layout_patch` HTTP transaction and delivered by `sql-erd:operation`. Each drag

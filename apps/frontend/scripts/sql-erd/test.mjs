@@ -967,7 +967,7 @@ autoLayoutTableChanges.suppressNext([
   { tableId: "table.users", x: 100, y: 50 },
   { tableId: "table.orders", x: 500, y: 50 }
 ]);
-autoLayoutTableChanges.record(
+const autoLayoutPreviewTableIds = autoLayoutTableChanges.record(
   createTableChangeEntry("user", [
     [
       createTableShape("table.users", 0, 0),
@@ -979,11 +979,12 @@ autoLayoutTableChanges.record(
     ]
   ])
 );
+assert.deepEqual(autoLayoutPreviewTableIds, []);
 assert.deepEqual(
   autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 999, y: 999 })),
   []
 );
-autoLayoutTableChanges.record(
+const directDragPreviewTableIds = autoLayoutTableChanges.record(
   createTableChangeEntry("user", [
     [
       createTableShape("table.users", 100, 50),
@@ -991,6 +992,7 @@ autoLayoutTableChanges.record(
     ]
   ])
 );
+assert.deepEqual(directDragPreviewTableIds, ["table.users"]);
 assert.deepEqual(
   autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 125, y: 50 })),
   [{ tableId: "table.users", x: 125, y: 50 }]

@@ -177,6 +177,7 @@ export type SqlErdLayoutPatchContext = {
 type SqlErdCanvasProps = {
   className?: string;
   committedTableMoves?: SqlErdTableMoveCommit[];
+  enableTableMovePreview?: boolean;
   isReadOnly?: boolean;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
@@ -2729,7 +2730,7 @@ type SqlErdLayoutSyncProps = {
     patch: SqltoerdLayoutPatch,
     context?: SqlErdLayoutPatchContext
   ) => boolean | void;
-  sendTableMovePreview: (preview: {
+  sendTableMovePreview?: (preview: {
     dragId: string;
     tableId: string;
     x: number;
@@ -2799,26 +2800,21 @@ function SqlErdLayoutSync({
     }
 
     const removeStoreListener = editor.store.listen((entry) => {
-      tablePositionChanges.record(entry);
-      Object.values(entry.changes.updated).forEach(([before, after]) => {
-        if (
-          !isSqlErdTableShape(before as TLShape) ||
-          !isSqlErdTableShape(after as TLShape) ||
-          (before as SqlErdTableShape).x === (after as SqlErdTableShape).x &&
-            (before as SqlErdTableShape).y === (after as SqlErdTableShape).y
-        ) {
-          return;
-        }
-        const tableShape = after as SqlErdTableShape;
+      tablePositionChanges.record(entry).forEach((tableId) => {
+        const tablePosition = getSqlErdTablePositionFromEditor(editor, tableId);
+        if (!tablePosition) return;
+
+        if (!sendTableMovePreview) return;
+
         const dragId =
           activeTableMoveDragIdRef.current ?? crypto.randomUUID();
         activeTableMoveDragIdRef.current = dragId;
-        previewedTableIdsRef.current.add(tableShape.props.tableId);
+        previewedTableIdsRef.current.add(tableId);
         sendTableMovePreview({
           dragId,
-          tableId: tableShape.props.tableId,
-          x: tableShape.x,
-          y: tableShape.y
+          tableId,
+          x: tablePosition.x,
+          y: tablePosition.y
         });
       });
     }, {
@@ -2864,6 +2860,7 @@ function SqlErdCanvasReadOnlyBridge({ isReadOnly }: { isReadOnly: boolean }) {
 export function SqlErdCanvas({
   className,
   committedTableMoves = [],
+  enableTableMovePreview = false,
   isReadOnly = false,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
@@ -3550,7 +3547,11 @@ export function SqlErdCanvas({
               }
               clearTableMovePreviews={sqlErdPresence.clearTableMovePreviews}
               onLayoutPatch={onLayoutPatch}
-              sendTableMovePreview={sqlErdPresence.sendTableMovePreview}
+              sendTableMovePreview={
+                enableTableMovePreview
+                  ? sqlErdPresence.sendTableMovePreview
+                  : undefined
+              }
               tablePositionChanges={tablePositionChanges}
             />
             <SqlErdCanvasAnnotationSync

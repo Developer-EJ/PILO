@@ -35,6 +35,12 @@ export type SqlErdTableMoveCommit = {
   tableIds: string[];
 };
 
+export function isSqlErdTableMovePreviewEnabled(
+  writeProtocol: "operations_v1" | "snapshot"
+) {
+  return writeProtocol === "operations_v1";
+}
+
 export function shouldClearSqlErdTableMovePreviewAfterDrop(
   durablePatchScheduled: boolean | void
 ) {

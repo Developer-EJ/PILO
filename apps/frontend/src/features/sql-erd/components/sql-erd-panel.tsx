@@ -71,6 +71,7 @@ import type {
 } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
 import {
   getSqlErdTableMoveCommit,
+  isSqlErdTableMovePreviewEnabled,
   type SqlErdTableMoveCommit
 } from "@/features/sql-erd/realtime/sql-erd-table-move-preview";
 import { useSqlErdOperationSync } from "@/features/sql-erd/realtime/use-sql-erd-operation-sync";
@@ -2300,6 +2301,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         <CanvasShell
           agentTableFocus={activeAgentTableFocus}
           autosavePausedBanner={layoutAutosavePausedBanner}
+          enableTableMovePreview={isSqlErdTableMovePreviewEnabled(
+            sqlErdViewSession.writeProtocol
+          )}
           layoutJson={sqlErdViewSession.layoutJson}
           modelJson={sqlErdViewSession.modelJson}
           committedTableMoves={committedTableMoves}
@@ -3077,6 +3081,7 @@ type CanvasShellProps = {
   agentTableFocus: SqlErdAgentTableFocus | null;
   autosavePausedBanner: LayoutAutosavePausedBannerViewModel | null;
   committedTableMoves: SqlErdTableMoveCommit[];
+  enableTableMovePreview: boolean;
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
   onLayoutPatch: (
@@ -3100,6 +3105,7 @@ function CanvasShell({
   agentTableFocus,
   autosavePausedBanner,
   committedTableMoves,
+  enableTableMovePreview,
   layoutJson,
   modelJson,
   onLayoutPatch,
@@ -3120,6 +3126,7 @@ function CanvasShell({
       <SqlErdCanvas
         className="absolute inset-0"
         committedTableMoves={committedTableMoves}
+        enableTableMovePreview={enableTableMovePreview}
         layoutJson={layoutJson}
         modelJson={modelJson}
         onLayoutPatch={onLayoutPatch}
