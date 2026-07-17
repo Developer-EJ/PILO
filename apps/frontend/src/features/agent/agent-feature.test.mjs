@@ -321,6 +321,24 @@ assert.deepEqual(
     }
   ]
 );
+assert.deepEqual(
+  getAgentResourceLinks({
+    ...completedRun,
+    steps: [
+      {
+        ...completedRun.steps[0],
+        resourceRefs: [{ ...focusedResourceRef, status: "created" }]
+      }
+    ]
+  }),
+  [
+    {
+      href: `/sql-erd/session?sessionId=${resourceSessionId}`,
+      key: `sqltoerd:session:${resourceSessionId}`,
+      label: "ERD 및 DDL 열기"
+    }
+  ]
+);
 
 for (const invalidMetadata of [
   { ...focusedResourceRef.metadata, sessionRevision: 0 },

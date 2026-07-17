@@ -75,7 +75,10 @@ function toSqlErdSessionLink(
     return null;
   }
 
-  const focus = parseSqlErdAgentTableFocusResource(resourceRef);
+  const focus =
+    resourceRef.status === "focused"
+      ? parseSqlErdAgentTableFocusResource(resourceRef)
+      : null;
   return {
     ...(focus ? { focus } : {}),
     href: `${SQL_ERD_SESSION_PATH}?sessionId=${encodeURIComponent(resourceRef.resourceId)}`,
