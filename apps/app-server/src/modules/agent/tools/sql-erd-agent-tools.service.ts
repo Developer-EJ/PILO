@@ -751,10 +751,7 @@ export class SqlErdAgentToolsService {
       question,
       ...candidates.map(
         (candidate, index) =>
-          `${index + 1}. ${candidate.title} · 수정 ${candidate.updatedAt.slice(
-            0,
-            10
-          )}`
+          `${index + 1}. ${candidate.title} · 수정 ${candidate.updatedAt} · 테이블 ${candidate.tableCount}개 · 관계 ${candidate.relationCount}개`
       )
     ].join("\n");
   }

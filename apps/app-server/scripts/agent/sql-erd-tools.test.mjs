@@ -646,10 +646,14 @@ const ambiguousPreparation = await multipleInspect.prepareExecution(
 );
 assert.equal(ambiguousPreparation.kind, "needs_clarification");
 assert.equal(ambiguousPreparation.outputSummary.reason, "multiple_sessions");
-assert.match(ambiguousPreparation.outputSummary.question, /1\. 주문 ERD/);
-assert.match(ambiguousPreparation.outputSummary.question, /2\. 결제 ERD/);
-assert.match(ambiguousPreparation.outputSummary.question, /2026-07-16/);
-assert.match(ambiguousPreparation.outputSummary.question, /2026-07-17/);
+assert.match(
+  ambiguousPreparation.outputSummary.question,
+  /1\. 주문 ERD · 수정 2026-07-16T00:00:00\.000Z · 테이블 4개 · 관계 3개/
+);
+assert.match(
+  ambiguousPreparation.outputSummary.question,
+  /2\. 결제 ERD · 수정 2026-07-17T00:00:00\.000Z · 테이블 4개 · 관계 3개/
+);
 assert.deepEqual(
   ambiguousPreparation.outputSummary.candidates.map((candidate) => ({
     title: candidate.title,

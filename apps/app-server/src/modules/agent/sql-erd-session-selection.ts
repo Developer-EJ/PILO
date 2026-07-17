@@ -96,7 +96,7 @@ export function toPublicAgentMessageContent(content: string): string {
 }
 
 export function containsReservedAgentSelectionMarker(content: string): boolean {
-  return content.startsWith("[PILO_INTERNAL_SELECTION");
+  return /^\[PILO_INTERNAL_SELECTION\b/i.test(content);
 }
 
 export function isSqlErdClarificationOutput(
