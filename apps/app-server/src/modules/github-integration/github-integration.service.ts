@@ -445,27 +445,29 @@ export class GithubIntegrationService {
   ): Promise<GithubRepositoryCollaboratorStatusPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const [oauthConnection, repository] = await Promise.all([
-      this.githubOAuthConnectionService.getActiveConnection(currentUserId, "app_user"),
-      this.database.queryOne<GithubRepositoryAccessRow>(
-        `
-          SELECT
-            id,
-            owner_login,
-            name,
-            full_name
-          FROM github_repositories
-          WHERE workspace_id = $1
-            AND id = $2
-        `,
-        [workspaceId, repositoryId]
-      )
-    ]);
+    const repository = await this.database.queryOne<GithubRepositoryAccessRow>(
+      `
+        SELECT
+          id,
+          owner_login,
+          name,
+          full_name
+        FROM github_repositories
+        WHERE workspace_id = $1
+          AND id = $2
+      `,
+      [workspaceId, repositoryId]
+    );
 
     if (!repository) {
       throw notFound("GitHub repository not found");
     }
 
+    const oauthConnection =
+      await this.githubOAuthConnectionService.getActiveConnection(
+        currentUserId,
+        "app_user"
+      );
     const { permission } =
       await this.githubOAuthClient.getRepositoryCollaboratorPermission({
         accessToken: oauthConnection.accessToken,

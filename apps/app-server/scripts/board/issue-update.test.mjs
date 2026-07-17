@@ -10,10 +10,13 @@ const {
   BoardIssueUpdateService
 } = require("../../dist/modules/board/board-issue-update.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
-const { forbidden } = require("../../dist/common/api-error.js");
+const { badRequest, forbidden } = require("../../dist/common/api-error.js");
 const {
   GithubIssueAssigneeValidationError
 } = require("../../dist/modules/github-integration/github-issue-assignee.error.js");
+const {
+  GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+} = require("../../dist/modules/github-integration/github-oauth-refresh.error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -874,6 +877,35 @@ function assertBoardReconnectError(error) {
     "GitHub OAuth connection is invalid; reconnect is required"
   );
   return true;
+}
+
+function assertBoardProactiveReconnectError(error) {
+  assert.equal(error.getStatus(), 400);
+  assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+  assert.equal(
+    error.getResponse().error.message,
+    GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+  );
+  return true;
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    error: badRequest(GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE)
+  });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { title: "Reconnect proactively" }
+    ),
+    assertBoardProactiveReconnectError
+  );
 }
 
 {

@@ -558,3 +558,54 @@ function assertNoSecretLookup(database) {
   assert.equal(status.permission, "push");
   assert.equal(status.hasAccess, true);
 }
+
+{
+  const database = new FakeDatabase({ queryOneRows: [null] });
+  const workspaceService = new FakeWorkspaceService();
+  let activeConnectionCalls = 0;
+  const githubOAuthConnectionService = {
+    async getActiveConnection() {
+      activeConnectionCalls += 1;
+      throw new Error("connection lookup must follow repository lookup");
+    }
+  };
+  const optionalDependencies = Array(17).fill(undefined);
+  const service = new GithubIntegrationService(
+    database,
+    {},
+    {},
+    {},
+    {},
+    workspaceService,
+    {},
+    {},
+    ...optionalDependencies,
+    githubOAuthConnectionService
+  );
+
+  await assert.rejects(
+    () =>
+      service.getGithubRepositoryCollaboratorStatus(
+        currentUserId,
+        workspaceId,
+        repositoryId
+      ),
+    (error) => {
+      assert.equal(error.getStatus?.(), 404);
+      assert.equal(error.getResponse?.().error.code, "NOT_FOUND");
+      assert.equal(
+        error.getResponse?.().error.message,
+        "GitHub repository not found"
+      );
+      return true;
+    }
+  );
+  assert.equal(
+    activeConnectionCalls,
+    0,
+    "missing repository must not request an OAuth connection"
+  );
+  assert.deepEqual(workspaceService.accessChecks, [
+    { currentUserId, workspaceId }
+  ]);
+}
