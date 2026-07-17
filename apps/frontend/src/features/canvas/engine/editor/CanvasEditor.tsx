@@ -2588,6 +2588,7 @@ export function CanvasEditor({
         error={canvasAgent.error}
         holdProgress={canvasAiChatHoldProgress}
         isRunning={canvasAgent.isRunning}
+        layoutStorageKey={`pilo:canvas-ai-chat-layout:${board.id}`}
         onApplyDraft={canvasAgent.applyDraft}
         onClose={() => setCanvasAiChatAnchor(null)}
         onDiscardDraft={canvasAgent.discardDraft}
