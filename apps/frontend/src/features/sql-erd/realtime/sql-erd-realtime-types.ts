@@ -98,6 +98,7 @@ export type SqlErdPresenceLeavePayload = {
 
 export type SqlErdTableMovePreview = {
   actorUserId: string;
+  dragId: string;
   sentAt: string;
   sessionId: string;
   tableId: string;
@@ -150,6 +151,7 @@ export type SqlErdClientToServerEvents = {
     workspaceId: string;
   }) => void;
   "sql-erd:table-move:preview": (payload: {
+    dragId: string;
     sessionId: string;
     tableId: string;
     workspaceId: string;

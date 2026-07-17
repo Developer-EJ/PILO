@@ -156,6 +156,7 @@ try {
   );
   firstTab.emit("sql-erd:table-move:preview", {
     ...room,
+    dragId: "drag-1",
     tableId: "table.orders",
     x: 14,
     y: 28,
@@ -165,6 +166,7 @@ try {
   assert.deepEqual(receivedTableMovePreview, {
     ...room,
     actorUserId: "user-se-in",
+    dragId: "drag-1",
     sentAt: receivedTableMovePreview.sentAt,
     tableId: "table.orders",
     x: 14,
@@ -179,6 +181,7 @@ try {
   );
   firstTab.emit("sql-erd:table-move:preview", {
     ...room,
+    dragId: "drag-cross-room",
     sessionId: "session-other",
     tableId: "table.orders",
     x: 99,

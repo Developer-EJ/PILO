@@ -44,10 +44,11 @@ export type SqlErdPresenceController = {
   dismissRemoteTableMovePreviews: (
     previews: Pick<
       SqlErdTableMovePreview,
-      "actorUserId" | "sentAt" | "tableId"
+      "actorUserId" | "dragId" | "sentAt" | "tableId"
     >[],
   ) => void;
   sendTableMovePreview: (preview: {
+    dragId: string;
     tableId: string;
     x: number;
     y: number;
@@ -143,7 +144,12 @@ export function useSqlErdPresence(
   const tableMovePreviewThrottlesRef = useRef(
     new Map<
       string,
-      SqlErdTableMovePreviewThrottle<{ tableId: string; x: number; y: number }>
+      SqlErdTableMovePreviewThrottle<{
+        dragId: string;
+        tableId: string;
+        x: number;
+        y: number;
+      }>
     >(),
   );
   const usableConfig = useMemo(
@@ -390,7 +396,7 @@ export function useSqlErdPresence(
   }, [emitCurrentPresence]);
 
   const sendTableMovePreview = useCallback(
-    (preview: { tableId: string; x: number; y: number }) => {
+    (preview: { dragId: string; tableId: string; x: number; y: number }) => {
       let throttle = tableMovePreviewThrottlesRef.current.get(preview.tableId);
       if (!throttle) {
         throttle = createSqlErdTableMovePreviewThrottle({
@@ -440,13 +446,13 @@ export function useSqlErdPresence(
     (
       previews: Pick<
         SqlErdTableMovePreview,
-        "actorUserId" | "sentAt" | "tableId"
+        "actorUserId" | "dragId" | "sentAt" | "tableId"
       >[],
     ) => {
       const previewKeys = new Set(
         previews.map(
           (preview) =>
-            `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.sentAt}`,
+            `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.dragId}\u0000${preview.sentAt}`,
         ),
       );
       if (!previewKeys.size) return;
@@ -455,7 +461,7 @@ export function useSqlErdPresence(
         currentPreviews.filter(
           (preview) =>
             !previewKeys.has(
-              `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.sentAt}`,
+              `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.dragId}\u0000${preview.sentAt}`,
             ),
         ),
       );

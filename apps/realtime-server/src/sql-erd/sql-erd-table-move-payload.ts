@@ -24,10 +24,12 @@ export function readSqlErdTableMovePreviewPayload(
 ): SqlErdTableMovePreviewPayload | null {
   if (!isRecord(value)) return null;
   const room = readRoom(value);
+  const dragId = readRequiredId(value.dragId, 128);
   const tableId = readRequiredId(value.tableId);
 
   if (
     !room ||
+    !dragId ||
     !tableId ||
     typeof value.x !== "number" ||
     typeof value.y !== "number" ||
@@ -39,7 +41,7 @@ export function readSqlErdTableMovePreviewPayload(
     return null;
   }
 
-  return { ...room, tableId, x: value.x, y: value.y };
+  return { ...room, dragId, tableId, x: value.x, y: value.y };
 }
 
 export function readSqlErdTableMoveClearPayload(

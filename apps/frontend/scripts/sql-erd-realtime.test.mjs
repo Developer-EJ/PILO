@@ -213,6 +213,10 @@ const canvas = await readFile(
   new URL("../src/features/sql-erd/components/sql-erd-canvas.tsx", import.meta.url),
   "utf8",
 );
+const panel = await readFile(
+  new URL("../src/features/sql-erd/components/sql-erd-panel.tsx", import.meta.url),
+  "utf8",
+);
 const apiDocument = await readFile(
   new URL("../../../docs/api/sqltoerd-api.md", import.meta.url),
   "utf8",
@@ -230,8 +234,9 @@ assert.match(apiDocument, /"sql-erd:table-move:preview"/);
 assert.match(apiDocument, /"sql-erd:table-move:clear"/);
 assert.match(apiDocument, /emits at most once every 33ms/);
 assert.match(apiDocument, /not written to the database/);
-assert.match(apiDocument, /canonical\s+position for that table changes/);
 assert.match(apiDocument, /position captured before the preview/);
+assert.match(apiDocument, /actorUserId, tableId, dragId/);
+assert.match(apiDocument, /late preview packets/);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
@@ -271,6 +276,16 @@ assert.match(bridge, /requestAnimationFrame/);
 assert.match(canvas, /useSqlErdPresence/);
 assert.match(canvas, /SqlErdRealtimeBridge/);
 assert.match(canvas, /cancelPendingTableMovePreviews\(tableIds\)/);
+assert.match(
+  canvas,
+  /shouldClearSqlErdTableMovePreviewAfterDrop\(scheduled\)/
+);
+assert.match(panel, /context\?\.clientOperationId\?\.trim\(\)/);
+assert.match(panel, /recordCommittedTableMove\(operationResult\.operation\)/);
+assert.match(
+  panel,
+  /areSqltoerdLayoutsEqual\(previousLayoutJson, nextLayoutJson\)/
+);
 assert.equal(
   [...canvas.matchAll(/window\.addEventListener\("pointerup", flushPendingLayoutSync\)/g)].length,
   2
@@ -319,9 +334,18 @@ assert.equal(
     assert.equal(timers.length, 1);
     throttle.cancel();
     assert.equal(timers.length, 0);
+    assert.equal(
+      preview.shouldClearSqlErdTableMovePreviewAfterDrop(false),
+      true
+    );
+    assert.equal(
+      preview.shouldClearSqlErdTableMovePreviewAfterDrop(true),
+      false
+    );
 
     const firstPreview = {
       actorUserId: "user-se-in",
+      dragId: "drag-1",
       sentAt: "2026-07-18T00:00:00.000Z",
       tableId: "table.orders",
       x: 240,
@@ -337,7 +361,8 @@ assert.equal(
       dismissPreview: null,
       nextState: {
         actorUserId: "user-se-in",
-        basePosition: { x: 80, y: 80 }
+        basePosition: { x: 80, y: 80 },
+        dragId: "drag-1"
       },
       position: { x: 240, y: 180 }
     });
@@ -364,13 +389,117 @@ assert.equal(
         previousState: initialResolution.nextState
       }),
       {
+        dismissPreview: null,
+        nextState: {
+          actorUserId: "user-se-in",
+          basePosition: { x: 80, y: 80 },
+          dragId: "drag-1",
+        },
+        position: { x: 240, y: 180 }
+      }
+    );
+
+    const completedDragKeys = new Set([
+      preview.createSqlErdTableMoveCompletionKey(
+        "user-se-in",
+        "table.orders",
+        "drag-1"
+      )
+    ]);
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 240, y: 180 },
+        preview: firstPreview,
+        previousState: initialResolution.nextState
+      }),
+      {
         dismissPreview: {
           actorUserId: "user-se-in",
+          dragId: "drag-1",
           sentAt: "2026-07-18T00:00:00.000Z",
           tableId: "table.orders"
         },
         nextState: null,
-        position: { x: 320, y: 260 }
+        position: { x: 80, y: 80 }
+      }
+    );
+
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 80, y: 80 },
+        preview: firstPreview,
+        previousState: null
+      }).position,
+      { x: 80, y: 80 }
+    );
+
+    const secondPreview = {
+      ...firstPreview,
+      dragId: "drag-2",
+      sentAt: "2026-07-18T00:00:01.000Z",
+      x: 360,
+      y: 280
+    };
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 80, y: 80 },
+        preview: secondPreview,
+        previousState: null
+      }),
+      {
+        dismissPreview: null,
+        nextState: {
+          actorUserId: "user-se-in",
+          basePosition: { x: 80, y: 80 },
+          dragId: "drag-2"
+        },
+        position: { x: 360, y: 280 }
+      }
+    );
+    const secondPreviewState =
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 80, y: 80 },
+        completedDragKeys,
+        currentPosition: { x: 80, y: 80 },
+        preview: secondPreview,
+        previousState: null
+      }).nextState;
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 240, y: 180 },
+        completedDragKeys,
+        currentPosition: { x: 360, y: 280 },
+        preview: secondPreview,
+        previousState: secondPreviewState
+      }),
+      {
+        dismissPreview: null,
+        nextState: secondPreviewState,
+        position: { x: 360, y: 280 }
+      }
+    );
+
+    assert.deepEqual(
+      preview.getSqlErdTableMoveCommit({
+        actorUserId: "user-se-in",
+        clientOperationId: "drag-1",
+        patch: {
+          tableLayouts: {
+            upsert: [{ tableId: "table.orders", x: 80, y: 80 }]
+          }
+        },
+        type: "layout_patch"
+      }),
+      {
+        actorUserId: "user-se-in",
+        dragId: "drag-1",
+        tableIds: ["table.orders"]
       }
     );
   } finally {

@@ -13,12 +13,14 @@ const room = {
 assert.deepEqual(
   readSqlErdTableMovePreviewPayload({
     ...room,
+    dragId: " drag-1 ",
     tableId: " table.orders ",
     x: 12.5,
     y: -3,
   }),
   {
     ...room,
+    dragId: "drag-1",
     tableId: "table.orders",
     x: 12.5,
     y: -3,
@@ -27,8 +29,19 @@ assert.deepEqual(
 assert.equal(
   readSqlErdTableMovePreviewPayload({
     ...room,
+    dragId: "drag-1",
     tableId: "table.orders",
     x: Number.NaN,
+    y: 0,
+  }),
+  null,
+);
+assert.equal(
+  readSqlErdTableMovePreviewPayload({
+    ...room,
+    dragId: "",
+    tableId: "table.orders",
+    x: 0,
     y: 0,
   }),
   null,

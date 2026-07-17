@@ -61,11 +61,18 @@ import {
   createSqlErdApiClient,
   SqlErdApiError
 } from "@/features/sql-erd/api/client";
-import { SqlErdCanvas } from "@/features/sql-erd/components/sql-erd-canvas";
+import {
+  SqlErdCanvas,
+  type SqlErdLayoutPatchContext
+} from "@/features/sql-erd/components/sql-erd-canvas";
 import type {
   SqlErdOperationPayload,
   SqlErdRealtimeConfig
 } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
+import {
+  getSqlErdTableMoveCommit,
+  type SqlErdTableMoveCommit
+} from "@/features/sql-erd/realtime/sql-erd-table-move-preview";
 import { useSqlErdOperationSync } from "@/features/sql-erd/realtime/use-sql-erd-operation-sync";
 import { useSqlErdSourceLock } from "@/features/sql-erd/realtime/use-sql-erd-source-lock";
 import { applySqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-layout";
@@ -532,6 +539,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const [pendingLayoutOperations, setPendingLayoutOperations] = useState<
     PendingSqlErdLayoutOperation[]
   >([]);
+  const [committedTableMoves, setCommittedTableMoves] = useState<
+    SqlErdTableMoveCommit[]
+  >([]);
   const [layoutAutosaveRetryAttempt, setLayoutAutosaveRetryAttempt] =
     useState(0);
   const [layoutAutosaveBlockReason, setLayoutAutosaveBlockReason] =
@@ -606,6 +616,25 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sqlErdViewSession.writeProtocol === "operations_v1",
     client: sourceLockClient
   });
+  const recordCommittedTableMove = useCallback(
+    (operation: SqlErdOperationPayload) => {
+      const commit = getSqlErdTableMoveCommit(operation);
+      if (!commit) return;
+
+      setCommittedTableMoves((current) => {
+        const withoutDuplicate = current.filter(
+          (entry) =>
+            entry.actorUserId !== commit.actorUserId ||
+            entry.dragId !== commit.dragId
+        );
+        return [...withoutDuplicate, commit].slice(-512);
+      });
+    },
+    []
+  );
+  useEffect(() => {
+    setCommittedTableMoves([]);
+  }, [sessionId]);
   const applyRemoteOperations = useCallback(
     async (operations: SqlErdOperationPayload[]) => {
       if (!accessToken || !activeWorkspaceId || !sqlErdViewSession.id) return;
@@ -629,6 +658,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         if (!current.id || current.id !== operation.sessionId) return;
 
         if (operation.type === "layout_patch") {
+          recordCommittedTableMove(operation);
           const snapshot = {
             ...current,
             latestOpSeq: operation.opSeq,
@@ -664,7 +694,13 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         applySqlErdEditAction({ snapshot, type: "remote_snapshot_applied" });
       });
     },
-    [accessToken, activeWorkspaceId, applySqlErdEditAction, sqlErdViewSession.id]
+    [
+      accessToken,
+      activeWorkspaceId,
+      applySqlErdEditAction,
+      recordCommittedTableMove,
+      sqlErdViewSession.id
+    ]
   );
   const catchUpOperations = useCallback(
     (afterSeq: number, signal?: AbortSignal) => {
@@ -1295,21 +1331,32 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     ]
   );
   const handleLayoutPatch = useCallback(
-    (patch: SqltoerdLayoutPatch) => {
+    (
+      patch: SqltoerdLayoutPatch,
+      context?: SqlErdLayoutPatchContext
+    ): boolean => {
+      const previousLayoutJson =
+        sqlErdEditStateRef.current.lastSuccessfulSnapshot.layoutJson;
       applySqlErdEditAction({ patch, type: "layout_patched" });
       const nextLayoutJson = sqlErdEditStateRef.current.lastSuccessfulSnapshot.layoutJson;
+      if (areSqltoerdLayoutsEqual(previousLayoutJson, nextLayoutJson)) {
+        return false;
+      }
 
       if (sqlErdViewSession.writeProtocol === "operations_v1") {
         const operationSessionId = sqlErdViewSession.id;
-        if (!operationSessionId || sqlErdViewSession.revision === null) return;
+        if (!operationSessionId || sqlErdViewSession.revision === null) {
+          return false;
+        }
 
         const operationPatch = createSqlErdOperationLayoutPatch(patch, nextLayoutJson);
-        if (!Object.keys(operationPatch).length) return;
+        if (!Object.keys(operationPatch).length) return false;
 
         setPendingLayoutOperations((current) => [
           ...current,
           {
-            clientOperationId: crypto.randomUUID(),
+            clientOperationId:
+              context?.clientOperationId?.trim() || crypto.randomUUID(),
             patch: operationPatch,
             sessionId: operationSessionId
           }
@@ -1320,10 +1367,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           message: "Canvas changes will sync as workspace operations",
           tone: "neutral"
         });
-        return;
+        return true;
       }
 
       handleLayoutChange(nextLayoutJson);
+      return true;
     },
     [
       applySqlErdEditAction,
@@ -1845,6 +1893,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
             sessionId: requestSessionId
           };
           applySqlErdEditAction({ snapshot, type: "operation_saved" });
+          recordCommittedTableMove(operationResult.operation);
           setPendingLayoutOperations((current) =>
             current.filter(
               (operation) =>
@@ -2253,6 +2302,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           autosavePausedBanner={layoutAutosavePausedBanner}
           layoutJson={sqlErdViewSession.layoutJson}
           modelJson={sqlErdViewSession.modelJson}
+          committedTableMoves={committedTableMoves}
           onLayoutPatch={handleLayoutPatch}
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
@@ -3026,9 +3076,13 @@ function PanelResizeHandle({
 type CanvasShellProps = {
   agentTableFocus: SqlErdAgentTableFocus | null;
   autosavePausedBanner: LayoutAutosavePausedBannerViewModel | null;
+  committedTableMoves: SqlErdTableMoveCommit[];
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
-  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
+  onLayoutPatch: (
+    patch: SqltoerdLayoutPatch,
+    context?: SqlErdLayoutPatchContext
+  ) => boolean | void;
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
   onSelectionChange: (selection: SqlErdSelection) => void;
@@ -3045,6 +3099,7 @@ type CanvasShellProps = {
 function CanvasShell({
   agentTableFocus,
   autosavePausedBanner,
+  committedTableMoves,
   layoutJson,
   modelJson,
   onLayoutPatch,
@@ -3064,6 +3119,7 @@ function CanvasShell({
     <div className="relative min-w-0 flex-1 overflow-hidden" id="canvas">
       <SqlErdCanvas
         className="absolute inset-0"
+        committedTableMoves={committedTableMoves}
         layoutJson={layoutJson}
         modelJson={modelJson}
         onLayoutPatch={onLayoutPatch}

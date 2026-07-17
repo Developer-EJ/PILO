@@ -26,8 +26,11 @@ import {
 import { SqlErdTableFocusProvider } from "@/features/sql-erd/components/sql-erd-table-focus-context";
 import { SqlErdRealtimeBridge } from "@/features/sql-erd/realtime/sql-erd-realtime-bridge";
 import {
+  createSqlErdTableMoveCompletionKey,
   resolveSqlErdRemoteTableMovePreview,
-  type SqlErdRemoteTableMovePreviewState
+  shouldClearSqlErdTableMovePreviewAfterDrop,
+  type SqlErdRemoteTableMovePreviewState,
+  type SqlErdTableMoveCommit
 } from "@/features/sql-erd/realtime/sql-erd-table-move-preview";
 import type {
   SqlErdRealtimeConfig,
@@ -167,12 +170,20 @@ import { cn } from "@/lib/utils";
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
 import { SqlErdWorkspaceLocationAdapter } from "@/features/sql-erd/sql-erd-workspace-location-adapter";
 
+export type SqlErdLayoutPatchContext = {
+  clientOperationId?: string;
+};
+
 type SqlErdCanvasProps = {
   className?: string;
+  committedTableMoves?: SqlErdTableMoveCommit[];
   isReadOnly?: boolean;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
-  onLayoutPatch?: (patch: SqltoerdLayoutPatch) => void;
+  onLayoutPatch?: (
+    patch: SqltoerdLayoutPatch,
+    context?: SqlErdLayoutPatchContext
+  ) => boolean | void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
@@ -1485,14 +1496,16 @@ function SqlErdSelectedColumnSync({
 }
 
 function SqlErdRemoteTableMovePreviewSync({
+  commits,
   dismissPreviews,
   layoutJson,
   previews
 }: {
+  commits: SqlErdTableMoveCommit[];
   dismissPreviews: (
     previews: Pick<
       SqlErdTableMovePreview,
-      "actorUserId" | "sentAt" | "tableId"
+      "actorUserId" | "dragId" | "sentAt" | "tableId"
     >[]
   ) => void;
   layoutJson: SqltoerdLayoutJsonV1;
@@ -1522,6 +1535,17 @@ function SqlErdRemoteTableMovePreviewSync({
     const canonicalLayoutByTableId = new Map(
       layoutJson.tableLayouts.map((layout) => [layout.tableId, layout])
     );
+    const completedDragKeys = new Set(
+      commits.flatMap((commit) =>
+        commit.tableIds.map((tableId) =>
+          createSqlErdTableMoveCompletionKey(
+            commit.actorUserId,
+            tableId,
+            commit.dragId
+          )
+        )
+      )
+    );
     const updates: TLShapePartial<SqlErdTableShape>[] = [];
     const nextPreviewStateByTableId = new Map<
       string,
@@ -1529,7 +1553,7 @@ function SqlErdRemoteTableMovePreviewSync({
     >();
     const previewsToDismiss: Pick<
       SqlErdTableMovePreview,
-      "actorUserId" | "sentAt" | "tableId"
+      "actorUserId" | "dragId" | "sentAt" | "tableId"
     >[] = [];
 
     editor.getCurrentPageShapes().forEach((shape) => {
@@ -1543,6 +1567,7 @@ function SqlErdRemoteTableMovePreviewSync({
       const resolution = resolveSqlErdRemoteTableMovePreview({
         canonicalPosition:
           canonicalLayoutByTableId.get(shape.props.tableId) ?? null,
+        completedDragKeys,
         currentPosition: { x: shape.x, y: shape.y },
         preview: latestPreviewByTableId.get(shape.props.tableId) ?? null,
         previousState:
@@ -1579,7 +1604,7 @@ function SqlErdRemoteTableMovePreviewSync({
     }
     previewStateByTableIdRef.current = nextPreviewStateByTableId;
     dismissPreviews(previewsToDismiss);
-  }, [dismissPreviews, editor, layoutJson, previews]);
+  }, [commits, dismissPreviews, editor, layoutJson, previews]);
 
   return null;
 }
@@ -2700,8 +2725,12 @@ function SqlErdCanvasAnnotationSync({
 type SqlErdLayoutSyncProps = {
   cancelPendingTableMovePreviews: (tableIds: string[]) => void;
   clearTableMovePreviews: (tableIds: string[]) => void;
-  onLayoutPatch: (patch: SqltoerdLayoutPatch) => void;
+  onLayoutPatch: (
+    patch: SqltoerdLayoutPatch,
+    context?: SqlErdLayoutPatchContext
+  ) => boolean | void;
   sendTableMovePreview: (preview: {
+    dragId: string;
     tableId: string;
     x: number;
     y: number;
@@ -2718,6 +2747,7 @@ function SqlErdLayoutSync({
 }: SqlErdLayoutSyncProps) {
   const editor = useEditor();
   const onLayoutPatchRef = useRef(onLayoutPatch);
+  const activeTableMoveDragIdRef = useRef<string | null>(null);
   const previewedTableIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
@@ -2736,17 +2766,26 @@ function SqlErdLayoutSync({
         }
 
         const tableIds = tablePositions.map(({ tableId }) => tableId);
+        const dragId = activeTableMoveDragIdRef.current;
+        activeTableMoveDragIdRef.current = null;
         cancelPendingTableMovePreviews(tableIds);
         tableIds.forEach((tableId) => {
           previewedTableIdsRef.current.delete(tableId);
         });
-        onLayoutPatchRef.current({ tablePositions });
+        const scheduled = onLayoutPatchRef.current(
+          { tablePositions },
+          dragId ? { clientOperationId: dragId } : undefined
+        );
+        if (shouldClearSqlErdTableMovePreviewAfterDrop(scheduled)) {
+          clearTableMovePreviews(tableIds);
+        }
       });
     }
 
     function cancelPendingLayoutSync() {
       window.requestAnimationFrame(() => {
         tablePositionChanges.cancel();
+        activeTableMoveDragIdRef.current = null;
         const tableIds = [...previewedTableIdsRef.current];
         previewedTableIdsRef.current.clear();
         clearTableMovePreviews(tableIds);
@@ -2771,8 +2810,12 @@ function SqlErdLayoutSync({
           return;
         }
         const tableShape = after as SqlErdTableShape;
+        const dragId =
+          activeTableMoveDragIdRef.current ?? crypto.randomUUID();
+        activeTableMoveDragIdRef.current = dragId;
         previewedTableIdsRef.current.add(tableShape.props.tableId);
         sendTableMovePreview({
+          dragId,
           tableId: tableShape.props.tableId,
           x: tableShape.x,
           y: tableShape.y
@@ -2793,6 +2836,7 @@ function SqlErdLayoutSync({
       removeStoreListener();
       clearTableMovePreviews([...previewedTableIdsRef.current]);
       previewedTableIdsRef.current.clear();
+      activeTableMoveDragIdRef.current = null;
       tablePositionChanges.cancel();
       tablePositionChanges.clearSuppressed();
     };
@@ -2819,6 +2863,7 @@ function SqlErdCanvasReadOnlyBridge({ isReadOnly }: { isReadOnly: boolean }) {
 
 export function SqlErdCanvas({
   className,
+  committedTableMoves = [],
   isReadOnly = false,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
@@ -3467,6 +3512,7 @@ export function SqlErdCanvas({
           shapes={shapes}
         />
         <SqlErdRemoteTableMovePreviewSync
+          commits={committedTableMoves}
           dismissPreviews={sqlErdPresence.dismissRemoteTableMovePreviews}
           layoutJson={layoutJson}
           previews={sqlErdPresence.remoteTableMovePreviews}

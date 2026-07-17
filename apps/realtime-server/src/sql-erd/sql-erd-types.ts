@@ -71,6 +71,7 @@ export type SqlErdPresenceLeavePayload = SqlErdRoomRef & {
 };
 
 export type SqlErdTableMovePreviewPayload = SqlErdRoomRef & {
+  dragId: string;
   tableId: string;
   x: number;
   y: number;
