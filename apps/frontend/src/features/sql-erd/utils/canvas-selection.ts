@@ -39,6 +39,35 @@ export function areSqlErdSelectionsEqual(
   return true;
 }
 
+export function resolveSqlErdTableInteractionSelection({
+  isShapeSelected,
+  selection,
+  tableId
+}: {
+  isShapeSelected: boolean;
+  selection: SqlErdSelection;
+  tableId: string;
+}) {
+  if (!isShapeSelected) {
+    return {
+      selectedColumnId: null,
+      selectedState: "none" as const
+    };
+  }
+
+  if (selection.type === "column" && selection.tableId === tableId) {
+    return {
+      selectedColumnId: selection.columnId,
+      selectedState: "column" as const
+    };
+  }
+
+  return {
+    selectedColumnId: null,
+    selectedState: "table" as const
+  };
+}
+
 export function getSqlErdSelectionFromSelectedShapes(
   selectedShapes: TLShape[]
 ): SqlErdSelection {
@@ -88,8 +117,15 @@ export function getSqlErdSelectionFromSelectedShapes(
 }
 
 export function selectSqlErdCanvasShapeAtPoint(
-  editor: Pick<Editor, "getShapeAtPoint" | "select">,
-  point: { x: number; y: number }
+  editor: Pick<
+    Editor,
+    "getSelectedShapeIds" | "getShapeAtPoint" | "selectNone" | "setSelectedShapes"
+  >,
+  point: { x: number; y: number },
+  options: {
+    clearOnMiss?: boolean;
+    toggle?: boolean;
+  } = {}
 ) {
   const shape = editor.getShapeAtPoint(point, {
     hitInside: true,
@@ -108,9 +144,22 @@ export function selectSqlErdCanvasShapeAtPoint(
       isSqlErdTableShape(shape)
     )
   ) {
+    if (options.clearOnMiss) {
+      editor.selectNone();
+    }
     return false;
   }
 
-  editor.select(shape.id);
+  if (!options.toggle) {
+    editor.setSelectedShapes([shape.id]);
+    return true;
+  }
+
+  const selectedShapeIds = Array.from(editor.getSelectedShapeIds());
+  editor.setSelectedShapes(
+    selectedShapeIds.includes(shape.id)
+      ? selectedShapeIds.filter((shapeId) => shapeId !== shape.id)
+      : [...selectedShapeIds, shape.id]
+  );
   return true;
 }

@@ -70,6 +70,25 @@ export type SqlErdPresenceLeavePayload = SqlErdRoomRef & {
   userId: string;
 };
 
+export type SqlErdTableMovePreviewPayload = SqlErdRoomRef & {
+  tableId: string;
+  x: number;
+  y: number;
+};
+
+export type SqlErdTableMovePreviewEvent = SqlErdTableMovePreviewPayload & {
+  actorUserId: string;
+  sentAt: string;
+};
+
+export type SqlErdTableMoveClearPayload = SqlErdRoomRef & {
+  tableIds: string[];
+};
+
+export type SqlErdTableMoveClearEvent = SqlErdTableMoveClearPayload & {
+  actorUserId: string;
+};
+
 export type SqlErdJoinedPayload = SqlErdRoomRef & {
   latestOpSeq: number;
   presence: SqlErdPresenceState[];

@@ -56,6 +56,30 @@ async function loadOperationSyncRuntime() {
   }
 }
 
+async function loadTableMovePreviewRuntime() {
+  const outputDir = await mkdtemp(
+    fileURLToPath(new URL("../../.pilo-sqltoerd-table-move-preview-", import.meta.url))
+  );
+  const outputPath = join(outputDir, "sql-erd-table-move-preview.mjs");
+
+  try {
+    await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/sql-erd-table-move-preview.ts",
+      outputPath
+    );
+
+    return {
+      preview: await import(
+        `${new URL(`file:///${outputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`
+      ),
+      outputDir
+    };
+  } catch (error) {
+    await rm(outputDir, { force: true, recursive: true });
+    throw error;
+  }
+}
+
 async function loadOperationSyncHookRuntime() {
   const outputDir = await mkdtemp(
     fileURLToPath(new URL("../../.pilo-sqltoerd-operation-hook-", import.meta.url))
@@ -202,9 +226,15 @@ assert.match(
   apiDocument,
   /on `SQL_ERD_WRITE_PROTOCOL_MISMATCH`, the client pauses autosave and persistence, disables retry, and shows a reload\/read-only 안내\. a session reload is required before persistence resumes/i
 );
+assert.match(apiDocument, /"sql-erd:table-move:preview"/);
+assert.match(apiDocument, /"sql-erd:table-move:clear"/);
+assert.match(apiDocument, /emits at most once every 33ms/);
+assert.match(apiDocument, /not written to the database/);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
+assert.match(types, /"sql-erd:table-move:preview"/);
+assert.match(types, /"sql-erd:table-move:clear"/);
 assert.match(types, /selectedObjects: SqlErdPresenceSelectedObject\[\]/);
 assert.match(types, /editingMode: SqlErdPresenceEditingMode/);
 assert.match(types, /sentAt: string/);
@@ -214,7 +244,7 @@ assert.match(presenceHook, /"sql-erd:presence:leave"/);
 assert.match(presenceHook, /socket\.volatile\.emit\("sql-erd:presence:update"/);
 assert.match(presenceHook, /localPresenceRef\.current/);
 assert.match(presenceHook, /PRESENCE_HEARTBEAT_MS = 5_000/);
-assert.match(presenceHook, /PRESENCE_UPDATE_MIN_INTERVAL_MS = 80/);
+assert.match(presenceHook, /PRESENCE_UPDATE_MIN_INTERVAL_MS = 33/);
 assert.match(presenceHook, /hasCursorMovedEnough/);
 assert.match(types, /"sql-erd:operation"/);
 assert.match(operationHook, /useSqlErdOperationSync/);
@@ -242,6 +272,54 @@ assert.equal(
   [...canvas.matchAll(/window\.addEventListener\("pointerup", flushPendingLayoutSync\)/g)].length,
   2
 );
+
+{
+  const { outputDir, preview } = await loadTableMovePreviewRuntime();
+  const emitted = [];
+  const timers = [];
+  let now = 0;
+
+  try {
+    const throttle = preview.createSqlErdTableMovePreviewThrottle({
+      emit: (payload) => emitted.push(payload),
+      now: () => now,
+      schedule: (callback, delay) => {
+        const timer = { callback, delay };
+        timers.push(timer);
+        return timer;
+      },
+      cancelSchedule: (timer) => {
+        const index = timers.indexOf(timer);
+        if (index >= 0) timers.splice(index, 1);
+      }
+    });
+
+    throttle.push({ tableId: "table.orders", x: 10, y: 20 });
+    now = 5;
+    throttle.push({ tableId: "table.orders", x: 20, y: 30 });
+    now = 10;
+    throttle.push({ tableId: "table.orders", x: 30, y: 40 });
+
+    assert.deepEqual(emitted, [{ tableId: "table.orders", x: 10, y: 20 }]);
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].delay, 28);
+
+    now = 33;
+    timers.shift().callback();
+    assert.deepEqual(emitted, [
+      { tableId: "table.orders", x: 10, y: 20 },
+      { tableId: "table.orders", x: 30, y: 40 }
+    ]);
+
+    now = 40;
+    throttle.push({ tableId: "table.users", x: 50, y: 60 });
+    assert.equal(timers.length, 1);
+    throttle.cancel();
+    assert.equal(timers.length, 0);
+  } finally {
+    await rm(outputDir, { force: true, recursive: true });
+  }
+}
 
 {
   const {

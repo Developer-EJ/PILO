@@ -15,6 +15,7 @@ import {
   type Editor,
   type TLBaseShape,
   type TLShape,
+  type TLShapeId,
   type TLShapePartial
 } from "tldraw";
 
@@ -195,9 +196,11 @@ export function getSqlErdTableShapeSelectionUpdates(
       }
     | {
         type: "table";
-      }
+      },
+  selectedShapeIds: readonly TLShapeId[] = [selectedTableShape.id]
 ) {
   const updates: TLShapePartial<SqlErdTableShape>[] = [];
+  const selectedShapeIdSet = new Set(selectedShapeIds);
 
   for (const shape of editor.getCurrentPageShapes()) {
     if (!isSqlErdTableShape(shape)) {
@@ -205,11 +208,14 @@ export function getSqlErdTableShapeSelectionUpdates(
     }
 
     const isSelectedTable = shape.id === selectedTableShape.id;
-    const selectedState: SqlErdTableSelectionState = isSelectedTable
-      ? selection.type
-      : "none";
+    const isShapeSelected = selectedShapeIdSet.has(shape.id);
+    const selectedState: SqlErdTableSelectionState = !isShapeSelected
+      ? "none"
+      : isSelectedTable
+        ? selection.type
+        : "table";
     const selectedColumnId =
-      isSelectedTable && selection.type === "column"
+      isShapeSelected && isSelectedTable && selection.type === "column"
         ? selection.columnId
         : null;
 
@@ -234,14 +240,41 @@ export function getSqlErdTableShapeSelectionUpdates(
   return updates;
 }
 
+function getNextSqlErdSelectedShapeIds(
+  editor: Pick<Editor, "getSelectedShapeIds">,
+  shapeId: TLShapeId,
+  toggle: boolean,
+  baseSelectedShapeIds?: readonly TLShapeId[]
+) {
+  if (!toggle) {
+    return [shapeId];
+  }
+
+  const selectedShapeIds = Array.from(
+    baseSelectedShapeIds ?? editor.getSelectedShapeIds()
+  );
+  return selectedShapeIds.includes(shapeId)
+    ? selectedShapeIds.filter((selectedShapeId) => selectedShapeId !== shapeId)
+    : [...selectedShapeIds, shapeId];
+}
+
 export function selectSqlErdTableShape(
   editor: Editor,
-  selectedTableShape: SqlErdTableShape
+  selectedTableShape: SqlErdTableShape,
+  toggle = false,
+  baseSelectedShapeIds?: readonly TLShapeId[]
 ) {
+  const selectedShapeIds = getNextSqlErdSelectedShapeIds(
+    editor,
+    selectedTableShape.id,
+    toggle,
+    baseSelectedShapeIds
+  );
   const updates = getSqlErdTableShapeSelectionUpdates(
     editor,
     selectedTableShape,
-    { type: "table" }
+    { type: "table" },
+    selectedShapeIds
   );
 
   editor.run(
@@ -250,7 +283,7 @@ export function selectSqlErdTableShape(
         editor.updateShapes(updates);
       }
 
-      editor.select(selectedTableShape.id);
+      editor.setSelectedShapes(selectedShapeIds);
     },
     { history: "ignore" }
   );
@@ -259,15 +292,24 @@ export function selectSqlErdTableShape(
 export function selectSqlErdTableShapeColumn(
   editor: Editor,
   selectedTableShape: SqlErdTableShape,
-  columnId: string
+  columnId: string,
+  toggle = false,
+  baseSelectedShapeIds?: readonly TLShapeId[]
 ) {
+  const selectedShapeIds = getNextSqlErdSelectedShapeIds(
+    editor,
+    selectedTableShape.id,
+    toggle,
+    baseSelectedShapeIds
+  );
   const updates = getSqlErdTableShapeSelectionUpdates(
     editor,
     selectedTableShape,
     {
       type: "column",
       columnId
-    }
+    },
+    selectedShapeIds
   );
 
   editor.run(
@@ -276,7 +318,7 @@ export function selectSqlErdTableShapeColumn(
         editor.updateShapes(updates);
       }
 
-      editor.select(selectedTableShape.id);
+      editor.setSelectedShapes(selectedShapeIds);
     },
     { history: "ignore" }
   );
@@ -379,7 +421,12 @@ export function getSqlErdColumnRowVisualStyle({
 function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const editor = useEditor();
   const tableFocus = useSqlErdTableFocus();
-  const columnPointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const tablePointerSelectionRef = useRef<TLShapeId[] | null>(null);
+  const columnPointerStartRef = useRef<{
+    selectedShapeIds: TLShapeId[];
+    x: number;
+    y: number;
+  } | null>(null);
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
@@ -390,10 +437,20 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     : null;
   const isFocusDimmed = focusRole === "dimmed";
 
-  function handleTableClick() {
+  function handleTableClick(
+    toggle = false,
+    baseSelectedShapeIds?: readonly TLShapeId[]
+  ) {
     if (isFocusDimmed) return;
-    selectSqlErdTableShape(editor, shape);
-    selectSqlErdTable({ tableId: shape.props.tableId });
+    selectSqlErdTableShape(
+      editor,
+      shape,
+      toggle,
+      baseSelectedShapeIds
+    );
+    if (!toggle) {
+      selectSqlErdTable({ tableId: shape.props.tableId });
+    }
   }
 
   function handleTableKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -406,17 +463,30 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     handleTableClick();
   }
 
-  function handleColumnClick(columnId: string) {
+  function handleColumnClick(
+    columnId: string,
+    toggle = false,
+    baseSelectedShapeIds?: readonly TLShapeId[]
+  ) {
     if (isFocusDimmed) return;
-    selectSqlErdTableShapeColumn(editor, shape, columnId);
-    selectSqlErdColumn({
+    selectSqlErdTableShapeColumn(
+      editor,
+      shape,
       columnId,
-      tableId: shape.props.tableId
-    });
+      toggle,
+      baseSelectedShapeIds
+    );
+    if (!toggle) {
+      selectSqlErdColumn({
+        columnId,
+        tableId: shape.props.tableId
+      });
+    }
   }
 
   function handleColumnPointerDown(event: PointerEvent<HTMLDivElement>) {
     columnPointerStartRef.current = {
+      selectedShapeIds: Array.from(editor.getSelectedShapeIds()),
       x: event.clientX,
       y: event.clientY
     };
@@ -440,7 +510,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     }
 
     event.stopPropagation();
-    handleColumnClick(columnId);
+    handleColumnClick(
+      columnId,
+      event.shiftKey,
+      pointerStart?.selectedShapeIds
+    );
   }
 
   return (
@@ -485,11 +559,20 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
           data-sqltoerd-table-id={shape.props.tableId}
           onClick={(event) => {
             event.stopPropagation();
-            handleTableClick();
+            handleTableClick(
+              event.shiftKey,
+              tablePointerSelectionRef.current ?? undefined
+            );
+            tablePointerSelectionRef.current = null;
           }}
           onKeyDown={handleTableKeyDown}
           role="button"
           tabIndex={isFocusDimmed ? -1 : 0}
+          onPointerDownCapture={() => {
+            tablePointerSelectionRef.current = Array.from(
+              editor.getSelectedShapeIds()
+            );
+          }}
         >
           {(["left", "right"] as const).map((side) => (
             <button
@@ -715,8 +798,19 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
       return;
     }
 
+    const toggle = this.editor.inputs.shiftKey;
+
+    if (toggle) {
+      return;
+    }
+
     if (selection.type === "column") {
-      selectSqlErdTableShapeColumn(this.editor, shape, selection.columnId);
+      selectSqlErdTableShapeColumn(
+        this.editor,
+        shape,
+        selection.columnId,
+        false
+      );
       selectSqlErdColumn({
         columnId: selection.columnId,
         tableId: shape.props.tableId

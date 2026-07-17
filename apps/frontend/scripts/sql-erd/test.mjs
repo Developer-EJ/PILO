@@ -684,26 +684,26 @@ function createRuntimeTableShape(id, table, tableShapeRuntime, overrides = {}) {
 
 function createRuntimeTableSelectionEditor(shapes) {
   let currentPagePoint = { x: 0, y: 0 };
-  let selectedShapeId = null;
+  let selectedShapeIds = [];
   const runOptions = [];
 
   return {
     getCurrentPageShapes: () => shapes,
     getSelectedShapes: () =>
-      selectedShapeId
-        ? shapes.filter((shape) => shape.id === selectedShapeId)
-        : [],
+      shapes.filter((shape) => selectedShapeIds.includes(shape.id)),
+    getSelectedShapeIds: () => selectedShapeIds,
     getPointInShapeSpace: (_shape, point) => point,
     inputs: {
-      getCurrentPagePoint: () => currentPagePoint
+      getCurrentPagePoint: () => currentPagePoint,
+      shiftKey: false
     },
     run: (callback, options) => {
       runOptions.push(options);
       callback();
     },
     runOptions,
-    select: (shapeId) => {
-      selectedShapeId = shapeId;
+    setSelectedShapes: (shapeIds) => {
+      selectedShapeIds = [...shapeIds];
     },
     setCurrentPagePoint: (point) => {
       currentPagePoint = point;
@@ -2555,6 +2555,31 @@ assert.equal(runtimeUsersShape.props.selectedColumnId, null);
 assert.equal(runtimeOrdersShape.props.selectedState, "none");
 assert.equal(runtimeOrdersShape.props.selectedColumnId, null);
 
+tableShapeRuntime.selectSqlErdTableShape(
+  runtimeSelectionEditor,
+  runtimeOrdersShape,
+  true,
+  runtimeSelectionEditor.getSelectedShapeIds()
+);
+assert.deepEqual(runtimeSelectionEditor.getSelectedShapeIds(), [
+  "shape:users",
+  "shape:orders"
+]);
+assert.equal(runtimeUsersShape.props.selectedState, "table");
+assert.equal(runtimeOrdersShape.props.selectedState, "table");
+
+tableShapeRuntime.selectSqlErdTableShape(
+  runtimeSelectionEditor,
+  runtimeOrdersShape,
+  true,
+  runtimeSelectionEditor.getSelectedShapeIds()
+);
+assert.deepEqual(runtimeSelectionEditor.getSelectedShapeIds(), [
+  "shape:users"
+]);
+assert.equal(runtimeUsersShape.props.selectedState, "table");
+assert.equal(runtimeOrdersShape.props.selectedState, "none");
+
 const selectedRelationFromCanvas =
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
     {
@@ -2571,15 +2596,22 @@ assert.deepEqual(selectedRelationFromCanvas, {
 });
 const runtimeInteractiveSelectionEditor = {
   selectedShapeIds: ["shape:sqltoerd-note-existing"],
-  getShapeAtPoint() {
-    return {
-      id: "shape:sqltoerd-frame-next",
-      type: "sqltoerd_frame",
-      props: { frameId: "frame.next" }
-    };
+  hitShape: {
+    id: "shape:sqltoerd-frame-next",
+    type: "sqltoerd_frame",
+    props: { frameId: "frame.next" }
   },
-  select(shapeId) {
-    this.selectedShapeIds = [shapeId];
+  getShapeAtPoint() {
+    return this.hitShape;
+  },
+  getSelectedShapeIds() {
+    return this.selectedShapeIds;
+  },
+  setSelectedShapes(shapeIds) {
+    this.selectedShapeIds = [...shapeIds];
+  },
+  selectNone() {
+    this.selectedShapeIds = [];
   }
 };
 
@@ -2593,6 +2625,70 @@ assert.equal(
 assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
   "shape:sqltoerd-frame-next"
 ]);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-note-existing"
+];
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 120, y: 80 },
+    { toggle: true }
+  ),
+  true
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-note-existing",
+  "shape:sqltoerd-frame-next"
+]);
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 120, y: 80 },
+    { toggle: true }
+  ),
+  true
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-note-existing"
+]);
+runtimeInteractiveSelectionEditor.hitShape = null;
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 20, y: 20 },
+    { clearOnMiss: true }
+  ),
+  false
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, []);
+assert.deepEqual(
+  canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
+    isShapeSelected: false,
+    selection: { type: "table", tableId: "table.users" },
+    tableId: "table.users"
+  }),
+  { selectedColumnId: null, selectedState: "none" }
+);
+assert.deepEqual(
+  canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
+    isShapeSelected: true,
+    selection: { type: "none" },
+    tableId: "table.users"
+  }),
+  { selectedColumnId: null, selectedState: "table" }
+);
+assert.deepEqual(
+  canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
+    isShapeSelected: true,
+    selection: {
+      type: "column",
+      tableId: "table.users",
+      columnId: "email"
+    },
+    tableId: "table.users"
+  }),
+  { selectedColumnId: "email", selectedState: "column" }
+);
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
     {
@@ -6966,17 +7062,17 @@ assert.match(tableShape, /function selectSqlErdTableShape/);
 assert.match(tableShape, /editor\.updateShapes\(updates\)/);
 assert.match(
   tableShape,
-  /function handleColumnClick\(columnId: string\) \{[\s\S]*?selectSqlErdTableShapeColumn\(editor, shape, columnId\);[\s\S]*?selectSqlErdColumn\({/
+  /function handleColumnClick\([\s\S]*?toggle = false[\s\S]*?selectSqlErdTableShapeColumn\([\s\S]*?toggle,[\s\S]*?baseSelectedShapeIds[\s\S]*?if \(!toggle\) \{/
 );
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /function handleTableKeyDown/);
 assert.match(
   tableShape,
-  /function handleTableClick\(\) \{\s*if \(isFocusDimmed\) return;/
+  /function handleTableClick\([\s\S]*?toggle = false,[\s\S]*?if \(isFocusDimmed\) return;/
 );
 assert.match(
   tableShape,
-  /function handleColumnClick\(columnId: string\) \{\s*if \(isFocusDimmed\) return;/
+  /function handleColumnClick\([\s\S]*?columnId: string,[\s\S]*?toggle = false,[\s\S]*?if \(isFocusDimmed\) return;/
 );
 assert.match(tableShape, /override onClick\(shape: SqlErdTableShape\)/);
 assert.match(tableShape, /isSqlErdColumnPointerDrag/);
