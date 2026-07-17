@@ -360,6 +360,21 @@ SQLtoERD 편집 화면은 REST session API와 별도로 Socket.IO presence room�
   sentAt: string; // ISO 8601
 };
 
+"sql-erd:table-move:preview" = {
+  workspaceId: string;
+  sessionId: string;
+  dragId: string; // 1..128, reused as durable clientOperationId
+  tableId: string;
+  x: number;
+  y: number;
+};
+
+"sql-erd:table-move:clear" = {
+  workspaceId: string;
+  sessionId: string;
+  tableIds: string[]; // 1..100
+};
+
 type SqltoerdPresenceSelectedObject = {
   type: "table" | "relation" | "annotation" | "note" | "frame" | "text" | "stroke";
   id: string;
@@ -367,7 +382,7 @@ type SqltoerdPresenceSelectedObject = {
 ```
 
 Client는 cursor를 tldraw page 좌표로 전송한다. pointer 이동은 `socket.volatile.emit()`
-으로 최대 80ms마다 전송하며, 마지막 전송 좌표에서 1.5 page 단위 이상 움직였을 때만
+으로 최대 33ms마다 전송하며, 마지막 전송 좌표에서 1.5 page 단위 이상 움직였을 때만
 전송한다. 5초 heartbeat와 15초 stale timeout을 사용하며, canvas를 벗어나면
 `cursor: null`을 전송한다.
 
@@ -387,6 +402,24 @@ Client는 cursor를 tldraw page 좌표로 전송한다. pointer 이동은 `socke
   workspaceId: string;
   sessionId: string;
   userId: string;
+};
+
+"sql-erd:table-move:preview" = {
+  workspaceId: string;
+  sessionId: string;
+  actorUserId: string;
+  dragId: string;
+  tableId: string;
+  x: number;
+  y: number;
+  sentAt: string; // server time, ISO 8601
+};
+
+"sql-erd:table-move:clear" = {
+  workspaceId: string;
+  sessionId: string;
+  actorUserId: string;
+  tableIds: string[]; // empty means clear every preview from the actor
 };
 
 "sql-erd:operation" = SqltoerdLayoutPatchOperation;
@@ -425,6 +458,40 @@ type SqltoerdLayoutPatchOperation = {
   createdAt: string;
 };
 ```
+
+Table move preview events are transient rendering hints. The client keeps only
+the latest value for each table and emits at most once every 33ms. The Realtime
+Server validates the payload and joined room, replaces `actorUserId` and
+`sentAt` with authenticated server values, and relays only to the same
+Workspace/session room. Preview events are not written to the database,
+operation log, outbox, or Activity Log, and are not replayed to late joiners.
+Table move preview is enabled only for `operations_v1` sessions, where the
+matching durable operation can prove completion. A legacy `snapshot` session
+continues to share cursor and presence updates but does not emit table move
+preview events. Auto layout changes suppressed from per-table drag persistence
+also do not emit table move preview events; they are shared only through the
+single durable layout update created by auto layout.
+
+The final table position is still committed through the existing
+`layout_patch` HTTP transaction and delivered by `sql-erd:operation`. Each drag
+uses one `dragId`, and an `operations_v1` client reuses that exact value as the
+durable operation's `clientOperationId`. A client cancels any unsent throttled
+preview when the drag ends. A receiver records completed
+`(actorUserId, tableId, dragId)` tuples when the matching durable operation is
+applied, immediately dismisses the matching preview, and rejects that drag's
+late preview packets. A later drag has a new ID and is not dismissed by an
+older operation. If a drag returns to its original position and produces no
+durable patch, the sender emits the reliable clear event immediately.
+
+A cancelled preview restores the position captured before the preview,
+including when `tableLayouts` omitted that table. Receivers also clear previews
+on room leave, disconnect, presence leave, session change, or after a
+five-second timeout. Therefore a dropped or reordered preview packet can reduce
+animation smoothness but cannot override a committed ERD layout.
+
+`sql-erd:leave` is accepted only for a room currently joined by that socket.
+An unjoined Workspace/session room returns `room_not_joined` and does not relay
+table preview cleanup into that room.
 
 `userId`와 `displayName`은 Socket.IO handshake payload를 신뢰하지 않는다. realtime
 server는 bearer session 검증 뒤 `users`와 `user_settings`에서 읽은 사용자 정보를
