@@ -38,6 +38,7 @@ import {
 } from "../canvas/state/canvas-room-state.service";
 import { createCanvasShapeLockService } from "../canvas/review-lock/canvas-shape-lock.service";
 import { createCanvasShapePreviewService } from "../canvas/preview/canvas-shape-preview.service";
+import { createCanvasRecordingActivityService } from "../canvas/recording-activity/canvas-recording-activity.service";
 import { createClassicCanvasMembershipRevocationHandler } from "../canvas/socket/canvas-membership-revocation";
 import {
   assertCanvasRoomWritable,
@@ -487,6 +488,11 @@ export async function createRealtimeSocketServer({
     },
     roomStateService,
   });
+  const recordingActivityService = createCanvasRecordingActivityService({
+    appServerUrl: config.appServerUrl,
+    database,
+    token: config.canvasActivityToken,
+  });
   const sqlErdRoomService = createSqlErdRoomService({
     accessService: sqlErdAccessService,
     presenceService: sqlErdPresenceService,
@@ -603,6 +609,16 @@ export async function createRealtimeSocketServer({
         if (!isMeetingStateRedisEvent(payload)) {
           console.error("Meeting state Redis payload is invalid", payload);
           return;
+        }
+
+        if (
+          payload.change === "recording_started" ||
+          payload.change === "recording_ended" ||
+          payload.change === "recording_failed" ||
+          payload.change === "participant_joined" ||
+          payload.change === "participant_left"
+        ) {
+          recordingActivityService.invalidateWorkspace(payload.workspaceId);
         }
 
         const { workspaceId, ...event } = payload;
@@ -801,6 +817,7 @@ export async function createRealtimeSocketServer({
       io,
       presenceService,
       roomCheckpointService,
+      recordingActivityService,
       roomService,
       roomStateService,
       shapeLockService,
@@ -1270,6 +1287,7 @@ export async function createRealtimeSocketServer({
       await unsubscribePrReviewDecisions?.();
       await unsubscribePrReviewRoomDeleted?.();
       await unsubscribePrReviewConflictDrafts?.();
+      await recordingActivityService.close();
       await roomCheckpointService.close();
       await io.close();
       await redisAdapter?.close();
