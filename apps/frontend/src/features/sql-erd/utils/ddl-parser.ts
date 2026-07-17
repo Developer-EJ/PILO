@@ -97,26 +97,35 @@ export function parseSqlDdlToErdModel(
   let astNodes: SqlParserAstNode[] | null = null;
   let resolvedDialect: SqltoerdResolvedDialect | null = null;
   let lastParseErrorMessage = "Failed to parse SQL DDL.";
+  let hasParserSource = false;
+  let hasParserError = false;
 
   for (const database of databases) {
     try {
       const parserSourceText = prepareParserSource(database, sourceText);
       if (!parserSourceText.trim()) {
-        astNodes = [];
-        resolvedDialect = database;
-        break;
+        continue;
       }
+      hasParserSource = true;
       const ast = parser.astify(parserSourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
       resolvedDialect = database;
       break;
     } catch (error) {
+      hasParserError = true;
       lastParseErrorMessage =
         error instanceof Error ? error.message : lastParseErrorMessage;
     }
   }
 
   if (!astNodes || !resolvedDialect) {
+    if (!hasParserSource && !hasParserError) {
+      return createParseFailure(
+        "NO_CREATE_TABLE",
+        "SQLtoERD MVP parser expects one or more CREATE TABLE statements."
+      );
+    }
+
     return createParseFailure(
       "PARSE_FAILED",
       lastParseErrorMessage
@@ -668,6 +677,13 @@ function resolveParserDatabases(
 function getAutoParserDatabases(
   sourceText: string
 ): SqltoerdResolvedDialect[] {
+  const hasMySqlDumpMarker =
+    /^\s*DELIMITER\s+\S+\s*$/im.test(sourceText) ||
+    /\/\*!\d{5}\s/.test(sourceText) ||
+    /^\s*(?:LOCK|UNLOCK)\s+TABLES\b/im.test(sourceText);
+  const hasSqliteDumpMarker =
+    /^\s*PRAGMA\b/im.test(sourceText) ||
+    /\bsqlite_sequence\b/i.test(sourceText);
   const hasMySqlMarker =
     /\b(?:AUTO_INCREMENT|UNSIGNED|UNIQUE\s+KEY|DATETIME)\b|\bENGINE\s*=|`[^`]+`/i.test(
       sourceText
@@ -680,6 +696,14 @@ function getAutoParserDatabases(
     /\b(?:AUTOINCREMENT|WITHOUT\s+ROWID|STRICT)\b|\bON\s+CONFLICT\b/i.test(
       sourceText
     );
+
+  if (hasMySqlDumpMarker) {
+    return ["mysql", "postgresql"];
+  }
+
+  if (hasSqliteDumpMarker) {
+    return ["sqlite", "postgresql", "mysql"];
+  }
 
   if (hasSqliteMarker && !hasMySqlMarker && !hasPostgreSqlMarker) {
     return ["sqlite", "postgresql", "mysql"];

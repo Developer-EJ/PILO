@@ -5122,6 +5122,21 @@ assert.equal(
   mysqlFullDumpSourceText
 );
 
+const mysqlFullDumpAutoParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: mysqlFullDumpSourceText
+});
+
+assert.equal(mysqlFullDumpAutoParseResult.ok, true);
+if (!mysqlFullDumpAutoParseResult.ok) {
+  throw new Error(mysqlFullDumpAutoParseResult.error.message);
+}
+assert.equal(mysqlFullDumpAutoParseResult.resolvedDialect, "mysql");
+assert.deepEqual(
+  mysqlFullDumpAutoParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "sessions"]
+);
+
 const invalidMySqlTableWithRoutine =
   ddlParserRuntime.parseSqlDdlToErdModel({
     dialect: "mysql",
@@ -5149,6 +5164,20 @@ if (mysqlRoutineOnlyParseResult.ok) {
   throw new Error("MySQL routine-only dump must not create an ERD");
 }
 assert.equal(mysqlRoutineOnlyParseResult.error.code, "NO_CREATE_TABLE");
+
+const mysqlRoutineOnlyAutoParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "auto",
+    sourceText: `DELIMITER $$
+CREATE PROCEDURE noop() BEGIN SELECT '$$'; END$$
+DELIMITER ;`
+  });
+
+assert.equal(mysqlRoutineOnlyAutoParseResult.ok, false);
+if (mysqlRoutineOnlyAutoParseResult.ok) {
+  throw new Error("Auto MySQL routine-only dump must not create an ERD");
+}
+assert.equal(mysqlRoutineOnlyAutoParseResult.error.code, "NO_CREATE_TABLE");
 
 const mysqlSourceText = `CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -5260,6 +5289,21 @@ assert.equal(
   sqliteFullDumpSourceText
 );
 
+const sqliteFullDumpAutoParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: sqliteFullDumpSourceText
+});
+
+assert.equal(sqliteFullDumpAutoParseResult.ok, true);
+if (!sqliteFullDumpAutoParseResult.ok) {
+  throw new Error(sqliteFullDumpAutoParseResult.error.message);
+}
+assert.equal(sqliteFullDumpAutoParseResult.resolvedDialect, "sqlite");
+assert.deepEqual(
+  sqliteFullDumpAutoParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "posts"]
+);
+
 const invalidSqliteTableWithPragma =
   ddlParserRuntime.parseSqlDdlToErdModel({
     dialect: "sqlite",
@@ -5284,6 +5328,19 @@ if (sqliteMetadataOnlyParseResult.ok) {
   throw new Error("SQLite metadata-only dump must not create an ERD");
 }
 assert.equal(sqliteMetadataOnlyParseResult.error.code, "NO_CREATE_TABLE");
+
+const sqliteMetadataOnlyAutoParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "auto",
+    sourceText: `PRAGMA foreign_keys=ON;
+CREATE VIEW empty_view AS SELECT 1;`
+  });
+
+assert.equal(sqliteMetadataOnlyAutoParseResult.ok, false);
+if (sqliteMetadataOnlyAutoParseResult.ok) {
+  throw new Error("Auto SQLite metadata-only dump must not create an ERD");
+}
+assert.equal(sqliteMetadataOnlyAutoParseResult.error.code, "NO_CREATE_TABLE");
 
 const sqliteSourceText = `CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
