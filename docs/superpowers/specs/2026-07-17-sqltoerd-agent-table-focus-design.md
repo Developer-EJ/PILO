@@ -56,7 +56,7 @@ App Server 도구가 model을 읽고 내부에서 LLM을 다시 호출하면 한
 
 compact ref는 현재 model의 table 선언 순서로 결정하며 해당 session revision에서만 유효하다. 긴 내부 table ID를 relation마다 반복하지 않아 큰 schema에서도 전체 FK 인접 그래프를 우선 전달할 수 있다. 두 번째 도구가 같은 revision의 model에서 compact ref를 실제 table ID로 다시 변환한다.
 
-Agent step output 64KB 제한을 지키기 위해 projection을 byte budget으로 조립한다. 모든 table ref와 이름, 모든 FK 인접 관계를 먼저 포함하고 남은 budget에 schema 이름, table comment와 주요 컬럼을 추가한다. 컬럼은 PK/FK, `featureQuery`와 이름이 일치하는 항목, 나머지 선언 순서 순으로 선택한다. 원문 SQL, 내부 table/column ID, 전체 modelJson, default value, constraint 원문은 반환하지 않는다.
+Agent step output의 저장 한도는 64KB지만 AI Worker가 다음 planner turn에 전달하는 전체 planning context는 12,000자이다. 따라서 inspect projection 자체는 최대 9,000자의 더 엄격한 budget으로 조립한다. 모든 table ref와 제한된 이름, 모든 FK edge를 먼저 포함하고 남은 budget에 schema 이름, table comment와 주요 컬럼을 추가한다. 컬럼은 PK/FK, `featureQuery`와 이름이 일치하는 항목, 나머지 선언 순서 순으로 선택한다. 각 이름과 comment도 개별 길이를 제한하며 생략 여부를 명시한다. 원문 SQL, 내부 table/column ID, 전체 modelJson, default value, constraint 원문은 반환하지 않는다.
 
 ### `focus_sql_erd_tables`
 
