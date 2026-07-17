@@ -102,6 +102,16 @@ the connector follows either bound shape when it moves. Repeated polling of the
 same run must not insert duplicates. The AI Worker and App Server never write
 these Canvas records directly, no Canvas draft is created, and generated HTML
 does not include JavaScript behavior.
+
+For HTML generation, `styleMode: faithful` means structural fidelity rather
+than literal Canvas pixel reproduction. The generator preserves hierarchy,
+section order, relative proportions, meaningful overlap, and user-authored
+text, then lays the result out as a browser-filling product UI with grid/flex.
+An explicit visual style in the user's prompt takes precedence. When no style
+is requested, the default is a bright, restrained, Toss-inspired Korean fintech
+visual language. The generator may add concise static example labels, cards,
+values, inputs, and buttons needed to complete the selected sections, but it
+must not add JavaScript behavior or contradict user-authored content.
 - Client-summary and embedding matches are classified as `find_shapes` with
   `focusResult: true`, so the client can move the requester-only Canvas AI
   pointer, zoom to the matching shape area, and highlight the result. Separate

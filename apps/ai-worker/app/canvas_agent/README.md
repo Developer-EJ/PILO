@@ -54,6 +54,13 @@ Canvas Agent run job의 실행 흐름을 담당한다.
 - `generate_html`이면 검증된 `selectedScene`을 정적 HTML/CSS로 변환
 - 분류 결과를 `route_intent` step으로 DB에 저장
 
+HTML 생성은 Canvas의 부모 관계, 섹션 순서, 상대 비율과 사용자 텍스트를 구조적
+와이어프레임으로 해석한다. 사용자 prompt에 시각 스타일이 있으면 그 스타일을
+적용하고, 별도 스타일 요청이 없으면 토스 계열의 밝고 정돈된 제품 UI를 기본값으로
+사용한다. Canvas의 작은 절대 크기와 임시 색상을 그대로 복사하지 않고 전체 브라우저
+영역을 채우는 grid/flex 레이아웃으로 구성하며, 필요한 정적 예시 버튼·카드·값을
+보완할 수 있다.
+
 중요한 원칙:
 
 - local semantic routing 실패는 Canvas AI 전체 실패로 만들지 않고 빈 검색 결과로 처리한다.
