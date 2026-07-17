@@ -10,6 +10,13 @@ import {
   getAgentResourceLinks,
   parseSqlErdAgentTableFocusResource
 } from "./resource-links.ts";
+import {
+  consumeStagedSqlErdAgentTableFocus,
+  getSqlErdFocusedRelationRole,
+  getSqlErdFocusedTableRole,
+  isSqlErdAgentTableFocusCurrent,
+  stageSqlErdAgentTableFocus
+} from "../sql-erd/utils/agent-table-focus.ts";
 
 async function readFeatureFile(path) {
   return readFile(new URL(path, import.meta.url), "utf8");
@@ -333,6 +340,65 @@ for (const invalidMetadata of [
     null
   );
 }
+
+assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-orders"), "primary");
+assert.equal(
+  getSqlErdFocusedTableRole(expectedFocus, "table-payment-attempts"),
+  "related"
+);
+assert.equal(getSqlErdFocusedTableRole(expectedFocus, "table-users"), "dimmed");
+assert.equal(
+  getSqlErdFocusedRelationRole(expectedFocus, "relation-orders-attempts"),
+  "focused"
+);
+assert.equal(
+  getSqlErdFocusedRelationRole(expectedFocus, "relation-users-orders"),
+  "dimmed"
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, resourceSessionId, 7),
+  true
+);
+assert.equal(
+  isSqlErdAgentTableFocusCurrent(expectedFocus, resourceSessionId, 8),
+  false
+);
+
+const stagedFocusStorage = new Map();
+const stagedFocusEvents = [];
+globalThis.CustomEvent = class {
+  constructor(type, init) {
+    this.type = type;
+    this.detail = init?.detail;
+  }
+};
+globalThis.window = {
+  dispatchEvent(event) {
+    stagedFocusEvents.push(event);
+  },
+  sessionStorage: {
+    getItem(key) {
+      return stagedFocusStorage.get(key) ?? null;
+    },
+    removeItem(key) {
+      stagedFocusStorage.delete(key);
+    },
+    setItem(key, value) {
+      stagedFocusStorage.set(key, value);
+    }
+  }
+};
+stageSqlErdAgentTableFocus(expectedFocus);
+assert.equal(stagedFocusStorage.size, 1);
+assert.deepEqual(stagedFocusEvents[0].detail, expectedFocus);
+assert.deepEqual(
+  consumeStagedSqlErdAgentTableFocus(resourceSessionId),
+  expectedFocus
+);
+assert.equal(stagedFocusStorage.size, 0);
+assert.equal(consumeStagedSqlErdAgentTableFocus(resourceSessionId), null);
+delete globalThis.window;
+delete globalThis.CustomEvent;
 assert.deepEqual(
   getAgentResourceLinks({ ...completedRun, status: "running" }),
   []

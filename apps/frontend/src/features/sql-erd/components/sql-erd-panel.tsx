@@ -70,6 +70,13 @@ import { useSqlErdOperationSync } from "@/features/sql-erd/realtime/use-sql-erd-
 import { useSqlErdSourceLock } from "@/features/sql-erd/realtime/use-sql-erd-source-lock";
 import { applySqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-layout";
 import { createSqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-patch";
+import {
+  consumeStagedSqlErdAgentTableFocus,
+  isSqlErdAgentTableFocusCurrent,
+  parseSqlErdAgentTableFocusValue,
+  SQL_ERD_AGENT_TABLE_FOCUS_EVENT,
+  type SqlErdAgentTableFocus
+} from "@/features/sql-erd/utils/agent-table-focus";
 import type {
   SqlErdSelection,
   SqltoerdDialect,
@@ -507,6 +514,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
     useState<SqlErdSelection>({ type: "none" });
+  const [agentTableFocus, setAgentTableFocus] =
+    useState<SqlErdAgentTableFocus | null>(null);
   const [tablePinState, setTablePinState] = useState(() =>
     createSqlErdTablePinState()
   );
@@ -542,6 +551,15 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const isSessionReady =
     sqlErdViewSession.id === sessionId &&
     sqlErdViewSession.revision !== null;
+  const activeAgentTableFocus =
+    agentTableFocus &&
+    isSqlErdAgentTableFocusCurrent(
+      agentTableFocus,
+      sessionId,
+      sqlErdViewSession.revision
+    )
+      ? agentTableFocus
+      : null;
   const sourceLockClient = useMemo(
     () => ({
       acquireSourceLock: async (leaseId: string) => {
@@ -1976,6 +1994,46 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, []);
 
   useEffect(() => {
+    setAgentTableFocus(consumeStagedSqlErdAgentTableFocus(sessionId));
+
+    function handleAgentTableFocus(event: Event) {
+      const focus =
+        consumeStagedSqlErdAgentTableFocus(sessionId) ??
+        parseSqlErdAgentTableFocusValue(
+          (event as CustomEvent<unknown>).detail,
+          sessionId
+        );
+      if (focus) {
+        setAgentTableFocus(focus);
+      }
+    }
+
+    window.addEventListener(
+      SQL_ERD_AGENT_TABLE_FOCUS_EVENT,
+      handleAgentTableFocus
+    );
+    return () => {
+      window.removeEventListener(
+        SQL_ERD_AGENT_TABLE_FOCUS_EVENT,
+        handleAgentTableFocus
+      );
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!activeAgentTableFocus) {
+      return;
+    }
+    setSelectedSqlErdObject({ type: "none" });
+  }, [activeAgentTableFocus]);
+
+  useEffect(() => {
+    if (isSessionReady && agentTableFocus && !activeAgentTableFocus) {
+      setAgentTableFocus(null);
+    }
+  }, [activeAgentTableFocus, agentTableFocus, isSessionReady]);
+
+  useEffect(() => {
     const panelContainer = panelContainerRef.current;
 
     if (!panelContainer) {
@@ -2169,6 +2227,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       ) : null}
       {isSessionReady ? (
         <CanvasShell
+          agentTableFocus={activeAgentTableFocus}
           autosavePausedBanner={layoutAutosavePausedBanner}
           layoutJson={sqlErdViewSession.layoutJson}
           modelJson={sqlErdViewSession.modelJson}
@@ -2176,6 +2235,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           onReloadSession={handleReloadPausedSession}
           onRetryLayoutAutosaveOnce={handleRetryLayoutAutosaveOnce}
           onSelectionChange={setSelectedSqlErdObject}
+          onShowAllTables={() => setAgentTableFocus(null)}
           pinNavigationRequestId={tablePinState.navigationRequestId}
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
@@ -2939,6 +2999,7 @@ function PanelResizeHandle({
 }
 
 type CanvasShellProps = {
+  agentTableFocus: SqlErdAgentTableFocus | null;
   autosavePausedBanner: LayoutAutosavePausedBannerViewModel | null;
   layoutJson: SqltoerdSessionPayload["layoutJson"];
   modelJson: SqltoerdSessionPayload["modelJson"];
@@ -2946,6 +3007,7 @@ type CanvasShellProps = {
   onReloadSession: () => void;
   onRetryLayoutAutosaveOnce: () => void;
   onSelectionChange: (selection: SqlErdSelection) => void;
+  onShowAllTables: () => void;
   pinNavigationRequestId: number;
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
@@ -2956,6 +3018,7 @@ type CanvasShellProps = {
 };
 
 function CanvasShell({
+  agentTableFocus,
   autosavePausedBanner,
   layoutJson,
   modelJson,
@@ -2963,6 +3026,7 @@ function CanvasShell({
   onReloadSession,
   onRetryLayoutAutosaveOnce,
   onSelectionChange,
+  onShowAllTables,
   pinNavigationRequestId,
   pinnedTableId,
   realtimeConfig,
@@ -2986,7 +3050,14 @@ function CanvasShell({
         isSqlSourceOpen={isSqlSourceOpen}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
+        tableFocus={agentTableFocus}
       />
+      {agentTableFocus ? (
+        <AgentTableFocusBanner
+          focus={agentTableFocus}
+          onShowAllTables={onShowAllTables}
+        />
+      ) : null}
       {autosavePausedBanner ? (
         <AutosavePausedBanner
           banner={autosavePausedBanner}
@@ -2994,6 +3065,38 @@ function CanvasShell({
           onRetryLayoutAutosaveOnce={onRetryLayoutAutosaveOnce}
         />
       ) : null}
+    </div>
+  );
+}
+
+function AgentTableFocusBanner({
+  focus,
+  onShowAllTables
+}: {
+  focus: SqlErdAgentTableFocus;
+  onShowAllTables: () => void;
+}) {
+  const confidenceLabel =
+    focus.confidence === "high"
+      ? "높음"
+      : focus.confidence === "medium"
+        ? "보통"
+        : "낮음";
+
+  return (
+    <div className="absolute left-4 top-4 z-30 flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-blue-200 bg-white/95 px-3 py-2 text-sm text-slate-700 shadow-lg backdrop-blur">
+      <strong className="text-slate-950">{focus.featureLabel} 집중 보기</strong>
+      <span>
+        핵심 {focus.primaryTableIds.length} · 관련 {focus.relatedTableIds.length}
+      </span>
+      <span>신뢰도 {confidenceLabel}</span>
+      <button
+        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        onClick={onShowAllTables}
+        type="button"
+      >
+        전체 보기
+      </button>
     </div>
   );
 }

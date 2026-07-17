@@ -23,6 +23,7 @@ import {
   SqlErdCanvasToolbar,
   type SqlErdCanvasTool
 } from "@/features/sql-erd/components/sql-erd-canvas-toolbar";
+import { SqlErdTableFocusProvider } from "@/features/sql-erd/components/sql-erd-table-focus-context";
 import { SqlErdRealtimeBridge } from "@/features/sql-erd/realtime/sql-erd-realtime-bridge";
 import type { SqlErdRealtimeConfig } from "@/features/sql-erd/realtime/sql-erd-realtime-types";
 import { useSqlErdPresence } from "@/features/sql-erd/realtime/use-sql-erd-presence";
@@ -145,6 +146,11 @@ import {
 } from "@/features/sql-erd/utils/canvas-shape-sync";
 import { getSqlErdPinnedTableCenter } from "@/features/sql-erd/utils/table-pin";
 import {
+  getSqlErdFocusedRelationRole,
+  getSqlErdFocusedTableRole,
+  type SqlErdAgentTableFocus
+} from "@/features/sql-erd/utils/agent-table-focus";
+import {
   areSqlErdSelectionsEqual,
   getSqlErdSelectionFromSelectedShapes,
   selectSqlErdCanvasShapeAtPoint
@@ -166,6 +172,7 @@ type SqlErdCanvasProps = {
   isSqlSourceOpen?: boolean;
   sessionId?: string | null;
   selectedSqlErdObject?: SqlErdSelection;
+  tableFocus?: SqlErdAgentTableFocus | null;
 };
 
 const sqlErdShapeUtils = [
@@ -2570,7 +2577,8 @@ export function SqlErdCanvas({
   realtimeConfig = null,
   isSqlSourceOpen = false,
   sessionId = null,
-  selectedSqlErdObject = { type: "none" }
+  selectedSqlErdObject = { type: "none" },
+  tableFocus = null
 }: SqlErdCanvasProps) {
   const onLayoutPatch = isReadOnly ? undefined : onLayoutPatchProp;
   const editorRef = useRef<Editor | null>(null);
@@ -2599,6 +2607,13 @@ export function SqlErdCanvas({
   useEffect(() => {
     toolRef.current = tool;
   }, [tool]);
+  useEffect(() => {
+    if (!tableFocus) {
+      return;
+    }
+    editorRef.current?.selectNone();
+    onSelectionChange?.({ type: "none" });
+  }, [onSelectionChange, tableFocus]);
   const shapes = useMemo(
     () => createSqltoerdCanvasShapes(modelJson, layoutJson),
     [layoutJson, modelJson]
@@ -2954,6 +2969,30 @@ export function SqlErdCanvas({
         y: event.clientY
       });
 
+      if (tableFocus) {
+        const hitShape = editor.getShapeAtPoint(pagePoint, {
+          hitInside: true,
+          hitLabels: true,
+          hitLocked: true
+        });
+        const isDimmedTable =
+          isSqlErdTableShape(hitShape) &&
+          getSqlErdFocusedTableRole(tableFocus, hitShape.props.tableId) ===
+            "dimmed";
+        const isDimmedRelation =
+          isSqlErdRelationShape(hitShape) &&
+          getSqlErdFocusedRelationRole(
+            tableFocus,
+            hitShape.props.relationId
+          ) === "dimmed";
+        if (isDimmedTable || isDimmedRelation) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.nativeEvent.stopImmediatePropagation();
+          return;
+        }
+      }
+
       if (eventTarget.closest("[data-sqltoerd-canvas-toolbar]")) {
         return;
       }
@@ -3067,7 +3106,7 @@ export function SqlErdCanvas({
         tableId
       });
     },
-    [deleteStrokeAt, isReadOnly, layoutJson.annotations?.strokes?.length, nextStrokeColor, placeAnnotationAt, updateStrokeShape]
+    [deleteStrokeAt, isReadOnly, layoutJson.annotations?.strokes?.length, nextStrokeColor, placeAnnotationAt, tableFocus, updateStrokeShape]
   );
   const handleDoubleClickCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -3141,17 +3180,18 @@ export function SqlErdCanvas({
       onPointerMoveCapture={handlePointerMoveCapture}
       onPointerUpCapture={handlePointerUpCapture}
     >
-      <TldrawSurface
-        className={cn(
-          "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
-          className
-        )}
-        components={sqlErdTldrawComponents}
-        hideUi
-        onMount={handleMount}
-        onPointerDownCapture={handlePointerDownCapture}
-        shapeUtils={sqlErdShapeUtils}
-      >
+      <SqlErdTableFocusProvider focus={tableFocus}>
+        <TldrawSurface
+          className={cn(
+            "h-full w-full bg-slate-50 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.12)_1px,transparent_0)] [background-size:24px_24px]",
+            className
+          )}
+          components={sqlErdTldrawComponents}
+          hideUi
+          onMount={handleMount}
+          onPointerDownCapture={handlePointerDownCapture}
+          shapeUtils={sqlErdShapeUtils}
+        >
         {sessionId ? (
           <SqlErdWorkspaceLocationAdapter sessionId={sessionId} />
         ) : null}
@@ -3202,7 +3242,8 @@ export function SqlErdCanvas({
             selectedSqlErdObject={selectedSqlErdObject}
           />
         ) : null}
-      </TldrawSurface>
+        </TldrawSurface>
+      </SqlErdTableFocusProvider>
       {onLayoutPatch && canvasEditor ? (
         <SqlErdCanvasToolbar
           editor={canvasEditor}
@@ -3224,7 +3265,7 @@ export function SqlErdCanvas({
           tool={tool}
         />
       ) : null}
-      {onLayoutPatch ? (
+      {onLayoutPatch && !tableFocus ? (
         <button
           aria-label="자동 정렬"
           className="absolute right-4 top-4 z-20 inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"

@@ -18,6 +18,38 @@ export type SqlErdAgentTableFocus = {
   confidence: (typeof CONFIDENCE_VALUES)[number];
 };
 
+export type SqlErdFocusedTableRole = "primary" | "related" | "dimmed";
+export type SqlErdFocusedRelationRole = "focused" | "dimmed";
+
+export function getSqlErdFocusedTableRole(
+  focus: SqlErdAgentTableFocus,
+  tableId: string
+): SqlErdFocusedTableRole {
+  if (focus.primaryTableIds.includes(tableId)) {
+    return "primary";
+  }
+  return focus.relatedTableIds.includes(tableId) ? "related" : "dimmed";
+}
+
+export function getSqlErdFocusedRelationRole(
+  focus: SqlErdAgentTableFocus,
+  relationId: string
+): SqlErdFocusedRelationRole {
+  return focus.relationIds.includes(relationId) ? "focused" : "dimmed";
+}
+
+export function isSqlErdAgentTableFocusCurrent(
+  focus: SqlErdAgentTableFocus,
+  sessionId: string,
+  sessionRevision: number | null
+): boolean {
+  return (
+    focus.sessionId === sessionId &&
+    sessionRevision !== null &&
+    focus.sessionRevision === sessionRevision
+  );
+}
+
 export function parseSqlErdAgentTableFocusResource(
   resourceRef: Record<string, unknown>
 ): SqlErdAgentTableFocus | null {
@@ -112,22 +144,26 @@ export function consumeStagedSqlErdAgentTableFocus(
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return parseStoredFocus(parsed, sessionId);
+    return parseSqlErdAgentTableFocusValue(parsed, sessionId);
   } catch {
     return null;
   }
 }
 
-function parseStoredFocus(
+export function parseSqlErdAgentTableFocusValue(
   value: unknown,
-  expectedSessionId: string
+  expectedSessionId?: string
 ): SqlErdAgentTableFocus | null {
-  if (!isPlainObject(value) || value.sessionId !== expectedSessionId) {
+  if (
+    !isPlainObject(value) ||
+    typeof value.sessionId !== "string" ||
+    (expectedSessionId !== undefined && value.sessionId !== expectedSessionId)
+  ) {
     return null;
   }
-  const { sessionId: _sessionId, ...metadata } = value;
+  const { sessionId, ...metadata } = value;
   return parseSqlErdAgentTableFocusResource({
-    resourceId: expectedSessionId,
+    resourceId: sessionId,
     metadata
   });
 }

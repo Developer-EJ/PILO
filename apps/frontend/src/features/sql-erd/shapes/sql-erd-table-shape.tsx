@@ -19,6 +19,8 @@ import {
 } from "tldraw";
 
 import type { ErdColumn, ErdTable } from "@/features/sql-erd/types";
+import { useSqlErdTableFocus } from "@/features/sql-erd/components/sql-erd-table-focus-context";
+import { getSqlErdFocusedTableRole } from "@/features/sql-erd/utils/agent-table-focus";
 import {
   getSqltoerdTableBadgeColumnWidth,
   getSqltoerdTableCardSize,
@@ -376,12 +378,17 @@ export function getSqlErdColumnRowVisualStyle({
 
 function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const editor = useEditor();
+  const tableFocus = useSqlErdTableFocus();
   const columnPointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
   const selectedState = shape.props.selectedState ?? "none";
   const highlightedColumnIds = shape.props.highlightedColumnIds ?? [];
+  const focusRole = tableFocus
+    ? getSqlErdFocusedTableRole(tableFocus, shape.props.tableId)
+    : null;
+  const isFocusDimmed = focusRole === "dimmed";
 
   function handleTableClick() {
     selectSqlErdTableShape(editor, shape);
@@ -438,8 +445,11 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     <HTMLContainer
       className="pointer-events-auto overflow-visible"
       style={{
+        filter: isFocusDimmed ? "blur(2px) saturate(0.45)" : undefined,
         height: shape.props.h,
-        pointerEvents: "all",
+        opacity: isFocusDimmed ? 0.2 : focusRole === "related" ? 0.86 : 1,
+        pointerEvents: isFocusDimmed ? "none" : "all",
+        transition: "filter 160ms ease, opacity 160ms ease",
         width: shape.props.w
       }}
     >
@@ -450,7 +460,14 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
             : selectedState === "column"
               ? "border-blue-300"
               : "border-slate-200"
+        } ${
+          focusRole === "primary"
+            ? "outline outline-4 outline-blue-400 outline-offset-4"
+            : focusRole === "related"
+              ? "outline outline-2 outline-sky-300 outline-offset-2"
+              : ""
         }`}
+        data-sqltoerd-table-focus-role={focusRole ?? undefined}
         data-sqltoerd-table-selected={
           selectedState === "table" ? "true" : undefined
         }
@@ -470,7 +487,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
           }}
           onKeyDown={handleTableKeyDown}
           role="button"
-          tabIndex={0}
+          tabIndex={isFocusDimmed ? -1 : 0}
         >
           {(["left", "right"] as const).map((side) => (
             <button
@@ -562,7 +579,7 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                   columnGap: ROW_COLUMN_GAP,
                   gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(max-content, 1fr)`
                 }}
-                tabIndex={0}
+                tabIndex={isFocusDimmed ? -1 : 0}
               >
                 {(["left", "right"] as const).map((side) => {
                   const isPortActive =
