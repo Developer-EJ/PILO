@@ -25,6 +25,7 @@ import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { BoardContextResolverService } from "./tools/board-context-resolver.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
+import { MeetingAgentResourceResolver } from "./tools/meeting-agent-resource-resolver.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
 import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
 import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
@@ -59,6 +60,7 @@ import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegati
     BoardContextResolverService,
     BoardAgentToolsService,
     CalendarAgentToolsService,
+    MeetingAgentResourceResolver,
     MeetingAgentToolsService,
     CanvasAgentDelegationToolsService,
     SqlErdAgentToolsService,

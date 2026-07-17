@@ -9,6 +9,9 @@ const { AgentToolRegistryService } = require(
 const { MeetingAgentToolsService } = require(
   "../../dist/modules/agent/tools/meeting-agent-tools.service.js"
 );
+const { MeetingAgentResourceResolver } = require(
+  "../../dist/modules/agent/tools/meeting-agent-resource-resolver.service.js"
+);
 const { MeetingActionItemDeliveryService } = require(
   "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
 );
@@ -129,6 +132,16 @@ assert.match(
   meetingServiceSource,
   /approveMeetingReportActionItem[\s\S]*?transitionMeetingReportActionItem\([\s\S]*?"APPROVED"/,
   "The legacy approval endpoint must remain compatible during the delivery rollout"
+);
+assert.match(
+  meetingServiceSource,
+  /async listMeetingsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
+  "Meeting resolver reads must scope every Meeting query to the current Workspace"
+);
+assert.match(
+  meetingServiceSource,
+  /async listActionItemsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
+  "Action item resolver reads must scope every query to the current Workspace"
 );
 
 function createMeeting(overrides = {}) {
@@ -256,6 +269,32 @@ class FakeMeetingService {
       meeting: createMeeting(),
       meetingRoom: createMeetingRoom()
     };
+    this.meetings = [
+      {
+        meeting: createMeeting(),
+        roomName: "기본 회의실"
+      }
+    ];
+    this.actionItems = [
+      {
+        id: "99999999-9999-4999-8999-999999999994",
+        reportId: REPORT_ID,
+        sourceIndex: 0,
+        title: "문서 정리",
+        status: "PENDING",
+        assignee: { userId: USER_ID, name: "진호", avatarUrl: null },
+        reportCreatedAt: "2026-07-08T00:00:00.000Z"
+      }
+    ];
+    this.reports[0].actionItems = [
+      {
+        id: this.actionItems[0].id,
+        title: this.actionItems[0].title,
+        status: this.actionItems[0].status
+      }
+    ];
+    this.staleMeetingIds = new Set();
+    this.staleReportIds = new Set();
     this.recordingConsentAccepted = true;
   }
 
@@ -286,6 +325,9 @@ class FakeMeetingService {
 
   async getMeeting(currentUserId, workspaceId, meetingId) {
     this.calls.push({ method: "getMeeting", currentUserId, workspaceId, meetingId });
+    if (this.staleMeetingIds.has(meetingId)) {
+      throw new Error("Meeting no longer exists");
+    }
     return {
       meeting: createMeeting({ id: meetingId }),
       currentRecording: this.currentMeetings.get(MEETING_ROOM_ID).currentRecording,
@@ -355,6 +397,26 @@ class FakeMeetingService {
     };
   }
 
+  async listMeetingsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listMeetingsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return { meetings: this.meetings };
+  }
+
+  async listActionItemsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listActionItemsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return { actionItems: this.actionItems };
+  }
+
   async getReport(currentUserId, workspaceId, reportId) {
     this.calls.push({
       method: "getReport",
@@ -362,6 +424,10 @@ class FakeMeetingService {
       workspaceId,
       reportId
     });
+
+    if (this.staleReportIds.has(reportId)) {
+      throw new Error("Meeting report no longer exists");
+    }
 
     const report =
       this.reports.find((candidate) => candidate.id === reportId) ?? this.reports[0];
@@ -375,6 +441,34 @@ class FakeMeetingService {
 class FakeMeetingTranscriptRagService {
   async search() {
     return [{ sourceId: "99999999-9999-4999-8999-999999999999", reportId: REPORT_ID, startedAtMs: 1000, endedAtMs: 2000, content: "원문은 output에 저장하지 않는다." }];
+  }
+}
+
+class FakeWorkspaceService {
+  constructor() {
+    this.members = [
+      {
+        userId: USER_ID,
+        role: "owner",
+        user: { name: "진호" }
+      },
+      {
+        userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        role: "member",
+        user: { name: "김진호" }
+      },
+      {
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        role: "member",
+        user: { name: "김진호" }
+      }
+    ];
+  }
+
+  async assertWorkspaceAccess() {}
+
+  async listMembers() {
+    return this.members;
   }
 }
 
@@ -403,6 +497,221 @@ const context = {
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
+}
+
+{
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "meeting-agent-resource-resolver-test-secret";
+  try {
+    const meetingService = new FakeMeetingService();
+    const workspaceService = new FakeWorkspaceService();
+    const resolver = new MeetingAgentResourceResolver(
+      meetingService,
+      workspaceService
+    );
+
+    const room = await resolver.resolveMeetingRoom(context, " 디자인   회의실 ");
+    assert.equal(room.kind, "selected");
+    assert.equal(room.candidate.label, "디자인 회의실");
+    assert.equal(room.candidate.resourceType, "meeting_room");
+    assert.equal(room.selectionToken.includes(SECOND_MEETING_ROOM_ID), false);
+    assert.deepEqual(
+      await resolver.revalidateSelectionToken(context, room.selectionToken),
+      room.reference
+    );
+    assert.equal(
+      await resolver.revalidateSelectionToken(
+        { ...context, workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" },
+        room.selectionToken
+      ),
+      null
+    );
+    assert.equal(
+      await resolver.revalidateSelectionToken(
+        { ...context, currentUserId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" },
+        room.selectionToken
+      ),
+      null
+    );
+    assert.equal(
+      await resolver.revalidateSelectionToken(
+        { ...context, runId: "ffffffff-ffff-4fff-8fff-ffffffffffff" },
+        room.selectionToken
+      ),
+      null
+    );
+    const tamperSegment = (token, index) => {
+      const parts = token.split(".");
+      const first = parts[index][0];
+      parts[index] = `${first === "A" ? "B" : "A"}${parts[index].slice(1)}`;
+      return parts.join(".");
+    };
+    for (const index of [2, 3, 4]) {
+      assert.equal(
+        await resolver.revalidateSelectionToken(
+          context,
+          tamperSegment(room.selectionToken, index)
+        ),
+        null
+      );
+    }
+    const originalNow = Date.now;
+    try {
+      let now = 1_000;
+      Date.now = () => now;
+      const expiringRoom = await resolver.resolveMeetingRoom(context, "기본 회의실");
+      assert.equal(expiringRoom.kind, "selected");
+      now += 15 * 60 * 1000 + 1;
+      assert.equal(
+        await resolver.revalidateSelectionToken(context, expiringRoom.selectionToken),
+        null
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+    delete process.env.SESSION_SECRET;
+    await assert.rejects(
+      () => resolver.resolveMeetingRoom(context, "기본 회의실"),
+      /SESSION_SECRET/
+    );
+    process.env.SESSION_SECRET = "meeting-agent-resource-resolver-test-secret";
+
+    const missingRoom = await resolver.resolveMeetingRoom(context, "없는 회의실");
+    assert.equal(missingRoom.kind, "needs_clarification");
+    assert.equal(missingRoom.reason, "not_found");
+
+    meetingService.rooms.push(
+      createMeetingRoom({
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        roomKey: "ROOM_THIRD",
+        name: "디자인 회의실",
+        isDefault: false
+      })
+    );
+    const ambiguousRoom = await resolver.resolveMeetingRoom(context, "디자인 회의실");
+    assert.equal(ambiguousRoom.kind, "needs_clarification");
+    assert.equal(ambiguousRoom.reason, "ambiguous");
+    assert.equal(ambiguousRoom.candidates.length, 2);
+    assert.doesNotMatch(JSON.stringify(ambiguousRoom.candidates), /[0-9a-f]{8}-/i);
+    assert.equal(typeof ambiguousRoom.candidates[0].selectionToken, "string");
+    assert.notEqual(
+      ambiguousRoom.candidates[0].selectionToken,
+      ambiguousRoom.candidates[1].selectionToken
+    );
+
+    const member = await resolver.resolveMember(context, { displayName: "김진호" });
+    assert.equal(member.kind, "needs_clarification");
+    assert.equal(member.reason, "ambiguous");
+    const self = await resolver.resolveMember(context, { self: true });
+    assert.equal(self.kind, "selected");
+    assert.equal(self.candidate.label, "진호");
+    const staleMemberToken = self.selectionToken;
+    workspaceService.members = [];
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, staleMemberToken),
+      null
+    );
+    workspaceService.members = [
+      {
+        userId: USER_ID,
+        role: "owner",
+        user: { name: "진호" }
+      },
+      {
+        userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        role: "member",
+        user: { name: "김진호" }
+      },
+      {
+        userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        role: "member",
+        user: { name: "김진호" }
+      }
+    ];
+
+    const meeting = await resolver.resolveMeeting(context, {
+      roomName: "기본 회의실",
+      from: "2026-07-08T00:00:00.000Z",
+      to: "2026-07-09T00:00:00.000Z"
+    });
+    assert.equal(meeting.kind, "selected");
+    assert.equal(meeting.candidate.label, "기본 회의실");
+    meetingService.staleMeetingIds.add(meeting.reference.resourceId);
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, meeting.selectionToken),
+      null
+    );
+    meetingService.staleMeetingIds.clear();
+
+    const report = await resolver.resolveReport(context, { status: "COMPLETED" });
+    assert.equal(report.kind, "selected");
+    assert.equal(report.candidate.status, "COMPLETED");
+    meetingService.staleReportIds.add(report.reference.resourceId);
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, report.selectionToken),
+      null
+    );
+    meetingService.staleReportIds.clear();
+    meetingService.reports.push(createReport({ id: SECOND_REPORT_ID }));
+    const ambiguousReport = await resolver.resolveReport(context, {});
+    assert.equal(ambiguousReport.kind, "needs_clarification");
+    assert.equal(ambiguousReport.reason, "ambiguous");
+    meetingService.reports.splice(1);
+
+    meetingService.activeMeeting = {
+      meeting: createMeeting({
+        workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      }),
+      meetingRoom: createMeetingRoom({
+        workspaceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      })
+    };
+    const otherWorkspaceActive = await resolver.resolveCurrentMeeting(context);
+    assert.equal(otherWorkspaceActive.kind, "needs_clarification");
+    assert.equal(otherWorkspaceActive.reason, "not_found");
+
+    meetingService.activeMeeting = {
+      meeting: createMeeting(),
+      meetingRoom: createMeetingRoom()
+    };
+    meetingService.actionItems.push({
+      id: "99999999-9999-4999-8999-999999999995",
+      reportId: REPORT_ID,
+      sourceIndex: 8,
+      title: "두 번째 필터 결과",
+      status: "PENDING",
+      assignee: { userId: USER_ID, name: "진호", avatarUrl: null },
+      reportCreatedAt: "2026-07-08T00:00:00.000Z"
+    });
+    const secondActionItem = await resolver.resolveActionItem(context, {
+      reportId: REPORT_ID,
+      ordinal: 2
+    });
+    assert.equal(secondActionItem.kind, "selected");
+    assert.equal(secondActionItem.candidate.label, "두 번째 필터 결과");
+    meetingService.actionItems.splice(1);
+    const actionItem = await resolver.resolveActionItem(context, {
+      reportId: REPORT_ID,
+      ordinal: 1
+    });
+    assert.equal(actionItem.kind, "selected");
+    assert.equal(actionItem.candidate.label, "문서 정리");
+    assert.deepEqual(
+      await resolver.revalidateSelectionToken(context, actionItem.selectionToken),
+      actionItem.reference
+    );
+    meetingService.reports[0].actionItems = [];
+    assert.equal(
+      await resolver.revalidateSelectionToken(context, actionItem.selectionToken),
+      null
+    );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.SESSION_SECRET;
+    } else {
+      process.env.SESSION_SECRET = previousSecret;
+    }
+  }
 }
 
 function errorCode(error) {
