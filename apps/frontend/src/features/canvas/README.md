@@ -138,6 +138,11 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
   `src/features/canvas/collaboration/`에 남는다.
 - `ClassicCanvasRuntime`은 socket state를 만들고, `CanvasEditor`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
 - cursor 좌표, selection, `editingShapeId`, `editingMode` presence는 DB에 저장하지 않는다.
+- remote shape preview는 `collaboration/canvas-remote-shape-preview-store`의 외부 store에서
+  관리해 preview packet마다 `ClassicCanvasRuntime` 전체를 다시 렌더링하지 않는다.
+- 로컬 draw/highlight pointer가 활성화된 동안에는 원격 preview와 committed shape patch를
+  tldraw document store에 적용하지 않는다. room event는 shape별 대기열에 유지하고 로컬
+  freehand가 끝난 직후 최신 상태를 적용해 서로 다른 사용자의 펜 segment가 끊기지 않게 한다.
 - local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
 - `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review는 공통 Socket
   transport와 cursor overlay를 사용하되 room 입장과 Presence 보고는 PR Review feature에서

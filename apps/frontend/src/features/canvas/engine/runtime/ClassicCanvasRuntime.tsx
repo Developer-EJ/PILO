@@ -81,6 +81,7 @@ const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
   currentToolId: "select.idle",
   editingShapeId: null,
   focusedGroupId: null,
+  isFreehandDrawing: false,
   isFocused: false,
   protectedShapeIds: [],
   selectedShapeIds: [],
@@ -160,7 +161,10 @@ function isRemoteOperationProtectedByLocalInteraction({
   localInteractionState: PiloCanvasLocalInteractionState;
   operation: CanvasShapeOperationPayload;
 }) {
-  return localInteractionState.protectedShapeIds.includes(operation.shapeId);
+  return (
+    localInteractionState.isFreehandDrawing ||
+    localInteractionState.protectedShapeIds.includes(operation.shapeId)
+  );
 }
 
 function isRemoteFrameCollapseProtected({
@@ -435,6 +439,7 @@ function ClassicCanvasRuntimeInner({
   }, []);
   const isCanvasShapePatchProtected = useCallback((shapeId: string) => {
     return (
+      localInteractionStateRef.current.isFreehandDrawing ||
       localInteractionStateRef.current.protectedShapeIds.includes(shapeId) ||
       pendingLocalShapeVersionsRef.current.has(shapeId) ||
       pendingRoomShapeAckCountsRef.current.has(shapeId)
@@ -655,7 +660,7 @@ function ClassicCanvasRuntimeInner({
     (state: PiloCanvasLocalInteractionState) => {
       localInteractionStateRef.current = state;
 
-      if (!state.protectedShapeIds.length) {
+      if (!state.isFreehandDrawing) {
         flushDeferredRemoteOperations();
         flushDeferredRoomShapeChangesRef.current();
       }
@@ -815,11 +820,14 @@ function ClassicCanvasRuntimeInner({
         ...pendingLocalShapeVersionsRef.current.keys(),
         ...pendingRoomShapeAckCountsRef.current.keys(),
       ]);
+      const shouldDeferForLocalFreehand =
+        localInteractionStateRef.current.isFreehandDrawing;
       const immediateDeletedShapeIds: string[] = [];
       const immediateUpsertShapes: PiloCanvasFreeformShape[] = [];
 
       patch.deletedShapeIds.forEach((shapeId) => {
         if (
+          shouldDeferForLocalFreehand ||
           isRemoteShapeDeletionProtected({
             currentShapes: freeformShapesRef.current,
             protectedShapeIds,
@@ -849,6 +857,7 @@ function ClassicCanvasRuntimeInner({
         }
 
         if (
+          shouldDeferForLocalFreehand ||
           protectedShapeIds.has(shapeId) ||
           isRemoteFrameCollapseProtected({
             currentShapes: freeformShapesRef.current,
@@ -884,7 +893,10 @@ function ClassicCanvasRuntimeInner({
     ],
   );
   const flushDeferredRoomShapeChanges = useCallback(() => {
-    if (!deferredRoomShapeChangesRef.current.size) {
+    if (
+      localInteractionStateRef.current.isFreehandDrawing ||
+      !deferredRoomShapeChangesRef.current.size
+    ) {
       return;
     }
 

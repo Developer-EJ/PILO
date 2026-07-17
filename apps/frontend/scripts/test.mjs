@@ -253,6 +253,20 @@ const canvasPresenceHook = await readFile(
   new URL("../src/features/canvas/collaboration/useCanvasRoom.ts", import.meta.url),
   "utf8"
 );
+const canvasRemoteShapePreviewStore = await readFile(
+  new URL(
+    "../src/features/canvas/collaboration/canvas-remote-shape-preview-store.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const canvasLocalInteractionPolicy = await readFile(
+  new URL(
+    "../src/features/canvas/engine/interactions/canvas-local-interaction-policy.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const canvasRemoteCursorOverlay = await readFile(
   new URL("../src/shared/canvas-realtime/RemoteCursorOverlay.tsx", import.meta.url),
   "utf8"
@@ -910,6 +924,9 @@ assert.match(canvasRuntime, /isRemoteShapeDeletionProtected/);
 assert.match(canvasRuntime, /flushDeferredRoomShapeChanges/);
 assert.match(canvasRuntime, /pendingRoomShapeAckCountsRef/);
 assert.match(canvasRuntime, /isCanvasShapePatchProtected/);
+assert.match(canvasRuntime, /localInteractionState\.isFreehandDrawing/);
+assert.match(canvasRuntime, /shouldDeferForLocalFreehand/);
+assert.match(canvasRuntime, /state\.isFreehandDrawing/);
 assert.match(canvasRuntime, /queueCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /consumeCanvasSurfaceShapePatch/);
 assert.match(canvasRuntime, /canvasShapePatchVersion/);
@@ -922,6 +939,9 @@ assert.match(piloTldrawCanvas, /editingMode/);
 assert.match(piloTldrawCanvas, /RemoteCursorOverlay/);
 assert.match(piloTldrawCanvas, /CanvasRemotePresenceProvider/);
 assert.match(piloTldrawCanvas, /CanvasRealtimePreviewApplier/);
+assert.match(piloTldrawCanvas, /isEditorFreehandInteractionActive/);
+assert.match(piloTldrawCanvas, /isLocalFreehandDrawing/);
+assert.match(piloTldrawCanvas, /useSyncExternalStore/);
 assert.match(piloTldrawCanvas, /handleRealtimePreviewDraftChange/);
 assert.match(piloTldrawCanvas, /CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60/);
 assert.match(piloTldrawCanvas, /scheduleShapePreviewSend/);
@@ -931,7 +951,7 @@ assert.doesNotMatch(piloTldrawCanvas, /releaseShapeLocks/);
 assert.match(piloTldrawCanvas, /deletedShapeIds/);
 assert.match(piloTldrawCanvas, /shapesToHide/);
 assert.doesNotMatch(piloTldrawCanvas, /remoteShapeLocks/);
-assert.match(piloTldrawCanvas, /remoteShapePreviews/);
+assert.match(piloTldrawCanvas, /remoteShapePreviewStore/);
 assert.match(piloTldrawCanvas, /resolveRealtimePreviewSnapshot/);
 assert.match(piloTldrawCanvas, /syncFreeformShapesIncrementally/);
 assert.match(piloTldrawCanvas, /applyFreeformShapePatchIncrementally/);
@@ -942,6 +962,12 @@ assert.match(piloTldrawCanvas, /isShapePatchProtected/);
 assert.match(piloTldrawCanvas, /shouldPreserveMissingFrameChildShape/);
 assert.match(piloTldrawCanvas, /getPreservedFreeformShapeSnapshots/);
 assert.match(piloTldrawCanvas, /editor\.updateShapes\(shapesToUpdate/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore/);
+assert.doesNotMatch(canvasPresenceHook, /setRemoteShapePreviews/);
+assert.match(canvasRemoteShapePreviewStore, /createCanvasRemoteShapePreviewStore/);
+assert.match(canvasRemoteShapePreviewStore, /removeShapeIds/);
+assert.match(canvasRemoteShapePreviewStore, /sweepStale/);
+assert.match(canvasLocalInteractionPolicy, /isCanvasFreehandInteractionActive/);
 assert.match(canvasAgentToolStepPlayback, /playbackState/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("playing"\)/);
 assert.match(canvasAgentToolStepPlayback, /setPlaybackState\("complete"\)/);
@@ -983,8 +1009,8 @@ assert.match(canvasRealtimeTypes, /previews: CanvasShapePreviewEventPayload\[\]/
 assert.match(canvasRealtimeTypes, /shapeLocks: CanvasShapeLockState\[\]/);
 assert.match(canvasRealtimeTypes, /deletedShapeIds/);
 assert.doesNotMatch(canvasPresenceHook, /remoteShapeLocks/);
-assert.match(canvasPresenceHook, /removeShapePreviewIds/);
-assert.match(canvasPresenceHook, /remoteShapePreviews/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore\.removeShapeIds/);
+assert.match(canvasPresenceHook, /remoteShapePreviewStore/);
 assert.match(canvasPresenceHook, /roomLoadedRegions/);
 assert.match(canvasPresenceHook, /getInitialViewportBounds/);
 assert.match(canvasPresenceHook, /initialViewportBounds/);
@@ -1042,7 +1068,7 @@ assert.match(canvasPresenceHook, /canvas:room:shapes:hydrate/);
 assert.match(canvasPresenceHook, /canvas:room:shape:patch/);
 assert.match(
   canvasPresenceHook,
-  /removeShapePreviewIds\(\{\s*actorUserId: payload\.actorUserId,\s*previews: currentPreviews,\s*shapeIds: patchedShapeIds,/,
+  /remoteShapePreviewStore\.removeShapeIds\(\s*payload\.actorUserId,\s*patchedShapeIds,/,
 );
 assert.match(canvasPresenceHook, /canvas:room:checkpoint/);
 assert.doesNotMatch(canvasPresenceHook, /ownedShapeLocks/);
