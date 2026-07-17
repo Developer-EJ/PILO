@@ -38,19 +38,21 @@ def extract_document_text_changes(before: object, after: object) -> list[Documen
         if tag == "equal":
             continue
         if tag == "delete":
-            changes.extend(DocumentTextChange("deleted", text) for text in before_blocks[before_start:before_end])
+            changes.extend(
+                DocumentTextChange("deleted", text)
+                for text in before_blocks[before_start:before_end]
+            )
             continue
         if tag == "insert":
-            changes.extend(DocumentTextChange("added", text) for text in after_blocks[after_start:after_end])
+            changes.extend(
+                DocumentTextChange("added", text) for text in after_blocks[after_start:after_end]
+            )
             continue
 
         before_slice = before_blocks[before_start:before_end]
         after_slice = after_blocks[after_start:after_end]
         paired_count = min(len(before_slice), len(after_slice))
-        changes.extend(
-            DocumentTextChange("modified", text)
-            for text in after_slice[:paired_count]
-        )
+        changes.extend(DocumentTextChange("modified", text) for text in after_slice[:paired_count])
         changes.extend(DocumentTextChange("deleted", text) for text in before_slice[paired_count:])
         changes.extend(DocumentTextChange("added", text) for text in after_slice[paired_count:])
 
@@ -88,7 +90,9 @@ def build_document_change_evidence(
             previous_title = _as_nonempty_text(row.get("previous_title"))
             renamed_title = _as_nonempty_text(row.get("renamed_title"))
             if previous_title and renamed_title and previous_title != renamed_title:
-                evidence.changes.append(DocumentTextChange("renamed", f"{previous_title} -> {renamed_title}"))
+                evidence.changes.append(
+                    DocumentTextChange("renamed", f"{previous_title} -> {renamed_title}")
+                )
             continue
 
         evidence.changes.extend(
@@ -119,7 +123,10 @@ def limit_document_change_evidence(
 
         bounded_changes: list[DocumentTextChange] = []
         for change in changes:
-            if len(bounded_changes) >= MAX_CHANGES_PER_DOCUMENT or total_changes >= MAX_DOCUMENT_CHANGES:
+            if (
+                len(bounded_changes) >= MAX_CHANGES_PER_DOCUMENT
+                or total_changes >= MAX_DOCUMENT_CHANGES
+            ):
                 break
             text = _truncate_utf8(change.text, MAX_DOCUMENT_CHANGE_TEXT_BYTES)
             if not text:
@@ -132,7 +139,9 @@ def limit_document_change_evidence(
             total_changes += 1
 
         if bounded_changes:
-            evidence.append(DocumentChangeEvidence(document_id, title, occurred_at, bounded_changes))
+            evidence.append(
+                DocumentChangeEvidence(document_id, title, occurred_at, bounded_changes)
+            )
 
         if total_bytes >= MAX_DOCUMENT_EVIDENCE_BYTES:
             break

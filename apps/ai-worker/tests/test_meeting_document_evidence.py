@@ -29,13 +29,16 @@ def test_extract_document_text_changes_returns_changed_text_without_attachment_a
 
 
 def test_extract_document_text_changes_ignores_attachment_only_snapshot() -> None:
-    assert extract_document_text_changes(
-        document(paragraph("회의록")),
-        document(
-            paragraph("회의록"),
-            {"type": "driveFileAttachment", "attrs": {"driveItemId": "file-1"}},
-        ),
-    ) == []
+    assert (
+        extract_document_text_changes(
+            document(paragraph("회의록")),
+            document(
+                paragraph("회의록"),
+                {"type": "driveFileAttachment", "attrs": {"driveItemId": "file-1"}},
+            ),
+        )
+        == []
+    )
 
 
 def test_limit_document_change_evidence_bounds_document_and_total_changes() -> None:
