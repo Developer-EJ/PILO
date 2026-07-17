@@ -150,6 +150,9 @@ export type RealtimeSocketServerOptions = {
   config: RealtimeServerConfig;
   database?: RealtimeDatabase;
   httpServer: HttpServer;
+  membershipRevocationHandlers?: Array<{
+    handle: (payload: unknown) => Promise<boolean>;
+  }>;
 };
 
 type AuthedSocket = Socket & {
@@ -471,6 +474,7 @@ export async function createRealtimeSocketServer({
   config,
   database: providedDatabase,
   httpServer,
+  membershipRevocationHandlers = [],
 }: RealtimeSocketServerOptions): Promise<RealtimeSocketServerHandle> {
   const io = new Server(httpServer, {
     cors: {
@@ -664,11 +668,16 @@ export async function createRealtimeSocketServer({
         WORKSPACE_MEMBERSHIP_REVOCATION_REDIS_CHANNEL,
         (payload) => {
           chatSubscriptionWork.trackRevocation(async () => {
-            const [chatHandled, pdfCollaborationHandled] = await Promise.all([
-              chatMembershipRevocationHandler.handle(payload),
-              pdfCollaborationMembershipRevocationHandler.handle(payload),
-            ]);
-            if (!chatHandled || !pdfCollaborationHandled) {
+            const handled = await Promise.all(
+              [
+                chatMembershipRevocationHandler.handle(payload),
+                pdfCollaborationMembershipRevocationHandler.handle(payload),
+                ...membershipRevocationHandlers.map((handler) =>
+                  handler.handle(payload),
+                ),
+              ],
+            );
+            if (handled.some((result) => !result)) {
               console.error("Workspace membership revocation handling failed");
             }
           });
