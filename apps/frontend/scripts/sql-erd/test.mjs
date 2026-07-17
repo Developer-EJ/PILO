@@ -23,6 +23,7 @@ async function compileSqlErdRuntimeModules() {
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
   const sourceNavigationOutputPath = join(outputDir, "source-navigation.mjs");
+  const schemaMutationOutputPath = join(outputDir, "schema-mutation.mjs");
   const sqlSourceDecorationOutputPath = join(
     outputDir,
     "sql-source-decoration.mjs"
@@ -124,6 +125,10 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/source-navigation.ts",
       sourceNavigationOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/schema-mutation.ts",
+      schemaMutationOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-decoration.ts",
@@ -391,6 +396,7 @@ async function compileSqlErdRuntimeModules() {
       ddlParserRuntime,
       sqlSourceMapRuntime,
       sourceNavigationRuntime,
+      schemaMutationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -420,6 +426,7 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
       import(pathToFileHref(sourceNavigationOutputPath)),
+      import(pathToFileHref(schemaMutationOutputPath)),
       import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(parseWorkerProtocolOutputPath)),
@@ -449,6 +456,7 @@ async function compileSqlErdRuntimeModules() {
       ddlParserRuntime,
       sqlSourceMapRuntime,
       sourceNavigationRuntime,
+      schemaMutationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -830,6 +838,7 @@ const {
   ddlParserRuntime,
   sqlSourceMapRuntime,
   sourceNavigationRuntime,
+  schemaMutationRuntime,
   sqlSourceDecorationRuntime,
   generateSessionRuntime,
   parseWorkerProtocolRuntime,
@@ -1238,6 +1247,172 @@ assert.deepEqual(cameraAfterAnnotationAdd, cameraBeforeAnnotationAdd);
     ["camera", cameraBeforeAnnotationRemove]
   ]);
   const runtimeModel = createRuntimeTestModel();
+const deletedOrdersUserId = schemaMutationRuntime.deleteSqlErdColumn(
+  runtimeModel,
+  "table.orders",
+  "user_id"
+);
+assert.equal(deletedOrdersUserId.ok, true);
+assert.equal(deletedOrdersUserId.affectedRelationCount, 1);
+assert.equal(deletedOrdersUserId.affectedConstraintCount, 0);
+assert.deepEqual(
+  deletedOrdersUserId.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.map((column) => column.id),
+  ["id"]
+);
+assert.deepEqual(
+  deletedOrdersUserId.modelJson.schema.relations.map((relation) => relation.id),
+  ["relation.users.manager_id.users.id"]
+);
+assert.equal(
+  runtimeModel.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.length,
+  2
+);
+const deletedUsersId = schemaMutationRuntime.deleteSqlErdColumn(
+  runtimeModel,
+  "table.users",
+  "id"
+);
+assert.equal(deletedUsersId.ok, true);
+assert.equal(deletedUsersId.affectedRelationCount, 2);
+assert.equal(deletedUsersId.affectedConstraintCount, 1);
+assert.equal(
+  deletedUsersId.modelJson.schema.tables[0].columns[0].foreignKey,
+  false
+);
+assert.equal(
+  deletedUsersId.modelJson.schema.tables[1].columns[1].foreignKey,
+  false
+);
+const deletedUsersTable = schemaMutationRuntime.deleteSqlErdTable(
+  runtimeModel,
+  "table.users"
+);
+assert.equal(deletedUsersTable.ok, true);
+assert.equal(deletedUsersTable.affectedRelationCount, 2);
+assert.deepEqual(
+  deletedUsersTable.modelJson.schema.tables.map((table) => table.id),
+  ["table.orders"]
+);
+assert.equal(
+  deletedUsersTable.modelJson.schema.tables[0].columns[1].foreignKey,
+  false
+);
+assert.deepEqual(
+  schemaMutationRuntime.deleteSqlErdTable(
+    {
+      ...runtimeModel,
+      schema: {
+        relations: [],
+        tables: [runtimeModel.schema.tables[0]]
+      }
+    },
+    "table.users"
+  ),
+  { ok: false, reason: "LAST_TABLE" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdTable(
+    runtimeModel,
+    "table.users",
+    "orders"
+  ),
+  { ok: false, reason: "DUPLICATE_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdColumn(
+    runtimeModel,
+    "table.orders",
+    "id",
+    "user_id"
+  ),
+  { ok: false, reason: "DUPLICATE_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdTable(
+    runtimeModel,
+    "table.users",
+    " users "
+  ),
+  { ok: false, reason: "INVALID_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.changeSqlErdColumnType(
+    runtimeModel,
+    "table.orders",
+    "id",
+    "BIGINT; DROP TABLE users"
+  ),
+  { ok: false, reason: "INVALID_DATA_TYPE" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.deleteSqlErdColumn(
+    {
+      ...runtimeModel,
+      schema: {
+        relations: [],
+        tables: [
+          {
+            ...runtimeModel.schema.tables[0],
+            columns: [runtimeModel.schema.tables[0].columns[0]]
+          }
+        ]
+      }
+    },
+    "table.users",
+    "id"
+  ),
+  { ok: false, reason: "LAST_COLUMN" }
+);
+const renamedUsersTable = schemaMutationRuntime.renameSqlErdTable(
+  runtimeModel,
+  "table.users",
+  "accounts"
+);
+assert.equal(renamedUsersTable.ok, true);
+assert.equal(
+  renamedUsersTable.modelJson.schema.tables[0].id,
+  "table.users"
+);
+assert.equal(
+  renamedUsersTable.modelJson.schema.tables[0].name,
+  "accounts"
+);
+const renamedOrdersColumn = schemaMutationRuntime.renameSqlErdColumn(
+  renamedUsersTable.modelJson,
+  "table.orders",
+  "user_id",
+  "account_id"
+);
+assert.equal(renamedOrdersColumn.ok, true);
+const changedOrdersColumnType = schemaMutationRuntime.changeSqlErdColumnType(
+  renamedOrdersColumn.modelJson,
+  "table.orders",
+  "user_id",
+  "BIGINT"
+);
+assert.equal(changedOrdersColumnType.ok, true);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regenerated = modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect,
+    modelJson: changedOrdersColumnType.modelJson
+  });
+  const reparsed = ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect,
+    sourceMapModelJson: changedOrdersColumnType.modelJson,
+    sourceText: regenerated.sql
+  });
+
+  assert.equal(reparsed.ok, true, `${dialect} mutation SQL should reparse`);
+  assert.equal(reparsed.modelJson.schema.tables[0].name, "accounts");
+  assert.equal(
+    reparsed.modelJson.schema.tables[1].columns[1].name,
+    "account_id"
+  );
+}
 const currentCanvasContentKey =
   canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
     modelJson: runtimeModel,
@@ -5654,6 +5829,20 @@ const modelSqlPreviewWithoutRelationNote =
     settingsJson: modelSqlPreviewTargetSettings
   });
 assert.deepEqual(modelSqlPreviewWithoutRelationNote.settingsJson, {});
+const semanticallyMismatchedPreviewModel = structuredClone(
+  modelSqlPreview.modelJson
+);
+semanticallyMismatchedPreviewModel.schema.tables[0].name = "renamed_users";
+const semanticallyMismatchedApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
+    ...modelSqlPreview,
+    modelJson: semanticallyMismatchedPreviewModel
+  });
+assert.equal(semanticallyMismatchedApplyResult.ok, false);
+assert.match(
+  semanticallyMismatchedApplyResult.error,
+  /재생성된 SQL이 요청한 ERD 변경과 일치하지 않습니다/
+);
 const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
   ...modelSqlPreview,
   generatedSourceText: "CREATE TABLE users ("

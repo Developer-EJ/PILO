@@ -176,6 +176,17 @@ export function applySqlErdNormalizedSqlPreview(
     };
   }
 
+  if (
+    createSqlErdSchemaSemanticSignature(parseResult.modelJson) !==
+    createSqlErdSchemaSemanticSignature(preview.modelJson)
+  ) {
+    return {
+      error:
+        "재생성된 SQL이 요청한 ERD 변경과 일치하지 않습니다. 변경 내용을 다시 확인하세요.",
+      ok: false
+    };
+  }
+
   return {
     ok: true,
     snapshot: {
@@ -190,6 +201,58 @@ export function applySqlErdNormalizedSqlPreview(
       sourceText: preview.generatedSourceText
     }
   };
+}
+
+export function createSqlErdSchemaSemanticSignature(
+  modelJson: SqltoerdModelJsonV1
+) {
+  const tables = modelJson.schema.tables
+    .map((table) => ({
+      columns: table.columns
+        .map((column) => ({
+          dataType: normalizeSqlSemanticText(column.dataType),
+          defaultValue:
+            column.defaultValue === null
+              ? null
+              : normalizeSqlSemanticText(column.defaultValue),
+          foreignKey: column.foreignKey,
+          id: column.id,
+          name: column.name,
+          nullable: column.nullable,
+          primaryKey: column.primaryKey,
+          unique: column.unique
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      constraints: table.constraints
+        .map((constraint) => ({
+          columnIds: [...constraint.columnIds],
+          kind: constraint.kind,
+          name: constraint.name
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right))
+        ),
+      id: table.id,
+      name: table.name,
+      schemaName: table.schemaName
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const relations = modelJson.schema.relations
+    .map((relation) => ({
+      constraintName: relation.constraintName,
+      fromColumnIds: [...relation.fromColumnIds],
+      fromTableId: relation.fromTableId,
+      id: relation.id,
+      toColumnIds: [...relation.toColumnIds],
+      toTableId: relation.toTableId
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+  return JSON.stringify({ relations, tables });
+}
+
+function normalizeSqlSemanticText(value: string) {
+  return value.trim().replace(/\s+/gu, " ").toUpperCase();
 }
 
 export function isSqlErdNormalizedSqlPreviewCurrent(
