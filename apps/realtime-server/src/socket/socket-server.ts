@@ -71,6 +71,7 @@ import { createWorkspacePresenceMembershipRevocationHandler } from "../workspace
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
 import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
 import {
+  isMeetingNotificationRedisEvent,
   isMeetingReportRedisEvent,
   isMeetingStateRedisEvent,
   meetingServerEvents
@@ -144,6 +145,7 @@ import {
 } from "../pr-review/pr-review-socket-events";
 import {
   createCanvasRoomName,
+  createMeetingNotificationUserRoomName,
   createMeetingRoomName,
   createSqlErdRoomName,
 } from "./room-names";
@@ -183,6 +185,7 @@ const CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations";
 const SQL_ERD_OPERATION_REDIS_CHANNEL = "sql-erd:operations";
 const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 const MEETING_STATE_REDIS_CHANNEL = "meeting:state-events";
+const MEETING_NOTIFICATION_REDIS_CHANNEL = "meeting:notification-events";
 const BOARD_INVALIDATION_REDIS_CHANNEL = "board:invalidations";
 const BOARD_SOURCE_REDIS_CHANNEL = "board:source-events";
 const GITHUB_SOURCE_INVALIDATION_REDIS_CHANNEL = "github:source-invalidations";
@@ -609,6 +612,21 @@ export async function createRealtimeSocketServer({
         );
       })
     : null;
+  const unsubscribeMeetingNotifications = redisAdapter
+    ? await redisAdapter.subscribe(MEETING_NOTIFICATION_REDIS_CHANNEL, payload => {
+        if (!isMeetingNotificationRedisEvent(payload)) {
+          console.error("Meeting notification Redis payload is invalid", payload);
+          return;
+        }
+        const { recipientUserId, ...event } = payload;
+        io.to(createMeetingNotificationUserRoomName(recipientUserId)).emit(
+          event.event === "meeting:notification:updated"
+            ? meetingServerEvents.notificationUpdated
+            : meetingServerEvents.notificationCreated,
+          event
+        );
+      })
+    : null;
   const unsubscribeBoardInvalidations = redisAdapter
     ? await redisAdapter.subscribe(BOARD_INVALIDATION_REDIS_CHANNEL, (payload) => {
         if (!boardInvalidationFanOut.fanOut(payload)) {
@@ -753,6 +771,7 @@ export async function createRealtimeSocketServer({
 
   io.on("connection", (socket) => {
     const authedSocket = socket as AuthedSocket;
+    socket.join(createMeetingNotificationUserRoomName(authedSocket.data.auth.userId));
 
     registerChatSocketHandlers({
       accessService: chatAccessService,
@@ -1241,6 +1260,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeSqlErdOperations?.();
       await unsubscribeMeetingReports?.();
       await unsubscribeMeetingStates?.();
+      await unsubscribeMeetingNotifications?.();
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
