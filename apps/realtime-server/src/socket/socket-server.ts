@@ -5,6 +5,7 @@ import type { RealtimeServerConfig } from "../config/realtime-config";
 import { createRealtimeSessionService } from "../auth/session.service";
 import { createBoardAccessService } from "../board/board-access.service";
 import { createBoardInvalidationFanOut } from "../board/board-invalidation-fan-out";
+import { createBoardMembershipRevocationHandler } from "../board/board-membership-revocation";
 import { createBoardSourceFanOut } from "../board/board-source-fan-out";
 import { createBoardRoomService } from "../board/board-room.service";
 import { createBoardSourceRoomService } from "../board/board-source-room.service";
@@ -19,6 +20,7 @@ import { registerChatSocketHandlers } from "../chat/chat-socket-handlers";
 import { createChatSubscriptionWorkQueue } from "../chat/chat-subscription-work";
 import { createGithubSourceAccessService } from "../github-source/github-source-access.service";
 import { createGithubSourceFanOut } from "../github-source/github-source-fan-out";
+import { createGithubSourceMembershipRevocationHandler } from "../github-source/github-source-membership-revocation";
 import { createGithubSourceRoomService } from "../github-source/github-source-room.service";
 import { registerGithubSourceSocketHandlers } from "../github-source/github-source-socket-handlers";
 import { canvasServerEvents } from "../canvas/socket/canvas-socket-events";
@@ -74,21 +76,16 @@ import {
   meetingServerEvents
 } from "../meeting/meeting-socket-events";
 import {
-  pageCursorClientEvents,
   pageCursorServerEvents,
 } from "../page-cursor/page-cursor-events";
 import {
-  readPageCursorRoomRef,
-  readPageCursorUpdatePayload,
-} from "../page-cursor/page-cursor-payload";
-import {
-  canJoinPageCursorRoom,
   createPageCursorRoomName,
 } from "../page-cursor/page-cursor-room";
 import type {
   PageCursorPresenceState,
-  PageCursorRoomRef,
 } from "../page-cursor/page-cursor-types";
+import { createPageCursorMembershipRevocationHandler } from "../page-cursor/page-cursor-membership-revocation";
+import { registerPageCursorSocketHandlers } from "../page-cursor/page-cursor-socket-handlers";
 import { createPdfCollaborationAccessService } from "../pdf-collaboration/pdf-collaboration-access.service";
 import { createPdfCollaborationMembershipRevocationHandler } from "../pdf-collaboration/pdf-collaboration-membership-revocation";
 import {
@@ -414,66 +411,11 @@ async function getSqlErdRoomSocketPresence(
   return [...presenceByUserId.values()];
 }
 
-function emitPageCursorError(socket: Socket, message: string) {
-  socket.emit(
-    pageCursorServerEvents.error,
-    createSocketErrorPayload("invalid_payload", message),
-  );
-}
-
 function emitPdfCollaborationError(socket: Socket, message: string) {
   socket.emit(
     pdfCollaborationServerEvents.error,
     createSocketErrorPayload("invalid_payload", message),
   );
-}
-
-function isPageCursorPresenceState(
-  value: unknown,
-): value is PageCursorPresenceState {
-  return (
-    isRecord(value) &&
-    typeof value.workspaceId === "string" &&
-    (value.page === "home" || value.page === "calendar" || value.page === "board") &&
-    (value.boardId === undefined || typeof value.boardId === "string") &&
-    typeof value.userId === "string" &&
-    typeof value.displayName === "string" &&
-    isRecord(value.fallback) &&
-    typeof value.fallback.xRatio === "number" &&
-    typeof value.fallback.yRatio === "number" &&
-    (value.target === null || isRecord(value.target)) &&
-    (value.targetPoint === null || isRecord(value.targetPoint)) &&
-    typeof value.updatedAt === "string"
-  );
-}
-
-async function getPageCursorRoomSocketPresence(
-  io: Server,
-  room: PageCursorRoomRef,
-  roomName: string,
-): Promise<PageCursorPresenceState[]> {
-  const sockets = await io.in(roomName).fetchSockets();
-  const presenceByUserId = new Map<string, PageCursorPresenceState>();
-
-  for (const socket of sockets) {
-    const socketData = socket.data as {
-      pageCursorPresenceByRoom?: Record<string, unknown>;
-    };
-    const presence = socketData.pageCursorPresenceByRoom?.[roomName];
-
-    if (!isPageCursorPresenceState(presence)) continue;
-    if (
-      presence.workspaceId !== room.workspaceId ||
-      presence.page !== room.page ||
-      (presence.boardId ?? null) !== (room.boardId ?? null)
-    ) {
-      continue;
-    }
-
-    presenceByUserId.set(presence.userId, presence);
-  }
-
-  return [...presenceByUserId.values()];
 }
 
 export async function createRealtimeSocketServer({
@@ -555,6 +497,12 @@ export async function createRealtimeSocketServer({
   const chatFanOut = createChatFanOut({ database, io });
   const chatMembershipRevocationHandler =
     createChatMembershipRevocationHandler({ io });
+  const pageCursorMembershipRevocationHandler =
+    createPageCursorMembershipRevocationHandler({ io });
+  const boardMembershipRevocationHandler =
+    createBoardMembershipRevocationHandler({ io });
+  const githubSourceMembershipRevocationHandler =
+    createGithubSourceMembershipRevocationHandler({ io });
   const classicCanvasMembershipRevocationHandler =
     createClassicCanvasMembershipRevocationHandler({
       emitLockReleases(payload) {
@@ -709,6 +657,9 @@ export async function createRealtimeSocketServer({
             const handled = await Promise.all(
               [
                 chatMembershipRevocationHandler.handle(payload),
+                pageCursorMembershipRevocationHandler.handle(payload),
+                boardMembershipRevocationHandler.handle(payload),
+                githubSourceMembershipRevocationHandler.handle(payload),
                 classicCanvasMembershipRevocationHandler.handle(payload),
                 pdfCollaborationMembershipRevocationHandler.handle(payload),
                 sqlErdMembershipRevocationHandler.handle(payload),
@@ -945,51 +896,12 @@ export async function createRealtimeSocketServer({
       });
     });
 
-    socket.on(pageCursorClientEvents.join, async (payload) => {
-      const room = readPageCursorRoomRef(payload);
-
-      if (!room) {
-        emitPageCursorError(socket, "page-cursor:join payload is invalid");
-        return;
-      }
-
-      const allowed = await canJoinPageCursorRoom({
-        accessService: boardAccessService,
-        context: authedSocket.data.auth,
-        room,
-      });
-
-      if (!allowed) {
-        socket.emit(
-          pageCursorServerEvents.error,
-          createSocketErrorPayload("forbidden", "page cursor room access denied"),
-        );
-        return;
-      }
-
-      const roomName = createPageCursorRoomName(room);
-      await socket.join(roomName);
-      socket.emit(pageCursorServerEvents.joined, {
-        ...room,
-        presence: await getPageCursorRoomSocketPresence(io, room, roomName),
-      });
-    });
-
-    socket.on(pageCursorClientEvents.leave, async (payload) => {
-      const room = readPageCursorRoomRef(payload);
-
-      if (!room) {
-        emitPageCursorError(socket, "page-cursor:leave payload is invalid");
-        return;
-      }
-
-      const roomName = createPageCursorRoomName(room);
-      await socket.leave(roomName);
-      delete authedSocket.data.pageCursorPresenceByRoom[roomName];
-      socket.to(roomName).emit(pageCursorServerEvents.leave, {
-        ...room,
-        userId: authedSocket.data.auth.userId ?? socket.id,
-      });
+    registerPageCursorSocketHandlers({
+      accessService: boardAccessService,
+      context: authedSocket.data.auth,
+      io,
+      membershipRevocationFence,
+      socket: authedSocket,
     });
 
     socket.on(pdfCollaborationClientEvents.join, async (payload) => {
@@ -1054,16 +966,19 @@ export async function createRealtimeSocketServer({
 
     registerBoardSocketHandlers({
       context: authedSocket.data.auth,
+      membershipRevocationFence,
       roomService: boardRoomService,
       socket,
     });
     registerBoardSourceSocketHandlers({
       context: authedSocket.data.auth,
+      membershipRevocationFence,
       roomService: boardSourceRoomService,
       socket,
     });
     registerGithubSourceSocketHandlers({
       context: authedSocket.data.auth,
+      membershipRevocationFence,
       roomService: githubSourceRoomService,
       socket,
     });
@@ -1112,38 +1027,6 @@ export async function createRealtimeSocketServer({
       authedSocket.data.sqlErdPresenceByRoom[roomName] = presence;
 
       socket.to(roomName).emit(sqlErdServerEvents.presenceUpdate, presence);
-    });
-
-    socket.on(pageCursorClientEvents.update, (payload) => {
-      const cursorPayload = readPageCursorUpdatePayload(payload);
-
-      if (!cursorPayload) {
-        emitPageCursorError(socket, "page-cursor:update payload is invalid");
-        return;
-      }
-
-      const roomName = createPageCursorRoomName(cursorPayload);
-
-      if (!socket.rooms.has(roomName)) {
-        socket.emit(
-          pageCursorServerEvents.error,
-          createSocketErrorPayload(
-            "room_not_joined",
-            "join page cursor room before sending cursor updates",
-          ),
-        );
-        return;
-      }
-
-      const presence: PageCursorPresenceState = {
-        ...cursorPayload,
-        displayName: authedSocket.data.auth.displayName,
-        userId: authedSocket.data.auth.userId ?? socket.id,
-        updatedAt: new Date().toISOString(),
-      };
-      authedSocket.data.pageCursorPresenceByRoom[roomName] = presence;
-
-      socket.to(roomName).emit(pageCursorServerEvents.update, presence);
     });
 
     socket.on(pdfCollaborationClientEvents.pageUpdate, (payload) => {
