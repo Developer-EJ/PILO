@@ -111,6 +111,14 @@ const meetingNavigation = await readFile(
   new URL("../../src/features/meeting/navigation.ts", import.meta.url),
   "utf8"
 );
+const navigationTypes = await readFile(
+  new URL("../../src/features/navigation-types.ts", import.meta.url),
+  "utf8"
+);
+const appSidebar = await readFile(
+  new URL("../../src/components/app-sidebar.tsx", import.meta.url),
+  "utf8"
+);
 const homeRouting = await readFile(
   new URL("../../src/features/home/utils/home-routing.ts", import.meta.url),
   "utf8"
@@ -269,7 +277,11 @@ assert.match(meetingNavigation, /title: "음성회의"/);
 assert.match(meetingNavigation, /회의 참여, 녹음, 회의록 확인과 재생성/);
 assert.match(meetingNavigation, /href: "\/meeting"/);
 assert.match(meetingNavigation, /href: "\/report"/);
+assert.match(meetingNavigation, /navigateOnTrigger: false/);
 assert.doesNotMatch(meetingNavigation, /#room|#report/);
+assert.match(navigationTypes, /navigateOnTrigger\?: boolean/);
+assert.match(appSidebar, /options\.navigate === false/);
+assert.match(appSidebar, /navigate: item\.navigateOnTrigger/);
 assert.match(homeRouting, /buildMeetingReportHref\(reportId: string\)/);
 assert.match(homeRouting, /\/report\?reportId=\$\{encodeURIComponent\(reportId\)\}/);
 
@@ -279,7 +291,7 @@ assert.match(meetingPanel, /useMeetingWorkspaceData/);
 assert.match(meetingPanel, /useMeetingRooms/);
 assert.match(meetingPanel, /meetingRoomId: selectedMeetingRoomId/);
 assert.match(meetingPanel, /회의방 목록/);
-assert.match(meetingPanel, /border-r px-6 text-base font-semibold/);
+assert.match(meetingPanel, /variant="outline"/);
 assert.match(meetingPanel, /getCurrentUserActiveMeeting/);
 assert.match(meetingPanel, /createMeetingRoom/);
 assert.match(meetingPanel, /updateMeetingRoom/);
@@ -318,6 +330,9 @@ assert.match(meetingPanel, /if \(shouldLeaveMeeting\)/);
 assert.match(meetingPanel, /녹음 시작/);
 assert.match(meetingPanel, /녹음 종료/);
 assert.match(meetingPanel, /현재 참여 인원/);
+assert.match(meetingPanel, /setMicrophoneEnabled\(!isMicEnabled\)/);
+assert.match(meetingPanel, /클릭하여 마이크 끄기/);
+assert.match(meetingPanel, /클릭하여 마이크 켜기/);
 assert.doesNotMatch(meetingPanel, /remoteAudioContainerRef/);
 assert.match(meetingPanel, /MeetingReportSection/);
 assert.match(meetingPanel, /activeSection/);
@@ -329,10 +344,15 @@ assert.match(meetingPanel, /reportStatusFilter/);
 assert.match(meetingPanel, /MEETING_REPORT_PAGE_SIZE = 20/);
 assert.match(meetingPanel, /reportCursorHistory/);
 assert.match(meetingPanel, /nextReportCursor/);
+assert.match(meetingPanel, /currentPage=\{reportCursorHistory\.length \+ 1\}/);
+assert.match(meetingPanel, /onPageChange=/);
 assert.match(meetingPanel, /onListFiltersChange/);
 assert.match(meetingPanel, /nextReportCursor/);
 assert.match(meetingPanel, /onListFiltersChange/);
 assert.match(meetingPanel, /60초 이하 녹음은 회의록이 생성되지 않습니다/);
+assert.match(meetingReportSection, /const pageNumbers = Array\.from/);
+assert.match(meetingReportSection, /onPageChange: \(page: number\) => void/);
+assert.match(meetingReportSection, /justify-center gap-2/);
 assert.match(meetingPanel, /useRecordingElapsedSeconds/);
 assert.match(meetingPanel, /setInterval/);
 assert.match(meetingPanel, /useMeetingStateInvalidation/);
@@ -368,7 +388,6 @@ assert.match(meetingConnectionActionStore, /consumeMeetingConnectionAction/);
 assert.match(meetingConnectionActionStore, /subscribeMeetingConnectionAction/);
 assert.match(meetingConnectionActionStore, /handledActionExpirations/);
 assert.doesNotMatch(meetingConnectionActionStore, /localStorage|sessionStorage/);
-assert.match(headerMeetingStatus, /useMeetingStateInvalidation/);
 assert.doesNotMatch(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS/);
 assert.match(meetingPanel, /result\.recording\.durationSec <= 60/);
 assert.doesNotMatch(meetingPanel, /window\.confirm/);
@@ -377,19 +396,13 @@ assert.doesNotMatch(meetingPanel, /aria-label="회의 상태"/);
 assert.doesNotMatch(meetingPanel, /fixed top-3 right-4/);
 
 assert.match(headerMeetingStatus, /HeaderMeetingStatus/);
-assert.match(headerMeetingStatus, /useAuthSession/);
-assert.match(headerMeetingStatus, /useMeetingWorkspaceData/);
 assert.match(headerMeetingStatus, /useSyncExternalStore/);
-assert.match(headerMeetingStatus, /usePathname/);
-assert.match(headerMeetingStatus, /isMeetingRoute/);
-assert.match(headerMeetingStatus, /reportsEnabled: false/);
-assert.match(headerMeetingStatus, /enabled: Boolean\(workspaceId && accessToken && !isMeetingRoute\)/);
 assert.doesNotMatch(headerMeetingStatus, /HEADER_MEETING_STATUS_POLL_INTERVAL_MS/);
-assert.match(headerMeetingStatus, /reloadCurrentMeeting/);
 assert.match(headerMeetingStatus, /음성 미연결/);
 assert.match(headerMeetingStatus, /음성 품질 낮음/);
 assert.match(headerMeetingStatus, /음성 연결 불안정/);
 assert.match(headerMeetingStatus, /hasConnectionSession/);
+assert.match(headerMeetingStatus, /if \(!headerMeetingStatus\.hasConnectionSession\)/);
 assert.match(headerMeetingStatus, /녹음 대기/);
 assert.match(headerMeetingStatus, /flex-nowrap/);
 assert.doesNotMatch(headerMeetingStatus, /useLiveKitMeetingRoom/);
@@ -430,15 +443,24 @@ assert.match(meetingReportSection, /회의록 상세를 찾을 수 없습니다/
 assert.doesNotMatch(meetingReportSection, /from "socket\.io-client"/);
 assert.doesNotMatch(meetingReportSection, /useRouter/);
 assert.doesNotMatch(meetingReportSection, /buildCalendarDraftHref/);
-assert.match(meetingReportSection, /승인 및 생성/);
-assert.match(meetingReportSection, /Calendar 일정/);
-assert.match(meetingReportSection, /Pilo issue/);
+assert.match(meetingReportSection, /수정 & 승인/);
+assert.match(meetingReportSection, /생성 대상 선택/);
+assert.match(meetingReportSection, /\{pending && !editing \? \(/);
+assert.match(meetingReportSection, /\{pending && editing \? \(/);
+assert.match(meetingReportSection, /\{deliveryType === "calendar_event" \? "일정" : "이슈"\}/);
+assert.match(meetingReportSection, /if \(!editing\) return;/);
+assert.match(meetingReportSection, /일정/);
+assert.match(meetingReportSection, /이슈/);
 assert.match(meetingReportSection, /DELIVERY_FAILED/);
-assert.doesNotMatch(meetingReportSection, /saveThenDeliverActionItem/);
-assert.match(meetingReportSection, /생성 대상 제목/);
-assert.match(meetingReportSection, /생성 대상 설명/);
-assert.match(meetingReportSection, /확인하고 생성/);
-assert.match(meetingReportSection, /showDelivery/);
+assert.match(meetingReportSection, /saveThenDeliverActionItem/);
+assert.match(meetingReportSection, /후속 작업 제목/);
+assert.match(meetingReportSection, /후속 작업 설명/);
+assert.match(meetingReportSection, /승인/);
+assert.match(meetingReportSection, /editing/);
+assert.match(
+  meetingReportSection,
+  /!editing && evidenceSegments\.length[\s\S]*?flex flex-wrap items-center justify-between gap-2[\s\S]*?<EvidenceTimeButtons[\s\S]*?취소[\s\S]*?승인/
+);
 assert.match(meetingReportSection, /endDate: endDate \|\| startDate/);
 assert.match(meetingReportSection, /종료 날짜 \(비우면 시작 날짜\)/);
 assert.match(meetingReportSection, /deliverMeetingReportActionItem/);
@@ -471,7 +493,7 @@ assert.match(meetingReportSection, /ActionItemReviewCard/);
 assert.doesNotMatch(meetingReportSection, /approveMeetingReportActionItem/);
 assert.match(meetingReportSection, /deliverMeetingReportActionItem/);
 assert.match(meetingReportSection, /dismissMeetingReportActionItem/);
-assert.doesNotMatch(meetingReportSection, /updateMeetingReportActionItem/);
+assert.match(meetingReportSection, /updateMeetingReportActionItem/);
 assert.match(meetingReportSection, /AI 후보 #\{actionItem\.sourceIndex \+ 1\}/);
 assert.match(meetingReportSection, /getEvidenceSegments/);
 assert.match(meetingReportSection, /sourceIndex\?: number/);
@@ -529,7 +551,26 @@ assert.match(meetingAudioPreflightDialog, /MeetingAudioPreflightDialog/);
 assert.match(meetingAudioPreflightDialog, /입력 장치/);
 assert.match(meetingAudioPreflightDialog, /입력 감도/);
 assert.match(meetingAudioPreflightDialog, /이 장치로 참여/);
+assert.match(meetingAudioPreflightDialog, /min-w-0 max-w-md overflow-hidden/);
+assert.match(meetingAudioPreflightDialog, /w-full min-w-0 max-w-full truncate/);
+assert.match(meetingAudioPreflightDialog, /title=\{selectedDevice/);
 assert.match(meetingPanel, /MeetingAudioPreflightDialog/);
 assert.match(meetingPanel, /prejoinAction/);
 assert.match(meetingRuntimeProvider, /audioDeviceId/);
 assert.match(liveKitHook, /audioDeviceId \? \{ deviceId: audioDeviceId \} : undefined/);
+assert.match(liveKitHook, /RemoteParticipantAudioSettings/);
+assert.match(liveKitHook, /participantIdentity/);
+assert.match(liveKitHook, /RoomEvent\.ParticipantDisconnected/);
+assert.match(liveKitHook, /element\.muted = settings\.muted/);
+assert.match(liveKitHook, /element\.volume = settings\.volume \/ 100/);
+assert.match(liveKitHook, /setRemoteParticipantAudioSettings/);
+assert.match(liveKitHook, /preserveRemoteParticipantAudioSettings = false/);
+assert.match(liveKitHook, /await disconnect\(preserveRemoteParticipantAudioSettings\)/);
+assert.match(meetingPanel, /수신 음량/);
+assert.match(meetingPanel, /participant-volume-/);
+assert.match(meetingPanel, /VolumeX/);
+assert.match(meetingPanel, /setRemoteParticipantAudioSettings/);
+assert.match(meetingRuntimeProvider, /refreshHeaderRecordingStatus/);
+assert.match(meetingRuntimeProvider, /getCurrentRecording\(session\.workspaceId, session\.meetingId\)/);
+assert.match(meetingRuntimeProvider, /onStateInvalidated: handleMeetingStateInvalidated/);
+assert.match(meetingRuntimeProvider, /previousSession\?\.workspaceId === workspaceId/);

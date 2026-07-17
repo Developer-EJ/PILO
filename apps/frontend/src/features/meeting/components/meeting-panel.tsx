@@ -7,6 +7,8 @@ import {
   Loader2,
   Mic,
   MicOff,
+  Volume2,
+  VolumeX,
   Phone,
   PhoneOff,
   Pencil,
@@ -1264,14 +1266,14 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                 <div className="flex items-center border-b px-4 py-3 sm:px-6">
                   <Button
                     aria-haspopup="dialog"
-                    className="h-9 rounded-none border-r px-6 text-base font-semibold"
+                    className="shrink-0"
                     disabled={
                       meetingRoomsStatus !== "success" ||
                       isActionPending ||
                       isMeetingRoomSwitching
                     }
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     onClick={() => {
                       setMeetingRoomManagementError(null);
                       setIsMeetingRoomDialogOpen(true);
@@ -1279,7 +1281,7 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                   >
                     회의방 목록
                   </Button>
-                  <h2 className="min-w-0 truncate pl-6 text-2xl font-semibold">
+                  <h2 className="min-w-0 truncate pl-3 text-2xl font-semibold">
                     {selectedMeetingRoom?.name ?? "회의방을 선택하세요"}
                   </h2>
                 </div>
@@ -1341,6 +1343,10 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                         isCurrentUser && liveKitRoom.status === "connected";
                       const isMicEnabled =
                         hasKnownMicState && liveKitRoom.isMicrophoneEnabled;
+                      const remoteAudioSettings =
+                        liveKitRoom.remoteParticipantAudioSettings[
+                          participant.livekitIdentity
+                        ] ?? { muted: false, volume: 100 };
 
                       return (
                         <div
@@ -1376,17 +1382,90 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                               )}
                             </div>
                           </div>
+                          {!isCurrentUser ? (
+                            <div className="flex shrink-0 items-center gap-2">
+                              <label className="sr-only" htmlFor={`participant-volume-${participant.id}`}>
+                                {getParticipantName(participant)} 수신 음량
+                              </label>
+                              <input
+                                aria-label={`${getParticipantName(participant)} 수신 음량`}
+                                className="h-2 w-20 accent-primary"
+                                id={`participant-volume-${participant.id}`}
+                                max="100"
+                                min="0"
+                                type="range"
+                                value={remoteAudioSettings.volume}
+                                onChange={(event) =>
+                                  liveKitRoom.setRemoteParticipantAudioSettings(
+                                    participant.livekitIdentity,
+                                    { volume: Number(event.target.value) }
+                                  )
+                                }
+                              />
+                              <Tooltip>
+                                <TooltipTrigger
+                                  aria-label={
+                                    remoteAudioSettings.muted
+                                      ? `${getParticipantName(participant)} 수신 음소거 해제`
+                                      : `${getParticipantName(participant)} 수신 음소거`
+                                  }
+                                  className="flex size-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground"
+                                  onClick={() =>
+                                    liveKitRoom.setRemoteParticipantAudioSettings(
+                                      participant.livekitIdentity,
+                                      { muted: !remoteAudioSettings.muted }
+                                    )
+                                  }
+                                >
+                                  {remoteAudioSettings.muted ? (
+                                    <VolumeX className="size-4" />
+                                  ) : (
+                                    <Volume2 className="size-4" />
+                                  )}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {remoteAudioSettings.muted
+                                    ? "내 수신 음소거 해제"
+                                    : "내 수신 음소거"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          ) : null}
                           <Tooltip>
                             <TooltipTrigger
                               aria-label={
-                                isMicEnabled ? "마이크 켜짐" : "마이크 상태 대기"
+                                isCurrentUser
+                                  ? hasKnownMicState
+                                    ? isMicEnabled
+                                      ? "마이크 끄기"
+                                      : "마이크 켜기"
+                                    : "마이크 상태 대기"
+                                  : isMicEnabled
+                                    ? "마이크 켜짐"
+                                    : "원격 마이크 상태 대기"
                               }
                               className={cn(
-                                "flex size-9 items-center justify-center rounded-full border",
+                                "flex size-9 items-center justify-center rounded-full border transition-colors",
                                 isMicEnabled
                                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-border bg-card text-muted-foreground"
+                                  : "border-border bg-card text-muted-foreground",
+                                isCurrentUser &&
+                                  hasKnownMicState &&
+                                  "cursor-pointer hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
                               )}
+                              disabled={isCurrentUser && !hasKnownMicState}
+                              onClick={() => {
+                                if (!isCurrentUser || !hasKnownMicState) return;
+
+                                void liveKitRoom
+                                  .setMicrophoneEnabled(!isMicEnabled)
+                                  .catch((error) => {
+                                    const message = getErrorMessage(error);
+                                    setActionError(message);
+                                    setToastMessage(message);
+                                  });
+                              }}
+                              type="button"
                             >
                               {isMicEnabled ? (
                                 <Mic className="size-4" />
@@ -1396,8 +1475,10 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                             </TooltipTrigger>
                             <TooltipContent>
                               {isCurrentUser
-                                ? isMicEnabled
-                                  ? "마이크 켜짐"
+                                ? hasKnownMicState
+                                  ? isMicEnabled
+                                    ? "클릭하여 마이크 끄기"
+                                    : "클릭하여 마이크 켜기"
                                   : "마이크 상태 대기"
                                 : "원격 마이크 상태는 LiveKit 이벤트 기준으로 표시됩니다."}
                             </TooltipContent>
@@ -1522,6 +1603,7 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
           <MeetingReportSection
             meetingData={meetingData}
             statusFilter={reportStatusFilter}
+            currentPage={reportCursorHistory.length + 1}
             onStatusFilterChange={(status) => {
               setReportStatusFilter(status);
               setReportCursorHistory([]);
@@ -1529,6 +1611,21 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
             onListFiltersChange={handleReportListFiltersChange}
             onNextPage={() => {
               if (meetingData.nextReportCursor) {
+                setReportCursorHistory((history) => [
+                  ...history,
+                  meetingData.nextReportCursor as string
+                ]);
+              }
+            }}
+            onPageChange={(page) => {
+              const currentPage = reportCursorHistory.length + 1;
+
+              if (page < currentPage) {
+                setReportCursorHistory((history) => history.slice(0, page - 1));
+                return;
+              }
+
+              if (page > currentPage && meetingData.nextReportCursor) {
                 setReportCursorHistory((history) => [
                   ...history,
                   meetingData.nextReportCursor as string

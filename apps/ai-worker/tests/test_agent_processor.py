@@ -963,6 +963,14 @@ def test_planner_prompt_allows_only_registered_safe_board_assignment() -> None:
     assert "label, assignee, milestone" not in prompt
 
 
+def test_planner_prompt_uses_server_board_issue_defaults() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "omit boardName and repositoryFullName" in prompt
+    assert "omit columnName so the App Server uses Unmapped" in prompt
+    assert "do not ask the user for those defaults" in prompt
+
+
 def test_processor_marks_planning_failed_for_invalid_planner_output() -> None:
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient(decision=planner_decision(status="bad_status"))
@@ -1128,6 +1136,21 @@ def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> No
     assert "action=replaced" in prompt
     assert "existing session title" in prompt
     assert "successful schema replacement" in prompt
+
+
+def test_sql_erd_table_focus_planner_contract_inspects_before_focusing() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "inspect_sql_erd_schema" in prompt
+    assert "focus_sql_erd_tables" in prompt
+    assert "compact table refs" in prompt
+    assert "direct FK neighbors" in prompt
+    assert "Never invent SQLtoERD session IDs" in prompt
+    assert "sessionSelectionToken" in prompt
+    assert "completed inspect_sql_erd_schema result" in prompt
+    assert "sessionRevision" in prompt
+    assert "primaryTableRefs" in prompt
+    assert "relatedTableRefs" in prompt
 
 
 def test_sql_erd_nullable_requested_dialect_is_not_missing() -> None:
