@@ -178,6 +178,10 @@ const canvasAiChatOverlay = await readFile(
   ),
   "utf8"
 );
+const canvasHtmlArtifactPreview = await readFile(
+  new URL("../src/components/canvas-html-artifact-preview.tsx", import.meta.url),
+  "utf8"
+);
 const canvasShapeSync = await readFile(
   new URL("../src/features/canvas/persistence/canvas-shape-sync.ts", import.meta.url),
   "utf8"
@@ -1536,7 +1540,12 @@ assert.match(canvasAiChatOverlay, /Canvas AI 열기 진행 중/);
 assert.match(canvasAiChatOverlay, /conic-gradient/);
 assert.match(canvasAiChatOverlay, /aria-label="Canvas AI 채팅"/);
 assert.match(canvasAiChatOverlay, /setMessages/);
-assert.match(canvasAiChatOverlay, /max-h-64/);
+assert.match(canvasAiChatOverlay, /layoutStorageKey/);
+assert.match(canvasAiChatOverlay, /moveCanvasAiChatLayout/);
+assert.match(canvasAiChatOverlay, /resizeCanvasAiChatLayout/);
+assert.match(canvasAiChatOverlay, /min-h-0 flex-1/);
+assert.match(canvasAiChatOverlay, /CanvasHtmlArtifactPreview/);
+assert.match(canvasHtmlArtifactPreview, /aspect-\[16\/10\]/);
 assert.match(canvasAiChatOverlay, /overflow-y-auto/);
 assert.match(canvasAiChatOverlay, /scrollbar-width:none/);
 assert.match(piloCanvasShapeFactory, /createImportedCodeFolderShapes/);
@@ -2164,6 +2173,7 @@ async function runScenarioBatchFallback(operations, runBatch) {
 await import("./calendar/test.mjs");
 await import("../src/features/agent/agent-feature.test.mjs");
 await import("../src/features/canvas/agent/canvas-agent-context.test.mjs");
+await import("../src/features/canvas/engine/editor/overlays/canvas-ai-chat-layout.test.mjs");
 await import("./github-integration/test.mjs");
 await import("../src/features/board/board-feature.test.mjs");
 await import("../src/features/board/board-load.test.mjs");
