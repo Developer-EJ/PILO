@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { canEmitSqlErdJoined } from "../../dist/sql-erd/sql-erd-join-state.js";
 import { createSqlErdMembershipRevocationHandler } from "../../dist/sql-erd/sql-erd-membership-revocation.js";
 import { createSqlErdPresenceService } from "../../dist/sql-erd/sql-erd-presence.service.js";
 import { sqlErdServerEvents } from "../../dist/sql-erd/sql-erd-socket-events.js";
@@ -275,6 +276,63 @@ test("local socket discovery 실패에도 source lock 삭제를 시도하고 안
   assert.equal(database.executeCalls.length, 1);
 });
 
+test("presence snapshot 대기 중 철회되면 joined 응답을 허용하지 않는다", async () => {
+  const roomName = createSqlErdRoomName(room);
+  const roomsByName = new Map([[roomName, room]]);
+  const revokedWorkspaceIds = new Set();
+  let releaseSnapshot;
+  const snapshot = new Promise((resolve) => {
+    releaseSnapshot = resolve;
+  });
+
+  const joinedAllowed = (async () => {
+    await snapshot;
+    return canEmitSqlErdJoined({
+      isRoomJoined: true,
+      room,
+      roomName,
+      roomsByName,
+      revokedWorkspaceIds,
+    });
+  })();
+
+  revokedWorkspaceIds.add(workspaceId);
+  roomsByName.delete(roomName);
+  releaseSnapshot();
+
+  assert.equal(await joinedAllowed, false);
+});
+
+test("joined 응답은 current join과 실제 room membership이 모두 유지될 때만 허용한다", () => {
+  const roomName = createSqlErdRoomName(room);
+  const roomsByName = new Map([[roomName, room]]);
+  const revokedWorkspaceIds = new Set();
+  const input = {
+    isRoomJoined: true,
+    room,
+    roomName,
+    roomsByName,
+    revokedWorkspaceIds,
+  };
+
+  assert.equal(canEmitSqlErdJoined(input), true);
+  assert.equal(canEmitSqlErdJoined({ ...input, isRoomJoined: false }), false);
+  assert.equal(
+    canEmitSqlErdJoined({
+      ...input,
+      roomsByName: new Map([[roomName, { ...room }]]),
+    }),
+    false,
+  );
+  assert.equal(
+    canEmitSqlErdJoined({
+      ...input,
+      revokedWorkspaceIds: new Set([workspaceId]),
+    }),
+    false,
+  );
+});
+
 test("socket server는 공통 철회 event를 Chat과 SQLtoERD handler에 함께 전달한다", async () => {
   const socketServerSource = await readFile(
     new URL("../socket/socket-server.ts", import.meta.url),
@@ -288,4 +346,18 @@ test("socket server는 공통 철회 event를 Chat과 SQLtoERD handler에 함께
   );
   assert.match(socketServerSource, /sqlErdRoomsByName/);
   assert.match(socketServerSource, /evictSqlErdSocketFromRooms/);
+  const snapshotIndex = socketServerSource.indexOf(
+    "const sqlErdPresence = await getSqlErdRoomSocketPresence",
+  );
+  const currentJoinCheckIndex = socketServerSource.indexOf(
+    "canEmitSqlErdJoined",
+    snapshotIndex,
+  );
+  const joinedEmitIndex = socketServerSource.indexOf(
+    "socket.emit(sqlErdServerEvents.joined",
+    snapshotIndex,
+  );
+  assert.ok(snapshotIndex >= 0);
+  assert.ok(currentJoinCheckIndex > snapshotIndex);
+  assert.ok(joinedEmitIndex > currentJoinCheckIndex);
 });

@@ -45,6 +45,7 @@ import {
   isCanvasShapeOperationPayload,
 } from "../canvas/socket/canvas-socket-payloads";
 import { createSqlErdAccessService } from "../sql-erd/sql-erd-access.service";
+import { canEmitSqlErdJoined } from "../sql-erd/sql-erd-join-state";
 import {
   createSqlErdPresenceService,
   type SqlErdPresenceClearResult,
@@ -852,13 +853,55 @@ export async function createRealtimeSocketServer({
       }
 
       authedSocket.data.sqlErdRoomsByName.set(result.roomName, joinPayload);
+      const sqlErdPresence = await getSqlErdRoomSocketPresence(
+        io,
+        joinPayload,
+        result.roomName,
+      );
+
+      if (
+        !canEmitSqlErdJoined({
+          isRoomJoined: socket.rooms.has(result.roomName),
+          room: joinPayload,
+          roomName: result.roomName,
+          roomsByName: authedSocket.data.sqlErdRoomsByName,
+          revokedWorkspaceIds:
+            authedSocket.data.sqlErdRevokedWorkspaceIds,
+        })
+      ) {
+        if (
+          authedSocket.data.sqlErdRoomsByName.get(result.roomName) ===
+          joinPayload
+        ) {
+          authedSocket.data.sqlErdRoomsByName.delete(result.roomName);
+        }
+
+        if (
+          authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+            joinPayload.workspaceId,
+          )
+        ) {
+          const safelyEvicted = socket.rooms.has(result.roomName)
+            ? await evictSqlErdSocketFromRooms(socket, [result.roomName])
+            : true;
+          if (!safelyEvicted) {
+            console.error("SQLtoERD revoked joined snapshot cleanup failed");
+            return;
+          }
+          socket.emit(
+            sqlErdServerEvents.error,
+            createSocketErrorPayload(
+              "forbidden",
+              "SQLtoERD room access denied",
+            ),
+          );
+        }
+        return;
+      }
+
       socket.emit(sqlErdServerEvents.joined, {
         ...result.payload,
-        presence: await getSqlErdRoomSocketPresence(
-          io,
-          joinPayload,
-          result.roomName,
-        ),
+        presence: sqlErdPresence,
       });
     });
 
