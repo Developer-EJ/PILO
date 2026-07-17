@@ -93,8 +93,15 @@ the run completes without generating a partial artifact.
 The AI Worker produces one complete static HTML document with inline CSS. The
 App Server rejects JavaScript, event handlers, active embedded content, and
 oversized output. The Frontend previews the artifact in a sandboxed iframe and
-offers copying the same validated HTML. HTML generation never mutates Canvas,
-does not create a Canvas draft, and does not include JavaScript behavior.
+offers copying the same validated HTML. After receiving the complete artifact,
+the Frontend also creates one `pilo-code-block` beside the selected source area
+with the validated HTML as its code, then binds a connector between the selected
+root shape and the code block. Both records use the normal Classic Canvas shape
+patch path, so they enter roomState, room history, and checkpoint persistence and
+the connector follows either bound shape when it moves. Repeated polling of the
+same run must not insert duplicates. The AI Worker and App Server never write
+these Canvas records directly, no Canvas draft is created, and generated HTML
+does not include JavaScript behavior.
 - Client-summary and embedding matches are classified as `find_shapes` with
   `focusResult: true`, so the client can move the requester-only Canvas AI
   pointer, zoom to the matching shape area, and highlight the result. Separate
@@ -597,6 +604,13 @@ For a completed `generate_html` run, `run.artifact` is returned as:
   "sourceShapeIds": ["shape:frame-1", "shape:title-1"]
 }
 ```
+
+The Frontend uses `sourceShapeIds` together with the submitted
+`selectedScene.rootShapeIds` to place the code block to the right of the source
+bounds. A real selected frame is preferred as the connector target; for a
+multi-selection without a frame, the first selected root is used. If the source
+records are no longer loaded, the artifact remains available in chat for preview
+and copy, but no partial Canvas insertion is attempted.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 

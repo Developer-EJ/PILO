@@ -3,8 +3,9 @@
 `canvas_agent`는 PILO Canvas 안에서만 동작하는 Canvas AI worker 영역이다.
 이 패키지는 Calendar, Issue, PR, Meeting 같은 외부 도메인 데이터를 직접 조회하거나 수정하지 않는다.
 Canvas 기능 설명, 기존 shape 검색·viewport 이동, 선택 영역의 정적 HTML/CSS
-artifact 생성을 담당한다. 새 Canvas shape 생성, 연결, 수정, 삭제와 Canvas
-diagram/code draft 생성은 하지 않는다.
+artifact 생성을 담당한다. Worker는 새 Canvas shape 생성, 연결, 수정, 삭제와
+Canvas diagram/code draft 생성을 직접 하지 않는다. `generate_html` artifact를 받은
+Canvas Frontend가 기존 tldraw 편집 경로로 코드블럭과 연결선을 생성한다.
 
 ## 폴더 구조
 
@@ -56,7 +57,8 @@ Canvas Agent run job의 실행 흐름을 담당한다.
 중요한 원칙:
 
 - local semantic routing 실패는 Canvas AI 전체 실패로 만들지 않고 빈 검색 결과로 처리한다.
-- 실제 Canvas write는 worker가 직접 하지 않고 App Server action executor가 처리한다.
+- 실제 Canvas write는 worker가 직접 하지 않는다. HTML artifact의 코드블럭/연결선
+  삽입은 Canvas Frontend가 일반 tldraw shape patch 경로로 처리한다.
 
 ### `embedding_processor.py`
 
