@@ -55,6 +55,10 @@ import {
   sqlErdServerEvents,
 } from "../sql-erd/sql-erd-socket-events";
 import { relaySqlErdOperation } from "../sql-erd/sql-erd-operation-relay";
+import {
+  createSqlErdMembershipRevocationHandler,
+  evictSqlErdSocketFromRooms,
+} from "../sql-erd/sql-erd-membership-revocation";
 import { createMeetingAccessService } from "../meeting/meeting-access.service";
 import { createWorkspacePresenceAccessService } from "../workspace-presence/workspace-presence-access.service";
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
@@ -164,6 +168,8 @@ type AuthedSocket = Socket & {
     canvasRoomsByName: Map<string, CanvasRoomRef>;
     pageCursorPresenceByRoom: Record<string, PageCursorPresenceState>;
     sqlErdPresenceByRoom: Record<string, SqlErdPresenceState>;
+    sqlErdRevokedWorkspaceIds: Set<string>;
+    sqlErdRoomsByName: Map<string, SqlErdRoomRef>;
   };
 };
 
@@ -553,6 +559,12 @@ export async function createRealtimeSocketServer({
       io,
       roomState: pdfCollaborationRoomState,
     });
+  const sqlErdMembershipRevocationHandler =
+    createSqlErdMembershipRevocationHandler({
+      database,
+      io,
+      presenceService: sqlErdPresenceService,
+    });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
       console.error("Chat Redis subscription work failed");
@@ -672,6 +684,7 @@ export async function createRealtimeSocketServer({
               [
                 chatMembershipRevocationHandler.handle(payload),
                 pdfCollaborationMembershipRevocationHandler.handle(payload),
+                sqlErdMembershipRevocationHandler.handle(payload),
                 ...membershipRevocationHandlers.map((handler) =>
                   handler.handle(payload),
                 ),
@@ -749,6 +762,8 @@ export async function createRealtimeSocketServer({
         (socket as AuthedSocket).data.canvasRoomsByName = new Map();
         (socket as AuthedSocket).data.pageCursorPresenceByRoom = {};
         (socket as AuthedSocket).data.sqlErdPresenceByRoom = {};
+        (socket as AuthedSocket).data.sqlErdRevokedWorkspaceIds = new Set();
+        (socket as AuthedSocket).data.sqlErdRoomsByName = new Map();
         next();
       })
       .catch(next);
@@ -803,7 +818,40 @@ export async function createRealtimeSocketServer({
         return;
       }
 
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+          joinPayload.workspaceId,
+        )
+      ) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+
       await socket.join(result.roomName);
+
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+          joinPayload.workspaceId,
+        )
+      ) {
+        const safelyEvicted = await evictSqlErdSocketFromRooms(socket, [
+          result.roomName,
+        ]);
+        if (!safelyEvicted) {
+          console.error("SQLtoERD revoked join cleanup failed");
+          return;
+        }
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
+
+      authedSocket.data.sqlErdRoomsByName.set(result.roomName, joinPayload);
       socket.emit(sqlErdServerEvents.joined, {
         ...result.payload,
         presence: await getSqlErdRoomSocketPresence(
@@ -948,6 +996,7 @@ export async function createRealtimeSocketServer({
 
       await socket.leave(roomName);
       delete authedSocket.data.sqlErdPresenceByRoom[roomName];
+      authedSocket.data.sqlErdRoomsByName.delete(roomName);
 
       if (clearResult) emitSqlErdPresenceClearResult(socket, clearResult);
     });
@@ -977,6 +1026,18 @@ export async function createRealtimeSocketServer({
       }
 
       const roomName = createSqlErdRoomName(presencePayload);
+
+      if (
+        authedSocket.data.sqlErdRevokedWorkspaceIds.has(
+          presencePayload.workspaceId,
+        )
+      ) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload("forbidden", "SQLtoERD room access denied"),
+        );
+        return;
+      }
 
       if (!socket.rooms.has(roomName)) {
         socket.emit(
@@ -1213,6 +1274,7 @@ export async function createRealtimeSocketServer({
         );
         const pdfCollaborationLeaveEvents = pdfCollaborationRoomState.clearSocket(socket.id);
         authedSocket.data.pageCursorPresenceByRoom = {};
+        authedSocket.data.sqlErdRoomsByName.clear();
 
         for (const clearResult of sqlErdClearResults) {
           emitSqlErdPresenceClearResult(socket, clearResult);
