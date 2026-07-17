@@ -14,7 +14,7 @@ export interface CalendarGoogleSyncEvent { id: number; title: string; descriptio
 
 interface ConnectionRow extends QueryResultRow { user_id: string; access_token_encrypted: string; refresh_token_encrypted: string; token_expires_at: Date | string | null; target_calendar_id: string | null; target_calendar_summary: string | null; revoked_at: Date | string | null; }
 interface OutboxClaim extends QueryResultRow { id: string; calendar_event_id: string | number; connection_user_id: string; operation: SyncOperation; payload: unknown; attempt_count: number; claim_token: string; }
-interface SyncRow extends QueryResultRow { google_event_id: string | null; status: "active" | "disconnected" | "failed"; }
+interface SyncRow extends QueryResultRow { google_event_id: string | null; google_calendar_id: string | null; status: "active" | "disconnected" | "failed"; }
 
 const GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -117,12 +117,33 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
       const connection = await this.activeConnection(transaction, currentUserId);
       if (!connection?.target_calendar_id) throw badRequest("Select a Google Calendar before syncing an event");
       await transaction.execute(
-        `INSERT INTO calendar_event_google_syncs (calendar_event_id, workspace_id, connection_user_id, status)
-         VALUES ($1,$2,$3,'active')
-         ON CONFLICT (calendar_event_id) DO UPDATE SET connection_user_id=EXCLUDED.connection_user_id, workspace_id=EXCLUDED.workspace_id, status='active', last_error=NULL`,
-        [event.id, workspaceId, currentUserId]
+        `INSERT INTO calendar_event_google_syncs (calendar_event_id, workspace_id, connection_user_id, google_calendar_id, status)
+         VALUES ($1,$2,$3,$4,'active')
+         ON CONFLICT (calendar_event_id) DO UPDATE SET connection_user_id=EXCLUDED.connection_user_id, workspace_id=EXCLUDED.workspace_id, google_calendar_id=EXCLUDED.google_calendar_id, status='active', last_error=NULL`,
+        [event.id, workspaceId, currentUserId, connection.target_calendar_id]
       );
       await this.enqueue(transaction, currentUserId, event.id, "create", event);
+    });
+  }
+
+  async retryEventSync(currentUserId: string, workspaceId: string, event: CalendarGoogleSyncEvent): Promise<void> {
+    await this.database.transaction(async transaction => {
+      await this.lockEventInTransaction(transaction, event.id);
+      const sync = await transaction.queryOne<SyncRow & { connection_user_id: string }>(
+        `SELECT connection_user_id, google_event_id, google_calendar_id, status
+         FROM calendar_event_google_syncs
+         WHERE calendar_event_id=$1 AND workspace_id=$2 FOR UPDATE`,
+        [event.id, workspaceId]
+      );
+      if (!sync || sync.status !== "failed") {
+        throw badRequest("Google Calendar sync is not retryable");
+      }
+      const connection = await this.activeConnection(transaction, sync.connection_user_id);
+      const googleCalendarId = sync.google_calendar_id ?? connection?.target_calendar_id;
+      if (!connection || !googleCalendarId) throw badRequest("Google Calendar is not connected");
+      const operation: SyncOperation = sync.google_event_id ? "update" : "create";
+      await transaction.execute(`UPDATE calendar_event_google_syncs SET status='active', google_calendar_id=$2, last_error=NULL WHERE calendar_event_id=$1`, [event.id, googleCalendarId]);
+      await this.requeueFailedSyncInTransaction(transaction, event.id, sync.connection_user_id, operation);
     });
   }
 
@@ -177,20 +198,23 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
 
   private async publishClaim(claim: OutboxClaim): Promise<void> {
       const payload = this.payload(claim.payload);
-      const connection = await this.connection(claim.connection_user_id);
-      if (!connection || connection.revoked_at || !connection.target_calendar_id) throw new Error("Google Calendar connection is unavailable");
-      const token = await this.accessToken(claim.connection_user_id, connection);
-      const sync = await this.database.queryOne<SyncRow>(`SELECT google_event_id, status FROM calendar_event_google_syncs WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
+      const sync = await this.database.queryOne<SyncRow>(`SELECT google_event_id, google_calendar_id, status FROM calendar_event_google_syncs WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
       if (claim.operation === "create") {
         if (!sync || sync.status !== "active") return await this.deliverWithoutRemoteCall(claim);
-        const remoteId = await this.client.insertEvent(token, connection.target_calendar_id, this.remoteEvent(payload));
+      }
+      if (!sync?.google_calendar_id) throw new Error("Google Calendar destination is unavailable");
+      const connection = await this.connection(claim.connection_user_id);
+      if (!connection || connection.revoked_at) throw new Error("Google Calendar connection is unavailable");
+      const token = await this.accessToken(claim.connection_user_id, connection);
+      if (claim.operation === "create") {
+        const remoteId = await this.client.insertEvent(token, sync.google_calendar_id, this.remoteEvent(payload));
         await this.database.execute(`UPDATE calendar_event_google_syncs SET google_event_id=$2, last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id, remoteId]);
       } else if (claim.operation === "update") {
         if (!sync || sync.status !== "active" || !sync.google_event_id) throw new Error("Google Calendar event is not ready for update");
-        await this.client.updateEvent(token, connection.target_calendar_id, sync.google_event_id, this.remoteEvent(payload));
+        await this.client.updateEvent(token, sync.google_calendar_id, sync.google_event_id, this.remoteEvent(payload));
         await this.database.execute(`UPDATE calendar_event_google_syncs SET last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
       } else if (sync?.google_event_id && claim.operation === "delete") {
-        await this.client.deleteEvent(token, connection.target_calendar_id, sync.google_event_id);
+        await this.client.deleteEvent(token, sync.google_calendar_id, sync.google_event_id);
         await this.database.execute(`UPDATE calendar_event_google_syncs SET status='disconnected', last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
       }
       await this.database.execute(`UPDATE calendar_google_sync_outbox SET status='delivered', delivered_at=now(), claim_token=NULL, claimed_at=NULL WHERE id=$1 AND claim_token=$2`, [claim.id, claim.claim_token]);
@@ -231,6 +255,31 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
 
   private async enqueue(transaction: DatabaseTransaction, userId: string, eventId: number, operation: SyncOperation, event: CalendarGoogleSyncEvent): Promise<void> {
     await transaction.execute(`INSERT INTO calendar_google_sync_outbox (calendar_event_id, connection_user_id, operation, payload, dedupe_key) VALUES ($1,$2,$3,$4::jsonb,$5) ON CONFLICT (connection_user_id, dedupe_key) DO NOTHING`, [eventId, userId, operation, JSON.stringify(event), `calendar:google_${operation}:${eventId}:${event.updatedAt}`]);
+  }
+
+  private async requeueFailedSyncInTransaction(
+    transaction: DatabaseTransaction,
+    eventId: number,
+    connectionUserId: string,
+    operation: SyncOperation
+  ): Promise<void> {
+    const requeued = await transaction.queryOne<{ id: string }>(
+      `WITH failed AS (
+         SELECT id FROM calendar_google_sync_outbox
+         WHERE calendar_event_id=$1 AND connection_user_id=$2 AND operation=$3 AND status='failed'
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE
+       )
+       UPDATE calendar_google_sync_outbox AS outbox
+       SET status='pending', attempt_count=0, next_attempt_at=now(), claim_token=NULL, claimed_at=NULL,
+           delivered_at=NULL, error_code=NULL, error_message=NULL
+       FROM failed
+       WHERE outbox.id=failed.id
+       RETURNING outbox.id`,
+      [eventId, connectionUserId, operation]
+    );
+    if (!requeued) throw badRequest("Google Calendar sync is not retryable");
   }
 
   private async accessToken(userId: string, existing?: ConnectionRow): Promise<string> {

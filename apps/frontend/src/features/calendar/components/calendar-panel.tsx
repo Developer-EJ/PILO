@@ -900,12 +900,14 @@ function CalendarEventDetailDialog({
   isSubmitting,
   onClose,
   onOpenEdit,
+  onRetryGoogleSync,
   onRequestDelete
 }: {
   event: CalendarEvent | null;
   isSubmitting: boolean;
   onClose: () => void;
   onOpenEdit: (event: CalendarEvent) => void;
+  onRetryGoogleSync: (event: CalendarEvent) => void;
   onRequestDelete: (
     event: CalendarEvent,
     returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
@@ -970,6 +972,20 @@ function CalendarEventDetailDialog({
               </p>
             </div>
           </div>
+
+          {event.googleSync ? (
+            <div className="mt-4 rounded-lg border bg-muted/20 p-3 text-sm">
+              <p className="font-medium">
+                Google Calendar: {event.googleSync.status === "synced" ? "동기화됨" : event.googleSync.status === "pending" ? "동기화 대기 중" : "동기화 실패"}
+              </p>
+              {event.googleSync.status === "failed" ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">{event.googleSync.lastError || "Google Calendar 동기화에 실패했습니다."}</span>
+                  <Button type="button" size="sm" variant="outline" disabled={isSubmitting} onClick={() => onRetryGoogleSync(event)}>다시 시도</Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             <div className="grid gap-1">
@@ -1171,6 +1187,7 @@ export function CalendarPanel() {
     createDefaultFormState(formatCalendarDate(new Date()))
   );
   const [formError, setFormError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [googleSyncEnabled, setGoogleSyncEnabled] = useState(false);
   const [googleCalendarPicker, setGoogleCalendarPicker] = useState<{
@@ -1264,7 +1281,17 @@ export function CalendarPanel() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("googleCalendarConnected") !== "1") return;
+    const connectionError = params.get("googleCalendarError");
+    if (connectionError) {
+      setSyncNotice("Google Calendar 연결에 실패했습니다. PILO 일정은 저장되어 있습니다.");
+      params.delete("googleCalendarError");
+    }
+    if (params.get("googleCalendarConnected") !== "1") {
+      if (connectionError) {
+        window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`);
+      }
+      return;
+    }
     const eventIdValue = Number(params.get("googleCalendarSyncEventId"));
     void calendarClient
       .listGoogleCalendars()
@@ -1272,7 +1299,7 @@ export function CalendarPanel() {
         eventId: Number.isSafeInteger(eventIdValue) && eventIdValue > 0 ? eventIdValue : null,
         calendars
       }))
-      .catch((error) => setFormError(errorMessageFromUnknown(error)));
+      .catch((error) => setSyncNotice(errorMessageFromUnknown(error)));
     params.delete("googleCalendarConnected");
     window.history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`);
   }, [calendarClient]);
@@ -1418,6 +1445,7 @@ export function CalendarPanel() {
         const connection = await calendarClient.getGoogleConnection();
         if (connection.connected && connection.targetCalendarId) {
           await calendarClient.enableGoogleSync(workspaceId, created.id);
+          await calendarEvents.reload();
         } else if (connection.connected) {
           const calendars = await calendarClient.listGoogleCalendars();
           setGoogleCalendarPicker({ eventId: created.id, calendars });
@@ -1429,6 +1457,7 @@ export function CalendarPanel() {
       }
     } catch (submitError) {
       setFormError(errorMessageFromUnknown(submitError));
+      setSyncNotice(errorMessageFromUnknown(submitError));
     } finally {
       setIsSubmitting(false);
     }
@@ -1592,6 +1621,11 @@ export function CalendarPanel() {
             일정을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
           </p>
         ) : null}
+        {syncNotice ? (
+          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {syncNotice}
+          </p>
+        ) : null}
 
         <div ref={calendarGridRef} className="min-h-0 flex-1 overflow-x-auto">
           <div className="grid min-w-[760px] grid-cols-7">
@@ -1751,10 +1785,12 @@ export function CalendarPanel() {
             await calendarClient.selectGoogleCalendar(calendarId);
             if (googleCalendarPicker?.eventId) {
               await calendarClient.enableGoogleSync(workspaceId, googleCalendarPicker.eventId);
+              await calendarEvents.reload();
             }
             setGoogleCalendarPicker(null);
           } catch (error) {
             setFormError(errorMessageFromUnknown(error));
+            setSyncNotice(errorMessageFromUnknown(error));
           } finally {
             setIsSubmitting(false);
           }
@@ -1766,6 +1802,20 @@ export function CalendarPanel() {
         isSubmitting={isSubmitting}
         onClose={() => setDetailEvent(null)}
         onOpenEdit={openEditSheet}
+        onRetryGoogleSync={(event) => {
+          setIsSubmitting(true);
+          setSyncNotice(null);
+          void calendarClient.retryGoogleSync(workspaceId, event.id)
+            .then(async () => {
+              setDetailEvent((currentEvent) => currentEvent && currentEvent.id === event.id
+                ? { ...currentEvent, googleSync: { status: "pending", lastError: null } }
+                : currentEvent
+              );
+              await calendarEvents.reload();
+            })
+            .catch((error) => setSyncNotice(errorMessageFromUnknown(error)))
+            .finally(() => setIsSubmitting(false));
+        }}
         onRequestDelete={requestDeleteSheet}
       />
 

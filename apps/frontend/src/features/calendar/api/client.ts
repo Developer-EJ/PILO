@@ -312,6 +312,13 @@ export function createCalendarApiClient({
         `${calendarEventPath(workspaceId, eventId)}/google-sync` as const,
         { method: "POST" }, requestOptions
       );
+    },
+
+    async retryGoogleSync(workspaceId: string, eventId: string | number) {
+      return requestCalendarData<{ queued: true }>(
+        `${calendarEventPath(workspaceId, eventId)}/google-sync/retry` as const,
+        { method: "POST" }, requestOptions
+      );
     }
   };
 }

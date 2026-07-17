@@ -14,6 +14,7 @@
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `POST` | `/workspaces/{workspaceId}/calendar/events/{eventId}/google-sync` | Queue an event for outbound sync |
+| `POST` | `/workspaces/{workspaceId}/calendar/events/{eventId}/google-sync/retry` | Retry a failed outbound sync for an existing event |
 | `GET` | `/calendar/google/connection` | Read connection/target status |
 | `POST` | `/calendar/google/connection/start` | Start Calendar OAuth (`returnPath` optional) |
 | `GET` | `/calendar/google/callback` | Browser callback and frontend redirect |
@@ -25,6 +26,22 @@ Connection response: `{ "connected": true, "targetCalendarId": "primary", "targe
 Only title, description (maximum 8,000 characters), all-day status, and start/end values
 are sent. Color, participant data, identity fields, and OAuth tokens are never exposed.
 All-day Google end dates are exclusive, so PILO's inclusive end date is sent plus one day.
+
+Event payloads include `googleSync` when the event is connected to Google Calendar:
+
+```json
+{
+  "googleSync": {
+    "status": "pending | synced | failed",
+    "lastError": null
+  }
+}
+```
+
+The selected Google Calendar ID is stored per event. Changing the connection's default
+target affects only later opt-in events; existing mapped events keep updating and deleting
+in their original Google Calendar. A Google DELETE `404` or `410` is treated as successful
+because the desired remote state is already absent.
 
 ## 범위
 

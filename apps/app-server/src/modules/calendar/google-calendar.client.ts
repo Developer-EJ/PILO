@@ -57,7 +57,12 @@ export class GoogleCalendarClient {
   }
 
   async deleteEvent(accessToken: string, calendarId: string, eventId: string): Promise<void> {
-    await this.request(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, accessToken, { method: "DELETE" });
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (response.ok || response.status === 404 || response.status === 410) return;
+    throw badRequest("Google Calendar request failed");
   }
 
   private async readToken(response: Response): Promise<GoogleCalendarTokenResponse> {

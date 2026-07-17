@@ -24,6 +24,9 @@ interface CalendarEventRow extends QueryResultRow {
   created_by_user_avatar_url: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  google_sync_status: "active" | "disconnected" | "failed" | null;
+  google_sync_google_event_id: string | null;
+  google_sync_last_error: string | null;
 }
 
 export interface NormalizedCalendarEventInput {
@@ -71,6 +74,10 @@ export interface CalendarEventPayload {
   };
   createdAt: string;
   updatedAt: string;
+  googleSync: {
+    status: "pending" | "synced" | "failed";
+    lastError: string | null;
+  } | null;
 }
 
 export interface DeleteCalendarEventPayload {
@@ -111,9 +118,14 @@ const CALENDAR_EVENT_SELECT = `
     users.name AS created_by_user_name,
     users.avatar_url AS created_by_user_avatar_url,
     calendar_events.created_at,
-    calendar_events.updated_at
+    calendar_events.updated_at,
+    google_sync.status AS google_sync_status,
+    google_sync.google_event_id AS google_sync_google_event_id,
+    google_sync.last_error AS google_sync_last_error
   FROM calendar_events
   JOIN users ON users.id = calendar_events.created_by
+  LEFT JOIN calendar_event_google_syncs AS google_sync
+    ON google_sync.calendar_event_id = calendar_events.id
 `;
 
 @Injectable()
@@ -856,8 +868,18 @@ export class CalendarService {
         avatarUrl: event.created_by_user_avatar_url
       },
       createdAt: this.toIsoString(event.created_at),
-      updatedAt: this.toIsoString(event.updated_at)
+      updatedAt: this.toIsoString(event.updated_at),
+      googleSync: this.mapGoogleSync(event)
     };
+  }
+
+  private mapGoogleSync(event: CalendarEventRow): CalendarEventPayload["googleSync"] {
+    if (!event.google_sync_status || event.google_sync_status === "disconnected") return null;
+    if (event.google_sync_status === "failed") {
+      return { status: "failed", lastError: event.google_sync_last_error };
+    }
+    if (event.google_sync_google_event_id) return { status: "synced", lastError: null };
+    return { status: "pending", lastError: null };
   }
 
   private toDateString(value: Date | string): string {

@@ -67,4 +67,11 @@ export class CalendarGoogleEventController {
     await this.syncService.enableEventSync(userId, workspaceId, event);
     return apiResponse({ queued: true });
   }
+
+  @Post(":eventId/google-sync/retry")
+  async retry(@CurrentUserId() userId: string, @Param("workspaceId") workspaceId: string, @Param("eventId") eventId: string): Promise<ApiSuccessResponse<{ queued: true }>> {
+    const event = await this.calendarService.getEvent(userId, workspaceId, eventId);
+    await this.syncService.retryEventSync(userId, workspaceId, event);
+    return apiResponse({ queued: true });
+  }
 }
