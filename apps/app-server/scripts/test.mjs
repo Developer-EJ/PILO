@@ -36,6 +36,9 @@ const calendarController = await readSource(
 );
 const calendarModule = await readSource("../src/modules/calendar/calendar.module.ts");
 const calendarService = await readSource("../src/modules/calendar/calendar.service.ts");
+const googleCalendarController = await readSource("../src/modules/calendar/google-calendar.controller.ts");
+const googleCalendarSyncService = await readSource("../src/modules/calendar/google-calendar-sync.service.ts");
+const googleCalendarClient = await readSource("../src/modules/calendar/google-calendar.client.ts");
 const userController = await readSource("../src/modules/user/user.controller.ts");
 const userService = await readSource("../src/modules/user/user.service.ts");
 const settingsController = await readSource(
@@ -304,6 +307,18 @@ assert.match(calendarService, /assertWorkspaceAccess/);
 assert.match(calendarService, /calendar_events/);
 assert.match(calendarService, /createdByUser/);
 assert.match(calendarService, /addOneHour/);
+assert.match(calendarService, /enqueueUpdatedEventInTransaction/);
+assert.match(calendarService, /enqueueDeletedEventInTransaction/);
+assert.match(googleCalendarController, /calendar\/google/);
+assert.match(googleCalendarController, /google-sync/);
+assert.match(googleCalendarSyncService, /calendar_google_sync_outbox/);
+assert.match(googleCalendarSyncService, /access_type/);
+assert.match(googleCalendarSyncService, /refresh/);
+assert.match(googleCalendarSyncService, /CLAIM_TIMEOUT_SECONDS/);
+assert.match(googleCalendarSyncService, /pg_advisory_xact_lock/);
+assert.match(googleCalendarSyncService, /withAdvisoryLock/);
+assert.match(googleCalendarSyncService, /pilo\$\{event\.id\}/);
+assert.match(googleCalendarClient, /calendar\/v3\/calendars/);
 assert.match(calendarService, /const endTime = shouldNormalizeEndTime\s*\?\s*null/);
 assert.match(userController, /@Controller\("me"\)/);
 assert.match(userController, /@UseGuards\(AuthGuard\)/);

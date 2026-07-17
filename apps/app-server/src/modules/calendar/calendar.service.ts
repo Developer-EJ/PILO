@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { ActivityLogService } from "../../common/activity-log.service";
 import { badRequest, notFound } from "../../common/api-error";
@@ -7,6 +7,7 @@ import {
   DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import { GoogleCalendarSyncService } from "./google-calendar-sync.service";
 
 interface CalendarEventRow extends QueryResultRow {
   id: string | number;
@@ -120,7 +121,8 @@ export class CalendarService {
   constructor(
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
-    private readonly activityLogService: ActivityLogService
+    private readonly activityLogService: ActivityLogService,
+    @Optional() private readonly googleCalendarSyncService?: GoogleCalendarSyncService
   ) {}
 
   getModuleInfo() {
@@ -372,6 +374,11 @@ export class CalendarService {
       if (activityLog) {
         await this.activityLogService.append(transaction, activityLog);
       }
+      await this.googleCalendarSyncService?.enqueueUpdatedEventInTransaction(
+        transaction,
+        workspaceId,
+        this.mapEvent(updated)
+      );
       return updated;
     });
 
@@ -394,6 +401,12 @@ export class CalendarService {
       if (!existing) {
         throw notFound("Calendar event not found");
       }
+
+      await this.googleCalendarSyncService?.enqueueDeletedEventInTransaction(
+        transaction,
+        workspaceId,
+        this.mapEvent(existing)
+      );
 
       const removed = await transaction.queryOne<{ id: string | number }>(
         `
