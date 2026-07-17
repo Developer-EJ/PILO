@@ -204,3 +204,56 @@ for (const fetchImplementation of [
   );
   assertTokenFree(error);
 }
+
+{
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timerHandle = { name: "github-oauth-refresh-timeout" };
+  let scheduledCallback;
+  let scheduledDelay;
+  let clearedHandle;
+
+  globalThis.setTimeout = (callback, delay) => {
+    scheduledCallback = callback;
+    scheduledDelay = delay;
+    return timerHandle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    clearedHandle = handle;
+  };
+
+  try {
+    const client = new GithubOAuthClient();
+    let receivedSignal;
+    const error = await withFetch(
+      async (_url, init) => {
+        receivedSignal = init?.signal;
+        scheduledCallback();
+        assert.equal(receivedSignal?.aborted, true);
+        throw new DOMException("controlled timeout", "AbortError");
+      },
+      () =>
+        captureRejection(() =>
+          client.refreshAccessToken({
+            clientId: "client-id",
+            clientSecret: "client-secret",
+            refreshToken
+          })
+        )
+    );
+
+    assert.equal(scheduledDelay, 10_000);
+    assert.equal(clearedHandle, timerHandle);
+    assert.notEqual(
+      error?.constructor?.name,
+      "GithubOAuthRefreshRejectedError"
+    );
+    assert.equal(
+      error?.response?.error?.message,
+      "GitHub OAuth token refresh failed"
+    );
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+}

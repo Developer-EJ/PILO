@@ -482,3 +482,79 @@ function assertNoSecretLookup(database) {
     }
   );
 }
+
+{
+  const refreshedAccessToken = "fixture-refreshed-collaborator-token";
+  const database = new FakeDatabase();
+  database.queryOne = async (text, values = []) => {
+    database.queries.push({ method: "queryOne", text, values });
+    if (/FROM github_oauth_connections/i.test(text)) {
+      return null;
+    }
+    if (/FROM github_repositories/i.test(text)) {
+      assert.deepEqual(values, [workspaceId, repositoryId]);
+      return repositoryRow();
+    }
+    assert.fail(`Unexpected query: ${text}`);
+  };
+
+  const workspaceService = new FakeWorkspaceService();
+  const collaboratorPermissionCalls = [];
+  const githubOAuthClient = {
+    async getRepositoryCollaboratorPermission(input) {
+      collaboratorPermissionCalls.push(input);
+      return { permission: "push" };
+    }
+  };
+  const activeConnectionCalls = [];
+  const githubOAuthConnectionService = {
+    async getActiveConnection(userId, purpose) {
+      activeConnectionCalls.push({ userId, purpose });
+      return {
+        githubUserId: 1234,
+        githubLogin: "pilo-collaborator",
+        accessToken: refreshedAccessToken,
+        tokenScope: "repo",
+        connectedAt: "2026-07-17T00:00:00.000Z"
+      };
+    }
+  };
+  const optionalDependencies = Array(17).fill(undefined);
+  const service = new GithubIntegrationService(
+    database,
+    githubOAuthClient,
+    {},
+    {},
+    {},
+    workspaceService,
+    {},
+    {},
+    ...optionalDependencies,
+    githubOAuthConnectionService
+  );
+
+  const status = await service.getGithubRepositoryCollaboratorStatus(
+    currentUserId,
+    workspaceId,
+    repositoryId
+  );
+
+  assert.deepEqual(activeConnectionCalls, [
+    { userId: currentUserId, purpose: "app_user" }
+  ]);
+  assert.deepEqual(collaboratorPermissionCalls, [
+    {
+      accessToken: refreshedAccessToken,
+      owner: "my-team",
+      repo: "pilo",
+      username: "pilo-collaborator"
+    }
+  ]);
+  assert.deepEqual(status.repository, {
+    id: repositoryId,
+    fullName: "my-team/pilo"
+  });
+  assert.equal(status.githubLogin, "pilo-collaborator");
+  assert.equal(status.permission, "push");
+  assert.equal(status.hasAccess, true);
+}

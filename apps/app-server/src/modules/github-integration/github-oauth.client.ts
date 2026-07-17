@@ -12,6 +12,8 @@ import {
 } from "./github-oauth-refresh.error";
 import { toGithubOAuthExpiryIso } from "./github-oauth-token-expiry";
 
+const GITHUB_OAUTH_TOKEN_REFRESH_TIMEOUT_MS = 10_000;
+
 export interface GithubOAuthTokenRequest {
   code: string;
   clientId: string;
@@ -210,6 +212,11 @@ export class GithubOAuthClient {
       refresh_token: input.refreshToken
     });
 
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GITHUB_OAUTH_TOKEN_REFRESH_TIMEOUT_MS
+    );
     let response: Response;
     try {
       response = await fetch("https://github.com/login/oauth/access_token", {
@@ -218,10 +225,13 @@ export class GithubOAuthClient {
           Accept: "application/json",
           "Content-Type": "application/x-www-form-urlencoded"
         },
-        body
+        body,
+        signal: controller.signal
       });
     } catch {
       throw badRequest(GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE);
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (response.status >= 400 && response.status < 500) {
