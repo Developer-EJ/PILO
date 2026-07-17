@@ -466,10 +466,19 @@ operation log, outbox, or Activity Log, and are not replayed to late joiners.
 
 The final table position is still committed through the existing
 `layout_patch` HTTP transaction and delivered by `sql-erd:operation`. A client
-clears a cancelled preview explicitly. Receivers also clear previews on room
+cancels any unsent throttled preview when a drop produces a durable layout
+patch. A receiver keeps the last transmitted preview only until the canonical
+position for that table changes through the durable operation, then dismisses
+the preview and renders the committed position. A cancelled preview is cleared
+explicitly and restores the position captured before the preview, including
+when `tableLayouts` omitted that table. Receivers also clear previews on room
 leave, disconnect, presence leave, session change, or after a five-second
 timeout. Therefore a dropped preview packet can reduce animation smoothness but
-cannot change the persisted ERD layout.
+cannot override a committed ERD layout.
+
+`sql-erd:leave` is accepted only for a room currently joined by that socket.
+An unjoined Workspace/session room returns `room_not_joined` and does not relay
+table preview cleanup into that room.
 
 `userId`와 `displayName`은 Socket.IO handshake payload를 신뢰하지 않는다. realtime
 server는 bearer session 검증 뒤 `users`와 `user_settings`에서 읽은 사용자 정보를

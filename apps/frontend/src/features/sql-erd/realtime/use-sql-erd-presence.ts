@@ -35,11 +35,18 @@ type LocalPresencePatch = Partial<
 >;
 
 export type SqlErdPresenceController = {
+  cancelPendingTableMovePreviews: (tableIds: string[]) => void;
   clearTableMovePreviews: (tableIds: string[]) => void;
   currentUserId: string | null;
   enabled: boolean;
   remotePresence: SqlErdRemotePresenceState[];
   remoteTableMovePreviews: SqlErdTableMovePreview[];
+  dismissRemoteTableMovePreviews: (
+    previews: Pick<
+      SqlErdTableMovePreview,
+      "actorUserId" | "sentAt" | "tableId"
+    >[],
+  ) => void;
   sendTableMovePreview: (preview: {
     tableId: string;
     x: number;
@@ -47,6 +54,12 @@ export type SqlErdPresenceController = {
   }) => void;
   updatePresence: (patch: LocalPresencePatch) => void;
 };
+
+function normalizeTableMovePreviewIds(tableIds: string[]) {
+  return Array.from(
+    new Set(tableIds.map((tableId) => tableId.trim()).filter(Boolean)),
+  ).slice(0, 100);
+}
 
 function isUsableRealtimeConfig(
   config: SqlErdRealtimeConfig | null | undefined,
@@ -397,14 +410,17 @@ export function useSqlErdPresence(
     [],
   );
 
-  const clearTableMovePreviews = useCallback((tableIds: string[]) => {
-    const normalizedTableIds = Array.from(
-      new Set(tableIds.map((tableId) => tableId.trim()).filter(Boolean)),
-    ).slice(0, 100);
+  const cancelPendingTableMovePreviews = useCallback((tableIds: string[]) => {
+    const normalizedTableIds = normalizeTableMovePreviewIds(tableIds);
     normalizedTableIds.forEach((tableId) => {
       tableMovePreviewThrottlesRef.current.get(tableId)?.cancel();
       tableMovePreviewThrottlesRef.current.delete(tableId);
     });
+  }, []);
+
+  const clearTableMovePreviews = useCallback((tableIds: string[]) => {
+    const normalizedTableIds = normalizeTableMovePreviewIds(tableIds);
+    cancelPendingTableMovePreviews(normalizedTableIds);
 
     const socket = socketRef.current;
     if (
@@ -418,10 +434,38 @@ export function useSqlErdPresence(
       ...roomRef.current,
       tableIds: normalizedTableIds,
     });
-  }, []);
+  }, [cancelPendingTableMovePreviews]);
+
+  const dismissRemoteTableMovePreviews = useCallback(
+    (
+      previews: Pick<
+        SqlErdTableMovePreview,
+        "actorUserId" | "sentAt" | "tableId"
+      >[],
+    ) => {
+      const previewKeys = new Set(
+        previews.map(
+          (preview) =>
+            `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.sentAt}`,
+        ),
+      );
+      if (!previewKeys.size) return;
+
+      setRemoteTableMovePreviews((currentPreviews) =>
+        currentPreviews.filter(
+          (preview) =>
+            !previewKeys.has(
+              `${preview.actorUserId}\u0000${preview.tableId}\u0000${preview.sentAt}`,
+            ),
+        ),
+      );
+    },
+    [],
+  );
 
   return useMemo(
     () => ({
+      cancelPendingTableMovePreviews,
       clearTableMovePreviews,
       currentUserId,
       enabled,
@@ -430,15 +474,18 @@ export function useSqlErdPresence(
           ? remotePresence
           : remotePresence.filter((entry) => entry.userId !== currentUserId),
       remoteTableMovePreviews,
+      dismissRemoteTableMovePreviews,
       sendTableMovePreview,
       updatePresence,
     }),
     [
+      cancelPendingTableMovePreviews,
       clearTableMovePreviews,
       currentUserId,
       enabled,
       remotePresence,
       remoteTableMovePreviews,
+      dismissRemoteTableMovePreviews,
       sendTableMovePreview,
       updatePresence,
     ],

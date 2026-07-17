@@ -230,6 +230,8 @@ assert.match(apiDocument, /"sql-erd:table-move:preview"/);
 assert.match(apiDocument, /"sql-erd:table-move:clear"/);
 assert.match(apiDocument, /emits at most once every 33ms/);
 assert.match(apiDocument, /not written to the database/);
+assert.match(apiDocument, /canonical\s+position for that table changes/);
+assert.match(apiDocument, /position captured before the preview/);
 
 assert.match(types, /"sql-erd:join"/);
 assert.match(types, /"sql-erd:presence:update"/);
@@ -268,6 +270,7 @@ assert.match(bridge, /pointer-events-none/);
 assert.match(bridge, /requestAnimationFrame/);
 assert.match(canvas, /useSqlErdPresence/);
 assert.match(canvas, /SqlErdRealtimeBridge/);
+assert.match(canvas, /cancelPendingTableMovePreviews\(tableIds\)/);
 assert.equal(
   [...canvas.matchAll(/window\.addEventListener\("pointerup", flushPendingLayoutSync\)/g)].length,
   2
@@ -316,6 +319,60 @@ assert.equal(
     assert.equal(timers.length, 1);
     throttle.cancel();
     assert.equal(timers.length, 0);
+
+    const firstPreview = {
+      actorUserId: "user-se-in",
+      sentAt: "2026-07-18T00:00:00.000Z",
+      tableId: "table.orders",
+      x: 240,
+      y: 180
+    };
+    const initialResolution = preview.resolveSqlErdRemoteTableMovePreview({
+      canonicalPosition: null,
+      currentPosition: { x: 80, y: 80 },
+      preview: firstPreview,
+      previousState: null
+    });
+    assert.deepEqual(initialResolution, {
+      dismissPreview: null,
+      nextState: {
+        actorUserId: "user-se-in",
+        basePosition: { x: 80, y: 80 }
+      },
+      position: { x: 240, y: 180 }
+    });
+
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: null,
+        currentPosition: { x: 240, y: 180 },
+        preview: null,
+        previousState: initialResolution.nextState
+      }),
+      {
+        dismissPreview: null,
+        nextState: null,
+        position: { x: 80, y: 80 }
+      }
+    );
+
+    assert.deepEqual(
+      preview.resolveSqlErdRemoteTableMovePreview({
+        canonicalPosition: { x: 320, y: 260 },
+        currentPosition: { x: 240, y: 180 },
+        preview: firstPreview,
+        previousState: initialResolution.nextState
+      }),
+      {
+        dismissPreview: {
+          actorUserId: "user-se-in",
+          sentAt: "2026-07-18T00:00:00.000Z",
+          tableId: "table.orders"
+        },
+        nextState: null,
+        position: { x: 320, y: 260 }
+      }
+    );
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }

@@ -198,6 +198,18 @@ try {
     tableIds: ["table.orders"],
   });
 
+  const unjoinedLeaveError = waitForEvent(firstTab, "sql-erd:error");
+  const observerDoesNotReceiveCrossRoomClear = expectNoEvent(
+    observer,
+    "sql-erd:table-move:clear",
+  );
+  firstTab.emit("sql-erd:leave", {
+    ...room,
+    sessionId: "session-other",
+  });
+  assert.equal((await unjoinedLeaveError).code, "room_not_joined");
+  await observerDoesNotReceiveCrossRoomClear;
+
   let update = waitForEvent(observer, "sql-erd:presence:update");
   firstTab.emit("sql-erd:presence:update", createPresence({ x: 10, y: 20 }));
   assert.deepEqual((await update).cursor, { x: 10, y: 20 });

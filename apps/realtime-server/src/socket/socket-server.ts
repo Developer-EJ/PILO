@@ -995,6 +995,16 @@ export async function createRealtimeSocketServer({
       }
 
       const roomName = createSqlErdRoomName(room);
+      if (!socket.rooms.has(roomName)) {
+        socket.emit(
+          sqlErdServerEvents.error,
+          createSocketErrorPayload(
+            "room_not_joined",
+            "join SQLtoERD room before leaving it",
+          ),
+        );
+        return;
+      }
       const clearResult = sqlErdPresenceService.clearRoomPresence(socket.id, room);
 
       socket.to(roomName).emit(sqlErdServerEvents.tableMoveClear, {
