@@ -43,6 +43,7 @@ import {
   CanvasAiChatOverlay,
 } from "./overlays/CanvasAiChatOverlay";
 import { CanvasAgentVisualOverlay } from "./overlays/CanvasAgentVisualOverlay";
+import { CanvasRemoteFreehandPreviewOverlay } from "./overlays/CanvasRemoteFreehandPreviewOverlay";
 import { PiloCollapsedFrameOverlay } from "./overlays/PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
@@ -237,6 +238,7 @@ const CANVAS_REMOTE_PREVIEW_DELETE_GRACE_MS = 8_000;
 const CANVAS_SHAPE_PREVIEW_THROTTLE_MS = 60;
 const EMPTY_REMOTE_SHAPE_PREVIEWS: readonly CanvasShapePreviewEventPayload[] = [];
 const emptyRemoteShapePreviewStore: CanvasRemoteShapePreviewStore = {
+  acknowledgeAppliedShapeIds: () => {},
   getSnapshot: () => EMPTY_REMOTE_SHAPE_PREVIEWS,
   subscribe: () => () => {},
 };
@@ -1451,13 +1453,28 @@ export function CanvasEditor({
       return;
     }
 
+    const patch = consumeShapePatch();
+
     applyFreeformShapePatchIncrementally(
       editor,
-      consumeShapePatch(),
+      patch,
       pendingArrowBindingsRef,
       piloDefaultArrowKindHydrationGuardRef,
     );
-  }, [consumeShapePatch, isLocalFreehandDrawing, shapePatchVersion]);
+    presence?.remoteShapePreviewStore.acknowledgeAppliedShapeIds([
+      ...patch.deletedShapeIds,
+      ...patch.upsertShapes.flatMap((shape) => {
+        const shapeId = getFreeformShapeId(shape);
+
+        return shapeId ? [shapeId] : [];
+      }),
+    ]);
+  }, [
+    consumeShapePatch,
+    isLocalFreehandDrawing,
+    presence?.remoteShapePreviewStore,
+    shapePatchVersion,
+  ]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -2528,6 +2545,11 @@ export function CanvasEditor({
             previewShapeIdsRef={remotePreviewShapeIdsRef}
             previewStore={presence?.remoteShapePreviewStore}
           />
+          {presence ? (
+            <CanvasRemoteFreehandPreviewOverlay
+              previewStore={presence.remoteShapePreviewStore}
+            />
+          ) : null}
           <CanvasHistoryStateReporter
             onHistoryStateChange={onHistoryStateChange}
           />
@@ -2634,6 +2656,12 @@ function CanvasRealtimePreviewApplier({
         const shapeId = getFreeformShapeId(previewShape);
 
         if (!shapeId) return;
+        if (
+          previewShape.type === "draw" ||
+          previewShape.type === "highlight"
+        ) {
+          return;
+        }
         activePreviewShapeIds.add(shapeId);
         if (
           shapeId === locallyEditingShapeId ||

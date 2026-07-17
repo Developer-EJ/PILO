@@ -60,3 +60,61 @@ test("오래된 preview를 정리한다", () => {
     ["user-b"],
   );
 });
+
+test("committed preview remains visible until the surface applies it", () => {
+  const store = createCanvasRemoteShapePreviewStore();
+
+  store.upsert(createPreview("user-a", ["shape:a", "shape:b"]));
+  store.markCommittedShapeIds("user-a", ["shape:a"]);
+  store.clearActor("user-a", ["shape:a", "shape:b"]);
+  store.sweepStale(new Date("2026-07-18T00:00:00.000Z").getTime());
+
+  assert.deepEqual(
+    store.getSnapshot()[0].shapes.map((shape) => shape.id),
+    ["shape:a"],
+  );
+
+  store.acknowledgeAppliedShapeIds(["shape:a"]);
+  assert.deepEqual(store.getSnapshot(), []);
+});
+
+test("a later live preview does not replace a committed preview awaiting apply", () => {
+  const store = createCanvasRemoteShapePreviewStore();
+
+  store.upsert(createPreview("user-a", ["shape:first"]));
+  store.markCommittedShapeIds("user-a", ["shape:first"]);
+  store.upsert(createPreview("user-a", ["shape:second"]));
+
+  assert.deepEqual(
+    store.getSnapshot()[0].shapes.map((shape) => shape.id),
+    ["shape:second", "shape:first"],
+  );
+
+  store.acknowledgeAppliedShapeIds(["shape:first"]);
+  assert.deepEqual(
+    store.getSnapshot()[0].shapes.map((shape) => shape.id),
+    ["shape:second"],
+  );
+});
+
+test("three actors keep independent committed previews while surface apply catches up", () => {
+  const store = createCanvasRemoteShapePreviewStore();
+
+  ["user-a", "user-b", "user-c"].forEach((actorUserId) => {
+    store.upsert(createPreview(actorUserId, [`shape:${actorUserId}`]));
+    store.markCommittedShapeIds(actorUserId, [`shape:${actorUserId}`]);
+  });
+
+  store.acknowledgeAppliedShapeIds(["shape:user-a"]);
+
+  assert.deepEqual(
+    store.getSnapshot().map((preview) => [
+      preview.actorUserId,
+      preview.shapes.map((shape) => shape.id),
+    ]),
+    [
+      ["user-b", ["shape:user-b"]],
+      ["user-c", ["shape:user-c"]],
+    ],
+  );
+});
