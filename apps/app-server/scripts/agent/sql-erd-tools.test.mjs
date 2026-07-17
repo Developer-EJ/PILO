@@ -9,6 +9,10 @@ const { AgentToolRegistryService } = require(
 const { SqlErdAgentToolsService } = require(
   "../../dist/modules/agent/tools/sql-erd-agent-tools.service.js"
 );
+const {
+  buildSqlErdAgentSchemaProjection,
+  resolveSqlErdAgentTableFocus
+} = require("../../dist/modules/agent/tools/sql-erd-table-focus.js");
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
@@ -75,6 +79,217 @@ function sessionPayload(overrides = {}) {
     deletedAt: null,
     ...overrides
   };
+}
+
+function focusModelJson() {
+  const table = (id, name, columns, comment = null) => ({
+    id,
+    name,
+    schemaName: "public",
+    columns,
+    constraints: [],
+    comment
+  });
+  const modelColumn = (
+    id,
+    name,
+    { primaryKey = false, foreignKey = false, comment = null } = {}
+  ) => ({
+    id,
+    name,
+    dataType: "bigint",
+    nullable: false,
+    primaryKey,
+    foreignKey,
+    unique: false,
+    defaultValue: null,
+    comment
+  });
+
+  return {
+    version: 1,
+    schema: {
+      tables: [
+        table(
+          "internal-orders-id",
+          "orders",
+          [
+            modelColumn("internal-orders-pk", "id", { primaryKey: true }),
+            modelColumn("internal-orders-user", "user_id", {
+              foreignKey: true
+            }),
+            modelColumn("internal-orders-total", "total_amount")
+          ],
+          "고객 주문"
+        ),
+        table(
+          "internal-payments-id",
+          "payments",
+          [
+            modelColumn("internal-payments-pk", "id", { primaryKey: true }),
+            modelColumn("internal-payments-order", "order_id", {
+              foreignKey: true
+            }),
+            modelColumn("internal-payments-status", "payment_status", {
+              comment: "결제 상태"
+            })
+          ],
+          "주문 결제"
+        ),
+        table(
+          "internal-attempts-id",
+          "payment_attempts",
+          [
+            modelColumn("internal-attempts-pk", "id", { primaryKey: true }),
+            modelColumn("internal-attempts-payment", "payment_id", {
+              foreignKey: true
+            })
+          ],
+          "결제 시도"
+        ),
+        table(
+          "internal-users-id",
+          "users",
+          [modelColumn("internal-users-pk", "id", { primaryKey: true })],
+          "사용자"
+        )
+      ],
+      relations: [
+        {
+          id: "internal-order-payment-relation",
+          kind: "foreign_key",
+          fromTableId: "internal-payments-id",
+          fromColumnIds: ["internal-payments-order"],
+          toTableId: "internal-orders-id",
+          toColumnIds: ["internal-orders-pk"],
+          constraintName: "payments_order_fk"
+        },
+        {
+          id: "internal-payment-attempt-relation",
+          kind: "foreign_key",
+          fromTableId: "internal-attempts-id",
+          fromColumnIds: ["internal-attempts-payment"],
+          toTableId: "internal-payments-id",
+          toColumnIds: ["internal-payments-pk"],
+          constraintName: "attempts_payment_fk"
+        },
+        {
+          id: "internal-order-user-relation",
+          kind: "foreign_key",
+          fromTableId: "internal-orders-id",
+          fromColumnIds: ["internal-orders-user"],
+          toTableId: "internal-users-id",
+          toColumnIds: ["internal-users-pk"],
+          constraintName: "orders_user_fk"
+        }
+      ]
+    }
+  };
+}
+
+const focusProjection = buildSqlErdAgentSchemaProjection(
+  focusModelJson(),
+  "결제 기능"
+);
+assert.deepEqual(
+  focusProjection.tables.map((table) => [table.ref, table.name]),
+  [
+    ["t1", "orders"],
+    ["t2", "payments"],
+    ["t3", "payment_attempts"],
+    ["t4", "users"]
+  ]
+);
+assert.deepEqual(focusProjection.edges, [
+  ["t2", "t1"],
+  ["t3", "t2"],
+  ["t1", "t4"]
+]);
+assert.equal(
+  focusProjection.tables[1].columns.some(
+    (column) => column.name === "payment_status"
+  ),
+  true
+);
+assert.equal(JSON.stringify(focusProjection).length <= 9_000, true);
+assert.equal(JSON.stringify(focusProjection).includes("internal-payments-id"), false);
+assert.equal(JSON.stringify(focusProjection).includes("internal-payments-pk"), false);
+
+const largeProjection = buildSqlErdAgentSchemaProjection(
+  {
+    version: 1,
+    schema: {
+      tables: Array.from({ length: 100 }, (_, index) => ({
+        id: `internal-large-table-${index}`,
+        name: `table_${index}_${"x".repeat(240)}`,
+        schemaName: `schema_${"y".repeat(240)}`,
+        columns: Array.from({ length: 10 }, (_column, columnIndex) => ({
+          id: `internal-large-column-${index}-${columnIndex}`,
+          name: `column_${columnIndex}_${"z".repeat(240)}`,
+          dataType: "text",
+          nullable: true,
+          primaryKey: columnIndex === 0,
+          foreignKey: false,
+          unique: false,
+          defaultValue: null,
+          comment: "설명".repeat(1_000)
+        })),
+        constraints: [],
+        comment: "테이블 설명".repeat(1_000)
+      })),
+      relations: Array.from({ length: 300 }, (_, index) => ({
+        id: `internal-large-relation-${index}`,
+        kind: "foreign_key",
+        fromTableId: `internal-large-table-${index % 100}`,
+        fromColumnIds: [],
+        toTableId: `internal-large-table-${(index + 1) % 100}`,
+        toColumnIds: [],
+        constraintName: null
+      }))
+    }
+  },
+  "대형 기능"
+);
+assert.equal(JSON.stringify(largeProjection).length <= 9_000, true);
+assert.equal(largeProjection.tables.length, 100);
+assert.equal(largeProjection.truncated, true);
+
+const resolvedFocus = resolveSqlErdAgentTableFocus(focusModelJson(), {
+  primaryTableRefs: ["t2"],
+  relatedTableRefs: ["t1", "t3"]
+});
+assert.deepEqual(resolvedFocus.primaryTableIds, ["internal-payments-id"]);
+assert.deepEqual(resolvedFocus.relatedTableIds, [
+  "internal-orders-id",
+  "internal-attempts-id"
+]);
+assert.deepEqual(resolvedFocus.relationIds, [
+  "internal-order-payment-relation",
+  "internal-payment-attempt-relation"
+]);
+assert.deepEqual(
+  resolvedFocus.tables.map((table) => [table.ref, table.name, table.role]),
+  [
+    ["t2", "payments", "primary"],
+    ["t1", "orders", "related"],
+    ["t3", "payment_attempts", "related"]
+  ]
+);
+
+for (const invalidSelection of [
+  { primaryTableRefs: [], relatedTableRefs: [] },
+  { primaryTableRefs: ["t2", "t2"], relatedTableRefs: [] },
+  { primaryTableRefs: ["t2"], relatedTableRefs: ["t2"] },
+  { primaryTableRefs: ["t99"], relatedTableRefs: [] },
+  { primaryTableRefs: ["t2"], relatedTableRefs: ["t4"] }
+]) {
+  assert.throws(
+    () => resolveSqlErdAgentTableFocus(focusModelJson(), invalidSelection),
+    (error) =>
+      /primary|related|reference|direct/i.test(
+        error.getResponse().error.message
+      )
+  );
 }
 
 class FakeSqlErdService {
