@@ -1,0 +1,171 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import ts from "typescript";
+
+const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+const readOptional = (path) => read(path).catch(() => "");
+
+async function loadPurePolicy(source, marker) {
+  const match = source.match(
+    new RegExp(
+      `// <${marker}>\\n([\\s\\S]*?)// </${marker}>`,
+    ),
+  );
+  assert.ok(match, `${marker} pure policy marker is missing`);
+  const output = ts.transpileModule(match[1], {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`);
+}
+
+const [provider, layout] = await Promise.all([
+  readOptional("./runtime/screen-share-runtime-provider.tsx"),
+  read("../../app/(workspace)/layout.tsx"),
+]);
+
+test("Workspace layout mounts screen share beside the Meeting runtime", () => {
+  assert.match(
+    layout,
+    /<WorkspacePresenceProvider>[\s\S]*<ScreenShareRuntimeProvider>[\s\S]*<MeetingRuntimeProvider>[\s\S]*<MainShell>\{children\}<\/MainShell>[\s\S]*<\/MeetingRuntimeProvider>[\s\S]*<\/ScreenShareRuntimeProvider>[\s\S]*<\/WorkspacePresenceProvider>/,
+  );
+});
+
+test("current session loads on mount and reloads on socket reconnect", () => {
+  assert.match(provider, /void reloadCurrent\(\)/);
+  assert.match(provider, /socket\.on\("connect", reloadCurrent\)/);
+  assert.match(provider, /socket\.off\("connect", reloadCurrent\)/);
+  assert.match(provider, /workspace-screen-share:started/);
+  assert.match(provider, /workspace-screen-share:ended/);
+  assert.match(
+    provider,
+    /const handleStarted[\s\S]{0,300}reloadAttemptRef\.current \+= 1/,
+  );
+  assert.match(
+    provider,
+    /const handleEnded[\s\S]{0,300}reloadAttemptRef\.current \+= 1/,
+  );
+});
+
+test("started reconciliation activates once and deduplicates its toast", async () => {
+  const { reconcileStartedScreenShare } = await loadPurePolicy(
+    provider,
+    "screen-share-runtime-pure",
+  );
+  const session = screenShareSession("session-1");
+  const first = reconcileStartedScreenShare({
+    notifiedSessionIds: new Set(),
+    session,
+  });
+  const duplicate = reconcileStartedScreenShare({
+    notifiedSessionIds: first.notifiedSessionIds,
+    session,
+  });
+
+  assert.equal(first.activeSession, session);
+  assert.equal(first.shouldToast, true);
+  assert.equal(duplicate.activeSession, session);
+  assert.equal(duplicate.shouldToast, false);
+});
+
+test("ended reconciliation removes only matching state and viewer", async () => {
+  const { reconcileEndedScreenShare } = await loadPurePolicy(
+    provider,
+    "screen-share-runtime-pure",
+  );
+  const activeSession = screenShareSession("session-2");
+
+  assert.deepEqual(
+    reconcileEndedScreenShare({
+      activeSession,
+      sessionId: "session-2",
+      viewerSessionId: "session-2",
+    }),
+    { activeSession: null, shouldDisconnectViewer: true },
+  );
+  assert.deepEqual(
+    reconcileEndedScreenShare({
+      activeSession,
+      sessionId: "session-old",
+      viewerSessionId: "session-2",
+    }),
+    { activeSession, shouldDisconnectViewer: false },
+  );
+  assert.doesNotMatch(provider, /toast\.(success|info)\([^)]*종료/);
+});
+
+test("Workspace changes clean up publisher and viewer independently", async () => {
+  const {
+    getWorkspaceScreenShareCleanup,
+    isCurrentScreenShareRequest,
+  } = await loadPurePolicy(
+    provider,
+    "screen-share-runtime-pure",
+  );
+
+  assert.deepEqual(
+    getWorkspaceScreenShareCleanup({
+      nextWorkspaceId: "workspace-2",
+      previousWorkspaceId: "workspace-1",
+      publisherSessionId: "publisher-1",
+      viewerSessionId: "viewer-1",
+    }),
+    { stopPublisher: true, stopViewer: true },
+  );
+  assert.deepEqual(
+    getWorkspaceScreenShareCleanup({
+      nextWorkspaceId: "workspace-1",
+      previousWorkspaceId: "workspace-1",
+      publisherSessionId: "publisher-1",
+      viewerSessionId: null,
+    }),
+    { stopPublisher: false, stopViewer: false },
+  );
+  assert.equal(
+    isCurrentScreenShareRequest({
+      attempt: 2,
+      currentAttempt: 2,
+      currentWorkspaceId: "workspace-2",
+      requestWorkspaceId: "workspace-2",
+    }),
+    true,
+  );
+  assert.equal(
+    isCurrentScreenShareRequest({
+      attempt: 1,
+      currentAttempt: 2,
+      currentWorkspaceId: "workspace-2",
+      requestWorkspaceId: "workspace-1",
+    }),
+    false,
+  );
+  assert.match(
+    provider,
+    /if \(cleanup\.stopPublisher\) \{[\s\S]{0,500}publisher\/stopping[\s\S]{0,300}publisher\/stopped/,
+  );
+});
+
+test("screen sharing owns no Meeting runtime dependency", () => {
+  assert.doesNotMatch(provider, /meeting-runtime|useMeetingRuntime|MeetingApi/);
+  assert.match(provider, /createPublisherSession/);
+  assert.match(provider, /createViewerSession/);
+  assert.match(
+    provider,
+    /api[\s\S]{0,30}\.end\(workspaceId, session\.id\)[\s\S]{0,250}\.catch\(/,
+  );
+});
+
+function screenShareSession(id) {
+  return {
+    id,
+    sharer: {
+      avatarUrl: null,
+      displayName: "민준",
+      userId: "user-2",
+    },
+    startedAt: "2026-07-18T00:00:01.000Z",
+  };
+}
