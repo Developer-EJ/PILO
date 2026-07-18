@@ -10,6 +10,10 @@ import {
   DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import {
+  isDriveInlinePreviewMimeType,
+  normalizeDriveMimeType
+} from "./drive-preview-policy";
 import { mapDriveItem } from "./drive.mapper";
 import { DriveStorageService } from "./drive-storage.service";
 import {
@@ -390,19 +394,19 @@ export class DriveService {
 
     const validFileId = validateDriveItemId(fileId);
     const file = await this.findActiveReadyFile(workspaceId, validFileId);
-    if (
-      !file ||
-      !file.object_key ||
-      !file.mime_type ||
-      file.mime_type !== "application/pdf"
-    ) {
-      throw notFound("Drive PDF file not found");
+    if (!file || !file.object_key || !file.mime_type) {
+      throw notFound("Drive file not found");
+    }
+
+    const previewMimeType = normalizeDriveMimeType(file.mime_type);
+    if (!isDriveInlinePreviewMimeType(previewMimeType)) {
+      throw notFound("Drive file preview is not supported");
     }
 
     const previewUrl = await this.driveStorageService.createPreviewUrl({
       objectKey: file.object_key,
       fileName: file.name,
-      mimeType: file.mime_type,
+      mimeType: previewMimeType,
       expiresInSeconds: DRIVE_UPLOAD_EXPIRES_SECONDS
     });
 

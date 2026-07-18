@@ -21,6 +21,9 @@ const driveValidation = await readSource(
   "../../src/modules/drive/drive.validation.ts"
 );
 const driveMapper = await readSource("../../src/modules/drive/drive.mapper.ts");
+const drivePreviewPolicy = await readSource(
+  "../../src/modules/drive/drive-preview-policy.ts"
+);
 const packageJson = await readSource("../../package.json");
 const require = createRequire(import.meta.url);
 const { DriveService } = require("../../dist/modules/drive/drive.service.js");
@@ -36,7 +39,9 @@ const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
 assert.match(appModule, /DriveModule/);
 assert.match(driveModule, /controllers: \[DriveController\]/);
-assert.match(driveModule, /providers: \[DocumentService, DriveService, DriveStorageService\]/);
+assert.match(driveModule, /DocumentService/);
+assert.match(driveModule, /DriveService/);
+assert.match(driveModule, /DriveStorageService/);
 assert.match(driveModule, /DocumentService/);
 assert.match(driveModule, /WorkspaceModule/);
 assert.match(driveController, /@Controller\("workspaces\/:workspaceId\/drive"\)/);
@@ -47,6 +52,7 @@ assert.match(driveController, /@Post\("documents"\)/);
 assert.match(driveController, /@Post\("files\/upload-url"\)/);
 assert.match(driveController, /@Post\("files\/:fileId\/complete"\)/);
 assert.match(driveController, /@Get\("files\/:fileId\/download-url"\)/);
+assert.match(driveController, /@Get\("files\/:fileId\/preview-url"\)/);
 assert.match(driveController, /@Patch\("items\/:itemId"\)/);
 assert.match(driveController, /@Delete\("items\/:itemId"\)/);
 assert.match(driveServiceSource, /domain: "drive"/);
@@ -72,6 +78,11 @@ assert.match(driveStorageService, /AWS_REGION/);
 assert.match(driveStorageService, /BAD_GATEWAY/);
 assert.match(driveStorageService, /async createPreviewUrl\(/);
 assert.match(driveStorageService, /ResponseContentDisposition: this\.inlineContentDisposition/);
+assert.match(drivePreviewPolicy, /application\/pdf/);
+assert.match(drivePreviewPolicy, /image\/png/);
+assert.match(drivePreviewPolicy, /text\/plain/);
+assert.doesNotMatch(drivePreviewPolicy, /image\/svg\+xml/);
+assert.doesNotMatch(drivePreviewPolicy, /text\/html/);
 assert.match(driveValidation, /validateCreateDriveFolderRequest/);
 assert.match(driveValidation, /validateCreateDriveUploadUrlRequest/);
 assert.match(driveValidation, /validateCompleteDriveUploadRequest/);
@@ -527,13 +538,11 @@ async function assertApiError(action, status, code, messagePattern) {
   const storage = new FakeDriveStorageService();
   const { service, driveStorageService } = createSubject(database, storage);
 
-  await assertApiError(
-    () => service.createPreviewUrl(currentUserId, workspaceId, fileId),
-    404,
-    "NOT_FOUND",
-    /PDF file not found/
-  );
-  assert.equal(driveStorageService.previewUrlCalls.length, 0);
+  const result = await service.createPreviewUrl(currentUserId, workspaceId, fileId);
+
+  assert.equal(result.file.id, fileId);
+  assert.equal(result.previewUrl, "https://s3.example/preview");
+  assert.equal(driveStorageService.previewUrlCalls[0].mimeType, "image/png");
 }
 
 {
@@ -550,11 +559,31 @@ async function assertApiError(action, status, code, messagePattern) {
   const storage = new FakeDriveStorageService();
   const { service, driveStorageService } = createSubject(database, storage);
 
+  const result = await service.createPreviewUrl(currentUserId, workspaceId, fileId);
+
+  assert.equal(result.previewUrl, "https://s3.example/preview");
+  assert.equal(driveStorageService.previewUrlCalls[0].mimeType, "application/pdf");
+}
+
+{
+  const readyHtml = itemRow({
+    id: fileId,
+    item_type: "file",
+    name: "unsafe.html",
+    object_key: "drive/workspaces/workspace/items/file/unsafe.html",
+    mime_type: "text/html",
+    size_bytes: "1024",
+    upload_status: "ready"
+  });
+  const database = new FakeDatabase({ queryOneRows: [readyHtml] });
+  const storage = new FakeDriveStorageService();
+  const { service, driveStorageService } = createSubject(database, storage);
+
   await assertApiError(
     () => service.createPreviewUrl(currentUserId, workspaceId, fileId),
     404,
     "NOT_FOUND",
-    /PDF file not found/
+    /preview is not supported/
   );
   assert.equal(driveStorageService.previewUrlCalls.length, 0);
 }
