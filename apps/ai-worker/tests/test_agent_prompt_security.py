@@ -20,12 +20,22 @@ def test_prompt_security_fixture_matches_detector_contract() -> None:
     for item in fixture["cases"]:
         source_kind = item["sourceKind"]
         text = item["text"]
-        prompt = text if source_kind == "current_user" else "최근 회의록 내용을 알려줘"
+        prompt = (
+            text
+            if source_kind in {"current_user", "user_follow_up"}
+            else "최근 회의록 내용을 알려줘"
+        )
         context_sources = (
-            () if source_kind == "current_user" else (PromptSecuritySource(source_kind, text),)
+            ()
+            if source_kind in {"current_user", "user_follow_up"}
+            else (PromptSecuritySource(source_kind, text),)
         )
 
-        assessment = assess_agent_prompt_security(prompt, context_sources)
+        assessment = assess_agent_prompt_security(
+            prompt,
+            context_sources,
+            prompt_source_kind=source_kind if not context_sources else "current_user",
+        )
 
         assert assessment.suspected is item["expectedSuspected"], item["id"]
         assert set(assessment.signal_types) == set(item["expectedSignalTypes"]), item["id"]

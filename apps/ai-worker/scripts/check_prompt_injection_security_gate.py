@@ -47,6 +47,7 @@ def main() -> int:
             or source_kind
             not in {
                 "current_user",
+                "user_follow_up",
                 "thread_resource",
                 "tool_result",
                 "selected_candidate",
@@ -59,11 +60,21 @@ def main() -> int:
         ):
             raise ValueError("Invalid prompt security fixture case")
 
-        prompt = text if source_kind == "current_user" else "최근 회의록 내용을 알려줘"
-        context_sources = (
-            () if source_kind == "current_user" else (PromptSecuritySource(source_kind, text),)
+        prompt = (
+            text
+            if source_kind in {"current_user", "user_follow_up"}
+            else "최근 회의록 내용을 알려줘"
         )
-        assessment = assess_agent_prompt_security(prompt, context_sources)
+        context_sources = (
+            ()
+            if source_kind in {"current_user", "user_follow_up"}
+            else (PromptSecuritySource(source_kind, text),)
+        )
+        assessment = assess_agent_prompt_security(
+            prompt,
+            context_sources,
+            prompt_source_kind=source_kind if not context_sources else "current_user",
+        )
         expected_source_kinds = [source_kind] if expected_suspected else []
         if assessment.suspected:
             blocked += 1

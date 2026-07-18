@@ -109,8 +109,10 @@ class PromptSecuritySource:
 def assess_agent_prompt_security(
     prompt: str,
     context_sources: tuple[PromptSecuritySource, ...] = (),
+    *,
+    prompt_source_kind: str = "current_user",
 ) -> PromptSecurityAssessment:
-    sources = (PromptSecuritySource("current_user", prompt), *context_sources)
+    sources = (PromptSecuritySource(prompt_source_kind, prompt), *context_sources)
 
     source_kinds: set[str] = set()
     signal_types: set[str] = set()
@@ -152,6 +154,15 @@ def _is_negated_or_reported(text: str, match: re.Match[str]) -> bool:
         after,
         re.I,
     ):
+        if re.match(
+            r"\s*하지\s*(?:않고|말고).{0,32}"
+            r"(?:실제로|진짜로|대신|그냥)?.{0,16}"
+            r"(?:무시|잊|폐기|덮어쓰|우회|생략|건너뛰|비활성화|"
+            r"출력|보여|알려|공개)",
+            after,
+            re.I,
+        ):
+            return False
         return True
     if re.match(r"\s*(?:했|하였|됐|되었)(?:다|다고|던|음|기로)", after):
         return True

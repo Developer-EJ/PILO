@@ -22,7 +22,8 @@
 - shortlist 밖 tool 또는 field를 planner가 반환하면 normalization이 거부한다.
 - shortlist 여부와 무관하게 App Server의 input validator, Workspace 권한, confirmation, 멱등성,
   실행 직전 상태·권한 재검증은 실행 권위 경계로 유지된다.
-- 현재 사용자 발화와 bounded thread resource, completed tool result, 선택 후보 label/description에서
+- 최초 사용자 발화 또는 현재 `turnSequence`를 재개한 최신 follow-up 한 건과 bounded thread resource,
+  completed tool result, 선택 후보 label/description에서
   고신뢰 prompt injection 신호가 탐지되면 retrieval과 planner를 호출하지 않는다. context repository가
   각 production value를 구조화된 source kind로 전달하며 detector가 display 문자열 prefix를 추측하지 않는다.
   이 경로는 전체-tool fallback으로 권한을 넓히지 않고 clarification으로 종료한다.
@@ -56,3 +57,5 @@ clarification으로 끝난 run을 사용자가 다시 요청해야 한다.
 prompt injection 의심 run은 mode와 무관하게 `shadow`로 fallback하지 않는다. 사용자가 외부 지시·보안
 우회 문구를 제거하고 작업과 대상만 다시 요청해야 한다. 운영자는 raw 발화를 조회하지 않고
 `promptSecurity.reason=prompt_injection_suspected`, `sourceKinds`, `signalTypes`만 확인한다.
+재개 run은 과거 user message 전체가 아니라 최신 follow-up만 `user_follow_up`으로 검사하므로 안전하게
+고친 후속 요청은 이전 차단 문장 때문에 반복 차단되지 않는다.

@@ -1917,6 +1917,7 @@ class PgAgentRunRepository:
             """,
             (job.run_id, job.run_id),
         ).fetchall()
+        latest_user_message: str | None = None
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
                 output = _serialize_agent_tool_output(str(item["tool_name"]), item["output_json"])
@@ -1930,6 +1931,8 @@ class PgAgentRunRepository:
             content = str(item["content"]).strip()[:1000]
             if content:
                 memory.append(f"{item['role']}: {content}")
+                if item["role"] == "user":
+                    latest_user_message = content
 
         planning_context = _build_bounded_agent_planning_context(memory)
         included_lines = set(planning_context.splitlines())
@@ -1944,6 +1947,11 @@ class PgAgentRunRepository:
             planning_context=planning_context,
             untrusted_context_sources=tuple(
                 source for line, source in untrusted_source_lines if line in included_lines
+            ),
+            current_user_source=(
+                PromptSecuritySource("user_follow_up", latest_user_message)
+                if job.turn_sequence > 1 and latest_user_message is not None
+                else None
             ),
         )
 

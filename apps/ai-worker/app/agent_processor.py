@@ -119,6 +119,7 @@ class AgentRunContext:
     planner_turn_count: int = 0
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
+    current_user_source: PromptSecuritySource | None = None
 
 
 @dataclass(frozen=True)
@@ -608,9 +609,14 @@ class AgentRunProcessor:
         try:
             step_id = self.repository.start_planner_step(job, context)
             current_date = self.current_date_provider(context.timezone).isoformat()
-            prompt_security = assess_agent_prompt_security(
+            current_user_source = context.current_user_source or PromptSecuritySource(
+                "current_user",
                 context.prompt,
+            )
+            prompt_security = assess_agent_prompt_security(
+                current_user_source.text,
                 context.untrusted_context_sources,
+                prompt_source_kind=current_user_source.source_kind,
             )
             if prompt_security.suspected:
                 return self._block_prompt_injection(
