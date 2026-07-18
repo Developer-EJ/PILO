@@ -843,6 +843,79 @@ Phase 3 작업으로 남긴다.
 - [ ] **10. 배포 전 검증을 수행한다.** build/lint/format/Agent script/AI Worker pytest와 dev에서
   자연어 요청 → clarification 선택 → tool 실행 또는 confirmation 흐름을 같은 runId로 대조한다.
 
+#### Phase 3 PR별 실행 체크리스트
+
+> 구현 순서는 후보 선택 foundation(#1385) → read/control·report selector(#1386) → action item
+> selector·mutation(#1387)이다. 현재 Phase 3 브랜치는 #1386부터 시작하며, #1385의 durable candidate
+> selection 계약을 다시 만들지 않는다.
+
+##### 공통 착수 기준
+
+- [ ] #1385가 만든 `POST .../inputs`의 `meeting_candidate` 선택 계약, 15분 TTL, run/user/Workspace
+  binding, single-use 및 재검증 회귀를 확인한다. browser·SQS·provider에는 candidate ID 외 selection token과
+  raw UUID가 전달되지 않는지 확인한다.
+- [ ] 각 Meeting tool의 planner schema, `validateInput`, `prepareExecution`/`execute`, resolver,
+  `MeetingService` 호출을 표로 inventory하고, raw UUID가 planner-facing schema에 남은 위치를 목록화한다.
+- [ ] #1386은 기존 Agent input API와 Meeting public API를 우선 재사용한다. 새 endpoint, request/response,
+  DB schema가 필요해지면 구현을 멈추고 `docs/api/agent-api.md`·`docs/api/meeting-api.md` 및 Meeting·DB
+  Schema owner와 계약을 먼저 확정한다.
+- [ ] candidate 선택은 free-text ordinal이 아닌 기존 후보 버튼 계약만 사용한다. 0/N 후보, 만료·재사용·다른
+  run/user/Workspace의 선택은 tool 실행 없이 clarification으로 끝낸다.
+
+##### PR 1 — #1386 read/control·report selector
+
+- [ ] `list_meeting_rooms`, `get_active_meeting`, `get_meeting_participants`, Meeting control tool,
+  `list_meeting_reports`, `get_meeting_report`, `summarize_meeting_report`의 UUID·selector 입력을 tool별로
+  분류한다. transcript/action item mutation은 #1387 이후 범위로 남긴다.
+- [ ] planner와 runtime이 공유하는 selector schema를 추가한다. room은 `current` 또는 normalized
+  `roomName`, Meeting/report는 검증된 server-owned selection reference 또는 명시 selector만 허용하고,
+  UUID field는 internal compatibility adapter에서만 받는다.
+- [ ] `from`/`to`는 사용자 timezone의 자연어 날짜를 ISO UTC 범위 `[from, to)`로 정규화하고,
+  `status`는 MeetingReport 공개 API의 허용 enum만 받게 한다. `roomName`과 기간·상태가 함께 있을 때는
+  같은 Workspace 범위에서 resolver가 후보를 만들도록 한다.
+- [ ] resolver 결과를 revalidated internal reference로 변환한 뒤 기존 `MeetingService` query/control
+  경로로 호출한다. resolver·candidate selection·domain service 어느 단계에서든 실패하면 UUID fallback이나
+  추측 실행을 하지 않는다.
+- [ ] App Server tool snapshot·capability catalog·AI Worker planner contract를 같은 selector field로
+  갱신한다. Worker에는 raw UUID, selection token plaintext, candidate record를 넣지 않는다.
+- [ ] formatter는 사람이 읽을 수 있는 room/report label과 다음 질문만 저장·표시하고, internal reference,
+  candidate ID, UUID, token은 사용자 메시지·Agent step/log·provider input에 내보내지 않는다.
+- [ ] 0/1/N·동명이인 room·invalid date/status·다른 Workspace·만료/소비 candidate·stale meeting/report와
+  UUID/token 비노출을 App Server/AI Worker 회귀로 고정한다.
+
+##### PR 2 — #1387 action item selector·mutation
+
+- [ ] `find_action_items`에 Workspace-scoped report/member/status/title/기간/정렬 selector와 bounded
+  1-based ordinal을 추가한다. ordinal은 같은 filter·sort의 결과에서만 해소한다.
+- [ ] update/dismiss/approve tool이 action item/member selector 또는 server-owned reference를 내부 ID로
+  변환하고, ambiguity·만료·cross-workspace는 confirmation plan을 만들지 않게 한다.
+- [ ] confirmation 생성 전과 승인 직전에 resource 존재·Workspace·권한·상태를 모두 재검증한다. confirmation
+  plan과 approval path에는 raw token을 저장하지 않는다.
+- [ ] action item 후보 버튼, 부분 마스킹 member 정보, expired/retry 상태와 write confirmation UI를
+  기존 Agent UI 계약 안에서 연결한다. Frontend common area 해당 여부를 PR 전에 재확인한다.
+- [ ] query/mutation/confirmation E2E에서 0/1/N, 동명이인, ordinal 변경, expired/stale/cross-workspace,
+  double-submit, UUID/token 비노출을 검증한다.
+
+##### Phase 3 통합 완료 gate
+
+- [ ] #1386/#1387의 API 문서·tool snapshot·AI Worker schema가 같은 selector 계약을 가리키는지 비교한다.
+- [ ] App Server format/lint/test/build, AI Worker pytest, Frontend format/lint/test/build을 통과시킨다.
+- [ ] dev에서 자연어 요청 → clarification 후보 버튼 → 같은 run 재개 → read 실행 또는 write confirmation
+  → 승인/거절/만료를 대조하고, run/step/log/provider-visible context에 UUID·token이 없는지 확인한다.
+
+#### Phase 3 착수 전 제품 결정 필요
+
+- [ ] **`current`의 의미를 확정한다.** 권장값은 “현재 사용자가 참여 중인 Meeting”으로 한정하고, room의
+  현재 Meeting은 `roomName` selector로 분리한다. 그래야 `current`가 user-active와 room-active 사이에서
+  모호해지지 않는다.
+- [ ] **회의록 `roomName` 필터의 제품 범위를 확정한다.** 권장값은 #1386에서 Agent 내부 resolver로만
+  지원하고, 공개 `GET /meeting-reports` query를 넓히지 않는 것이다. public API 필터가 필요하면 API 계약
+  및 Meeting owner 확인을 같은 PR에 포함한다.
+- [ ] **기간 없는 회의록 조회의 기본값을 확정한다.** 권장값은 공개 API와 같은 `createdAt` 내림차순,
+  `limit` 범위 내 최신 결과이며, 자연어 날짜는 사용자 timezone에서 `[from, to)` UTC 범위로 변환한다.
+- [ ] **후속작업 ordinal의 대상을 확정한다.** 권장값은 “직전 같은 run의 같은 filter/sort 목록”에만
+  허용하고, 목록 문맥이 없거나 달라지면 후보 버튼 clarification으로 되돌리는 것이다.
+
 #### Phase 3 확정 제품·보안 결정
 
 - [x] 후보 선택은 자유 텍스트의 “1번/2번” 해석이 아니라 Agent 채팅의 **후보 버튼**으로 한다.
