@@ -39,6 +39,11 @@ export type CanvasRoomCheckpointState = {
   historySeq: number;
 };
 
+export type CanvasRoomDirtyState = {
+  payloadBytes: number;
+  shapeCount: number;
+};
+
 export type CanvasRoomHistoryState = {
   canRedo: boolean;
   canUndo: boolean;
@@ -82,10 +87,15 @@ export type CanvasRoomStateService = {
     patch: { deletedShapeIds: string[]; upsertShapes: Record<string, unknown>[] },
     options?: { actorUserId?: string | null },
   ) => CanvasRoomShapePatchResult;
+  clearRoomState: (room: CanvasRoomRef) => void;
   getCachedShapes: (room: CanvasRoomRef) => Record<string, unknown>[];
-  getCheckpointSnapshot: (room: CanvasRoomRef) => CanvasRoomCheckpointSnapshot;
+  getCheckpointSnapshot: (
+    room: CanvasRoomRef,
+    options?: { shapeIds?: string[] },
+  ) => CanvasRoomCheckpointSnapshot;
   getCheckpointState: (room: CanvasRoomRef) => CanvasRoomCheckpointState;
   getDeletedTombstones: (room: CanvasRoomRef) => string[];
+  getDirtyState: (room: CanvasRoomRef) => CanvasRoomDirtyState;
   getDirtyShapeIds: (room: CanvasRoomRef) => string[];
   getHistoryState: (room: CanvasRoomRef) => CanvasRoomHistoryState;
   getLoadedRegions: (room: CanvasRoomRef) => CanvasRoomLoadedRegion[];
@@ -117,6 +127,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
   const loadedRegionsByRoom = new Map<string, CanvasRoomLoadedRegion[]>();
   const deletedTombstonesByRoom = new Map<string, Map<string, number | null>>();
   const dirtyShapeIdsByRoom = new Map<string, Set<string>>();
+  const dirtyPayloadBytesByRoom = new Map<string, Map<string, number>>();
   const checkpointOperationIdsByRoom = new Map<string, Map<string, string>>();
   const checkpointHistorySeqByRoom = new Map<string, number | null>();
   const checkpointVersionByRoom = new Map<string, number>();
@@ -156,6 +167,38 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
     }
 
     return tombstones;
+  }
+
+  function estimateDirtyPayloadBytes(
+    shapeId: string,
+    shape: Record<string, unknown> | null,
+  ) {
+    try {
+      return Buffer.byteLength(
+        JSON.stringify(
+          shape ?? {
+            shapeId,
+            type: "delete",
+          },
+        ),
+        "utf8",
+      );
+    } catch {
+      return shape ? 1_024 : 64;
+    }
+  }
+
+  function markShapeDirty(
+    roomName: string,
+    shapeId: string,
+    shape: Record<string, unknown> | null,
+  ) {
+    getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName).add(shapeId);
+
+    const payloadBytes = dirtyPayloadBytesByRoom.get(roomName) ?? new Map();
+
+    payloadBytes.set(shapeId, estimateDirtyPayloadBytes(shapeId, shape));
+    dirtyPayloadBytesByRoom.set(roomName, payloadBytes);
   }
 
   function getNextHistorySeq(roomName: string) {
@@ -252,8 +295,6 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
 
     const shapeCache = getRoomShapeCache(roomName);
     const deletedTombstones = getRoomTombstones(roomName);
-    const dirtyShapeIds = getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName);
-
     patch.deletedShapeIds.forEach((shapeId) => {
       const normalizedShapeId = shapeId.trim();
 
@@ -264,7 +305,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       shapeCache.delete(normalizedShapeId);
       deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
       invalidateCheckpointOperationIds(roomName, normalizedShapeId);
-      dirtyShapeIds.add(normalizedShapeId);
+      markShapeDirty(roomName, normalizedShapeId, null);
     });
   }
 
@@ -484,7 +525,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       if (options.markDirty) {
         tombstones.delete(shapeId);
         invalidateCheckpointOperationIds(roomName, shapeId);
-        getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName).add(shapeId);
+        markShapeDirty(roomName, shapeId, nextShape);
       }
     });
 
@@ -574,8 +615,6 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       }
 
       const deletedTombstones = getRoomTombstones(roomName);
-      const dirtyShapeIds = getRoomShapeIdSet(dirtyShapeIdsByRoom, roomName);
-
       patch.deletedShapeIds.forEach((shapeId) => {
         const normalizedShapeId = shapeId.trim();
 
@@ -604,7 +643,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         shapeCache.delete(normalizedShapeId);
         deletedTombstones.set(normalizedShapeId, readShapeRevision(deletedShape));
         invalidateCheckpointOperationIds(roomName, normalizedShapeId);
-        dirtyShapeIds.add(normalizedShapeId);
+        markShapeDirty(roomName, normalizedShapeId, null);
       });
 
       return {
@@ -613,13 +652,30 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       };
     },
 
+    clearRoomState(room) {
+      const roomName = createCanvasRoomName(room);
+
+      receiveSequenceByRoom.delete(roomName);
+      loadedRegionsByRoom.delete(roomName);
+      deletedTombstonesByRoom.delete(roomName);
+      dirtyShapeIdsByRoom.delete(roomName);
+      dirtyPayloadBytesByRoom.delete(roomName);
+      checkpointOperationIdsByRoom.delete(roomName);
+      checkpointHistorySeqByRoom.delete(roomName);
+      checkpointVersionByRoom.delete(roomName);
+      historyByRoom.delete(roomName);
+      historySeqByRoom.delete(roomName);
+      redoHistoryByRoom.delete(roomName);
+      shapesByRoom.delete(roomName);
+    },
+
     getCachedShapes(room) {
       const shapeCache = shapesByRoom.get(createCanvasRoomName(room));
 
       return shapeCache ? Array.from(shapeCache.values(), ({ shape }) => shape) : [];
     },
 
-    getCheckpointSnapshot(room) {
+    getCheckpointSnapshot(room, options = {}) {
       const roomName = createCanvasRoomName(room);
       const shapeCache = shapesByRoom.get(roomName) ?? new Map();
       const dirtyShapeIds = dirtyShapeIdsByRoom.get(roomName) ?? new Set();
@@ -627,7 +683,10 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         deletedTombstonesByRoom.get(roomName) ?? new Map();
       const operations: CanvasCheckpointSyncOperation[] = [];
 
-      Array.from(dirtyShapeIds).forEach((shapeId) => {
+      const requestedShapeIds = options.shapeIds ?? Array.from(dirtyShapeIds);
+
+      requestedShapeIds.forEach((shapeId) => {
+        if (!dirtyShapeIds.has(shapeId)) return;
         if (deletedTombstones.has(shapeId)) {
           operations.push({
             baseRevision: null,
@@ -680,6 +739,20 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       );
     },
 
+    getDirtyState(room) {
+      const roomName = createCanvasRoomName(room);
+      const dirtyShapeIds = dirtyShapeIdsByRoom.get(roomName);
+      const payloadBytes = dirtyPayloadBytesByRoom.get(roomName);
+
+      return {
+        payloadBytes: Array.from(payloadBytes?.values() ?? []).reduce(
+          (sum, bytes) => sum + bytes,
+          0,
+        ),
+        shapeCount: dirtyShapeIds?.size ?? 0,
+      };
+    },
+
     getDirtyShapeIds(room) {
       return Array.from(dirtyShapeIdsByRoom.get(createCanvasRoomName(room)) ?? []);
     },
@@ -701,6 +774,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
         loadedRegionsByRoom,
         deletedTombstonesByRoom,
         dirtyShapeIdsByRoom,
+        dirtyPayloadBytesByRoom,
         checkpointOperationIdsByRoom,
         checkpointHistorySeqByRoom,
         checkpointVersionByRoom,
@@ -747,6 +821,7 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
       const shapeCache = shapesByRoom.get(roomName);
       const dirtyShapeIds = dirtyShapeIdsByRoom.get(roomName);
       const deletedTombstones = deletedTombstonesByRoom.get(roomName);
+      const dirtyPayloadBytes = dirtyPayloadBytesByRoom.get(roomName);
       const metadataById = readPersistedShapeMetadataById(result);
 
       operations.forEach((operation) => {
@@ -762,11 +837,20 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
               operation.shapeId,
               metadataById.get(operation.shapeId),
             );
+            const latestShape = shapeCache.get(operation.shapeId)?.shape;
+
+            if (dirtyShapeIds?.has(operation.shapeId) && latestShape) {
+              dirtyPayloadBytes?.set(
+                operation.shapeId,
+                estimateDirtyPayloadBytes(operation.shapeId, latestShape),
+              );
+            }
           }
           return;
         }
 
         dirtyShapeIds?.delete(operation.shapeId);
+        dirtyPayloadBytes?.delete(operation.shapeId);
         clearCheckpointOperationIds(roomName, operation.shapeId);
         if (operation.type === "delete") {
           deletedTombstones?.delete(operation.shapeId);
@@ -781,6 +865,13 @@ export function createCanvasRoomStateService(): CanvasRoomStateService {
           );
         }
       });
+
+      if (!dirtyShapeIds?.size) {
+        dirtyShapeIdsByRoom.delete(roomName);
+      }
+      if (!dirtyPayloadBytes?.size) {
+        dirtyPayloadBytesByRoom.delete(roomName);
+      }
 
       if (
         operations.length &&

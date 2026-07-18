@@ -814,16 +814,27 @@ preview는 최신 payload를 짧은 주기로 합쳐 전송한다.
 
 classic Canvas realtime roomState가 활성화된 경우 클라이언트는 매 shape 변경마다
 `/shapes/batch`를 직접 호출하지 않고, realtime-server가 dirty roomState를 checkpoint로
-묶어 App Server `/shapes/batch`에 저장한다. checkpoint는 첫 dirty 변경 후 5분 주기,
-새 사용자 입장 직전, 사용자 leave/disconnect, realtime-server 종료 시점에 실행한다.
-shape patch가 추가될 때마다 5분 타이머를 다시 시작하지 않는다. App Server는 계속
-DB transaction, revision/opSeq, operation log의 owner다.
+묶어 App Server `/shapes/batch`에 저장한다. 같은 Shape가 반복 변경되면 이벤트를 누적하지
+않고 최신 Shape 하나만 dirty로 유지한다. checkpoint는 마지막 Shape 변경 후 1분 idle,
+최초 dirty 후 최대 5분, dirty Shape 100개, dirty 예상 payload 1MB 중 먼저 도달한 조건에서
+실행한다. cursor, selection, camera, presence와 preview는 checkpoint 조건에 포함하지 않는다.
+App Server는 계속 DB transaction, revision/opSeq, operation log의 owner다.
+
+`/shapes/batch`의 최대 100개 계약은 유지한다. dirty가 100개를 넘으면 realtime-server가
+100개씩 연속 저장하며 batch 사이에 짧게 event loop를 양보한다. 방별 checkpoint는 하나만
+실행하고 서버 전체에서 동시에 저장하는 room 수도 제한한다. 일반 사용자의 leave/disconnect는
+checkpoint를 실행하지 않는다. 마지막 사용자가 나간 뒤 7.5초 동안 재입장이 없을 때만 남은
+dirty를 모두 저장하고, 성공하면 해당 빈 roomState를 정리한다. 새로고침으로 유예 시간 안에
+재입장하면 빈 room 정리를 취소한다. realtime-server 정상 종료 시에는 남은 dirty 전체의
+저장을 시도한다. 입장 직전 checkpoint는 viewport DB baseline과 roomState 병합 전환이
+완료될 때까지 호환 경로로 유지한다.
 
 일부 shape operation의 4xx 오류로 batch 전체가 rollback되면 realtime-server는 실패한
 operation을 격리해 성공 가능한 operation부터 저장한다. 인증 실패, rate limit, App Server
 장애처럼 batch 전체에 영향을 주는 오류는 operation별로 분할하지 않는다. checkpoint 실패
-operation은 dirty 상태로 유지하며 다음 5분 checkpoint 또는 입장·퇴장 checkpoint에서
-재시도한다.
+operation은 dirty 상태로 유지하며 `1초 → 2초 → 5초 → 10초 → 30초` backoff로
+재시도한다. 저장 중 같은 Shape가 다시 변경되면 이전 저장 성공 응답은 최신 dirty를
+제거하지 않으며, 최신 상태는 다음 checkpoint 대상으로 남는다.
 
 `canvas:room:checkpoint`는 checkpoint 저장 상태를 같은 room에 알리는 서버 이벤트다.
 payload는 `status`(`saving`, `saved`, `delayed`), `pendingOperations`, `updatedAt`을

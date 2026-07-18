@@ -294,12 +294,18 @@ assert.match(canvasRoomCheckpoint, /checkpointVersion: checkpointState\.checkpoi
 assert.match(canvasRoomCheckpoint, /historySeq: checkpointState\.historySeq/);
 assert.match(
   canvasRoomCheckpoint,
-  /CANVAS_CHECKPOINT_INTERVAL_MS = 5 \* 60 \* 1_000/
+  /CANVAS_CHECKPOINT_MAX_DIRTY_AGE_MS = 5 \* 60 \* 1_000/
 );
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_IDLE_MS = 60 \* 1_000/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_MAX_PAYLOAD_BYTES/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_MAX_CONCURRENT_ROOMS/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_RETRY_DELAYS_MS/);
 assert.match(canvasRoomCheckpoint, /SPLITTABLE_CHECKPOINT_STATUSES/);
-assert.match(canvasRoomCheckpoint, /if \(timersByRoom\.has\(roomKey\)\) return/);
+assert.match(canvasRoomCheckpoint, /scheduleDirtyTimers/);
+assert.match(canvasRoomCheckpoint, /scheduleEmptyRoomCleanup/);
+assert.match(canvasRoomCheckpoint, /pumpCheckpointQueue/);
 assert.match(canvasRoomCheckpoint, /flushCheckpointNow/);
-assert.match(canvasRoomCheckpoint, /await Promise\.all\(Array\.from\(roomsByKey\.keys\(\), flushCheckpoint\)\)/);
+assert.match(canvasRoomCheckpoint, /enqueueCheckpoint\(roomKey, "drain"/);
 assert.match(canvasRoomCheckpoint, /\/shapes\/batch/);
 assert.match(canvasRoomCheckpoint, /Authorization: `Bearer \$\{token\}`/);
 assert.match(canvasRoomCheckpoint, /onCheckpointStatus/);

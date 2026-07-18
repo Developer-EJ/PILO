@@ -79,6 +79,7 @@ export function createClassicCanvasMembershipRevocationHandler({
                   io,
                   presenceService,
                   room,
+                  roomCheckpointService,
                   roomName,
                   shapeLockService,
                   shapePreviewService,
@@ -137,6 +138,7 @@ async function cleanupClassicCanvasRoom({
   io,
   presenceService,
   room,
+  roomCheckpointService,
   roomName,
   shapeLockService,
   shapePreviewService,
@@ -146,6 +148,7 @@ async function cleanupClassicCanvasRoom({
   io: Server;
   presenceService: CanvasPresenceService;
   room: CanvasRoomRef;
+  roomCheckpointService: CanvasRoomCheckpointService;
   roomName: string;
   shapeLockService: CanvasShapeLockService;
   shapePreviewService: CanvasShapePreviewService;
@@ -166,6 +169,7 @@ async function cleanupClassicCanvasRoom({
   ]);
 
   await socket.leave(roomName);
+  roomCheckpointService.unregisterRoomParticipant(room, socket.id);
 
   if (leavePayload) {
     io.to(roomName).emit(canvasServerEvents.presenceLeave, leavePayload);

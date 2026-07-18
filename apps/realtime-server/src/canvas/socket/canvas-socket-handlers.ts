@@ -124,7 +124,15 @@ export function registerCanvasSocketHandlers({
       socket.data.revokedClassicCanvasWorkspaceIds.has(
         joinPayload.workspaceId,
       );
+    let participantRegistered = false;
     const rejectRevokedClassicJoin = () => {
+      if (participantRegistered) {
+        roomCheckpointService.unregisterRoomParticipant(
+          joinPayload,
+          socket.id,
+        );
+        participantRegistered = false;
+      }
       roomCheckpointService.revokeRoomAuthorization(
         joinPayload,
         socket.data.auth.userId,
@@ -140,6 +148,13 @@ export function registerCanvasSocketHandlers({
       return;
     }
 
+    roomCheckpointService.registerRoomParticipant(
+      joinPayload,
+      socket.id,
+      socket.data.auth.token,
+      socket.data.auth.userId,
+    );
+    participantRegistered = true;
     await roomCheckpointService.flushCheckpointNow(
       joinPayload,
       socket.data.auth.token,
@@ -205,14 +220,11 @@ export function registerCanvasSocketHandlers({
 
     if (!socket.rooms.has(roomName) || !hasCanvasRoomAccess(socket, roomName)) {
       await socket.leave(roomName);
+      roomCheckpointService.unregisterRoomParticipant(room, socket.id);
       return;
     }
-    await roomCheckpointService.flushCheckpointNow(
-      room,
-      socket.data.auth.token,
-      socket.data.auth.userId,
-    );
     await socket.leave(roomName);
+    roomCheckpointService.unregisterRoomParticipant(room, socket.id);
     socket.data.canvasRoomAccess.delete(roomName);
     socket.data.canvasRoomsByName.delete(roomName);
 
@@ -616,13 +628,9 @@ async function cleanupCanvasSocket({
     shapePreviewService.clearSocket(socket.id)
   ]);
 
-  await Promise.all(canvasRooms.map(room =>
-    roomCheckpointService.flushCheckpointNow(
-      room,
-      socket.data.auth.token,
-      socket.data.auth.userId,
-    )
-  ));
+  canvasRooms.forEach((room) => {
+    roomCheckpointService.unregisterRoomParticipant(room, socket.id);
+  });
   await Promise.all(canvasRooms.map(room => recordingActivityService.flushRoom(room)));
 
   for (const leavePayload of leaveEvents) {
