@@ -4,6 +4,7 @@ import { useMemo, type RefObject } from "react";
 
 import { useWorkspaceLocationAdapter } from "@/shared/workspace-presence/use-workspace-location-adapter";
 import type { WorkspacePresenceLocation } from "@/shared/workspace-presence/workspace-presence-types";
+import { restoreDriveAttachedPdfWhenReady } from "./drive-attached-pdf-follow";
 import {
   createDriveDocumentWorkspaceLocation,
   createDrivePdfWorkspaceLocation,
@@ -37,6 +38,17 @@ function findDrivePdfScroller(fileId: string) {
   ) ?? null;
 }
 
+function findOpenDrivePdfScroller() {
+  return document.querySelector<HTMLElement>(
+    "[data-workspace-follow-drive-pdf-file-id][data-workspace-follow-drive-pdf-page]",
+  );
+}
+
+function readDrivePdfPage(pdf: HTMLElement) {
+  const pageNumber = Number(pdf.dataset.workspaceFollowDrivePdfPage);
+  return Number.isInteger(pageNumber) && pageNumber > 0 ? pageNumber : null;
+}
+
 export function DriveWorkspaceLocationAdapter({
   documentId,
   folderId,
@@ -61,6 +73,30 @@ export function DriveWorkspaceLocationAdapter({
   const adapter = useMemo(
     () => ({
       capture() {
+        const pdf = pdfFileId
+          ? findDrivePdfScroller(pdfFileId)
+          : documentId
+            ? findOpenDrivePdfScroller()
+            : null;
+        const currentPdfFileId =
+          pdf?.dataset.workspaceFollowDrivePdfFileId ?? null;
+        const currentPdfPageNumber = pdf ? readDrivePdfPage(pdf) : null;
+        if (pdf && currentPdfFileId && currentPdfPageNumber) {
+          return createDrivePdfWorkspaceLocation({
+            documentId,
+            fileId: currentPdfFileId,
+            folderId: documentId ? null : folderId,
+            metrics: {
+              clientHeight: pdf.clientHeight,
+              clientWidth: pdf.clientWidth,
+              scrollHeight: pdf.scrollHeight,
+              scrollLeft: pdf.scrollLeft,
+              scrollTop: pdf.scrollTop,
+              scrollWidth: pdf.scrollWidth,
+            },
+            pageNumber: currentPdfPageNumber,
+          }) as WorkspacePresenceLocation;
+        }
         if (documentId && findDriveDocumentSurface(documentId)) {
           const scroller = getDocumentScroller();
           return createDriveDocumentWorkspaceLocation(documentId, {
@@ -71,24 +107,6 @@ export function DriveWorkspaceLocationAdapter({
             scrollTop: scroller.scrollTop,
             scrollWidth: scroller.scrollWidth,
           });
-        }
-        if (pdfFileId) {
-          const pdf = findDrivePdfScroller(pdfFileId);
-          if (pdf) {
-            return createDrivePdfWorkspaceLocation({
-              fileId: pdfFileId,
-              folderId,
-              metrics: {
-                clientHeight: pdf.clientHeight,
-                clientWidth: pdf.clientWidth,
-                scrollHeight: pdf.scrollHeight,
-                scrollLeft: pdf.scrollLeft,
-                scrollTop: pdf.scrollTop,
-                scrollWidth: pdf.scrollWidth,
-              },
-              pageNumber: pdfPageNumber,
-            }) as WorkspacePresenceLocation;
-          }
         }
         const list = listRef.current;
         if (!list) return null;
@@ -129,10 +147,24 @@ export function DriveWorkspaceLocationAdapter({
           return true;
         }
         if (target.surface === "pdf") {
-          if (!(await openPdf(target.fileId, target.folderId)) || signal.aborted) {
-            return false;
+          if ("documentId" in target) {
+            if (target.documentId !== documentId) return false;
+            const opened = await restoreDriveAttachedPdfWhenReady({
+              fileId: target.fileId,
+              pageNumber: target.pageNumber,
+              signal,
+              timeoutMs: 5_000,
+            });
+            if (!opened || signal.aborted) return false;
+          } else {
+            if (
+              !(await openPdf(target.fileId, target.folderId)) ||
+              signal.aborted
+            ) {
+              return false;
+            }
+            setPdfPageNumber(target.pageNumber);
           }
-          setPdfPageNumber(target.pageNumber);
           const pdf = await waitForDriveSurfaceTarget({
             findTarget: () => findDrivePdfScroller(target.fileId),
             signal,

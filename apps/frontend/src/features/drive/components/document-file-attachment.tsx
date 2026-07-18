@@ -14,6 +14,7 @@ import { useAuthSession } from "@/features/auth";
 import { DriveApiError, createDriveApiClient } from "@/features/drive/api/client";
 import type { DriveItem } from "@/features/drive/types";
 
+import { driveAttachedPdfFollowCoordinator } from "../drive-attached-pdf-follow";
 import styles from "./document-editor.module.css";
 import { PdfPreviewDialog } from "./pdf-preview-dialog";
 
@@ -105,6 +106,18 @@ function DocumentFileAttachmentView({ node, deleteNode, editor }: NodeViewProps)
 
   const file = attachmentState.status === "ready" ? attachmentState.file : null;
   const isPdf = file?.mimeType === "application/pdf";
+  const openPdfPreviewAtPage = useCallback((pageNumber: number) => {
+    setPreviewPageNumber(pageNumber);
+    setIsPreviewOpen(true);
+  }, []);
+
+  useEffect(
+    () =>
+      driveAttachedPdfFollowCoordinator.register(driveItemId, {
+        openAtPage: openPdfPreviewAtPage,
+      }),
+    [driveItemId, openPdfPreviewAtPage],
+  );
 
   function openPdfPreview() {
     setPreviewPageNumber(1);

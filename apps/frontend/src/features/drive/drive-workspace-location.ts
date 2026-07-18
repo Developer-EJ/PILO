@@ -75,11 +75,13 @@ export function createDriveDocumentWorkspaceLocation(
 }
 
 export function createDrivePdfWorkspaceLocation({
+  documentId = null,
   fileId,
   folderId,
   metrics,
   pageNumber,
 }: {
+  documentId?: string | null;
   fileId: string;
   folderId: string | null;
   metrics: ScrollMetrics;
@@ -87,7 +89,7 @@ export function createDrivePdfWorkspaceLocation({
 }) {
   return {
     context: {
-      documentId: null,
+      documentId,
       folderId,
       pdfFileId: fileId,
       pdfPage: String(pageNumber),
@@ -95,7 +97,11 @@ export function createDrivePdfWorkspaceLocation({
     page: "drive" as const,
     route: {
       pathname: "/files",
-      search: folderId ? `?folderId=${encodeURIComponent(folderId)}` : "",
+      search: documentId
+        ? `?documentId=${encodeURIComponent(documentId)}`
+        : folderId
+          ? `?folderId=${encodeURIComponent(folderId)}`
+          : "",
     },
     viewport: {
       kind: "element" as const,
@@ -154,7 +160,9 @@ export function readDriveWorkspaceTarget(location: DriveLocationLike) {
     Number.isFinite(viewport.xRatio) &&
     Number.isFinite(viewport.yRatio)
   ) {
+    const pdfDocumentId = normalizedId(location.context.documentId);
     return {
+      ...(pdfDocumentId ? { documentId: pdfDocumentId } : {}),
       fileId,
       folderId: normalizedId(location.context.folderId),
       pageNumber: parsedPage,

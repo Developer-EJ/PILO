@@ -103,6 +103,83 @@ test("Drive PDF 읽기 위치는 opaque file ID, page와 읽기 영역 scroll ra
   );
 });
 
+test("Drive 문서 첨부 PDF는 document route에서 file/page를 capture하고 등록된 preview로 restore한다", async () => {
+  const location = createDrivePdfWorkspaceLocation({
+    documentId: "document-1",
+    fileId: "attached-pdf-1",
+    folderId: null,
+    metrics: {
+      clientHeight: 400,
+      clientWidth: 600,
+      scrollHeight: 1_400,
+      scrollLeft: 0,
+      scrollTop: 500,
+      scrollWidth: 600,
+    },
+    pageNumber: 4,
+  });
+
+  assert.equal(location.route.search, "?documentId=document-1");
+  assert.equal(location.context.documentId, "document-1");
+  const target = readDriveWorkspaceTarget(location);
+  assert.deepEqual(target, {
+    documentId: "document-1",
+    fileId: "attached-pdf-1",
+    folderId: null,
+    pageNumber: 4,
+    surface: "pdf",
+    viewport: location.viewport,
+  });
+
+  const coordinatorModule = await import("./drive-attached-pdf-follow.ts").catch(
+    () => ({}),
+  );
+  assert.equal(
+    typeof coordinatorModule.createDriveAttachedPdfFollowCoordinator,
+    "function",
+  );
+  assert.equal(
+    typeof coordinatorModule.restoreDriveAttachedPdfWhenReady,
+    "function",
+  );
+  const coordinator = coordinatorModule.createDriveAttachedPdfFollowCoordinator();
+  const restoredPages = [];
+  let unregister = () => {};
+  setTimeout(() => {
+    unregister = coordinator.register("attached-pdf-1", {
+      openAtPage: (pageNumber) => restoredPages.push(pageNumber),
+    });
+  }, 5);
+
+  assert.equal(
+    await coordinatorModule.restoreDriveAttachedPdfWhenReady({
+      coordinator,
+      fileId: target.fileId,
+      intervalMs: 1,
+      pageNumber: target.pageNumber,
+      signal: new AbortController().signal,
+      timeoutMs: 100,
+    }),
+    true,
+  );
+  assert.deepEqual(restoredPages, [4]);
+  unregister();
+  assert.equal(coordinator.openAtPage(target.fileId, 2), false);
+  assert.equal(JSON.stringify(location).includes("contentJson"), false);
+  assert.equal(JSON.stringify(location).includes("yjsState"), false);
+
+  const adapter = await readFile(
+    new URL("./drive-workspace-location-adapter.tsx", import.meta.url),
+    "utf8",
+  );
+  const attachment = await readFile(
+    new URL("./components/document-file-attachment.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(adapter, /restoreDriveAttachedPdfWhenReady/);
+  assert.match(attachment, /driveAttachedPdfFollowCoordinator\.register/);
+});
+
 test("Drive read surface restore 대기는 abort 후 늦게 mount된 target을 무시한다", async () => {
   assert.equal(typeof waitForDriveSurfaceTarget, "function");
   const controller = new AbortController();

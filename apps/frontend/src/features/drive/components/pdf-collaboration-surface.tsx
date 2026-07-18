@@ -405,6 +405,7 @@ export function PdfCollaborationSurface({
         ref={viewportRef}
         className={styles.pdfCollaborationViewport}
         data-workspace-follow-drive-pdf-file-id={fileId}
+        data-workspace-follow-drive-pdf-page={pageNumber}
       >
         <div className={styles.pdfPageFrame} style={{ width: pageWidth }}>
           <Document
