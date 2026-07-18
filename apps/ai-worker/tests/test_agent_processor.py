@@ -377,6 +377,40 @@ def test_meeting_candidate_selection_resumes_terminal_goal_without_repeating_loo
     assert normalized.output_summary["input"] == {"useSelectedMeetingRoomCandidate": True}
 
 
+def test_meeting_candidate_selection_prefers_terminal_clarification_over_retrieval_goal() -> None:
+    tools = [
+        tool_snapshot(
+            name="find_action_items",
+            executionMode="contextual",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        tool_snapshot(
+            name="summarize_meeting_report",
+            executionMode="contextual",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+    planning_context = (
+        'selected meeting candidate resume: {"clarificationToolName":"find_action_items",'
+        '"goalToolName":"summarize_meeting_report","resourceType":"meeting_report",'
+        '"toolInput":{"roomName":"개발 회의실"}}'
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={"roomName": "개발 회의실"},
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "find_action_items"
+    assert normalized.output_summary["input"] == {"useSelectedMeetingReportCandidate": True}
+
+
 def test_meeting_candidate_selection_recovers_compatible_goal_when_catalog_was_missing() -> None:
     tools = [
         tool_snapshot(

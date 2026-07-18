@@ -1525,12 +1525,12 @@ def _normalize_meeting_candidate_goal_resume(
         return decision
 
     compatible_goal_tools = MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE.get(resource_type, set())
-    if goal_tool_name not in compatible_goal_tools:
-        goal_tool_name = _meeting_candidate_fallback_goal(
-            decision,
-            clarification_tool_name=clarification_tool_name,
-            compatible_goal_tools=compatible_goal_tools,
-        )
+    goal_tool_name = _meeting_candidate_goal(
+        decision,
+        stored_goal_tool_name=goal_tool_name,
+        clarification_tool_name=clarification_tool_name,
+        compatible_goal_tools=compatible_goal_tools,
+    )
     if goal_tool_name is None:
         return _meeting_candidate_resume_clarification("meeting_candidate_goal")
 
@@ -1595,14 +1595,20 @@ def _latest_meeting_candidate_resume(planning_context: str) -> dict[str, object]
     return None
 
 
-def _meeting_candidate_fallback_goal(
+def _meeting_candidate_goal(
     decision: AgentPlannerDecision,
     *,
+    stored_goal_tool_name: str,
     clarification_tool_name: str,
     compatible_goal_tools: set[str],
 ) -> str | None:
     if clarification_tool_name in compatible_goal_tools:
         return clarification_tool_name
+    if (
+        clarification_tool_name == "resolve_meeting_resource"
+        and stored_goal_tool_name in compatible_goal_tools
+    ):
+        return stored_goal_tool_name
     if decision.status == "tool_candidate" and decision.tool_name in compatible_goal_tools:
         return decision.tool_name
     return None
