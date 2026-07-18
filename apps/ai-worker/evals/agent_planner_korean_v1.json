@@ -1988,6 +1988,56 @@
       "expected": {
         "status": "tool_candidate",
         "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": [
+            "summary"
+          ]
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_summary_discussion_and_decisions",
+      "prompt": "회의록의 논의사항과 결정사항만 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": [
+            "discussionPoints",
+            "decisions"
+          ]
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_summary_action_items_only",
+      "prompt": "회의록 요약에서 후속 작업만 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": [
+            "actionItems"
+          ]
+        },
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "id": "meeting_summary_excludes_decisions",
+      "prompt": "회의록 요약에서 결정사항은 빼고 보여줘",
+      "expected": {
+        "status": "tool_candidate",
+        "toolName": "summarize_meeting_report",
+        "inputContains": {
+          "sections": [
+            "summary",
+            "discussionPoints",
+            "actionItems"
+          ]
+        },
         "requiresConfirmation": false
       }
     },
