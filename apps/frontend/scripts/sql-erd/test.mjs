@@ -8096,11 +8096,20 @@ assert.match(annotationShape, /SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT/);
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_DELETE_EVENT/);
 assert.match(annotationShape, /getSqlErdRelationCurvePathData/);
 assert.match(annotationShape, /getSqlErdRelationCurveMidpoint/);
+assert.match(
+  annotationShape,
+  /const shouldShowLabel = isSelected \|\| shape\.props\.label\.length > 0/
+);
+assert.match(annotationShape, /\{shouldShowLabel \? \(/);
 assert.doesNotMatch(
   annotationShape,
   /\(startPoint\.x \+ endPoint\.x\) \/ 2/
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
+assert.match(panel, /whitespace-pre-wrap/);
+assert.match(panel, /\[overflow-wrap:anywhere\]/);
+assert.doesNotMatch(panel, /min-w-\[760px\]/);
+assert.doesNotMatch(panel, /<code className="whitespace-pre px-2">/);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
 assert.match(frameShape, /editor\.select\(shape\.id\)/);
 assert.match(frameShape, /resizeBox/);
