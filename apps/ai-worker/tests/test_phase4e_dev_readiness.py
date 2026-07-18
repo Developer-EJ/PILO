@@ -1,0 +1,143 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from app.phase4e_dev_readiness import (
+    PHASE4E_READINESS_FORMAT,
+    Phase4eReadinessInputs,
+    evaluate_phase4e_dev_readiness,
+)
+
+CATALOG_PATH = Path(__file__).parents[1] / "evals" / "meeting_agent_capability_catalog_v1.json"
+
+
+def write_json(path: Path, value: object) -> Path:
+    path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
+    hashes = {
+        "inventorySha256": "a" * 64,
+        "catalogSha256": "b" * 64,
+        "eligibleSnapshotSha256": "c" * 64,
+    }
+    registry = {
+        "format": "agent-tool-retrieval-registry-snapshot:v1",
+        "inventory": {
+            "sha256": hashes["inventorySha256"],
+            "catalogSha256": hashes["catalogSha256"],
+        },
+        "eligibleSnapshotSha256": hashes["eligibleSnapshotSha256"],
+        "toolCapabilityCatalog": {"capabilities": [], "descriptors": []},
+    }
+    retrieval = {
+        "format": "agent-tool-retrieval-quality-baseline:v1",
+        "passed": True,
+        "metadata": {
+            "registryInventorySha256": hashes["inventorySha256"],
+            "registryCatalogSha256": hashes["catalogSha256"],
+            "registryEligibleSnapshotSha256": hashes["eligibleSnapshotSha256"],
+        },
+        "thresholds": {
+            "canonicalRequiredToolRecallAt8": 1.0,
+            "heldOutDomainRecallAt8": 0.95,
+            "heldOutCapabilityRecallAt8": 0.95,
+        },
+        "metrics": {
+            "canonicalRequiredToolRecallAt8": 1.0,
+            "heldOutDomainRecallAt8": 1.0,
+            "heldOutCapabilityRecallAt8": 1.0,
+        },
+        "privacy": {"violationCount": 0},
+    }
+    security = {
+        "version": "agent-prompt-security-gate:v1",
+        "passed": True,
+        "caseCount": 26,
+        "blockedCount": 17,
+        "allowedCount": 9,
+    }
+    app_server = {
+        "format": "phase4e-meeting-runtime-readiness:v1",
+        "passed": True,
+        "registry": hashes,
+        "checks": [{"id": "meeting_write_contracts", "status": "passed"}],
+        "writeContracts": [
+            {"contractId": "meeting.control.leave"},
+            {"contractId": "meeting.recording.end"},
+            {"contractId": "meeting.action_items.update"},
+            {"contractId": "meeting.action_items.approve"},
+        ],
+    }
+    terraform = tmp_path / "main.tf"
+    terraform.write_text(
+        'environment = {\n  AGENT_TOOL_RETRIEVAL_MODE = "shortlist"\n}\n',
+        encoding="utf-8",
+    )
+    runbook = tmp_path / "runbook.md"
+    runbook.write_text(
+        "AGENT_TOOL_RETRIEVAL_MODE `shortlist` `shadow` Terraform apply "
+        "usedShortlist fallback reason confirmation 실행 직전",
+        encoding="utf-8",
+    )
+    return Phase4eReadinessInputs(
+        registry_snapshot=write_json(tmp_path / "registry.json", registry),
+        tool_retrieval_report=write_json(tmp_path / "retrieval.json", retrieval),
+        prompt_security_report=write_json(tmp_path / "security.json", security),
+        app_server_report=write_json(tmp_path / "app-server.json", app_server),
+        meeting_catalog=CATALOG_PATH,
+        dev_terraform=terraform,
+        rollout_runbook=runbook,
+    )
+
+
+def test_phase4e_readiness_combines_all_gates_without_raw_values(tmp_path: Path) -> None:
+    report = evaluate_phase4e_dev_readiness(readiness_inputs(tmp_path))
+
+    assert report["format"] == PHASE4E_READINESS_FORMAT
+    assert report["passed"] is True
+    assert report["regression"] == {
+        "capabilityCount": 18,
+        "canonicalCount": 216,
+        "heldOutCount": 54,
+        "counterexampleCount": 72,
+        "multiTurnCount": 54,
+        "selectorCardinalityCount": 4,
+    }
+    assert report["runtime"] == {"writeContractCount": 4}
+    serialized = json.dumps(report, ensure_ascii=False)
+    assert "회의방 목록 보여줘" not in serialized
+    assert "resourceId" not in serialized
+    assert "token" not in serialized.lower()
+
+
+def test_phase4e_readiness_fails_when_retrieval_threshold_is_not_met(tmp_path: Path) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.tool_retrieval_report.read_text(encoding="utf-8"))
+    report["metrics"]["heldOutCapabilityRecallAt8"] = 0.94
+    write_json(inputs.tool_retrieval_report, report)
+
+    with pytest.raises(ValueError, match="Retrieval threshold failed"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_fails_when_dev_is_not_shortlist(tmp_path: Path) -> None:
+    inputs = readiness_inputs(tmp_path)
+    inputs.dev_terraform.write_text('AGENT_TOOL_RETRIEVAL_MODE = "shadow"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="default to shortlist"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_fails_when_write_contract_evidence_is_incomplete(
+    tmp_path: Path,
+) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.app_server_report.read_text(encoding="utf-8"))
+    report["writeContracts"] = report["writeContracts"][:3]
+    write_json(inputs.app_server_report, report)
+
+    with pytest.raises(ValueError, match="write readiness contracts"):
+        evaluate_phase4e_dev_readiness(inputs)
