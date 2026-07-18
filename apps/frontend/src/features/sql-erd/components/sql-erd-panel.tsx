@@ -198,6 +198,7 @@ import {
   type SqlErdSchemaMutationResult
 } from "@/features/sql-erd/utils/schema-mutation";
 import {
+  createSqlErdGeneratedSqlParseError,
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
   createSqlErdSplitDiffRows,
@@ -1021,7 +1022,18 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         }
 
         if (!parseResult.ok) {
-          setNormalizedSqlApplyError(parseResult.error.message);
+          setNormalizedSqlApplyError(
+            createSqlErdGeneratedSqlParseError(
+              {
+                modelJson: sourceMapModelJson,
+                resolvedDialect: resolveSqlSourceEditorDialect(
+                  targetSnapshot.dialect,
+                  lastResolvedDialect
+                )
+              },
+              parseResult.error.message
+            )
+          );
           setIsNormalizedSqlApplying(false);
           return;
         }
@@ -1066,6 +1078,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     [
       applySqlErdEditAction,
       isNormalizedSqlApplying,
+      lastResolvedDialect,
       runSqlErdParseWorker,
       setPendingSourceAutosaveSnapshot
     ]
@@ -2536,7 +2549,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
           isReadOnly={isWriteProtocolMismatch}
+          isInspectorOpen={isInspectorOpen}
           isSqlSourceOpen={isSourceOpen}
+          onInspectorOpenChange={setIsInspectorOpen}
           selectedSqlErdObject={selectedSqlErdObject}
           sessionId={sessionId}
         />
@@ -2730,11 +2745,11 @@ function SqlPreviewDiff({
         <p className="border-r px-3 py-2">변경 전</p>
         <p className="px-3 py-2">변경 후</p>
       </div>
-      <div className="max-h-80 overflow-auto bg-slate-950 font-mono text-xs leading-5 text-slate-100">
-        <div className="min-w-[760px]">
+      <div className="max-h-80 overflow-y-auto overflow-x-hidden bg-slate-950 font-mono text-xs leading-5 text-slate-100">
+        <div className="min-w-0">
           {visibleRows.map((row, index) => (
             <div
-              className="grid grid-cols-2"
+              className="grid grid-cols-2 items-stretch"
               key={`${index}-${row.before.lineNumber}-${row.after.lineNumber}`}
             >
               <SqlPreviewDiffCell cell={row.before} side="before" />
@@ -2772,7 +2787,7 @@ function SqlPreviewDiffCell({
       <span className="select-none border-r border-slate-700 px-2 text-right text-slate-500">
         {cell.lineNumber ?? ""}
       </span>
-      <code className="whitespace-pre px-2">
+      <code className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] px-2">
         {cell.kind === "added" ? "+ " : cell.kind === "removed" ? "- " : "  "}
         {cell.value}
       </code>
@@ -3414,7 +3429,9 @@ type CanvasShellProps = {
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
   isReadOnly: boolean;
+  isInspectorOpen: boolean;
   isSqlSourceOpen: boolean;
+  onInspectorOpenChange: (isOpen: boolean) => void;
   selectedSqlErdObject: SqlErdSelection;
   sessionId: string;
 };
@@ -3437,7 +3454,9 @@ function CanvasShell({
   pinnedTableId,
   realtimeConfig,
   isReadOnly,
+  isInspectorOpen,
   isSqlSourceOpen,
+  onInspectorOpenChange,
   selectedSqlErdObject,
   sessionId
 }: CanvasShellProps) {
@@ -3457,7 +3476,9 @@ function CanvasShell({
         pinnedTableId={pinnedTableId}
         realtimeConfig={realtimeConfig}
         isReadOnly={isReadOnly}
+        isInspectorOpen={isInspectorOpen}
         isSqlSourceOpen={isSqlSourceOpen}
+        onInspectorOpenChange={onInspectorOpenChange}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
         tableFocus={agentTableFocus}
@@ -3667,7 +3688,10 @@ function InspectorPanel({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
+      <div
+        className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+        data-workspace-follow-surface="sql-erd-inspector"
+      >
         <InspectorContent
           canAddForeignKey={canAddForeignKey}
           canEditSchema={canEditSchema}

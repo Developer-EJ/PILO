@@ -12,6 +12,7 @@ from app.agent_planner_evaluation import (
     build_legacy_shadow_comparison,
     evaluate_suite,
     load_evaluation_suite,
+    load_meeting_regression_suite,
     select_shadow_planner_tools,
 )
 from app.agent_processor import AgentPlannerDecision
@@ -86,6 +87,27 @@ def write_suite(tmp_path, cases):
         encoding="utf-8",
     )
     return path
+
+
+def test_context_regression_case_forwards_safe_planning_context() -> None:
+    root = Path(__file__).parents[1]
+    suite = load_meeting_regression_suite(
+        root / "evals" / "meeting_agent_capability_catalog_v1.json",
+        root / "evals" / "agent_planner_korean_v1.json",
+        variant="context",
+    )
+    case = suite.cases[0]
+    planner = FakePlanner([decision()])
+
+    evaluate_suite(
+        planner,
+        replace(suite, cases=(case,)),
+        current_date="2026-07-18",
+    )
+
+    assert planner.requests[0].planning_context == case.planning_context
+    assert "previous resource:" in planner.requests[0].planning_context
+    assert "00000000-0000-4000-8000-000000000001" not in planner.requests[0].planning_context
 
 
 def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unknown_prompt(
@@ -590,9 +612,10 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["meeting_rooms"].tool_name == "list_meeting_rooms"
     assert expectations["meeting_active"].tool_name == "get_active_meeting"
     assert expectations["meeting_participants"].input_contains == {
-        "meetingId": "123e4567-e89b-12d3-a456-426614174000",
+        "current": True,
     }
-    assert expectations["meeting_recording_missing_id"].missing_fields == ("meetingId",)
+    assert expectations["meeting_recording_missing_id"].tool_name == "start_meeting_recording"
+    assert expectations["meeting_recording_missing_id"].requires_confirmation is True
     assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
     assert expectations["sql_erd_generate"].requires_confirmation is None
     assert expectations["sql_erd_focus_payment_tables"].tool_name == "inspect_sql_erd_schema"

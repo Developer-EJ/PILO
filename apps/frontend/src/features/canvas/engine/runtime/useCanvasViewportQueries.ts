@@ -1,7 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/canvas-storage";
-import { isPiloFrameCollapsed } from "@/features/canvas/engine/shapes/frame/canvas-frame-collapse";
 import type {
   PiloCanvasFreeformShape,
   PiloCanvasViewportBounds,
@@ -43,6 +42,11 @@ export type CanvasInitialViewportLoadStatus =
   | "retrying"
   | "loaded";
 
+export type CanvasAdditionalViewportLoadStatus =
+  | "idle"
+  | "loading"
+  | "retrying";
+
 type UseCanvasViewportQueriesOptions = {
   board: CanvasBoardDetail;
   canvasClient: CanvasViewSettingApiClient | null;
@@ -66,13 +70,12 @@ type UseCanvasViewportQueriesOptions = {
   viewportShapeLoadTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
 };
 
-function shouldLoadExpandedFrameChildren(
+function shouldLoadFrameChildren(
   shape: PiloCanvasFreeformShape,
 ): shape is PiloCanvasFreeformShape & { id: string; type: "frame" } {
   return (
     shape.type === "frame" &&
-    typeof shape.id === "string" &&
-    !isPiloFrameCollapsed(shape)
+    typeof shape.id === "string"
   );
 }
 
@@ -137,7 +140,9 @@ export function useCanvasViewportQueries({
   const frameSubtreeRecoveryTimersRef = useRef(
     new Map<string, ReturnType<typeof setTimeout>>(),
   );
-  const loadFrameChildrenRef = useRef<(frameId: string) => void>(() => {});
+  const loadFrameChildrenRef = useRef<
+    (frameId: string, visitedFrameIds?: Set<string>) => void
+  >(() => {});
   const loadFrameSubtreeRef = useRef<
     (frameId: string) => Promise<void>
   >(async () => {});
@@ -149,9 +154,17 @@ export function useCanvasViewportQueries({
   const initialViewportLoadCompletedRef = useRef(false);
   const [initialViewportLoadStatus, setInitialViewportLoadStatus] =
     useState<CanvasInitialViewportLoadStatus>("idle");
+  const [additionalViewportLoadStatus, setAdditionalViewportLoadStatus] =
+    useState<CanvasAdditionalViewportLoadStatus>("idle");
   const [loadingFrameIds, setLoadingFrameIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [loadingFrameChildrenIds, setLoadingFrameChildrenIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const [loadingFrameSubtreeIds, setLoadingFrameSubtreeIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const loadedViewportBoundsRef = useRef<{
     boardId: string;
     bounds: LoadedViewportShapeBounds[];
@@ -179,6 +192,52 @@ export function useCanvasViewportQueries({
     });
   }, []);
 
+  const setFrameChildrenLoading = useCallback(
+    (frameId: string, isLoading: boolean) => {
+      setLoadingFrameChildrenIds((currentFrameIds) => {
+        const hasFrame = currentFrameIds.has(frameId);
+
+        if (hasFrame === isLoading) {
+          return currentFrameIds;
+        }
+
+        const nextFrameIds = new Set(currentFrameIds);
+
+        if (isLoading) {
+          nextFrameIds.add(frameId);
+        } else {
+          nextFrameIds.delete(frameId);
+        }
+
+        return nextFrameIds;
+      });
+    },
+    [],
+  );
+
+  const setFrameSubtreeLoading = useCallback(
+    (frameId: string, isLoading: boolean) => {
+      setLoadingFrameSubtreeIds((currentFrameIds) => {
+        const hasFrame = currentFrameIds.has(frameId);
+
+        if (hasFrame === isLoading) {
+          return currentFrameIds;
+        }
+
+        const nextFrameIds = new Set(currentFrameIds);
+
+        if (isLoading) {
+          nextFrameIds.add(frameId);
+        } else {
+          nextFrameIds.delete(frameId);
+        }
+
+        return nextFrameIds;
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     isMountedRef.current = true;
 
@@ -190,7 +249,10 @@ export function useCanvasViewportQueries({
   useEffect(() => {
     initialViewportLoadCompletedRef.current = false;
     setInitialViewportLoadStatus("idle");
+    setAdditionalViewportLoadStatus("idle");
     setLoadingFrameIds(new Set());
+    setLoadingFrameChildrenIds(new Set());
+    setLoadingFrameSubtreeIds(new Set());
     frameChildrenRecoveryTimersRef.current.forEach((timer) => {
       clearTimeout(timer);
     });
@@ -246,8 +308,14 @@ export function useCanvasViewportQueries({
 
       const nextVisitedFrameIds = new Set(visitedFrameIds);
       nextVisitedFrameIds.add(frameId);
+      const isNestedFrameLoad = visitedFrameIds.size > 0;
       loadingFrameChildrenRef.current.add(frameId);
       setFrameLoading(frameId, true);
+      if (isNestedFrameLoad) {
+        setFrameSubtreeLoading(frameId, true);
+      } else {
+        setFrameChildrenLoading(frameId, true);
+      }
 
       function mergeFrameChildren(loadedShapes: PiloCanvasFreeformShape[]) {
         const nextLoadedShapes = loadedShapes.filter(
@@ -266,7 +334,7 @@ export function useCanvasViewportQueries({
         });
         mergeLoadedFreeformShapes(nextLoadedShapes);
         nextLoadedShapes.forEach((shape) => {
-          if (shouldLoadExpandedFrameChildren(shape)) {
+          if (shouldLoadFrameChildren(shape)) {
             loadFrameChildren(shape.id, nextVisitedFrameIds);
           }
         });
@@ -287,6 +355,11 @@ export function useCanvasViewportQueries({
         mergeFrameChildren(cachedShapes);
         loadingFrameChildrenRef.current.delete(frameId);
         setFrameLoading(frameId, false);
+        if (isNestedFrameLoad) {
+          setFrameSubtreeLoading(frameId, false);
+        } else {
+          setFrameChildrenLoading(frameId, false);
+        }
         return;
       }
 
@@ -354,7 +427,10 @@ export function useCanvasViewportQueries({
             keepLoadingIndicator = true;
             const timer = setTimeout(() => {
               frameChildrenRecoveryTimersRef.current.delete(frameId);
-              loadFrameChildrenRef.current(frameId);
+              loadFrameChildrenRef.current(
+                frameId,
+                new Set(visitedFrameIds),
+              );
             }, CANVAS_LAZY_LOAD_RECOVERY_DELAY_MS);
 
             frameChildrenRecoveryTimersRef.current.set(frameId, timer);
@@ -364,10 +440,20 @@ export function useCanvasViewportQueries({
           loadingFrameChildrenRef.current.delete(frameId);
           if (pendingFrameChildrenReloadRef.current.delete(frameId)) {
             keepLoadingIndicator = true;
+            if (isNestedFrameLoad) {
+              setFrameSubtreeLoading(frameId, false);
+            } else {
+              setFrameChildrenLoading(frameId, false);
+            }
             loadFrameChildren(frameId);
           }
           if (!keepLoadingIndicator && isMountedRef.current) {
             setFrameLoading(frameId, false);
+            if (isNestedFrameLoad) {
+              setFrameSubtreeLoading(frameId, false);
+            } else {
+              setFrameChildrenLoading(frameId, false);
+            }
           }
         });
     },
@@ -383,6 +469,8 @@ export function useCanvasViewportQueries({
       storageMode,
       unloadedShapeIdsRef,
       setFrameLoading,
+      setFrameChildrenLoading,
+      setFrameSubtreeLoading,
     ],
   );
   loadFrameChildrenRef.current = loadFrameChildren;
@@ -397,6 +485,7 @@ export function useCanvasViewportQueries({
       }
 
       const visitedFrameIds = new Set<string>();
+      setFrameSubtreeLoading(rootFrameId, true);
 
       async function visit(frameId: string, depth: number): Promise<void> {
         if (visitedFrameIds.has(frameId) || visitedFrameIds.size >= 160 || depth > 12) return;
@@ -471,6 +560,8 @@ export function useCanvasViewportQueries({
         }
       }
 
+      let keepLoadingIndicator = false;
+
       try {
         await visit(rootFrameId, 0);
       } catch (error) {
@@ -480,6 +571,7 @@ export function useCanvasViewportQueries({
           activeBoardIdRef.current === board.id &&
           !frameSubtreeRecoveryTimersRef.current.has(rootFrameId)
         ) {
+          keepLoadingIndicator = true;
           setFrameLoading(rootFrameId, true);
           const timer = setTimeout(() => {
             frameSubtreeRecoveryTimersRef.current.delete(rootFrameId);
@@ -499,6 +591,10 @@ export function useCanvasViewportQueries({
         }
 
         throw error;
+      } finally {
+        if (!keepLoadingIndicator && isMountedRef.current) {
+          setFrameSubtreeLoading(rootFrameId, false);
+        }
       }
     },
     [
@@ -513,6 +609,7 @@ export function useCanvasViewportQueries({
       storageMode,
       unloadedShapeIdsRef,
       setFrameLoading,
+      setFrameSubtreeLoading,
     ],
   );
   loadFrameSubtreeRef.current = loadFrameSubtree;
@@ -571,12 +668,18 @@ export function useCanvasViewportQueries({
 
         const requestBounds = createViewportShapeLoadBounds(latestBounds);
         const requestSeq = viewportShapeLoadRequestSeqRef.current + 1;
+        const isInitialViewportRequest =
+          !initialViewportLoadCompletedRef.current;
         viewportShapeLoadRequestSeqRef.current = requestSeq;
+        if (!isInitialViewportRequest) {
+          setAdditionalViewportLoadStatus("loading");
+        }
         const queryKey = buildViewportShapeQueryKey({
           boardId: board.id,
           bounds: latestBounds,
           workspaceId: board.workspaceId,
         });
+        let keepAdditionalViewportLoading = false;
 
         void queryClient
           .cancelQueries({
@@ -609,12 +712,15 @@ export function useCanvasViewportQueries({
                     ),
                   onRetry: () => {
                     if (
-                      !initialViewportLoadCompletedRef.current &&
                       isMountedRef.current &&
                       activeBoardIdRef.current === board.id &&
                       viewportShapeLoadRequestSeqRef.current === requestSeq
                     ) {
-                      setInitialViewportLoadStatus("retrying");
+                      if (isInitialViewportRequest) {
+                        setInitialViewportLoadStatus("retrying");
+                      } else {
+                        setAdditionalViewportLoadStatus("retrying");
+                      }
                     }
                   },
                   shouldContinue: () =>
@@ -667,7 +773,7 @@ export function useCanvasViewportQueries({
 
             mergeLoadedFreeformShapes(nextLoadedShapes);
             nextLoadedShapes.forEach((shape) => {
-              if (shouldLoadExpandedFrameChildren(shape)) {
+              if (shouldLoadFrameChildren(shape)) {
                 loadFrameChildren(shape.id);
               }
             });
@@ -687,15 +793,29 @@ export function useCanvasViewportQueries({
               latestViewportBoundsRef.current === latestBounds &&
               !viewportShapeLoadTimerRef.current
             ) {
-              if (!initialViewportLoadCompletedRef.current) {
+              if (isInitialViewportRequest) {
                 setInitialViewportLoadStatus("retrying");
+              } else {
+                keepAdditionalViewportLoading = true;
+                setAdditionalViewportLoadStatus("retrying");
               }
               viewportShapeLoadTimerRef.current = setTimeout(() => {
                 viewportShapeLoadTimerRef.current = null;
                 loadViewportShapesRef.current(latestBounds);
               }, CANVAS_LAZY_LOAD_RECOVERY_DELAY_MS);
-            } else if (!initialViewportLoadCompletedRef.current) {
+            } else if (isInitialViewportRequest) {
               setInitialViewportLoadStatus("idle");
+            }
+          })
+          .finally(() => {
+            if (
+              !isInitialViewportRequest &&
+              !keepAdditionalViewportLoading &&
+              isMountedRef.current &&
+              activeBoardIdRef.current === board.id &&
+              viewportShapeLoadRequestSeqRef.current === requestSeq
+            ) {
+              setAdditionalViewportLoadStatus("idle");
             }
           });
       }, DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS);
@@ -719,7 +839,10 @@ export function useCanvasViewportQueries({
   loadViewportShapesRef.current = loadViewportShapes;
 
   return {
+    additionalViewportLoadStatus,
     initialViewportLoadStatus,
+    isLoadingFrameChildren: loadingFrameChildrenIds.size > 0,
+    isLoadingFrameSubtree: loadingFrameSubtreeIds.size > 0,
     loadFrameChildren,
     loadFrameSubtree,
     loadViewportShapes,

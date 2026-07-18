@@ -165,6 +165,7 @@ import {
   areSqlErdSelectionsEqual,
   getSqlErdContextRelationIds,
   getSqlErdSelectionFromSelectedShapes,
+  isSqlErdCanvasBackgroundPoint,
   resolveSqlErdTableInteractionSelection,
   selectSqlErdCanvasShapeAtPoint,
   shouldHandleSqlErdSchemaDeleteShortcut
@@ -182,6 +183,7 @@ type SqlErdCanvasProps = {
   committedTableMoves?: SqlErdTableMoveCommit[];
   enableTableMovePreview?: boolean;
   isReadOnly?: boolean;
+  isInspectorOpen?: boolean;
   layoutJson?: SqltoerdLayoutJsonV1;
   modelJson?: SqltoerdModelJsonV1;
   onLayoutPatch?: (
@@ -193,6 +195,7 @@ type SqlErdCanvasProps = {
     selection: Extract<SqlErdSelection, { type: "table" | "column" }>
   ) => void;
   onSelectionChange?: (selection: SqlErdSelection) => void;
+  onInspectorOpenChange?: (isOpen: boolean) => void;
   pinNavigationRequestId?: number;
   pinnedTableId?: string | null;
   realtimeConfig?: SqlErdRealtimeConfig | null;
@@ -2983,11 +2986,13 @@ export function SqlErdCanvas({
   committedTableMoves = [],
   enableTableMovePreview = false,
   isReadOnly = false,
+  isInspectorOpen = false,
   layoutJson = commerceSqltoerdFixture.layoutJson,
   modelJson = commerceSqltoerdFixture.modelJson,
   onLayoutPatch: onLayoutPatchProp,
   onDeleteForeignKey,
   onSchemaDelete,
+  onInspectorOpenChange,
   onSelectionChange,
   pinNavigationRequestId = 0,
   pinnedTableId = null,
@@ -3085,7 +3090,7 @@ export function SqlErdCanvas({
             height: 420,
             title: "프레임",
             color: nextFrameColor,
-            isLocked: true
+            isLocked: false
           }]
         });
       } else {
@@ -3476,11 +3481,7 @@ export function SqlErdCanvas({
 
       if (
         toolRef.current === null &&
-        !editor.getShapeAtPoint(pagePoint, {
-          hitInside: true,
-          hitLabels: true,
-          hitLocked: true
-        })
+        isSqlErdCanvasBackgroundPoint(editor, pagePoint)
       ) {
         editor.selectNone();
         onSelectionChange?.({ type: "none" });
@@ -3628,8 +3629,14 @@ export function SqlErdCanvas({
           onPointerDownCapture={handlePointerDownCapture}
           shapeUtils={sqlErdShapeUtils}
         >
-        {sessionId ? (
-          <SqlErdWorkspaceLocationAdapter sessionId={sessionId} />
+        {sessionId && onInspectorOpenChange && onSelectionChange ? (
+          <SqlErdWorkspaceLocationAdapter
+            isInspectorOpen={isInspectorOpen}
+            onInspectorOpenChange={onInspectorOpenChange}
+            onSelectionChange={onSelectionChange}
+            selectedSqlErdObject={selectedSqlErdObject}
+            sessionId={sessionId}
+          />
         ) : null}
         <SqlErdCanvasReadOnlyBridge isReadOnly={isReadOnly} />
         <SqlErdCanvasShapeSync

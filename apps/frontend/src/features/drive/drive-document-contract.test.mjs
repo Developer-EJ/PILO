@@ -102,6 +102,14 @@ assert.match(pdfCollaborationSurface, /ArrowLeft/);
 assert.match(pdfCollaborationSurface, /ArrowRight/);
 assert.match(pdfCollaborationSurface, /isPdf/);
 assert.match(pdfCollaborationSurface, /<img/);
+assert.match(
+  pdfCollaborationSurface,
+  /data-workspace-follow-drive-pdf-file-id=\{isPdf \? fileId : undefined\}/
+);
+assert.match(
+  pdfCollaborationSurface,
+  /data-workspace-follow-drive-pdf-page=\{isPdf \? pageNumber : undefined\}/
+);
 assert.match(slashMenu, /role="listbox"/);
 assert.match(slashMenu, /filterSlashCommands/);
 assert.match(slashMenu, /query/);
@@ -135,7 +143,20 @@ assert.match(
   /const isPreviewableFile = item\.itemType === "file" && getPreviewFileKind\(item\.mimeType\) !== null/
 );
 assert.match(panel, /onOpenPreview: \(item: DriveItem\) => void/);
-assert.match(panel, /onOpenPreview=\{setPreviewFile\}/);
+assert.match(panel, /function openPreview\(item: DriveItem\)/);
+assert.match(panel, /onOpenPreview=\{openPreview\}/);
+assert.match(panel, /mimeType=\{previewFile\?\.mimeType \?\? null\}/);
+assert.match(panel, /pageNumber=\{previewPageNumber\}/);
+assert.match(
+  attachment,
+  /setPreviewPageNumber\(1\)[\s\S]*setIsPreviewOpen\(true\)/
+);
+assert.match(attachment, /getPreviewFileKind/);
+assert.match(attachment, /driveAttachedPdfFollowCoordinator\.register/);
+assert.match(
+  attachment,
+  /useEffect\(\s*\(\) =>\s*driveAttachedPdfFollowCoordinator\.register/
+);
 assert.match(panel, /function MoveItemSheet\(/);
 assert.match(panel, /onOpenMove/);
 assert.match(

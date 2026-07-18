@@ -66,12 +66,16 @@ export function PdfPreviewDialog({
   fileName,
   mimeType,
   open,
+  onPageNumberChange,
+  pageNumber,
   onOpenChange
 }: {
   fileId: string;
   fileName: string;
   mimeType: string | null;
   open: boolean;
+  onPageNumberChange: (pageNumber: number) => void;
+  pageNumber: number;
   onOpenChange: (open: boolean) => void;
 }) {
   const authSession = useAuthSession();
@@ -154,6 +158,8 @@ export function PdfPreviewDialog({
               fileId={fileId}
               fileName={fileName}
               mimeType={mimeType}
+              onPageNumberChange={onPageNumberChange}
+              pageNumber={pageNumber}
               previewUrl={previewState.previewUrl}
               workspaceId={workspaceId}
             />

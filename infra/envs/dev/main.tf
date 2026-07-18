@@ -101,6 +101,7 @@ module "ecr" {
     "pilo-app-server",
     "pilo-realtime-server",
     "pilo-ai-worker",
+    "pilo-db-migrations",
   ]
 }
 
@@ -306,6 +307,7 @@ module "ecs" {
         AGENT_EXECUTION_HANDOFF_BASE_URL         = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS  = "10"
         OPENAI_AGENT_PLANNER_TIMEOUT_MS          = "60000"
+        AGENT_TOOL_RETRIEVAL_MODE                = "shortlist"
         AI_WORKER_SQS_VISIBILITY_TIMEOUT_SECONDS = "900"
       }
       secrets = module.secrets.agent_worker_ecs_secrets
@@ -406,6 +408,20 @@ module "ecs" {
       secrets = module.secrets.github_sync_worker_ecs_secrets
     }
   }
+}
+
+module "db_migrations" {
+  source = "../../modules/db-migrations"
+
+  name_prefix           = local.name_prefix
+  aws_region            = var.aws_region
+  image                 = "${module.ecr.repository_urls["pilo-db-migrations"]}:latest"
+  execution_role_arn    = module.iam.ecs_task_execution_role_arn
+  database_host         = module.rds.address
+  database_port         = module.rds.port
+  database_name         = module.rds.database_name
+  database_secret_arn   = module.rds.master_user_secret_arn
+  log_retention_in_days = var.log_retention_in_days
 }
 
 module "github_sync_observability" {
