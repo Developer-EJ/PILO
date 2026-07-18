@@ -55,7 +55,25 @@ function snapshot() {
   };
 }
 
-const report = evaluatePhase4eMeetingReadiness(snapshot());
+const runtimeEvidence = {
+  status: "passed",
+  suites: [
+    "scripts/agent/meeting-tools.test.mjs",
+    "scripts/agent/execution.test.mjs",
+    "scripts/agent/confirmation.test.mjs"
+  ],
+  suiteSha256: ["d".repeat(64), "e".repeat(64), "f".repeat(64)],
+  guarantees: [
+    "meeting_leave_execution",
+    "recording_end_confirmation_and_execution",
+    "action_item_update_confirmation_and_execution",
+    "action_item_approve_confirmation_and_execution",
+    "workspace_permission_enforcement",
+    "approval_idempotency",
+    "pre_execution_revalidation"
+  ]
+};
+const report = evaluatePhase4eMeetingReadiness(snapshot(), runtimeEvidence);
 assert.equal(report.passed, true);
 assert.equal(report.meetingDescriptorCount, 18);
 assert.equal(report.writeContracts.length, 4);
@@ -71,6 +89,6 @@ invalid.toolCapabilityCatalog.descriptors.find(
   (descriptor) => descriptor.toolName === "end_meeting_recording"
 ).requiresConfirmation = false;
 assert.throws(
-  () => evaluatePhase4eMeetingReadiness(invalid),
+  () => evaluatePhase4eMeetingReadiness(invalid, runtimeEvidence),
   /Invalid Phase 4-E write contract/
 );

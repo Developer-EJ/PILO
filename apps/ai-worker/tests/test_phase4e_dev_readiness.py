@@ -60,7 +60,7 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
         "allowedCount": 9,
     }
     app_server = {
-        "format": "phase4e-meeting-runtime-readiness:v1",
+        "format": "phase4e-meeting-runtime-readiness:v2",
         "passed": True,
         "registry": hashes,
         "checks": [{"id": "meeting_write_contracts", "status": "passed"}],
@@ -70,6 +70,18 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
             {"contractId": "meeting.action_items.update"},
             {"contractId": "meeting.action_items.approve"},
         ],
+        "runtimeEvidence": {
+            "status": "passed",
+            "guarantees": [
+                "meeting_leave_execution",
+                "recording_end_confirmation_and_execution",
+                "action_item_update_confirmation_and_execution",
+                "action_item_approve_confirmation_and_execution",
+                "workspace_permission_enforcement",
+                "approval_idempotency",
+                "pre_execution_revalidation",
+            ],
+        },
     }
     terraform = tmp_path / "main.tf"
     terraform.write_text(
@@ -82,6 +94,42 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
         "usedShortlist fallback reason confirmation 실행 직전",
         encoding="utf-8",
     )
+    catalog_sha = __import__("hashlib").sha256(CATALOG_PATH.read_bytes()).hexdigest()
+    evaluation_reports = []
+    variants = {
+        "canonical": (216, 1.0, 1.0),
+        "held_out": (54, 0.95, 0.95),
+        "counterexample": (72, 0.95, 0.95),
+        "context": (54, 0.95, 0.95),
+    }
+    for variant, (attempts, exact_rate, tool_accuracy) in variants.items():
+        mode_report = {
+            "totalAttempts": attempts,
+            "exactAttemptRate": exact_rate,
+            "toolSelectionAccuracy": tool_accuracy,
+            "retrieval": {
+                "shortlistViolations": 0,
+                "supportedToUnsupportedRate": 0.0,
+                "capabilityRecallAtK": 1.0,
+            },
+        }
+        evaluation_reports.append(
+            write_json(
+                tmp_path / f"meeting-{variant}.json",
+                {
+                    "legacy": mode_report,
+                    "shadow": mode_report,
+                    "metadata": {
+                        "suiteVersion": f"meeting-agent-regression:v1:{variant}",
+                        "compareShadowRetrieval": True,
+                        "meetingCatalogSha256": catalog_sha,
+                        "registryInventorySha256": hashes["inventorySha256"],
+                        "registryCatalogSha256": hashes["catalogSha256"],
+                        "registryEligibleSnapshotSha256": hashes["eligibleSnapshotSha256"],
+                    },
+                },
+            )
+        )
     return Phase4eReadinessInputs(
         registry_snapshot=write_json(tmp_path / "registry.json", registry),
         tool_retrieval_report=write_json(tmp_path / "retrieval.json", retrieval),
@@ -90,6 +138,7 @@ def readiness_inputs(tmp_path: Path) -> Phase4eReadinessInputs:
         meeting_catalog=CATALOG_PATH,
         dev_terraform=terraform,
         rollout_runbook=runbook,
+        meeting_evaluation_reports=tuple(evaluation_reports),
     )
 
 
@@ -140,4 +189,39 @@ def test_phase4e_readiness_fails_when_write_contract_evidence_is_incomplete(
     write_json(inputs.app_server_report, report)
 
     with pytest.raises(ValueError, match="write readiness contracts"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_fails_when_actual_meeting_eval_is_below_threshold(
+    tmp_path: Path,
+) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.meeting_evaluation_reports[0].read_text(encoding="utf-8"))
+    report["shadow"]["exactAttemptRate"] = 0.99
+    write_json(inputs.meeting_evaluation_reports[0], report)
+
+    with pytest.raises(ValueError, match="Meeting evaluation threshold failed"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_requires_all_four_actual_meeting_evals(tmp_path: Path) -> None:
+    inputs = readiness_inputs(tmp_path)
+    inputs = Phase4eReadinessInputs(
+        **{
+            **inputs.__dict__,
+            "meeting_evaluation_reports": inputs.meeting_evaluation_reports[:3],
+        }
+    )
+
+    with pytest.raises(ValueError, match="all four Meeting evaluation reports"):
+        evaluate_phase4e_dev_readiness(inputs)
+
+
+def test_phase4e_readiness_rejects_eval_from_another_registry(tmp_path: Path) -> None:
+    inputs = readiness_inputs(tmp_path)
+    report = json.loads(inputs.meeting_evaluation_reports[1].read_text(encoding="utf-8"))
+    report["metadata"]["registryCatalogSha256"] = "f" * 64
+    write_json(inputs.meeting_evaluation_reports[1], report)
+
+    with pytest.raises(ValueError, match="not bound to the registry snapshot"):
         evaluate_phase4e_dev_readiness(inputs)

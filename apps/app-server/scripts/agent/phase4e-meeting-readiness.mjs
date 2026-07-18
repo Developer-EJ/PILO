@@ -1,8 +1,23 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const FORMAT = "phase4e-meeting-runtime-readiness:v1";
+const FORMAT = "phase4e-meeting-runtime-readiness:v2";
+const RUNTIME_SUITES = [
+  "scripts/agent/meeting-tools.test.mjs",
+  "scripts/agent/execution.test.mjs",
+  "scripts/agent/confirmation.test.mjs"
+];
+const RUNTIME_GUARANTEES = [
+  "meeting_leave_execution",
+  "recording_end_confirmation_and_execution",
+  "action_item_update_confirmation_and_execution",
+  "action_item_approve_confirmation_and_execution",
+  "workspace_permission_enforcement",
+  "approval_idempotency",
+  "pre_execution_revalidation"
+];
 const REQUIRED_WRITE_CONTRACTS = [
   {
     capabilityId: "meeting.control.leave",
@@ -46,7 +61,7 @@ function requiredString(value, message) {
   return value;
 }
 
-export function evaluatePhase4eMeetingReadiness(snapshot) {
+export function evaluatePhase4eMeetingReadiness(snapshot, runtimeEvidence) {
   const root = requiredObject(snapshot, "Invalid Agent registry snapshot");
   if (root.format !== "agent-tool-retrieval-registry-snapshot:v1") {
     throw new Error("Unsupported Agent registry snapshot");
@@ -137,10 +152,52 @@ export function evaluatePhase4eMeetingReadiness(snapshot) {
     checks: [
       { id: "meeting_read_write_descriptors", status: "passed" },
       { id: "meeting_write_confirmation_contracts", status: "passed" },
-      { id: "meeting_write_schema_binding", status: "passed" }
+      { id: "meeting_write_schema_binding", status: "passed" },
+      { id: "meeting_write_runtime_e2e", status: "passed" }
     ],
     meetingDescriptorCount: meetingDescriptors.length,
-    writeContracts
+    writeContracts,
+    runtimeEvidence: validateRuntimeEvidence(runtimeEvidence)
+  };
+}
+
+export function validateRuntimeEvidence(value) {
+  const evidence = requiredObject(value, "Missing Meeting runtime E2E evidence");
+  if (
+    evidence.status !== "passed" ||
+    JSON.stringify(evidence.suites) !== JSON.stringify(RUNTIME_SUITES) ||
+    JSON.stringify(evidence.guarantees) !== JSON.stringify(RUNTIME_GUARANTEES) ||
+    !Array.isArray(evidence.suiteSha256) ||
+    evidence.suiteSha256.length !== RUNTIME_SUITES.length ||
+    evidence.suiteSha256.some((sha) => !/^[a-f0-9]{64}$/.test(sha))
+  ) {
+    throw new Error("Meeting runtime E2E evidence is incomplete");
+  }
+  return evidence;
+}
+
+async function runRuntimeSuites() {
+  const suiteSha256 = [];
+  for (const suite of RUNTIME_SUITES) {
+    const result = spawnSync(process.execPath, [suite], {
+      cwd: new URL("../../", import.meta.url),
+      encoding: "utf8",
+      stdio: "inherit"
+    });
+    if (result.status !== 0) {
+      throw new Error(`Meeting runtime E2E suite failed: ${suite}`);
+    }
+    suiteSha256.push(
+      createHash("sha256")
+        .update(await readFile(new URL(`../../${suite}`, import.meta.url)))
+        .digest("hex")
+    );
+  }
+  return {
+    status: "passed",
+    suites: RUNTIME_SUITES,
+    suiteSha256,
+    guarantees: RUNTIME_GUARANTEES
   };
 }
 
@@ -163,7 +220,10 @@ async function main(argv) {
     throw new Error("--registry-snapshot and --output are required");
   }
   const snapshot = JSON.parse(await readFile(argv[snapshotIndex + 1], "utf8"));
-  const report = evaluatePhase4eMeetingReadiness(snapshot);
+  const report = evaluatePhase4eMeetingReadiness(
+    snapshot,
+    await runRuntimeSuites()
+  );
   await writeFile(argv[outputIndex + 1], `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }
 

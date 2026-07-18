@@ -35,6 +35,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Verify stable Agent Worker mode
         env:
           ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
@@ -70,12 +75,27 @@ jobs:
             --argjson desired "$desired_count" \
             --argjson running "$running_count" \
             '{format:"phase4e-agent-dev-smoke:v1",passed:true,mode:$mode,service:{desiredCount:$desired,runningCount:$running,stable:true}}' \
-            > "$RUNNER_TEMP/phase4e-agent-dev-smoke.json"
+            > "$RUNNER_TEMP/phase4e-agent-dev-ecs-state.json"
+
+      - name: Run actual Agent read and write-boundary smoke
+        working-directory: apps/ai-worker
+        env:
+          PHASE4E_DEV_AGENT_TOKEN: ${{ secrets.PHASE4E_DEV_AGENT_TOKEN }}
+          DEV_APP_SERVER_URL: ${{ vars.DEV_APP_SERVER_URL }}
+          PHASE4E_DEV_WORKSPACE_ID: ${{ vars.PHASE4E_DEV_WORKSPACE_ID }}
+        run: >-
+          PYTHONPATH=. python scripts/run_phase4e_dev_agent_smoke.py
+          --base-url "$DEV_APP_SERVER_URL"
+          --workspace-id "$PHASE4E_DEV_WORKSPACE_ID"
+          --expected-mode "${{ inputs.expected_mode }}"
+          --output "$RUNNER_TEMP/phase4e-agent-dev-smoke.json"
 
       - name: Upload privacy-safe dev smoke result
         uses: actions/upload-artifact@v4
         with:
           name: phase4e-agent-dev-smoke-${{ inputs.expected_mode }}
-          path: ${{ runner.temp }}/phase4e-agent-dev-smoke.json
+          path: |
+            ${{ runner.temp }}/phase4e-agent-dev-ecs-state.json
+            ${{ runner.temp }}/phase4e-agent-dev-smoke.json
           if-no-files-found: error
           retention-days: 30

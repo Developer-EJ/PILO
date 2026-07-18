@@ -23,6 +23,13 @@ def main() -> int:
     )
     parser.add_argument("--dev-terraform", type=Path, required=True)
     parser.add_argument("--rollout-runbook", type=Path, required=True)
+    parser.add_argument(
+        "--meeting-evaluation-report",
+        action="append",
+        type=Path,
+        required=True,
+        help="One compare-mode report for each Meeting evaluation variant.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -35,6 +42,7 @@ def main() -> int:
             meeting_catalog=args.meeting_catalog,
             dev_terraform=args.dev_terraform,
             rollout_runbook=args.rollout_runbook,
+            meeting_evaluation_reports=tuple(args.meeting_evaluation_report),
         )
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
