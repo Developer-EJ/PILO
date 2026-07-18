@@ -158,6 +158,7 @@ class FakeRoomService {
   activeCalls = [];
   removeCalls = [];
   deleteCalls = [];
+  revocationCalls = [];
   beforeActiveResult = null;
 
   async hasActiveScreenTrack(session) {
@@ -172,6 +173,10 @@ class FakeRoomService {
 
   async deleteRoom(session) {
     this.deleteCalls.push(session);
+  }
+
+  async removeParticipantForRevocation(session) {
+    this.revocationCalls.push(session);
   }
 }
 
@@ -465,6 +470,31 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
   });
   assert.equal(harness.rooms.removeCalls.length, 1);
   assert.equal(harness.rooms.deleteCalls.length, 1);
+}
+
+{
+  const harness = createHarness({ current: activeSession() });
+  assert.equal(
+    await harness.service.endForRevocation(workspaceId, otherUserId),
+    false
+  );
+  assert.equal(harness.state.current?.sessionId, sessionId);
+  assert.equal(harness.state.endCalls.length, 0);
+
+  assert.equal(
+    await harness.service.endForRevocation(workspaceId, userId),
+    true
+  );
+  assert.equal(harness.state.current, null);
+  assert.deepEqual(harness.rooms.revocationCalls, [activeSession()]);
+  assert.deepEqual(harness.realtime.events, [
+    {
+      version: 1,
+      event: "workspace-screen-share:ended",
+      workspaceId,
+      sessionId
+    }
+  ]);
 }
 
 class TestScreenShareRoomService extends ScreenShareRoomService {

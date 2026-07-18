@@ -82,7 +82,8 @@ class FakeRedisClient {
       const session = JSON.parse(value);
       if (
         session.sessionId !== options.arguments[0] ||
-        session.livekitRoomName !== options.arguments[1]
+        session.livekitRoomName !== options.arguments[1] ||
+        session.status !== "starting"
       ) {
         return null;
       }
@@ -176,6 +177,37 @@ try {
     false
   );
   assert.deepEqual(await state.getCurrent(session.workspaceId), session);
+  assert.deepEqual(await state.getByRoom(session.livekitRoomName), session);
+
+  const replacement = {
+    ...session,
+    sessionId: "99999999-9999-4999-8999-999999999999",
+    sharerLiveKitIdentity:
+      "screen-share:99999999-9999-4999-8999-999999999999:33333333-3333-4333-8333-333333333333",
+    livekitRoomName:
+      "pilo-screen-share-99999999-9999-4999-8999-999999999999"
+  };
+  redis.values.set(
+    `workspace-screen-share:workspace:v1:${session.workspaceId}`,
+    JSON.stringify(replacement)
+  );
+  assert.equal(await state.getByRoom(session.livekitRoomName), null);
+  redis.values.set(
+    `workspace-screen-share:workspace:v1:${session.workspaceId}`,
+    JSON.stringify(session)
+  );
+  redis.values.set(
+    `workspace-screen-share:workspace:v1:${session.workspaceId}`,
+    JSON.stringify({
+      ...session,
+      workspaceId: "88888888-8888-4888-8888-888888888888"
+    })
+  );
+  assert.equal(await state.getByRoom(session.livekitRoomName), null);
+  redis.values.set(
+    `workspace-screen-share:workspace:v1:${session.workspaceId}`,
+    JSON.stringify(session)
+  );
 
   redis.advance(12 * 60 * 60 - 1);
   const activated = await state.activate({
@@ -186,6 +218,19 @@ try {
   });
   assert.equal(activated?.status, "active");
   assert.equal(activated?.startedAt, "2026-07-18T00:00:01.000Z");
+  assert.equal(
+    await state.activate({
+      workspaceId: session.workspaceId,
+      sessionId: session.sessionId,
+      livekitRoomName: session.livekitRoomName,
+      startedAt: "2026-07-18T00:00:02.000Z"
+    }),
+    null
+  );
+  assert.equal(
+    (await state.getCurrent(session.workspaceId))?.startedAt,
+    "2026-07-18T00:00:01.000Z"
+  );
   redis.advance(2);
   assert.equal(
     await state.reserve({

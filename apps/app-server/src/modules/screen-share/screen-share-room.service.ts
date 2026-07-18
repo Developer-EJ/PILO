@@ -47,6 +47,52 @@ export class ScreenShareRoomService {
     );
   }
 
+  async removeParticipantForRevocation(
+    session: WorkspaceScreenShareSession
+  ): Promise<void> {
+    await this.runRoomCommand(async client => {
+      try {
+        await client.removeParticipant(
+          session.livekitRoomName,
+          session.sharerLiveKitIdentity,
+          { revokeTokenTs: this.revocationTimestamp() }
+        );
+      } catch (error) {
+        if (!this.isParticipantAbsent(error)) throw error;
+      }
+    });
+  }
+
+  async removeViewerParticipants(
+    session: WorkspaceScreenShareSession,
+    userId: string
+  ): Promise<void> {
+    await this.runRoomCommand(async client => {
+      let participants;
+      try {
+        participants = await client.listParticipants(session.livekitRoomName);
+      } catch (error) {
+        if (this.isParticipantAbsent(error)) return;
+        throw error;
+      }
+
+      const prefix = `screen-share-viewer:${session.sessionId}:${userId}:`;
+      const revokeTokenTs = this.revocationTimestamp();
+      for (const participant of participants) {
+        if (!participant.identity.startsWith(prefix)) continue;
+        try {
+          await client.removeParticipant(
+            session.livekitRoomName,
+            participant.identity,
+            { revokeTokenTs }
+          );
+        } catch (error) {
+          if (!this.isParticipantAbsent(error)) throw error;
+        }
+      }
+    });
+  }
+
   async deleteRoom(session: WorkspaceScreenShareSession): Promise<void> {
     await this.runRoomCommand(client =>
       client.deleteRoom(session.livekitRoomName).then(() => undefined)
@@ -61,6 +107,10 @@ export class ScreenShareRoomService {
       config.apiKey,
       config.apiSecret
     );
+  }
+
+  protected now(): Date {
+    return new Date();
   }
 
   private getClient(): LiveKitRoomClient {
@@ -101,5 +151,18 @@ export class ScreenShareRoomService {
       throw serviceUnavailable("Screen sharing is unavailable");
     }
     return value.trim();
+  }
+
+  private revocationTimestamp(): bigint {
+    return BigInt(Math.floor(this.now().getTime() / 1000) + 1);
+  }
+
+  private isParticipantAbsent(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String(error.code).toLowerCase() === "not_found"
+    );
   }
 }

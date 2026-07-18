@@ -50,7 +50,7 @@ if not encoded then
   return false
 end
 local session = cjson.decode(encoded)
-if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] or session.status ~= "starting" then
   return false
 end
 local workspaceId = redis.call("GET", KEYS[2])
@@ -95,6 +95,24 @@ export class ScreenShareStateService {
       client.get(this.workspaceKey(workspaceId))
     );
     return value === null ? null : parseWorkspaceScreenShareSession(value);
+  }
+
+  async getByRoom(
+    livekitRoomName: string
+  ): Promise<WorkspaceScreenShareSession | null> {
+    const lookup = await this.runRedisCommand(async client => {
+      const workspaceId = await client.get(this.roomKey(livekitRoomName));
+      if (workspaceId === null) return null;
+      const value = await client.get(this.workspaceKey(workspaceId));
+      return value === null ? null : { workspaceId, value };
+    });
+    if (lookup === null) return null;
+
+    const current = parseWorkspaceScreenShareSession(lookup.value);
+    return current.workspaceId === lookup.workspaceId &&
+      current.livekitRoomName === livekitRoomName
+      ? current
+      : null;
   }
 
   async reserve(session: WorkspaceScreenShareSession): Promise<boolean> {

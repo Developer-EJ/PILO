@@ -166,6 +166,30 @@ export class ScreenShareService {
     return payload;
   }
 
+  async endForRevocation(
+    workspaceId: string,
+    userId: string
+  ): Promise<boolean> {
+    const current = await this.state.getCurrent(workspaceId);
+    if (!current || current.sharerUserId !== userId) return false;
+
+    await this.rooms.removeParticipantForRevocation(current);
+    const ended = await this.state.endIfCurrent({
+      workspaceId,
+      sessionId: current.sessionId,
+      livekitRoomName: current.livekitRoomName
+    });
+    if (!ended) return false;
+
+    await this.publishEnded(ended);
+    try {
+      await this.rooms.deleteRoom(ended);
+    } catch {
+      // The publisher token is revoked and Redis no longer exposes the session.
+    }
+    return true;
+  }
+
   getStartHttpStatus(payload: StartWorkspaceScreenSharePayload): HttpStatus {
     return this.startHttpStatuses.get(payload) ?? HttpStatus.CREATED;
   }
