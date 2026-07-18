@@ -200,8 +200,8 @@ import {
 import {
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
-  createSqlErdSchemaSemanticSignature,
   createSqlErdSqlLineDiff,
+  createSqlErdVerifiedNormalizedSnapshot,
   isSqlErdNormalizedSqlPreviewCurrent,
   isSqlErdViewSessionCurrent,
   recordSqlErdModelSqlHistory,
@@ -1026,24 +1026,23 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
-        if (
-          createSqlErdSchemaSemanticSignature(parseResult.modelJson) !==
-          createSqlErdSchemaSemanticSignature(sourceMapModelJson)
-        ) {
-          setNormalizedSqlApplyError(
-            "재생성된 SQL이 요청한 ERD 변경과 일치하지 않습니다. 변경 내용을 다시 확인하세요."
-          );
+        const verifiedSnapshot = createSqlErdVerifiedNormalizedSnapshot({
+          parsedModelJson: parseResult.modelJson,
+          targetModelJson: sourceMapModelJson,
+          targetSnapshot: {
+            ...baseSnapshot,
+            layoutJson: targetSnapshot.layoutJson,
+            settingsJson: targetSnapshot.settingsJson,
+            sourceText: targetSnapshot.sourceText
+          }
+        });
+        if (!verifiedSnapshot.ok) {
+          setNormalizedSqlApplyError(verifiedSnapshot.error);
           setIsNormalizedSqlApplying(false);
           return;
         }
 
-        const parsedSnapshot: SqlErdViewSession = {
-          ...baseSnapshot,
-          layoutJson: parseResult.layoutJson,
-          modelJson: parseResult.modelJson,
-          settingsJson: targetSnapshot.settingsJson,
-          sourceText: targetSnapshot.sourceText
-        };
+        const parsedSnapshot = verifiedSnapshot.snapshot;
 
         applySqlErdEditAction({
           baseSnapshot,

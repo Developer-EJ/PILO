@@ -5855,6 +5855,92 @@ assert.deepEqual(
   appliedModelSqlPreview.snapshot.layoutJson.tableLayouts,
   modelSqlPreviewSession.layoutJson.tableLayouts
 );
+const renamedTableMutation = schemaMutationRuntime.renameSqlErdTable(
+  modelSqlPreviewSession.modelJson,
+  "table.users",
+  "accounts"
+);
+assert.equal(renamedTableMutation.ok, true);
+const renamedTablePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: renamedTableMutation.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession
+  });
+const appliedRenamedTablePreview =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(renamedTablePreview);
+assert.equal(
+  appliedRenamedTablePreview.ok,
+  true,
+  "table rename preview must apply with stable IDs"
+);
+assert.equal(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.tables[0].id,
+  "table.users"
+);
+assert.equal(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.tables[0].name,
+  "accounts"
+);
+assert.deepEqual(
+  appliedRenamedTablePreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.deepEqual(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.relations[0],
+  renamedTableMutation.modelJson.schema.relations[0]
+);
+assert.match(
+  appliedRenamedTablePreview.snapshot.sourceText,
+  /REFERENCES `accounts` \(`id`\)/
+);
+
+const renamedColumnMutation = schemaMutationRuntime.renameSqlErdColumn(
+  modelSqlPreviewSession.modelJson,
+  "table.orders",
+  "column.orders.user_id",
+  "account_id"
+);
+assert.equal(renamedColumnMutation.ok, true);
+const renamedColumnPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: renamedColumnMutation.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession
+  });
+const appliedRenamedColumnPreview =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(renamedColumnPreview);
+assert.equal(
+  appliedRenamedColumnPreview.ok,
+  true,
+  "column rename preview must apply with stable IDs"
+);
+assert.equal(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].columns[1]
+    .id,
+  "column.orders.user_id"
+);
+assert.equal(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].columns[1]
+    .name,
+  "account_id"
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].constraints,
+  renamedColumnMutation.modelJson.schema.tables[1].constraints
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.relations[0],
+  renamedColumnMutation.modelJson.schema.relations[0]
+);
+assert.match(
+  appliedRenamedColumnPreview.snapshot.sourceText,
+  /FOREIGN KEY \(`account_id`\) REFERENCES `users` \(`id`\)/
+);
 assert.equal(
   sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
     modelSqlPreview,
@@ -7454,7 +7540,7 @@ assert.match(
 );
 assert.match(panel, /handlePreviewSchemaMutation/);
 assert.match(panel, /createSqltoerdLayoutForModel/);
-assert.match(panel, /createSqlErdSchemaSemanticSignature/);
+assert.match(panel, /createSqlErdVerifiedNormalizedSnapshot/);
 assert.match(panel, /테이블명 SQL diff 보기/);
 assert.match(panel, /테이블 삭제 SQL diff 보기/);
 assert.match(panel, /컬럼 변경 SQL diff 보기/);
