@@ -1238,6 +1238,23 @@ function errorCode(error) {
     createReport({
       id: SECOND_REPORT_ID,
       createdAt: "2026-07-07T00:00:00.000Z"
+    })
+  ];
+  const tool = registry.getDefinition("list_meeting_reports");
+  const result = await tool.execute(context, tool.validateInput({}));
+
+  assert.equal(result.outputSummary.count, 1);
+  assert.equal(result.outputSummary.reports[0].reportId, REPORT_ID);
+  assert.deepEqual(meetingService.calls[0].query, { limit: 1 });
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport(),
+    createReport({
+      id: SECOND_REPORT_ID,
+      createdAt: "2026-07-07T00:00:00.000Z"
     }),
     createReport({
       id: THIRD_REPORT_ID,
