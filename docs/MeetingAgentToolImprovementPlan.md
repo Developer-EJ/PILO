@@ -588,13 +588,13 @@ model/retrieval rollout**으로 전환하지 않는다. DB 비의존적인 Phase
 
 #### 0-5. 평가·shadow·privacy-safe 관측
 
-- [ ] canonical/held-out fixture에서 domain/capability recall@k, 필수 tool recall@k, 인접 intent
+- [x] canonical/held-out fixture에서 domain/capability recall@k, 필수 tool recall@k, 인접 intent
   오선택, supported→unsupported 오판, shortlist 크기, latency를 계산한다.
-- [ ] `(legacy all-tool + current planner)`와 `(retriever shortlist + current planner)`를 같은
+- [x] `(legacy all-tool + current planner)`와 `(retriever shortlist + current planner)`를 같은
   catalog/suite/model/date/timezone/seed에서 비교한다. candidate model 비교는 Phase 4에서 추가한다.
-- [ ] feature flag로 legacy와 shortlist 경로를 전환 가능하게 하고, 초기에는 DB 실행 결과에 영향을
+- [x] feature flag로 legacy와 shortlist 경로를 전환 가능하게 하고, 초기에는 DB 실행 결과에 영향을
   주지 않는 offline 또는 shadow mode만 사용한다.
-- [ ] catalog/model/retriever version, 후보 수, confidence 구간, fallback 이유, latency/token usage만
+- [x] catalog/model/retriever version, 후보 수, confidence 구간, fallback 이유, latency/token usage만
   bounded event로 남긴다. raw 사용자 발화, UUID, resource reference, tool payload, token, secret은
   관측 데이터에 저장하지 않는다.
 

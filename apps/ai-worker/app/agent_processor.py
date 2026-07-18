@@ -180,6 +180,9 @@ class AgentPlannerDecision:
     requires_confirmation: bool | None
     missing_fields: tuple[str, ...]
     unsupported_reason: str | None
+    provider_input_tokens: int | None = None
+    provider_output_tokens: int | None = None
+    provider_total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1195,7 +1198,19 @@ class OpenAiAgentPlannerClient:
         if not isinstance(output_text, str) or not output_text.strip():
             output_text = _extract_response_text(response)
 
-        return parse_agent_planner_output(output_text)
+        decision = parse_agent_planner_output(output_text)
+        usage = getattr(response, "usage", None)
+        return replace(
+            decision,
+            provider_input_tokens=_optional_nonnegative_int_attribute(usage, "input_tokens"),
+            provider_output_tokens=_optional_nonnegative_int_attribute(usage, "output_tokens"),
+            provider_total_tokens=_optional_nonnegative_int_attribute(usage, "total_tokens"),
+        )
+
+
+def _optional_nonnegative_int_attribute(value: object, key: str) -> int | None:
+    item = getattr(value, key, None)
+    return item if isinstance(item, int) and item >= 0 else None
 
 
 def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:

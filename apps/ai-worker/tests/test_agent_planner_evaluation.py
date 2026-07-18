@@ -1,11 +1,15 @@
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from app.agent_planner_evaluation import (
     attach_tool_capability_catalog,
     build_evaluation_input_hashes,
     build_evaluation_report,
+    build_legacy_shadow_comparison,
     evaluate_suite,
     load_evaluation_suite,
     select_shadow_planner_tools,
@@ -95,6 +99,10 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
                 "expected": {
                     "status": "tool_candidate",
                     "toolName": "list_calendar_events",
+                    "domain": "calendar",
+                    "capabilityId": "calendar.list",
+                    "requiredToolNames": ["list_calendar_events"],
+                    "supported": True,
                 },
             },
             {
@@ -202,7 +210,12 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
     results = evaluate_suite(
         FakePlanner(
             [
-                decision(tool_name="list_meeting_reports"),
+                decision(
+                    tool_name="list_meeting_reports",
+                    provider_input_tokens=120,
+                    provider_output_tokens=30,
+                    provider_total_tokens=150,
+                ),
                 decision(status="unsupported", tool_name=None, tool_input={}),
             ]
         ),
@@ -216,12 +229,73 @@ def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unkno
 
     assert "shortlist_tool" in result.failure_reasons
     assert report["retrieval"]["toolRecall"] == 1.0
+    assert report["retrieval"]["domainRecallAtK"] == 1.0
+    assert report["retrieval"]["capabilityRecallAtK"] == 1.0
+    assert report["retrieval"]["requiredToolRecallAtK"] == 1.0
+    assert report["retrieval"]["supportedToUnsupportedRate"] == 0.0
     assert report["retrieval"]["averageShortlistSize"] == 1.5
     assert report["retrieval"]["shortlistViolations"] == 1
     assert report["retrieval"]["fallbackTaxonomy"] == {"no_metadata_match": 1}
     assert report["results"][0]["retrieval"]["fallbackReason"] is None
+    assert report["results"][0]["retrieval"]["candidateCount"] > 0
+    assert report["results"][0]["retrieval"]["confidenceBucket"] in {
+        "low",
+        "medium",
+        "high",
+    }
+    observation = report["retrievalEvents"][0]
+    assert observation["eventVersion"] == "agent-tool-retrieval-observation:v1"
+    assert observation["catalogVersion"] == "agent-tool-capabilities:v1"
+    assert observation["retrieverVersion"] == "agent-tool-metadata-overlap:v1"
+    assert observation["tokenUsage"]["providerTotalTokens"] == 150
+    assert "shortlistToolNames" not in observation
+    assert "prompt" not in observation
     assert "이번 주 일정 보여줘" not in json.dumps(report, ensure_ascii=False)
     assert "prompt" not in report["results"][0]
+
+
+def test_legacy_shadow_comparison_requires_paired_inputs_and_reports_deltas(tmp_path) -> None:
+    suite = load_evaluation_suite(
+        write_suite(
+            tmp_path,
+            [
+                {
+                    "id": "calendar",
+                    "prompt": "오늘 일정",
+                    "expected": {
+                        "status": "tool_candidate",
+                        "toolName": "list_calendar_events",
+                    },
+                }
+            ],
+        )
+    )
+    legacy = evaluate_suite(
+        FakePlanner([decision()]),
+        suite,
+        current_date="2026-07-11",
+        model_version="planner:test",
+        evaluation_seed=17,
+    )
+    shadow = evaluate_suite(
+        FakePlanner([decision()]),
+        suite,
+        current_date="2026-07-11",
+        model_version="planner:test",
+        evaluation_seed=17,
+    )
+
+    comparison = build_legacy_shadow_comparison(legacy, shadow)
+
+    assert comparison["comparison"]["pairedAttempts"] == 1
+    assert comparison["comparison"]["sameFixedInputs"] is True
+    assert comparison["comparison"]["shadowMinusLegacy"]["exactAttemptRate"] == 0.0
+
+    with pytest.raises(ValueError, match="inputs must match"):
+        build_legacy_shadow_comparison(
+            legacy,
+            (replace(shadow[0], evaluation_seed=18),),
+        )
 
 
 def test_evaluate_suite_scores_normalized_planner_output(tmp_path) -> None:
