@@ -784,7 +784,25 @@ export class MeetingAgentToolsService {
           context.workspaceId,
           { query: draft.query, ...(reportId ? { reportId } : {}) }
         );
-        return { outputSummary: { status: "grounding_queued", sourceCount: sources.length, sourceIds: sources.map((source) => source.sourceId) }, resourceRefs: sources.map((source) => ({ domain: "meeting", resourceType: "meeting_report", resourceId: source.reportId })), status: "grounding_queued" };
+        const sourceTypes = [
+          ...new Set(sources.map((source) => source.sourceType))
+        ].sort();
+        return {
+          outputSummary: {
+            status: "grounding_queued",
+            groundingOutcome:
+              sources.length === 0 ? "no_relevant_sources" : "sources_found",
+            sourceCount: sources.length,
+            sourceTypes,
+            sourceIds: sources.map((source) => source.sourceId)
+          },
+          resourceRefs: sources.map((source) => ({
+            domain: "meeting",
+            resourceType: "meeting_report",
+            resourceId: source.reportId
+          })),
+          status: "grounding_queued"
+        };
       }
     };
   }

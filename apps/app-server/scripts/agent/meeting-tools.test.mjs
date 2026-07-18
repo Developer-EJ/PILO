@@ -480,13 +480,14 @@ class FakeMeetingService {
 }
 
 class FakeMeetingTranscriptRagService {
-  constructor() {
+  constructor(sources = [{ sourceId: "99999999-9999-4999-8999-999999999999", sourceType: "transcript", reportId: REPORT_ID, startedAtMs: 1000, endedAtMs: 2000, content: "원문은 output에 저장하지 않는다." }]) {
     this.calls = [];
+    this.sources = sources;
   }
 
   async search(currentUserId, workspaceId, input) {
     this.calls.push({ currentUserId, workspaceId, input });
-    return [{ sourceId: "99999999-9999-4999-8999-999999999999", reportId: REPORT_ID, startedAtMs: 1000, endedAtMs: 2000, content: "원문은 output에 저장하지 않는다." }];
+    return this.sources;
   }
 }
 
@@ -558,7 +559,9 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   const result = await tool.execute(context, tool.validateInput({ query: "일정 결론" }));
   assert.equal(tool.requiresGroundedAnswer, true);
   assert.equal(tool.executionMode, "contextual");
+  assert.equal(result.outputSummary.groundingOutcome, "sources_found");
   assert.equal(result.outputSummary.sourceCount, 1);
+  assert.deepEqual(result.outputSummary.sourceTypes, ["transcript"]);
   assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
   assert.deepEqual(ragService.calls[0].input, { query: "일정 결론" });
@@ -580,6 +583,29 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   assert.throws(
     () => tool.validateInput({ query: "일정 결론", reportId: REPORT_ID })
   );
+}
+
+{
+  const meetingService = new FakeMeetingService();
+  const registry = new AgentToolRegistryService(
+    undefined,
+    new MeetingAgentToolsService(
+      meetingService,
+      new FakeMeetingTranscriptRagService([]),
+      undefined,
+      new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+    )
+  );
+  const tool = registry.getDefinition("search_meeting_transcript");
+  const result = await tool.execute(context, tool.validateInput({ query: "근거 없는 질문" }));
+  assert.deepEqual(result.outputSummary, {
+    status: "grounding_queued",
+    groundingOutcome: "no_relevant_sources",
+    sourceCount: 0,
+    sourceTypes: [],
+    sourceIds: []
+  });
+  assert.deepEqual(result.resourceRefs, []);
 }
 
 class FakeCandidateSelectionDatabase {
