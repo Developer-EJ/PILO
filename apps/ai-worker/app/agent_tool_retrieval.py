@@ -32,9 +32,11 @@ _KOREAN_PARTICLES = (
     "만",
     "도",
 )
+_KOREAN_REQUEST_ENDINGS = ("해주세요", "해 주세요", "해줘", "해요")
 _CAPABILITY_EXAMPLE_KINDS = frozenset(
     {"canonical", "paraphrase", "typo", "honorific", "abbreviation"}
 )
+DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET = 8_000
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class ToolCapabilityDescriptor:
     tool_name: str
     domain: str
     action: str
+    operation: str | None
     capability_ids: tuple[str, ...]
     when_to_use: str
     must_not_use_for: tuple[str, ...]
@@ -90,6 +93,7 @@ class ToolRetrievalResult:
     low_confidence: bool
     fallback_reason: str | None
     unsupported_capability_id: str | None = None
+    primary_tool_name: str | None = None
 
 
 class SemanticReranker(Protocol):
@@ -172,11 +176,16 @@ def retrieve_tool_shortlist(
     *,
     top_k: int = 8,
     semantic_reranker: SemanticReranker | None = None,
+    tool_schema_bytes: dict[str, int] | None = None,
+    schema_token_budget: int | None = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
 ) -> ToolRetrievalResult:
     if top_k < 1:
         raise ValueError("top_k must be positive")
+    if schema_token_budget is not None and schema_token_budget < 1:
+        raise ValueError("schema_token_budget must be positive")
 
     prompt_tokens = set(_tokens(prompt))
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     scored: list[tuple[float, str]] = []
     metadata_scores: list[float] = []
     for descriptor in catalog.descriptors:
@@ -193,7 +202,22 @@ def retrieve_tool_shortlist(
             )
         )
         negative_tokens = set(_tokens(" ".join(descriptor.must_not_use_for)))
-        score = float(len(prompt_tokens & metadata_tokens))
+        capability_tokens = set(
+            token
+            for capability_id in descriptor.capability_ids
+            for token in _tokens(
+                " ".join(
+                    (
+                        *capability_by_id[capability_id].positive_examples,
+                        *(
+                            example.utterance
+                            for example in capability_by_id[capability_id].examples
+                        ),
+                    )
+                )
+            )
+        )
+        score = float(len(prompt_tokens & (metadata_tokens | capability_tokens)))
         score -= float(len(prompt_tokens & negative_tokens)) * 0.75
         metadata_scores.append(score)
         if semantic_reranker:
@@ -228,10 +252,49 @@ def retrieve_tool_shortlist(
             fallback_reason="no_metadata_match",
         )
 
+    descriptor_by_tool_name = {
+        descriptor.tool_name: descriptor for descriptor in catalog.descriptors
+    }
+    selected: list[str] = []
+    selected_set: set[str] = set()
+    remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
+
+    for _, tool_name in ranked[:top_k]:
+        descriptor = descriptor_by_tool_name[tool_name]
+        required_chain = (
+            *descriptor.prerequisite_tool_names,
+            descriptor.tool_name,
+            *descriptor.follow_up_tool_names,
+        )
+        if any(name not in descriptor_by_tool_name for name in required_chain):
+            return ToolRetrievalResult(
+                tool_names=tuple(),
+                low_confidence=True,
+                fallback_reason="invalid_tool_chain",
+            )
+        chain_schema_bytes = sum(
+            tool_schema_bytes.get(name, 0) if tool_schema_bytes else 0
+            for name in required_chain
+            if name not in selected_set
+        )
+        if remaining_schema_bytes is not None and chain_schema_bytes > remaining_schema_bytes:
+            return ToolRetrievalResult(
+                tool_names=tuple(),
+                low_confidence=True,
+                fallback_reason="tool_schema_budget_exceeded",
+            )
+        for name in required_chain:
+            if name not in selected_set:
+                selected.append(name)
+                selected_set.add(name)
+        if remaining_schema_bytes is not None:
+            remaining_schema_bytes -= chain_schema_bytes
+
     return ToolRetrievalResult(
-        tool_names=tuple(name for _, name in ranked[:top_k]),
+        tool_names=tuple(selected),
         low_confidence=False,
         fallback_reason=None,
+        primary_tool_name=ranked[0][1],
     )
 
 
@@ -316,6 +379,7 @@ def _parse_descriptor(value: object, *, strict_v2: bool = False) -> ToolCapabili
         tool_name=_required_string(value, "toolName"),
         domain=_required_string(value, "domain"),
         action=_required_string(value, "action"),
+        operation=(_required_operation(value) if strict_v2 else _optional_operation(value)),
         capability_ids=_string_tuple(value, "capabilityIds"),
         when_to_use=_required_string(value, "whenToUse"),
         must_not_use_for=_string_tuple(value, "mustNotUseFor"),
@@ -431,6 +495,19 @@ def _optional_string(value: dict[object, object], key: str, default: str) -> str
     return result.strip()
 
 
+def _optional_operation(value: dict[object, object]) -> str | None:
+    if "operation" not in value:
+        return None
+    return _required_operation(value)
+
+
+def _required_operation(value: dict[object, object]) -> str:
+    operation = _required_string(value, "operation")
+    if operation not in {"read", "write"}:
+        raise ValueError("Invalid tool capability descriptor")
+    return operation
+
+
 def _sha256_string(value: dict[object, object], key: str) -> str:
     result = _required_string(value, key).lower()
     if not _SHA256_PATTERN.fullmatch(result):
@@ -469,6 +546,10 @@ def _tokens(value: str) -> tuple[str, ...]:
     for raw_token in _TOKEN_PATTERN.findall(value):
         token = raw_token.lower()
         tokens.append(token)
+        for ending in _KOREAN_REQUEST_ENDINGS:
+            if token.endswith(ending) and len(token) > len(ending) + 1:
+                tokens.append(token[: -len(ending)])
+                break
         for particle in _KOREAN_PARTICLES:
             if token.endswith(particle) and len(token) > len(particle) + 1:
                 tokens.append(token[: -len(particle)])
