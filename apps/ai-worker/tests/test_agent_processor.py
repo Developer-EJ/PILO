@@ -7,7 +7,6 @@ import pytest
 
 from app.agent_processor import (
     AGENT_TOOL_SCHEMA_VERSION,
-    TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
     TOOL_RETRIEVAL_MODE_SHADOW,
     TOOL_RETRIEVAL_MODE_SHORTLIST,
     AgentPlannerDecision,
@@ -586,7 +585,7 @@ def test_processor_completes_planning_run_with_tool_candidate() -> None:
     assert planner_client.requests[0].timezone == "Asia/Seoul"
 
 
-def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_tools() -> None:
+def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_and_write_tools() -> None:
     tools = [
         tool_snapshot(),
         tool_snapshot(
@@ -607,23 +606,23 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
     shortlist = select_agent_planner_tools(
         job,
         "이번 주 일정 조회해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
         top_k=1,
     )
     mutation = select_agent_planner_tools(
         job,
         "새 일정 생성해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
     )
     low_confidence = select_agent_planner_tools(
         job,
         "점심 메뉴 추천해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
     )
     budget_fallback = select_agent_planner_tools(
         job,
         "이번 주 일정 조회해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
         top_k=1,
         schema_token_budget=1,
     )
@@ -633,10 +632,7 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
         "create_calendar_event",
     ]
     assert [tool.name for tool in shortlist] == ["list_calendar_events"]
-    assert [tool.name for tool in mutation] == [
-        "list_calendar_events",
-        "create_calendar_event",
-    ]
+    assert [tool.name for tool in mutation] == ["create_calendar_event"]
     assert [tool.name for tool in low_confidence] == [
         "list_calendar_events",
         "create_calendar_event",
@@ -647,7 +643,7 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
     ]
 
 
-def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_failure() -> None:
+def test_shortlist_mode_keeps_supported_write_chain_and_falls_back_on_low_confidence() -> None:
     tools = [
         tool_snapshot(),
         tool_snapshot(
@@ -673,7 +669,10 @@ def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_fail
 
     assert [tool.name for tool in supported.tools] == ["create_calendar_event"]
     assert supported.used_shortlist is True
-    assert unknown.tools == ()
+    assert [tool.name for tool in unknown.tools] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
     assert unknown.retrieval is not None
     assert unknown.retrieval.fallback_reason == "no_metadata_match"
 
@@ -689,15 +688,17 @@ def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_fail
 
     result = processor.process_payload(payload)
 
-    assert result.reason == "agent_tool_retrieval_needs_clarification"
-    assert planner_client.requests == []
-    assert repository.waiting_user_input_updates
+    assert result.reason == "agent_execution_handoff_completed"
+    assert [tool.name for tool in planner_client.requests[0].tools] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
     summary = repository.completed_steps[0][2]
-    assert summary["status"] == "needs_clarification"
+    assert summary["status"] == "tool_candidate"
     assert summary["toolRetrieval"] == {
         "mode": "shortlist",
         "usedShortlist": False,
-        "shortlistSize": 0,
+        "shortlistSize": 2,
         "fallbackReason": "no_metadata_match",
         "candidateCount": 0,
         "confidenceBucket": "none",
@@ -706,20 +707,26 @@ def test_shortlist_mode_keeps_supported_write_chain_and_clarifies_retrieval_fail
         "eligibleSnapshotSha256": (
             "d5a810ef126f10a54e783f5799ae3bf726a9226f9e8885926538598b7cdd4fc3"
         ),
+        "shortlistSha256": ("d5a810ef126f10a54e783f5799ae3bf726a9226f9e8885926538598b7cdd4fc3"),
     }
 
 
-@pytest.mark.parametrize(
-    ("catalog", "expected_reason"),
-    [
-        (None, "missing_catalog"),
-        ({"version": "agent-tool-capabilities:v3"}, "invalid_catalog"),
-    ],
-)
-def test_shortlist_mode_clarifies_missing_or_invalid_catalog(catalog, expected_reason) -> None:
-    payload = agent_payload()
-    if catalog is not None:
-        payload["toolCapabilityCatalog"] = catalog
+@pytest.mark.parametrize("failure", ["sha", "schema"])
+def test_shortlist_mode_clarifies_catalog_integrity_failure(failure: str) -> None:
+    tools = [tool_snapshot()]
+    catalog = tool_capability_catalog(tools)
+    expected_reason = "catalog_sha_mismatch"
+    if failure == "sha":
+        catalog["sha256"] = "0" * 64
+    else:
+        tools[0]["inputSchema"] = {
+            "type": "object",
+            "required": ["start"],
+            "additionalProperties": False,
+            "properties": {"start": {"type": "string", "format": "date"}},
+        }
+        expected_reason = "catalog_schema_mismatch"
+    payload = agent_payload(tools=tools, toolCapabilityCatalog=catalog)
 
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient()
@@ -736,7 +743,28 @@ def test_shortlist_mode_clarifies_missing_or_invalid_catalog(catalog, expected_r
     assert result.reason == "agent_tool_retrieval_needs_clarification"
     assert planner_client.requests == []
     assert repository.waiting_user_input_updates
-    assert repository.completed_steps[0][2]["toolRetrieval"]["fallbackReason"] == expected_reason
+    retrieval = repository.completed_steps[0][2]["toolRetrieval"]
+    assert retrieval["fallbackReason"] == expected_reason
+    assert retrieval["catalogVersion"] == catalog["version"]
+    assert retrieval["catalogSha256"] == catalog["sha256"]
+
+
+def test_shortlist_mode_falls_back_to_legacy_tools_when_catalog_is_missing() -> None:
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient()
+    processor = AgentRunProcessor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
+    )
+
+    result = processor.process_payload(agent_payload())
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert [tool.name for tool in planner_client.requests[0].tools] == ["list_calendar_events"]
+    assert repository.completed_steps[0][2]["toolRetrieval"]["fallbackReason"] == "missing_catalog"
 
 
 def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> None:
@@ -752,8 +780,9 @@ def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> 
 
     monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "shortlist")
     shortlist_planner = FakePlannerClient()
+    shortlist_repository = FakeAgentRunRepository(context=run_context(prompt="일정 조회"))
     shortlist_processor = AgentRunProcessor(
-        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        shortlist_repository,
         shortlist_planner,
         FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
@@ -775,9 +804,41 @@ def test_environment_flag_switches_between_shortlist_and_shadow(monkeypatch) -> 
         "list_calendar_events",
         "create_calendar_event",
     ]
+    retrieval = shortlist_repository.completed_steps[0][2]["toolRetrieval"]
+    assert retrieval["catalogSha256"] == tool_capability_catalog(tools)["sha256"]
+    assert retrieval["eligibleSnapshotSha256"] != retrieval["shortlistSha256"]
+    assert len(retrieval["shortlistSha256"]) == 64
 
 
-def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain() -> None:
+def test_unknown_environment_mode_falls_back_to_shadow(monkeypatch) -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="create_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    monkeypatch.setenv("AGENT_TOOL_RETRIEVAL_MODE", "read_only_shortlist")
+    planner_client = FakePlannerClient()
+    processor = AgentRunProcessor(
+        FakeAgentRunRepository(context=run_context(prompt="일정 조회")),
+        planner_client,
+        FakeExecutionHandoffClient(),
+        current_date_provider=lambda _timezone: date(2026, 7, 9),
+    )
+
+    processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+
+    assert [tool.name for tool in planner_client.requests[0].tools] == [
+        "list_calendar_events",
+        "create_calendar_event",
+    ]
+
+
+def test_shortlist_includes_the_matched_write_capability_prerequisite_chain() -> None:
     tools = [
         tool_snapshot(),
         tool_snapshot(
@@ -796,23 +857,23 @@ def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain()
     list_shortlist = select_agent_planner_tools(
         job,
         "이번 주 일정 조회해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
         top_k=1,
     )
-    update_fallback = select_agent_planner_tools(
+    update_shortlist = select_agent_planner_tools(
         job,
         "기존 일정 변경해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
     )
 
     assert [tool.name for tool in list_shortlist] == ["list_calendar_events"]
-    assert [tool.name for tool in update_fallback] == [
+    assert [tool.name for tool in update_shortlist] == [
         "list_calendar_events",
         "update_calendar_event",
     ]
 
 
-def test_read_only_shortlist_passes_all_selected_top_k_capability_chains() -> None:
+def test_shortlist_passes_all_selected_top_k_capability_chains() -> None:
     tools = [tool_snapshot(), tool_snapshot(name="list_meeting_reports")]
     job = parse_agent_run_job_payload(
         agent_payload(
@@ -824,7 +885,7 @@ def test_read_only_shortlist_passes_all_selected_top_k_capability_chains() -> No
     shortlist = select_agent_planner_tools(
         job,
         "이번 주 일정 조회와 최근 회의록 조회해줘",
-        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
         top_k=2,
     )
 
@@ -834,7 +895,7 @@ def test_read_only_shortlist_passes_all_selected_top_k_capability_chains() -> No
     ]
 
 
-def test_read_only_shortlist_rejects_planner_tool_outside_the_shortlist() -> None:
+def test_shortlist_rejects_planner_tool_outside_the_shortlist() -> None:
     tools = [
         tool_snapshot(),
         tool_snapshot(
@@ -856,7 +917,7 @@ def test_read_only_shortlist_rejects_planner_tool_outside_the_shortlist() -> Non
         planner_client,
         FakeExecutionHandoffClient(),
         current_date_provider=lambda _timezone: date(2026, 7, 9),
-        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+        tool_retrieval_mode=TOOL_RETRIEVAL_MODE_SHORTLIST,
         tool_retrieval_top_k=1,
     )
 
@@ -1408,6 +1469,313 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
 
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["input"] == {"limit": 1}
+
+
+@pytest.mark.parametrize(
+    ("prompt", "current_date", "expected_input"),
+    [
+        ("최근 회의록 보여줘", "2026-07-15", {}),
+        ("최근 3건 회의록 보여줘", "2026-07-15", {"limit": 3}),
+        (
+            "오늘 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-14T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "어제 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-13T15:00:00.000Z", "to": "2026-07-14T15:00:00.000Z"},
+        ),
+        (
+            "2026-07-10 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-09T15:00:00.000Z", "to": "2026-07-10T15:00:00.000Z"},
+        ),
+        (
+            "7월 10일부터 7월 12일까지 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-09T15:00:00.000Z", "to": "2026-07-12T15:00:00.000Z"},
+        ),
+        (
+            "지난주 회의록 조회해줘",
+            "2026-07-15",
+            {"from": "2026-07-05T15:00:00.000Z", "to": "2026-07-12T15:00:00.000Z"},
+        ),
+        (
+            "다음 주 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-19T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+        (
+            "최근 7일 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-08T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "며칠 전 회의록 보여줘",
+            "2026-07-15",
+            {"from": "2026-07-08T15:00:00.000Z", "to": "2026-07-15T15:00:00.000Z"},
+        ),
+        (
+            "다가오는 주말 회의록 보여줘",
+            "2026-07-17",
+            {"from": "2026-07-17T15:00:00.000Z", "to": "2026-07-19T15:00:00.000Z"},
+        ),
+        (
+            "다가오는 주말 회의록 보여줘",
+            "2026-07-18",
+            {"from": "2026-07-24T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+        (
+            "주말 회의록 보여줘",
+            "2026-07-18",
+            {"from": "2026-07-24T15:00:00.000Z", "to": "2026-07-26T15:00:00.000Z"},
+        ),
+    ],
+)
+def test_normalizer_resolves_meeting_report_defaults_and_relative_dates(
+    prompt: str,
+    current_date: str,
+    expected_input: dict[str, int | str],
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("meetingReport",),
+        ),
+        job,
+        prompt=prompt,
+        current_date=current_date,
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "list_meeting_reports"
+    assert normalized.output_summary["input"] == expected_input
+
+
+def test_normalizer_enforces_latest_one_for_unqualified_meeting_report_list() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={
+                "from": "2026-07-01T00:00:00.000Z",
+                "to": "2026-07-16T00:00:00.000Z",
+                "roomName": "디자인 회의실",
+                "limit": 20,
+            },
+        ),
+        job,
+        prompt="최근 회의록 보여줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"roomName": "디자인 회의실"}
+
+
+def test_normalizer_prioritizes_explicit_count_over_date_range_and_keeps_room() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "roomName": {"type": "string"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={
+                "from": "2026-07-06T15:00:00.000Z",
+                "to": "2026-07-13T15:00:00.000Z",
+                "roomName": "디자인 회의실",
+            },
+        ),
+        job,
+        prompt="디자인 회의실 최근 3건 회의록 보여줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "roomName": "디자인 회의실",
+        "limit": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "그때 회의록 보여줘",
+        "지난달 회의록 보여줘",
+        "지난 주말 회의록 보여줘",
+        "다다음 주 회의록 보여줘",
+        "이번 주 회의록 보여줘",
+        "저저번 주 회의록 보여줘",
+        "작년 회의록 보여줘",
+        "2026-13-40 회의록 보여줘",
+    ],
+)
+def test_normalizer_clarifies_unresolved_meeting_report_dates(prompt: str) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"limit": 1},
+        ),
+        job,
+        prompt=prompt,
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_date_range"]
+    assert "날짜나 기간" in normalized.final_answer
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    ["회의록 0건 보여줘", "최근 회의록 101건 보여줘", "회의록 101개만 보여줘"],
+)
+def test_normalizer_clarifies_out_of_range_meeting_report_counts(prompt: str) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="list_meeting_reports", tool_input={"limit": 1}),
+        job,
+        prompt=prompt,
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_limit"]
+    assert "1건부터 100건" in normalized.final_answer
+
+
+def test_normalizer_preserves_meeting_report_summary_with_relative_date_selector() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={},
+        ),
+        job,
+        prompt="지난주 회의록 요약해줘",
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "summarize_meeting_report"
+    assert normalized.output_summary["input"] == {
+        "from": "2026-07-05T15:00:00.000Z",
+        "to": "2026-07-12T15:00:00.000Z",
+    }
 
 
 @pytest.mark.parametrize(
