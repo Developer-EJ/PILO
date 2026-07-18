@@ -44,6 +44,16 @@ class ToolRetrievalQualityFixture:
     catalog: ToolCapabilityCatalog
     cases: tuple[QualityGateCase, ...]
     privacy_sensitive_values: tuple[str, ...]
+    registry_snapshot_expectation: dict[str, str]
+
+
+@dataclass(frozen=True)
+class AgentToolRegistrySnapshot:
+    inventory_sha256: str
+    catalog_sha256: str
+    eligible_snapshot_sha256: str
+    tool_schemas: dict[str, dict[str, object]]
+    catalog: ToolCapabilityCatalog
 
 
 def load_tool_retrieval_quality_fixture(path: Path) -> ToolRetrievalQualityFixture:
@@ -81,6 +91,7 @@ def load_tool_retrieval_quality_fixture(path: Path) -> ToolRetrievalQualityFixtu
         isinstance(item, str) and item for item in raw_sensitive_values
     ):
         raise ValueError("Tool retrieval quality fixture requires privacySensitiveValues")
+    registry_snapshot_expectation = _registry_snapshot_expectation(value)
     return ToolRetrievalQualityFixture(
         suite_version=suite_version,
         top_k=top_k,
@@ -89,7 +100,55 @@ def load_tool_retrieval_quality_fixture(path: Path) -> ToolRetrievalQualityFixtu
         catalog=catalog,
         cases=cases,
         privacy_sensitive_values=tuple(raw_sensitive_values),
+        registry_snapshot_expectation=registry_snapshot_expectation,
     )
+
+
+def load_agent_tool_registry_snapshot(path: Path) -> AgentToolRegistrySnapshot:
+    try:
+        value = json.loads(path.read_bytes())
+    except json.JSONDecodeError as error:
+        raise ValueError("Invalid agent tool registry snapshot") from error
+    if (
+        not isinstance(value, dict)
+        or value.get("format") != "agent-tool-retrieval-registry-snapshot:v1"
+    ):
+        raise ValueError("Unsupported agent tool registry snapshot")
+
+    inventory = value.get("inventory")
+    if not isinstance(inventory, dict):
+        raise ValueError("Invalid agent tool registry snapshot")
+    inventory_sha256 = _required_string(inventory, "sha256")
+    catalog_sha256 = _required_string(inventory, "catalogSha256")
+    eligible_snapshot_sha256 = _required_string(value, "eligibleSnapshotSha256")
+    tool_schemas = _tool_schemas(value.get("eligibleToolSchemas"))
+    if eligible_snapshot_sha256 != _eligible_snapshot_sha256(tool_schemas):
+        raise ValueError("Invalid agent tool registry snapshot")
+    catalog = parse_tool_capability_catalog(value.get("toolCapabilityCatalog"), tool_schemas)
+    if catalog is None or catalog.sha256 != catalog_sha256:
+        raise ValueError("Invalid agent tool registry snapshot")
+    return AgentToolRegistrySnapshot(
+        inventory_sha256=inventory_sha256,
+        catalog_sha256=catalog_sha256,
+        eligible_snapshot_sha256=eligible_snapshot_sha256,
+        tool_schemas=tool_schemas,
+        catalog=catalog,
+    )
+
+
+def bind_quality_fixture_to_registry_snapshot(
+    fixture: ToolRetrievalQualityFixture,
+    snapshot: AgentToolRegistrySnapshot,
+) -> ToolRetrievalQualityFixture:
+    expected = fixture.registry_snapshot_expectation
+    actual = {
+        "inventorySha256": snapshot.inventory_sha256,
+        "catalogSha256": snapshot.catalog_sha256,
+        "eligibleSnapshotSha256": snapshot.eligible_snapshot_sha256,
+    }
+    if expected != actual:
+        raise ValueError("Quality fixture does not match agent tool registry snapshot")
+    return fixture
 
 
 def evaluate_tool_retrieval_quality_gate(
@@ -185,6 +244,11 @@ def evaluate_tool_retrieval_quality_gate(
             "catalogVersion": fixture.catalog.version,
             "catalogSha256": fixture.catalog.sha256,
             "eligibleSnapshotSha256": _eligible_snapshot_sha256(fixture.tool_schemas),
+            "registryInventorySha256": fixture.registry_snapshot_expectation["inventorySha256"],
+            "registryCatalogSha256": fixture.registry_snapshot_expectation["catalogSha256"],
+            "registryEligibleSnapshotSha256": fixture.registry_snapshot_expectation[
+                "eligibleSnapshotSha256"
+            ],
             "modelVersion": "deterministic:no-provider",
             "retrieverVersion": TOOL_RETRIEVER_VERSION,
             "topK": fixture.top_k,
@@ -213,6 +277,17 @@ def evaluate_tool_retrieval_quality_gate(
 
 def fixture_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _registry_snapshot_expectation(value: dict[object, object]) -> dict[str, str]:
+    snapshot = value.get("registrySnapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("Tool retrieval quality fixture requires registrySnapshot")
+    return {
+        "inventorySha256": _required_string(snapshot, "inventorySha256"),
+        "catalogSha256": _required_string(snapshot, "catalogSha256"),
+        "eligibleSnapshotSha256": _required_string(snapshot, "eligibleSnapshotSha256"),
+    }
 
 
 def _quality_case(value: object, *, schema_token_budget: int) -> QualityGateCase:

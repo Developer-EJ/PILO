@@ -82,14 +82,22 @@ raw prompt, UUID/resource reference, tool 이름·payload, token·secret을 포�
 
 ## Phase 0 deterministic quality gate
 
-CI는 provider를 호출하지 않고 `tool_retrieval_quality_gate_v1.json`을 실행한다. 이 fixture는 strict v2
-catalog와 eligible schema snapshot의 digest 정합성, canonical 필수 tool recall@8 100%, held-out
+CI는 provider를 호출하지 않고 `tool_retrieval_quality_gate_v1.json`을 실행한다. App Server는 먼저 full
+registry의 inventory·catalog·eligible schema snapshot artifact를 만들고, Worker gate는 fixture에 고정한
+세 SHA와 artifact를 대조한다. 따라서 registry tool/schema/capability drift는 fixture 갱신 없이는 통과하지
+않는다. 이 fixture는 strict v2 catalog와 eligible schema snapshot의 digest 정합성, canonical 필수 tool
+recall@8 100%, held-out
 domain/capability recall@8 95%, adjacent unsupported intent, schema budget·low-confidence·write capability
 legacy fallback, 그리고 UUID/민감 입력값 비노출을 검증한다.
 
 ```bash
+cd apps/app-server
+node scripts/agent/export-tool-retrieval-snapshot.mjs \
+  --output /tmp/agent-tool-registry-snapshot.json
+
 cd apps/ai-worker
 PYTHONPATH=. .venv/bin/python scripts/check_tool_retrieval_quality_gate.py \
+  --registry-snapshot /tmp/agent-tool-registry-snapshot.json \
   --output /tmp/agent-tool-retrieval-quality-gate.json
 ```
 

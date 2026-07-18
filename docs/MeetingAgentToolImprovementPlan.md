@@ -610,9 +610,9 @@ Phase 1B의 dev 실행으로 별도 기록한다.
 #### 0-6. Phase 0 검증과 완료 기준
 
 - [x] catalog schema·registry 정합성·canonical/held-out retrieval·인접 intent negative·shortlist
-  token budget·fallback·low-confidence mutation safety·UUID/token 비노출 회귀를 자동화한다. App Server
-  registry snapshot 정합성은 기존 `agent-job.test.mjs`가, Worker retrieval 경계는
-  `tool_retrieval_quality_gate_v1.json`이 CI에서 검증한다.
+  token budget·fallback·low-confidence mutation safety·UUID/token 비노출 회귀를 자동화한다. App Server가
+  full registry inventory·catalog·eligible schema snapshot artifact를 만들고, Worker gate가 fixture에 고정한
+  세 SHA와 대조하므로 registry drift는 fixture 갱신 없이는 CI를 통과하지 못한다.
 - [x] canonical fixture에서 필수 tool recall@8 100%, held-out fixture에서 domain/capability
   recall@8 95% 이상을 초기 목표로 기록한다. deterministic baseline은 현재 각각 100%이며, 미달 시
   CI artifact의 failure taxonomy에 threshold와 case 유형을 남긴다.
