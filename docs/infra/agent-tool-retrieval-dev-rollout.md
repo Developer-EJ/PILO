@@ -25,6 +25,8 @@
 
 Worker step의 `outputSummary.toolRetrieval`에는 mode, fallback reason, catalog/eligible snapshot/
 planner tool snapshot SHA만 기록한다. raw 발화, tool input, resource ID, token은 기록하지 않는다.
+catalog integrity failure에서도 형식이 유효한 수신 catalog version/SHA는 trace에 남긴다. 형식 자체가
+유효하지 않은 값은 trace에 기록하지 않는다.
 
 ## dev 전환과 rollback
 

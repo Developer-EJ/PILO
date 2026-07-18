@@ -743,7 +743,10 @@ def test_shortlist_mode_clarifies_catalog_integrity_failure(failure: str) -> Non
     assert result.reason == "agent_tool_retrieval_needs_clarification"
     assert planner_client.requests == []
     assert repository.waiting_user_input_updates
-    assert repository.completed_steps[0][2]["toolRetrieval"]["fallbackReason"] == expected_reason
+    retrieval = repository.completed_steps[0][2]["toolRetrieval"]
+    assert retrieval["fallbackReason"] == expected_reason
+    assert retrieval["catalogVersion"] == catalog["version"]
+    assert retrieval["catalogSha256"] == catalog["sha256"]
 
 
 def test_shortlist_mode_falls_back_to_legacy_tools_when_catalog_is_missing() -> None:

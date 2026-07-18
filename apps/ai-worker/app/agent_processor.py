@@ -46,6 +46,8 @@ TOOL_RETRIEVAL_MODES = {
     TOOL_RETRIEVAL_MODE_SHADOW,
     TOOL_RETRIEVAL_MODE_SHORTLIST,
 }
+TOOL_CAPABILITY_CATALOG_VERSION_PATTERN = re.compile(r"^agent-tool-capabilities:v[0-9]+$")
+TOOL_CAPABILITY_CATALOG_SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 DEFAULT_TOOL_RETRIEVAL_TOP_K = 8
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 USER_VISIBLE_UUID_PATTERN = re.compile(
@@ -79,6 +81,8 @@ class AgentRunJob:
     request_context: dict[str, str] | None = None
     tool_capability_catalog: ToolCapabilityCatalog | None = None
     tool_capability_catalog_error: str | None = None
+    received_tool_capability_catalog_version: str | None = None
+    received_tool_capability_catalog_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -394,6 +398,9 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         raise ValueError("Unsupported Agent job type")
 
     tools = _parse_tool_schema_snapshot(payload.get("tools"))
+    received_catalog_version, received_catalog_sha256 = _catalog_trace_metadata(
+        payload.get("toolCapabilityCatalog")
+    )
     catalog, catalog_error = _parse_tool_capability_catalog_for_job(
         payload.get("toolCapabilityCatalog"),
         tools,
@@ -408,6 +415,8 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
         request_context=_parse_request_context(payload.get("requestContext")),
         tool_capability_catalog=catalog,
         tool_capability_catalog_error=catalog_error,
+        received_tool_capability_catalog_version=received_catalog_version,
+        received_tool_capability_catalog_sha256=received_catalog_sha256,
     )
 
 
@@ -427,6 +436,25 @@ def _parse_tool_capability_catalog_for_job(
             return None, "catalog_sha_mismatch"
         return None, "catalog_schema_mismatch"
     return catalog, None
+
+
+def _catalog_trace_metadata(value: object) -> tuple[str | None, str | None]:
+    if not isinstance(value, dict):
+        return None, None
+    version = value.get("version")
+    sha256 = value.get("sha256")
+    safe_version = (
+        version
+        if isinstance(version, str) and TOOL_CAPABILITY_CATALOG_VERSION_PATTERN.fullmatch(version)
+        else None
+    )
+    safe_sha256 = (
+        sha256.lower()
+        if isinstance(sha256, str)
+        and TOOL_CAPABILITY_CATALOG_SHA256_PATTERN.fullmatch(sha256.lower())
+        else None
+    )
+    return safe_version, safe_sha256
 
 
 class AgentRunProcessor:
@@ -1585,8 +1613,12 @@ def _tool_retrieval_observation(
         "fallbackReason": retrieval.fallback_reason if retrieval else None,
         "candidateCount": retrieval.candidate_count if retrieval else 0,
         "confidenceBucket": retrieval.confidence_bucket if retrieval else "none",
-        "catalogVersion": catalog.version if catalog else None,
-        "catalogSha256": catalog.sha256 if catalog else None,
+        "catalogVersion": (
+            catalog.version if catalog else job.received_tool_capability_catalog_version
+        ),
+        "catalogSha256": (
+            catalog.sha256 if catalog else job.received_tool_capability_catalog_sha256
+        ),
         "eligibleSnapshotSha256": _eligible_snapshot_sha256(job.tools),
         "shortlistSha256": _eligible_snapshot_sha256(selection.tools),
     }
