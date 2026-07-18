@@ -356,6 +356,13 @@ const piloCollapsedFrameOverlay = await readFile(
   ),
   "utf8"
 );
+const canvasFrameLazyLoadingOverlay = await readFile(
+  new URL(
+    "../src/features/canvas/engine/editor/overlays/CanvasFrameLazyLoadingOverlay.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const piloCodeBlockShapeUtil = await readFile(
   new URL(
     "../src/features/canvas/engine/shapes/code-block/PiloCodeBlockShapeUtil.tsx",
@@ -752,6 +759,10 @@ assert.match(canvasViewportQueries, /doesLoadedViewportCoverBounds/);
 assert.match(canvasViewportQueries, /MAX_LOADED_VIEWPORT_BOUNDS = 24/);
 assert.match(canvasViewportQueries, /loadedViewportBoundsRef/);
 assert.match(canvasViewportQueries, /currentLoadedViewport\.bounds\.some/);
+assert.match(canvasViewportQueries, /initialViewportLoadStatus/);
+assert.match(canvasViewportQueries, /setInitialViewportLoadStatus\("retrying"\)/);
+assert.match(canvasViewportQueries, /loadingFrameIds/);
+assert.match(canvasViewportQueries, /setFrameLoading\(frameId, true\)/);
 assert.match(canvasRuntimeUtils, /DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN/);
 assert.match(canvasInitialCamera, /CLASSIC_CANVAS_INITIAL_ZOOM = 1/);
 assert.match(canvasInitialCamera, /editor\.centerOnPoint\(CLASSIC_CANVAS_ORIGIN/);
@@ -886,6 +897,8 @@ assert.match(canvasRuntime, /canvasClient,\s*[\r\n]\s*latestViewportBoundsRef/);
 assert.doesNotMatch(canvasRuntime, /persistenceCanvasClient/);
 assert.doesNotMatch(canvasRuntime, /commitShapeOperations/);
 assert.match(canvasRuntime, /canvas-sync-notice/);
+assert.match(canvasRuntime, /Canvas Shape를 불러오는 중이에요\./);
+assert.match(canvasRuntime, /Canvas Shape를 다시 불러오는 중이에요\./);
 assert.doesNotMatch(canvasRuntime, /getShapeSyncErrorNoticeMessage/);
 assert.match(canvasRuntime, /onShapeSyncError: handleShapeSyncError/);
 assert.match(canvasRuntime, /catchUpCanvasOperations/);
@@ -1336,6 +1349,8 @@ assert.match(piloTldrawCanvas, /collectFrameDescendantShapes/);
 assert.match(piloTldrawCanvas, /onFreeformShapesChange\(nextFreeformShapes, frameChange\)/);
 assert.match(piloTldrawCanvas, /registerPendingRealtimePreviewGroup\(freehandShapes, "freehand"\)/);
 assert.match(piloTldrawCanvas, /PiloCollapsedFrameOverlay/);
+assert.match(piloTldrawCanvas, /CanvasFrameLazyLoadingOverlay/);
+assert.match(piloTldrawCanvas, /loadingFrameIds/);
 assert.match(piloTldrawCanvas, /onViewportBoundsChange/);
 assert.match(piloTldrawCanvas, /placePiloCanvasShapeInEmptyViewport/);
 assert.match(piloTldrawCanvas, /createPiloCanvasShapeInEmptyViewport/);
@@ -1434,6 +1449,10 @@ assert.match(piloCollapsedFrameOverlay, /scale\(\$\{item\.zoom\}\)/);
 assert.match(piloCollapsedFrameOverlay, /handleExpandPointerDown/);
 assert.match(piloCollapsedFrameOverlay, /onFrameCollapsedChange\(frame, false\)/);
 assert.match(piloCollapsedFrameOverlay, /getPiloChildShapeCount/);
+assert.match(canvasFrameLazyLoadingOverlay, /canvas-frame-lazy-loading-layer/);
+assert.match(canvasFrameLazyLoadingOverlay, /canvas-frame-lazy-loading-indicator/);
+assert.match(canvasFrameLazyLoadingOverlay, /pageToViewport/);
+assert.match(canvasFrameLazyLoadingOverlay, /⟳/);
 assert.match(piloCodeBlockShapeUtil, /BaseBoxShapeUtil/);
 assert.match(piloCodeBlockShapeUtil, /isCollapsed: T\.boolean\.optional/);
 assert.doesNotMatch(piloCodeBlockShapeUtil, /BaseFrameLikeShapeUtil/);
@@ -1459,6 +1478,8 @@ assert.doesNotMatch(canvasCss, /is-remotely-edit-locked/);
 assert.match(canvasCss, /is-pilo-eraser-active/);
 assert.match(canvasCss, /pilo-tldraw-canvas \.tl-canvas/);
 assert.match(canvasCss, /crosshair !important/);
+assert.match(canvasCss, /canvas-frame-lazy-loading-indicator/);
+assert.match(canvasCss, /canvas-frame-lazy-loading-spin/);
 assert.match(piloCodeMirrorEditor, /@codemirror\/view/);
 assert.match(piloCodeBlockShapeTypes, /export type PiloCodeBlockShape/);
 assert.match(piloCodeBlockShapeTypes, /isCollapsed\?: boolean/);

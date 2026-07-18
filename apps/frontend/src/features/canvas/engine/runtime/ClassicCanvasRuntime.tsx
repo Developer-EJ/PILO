@@ -1172,7 +1172,13 @@ function ClassicCanvasRuntimeInner({
     );
   }, []);
 
-  const { loadFrameChildren, loadFrameSubtree, loadViewportShapes } =
+  const {
+    initialViewportLoadStatus,
+    loadFrameChildren,
+    loadFrameSubtree,
+    loadViewportShapes,
+    loadingFrameIds,
+  } =
     useCanvasViewportQueries({
       board,
       canvasClient,
@@ -1269,6 +1275,7 @@ function ClassicCanvasRuntimeInner({
           consumeShapePatch={consumeCanvasSurfaceShapePatch}
           freeformShapes={freeformShapes}
           hydrationVersion={canvasHydrationVersion}
+          loadingFrameIds={loadingFrameIds}
           onReady={setCanvasActions}
           onFreeformShapesDraftChange={captureDraftFreeformShapes}
           onFreeformShapesChange={persistFreeformShapes}
@@ -1291,12 +1298,17 @@ function ClassicCanvasRuntimeInner({
           shapePatchVersion={canvasShapePatchVersion}
           canvasAgentEnabled={storageMode === "api"}
         />
-        {canvasSyncNotice ? (
+        {canvasSyncNotice ||
+        initialViewportLoadStatus === "loading" ||
+        initialViewportLoadStatus === "retrying" ? (
           <div
-            className={`canvas-sync-notice canvas-sync-notice--${canvasSyncNotice.tone}`}
+            className={`canvas-sync-notice canvas-sync-notice--${canvasSyncNotice?.tone ?? "info"}`}
             role="status"
           >
-            {canvasSyncNotice.message}
+            {canvasSyncNotice?.message ??
+              (initialViewportLoadStatus === "retrying"
+                ? "Canvas Shape를 다시 불러오는 중이에요."
+                : "Canvas Shape를 불러오는 중이에요.")}
           </div>
         ) : null}
       </section>

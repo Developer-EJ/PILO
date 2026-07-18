@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { normalizeCanvasFreeformShapes } from "@/features/canvas/persistence/canvas-storage";
 import { isPiloFrameCollapsed } from "@/features/canvas/engine/shapes/frame/canvas-frame-collapse";
 import type {
@@ -36,6 +36,12 @@ type LoadedViewportShapeBounds = {
 
 const MAX_LOADED_VIEWPORT_BOUNDS = 24;
 const CANVAS_LAZY_LOAD_RECOVERY_DELAY_MS = 30_000;
+
+export type CanvasInitialViewportLoadStatus =
+  | "idle"
+  | "loading"
+  | "retrying"
+  | "loaded";
 
 type UseCanvasViewportQueriesOptions = {
   board: CanvasBoardDetail;
@@ -140,12 +146,38 @@ export function useCanvasViewportQueries({
   >(() => {});
   const isMountedRef = useRef(true);
   const activeBoardIdRef = useRef(board.id);
+  const initialViewportLoadCompletedRef = useRef(false);
+  const [initialViewportLoadStatus, setInitialViewportLoadStatus] =
+    useState<CanvasInitialViewportLoadStatus>("idle");
+  const [loadingFrameIds, setLoadingFrameIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const loadedViewportBoundsRef = useRef<{
     boardId: string;
     bounds: LoadedViewportShapeBounds[];
   } | null>(null);
 
   activeBoardIdRef.current = board.id;
+
+  const setFrameLoading = useCallback((frameId: string, isLoading: boolean) => {
+    setLoadingFrameIds((currentFrameIds) => {
+      const hasFrame = currentFrameIds.has(frameId);
+
+      if (hasFrame === isLoading) {
+        return currentFrameIds;
+      }
+
+      const nextFrameIds = new Set(currentFrameIds);
+
+      if (isLoading) {
+        nextFrameIds.add(frameId);
+      } else {
+        nextFrameIds.delete(frameId);
+      }
+
+      return nextFrameIds;
+    });
+  }, []);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -156,6 +188,9 @@ export function useCanvasViewportQueries({
   }, []);
 
   useEffect(() => {
+    initialViewportLoadCompletedRef.current = false;
+    setInitialViewportLoadStatus("idle");
+    setLoadingFrameIds(new Set());
     frameChildrenRecoveryTimersRef.current.forEach((timer) => {
       clearTimeout(timer);
     });
@@ -212,6 +247,7 @@ export function useCanvasViewportQueries({
       const nextVisitedFrameIds = new Set(visitedFrameIds);
       nextVisitedFrameIds.add(frameId);
       loadingFrameChildrenRef.current.add(frameId);
+      setFrameLoading(frameId, true);
 
       function mergeFrameChildren(loadedShapes: PiloCanvasFreeformShape[]) {
         const nextLoadedShapes = loadedShapes.filter(
@@ -250,6 +286,7 @@ export function useCanvasViewportQueries({
       ) {
         mergeFrameChildren(cachedShapes);
         loadingFrameChildrenRef.current.delete(frameId);
+        setFrameLoading(frameId, false);
         return;
       }
 
@@ -261,6 +298,7 @@ export function useCanvasViewportQueries({
       });
 
       queryClient.removeQueries({ exact: true, queryKey });
+      let keepLoadingIndicator = false;
       void queryClient
         .fetchQuery({
           queryKey,
@@ -285,6 +323,13 @@ export function useCanvasViewportQueries({
             }),
         })
         .then((shapes) => {
+          if (
+            !isMountedRef.current ||
+            activeBoardIdRef.current !== board.id
+          ) {
+            return;
+          }
+
           rememberPersistedShapeMetadata(shapes);
 
           const loadedShapes = normalizeCanvasFreeformShapes(
@@ -306,6 +351,7 @@ export function useCanvasViewportQueries({
             activeBoardIdRef.current === board.id &&
             !frameChildrenRecoveryTimersRef.current.has(frameId)
           ) {
+            keepLoadingIndicator = true;
             const timer = setTimeout(() => {
               frameChildrenRecoveryTimersRef.current.delete(frameId);
               loadFrameChildrenRef.current(frameId);
@@ -317,7 +363,11 @@ export function useCanvasViewportQueries({
         .finally(() => {
           loadingFrameChildrenRef.current.delete(frameId);
           if (pendingFrameChildrenReloadRef.current.delete(frameId)) {
+            keepLoadingIndicator = true;
             loadFrameChildren(frameId);
+          }
+          if (!keepLoadingIndicator && isMountedRef.current) {
+            setFrameLoading(frameId, false);
           }
         });
     },
@@ -332,6 +382,7 @@ export function useCanvasViewportQueries({
       shapeDetailCacheRef,
       storageMode,
       unloadedShapeIdsRef,
+      setFrameLoading,
     ],
   );
   loadFrameChildrenRef.current = loadFrameChildren;
@@ -350,61 +401,74 @@ export function useCanvasViewportQueries({
       async function visit(frameId: string, depth: number): Promise<void> {
         if (visitedFrameIds.has(frameId) || visitedFrameIds.size >= 160 || depth > 12) return;
         visitedFrameIds.add(frameId);
+        setFrameLoading(frameId, true);
 
-        const cachedShapes = Array.from(shapeDetailCacheRef.current.values()).filter(
-          (shape) =>
-            shape.parentId === frameId &&
-            (typeof shape.id !== "string" || !deletedShapeIdsRef.current.has(shape.id)),
-        );
-        let loadedShapes = cachedShapes;
+        try {
+          const cachedShapes = Array.from(shapeDetailCacheRef.current.values()).filter(
+            (shape) =>
+              shape.parentId === frameId &&
+              (typeof shape.id !== "string" || !deletedShapeIdsRef.current.has(shape.id)),
+          );
+          let loadedShapes = cachedShapes;
 
-        if (
-          storageMode === "api" &&
-          canvasClient?.listShapesInViewport
-        ) {
-          const queryKey = buildFrameChildrenQueryKey({
-            boardId: board.id,
-            frameId,
-            workspaceId: board.workspaceId,
+          if (
+            storageMode === "api" &&
+            canvasClient?.listShapesInViewport
+          ) {
+            const queryKey = buildFrameChildrenQueryKey({
+              boardId: board.id,
+              frameId,
+              workspaceId: board.workspaceId,
+            });
+            const shapes = await queryClient.fetchQuery({
+              queryKey,
+              retry: false,
+              staleTime: 0,
+              queryFn: ({ signal }) =>
+                runCanvasLazyLoadWithRetry({
+                  load: () =>
+                    canvasClient.listShapesInViewport!(
+                      board.id,
+                      { parentShapeId: frameId },
+                      { signal, workspaceId: board.workspaceId },
+                    ),
+                  shouldContinue: () =>
+                    isMountedRef.current &&
+                    activeBoardIdRef.current === board.id,
+                }),
+            });
+            if (
+              !isMountedRef.current ||
+              activeBoardIdRef.current !== board.id
+            ) {
+              return;
+            }
+            rememberPersistedShapeMetadata(shapes);
+            loadedShapes = normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[];
+          }
+
+          const nextShapes = loadedShapes.filter(
+            (shape) => typeof shape.id !== "string" || !deletedShapeIdsRef.current.has(shape.id),
+          );
+          nextShapes.forEach((shape) => {
+            if (typeof shape.id !== "string") return;
+            unloadedShapeIdsRef.current.delete(shape.id);
+            shapeDetailCacheRef.current.set(shape.id, shape);
           });
-          const shapes = await queryClient.fetchQuery({
-            queryKey,
-            retry: false,
-            staleTime: 0,
-            queryFn: ({ signal }) =>
-              runCanvasLazyLoadWithRetry({
-                load: () =>
-                  canvasClient.listShapesInViewport!(
-                    board.id,
-                    { parentShapeId: frameId },
-                    { signal, workspaceId: board.workspaceId },
-                  ),
-                shouldContinue: () =>
-                  isMountedRef.current &&
-                  activeBoardIdRef.current === board.id,
-              }),
-          });
-          rememberPersistedShapeMetadata(shapes);
-          loadedShapes = normalizeCanvasFreeformShapes(shapes) as PiloCanvasFreeformShape[];
+          if (nextShapes.length) mergeLoadedFreeformShapes(nextShapes);
+
+          await Promise.all(
+            nextShapes.flatMap((shape) =>
+              shape.type === "frame" && typeof shape.id === "string"
+                ? [visit(shape.id, depth + 1)]
+                : []
+            ),
+          );
+        } finally {
+          if (isMountedRef.current) {
+            setFrameLoading(frameId, false);
+          }
         }
-
-        const nextShapes = loadedShapes.filter(
-          (shape) => typeof shape.id !== "string" || !deletedShapeIdsRef.current.has(shape.id),
-        );
-        nextShapes.forEach((shape) => {
-          if (typeof shape.id !== "string") return;
-          unloadedShapeIdsRef.current.delete(shape.id);
-          shapeDetailCacheRef.current.set(shape.id, shape);
-        });
-        if (nextShapes.length) mergeLoadedFreeformShapes(nextShapes);
-
-        await Promise.all(
-          nextShapes.flatMap((shape) =>
-            shape.type === "frame" && typeof shape.id === "string"
-              ? [visit(shape.id, depth + 1)]
-              : []
-          ),
-        );
       }
 
       try {
@@ -416,6 +480,7 @@ export function useCanvasViewportQueries({
           activeBoardIdRef.current === board.id &&
           !frameSubtreeRecoveryTimersRef.current.has(rootFrameId)
         ) {
+          setFrameLoading(rootFrameId, true);
           const timer = setTimeout(() => {
             frameSubtreeRecoveryTimersRef.current.delete(rootFrameId);
             void loadFrameSubtreeRef.current(rootFrameId).catch(
@@ -447,6 +512,7 @@ export function useCanvasViewportQueries({
       shapeDetailCacheRef,
       storageMode,
       unloadedShapeIdsRef,
+      setFrameLoading,
     ],
   );
   loadFrameSubtreeRef.current = loadFrameSubtree;
@@ -473,6 +539,12 @@ export function useCanvasViewportQueries({
         )
       ) {
         return;
+      }
+
+      if (!initialViewportLoadCompletedRef.current) {
+        setInitialViewportLoadStatus((currentStatus) =>
+          currentStatus === "idle" ? "loading" : currentStatus,
+        );
       }
 
       if (viewportShapeLoadTimerRef.current) {
@@ -535,6 +607,16 @@ export function useCanvasViewportQueries({
                         workspaceId: board.workspaceId,
                       },
                     ),
+                  onRetry: () => {
+                    if (
+                      !initialViewportLoadCompletedRef.current &&
+                      isMountedRef.current &&
+                      activeBoardIdRef.current === board.id &&
+                      viewportShapeLoadRequestSeqRef.current === requestSeq
+                    ) {
+                      setInitialViewportLoadStatus("retrying");
+                    }
+                  },
                   shouldContinue: () =>
                     isMountedRef.current &&
                     activeBoardIdRef.current === board.id &&
@@ -545,6 +627,8 @@ export function useCanvasViewportQueries({
           )
           .then((shapes) => {
             if (
+              !isMountedRef.current ||
+              activeBoardIdRef.current !== board.id ||
               viewportShapeLoadRequestSeqRef.current !== requestSeq ||
               latestViewportBoundsRef.current !== latestBounds
             ) {
@@ -572,6 +656,10 @@ export function useCanvasViewportQueries({
                 -MAX_LOADED_VIEWPORT_BOUNDS,
               ),
             };
+            if (!initialViewportLoadCompletedRef.current) {
+              initialViewportLoadCompletedRef.current = true;
+              setInitialViewportLoadStatus("loaded");
+            }
             onViewportShapesLoaded?.({
               ...latestBounds,
               margin: DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
@@ -599,10 +687,15 @@ export function useCanvasViewportQueries({
               latestViewportBoundsRef.current === latestBounds &&
               !viewportShapeLoadTimerRef.current
             ) {
+              if (!initialViewportLoadCompletedRef.current) {
+                setInitialViewportLoadStatus("retrying");
+              }
               viewportShapeLoadTimerRef.current = setTimeout(() => {
                 viewportShapeLoadTimerRef.current = null;
                 loadViewportShapesRef.current(latestBounds);
               }, CANVAS_LAZY_LOAD_RECOVERY_DELAY_MS);
+            } else if (!initialViewportLoadCompletedRef.current) {
+              setInitialViewportLoadStatus("idle");
             }
           });
       }, DEFAULT_VIEWPORT_SHAPE_LOAD_DEBOUNCE_MS);
@@ -626,8 +719,10 @@ export function useCanvasViewportQueries({
   loadViewportShapesRef.current = loadViewportShapes;
 
   return {
+    initialViewportLoadStatus,
     loadFrameChildren,
     loadFrameSubtree,
     loadViewportShapes,
+    loadingFrameIds,
   };
 }

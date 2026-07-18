@@ -47,6 +47,7 @@ import {
 import { CanvasAgentVisualOverlay } from "./overlays/CanvasAgentVisualOverlay";
 import { CanvasRemoteConnectionPreviewOverlay } from "./overlays/CanvasRemoteConnectionPreviewOverlay";
 import { CanvasRemoteFreehandPreviewOverlay } from "./overlays/CanvasRemoteFreehandPreviewOverlay";
+import { CanvasFrameLazyLoadingOverlay } from "./overlays/CanvasFrameLazyLoadingOverlay";
 import { PiloCollapsedFrameOverlay } from "./overlays/PiloCollapsedFrameOverlay";
 import { SelectedShapeStackingManager } from "../interactions/PiloCanvasStackingManager";
 import { SelectedGroupToolbar } from "../interactions/PiloCanvasGroupToolbar";
@@ -199,6 +200,7 @@ type CanvasEditorProps = {
   consumeShapePatch: () => PiloCanvasShapePatch;
   hydrationVersion: number;
   freeformShapes: PiloCanvasFreeformShape[];
+  loadingFrameIds: ReadonlySet<string>;
   onReady: (actions: PiloCanvasActions | null) => void;
   onFreeformShapesDraftChange: (
     shapes: PiloCanvasFreeformShape[],
@@ -1043,6 +1045,7 @@ export function CanvasEditor({
   consumeShapePatch,
   freeformShapes,
   hydrationVersion,
+  loadingFrameIds,
   onReady,
   onFreeformShapesDraftChange,
   onFreeformShapesChange,
@@ -2575,6 +2578,9 @@ export function CanvasEditor({
           <CanvasSnapStateReporter onSnapStateChange={onSnapStateChange} />
           <SelectedShapeStackingManager />
           <SelectedGroupToolbar />
+          {loadingFrameIds.size ? (
+            <CanvasFrameLazyLoadingOverlay loadingFrameIds={loadingFrameIds} />
+          ) : null}
           <PiloCollapsedFrameOverlay
             onFrameCollapsedChange={handleFrameCollapsedChange}
           />
