@@ -32,6 +32,8 @@ USER_VISIBLE_UUID_PATTERN = re.compile(
     r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f])",
     re.IGNORECASE,
 )
+SQL_ERD_TABLE_REF_PATTERN = re.compile(r"^t[1-9][0-9]*$")
+SQL_ERD_PRIMARY_TABLE_REF_LIMIT = 20
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -663,6 +665,11 @@ def normalize_agent_planner_decision(
 
     if status == "tool_candidate" and tool is not None:
         missing_fields = _missing_required_tool_input_fields(tool, decision.tool_input)
+        if tool.name == "focus_sql_erd_tables":
+            missing_fields = _missing_sql_erd_focus_fields(
+                decision.tool_input,
+                missing_fields,
+            )
         if tool.name == "update_calendar_event":
             missing_fields = _missing_calendar_update_fields(
                 decision.tool_input,
@@ -785,6 +792,25 @@ def _missing_required_tool_input_fields(
             if isinstance(min_items, int) and len(value) < min_items:
                 missing.append(field)
     return tuple(missing)
+
+
+def _missing_sql_erd_focus_fields(
+    input_value: dict[str, object],
+    missing_fields: tuple[str, ...],
+) -> tuple[str, ...]:
+    missing = set(missing_fields)
+    primary_refs = input_value.get("primaryTableRefs")
+    if (
+        not isinstance(primary_refs, list)
+        or not 1 <= len(primary_refs) <= SQL_ERD_PRIMARY_TABLE_REF_LIMIT
+        or any(
+            not isinstance(ref, str) or SQL_ERD_TABLE_REF_PATTERN.fullmatch(ref) is None
+            for ref in primary_refs
+        )
+        or len(set(primary_refs)) != len(primary_refs)
+    ):
+        missing.add("primaryTableRefs")
+    return tuple(sorted(missing))
 
 
 def _tool_input_property_schema(
@@ -953,6 +979,7 @@ def _clarification_answer(
         "end": "조회 종료일",
         "calendar_event_end_time": "시작 시각보다 늦은 종료 시각",
         "calendar_event_time_or_all_day": "종일 여부 또는 시작 시각",
+        "primaryTableRefs": "집중해서 볼 핵심 테이블",
     }
     fields = [labels.get(field, field) for field in missing_fields]
     if not fields:
@@ -1121,7 +1148,8 @@ def _agent_planner_system_prompt() -> str:
         "uses compact table refs. Classify semantically direct matches as primary tables and only "
         "meaningful direct FK neighbors as related tables; do not expand to two-hop neighbors by "
         "default. After a completed inspect_sql_erd_schema result, use focus_sql_erd_tables with "
-        "that exact sessionId and sessionRevision, primaryTableRefs, relatedTableRefs, confidence, "
+        "that exact sessionId, sessionRevision, and modelFingerprint, primaryTableRefs, "
+        "relatedTableRefs, confidence, "
         "and one concise reason per selected ref. Do not derive refs from memory or a stale "
         "result. "
         "When contextSurface is pr_review, the App Server has already identified and revalidated "
