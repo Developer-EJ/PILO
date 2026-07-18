@@ -75,6 +75,10 @@ import { createWorkspacePresenceAccessService } from "../workspace-presence/work
 import { createWorkspacePresenceMembershipRevocationHandler } from "../workspace-presence/workspace-presence-membership-revocation";
 import { createWorkspacePresenceService } from "../workspace-presence/workspace-presence.service";
 import { registerWorkspacePresenceSocketHandlers } from "../workspace-presence/workspace-presence-socket-handlers";
+import { createScreenShareFanOut } from "../screen-share/screen-share-fan-out";
+import {
+  WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL,
+} from "../screen-share/screen-share-events";
 import {
   isMeetingNotificationRedisEvent,
   isMeetingReportRedisEvent,
@@ -545,6 +549,11 @@ export async function createRealtimeSocketServer({
       io,
       service: workspacePresenceService,
     });
+  const screenShareFanOut = createScreenShareFanOut({
+    emit(room, event, payload) {
+      io.to(room).emit(event, payload);
+    },
+  });
   const chatSubscriptionWork = createChatSubscriptionWorkQueue({
     onRejected() {
       console.error("Chat Redis subscription work failed");
@@ -667,6 +676,16 @@ export async function createRealtimeSocketServer({
         (payload) => {
           if (!githubSourceFanOut.fanOut(payload)) {
             console.error("GitHub source invalidation Redis payload is invalid");
+          }
+        },
+      )
+    : null;
+  const unsubscribeScreenShareEvents = redisAdapter
+    ? await redisAdapter.subscribe(
+        WORKSPACE_SCREEN_SHARE_REDIS_CHANNEL,
+        (payload) => {
+          if (!screenShareFanOut.fanOut(payload)) {
+            console.error("Workspace screen share Redis payload is invalid");
           }
         },
       )
@@ -1380,6 +1399,7 @@ export async function createRealtimeSocketServer({
       await unsubscribeBoardInvalidations?.();
       await unsubscribeBoardSourceEvents?.();
       await unsubscribeGithubSourceInvalidations?.();
+      await unsubscribeScreenShareEvents?.();
       await unsubscribeChatEvents?.();
       await unsubscribeWorkspaceMembershipRevocations?.();
       await chatSubscriptionWork.drain();
