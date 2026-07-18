@@ -581,7 +581,8 @@ model/retrieval rollout**으로 전환하지 않는다. DB 비의존적인 Phase
   예산을 넘으면 legacy로 fallback하고, 낮은 순위 chain은 건너뛴다.
 - [x] `AGENT_TOOL_RETRIEVAL_MODE=read_only_shortlist`에서 planner에는 최종 read-only shortlist schema만
   전달한다. shortlist 밖 tool 출력은 planning failure로 거부하고, 낮은 confidence·budget 초과·retriever
-  예외·write capability는 legacy all-eligible planner로 fallback한다. 기본 mode는 `shadow`다.
+  예외·write capability는 legacy all-eligible planner로 fallback한다. offline shadow evaluator도 같은
+  selection helper로 이 fallback을 재현한다. 기본 mode는 `shadow`다.
 - [x] low-confidence가 mutation을 단독으로 선택하거나 지원 요청을 즉시 `unsupported`로 바꾸지
   않도록 한다. App Server registry, validator, Workspace 권한, confirmation, revalidation은
   여전히 권위 있는 실행 경계다.

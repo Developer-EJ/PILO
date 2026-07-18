@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 _SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
@@ -96,6 +96,13 @@ class ToolRetrievalResult:
     selected_capability_ids: tuple[str, ...] = ()
     primary_capability_id: str | None = None
     primary_tool_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ReadOnlyToolSelection:
+    tool_names: tuple[str, ...]
+    retrieval: ToolRetrievalResult
+    used_shortlist: bool
 
 
 class SemanticReranker(Protocol):
@@ -277,6 +284,73 @@ def retrieve_tool_shortlist(
         selected_capability_ids=tuple(selected_capability_ids),
         primary_capability_id=ranked[0][1],
         primary_tool_name=capability_by_id[ranked[0][1]].tool_names[-1],
+    )
+
+
+def select_read_only_tool_shortlist(
+    prompt: str,
+    catalog: ToolCapabilityCatalog,
+    eligible_tool_schemas: dict[str, dict[str, object]],
+    *,
+    top_k: int = 8,
+    schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+) -> ReadOnlyToolSelection:
+    legacy_tool_names = tuple(eligible_tool_schemas)
+    try:
+        retrieval = retrieve_tool_shortlist(
+            prompt,
+            catalog,
+            top_k=top_k,
+            tool_schema_bytes={
+                tool_name: len(
+                    json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode()
+                )
+                for tool_name, schema in eligible_tool_schemas.items()
+            },
+            schema_token_budget=schema_token_budget,
+        )
+    except Exception:
+        return ReadOnlyToolSelection(
+            tool_names=legacy_tool_names,
+            retrieval=ToolRetrievalResult(
+                tool_names=tuple(),
+                low_confidence=True,
+                fallback_reason="retriever_error",
+            ),
+            used_shortlist=False,
+        )
+
+    if retrieval.low_confidence or not retrieval.selected_capability_ids:
+        return ReadOnlyToolSelection(
+            tool_names=legacy_tool_names,
+            retrieval=retrieval,
+            used_shortlist=False,
+        )
+
+    descriptor_by_tool_name = {
+        descriptor.tool_name: descriptor for descriptor in catalog.descriptors
+    }
+    if any(
+        descriptor_by_tool_name.get(tool_name) is None
+        or descriptor_by_tool_name[tool_name].operation != "read"
+        for tool_name in retrieval.tool_names
+    ):
+        return ReadOnlyToolSelection(
+            tool_names=legacy_tool_names,
+            retrieval=replace(retrieval, fallback_reason="write_capability"),
+            used_shortlist=False,
+        )
+
+    return ReadOnlyToolSelection(
+        tool_names=tuple(
+            tool_name for tool_name in legacy_tool_names if tool_name in set(retrieval.tool_names)
+        ),
+        retrieval=retrieval,
+        used_shortlist=True,
     )
 
 
