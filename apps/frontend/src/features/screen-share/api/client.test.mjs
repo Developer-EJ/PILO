@@ -135,6 +135,39 @@ test("screen share client maps API error status, code, path, and message", async
         "/workspaces/workspace-1/screen-share-sessions",
       );
       assert.equal(error.message, "Screen share is already active");
+      assert.deepEqual(error.details, { session });
+      return true;
+    },
+  );
+});
+
+test("screen share client discards unvalidated conflict details", async () => {
+  const client = createScreenShareApiClient({
+    accessToken: "access-token",
+    fetcher: async () =>
+      new Response(
+        JSON.stringify({
+          success: false,
+          error: {
+            code: "SCREEN_SHARE_ALREADY_ACTIVE",
+            message: "Screen share is already active",
+            details: {
+              session: {
+                ...session,
+                livekitToken: "must-not-escape",
+              },
+            },
+          },
+        }),
+        { status: 409 },
+      ),
+  });
+
+  await assert.rejects(
+    () => client.start("workspace-1"),
+    (error) => {
+      assert.equal(error instanceof ScreenShareApiError, true);
+      assert.equal(error.details, undefined);
       return true;
     },
   );

@@ -43,6 +43,7 @@ function createLocalTrack(source = Track.Source.ScreenShare) {
 function createRoomHarness({ connectError, publishError } = {}) {
   const handlers = new Map();
   const published = [];
+  const unpublished = [];
   const room = {
     connectCalls: [],
     disconnectCalls: 0,
@@ -50,6 +51,9 @@ function createRoomHarness({ connectError, publishError } = {}) {
       async publishTrack(track) {
         published.push(track);
         if (publishError) throw publishError;
+      },
+      async unpublishTrack(track) {
+        unpublished.push(track);
       },
     },
     on(event, handler) {
@@ -71,7 +75,7 @@ function createRoomHarness({ connectError, publishError } = {}) {
       handlers.get(event)?.(...args);
     },
   };
-  return { handlers, published, room };
+  return { handlers, published, room, unpublished };
 }
 
 function publisherStart() {
@@ -203,9 +207,10 @@ for (const failure of ["api", "connect", "publish"]) {
   });
 }
 
-test("publisher native track end invokes the stop callback once", async () => {
+test("publisher native track end cleans resources and then invokes the callback once", async () => {
   const track = createLocalTrack();
-  const { room } = createRoomHarness();
+  const ended = [];
+  const { room, unpublished } = createRoomHarness();
   let nativeStops = 0;
   const session = await createPublisherSession({
     workspaceId: "workspace-1",
@@ -214,6 +219,7 @@ test("publisher native track end invokes the stop callback once", async () => {
         return publisherStart();
       },
       async end(_workspaceId, sessionId) {
+        ended.push(sessionId);
         return { sessionId, ended: true };
       },
     },
@@ -228,8 +234,19 @@ test("publisher native track end invokes the stop callback once", async () => {
 
   track.emitEnded();
   track.emitEnded();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(track.stopped, 1);
+  assert.deepEqual(unpublished, [track]);
+  assert.equal(room.disconnectCalls, 1);
+  assert.deepEqual(ended, ["session-1"]);
   assert.equal(nativeStops, 1);
   await session.stop();
+  assert.equal(track.stopped, 1);
+  assert.deepEqual(unpublished, [track]);
+  assert.equal(room.disconnectCalls, 1);
+  assert.deepEqual(ended, ["session-1"]);
+  assert.equal(nativeStops, 1);
 });
 
 test("viewer subscribes only to screen share, attaches one video, and fully cleans up", async () => {

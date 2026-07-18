@@ -27,6 +27,7 @@ type TrackPublication = {
 type ScreenShareRoom = {
   localParticipant: {
     publishTrack(track: LocalScreenTrack): Promise<unknown>;
+    unpublishTrack(track: LocalScreenTrack): Promise<unknown>;
   };
   connect(url: string, token: string): Promise<void>;
   disconnect(): Promise<void>;
@@ -97,12 +98,19 @@ export async function createPublisherSession({
   let start: StartScreenSharePayload | null = null;
   let stopped = false;
   let nativeStopCalled = false;
+  let published = false;
   let screenTrack: LocalScreenTrack | null = null;
 
   const handleNativeStop = () => {
     if (nativeStopCalled) return;
     nativeStopCalled = true;
-    onNativeStop();
+    void (async () => {
+      try {
+        await cleanup(true);
+      } finally {
+        onNativeStop();
+      }
+    })().catch(() => undefined);
   };
 
   const cleanup = async (endSession: boolean) => {
@@ -116,6 +124,9 @@ export async function createPublisherSession({
     }
     stopTracks(tracks);
     await settle([
+      ...(published && room && screenTrack
+        ? [room.localParticipant.unpublishTrack(screenTrack)]
+        : []),
       ...(room ? [room.disconnect()] : []),
       ...(endSession && start ? [api.end(workspaceId, start.id)] : [])
     ]);
@@ -132,6 +143,7 @@ export async function createPublisherSession({
     room = createRoom();
     await room.connect(start.livekitUrl, start.livekitToken);
     await room.localParticipant.publishTrack(screenTrack);
+    published = true;
     screenTrack.mediaStreamTrack.addEventListener(
       "ended",
       handleNativeStop,

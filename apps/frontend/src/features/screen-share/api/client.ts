@@ -18,6 +18,10 @@ type ApiSuccessResponse<T> = {
   data: T;
 };
 
+export type ScreenShareApiErrorDetails = {
+  session: PublicScreenShareSession;
+};
+
 export type ScreenShareApiClient = {
   getCurrent(
     workspaceId: string
@@ -55,16 +59,23 @@ export class ScreenShareApiError extends Error {
   status?: number;
   path?: string;
   code?: string;
+  details?: ScreenShareApiErrorDetails;
 
   constructor(
     message: string,
-    options: { status?: number; path?: string; code?: string } = {}
+    options: {
+      status?: number;
+      path?: string;
+      code?: string;
+      details?: ScreenShareApiErrorDetails;
+    } = {}
   ) {
     super(message);
     this.name = "ScreenShareApiError";
     this.status = options.status;
     this.path = options.path;
     this.code = options.code;
+    this.details = options.details;
   }
 }
 
@@ -81,13 +92,61 @@ function readApiError(payload: unknown) {
     return null;
   }
 
+  const code =
+    typeof payload.error.code === "string" ? payload.error.code : undefined;
   return {
-    code:
-      typeof payload.error.code === "string" ? payload.error.code : undefined,
+    code,
+    details:
+      code === "SCREEN_SHARE_ALREADY_ACTIVE"
+        ? readConflictDetails(payload.error.details)
+        : undefined,
     message:
       typeof payload.error.message === "string"
         ? payload.error.message
         : "Screen share API request failed"
+  };
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: string[]) {
+  const actualKeys = Object.keys(value);
+  return (
+    actualKeys.length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function readConflictDetails(
+  value: unknown
+): ScreenShareApiErrorDetails | undefined {
+  if (!isRecord(value) || !hasExactKeys(value, ["session"])) {
+    return undefined;
+  }
+  const session = value.session;
+  if (
+    !isRecord(session) ||
+    !hasExactKeys(session, ["id", "sharer", "startedAt"]) ||
+    typeof session.id !== "string" ||
+    typeof session.startedAt !== "string" ||
+    !isRecord(session.sharer) ||
+    !hasExactKeys(session.sharer, ["userId", "displayName", "avatarUrl"]) ||
+    typeof session.sharer.userId !== "string" ||
+    typeof session.sharer.displayName !== "string" ||
+    (session.sharer.avatarUrl !== null &&
+      typeof session.sharer.avatarUrl !== "string")
+  ) {
+    return undefined;
+  }
+
+  return {
+    session: {
+      id: session.id,
+      sharer: {
+        userId: session.sharer.userId,
+        displayName: session.sharer.displayName,
+        avatarUrl: session.sharer.avatarUrl
+      },
+      startedAt: session.startedAt
+    }
   };
 }
 
@@ -131,6 +190,7 @@ async function requestData<T>(
       apiError?.message ?? "Screen share API request failed",
       {
         code: apiError?.code,
+        details: apiError?.details,
         path,
         status: response.status
       }

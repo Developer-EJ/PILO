@@ -104,6 +104,31 @@ test("publisher failure rejects stale session IDs", () => {
   );
 });
 
+test("publisher selecting cannot replace an in-flight or active publisher", () => {
+  const connecting = reduceScreenShareState(
+    reduceScreenShareState(
+      reduceScreenShareState(initialScreenShareState, {
+        type: "publisher/selecting",
+      }),
+      { type: "publisher/reserving" },
+    ),
+    { type: "publisher/connecting", sessionId: "session-1" },
+  );
+  const sharing = reduceScreenShareState(connecting, {
+    type: "publisher/sharing",
+    sessionId: "session-1",
+  });
+
+  assert.equal(
+    reduceScreenShareState(connecting, { type: "publisher/selecting" }),
+    connecting,
+  );
+  assert.equal(
+    reduceScreenShareState(sharing, { type: "publisher/selecting" }),
+    sharing,
+  );
+});
+
 test("viewer opts in from closed through connecting and display modes back to closed", () => {
   let state = reduceScreenShareState(initialScreenShareState, {
     type: "viewer/connecting",
@@ -176,5 +201,31 @@ test("viewer ended and other session actions reject stale session IDs", () => {
       mode: "floating",
       error: null,
     },
+  );
+});
+
+test("viewer connecting cannot replace a newer non-closed viewer session", () => {
+  const connecting = reduceScreenShareState(initialScreenShareState, {
+    type: "viewer/connecting",
+    sessionId: "session-new",
+  });
+  const viewing = reduceScreenShareState(connecting, {
+    type: "viewer/connected",
+    sessionId: "session-new",
+  });
+
+  assert.equal(
+    reduceScreenShareState(connecting, {
+      type: "viewer/connecting",
+      sessionId: "session-old",
+    }),
+    connecting,
+  );
+  assert.equal(
+    reduceScreenShareState(viewing, {
+      type: "viewer/connecting",
+      sessionId: "session-old",
+    }),
+    viewing,
   );
 });

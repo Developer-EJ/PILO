@@ -88,7 +88,9 @@ export function reduceScreenShareState(
 ): ScreenShareState {
   switch (action.type) {
     case "publisher/selecting":
-      return withPublisher(state, { ...idlePublisher, status: "selecting" });
+      return state.publisher.status === "idle"
+        ? withPublisher(state, { ...idlePublisher, status: "selecting" })
+        : state;
     case "publisher/picker-cancelled":
       return state.publisher.status === "selecting"
         ? withPublisher(state, idlePublisher)
@@ -132,12 +134,14 @@ export function reduceScreenShareState(
         ? withPublisher(state, { ...idlePublisher, error: action.error })
         : state;
     case "viewer/connecting":
-      return withViewer(state, {
-        status: "connecting",
-        sessionId: action.sessionId,
-        mode: "floating",
-        error: null
-      });
+      return state.viewer.status === "closed"
+        ? withViewer(state, {
+            status: "connecting",
+            sessionId: action.sessionId,
+            mode: "floating",
+            error: null
+          })
+        : state;
     case "viewer/connected":
       return state.viewer.status === "connecting" &&
         hasViewerSession(state, action.sessionId)
