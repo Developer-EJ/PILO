@@ -48,7 +48,7 @@ export function BoardIssueAssigneeSelector({
   function renderOptions() {
     if (status === "loading") {
       return (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[18px] text-muted-foreground">
           담당자 후보를 불러오는 중입니다.
         </p>
       );
@@ -57,7 +57,7 @@ export function BoardIssueAssigneeSelector({
     if (status === "error") {
       return (
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-destructive">
+          <p className="text-[18px] text-destructive">
             {error ?? "담당자 후보를 불러오지 못했습니다."}
           </p>
           <Button
@@ -79,7 +79,7 @@ export function BoardIssueAssigneeSelector({
 
     if (visibleOptions.length === 0) {
       return (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[18px] text-muted-foreground">
           지정 가능한 담당자가 없습니다.
         </p>
       );
@@ -92,7 +92,7 @@ export function BoardIssueAssigneeSelector({
           return (
             <label
               key={option.login.toLowerCase()}
-              className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50"
+              className="flex min-h-[45px] cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[21px] hover:bg-muted/50"
             >
               <input
                 type="checkbox"
@@ -120,7 +120,7 @@ export function BoardIssueAssigneeSelector({
       />
       {renderOptions()}
       {atAssigneeLimit ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[18px] text-muted-foreground">
           담당자는 최대 {MAX_BOARD_ISSUE_ASSIGNEES}명까지 선택할 수 있습니다.
         </p>
       ) : null}
