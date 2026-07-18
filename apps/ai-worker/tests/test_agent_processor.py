@@ -331,6 +331,145 @@ def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
     assert "Never copy, ask for, or invent a raw resource ID" in prompt
     assert "useSelectedMeetingRoomCandidate=true" in prompt
     assert "useSelectedWorkspaceMemberCandidate=true" in prompt
+    assert "Never call the completed lookup tool again" in prompt
+
+
+def test_meeting_candidate_selection_resumes_terminal_goal_without_repeating_lookup() -> None:
+    tools = [
+        tool_snapshot(
+            name="resolve_meeting_resource",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        tool_snapshot(
+            name="start_meeting_in_room",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "roomName": {"type": "string"},
+                    "useSelectedMeetingRoomCandidate": {
+                        "type": "boolean",
+                        "const": True,
+                    },
+                },
+            },
+        ),
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+    planning_context = (
+        'selected meeting candidate resume: {"clarificationToolName":"resolve_meeting_resource",'
+        '"goalToolName":"start_meeting_in_room","resourceType":"meeting_room",'
+        '"toolInput":{"roomName":"개발 회의실"}}'
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="resolve_meeting_resource",
+            tool_input={"resourceType": "meeting_room", "roomName": "개발 회의실"},
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "start_meeting_in_room"
+    assert normalized.output_summary["input"] == {"useSelectedMeetingRoomCandidate": True}
+
+
+def test_meeting_candidate_selection_resumes_one_ambiguous_selector_at_a_time() -> None:
+    tool = tool_snapshot(
+        name="update_meeting_report_action_item",
+        riskLevel="medium",
+        executionMode="confirmation_required",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[tool]))
+    planning_context = (
+        'selected meeting candidate resume: {"clarificationToolName":'
+        '"update_meeting_report_action_item","goalToolName":'
+        '"update_meeting_report_action_item","resourceType":"workspace_member",'
+        '"toolInput":{"title":"정리","useSelectedMeetingActionItemCandidate":true,'
+        '"assigneeDisplayName":"김진호"}}'
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="update_meeting_report_action_item",
+            tool_input={},
+            requires_confirmation=True,
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "title": "정리",
+        "useSelectedMeetingActionItemCandidate": True,
+        "useSelectedWorkspaceMemberCandidate": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "tool_name", "selector_input", "selection_field"),
+    [
+        (
+            "meeting",
+            "join_meeting",
+            {"roomName": "개발 회의실"},
+            "useSelectedMeetingCandidate",
+        ),
+        (
+            "meeting_report",
+            "summarize_meeting_report",
+            {"roomName": "개발 회의실"},
+            "useSelectedMeetingReportCandidate",
+        ),
+        (
+            "meeting_report_action_item",
+            "dismiss_meeting_report_action_item",
+            {"reportContextRef": "ctx_0123456789abcdef01234567", "ordinal": 2},
+            "useSelectedMeetingActionItemCandidate",
+        ),
+    ],
+)
+def test_meeting_candidate_selection_resumes_all_meeting_resource_types(
+    resource_type: str,
+    tool_name: str,
+    selector_input: dict[str, object],
+    selection_field: str,
+) -> None:
+    tool = tool_snapshot(
+        name=tool_name,
+        riskLevel="medium" if tool_name != "summarize_meeting_report" else "low",
+        executionMode=(
+            "confirmation_required" if tool_name != "summarize_meeting_report" else "contextual"
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[tool]))
+    planning_context = "selected meeting candidate resume: " + json.dumps(
+        {
+            "clarificationToolName": tool_name,
+            "goalToolName": tool_name,
+            "resourceType": resource_type,
+            "toolInput": selector_input,
+        },
+        separators=(",", ":"),
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name=tool_name,
+            tool_input=selector_input,
+        ),
+        job,
+        planning_context=planning_context,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {selection_field: True}
 
 
 class FakeAgentRunRepository:
@@ -702,6 +841,8 @@ def test_shortlist_mode_keeps_supported_write_chain_and_falls_back_on_low_confid
         "fallbackReason": "no_metadata_match",
         "candidateCount": 0,
         "confidenceBucket": "none",
+        "primaryCapabilityId": None,
+        "primaryToolName": None,
         "catalogVersion": "agent-tool-capabilities:v2",
         "catalogSha256": job.tool_capability_catalog.sha256,
         "eligibleSnapshotSha256": (
