@@ -864,6 +864,9 @@ Phase 3 작업으로 남긴다.
 
 ##### PR 1 — #1386 read/control·report selector
 
+> 상태 (2026-07-18): 구현과 P1 보완을 완료했고 [PR #1438](https://github.com/Developer-EJ/PILO/pull/1438)에서
+> CI 재검증 중이다. #1387 action item selector·mutation과 Phase 3 통합 E2E gate는 아직 시작하지 않았다.
+
 - [x] `list_meeting_rooms`, `get_active_meeting`, `get_meeting_participants`, Meeting control tool,
   `list_meeting_reports`, `get_meeting_report`, `summarize_meeting_report`의 UUID·selector 입력을 tool별로
   분류한다. transcript/action item mutation은 #1387 이후 범위로 남긴다.
@@ -886,6 +889,11 @@ Phase 3 작업으로 남긴다.
   candidate ID, UUID, token은 사용자 메시지·Agent step/log·provider input에 내보내지 않는다.
 - [x] 0/1/N·동명이인 room·invalid date/status·다른 Workspace·만료/소비 candidate·stale meeting/report와
   UUID/token 비노출을 App Server/AI Worker 회귀로 고정한다.
+- [x] schema 전환 전에 저장된 `get_meeting_report`/`summarize_meeting_report`의 legacy `reportId` planner
+  step은 AgentExecution 내부 compatibility adapter로만 실행한다. 새 planner schema를 다시 열지 않고, 새
+  tool step에는 raw UUID 대신 compatibility marker만 남긴다.
+- [x] Agent 전용 report query는 `limit: 1..100`을 그대로 보존한다. public Meeting API의 기존 최소 20개
+  기본값은 바꾸지 않으며, 다수 report에서 빈 selector가 최신 1개를 고르는 회귀를 고정한다.
 
 ##### PR 2 — #1387 action item selector·mutation
 
