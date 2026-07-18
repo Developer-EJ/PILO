@@ -1467,6 +1467,67 @@ PR Review·Drive도 같은 gate로 순차 등록하고, 각 도메인의 조회 
 
 완료 기준: 요청한 범위만 근거와 함께 답하고, 미지원 오판이나 근거 혼합이 발생하지 않는다.
 
+#### 구현 계획 체크리스트
+
+> Phase 5 공개는 Phase 4-E의 실제 provider evaluation, `shortlist` dev smoke, `shadow`
+> rollback rehearsal이 모두 통과한 뒤에만 시작한다. Phase 5.5의 사용자 편집 회의록 정본·
+> 자연어 검색은 별도 범위로 유지한다.
+
+##### 5-A. 공통 Domain Adapter admission gate
+
+- [ ] registry inventory의 각 domain tool을 `open`, `blocked`, `unsupported`로 분류하고, resolver·eval·
+  flag가 없는 descriptor는 `open`으로 planner shortlist에 노출하지 않는다.
+- [ ] catalog에 `whenToUse`, `mustNotUseFor`, read/write operation, prerequisite chain, selector kinds,
+  confirmation requirement, canonical schema digest를 완결한다.
+- [ ] selector를 공통 primitive와 domain adapter selector로 나누고, raw UUID·schema 밖 field를
+  normalization에서 거부한다.
+- [ ] App Server adapter는 `selector → 0/1/N candidate → server-owned choice → revalidate → domain service`
+  경계를 지키며 stale/cross-scope choice는 clarification으로 끝낸다.
+- [ ] 후보 formatter는 최대 3개, timezone 기준 bounded label/status/time만 반환하며 raw ID·token·
+  provider payload·긴 원문을 남기지 않는다.
+- [ ] 모든 open adapter에 같은 thread/user/workspace `contextRef` 소유권 및 실행 직전 revalidation을
+  적용한다.
+- [ ] `domain + read/write` flag, domain 단위 rollback, selector outcome·fallback·clarification reason의
+  privacy-safe 관측을 추가한다.
+
+##### 5-B. Meeting reference adapter 품질 완료
+
+- [ ] 회의방·active meeting·참여자 formatter는 사용자 timezone, 빈 목록·종료됨·녹음 중·권한 없음의
+  상태를 일관되게 표시한다.
+- [ ] report 목록/상세는 최신 기본값, 기간·상태·명시 count, 실패 단계와 재시도 가능 여부를 보존한다.
+- [ ] summary/discussion/decision/action-item 요청은 선택한 section만 반환하며 transcript·다른 section을
+  섞지 않는다.
+- [ ] grounded answer는 selector의 report/meeting/action item scope를 교차 검증해 다른 resource·stale
+  source·직접 연결되지 않은 decision evidence를 제거한다.
+- [ ] source type, bounded citation 수, 빈 근거와 관련성 탈락 사유만 관측하고 raw evidence/provider payload는
+  저장하지 않는다.
+- [ ] canonical·held-out·counterexample·stateful follow-up에서 section 범위, citation relevance,
+  unsupported 오판, 0/1/N clarification, UUID 비노출을 검증한다.
+
+##### 5-C. 순차 도메인 공개
+
+- [ ] **Meeting 품질 → Calendar → Board → Canvas → SQLtoERD → Drive → PR Review** 순서로 adapter gate를
+  통과시킨다. 이전 domain의 안정성은 다음 domain의 공개 조건을 대체하지 않는다.
+- [ ] Calendar는 date range/relative date/timezone와 event candidate·context continuation, Board는
+  board/repository/issue/status/assignee candidate와 preview/revalidation을 각각 고정한다.
+- [ ] Canvas·SQLtoERD는 server-owned session context만 재사용하고 client session/resource ID 주입을
+  차단한다. Drive·PR Review는 private content, download/external URL, GitHub side effect를 planner context와
+  telemetry에 넣지 않는다.
+- [ ] 각 domain은 read와 기존 confirmation-required write의 정상·실패 경계를 **같은 dev release gate**에서
+  검증한다. 새 mutation capability 또는 confirmation 정책 변경은 Phase 5 범위에 포함하지 않는다.
+- [ ] 동일 smoke run에서 정상 read, ambiguous choice → original goal 재개, unsupported, stale/cross-scope
+  rejection, write confirmation·reject·approve, idempotent retry와 `shadow` rollback을 검증한다.
+- [ ] domain/API owner가 selector 의미, `mustNotUseFor`, candidate wording, confirmation 및 재검증 경계를
+  승인하고, API/DB schema 변경은 해당 owner와 DB Schema owner 확인 뒤에만 시작한다.
+
+#### Phase 5 시작 결정
+
+1. [x] 공개 순서: **Meeting 품질 → Calendar → Board → Canvas → SQLtoERD → Drive → PR Review**.
+2. [x] feature flag: 전역 flag가 아닌 **domain + read/write** 단위.
+3. [x] read와 기존 confirmation-required write는 같은 dev release gate에서 함께 테스트한다.
+4. [x] Meeting 답변은 source type과 bounded citation만 표시한다. selector 범위에 맞는 근거가 없으면
+   transcript 원문을 노출하지 않고 안전한 안내로 끝낸다.
+
 ### Phase 5.5. 사용자 편집 회의록 정본과 자연어 검색
 
 > 선행 구현: [#1346 — 회의록 내용 편집](https://github.com/Developer-EJ/PILO/issues/1346)는 title·논의사항·결정사항의 저장/조회/UI 편집 계약만 먼저 제공한다. 이 Phase의 Agent selector·RAG 재색인·AI 초안 복원은 #1346 이후 별도 작업으로 진행한다.

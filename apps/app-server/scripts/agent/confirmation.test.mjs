@@ -402,6 +402,10 @@ class FakeAgentToolRegistryService {
       }
     };
   }
+
+  getDefinitionForContext(name) {
+    return this.getDefinition(name);
+  }
 }
 
 class FakeAgentOutboxPublisherService {

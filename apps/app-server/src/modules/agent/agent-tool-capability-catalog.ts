@@ -137,6 +137,14 @@ const TOOL_OPERATION_BY_NAME: Readonly<Record<string, AgentToolOperation>> = {
   update_meeting_report_action_item: "write"
 };
 
+export function getAgentToolDomainAndOperation(
+  toolName: string
+): { domain: string; operation: AgentToolOperation } | null {
+  const domain = TOOL_DOMAIN_BY_NAME[toolName];
+  const operation = TOOL_OPERATION_BY_NAME[toolName];
+  return domain && operation ? { domain, operation } : null;
+}
+
 const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.rooms.list", "meeting", ["list_meeting_rooms"], "회의방 또는 진행 중인 회의를 조회할 때", ["회의에 참여하거나 시작하는 요청"]),
   capability("meeting.control.start", "meeting", ["list_meeting_rooms", "start_meeting_in_room"], "특정 회의방에서 새 회의를 시작할 때", ["기존 회의 참여 또는 퇴장 요청"]),

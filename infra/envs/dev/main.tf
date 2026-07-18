@@ -228,6 +228,20 @@ module "ecs" {
         OPENAI_PR_REVIEW_MODEL              = "gpt-5.5"
         OPENAI_PR_REVIEW_TIMEOUT_MS         = "45000"
         SQL_ERD_OPERATIONS_V1_ENABLED       = tostring(var.sql_erd_operations_v1_enabled)
+        AGENT_DOMAIN_MEETING_READ_ENABLED   = "true"
+        AGENT_DOMAIN_MEETING_WRITE_ENABLED  = "true"
+        AGENT_DOMAIN_CALENDAR_READ_ENABLED  = "false"
+        AGENT_DOMAIN_CALENDAR_WRITE_ENABLED = "false"
+        AGENT_DOMAIN_BOARD_READ_ENABLED     = "false"
+        AGENT_DOMAIN_BOARD_WRITE_ENABLED    = "false"
+        AGENT_DOMAIN_CANVAS_READ_ENABLED    = "false"
+        AGENT_DOMAIN_CANVAS_WRITE_ENABLED   = "false"
+        AGENT_DOMAIN_SQL_ERD_READ_ENABLED   = "false"
+        AGENT_DOMAIN_SQL_ERD_WRITE_ENABLED  = "false"
+        AGENT_DOMAIN_DRIVE_READ_ENABLED     = "false"
+        AGENT_DOMAIN_DRIVE_WRITE_ENABLED    = "false"
+        AGENT_DOMAIN_PR_REVIEW_READ_ENABLED = "false"
+        AGENT_DOMAIN_PR_REVIEW_WRITE_ENABLED = "false"
       }
       secrets = module.secrets.app_server_ecs_secrets
     }
