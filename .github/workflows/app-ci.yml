@@ -112,11 +112,25 @@ jobs:
           node scripts/agent/export-tool-retrieval-snapshot.mjs
           --output "$RUNNER_TEMP/agent-tool-registry-snapshot.json"
 
+      - name: Check Phase 4-E Meeting runtime readiness
+        run: |
+          node scripts/agent/phase4e-meeting-readiness.test.mjs
+          node scripts/agent/phase4e-meeting-readiness.mjs \
+            --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json" \
+            --output "$RUNNER_TEMP/phase4e-meeting-runtime-readiness.json"
+
       - name: Upload agent tool registry snapshot
         uses: actions/upload-artifact@v4
         with:
           name: agent-tool-registry-snapshot
           path: ${{ runner.temp }}/agent-tool-registry-snapshot.json
+          if-no-files-found: error
+
+      - name: Upload Phase 4-E Meeting runtime readiness
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4e-meeting-runtime-readiness
+          path: ${{ runner.temp }}/phase4e-meeting-runtime-readiness.json
           if-no-files-found: error
 
       - name: Audit production dependencies
@@ -174,6 +188,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: agent-tool-registry-snapshot
+          path: ${{ runner.temp }}
+
+      - name: Download Phase 4-E Meeting runtime readiness
+        uses: actions/download-artifact@v4
+        with:
+          name: phase4e-meeting-runtime-readiness
           path: ${{ runner.temp }}
 
       - name: Setup Python

@@ -126,3 +126,33 @@ PYTHONPATH=. .venv/bin/python scripts/check_prompt_injection_security_gate.py \
 기록한다. 공격 원문, 사용자 발화, Meeting evidence, tool payload, resource ID, token·secret은 기록하지
 않는다. runtime에서도 같은 detector를 retrieval·planner보다 먼저 실행하며, 탐지되면 full-tool fallback이나
 write/confirmation 후보를 만들지 않고 안전한 clarification으로 종료한다.
+
+## Phase 4-E dev 공개 gate
+
+App CI는 registry snapshot, deterministic retrieval/security 결과와 실제 App Server Meeting write runtime
+suite를 preflight로 검증한다. fixture inventory만으로 dev 공개 readiness를 통과시키지 않는다. 최종 gate는
+`Evaluate Agent Planner` workflow가 registry-bound Meeting canonical·held-out·counterexample·context를
+각각 runtime `shadow`와 `shortlist` 경로로 실제 provider 평가한 뒤 실행한다.
+
+```bash
+cd apps/ai-worker
+PYTHONPATH=. .venv/bin/python scripts/check_phase4e_dev_readiness.py \
+  --registry-snapshot /tmp/agent-tool-registry-snapshot.json \
+  --tool-retrieval-report /tmp/agent-tool-retrieval-quality-gate.json \
+  --prompt-security-report /tmp/agent-prompt-injection-security-gate.json \
+  --app-server-report /tmp/phase4e-meeting-runtime-readiness.json \
+  --meeting-evaluation-report /tmp/meeting-canonical-evaluation.json \
+  --meeting-evaluation-report /tmp/meeting-held_out-evaluation.json \
+  --meeting-evaluation-report /tmp/meeting-counterexample-evaluation.json \
+  --meeting-evaluation-report /tmp/meeting-context-evaluation.json \
+  --dev-terraform ../../infra/envs/dev/main.tf \
+  --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
+  --output /tmp/phase4e-dev-readiness.json
+```
+
+`phase4e-dev-readiness` artifact에는 registry·catalog·fixture SHA, 실제 mode별 attempt 수·정확도, recall
+metric, bounded check ID만
+포함한다. 사용자 발화, raw resource reference, tool input, UUID, credential은 포함하지 않는다. canonical
+216건, held-out 54건, counterexample 72건, multi-turn 54건과 0/1/N·동명이인 selector fixture가 빠지면
+fail-closed한다. canonical은 exact 100%, held-out/counterexample tool 선택은 95%, context exact는 95%를
+요구하며 shortlist capability recall과 shortlist violation도 함께 검사한다.

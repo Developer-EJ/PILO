@@ -42,6 +42,11 @@ def main() -> None:
         help="Path to an App Server-generated capability catalog snapshot.",
     )
     parser.add_argument(
+        "--registry-snapshot",
+        type=Path,
+        help="Bind the report to the App Server registry snapshot used to build its inputs.",
+    )
+    parser.add_argument(
         "--meeting-variant",
         choices=("canonical", "held_out", "counterexample", "context"),
         default="canonical",
@@ -205,6 +210,7 @@ def main() -> None:
             args.meeting_catalog,
             args.tool_capability_catalog,
         ),
+        **_registry_binding(args.registry_snapshot),
         "sourceRevision": _git_revision(),
     }
     rendered_report = json.dumps(report, ensure_ascii=False, indent=2)
@@ -223,6 +229,24 @@ def _git_revision() -> str:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+
+
+def _registry_binding(path: Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        inventory = value["inventory"]
+        hashes = {
+            "registryInventorySha256": inventory["sha256"],
+            "registryCatalogSha256": inventory["catalogSha256"],
+            "registryEligibleSnapshotSha256": value["eligibleSnapshotSha256"],
+        }
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        raise SystemExit("--registry-snapshot is invalid") from error
+    if any(not isinstance(item, str) or len(item) != 64 for item in hashes.values()):
+        raise SystemExit("--registry-snapshot does not contain valid SHA-256 values")
+    return hashes
 
 
 if __name__ == "__main__":
