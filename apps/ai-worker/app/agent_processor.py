@@ -145,25 +145,21 @@ def select_agent_planner_tools(
     descriptors = {
         descriptor.tool_name: descriptor for descriptor in job.tool_capability_catalog.descriptors
     }
-    primary_descriptor = descriptors.get(retrieval.primary_tool_name or "")
-    if primary_descriptor is None or primary_descriptor.operation != "read":
+    capabilities = {
+        capability.capability_id: capability
+        for capability in job.tool_capability_catalog.capabilities
+    }
+    primary_capability = capabilities.get(retrieval.primary_capability_id or "")
+    if primary_capability is None:
         return job.tools
-    required_primary_chain = (
-        *primary_descriptor.prerequisite_tool_names,
-        primary_descriptor.tool_name,
-        *primary_descriptor.follow_up_tool_names,
-    )
+    required_primary_chain = primary_capability.tool_names
     if any(
         descriptors.get(tool_name) is None or descriptors[tool_name].operation != "read"
         for tool_name in required_primary_chain
     ):
         return job.tools
 
-    selected_tool_names = {
-        tool_name
-        for tool_name in retrieval.tool_names
-        if descriptors[tool_name].operation == "read"
-    }
+    selected_tool_names = set(required_primary_chain)
     shortlist = tuple(tool for tool in job.tools if tool.name in selected_tool_names)
     return shortlist or job.tools
 

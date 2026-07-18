@@ -169,6 +169,56 @@ def tool_capability_catalog(tools: list[dict[str, object]]) -> dict[str, object]
     return catalog
 
 
+def calendar_list_update_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    catalog = tool_capability_catalog(tools)
+    list_capability, update_capability = catalog["capabilities"]
+    list_descriptor, update_descriptor = catalog["descriptors"]
+    assert isinstance(list_capability, dict)
+    assert isinstance(update_capability, dict)
+    assert isinstance(list_descriptor, dict)
+    assert isinstance(update_descriptor, dict)
+
+    update_capability.update(
+        {
+            "id": "calendar.events.update",
+            "toolNames": ["list_calendar_events", "update_calendar_event"],
+            "whenToUse": "기존 일정의 시간이나 내용을 변경할 때",
+            "mustNotUseFor": ["새 일정 생성 요청"],
+            "positiveExamples": [
+                "기존 일정 변경",
+                "일정 수정",
+                "일정 수졍",
+                "일정 바꿔주세요",
+                "일정 수정",
+            ],
+            "examples": [
+                {"kind": "canonical", "utterance": "기존 일정 변경"},
+                {"kind": "paraphrase", "utterance": "일정 수정"},
+                {"kind": "typo", "utterance": "일정 수졍"},
+                {"kind": "honorific", "utterance": "일정 바꿔주세요"},
+                {"kind": "abbreviation", "utterance": "일정 수정"},
+            ],
+        }
+    )
+    list_descriptor.update(
+        {
+            "capabilityIds": ["calendar.events.list", "calendar.events.update"],
+            "followUpToolNames": ["update_calendar_event"],
+        }
+    )
+    update_descriptor.update(
+        {
+            "toolName": "update_calendar_event",
+            "action": "update_calendar_event",
+            "capabilityIds": ["calendar.events.update"],
+        }
+    )
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def test_completed_planner_decision_finishes_multi_tool_run() -> None:
     job = parse_agent_run_job_payload(agent_payload())
     normalized = normalize_agent_planner_decision(
@@ -543,6 +593,40 @@ def test_tool_retrieval_keeps_legacy_tools_in_shadow_and_shortlists_read_only_to
     assert [tool.name for tool in budget_fallback] == [
         "list_calendar_events",
         "create_calendar_event",
+    ]
+
+
+def test_shared_calendar_list_tool_uses_the_matched_read_only_capability_chain() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="update_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=calendar_list_update_catalog(tools),
+        )
+    )
+
+    list_shortlist = select_agent_planner_tools(
+        job,
+        "이번 주 일정 조회해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    )
+    update_fallback = select_agent_planner_tools(
+        job,
+        "기존 일정 변경해줘",
+        mode=TOOL_RETRIEVAL_MODE_READ_ONLY_SHORTLIST,
+    )
+
+    assert [tool.name for tool in list_shortlist] == ["list_calendar_events"]
+    assert [tool.name for tool in update_fallback] == [
+        "list_calendar_events",
+        "update_calendar_event",
     ]
 
 

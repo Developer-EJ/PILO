@@ -93,6 +93,7 @@ class ToolRetrievalResult:
     low_confidence: bool
     fallback_reason: str | None
     unsupported_capability_id: str | None = None
+    primary_capability_id: str | None = None
     primary_tool_name: str | None = None
 
 
@@ -186,43 +187,23 @@ def retrieve_tool_shortlist(
 
     prompt_tokens = set(_tokens(prompt))
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    descriptor_by_tool_name = {
+        descriptor.tool_name: descriptor for descriptor in catalog.descriptors
+    }
     scored: list[tuple[float, str]] = []
     metadata_scores: list[float] = []
-    for descriptor in catalog.descriptors:
-        metadata_tokens = set(
-            _tokens(
-                " ".join(
-                    (
-                        descriptor.domain,
-                        descriptor.action,
-                        *descriptor.capability_ids,
-                        descriptor.when_to_use,
-                    )
-                )
-            )
-        )
-        negative_tokens = set(_tokens(" ".join(descriptor.must_not_use_for)))
-        capability_tokens = set(
-            token
-            for capability_id in descriptor.capability_ids
-            for token in _tokens(
-                " ".join(
-                    (
-                        *capability_by_id[capability_id].positive_examples,
-                        *(
-                            example.utterance
-                            for example in capability_by_id[capability_id].examples
-                        ),
-                    )
-                )
-            )
-        )
-        score = float(len(prompt_tokens & (metadata_tokens | capability_tokens)))
+    for capability in catalog.capabilities:
+        if capability.availability != "supported":
+            continue
+        terminal_tool_name = capability.tool_names[-1]
+        terminal_descriptor = descriptor_by_tool_name[terminal_tool_name]
+        negative_tokens = set(_tokens(" ".join(capability.must_not_use_for)))
+        score = _capability_match_score(prompt_tokens, capability)
         score -= float(len(prompt_tokens & negative_tokens)) * 0.75
         metadata_scores.append(score)
         if semantic_reranker:
-            score += semantic_reranker.score(prompt, descriptor)
-        scored.append((score, descriptor.tool_name))
+            score += semantic_reranker.score(prompt, terminal_descriptor)
+        scored.append((score, capability.capability_id))
 
     ranked = sorted(scored, key=lambda item: (-item[0], item[1]))
     best_score = ranked[0][0] if ranked else 0.0
@@ -252,20 +233,12 @@ def retrieve_tool_shortlist(
             fallback_reason="no_metadata_match",
         )
 
-    descriptor_by_tool_name = {
-        descriptor.tool_name: descriptor for descriptor in catalog.descriptors
-    }
     selected: list[str] = []
     selected_set: set[str] = set()
     remaining_schema_bytes = schema_token_budget * 4 if schema_token_budget is not None else None
 
-    for _, tool_name in ranked[:top_k]:
-        descriptor = descriptor_by_tool_name[tool_name]
-        required_chain = (
-            *descriptor.prerequisite_tool_names,
-            descriptor.tool_name,
-            *descriptor.follow_up_tool_names,
-        )
+    for _, capability_id in ranked[:top_k]:
+        required_chain = capability_by_id[capability_id].tool_names
         if any(name not in descriptor_by_tool_name for name in required_chain):
             return ToolRetrievalResult(
                 tool_names=tuple(),
@@ -294,7 +267,8 @@ def retrieve_tool_shortlist(
         tool_names=tuple(selected),
         low_confidence=False,
         fallback_reason=None,
-        primary_tool_name=ranked[0][1],
+        primary_capability_id=ranked[0][1],
+        primary_tool_name=capability_by_id[ranked[0][1]].tool_names[-1],
     )
 
 

@@ -178,7 +178,12 @@ def test_catalog_rejects_descriptor_digest_that_does_not_match_the_tool_schema()
 
 def test_retrieval_expands_required_chain_within_the_schema_budget() -> None:
     payload = catalog_payload()
-    payload["descriptors"][0]["followUpToolNames"] = ["list_meeting_reports"]
+    payload["capabilities"][0]["toolNames"] = [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    payload["descriptors"][1]["capabilityIds"].append("calendar.list")
+    payload["descriptors"][1]["selectorKinds"].append("date_range")
     payload["sha256"] = compute_tool_capability_catalog_sha(
         payload["version"], payload["capabilities"], payload["descriptors"]
     )
