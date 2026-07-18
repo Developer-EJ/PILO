@@ -1662,6 +1662,10 @@ def test_normalizer_prioritizes_explicit_count_over_date_range_and_keeps_room() 
         "그때 회의록 보여줘",
         "지난달 회의록 보여줘",
         "지난 주말 회의록 보여줘",
+        "다다음 주 회의록 보여줘",
+        "이번 주 회의록 보여줘",
+        "저저번 주 회의록 보여줘",
+        "작년 회의록 보여줘",
         "2026-13-40 회의록 보여줘",
     ],
 )
@@ -1699,6 +1703,41 @@ def test_normalizer_clarifies_unresolved_meeting_report_dates(prompt: str) -> No
     assert normalized.status == "needs_clarification"
     assert normalized.output_summary["missingFields"] == ["meeting_report_date_range"]
     assert "날짜나 기간" in normalized.final_answer
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    ["회의록 0건 보여줘", "최근 회의록 101건 보여줘", "회의록 101개만 보여줘"],
+)
+def test_normalizer_clarifies_out_of_range_meeting_report_counts(prompt: str) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    description="MeetingReport 목록 조회",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(tool_name="list_meeting_reports", tool_input={"limit": 1}),
+        job,
+        prompt=prompt,
+        current_date="2026-07-15",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_limit"]
+    assert "1건부터 100건" in normalized.final_answer
 
 
 def test_normalizer_preserves_meeting_report_summary_with_relative_date_selector() -> None:

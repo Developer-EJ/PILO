@@ -1262,30 +1262,29 @@ def _normalize_meeting_report_relative_date_query(
     selector = _supported_meeting_report_selector(prompt, current_date, timezone)
     available_tool_names = {tool.name for tool in job.tools}
     selected_tool_name = decision.tool_name if decision.tool_name in MEETING_REPORT_TOOLS else None
-    planner_has_filter = _has_meeting_report_filter(decision.tool_input)
-    if selector is None and _has_unresolved_meeting_report_date_expression(prompt):
+    if selector is None:
+        invalid_count = _has_invalid_meeting_report_count_expression(prompt)
         return AgentPlannerDecision(
             status="needs_clarification",
-            message="회의록 조회 기간을 해석할 수 없습니다.",
-            final_answer_draft="조회할 날짜나 기간을 조금 더 구체적으로 알려주세요.",
+            message=(
+                "회의록 조회 개수는 1건부터 100건까지 지정할 수 있습니다."
+                if invalid_count
+                else "회의록 조회 기간을 해석할 수 없습니다."
+            ),
+            final_answer_draft=(
+                "조회할 회의록 개수를 1건부터 100건 사이로 알려주세요."
+                if invalid_count
+                else "조회할 날짜나 기간을 조금 더 구체적으로 알려주세요."
+            ),
             tool_name=None,
             tool_input={},
             requires_confirmation=False,
-            missing_fields=("meeting_report_date_range",),
+            missing_fields=(
+                "meeting_report_limit" if invalid_count else "meeting_report_date_range",
+            ),
             unsupported_reason=None,
         )
-    default_latest = selector == {} or (selector is None and not planner_has_filter)
-
-    if selector is None:
-        if planner_has_filter:
-            selector = {}
-        elif "list_meeting_reports" not in available_tool_names:
-            return decision
-        elif selected_tool_name in MEETING_REPORT_ID_TOOLS:
-            return decision
-        else:
-            selector = {}
-            selected_tool_name = "list_meeting_reports"
+    default_latest = selector == {}
 
     if "limit" in selector:
         if "list_meeting_reports" not in available_tool_names:
@@ -1342,9 +1341,9 @@ def _supported_meeting_report_selector(
     except ValueError:
         return None
 
-    count_match = re.search(r"\b(100|[1-9][0-9]?)\s*(?:건|개)\b", normalized_prompt)
-    if count_match is not None:
-        return {"limit": int(count_match.group(1))}
+    count = _meeting_report_requested_count(normalized_prompt)
+    if count is not None:
+        return {"limit": count} if 1 <= count <= 100 else None
 
     absolute_date_range = _meeting_report_absolute_date_range(
         normalized_prompt,
@@ -1367,7 +1366,7 @@ def _supported_meeting_report_selector(
     if _has_unresolved_meeting_report_date_expression(normalized_prompt):
         return None
 
-    if re.search(r"지난\s*주", normalized_prompt):
+    if re.search(r"(?<![가-힣])지난\s*주(?!말)", normalized_prompt):
         current_week_start = base_date - timedelta(days=base_date.weekday())
         return _meeting_report_date_range(
             current_week_start - timedelta(days=7),
@@ -1375,7 +1374,7 @@ def _supported_meeting_report_selector(
             timezone,
         )
 
-    if re.search(r"다음\s*주", normalized_prompt):
+    if re.search(r"(?<![가-힣])다음\s*주(?!말)", normalized_prompt):
         current_week_start = base_date - timedelta(days=base_date.weekday())
         next_week_start = current_week_start + timedelta(days=7)
         return _meeting_report_date_range(
@@ -1447,24 +1446,43 @@ def _meeting_report_absolute_date_range(
     )
 
 
-def _has_meeting_report_filter(tool_input: dict[str, object]) -> bool:
-    return any(
-        field in tool_input
-        for field in ("from", "to", "status", "roomName", "useSelectedMeetingReportCandidate")
-    )
-
-
 def _has_unresolved_meeting_report_date_expression(prompt: str) -> bool:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
+    supported_expression_pattern = re.compile(
+        r"(?<![가-힣])(?:"
+        r"지난\s*주(?!말)|다음\s*주(?!말)|"
+        r"(?:다가오는|이번)\s*주말|주말|"
+        r"최근\s*7\s*일|며칠\s*전|오늘|어제|최근"
+        r")"
+    )
+    remaining_prompt = supported_expression_pattern.sub(" ", normalized_prompt)
     return bool(
         re.search(
-            r"(?:그때|언젠가|예전에|저번에|지난\s*달|이번\s*달|다음\s*달|"
-            r"지난\s*주말|저번\s*주말|다음\s*주말)",
-            normalized_prompt,
+            r"(?:그때|언젠가|예전에|저번에|내일|모레|글피|작년|올해|내년|"
+            r"(?:지지난|저저번|지난|저번|이번|다음|다다음)\s*"
+            r"(?:주말|주|달|월|년|(?:월|화|수|목|금|토|일)요일)|"
+            r"(?<![가-힣])(?:지지난|저저번|지난|저번|이번|다음|다다음)(?![가-힣])|"
+            r"(?:월|화|수|목|금|토|일)요일|분기|상반기|하반기|"
+            r"(?:\d+|한|두|세|네)\s*(?:일|주|개월|달|년)\s*(?:전|후))",
+            remaining_prompt,
         )
-        or re.search(r"\b\d{4}-\d{1,2}-\d{1,2}\b", normalized_prompt)
-        or re.search(r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일", normalized_prompt)
+        or re.search(r"\b\d{4}-\d{1,2}-\d{1,2}\b", remaining_prompt)
+        or re.search(r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일", remaining_prompt)
+        or re.search(r"\b\d+\s*(?:일|주|개월|달|년)\b", remaining_prompt)
     )
+
+
+def _has_invalid_meeting_report_count_expression(prompt: str) -> bool:
+    count = _meeting_report_requested_count(prompt)
+    return count is not None and not 1 <= count <= 100
+
+
+def _meeting_report_requested_count(prompt: str) -> int | None:
+    count_match = re.search(
+        r"(?<!\d)(\d+)\s*(?:건|개)(?=\s|$|만|를|을|씩)",
+        prompt,
+    )
+    return int(count_match.group(1)) if count_match is not None else None
 
 
 def _meeting_report_date_range(
