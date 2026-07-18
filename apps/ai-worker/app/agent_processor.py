@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.agent_tool_retrieval import ToolCapabilityCatalog, parse_tool_capability_catalog
 from app.meeting_report_processor import InfrastructureError
 
 AGENT_RUN_REQUESTED_JOB_TYPE = "agent_run_requested"
@@ -55,6 +56,7 @@ class AgentRunJob:
     turn_sequence: int
     tools: tuple[AgentToolSchema, ...]
     request_context: dict[str, str] | None = None
+    tool_capability_catalog: ToolCapabilityCatalog | None = None
 
 
 @dataclass(frozen=True)
@@ -284,14 +286,18 @@ def parse_agent_run_job_payload(payload: dict[str, object]) -> AgentRunJob:
     if payload.get("jobType") != AGENT_RUN_REQUESTED_JOB_TYPE:
         raise ValueError("Unsupported Agent job type")
 
+    tools = _parse_tool_schema_snapshot(payload.get("tools"))
     return AgentRunJob(
         run_id=_require_uuid_string(payload, "runId"),
         workspace_id=_require_uuid_string(payload, "workspaceId"),
         requested_by_user_id=_require_uuid_string(payload, "requestedByUserId"),
         tool_schema_version=_require_non_empty_string(payload, "toolSchemaVersion"),
         turn_sequence=_optional_positive_int(payload, "turnSequence", default=1),
-        tools=_parse_tool_schema_snapshot(payload.get("tools")),
+        tools=tools,
         request_context=_parse_request_context(payload.get("requestContext")),
+        tool_capability_catalog=parse_tool_capability_catalog(
+            payload.get("toolCapabilityCatalog"), {tool.name for tool in tools}
+        ),
     )
 
 
