@@ -321,6 +321,31 @@ class FakeOutboxToolRegistryService {
     );
   }
 
+  listCapabilityCatalogForContext(requestContext) {
+    this.calls.push({ method: "listCapabilityCatalogForContext", requestContext });
+    const descriptors = this.listDefinitionsForContext(requestContext).map(
+      (definition) => ({
+        toolName: definition.name,
+        domain: definition.name.includes("calendar") ? "calendar" : "pr_review",
+        action: definition.name,
+        capabilityIds: [definition.name],
+        whenToUse: definition.description,
+        mustNotUseFor: ["다른 도메인의 요청"],
+        acceptedSelectorFields: [],
+        prerequisiteToolNames: [],
+        followUpToolNames: [],
+        riskLevel: definition.riskLevel,
+        executionMode: definition.executionMode,
+        contextSurface: definition.contextRequirement?.surface ?? null
+      })
+    );
+    return {
+      version: "agent-tool-capabilities:v1",
+      sha256: "a".repeat(64),
+      descriptors
+    };
+  }
+
   definitions() {
     return [
       {
@@ -484,7 +509,29 @@ try {
         }
       }
     ]);
+    assert.deepEqual(jobService.calls[0].toolCapabilityCatalog, {
+      version: "agent-tool-capabilities:v1",
+      sha256: "a".repeat(64),
+      descriptors: [
+        {
+          toolName: "list_calendar_events",
+          domain: "calendar",
+          action: "list_calendar_events",
+          capabilityIds: ["list_calendar_events"],
+          whenToUse: "Calendar 일정 목록을 조회합니다.",
+          mustNotUseFor: ["다른 도메인의 요청"],
+          acceptedSelectorFields: [],
+          prerequisiteToolNames: [],
+          followUpToolNames: [],
+          riskLevel: "low",
+          executionMode: "auto",
+          contextSurface: null
+        }
+      ]
+    });
     assert.deepEqual(registry.calls, [
+      { method: "listDefinitionsForContext", requestContext: null },
+      { method: "listCapabilityCatalogForContext", requestContext: null },
       { method: "listDefinitionsForContext", requestContext: null }
     ]);
     assert.match(
@@ -536,6 +583,8 @@ try {
       ["list_calendar_events", "pr_review_fixture"]
     );
     assert.deepEqual(registry.calls, [
+      { method: "listDefinitionsForContext", requestContext },
+      { method: "listCapabilityCatalogForContext", requestContext },
       { method: "listDefinitionsForContext", requestContext }
     ]);
   }
