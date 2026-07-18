@@ -12,10 +12,12 @@ from app.agent_processor import (
     AgentPlannerClient,
     AgentPlanningRequest,
     AgentRunJob,
+    AgentToolSchema,
     NormalizedPlannerDecision,
     normalize_agent_planner_decision,
     parse_agent_run_job_payload,
 )
+from app.agent_tool_retrieval import ToolRetrievalResult, retrieve_tool_shortlist
 
 EVALUATION_RUN_ID = "00000000-0000-4000-8000-000000000001"
 EVALUATION_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002"
@@ -97,6 +99,7 @@ def load_evaluation_suite(path: Path) -> EvaluationSuite:
             "requestedByUserId": EVALUATION_USER_ID,
             "toolSchemaVersion": _require_string(raw, "toolSchemaVersion"),
             "tools": tools,
+            "toolCapabilityCatalog": raw.get("toolCapabilityCatalog"),
         }
     )
 
@@ -197,12 +200,21 @@ def evaluate_suite(
     current_date: str,
     timezone: str = "Asia/Seoul",
     repetitions: int = 1,
+    use_shadow_retrieval: bool = False,
 ) -> tuple[CaseEvaluationResult, ...]:
     if repetitions < 1:
         raise ValueError("Evaluation repetitions must be at least 1")
 
     return tuple(
-        evaluate_case(planner, suite.job, case, current_date, timezone, attempt)
+        evaluate_case(
+            planner,
+            suite.job,
+            case,
+            current_date,
+            timezone,
+            attempt,
+            use_shadow_retrieval=use_shadow_retrieval,
+        )
         for attempt in range(1, repetitions + 1)
         for case in suite.cases
     )
@@ -215,7 +227,13 @@ def evaluate_case(
     current_date: str,
     timezone: str,
     attempt: int,
+    *,
+    use_shadow_retrieval: bool = False,
 ) -> CaseEvaluationResult:
+    tools = job.tools
+    if use_shadow_retrieval:
+        tools, _ = select_shadow_planner_tools(job, case.prompt)
+
     decision = planner.plan(
         AgentPlanningRequest(
             run_id=str(uuid5(NAMESPACE_URL, f"agent-planner-evaluation:{case.case_id}:{attempt}")),
@@ -223,7 +241,7 @@ def evaluate_case(
             timezone=timezone,
             current_date=current_date,
             tool_schema_version=job.tool_schema_version,
-            tools=job.tools,
+            tools=tools,
         )
     )
     actual = normalize_agent_planner_decision(
@@ -242,6 +260,21 @@ def evaluate_case(
         expected=case.expectation,
         actual=actual,
     )
+
+
+def select_shadow_planner_tools(
+    job: AgentRunJob, prompt: str, top_k: int = 8
+) -> tuple[tuple[AgentToolSchema, ...], ToolRetrievalResult | None]:
+    catalog = job.tool_capability_catalog
+    if catalog is None:
+        return job.tools, None
+
+    retrieval = retrieve_tool_shortlist(prompt, catalog, top_k=top_k)
+    if retrieval.low_confidence:
+        return job.tools, retrieval
+
+    selected_names = set(retrieval.tool_names)
+    return tuple(tool for tool in job.tools if tool.name in selected_names), retrieval
 
 
 def build_evaluation_report(results: tuple[CaseEvaluationResult, ...]) -> dict[str, object]:

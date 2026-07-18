@@ -50,6 +50,11 @@ def main() -> None:
         "--model",
         default=os.environ.get("OPENAI_AGENT_PLANNER_MODEL", "gpt-5.4-mini"),
     )
+    parser.add_argument(
+        "--shadow-retrieval",
+        action="store_true",
+        help="Use the job capability catalog to give the evaluator a shortlist only.",
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -71,6 +76,7 @@ def main() -> None:
         current_date=args.current_date,
         timezone=args.timezone,
         repetitions=args.repetitions,
+        use_shadow_retrieval=args.shadow_retrieval,
     )
     report = build_evaluation_report(results)
     report["metadata"] = {

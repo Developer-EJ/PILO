@@ -7,6 +7,7 @@ from app.agent_planner_evaluation import (
     build_evaluation_report,
     evaluate_suite,
     load_evaluation_suite,
+    select_shadow_planner_tools,
 )
 from app.agent_processor import AgentPlannerDecision
 
@@ -75,6 +76,78 @@ def write_suite(tmp_path, cases):
         encoding="utf-8",
     )
     return path
+
+
+def test_shadow_retrieval_uses_only_matched_tool_schema_and_falls_back_for_unknown_prompt(
+    tmp_path,
+) -> None:
+    path = write_suite(
+        tmp_path,
+        [
+            {
+                "id": "calendar",
+                "prompt": "이번 주 일정 보여줘",
+                "expected": {"status": "tool_candidate"},
+            }
+        ],
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["tools"].append(
+        {
+            "name": "list_meeting_reports",
+            "description": "회의록 목록을 조회합니다.",
+            "riskLevel": "low",
+            "executionMode": "auto",
+            "inputSchema": {"type": "object"},
+        }
+    )
+    raw["toolCapabilityCatalog"] = {
+        "version": "agent-tool-capabilities:v1",
+        "sha256": "a" * 64,
+        "descriptors": [
+            {
+                "toolName": "list_calendar_events",
+                "domain": "calendar",
+                "action": "list_calendar_events",
+                "capabilityIds": ["calendar.list"],
+                "whenToUse": "이번 주 일정과 Calendar event를 조회합니다.",
+                "mustNotUseFor": ["회의록 요청"],
+                "acceptedSelectorFields": ["start", "end"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+            },
+            {
+                "toolName": "list_meeting_reports",
+                "domain": "meeting",
+                "action": "list_meeting_reports",
+                "capabilityIds": ["meeting.reports.list"],
+                "whenToUse": "회의록 목록을 조회합니다.",
+                "mustNotUseFor": ["일정 요청"],
+                "acceptedSelectorFields": [],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+                "riskLevel": "low",
+                "executionMode": "auto",
+                "contextSurface": None,
+            },
+        ],
+    }
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    suite = load_evaluation_suite(path)
+
+    selected, retrieval = select_shadow_planner_tools(suite.job, "이번 주 일정 보여줘", top_k=1)
+    assert [tool.name for tool in selected] == ["list_calendar_events"]
+    assert retrieval is not None and not retrieval.low_confidence
+
+    fallback, low_confidence = select_shadow_planner_tools(suite.job, "점심 메뉴 추천")
+    assert [tool.name for tool in fallback] == [
+        "list_calendar_events",
+        "list_meeting_reports",
+    ]
+    assert low_confidence is not None and low_confidence.low_confidence
 
 
 def test_evaluate_suite_scores_normalized_planner_output(tmp_path) -> None:
