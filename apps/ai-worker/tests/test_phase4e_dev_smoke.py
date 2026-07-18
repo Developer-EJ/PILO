@@ -1,6 +1,10 @@
 import pytest
 
-from app.phase4e_dev_smoke import validate_observation, validate_tool_step
+from app.phase4e_dev_smoke import (
+    validate_observation,
+    validate_running_recording_unchanged,
+    validate_tool_step,
+)
 
 
 def run(tool_status: str = "pending", mode: str = "shortlist") -> dict[str, object]:
@@ -45,3 +49,12 @@ def test_dev_smoke_rejects_write_completed_before_confirmation() -> None:
     validate_tool_step(run(), "end_meeting_recording", completed=False)
     with pytest.raises(ValueError, match="mutated before confirmation"):
         validate_tool_step(run(tool_status="completed"), "end_meeting_recording", completed=False)
+
+
+def test_dev_smoke_requires_authoritative_recording_to_remain_running() -> None:
+    running = {"id": "recording-1", "status": "RUNNING"}
+    validate_running_recording_unchanged(running, {"id": "recording-1", "status": "RUNNING"})
+    with pytest.raises(ValueError, match="recording changed"):
+        validate_running_recording_unchanged(running, {"id": "recording-1", "status": "COMPLETED"})
+    with pytest.raises(ValueError, match="no longer running"):
+        validate_running_recording_unchanged(running, None)

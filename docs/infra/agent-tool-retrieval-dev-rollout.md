@@ -89,8 +89,10 @@ GitHub Actions에 `DEV_APP_SERVER_URL`, `PHASE4E_DEV_WORKSPACE_ID` repository va
 `Phase 4-E Agent Dev Smoke` workflow를 `expected_mode=shortlist`로 실행한다. workflow는
 dev Agent Worker service의 running/desired count, 단일 안정 deployment와 실제 task definition의
 `AGENT_TOOL_RETRIEVAL_MODE`를 확인한 뒤 실제 Agent API로 최근 회의록 read run과 녹음 종료 write run을
-생성한다. read는 `get_meeting_report` 완료와 retrieval trace를, write는 pending confirmation과 승인 전
-mutation 부재를 검사한 뒤 confirmation을 reject해 정리한다. rollback 검증 시에는
+생성한다. read는 `list_meeting_reports` 완료와 retrieval trace를 검사한다. write 전에 현재 Meeting의
+authoritative `RUNNING` recording을 조회하고, pending confirmation 중과 reject 후에도 같은 recording이
+계속 `RUNNING`인지 Meeting API로 재조회해 승인 전 mutation 부재를 확인한다. 이후 confirmation을 reject해
+정리한다. rollback 검증 시에는
 Terraform에서 `shadow`로 변경·apply하고 service가 stable해진 뒤 같은 workflow를 `expected_mode=shadow`로
 실행한다. smoke workflow 자체는 배포나 mode 변경을 수행하지 않고 실제 write confirmation을 승인하지 않는다.
 

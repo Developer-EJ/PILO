@@ -22,6 +22,7 @@ class AgentApiClient:
         self.root = (
             f"{config.base_url.rstrip('/')}/api/v1/workspaces/" f"{config.workspace_id}/agent"
         )
+        self.workspace_root = self.root.removesuffix("/agent")
 
     def create_run(self, prompt: str, request_key: str) -> dict[str, object]:
         return self._request(
@@ -39,6 +40,23 @@ class AgentApiClient:
             f"{self.root}/runs/{run_id}/confirmations/{confirmation_id}/reject",
             {},
         )
+
+    def get_current_meeting(self) -> dict[str, object]:
+        data = self._request("GET", f"{self.workspace_root}/meetings/current").get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("meeting"), dict):
+            raise RuntimeError("Agent smoke requires an active dev Meeting")
+        return data["meeting"]
+
+    def get_current_recording(self, meeting_id: str) -> dict[str, object] | None:
+        data = self._request(
+            "GET", f"{self.workspace_root}/meetings/{meeting_id}/recordings/current"
+        ).get("data")
+        if not isinstance(data, dict):
+            raise RuntimeError("Agent smoke recording response is invalid")
+        recording = data.get("recording")
+        if recording is not None and not isinstance(recording, dict):
+            raise RuntimeError("Agent smoke recording response is invalid")
+        return recording
 
     def _request(
         self, method: str, url: str, body: dict[str, object] | None = None
@@ -125,3 +143,19 @@ def validate_tool_step(run: dict[str, object], tool_name: str, *, completed: boo
         raise ValueError(f"Agent smoke did not complete expected tool: {tool_name}")
     if not completed and any(step.get("status") == "completed" for step in matches):
         raise ValueError(f"Agent smoke mutated before confirmation: {tool_name}")
+
+
+def validate_running_recording_unchanged(
+    before: dict[str, object] | None, after: dict[str, object] | None
+) -> None:
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        raise ValueError("Agent smoke recording is no longer running")
+    before_id = before.get("id")
+    after_id = after.get("id")
+    if (
+        not isinstance(before_id, str)
+        or before_id != after_id
+        or before.get("status") != "RUNNING"
+        or after.get("status") != "RUNNING"
+    ):
+        raise ValueError("Agent smoke recording changed before confirmation")
