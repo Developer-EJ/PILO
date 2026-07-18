@@ -2,20 +2,39 @@ import { createHash } from "node:crypto";
 import type { AgentToolDefinition } from "./types/agent-tool.types";
 
 export const AGENT_TOOL_CAPABILITY_CATALOG_VERSION =
-  "agent-tool-capabilities:v1";
+  "agent-tool-capabilities:v2";
+
+export type AgentCapabilityAvailability = "supported" | "unsupported";
+
+export type AgentCapabilityExampleKind =
+  | "canonical"
+  | "paraphrase"
+  | "typo"
+  | "honorific"
+  | "abbreviation";
+
+export interface AgentCapabilityExample {
+  kind: AgentCapabilityExampleKind;
+  utterance: string;
+}
+
+export type AgentToolOperation = "read" | "write";
 
 export interface AgentToolCapabilityDescriptor {
   toolName: string;
   domain: string;
   action: string;
+  operation: AgentToolOperation;
   capabilityIds: string[];
   whenToUse: string;
   mustNotUseFor: string[];
   acceptedSelectorFields: string[];
+  selectorKinds: string[];
   prerequisiteToolNames: string[];
   followUpToolNames: string[];
   riskLevel: AgentToolDefinition<unknown>["riskLevel"];
   executionMode: AgentToolDefinition<unknown>["executionMode"];
+  requiresConfirmation: boolean;
   contextSurface: string | null;
   inputSchemaSha256: string;
 }
@@ -27,6 +46,10 @@ export interface AgentCapabilityDefinition {
   whenToUse: string;
   mustNotUseFor: string[];
   positiveExamples: string[];
+  examples: AgentCapabilityExample[];
+  selectorKinds: string[];
+  requiresConfirmation: boolean;
+  availability: AgentCapabilityAvailability;
 }
 
 export interface AgentToolCapabilityCatalogSnapshot {
@@ -75,6 +98,45 @@ const TOOL_DOMAIN_BY_NAME: Readonly<Record<string, string>> = {
   update_meeting_report_action_item: "meeting"
 };
 
+const TOOL_OPERATION_BY_NAME: Readonly<Record<string, AgentToolOperation>> = {
+  approve_meeting_report_action_item: "write",
+  assign_board_issue_safely: "write",
+  create_board_issue: "write",
+  create_calendar_event: "write",
+  delegate_canvas_agent: "write",
+  diagnose_board_freshness: "read",
+  dismiss_meeting_report_action_item: "write",
+  end_meeting_recording: "write",
+  find_action_items: "read",
+  focus_sql_erd_tables: "read",
+  generate_sql_erd: "write",
+  get_active_meeting: "read",
+  get_board_briefing: "read",
+  get_board_issue_context: "read",
+  get_meeting_decision_evidence: "read",
+  get_meeting_participants: "read",
+  get_meeting_report: "read",
+  inspect_sql_erd_schema: "read",
+  join_meeting: "write",
+  leave_meeting: "write",
+  list_calendar_events: "read",
+  list_meeting_reports: "read",
+  list_meeting_rooms: "read",
+  move_board_issue_status: "write",
+  recommend_pr_review_focus: "read",
+  regenerate_meeting_report: "write",
+  resolve_board_context: "read",
+  resolve_meeting_resource: "read",
+  search_board_issues: "read",
+  search_meeting_transcript: "read",
+  search_workspace_documents: "read",
+  start_meeting_in_room: "write",
+  start_meeting_recording: "write",
+  summarize_meeting_report: "read",
+  update_calendar_event: "write",
+  update_meeting_report_action_item: "write"
+};
+
 const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.rooms.list", "meeting", ["list_meeting_rooms"], "회의방 또는 진행 중인 회의를 조회할 때", ["회의에 참여하거나 시작하는 요청"]),
   capability("meeting.control.start", "meeting", ["list_meeting_rooms", "start_meeting_in_room"], "특정 회의방에서 새 회의를 시작할 때", ["기존 회의 참여 또는 퇴장 요청"]),
@@ -106,17 +168,35 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("sql_erd.generate", "sql_erd", ["generate_sql_erd"], "SQL로 ERD를 생성할 때", ["기존 schema inspection 요청"]),
   capability("canvas.delegate", "canvas", ["delegate_canvas_agent"], "Canvas 작업을 Agent에게 위임할 때", ["SQLtoERD 또는 Board 요청"]),
   capability("pr_review.focus", "pr_review", ["recommend_pr_review_focus"], "PR review에서 우선 확인할 변경을 추천받을 때", ["Board 또는 Meeting 요청"]),
-  capability("drive.documents.search", "drive", ["search_workspace_documents"], "Workspace 문서를 검색할 때", ["회의 transcript 또는 Board issue 검색 요청"])
+  capability("drive.documents.search", "drive", ["search_workspace_documents"], "Workspace 문서를 검색할 때", ["회의 transcript 또는 Board issue 검색 요청"]),
+  unsupportedCapability("meeting.action_items.create", "meeting", "회의록에 없는 새 후속 작업을 추가할 때", ["새 회의 할 일 추가", "회의록에 액션 아이템 넣어줘"]),
+  unsupportedCapability("calendar.events.delete", "calendar", "기존 Calendar 일정을 삭제할 때", ["내일 일정 삭제", "캘린더 이벤트 지워줘"]),
+  unsupportedCapability("board.issues.delete", "board", "GitHub Board Issue를 삭제할 때", ["보드 이슈 삭제", "이슈 지워줘"]),
+  unsupportedCapability("canvas.shapes.mutate", "canvas", "Canvas 도형을 직접 생성·수정·삭제할 때", ["캔버스 도형 직접 수정", "도형 지워줘"]),
+  unsupportedCapability("sql_erd.sql.execute", "sql_erd", "SQL을 데이터베이스에서 실행할 때", ["SQL 실행", "DDL 돌려줘"]),
+  unsupportedCapability("drive.documents.write", "drive", "Workspace 문서를 생성·수정·삭제할 때", ["문서 수정", "파일 삭제"]),
+  unsupportedCapability("pr_review.submit", "pr_review", "GitHub PR Review를 제출하거나 merge할 때", ["PR 리뷰 제출", "PR 머지"])
 ];
 
 export function buildAgentToolCapabilityCatalog(
   definitions: AgentToolDefinition<unknown>[]
 ): AgentToolCapabilityCatalogSnapshot {
-  const capabilities = CAPABILITY_DEFINITIONS.filter((capability) =>
-    capability.toolNames.every((toolName) =>
-      definitions.some((definition) => definition.name === toolName)
-    )
-  );
+  const capabilities = CAPABILITY_DEFINITIONS.filter(
+    (capability) =>
+      capability.availability === "unsupported" ||
+      capability.toolNames.every((toolName) =>
+        definitions.some((definition) => definition.name === toolName)
+      )
+  ).map((capability) => ({
+    ...capability,
+    requiresConfirmation:
+      capability.availability === "supported" &&
+      definitions.some(
+        (definition) =>
+          definition.name === capability.toolNames.at(-1) &&
+          definition.executionMode === "confirmation_required"
+      )
+  }));
   const descriptors = definitions
     .map((definition) => toDescriptor(definition, capabilities))
     .sort((left, right) => left.toolName.localeCompare(right.toolName));
@@ -145,6 +225,12 @@ function toDescriptor(
       `Agent tool capability descriptor is missing for ${definition.name}`
     );
   }
+  const operation = TOOL_OPERATION_BY_NAME[definition.name];
+  if (!operation) {
+    throw new Error(
+      `Agent tool operation inventory is missing for ${definition.name}`
+    );
+  }
 
   const matchingCapabilities = capabilities.filter((capability) =>
     capability.toolNames.includes(definition.name)
@@ -167,16 +253,21 @@ function toDescriptor(
     toolName: definition.name,
     domain,
     action: definition.name,
+    operation,
     capabilityIds: matchingCapabilities.map((capability) => capability.id),
     whenToUse: matchingCapabilities.map((capability) => capability.whenToUse).join(" "),
     mustNotUseFor: [...new Set(matchingCapabilities.flatMap((capability) => capability.mustNotUseFor))],
     acceptedSelectorFields: Object.keys(
       (definition.inputSchema.properties as Record<string, unknown> | undefined) ?? {}
     ).sort(),
+    selectorKinds: [
+      ...new Set(matchingCapabilities.flatMap((capability) => capability.selectorKinds))
+    ].sort(),
     prerequisiteToolNames: [...prerequisiteToolNames].sort(),
     followUpToolNames: [...followUpToolNames].sort(),
     riskLevel: definition.riskLevel,
     executionMode: definition.executionMode,
+    requiresConfirmation: definition.executionMode === "confirmation_required",
     contextSurface: definition.contextRequirement?.surface ?? null,
     inputSchemaSha256: hashCanonicalJson(definition.inputSchema)
   };
@@ -189,14 +280,76 @@ function capability(
   whenToUse: string,
   mustNotUseFor: string[]
 ): AgentCapabilityDefinition {
+  const examples = capabilityExamples(id, domain, whenToUse);
   return {
     id,
     domain,
     toolNames,
     whenToUse,
     mustNotUseFor,
-    positiveExamples: [whenToUse]
+    positiveExamples: examples.map((example) => example.utterance),
+    examples,
+    selectorKinds: selectorKindsFor(id),
+    requiresConfirmation: false,
+    availability: "supported"
   };
+}
+
+function unsupportedCapability(
+  id: string,
+  domain: string,
+  whenToUse: string,
+  positiveExamples: string[]
+): AgentCapabilityDefinition {
+  const canonical = positiveExamples[0] ?? whenToUse;
+  const examples = capabilityExamples(id, domain, canonical, positiveExamples);
+  return {
+    id,
+    domain,
+    toolNames: [],
+    whenToUse,
+    mustNotUseFor: ["현재 Agent registry에 실행 tool이 없는 요청"],
+    positiveExamples: examples.map((example) => example.utterance),
+    examples,
+    selectorKinds: selectorKindsFor(id),
+    requiresConfirmation: false,
+    availability: "unsupported"
+  };
+}
+
+function capabilityExamples(
+  id: string,
+  domain: string,
+  canonical: string,
+  overrides: string[] = []
+): AgentCapabilityExample[] {
+  const base = overrides[0] ?? canonical;
+  const paraphrase = overrides[1] ?? `${base} 알려줘`;
+  return [
+    { kind: "canonical", utterance: base },
+    { kind: "paraphrase", utterance: paraphrase },
+    { kind: "typo", utterance: base.replaceAll(" ", "") },
+    { kind: "honorific", utterance: `${base} 부탁드려요` },
+    { kind: "abbreviation", utterance: `${domain} ${id.split(".").at(-1)} 요청` }
+  ];
+}
+
+function selectorKindsFor(id: string): string[] {
+  if (id.includes("meeting.control") || id.includes("meeting.recording")) {
+    return ["current_meeting", "meeting_room_name"];
+  }
+  if (id.includes("meeting.participants")) return ["meeting_scope"];
+  if (id.includes("meeting.report")) return ["meeting_report"];
+  if (id.includes("meeting.action_items")) return ["action_item", "workspace_member"];
+  if (id.includes("meeting.evidence")) return ["meeting_report", "query"];
+  if (id.includes("calendar.events")) return ["calendar_event", "date_range"];
+  if (id.includes("board.issues")) return ["board_issue"];
+  if (id === "board.briefing") return ["board_context"];
+  if (id.startsWith("sql_erd.")) return ["sql_erd_session", "table_reference"];
+  if (id.startsWith("canvas.")) return ["canvas_context"];
+  if (id.startsWith("pr_review.")) return ["pr_review_session"];
+  if (id.startsWith("drive.")) return ["document_query"];
+  return ["none"];
 }
 
 function hashCanonicalJson(value: unknown): string {
@@ -218,12 +371,22 @@ export function validateAgentToolCapabilityCatalog(
   if (
     capabilities.some(
       (capability) =>
-        !capability.toolNames.length ||
+        (capability.availability === "supported" && !capability.toolNames.length) ||
+        (capability.availability === "unsupported" && capability.toolNames.length > 0) ||
         new Set(capability.toolNames).size !== capability.toolNames.length ||
         !capability.whenToUse ||
         !capability.mustNotUseFor.length ||
         !capability.positiveExamples.length ||
-        capability.toolNames.some((toolName) => !registeredToolNames.has(toolName))
+        !capability.selectorKinds.length ||
+        capability.examples.length !== 5 ||
+        new Set(capability.examples.map((example) => example.kind)).size !== 5 ||
+        capability.examples.some((example) => !example.utterance.trim()) ||
+        capability.toolNames.some((toolName) => !registeredToolNames.has(toolName)) ||
+        (capability.availability === "supported" &&
+          capability.requiresConfirmation !==
+            (definitions.find(
+              (definition) => definition.name === capability.toolNames.at(-1)
+            )?.executionMode === "confirmation_required"))
     )
   ) {
     throw new Error("Agent capability catalog contains an invalid capability");
@@ -233,10 +396,14 @@ export function validateAgentToolCapabilityCatalog(
     descriptors.some(
       (descriptor) =>
         !registeredToolNames.has(descriptor.toolName) ||
+        (descriptor.operation !== "read" && descriptor.operation !== "write") ||
         !descriptor.capabilityIds.length ||
         !descriptor.whenToUse ||
         !descriptor.mustNotUseFor.length ||
+        !descriptor.selectorKinds.length ||
         !descriptor.inputSchemaSha256 ||
+        descriptor.requiresConfirmation !==
+          (descriptor.executionMode === "confirmation_required") ||
         descriptor.capabilityIds.some((id) => !capabilityIds.has(id))
     )
   ) {
