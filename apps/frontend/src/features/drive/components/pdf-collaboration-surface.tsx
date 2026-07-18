@@ -99,16 +99,19 @@ export function PdfCollaborationSurface({
   fileId,
   fileName,
   mimeType,
+  onPageNumberChange,
+  pageNumber,
   previewUrl,
   workspaceId,
 }: {
   fileId: string;
   fileName: string;
   mimeType: string | null;
+  onPageNumberChange: (pageNumber: number) => void;
+  pageNumber: number;
   previewUrl: string;
   workspaceId: string;
 }) {
-  const [pageNumber, setPageNumber] = useState(1);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageWidth, setPageWidth] = useState(720);
   const [tool, setTool] = useState<PdfCollaborationTool>("pen");
@@ -139,6 +142,10 @@ export function PdfCollaborationSurface({
   const isPdf = mimeType === "application/pdf";
 
   useEffect(() => {
+    updatePage(pageNumber);
+  }, [pageNumber, updatePage]);
+
+  useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
 
@@ -156,10 +163,9 @@ export function PdfCollaborationSurface({
   const movePage = useCallback(
     (nextPageNumber: number) => {
       if (!numPages || nextPageNumber < 1 || nextPageNumber > numPages) return;
-      setPageNumber(nextPageNumber);
-      updatePage(nextPageNumber);
+      onPageNumberChange(nextPageNumber);
     },
-    [numPages, updatePage],
+    [numPages, onPageNumberChange],
   );
 
   useEffect(() => {
@@ -407,29 +413,34 @@ export function PdfCollaborationSurface({
         </div>
       </div>
 
-      <div ref={viewportRef} className={styles.pdfCollaborationViewport}>
+      <div
+        ref={viewportRef}
+        className={styles.pdfCollaborationViewport}
+        data-workspace-follow-drive-pdf-file-id={isPdf ? fileId : undefined}
+        data-workspace-follow-drive-pdf-page={isPdf ? pageNumber : undefined}
+      >
         <div className={styles.pdfPageFrame} style={{ width: pageWidth }}>
           {isPdf ? (
             <Document
-            file={previewUrl}
-            loading={
-              <div className={styles.pdfPreviewState}>
-                <Loader2 className="animate-spin" />
-                PDF를 불러오는 중입니다.
-              </div>
-            }
-            error={<div className={styles.pdfPreviewState}>PDF를 표시하지 못했습니다. 다시 열어주세요.</div>}
-            onLoadSuccess={({ numPages: nextNumPages }) => {
-              setNumPages(nextNumPages);
-              if (pageNumber > nextNumPages) movePage(nextNumPages);
-            }}
-          >
-            <Page
-              pageNumber={pageNumber}
-              renderAnnotationLayer={false}
-              renderTextLayer={false}
-              width={pageWidth}
-            />
+              file={previewUrl}
+              loading={
+                <div className={styles.pdfPreviewState}>
+                  <Loader2 className="animate-spin" />
+                  PDF를 불러오는 중입니다.
+                </div>
+              }
+              error={<div className={styles.pdfPreviewState}>PDF를 표시하지 못했습니다. 다시 열어주세요.</div>}
+              onLoadSuccess={({ numPages: nextNumPages }) => {
+                setNumPages(nextNumPages);
+                if (pageNumber > nextNumPages) onPageNumberChange(nextNumPages);
+              }}
+            >
+              <Page
+                pageNumber={pageNumber}
+                renderAnnotationLayer={false}
+                renderTextLayer={false}
+                width={pageWidth}
+              />
             </Document>
           ) : hasImageError ? (
             <div className={styles.pdfPreviewState}>이미지를 표시하지 못했습니다.</div>
