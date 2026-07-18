@@ -2533,7 +2533,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           pinnedTableId={tablePinState.pinnedTableId}
           realtimeConfig={realtimeConfig}
           isReadOnly={isWriteProtocolMismatch}
+          isInspectorOpen={isInspectorOpen}
           isSqlSourceOpen={isSourceOpen}
+          onInspectorOpenChange={setIsInspectorOpen}
           selectedSqlErdObject={selectedSqlErdObject}
           sessionId={sessionId}
         />
@@ -3363,7 +3365,9 @@ type CanvasShellProps = {
   pinnedTableId: string | null;
   realtimeConfig: SqlErdRealtimeConfig;
   isReadOnly: boolean;
+  isInspectorOpen: boolean;
   isSqlSourceOpen: boolean;
+  onInspectorOpenChange: (isOpen: boolean) => void;
   selectedSqlErdObject: SqlErdSelection;
   sessionId: string;
 };
@@ -3385,7 +3389,9 @@ function CanvasShell({
   pinnedTableId,
   realtimeConfig,
   isReadOnly,
+  isInspectorOpen,
   isSqlSourceOpen,
+  onInspectorOpenChange,
   selectedSqlErdObject,
   sessionId
 }: CanvasShellProps) {
@@ -3404,7 +3410,9 @@ function CanvasShell({
         pinnedTableId={pinnedTableId}
         realtimeConfig={realtimeConfig}
         isReadOnly={isReadOnly}
+        isInspectorOpen={isInspectorOpen}
         isSqlSourceOpen={isSqlSourceOpen}
+        onInspectorOpenChange={onInspectorOpenChange}
         sessionId={sessionId}
         selectedSqlErdObject={selectedSqlErdObject}
         tableFocus={agentTableFocus}
@@ -3614,7 +3622,10 @@ function InspectorPanel({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
+      <div
+        className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+        data-workspace-follow-surface="sql-erd-inspector"
+      >
         <InspectorContent
           canAddForeignKey={canAddForeignKey}
           canEditSchema={canEditSchema}
