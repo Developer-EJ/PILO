@@ -100,26 +100,29 @@ class PromptSecurityAssessment:
         }
 
 
+@dataclass(frozen=True)
+class PromptSecuritySource:
+    source_kind: str
+    text: str
+
+
 def assess_agent_prompt_security(
     prompt: str,
-    planning_context: str = "",
+    context_sources: tuple[PromptSecuritySource, ...] = (),
 ) -> PromptSecurityAssessment:
-    sources: list[tuple[str, str]] = [("current_user", prompt)]
-    for line in planning_context.splitlines():
-        if line.startswith("previous resource: "):
-            sources.append(("thread_resource", line.removeprefix("previous resource: ")))
+    sources = (PromptSecuritySource("current_user", prompt), *context_sources)
 
     source_kinds: set[str] = set()
     signal_types: set[str] = set()
-    for source_kind, text in sources:
-        normalized_text = _normalize_security_text(text)
+    for source in sources:
+        normalized_text = _normalize_security_text(source.text)
         matched = {
             signal_type
             for signal_type, patterns in _SIGNAL_PATTERNS.items()
-            if any(pattern.search(normalized_text) for pattern in patterns)
+            if any(_has_actionable_match(pattern, normalized_text) for pattern in patterns)
         }
         if matched:
-            source_kinds.add(source_kind)
+            source_kinds.add(source.source_kind)
             signal_types.update(matched)
 
     return PromptSecurityAssessment(
@@ -133,3 +136,31 @@ def _normalize_security_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value)
     normalized = re.sub(r"[\u200b-\u200d\ufeff]", "", normalized)
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _has_actionable_match(pattern: re.Pattern[str], text: str) -> bool:
+    return any(not _is_negated_or_reported(text, match) for match in pattern.finditer(text))
+
+
+def _is_negated_or_reported(text: str, match: re.Match[str]) -> bool:
+    before = text[max(0, match.start() - 32) : match.start()]
+    after = text[match.end() : match.end() + 96]
+    if re.search(r"(?:do|does|did|should|must|can|could|would)\s+not\s*$|never\s*$", before, re.I):
+        return True
+    if re.match(
+        r"\s*(?:하지\s*(?:않|말|마)|하면\s*안|해서는\s*안|해서\s*안|금지|방지)",
+        after,
+        re.I,
+    ):
+        return True
+    if re.match(r"\s*(?:했|하였|됐|되었)(?:다|다고|던|음|기로)", after):
+        return True
+    return bool(
+        re.match(
+            r".{0,24}(?:라는|라고|인용한|회고한).{0,32}"
+            r"(?:공격|악성|문장|발언|요청|내용).{0,32}"
+            r"(?:차단|거절|검토|논의|기록)",
+            after,
+            re.I,
+        )
+    )

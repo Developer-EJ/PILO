@@ -22,9 +22,10 @@
 - shortlist 밖 tool 또는 field를 planner가 반환하면 normalization이 거부한다.
 - shortlist 여부와 무관하게 App Server의 input validator, Workspace 권한, confirmation, 멱등성,
   실행 직전 상태·권한 재검증은 실행 권위 경계로 유지된다.
-- 현재 사용자 발화와 bounded thread resource에서 고신뢰 prompt injection 신호가 탐지되면 retrieval과
-  planner를 호출하지 않는다. 이 경로는 전체-tool fallback으로 권한을 넓히지 않고 clarification으로
-  종료한다.
+- 현재 사용자 발화와 bounded thread resource, completed tool result, 선택 후보 label/description에서
+  고신뢰 prompt injection 신호가 탐지되면 retrieval과 planner를 호출하지 않는다. context repository가
+  각 production value를 구조화된 source kind로 전달하며 detector가 display 문자열 prefix를 추측하지 않는다.
+  이 경로는 전체-tool fallback으로 권한을 넓히지 않고 clarification으로 종료한다.
 
 Worker step의 `outputSummary.toolRetrieval`에는 mode, fallback reason, catalog/eligible snapshot/
 planner tool snapshot SHA만 기록한다. raw 발화, tool input, resource ID, token은 기록하지 않는다.

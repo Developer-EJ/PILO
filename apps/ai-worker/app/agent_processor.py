@@ -11,7 +11,11 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from app.agent_prompt_security import PromptSecurityAssessment, assess_agent_prompt_security
+from app.agent_prompt_security import (
+    PromptSecurityAssessment,
+    PromptSecuritySource,
+    assess_agent_prompt_security,
+)
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     ToolCapabilityCatalog,
@@ -114,6 +118,7 @@ class AgentRunContext:
     timezone: str
     planner_turn_count: int = 0
     planning_context: str = ""
+    untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -273,8 +278,11 @@ class AgentGroundedAnswerProcessor:
                 return AgentProcessResult(True, "grounded_answer_no_sources", run_id)
             prompt = str(context.get("prompt", ""))
             safe_sources = [source for source in sources if isinstance(source, dict)][:5]
-            source_context = "\n".join(
-                f"previous resource: {json.dumps(source, ensure_ascii=False)}"
+            source_context = tuple(
+                PromptSecuritySource(
+                    "grounded_evidence",
+                    json.dumps(source, ensure_ascii=False),
+                )
                 for source in safe_sources
             )
             if assess_agent_prompt_security(prompt, source_context).suspected:
@@ -602,7 +610,7 @@ class AgentRunProcessor:
             current_date = self.current_date_provider(context.timezone).isoformat()
             prompt_security = assess_agent_prompt_security(
                 context.prompt,
-                context.planning_context,
+                context.untrusted_context_sources,
             )
             if prompt_security.suspected:
                 return self._block_prompt_injection(

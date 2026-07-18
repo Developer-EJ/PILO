@@ -3,6 +3,7 @@ import logging
 import re
 
 from app.agent_processor import AGENT_TOOL_SCHEMA_VERSION, parse_agent_run_job_payload
+from app.agent_prompt_security import PromptSecuritySource
 from app.job_dispatcher import JobProcessResult
 from app.meeting_report_runtime import (
     PgAgentRunRepository,
@@ -908,6 +909,9 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
         "user: 회의 상태 조회가 끝났나요?",
         "assistant: 현재 회의를 찾았습니다.",
     ]
+    assert context.untrusted_context_sources == (
+        PromptSecuritySource("tool_result", '{"meetingId": "meeting-1"}'),
+    )
     timeline_query, timeline_values = connection.executed[-1]
     assert "UNION ALL" in timeline_query
     assert "ORDER BY occurred_at DESC" in timeline_query
@@ -1136,6 +1140,9 @@ def test_agent_repository_adds_only_bounded_same_thread_memory() -> None:
         "label": "최근 회의",
     }
     assert re.fullmatch(r"ctx_[0-9a-f]{24}", resource["contextRef"])
+    assert context.untrusted_context_sources == (
+        PromptSecuritySource("thread_resource", "최근 회의"),
+    )
     assert "report-6" not in context.planning_context
     assert len(context.planning_context.encode("utf-8")) <= 12 * 1024
     thread_query, thread_values = connection.executed[1]
@@ -1335,6 +1342,10 @@ def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None
     assert "resource_id" not in context.planning_context
     assert "update_meeting_report_action_item" in context.planning_context
     assert "workspaceId" not in context.planning_context
+    assert context.untrusted_context_sources == (
+        PromptSecuritySource("selected_candidate", "김진호"),
+        PromptSecuritySource("selected_candidate", "member · ji***@example.com"),
+    )
     candidate_query = next(
         query
         for query, _values in connection.executed

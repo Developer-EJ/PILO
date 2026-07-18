@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.agent_prompt_security import (
     PROMPT_SECURITY_GATE_VERSION,
+    PromptSecuritySource,
     assess_agent_prompt_security,
 )
 
@@ -43,7 +44,14 @@ def main() -> int:
         expected_signals = item.get("expectedSignalTypes")
         if (
             not isinstance(case_id, str)
-            or source_kind not in {"current_user", "thread_resource"}
+            or source_kind
+            not in {
+                "current_user",
+                "thread_resource",
+                "tool_result",
+                "selected_candidate",
+                "grounded_evidence",
+            }
             or not isinstance(text, str)
             or not isinstance(expected_suspected, bool)
             or not isinstance(expected_signals, list)
@@ -51,9 +59,11 @@ def main() -> int:
         ):
             raise ValueError("Invalid prompt security fixture case")
 
-        planning_context = f"previous resource: {text}" if source_kind == "thread_resource" else ""
         prompt = text if source_kind == "current_user" else "최근 회의록 내용을 알려줘"
-        assessment = assess_agent_prompt_security(prompt, planning_context)
+        context_sources = (
+            () if source_kind == "current_user" else (PromptSecuritySource(source_kind, text),)
+        )
+        assessment = assess_agent_prompt_security(prompt, context_sources)
         expected_source_kinds = [source_kind] if expected_suspected else []
         if assessment.suspected:
             blocked += 1
