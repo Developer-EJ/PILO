@@ -126,3 +126,27 @@ PYTHONPATH=. .venv/bin/python scripts/check_prompt_injection_security_gate.py \
 기록한다. 공격 원문, 사용자 발화, Meeting evidence, tool payload, resource ID, token·secret은 기록하지
 않는다. runtime에서도 같은 detector를 retrieval·planner보다 먼저 실행하며, 탐지되면 full-tool fallback이나
 write/confirmation 후보를 만들지 않고 안전한 clarification으로 종료한다.
+
+## Phase 4-E dev 공개 gate
+
+App CI의 마지막 Agent gate는 registry snapshot, deterministic retrieval 결과, prompt injection 결과,
+App Server Meeting write 계약, Meeting regression catalog, dev Terraform 기본값과 rollback runbook을 하나의
+판정으로 묶는다. App Server의 전체 Agent/Meeting 실행·confirmation 테스트와 AI Worker pytest가 먼저
+통과해야 이 gate가 실행된다.
+
+```bash
+cd apps/ai-worker
+PYTHONPATH=. .venv/bin/python scripts/check_phase4e_dev_readiness.py \
+  --registry-snapshot /tmp/agent-tool-registry-snapshot.json \
+  --tool-retrieval-report /tmp/agent-tool-retrieval-quality-gate.json \
+  --prompt-security-report /tmp/agent-prompt-injection-security-gate.json \
+  --app-server-report /tmp/phase4e-meeting-runtime-readiness.json \
+  --dev-terraform ../../infra/envs/dev/main.tf \
+  --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
+  --output /tmp/phase4e-dev-readiness.json
+```
+
+`phase4e-dev-readiness` artifact에는 registry·catalog·fixture SHA, case 수, recall metric, bounded check ID만
+포함한다. 사용자 발화, raw resource reference, tool input, UUID, credential은 포함하지 않는다. canonical
+216건, held-out 54건, counterexample 72건, multi-turn 54건과 0/1/N·동명이인 selector fixture가 빠지면
+fail-closed한다.
