@@ -103,6 +103,39 @@ const payload = {
     "Drive document search must be registered for Agent planning"
   );
   assert.deepEqual(suite.tools, actualSnapshot);
+
+  const capabilityCatalog = registry.listCapabilityCatalogForContext(null);
+  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v1");
+  assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(
+    capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
+    [...actualSnapshot].map((tool) => tool.name).sort()
+  );
+  assert.equal(
+    capabilityCatalog.descriptors.find(
+      (descriptor) => descriptor.toolName === "list_calendar_events"
+    )?.domain,
+    "calendar"
+  );
+  assert.deepEqual(
+    capabilityCatalog.descriptors.find(
+      (descriptor) => descriptor.toolName === "list_calendar_events"
+    )?.acceptedSelectorFields,
+    ["end", "start"]
+  );
+  assert.ok(
+    capabilityCatalog.descriptors.every(
+      (descriptor) =>
+        descriptor.whenToUse &&
+        descriptor.mustNotUseFor.length > 0 &&
+        descriptor.capabilityIds.length === 1
+    )
+  );
+  assert.deepEqual(
+    registry.listCapabilityCatalogForContext(null),
+    capabilityCatalog,
+    "capability snapshot must be deterministic for the same eligible tools"
+  );
 }
 
 class FakeSqsClient {
