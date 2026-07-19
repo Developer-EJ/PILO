@@ -59,6 +59,26 @@ const panelSource = await readFile(
   new URL("./components/github-panel.tsx", import.meta.url),
   "utf8"
 );
+const layoutSource = await readFile(
+  new URL("./components/github-connect-layout.tsx", import.meta.url),
+  "utf8"
+);
+const syncSource = await readFile(
+  new URL("./components/github-connect-sync.tsx", import.meta.url),
+  "utf8"
+);
+
+assert.match(layoutSource, /GithubConnectRepositories/);
+assert.match(layoutSource, /GithubConnectProject/);
+assert.match(layoutSource, /GithubConnectSync/);
+assert.doesNotMatch(layoutSource, /main-grid/);
+assert.match(syncSource, /동기화 대상/);
+assert.match(syncSource, /동기화 시작/);
+assert.match(syncSource, /최근 수동 실행/);
+assert.match(syncSource, /아직 수동 동기화 기록이 없습니다/);
+assert.doesNotMatch(panelSource, /loadGithubPullRequests/);
+assert.doesNotMatch(panelSource, /pullRequestsRequestGateRef/);
+assert.doesNotMatch(panelSource, /setPullRequests/);
 
 assert.match(repositorySource, /Project를 조회하고 동기화할 repository/);
 assert.doesNotMatch(repositorySource, /Pull Request 조회 기준/);
@@ -70,10 +90,7 @@ assert.match(
   /async function handleActivateProjectV2\(projectV2Id: string\)/
 );
 assert.match(panelSource, /await apiClient\.activateWorkspaceBoardSource/);
-assert.match(
-  panelSource,
-  /void handleActivateProjectV2\(selectedProjectV2Id\)\.catch\(\(\) => undefined\);/
-);
+assert.doesNotMatch(panelSource, /handleSaveProjectV2Selections/);
 
 assert.deepEqual(
   getGithubSettingsAccessState({

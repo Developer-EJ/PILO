@@ -21,8 +21,8 @@ const steps = await readFile(
   new URL("./components/github-connect-steps.tsx", import.meta.url),
   "utf8"
 );
-const tables = await readFile(
-  new URL("./components/github-connect-tables.tsx", import.meta.url),
+const repositories = await readFile(
+  new URL("./components/github-connect-repositories.tsx", import.meta.url),
   "utf8"
 );
 
@@ -49,5 +49,5 @@ assert.match(
   steps,
   /disabled=\{!access\.canChooseRepository \|\| isSyncing \|\| isLoading\}/
 );
-assert.doesNotMatch(tables, /max-\[760px\]/);
-assert.equal((tables.match(/@\[48rem\]:grid-cols-/g) ?? []).length, 4);
+assert.doesNotMatch(repositories, /max-\[760px\]/);
+assert.equal((repositories.match(/@\[48rem\]:grid-cols-/g) ?? []).length, 2);
