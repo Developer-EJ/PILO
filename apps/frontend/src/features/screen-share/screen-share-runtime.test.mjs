@@ -112,33 +112,36 @@ test("event adapter invalidates for matching presence joins and screen-share eve
   assert.equal(handlers.size, 0);
 });
 
-test("null snapshot closes only the viewer attached to the stale active session", async () => {
+test("snapshot closes a viewer when its target differs from the authoritative session", async () => {
   const { getCurrentScreenShareSnapshotOutcome } = await import(
     "./runtime/screen-share-current-session-policy.ts"
   );
-  const activeSession = screenShareSession("session-1");
 
   assert.deepEqual(
     getCurrentScreenShareSnapshotOutcome({
-      activeSession,
-      session: null,
-      viewerSessionId: "session-1",
+      session: screenShareSession("session-b"),
+      viewerSessionId: "session-a",
     }),
     { shouldDisconnectViewer: true },
   );
   assert.deepEqual(
     getCurrentScreenShareSnapshotOutcome({
-      activeSession,
       session: null,
-      viewerSessionId: "session-other",
+      viewerSessionId: "session-a",
+    }),
+    { shouldDisconnectViewer: true },
+  );
+  assert.deepEqual(
+    getCurrentScreenShareSnapshotOutcome({
+      session: screenShareSession("session-a"),
+      viewerSessionId: "session-a",
     }),
     { shouldDisconnectViewer: false },
   );
   assert.deepEqual(
     getCurrentScreenShareSnapshotOutcome({
-      activeSession,
-      session: screenShareSession("session-2"),
-      viewerSessionId: "session-1",
+      session: screenShareSession("session-b"),
+      viewerSessionId: null,
     }),
     { shouldDisconnectViewer: false },
   );

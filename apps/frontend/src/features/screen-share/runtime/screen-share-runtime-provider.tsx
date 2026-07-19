@@ -495,7 +495,6 @@ export function ScreenShareRuntimeProvider({
       onSnapshot: ({ session }) => {
         const viewerSessionId = viewerTargetSessionIdRef.current;
         const outcome = getCurrentScreenShareSnapshotOutcome({
-          activeSession: activeSessionRef.current,
           session,
           viewerSessionId
         });
