@@ -989,6 +989,11 @@ def normalize_agent_planner_decision(
         prompt=prompt,
         planning_context=planning_context,
     )
+    decision = _normalize_meeting_report_summary_sections(
+        decision,
+        job,
+        prompt=prompt,
+    )
     decision = _normalize_meeting_candidate_goal_resume(
         decision,
         job,
@@ -1368,6 +1373,149 @@ def _meeting_report_tool_requires_legacy_id(tool: AgentToolSchema) -> bool:
         or isinstance(properties, dict)
         and "reportId" in properties
     )
+
+
+_MEETING_REPORT_SUMMARY_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "summary",
+        re.compile(r"(?:요약|요점|핵심)(?!\s*에서)|정리\s*(?:내용|부분|항목)"),
+    ),
+    ("discussionPoints", re.compile(r"논의\s*사항|논의|토론")),
+    ("decisions", re.compile(r"결정\s*사항|결정|합의|결론")),
+    (
+        "actionItems",
+        re.compile(
+            r"후속\s*작업|액션\s*아이템|할\s*일|해야\s*할\s*(?:일|작업)|todo|to-do",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def _normalize_meeting_report_summary_sections(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+) -> AgentPlannerDecision:
+    if decision.status != "tool_candidate":
+        return decision
+
+    sections = _requested_meeting_report_summary_sections(prompt)
+    if sections is None:
+        return decision
+
+    if decision.tool_name not in {"get_meeting_report", "summarize_meeting_report"}:
+        return decision
+
+    tool = next(
+        (tool for tool in job.tools if tool.name == "summarize_meeting_report"),
+        None,
+    )
+    if tool is None or not _tool_input_property_schema(tool, "sections"):
+        return decision
+
+    tool_input = dict(decision.tool_input)
+    tool_input["sections"] = list(sections)
+    return AgentPlannerDecision(
+        status=decision.status,
+        message=decision.message,
+        final_answer_draft=decision.final_answer_draft,
+        tool_name="summarize_meeting_report",
+        tool_input=tool_input,
+        requires_confirmation=decision.requires_confirmation,
+        missing_fields=decision.missing_fields,
+        unsupported_reason=decision.unsupported_reason,
+    )
+
+
+def _requested_meeting_report_summary_sections(prompt: str) -> tuple[str, ...] | None:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
+    mentioned = [
+        key
+        for key, pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS
+        if pattern.search(normalized_prompt)
+    ]
+    excluded = {
+        key
+        for key, pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS
+        if re.search(
+            rf"(?:{pattern.pattern})\s*(?:은|는|을|를|이|가)?\s*"
+            r"(?:말고|빼(?:고|줘|주세요)?|제외(?:하고|해줘|해주세요)?|"
+            r"없이|생략(?:하고|해줘|해주세요)?|필요\s*없(?:고|어|습니다)?|"
+            r"안\s*(?:보여|알려)(?:줘|주세요)?|"
+            r"(?:알려|보여|포함|요약)\s*(?:주지|하지)\s*말고|"
+            r"하지\s*말고)",
+            normalized_prompt,
+            pattern.flags,
+        )
+    }
+    only_selected_set: set[str] = set()
+    for key, pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS:
+        only_match = re.search(
+            rf"(?:{pattern.pattern})(?:은|는|을|를|이|가)?\s*만(?:\s|$)",
+            normalized_prompt,
+            pattern.flags,
+        )
+        if only_match is None or key in excluded:
+            continue
+
+        only_selected_set.add(key)
+        # Walk the complete connector-delimited section chain to the left of
+        # ``X만``.  A single direct look-behind would lose the earliest
+        # section in requests such as "요약과 논의사항과 결정사항만".
+        chain_end = only_match.start()
+        while chain_end > 0:
+            prefix = normalized_prompt[:chain_end]
+            linked_sections: list[tuple[int, int, str]] = []
+            for grouped_key, grouped_pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS:
+                if grouped_key in excluded:
+                    continue
+                for grouped_match in grouped_pattern.finditer(prefix):
+                    connector = prefix[grouped_match.end() : chain_end]
+                    if re.fullmatch(r"\s*(?:와|과|및|,|하고)\s*", connector):
+                        linked_sections.append(
+                            (grouped_match.end(), grouped_match.start(), grouped_key)
+                        )
+
+            if not linked_sections:
+                break
+
+            _matched_end, chain_end, grouped_key = max(
+                linked_sections,
+                key=lambda candidate: candidate[0],
+            )
+            only_selected_set.add(grouped_key)
+
+    only_selected = [
+        key
+        for key, _pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS
+        if key in only_selected_set
+    ]
+    if only_selected:
+        return tuple(only_selected)
+
+    replacement_selected = [
+        key
+        for key, pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS
+        if re.search(
+            rf"대신\s*(?:{pattern.pattern})",
+            normalized_prompt,
+            pattern.flags,
+        )
+        and key not in excluded
+    ]
+    if replacement_selected:
+        return tuple(replacement_selected)
+
+    selected = [key for key in mentioned if key not in excluded]
+    if selected:
+        return tuple(selected)
+    if excluded:
+        return tuple(
+            key for key, _pattern in _MEETING_REPORT_SUMMARY_SECTION_PATTERNS if key not in excluded
+        )
+    return None
 
 
 def _normalize_meeting_thread_context_reference(
