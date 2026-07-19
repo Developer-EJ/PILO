@@ -389,9 +389,10 @@ class FakeTransaction {
     }
 
     if (text.includes("status = 'completed'")) {
-      const riskLevel = values.length === 3 ? values[1] : values[2];
-      const message = values.length === 3 ? values[2] : values[3];
-      const finalAnswer = values.length === 3 ? values[2] : values[4];
+      const completesAfterTool = text.includes("tool_call_count = LEAST");
+      const riskLevel = completesAfterTool ? values[1] : values[2];
+      const message = completesAfterTool ? values[2] : values[3];
+      const finalAnswer = completesAfterTool ? values[2] : values[4];
       run.status = "completed";
       run.risk_level = riskLevel ?? run.risk_level;
       run.message = message;

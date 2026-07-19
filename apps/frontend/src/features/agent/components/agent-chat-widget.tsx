@@ -69,7 +69,7 @@ type AgentConfirmationActionState = {
 type AgentChatBusyState = "idle" | "polling" | "submitting";
 
 const AGENT_RUN_POLL_INTERVAL_MS = 1800;
-const AGENT_PLANNING_POLL_TIMEOUT_MS = 190_000;
+const AGENT_PLANNING_POLL_TIMEOUT_MS = 270_000;
 const DEFAULT_AGENT_TIMEZONE = "Asia/Seoul";
 const MAX_MEETING_CLIENT_ACTION_EXPIRY_SECONDS = 300;
 

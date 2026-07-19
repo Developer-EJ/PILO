@@ -98,6 +98,16 @@ class FakeDatabaseService {
     this.calls = [];
   }
 
+  async query(text) {
+    this.calls.push({ text, values: [] });
+    if (text.includes("SELECT DISTINCT tool_name")) {
+      return (this.state.completedToolNames ?? []).map((tool_name) => ({
+        tool_name
+      }));
+    }
+    throw new Error(`Unhandled query: ${text}`);
+  }
+
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
 
@@ -166,6 +176,31 @@ class FakeAgentLoggingService {
       runId: input.runId,
       status: "running"
     };
+  }
+
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId,
+    workspaceId,
+    input
+  ) {
+    const step = await this.startNextToolStepIfAbsent(
+      currentUserId,
+      workspaceId,
+      input
+    );
+    return step
+      ? {
+          step,
+          lease: {
+            token: "66666666-6666-4666-8666-666666666666",
+            generation: 1
+          }
+        }
+      : null;
+  }
+
+  async heartbeatExecutionLease() {
+    return true;
   }
 
   async completeStep(currentUserId, workspaceId, input) {
@@ -1031,6 +1066,7 @@ function createService({
   executionStarted = false,
   requestContext = null,
   toolCallLimitReached = false,
+  completedToolNames = [],
   publisherError = null,
   candidateSelectionService = undefined
 } = {}) {
@@ -1049,7 +1085,8 @@ function createService({
       output_json: planner
     },
     executionStarted,
-    toolCallLimitReached
+    toolCallLimitReached,
+    completedToolNames
   };
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
@@ -1517,6 +1554,47 @@ function formatterMeetingReport(index, overrides = {}) {
   );
   assert.equal(completion.input.postExecutionDisposition, "complete_run");
   assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRouting: {
+        capabilityIds: ["calendar.events.list"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService } = createService({
+    completedToolNames: ["list_calendar_events"],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
 }
 
 {
