@@ -994,7 +994,7 @@ def normalize_agent_planner_decision(
         job,
         prompt=prompt,
     )
-    decision = _normalize_meeting_candidate_goal_resume(
+    decision = _normalize_candidate_goal_resume(
         decision,
         job,
         planning_context=planning_context,
@@ -1751,6 +1751,18 @@ MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE = {
 }
 
 
+def _normalize_candidate_goal_resume(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    """Apply domain adapters without coupling the planner pipeline to one domain."""
+    for adapter in (_normalize_meeting_candidate_goal_resume,):
+        decision = adapter(decision, job, planning_context=planning_context)
+    return decision
+
+
 def _normalize_meeting_candidate_goal_resume(
     decision: AgentPlannerDecision,
     job: AgentRunJob,
@@ -2382,7 +2394,11 @@ def _agent_planner_system_prompt() -> str:
         "Use YYYY-MM-DD dates and HH:mm 24-hour times in tool inputs. "
         "When planningContext contains completed tool results, use them to answer the user's "
         "original request. If the request is satisfied, return completed instead of "
-        "repeating a tool. "
+        "repeating a tool. For an action-item request that changes the assignee and then "
+        "approves the item, a completed update_meeting_report_action_item result satisfies "
+        "only the assignee-change part. Continue with approve_meeting_report_action_item, "
+        "using the same resolved action-item context, and return completed only after the "
+        "approval result is present. Never approve before the assignee update succeeds. "
         "When planningContext contains selected meeting candidate resume state, continue the "
         "original Meeting goal with the selected-candidate field. Never call the completed "
         "lookup tool again. Resolve at most one ambiguous selector per turn; if another selector "

@@ -327,7 +327,8 @@ class FakeMeetingService {
       {
         id: this.actionItems[0].id,
         title: this.actionItems[0].title,
-        status: this.actionItems[0].status
+        status: this.actionItems[0].status,
+        updatedAt: "2026-07-08T00:00:00.000Z"
       }
     ];
     this.staleMeetingIds = new Set();
@@ -643,7 +644,11 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 class FakeCandidateSelectionDatabase {
   constructor() {
     this.id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    this.domain = "meeting";
+    this.resourceType = "meeting_room";
     this.resourceId = MEETING_ROOM_ID;
+    this.label = "기본 회의실";
+    this.description = "기본 회의방";
     this.latestStepId = CANDIDATE_STEP_ID;
     this.consumed = false;
   }
@@ -653,15 +658,28 @@ class FakeCandidateSelectionDatabase {
   }
 
   async queryOne(text, values = []) {
+    if (text.includes("SELECT candidate.id")) {
+      const [workspaceId, userId, runId, ordinal] = values;
+      return !this.consumed &&
+        this.latestStepId === CANDIDATE_STEP_ID &&
+        workspaceId === WORKSPACE_ID &&
+        userId === USER_ID &&
+        runId === RUN_ID &&
+        ordinal === 1
+        ? { id: this.id }
+        : null;
+    }
     if (text.includes("INSERT INTO agent_candidate_selections")) {
       return {
         id: this.id,
         tool_step_id: CANDIDATE_STEP_ID,
-        resource_type: "meeting_room",
+        domain: this.domain,
+        candidate_ordinal: 1,
+        resource_type: this.resourceType,
         resource_id: this.resourceId,
         report_id: null,
-        label: "기본 회의실",
-        description: "기본 회의방",
+        label: this.label,
+        description: this.description,
         status: null
       };
     }
@@ -680,11 +698,13 @@ class FakeCandidateSelectionDatabase {
       return {
         id: this.id,
         tool_step_id: CANDIDATE_STEP_ID,
-        resource_type: "meeting_room",
+        domain: this.domain,
+        candidate_ordinal: 1,
+        resource_type: this.resourceType,
         resource_id: this.resourceId,
         report_id: null,
-        label: "기본 회의실",
-        description: "기본 회의방",
+        label: this.label,
+        description: this.description,
         status: null
       };
     }
@@ -730,6 +750,22 @@ class FakeCandidateSelectionDatabase {
     status: null
   });
   assert.doesNotMatch(JSON.stringify(candidate), new RegExp(MEETING_ROOM_ID));
+  assert.equal(
+    await service.getLatestCandidateSelectionIdByOrdinalInTransaction(
+      database,
+      context,
+      1
+    ),
+    candidate.candidateSelectionId
+  );
+  assert.equal(
+    await service.getLatestCandidateSelectionIdByOrdinalInTransaction(
+      database,
+      context,
+      2
+    ),
+    null
+  );
   assert.deepEqual(
     await service.consumeMeetingCandidate(context, candidate.candidateSelectionId),
     {
@@ -756,6 +792,74 @@ class FakeCandidateSelectionDatabase {
     (error) => error.getStatus?.() === 400,
     "A candidate from an earlier clarification cannot be claimed after a newer tool step"
   );
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  database.domain = "sqltoerd";
+  database.resourceType = "session";
+  database.resourceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  database.label = "결제 ERD";
+  database.description = "테이블 4개";
+  const sqlErdCalls = [];
+  const service = new AgentCandidateSelectionService(
+    database,
+    { async revalidateReference() { return null; } },
+    {
+      async getSession(currentUserId, workspaceId, sessionId) {
+        sqlErdCalls.push({ currentUserId, workspaceId, sessionId });
+        return { id: sessionId };
+      }
+    }
+  );
+  const [candidate] = await service.createCandidates(context, CANDIDATE_STEP_ID, [
+    {
+      reference: {
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: database.resourceId
+      },
+      candidate: {
+        label: database.label,
+        description: database.description,
+        status: null
+      }
+    }
+  ]);
+
+  assert.deepEqual(
+    await service.consumeCandidateInTransaction(database, context, candidate.candidateSelectionId),
+    {
+      label: "결제 ERD",
+      reference: {
+        domain: "sqltoerd",
+        resourceType: "session",
+        resourceId: database.resourceId
+      }
+    }
+  );
+  assert.deepEqual(sqlErdCalls, [
+    {
+      currentUserId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      sessionId: database.resourceId
+    }
+  ]);
+}
+
+{
+  const database = new FakeCandidateSelectionDatabase();
+  const service = new AgentCandidateSelectionService(database, {
+    async revalidateReference() {
+      return null;
+    }
+  });
+  await assert.rejects(
+    () => service.consumeMeetingCandidate(context, database.id),
+    (error) => error.getStatus?.() === 400,
+    "Permission loss or stale resources must stop before candidate consumption"
+  );
+  assert.equal(database.consumed, false);
 }
 
 {
@@ -1186,6 +1290,28 @@ class FakeCandidateSelectionDatabase {
     );
     assert.equal(confirmation.toolName, "update_meeting_report_action_item");
     assert.equal(confirmation.call.input.actionItemId, ACTION_ITEM_ID);
+    assert.equal(confirmation.call.input.expectedStatus, "PENDING");
+    assert.equal(
+      confirmation.call.input.expectedUpdatedAt,
+      "2026-07-08T00:00:00.000Z"
+    );
+
+    meetingService.reports[0].actionItems[0].updatedAt =
+      "2026-07-08T00:01:00.000Z";
+    await assert.rejects(
+      () =>
+        actionUpdateTool.execute(
+          context,
+          actionUpdateTool.validateConfirmationInput(
+            actionUpdateTool.buildConfirmationInput(confirmation)
+          )
+        ),
+      (error) =>
+        error.getStatus?.() === 400 &&
+        error.response?.error?.message?.includes("changed after confirmation")
+    );
+    meetingService.reports[0].actionItems[0].updatedAt =
+      "2026-07-08T00:00:00.000Z";
 
     const stalePreparation = await actionUpdateTool.buildConfirmation(
       context,
@@ -1612,12 +1738,25 @@ function errorCode(error) {
 
 {
   const { meetingService, registry } = createRegistry();
+  meetingService.participants.push({
+    ...meetingService.participants[0],
+    id: "99999999-9999-4999-8999-999999999992",
+    userId: "11111111-1111-4111-8111-111111111112",
+    joinedAt: "2026-07-08T00:30:00.000Z",
+    leftAt: "2026-07-08T01:00:00.000Z",
+    isActive: false,
+    user: {
+      id: "11111111-1111-4111-8111-111111111112",
+      name: "은재",
+      avatarUrl: null
+    }
+  });
   const tool = registry.getDefinition("get_meeting_participants");
   const result = await tool.execute(context, tool.validateInput({}));
 
   assert.deepEqual(result.outputSummary, {
     meetingId: MEETING_ID,
-    count: 1,
+    count: 2,
     hasMore: false,
     participants: [
       {
@@ -1627,6 +1766,14 @@ function errorCode(error) {
         joinedAt: "2026-07-08T00:00:00.000Z",
         leftAt: null,
         isActive: true
+      },
+      {
+        userId: "11111111-1111-4111-8111-111111111112",
+        name: "은재",
+        avatarUrl: null,
+        joinedAt: "2026-07-08T00:30:00.000Z",
+        leftAt: "2026-07-08T01:00:00.000Z",
+        isActive: false
       }
     ]
   });
@@ -2006,7 +2153,9 @@ class FakeActionItemDeliveryDatabase {
       requested_by_user_id: USER_ID,
       status: "FAILED",
       locked_until: null,
-      claim_token: null
+      claim_token: null,
+      calendar_event_id: null,
+      pilo_issue_id: null
     };
     this.calls = [];
   }
@@ -2060,8 +2209,17 @@ class FakeActionItemDeliveryDatabase {
       return { id: this.delivery.id };
     }
     if (text.includes("SET status = 'APPROVED'")) {
+      assert.match(text, /approved_by_user_id = COALESCE\(approved_by_user_id, \$2\)/);
+      assert.match(text, /WHEN status = 'PENDING' OR approved_by_user_id IS NULL/);
       this.actionItem.status = "APPROVED";
       return { id: this.actionItem.id };
+    }
+    if (text.includes("SET status = 'FAILED'")) {
+      assert.equal(values[2], this.delivery.claim_token);
+      this.delivery.status = "FAILED";
+      this.delivery.claim_token = null;
+      this.delivery.locked_until = null;
+      return { id: this.delivery.id };
     }
     throw new Error(`Unhandled delivery queryOne: ${text}`);
   }
@@ -2133,6 +2291,11 @@ class FakeInvalidCalendarDeliveryDatabase {
 
   assert.equal(result.status, "COMPLETED");
   assert.equal(result.piloIssueId, "42");
+  assert.equal(
+    database.actionItem.status,
+    "APPROVED",
+    "delivery completion must not be the condition for the action-item approval"
+  );
   assert.deepEqual(boardCalls, [
     {
       userId: USER_ID,
@@ -2146,6 +2309,88 @@ class FakeInvalidCalendarDeliveryDatabase {
       idempotencyKey: "meeting-action-item:stable-operation"
     }
   ]);
+}
+
+{
+  const database = new FakeActionItemDeliveryDatabase();
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {},
+    {
+      async validateBoardIssueCreateInput() {},
+      async createBoardIssue() {
+        throw new Error("GitHub delivery is temporarily unavailable");
+      }
+    }
+  );
+
+  const result = await service.deliver(
+    USER_ID,
+    WORKSPACE_ID,
+    REPORT_ID,
+    database.actionItem.id,
+    {
+      deliveryType: "pilo_issue",
+      issue: {
+        boardId: "99",
+        columnId: "77"
+      }
+    }
+  );
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(
+    database.actionItem.status,
+    "APPROVED",
+    "a delivery failure must remain separately retryable without rolling back approval"
+  );
+  assert.equal(database.delivery.status, "FAILED");
+}
+
+{
+  const database = new FakeActionItemDeliveryDatabase();
+  database.actionItem.status = "APPROVED";
+  database.delivery.status = "COMPLETED";
+  database.delivery.pilo_issue_id = "42";
+  const boardCalls = [];
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {},
+    {
+      async validateBoardIssueCreateInput() {
+        boardCalls.push("validate");
+        throw new Error("A completed delivery must not be revalidated");
+      },
+      async createBoardIssue() {
+        boardCalls.push("create");
+        throw new Error("A completed delivery must not run twice");
+      }
+    }
+  );
+
+  const result = await service.deliver(
+    USER_ID,
+    WORKSPACE_ID,
+    REPORT_ID,
+    database.actionItem.id,
+    {
+      deliveryType: "pilo_issue",
+      issue: {
+        boardId: "99",
+        columnId: "77"
+      }
+    }
+  );
+
+  assert.deepEqual(result, {
+    actionItemId: database.actionItem.id,
+    deliveryType: "pilo_issue",
+    status: "COMPLETED",
+    piloIssueId: "42"
+  });
+  assert.deepEqual(boardCalls, []);
 }
 
 {
@@ -2212,9 +2457,9 @@ class FakeInvalidCalendarDeliveryDatabase {
   assert.equal(await service.recoverStaleDeliveries(), 1);
   const recovery = database.calls.find((call) => call.method === "query");
   assert.match(recovery.text, /delivery\.locked_until <= now\(\)/);
-  assert.match(recovery.text, /FOR UPDATE OF delivery, action_item SKIP LOCKED/);
+  assert.match(recovery.text, /FOR UPDATE OF delivery SKIP LOCKED/);
   assert.match(recovery.text, /last_error_code = 'ACTION_ITEM_DELIVERY_STALE'/);
-  assert.match(recovery.text, /SET status = 'DELIVERY_FAILED'/);
+  assert.doesNotMatch(recovery.text, /UPDATE meeting_report_action_items/);
 }
 
 {

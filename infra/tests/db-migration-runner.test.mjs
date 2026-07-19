@@ -35,6 +35,8 @@ assert.match(runner, /CONFIRM_BASELINE=RDS_SCHEMA_VERIFIED/);
 assert.match(runner, /execution_mode IN \('baseline', 'applied'\)/);
 assert.match(runner, /runner-managed migration must not contain transaction control/);
 assert.match(runner, /has_top_level_transaction_control/);
+assert.match(runner, /has_outer_transaction_wrapper/);
+assert.match(runner, /sed '1d;\$d'/);
 assert.match(runner, /history contains versions missing from the runner bundle/);
 assert.match(runner, /runner image revision does not match MIGRATION_SOURCE_REVISION/);
 assert.match(runner, /baseline verification SQL not found/);

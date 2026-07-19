@@ -40,7 +40,7 @@ const [
   agentConfirmationCard,
   agentChatWidget,
   agentResourceLinks,
-  agentSqlErdSessionCandidates
+  agentCandidateSelections
 ] =
   await Promise.all([
     readFeatureFile("./types.ts"),
@@ -48,7 +48,7 @@ const [
     readFeatureFile("./components/agent-confirmation-card.tsx"),
     readFeatureFile("./components/agent-chat-widget.tsx"),
     readFeatureFile("./components/agent-resource-links.tsx"),
-    readFeatureFile("./components/agent-sql-erd-session-candidates.tsx")
+    readFeatureFile("./components/agent-candidate-selections.tsx")
   ]);
 
 assert.match(agentTypes, /export type AgentRunStatus/);
@@ -60,6 +60,7 @@ assert.match(agentTypes, /export type AgentRun/);
 assert.match(agentTypes, /export type CreateAgentRunInput/);
 assert.match(agentTypes, /export type SubmitAgentRunInput/);
 assert.match(agentTypes, /kind: "sql_erd_session"/);
+assert.match(agentTypes, /kind: "candidate"/);
 assert.match(agentTypes, /selection\?: AgentRunInputSelection/);
 assert.match(agentTypes, /export type AgentRunMessage/);
 assert.match(agentTypes, /messages: AgentRunMessage\[\]/);
@@ -134,6 +135,9 @@ assert.match(agentConfirmationCard, /plan\.kind === "choice"/);
 assert.match(agentConfirmationCard, /selectedChoiceId/);
 assert.match(agentConfirmationCard, /aria-pressed/);
 assert.match(agentConfirmationCard, /작업 대상/);
+assert.match(agentConfirmationCard, /isInternalPlanKey/);
+assert.match(agentConfirmationCard, /idempotencykey/);
+assert.match(agentConfirmationCard, /plan\.target\.label/);
 assert.match(agentConfirmationCard, /pending: "선택 대기"/);
 assert.match(agentConfirmationCard, /approved: "승인됨"/);
 assert.match(agentConfirmationCard, /rejected: "거절됨"/);
@@ -156,7 +160,7 @@ assert.match(agentChatWidget, /approveConfirmation/);
 assert.match(agentChatWidget, /rejectConfirmation/);
 assert.match(agentChatWidget, /AgentConfirmationCard/);
 assert.match(agentChatWidget, /AgentResourceLinks/);
-assert.match(agentChatWidget, /AgentSqlErdSessionCandidates/);
+assert.match(agentChatWidget, /AgentCandidateSelections/);
 assert.match(agentChatWidget, /AgentCanvasArtifact/);
 assert.match(agentChatWidget, /buildRequestContext\(isCanvasToolHelpMode\)/);
 assert.match(agentChatWidget, /기능 설명/);
@@ -167,6 +171,11 @@ assert.match(agentChatWidget, /회의 발언/);
 assert.match(agentChatWidget, /실제 활동/);
 assert.match(agentChatWidget, /citationSources/);
 assert.match(agentChatWidget, /handleConfirmationAction/);
+assert.match(agentChatWidget, /confirmationActionHandled/);
+assert.match(agentChatWidget, /getConfirmationRefreshErrorMessage/);
+assert.match(agentChatWidget, /getConfirmationOutcomeUnknownMessage/);
+assert.match(agentChatWidget, /서버에서 처리되었습니다/);
+assert.match(agentChatWidget, /서버에서 처리되었을 수 있으므로/);
 assert.match(agentChatWidget, /choiceId/);
 assert.match(agentChatWidget, /CONFIRMATION_EXPIRED/);
 assert.match(agentChatWidget, /CONFIRMATION_NOT_PENDING/);
@@ -237,13 +246,10 @@ assert.match(agentResourceLinks, /getAgentResourceLinks/);
 assert.match(agentResourceLinks, /<Link/);
 assert.match(agentResourceLinks, /stageSqlErdAgentTableFocus/);
 assert.match(agentResourceLinks, /link\.focus/);
-assert.match(agentSqlErdSessionCandidates, /getSqlErdSessionCandidates/);
-assert.match(agentSqlErdSessionCandidates, /disabled=\{disabled\}/);
-assert.match(agentSqlErdSessionCandidates, /kind: "sql_erd_session"/);
-assert.match(agentSqlErdSessionCandidates, /token: candidate\.selectionToken/);
-assert.match(agentSqlErdSessionCandidates, /수정/);
-assert.match(agentSqlErdSessionCandidates, /테이블/);
-assert.match(agentSqlErdSessionCandidates, /관계/);
+assert.match(agentCandidateSelections, /getAgentCandidateSelections/);
+assert.match(agentCandidateSelections, /disabled=\{disabled\}/);
+assert.match(agentCandidateSelections, /candidate\.selection/);
+assert.match(agentCandidateSelections, /다시 찾기/);
 assert.equal(
   typeof agentResourceUtilities.getSqlErdSessionCandidates,
   "function",
@@ -438,6 +444,108 @@ assert.deepEqual(
     }
   ]
 );
+assert.deepEqual(agentResourceUtilities.getAgentCandidateSelections(sqlErdCandidateRun), [
+  {
+    key: `sql-erd:${candidateSessionId}`,
+    label: "결제 ERD",
+    description: "수정 2026-07-17T00:00:00.000Z · 테이블 4개 · 관계 3개",
+    status: null,
+    selection: {
+      kind: "sql_erd_session",
+      token: candidateSessionId
+    }
+  },
+  {
+    key: `sql-erd:${resourceSessionId}`,
+    label: "결제 ERD",
+    description: "수정 2026-07-16T00:00:00.000Z · 테이블 2개 · 관계 1개",
+    status: null,
+    selection: {
+      kind: "sql_erd_session",
+      token: resourceSessionId
+    }
+  }
+]);
+const meetingCandidateSelectionId = "99999999-9999-4999-8999-999999999999";
+assert.deepEqual(
+  agentResourceUtilities.getAgentCandidateSelections({
+    status: "waiting_user_input",
+    steps: [
+      {
+        id: "meeting-candidate-step",
+        order: 1,
+        type: "tool",
+        status: "completed",
+        toolName: "resolve_meeting_resource",
+        outputSummary: {
+          status: "needs_clarification",
+          candidateSelections: [
+            {
+              candidateSelectionId: meetingCandidateSelectionId,
+              resourceType: "meeting_report",
+              label: "주간 개발 회의록",
+              description: "2026년 7월 17일",
+              status: "completed"
+            }
+          ]
+        },
+        resourceRefs: []
+      }
+    ]
+  }),
+  [
+    {
+      key: `candidate:${meetingCandidateSelectionId}`,
+      label: "주간 개발 회의록",
+      description: "2026년 7월 17일",
+      status: "completed",
+      selection: {
+        kind: "candidate",
+        candidateSelectionId: meetingCandidateSelectionId
+      }
+    }
+  ]
+);
+const sqlCandidateSelectionId = "77777777-7777-4777-8777-777777777777";
+assert.deepEqual(
+  agentResourceUtilities.getAgentCandidateSelections({
+    status: "waiting_user_input",
+    steps: [
+      {
+        id: "sql-candidate-step",
+        order: 1,
+        type: "tool",
+        status: "completed",
+        toolName: "inspect_sql_erd_schema",
+        outputSummary: {
+          status: "needs_clarification",
+          candidateSelections: [
+            {
+              candidateSelectionId: sqlCandidateSelectionId,
+              resourceType: "session",
+              label: "결제 ERD",
+              description: "테이블 4개 · 관계 3개",
+              status: null
+            }
+          ]
+        },
+        resourceRefs: []
+      }
+    ]
+  }),
+  [
+    {
+      key: `candidate:${sqlCandidateSelectionId}`,
+      label: "결제 ERD",
+      description: "테이블 4개 · 관계 3개",
+      status: null,
+      selection: {
+        kind: "candidate",
+        candidateSelectionId: sqlCandidateSelectionId
+      }
+    }
+  ]
+);
 assert.deepEqual(
   agentResourceUtilities.getSqlErdSessionCandidates({
     ...sqlErdCandidateRun,
@@ -500,15 +608,7 @@ assert.deepEqual(
       }
     ]
   }),
-  [
-    {
-      selectionToken: resourceSessionId,
-      title: "결제 ERD",
-      updatedAt: "2026-07-16T00:00:00.000Z",
-      tableCount: 2,
-      relationCount: 1
-    }
-  ]
+  []
 );
 assert.deepEqual(
   agentResourceUtilities.getSqlErdSessionCandidates({
@@ -553,15 +653,7 @@ assert.deepEqual(
       }
     ]
   }),
-  [
-    {
-      selectionToken: resourceSessionId,
-      title: "결제 ERD",
-      updatedAt: "2026-07-16T00:00:00.000Z",
-      tableCount: 2,
-      relationCount: 1
-    }
-  ]
+  []
 );
 const validResourceRef = {
   domain: "sqltoerd",

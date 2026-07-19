@@ -35,9 +35,8 @@ import {
   createAgentApiClient
 } from "@/features/agent/api/client";
 import { AgentConfirmationCard } from "@/features/agent/components/agent-confirmation-card";
-import { AgentMeetingCandidateSelections } from "@/features/agent/components/agent-meeting-candidate-selections";
+import { AgentCandidateSelections } from "@/features/agent/components/agent-candidate-selections";
 import { AgentResourceLinks } from "@/features/agent/components/agent-resource-links";
-import { AgentSqlErdSessionCandidates } from "@/features/agent/components/agent-sql-erd-session-candidates";
 import { AgentCanvasArtifact } from "@/features/agent/components/agent-canvas-artifact";
 import {
   getCanvasAgentDelegationAdapter,
@@ -328,6 +327,21 @@ function getAgentRequestErrorMessage(error: unknown) {
   }
 
   return "Agent 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function getConfirmationRefreshErrorMessage(
+  action: "approve" | "reject",
+  run: AgentRun
+) {
+  const actionLabel = action === "approve" ? "승인 작업" : "거절 요청";
+
+  return `${getAgentRunDisplayMessage(run)}\n\n${actionLabel}은 서버에서 처리되었습니다. 다만 최신 상태를 다시 불러오지 못했습니다. 잠시 후 이 대화를 다시 열어 상태를 확인해주세요.`;
+}
+
+function getConfirmationOutcomeUnknownMessage(action: "approve" | "reject") {
+  const actionLabel = action === "approve" ? "승인 작업" : "거절 요청";
+
+  return `${actionLabel} 결과를 확인하지 못했습니다. 서버에서 처리되었을 수 있으므로 같은 요청을 반복하지 말고, 잠시 후 이 대화를 다시 열어 상태를 확인해주세요.`;
 }
 
 export function AgentChatWidget() {
@@ -821,6 +835,7 @@ export function AgentChatWidget() {
     );
 
     let lastKnownRun = run;
+    let confirmationActionHandled = false;
     try {
       const actionPayload =
         action === "approve"
@@ -851,6 +866,7 @@ export function AgentChatWidget() {
         }
       };
       lastKnownRun = updatedRun;
+      confirmationActionHandled = true;
       updateAssistantMessage(
         message.id,
         getAgentRunDisplayMessage(updatedRun),
@@ -868,6 +884,48 @@ export function AgentChatWidget() {
     } catch (error) {
       if (isAbortError(error)) {
         return;
+      }
+
+      if (confirmationActionHandled) {
+        updateAssistantMessage(
+          message.id,
+          getConfirmationRefreshErrorMessage(action, lastKnownRun),
+          lastKnownRun
+        );
+        return;
+      }
+
+      if (!(error instanceof AgentApiError)) {
+        let reconciliationFailed = false;
+        const reconciledRun = await agentApiClient
+          .getRun(run.workspaceId, run.id, {
+            signal: abortController.signal
+          })
+          .then((runPayload) => runPayload.run)
+          .catch(() => {
+            reconciliationFailed = true;
+            return null;
+          });
+        if (
+          reconciledRun &&
+          (reconciledRun.status !== "waiting_confirmation" ||
+            reconciledRun.confirmation?.status !== "pending")
+        ) {
+          updateAssistantMessage(
+            message.id,
+            getAgentRunDisplayMessage(reconciledRun),
+            reconciledRun
+          );
+          return;
+        }
+        if (reconciliationFailed) {
+          updateAssistantMessage(
+            message.id,
+            getConfirmationOutcomeUnknownMessage(action),
+            lastKnownRun
+          );
+          return;
+        }
       }
 
       let refreshedAfterActionError = false;
@@ -1066,7 +1124,7 @@ export function AgentChatWidget() {
                         />
                       ) : null}
                       {message.run ? (
-                        <AgentMeetingCandidateSelections
+                        <AgentCandidateSelections
                           run={message.run}
                           disabled={
                             !accessToken?.trim() || hasActiveAgentRequest
@@ -1074,16 +1132,10 @@ export function AgentChatWidget() {
                           onSelect={(input) =>
                             void appendRunInput(message, input)
                           }
-                        />
-                      ) : null}
-                      {message.run ? (
-                        <AgentSqlErdSessionCandidates
-                          run={message.run}
-                          disabled={
-                            !accessToken?.trim() || hasActiveAgentRequest
-                          }
-                          onSelect={(input) =>
-                            void appendRunInput(message, input)
+                          onRetry={() =>
+                            void appendRunInput(message, {
+                              message: "후보를 다시 찾아주세요."
+                            })
                           }
                         />
                       ) : null}
