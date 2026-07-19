@@ -95,6 +95,69 @@ class FakeWorkspaceService {
   }
 }
 
+class FakeDatabaseService {
+  constructor(workspaces) {
+    this.workspaces = workspaces;
+  }
+
+  transactionCalls = 0;
+  lockQueries = [];
+  activeTransactions = 0;
+  pendingDeletions = [];
+  afterMembershipLock = null;
+  deletionWaits = 0;
+
+  async transaction(callback) {
+    this.transactionCalls += 1;
+    this.activeTransactions += 1;
+    try {
+      return await callback({
+        queryOne: async (sql, values) => {
+          this.lockQueries.push({ sql, values });
+          const member = this.workspaces.members.find(
+            item => item.workspaceId === values[0] && item.userId === values[1]
+          );
+          if (!member) return null;
+          await this.afterMembershipLock?.();
+          return {
+            user_id: member.userId,
+            display_name:
+              member.user.name?.trim() ||
+              member.user.email?.split("@")[0]?.trim() ||
+              "PILO",
+            avatar_url: member.user.avatarUrl
+          };
+        }
+      });
+    } finally {
+      this.activeTransactions -= 1;
+      if (this.activeTransactions === 0) {
+        const pending = this.pendingDeletions.splice(0);
+        for (const deletion of pending) deletion();
+      }
+    }
+  }
+
+  async deleteMembership(requestedUserId) {
+    const remove = () => {
+      this.workspaces.members = this.workspaces.members.filter(
+        item => item.userId !== requestedUserId
+      );
+    };
+    if (this.activeTransactions === 0) {
+      remove();
+      return;
+    }
+    this.deletionWaits += 1;
+    await new Promise(resolve => {
+      this.pendingDeletions.push(() => {
+        remove();
+        resolve();
+      });
+    });
+  }
+}
+
 class FakeStateService {
   constructor(current = null) {
     this.current = current;
@@ -107,6 +170,9 @@ class FakeStateService {
   pendingEvents = [];
   releaseStartingCalls = [];
   replaceExpiredStartingCalls = [];
+  registerViewerCalls = [];
+  removeViewerCalls = [];
+  viewerIdentities = new Map();
   rollbackAttemptId = null;
   failReserve = false;
   beforeTerminate = null;
@@ -139,6 +205,7 @@ class FakeStateService {
     const ended = this.current;
     this.current = null;
     this.rollbackAttemptId = null;
+    this.viewerIdentities.clear();
     const outboxId = `outbox-${this.pendingEvents.length + 1}`;
     this.pendingEvents.push({
       id: outboxId,
@@ -199,17 +266,52 @@ class FakeStateService {
     this.rollbackAttemptId = rollbackAttemptId;
     return true;
   }
+
+  async registerViewerIdentity(input) {
+    this.registerViewerCalls.push(input);
+    if (
+      this.current?.workspaceId !== input.workspaceId ||
+      this.current.sessionId !== input.sessionId ||
+      this.current.livekitRoomName !== input.livekitRoomName ||
+      this.current.status !== "active"
+    ) {
+      return false;
+    }
+    const identities = this.viewerIdentities.get(input.userId) ?? new Set();
+    identities.add(input.identity);
+    this.viewerIdentities.set(input.userId, identities);
+    return true;
+  }
+
+  async removeViewerIdentityIfCurrent(input) {
+    this.removeViewerCalls.push(input);
+    const identities = this.viewerIdentities.get(input.userId);
+    identities?.delete(input.identity);
+    if (identities?.size === 0) this.viewerIdentities.delete(input.userId);
+    return true;
+  }
+
+  async drainViewerIdentities(input) {
+    const identities = [...(this.viewerIdentities.get(input.userId) ?? [])];
+    this.viewerIdentities.delete(input.userId);
+    return identities;
+  }
 }
 
 class FakeTokenService {
   publisherCalls = [];
   viewerCalls = [];
   publisherFailures = 0;
+  viewerFailures = 0;
   beforePublisherFailure = null;
+  beforePublisherMint = null;
+  beforeViewerMint = null;
   publisherError = new Error("publisher token failed");
+  viewerError = new Error("viewer token failed");
 
   async createPublisherToken(input) {
     this.publisherCalls.push(input);
+    await this.beforePublisherMint?.(input);
     if (this.publisherFailures > 0) {
       this.publisherFailures -= 1;
       await this.beforePublisherFailure?.();
@@ -224,6 +326,11 @@ class FakeTokenService {
 
   async createViewerToken(input) {
     this.viewerCalls.push(input);
+    await this.beforeViewerMint?.(input);
+    if (this.viewerFailures > 0) {
+      this.viewerFailures -= 1;
+      throw this.viewerError;
+    }
     return {
       livekitUrl: "wss://screen-share.test",
       livekitToken: `viewer-token-${this.viewerCalls.length}`,
@@ -238,6 +345,7 @@ class FakeRoomService {
   removeCalls = [];
   deleteCalls = [];
   revocationCalls = [];
+  identityRevocationCalls = [];
   revocationFailures = 0;
   beforeActiveResult = null;
   removeFailures = 0;
@@ -271,6 +379,10 @@ class FakeRoomService {
       this.revocationFailures -= 1;
       throw new Error("LiveKit cleanup failed");
     }
+  }
+
+  async revokeParticipantIdentity(roomName, identity) {
+    this.identityRevocationCalls.push({ roomName, identity });
   }
 }
 
@@ -319,9 +431,10 @@ class TestScreenShareService extends ScreenShareService {
     rooms,
     realtime,
     workspaces,
+    database,
     { uuids = [sessionId], currentTime = nowIso } = {}
   ) {
-    super(state, tokens, rooms, realtime, workspaces);
+    super(state, tokens, rooms, realtime, workspaces, database);
     this.uuids = [...uuids];
     this.currentTime = currentTime;
   }
@@ -348,15 +461,17 @@ const createHarness = ({
   const rooms = new FakeRoomService();
   const realtime = new FakeRealtimePublisher(state);
   const workspaces = new FakeWorkspaceService(members);
+  const database = new FakeDatabaseService(workspaces);
   const service = new TestScreenShareService(
     state,
     tokens,
     rooms,
     realtime,
     workspaces,
+    database,
     { uuids, currentTime }
   );
-  return { service, state, tokens, rooms, realtime, workspaces };
+  return { service, state, tokens, rooms, realtime, workspaces, database };
 };
 
 {
@@ -414,6 +529,48 @@ assert.deepEqual(startHarness.tokens.publisherCalls, [
   }
 ]);
 assert.equal(startHarness.service.getStartHttpStatus(started), 201);
+assert.equal(startHarness.database.transactionCalls, 1);
+assert.match(startHarness.database.lockQueries[0].sql, /FOR KEY SHARE OF wm/);
+
+{
+  const harness = createHarness({ uuids: [sessionId] });
+  let deletionSettled = false;
+  let deletionPromise;
+  harness.database.afterMembershipLock = () => {
+    harness.database.afterMembershipLock = null;
+    deletionPromise = harness.database
+      .deleteMembership(userId)
+      .then(() => {
+        deletionSettled = true;
+      });
+  };
+  harness.tokens.beforePublisherMint = () => {
+    assert.equal(
+      deletionSettled,
+      false,
+      "membership deletion must wait while publisher issuance holds the row lock"
+    );
+  };
+
+  const issued = await harness.service.start(userId, workspaceId);
+  await deletionPromise;
+  assert.equal(issued.id, sessionId);
+  assert.equal(harness.database.deletionWaits, 1);
+  assert.equal(deletionSettled, true);
+  assert.equal(await harness.service.endForRevocation(workspaceId, userId), true);
+  assert.deepEqual(harness.rooms.revocationCalls, [startingSession()]);
+}
+
+{
+  const harness = createHarness({ uuids: [sessionId] });
+  await harness.database.deleteMembership(userId);
+  await assert.rejects(
+    () => harness.service.start(userId, workspaceId),
+    error => error.getStatus() === 403
+  );
+  assert.equal(harness.state.reserveCalls.length, 0);
+  assert.equal(harness.tokens.publisherCalls.length, 0);
+}
 
 {
   const recovered = await startHarness.service.start(userId, workspaceId);
@@ -534,7 +691,7 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     uuids: [sessionId]
   });
   const result = await harness.service.start(userId, workspaceId);
-  assert.equal(result.sharer.displayName, "member@example.com");
+  assert.equal(result.sharer.displayName, "member");
 }
 
 {
@@ -701,6 +858,13 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
     current: activeSession(),
     uuids: [nextSessionId]
   });
+  active.tokens.beforeViewerMint = input => {
+    assert.equal(
+      active.state.viewerIdentities.get(otherUserId)?.has(input.identity),
+      true,
+      "viewer identity must be registered before token minting"
+    );
+  };
   assert.deepEqual(
     await active.service.createViewerToken(otherUserId, workspaceId, sessionId),
     {
@@ -725,6 +889,74 @@ assert.equal(startHarness.service.getStartHttpStatus(started), 201);
         "The screen sharer cannot request a viewer token"
   );
   assert.equal(active.tokens.viewerCalls.length, 1);
+  assert.equal(active.database.transactionCalls, 2);
+}
+
+{
+  const harness = createHarness({
+    current: activeSession(),
+    uuids: [nextSessionId]
+  });
+  let deletionSettled = false;
+  let deletionPromise;
+  harness.database.afterMembershipLock = () => {
+    harness.database.afterMembershipLock = null;
+    deletionPromise = harness.database
+      .deleteMembership(otherUserId)
+      .then(() => {
+        deletionSettled = true;
+      });
+  };
+  harness.tokens.beforeViewerMint = input => {
+    assert.equal(deletionSettled, false);
+    assert.equal(
+      harness.state.viewerIdentities.get(otherUserId)?.has(input.identity),
+      true
+    );
+  };
+
+  await harness.service.createViewerToken(otherUserId, workspaceId, sessionId);
+  await deletionPromise;
+  const identities = await harness.state.drainViewerIdentities({
+    workspaceId,
+    sessionId,
+    livekitRoomName: `pilo-screen-share-${sessionId}`,
+    userId: otherUserId
+  });
+  for (const identity of identities) {
+    await harness.rooms.revokeParticipantIdentity(
+      `pilo-screen-share-${sessionId}`,
+      identity
+    );
+  }
+  assert.equal(harness.database.deletionWaits, 1);
+  assert.deepEqual(harness.rooms.identityRevocationCalls, [
+    {
+      roomName: `pilo-screen-share-${sessionId}`,
+      identity: `screen-share-viewer:${sessionId}:${otherUserId}:${nextSessionId}`
+    }
+  ]);
+
+  await assert.rejects(
+    () => harness.service.createViewerToken(otherUserId, workspaceId, sessionId),
+    error => error.getStatus() === 403
+  );
+  assert.equal(harness.tokens.viewerCalls.length, 1);
+}
+
+{
+  const harness = createHarness({
+    current: activeSession(),
+    uuids: [nextSessionId]
+  });
+  harness.tokens.viewerFailures = 1;
+  await assert.rejects(
+    () => harness.service.createViewerToken(otherUserId, workspaceId, sessionId),
+    error => error === harness.tokens.viewerError
+  );
+  assert.equal(harness.state.registerViewerCalls.length, 1);
+  assert.equal(harness.state.removeViewerCalls.length, 1);
+  assert.equal(harness.state.viewerIdentities.has(otherUserId), false);
 }
 
 {

@@ -60,6 +60,14 @@ class FakeStateService {
   endCalls = [];
   pendingEvents = [];
   endedRooms = new Set();
+  viewerIdentities = new Map();
+  drainViewerCalls = [];
+  listViewerCalls = [];
+  removeViewerCalls = [];
+  enqueueViewerCalls = [];
+  claimViewerCalls = [];
+  completeViewerCalls = [];
+  pendingViewerRevocations = new Map();
   beforeTerminate = null;
 
   async isKnownScreenShareRoom(roomName) {
@@ -143,6 +151,63 @@ class FakeStateService {
       }
     });
     return { session: ended, outboxId };
+  }
+
+  async drainViewerIdentities(input) {
+    this.drainViewerCalls.push(input);
+    const identities = [...(this.viewerIdentities.get(input.userId) ?? [])];
+    this.viewerIdentities.delete(input.userId);
+    return identities;
+  }
+
+  async listViewerIdentities(input) {
+    this.listViewerCalls.push(input);
+    return [...(this.viewerIdentities.get(input.userId) ?? [])];
+  }
+
+  async removeViewerIdentityIfCurrent(input) {
+    this.removeViewerCalls.push(input);
+    const identities = this.viewerIdentities.get(input.userId);
+    identities?.delete(input.identity);
+    if (identities?.size === 0) this.viewerIdentities.delete(input.userId);
+    return true;
+  }
+
+  async enqueueViewerRevocation(input, dueAtMs) {
+    this.order.push("enqueue-viewer-revocation");
+    this.enqueueViewerCalls.push({ input, dueAtMs });
+    if (
+      this.current?.workspaceId !== input.workspaceId ||
+      this.current.sessionId !== input.sessionId ||
+      this.current.livekitRoomName !== input.livekitRoomName
+    ) {
+      return false;
+    }
+    const key = JSON.stringify(input);
+    this.pendingViewerRevocations.set(key, { task: input, dueAtMs });
+    return true;
+  }
+
+  async claimDueViewerRevocation(nowMs, leaseUntilMs) {
+    this.claimViewerCalls.push({ nowMs, leaseUntilMs });
+    const due = [...this.pendingViewerRevocations.values()]
+      .filter(item => item.dueAtMs <= nowMs)
+      .sort((left, right) => left.dueAtMs - right.dueAtMs)[0];
+    if (!due) return null;
+    due.dueAtMs = leaseUntilMs;
+    return due.task;
+  }
+
+  async completeViewerRevocation(input, retryAtMs) {
+    this.completeViewerCalls.push({ input, retryAtMs });
+    const key = JSON.stringify(input);
+    if ((this.viewerIdentities.get(input.userId)?.size ?? 0) === 0) {
+      this.pendingViewerRevocations.delete(key);
+      return true;
+    }
+    const pending = this.pendingViewerRevocations.get(key);
+    if (pending) pending.dueAtMs = retryAtMs;
+    return false;
   }
 }
 
@@ -607,9 +672,40 @@ class FakeScreenShareService {
 
 class FakeRoomService {
   viewerCalls = [];
+  identityRevocationCalls = [];
+  failingIdentities = new Set();
+  identityFailureCounts = new Map();
 
   async removeViewerParticipants(session, requestedUserId) {
     this.viewerCalls.push({ session, userId: requestedUserId });
+  }
+
+  async revokeParticipantIdentity(roomName, identity) {
+    this.order?.push("revoke-viewer-identity");
+    this.identityRevocationCalls.push({ roomName, identity });
+    const failuresRemaining = this.identityFailureCounts.get(identity) ?? 0;
+    if (failuresRemaining > 0) {
+      this.identityFailureCounts.set(identity, failuresRemaining - 1);
+      throw new Error("LiveKit revocation failed");
+    }
+    if (this.failingIdentities.has(identity)) {
+      throw new Error("LiveKit revocation failed");
+    }
+  }
+}
+
+class TestRetryMembershipRevocationService extends ScreenShareMembershipRevocationService {
+  retryDelays = [];
+  currentTimeMs = 100;
+
+  viewerRevocationRetryDelaysMs() {
+    return this.retryDelays;
+  }
+
+  async waitBeforeViewerRevocationRetry() {}
+
+  nowMs() {
+    return this.currentTimeMs;
   }
 }
 
@@ -625,7 +721,8 @@ const validRevocation = {
   const state = new FakeStateService(activeSession());
   const shares = new FakeScreenShareService();
   const rooms = new FakeRoomService();
-  const service = new ScreenShareMembershipRevocationService(
+  rooms.order = state.order;
+  const service = new TestRetryMembershipRevocationService(
     state,
     shares,
     rooms
@@ -638,9 +735,45 @@ const validRevocation = {
 
 {
   const session = activeSession();
+  const retryIdentity =
+    `screen-share-viewer:${sessionId}:${otherUserId}:automatic-retry`;
   const state = new FakeStateService(session);
+  state.viewerIdentities.set(otherUserId, new Set([retryIdentity]));
   const shares = new FakeScreenShareService();
   const rooms = new FakeRoomService();
+  rooms.identityFailureCounts.set(retryIdentity, 1);
+  const service = new TestRetryMembershipRevocationService(
+    state,
+    shares,
+    rooms
+  );
+  service.retryDelays = [1];
+  service.logger = { error() {}, warn() {} };
+
+  assert.equal(
+    await service.handleMembershipRevocation({
+      ...validRevocation,
+      userId: otherUserId
+    }),
+    true
+  );
+  assert.equal(state.viewerIdentities.has(otherUserId), false);
+  assert.deepEqual(
+    rooms.identityRevocationCalls.map(call => call.identity),
+    [retryIdentity, retryIdentity],
+    "a transient subscriber failure must retry automatically before ack"
+  );
+}
+
+{
+  const session = activeSession();
+  const state = new FakeStateService(session);
+  const issuedIdentity =
+    `screen-share-viewer:${sessionId}:${otherUserId}:issued-not-joined`;
+  state.viewerIdentities.set(otherUserId, new Set([issuedIdentity]));
+  const shares = new FakeScreenShareService();
+  const rooms = new FakeRoomService();
+  rooms.order = state.order;
   const service = new ScreenShareMembershipRevocationService(
     state,
     shares,
@@ -655,8 +788,33 @@ const validRevocation = {
     true
   );
   assert.equal(shares.calls.length, 0);
-  assert.deepEqual(rooms.viewerCalls, [
-    { session, userId: otherUserId }
+  assert.deepEqual(state.listViewerCalls, [
+    {
+      workspaceId,
+      sessionId,
+      livekitRoomName: session.livekitRoomName,
+      userId: otherUserId
+    }
+  ]);
+  assert.ok(
+    state.order.indexOf("enqueue-viewer-revocation") <
+      state.order.indexOf("revoke-viewer-identity"),
+    "the durable retry task must be enqueued before LiveKit revocation"
+  );
+  assert.deepEqual(rooms.identityRevocationCalls, [
+    {
+      roomName: session.livekitRoomName,
+      identity: issuedIdentity
+    }
+  ]);
+  assert.deepEqual(state.removeViewerCalls, [
+    {
+      workspaceId,
+      sessionId,
+      livekitRoomName: session.livekitRoomName,
+      userId: otherUserId,
+      identity: issuedIdentity
+    }
   ]);
   assert.equal(
     await service.handleMembershipRevocation({
@@ -664,6 +822,65 @@ const validRevocation = {
       userId: "not-a-uuid"
     }),
     false
+  );
+}
+
+{
+  const session = activeSession();
+  const firstIdentity =
+    `screen-share-viewer:${sessionId}:${otherUserId}:first`;
+  const retryIdentity =
+    `screen-share-viewer:${sessionId}:${otherUserId}:retry`;
+  const state = new FakeStateService(session);
+  state.viewerIdentities.set(
+    otherUserId,
+    new Set([firstIdentity, retryIdentity])
+  );
+  const shares = new FakeScreenShareService();
+  const rooms = new FakeRoomService();
+  rooms.failingIdentities.add(retryIdentity);
+  const service = new TestRetryMembershipRevocationService(
+    state,
+    shares,
+    rooms
+  );
+  service.logger = { error() {}, warn() {} };
+
+  assert.equal(
+    await service.handleMembershipRevocation({
+      ...validRevocation,
+      userId: otherUserId
+    }),
+    false
+  );
+  assert.deepEqual(
+    [...(state.viewerIdentities.get(otherUserId) ?? [])],
+    [retryIdentity],
+    "a failed explicit revocation must remain registered for redelivery"
+  );
+  assert.deepEqual(
+    state.removeViewerCalls.map(call => call.identity),
+    [firstIdentity]
+  );
+
+  rooms.failingIdentities.clear();
+  const restartedService = new TestRetryMembershipRevocationService(
+    state,
+    shares,
+    rooms
+  );
+  restartedService.currentTimeMs = 1_100;
+  restartedService.logger = { error() {}, warn() {} };
+  assert.equal(
+    await restartedService.processViewerRevocationTasks(),
+    1
+  );
+  assert.equal(state.viewerIdentities.has(otherUserId), false);
+  assert.equal(state.pendingViewerRevocations.size, 0);
+  assert.deepEqual(
+    rooms.identityRevocationCalls.map(call => call.identity),
+    [firstIdentity, retryIdentity, retryIdentity],
+    "redelivery must retry only the identity that was not acknowledged"
   );
 }
 
@@ -778,6 +995,18 @@ try {
   assert.deepEqual(client.removeCalls.at(-1), {
     roomName: session.livekitRoomName,
     identity: session.sharerLiveKitIdentity,
+    options: { revokeTokenTs: 1784332801n }
+  });
+
+  const absentViewerIdentity = `${prefix}issued-but-not-joined`;
+  client.absentIdentities.add(absentViewerIdentity);
+  await rooms.revokeParticipantIdentity(
+    session.livekitRoomName,
+    absentViewerIdentity
+  );
+  assert.deepEqual(client.removeCalls.at(-1), {
+    roomName: session.livekitRoomName,
+    identity: absentViewerIdentity,
     options: { revokeTokenTs: 1784332801n }
   });
 } finally {

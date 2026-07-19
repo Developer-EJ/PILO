@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable } from "@nestjs/common";
+import type { QueryResultRow } from "pg";
 import { forbidden } from "../../common/api-error";
 import {
-  type WorkspaceMemberPayload,
-  WorkspaceService
-} from "../workspace/workspace.service";
+  type DatabaseTransaction,
+  DatabaseService
+} from "../../database/database.service";
+import { WorkspaceService } from "../workspace/workspace.service";
 import {
   screenShareAlreadyActive,
   screenShareNotFound
@@ -42,6 +44,18 @@ export type EndWorkspaceScreenSharePayload = {
   ended: true;
 };
 
+type LockedWorkspaceMemberRow = QueryResultRow & {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+};
+
+type LockedWorkspaceMember = {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+};
+
 @Injectable()
 export class ScreenShareService {
   private readonly startHttpStatuses = new WeakMap<
@@ -54,7 +68,8 @@ export class ScreenShareService {
     private readonly tokens: ScreenShareTokenService,
     private readonly rooms: ScreenShareRoomService,
     private readonly realtime: ScreenShareRealtimePublisherService,
-    private readonly workspaces: WorkspaceService
+    private readonly workspaces: WorkspaceService,
+    private readonly database: DatabaseService
   ) {}
 
   async getCurrent(
@@ -79,10 +94,22 @@ export class ScreenShareService {
     userId: string,
     workspaceId: string
   ): Promise<StartWorkspaceScreenSharePayload> {
-    const members = await this.workspaces.listMembers(userId, workspaceId);
-    const member = members.find(item => item.userId === userId);
-    if (!member) throw forbidden("Workspace access denied");
+    return this.database.transaction(async transaction => {
+      const member = await this.lockWorkspaceMembership(
+        transaction,
+        userId,
+        workspaceId
+      );
+      if (!member) throw forbidden("Workspace access denied");
+      return this.startWithLockedMembership(userId, workspaceId, member);
+    });
+  }
 
+  private async startWithLockedMembership(
+    userId: string,
+    workspaceId: string,
+    member: LockedWorkspaceMember
+  ): Promise<StartWorkspaceScreenSharePayload> {
     const candidate = this.createSession(member, workspaceId);
     const rollbackAttemptId = candidate.sessionId;
     if (await this.state.reserve(candidate, rollbackAttemptId)) {
@@ -130,28 +157,58 @@ export class ScreenShareService {
     workspaceId: string,
     sessionId: string
   ): Promise<ScreenShareTokenPayload> {
-    await this.workspaces.assertWorkspaceAccess(userId, workspaceId);
-    const current = await this.state.getCurrent(workspaceId);
-    if (
-      !current ||
-      current.sessionId !== sessionId ||
-      current.status !== "active"
-    ) {
-      throw screenShareNotFound();
-    }
-    if (current.sharerUserId === userId) {
-      throw forbidden("The screen sharer cannot request a viewer token");
-    }
+    return this.database.transaction(async transaction => {
+      const member = await this.lockWorkspaceMembership(
+        transaction,
+        userId,
+        workspaceId
+      );
+      if (!member) throw forbidden("Workspace access denied");
 
-    if (!(await this.rooms.hasActiveScreenTrack(current))) {
-      await this.endStaleSession(current);
-      throw screenShareNotFound();
-    }
+      const current = await this.state.getCurrent(workspaceId);
+      if (
+        !current ||
+        current.sessionId !== sessionId ||
+        current.status !== "active"
+      ) {
+        throw screenShareNotFound();
+      }
+      if (current.sharerUserId === userId) {
+        throw forbidden("The screen sharer cannot request a viewer token");
+      }
 
-    return this.tokens.createViewerToken({
-      identity: `screen-share-viewer:${sessionId}:${userId}:${this.createUuid()}`,
-      roomName: current.livekitRoomName,
-      participantName: userId
+      if (!(await this.rooms.hasActiveScreenTrack(current))) {
+        await this.endStaleSession(current);
+        throw screenShareNotFound();
+      }
+
+      const identity =
+        `screen-share-viewer:${sessionId}:${userId}:${this.createUuid()}`;
+      const identityInput = {
+        workspaceId,
+        sessionId,
+        livekitRoomName: current.livekitRoomName,
+        userId,
+        identity
+      };
+      if (!(await this.state.registerViewerIdentity(identityInput))) {
+        throw screenShareNotFound();
+      }
+
+      try {
+        return await this.tokens.createViewerToken({
+          identity,
+          roomName: current.livekitRoomName,
+          participantName: userId
+        });
+      } catch (error) {
+        try {
+          await this.state.removeViewerIdentityIfCurrent(identityInput);
+        } catch {
+          // Preserve the token failure as the API cause.
+        }
+        throw error;
+      }
     });
   }
 
@@ -235,7 +292,7 @@ export class ScreenShareService {
   }
 
   private createSession(
-    member: WorkspaceMemberPayload,
+    member: LockedWorkspaceMember,
     workspaceId: string
   ): WorkspaceScreenShareSession {
     const id = this.createUuid();
@@ -243,8 +300,8 @@ export class ScreenShareService {
       sessionId: id,
       workspaceId,
       sharerUserId: member.userId,
-      sharerDisplayName: this.displayName(member),
-      sharerAvatarUrl: member.user.avatarUrl,
+      sharerDisplayName: member.displayName,
+      sharerAvatarUrl: member.avatarUrl,
       sharerLiveKitIdentity: `screen-share:${id}:${member.userId}`,
       livekitRoomName: `pilo-screen-share-${id}`,
       status: "starting",
@@ -253,8 +310,44 @@ export class ScreenShareService {
     };
   }
 
-  private displayName(member: WorkspaceMemberPayload): string {
-    return member.user.name?.trim() || member.user.email?.trim() || "PILO";
+  private async lockWorkspaceMembership(
+    transaction: DatabaseTransaction,
+    userId: string,
+    workspaceId: string
+  ): Promise<LockedWorkspaceMember | null> {
+    const member = await transaction.queryOne<LockedWorkspaceMemberRow>(
+      `
+        SELECT
+          wm.user_id,
+          COALESCE(
+            NULLIF(BTRIM(us.display_name), ''),
+            NULLIF(BTRIM(u.name), ''),
+            NULLIF(split_part(u.email, '@', 1), ''),
+            'PILO 사용자'
+          ) AS display_name,
+          CASE COALESCE(us.avatar_mode, 'provider')
+            WHEN 'custom' THEN us.custom_avatar_url
+            WHEN 'initials' THEN NULL
+            ELSE u.avatar_url
+          END AS avatar_url
+        FROM workspace_members wm
+        JOIN users u
+          ON u.id = wm.user_id
+        LEFT JOIN user_settings us
+          ON us.user_id = u.id
+        WHERE wm.workspace_id = $1
+          AND wm.user_id = $2
+        FOR KEY SHARE OF wm
+      `,
+      [workspaceId, userId]
+    );
+    return member
+      ? {
+          userId: member.user_id,
+          displayName: member.display_name,
+          avatarUrl: member.avatar_url
+        }
+      : null;
   }
 
   private async recoverStartingSession(

@@ -5,8 +5,10 @@ import {
   parseWorkspaceScreenShareSession,
   SCREEN_SHARE_ENDED_ROOM_TOMBSTONE_TTL_SECONDS,
   SCREEN_SHARE_STATE_TTL_SECONDS,
+  SCREEN_SHARE_VIEWER_REGISTRY_TTL_SECONDS,
   WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM,
   WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM,
+  WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATIONS,
   type WorkspaceScreenShareSession
 } from "./screen-share.types";
 
@@ -56,6 +58,17 @@ export type ReplaceExpiredStartingInput = EndScreenShareInput & {
   createdAt: string;
   expiredBefore: string;
 };
+
+export type ViewerIdentityInput = EndScreenShareInput & {
+  userId: string;
+  identity: string;
+};
+
+export type DrainViewerIdentitiesInput = EndScreenShareInput & {
+  userId: string;
+};
+
+export type ViewerRevocationTask = DrainViewerIdentitiesInput;
 
 const RESERVE_SESSION_SCRIPT = `
 -- RESERVE_WORKSPACE_SCREEN_SHARE
@@ -135,9 +148,115 @@ local event = cjson.encode({
 })
 local outboxId = redis.call("XADD", KEYS[4], "*", "event", event)
 local cleanupId = redis.call("XADD", KEYS[6], "*", "session", encoded, "mode", ARGV[4])
+local viewerKeys = redis.call("SMEMBERS", KEYS[7])
+for _, viewerKey in ipairs(viewerKeys) do
+  redis.call("DEL", viewerKey)
+end
+redis.call("DEL", KEYS[7])
 redis.call("DEL", KEYS[1], KEYS[2], KEYS[3])
 redis.call("SET", KEYS[5], session.sessionId, "EX", ARGV[3])
 return {encoded, outboxId, cleanupId}
+`;
+
+const REGISTER_VIEWER_IDENTITY_SCRIPT = `
+-- REGISTER_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITY
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return 0
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] or session.status ~= "active" then
+  return 0
+end
+local workspaceId = redis.call("GET", KEYS[2])
+if workspaceId ~= session.workspaceId then
+  return 0
+end
+redis.call("SADD", KEYS[3], ARGV[3])
+redis.call("EXPIRE", KEYS[3], ARGV[4])
+redis.call("SADD", KEYS[4], KEYS[3])
+redis.call("EXPIRE", KEYS[4], ARGV[4])
+return 1
+`;
+
+const REMOVE_VIEWER_IDENTITY_SCRIPT = `
+-- REMOVE_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITY
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return 0
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
+  return 0
+end
+redis.call("SREM", KEYS[2], ARGV[3])
+if redis.call("SCARD", KEYS[2]) == 0 then
+  redis.call("DEL", KEYS[2])
+  redis.call("SREM", KEYS[3], KEYS[2])
+end
+return 1
+`;
+
+const LIST_VIEWER_IDENTITIES_SCRIPT = `
+-- LIST_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITIES
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return false
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
+  return false
+end
+return redis.call("SMEMBERS", KEYS[2])
+`;
+
+const DRAIN_VIEWER_IDENTITIES_SCRIPT = `
+-- DRAIN_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITIES
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return false
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
+  return false
+end
+local identities = redis.call("SMEMBERS", KEYS[2])
+redis.call("DEL", KEYS[2])
+redis.call("SREM", KEYS[3], KEYS[2])
+return identities
+`;
+
+const ENQUEUE_VIEWER_REVOCATION_SCRIPT = `
+-- ENQUEUE_WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATION
+local encoded = redis.call("GET", KEYS[1])
+if not encoded then
+  return 0
+end
+local session = cjson.decode(encoded)
+if session.sessionId ~= ARGV[1] or session.livekitRoomName ~= ARGV[2] then
+  return 0
+end
+return redis.call("ZADD", KEYS[2], "NX", ARGV[4], ARGV[3])
+`;
+
+const CLAIM_VIEWER_REVOCATION_SCRIPT = `
+-- CLAIM_WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATION
+local tasks = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", ARGV[1], "LIMIT", 0, 1)
+if #tasks == 0 then
+  return false
+end
+redis.call("ZADD", KEYS[1], ARGV[2], tasks[1])
+return tasks[1]
+`;
+
+const COMPLETE_VIEWER_REVOCATION_SCRIPT = `
+-- COMPLETE_WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATION
+if redis.call("SCARD", KEYS[2]) == 0 then
+  redis.call("ZREM", KEYS[1], ARGV[1])
+  return 1
+end
+redis.call("ZADD", KEYS[1], ARGV[2], ARGV[1])
+return 0
 `;
 
 const CLAIM_STARTING_SESSION_SCRIPT = `
@@ -315,7 +434,8 @@ export class ScreenShareStateService {
           this.rollbackKey(input.sessionId),
           WORKSPACE_SCREEN_SHARE_OUTBOX_STREAM,
           this.endedRoomKey(input.livekitRoomName),
-          WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM
+          WORKSPACE_SCREEN_SHARE_CLEANUP_STREAM,
+          this.viewerIndexKey(input.workspaceId, input.sessionId)
         ],
         arguments: [
           input.sessionId,
@@ -326,6 +446,178 @@ export class ScreenShareStateService {
       })
     );
     return this.parseTransition(value);
+  }
+
+  async registerViewerIdentity(input: ViewerIdentityInput): Promise<boolean> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(REGISTER_VIEWER_IDENTITY_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          this.roomKey(input.livekitRoomName),
+          this.viewerIdentityKey(
+            input.workspaceId,
+            input.sessionId,
+            input.userId
+          ),
+          this.viewerIndexKey(input.workspaceId, input.sessionId)
+        ],
+        arguments: [
+          input.sessionId,
+          input.livekitRoomName,
+          input.identity,
+          String(SCREEN_SHARE_VIEWER_REGISTRY_TTL_SECONDS)
+        ]
+      })
+    );
+    return value === 1;
+  }
+
+  async removeViewerIdentityIfCurrent(
+    input: ViewerIdentityInput
+  ): Promise<boolean> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(REMOVE_VIEWER_IDENTITY_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          this.viewerIdentityKey(
+            input.workspaceId,
+            input.sessionId,
+            input.userId
+          ),
+          this.viewerIndexKey(input.workspaceId, input.sessionId)
+        ],
+        arguments: [
+          input.sessionId,
+          input.livekitRoomName,
+          input.identity
+        ]
+      })
+    );
+    return value === 1;
+  }
+
+  async drainViewerIdentities(
+    input: DrainViewerIdentitiesInput
+  ): Promise<string[]> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(DRAIN_VIEWER_IDENTITIES_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          this.viewerIdentityKey(
+            input.workspaceId,
+            input.sessionId,
+            input.userId
+          ),
+          this.viewerIndexKey(input.workspaceId, input.sessionId)
+        ],
+        arguments: [input.sessionId, input.livekitRoomName]
+      })
+    );
+    return Array.isArray(value)
+      ? value.filter((identity): identity is string =>
+          typeof identity === "string"
+        )
+      : [];
+  }
+
+  async listViewerIdentities(
+    input: DrainViewerIdentitiesInput
+  ): Promise<string[]> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(LIST_VIEWER_IDENTITIES_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          this.viewerIdentityKey(
+            input.workspaceId,
+            input.sessionId,
+            input.userId
+          )
+        ],
+        arguments: [input.sessionId, input.livekitRoomName]
+      })
+    );
+    return Array.isArray(value)
+      ? value.filter((identity): identity is string =>
+          typeof identity === "string"
+        )
+      : [];
+  }
+
+  async enqueueViewerRevocation(
+    input: ViewerRevocationTask,
+    dueAtMs: number
+  ): Promise<boolean> {
+    const encoded = JSON.stringify(input);
+    const value = await this.runRedisCommand(client =>
+      client.eval(ENQUEUE_VIEWER_REVOCATION_SCRIPT, {
+        keys: [
+          this.workspaceKey(input.workspaceId),
+          WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATIONS
+        ],
+        arguments: [
+          input.sessionId,
+          input.livekitRoomName,
+          encoded,
+          String(dueAtMs)
+        ]
+      })
+    );
+    return value === 1;
+  }
+
+  async claimDueViewerRevocation(
+    nowMs: number,
+    leaseUntilMs: number
+  ): Promise<ViewerRevocationTask | null> {
+    const value = await this.runRedisCommand(client =>
+      client.eval(CLAIM_VIEWER_REVOCATION_SCRIPT, {
+        keys: [WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATIONS],
+        arguments: [String(nowMs), String(leaseUntilMs)]
+      })
+    );
+    if (typeof value !== "string") return null;
+    const parsed: unknown = JSON.parse(value);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("workspaceId" in parsed) ||
+      !("sessionId" in parsed) ||
+      !("livekitRoomName" in parsed) ||
+      !("userId" in parsed) ||
+      typeof parsed.workspaceId !== "string" ||
+      typeof parsed.sessionId !== "string" ||
+      typeof parsed.livekitRoomName !== "string" ||
+      typeof parsed.userId !== "string"
+    ) {
+      throw new Error("Invalid screen share viewer revocation task");
+    }
+    return {
+      workspaceId: parsed.workspaceId,
+      sessionId: parsed.sessionId,
+      livekitRoomName: parsed.livekitRoomName,
+      userId: parsed.userId
+    };
+  }
+
+  async completeViewerRevocation(
+    input: ViewerRevocationTask,
+    retryAtMs: number
+  ): Promise<boolean> {
+    const encoded = JSON.stringify(input);
+    const value = await this.runRedisCommand(client =>
+      client.eval(COMPLETE_VIEWER_REVOCATION_SCRIPT, {
+        keys: [
+          WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATIONS,
+          this.viewerIdentityKey(
+            input.workspaceId,
+            input.sessionId,
+            input.userId
+          )
+        ],
+        arguments: [encoded, String(retryAtMs)]
+      })
+    );
+    return value === 1;
   }
 
   async releaseStartingIfCurrent(
@@ -491,6 +783,18 @@ export class ScreenShareStateService {
 
   private endedRoomKey(livekitRoomName: string): string {
     return `workspace-screen-share:ended-room:v1:${livekitRoomName}`;
+  }
+
+  private viewerIdentityKey(
+    workspaceId: string,
+    sessionId: string,
+    userId: string
+  ): string {
+    return `workspace-screen-share:viewers:v1:${workspaceId}:${sessionId}:${userId}`;
+  }
+
+  private viewerIndexKey(workspaceId: string, sessionId: string): string {
+    return `workspace-screen-share:viewer-index:v1:${workspaceId}:${sessionId}`;
   }
 
   private parseTransition(value: unknown): ScreenShareStateTransition | null {

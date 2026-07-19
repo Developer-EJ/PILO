@@ -54,11 +54,21 @@ export class ScreenShareRoomService {
   async removeParticipantForRevocation(
     session: WorkspaceScreenShareSession
   ): Promise<void> {
+    await this.revokeParticipantIdentity(
+      session.livekitRoomName,
+      session.sharerLiveKitIdentity
+    );
+  }
+
+  async revokeParticipantIdentity(
+    livekitRoomName: string,
+    identity: string
+  ): Promise<void> {
     await this.runRoomCommand(async client => {
       try {
         await client.removeParticipant(
-          session.livekitRoomName,
-          session.sharerLiveKitIdentity,
+          livekitRoomName,
+          identity,
           { revokeTokenTs: this.revocationTimestamp() }
         );
       } catch (error) {

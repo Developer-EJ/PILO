@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
+import { DatabaseModule } from "../../database/database.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { ScreenShareController } from "./screen-share.controller";
 import { ScreenShareCleanupService } from "./screen-share-cleanup.service";
@@ -12,7 +13,7 @@ import { ScreenShareTokenService } from "./screen-share-token.service";
 import { ScreenShareWebhookService } from "./screen-share-webhook.service";
 
 @Module({
-  imports: [CommonModule, WorkspaceModule],
+  imports: [CommonModule, DatabaseModule, WorkspaceModule],
   controllers: [ScreenShareController],
   providers: [
     ScreenShareService,

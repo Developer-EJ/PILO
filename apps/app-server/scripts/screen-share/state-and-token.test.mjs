@@ -14,6 +14,8 @@ const decodeJwtPayload = token => {
 
 class FakeRedisClient {
   values = new Map();
+  sets = new Map();
+  sortedSets = new Map();
   expiries = new Map();
   streamEntries = [];
   cleanupEntries = [];
@@ -133,6 +135,120 @@ class FakeRedisClient {
       return [encoded, outboxId, ""];
     }
 
+    if (script.includes("REGISTER_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITY")) {
+      const [workspaceKey, roomKey, viewerKey, viewerIndexKey] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return 0;
+      const session = JSON.parse(value);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1] ||
+        session.status !== "active" ||
+        this.values.get(roomKey) !== session.workspaceId
+      ) {
+        return 0;
+      }
+      const identities = this.sets.get(viewerKey) ?? new Set();
+      identities.add(options.arguments[2]);
+      this.sets.set(viewerKey, identities);
+      const viewerKeys = this.sets.get(viewerIndexKey) ?? new Set();
+      viewerKeys.add(viewerKey);
+      this.sets.set(viewerIndexKey, viewerKeys);
+      return 1;
+    }
+
+    if (script.includes("ENQUEUE_WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATION")) {
+      const [workspaceKey, pendingKey] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return 0;
+      const session = JSON.parse(value);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1]
+      ) {
+        return 0;
+      }
+      const pending = this.sortedSets.get(pendingKey) ?? new Map();
+      if (pending.has(options.arguments[2])) return 0;
+      pending.set(options.arguments[2], Number(options.arguments[3]));
+      this.sortedSets.set(pendingKey, pending);
+      return 1;
+    }
+
+    if (script.includes("CLAIM_WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATION")) {
+      const [pendingKey] = options.keys;
+      const now = Number(options.arguments[0]);
+      const pending = this.sortedSets.get(pendingKey) ?? new Map();
+      const due = [...pending.entries()]
+        .filter(([, score]) => score <= now)
+        .sort((left, right) => left[1] - right[1]);
+      if (due.length === 0) return null;
+      pending.set(due[0][0], Number(options.arguments[1]));
+      return due[0][0];
+    }
+
+    if (script.includes("COMPLETE_WORKSPACE_SCREEN_SHARE_VIEWER_REVOCATION")) {
+      const [pendingKey, viewerKey] = options.keys;
+      const pending = this.sortedSets.get(pendingKey) ?? new Map();
+      if ((this.sets.get(viewerKey)?.size ?? 0) === 0) {
+        pending.delete(options.arguments[0]);
+        return 1;
+      }
+      pending.set(options.arguments[0], Number(options.arguments[1]));
+      return 0;
+    }
+
+    if (script.includes("REMOVE_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITY")) {
+      const [workspaceKey, viewerKey, viewerIndexKey] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return 0;
+      const session = JSON.parse(value);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1]
+      ) {
+        return 0;
+      }
+      const identities = this.sets.get(viewerKey) ?? new Set();
+      identities.delete(options.arguments[2]);
+      if (identities.size === 0) {
+        this.sets.delete(viewerKey);
+        this.sets.get(viewerIndexKey)?.delete(viewerKey);
+      }
+      return 1;
+    }
+
+    if (script.includes("LIST_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITIES")) {
+      const [workspaceKey, viewerKey] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return null;
+      const session = JSON.parse(value);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1]
+      ) {
+        return null;
+      }
+      return [...(this.sets.get(viewerKey) ?? [])];
+    }
+
+    if (script.includes("DRAIN_WORKSPACE_SCREEN_SHARE_VIEWER_IDENTITIES")) {
+      const [workspaceKey, viewerKey, viewerIndexKey] = options.keys;
+      const value = await this.get(workspaceKey);
+      if (!value) return null;
+      const session = JSON.parse(value);
+      if (
+        session.sessionId !== options.arguments[0] ||
+        session.livekitRoomName !== options.arguments[1]
+      ) {
+        return null;
+      }
+      const identities = [...(this.sets.get(viewerKey) ?? [])];
+      this.sets.delete(viewerKey);
+      this.sets.get(viewerIndexKey)?.delete(viewerKey);
+      return identities;
+    }
+
     if (script.includes("CLAIM_STARTING_WORKSPACE_SCREEN_SHARE")) {
       const [workspaceKey, roomKey, rollbackKey] = options.keys;
       const value = await this.get(workspaceKey);
@@ -248,6 +364,11 @@ class FakeRedisClient {
           session: value,
           mode: options.arguments[3]
         });
+        const viewerIndexKey = options.keys[6];
+        for (const viewerKey of this.sets.get(viewerIndexKey) ?? []) {
+          this.sets.delete(viewerKey);
+        }
+        this.sets.delete(viewerIndexKey);
         return [value, outboxId, cleanupId];
       }
       return value;
@@ -397,6 +518,66 @@ try {
     (await state.getCurrent(session.workspaceId))?.startedAt,
     "2026-07-18T00:00:01.000Z"
   );
+  const viewerIdentity =
+    `screen-share-viewer:${session.sessionId}:viewer-user:viewer-request`;
+  const viewerIdentityInput = {
+    workspaceId: session.workspaceId,
+    sessionId: session.sessionId,
+    livekitRoomName: session.livekitRoomName,
+    userId: "viewer-user",
+    identity: viewerIdentity
+  };
+  assert.equal(await state.registerViewerIdentity(viewerIdentityInput), true);
+  assert.equal(
+    await state.enqueueViewerRevocation(viewerIdentityInput, 100),
+    true
+  );
+  assert.deepEqual(
+    await state.claimDueViewerRevocation(100, 1_000),
+    {
+      workspaceId: viewerIdentityInput.workspaceId,
+      sessionId: viewerIdentityInput.sessionId,
+      livekitRoomName: viewerIdentityInput.livekitRoomName,
+      userId: viewerIdentityInput.userId
+    }
+  );
+  assert.equal(
+    await state.enqueueViewerRevocation(viewerIdentityInput, 100),
+    false,
+    "a duplicate event must not shorten an active worker lease"
+  );
+  assert.equal(
+    await state.claimDueViewerRevocation(100, 1_000),
+    null,
+    "a claimed revocation lease must exclude a concurrent worker"
+  );
+  assert.equal(
+    await state.completeViewerRevocation(viewerIdentityInput, 1_100),
+    false,
+    "a pending task must remain while an identity is registered"
+  );
+  assert.equal(await state.claimDueViewerRevocation(1_099, 2_000), null);
+  assert.deepEqual(
+    await state.listViewerIdentities(viewerIdentityInput),
+    [viewerIdentity]
+  );
+  assert.equal(
+    await state.removeViewerIdentityIfCurrent(viewerIdentityInput),
+    true
+  );
+  assert.equal(
+    await state.completeViewerRevocation(viewerIdentityInput, 2_000),
+    true
+  );
+  assert.equal(await state.claimDueViewerRevocation(2_000, 3_000), null);
+  assert.deepEqual(await state.drainViewerIdentities(viewerIdentityInput), []);
+  assert.equal(await state.registerViewerIdentity(viewerIdentityInput), true);
+  assert.deepEqual(
+    await state.drainViewerIdentities(viewerIdentityInput),
+    [viewerIdentity]
+  );
+  assert.deepEqual(await state.drainViewerIdentities(viewerIdentityInput), []);
+  assert.equal(await state.registerViewerIdentity(viewerIdentityInput), true);
   assert.equal(
     typeof state.releaseStartingIfCurrent,
     "function",
@@ -462,6 +643,13 @@ try {
     session.sessionId
   );
   assert.equal(await state.getCurrent(session.workspaceId), null);
+  assert.equal(
+    redis.sets.has(
+      `workspace-screen-share:viewers:v1:${session.workspaceId}:${session.sessionId}:viewer-user`
+    ),
+    false,
+    "ending a session must purge every registered viewer identity"
+  );
   assert.equal(await state.isKnownScreenShareRoom(session.livekitRoomName), true);
   assert.deepEqual(redis.cleanupEntries.at(-1), {
     id: "cleanup-1",
@@ -582,7 +770,7 @@ try {
   assert.equal(viewer.video?.canPublish, false);
   assert.equal(viewer.video?.canSubscribe, true);
   assert.equal(viewer.video?.canPublishData, false);
-  assert.equal(viewer.exp - viewer.nbf, 60 * 60);
+  assert.equal(viewer.exp - viewer.nbf, 45);
 
   const publicSession = {
     id: session.sessionId,

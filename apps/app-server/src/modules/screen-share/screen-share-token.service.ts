@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { AccessToken, TrackSource, VideoGrant } from "livekit-server-sdk";
 import { serviceUnavailable } from "./screen-share.errors";
-import { SCREEN_SHARE_STARTING_LEASE_MS } from "./screen-share.types";
+import { SCREEN_SHARE_JOIN_TOKEN_TTL_SECONDS } from "./screen-share.types";
 
 export type CreateScreenShareTokenInput = {
   identity: string;
@@ -14,10 +14,6 @@ export type ScreenShareTokenPayload = {
   livekitToken: string;
   expiresAt: string;
 };
-
-const LIVEKIT_JOIN_TOKEN_TTL_SECONDS = 60 * 60;
-const LIVEKIT_PUBLISHER_TOKEN_TTL_SECONDS =
-  SCREEN_SHARE_STARTING_LEASE_MS / 1000 - 15;
 
 @Injectable()
 export class ScreenShareTokenService {
@@ -35,7 +31,7 @@ export class ScreenShareTokenService {
     return this.createToken(
       input,
       publisherGrant,
-      LIVEKIT_PUBLISHER_TOKEN_TTL_SECONDS
+      SCREEN_SHARE_JOIN_TOKEN_TTL_SECONDS
     );
   }
 
@@ -49,7 +45,11 @@ export class ScreenShareTokenService {
       canPublishData: false,
       canSubscribe: true
     };
-    return this.createToken(input, viewerGrant, LIVEKIT_JOIN_TOKEN_TTL_SECONDS);
+    return this.createToken(
+      input,
+      viewerGrant,
+      SCREEN_SHARE_JOIN_TOKEN_TTL_SECONDS
+    );
   }
 
   private async createToken(
