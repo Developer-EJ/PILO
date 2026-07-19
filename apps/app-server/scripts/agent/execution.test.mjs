@@ -1135,7 +1135,8 @@ function formatterMeetingReport(index, overrides = {}) {
     resourceRefs: []
   });
 
-  assert.match(answer, /로그 관련 테이블에 집중 표시했습니다/);
+  assert.match(answer, /로그 관련 집중 보기 결과를 준비했습니다/);
+  assert.doesNotMatch(answer, /집중 표시했습니다/);
   assert.match(answer, /핵심 테이블: activity_logs/);
   assert.match(answer, /관련 테이블: users/);
 }
