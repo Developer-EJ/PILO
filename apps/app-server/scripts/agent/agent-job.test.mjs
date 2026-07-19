@@ -13,6 +13,9 @@ const { AgentOutboxPublisherService } = require(
 const { AgentToolRegistryService } = require(
   "../../dist/modules/agent/agent-tool-registry.service.js"
 );
+const { AgentDomainFeatureFlagService } = require(
+  "../../dist/modules/agent/agent-domain-feature-flag.service.js"
+);
 const {
   buildAgentToolCapabilityCatalog,
   validateAgentToolCapabilityCatalog
@@ -51,7 +54,7 @@ const originalEnv = {
 };
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "9e662367cf94e5ba2acd1694187319bdfa1ae029679cede452d9da706e810ff6";
+  "eb835c93100f96283166751167fe23eb7fe649711f566e6248f80223476c1b34";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -202,16 +205,55 @@ const payload = {
   );
   assert.ok(updateActionItem?.mustNotUseFor.includes("후속 작업 승인 또는 반려 요청"));
 
-  const fullRegistry = new AgentToolRegistryService(
+const fullRegistry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
     new MeetingAgentToolsService({}),
     new BoardAgentToolsService({}),
     new SqlErdAgentToolsService({}),
     new PrReviewAgentToolsService({}),
     new CanvasAgentDelegationToolsService({}, {}),
-    new DriveAgentToolsService({})
-  );
-  const inventory = fullRegistry.listToolInventory();
+  new DriveAgentToolsService({})
+);
+{
+  const previousRead = process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+  const previousWrite = process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED;
+  try {
+    process.env.AGENT_DOMAIN_MEETING_READ_ENABLED = "false";
+    process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED = "false";
+    const gatedRegistry = new AgentToolRegistryService(
+      undefined,
+      new MeetingAgentToolsService({}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new AgentDomainFeatureFlagService()
+    );
+    assert.equal(
+      gatedRegistry.getDefinitionForContext("list_meeting_reports", null),
+      null,
+      "an explicit read flag must keep Meeting reads out of planning and execution"
+    );
+    assert.equal(
+      gatedRegistry.getDefinitionForContext("leave_meeting", null),
+      null,
+      "an explicit write flag must also reject pending execution"
+    );
+  } finally {
+    if (previousRead === undefined) {
+      delete process.env.AGENT_DOMAIN_MEETING_READ_ENABLED;
+    } else {
+      process.env.AGENT_DOMAIN_MEETING_READ_ENABLED = previousRead;
+    }
+    if (previousWrite === undefined) {
+      delete process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED;
+    } else {
+      process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED = previousWrite;
+    }
+  }
+}
+const inventory = fullRegistry.listToolInventory();
   const legacyFixtureToolNames = new Set(suite.tools.map((tool) => tool.name));
   const legacyExpectedToolSelections = Object.fromEntries(
     suite.cases

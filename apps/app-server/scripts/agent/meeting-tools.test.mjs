@@ -480,7 +480,12 @@ class FakeMeetingService {
 }
 
 class FakeMeetingTranscriptRagService {
-  async search() {
+  constructor() {
+    this.calls = [];
+  }
+
+  async search(currentUserId, workspaceId, input) {
+    this.calls.push({ currentUserId, workspaceId, input });
     return [{ sourceId: "99999999-9999-4999-8999-999999999999", reportId: REPORT_ID, startedAtMs: 1000, endedAtMs: 2000, content: "원문은 output에 저장하지 않는다." }];
   }
 }
@@ -538,13 +543,43 @@ const context = {
 process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 
 {
-  const { registry } = createRegistry();
+  const meetingService = new FakeMeetingService();
+  const ragService = new FakeMeetingTranscriptRagService();
+  const registry = new AgentToolRegistryService(
+    undefined,
+    new MeetingAgentToolsService(
+      meetingService,
+      ragService,
+      undefined,
+      new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+    )
+  );
   const tool = registry.getDefinition("search_meeting_transcript");
   const result = await tool.execute(context, tool.validateInput({ query: "일정 결론" }));
   assert.equal(tool.requiresGroundedAnswer, true);
+  assert.equal(tool.executionMode, "contextual");
   assert.equal(result.outputSummary.sourceCount, 1);
   assert.deepEqual(result.outputSummary.sourceIds, ["99999999-9999-4999-8999-999999999999"]);
   assert.doesNotMatch(JSON.stringify(result.outputSummary), /원문/);
+  assert.deepEqual(ragService.calls[0].input, { query: "일정 결론" });
+
+  const preparation = await tool.prepareExecution(
+    context,
+    tool.validateInput({ query: "일정 결론", roomName: "기본 회의실" })
+  );
+  assert.deepEqual(preparation, { kind: "execute" });
+  await tool.execute(
+    context,
+    tool.validateInput({ query: "일정 결론", roomName: "기본 회의실" })
+  );
+  assert.deepEqual(ragService.calls[1].input, {
+    query: "일정 결론",
+    reportId: REPORT_ID
+  });
+
+  assert.throws(
+    () => tool.validateInput({ query: "일정 결론", reportId: REPORT_ID })
+  );
 }
 
 class FakeCandidateSelectionDatabase {
@@ -701,7 +736,7 @@ class FakeCandidateSelectionDatabase {
     .find((tool) => tool.name === "update_meeting_report_action_item");
   const result = await definition.execute(
     context,
-    definition.validateInput({
+    definition.validateConfirmationInput({
       reportId: REPORT_ID,
       actionItemId: ACTION_ITEM_ID,
       useSelectedWorkspaceMemberCandidate: true
@@ -736,8 +771,145 @@ class FakeCandidateSelectionDatabase {
     const workspaceService = new FakeWorkspaceService();
     const resolver = new MeetingAgentResourceResolver(
       meetingService,
-      workspaceService
+      workspaceService,
+      {
+        async resolveMeetingReference(_context, contextRef) {
+          if (contextRef === "ctx_0123456789abcdef01234567") {
+            return { resourceType: "meeting_report", resourceId: REPORT_ID };
+          }
+          if (contextRef === "ctx_89abcdef0123456789abcdef") {
+            return { resourceType: "meeting", resourceId: MEETING_ID };
+          }
+          return null;
+        }
+      }
     );
+
+    const contextReport = await resolver.resolveContextReference(
+      context,
+      "ctx_0123456789abcdef01234567",
+      "meeting_report"
+    );
+    assert.equal(contextReport.kind, "selected");
+    assert.equal(contextReport.reference.resourceId, REPORT_ID);
+    assert.equal(
+      (
+        await resolver.resolveContextReference(
+          context,
+          "ctx_0123456789abcdef01234567",
+          "meeting"
+        )
+      ).kind,
+      "needs_clarification"
+    );
+
+    const contextTools = new MeetingAgentToolsService(
+      meetingService,
+      new FakeMeetingTranscriptRagService(),
+      undefined,
+      resolver
+    );
+    const reportTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "get_meeting_report");
+    const reportResult = await reportTool.execute(
+      context,
+      reportTool.validateInput({
+        contextRef: "ctx_0123456789abcdef01234567"
+      })
+    );
+    assert.equal(reportResult.outputSummary.report.reportId, REPORT_ID);
+
+    for (const toolName of [
+      "find_action_items",
+      "get_meeting_decision_evidence",
+      "regenerate_meeting_report"
+    ]) {
+      const contextualTool = contextTools
+        .listDefinitions()
+        .find((tool) => tool.name === toolName);
+      assert.throws(
+        () => contextualTool.validateInput({ reportId: REPORT_ID }),
+        (error) =>
+          error.getStatus?.() === 400 &&
+          error.response?.error?.message?.includes("reportId is not supported"),
+        `${toolName} must not accept a raw planner-facing reportId`
+      );
+      const contextualInput = contextualTool.validateInput({
+        contextRef: "ctx_0123456789abcdef01234567",
+        ...(toolName === "get_meeting_decision_evidence"
+          ? { decisionIndex: 0 }
+          : {})
+      });
+      if (contextualTool.prepareExecution) {
+        assert.deepEqual(
+          await contextualTool.prepareExecution(context, contextualInput),
+          { kind: "execute" }
+        );
+      }
+      if (toolName === "regenerate_meeting_report") {
+        const plan = await contextualTool.buildConfirmation(
+          context,
+          contextualInput
+        );
+        assert.equal(plan.call.input.reportId, REPORT_ID);
+      }
+    }
+
+    const leaveTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "leave_meeting");
+    assert.deepEqual(
+      await leaveTool.prepareExecution(
+        context,
+        leaveTool.validateInput({
+          contextRef: "ctx_89abcdef0123456789abcdef"
+        })
+      ),
+      { kind: "execute" }
+    );
+
+    const updateTool = contextTools
+      .listDefinitions()
+      .find((tool) => tool.name === "update_meeting_report_action_item");
+    assert.equal(updateTool.adaptLegacyPlannerInput, undefined);
+    assert.throws(
+      () =>
+        updateTool.validateInput({
+          reportId: REPORT_ID,
+          actionItemId: ACTION_ITEM_ID,
+          priority: "HIGH"
+        }),
+      (error) =>
+        error.getStatus?.() === 400 &&
+        error.response?.error?.message?.includes("reportId is not supported"),
+      "new planner output must not reintroduce raw action item IDs"
+    );
+    assert.deepEqual(
+      updateTool.validateConfirmationInput({
+        reportId: REPORT_ID,
+        actionItemId: ACTION_ITEM_ID,
+        priority: "HIGH"
+      }),
+      {
+        reportId: REPORT_ID,
+        actionItemId: ACTION_ITEM_ID,
+        priority: "HIGH"
+      },
+      "an already persisted confirmation plan remains executable after revalidation"
+    );
+    const updatePlan = await updateTool.buildConfirmation(
+      context,
+      updateTool.validateInput({
+        reportContextRef: "ctx_0123456789abcdef01234567",
+        ordinal: 1,
+        priority: "HIGH"
+      })
+    );
+    assert.equal(updatePlan.toolName, "update_meeting_report_action_item");
+    assert.equal(updatePlan.call.input.reportId, REPORT_ID);
+    assert.equal(updatePlan.call.input.actionItemId, ACTION_ITEM_ID);
+    assert.equal(updatePlan.call.input.priority, "HIGH");
 
     const room = await resolver.resolveMeetingRoom(context, " 디자인   회의실 ");
     assert.equal(room.kind, "selected");
@@ -1008,6 +1180,76 @@ function errorCode(error) {
       false,
       "Clarification output must not persist a raw resource reference"
     );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.SESSION_SECRET;
+    } else {
+      process.env.SESSION_SECRET = previousSecret;
+    }
+  }
+}
+
+{
+  const previousSecret = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = "meeting-tool-sequential-selection-test-secret";
+  const meetingService = new FakeMeetingService();
+  const resolver = new MeetingAgentResourceResolver(
+    meetingService,
+    new FakeWorkspaceService()
+  );
+  const selectedMemberId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const candidateSelectionService = {
+    async getLatestConsumedMeetingReference(_context, resourceType) {
+      if (resourceType === "meeting_report_action_item") {
+        return {
+          resourceType,
+          resourceId: ACTION_ITEM_ID,
+          reportId: REPORT_ID
+        };
+      }
+      if (resourceType === "workspace_member") {
+        return { resourceType, resourceId: selectedMemberId };
+      }
+      return null;
+    }
+  };
+  const meetingTools = new MeetingAgentToolsService(
+    meetingService,
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    resolver,
+    candidateSelectionService
+  );
+  const tool = meetingTools
+    .listDefinitions()
+    .find(
+      (definition) => definition.name === "update_meeting_report_action_item"
+    );
+  try {
+    const nextSelection = await tool.buildConfirmation(
+      context,
+      tool.validateInput({
+        useSelectedMeetingActionItemCandidate: true,
+        assigneeDisplayName: "김진호"
+      })
+    );
+    assert.equal(nextSelection.kind, "needs_clarification");
+    assert.equal(nextSelection.candidateResources.length, 2);
+    assert.equal(
+      nextSelection.candidateResources[0].candidate.resourceType,
+      "workspace_member"
+    );
+
+    const confirmation = await tool.buildConfirmation(
+      context,
+      tool.validateInput({
+        useSelectedMeetingActionItemCandidate: true,
+        useSelectedWorkspaceMemberCandidate: true
+      })
+    );
+    assert.equal(confirmation.toolName, "update_meeting_report_action_item");
+    assert.equal(confirmation.target.resourceId, ACTION_ITEM_ID);
+    assert.equal(confirmation.call.input.assigneeUserId, selectedMemberId);
   } finally {
     if (previousSecret === undefined) {
       delete process.env.SESSION_SECRET;

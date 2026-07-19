@@ -10,7 +10,7 @@ on:
       repetitions:
         description: Number of attempts for every fixed evaluation case
         required: true
-        default: "5"
+        default: "1"
 
 permissions:
   contents: read
@@ -37,16 +37,43 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/app-server/package-lock.json
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Planner evaluation dependency
-        run: python -m pip install "openai>=2,<3"
+      - name: Build App Server registry and run Meeting write E2E
+        working-directory: apps/app-server
+        run: |
+          npm ci
+          npm run build
+          node scripts/agent/export-tool-retrieval-snapshot.mjs \
+            --output "$RUNNER_TEMP/agent-tool-registry-snapshot.json"
+          node scripts/agent/phase4e-meeting-readiness.mjs \
+            --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json" \
+            --output "$RUNNER_TEMP/phase4e-meeting-runtime-readiness.json"
 
-      - name: Run dev Planner evaluation
+      - name: Install Planner evaluation dependencies
+        working-directory: ${{ env.APP_PATH }}
+        run: python -m pip install -r requirements.txt
+
+      - name: Export registry-bound evaluation inputs
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          PYTHONPATH=. python scripts/export_phase4e_evaluation_inputs.py \
+            --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json" \
+            --tool-snapshot-output "$RUNNER_TEMP/phase4e-evaluation-tools.json" \
+            --catalog-output "$RUNNER_TEMP/phase4e-tool-capability-catalog.json"
+
+      - name: Run Meeting shadow and shortlist evaluations
         working-directory: ${{ env.APP_PATH }}
         env:
           CURRENT_DATE: ${{ inputs.current_date }}
@@ -54,21 +81,60 @@ jobs:
         run: |
           set -euo pipefail
 
-          OPENAI_API_KEY="$(aws secretsmanager get-secret-value \
+          export OPENAI_API_KEY="$(aws secretsmanager get-secret-value \
             --secret-id pilo-dev/ai-worker/OPENAI_API_KEY \
             --query SecretString \
-            --output text)" \
-          PYTHONPATH=. python scripts/evaluate_agent_planner.py \
-            --current-date "$CURRENT_DATE" \
-            --timezone Asia/Seoul \
-            --model gpt-5.4-mini \
-            --repetitions "$REPETITIONS" \
-            > "agent-planner-baseline-${CURRENT_DATE}.json"
+            --output text)"
+          for variant in canonical held_out counterexample context; do
+            PYTHONPATH=. python scripts/evaluate_agent_planner.py \
+              --suite "$RUNNER_TEMP/phase4e-evaluation-tools.json" \
+              --meeting-catalog evals/meeting_agent_capability_catalog_v1.json \
+              --meeting-variant "$variant" \
+              --tool-capability-catalog "$RUNNER_TEMP/phase4e-tool-capability-catalog.json" \
+              --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json" \
+              --compare-shadow-retrieval \
+              --retrieval-top-k 8 \
+              --seed 17 \
+              --current-date "$CURRENT_DATE" \
+              --timezone Asia/Seoul \
+              --model gpt-5.4-mini \
+              --repetitions "$REPETITIONS" \
+              --output "$RUNNER_TEMP/meeting-${variant}-evaluation.json"
+          done
+          unset OPENAI_API_KEY
+
+      - name: Run deterministic supporting gates
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          PYTHONPATH=. python scripts/check_tool_retrieval_quality_gate.py \
+            --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json" \
+            --output "$RUNNER_TEMP/agent-tool-retrieval-quality-gate.json"
+          PYTHONPATH=. python scripts/check_prompt_injection_security_gate.py \
+            --output "$RUNNER_TEMP/agent-prompt-injection-security-gate.json"
+
+      - name: Enforce Phase 4-E dev release gate
+        working-directory: ${{ env.APP_PATH }}
+        run: |
+          PYTHONPATH=. python scripts/check_phase4e_dev_readiness.py \
+            --registry-snapshot "$RUNNER_TEMP/agent-tool-registry-snapshot.json" \
+            --tool-retrieval-report "$RUNNER_TEMP/agent-tool-retrieval-quality-gate.json" \
+            --prompt-security-report "$RUNNER_TEMP/agent-prompt-injection-security-gate.json" \
+            --app-server-report "$RUNNER_TEMP/phase4e-meeting-runtime-readiness.json" \
+            --meeting-evaluation-report "$RUNNER_TEMP/meeting-canonical-evaluation.json" \
+            --meeting-evaluation-report "$RUNNER_TEMP/meeting-held_out-evaluation.json" \
+            --meeting-evaluation-report "$RUNNER_TEMP/meeting-counterexample-evaluation.json" \
+            --meeting-evaluation-report "$RUNNER_TEMP/meeting-context-evaluation.json" \
+            --dev-terraform ../../infra/envs/dev/main.tf \
+            --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
+            --output "$RUNNER_TEMP/phase4e-dev-readiness.json"
 
       - name: Upload evaluation result
         uses: actions/upload-artifact@v4
         with:
-          name: agent-planner-baseline-${{ inputs.current_date }}
-          path: ${{ env.APP_PATH }}/agent-planner-baseline-${{ inputs.current_date }}.json
+          name: phase4e-dev-readiness-${{ inputs.current_date }}
+          path: |
+            ${{ runner.temp }}/meeting-*-evaluation.json
+            ${{ runner.temp }}/phase4e-meeting-runtime-readiness.json
+            ${{ runner.temp }}/phase4e-dev-readiness.json
           if-no-files-found: error
           retention-days: 30

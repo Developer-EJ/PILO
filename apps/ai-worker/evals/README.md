@@ -105,3 +105,54 @@ PYTHONPATH=. .venv/bin/python scripts/check_tool_retrieval_quality_gate.py \
 `deterministic:no-provider` model version, topK, schema budget, case 유형, failure taxonomy만 남긴다. App CI는 이 파일을
 `agent-tool-retrieval-quality-baseline` artifact로 업로드한다. provider model/SHA는 실제 provider baseline의
 metadata에 별도로 남기며, deterministic CI gate에는 provider model을 고정하거나 호출하지 않는다.
+
+## Prompt injection security gate
+
+CI는 provider를 호출하기 전에 `prompt_injection_security_gate_v1.json`의 사용자 발화, bounded thread
+resource, 실제 직렬화 형태의 tool result, 선택 후보 label/description과 grounded evidence fixture를 실행한다.
+runtime context 생성 시 이 값들을 구조화된 source kind로 분리하므로 detector가 문자열 prefix를 추측하지
+않는다. 명시적인 system instruction override, system prompt·credential 추출,
+shortlist·registry·ECS flag 변경, confirmation·권한 우회 신호는 `prompt_injection_suspected`로 차단한다.
+보안 주제를 정상적으로 논의하거나 기존 confirmation을 요청하는 인접 반례, 부정형 결정·회고·인용 문장은
+차단하지 않는다.
+
+```bash
+cd apps/ai-worker
+PYTHONPATH=. .venv/bin/python scripts/check_prompt_injection_security_gate.py \
+  --output /tmp/agent-prompt-injection-security-gate.json
+```
+
+출력 artifact에는 fixture SHA, detector version, 전체·차단·허용 case 수와 실패 case ID·signal taxonomy만
+기록한다. 공격 원문, 사용자 발화, Meeting evidence, tool payload, resource ID, token·secret은 기록하지
+않는다. runtime에서도 같은 detector를 retrieval·planner보다 먼저 실행하며, 탐지되면 full-tool fallback이나
+write/confirmation 후보를 만들지 않고 안전한 clarification으로 종료한다.
+
+## Phase 4-E dev 공개 gate
+
+App CI는 registry snapshot, deterministic retrieval/security 결과와 실제 App Server Meeting write runtime
+suite를 preflight로 검증한다. fixture inventory만으로 dev 공개 readiness를 통과시키지 않는다. 최종 gate는
+`Evaluate Agent Planner` workflow가 registry-bound Meeting canonical·held-out·counterexample·context를
+각각 runtime `shadow`와 `shortlist` 경로로 실제 provider 평가한 뒤 실행한다.
+
+```bash
+cd apps/ai-worker
+PYTHONPATH=. .venv/bin/python scripts/check_phase4e_dev_readiness.py \
+  --registry-snapshot /tmp/agent-tool-registry-snapshot.json \
+  --tool-retrieval-report /tmp/agent-tool-retrieval-quality-gate.json \
+  --prompt-security-report /tmp/agent-prompt-injection-security-gate.json \
+  --app-server-report /tmp/phase4e-meeting-runtime-readiness.json \
+  --meeting-evaluation-report /tmp/meeting-canonical-evaluation.json \
+  --meeting-evaluation-report /tmp/meeting-held_out-evaluation.json \
+  --meeting-evaluation-report /tmp/meeting-counterexample-evaluation.json \
+  --meeting-evaluation-report /tmp/meeting-context-evaluation.json \
+  --dev-terraform ../../infra/envs/dev/main.tf \
+  --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
+  --output /tmp/phase4e-dev-readiness.json
+```
+
+`phase4e-dev-readiness` artifact에는 registry·catalog·fixture SHA, 실제 mode별 attempt 수·정확도, recall
+metric, bounded check ID만
+포함한다. 사용자 발화, raw resource reference, tool input, UUID, credential은 포함하지 않는다. canonical
+216건, held-out 54건, counterexample 72건, multi-turn 54건과 0/1/N·동명이인 selector fixture가 빠지면
+fail-closed한다. canonical은 exact 100%, held-out/counterexample tool 선택은 95%, context exact는 95%를
+요구하며 shortlist capability recall과 shortlist violation도 함께 검사한다.

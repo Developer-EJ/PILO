@@ -703,7 +703,10 @@ export class AgentConfirmationService {
     selectedChoiceId: string | null
   ): ApprovedToolExecution {
     const plan = confirmation.plan_json;
-    const definition = this.agentToolRegistryService.getDefinition(plan.toolName);
+    const definition = this.agentToolRegistryService.getDefinitionForContext(
+      plan.toolName,
+      confirmation.run_request_context_json ?? null
+    );
     if (!definition) {
       throw badRequest(`Agent tool is not executable: ${plan.toolName}`);
     }

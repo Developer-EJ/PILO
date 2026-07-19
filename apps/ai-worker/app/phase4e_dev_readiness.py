@@ -1,0 +1,439 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+PHASE4E_READINESS_FORMAT = "phase4e-dev-readiness:v1"
+_REGISTRY_FORMAT = "agent-tool-retrieval-registry-snapshot:v1"
+_APP_SERVER_FORMAT = "phase4e-meeting-runtime-readiness:v2"
+_QUALITY_FORMAT = "agent-tool-retrieval-quality-baseline:v1"
+_SECURITY_FORMAT = "agent-prompt-security-gate:v1"
+_UUID_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+_DEV_MODE_PATTERN = re.compile(r'AGENT_TOOL_RETRIEVAL_MODE\s*=\s*"shortlist"')
+_FORBIDDEN_OUTPUT_KEY_PARTS = (
+    "authorization",
+    "credential",
+    "password",
+    "prompt",
+    "resourceid",
+    "secret",
+    "token",
+    "transcript",
+)
+_REQUIRED_WRITE_CHAINS = {
+    "meeting.leave": ("get_active_meeting", "leave_meeting"),
+    "meeting.recording.end": ("get_active_meeting", "end_meeting_recording"),
+    "meeting.action_items.update": (
+        "find_action_items",
+        "update_meeting_report_action_item",
+    ),
+    "meeting.action_items.approve": (
+        "find_action_items",
+        "approve_meeting_report_action_item",
+    ),
+}
+_MEETING_EVALUATION_VARIANTS = {
+    "canonical": {"caseCount": 216, "exactAttemptRate": 1.0},
+    "held_out": {"caseCount": 54, "toolSelectionAccuracy": 0.95},
+    "counterexample": {"caseCount": 72, "toolSelectionAccuracy": 0.95},
+    "context": {"caseCount": 54, "exactAttemptRate": 0.95},
+}
+
+
+@dataclass(frozen=True)
+class Phase4eReadinessInputs:
+    registry_snapshot: Path
+    tool_retrieval_report: Path
+    prompt_security_report: Path
+    app_server_report: Path
+    meeting_catalog: Path
+    dev_terraform: Path
+    rollout_runbook: Path
+    meeting_evaluation_reports: tuple[Path, ...]
+
+
+def evaluate_phase4e_dev_readiness(inputs: Phase4eReadinessInputs) -> dict[str, object]:
+    registry = _load_json(inputs.registry_snapshot)
+    retrieval = _load_json(inputs.tool_retrieval_report)
+    security = _load_json(inputs.prompt_security_report)
+    app_server = _load_json(inputs.app_server_report)
+    meeting_catalog = _load_json(inputs.meeting_catalog)
+
+    registry_hashes = _validate_registry(registry)
+    retrieval_metrics = _validate_retrieval(retrieval, registry_hashes)
+    security_counts = _validate_security(security)
+    write_contract_count = _validate_app_server(app_server, registry_hashes)
+    regression_counts = _validate_meeting_catalog(meeting_catalog)
+    evaluation_metrics = _validate_meeting_evaluations(
+        inputs.meeting_evaluation_reports,
+        registry_hashes,
+        _file_sha256(inputs.meeting_catalog),
+    )
+    _validate_dev_rollout(inputs.dev_terraform, inputs.rollout_runbook)
+
+    report: dict[str, object] = {
+        "format": PHASE4E_READINESS_FORMAT,
+        "passed": True,
+        "checks": [
+            {"id": "registry_integrity", "status": "passed"},
+            {"id": "meeting_regression_inventory", "status": "passed"},
+            {"id": "meeting_planner_evaluation", "status": "passed"},
+            {"id": "tool_retrieval_quality", "status": "passed"},
+            {"id": "prompt_injection_security", "status": "passed"},
+            {"id": "meeting_write_runtime_contracts", "status": "passed"},
+            {"id": "dev_shortlist_default", "status": "passed"},
+            {"id": "shadow_rollback_runbook", "status": "passed"},
+        ],
+        "registry": registry_hashes,
+        "regression": regression_counts,
+        "evaluation": evaluation_metrics,
+        "retrieval": retrieval_metrics,
+        "security": security_counts,
+        "runtime": {"writeContractCount": write_contract_count},
+        "rollout": {"defaultMode": "shortlist", "rollbackMode": "shadow"},
+        "inputSha256": {
+            "meetingCatalog": _file_sha256(inputs.meeting_catalog),
+            "rolloutRunbook": _file_sha256(inputs.rollout_runbook),
+            "devTerraform": _file_sha256(inputs.dev_terraform),
+        },
+    }
+    _assert_privacy_safe(report)
+    return report
+
+
+def _validate_meeting_evaluations(
+    paths: tuple[Path, ...],
+    registry_hashes: dict[str, str],
+    meeting_catalog_sha256: str,
+) -> dict[str, object]:
+    if len(paths) != len(_MEETING_EVALUATION_VARIANTS):
+        raise ValueError("Phase 4-E requires all four Meeting evaluation reports")
+    summaries: dict[str, object] = {}
+    for path in paths:
+        report = _load_json(path)
+        metadata = _object(report.get("metadata"), "Missing Meeting evaluation metadata")
+        suite_version = metadata.get("suiteVersion")
+        if not isinstance(suite_version, str) or not suite_version.startswith(
+            "meeting-agent-regression:v1:"
+        ):
+            raise ValueError("Invalid Meeting evaluation suite")
+        variant = suite_version.rsplit(":", 1)[-1]
+        expected = _MEETING_EVALUATION_VARIANTS.get(variant)
+        if expected is None or variant in summaries:
+            raise ValueError("Duplicate or unknown Meeting evaluation variant")
+        if metadata.get("compareShadowRetrieval") is not True:
+            raise ValueError("Meeting evaluation must compare shadow and shortlist")
+        if metadata.get("meetingCatalogSha256") != meeting_catalog_sha256:
+            raise ValueError("Meeting evaluation is not bound to the fixture catalog")
+        received_registry = {
+            "inventorySha256": metadata.get("registryInventorySha256"),
+            "catalogSha256": metadata.get("registryCatalogSha256"),
+            "eligibleSnapshotSha256": metadata.get("registryEligibleSnapshotSha256"),
+        }
+        if received_registry != registry_hashes:
+            raise ValueError("Meeting evaluation is not bound to the registry snapshot")
+
+        mode_metrics: dict[str, object] = {}
+        for report_key, runtime_mode in (("legacy", "shadow"), ("shadow", "shortlist")):
+            mode_report = _object(report.get(report_key), "Missing Meeting mode evaluation")
+            attempts = mode_report.get("totalAttempts")
+            case_count = expected["caseCount"]
+            if not isinstance(attempts, int) or attempts < case_count:
+                raise ValueError(f"Incomplete Meeting evaluation: {variant}/{runtime_mode}")
+            for metric_name, threshold in expected.items():
+                if metric_name == "caseCount":
+                    continue
+                metric = mode_report.get(metric_name)
+                if not isinstance(metric, int | float) or float(metric) < float(threshold):
+                    raise ValueError(
+                        f"Meeting evaluation threshold failed: "
+                        f"{variant}/{runtime_mode}/{metric_name}"
+                    )
+            retrieval = _object(mode_report.get("retrieval"), "Missing retrieval evaluation")
+            if runtime_mode == "shortlist":
+                if retrieval.get("shortlistViolations") != 0:
+                    raise ValueError("Meeting shortlist evaluation escaped the shortlist")
+                supported_rate = retrieval.get("supportedToUnsupportedRate")
+                if supported_rate not in (0, 0.0, None):
+                    raise ValueError("Meeting shortlist marked a supported request unsupported")
+                if variant in {"canonical", "held_out", "counterexample"}:
+                    capability_recall = retrieval.get("capabilityRecallAtK")
+                    minimum = 1.0 if variant == "canonical" else 0.95
+                    if (
+                        not isinstance(capability_recall, int | float)
+                        or float(capability_recall) < minimum
+                    ):
+                        raise ValueError(
+                            f"Meeting capability threshold failed: {variant}/shortlist"
+                        )
+            mode_metrics[runtime_mode] = {
+                "attempts": attempts,
+                "exactAttemptRate": mode_report.get("exactAttemptRate"),
+                "toolSelectionAccuracy": mode_report.get("toolSelectionAccuracy"),
+            }
+        summaries[variant] = mode_metrics
+    if set(summaries) != set(_MEETING_EVALUATION_VARIANTS):
+        raise ValueError("Meeting evaluation variants are incomplete")
+    return {"variants": summaries, "modeCount": 2}
+
+
+def _validate_registry(value: dict[str, object]) -> dict[str, str]:
+    if value.get("format") != _REGISTRY_FORMAT:
+        raise ValueError("Unsupported Agent registry snapshot")
+    inventory = _object(value.get("inventory"), "Invalid Agent inventory")
+    catalog = _object(value.get("toolCapabilityCatalog"), "Missing capability catalog")
+    if not isinstance(catalog.get("capabilities"), list) or not isinstance(
+        catalog.get("descriptors"), list
+    ):
+        raise ValueError("Invalid capability catalog")
+    return {
+        "inventorySha256": _sha(inventory.get("sha256")),
+        "catalogSha256": _sha(inventory.get("catalogSha256")),
+        "eligibleSnapshotSha256": _sha(value.get("eligibleSnapshotSha256")),
+    }
+
+
+def _validate_retrieval(
+    value: dict[str, object], registry_hashes: dict[str, str]
+) -> dict[str, float]:
+    if value.get("format") != _QUALITY_FORMAT or value.get("passed") is not True:
+        raise ValueError("Tool retrieval quality gate did not pass")
+    metadata = _object(value.get("metadata"), "Missing retrieval metadata")
+    expected = {
+        "inventorySha256": metadata.get("registryInventorySha256"),
+        "catalogSha256": metadata.get("registryCatalogSha256"),
+        "eligibleSnapshotSha256": metadata.get("registryEligibleSnapshotSha256"),
+    }
+    if expected != registry_hashes:
+        raise ValueError("Tool retrieval report is not bound to the registry snapshot")
+    privacy = _object(value.get("privacy"), "Missing retrieval privacy result")
+    if privacy.get("violationCount") != 0:
+        raise ValueError("Tool retrieval report contains a privacy violation")
+    thresholds = _object(value.get("thresholds"), "Missing retrieval thresholds")
+    metrics = _object(value.get("metrics"), "Missing retrieval metrics")
+    names = (
+        "canonicalRequiredToolRecallAt8",
+        "heldOutDomainRecallAt8",
+        "heldOutCapabilityRecallAt8",
+    )
+    result: dict[str, float] = {}
+    for name in names:
+        metric = metrics.get(name)
+        threshold = thresholds.get(name)
+        if not isinstance(metric, int | float) or not isinstance(threshold, int | float):
+            raise ValueError("Invalid retrieval metric")
+        if float(metric) < float(threshold):
+            raise ValueError(f"Retrieval threshold failed: {name}")
+        result[name] = float(metric)
+    return result
+
+
+def _validate_security(value: dict[str, object]) -> dict[str, int]:
+    if value.get("version") != _SECURITY_FORMAT or value.get("passed") is not True:
+        raise ValueError("Prompt security gate did not pass")
+    counts: dict[str, int] = {}
+    for source, target in (
+        ("caseCount", "caseCount"),
+        ("blockedCount", "blockedCount"),
+        ("allowedCount", "allowedCount"),
+    ):
+        count = value.get(source)
+        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+            raise ValueError("Invalid prompt security count")
+        counts[target] = count
+    if counts["blockedCount"] + counts["allowedCount"] != counts["caseCount"]:
+        raise ValueError("Prompt security counts do not add up")
+    return counts
+
+
+def _validate_app_server(value: dict[str, object], registry_hashes: dict[str, str]) -> int:
+    if value.get("format") != _APP_SERVER_FORMAT or value.get("passed") is not True:
+        raise ValueError("App Server Meeting readiness gate did not pass")
+    if _object(value.get("registry"), "Missing App Server registry binding") != registry_hashes:
+        raise ValueError("App Server readiness report is not bound to the registry snapshot")
+    checks = value.get("checks")
+    if (
+        not isinstance(checks, list)
+        or not checks
+        or any(not isinstance(check, dict) or check.get("status") != "passed" for check in checks)
+    ):
+        raise ValueError("App Server readiness checks are incomplete")
+    contracts = value.get("writeContracts")
+    if not isinstance(contracts, list) or len(contracts) != len(_REQUIRED_WRITE_CHAINS):
+        raise ValueError("Meeting write readiness contracts are incomplete")
+    contract_ids = {
+        contract.get("contractId") for contract in contracts if isinstance(contract, dict)
+    }
+    expected_contract_ids = {
+        "meeting.control.leave",
+        "meeting.recording.end",
+        "meeting.action_items.update",
+        "meeting.action_items.approve",
+    }
+    if contract_ids != expected_contract_ids:
+        raise ValueError("Meeting write readiness contract IDs are incomplete")
+    runtime = _object(value.get("runtimeEvidence"), "Missing Meeting runtime E2E evidence")
+    expected_guarantees = {
+        "meeting_leave_execution",
+        "recording_end_confirmation_and_execution",
+        "action_item_update_confirmation_and_execution",
+        "action_item_approve_confirmation_and_execution",
+        "workspace_permission_enforcement",
+        "approval_idempotency",
+        "pre_execution_revalidation",
+    }
+    guarantees = runtime.get("guarantees")
+    if (
+        runtime.get("status") != "passed"
+        or not isinstance(guarantees, list)
+        or set(guarantees) != expected_guarantees
+    ):
+        raise ValueError("Meeting runtime E2E guarantees are incomplete")
+    return len(contracts)
+
+
+def _validate_meeting_catalog(value: dict[str, object]) -> dict[str, int]:
+    if value.get("version") != "meeting-agent-regression:v1":
+        raise ValueError("Unsupported Meeting regression catalog")
+    prefixes = value.get("canonicalPrefixes")
+    capabilities = value.get("capabilities")
+    fixtures = value.get("resolutionFixtures")
+    if not isinstance(prefixes, list) or not isinstance(capabilities, list):
+        raise ValueError("Invalid Meeting regression catalog")
+    if len(capabilities) != 18 or len(set(map(str, prefixes))) != 3:
+        raise ValueError("Meeting regression coverage is incomplete")
+
+    by_id = {_required_string(item, "id"): item for item in capabilities if isinstance(item, dict)}
+    if len(by_id) != len(capabilities):
+        raise ValueError("Meeting regression capability IDs must be unique")
+    canonical_count = 0
+    held_out_count = 0
+    counterexample_count = 0
+    context_count = 0
+    for capability in capabilities:
+        if not isinstance(capability, dict):
+            raise ValueError("Invalid Meeting regression capability")
+        canonical_count += len(_string_list(capability, "canonicalSeeds")) * len(prefixes)
+        held_out_count += len(_string_list(capability, "heldOutParaphrases"))
+        context_count += len(_string_list(capability, "contextFollowups"))
+        counterexamples = capability.get("counterexamples")
+        if not isinstance(counterexamples, list):
+            raise ValueError("Invalid Meeting counterexamples")
+        counterexample_count += len(counterexamples)
+        for counterexample in counterexamples:
+            if (
+                not isinstance(counterexample, dict)
+                or counterexample.get("expectedCapability") not in by_id
+            ):
+                raise ValueError("Invalid Meeting counterexample target")
+
+    for capability_id, expected_chain in _REQUIRED_WRITE_CHAINS.items():
+        capability = by_id.get(capability_id)
+        if capability is None:
+            raise ValueError(f"Missing Meeting regression capability: {capability_id}")
+        target = _object(capability.get("target"), "Missing Meeting target")
+        if tuple(target.get("toolSequence", ())) != expected_chain:
+            raise ValueError(f"Invalid Meeting write chain: {capability_id}")
+
+    cardinalities = (
+        {fixture.get("cardinality") for fixture in fixtures if isinstance(fixture, dict)}
+        if isinstance(fixtures, list)
+        else set()
+    )
+    if cardinalities != {"none", "single", "multiple", "homonym"}:
+        raise ValueError("Meeting selector cardinality fixtures are incomplete")
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if _UUID_PATTERN.search(serialized):
+        raise ValueError("Meeting regression catalog contains a raw UUID")
+    return {
+        "capabilityCount": len(capabilities),
+        "canonicalCount": canonical_count,
+        "heldOutCount": held_out_count,
+        "counterexampleCount": counterexample_count,
+        "multiTurnCount": context_count,
+        "selectorCardinalityCount": len(cardinalities),
+    }
+
+
+def _validate_dev_rollout(terraform_path: Path, runbook_path: Path) -> None:
+    terraform = terraform_path.read_text(encoding="utf-8")
+    if len(_DEV_MODE_PATTERN.findall(terraform)) != 1:
+        raise ValueError("dev Agent Worker must default to shortlist exactly once")
+    runbook = runbook_path.read_text(encoding="utf-8")
+    required_phrases = (
+        "AGENT_TOOL_RETRIEVAL_MODE",
+        "`shortlist`",
+        "`shadow`",
+        "Terraform apply",
+        "usedShortlist",
+        "fallback reason",
+        "confirmation",
+        "실행 직전",
+    )
+    if any(phrase not in runbook for phrase in required_phrases):
+        raise ValueError("Agent retrieval rollback runbook is incomplete")
+
+
+def _assert_privacy_safe(report: dict[str, object]) -> None:
+    serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
+    if _UUID_PATTERN.search(serialized):
+        raise ValueError("Phase 4-E report contains a raw UUID")
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+                if any(part in normalized for part in _FORBIDDEN_OUTPUT_KEY_PARTS):
+                    raise ValueError("Phase 4-E report contains a forbidden field")
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(report)
+
+
+def _load_json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Invalid Phase 4-E input: {path.name}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"Invalid Phase 4-E input: {path.name}")
+    return value
+
+
+def _object(value: object, message: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(message)
+    return value
+
+
+def _required_string(value: dict[str, object], key: str) -> str:
+    result = value.get(key)
+    if not isinstance(result, str) or not result:
+        raise ValueError(f"Missing {key}")
+    return result
+
+
+def _string_list(value: dict[str, object], key: str) -> list[str]:
+    result = value.get(key)
+    if not isinstance(result, list) or not all(isinstance(item, str) and item for item in result):
+        raise ValueError(f"Invalid {key}")
+    return result
+
+
+def _sha(value: object) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+        raise ValueError("Invalid SHA-256")
+    return value
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()

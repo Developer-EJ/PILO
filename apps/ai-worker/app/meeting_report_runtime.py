@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from app.agent_processor import (
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
 )
+from app.agent_prompt_security import PromptSecuritySource
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
 from app.canvas_agent.planning.html_generator import OpenAiCanvasAgentHtmlGenerator
@@ -97,6 +99,9 @@ AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
 AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
+AGENT_THREAD_CONTEXT_MAX_RUNS = 6
+AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
+AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS = 12
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 LOCAL_APP_ENVS = {"local", "test", "development"}
@@ -112,7 +117,7 @@ MEETING_REPORT_FAILURE_STEPS = {
 
 def _project_json_value(value: object, max_characters: int) -> object:
     serialized = json.dumps(value, ensure_ascii=False)
-    if len(serialized) <= max_characters:
+    if _utf8_size(serialized) <= max_characters:
         return value
 
     if isinstance(value, dict):
@@ -120,13 +125,15 @@ def _project_json_value(value: object, max_characters: int) -> object:
         for key, item in value.items():
             key_text = str(key)
             candidate_with_null = {**projected, key_text: None}
-            value_overhead = len(json.dumps(candidate_with_null, ensure_ascii=False)) - len("null")
+            value_overhead = _utf8_size(json.dumps(candidate_with_null, ensure_ascii=False)) - len(
+                "null"
+            )
             remaining = max_characters - value_overhead
             if remaining <= 0:
                 break
             candidate_value = _project_json_value(item, remaining)
             candidate = {**projected, key_text: candidate_value}
-            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+            if _utf8_size(json.dumps(candidate, ensure_ascii=False)) > max_characters:
                 break
             projected = candidate
         return projected
@@ -135,7 +142,7 @@ def _project_json_value(value: object, max_characters: int) -> object:
         projected_items: list[object] = []
         for item in value:
             candidate = [*projected_items, item]
-            if len(json.dumps(candidate, ensure_ascii=False)) > max_characters:
+            if _utf8_size(json.dumps(candidate, ensure_ascii=False)) > max_characters:
                 break
             projected_items = candidate
         return projected_items
@@ -146,7 +153,7 @@ def _project_json_value(value: object, max_characters: int) -> object:
         while low < high:
             midpoint = (low + high + 1) // 2
             candidate = value[:midpoint] + "…"
-            if len(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
+            if _utf8_size(json.dumps(candidate, ensure_ascii=False)) <= max_characters:
                 low = midpoint
             else:
                 high = midpoint - 1
@@ -157,7 +164,7 @@ def _project_json_value(value: object, max_characters: int) -> object:
 
 def _serialize_bounded_agent_tool_output(output_json: object, max_characters: int) -> str:
     marker = {"planningContextTruncated": True}
-    marker_size = len(json.dumps(marker, ensure_ascii=False))
+    marker_size = _utf8_size(json.dumps(marker, ensure_ascii=False))
     projected = _project_json_value(
         output_json,
         max(2, max_characters - marker_size),
@@ -166,39 +173,199 @@ def _serialize_bounded_agent_tool_output(output_json: object, max_characters: in
         {**projected, **marker} if isinstance(projected, dict) else {"value": projected, **marker}
     )
     serialized = json.dumps(bounded, ensure_ascii=False)
-    if len(serialized) <= max_characters:
+    if _utf8_size(serialized) <= max_characters:
         return serialized
     return json.dumps(marker, ensure_ascii=False)
 
 
 def _serialize_agent_tool_output(tool_name: str, output_json: object) -> str:
     serialized = json.dumps(output_json, ensure_ascii=False)
-    prefix_size = len(f"tool {tool_name}: ")
+    prefix_size = _utf8_size(f"tool {tool_name}: ")
     max_size = (
         AGENT_PLANNING_CONTEXT_MAX_CHARACTERS - prefix_size
         if tool_name == SQL_ERD_INSPECTION_TOOL_NAME
         else AGENT_TOOL_OUTPUT_MAX_CHARACTERS
     )
-    if len(serialized) <= max_size:
+    if _utf8_size(serialized) <= max_size:
         return serialized
     return _serialize_bounded_agent_tool_output(output_json, max_size)
 
 
-def _build_bounded_agent_planning_context(lines: list[str]) -> str:
-    selected_reversed: list[str] = []
-    total_characters = 0
-    for line in reversed(lines):
-        line_characters = len(line)
-        separator_characters = 1 if selected_reversed else 0
-        if line_characters + separator_characters > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS:
+SAFE_THREAD_RESOURCE_TYPES = {
+    "meeting",
+    "meeting_report",
+    "meeting_report_action_item",
+}
+UUID_TEXT_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+SENSITIVE_TEXT_PATTERNS = (
+    re.compile(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?" r"-----END [A-Z0-9 ]*PRIVATE KEY-----",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{6,}\b"),
+    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_-]{6,}|github_pat_[A-Za-z0-9_-]{6,})\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{6,}\b", re.IGNORECASE),
+    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b"),
+    re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+)
+CREDENTIAL_ASSIGNMENT_PATTERN = re.compile(
+    r"""(?<![A-Za-z0-9])
+    (?:
+        (?P<key_quote>["'])(?P<quoted_key>[A-Za-z][A-Za-z0-9_. -]{0,127})(?P=key_quote)
+        |
+        (?P<bare_key>[A-Za-z][A-Za-z0-9_.-]*(?:[ \t]+[A-Za-z][A-Za-z0-9_.-]*){0,4})
+    )
+    [ \t]*[:=][ \t]*
+    (?:
+        (?P<value_quote>["'])(?P<quoted_value>[^"'\r\n]{4,})(?P=value_quote)
+        |
+        (?P<bare_value>[^\s"',;}\]]{4,})
+    )
+    """,
+    re.VERBOSE,
+)
+SENSITIVE_CREDENTIAL_SEGMENTS = {
+    "authorization",
+    "credential",
+    "passphrase",
+    "password",
+    "secret",
+    "token",
+}
+SENSITIVE_CREDENTIAL_SEQUENCES = (
+    ("api", "key"),
+    ("access", "key"),
+    ("private", "key"),
+    ("service", "role", "key"),
+)
+SENSITIVE_CREDENTIAL_COMPACT_NAMES = {
+    "accesstoken",
+    "apikey",
+    "clientsecret",
+    "privatekey",
+    "refreshtoken",
+    "servicerolekey",
+}
+
+
+def _credential_key_segments(key: str) -> tuple[str, ...]:
+    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", key)
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
+    return tuple(re.findall(r"[a-z0-9]+", normalized.lower()))
+
+
+def _contains_segment_sequence(segments: tuple[str, ...], sequence: tuple[str, ...]) -> bool:
+    sequence_size = len(sequence)
+    return any(
+        segments[index : index + sequence_size] == sequence
+        for index in range(len(segments) - sequence_size + 1)
+    )
+
+
+def _is_sensitive_credential_key(key: str) -> bool:
+    segments = _credential_key_segments(key)
+    if any(segment in SENSITIVE_CREDENTIAL_SEGMENTS for segment in segments):
+        return True
+    if any(
+        _contains_segment_sequence(segments, sequence)
+        for sequence in SENSITIVE_CREDENTIAL_SEQUENCES
+    ):
+        return True
+    compact_key = "".join(segments)
+    return any(name in compact_key for name in SENSITIVE_CREDENTIAL_COMPACT_NAMES)
+
+
+def _redact_sensitive_credential_assignments(value: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group("quoted_key") or match.group("bare_key") or ""
+        return "[secret]" if _is_sensitive_credential_key(key) else match.group(0)
+
+    return CREDENTIAL_ASSIGNMENT_PATTERN.sub(replace, value)
+
+
+def _utf8_size(value: str) -> int:
+    return len(value.encode("utf-8"))
+
+
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    sanitized = _redact_sensitive_credential_assignments(value.replace("\x00", ""))
+    for pattern in SENSITIVE_TEXT_PATTERNS:
+        sanitized = pattern.sub("[secret]", sanitized)
+    sanitized = UUID_TEXT_PATTERN.sub("[resource]", sanitized)
+    if _utf8_size(sanitized) <= max_bytes:
+        return sanitized
+    suffix = "…"
+    suffix_size = _utf8_size(suffix)
+    if max_bytes <= suffix_size:
+        return ""
+    encoded = sanitized.encode("utf-8")[: max_bytes - suffix_size]
+    while encoded:
+        try:
+            return encoded.decode("utf-8") + suffix
+        except UnicodeDecodeError:
+            encoded = encoded[:-1]
+    return ""
+
+
+def _agent_context_ref(thread_id: str, run_id: str, step_id: str, ref_index: int) -> str:
+    digest = hashlib.sha256(f"{thread_id}:{run_id}:{step_id}:{ref_index}".encode()).hexdigest()
+    return f"ctx_{digest[:24]}"
+
+
+def _thread_context_line(kind: str, **values: object) -> str:
+    return f"previous {kind}: {json.dumps(values, ensure_ascii=False, separators=(',', ':'))}"
+
+
+def _safe_meeting_candidate_resume_input(value: dict[object, object]) -> dict[str, object]:
+    safe: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
             continue
-        if (
-            total_characters + line_characters + separator_characters
-            > AGENT_PLANNING_CONTEXT_MAX_CHARACTERS
+        normalized_key = re.sub(r"[_-]", "", key).lower()
+        if normalized_key.endswith("id") or any(
+            part in normalized_key
+            for part in (
+                "authorization",
+                "cookie",
+                "credential",
+                "password",
+                "secret",
+                "token",
+                "transcript",
+            )
         ):
             continue
+        if isinstance(item, dict):
+            safe[key] = _safe_meeting_candidate_resume_input(item)
+        elif isinstance(item, list):
+            safe[key] = [
+                _truncate_utf8(str(entry), 300)
+                for entry in item[:20]
+                if isinstance(entry, str | int | float | bool)
+            ]
+        elif isinstance(item, str):
+            safe[key] = _truncate_utf8(item, 1000)
+        elif isinstance(item, int | float | bool) or item is None:
+            safe[key] = item
+    return safe
+
+
+def _build_bounded_agent_planning_context(lines: list[str]) -> str:
+    selected_reversed: list[str] = []
+    total_bytes = 0
+    for line in reversed(lines):
+        line_bytes = _utf8_size(line)
+        separator_bytes = 1 if selected_reversed else 0
+        if line_bytes + separator_bytes > AGENT_THREAD_CONTEXT_MAX_BYTES:
+            continue
+        if total_bytes + line_bytes + separator_bytes > AGENT_THREAD_CONTEXT_MAX_BYTES:
+            continue
         selected_reversed.append(line)
-        total_characters += line_characters + separator_characters
+        total_bytes += line_bytes + separator_bytes
     return "\n".join(reversed(selected_reversed))
 
 
@@ -1504,6 +1671,7 @@ class PgAgentRunRepository:
             return None
 
         memory: list[str] = []
+        untrusted_source_lines: list[tuple[str, PromptSecuritySource]] = []
         thread_id = row["thread_id"]
         if thread_id is not None:
             thread_runs = self.connection.execute(
@@ -1516,69 +1684,144 @@ class PgAgentRunRepository:
                   AND requested_by_user_id = %s
                   AND status = 'completed'
                   AND final_answer IS NOT NULL
-                ORDER BY created_at DESC
-                LIMIT 6
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
                 """,
-                (thread_id, job.run_id, job.workspace_id, job.requested_by_user_id),
+                (
+                    thread_id,
+                    job.run_id,
+                    job.workspace_id,
+                    job.requested_by_user_id,
+                    AGENT_THREAD_CONTEXT_MAX_RUNS,
+                ),
             ).fetchall()
-            for thread_run in reversed(thread_runs):
-                prompt = str(thread_run["prompt"]).strip()[:1000]
-                answer = str(thread_run["final_answer"]).strip()[:2000]
+            thread_memory_newest: list[list[str]] = []
+            remaining_resource_refs = AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS
+            for newest_index, thread_run in enumerate(thread_runs):
+                turn_lines: list[str] = []
+                turn = len(thread_runs) - newest_index
+                prompt = _truncate_utf8(str(thread_run["prompt"]).strip(), 1000)
+                answer = _truncate_utf8(str(thread_run["final_answer"]).strip(), 2000)
                 if prompt:
-                    memory.append(f"previous user: {prompt}")
+                    turn_lines.append(_thread_context_line("user", turn=turn, text=prompt))
                 if answer:
-                    memory.append(f"previous assistant: {answer}")
+                    turn_lines.append(_thread_context_line("assistant", turn=turn, text=answer))
 
                 ref_rows = self.connection.execute(
                     """
-                    SELECT resource_refs
+                    SELECT id, resource_refs
                     FROM agent_steps
                     WHERE run_id = %s
                       AND step_type = 'tool'
                       AND status = 'completed'
-                    ORDER BY step_order ASC
+                    ORDER BY step_order ASC, id ASC
                     """,
                     (thread_run["id"],),
                 ).fetchall()
+                resource_ordinals: dict[str, int] = {}
                 for ref_row in ref_rows:
-                    for resource_ref in ref_row["resource_refs"] or []:
+                    for ref_index, resource_ref in enumerate(ref_row["resource_refs"] or []):
+                        if remaining_resource_refs <= 0:
+                            break
                         if not isinstance(resource_ref, dict):
                             continue
                         domain = resource_ref.get("domain")
                         resource_type = resource_ref.get("resourceType")
                         resource_id = resource_ref.get("resourceId")
                         label = resource_ref.get("label")
+                        status = resource_ref.get("status")
                         if not all(
                             isinstance(value, str) and value.strip()
                             for value in (domain, resource_type, resource_id)
                         ):
                             continue
-                        suffix = (
-                            f" label={str(label).strip()[:300]}"
+                        if domain != "meeting" or resource_type not in SAFE_THREAD_RESOURCE_TYPES:
+                            continue
+                        resource_ordinals[resource_type] = (
+                            resource_ordinals.get(resource_type, 0) + 1
+                        )
+                        resource_label = (
+                            _truncate_utf8(label.strip(), 300)
                             if isinstance(label, str) and label.strip()
-                            else ""
+                            else None
                         )
-                        memory.append(
-                            f"previous resource {domain}:{resource_type} id={resource_id}{suffix}"
+                        resource_line = _thread_context_line(
+                            "resource",
+                            turn=turn,
+                            contextRef=_agent_context_ref(
+                                str(thread_id),
+                                str(thread_run["id"]),
+                                str(ref_row["id"]),
+                                ref_index,
+                            ),
+                            resourceType=resource_type,
+                            ordinal=resource_ordinals[resource_type],
+                            **({"label": resource_label} if resource_label else {}),
+                            **(
+                                {"status": _truncate_utf8(status.strip(), 100)}
+                                if isinstance(status, str) and status.strip()
+                                else {}
+                            ),
                         )
+                        turn_lines.append(resource_line)
+                        if resource_label:
+                            untrusted_source_lines.append(
+                                (
+                                    resource_line,
+                                    PromptSecuritySource("thread_resource", resource_label),
+                                )
+                            )
+                        remaining_resource_refs -= 1
+                thread_memory_newest.append(turn_lines)
+            for turn_lines in reversed(thread_memory_newest):
+                memory.extend(turn_lines)
 
         selected_candidate = self.connection.execute(
             """
-            SELECT resource_type, label, description, status
-            FROM agent_candidate_selections
-            WHERE run_id = %s
-              AND workspace_id = %s
-              AND requested_by_user_id = %s
-              AND consumed_at IS NOT NULL
-              AND expires_at > now()
-            ORDER BY consumed_at DESC
+            SELECT
+              candidate.resource_type,
+              candidate.label,
+              candidate.description,
+              candidate.status,
+              clarification_step.tool_name AS clarification_tool_name,
+              clarification_step.input_summary,
+              planner_step.output_json->'toolRetrieval'->>'primaryToolName'
+                AS goal_tool_name
+            FROM agent_candidate_selections AS candidate
+            INNER JOIN agent_steps AS clarification_step
+              ON clarification_step.id = candidate.tool_step_id
+             AND clarification_step.run_id = candidate.run_id
+            LEFT JOIN LATERAL (
+              SELECT planner.output_json
+              FROM agent_steps AS planner
+              WHERE planner.run_id = candidate.run_id
+                AND planner.step_type = 'planner'
+                AND planner.status = 'completed'
+                AND planner.step_order < clarification_step.step_order
+              ORDER BY planner.step_order DESC, planner.id DESC
+              LIMIT 1
+            ) AS planner_step ON TRUE
+            WHERE candidate.run_id = %s
+              AND candidate.workspace_id = %s
+              AND candidate.requested_by_user_id = %s
+              AND candidate.consumed_at IS NOT NULL
+              AND candidate.expires_at > now()
+              AND NOT EXISTS (
+                SELECT 1
+                FROM agent_steps AS resumed_step
+                WHERE resumed_step.run_id = candidate.run_id
+                  AND resumed_step.step_type = 'tool'
+                  AND resumed_step.status = 'completed'
+                  AND resumed_step.step_order > clarification_step.step_order
+              )
+            ORDER BY candidate.consumed_at DESC, candidate.id DESC
             LIMIT 1
             """,
             (job.run_id, job.workspace_id, job.requested_by_user_id),
         ).fetchone()
         if selected_candidate is not None:
             resource_type = str(selected_candidate["resource_type"]).strip()
-            label = str(selected_candidate["label"]).strip()[:300]
+            label = _truncate_utf8(str(selected_candidate["label"]).strip(), 300)
             description = selected_candidate["description"]
             status = selected_candidate["status"]
             if resource_type and label:
@@ -1587,10 +1830,50 @@ class PgAgentRunRepository:
                     f"label={label}",
                 ]
                 if isinstance(description, str) and description.strip():
-                    details.append(f"description={description.strip()[:300]}")
+                    details.append(f"description={_truncate_utf8(description.strip(), 300)}")
                 if isinstance(status, str) and status.strip():
-                    details.append(f"status={status.strip()[:100]}")
-                memory.append(" ".join(details))
+                    details.append(f"status={_truncate_utf8(status.strip(), 100)}")
+                candidate_line = " ".join(details)
+                memory.append(candidate_line)
+                untrusted_source_lines.append(
+                    (candidate_line, PromptSecuritySource("selected_candidate", label))
+                )
+                if isinstance(description, str) and description.strip():
+                    untrusted_source_lines.append(
+                        (
+                            candidate_line,
+                            PromptSecuritySource(
+                                "selected_candidate",
+                                _truncate_utf8(description.strip(), 300),
+                            ),
+                        )
+                    )
+                input_summary = selected_candidate.get("input_summary")
+                tool_input = (
+                    input_summary.get("input")
+                    if isinstance(input_summary, dict)
+                    and isinstance(input_summary.get("input"), dict)
+                    else {}
+                )
+                resume_state = {
+                    "resourceType": resource_type,
+                    "goalToolName": (
+                        selected_candidate["goal_tool_name"]
+                        if isinstance(selected_candidate["goal_tool_name"], str)
+                        else ""
+                    ),
+                    "clarificationToolName": str(selected_candidate["clarification_tool_name"]),
+                    "toolInput": _safe_meeting_candidate_resume_input(tool_input),
+                }
+                memory.append(
+                    "selected meeting candidate resume: "
+                    + json.dumps(
+                        resume_state,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
 
         timeline_rows = self.connection.execute(
             """
@@ -1634,16 +1917,25 @@ class PgAgentRunRepository:
             """,
             (job.run_id, job.run_id),
         ).fetchall()
+        latest_user_message: str | None = None
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
                 output = _serialize_agent_tool_output(str(item["tool_name"]), item["output_json"])
-                memory.append(f"tool {item['tool_name']}: {output}")
+                tool_line = f"tool {item['tool_name']}: {output}"
+                memory.append(tool_line)
+                untrusted_source_lines.append(
+                    (tool_line, PromptSecuritySource("tool_result", output))
+                )
                 continue
 
             content = str(item["content"]).strip()[:1000]
             if content:
                 memory.append(f"{item['role']}: {content}")
+                if item["role"] == "user":
+                    latest_user_message = content
 
+        planning_context = _build_bounded_agent_planning_context(memory)
+        included_lines = set(planning_context.splitlines())
         return AgentRunContext(
             run_id=str(row["id"]),
             workspace_id=str(row["workspace_id"]),
@@ -1652,7 +1944,15 @@ class PgAgentRunRepository:
             prompt=str(row["prompt"]),
             timezone=str(row["timezone"]),
             planner_turn_count=int(row["planner_turn_count"]),
-            planning_context=_build_bounded_agent_planning_context(memory),
+            planning_context=planning_context,
+            untrusted_context_sources=tuple(
+                source for line, source in untrusted_source_lines if line in included_lines
+            ),
+            current_user_source=(
+                PromptSecuritySource("user_follow_up", latest_user_message)
+                if job.turn_sequence > 1 and latest_user_message is not None
+                else None
+            ),
         )
 
     def start_planner_step(self, job: AgentRunJob, context: AgentRunContext) -> str:

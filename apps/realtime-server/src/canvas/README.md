@@ -42,11 +42,16 @@ re-export다. 새 코드는 역할별 하위 폴더의 실제 구현을 직접 i
   편집을 차단하지 않는다. 최종 상태는 마지막으로 반영된 변경이 결정한다.
 - 삭제는 명시적인 delete patch와 tombstone으로만 판단한다.
 - viewport/API hydrate는 tombstone을 지우거나 삭제된 shape를 되살리지 않는다.
+- 입장과 Lazy Loading은 DB Shape를 baseline으로 사용하되, 같은 ID의 roomState와
+  tombstone을 우선해 병합한다. raw DB 응답은 room 전체에 직접 전파하지 않는다.
 - dirty shape는 App Server가 checkpoint 성공을 확인하기 전에 제거하지 않는다.
-- leave, disconnect와 graceful shutdown에서는 남은 dirty operation의 flush를
-  시도한다.
+- checkpoint는 1분 idle, 최초 dirty 후 최대 5분, dirty Shape 100개, 예상 payload
+  1MB 중 먼저 도달한 조건에서 실행한다.
+- 마지막 사용자가 나간 뒤 7.5초 동안 재입장이 없을 때 남은 dirty operation을
+  drain하고 빈 roomState를 정리한다. 일반 leave/disconnect는 저장을 유발하지 않는다.
+- graceful shutdown에서는 남은 dirty operation 전체의 drain을 시도한다.
 - 일부 shape 저장이 실패하면 분리 가능한 요청을 나누어 정상 shape 저장을
-  계속하고, 실패한 shape는 dirty 상태로 유지한다.
+  계속하고, 실패한 shape는 dirty 상태로 유지해 backoff로 재시도한다.
 
 ## presence와 preview
 
