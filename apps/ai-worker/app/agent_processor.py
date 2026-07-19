@@ -1601,9 +1601,7 @@ def _normalize_meeting_thread_context_reference(
         )
         if ordinal is not None:
             action_refs = [
-                reference
-                for reference in action_refs
-                if reference.get("ordinal") == ordinal
+                reference for reference in action_refs if reference.get("ordinal") == ordinal
             ]
         if len(action_refs) == 1:
             tool_input.pop("reportId", None)
