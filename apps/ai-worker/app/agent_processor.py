@@ -18,6 +18,7 @@ from app.agent_prompt_security import (
 )
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
+    CapabilityDefinition,
     ToolCapabilityCatalog,
     ToolRetrievalResult,
     parse_tool_capability_catalog,
@@ -140,6 +141,7 @@ class AgentPlanningRequest:
     planning_context: str = ""
     context_surface: str | None = None
     routing: AgentRoutingDecision | None = None
+    workflow_incomplete: bool = False
 
 
 @dataclass(frozen=True)
@@ -321,6 +323,67 @@ def select_agent_planner_tools_for_routing(
     if schema_bytes > schema_token_budget * 4:
         raise AgentRouterOutputError("Agent router tool schemas exceed the configured budget")
     return selected_tools
+
+
+def select_pending_agent_planner_tools_for_routing(
+    job: AgentRunJob,
+    routing: AgentRoutingDecision,
+    selected_tools: tuple[AgentToolSchema, ...],
+    planning_context: str,
+) -> tuple[AgentToolSchema, ...]:
+    """Expose only the next unfinished tool in each routed capability chain."""
+    catalog = job.tool_capability_catalog
+    if catalog is None:
+        raise AgentRouterOutputError("Agent router requires a valid capability catalog")
+
+    completed_tool_names = _completed_planning_tool_names(planning_context)
+    if not completed_tool_names:
+        return selected_tools
+
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    pending_names: set[str] = set()
+    for capability_id in routing.capability_ids:
+        capability = capability_by_id.get(capability_id)
+        if capability is None or capability.availability != "supported":
+            raise AgentRouterOutputError("Agent router selected an invalid capability")
+        next_tool_name = next(
+            (
+                tool_name
+                for tool_name in capability.tool_names
+                if tool_name not in completed_tool_names
+            ),
+            None,
+        )
+        if next_tool_name is not None:
+            pending_names.add(next_tool_name)
+
+    return tuple(tool for tool in selected_tools if tool.name in pending_names)
+
+
+def _completed_planning_tool_names(planning_context: str) -> set[str]:
+    return {
+        match.group(1)
+        for line in planning_context.splitlines()
+        if (match := re.match(r"^tool ([A-Za-z0-9_]+):", line)) is not None
+    }
+
+
+def _has_started_routed_workflow(
+    job: AgentRunJob,
+    routing: AgentRoutingDecision,
+    planning_context: str,
+) -> bool:
+    catalog = job.tool_capability_catalog
+    if catalog is None:
+        return False
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    routed_tool_names = {
+        tool_name
+        for capability_id in routing.capability_ids
+        for tool_name in capability_by_id[capability_id].tool_names
+        if capability_id in capability_by_id
+    }
+    return bool(routed_tool_names & _completed_planning_tool_names(planning_context))
 
 
 @dataclass(frozen=True)
@@ -778,6 +841,12 @@ class AgentRunProcessor:
                     top_k=self.tool_retrieval_top_k,
                     schema_token_budget=self.tool_retrieval_schema_token_budget,
                 )
+                planner_tools = select_pending_agent_planner_tools_for_routing(
+                    job,
+                    routing,
+                    planner_tools,
+                    context.planning_context,
+                )
                 planner_selection = AgentPlannerToolSelection(
                     tools=planner_tools,
                     retrieval=None,
@@ -824,6 +893,11 @@ class AgentRunProcessor:
                     ),
                 )
             planner_job = replace(job, tools=planner_tools)
+            workflow_incomplete = routing is not None and _has_started_routed_workflow(
+                job,
+                routing,
+                context.planning_context,
+            )
             decision = self.planner_client.plan(
                 AgentPlanningRequest(
                     run_id=job.run_id,
@@ -835,6 +909,7 @@ class AgentRunProcessor:
                     planning_context=context.planning_context,
                     context_surface=context_surface,
                     routing=routing,
+                    workflow_incomplete=workflow_incomplete,
                 )
             )
             normalized = normalize_agent_planner_decision(
@@ -846,6 +921,10 @@ class AgentRunProcessor:
                 planning_context=context.planning_context,
                 strict_tool_selection=len(planner_tools) < len(job.tools),
             )
+            if workflow_incomplete and normalized.status in {"completed", "unsupported"}:
+                raise AgentPlannerOutputError(
+                    "Agent planner ended before the routed workflow was complete"
+                )
             output_summary = dict(normalized.output_summary)
             if routing is not None:
                 output_summary["toolRouting"] = _agent_routing_observation(
@@ -2554,14 +2633,15 @@ def normalize_agent_routing_decision(
         raise AgentRouterOutputError("Agent router output exceeds routing limits")
 
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    selected_capabilities: list[CapabilityDefinition] = []
     for capability_id in capability_ids:
         capability = capability_by_id.get(capability_id)
-        if (
-            capability is None
-            or capability.availability != "supported"
-            or capability.domain not in domains
-        ):
+        if capability is None or capability.availability != "supported":
             raise AgentRouterOutputError("Agent router selected an invalid capability")
+        selected_capabilities.append(capability)
+
+    if capability_ids:
+        domains = tuple(dict.fromkeys(capability.domain for capability in selected_capabilities))
 
     intent_summary = USER_VISIBLE_UUID_PATTERN.sub("내부 식별자", decision.intent_summary.strip())[
         :1000
@@ -2735,7 +2815,10 @@ class OpenAiAgentPlannerClient:
                         "type": "json_schema",
                         "name": "agent_planner_result",
                         "strict": True,
-                        "schema": _agent_planner_schema(workflow_constraint),
+                        "schema": _agent_planner_schema(
+                            workflow_constraint,
+                            workflow_incomplete=request.workflow_incomplete,
+                        ),
                     }
                 },
             )
@@ -2807,6 +2890,8 @@ def _agent_planner_system_prompt() -> str:
         "completed; use needs_clarification only when its grounded input cannot be determined. "
         "When routing is present, use its validated domains, capabilityIds, and intentSummary "
         "to choose the next tool from the provided shortlist. "
+        "When workflowIncomplete is true, completed and unsupported are forbidden; choose the "
+        "next provided tool or return needs_clarification when user input is still required. "
         "Choose only tools from the provided tool list. "
         "When delegate_canvas_agent is available, use it for requests about Canvas content, "
         "the active Canvas selection, Canvas tool help, or static HTML generation from a "
@@ -2984,6 +3069,7 @@ def _agent_planner_user_prompt(
                 if constraint is not None
                 else None
             ),
+            "workflowIncomplete": request.workflow_incomplete,
         },
         ensure_ascii=False,
     )
@@ -2991,10 +3077,12 @@ def _agent_planner_user_prompt(
 
 def _agent_planner_schema(
     workflow_constraint: AgentPlannerWorkflowConstraint | None = None,
+    *,
+    workflow_incomplete: bool = False,
 ) -> dict[str, object]:
     statuses = (
         ["tool_candidate", "needs_clarification"]
-        if workflow_constraint is not None
+        if workflow_constraint is not None or workflow_incomplete
         else ["tool_candidate", "needs_clarification", "completed", "unsupported"]
     )
     tool_name_schema: dict[str, object] = {"type": ["string", "null"]}

@@ -171,7 +171,7 @@ assert.match(
 );
 assert.match(agentChatWidget, /const canSend = draft\.trim\(\)\.length > 0 && !hasActiveAgentRequest/);
 assert.match(agentChatWidget, /AGENT_RUN_POLL_INTERVAL_MS/);
-assert.match(agentChatWidget, /AGENT_PLANNING_POLL_TIMEOUT_MS = 190_000/);
+assert.match(agentChatWidget, /AGENT_PLANNING_POLL_TIMEOUT_MS = 270_000/);
 assert.match(agentChatWidget, /createAgentPlanningPollingTimeoutError/);
 assert.match(agentChatWidget, /currentRun\.status === "planning"/);
 assert.match(agentChatWidget, /previousStatus !== "planning"/);
