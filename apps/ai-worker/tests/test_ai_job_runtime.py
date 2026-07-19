@@ -1414,6 +1414,7 @@ def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None
         for query, _values in connection.executed
         if "FROM agent_candidate_selections AS candidate" in query
     )
+    assert "clarification_step.input_json AS input_summary" in candidate_query
     assert "resumed_step.step_order > clarification_step.step_order" in candidate_query
 
 

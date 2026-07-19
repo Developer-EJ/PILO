@@ -1784,7 +1784,7 @@ class PgAgentRunRepository:
               candidate.description,
               candidate.status,
               clarification_step.tool_name AS clarification_tool_name,
-              clarification_step.input_summary,
+              clarification_step.input_json AS input_summary,
               planner_step.output_json->'toolRetrieval'->>'primaryToolName'
                 AS goal_tool_name
             FROM agent_candidate_selections AS candidate
