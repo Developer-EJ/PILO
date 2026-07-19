@@ -446,9 +446,10 @@ export function createSqlErdSchemaSemanticSignature(
 }
 
 function normalizeSqlDataTypeSemanticText(value: string) {
-  const normalized = normalizeSqlSemanticText(value);
+  const normalized = value.trim();
   let quote: '"' | "'" | null = null;
   let result = "";
+  let hasPendingWhitespace = false;
 
   for (let index = 0; index < normalized.length; index += 1) {
     const character = normalized[index];
@@ -466,7 +467,21 @@ function normalizeSqlDataTypeSemanticText(value: string) {
       continue;
     }
 
+    if (/\s/u.test(character)) {
+      hasPendingWhitespace = true;
+      continue;
+    }
+
     if (character === '"' || character === "'") {
+      if (
+        hasPendingWhitespace &&
+        result.length > 0 &&
+        result.at(-1) !== "(" &&
+        result.at(-1) !== ","
+      ) {
+        result += " ";
+      }
+      hasPendingWhitespace = false;
       quote = character;
       result += character;
       continue;
@@ -474,18 +489,26 @@ function normalizeSqlDataTypeSemanticText(value: string) {
 
     if (character === "(" || character === ",") {
       result = `${result.trimEnd()}${character}`;
-      while (/\s/u.test(normalized[index + 1] ?? "")) {
-        index += 1;
-      }
+      hasPendingWhitespace = false;
       continue;
     }
 
     if (character === ")") {
       result = `${result.trimEnd()})`;
+      hasPendingWhitespace = false;
       continue;
     }
 
-    result += character;
+    if (
+      hasPendingWhitespace &&
+      result.length > 0 &&
+      result.at(-1) !== "(" &&
+      result.at(-1) !== ","
+    ) {
+      result += " ";
+    }
+    hasPendingWhitespace = false;
+    result += character.toUpperCase();
   }
 
   return result;
