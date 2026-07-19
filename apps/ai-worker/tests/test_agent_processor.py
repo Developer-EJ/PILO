@@ -339,6 +339,14 @@ def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
     assert "Never call the completed lookup tool again" in prompt
 
 
+def test_planner_prompt_finishes_action_item_transfer_before_approval() -> None:
+    prompt = _agent_planner_system_prompt()
+
+    assert "a completed update_meeting_report_action_item result satisfies" in prompt
+    assert "Continue with approve_meeting_report_action_item" in prompt
+    assert "Never approve before the assignee update succeeds" in prompt
+
+
 def test_meeting_candidate_selection_resumes_terminal_goal_without_repeating_lookup() -> None:
     tools = [
         tool_snapshot(

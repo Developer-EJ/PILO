@@ -327,7 +327,8 @@ class FakeMeetingService {
       {
         id: this.actionItems[0].id,
         title: this.actionItems[0].title,
-        status: this.actionItems[0].status
+        status: this.actionItems[0].status,
+        updatedAt: "2026-07-08T00:00:00.000Z"
       }
     ];
     this.staleMeetingIds = new Set();
@@ -1289,6 +1290,28 @@ class FakeCandidateSelectionDatabase {
     );
     assert.equal(confirmation.toolName, "update_meeting_report_action_item");
     assert.equal(confirmation.call.input.actionItemId, ACTION_ITEM_ID);
+    assert.equal(confirmation.call.input.expectedStatus, "PENDING");
+    assert.equal(
+      confirmation.call.input.expectedUpdatedAt,
+      "2026-07-08T00:00:00.000Z"
+    );
+
+    meetingService.reports[0].actionItems[0].updatedAt =
+      "2026-07-08T00:01:00.000Z";
+    await assert.rejects(
+      () =>
+        actionUpdateTool.execute(
+          context,
+          actionUpdateTool.validateConfirmationInput(
+            actionUpdateTool.buildConfirmationInput(confirmation)
+          )
+        ),
+      (error) =>
+        error.getStatus?.() === 400 &&
+        error.response?.error?.message?.includes("changed after confirmation")
+    );
+    meetingService.reports[0].actionItems[0].updatedAt =
+      "2026-07-08T00:00:00.000Z";
 
     const stalePreparation = await actionUpdateTool.buildConfirmation(
       context,
@@ -2130,7 +2153,9 @@ class FakeActionItemDeliveryDatabase {
       requested_by_user_id: USER_ID,
       status: "FAILED",
       locked_until: null,
-      claim_token: null
+      claim_token: null,
+      calendar_event_id: null,
+      pilo_issue_id: null
     };
     this.calls = [];
   }
@@ -2184,8 +2209,17 @@ class FakeActionItemDeliveryDatabase {
       return { id: this.delivery.id };
     }
     if (text.includes("SET status = 'APPROVED'")) {
+      assert.match(text, /approved_by_user_id = COALESCE\(approved_by_user_id, \$2\)/);
+      assert.match(text, /WHEN status = 'PENDING' OR approved_by_user_id IS NULL/);
       this.actionItem.status = "APPROVED";
       return { id: this.actionItem.id };
+    }
+    if (text.includes("SET status = 'FAILED'")) {
+      assert.equal(values[2], this.delivery.claim_token);
+      this.delivery.status = "FAILED";
+      this.delivery.claim_token = null;
+      this.delivery.locked_until = null;
+      return { id: this.delivery.id };
     }
     throw new Error(`Unhandled delivery queryOne: ${text}`);
   }
@@ -2257,6 +2291,11 @@ class FakeInvalidCalendarDeliveryDatabase {
 
   assert.equal(result.status, "COMPLETED");
   assert.equal(result.piloIssueId, "42");
+  assert.equal(
+    database.actionItem.status,
+    "APPROVED",
+    "delivery completion must not be the condition for the action-item approval"
+  );
   assert.deepEqual(boardCalls, [
     {
       userId: USER_ID,
@@ -2270,6 +2309,88 @@ class FakeInvalidCalendarDeliveryDatabase {
       idempotencyKey: "meeting-action-item:stable-operation"
     }
   ]);
+}
+
+{
+  const database = new FakeActionItemDeliveryDatabase();
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {},
+    {
+      async validateBoardIssueCreateInput() {},
+      async createBoardIssue() {
+        throw new Error("GitHub delivery is temporarily unavailable");
+      }
+    }
+  );
+
+  const result = await service.deliver(
+    USER_ID,
+    WORKSPACE_ID,
+    REPORT_ID,
+    database.actionItem.id,
+    {
+      deliveryType: "pilo_issue",
+      issue: {
+        boardId: "99",
+        columnId: "77"
+      }
+    }
+  );
+
+  assert.equal(result.status, "FAILED");
+  assert.equal(
+    database.actionItem.status,
+    "APPROVED",
+    "a delivery failure must remain separately retryable without rolling back approval"
+  );
+  assert.equal(database.delivery.status, "FAILED");
+}
+
+{
+  const database = new FakeActionItemDeliveryDatabase();
+  database.actionItem.status = "APPROVED";
+  database.delivery.status = "COMPLETED";
+  database.delivery.pilo_issue_id = "42";
+  const boardCalls = [];
+  const service = new MeetingActionItemDeliveryService(
+    database,
+    { async assertWorkspaceAccess() {} },
+    {},
+    {
+      async validateBoardIssueCreateInput() {
+        boardCalls.push("validate");
+        throw new Error("A completed delivery must not be revalidated");
+      },
+      async createBoardIssue() {
+        boardCalls.push("create");
+        throw new Error("A completed delivery must not run twice");
+      }
+    }
+  );
+
+  const result = await service.deliver(
+    USER_ID,
+    WORKSPACE_ID,
+    REPORT_ID,
+    database.actionItem.id,
+    {
+      deliveryType: "pilo_issue",
+      issue: {
+        boardId: "99",
+        columnId: "77"
+      }
+    }
+  );
+
+  assert.deepEqual(result, {
+    actionItemId: database.actionItem.id,
+    deliveryType: "pilo_issue",
+    status: "COMPLETED",
+    piloIssueId: "42"
+  });
+  assert.deepEqual(boardCalls, []);
 }
 
 {
@@ -2336,9 +2457,9 @@ class FakeInvalidCalendarDeliveryDatabase {
   assert.equal(await service.recoverStaleDeliveries(), 1);
   const recovery = database.calls.find((call) => call.method === "query");
   assert.match(recovery.text, /delivery\.locked_until <= now\(\)/);
-  assert.match(recovery.text, /FOR UPDATE OF delivery, action_item SKIP LOCKED/);
+  assert.match(recovery.text, /FOR UPDATE OF delivery SKIP LOCKED/);
   assert.match(recovery.text, /last_error_code = 'ACTION_ITEM_DELIVERY_STALE'/);
-  assert.match(recovery.text, /SET status = 'DELIVERY_FAILED'/);
+  assert.doesNotMatch(recovery.text, /UPDATE meeting_report_action_items/);
 }
 
 {
