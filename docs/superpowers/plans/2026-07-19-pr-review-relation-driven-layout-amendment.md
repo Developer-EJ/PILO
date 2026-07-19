@@ -17,6 +17,7 @@
 - semantic relation이 하나도 없는 Flow는 기존 1→2→3 fallback을 사용한다.
 - pin된 node와 기존 저장 geometry·route 보존 정책을 유지한다.
 - synthetic layout edge는 Canvas relation 또는 DB에 저장하지 않는다.
+- 인접 `review_order`는 target이 실제로 오른쪽에 있을 때만 짧은 route를 사용한다.
 - 전체 monorepo 테스트는 실행하지 않는다.
 
 ---
@@ -61,6 +62,8 @@ assert.ok(branch.get("one").x < branch.get("three").x);
 assert.equal(branch.get("two").x, branch.get("three").x);
 assert.equal(branch.get("four").x, branch.get("five").x);
 assert.ok(new Set([...branch.values()].map((node) => node.x)).size < 5);
+const sameRankOrderRoute = branchLayout.routePointsByRelationId.get("order-2-3");
+assert.ok(sameRankOrderRoute.length >= 4);
 ```
 
 semantic relation이 없는 별도 Flow에는 review-order relation만 전달하고 `one.x < two.x < three.x`를 검증한다. 기존 semantic 하단 lane, 다음 Flow 간격, synthetic ID 비노출 assertion은 유지한다.
@@ -143,6 +146,17 @@ children: files.map((file, index) => ({
     ? { layoutOptions: { "elk.layered.layering.layerConstraint": "FIRST" } }
     : {})
 }))
+```
+
+기존 직선 review-order 판정에는 실제 x 방향 조건을 추가한다.
+
+```ts
+return (
+  relation.isReviewOrder &&
+  from.flowKey === to.flowKey &&
+  to.columnIndex === from.columnIndex + 1 &&
+  to.x >= from.x + from.width
+);
 ```
 
 - [ ] **Step 4: focused GREEN을 확인한다**
