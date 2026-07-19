@@ -34,6 +34,7 @@ from app.agent_processor import (
     select_agent_planner_tool_selection,
     select_agent_planner_tools,
     select_agent_planner_tools_for_routing,
+    select_pending_agent_planner_tools_for_routing,
 )
 from app.agent_prompt_security import PromptSecuritySource
 from app.agent_tool_retrieval import (
@@ -982,7 +983,7 @@ def test_llm_router_rejects_unknown_capability_before_planner() -> None:
     assert repository.failed_updates[0][1] == "AGENT_ROUTER_FAILED"
 
 
-def test_llm_router_rejects_domain_capability_mismatch_before_planner() -> None:
+def test_llm_router_normalizes_domains_from_selected_capabilities() -> None:
     tools = [tool_snapshot()]
     repository = FakeAgentRunRepository()
     planner_client = FakePlannerClient()
@@ -998,9 +999,38 @@ def test_llm_router_rejects_domain_capability_mismatch_before_planner() -> None:
         agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
     )
 
-    assert result.reason == "agent_routing_failed"
-    assert planner_client.requests == []
-    assert repository.failed_updates[0][1] == "AGENT_ROUTER_FAILED"
+    assert result.reason == "agent_execution_handoff_completed"
+    assert planner_client.requests[0].routing is not None
+    assert planner_client.requests[0].routing.domains == ("calendar",)
+    assert repository.failed_updates == []
+
+
+def test_routed_multistep_chain_exposes_only_next_unfinished_tool() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="update_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=calendar_list_update_catalog(tools),
+        )
+    )
+    routing = routing_decision(capability_ids=("calendar.events.update",))
+    selected = select_agent_planner_tools_for_routing(job, routing)
+
+    pending = select_pending_agent_planner_tools_for_routing(
+        job,
+        routing,
+        selected,
+        'tool list_calendar_events: {"items":[]}',
+    )
+
+    assert [tool.name for tool in pending] == ["update_calendar_event"]
 
 
 def test_llm_router_rejects_schema_budget_overflow() -> None:
@@ -3381,6 +3411,10 @@ def test_agent_planner_schema_is_strict_closed_schema() -> None:
                 assert_closed_objects(value)
 
     assert_closed_objects(_agent_planner_schema())
+    assert _agent_planner_schema(workflow_incomplete=True)["properties"]["status"]["enum"] == [
+        "tool_candidate",
+        "needs_clarification",
+    ]
 
 
 def test_sql_erd_planner_workflow_constraint_forces_focus_after_inspection(

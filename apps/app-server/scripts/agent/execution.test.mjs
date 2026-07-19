@@ -98,6 +98,16 @@ class FakeDatabaseService {
     this.calls = [];
   }
 
+  async query(text) {
+    this.calls.push({ text, values: [] });
+    if (text.includes("SELECT DISTINCT tool_name")) {
+      return (this.state.completedToolNames ?? []).map((tool_name) => ({
+        tool_name
+      }));
+    }
+    throw new Error(`Unhandled query: ${text}`);
+  }
+
   async queryOne(text, values = []) {
     this.calls.push({ text, values });
 
@@ -168,6 +178,31 @@ class FakeAgentLoggingService {
     };
   }
 
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId,
+    workspaceId,
+    input
+  ) {
+    const step = await this.startNextToolStepIfAbsent(
+      currentUserId,
+      workspaceId,
+      input
+    );
+    return step
+      ? {
+          step,
+          lease: {
+            token: "66666666-6666-4666-8666-666666666666",
+            generation: 1
+          }
+        }
+      : null;
+  }
+
+  async heartbeatExecutionLease() {
+    return true;
+  }
+
   async completeStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "completeStep",
@@ -192,9 +227,14 @@ class FakeAgentLoggingService {
     });
 
     const queuedNextPlannerTurn =
+      input.completeRun !== true &&
       input.waitForUserInput !== true &&
       this.state.toolCallLimitReached !== true;
-    const status = queuedNextPlannerTurn ? "planning" : "waiting_user_input";
+    const status = input.completeRun
+      ? "completed"
+      : queuedNextPlannerTurn
+        ? "planning"
+        : "waiting_user_input";
     return {
       step: {
         id: input.stepId,
@@ -213,7 +253,7 @@ class FakeAgentLoggingService {
         message: queuedNextPlannerTurn
           ? "다음 작업을 확인하고 있습니다."
           : input.waitingMessage,
-        finalAnswer: null,
+        finalAnswer: input.completeRun ? input.waitingMessage : null,
         errorCode: null,
         errorMessage: null,
         expiresAt: "2026-08-09T00:00:00.000Z",
@@ -1024,6 +1064,7 @@ function createService({
   executionStarted = false,
   requestContext = null,
   toolCallLimitReached = false,
+  completedToolNames = [],
   publisherError = null,
   candidateSelectionService = undefined
 } = {}) {
@@ -1042,7 +1083,8 @@ function createService({
       output_json: planner
     },
     executionStarted,
-    toolCallLimitReached
+    toolCallLimitReached,
+    completedToolNames
   };
   const workspaceService = new FakeWorkspaceService();
   const database = new FakeDatabaseService(state);
@@ -1501,14 +1543,55 @@ function formatterMeetingReport(index, overrides = {}) {
 
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "waiting_user_input");
-  assert.equal(result.run.status, "waiting_user_input");
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
   assert.deepEqual(outboxPublisherService.calls, []);
   const completion = loggingService.calls.find(
     (call) => call.method === "completeToolStepAndAdvance"
   );
-  assert.equal(completion.input.waitForUserInput, true);
+  assert.equal(completion.input.completeRun, true);
   assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRouting: {
+        capabilityIds: ["calendar.events.list"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.completeRun, true);
+}
+
+{
+  const { service, loggingService } = createService({
+    completedToolNames: ["list_calendar_events"],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.completeRun, true);
 }
 
 {
