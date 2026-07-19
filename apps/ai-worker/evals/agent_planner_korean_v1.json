@@ -545,9 +545,9 @@
     },
     {
       "name": "search_meeting_transcript",
-      "description": "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
+      "description": "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색합니다. 특정 회의록 범위는 MeetingReport selector로 해소하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
       "riskLevel": "low",
-      "executionMode": "auto",
+      "executionMode": "contextual",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -560,9 +560,37 @@
             "minLength": 1,
             "maxLength": 1000
           },
-          "reportId": {
+          "contextRef": {
             "type": "string",
-            "format": "uuid"
+            "pattern": "^ctx_[0-9a-f]{24}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "TRANSCRIBING",
+              "SUMMARIZING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "roomName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "useSelectedMeetingReportCandidate": {
+            "type": "boolean",
+            "const": true
           }
         }
       }

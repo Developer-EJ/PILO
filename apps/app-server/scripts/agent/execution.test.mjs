@@ -1223,6 +1223,50 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
+  const providerError = "provider raw error must not be shown";
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_report",
+    outputSummary: {
+      report: formatterMeetingReport(8, {
+        status: "FAILED",
+        retryCount: 2,
+        failure: { failedStep: "SUMMARIZING", errorMessage: providerError },
+        sections: [],
+        actionItems: []
+      })
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /생성 실패/);
+  assert.match(answer, /실패 단계: SUMMARIZING/);
+  assert.match(answer, /재시도 2회/);
+  assert.match(answer, /재생성 가능 여부/);
+  assert.doesNotMatch(answer, /provider raw error/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_participants",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      count: 1,
+      participants: [
+        {
+          name: "진호",
+          isActive: false,
+          joinedAt: "2026-07-08T00:00:00.000Z",
+          leftAt: "2026-07-08T01:00:00.000Z"
+        }
+      ]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /진호 · 퇴장 · 입장 2026-07-08 09:00 · 퇴장 2026-07-08 10:00/);
+}
+
+{
   const longSummary = "긴 요약 ".repeat(200);
   const answer = buildAgentReadResultAnswer({
     toolName: "summarize_meeting_report",

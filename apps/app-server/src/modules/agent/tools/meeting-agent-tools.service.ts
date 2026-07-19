@@ -103,7 +103,9 @@ interface ResolvedJoinMeetingInput extends MeetingIdInput {
   recordingConsent?: RecordingConsentInput;
 }
 
-interface SearchMeetingTranscriptInput { query: string; reportId?: string }
+interface SearchMeetingTranscriptInput extends MeetingReportSelectorInput {
+  query: string;
+}
 
 interface ActionItemInput extends ReportIdInput { actionItemId: string }
 
@@ -200,7 +202,7 @@ const JOIN_MEETING_INPUT_FIELDS = [
   ...MEETING_SELECTOR_INPUT_FIELDS,
   "recordingConsent"
 ];
-const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", "reportId"];
+const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", ...REPORT_SELECTOR_INPUT_FIELDS];
 const ACTION_ITEM_INPUT_FIELDS = ["reportId", "actionItemId"];
 const UPDATE_ACTION_ITEM_INPUT_FIELDS = [
   "actionItemContextRef",
@@ -733,14 +735,36 @@ export class MeetingAgentToolsService {
   private searchMeetingTranscriptDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "search_meeting_transcript",
-      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
+      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색합니다. 특정 회의록 범위는 MeetingReport selector로 해소하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
       riskLevel: "low",
-      executionMode: "auto",
+      executionMode: "contextual",
       requiresGroundedAnswer: true,
-      inputSchema: { type: "object", required: ["query"], additionalProperties: false, properties: { query: { type: "string", minLength: 1, maxLength: 1000 }, reportId: { type: "string", format: "uuid" } } },
+      inputSchema: {
+        type: "object",
+        required: ["query"],
+        additionalProperties: false,
+        properties: {
+          query: { type: "string", minLength: 1, maxLength: 1000 },
+          ...this.meetingReportSelectorSchema()
+        }
+      },
       validateInput: (input) => this.validateSearchTranscriptInput(input),
+      prepareExecution: async (context, input) => {
+        const draft = this.validateSearchTranscriptInput(input);
+        return this.hasMeetingReportSelector(draft)
+          ? this.prepareMeetingReportSelectorExecution(context, draft)
+          : { kind: "execute" as const };
+      },
       execute: async (context, input) => {
-        const sources = await this.meetingTranscriptRagService.search(context.currentUserId, context.workspaceId, this.validateSearchTranscriptInput(input));
+        const draft = this.validateSearchTranscriptInput(input);
+        const reportId = this.hasMeetingReportSelector(draft)
+          ? (await this.requireResolvedReport(context, draft)).resourceId
+          : undefined;
+        const sources = await this.meetingTranscriptRagService.search(
+          context.currentUserId,
+          context.workspaceId,
+          { query: draft.query, ...(reportId ? { reportId } : {}) }
+        );
         return { outputSummary: { status: "grounding_queued", sourceCount: sources.length, sourceIds: sources.map((source) => source.sourceId) }, resourceRefs: sources.map((source) => ({ domain: "meeting", resourceType: "meeting_report", resourceId: source.reportId })), status: "grounding_queued" };
       }
     };
@@ -1751,6 +1775,7 @@ export class MeetingAgentToolsService {
       meetingId: report.meetingId,
       status: report.status,
       createdAt: report.createdAt,
+      retryCount: report.retryCount,
       sections: this.buildSections(report, options),
       actionItems: this.buildActionItems(report.actionItemCandidates),
       transcript: this.buildTranscriptSummary(report)
@@ -2657,7 +2682,29 @@ export class MeetingAgentToolsService {
     this.assertOnlyAllowedFields(object, SEARCH_TRANSCRIPT_INPUT_FIELDS, "Meeting transcript search input");
     const query = this.boundText(typeof object.query === "string" ? object.query : null, 1000);
     if (query === null) throw badRequest("query must be a non-empty string");
-    return { query, reportId: object.reportId === undefined ? undefined : this.requireReportId(object.reportId) };
+    return {
+      query,
+      ...this.validateMeetingReportSelectorInput({
+        contextRef: object.contextRef,
+        from: object.from,
+        to: object.to,
+        status: object.status,
+        roomName: object.roomName,
+        useSelectedMeetingReportCandidate:
+          object.useSelectedMeetingReportCandidate
+      })
+    };
+  }
+
+  private hasMeetingReportSelector(input: MeetingReportSelectorInput): boolean {
+    return (
+      input.contextRef !== undefined ||
+      input.from !== undefined ||
+      input.to !== undefined ||
+      input.status !== undefined ||
+      input.roomName !== undefined ||
+      input.useSelectedMeetingReportCandidate === true
+    );
   }
 
   private validateActionItemInput(input: unknown): ActionItemInput {

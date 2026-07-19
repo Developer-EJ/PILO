@@ -575,7 +575,7 @@ function formatMeetingParticipants(
   }
 
   const lines = participants
-    .map((participant) => formatMeetingParticipant(participant))
+    .map((participant) => formatMeetingParticipant(participant, input.timezone))
     .filter((line): line is string => line !== null)
     .slice(0, MAX_LIST_ITEMS);
   if (lines.length === 0) {
@@ -590,13 +590,25 @@ function formatMeetingParticipants(
   return answer.join("\n");
 }
 
-function formatMeetingParticipant(participant: AgentJsonObject): string | null {
+function formatMeetingParticipant(
+  participant: AgentJsonObject,
+  timezone: string | undefined
+): string | null {
   const name = boundText(participant.name, MAX_CALENDAR_TITLE_LENGTH);
   if (!name) {
     return null;
   }
-
-  return `${name} · ${participant.isActive === true ? "참여 중" : "퇴장"}`;
+  const joinedAt = formatIsoDateTime(participant.joinedAt, timezone);
+  const leftAt = formatIsoDateTime(participant.leftAt, timezone);
+  const status = participant.isActive === true ? "참여 중" : "퇴장";
+  return [
+    name,
+    status,
+    joinedAt ? `입장 ${joinedAt}` : null,
+    leftAt ? `퇴장 ${leftAt}` : null
+  ]
+    .filter((value): value is string => value !== null)
+    .join(" · ");
 }
 
 function formatCalendarUpdateClarification(
@@ -781,6 +793,11 @@ function formatMeetingReportList(
     const createdAt = formatIsoDateTime(report.createdAt, input.timezone);
     const status = formatMeetingStatus(report.status);
     answer.push(`- ${createdAt ? `${createdAt} · ` : ""}${status}`);
+
+    if (readString(report.status) === "FAILED") {
+      answer.push(`  ${formatUnavailableMeetingReport(report)}`);
+      continue;
+    }
 
     for (const key of sectionKeys) {
       answer.push(
@@ -984,9 +1001,17 @@ function formatUnavailableMeetingReport(report: AgentJsonObject): string {
   if (status === "FAILED") {
     const failure = isPlainObject(report.failure) ? report.failure : null;
     const failedStep = failure ? readString(failure.failedStep) : null;
-    return failedStep
-      ? `회의록 생성에 실패했습니다. 실패 단계: ${failedStep}`
-      : "회의록 생성에 실패했습니다.";
+    const retryCount = readCount(report.retryCount);
+    const retry = retryCount === null ? null : `재시도 ${retryCount}회`;
+    return [
+      failedStep
+        ? `회의록 생성에 실패했습니다. 실패 단계: ${failedStep}`
+        : "회의록 생성에 실패했습니다.",
+      retry,
+      "재생성 가능 여부를 확인한 뒤 요청할 수 있습니다."
+    ]
+      .filter((value): value is string => value !== null)
+      .join(" ");
   }
 
   return "표시할 회의록 내용이 없습니다.";

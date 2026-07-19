@@ -14,6 +14,7 @@ import {
   buildAgentToolInventory,
   type AgentToolInventorySnapshot
 } from "./agent-tool-inventory";
+import { AgentDomainFeatureFlagService } from "./agent-domain-feature-flag.service";
 import type {
   AgentRunRequestContext,
   AgentToolDefinition
@@ -30,7 +31,8 @@ export class AgentToolRegistryService {
     sqlErdAgentToolsService?: SqlErdAgentToolsService,
     prReviewAgentToolsService?: PrReviewAgentToolsService,
     canvasAgentDelegationToolsService?: CanvasAgentDelegationToolsService,
-    driveAgentToolsService?: DriveAgentToolsService
+    driveAgentToolsService?: DriveAgentToolsService,
+    private readonly domainFeatureFlags = new AgentDomainFeatureFlagService()
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -110,8 +112,9 @@ export class AgentToolRegistryService {
     requestContext: AgentRunRequestContext
   ): boolean {
     return (
-      !definition.contextRequirement ||
-      definition.contextRequirement.surface === requestContext?.surface
+      this.domainFeatureFlags.isToolEnabled(definition.name) &&
+      (!definition.contextRequirement ||
+        definition.contextRequirement.surface === requestContext?.surface)
     );
   }
 
