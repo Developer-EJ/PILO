@@ -98,6 +98,8 @@ assert.match(boardDataHook, /listBoardColumns/);
 assert.match(boardDataHook, /listBoardIssues/);
 assert.match(boardDataHook, /BOARD_ISSUES_PAGE_LIMIT\s*=\s*100/);
 assert.match(boardDataHook, /loadAllBoardIssuePages/);
+assert.match(boardDataHook, /onFirstPage:[\s\S]*setBoardStatus\("success"\)/);
+assert.match(boardDataHook, /createBoardIssueLoadPublicationGuard/);
 assert.match(boardDataHook, /getBoardFilterOptions/);
 assert.match(boardDataHook, /Promise\.all/);
 assert.match(boardDataHook, /refreshBoard/);

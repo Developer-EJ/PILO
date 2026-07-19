@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createBoardApiClient } from "@/features/board/api/client";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/features/board/utils/board-request-coordinator";
 import { selectBoardProjectRepositoryId } from "@/features/board/utils/board-project-repository";
 import { loadAllBoardIssuePages } from "@/features/board/utils/board-issue-page-loader";
+import { createBoardIssueLoadPublicationGuard } from "@/features/board/utils/board-issue-load-publication-guard";
 import type {
   BoardColumnPayload,
   BoardDetailPayload,
@@ -111,7 +112,6 @@ export function useBoardWorkspaceData({
       loaded: 0,
       total: 0
     });
-  const boardIssueLoadGeneration = useRef(0);
   const boardClient = useMemo(
     () => createBoardApiClient({ accessToken: normalizedAccessToken }),
     [normalizedAccessToken]
@@ -122,6 +122,10 @@ export function useBoardWorkspaceData({
   );
   const boardRequestCoordinator = useMemo(
     () => createBoardRequestCoordinator(),
+    []
+  );
+  const boardIssueLoadPublicationGuard = useMemo(
+    () => createBoardIssueLoadPublicationGuard(),
     []
   );
 
@@ -172,10 +176,7 @@ export function useBoardWorkspaceData({
     }
 
     const parsedIssueQuery = JSON.parse(issueQueryKey) as ListBoardIssuesQuery;
-    const issueLoadGeneration = boardIssueLoadGeneration.current + 1;
-    boardIssueLoadGeneration.current = issueLoadGeneration;
-    const canPublishIssues = () =>
-      boardIssueLoadGeneration.current === issueLoadGeneration;
+    const canPublishIssues = boardIssueLoadPublicationGuard.begin();
     let latestIssues: BoardIssueCardPayload[] = [];
     let latestIssuesMeta: BoardPaginatedPayload<BoardIssueCardPayload>["meta"] | null =
       null;
@@ -210,6 +211,7 @@ export function useBoardWorkspaceData({
             issues: latestIssues,
             issuesMeta: latestIssuesMeta
           });
+          setBoardStatus("success");
           setIssuesLoadProgress({
             error: null,
             isLoading: firstPage.meta.total > latestIssues.length,
@@ -266,6 +268,7 @@ export function useBoardWorkspaceData({
     };
   }, [
     boardClient,
+    boardIssueLoadPublicationGuard,
     canLoad,
     issueQueryKey,
     normalizedBoardId,
@@ -331,7 +334,7 @@ export function useBoardWorkspaceData({
   const refreshBoard = useCallback(async () => {
     if (!canLoad || !normalizedBoardId) {
       boardRequestCoordinator.invalidate();
-      boardIssueLoadGeneration.current += 1;
+      boardIssueLoadPublicationGuard.invalidate();
       setBoardError(null);
       return null;
     }
@@ -358,6 +361,7 @@ export function useBoardWorkspaceData({
     return null;
   }, [
     boardRequestCoordinator,
+    boardIssueLoadPublicationGuard,
     canLoad,
     loadBoardData,
     normalizedBoardId
@@ -395,6 +399,7 @@ export function useBoardWorkspaceData({
       }
 
       const mutation = boardRequestCoordinator.beginMutation();
+      boardIssueLoadPublicationGuard.invalidate();
       setBoardError(null);
       setBoardState((current) => ({
         ...current,
@@ -433,6 +438,7 @@ export function useBoardWorkspaceData({
     },
     [
       boardClient,
+      boardIssueLoadPublicationGuard,
       boardRequestCoordinator,
       boardState,
       canLoad,
@@ -449,6 +455,7 @@ export function useBoardWorkspaceData({
       }
 
       const mutation = boardRequestCoordinator.beginMutation();
+      boardIssueLoadPublicationGuard.invalidate();
       setBoardError(null);
 
       try {
@@ -497,6 +504,7 @@ export function useBoardWorkspaceData({
     },
     [
       boardClient,
+      boardIssueLoadPublicationGuard,
       boardRequestCoordinator,
       canLoad,
       normalizedBoardId,
@@ -547,7 +555,7 @@ export function useBoardWorkspaceData({
     async function loadSelectedBoard() {
       if (!canLoad || !normalizedBoardId) {
         boardRequestCoordinator.invalidate();
-        boardIssueLoadGeneration.current += 1;
+        boardIssueLoadPublicationGuard.invalidate();
         setBoardState(emptyBoardState);
         setBoardStatus("idle");
         setBoardError(null);
@@ -576,9 +584,11 @@ export function useBoardWorkspaceData({
     return () => {
       active = false;
       boardRequestCoordinator.invalidate();
+      boardIssueLoadPublicationGuard.invalidate();
     };
   }, [
     boardRequestCoordinator,
+    boardIssueLoadPublicationGuard,
     canLoad,
     loadBoardData,
     normalizedBoardId
