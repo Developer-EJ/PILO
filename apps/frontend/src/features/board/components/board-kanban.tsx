@@ -10,6 +10,10 @@ import type {
   BoardDetailPayload,
   BoardIssueCardPayload
 } from "@/features/board/types";
+import {
+  orderBoardColumns,
+  resolveMobileBoardColumnId
+} from "@/features/board/utils/board-presentation";
 import { cn } from "@/lib/utils";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
@@ -45,6 +49,52 @@ function columnToneClassName(index: number) {
   return tones[index % tones.length];
 }
 
+function columnSurfaceClassName(index: number) {
+  const tones = [
+    "bg-violet-50/35",
+    "bg-amber-50/35",
+    "bg-red-50/25",
+    "bg-emerald-50/30",
+    "bg-slate-50/70"
+  ];
+
+  return tones[index % tones.length];
+}
+
+function BoardKanbanSkeleton() {
+  const lane = (
+    <article className="lane min-h-[calc(100vh-252px)] rounded-xl border border-slate-200 bg-white/60">
+      <div className="lane-header flex min-h-16 items-center justify-between gap-2 border-b border-slate-200 px-3 py-3">
+        <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
+        <div className="h-7 w-8 animate-pulse rounded-full bg-slate-200" />
+      </div>
+      <div className="lane-stack grid gap-2.5 p-3">
+        <div className="h-36 animate-pulse rounded-lg bg-slate-200" />
+        <div className="h-36 animate-pulse rounded-lg bg-slate-200" />
+      </div>
+    </article>
+  );
+
+  return (
+    <div className="kanban-scroll overflow-x-auto p-4 sm:p-6">
+      <div className="mb-3 flex gap-2 overflow-hidden md:hidden">
+        {[0, 1, 2].map((index) => (
+          <div
+            key={index}
+            className="h-9 w-24 shrink-0 animate-pulse rounded-lg bg-slate-200"
+          />
+        ))}
+      </div>
+      <div className="md:hidden">{lane}</div>
+      <div className="kanban-board hidden md:grid min-w-[80rem] grid-flow-col auto-cols-[minmax(16rem,1fr)] gap-3.5">
+        {[0, 1, 2, 3, 4].map((index) => (
+          <div key={index}>{lane}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function BoardKanban({
   board,
   boardStatus,
@@ -57,10 +107,12 @@ export function BoardKanban({
 }: BoardKanbanProps) {
   const [draggedIssue, setDraggedIssue] = useState<DraggedIssue | null>(null);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
+  const [mobileColumnId, setMobileColumnId] = useState("");
+  const orderedColumns = useMemo(() => orderBoardColumns(columns), [columns]);
   const issuesByColumnId = useMemo(() => {
     const nextIssuesByColumnId = new Map<string, BoardIssueCardPayload[]>();
 
-    columns.forEach((column) => {
+    orderedColumns.forEach((column) => {
       nextIssuesByColumnId.set(column.id, []);
     });
 
@@ -71,7 +123,14 @@ export function BoardKanban({
     });
 
     return nextIssuesByColumnId;
-  }, [columns, issues]);
+  }, [issues, orderedColumns]);
+  const resolvedMobileColumnId = resolveMobileBoardColumnId(
+    orderedColumns,
+    mobileColumnId
+  );
+  const mobileColumn = orderedColumns.find(
+    ({ id }) => id === resolvedMobileColumnId
+  );
 
   function readDraggedIssue(event: React.DragEvent): DraggedIssue | null {
     if (draggedIssue) {
@@ -115,36 +174,123 @@ export function BoardKanban({
     });
   }
 
-  if (boardStatus === "loading") {
+  function renderColumn(
+    column: BoardColumnPayload,
+    index: number,
+    enableDrop: boolean
+  ) {
+    const columnIssues = issuesByColumnId.get(column.id) ?? [];
+    const cursorAttributes = enableDrop
+      ? pageCursorTargetAttributes({
+          id: column.id,
+          label: column.name,
+          type: "board_column"
+        })
+      : {};
+
     return (
-      <div className="kanban-scroll overflow-x-auto p-6">
-        <div className="kanban-board grid min-w-[1060px] grid-cols-5 gap-3.5">
-          {[0, 1, 2, 3, 4].map((index) => (
-            <article
-              key={index}
-              className="lane min-h-[calc(100vh-252px)] rounded-2xl border border-slate-200 bg-white/50"
-            >
-              <div className="lane-header flex min-h-[81px] items-center justify-between gap-2 border-b border-slate-200 px-3 py-3">
-                <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
-                <div className="h-9 w-8 animate-pulse rounded-full bg-slate-200" />
-              </div>
-              <div className="lane-stack grid gap-2.5 p-3">
-                <div className="h-36 animate-pulse rounded-[14px] bg-slate-200" />
-                <div className="h-36 animate-pulse rounded-[14px] bg-slate-200" />
-              </div>
-            </article>
-          ))}
+      <article
+        {...cursorAttributes}
+        id={enableDrop ? (column.normalizedName ?? column.id) : undefined}
+        key={`${enableDrop ? "desktop" : "mobile"}-${column.id}`}
+        className={cn(
+          "lane flex min-h-[calc(100vh-252px)] min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 transition",
+          columnSurfaceClassName(index),
+          enableDrop &&
+            dragOverColumnId === column.id &&
+            "border-violet-300 bg-violet-50/60 ring-2 ring-violet-100"
+        )}
+        onDragLeave={
+          enableDrop
+            ? (event) => {
+                const nextTarget = event.relatedTarget;
+                if (
+                  !(nextTarget instanceof Node) ||
+                  !event.currentTarget.contains(nextTarget)
+                ) {
+                  setDragOverColumnId(null);
+                }
+              }
+            : undefined
+        }
+        onDragOver={
+          enableDrop
+            ? (event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDragOverColumnId(column.id);
+              }
+            : undefined
+        }
+        onDrop={enableDrop ? (event) => handleDrop(event, column.id) : undefined}
+        role="listitem"
+      >
+        <header className="lane-header flex min-h-16 items-center justify-between gap-2 border-b border-slate-200 bg-white/65 px-3 py-3">
+          <div className="lane-name flex min-w-0 items-center gap-2">
+            <span
+              className={cn(
+                "dot size-2.5 shrink-0 rounded-full",
+                columnToneClassName(index)
+              )}
+            />
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-bold leading-6">
+                {column.name}
+              </h2>
+              <span className="block truncate text-xs font-medium text-slate-500">
+                ProjectV2 Status
+              </span>
+            </div>
+          </div>
+          <span className="lane-count inline-flex h-7 min-w-7 items-center justify-center rounded-full border border-slate-200 bg-white px-2 font-mono text-xs font-bold text-slate-600">
+            {columnIssues.length}
+          </span>
+        </header>
+
+        <div className="lane-stack grid gap-2.5 p-3">
+          {columnIssues.length ? (
+            columnIssues.map((issue) => (
+              <BoardIssueCard
+                key={issue.id}
+                issue={issue}
+                moving={movingIssueId === issue.id}
+                selected={selectedIssueId === issue.id}
+                onOpenIssue={onOpenIssue}
+                onDragEnd={() => {
+                  setDraggedIssue(null);
+                  setDragOverColumnId(null);
+                }}
+                onDragStart={(dragIssue) => {
+                  setDraggedIssue({
+                    issueId: dragIssue.id,
+                    previousColumnId: dragIssue.columnId
+                  });
+                }}
+              />
+            ))
+          ) : (
+            <div className="empty-slot grid min-h-28 place-items-center rounded-lg border border-dashed border-slate-300 bg-white/50 px-3 text-center text-sm font-semibold text-slate-500">
+              <span className="inline-flex items-center gap-1">
+                <GitPullRequestArrow className="size-4" />
+                표시할 이슈가 없습니다.
+              </span>
+            </div>
+          )}
         </div>
-      </div>
+      </article>
     );
+  }
+
+  if (boardStatus === "loading") {
+    return <BoardKanbanSkeleton />;
   }
 
   if (!board) {
     return (
-      <section className="kanban-scroll p-6">
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-8 text-center">
-          <h2 className="text-[27px] font-bold">구성된 Board가 없습니다</h2>
-          <p className="mt-2 text-[21px] font-medium text-slate-500">
+      <section className="kanban-scroll p-4 sm:p-6">
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-6 text-center">
+          <h2 className="text-base font-semibold">구성된 Board가 없습니다</h2>
+          <p className="mt-1 text-sm text-slate-500">
             GitHub에서 저장소와 ProjectV2를 선택하면 Board cache를 구성합니다.
           </p>
         </div>
@@ -152,12 +298,12 @@ export function BoardKanban({
     );
   }
 
-  if (!columns.length) {
+  if (!orderedColumns.length) {
     return (
-      <section className="kanban-scroll p-6">
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-8 text-center">
-          <h2 className="text-[27px] font-bold">컬럼이 없습니다</h2>
-          <p className="mt-2 text-[21px] font-medium text-slate-500">
+      <section className="kanban-scroll p-4 sm:p-6">
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-6 text-center">
+          <h2 className="text-base font-semibold">컬럼이 없습니다</h2>
+          <p className="mt-1 text-sm text-slate-500">
             GitHub ProjectV2 Status field를 동기화한 뒤 Board를 새로고침하세요.
           </p>
         </div>
@@ -166,7 +312,11 @@ export function BoardKanban({
   }
 
   return (
-    <section id="kanban" className="kanban-scroll overflow-x-auto p-6" aria-label="보드 칸반">
+    <section
+      id="kanban"
+      className="kanban-scroll overflow-x-auto p-4 sm:p-6"
+      aria-label="보드 칸반"
+    >
       <div className="mb-3 flex justify-end">
         <Button
           type="button"
@@ -174,7 +324,9 @@ export function BoardKanban({
           size="sm"
           className="h-[48px] text-[19.2px]"
           disabled={!board.repository.htmlUrl}
-          onClick={() => window.open(board.repository.htmlUrl, "_blank", "noopener")}
+          onClick={() =>
+            window.open(board.repository.htmlUrl, "_blank", "noopener")
+          }
         >
           <ExternalLink />
           저장소
@@ -182,100 +334,54 @@ export function BoardKanban({
       </div>
 
       <div
-        className="kanban-board grid min-w-[1060px] gap-3.5"
-        style={{
-          gridTemplateColumns: `repeat(${Math.max(columns.length, 1)}, minmax(196px, 1fr))`
-        }}
+        className="mb-3 flex max-w-full gap-2 overflow-x-auto pb-1 md:hidden"
+        role="tablist"
+        aria-label="Board 컬럼"
       >
-        {columns.map((column, index) => {
-          const columnIssues = issuesByColumnId.get(column.id) ?? [];
+        {orderedColumns.map((column) => {
+          const issueCount = issuesByColumnId.get(column.id)?.length ?? 0;
 
           return (
-            <article
-              {...pageCursorTargetAttributes({
-                id: column.id,
-                label: column.name,
-                type: "board_column"
-              })}
-              id={column.normalizedName ?? column.id}
+            <button
               key={column.id}
+              type="button"
+              role="tab"
+              aria-selected={resolvedMobileColumnId === column.id}
               className={cn(
-                "lane flex min-h-[calc(100vh-252px)] flex-col rounded-2xl border border-slate-200 bg-white/50 transition",
-                dragOverColumnId === column.id &&
-                  "border-violet-300 bg-violet-50/60 ring-2 ring-violet-100"
+                "inline-flex h-9 max-w-48 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600",
+                resolvedMobileColumnId === column.id &&
+                  "border-violet-300 bg-violet-50 text-violet-700"
               )}
-              onDragLeave={(event) => {
-                const nextTarget = event.relatedTarget;
-                if (
-                  !(nextTarget instanceof Node) ||
-                  !event.currentTarget.contains(nextTarget)
-                ) {
-                  setDragOverColumnId(null);
-                }
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                setDragOverColumnId(column.id);
-              }}
-              onDrop={(event) => handleDrop(event, column.id)}
-              role="listitem"
+              onClick={() => setMobileColumnId(column.id)}
             >
-              <header className="lane-header flex min-h-[81px] items-center justify-between gap-2 border-b border-slate-200 px-3 py-3">
-                <div className="lane-name flex min-w-0 items-center gap-2">
-                  <span
-                    className={cn(
-                      "dot size-[9px] shrink-0 rounded-full",
-                      columnToneClassName(index)
-                    )}
-                  />
-                  <div className="min-w-0">
-                    <h2 className="truncate text-[21.75px] font-bold leading-7">
-                      {column.name}
-                    </h2>
-                    <span className="block truncate text-[17.25px] font-medium text-slate-400">
-                      ProjectV2 Status
-                    </span>
-                  </div>
-                </div>
-                <span className="lane-count inline-flex h-9 min-w-9 items-center justify-center rounded-full border border-slate-200 bg-white px-2 font-mono text-[16.5px] font-bold text-slate-500">
-                  {columnIssues.length}
-                </span>
-              </header>
-
-              <div className="lane-stack grid gap-2.5 p-3">
-                {columnIssues.length ? (
-                  columnIssues.map((issue) => (
-                    <BoardIssueCard
-                      key={issue.id}
-                      issue={issue}
-                      moving={movingIssueId === issue.id}
-                      selected={selectedIssueId === issue.id}
-                      onOpenIssue={onOpenIssue}
-                      onDragEnd={() => {
-                        setDraggedIssue(null);
-                        setDragOverColumnId(null);
-                      }}
-                      onDragStart={(dragIssue) => {
-                        setDraggedIssue({
-                          issueId: dragIssue.id,
-                          previousColumnId: dragIssue.columnId
-                        });
-                      }}
-                    />
-                  ))
-                ) : (
-                  <div className="empty-slot grid min-h-[129px] place-items-center rounded-[14px] border border-dashed border-slate-300 bg-white/50 px-3 text-center text-[18px] font-bold text-slate-400">
-                    <span className="inline-flex items-center gap-1">
-                      <GitPullRequestArrow className="size-4" />
-                      표시할 이슈가 없습니다.
-                    </span>
-                  </div>
-                )}
-              </div>
-            </article>
+              <span className="truncate">{column.name}</span>
+              <span className="font-mono text-xs">{issueCount}</span>
+            </button>
           );
         })}
+      </div>
+
+      <div className="md:hidden" role="list">
+        {mobileColumn
+          ? renderColumn(
+              mobileColumn,
+              orderedColumns.findIndex(({ id }) => id === mobileColumn.id),
+              false
+            )
+          : null}
+      </div>
+
+      <div
+        className="kanban-board hidden md:grid grid-flow-col auto-cols-[minmax(16rem,1fr)] gap-3.5"
+        style={{
+          gridAutoColumns: "minmax(16rem, 1fr)",
+          minWidth: `max(100%, ${Math.max(orderedColumns.length, 1) * 16}rem)`
+        }}
+        role="list"
+      >
+        {orderedColumns.map((column, index) =>
+          renderColumn(column, index, true)
+        )}
       </div>
     </section>
   );
