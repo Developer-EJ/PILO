@@ -80,6 +80,59 @@ test("started reconciliation keeps the active session but suppresses the sharer'
   assert.equal(mine.shouldToast, false);
 });
 
+test("current-session reconciliation reuses the once-per-session toast policy", async () => {
+  const { reconcileCurrentScreenShare } = await loadPurePolicy(
+    provider,
+    "screen-share-runtime-pure",
+  );
+  const session = screenShareSession("session-current");
+  const first = reconcileCurrentScreenShare({
+    currentUserId: "user-3",
+    notifiedSessionIds: new Set(),
+    session,
+  });
+  const duplicate = reconcileCurrentScreenShare({
+    currentUserId: "user-3",
+    notifiedSessionIds: first.notifiedSessionIds,
+    session,
+  });
+  const empty = reconcileCurrentScreenShare({
+    currentUserId: "user-3",
+    notifiedSessionIds: new Set(),
+    session: null,
+  });
+
+  assert.equal(first.activeSession, session);
+  assert.equal(first.shouldToast, true);
+  assert.equal(duplicate.shouldToast, false);
+  assert.deepEqual(empty, {
+    activeSession: null,
+    notifiedSessionIds: empty.notifiedSessionIds,
+    shouldToast: false,
+  });
+});
+
+test("current-session polling is bounded to an inactive workspace lifecycle", () => {
+  const pollingStart = provider.indexOf("const schedulePoll = () => {");
+  const pollingEnd = provider.indexOf("\n\n  useEffect(() => {", pollingStart);
+  const polling = provider.slice(pollingStart, pollingEnd);
+
+  assert.notEqual(pollingStart, -1);
+  assert.notEqual(pollingEnd, -1);
+  assert.match(provider, /const reconcileCurrentSession[\s\S]*reconcileCurrentScreenShare/);
+  assert.match(
+    provider,
+    /useEffect\(\(\) => \{\s*if \(activeSession \|\| !workspaceId\) return;[\s\S]*setTimeout\(\(\) => \{[\s\S]*\}, 5_000\)/,
+  );
+  assert.match(provider, /let timeoutId: ReturnType<typeof setTimeout> \| null = null/);
+  assert.match(
+    polling,
+    /const attempt = \+\+reloadAttemptRef\.current;[\s\S]*isCurrentScreenShareRequest/,
+  );
+  assert.match(polling, /\.then\([\s\S]*schedulePoll\(\)[\s\S]*\.catch\([\s\S]*schedulePoll\(\)/);
+  assert.match(polling, /return \(\) => \{\s*cancelled = true;[\s\S]*clearTimeout\(timeoutId\)/);
+});
+
 test("viewing guard rejects the current user's active share", async () => {
   const { canStartViewingScreenShare } = await loadPurePolicy(
     provider,

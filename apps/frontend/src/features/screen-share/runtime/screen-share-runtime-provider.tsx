@@ -80,6 +80,29 @@ export function reconcileStartedScreenShare({
   };
 }
 
+export function reconcileCurrentScreenShare({
+  currentUserId,
+  notifiedSessionIds,
+  session
+}: {
+  currentUserId: string | null;
+  notifiedSessionIds: Set<string>;
+  session: RuntimePolicySession | null;
+}) {
+  if (!session) {
+    return {
+      activeSession: null,
+      notifiedSessionIds,
+      shouldToast: false
+    };
+  }
+  return reconcileStartedScreenShare({
+    currentUserId,
+    notifiedSessionIds,
+    session
+  });
+}
+
 export function reconcileEndedScreenShare({
   activeSession,
   sessionId,
@@ -501,6 +524,20 @@ export function ScreenShareRuntimeProvider({
     dispatch({ type });
   }, []);
 
+  const reconcileCurrentSession = useCallback(
+    (session: PublicScreenShareSession | null) => {
+      const result = reconcileCurrentScreenShare({
+        currentUserId,
+        notifiedSessionIds: notifiedSessionIdsRef.current,
+        session
+      });
+      notifiedSessionIdsRef.current = result.notifiedSessionIds;
+      setActiveSession(result.activeSession);
+      return result;
+    },
+    [currentUserId]
+  );
+
   const reloadCurrent = useCallback(() => {
     if (!workspaceId) {
       setActiveSession(null);
@@ -517,28 +554,79 @@ export function ScreenShareRuntimeProvider({
           currentWorkspaceId: workspaceIdRef.current,
           requestWorkspaceId
         })) {
-          setActiveSession(session);
+          const result = reconcileCurrentSession(session);
+          if (result.shouldToast && session) {
+            toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
+              action: {
+                label: "시청하기",
+                onClick: () => startViewingRef.current(session.id)
+              }
+            });
+          }
         }
       })
       .catch(() => undefined);
-  }, [api, workspaceId]);
+  }, [api, reconcileCurrentSession, workspaceId]);
 
   useEffect(() => {
     void reloadCurrent();
   }, [reloadCurrent]);
 
   useEffect(() => {
+    if (activeSession || !workspaceId) return;
+
+    const requestWorkspaceId = workspaceId;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const schedulePoll = () => {
+      if (cancelled) return;
+      const attempt = ++reloadAttemptRef.current;
+      timeoutId = setTimeout(() => {
+        void api
+          .getCurrent(requestWorkspaceId)
+          .then(({ session }) => {
+            if (!isCurrentScreenShareRequest({
+              attempt,
+              currentAttempt: reloadAttemptRef.current,
+              currentWorkspaceId: workspaceIdRef.current,
+              requestWorkspaceId
+            })) {
+              if (activeSessionRef.current === null) schedulePoll();
+              return;
+            }
+            if (cancelled) {
+              return;
+            }
+            const result = reconcileCurrentSession(session);
+            if (result.shouldToast && session) {
+              toast(`${session.sharer.displayName}님이 화면 공유를 시작했어요`, {
+                action: {
+                  label: "시청하기",
+                  onClick: () => startViewingRef.current(session.id)
+                }
+              });
+            }
+            if (!session) schedulePoll();
+          })
+          .catch(() => {
+            schedulePoll();
+          });
+      }, 5_000);
+    };
+
+    schedulePoll();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [activeSession, api, reconcileCurrentSession, workspaceId]);
+
+  useEffect(() => {
     if (!socket || !workspaceId) return;
 
     const handleStarted = (payload: StartedPayload) => {
       reloadAttemptRef.current += 1;
-      const result = reconcileStartedScreenSharePayload({
-        currentUserId,
-        notifiedSessionIds: notifiedSessionIdsRef.current,
-        payload
-      });
-      notifiedSessionIdsRef.current = result.notifiedSessionIds;
-      setActiveSession(result.activeSession);
+      const result = reconcileCurrentSession(payload.session);
       if (result.shouldToast) {
         toast(`${payload.session.sharer.displayName}님이 화면 공유를 시작했어요.`, {
           action: {
@@ -569,7 +657,7 @@ export function ScreenShareRuntimeProvider({
       socket.off("workspace-screen-share:started", handleStarted);
       socket.off("workspace-screen-share:ended", handleEnded);
     };
-  }, [currentUserId, reloadCurrent, socket, stopViewerResource, workspaceId]);
+  }, [reconcileCurrentSession, reloadCurrent, socket, stopViewerResource, workspaceId]);
 
   useEffect(() => {
     const previousWorkspaceId = previousWorkspaceIdRef.current;
