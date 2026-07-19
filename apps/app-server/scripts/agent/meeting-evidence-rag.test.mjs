@@ -8,6 +8,14 @@ const {
 const {
   AgentGroundedAnswerService
 } = require("../../dist/modules/agent/agent-grounded-answer.service.js");
+const {
+  EmbeddingTemporarilyUnavailableError,
+  embedGroundingQuery
+} = require("../../dist/modules/agent/grounding/query-embedding.js");
+const {
+  meetingRagMinimumSimilarity,
+  passesRelevanceThreshold
+} = require("../../dist/modules/agent/grounding/relevance-policy.js");
 
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -16,6 +24,42 @@ const TRANSCRIPT_ID = "55555555-5555-4555-8555-555555555555";
 const ACTIVITY_ID = "66666666-6666-4666-8666-666666666666";
 const SECOND_TRANSCRIPT_ID = "77777777-7777-4777-8777-777777777777";
 const SECOND_ACTIVITY_ID = "88888888-8888-4888-8888-888888888888";
+
+{
+  const previousThreshold = process.env.MEETING_RAG_MIN_SIMILARITY;
+  process.env.MEETING_RAG_MIN_SIMILARITY = "1.2";
+  try {
+    assert.throws(() => meetingRagMinimumSimilarity(), /between 0 and 1/);
+    assert.equal(passesRelevanceThreshold(0.55, 0.55), true);
+    assert.equal(passesRelevanceThreshold(0.549, 0.55), false);
+  } finally {
+    if (previousThreshold === undefined) delete process.env.MEETING_RAG_MIN_SIMILARITY;
+    else process.env.MEETING_RAG_MIN_SIMILARITY = previousThreshold;
+  }
+}
+
+{
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  globalThis.fetch = async () => {
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    throw error;
+  };
+  process.env.OPENAI_API_KEY = "test-key";
+  try {
+    await assert.rejects(
+      () => embedGroundingQuery("배포 구조"),
+      (error) =>
+        error instanceof EmbeddingTemporarilyUnavailableError &&
+        error.code === "EMBEDDING_TEMPORARILY_UNAVAILABLE"
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+}
 
 class FakeDatabase {
   constructor({ transcripts, activities, duplicatePairs = [] }) {

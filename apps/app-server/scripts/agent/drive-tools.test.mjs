@@ -8,11 +8,25 @@ const { DriveAgentToolsService } = require(
 const { DocumentSearchService } = require(
   "../../dist/modules/drive/document-search.service.js"
 );
+const {
+  driveRagMinimumSimilarity
+} = require("../../dist/modules/agent/grounding/relevance-policy.js");
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "33333333-3333-4333-8333-333333333333";
 const DOCUMENT_ID = "44444444-4444-4444-8444-444444444444";
+
+{
+  const previousThreshold = process.env.DRIVE_RAG_MIN_SIMILARITY;
+  process.env.DRIVE_RAG_MIN_SIMILARITY = "not-a-number";
+  try {
+    assert.throws(() => driveRagMinimumSimilarity(), /between 0 and 1/);
+  } finally {
+    if (previousThreshold === undefined) delete process.env.DRIVE_RAG_MIN_SIMILARITY;
+    else process.env.DRIVE_RAG_MIN_SIMILARITY = previousThreshold;
+  }
+}
 
 const context = {
   currentUserId: USER_ID,
