@@ -272,6 +272,12 @@ export class MeetingActionItemDeliveryService {
       if (delivery && delivery.delivery_type !== deliveryType) {
         throw badRequest("Action item delivery type cannot be changed after a failed delivery");
       }
+      if (delivery?.status === "COMPLETED") {
+        return {
+          completed: true as const,
+          delivery
+        };
+      }
       if (
         actionItem.status !== "PENDING" &&
         actionItem.status !== "APPROVED" &&
@@ -314,21 +320,20 @@ export class MeetingActionItemDeliveryService {
         throw new Error("Action item delivery could not be prepared");
       }
 
-      if (delivery.status === "COMPLETED") {
-        return {
-          completed: true as const,
-          delivery
-        };
-      }
-
       const approved = await transaction.queryOne<{ id: string }>(
         `
           UPDATE meeting_report_action_items
           SET status = 'APPROVED',
-              approved_by_user_id = $2,
+              approved_by_user_id = COALESCE(approved_by_user_id, $2),
               approved_at = COALESCE(approved_at, now()),
-              updated_by_user_id = $2,
-              updated_at = now()
+              updated_by_user_id = CASE
+                WHEN status = 'PENDING' OR approved_by_user_id IS NULL THEN $2
+                ELSE updated_by_user_id
+              END,
+              updated_at = CASE
+                WHEN status = 'PENDING' OR approved_at IS NULL THEN now()
+                ELSE updated_at
+              END
           WHERE id = $1
             AND status IN ('PENDING', 'APPROVED', 'DELIVERING', 'DELIVERY_FAILED')
           RETURNING id

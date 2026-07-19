@@ -151,7 +151,11 @@ interface ResolvedFindActionItemsInput {
   limit: number;
 }
 
-interface ActionItemInput extends ReportIdInput { actionItemId: string }
+interface ActionItemInput extends ReportIdInput {
+  actionItemId: string;
+  expectedStatus?: MeetingActionItemStatus;
+  expectedUpdatedAt?: string;
+}
 
 interface ActionItemContextInput {
   actionItemContextRef?: string;
@@ -293,7 +297,12 @@ const FIND_ACTION_ITEMS_INPUT_FIELDS = [
   "sort",
   "limit"
 ];
-const ACTION_ITEM_INPUT_FIELDS = ["reportId", "actionItemId"];
+const ACTION_ITEM_INPUT_FIELDS = [
+  "reportId",
+  "actionItemId",
+  "expectedStatus",
+  "expectedUpdatedAt"
+];
 const UPDATE_ACTION_ITEM_INPUT_FIELDS = [
   "actionItemContextRef",
   "reportContextRef",
@@ -1229,6 +1238,11 @@ export class MeetingAgentToolsService {
 
     const isApproval = toolName === "approve_meeting_report_action_item";
     const delivery = isApproval ? (input as ApproveActionItemInput).delivery : undefined;
+    const executionInput: AgentJsonObject = {
+      ...(input as unknown as AgentJsonObject),
+      expectedStatus: actionItem.status,
+      expectedUpdatedAt: actionItem.updatedAt
+    };
     const after: AgentJsonObject = isApproval
       ? {
           title: actionItem.title,
@@ -1261,7 +1275,7 @@ export class MeetingAgentToolsService {
         status: actionItem.status
       },
       after,
-      call: { input: input as unknown as AgentJsonObject }
+      call: { input: executionInput }
     };
   }
 
@@ -2491,6 +2505,27 @@ export class MeetingAgentToolsService {
     if (!reference) {
       throw badRequest("Meeting report action item is no longer available");
     }
+    if (input.expectedStatus !== undefined || input.expectedUpdatedAt !== undefined) {
+      const report = await this.meetingService.getReport(
+        context.currentUserId,
+        context.workspaceId,
+        input.reportId
+      );
+      const actionItem = report.report.actionItems.find(
+        (item) => item.id === input.actionItemId
+      );
+      if (
+        !actionItem ||
+        (input.expectedStatus !== undefined &&
+          actionItem.status !== input.expectedStatus) ||
+        (input.expectedUpdatedAt !== undefined &&
+          actionItem.updatedAt !== input.expectedUpdatedAt)
+      ) {
+        throw badRequest(
+          "Meeting report action item changed after confirmation was created"
+        );
+      }
+    }
     if ("assigneeUserId" in input && typeof input.assigneeUserId === "string") {
       const assignee = await this.requireMeetingResourceResolver().revalidateReference(
         context,
@@ -3166,9 +3201,26 @@ export class MeetingAgentToolsService {
     const object = this.requirePlainObject(input, "Meeting action item input");
     this.rejectForbiddenMeetingToolFields(object);
     this.assertOnlyAllowedFields(object, ACTION_ITEM_INPUT_FIELDS, "Meeting action item input");
+    const expectedStatus =
+      object.expectedStatus === undefined
+        ? undefined
+        : MEETING_ACTION_ITEM_STATUSES.includes(
+              object.expectedStatus as MeetingActionItemStatus
+            )
+          ? (object.expectedStatus as MeetingActionItemStatus)
+          : null;
+    if (expectedStatus === null) {
+      throw badRequest("expectedStatus must be a supported action item status");
+    }
+    const expectedUpdatedAt = this.readOptionalDateTime(
+      object.expectedUpdatedAt,
+      "expectedUpdatedAt"
+    );
     return {
       reportId: this.requireReportId(object.reportId),
-      actionItemId: this.requireActionItemId(object.actionItemId)
+      actionItemId: this.requireActionItemId(object.actionItemId),
+      ...(expectedStatus === undefined ? {} : { expectedStatus }),
+      ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt })
     };
   }
 
@@ -3256,7 +3308,12 @@ export class MeetingAgentToolsService {
     const object = this.requirePlainObject(input, "Meeting action item update input");
     this.rejectForbiddenMeetingToolFields(object);
     this.assertOnlyAllowedFields(object, LEGACY_UPDATE_ACTION_ITEM_INPUT_FIELDS, "Meeting action item update input");
-    const base = this.validateActionItemInput({ reportId: object.reportId, actionItemId: object.actionItemId });
+    const base = this.validateActionItemInput({
+      reportId: object.reportId,
+      actionItemId: object.actionItemId,
+      expectedStatus: object.expectedStatus,
+      expectedUpdatedAt: object.expectedUpdatedAt
+    });
     return { ...base, ...this.readActionItemUpdateChanges(object) };
   }
 
@@ -3300,7 +3357,12 @@ export class MeetingAgentToolsService {
     const object = this.requirePlainObject(input, "Meeting action item approval input");
     this.rejectForbiddenMeetingToolFields(object);
     this.assertOnlyAllowedFields(object, LEGACY_APPROVE_ACTION_ITEM_INPUT_FIELDS, "Meeting action item approval input");
-    const base = this.validateActionItemInput({ reportId: object.reportId, actionItemId: object.actionItemId });
+    const base = this.validateActionItemInput({
+      reportId: object.reportId,
+      actionItemId: object.actionItemId,
+      expectedStatus: object.expectedStatus,
+      expectedUpdatedAt: object.expectedUpdatedAt
+    });
     return { ...base, delivery: this.readActionItemDelivery(object.delivery) };
   }
 
@@ -3446,7 +3508,7 @@ export class MeetingAgentToolsService {
 
   private readOptionalDateTime(
     value: unknown,
-    field: "from" | "to"
+    field: "from" | "to" | "expectedUpdatedAt"
   ): string | undefined {
     if (value === undefined || value === null || value === "") {
       return undefined;
