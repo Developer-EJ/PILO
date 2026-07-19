@@ -57,9 +57,10 @@ import { PrReviewDecisionRealtimePublisherService } from "./pr-review-decision-r
 import { PrReviewConflictDraftRealtimePublisherService } from "./pr-review-conflict-draft-realtime-publisher.service";
 import { PrReviewRoomRealtimePublisherService } from "./pr-review-room-realtime-publisher.service";
 import {
-  buildPrReviewSemanticGraphHandoff,
-  PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
-  type PrReviewSemanticGraphHandoffPayload
+  buildPrReviewSemanticGraphHandoffV1,
+  buildPrReviewSemanticGraphHandoffV2,
+  PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2,
+  type PrReviewSemanticGraphHandoffPayloadV2
 } from "./pr-review-semantic-contract";
 import {
   resolvePrReviewSemanticGraph,
@@ -632,7 +633,7 @@ export interface PrReviewAnalysisInputPayload {
   reviewSessionId: string;
   workspaceId: string;
   headSha: string;
-  graphSchemaVersion: typeof PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION;
+  graphSchemaVersion: typeof PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2;
   pullRequest: {
     prNumber: number;
     title: string;
@@ -660,7 +661,7 @@ export interface PrReviewAnalysisInputPayload {
     isLargeDiff: boolean;
     patch: string | null;
   }>;
-  semanticGraph: PrReviewSemanticGraphHandoffPayload;
+  semanticGraph: PrReviewSemanticGraphHandoffPayloadV2;
 }
 
 export interface PrReviewAnalysisJobCompletionPayload {
@@ -1546,7 +1547,7 @@ export class PrReviewService {
       reviewSessionId: job.review_session_id,
       workspaceId: job.workspace_id,
       headSha: job.head_sha,
-      graphSchemaVersion: PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION,
+      graphSchemaVersion: PR_REVIEW_SEMANTIC_GRAPH_SCHEMA_VERSION_V2,
       pullRequest: {
         prNumber: detail.prNumber,
         title: detail.title,
@@ -1564,7 +1565,7 @@ export class PrReviewService {
         commitsCount: detail.commitsCount
       },
       files: changedFiles,
-      semanticGraph: buildPrReviewSemanticGraphHandoff(changedFiles)
+      semanticGraph: buildPrReviewSemanticGraphHandoffV2(changedFiles)
     };
   }
 
@@ -4185,7 +4186,7 @@ export class PrReviewService {
       }
       return metadata;
     });
-    const semanticGraphCandidates = buildPrReviewSemanticGraphHandoff(
+    const semanticGraphCandidates = buildPrReviewSemanticGraphHandoffV1(
       files.map((file) => ({
         filePath: file.filePath,
         previousFilePath: file.previousFilePath,
