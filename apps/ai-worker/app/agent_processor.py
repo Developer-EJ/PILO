@@ -74,6 +74,9 @@ SQL_ERD_TABLE_REF_PATTERN = re.compile(r"^t[1-9][0-9]*$")
 SQL_ERD_PRIMARY_TABLE_REF_LIMIT = 20
 SQL_ERD_INSPECTION_TOOL_NAME = "inspect_sql_erd_schema"
 SQL_ERD_FOCUS_TOOL_NAME = "focus_sql_erd_tables"
+TOOL_INPUT_SENSITIVE_KEY_ALLOWLIST = {
+    SQL_ERD_INSPECTION_TOOL_NAME: frozenset({"sessionSelectionToken"}),
+}
 FORBIDDEN_JSON_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -1353,7 +1356,7 @@ def normalize_agent_planner_decision(
                 "riskLevel": tool.risk_level,
                 "executionMode": tool.execution_mode,
                 "requiresConfirmation": requires_confirmation,
-                "input": _sanitize_json_value(decision.tool_input),
+                "input": _sanitize_tool_input(tool.name, decision.tool_input),
                 "toolInputValidation": "app_server_required",
             }
         )
@@ -2776,7 +2779,10 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
     message = _planner_string(payload, "message")
     final_answer_draft = _planner_optional_string(payload, "finalAnswerDraft")
     tool_name = _planner_optional_string(payload, "toolName")
-    tool_input = _parse_planner_input_json(_planner_optional_string(payload, "inputJson"))
+    tool_input = _parse_planner_input_json(
+        _planner_optional_string(payload, "inputJson"),
+        tool_name=tool_name,
+    )
     requires_confirmation = payload.get("requiresConfirmation") is True
     missing_fields = _planner_string_list(payload.get("missingFields"))
     unsupported_reason = _planner_optional_string(payload, "unsupportedReason")
@@ -3096,7 +3102,11 @@ def _planner_string_list(value: object) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
-def _parse_planner_input_json(value: str | None) -> dict[str, object]:
+def _parse_planner_input_json(
+    value: str | None,
+    *,
+    tool_name: str | None = None,
+) -> dict[str, object]:
     if value is None:
         return {}
 
@@ -3108,11 +3118,20 @@ def _parse_planner_input_json(value: str | None) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise AgentPlannerOutputError("Agent planner inputJson must be a JSON object")
 
-    return _sanitize_json_value(parsed)
+    return _sanitize_tool_input(tool_name, parsed)
 
 
-def _sanitize_json_value(value: object) -> dict[str, object]:
-    sanitized = _sanitize_any_json_value(value)
+def _sanitize_tool_input(tool_name: str | None, value: object) -> dict[str, object]:
+    allowed_root_keys = TOOL_INPUT_SENSITIVE_KEY_ALLOWLIST.get(tool_name or "", frozenset())
+    return _sanitize_json_value(value, allowed_root_keys=allowed_root_keys)
+
+
+def _sanitize_json_value(
+    value: object,
+    *,
+    allowed_root_keys: frozenset[str] = frozenset(),
+) -> dict[str, object]:
+    sanitized = _sanitize_any_json_value(value, allowed_root_keys=allowed_root_keys)
     if isinstance(sanitized, dict):
         return sanitized
     return {}
@@ -3186,11 +3205,17 @@ def _current_date_for_timezone(timezone: str) -> date:
         raise AgentPlannerOutputError("Agent run timezone is invalid") from error
 
 
-def _sanitize_any_json_value(value: object) -> object:
+def _sanitize_any_json_value(
+    value: object,
+    *,
+    allowed_root_keys: frozenset[str] = frozenset(),
+) -> object:
     if isinstance(value, dict):
         result: dict[str, object] = {}
         for key, item in value.items():
-            if not isinstance(key, str) or _is_forbidden_json_key(key):
+            if not isinstance(key, str) or (
+                _is_forbidden_json_key(key) and key not in allowed_root_keys
+            ):
                 continue
             result[key] = _sanitize_any_json_value(item)
         return result

@@ -3274,6 +3274,7 @@ def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
                         "start": "2026-07-09",
                         "end": "2026-07-16",
                         "token": "must-not-leak",
+                        "sessionSelectionToken": "must-not-leak-for-other-tools",
                         "nested": {
                             "providerRawResponse": "must-not-leak",
                             "visible": "ok",
@@ -3293,6 +3294,56 @@ def test_parse_agent_planner_output_sanitizes_sensitive_fields() -> None:
         "nested": {
             "visible": "ok",
         },
+    }
+
+
+def test_sql_erd_session_selection_token_survives_tool_input_sanitizing() -> None:
+    selection_token = "88888888-8888-4888-8888-888888888888"
+    decision = parse_agent_planner_output(
+        json.dumps(
+            {
+                "status": "tool_candidate",
+                "message": "선택한 SQL ERD 세션을 확인합니다.",
+                "finalAnswerDraft": None,
+                "toolName": "inspect_sql_erd_schema",
+                "inputJson": json.dumps(
+                    {
+                        "featureQuery": "회의 기능",
+                        "sessionSelectionToken": selection_token,
+                        "accessToken": "must-not-leak",
+                    }
+                ),
+                "requiresConfirmation": False,
+                "missingFields": [],
+                "unsupportedReason": None,
+            }
+        )
+    )
+    tools = [
+        tool_snapshot(
+            name="inspect_sql_erd_schema",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["featureQuery"],
+                "additionalProperties": False,
+                "properties": {
+                    "featureQuery": {"type": "string"},
+                    "sessionSelectionToken": {"type": "string", "format": "uuid"},
+                },
+            },
+        )
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+
+    assert decision.tool_input == {
+        "featureQuery": "회의 기능",
+        "sessionSelectionToken": selection_token,
+    }
+    normalized = normalize_agent_planner_decision(decision, job)
+    assert normalized.output_summary["input"] == {
+        "featureQuery": "회의 기능",
+        "sessionSelectionToken": selection_token,
     }
 
 
