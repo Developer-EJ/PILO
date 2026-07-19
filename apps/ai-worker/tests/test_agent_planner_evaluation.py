@@ -547,7 +547,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 50
+    assert len(suite.cases) == 53
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -608,6 +608,16 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["calendar_create_multi_day"].missing_fields == (
         "calendar_event_time_or_all_day",
     )
+    assert expectations["meeting_summary_without_id"].input_contains == {"sections": ["summary"]}
+    assert expectations["meeting_summary_discussion_and_decisions"].input_contains == {
+        "sections": ["discussionPoints", "decisions"]
+    }
+    assert expectations["meeting_summary_action_items_only"].input_contains == {
+        "sections": ["actionItems"]
+    }
+    assert expectations["meeting_summary_excludes_decisions"].input_contains == {
+        "sections": ["summary", "discussionPoints", "actionItems"]
+    }
     assert expectations["calendar_create_recurrence"].status == "unsupported"
     assert expectations["meeting_rooms"].tool_name == "list_meeting_rooms"
     assert expectations["meeting_active"].tool_name == "get_active_meeting"
