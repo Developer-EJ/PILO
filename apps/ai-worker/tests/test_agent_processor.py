@@ -864,11 +864,13 @@ def test_grounded_answer_regenerates_once_for_missing_citation() -> None:
     handoff = FakeGroundedAnswerHandoffClient(
         {
             "prompt": "배포 순서를 알려줘",
-            "sources": [{
-                "citationId": "citation_valid",
-                "sourceType": "drive_document",
-                "excerpt": "App Server 다음 Worker를 배포합니다.",
-            }],
+            "sources": [
+                {
+                    "citationId": "citation_valid",
+                    "sourceType": "drive_document",
+                    "excerpt": "App Server 다음 Worker를 배포합니다.",
+                }
+            ],
         }
     )
     processor = FakeGroundedAnswerProcessor(
@@ -879,10 +881,12 @@ def test_grounded_answer_regenerates_once_for_missing_citation() -> None:
         answers=[("초안", []), ("수정 답변", ["citation_valid"])],
     )
 
-    result = processor.process_payload({
-        "jobType": "agent_grounded_answer_requested",
-        "runId": RUN_ID,
-    })
+    result = processor.process_payload(
+        {
+            "jobType": "agent_grounded_answer_requested",
+            "runId": RUN_ID,
+        }
+    )
 
     assert result.reason == "grounded_answer_completed"
     assert processor.answer_calls == 2
@@ -893,11 +897,13 @@ def test_grounded_answer_terminalizes_after_second_invalid_citation() -> None:
     handoff = FakeGroundedAnswerHandoffClient(
         {
             "prompt": "배포 순서를 알려줘",
-            "sources": [{
-                "citationId": "citation_valid",
-                "sourceType": "drive_document",
-                "excerpt": "App Server 다음 Worker를 배포합니다.",
-            }],
+            "sources": [
+                {
+                    "citationId": "citation_valid",
+                    "sourceType": "drive_document",
+                    "excerpt": "App Server 다음 Worker를 배포합니다.",
+                }
+            ],
         }
     )
     processor = FakeGroundedAnswerProcessor(
@@ -908,10 +914,12 @@ def test_grounded_answer_terminalizes_after_second_invalid_citation() -> None:
         answers=[("초안", ["citation_unknown"]), ("재시도", [])],
     )
 
-    result = processor.process_payload({
-        "jobType": "agent_grounded_answer_requested",
-        "runId": RUN_ID,
-    })
+    result = processor.process_payload(
+        {
+            "jobType": "agent_grounded_answer_requested",
+            "runId": RUN_ID,
+        }
+    )
 
     assert result.reason == "grounded_answer_citation_failed"
     assert processor.answer_calls == 2
