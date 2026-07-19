@@ -1463,6 +1463,16 @@ class PgMeetingTranscriptEmbeddingRepository:
             (message[:4096], job_id),
         )
 
+    def requeue_transcript_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_transcript_embedding_jobs
+            SET status = 'pending', error_message = %s, completed_at = NULL, locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
 
 class PgMeetingActivityEvidenceEmbeddingRepository:
     def __init__(self, database_url: str, database_ssl: bool) -> None:
@@ -1611,6 +1621,16 @@ class PgMeetingActivityEvidenceEmbeddingRepository:
             """
             UPDATE meeting_report_activity_evidence_embedding_jobs
             SET status = 'failed', error_message = %s, completed_at = now(), locked_at = NULL
+            WHERE id = %s AND status = 'processing'
+            """,
+            (message[:4096], job_id),
+        )
+
+    def requeue_activity_evidence_embedding_job(self, job_id: str, message: str) -> None:
+        self.connection.execute(
+            """
+            UPDATE meeting_report_activity_evidence_embedding_jobs
+            SET status = 'pending', error_message = %s, completed_at = NULL, locked_at = NULL
             WHERE id = %s AND status = 'processing'
             """,
             (message[:4096], job_id),
