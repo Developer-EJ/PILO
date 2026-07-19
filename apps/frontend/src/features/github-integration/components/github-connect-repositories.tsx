@@ -53,6 +53,7 @@ export function GithubConnectRepositories({
       icon={<FolderGit2 className="size-4" />}
       subtitle="Project를 조회하고 동기화할 repository를 선택합니다."
       title="저장소"
+      tone="repository"
     >
       {!enabled ? (
         <GithubConnectEmptyState>
