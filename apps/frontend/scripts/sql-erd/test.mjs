@@ -6010,6 +6010,39 @@ assert.equal(
   sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(uuidModelSqlPreview).ok,
   true
 );
+const aiGeneratedDecimalModel = structuredClone(mysqlParseResult.modelJson);
+aiGeneratedDecimalModel.schema.tables[0].columns[0].dataType =
+  "DECIMAL(12, 2)";
+const aiGeneratedDecimalPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: aiGeneratedDecimalModel,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      modelJson: aiGeneratedDecimalModel
+    }
+  });
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    aiGeneratedDecimalPreview
+  ).ok,
+  true,
+  "AI-generated DECIMAL precision spacing must survive semantic verification"
+);
+const quotedCommaTypeWithSpace = structuredClone(mysqlParseResult.modelJson);
+quotedCommaTypeWithSpace.schema.tables[0].columns[0].dataType = '"Type, Name"';
+const quotedCommaTypeWithoutSpace = structuredClone(mysqlParseResult.modelJson);
+quotedCommaTypeWithoutSpace.schema.tables[0].columns[0].dataType =
+  '"Type,Name"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedCommaTypeWithSpace
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedCommaTypeWithoutSpace
+  ),
+  "quoted data type identifiers must preserve comma-adjacent whitespace"
+);
 const unsupportedTypeModel = structuredClone(mysqlParseResult.modelJson);
 unsupportedTypeModel.schema.tables[0].columns[0].dataType = "USER_ROLE";
 const unsupportedTypeApplyResult =

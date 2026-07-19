@@ -394,7 +394,7 @@ export function createSqlErdSchemaSemanticSignature(
     .map((table) => ({
       columns: table.columns
         .map((column) => ({
-          dataType: normalizeSqlSemanticText(column.dataType),
+          dataType: normalizeSqlDataTypeSemanticText(column.dataType),
           defaultValue:
             column.defaultValue === null
               ? null
@@ -443,6 +443,52 @@ export function createSqlErdSchemaSemanticSignature(
     );
 
   return JSON.stringify({ relations, tables });
+}
+
+function normalizeSqlDataTypeSemanticText(value: string) {
+  const normalized = normalizeSqlSemanticText(value);
+  let quote: '"' | "'" | null = null;
+  let result = "";
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+
+    if (quote) {
+      result += character;
+      if (character === quote) {
+        if (normalized[index + 1] === quote) {
+          result += normalized[index + 1];
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character;
+      result += character;
+      continue;
+    }
+
+    if (character === "(" || character === ",") {
+      result = `${result.trimEnd()}${character}`;
+      while (/\s/u.test(normalized[index + 1] ?? "")) {
+        index += 1;
+      }
+      continue;
+    }
+
+    if (character === ")") {
+      result = `${result.trimEnd()})`;
+      continue;
+    }
+
+    result += character;
+  }
+
+  return result;
 }
 
 function normalizeSqlSemanticText(value: string) {
