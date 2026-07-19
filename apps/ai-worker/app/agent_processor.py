@@ -1176,16 +1176,16 @@ class AgentRunProcessor:
         reason: str,
     ) -> AgentProcessResult:
         if step_id and not self.repository.complete_planner_step(
-                job.run_id,
-                step_id,
-                {
-                    "status": "needs_clarification",
-                    "message": message,
-                    "finalAnswerDraft": message,
-                    "toolSchemaVersion": job.tool_schema_version,
-                    "missingFields": ["intent"],
-                },
-            ):
+            job.run_id,
+            step_id,
+            {
+                "status": "needs_clarification",
+                "message": message,
+                "finalAnswerDraft": message,
+                "toolSchemaVersion": job.tool_schema_version,
+                "missingFields": ["intent"],
+            },
+        ):
             return self._result(
                 job,
                 delete_message=True,
@@ -2856,9 +2856,7 @@ def _router_capabilities_for_surface(
     if required_domain is None:
         return catalog.capabilities
     return tuple(
-        capability
-        for capability in catalog.capabilities
-        if capability.domain == required_domain
+        capability for capability in catalog.capabilities if capability.domain == required_domain
     )
 
 
@@ -2874,9 +2872,7 @@ def _restrict_agent_job_to_context_surface(
         return replace(job, tools=())
 
     capabilities = tuple(
-        capability
-        for capability in catalog.capabilities
-        if capability.domain == required_domain
+        capability for capability in catalog.capabilities if capability.domain == required_domain
     )
     capability_ids = {capability.capability_id for capability in capabilities}
     tool_names = {
@@ -3032,7 +3028,9 @@ def _validate_agent_planner_provider_decision(
         _agent_planner_schema(
             workflow_constraint,
             completion_allowed=completion_allowed,
-        )["properties"]["status"]["enum"]
+        )[
+            "properties"
+        ]["status"]["enum"]
     )
     if decision.status not in allowed_statuses:
         raise AgentPlannerOutputError("Agent planner returned a disallowed status")
@@ -3436,9 +3434,7 @@ def _capability_terminal_tool_names(
     catalog: ToolCapabilityCatalog,
     capability_ids: tuple[str, ...],
 ) -> tuple[str, ...]:
-    capability_by_id = {
-        capability.capability_id: capability for capability in catalog.capabilities
-    }
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     terminal_names: list[str] = []
     for capability_id in capability_ids:
         capability = capability_by_id.get(capability_id)

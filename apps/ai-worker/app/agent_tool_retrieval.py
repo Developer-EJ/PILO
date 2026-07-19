@@ -606,10 +606,7 @@ def _valid_v2_capability_contract(
             or set(descriptor.selector_kinds) != expected_selector_kinds
             or set(descriptor.capability_ids)
             != {capability.capability_id for capability in matching_capabilities}
-            or any(
-                capability.domain != descriptor.domain
-                for capability in matching_capabilities
-            )
+            or any(capability.domain != descriptor.domain for capability in matching_capabilities)
         ):
             return False
     return True
