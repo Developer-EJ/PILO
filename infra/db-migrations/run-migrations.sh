@@ -72,10 +72,26 @@ has_top_level_transaction_control() {
   ' "$1"
 }
 
+has_outer_transaction_wrapper() {
+  awk '
+    NR == 1 {
+      first = toupper($0)
+    }
+    {
+      last = toupper($0)
+    }
+    END {
+      has_begin = first ~ /^[[:space:]]*BEGIN[[:space:]]*;?[[:space:]]*(--.*)?$/
+      has_commit = last ~ /^[[:space:]]*COMMIT[[:space:]]*;?[[:space:]]*(--.*)?$/
+      exit(has_begin && has_commit ? 0 : 1)
+    }
+  ' "$1"
+}
+
 [ -d "$MIGRATIONS_DIR" ] || fail "migrations directory not found: $MIGRATIONS_DIR"
 
 MIGRATION_LIST="$(mktemp)"
-trap 'rm -f "$MIGRATION_LIST" "${CONTROL_SQL:-}" "${BASELINE_SQL:-}"' EXIT
+trap 'rm -f "$MIGRATION_LIST" "${CONTROL_SQL:-}" "${BASELINE_SQL:-}" "${MIGRATION_SQL:-}"' EXIT
 
 find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name '[0-9][0-9][0-9]_*.sql' \
   | sort > "$MIGRATION_LIST"
@@ -248,8 +264,19 @@ run_apply() {
       continue
     fi
 
-    if has_top_level_transaction_control "$migration_path"; then
-      fail "runner-managed migration must not contain transaction control: $migration_name"
+    MIGRATION_SQL=""
+    MIGRATION_EXECUTION_PATH="$migration_path"
+    if has_outer_transaction_wrapper "$migration_path"; then
+      MIGRATION_SQL="$(mktemp)"
+      sed '1d;$d' "$migration_path" > "$MIGRATION_SQL"
+      if has_top_level_transaction_control "$MIGRATION_SQL"; then
+        fail "runner-managed migration must only contain one outer transaction wrapper: $migration_name"
+      fi
+      MIGRATION_EXECUTION_PATH="$MIGRATION_SQL"
+    else
+      if has_top_level_transaction_control "$migration_path"; then
+        fail "runner-managed migration must not contain transaction control: $migration_name"
+      fi
     fi
 
     if grep -Eq '^[[:space:]]*\\' "$migration_path"; then
@@ -284,7 +311,7 @@ SELECT
     \quit 42
   \endif
 \else
-  \ir $migration_path
+  \ir $MIGRATION_EXECUTION_PATH
   INSERT INTO pilo_migrations.schema_migrations (
     version,
     name,
@@ -305,6 +332,11 @@ SQL
     psql_db -f "$CONTROL_SQL"
     rm -f "$CONTROL_SQL"
     CONTROL_SQL=""
+    if [ -n "$MIGRATION_SQL" ]; then
+      rm -f "$MIGRATION_SQL"
+    fi
+    MIGRATION_SQL=""
+    MIGRATION_EXECUTION_PATH=""
     echo "migration_applied=$migration_name"
   done < "$MIGRATION_LIST"
 

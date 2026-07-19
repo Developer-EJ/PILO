@@ -117,8 +117,18 @@ try {
     --tuples-only `
     --no-align `
     --command "SELECT string_agg(version || ':' || execution_mode, ',' ORDER BY version) FROM pilo_migrations.schema_migrations;").Trim()
-  if ($history -ne "1:baseline,2:baseline,3:applied,4:applied") {
+  if ($history -ne "1:baseline,2:baseline,3:applied,4:applied,5:applied") {
     throw "Unexpected migration history: $history"
+  }
+
+  $outerTransactionMarker = (& docker exec $postgresName psql `
+    --username postgres `
+    --dbname pilo `
+    --tuples-only `
+    --no-align `
+    --command "SELECT count(*) FROM public.outer_transaction_marker;").Trim()
+  if ($outerTransactionMarker -ne "0") {
+    throw "Outer transaction wrapper migration was not applied."
   }
 
   $previousErrorActionPreference = $ErrorActionPreference
