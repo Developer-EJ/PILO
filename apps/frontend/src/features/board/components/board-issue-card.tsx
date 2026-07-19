@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 type BoardIssueCardProps = {
+  enableCursorTarget: boolean;
   issue: BoardIssueCardPayload;
   moving: boolean;
   onOpenIssue: (issue: BoardIssueCardPayload) => void;
@@ -43,6 +44,7 @@ function readAssigneeInitials(login: string) {
 }
 
 export function BoardIssueCard({
+  enableCursorTarget,
   issue,
   moving,
   onOpenIssue,
@@ -73,11 +75,13 @@ export function BoardIssueCard({
 
   return (
     <Card
-      {...pageCursorTargetAttributes({
-        id: issue.id,
-        label: issue.title,
-        type: "board_issue"
-      })}
+      {...(enableCursorTarget
+        ? pageCursorTargetAttributes({
+            id: issue.id,
+            label: issue.title,
+            type: "board_issue"
+          })
+        : {})}
       draggable={!moving}
       role="button"
       tabIndex={0}

@@ -289,6 +289,7 @@ export function BoardKanban({
             columnIssues.map((issue) => (
               <BoardIssueCard
                 key={issue.id}
+                enableCursorTarget={enableCursorTarget}
                 issue={issue}
                 moving={movingIssueId === issue.id}
                 selected={selectedIssueId === issue.id}
@@ -386,22 +387,22 @@ export function BoardKanban({
         })}
       </div>
 
-      <div
-        className="md:hidden"
-        id={mobileColumn ? `board-column-panel-${mobileColumn.id}` : undefined}
-        role="tabpanel"
-        aria-labelledby={
-          mobileColumn ? `board-column-tab-${mobileColumn.id}` : undefined
-        }
-      >
-        {mobileColumn
-          ? renderColumn(
-              mobileColumn,
-              orderedColumns.findIndex(({ id }) => id === mobileColumn.id),
-              false,
-              false
-            )
-          : null}
+      <div className="md:hidden">
+        {orderedColumns.map((column, index) => {
+          const isSelected = resolvedMobileColumnId === column.id;
+
+          return (
+            <div
+              key={column.id}
+              id={`board-column-panel-${column.id}`}
+              role="tabpanel"
+              aria-labelledby={`board-column-tab-${column.id}`}
+              hidden={!isSelected}
+            >
+              {isSelected ? renderColumn(column, index, false, false) : null}
+            </div>
+          );
+        })}
       </div>
 
       <div

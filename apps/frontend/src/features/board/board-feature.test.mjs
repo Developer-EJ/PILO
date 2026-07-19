@@ -226,7 +226,7 @@ assert.match(
 assert.match(boardKanban, /enableCursorTarget\s*\? pageCursorTargetAttributes/);
 assert.match(
   boardKanban,
-  /renderColumn\(\s*mobileColumn,[\s\S]*?false,\s*false\s*\)/,
+  /isSelected \? renderColumn\(column, index, false, false\) : null/,
   "The hidden mobile lane must not be selectable as a cursor target"
 );
 assert.match(
@@ -244,24 +244,64 @@ assert.match(boardKanban, /onKeyDown=\{handleMobileTabKeyDown\}/);
 assert.match(boardKanban, /role="tabpanel"/);
 assert.match(
   boardKanban,
-  /mobileColumn \? `board-column-tab-\$\{mobileColumn.id\}` : undefined/
+  /aria-labelledby=\{`board-column-tab-\$\{column.id\}`\}/
 );
 assert.match(boardKanban, /case "ArrowRight":/);
 assert.match(boardKanban, /case "ArrowLeft":/);
 assert.match(boardKanban, /case "Home":/);
 assert.match(boardKanban, /case "End":/);
 assert.match(boardKanban, /nextTab\?\.focus\(\)/);
+assert.match(
+  boardKanban,
+  /<BoardIssueCard[\s\S]*?enableCursorTarget=\{enableCursorTarget\}/,
+  "A mobile lane must also disable page cursor targets on its issue cards"
+);
+assert.match(
+  boardKanban,
+  /orderedColumns\.map\(\(column, index\) => \{[\s\S]*?const isSelected = resolvedMobileColumnId === column.id;[\s\S]*?role="tabpanel"[\s\S]*?hidden=\{!isSelected\}/,
+  "Every mobile tab must retain the panel ID it controls"
+);
+
+assert.match(
+  boardIssueCard,
+  /enableCursorTarget: boolean/,
+  "Issue cards must receive the variant cursor-target policy"
+);
+assert.match(
+  boardIssueCard,
+  /enableCursorTarget\s*\? pageCursorTargetAttributes/,
+  "Issue cursor attributes must be omitted when the rendered variant is hidden"
+);
 
 assert.match(
   boardPanel,
-  /const ALL_FILTER_VALUE = "__pilo_all_filters__"/,
-  "The all-filter UI value must not collide with GitHub labels or logins"
+  /const ALL_FILTER_VALUE = "filter:all"/,
+  "The all-filter UI value must use a reserved encoded namespace"
 );
-assert.doesNotMatch(boardPanel, /value="__all__"/);
-assert.match(boardPanel, /value=\{state \|\| ALL_FILTER_VALUE\}/);
-assert.match(boardPanel, /value=\{assignee \|\| ALL_FILTER_VALUE\}/);
-assert.match(boardPanel, /value=\{label \|\| ALL_FILTER_VALUE\}/);
-assert.match(boardPanel, /value !== ALL_FILTER_VALUE/);
+assert.match(boardPanel, /function encodeFilterValue/);
+assert.match(boardPanel, /function decodeFilterValue/);
+assert.match(boardPanel, /encodeURIComponent\(value \?\? ""\)/);
+assert.match(boardPanel, /decodeURIComponent/);
+assert.match(
+  boardPanel,
+  /assignee\s*\? encodeFilterValue\(ASSIGNEE_FILTER_PREFIX, assignee\)\s*: ALL_FILTER_VALUE/
+);
+assert.match(
+  boardPanel,
+  /label\s*\? encodeFilterValue\(LABEL_FILTER_PREFIX, label\)\s*: ALL_FILTER_VALUE/
+);
+assert.match(boardPanel, /decodeFilterValue\(value, ASSIGNEE_FILTER_PREFIX\)/);
+assert.match(boardPanel, /decodeFilterValue\(value, LABEL_FILTER_PREFIX\)/);
+assert.match(
+  boardPanel,
+  /value=\{encodeFilterValue\(ASSIGNEE_FILTER_PREFIX, option.login\)\}/,
+  "A literal __all__ login must remain selectable"
+);
+assert.match(
+  boardPanel,
+  /value=\{encodeFilterValue\(LABEL_FILTER_PREFIX, option.name\)\}/,
+  "Labels named __all__ or __pilo_all_filters__ must remain selectable"
+);
 
 assert.match(boardIssueCard, /from "@\/components\/ui\/card"/);
 assert.match(boardIssueCard, /<Card/);

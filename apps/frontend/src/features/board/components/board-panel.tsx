@@ -37,7 +37,25 @@ import { cn } from "@/lib/utils";
 import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
 import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
-const ALL_FILTER_VALUE = "__pilo_all_filters__";
+const ALL_FILTER_VALUE = "filter:all";
+const ASSIGNEE_FILTER_PREFIX = "filter:assignee:";
+const LABEL_FILTER_PREFIX = "filter:label:";
+
+function encodeFilterValue(prefix: string, value: string | null | undefined) {
+  return `${prefix}${encodeURIComponent(value ?? "")}`;
+}
+
+function decodeFilterValue(value: string | null, prefix: string) {
+  if (!value?.startsWith(prefix)) {
+    return "";
+  }
+
+  try {
+    return decodeURIComponent(value.slice(prefix.length));
+  } catch {
+    return "";
+  }
+}
 
 function SummaryChip({
   children,
@@ -305,9 +323,13 @@ export function BoardPanel() {
           </Select>
 
           <Select
-            value={assignee || ALL_FILTER_VALUE}
+            value={
+              assignee
+                ? encodeFilterValue(ASSIGNEE_FILTER_PREFIX, assignee)
+                : ALL_FILTER_VALUE
+            }
             onValueChange={(value) => {
-              setAssignee(value && value !== ALL_FILTER_VALUE ? value : "");
+              setAssignee(decodeFilterValue(value, ASSIGNEE_FILTER_PREFIX));
               setSelectedIssueId(null);
             }}
           >
@@ -323,7 +345,10 @@ export function BoardPanel() {
             <SelectContent>
               <SelectItem value={ALL_FILTER_VALUE}>담당자 전체</SelectItem>
               {(boardData.filterOptions?.assignees ?? []).map((option) => (
-                <SelectItem key={option.login} value={option.login}>
+                <SelectItem
+                  key={option.login}
+                  value={encodeFilterValue(ASSIGNEE_FILTER_PREFIX, option.login)}
+                >
                   @{option.login} ({option.count})
                 </SelectItem>
               ))}
@@ -331,9 +356,13 @@ export function BoardPanel() {
           </Select>
 
           <Select
-            value={label || ALL_FILTER_VALUE}
+            value={
+              label
+                ? encodeFilterValue(LABEL_FILTER_PREFIX, label)
+                : ALL_FILTER_VALUE
+            }
             onValueChange={(value) => {
-              setLabel(value && value !== ALL_FILTER_VALUE ? value : "");
+              setLabel(decodeFilterValue(value, LABEL_FILTER_PREFIX));
               setSelectedIssueId(null);
             }}
           >
@@ -349,7 +378,10 @@ export function BoardPanel() {
             <SelectContent>
               <SelectItem value={ALL_FILTER_VALUE}>라벨 전체</SelectItem>
               {(boardData.filterOptions?.labels ?? []).map((option) => (
-                <SelectItem key={option.name} value={option.name}>
+                <SelectItem
+                  key={option.name}
+                  value={encodeFilterValue(LABEL_FILTER_PREFIX, option.name)}
+                >
                   {option.name} ({option.count})
                 </SelectItem>
               ))}
