@@ -188,7 +188,11 @@ assert.match(canvasSocketHandlers, /recordingActivityService\.capture/);
 assert.match(canvasSocketHandlers, /authenticatedActorUserId/);
 assert.match(socketServer, /createCanvasRoomCheckpointService/);
 assert.match(socketServer, /roomCheckpointService\.scheduleCheckpoint/);
-assert.match(socketServer, /roomCheckpointService\.flushCheckpointNow/);
+assert.match(socketServer, /roomCheckpointService\.registerRoomParticipant/);
+assert.match(socketServer, /roomCheckpointService\.unregisterRoomParticipant/);
+assert.doesNotMatch(canvasSocketHandlers, /flushCheckpointNow/);
+assert.match(canvasSocketHandlers, /shapes: hydration\.shapes/);
+assert.doesNotMatch(canvasSocketHandlers, /shapes: loadedPayload\.shapes/);
 assert.match(socketServer, /socket\.data\.canvasRoomsByName\.values\(\)/);
 assert.match(socketServer, /socket\.data\.canvasRoomsByName\.clear\(\)/);
 assert.doesNotMatch(socketServer, /createCanvasShapeCommitService/);
@@ -286,20 +290,26 @@ assert.match(canvasRoomState, /readShapeContentHash\(shape\)/);
 assert.match(canvasRoomState, /baseRevision: null/);
 assert.match(canvasRoomState, /delete rawShape\.revision/);
 assert.match(canvasRoomState, /delete rawShape\.contentHash/);
-assert.match(canvasRoom, /loadedRegions: roomStateService\.getLoadedRegions/);
-assert.match(canvasRoom, /roomShapes: roomStateService\.getCachedShapes/);
+assert.match(canvasRoom, /initialViewportHydration\?\.loadedRegions/);
+assert.match(canvasRoom, /initialViewportHydration\?\.shapes/);
 assert.match(canvasRoom, /checkpointVersion: checkpointState\.checkpointVersion/);
 assert.match(canvasRoom, /historySeq: historyState\.historySeq/);
 assert.match(canvasRoomCheckpoint, /checkpointVersion: checkpointState\.checkpointVersion/);
 assert.match(canvasRoomCheckpoint, /historySeq: checkpointState\.historySeq/);
 assert.match(
   canvasRoomCheckpoint,
-  /CANVAS_CHECKPOINT_INTERVAL_MS = 5 \* 60 \* 1_000/
+  /CANVAS_CHECKPOINT_MAX_DIRTY_AGE_MS = 5 \* 60 \* 1_000/
 );
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_IDLE_MS = 60 \* 1_000/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_MAX_PAYLOAD_BYTES/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_MAX_CONCURRENT_ROOMS/);
+assert.match(canvasRoomCheckpoint, /CANVAS_CHECKPOINT_RETRY_DELAYS_MS/);
 assert.match(canvasRoomCheckpoint, /SPLITTABLE_CHECKPOINT_STATUSES/);
-assert.match(canvasRoomCheckpoint, /if \(timersByRoom\.has\(roomKey\)\) return/);
+assert.match(canvasRoomCheckpoint, /scheduleDirtyTimers/);
+assert.match(canvasRoomCheckpoint, /scheduleEmptyRoomCleanup/);
+assert.match(canvasRoomCheckpoint, /pumpCheckpointQueue/);
 assert.match(canvasRoomCheckpoint, /flushCheckpointNow/);
-assert.match(canvasRoomCheckpoint, /await Promise\.all\(Array\.from\(roomsByKey\.keys\(\), flushCheckpoint\)\)/);
+assert.match(canvasRoomCheckpoint, /enqueueCheckpoint\(roomKey, "drain"/);
 assert.match(canvasRoomCheckpoint, /\/shapes\/batch/);
 assert.match(canvasRoomCheckpoint, /Authorization: `Bearer \$\{token\}`/);
 assert.match(canvasRoomCheckpoint, /onCheckpointStatus/);
