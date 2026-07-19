@@ -18,7 +18,7 @@ import type {
   AgentRunRequestContext
 } from "./types/agent-tool.types";
 
-const OUTBOX_SWEEP_INTERVAL_MS = 60_000;
+const OUTBOX_SWEEP_INTERVAL_MS = 15_000;
 const OUTBOX_CLAIM_TIMEOUT_SECONDS = 60;
 const OUTBOX_SWEEP_BATCH_SIZE = 20;
 const AGENT_PLANNING_TIMEOUT_SECONDS = 120;
@@ -138,7 +138,7 @@ export class AgentOutboxPublisherService
             ON outbox.run_id = run.id
             AND outbox.workspace_id = run.workspace_id
           WHERE run.status = 'planning'
-            AND run.updated_at <= now() - ($1 * INTERVAL '1 second')
+            AND outbox.planning_started_at <= now() - ($1 * INTERVAL '1 second')
             AND outbox.status IN ('pending', 'publishing', 'delivered', 'failed')
           ORDER BY run.updated_at ASC, run.id ASC
           FOR UPDATE OF run, outbox SKIP LOCKED
