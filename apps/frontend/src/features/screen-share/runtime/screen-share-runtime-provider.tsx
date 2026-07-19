@@ -544,7 +544,7 @@ export function ScreenShareRuntimeProvider({
   }, []);
 
   useEffect(() => {
-    if (activeSession || !workspaceId) return;
+    if (!workspaceId) return;
 
     const requestWorkspaceId = workspaceId;
     let cancelled = false;
@@ -586,7 +586,7 @@ export function ScreenShareRuntimeProvider({
           shouldPoll = !session;
         })
         .catch(() => {
-          shouldPoll = true;
+          shouldPoll = activeSessionRef.current === null;
         })
         .finally(() => {
           inFlight = false;
@@ -602,7 +602,7 @@ export function ScreenShareRuntimeProvider({
     };
 
     requestCurrentRef.current = requestCurrent;
-    requestCurrent();
+    if (!activeSession) requestCurrent();
     return () => {
       cancelled = true;
       requestCurrentRef.current = () => undefined;

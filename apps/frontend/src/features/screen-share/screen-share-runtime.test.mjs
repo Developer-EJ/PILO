@@ -52,6 +52,19 @@ test("current session loads on mount and reloads on socket reconnect", () => {
   );
 });
 
+test("active session keeps the shared request coordinator for socket reconnect only", () => {
+  assert.doesNotMatch(provider, /if \(activeSession \|\| !workspaceId\) return;/);
+  assert.match(
+    provider,
+    /useEffect\(\(\) => \{\s*if \(!workspaceId\) return;[\s\S]*requestCurrentRef\.current = requestCurrent;\s*if \(!activeSession\) requestCurrent\(\);/,
+  );
+  assert.match(
+    provider,
+    /\.catch\(\(\) => \{\s*shouldPoll = activeSessionRef\.current === null;\s*\}\)/,
+  );
+  assert.equal((provider.match(/\.getCurrent\(/g) ?? []).length, 1);
+});
+
 test("started reconciliation keeps the active session but suppresses the sharer's toast", async () => {
   const { reconcileStartedScreenShare } = await loadPurePolicy(
     provider,
