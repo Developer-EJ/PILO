@@ -227,6 +227,16 @@ def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: s
             {"list_calendar_events", "update_calendar_event"},
         ),
         (
+            "최근 회의 결정사항 알려줘",
+            "meeting.report.summary",
+            {"list_meeting_reports", "summarize_meeting_report"},
+        ),
+        (
+            "최근 회의 내용 알려줘",
+            "meeting.report.summary",
+            {"list_meeting_reports", "summarize_meeting_report"},
+        ),
+        (
             "첫 번째 후속 작업 승인해줘",
             "meeting.action_items.approve",
             {"find_action_items", "approve_meeting_report_action_item"},

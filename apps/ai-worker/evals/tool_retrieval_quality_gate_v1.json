@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "1182c191fcec737ae9248381be37e574a5f4895a60a341a813a31f7f0534cd60",
-    "catalogSha256": "80b9156fc17a055c3f6070f083dd5df374b5197593c13d384e493a9e3b36e489",
+    "inventorySha256": "abbf99610ec87908209d2d9c1431e938108269b83277124fbd464ba9bc13696b",
+    "catalogSha256": "8b7edac26c20df6c1acc0ae7b384be7dd7ec1c1d3cfac440974ac67306dbbee1",
     "eligibleSnapshotSha256": "2a396b2efef711beb2c0ac2c505c2ff8f28b74c0f4b1587b2b0793119b33e64b"
   },
   "privacySensitiveValues": [
@@ -1516,7 +1516,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "80b9156fc17a055c3f6070f083dd5df374b5197593c13d384e493a9e3b36e489",
+    "sha256": "8b7edac26c20df6c1acc0ae7b384be7dd7ec1c1d3cfac440974ac67306dbbee1",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -1947,28 +1947,28 @@
           "원문 근거 검색 요청"
         ],
         "positiveExamples": [
-          "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때",
-          "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 알려줘",
-          "회의록의요약,결정사항,논의,후속작업을요청할때",
-          "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 부탁드려요",
+          "최근 회의 결정사항 알려줘",
+          "최근 회의 내용 알려줘",
+          "최근회의결정사항알려줘",
+          "최근 회의 결정사항 알려줘 부탁드려요",
           "meeting summary 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때"
+            "utterance": "최근 회의 결정사항 알려줘"
           },
           {
             "kind": "paraphrase",
-            "utterance": "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 알려줘"
+            "utterance": "최근 회의 내용 알려줘"
           },
           {
             "kind": "typo",
-            "utterance": "회의록의요약,결정사항,논의,후속작업을요청할때"
+            "utterance": "최근회의결정사항알려줘"
           },
           {
             "kind": "honorific",
-            "utterance": "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 부탁드려요"
+            "utterance": "최근 회의 결정사항 알려줘 부탁드려요"
           },
           {
             "kind": "abbreviation",

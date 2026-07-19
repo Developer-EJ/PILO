@@ -67,7 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "1182c191fcec737ae9248381be37e574a5f4895a60a341a813a31f7f0534cd60";
+  "abbf99610ec87908209d2d9c1431e938108269b83277124fbd464ba9bc13696b";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -201,6 +201,14 @@ const payload = {
       "update_meeting_report_action_item",
       "approve_meeting_report_action_item"
     ]
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities
+      .find((capability) => capability.id === "meeting.report.summary")
+      ?.examples.slice(0, 2)
+      .map((example) => example.utterance),
+    ["최근 회의 결정사항 알려줘", "최근 회의 내용 알려줘"],
+    "recent meeting summary requests must keep their routing examples in the catalog"
   );
   const updateActionItem = capabilityCatalog.descriptors.find(
     (descriptor) => descriptor.toolName === "update_meeting_report_action_item"

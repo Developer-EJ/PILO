@@ -24,6 +24,7 @@ from app.agent_processor import (
     _agent_planner_schema,
     _agent_planner_system_prompt,
     _agent_planner_user_prompt,
+    _agent_router_system_prompt,
     _agent_router_schema,
     _agent_router_user_prompt,
     normalize_agent_planner_decision,
@@ -1066,6 +1067,13 @@ def test_agent_router_prompt_uses_compact_catalog_without_tool_schema() -> None:
     assert "toolNames" not in prompt["capabilities"][0]
     assert "inputSchema" not in json.dumps(prompt)
     assert schema["properties"]["domains"]["maxItems"] == 3
+
+
+def test_agent_router_prompt_marks_recent_meeting_summary_as_supported() -> None:
+    assert "recent Meeting content, decisions, discussion, or follow-up items" in (
+        _agent_router_system_prompt()
+    )
+    assert "meeting.report.summary" in _agent_planner_system_prompt()
 
 
 def test_parse_agent_router_output_requires_structured_fields() -> None:
