@@ -8296,6 +8296,18 @@ const autoLayoutImplementation = canvasSurface.slice(
 );
 assert.doesNotMatch(autoLayoutImplementation, /fitSqlErdCanvas\(editor\)/);
 assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
+const autoLayoutButtonSource = canvasSurface.slice(
+  canvasSurface.lastIndexOf(
+    "<button",
+    canvasSurface.indexOf("data-sqltoerd-auto-layout")
+  ),
+  canvasSurface.indexOf(
+    "</button>",
+    canvasSurface.indexOf("data-sqltoerd-auto-layout")
+  )
+);
+assert.match(autoLayoutButtonSource, /absolute left-4 top-4/);
+assert.doesNotMatch(autoLayoutButtonSource, /right-4/);
 assert.match(canvasSurface, /SqlErdTableFocusProvider/);
 assert.match(canvasSurface, /SqlErdTableFocusInteractionGuard/);
 assert.match(canvasSurface, /editor\.setSelectedShapes\(allowedShapeIds\)/);
