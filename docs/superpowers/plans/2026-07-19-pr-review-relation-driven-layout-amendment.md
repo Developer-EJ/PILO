@@ -17,7 +17,7 @@
 - semantic relation이 하나도 없는 Flow는 기존 1→2→3 fallback을 사용한다.
 - pin된 node와 기존 저장 geometry·route 보존 정책을 유지한다.
 - synthetic layout edge는 Canvas relation 또는 DB에 저장하지 않는다.
-- 인접 `review_order`는 target이 실제로 오른쪽에 있을 때만 짧은 route를 사용한다.
+- 인접 `review_order`는 target이 실제로 오른쪽의 같은 행에 있을 때만 짧은 route를 사용한다.
 - 전체 monorepo 테스트는 실행하지 않는다.
 
 ---
@@ -155,7 +155,8 @@ return (
   relation.isReviewOrder &&
   from.flowKey === to.flowKey &&
   to.columnIndex === from.columnIndex + 1 &&
-  to.x >= from.x + from.width
+  to.x >= from.x + from.width &&
+  Math.abs(getCenterY(to) - getCenterY(from)) <= 1
 );
 ```
 
