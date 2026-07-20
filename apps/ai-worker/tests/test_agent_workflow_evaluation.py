@@ -449,21 +449,25 @@ def _job():
 def _confirmation_job():
     job = _job()
     tools = tuple(
-        replace(tool, execution_mode="confirmation_required")
-        if tool.name == "list_calendar_events"
-        else tool
+        (
+            replace(tool, execution_mode="confirmation_required")
+            if tool.name == "list_calendar_events"
+            else tool
+        )
         for tool in job.tools
     )
     catalog = job.tool_capability_catalog
     assert catalog is not None
     descriptors = tuple(
-        replace(
-            descriptor,
-            execution_mode="confirmation_required",
-            requires_confirmation=True,
+        (
+            replace(
+                descriptor,
+                execution_mode="confirmation_required",
+                requires_confirmation=True,
+            )
+            if descriptor.tool_name == "list_calendar_events"
+            else descriptor
         )
-        if descriptor.tool_name == "list_calendar_events"
-        else descriptor
         for descriptor in catalog.descriptors
     )
     return replace(

@@ -730,9 +730,7 @@ def evaluate_case(
         retriever_version=(
             "agent-tool-llm-router:v1"
             if use_llm_routing
-            else TOOL_RETRIEVER_VERSION
-            if retrieval
-            else None
+            else TOOL_RETRIEVER_VERSION if retrieval else None
         ),
         current_date=current_date,
         timezone=timezone,
