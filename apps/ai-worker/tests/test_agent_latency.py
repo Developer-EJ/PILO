@@ -2,7 +2,6 @@ import json
 
 from app.agent_latency import AgentLatencyObserver, agent_latency_trace_key
 
-
 RUN_ID = "33333333-3333-3333-3333-333333333333"
 
 

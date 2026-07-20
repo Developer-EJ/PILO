@@ -1289,6 +1289,36 @@ def test_sql_erd_focus_toolless_planner_clarification_emits_latency() -> None:
     assert all(call["outcome"] == "clarification" for call in observer.calls)
 
 
+def test_sql_erd_running_handoff_retry_recovers_target_from_latest_planner_tool() -> None:
+    retry_context = run_context(
+        status="running",
+        queue_wait_ms=41,
+        latest_planner_tool_name="focus_sql_erd_tables",
+    )
+    observer = FakeAgentLatencyObserver()
+    handoff = FakeExecutionHandoffClient()
+    processor = create_processor(
+        FakeAgentRunRepository(context=retry_context),
+        execution_handoff_client=handoff,
+        latency_observer=observer,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+        )
+    )
+
+    assert result.reason == "agent_execution_handoff_retried"
+    assert handoff.calls == [RUN_ID]
+    assert [call["stage"] for call in observer.calls] == [
+        "queue_wait",
+        "execution_handoff",
+        "planning_turn",
+    ]
+    assert observer.calls[1]["outcome"] == "success"
+
+
 def test_sql_erd_incomplete_workflow_records_planner_validation_failure_once() -> None:
     tools = [
         tool_snapshot(

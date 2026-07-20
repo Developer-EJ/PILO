@@ -143,6 +143,7 @@ class AgentRunContext:
     timezone: str
     planner_turn_count: int = 0
     queue_wait_ms: int | None = None
+    latest_planner_tool_name: str | None = None
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
@@ -829,6 +830,11 @@ class AgentRunProcessor:
                 )
 
             if status == "running":
+                latency_scope.targeted = context.latest_planner_tool_name in {
+                    SQL_ERD_INSPECTION_TOOL_NAME,
+                    SQL_ERD_FOCUS_TOOL_NAME,
+                }
+                self._emit_queue_latency(job, latency_scope)
                 return self._handoff_execution(
                     job,
                     retried=True,

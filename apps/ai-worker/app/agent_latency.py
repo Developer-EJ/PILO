@@ -6,22 +6,15 @@ from collections.abc import Callable
 from hashlib import sha256
 from time import monotonic
 
-
 LOGGER = logging.getLogger(__name__)
 
 SQL_ERD_SURFACE = "sql_erd"
-SQL_ERD_TOOL_NAMES = frozenset(
-    {"inspect_sql_erd_schema", "focus_sql_erd_tables"}
-)
+SQL_ERD_TOOL_NAMES = frozenset({"inspect_sql_erd_schema", "focus_sql_erd_tables"})
 AGENT_LATENCY_STAGES = frozenset(
     {"queue_wait", "router", "planner", "execution_handoff", "planning_turn"}
 )
-AGENT_LATENCY_OUTCOMES = frozenset(
-    {"success", "failure", "fallback", "clarification"}
-)
-AGENT_LATENCY_RETRIEVAL_MODES = frozenset(
-    {"shadow", "shortlist", "llm_router"}
-)
+AGENT_LATENCY_OUTCOMES = frozenset({"success", "failure", "fallback", "clarification"})
+AGENT_LATENCY_RETRIEVAL_MODES = frozenset({"shadow", "shortlist", "llm_router"})
 AGENT_LATENCY_FAILURE_TYPES = frozenset(
     {
         "timeout",
@@ -43,7 +36,7 @@ def _default_emit(event: dict[str, object]) -> None:
 
 
 def _nonnegative_int(value: object) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     rounded = int(round(value))
     return rounded if rounded >= 0 else None
@@ -87,7 +80,7 @@ class AgentLatencyObserver:
 
             if elapsed_ms is None and started_at is not None:
                 elapsed_ms = (self._now() - started_at) * 1000
-            if isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, (int, float)):
+            if isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, int | float):
                 return
             safe_elapsed_ms = max(0, int(round(elapsed_ms)))
 
@@ -95,9 +88,7 @@ class AgentLatencyObserver:
                 "event": "agent_latency",
                 "component": "ai_worker",
                 "stage": stage,
-                "outcome": (
-                    outcome if outcome in AGENT_LATENCY_OUTCOMES else "failure"
-                ),
+                "outcome": (outcome if outcome in AGENT_LATENCY_OUTCOMES else "failure"),
                 "elapsed_ms": safe_elapsed_ms,
                 "trace_key": agent_latency_trace_key(run_id),
                 "surface": SQL_ERD_SURFACE,
@@ -119,9 +110,7 @@ class AgentLatencyObserver:
                     event[key] = safe_value
             if failure_type is not None:
                 event["failure_type"] = (
-                    failure_type
-                    if failure_type in AGENT_LATENCY_FAILURE_TYPES
-                    else "unknown"
+                    failure_type if failure_type in AGENT_LATENCY_FAILURE_TYPES else "unknown"
                 )
 
             self._emit(event)

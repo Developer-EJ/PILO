@@ -1036,6 +1036,7 @@ function createExecutionServiceWithRegistry(
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: "running",
+      turn_sequence: 1,
       prompt,
       timezone,
       request_context_json: requestContext
@@ -1105,6 +1106,7 @@ function createService({
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: runStatus,
+      turn_sequence: 1,
       prompt: "이번 주 일정 알려줘",
       timezone: "Asia/Seoul",
       request_context_json: requestContext
@@ -1571,7 +1573,7 @@ function formatterMeetingReport(index, overrides = {}) {
 
 {
   const latencyObserver = new FakeAgentLatencyObserver();
-  const { service, loggingService, outboxPublisherService } = createService({
+  const { service, database, loggingService, outboxPublisherService } = createService({
     registryState: {
       postExecutionDisposition: "complete_run",
       name: "focus_sql_erd_tables"
@@ -1601,11 +1603,14 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(
     latencyObserver.calls.every(
       (call) =>
-        call.surface === "sql_erd" && call.toolName === "focus_sql_erd_tables"
+        call.surface === "sql_erd" &&
+        call.toolName === "focus_sql_erd_tables" &&
+        call.turnSequence === 1
     ),
     true
   );
   assert.equal(latencyObserver.timeline[0], "latency:start");
+  assert.match(database.calls[0].text, /planner_turn_count AS turn_sequence/);
 }
 
 {
@@ -1730,7 +1735,7 @@ for (const testCase of [
 
 {
   const latencyObserver = new FakeAgentLatencyObserver();
-  const { service, confirmationService } = createService({
+  const { service, confirmationService, loggingService } = createService({
     registryState: {
       name: "inspect_sql_erd_schema",
       executionMode: "contextual",
@@ -1754,9 +1759,14 @@ for (const testCase of [
     throw new Error("confirmation persistence unavailable");
   };
 
-  const result = await service.executeReadyRun(RUN_ID);
-
-  assert.equal(result.status, "failed");
+  await assert.rejects(
+    service.executeReadyRun(RUN_ID),
+    /confirmation persistence unavailable/
+  );
+  assert.equal(
+    loggingService.calls.some((call) => call.method === "failRun"),
+    false
+  );
   const preparationEvents = latencyObserver.calls.filter(
     (call) => call.stage === "tool_preparation"
   );

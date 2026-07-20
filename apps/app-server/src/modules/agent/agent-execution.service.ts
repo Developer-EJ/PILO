@@ -70,6 +70,7 @@ interface AgentExecutionRunRow extends AgentRunRow {
   requested_by_user_id: string;
   timezone: string;
   request_context_json: AgentRunRequestContext;
+  turn_sequence: number | string;
 }
 
 interface AgentPlannerStepRow extends QueryResultRow {
@@ -132,15 +133,16 @@ export class AgentExecutionService {
     const run = await this.database.queryOne<AgentExecutionRunRow>(
       `
         SELECT
-          id,
-          workspace_id,
-          requested_by_user_id,
-          status,
-          prompt,
-          timezone,
-          request_context_json
-        FROM agent_runs
-        WHERE id = $1
+          run.id,
+          run.workspace_id,
+          run.requested_by_user_id,
+          run.status,
+          run.prompt,
+          run.timezone,
+          run.request_context_json,
+          run.planner_turn_count AS turn_sequence
+        FROM agent_runs AS run
+        WHERE run.id = $1
       `,
       [runId]
     );
@@ -157,7 +159,8 @@ export class AgentExecutionService {
         prompt: run.prompt,
         timezone: run.timezone,
         requestContext: run.request_context_json,
-        toolTurnStartedAt
+        toolTurnStartedAt,
+        turnSequence: Number(run.turn_sequence)
       }
     );
   }
@@ -171,6 +174,7 @@ export class AgentExecutionService {
       timezone?: string;
       requestContext?: AgentRunRequestContext;
       toolTurnStartedAt?: number;
+      turnSequence?: number;
     } = {}
   ): Promise<AgentExecutionResult> {
     const toolTurnStartedAt =
@@ -212,7 +216,8 @@ export class AgentExecutionService {
           plannerOutput: plannerStep.output_json,
           prompt: context.prompt,
           timezone: context.timezone,
-          requestContext
+          requestContext,
+          turnSequence: context.turnSequence
         }
       );
       this.observeLatency({
@@ -221,7 +226,8 @@ export class AgentExecutionService {
         toolName,
         stage: "tool_turn",
         outcome: this.latencyOutcome(result),
-        startedAt: toolTurnStartedAt
+        startedAt: toolTurnStartedAt,
+        turnSequence: context.turnSequence
       });
       return result;
     } catch (error) {
@@ -232,7 +238,8 @@ export class AgentExecutionService {
         stage: "tool_turn",
         outcome: "failure",
         startedAt: toolTurnStartedAt,
-        failureType: "domain_error"
+        failureType: "domain_error",
+        turnSequence: context.turnSequence
       });
       throw error;
     }
@@ -247,6 +254,7 @@ export class AgentExecutionService {
       prompt?: string;
       timezone?: string;
       requestContext?: AgentRunRequestContext;
+      turnSequence?: number;
     }
   ): Promise<AgentExecutionResult> {
     const candidate = this.parsePlannerOutput(input.plannerOutput);
@@ -268,7 +276,8 @@ export class AgentExecutionService {
         stage: "tool_preparation",
         outcome: "failure",
         startedAt: preparationStartedAt,
-        failureType: "validation_error"
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
       });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_CONTEXT_UNAVAILABLE",
@@ -303,7 +312,8 @@ export class AgentExecutionService {
         stage: "tool_preparation",
         outcome: "failure",
         startedAt: preparationStartedAt,
-        failureType: "validation_error"
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
       });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PLAN_MISMATCH",
@@ -320,7 +330,8 @@ export class AgentExecutionService {
         stage: "tool_preparation",
         outcome: "failure",
         startedAt: preparationStartedAt,
-        failureType: "validation_error"
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
       });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_HIGH_RISK",
@@ -345,7 +356,8 @@ export class AgentExecutionService {
         stage: "tool_preparation",
         outcome: "failure",
         startedAt: preparationStartedAt,
-        failureType: "validation_error"
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
       });
       return validatedInput.result;
     }
@@ -362,7 +374,8 @@ export class AgentExecutionService {
         input.prompt,
         input.timezone,
         postExecutionDisposition,
-        preparationStartedAt
+        preparationStartedAt,
+        input.turnSequence
       );
     }
 
@@ -373,7 +386,8 @@ export class AgentExecutionService {
         toolName: definition.name,
         stage: "tool_preparation",
         outcome: "success",
-        startedAt: preparationStartedAt
+        startedAt: preparationStartedAt,
+        turnSequence: input.turnSequence
       });
       return this.createConfirmation(
         currentUserId,
@@ -394,7 +408,8 @@ export class AgentExecutionService {
       toolName: definition.name,
       stage: "tool_preparation",
       outcome: "success",
-      startedAt: preparationStartedAt
+      startedAt: preparationStartedAt,
+      turnSequence: input.turnSequence
     });
     return this.executeAutoTool(
       currentUserId,
@@ -406,7 +421,8 @@ export class AgentExecutionService {
       requestContext,
       input.prompt,
       input.timezone,
-      postExecutionDisposition
+      postExecutionDisposition,
+      input.turnSequence
     );
   }
 
@@ -674,7 +690,8 @@ export class AgentExecutionService {
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
       "continue_planning",
-    preparationStartedAt?: number
+    preparationStartedAt?: number,
+    turnSequence?: number
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       this.observeLatency({
@@ -684,7 +701,8 @@ export class AgentExecutionService {
         stage: "tool_preparation",
         outcome: "failure",
         startedAt: preparationStartedAt,
-        failureType: "validation_error"
+        failureType: "validation_error",
+        turnSequence
       });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PREPARATION_UNAVAILABLE",
@@ -694,7 +712,6 @@ export class AgentExecutionService {
     }
 
     let preparationReturned = false;
-    let preparationOutcomeEmitted = false;
     try {
       const preparation: AgentToolPreparationResult =
         await definition.prepareExecution(
@@ -715,10 +732,10 @@ export class AgentExecutionService {
           toolName: definition.name,
           stage: "tool_preparation",
           outcome: "clarification",
-          startedAt: preparationStartedAt
+          startedAt: preparationStartedAt,
+          turnSequence
         });
-        preparationOutcomeEmitted = true;
-        return await this.completeClarification(
+        return this.completeClarification(
           currentUserId,
           workspaceId,
           runId,
@@ -737,10 +754,10 @@ export class AgentExecutionService {
           toolName: definition.name,
           stage: "tool_preparation",
           outcome: "success",
-          startedAt: preparationStartedAt
+          startedAt: preparationStartedAt,
+          turnSequence
         });
-        preparationOutcomeEmitted = true;
-        return await this.createConfirmationFromPlan(
+        return this.createConfirmationFromPlan(
           currentUserId,
           workspaceId,
           runId,
@@ -759,9 +776,9 @@ export class AgentExecutionService {
         toolName: definition.name,
         stage: "tool_preparation",
         outcome: "success",
-        startedAt: preparationStartedAt
+        startedAt: preparationStartedAt,
+        turnSequence
       });
-      preparationOutcomeEmitted = true;
       return this.executeAutoTool(
         currentUserId,
         workspaceId,
@@ -772,20 +789,20 @@ export class AgentExecutionService {
         requestContext,
         prompt,
         timezone,
-        postExecutionDisposition
+        postExecutionDisposition,
+        turnSequence
       );
     } catch (error) {
-      if (!preparationOutcomeEmitted) {
-        this.observeLatency({
-          runId,
-          requestContext,
-          toolName: definition.name,
-          stage: "tool_preparation",
-          outcome: "failure",
-          startedAt: preparationStartedAt,
-          failureType: preparationReturned ? "validation_error" : "domain_error"
-        });
-      }
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: preparationReturned ? "validation_error" : "domain_error",
+        turnSequence
+      });
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
         return {
           status: "skipped",
@@ -1043,7 +1060,8 @@ export class AgentExecutionService {
     prompt?: string,
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
-      "continue_planning"
+      "continue_planning",
+    turnSequence?: number
   ): Promise<AgentExecutionResult> {
     const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
@@ -1093,7 +1111,8 @@ export class AgentExecutionService {
         toolName: definition.name,
         stage: "tool_execution",
         outcome: "success",
-        startedAt: executionStartedAt
+        startedAt: executionStartedAt,
+        turnSequence
       });
       advanceStartedAt = this.agentLatencyObserver?.start();
       const outputSummary = this.buildOutputSummary(result);
@@ -1119,7 +1138,8 @@ export class AgentExecutionService {
           toolName: definition.name,
           stage: "tool_advance",
           outcome: "success",
-          startedAt: advanceStartedAt
+          startedAt: advanceStartedAt,
+          turnSequence
         });
         return { status: "skipped", reason: "already_started" };
       }
@@ -1135,7 +1155,8 @@ export class AgentExecutionService {
           toolName: definition.name,
           stage: "tool_advance",
           outcome: "success",
-          startedAt: advanceStartedAt
+          startedAt: advanceStartedAt,
+          turnSequence
         });
         return { status: "skipped", reason: "already_started" };
       }
@@ -1170,7 +1191,8 @@ export class AgentExecutionService {
         outcome: advanced.run.status === "waiting_user_input"
           ? "clarification"
           : "success",
-        startedAt: advanceStartedAt
+        startedAt: advanceStartedAt,
+        turnSequence
       });
       if (advanced.queuedNextPlannerTurn) {
         await this.agentOutboxPublisherService
@@ -1190,7 +1212,8 @@ export class AgentExecutionService {
         stage: executionCompleted ? "tool_advance" : "tool_execution",
         outcome: "failure",
         startedAt: executionCompleted ? advanceStartedAt : executionStartedAt,
-        failureType: "domain_error"
+        failureType: "domain_error",
+        turnSequence
       });
       const embeddingUnavailable = error instanceof EmbeddingTemporarilyUnavailableError;
       const errorCode = embeddingUnavailable
@@ -1512,6 +1535,7 @@ export class AgentExecutionService {
     outcome: string;
     startedAt?: number;
     failureType?: string;
+    turnSequence?: number;
   }): void {
     if (
       !this.agentLatencyObserver ||
@@ -1529,7 +1553,8 @@ export class AgentExecutionService {
       startedAt: input.startedAt,
       surface: "sql_erd",
       toolName: input.toolName,
-      failureType: input.failureType
+      failureType: input.failureType,
+      turnSequence: input.turnSequence
     });
   }
 
