@@ -567,6 +567,33 @@ function request(message, overrides = {}) {
 }
 
 {
+  const longPem = [
+    "-----BEGIN PRIVATE KEY-----",
+    "A".repeat(1600),
+    "-----END PRIVATE KEY-----"
+  ].join("\n");
+  const state = createState(
+    waitingRun({
+      prompt: `기존 목표 ${longPem}`,
+      messages: [
+        { role: "assistant", content: `대기 질문 ${longPem}` }
+      ]
+    })
+  );
+  const { service, relationshipService } = createService(state);
+  await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request(`새 요청 ${longPem}`, { clientRequestId: "long-pem-redaction" })
+  );
+  const providerContext = JSON.stringify(relationshipService.calls[0]);
+  assert.doesNotMatch(providerContext, /BEGIN PRIVATE KEY/);
+  assert.doesNotMatch(providerContext, /END PRIVATE KEY/);
+  assert.doesNotMatch(providerContext, /A{100}/);
+  assert.ok((providerContext.match(/\[secret\]/g)?.length ?? 0) >= 3);
+}
+
+{
   const state = createState();
   const { service, publisher } = createService(state);
   const result = await service.routeMessage(

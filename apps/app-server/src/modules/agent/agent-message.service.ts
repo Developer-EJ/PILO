@@ -1236,9 +1236,9 @@ export class AgentMessageService {
   }
 
   private sanitizeProviderText(value: string, maxLength: number): string {
-    return this.truncate(value, maxLength)
+    const sanitized = value
       .replace(
-        /-----BEGIN [^-\r\n]+-----[\s\S]*?-----END [^-\r\n]+-----/gi,
+        /-----BEGIN [^-\r\n]+-----[\s\S]*?(?:-----END [^-\r\n]+-----|$)/gi,
         "[secret]"
       )
       .replace(UUID_IN_TEXT_PATTERN, "[resource]")
@@ -1249,6 +1249,7 @@ export class AgentMessageService {
         /\b(token|secret|api[_-]?key|authorization|credential)\s*[:=]\s*[^\s,;]+/gi,
         "$1=[secret]"
       );
+    return this.truncate(sanitized, maxLength);
   }
 
   private routingMode(): "legacy" | "intent" {

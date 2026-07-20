@@ -44,6 +44,10 @@ import {
   subscribeCanvasAgentDelegationAdapter,
 } from "@/features/agent/canvas-delegation-context";
 import { readAgentRequestContext } from "@/features/agent/request-context";
+import {
+  didAgentRunAcceptInput,
+  getLatestAgentRunMessageSequence
+} from "@/features/agent/run-input-recovery";
 import type {
   AgentMessageDisposition,
   AgentMessagePayload,
@@ -687,6 +691,9 @@ export function AgentChatWidget() {
     const userMessageId = createClientId("user-input");
     const assistantMessageId = createClientId("assistant");
     const clientRequestId = createClientId("agent-message");
+    const previousLatestMessageSequence = getLatestAgentRunMessageSequence(
+      run.messages ?? []
+    );
     setMessages((currentMessages) => [
       ...currentMessages,
       {
@@ -740,19 +747,67 @@ export function AgentChatWidget() {
         );
       } catch (error) {
         if (shouldFallbackToLegacyMessageApi(error)) {
-          const legacyPayload = await agentApiClient.submitRunInput(
-            run.workspaceId,
-            run.id,
-            { ...input, message: displayMessage },
-            { signal: abortController.signal }
-          );
-          updateAssistantMessage(targetMessage.id, targetMessage.content, null);
-          await pollAgentRunUntilStop(
-            legacyPayload.run,
-            assistantMessageId,
-            abortController.signal
-          );
-          return;
+          try {
+            const legacyPayload = await agentApiClient.submitRunInput(
+              run.workspaceId,
+              run.id,
+              { ...input, message: displayMessage },
+              { signal: abortController.signal }
+            );
+            updateAssistantMessage(
+              targetMessage.id,
+              targetMessage.content,
+              null
+            );
+            await pollAgentRunUntilStop(
+              legacyPayload.run,
+              assistantMessageId,
+              abortController.signal
+            );
+            return;
+          } catch (legacyError) {
+            if (isAbortError(legacyError)) throw legacyError;
+
+            let refreshRun: AgentRun | null = null;
+            try {
+              const refreshPayload = await agentApiClient.getRun(
+                run.workspaceId,
+                run.id,
+                { signal: abortController.signal }
+              );
+              refreshRun = refreshPayload.run;
+            } catch (refreshError) {
+              if (isAbortError(refreshError)) throw refreshError;
+            }
+
+            const inputWasAccepted = Boolean(
+              refreshRun &&
+                didAgentRunAcceptInput(
+                  refreshRun.messages ?? [],
+                  previousLatestMessageSequence,
+                  displayMessage
+                )
+            );
+            if (
+              refreshRun &&
+              (inputWasAccepted ||
+                refreshRun.status !== "waiting_user_input")
+            ) {
+              updateAssistantMessage(
+                targetMessage.id,
+                targetMessage.content,
+                null
+              );
+              await pollAgentRunUntilStop(
+                refreshRun,
+                assistantMessageId,
+                abortController.signal
+              );
+              return;
+            }
+
+            throw legacyError;
+          }
         }
         if (error instanceof AgentApiError || isAbortError(error)) throw error;
         routedPayload = await agentApiClient.routeMessage(

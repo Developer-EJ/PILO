@@ -219,6 +219,16 @@ assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_STALE/);
 assert.match(agentChatWidget, /refreshRoutingTargetAfterStale/);
 assert.match(agentChatWidget, /agentApiClient\.getRun\(workspaceId, activeRunId/);
 assert.match(agentChatWidget, /최신 상태를 확인한 뒤 다시 요청해주세요/);
+assert.match(agentChatWidget, /previousLatestMessageSequence/);
+assert.match(agentChatWidget, /didAgentRunAcceptInput/);
+assert.match(
+  agentChatWidget,
+  /inputWasAccepted \|\|\s+refreshRun\.status !== "waiting_user_input"/
+);
+assert.match(
+  agentChatWidget,
+  /submitRunInput[\s\S]*catch \(legacyError\)[\s\S]*getRun[\s\S]*pollAgentRunUntilStop/
+);
 assert.match(
   agentChatWidget,
   /if \(error instanceof AgentApiError \|\| isAbortError\(error\)\) throw error;[\s\S]*routeMessage/,
