@@ -253,3 +253,39 @@ ci: Agent 평가 revision과 artifact 조건 강화 (#1487)
 PR 제목: `test(agent,ci): 사용자 작업 성공률 평가 근거 강화`
 
 PR 본문에는 실제 provider 평가는 미수행이며, 현재 31개 대표 workflow는 운영 트래픽 전체나 모든 요청 유형의 개선을 의미하지 않는다고 명시한다.
+
+### Task 5: main 절대 성능 snapshot
+
+**Files:**
+- Modify: `apps/ai-worker/app/agent_planner_comparison.py`
+- Create: `apps/ai-worker/scripts/snapshot_agent_planner_evaluations.py`
+- Modify: `.github/workflows/evaluate-agent-planner.yml`
+- Modify: `apps/ai-worker/tests/test_agent_planner_comparison.py`
+- Modify: `apps/ai-worker/tests/test_agent_planner_workflow.py`
+
+**Interfaces:**
+- Consumes: 단일 revision의 완전한 `agent_workflow` evaluation report.
+- Produces: `build_agent_performance_snapshot(...)`, `agent-performance-snapshot:v1` JSON artifact.
+
+- [x] **Step 1: 단일 report 절대 지표 실패 테스트 작성 및 RED 확인**
+
+source revision, 31개 고유 scenario 성공률, scenario 평균 latency/token, 도메인·작업 범주 성공률,
+안전 위반 건수를 기대하고 `passed`가 없음을 검증한다.
+
+- [x] **Step 2: 최소 snapshot builder와 CLI 구현**
+
+`agent_workflow` variant 하나만 허용하고 report 완전성을 기존 comparison validator로 검증한다.
+CLI는 유효한 report를 JSON으로 저장하면 성능값과 무관하게 0을 반환한다.
+
+- [x] **Step 3: workflow를 snapshot/compare mode로 분리**
+
+snapshot은 실행 시점의 current main `target_sha`를 받고 `agent_workflow` 하나만 실행한다.
+compare는 기존 baseline/candidate ancestry와 paired 개선 gate를 유지한다.
+
+- [x] **Step 4: 최소 관련 테스트와 정적 검사 실행**
+
+Run: `python -m pytest -q tests/test_agent_planner_comparison.py tests/test_agent_planner_workflow.py`
+Expected: PASS.
+
+Run: `python -m ruff check app/agent_planner_comparison.py scripts/snapshot_agent_planner_evaluations.py tests/test_agent_planner_comparison.py tests/test_agent_planner_workflow.py`
+Expected: PASS.

@@ -17,14 +17,13 @@ def test_evaluation_workflow_accepts_unmerged_candidate_descending_from_dev_base
     assert "must be distinct" in workflow
     assert '[[ "$sha" =~ ^[0-9a-f]{40}$ ]]' in workflow
     assert "merge-base --is-ancestor" in workflow
-    assert "refs/remotes/origin/main" not in workflow
     assert "refs/remotes/origin/dev" in workflow
     assert '"$BASELINE_SHA" "$CANDIDATE_SHA"' in workflow
     assert "candidate SHA does not descend from baseline SHA" in workflow
     assert workflow.count("needs.prepare.outputs.baseline_sha") == 2
     assert workflow.count("needs.prepare.outputs.candidate_sha") == 2
     assert "fail-fast: false" in workflow
-    assert "always() && needs.prepare.result == 'success'" in workflow
+    assert "always() && inputs.mode == 'compare' && needs.prepare.result == 'success'" in workflow
     assert workflow.count("if: always()") >= 2
 
 
@@ -45,11 +44,13 @@ def test_agent_workflow_variant_is_compared_without_entering_meeting_readiness()
 
     assert '"agent_workflow"' in script
     assert "--workflow-catalog" in script
-    assert "- agent_workflow" in workflow
+    assert '"agent_workflow"' in workflow
     assert "agent-workflow-catalog.json" in workflow
     assert "baseline-meeting-agent_workflow-evaluation.json" in workflow
     assert "candidate-meeting-agent_workflow-evaluation.json" in workflow
-    readiness_command = workflow.split("check_phase4e_dev_readiness.py", 1)[1]
+    readiness_command = workflow.split("check_phase4e_dev_readiness.py", 1)[1].split(
+        "- name: Upload evaluation result", 1
+    )[0]
     assert "agent_workflow" not in readiness_command
 
 
@@ -57,3 +58,17 @@ def test_comparison_command_fails_without_improvement_evidence() -> None:
     script = COMPARISON_SCRIPT_PATH.read_text(encoding="utf-8")
 
     assert 'comparison["improvementEvidence"]["passed"] is True' in script
+
+
+def test_evaluation_workflow_supports_main_snapshot_without_comparison_gate() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "mode:" in workflow
+    assert "target_sha:" in workflow
+    assert "snapshot_agent_planner_evaluations.py" in workflow
+    assert "agent-performance-snapshot-${{ needs.prepare.outputs.target_sha }}" in workflow
+    assert "inputs.mode == 'snapshot'" in workflow
+    assert "inputs.mode == 'compare'" in workflow
+    assert "agent-evaluation-target-agent_workflow" in workflow
+    assert "inputs.target_sha || github.sha" in workflow
+    assert "target SHA must match the current main revision" in workflow

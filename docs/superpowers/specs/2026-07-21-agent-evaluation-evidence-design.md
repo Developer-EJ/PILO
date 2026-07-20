@@ -71,6 +71,19 @@
 - 평가된 각 작업 범주의 candidate 성공률이 baseline보다 낮아도 개선 판정을 거부한다.
 - 안전 위반이나 누락 pair가 있으면 개선 판정을 거부한다.
 
+### 5. main 절대 성능 snapshot
+
+- workflow는 `snapshot`과 `compare` mode를 분리한다.
+- `snapshot`은 실행 시점의 current `main` SHA만 받으며 입력을 생략하면 dispatch SHA를 사용한다.
+- 비용을 최소화하기 위해 Canvas 제외 31개 `agent_workflow` scenario만 실행한다.
+- 고유 scenario를 동일 가중치로 집계해 task success rate, 평균 end-to-end latency,
+  평균 provider token, 도메인별·작업 범주별 성공률, 안전 위반 건수를 기록한다.
+- report에 workflow summary와 정확히 31개 고유 scenario의 전체 반복 결과가 없으면 snapshot 생성을 거부한다.
+- snapshot은 절대 현황 기록이므로 `passed`나 개선 판정을 생성하지 않는다.
+- snapshot artifact는 원본 evaluation report와 집계 JSON을 함께 30일 보관한다.
+- 저장된 snapshot은 추세 참고용이며, PR 개선 판정은 baseline/candidate를 같은 실행에서 다시 평가한
+  paired comparison으로만 수행한다.
+
 ## 파일 범위
 
 수정:
@@ -79,11 +92,13 @@
   - multi-tool의 합성 context 제거
   - workflow 결과와 case-level 오류 기록
 - `apps/ai-worker/app/agent_planner_comparison.py`
-  - paired scenario 비교와 95% 신뢰구간
+  - paired scenario 비교, 95% 신뢰구간, 단일 revision 절대 성능 집계
+- `apps/ai-worker/scripts/snapshot_agent_planner_evaluations.py`
+  - 단일 `agent_workflow` report를 pass/fail gate 없는 snapshot JSON으로 변환
 - `apps/ai-worker/scripts/evaluate_agent_planner.py`
   - evaluator hash 및 workflow 메타데이터 기록
 - `.github/workflows/evaluate-agent-planner.yml`
-  - immutable SHA, distinct revision, 동일 evaluator 검증, fail-fast 해제
+  - `snapshot`/`compare` mode, immutable SHA, distinct revision, 동일 evaluator 검증, fail-fast 해제
 - `apps/ai-worker/evals/meeting_agent_capability_catalog_v1.json`
   - multi-tool 단계의 결정론적 Tool output과 최종 근거 조건
 - `apps/ai-worker/evals/agent_workflow_catalog_v1.json`
@@ -112,6 +127,8 @@
 7. latency/token 개선과 안전 위반 여부가 최종 개선 판정에 반영된다.
 8. `agent_workflow`가 있으면 기존 Meeting workflow를 개선 표본에 중복 산입하지 않는다.
 9. 평가된 도메인 하나라도 성공률이 후퇴하면 최종 개선 판정을 거부한다.
+10. snapshot이 단일 revision의 31개 scenario를 절대 지표로 집계하고 `passed`를 만들지 않는다.
+11. snapshot workflow는 `agent_workflow`만 실행하고 compare gate에 진입하지 않는다.
 
 이 목록 외의 조합 테스트, UI 테스트, Canvas 테스트, 운영 대시보드 테스트는 추가하지 않는다.
 
@@ -132,5 +149,6 @@
 - 위 최소 테스트가 통과한다.
 - workflow 결과가 실제 Tool output 기반임을 테스트로 증명한다.
 - 비교 report가 distinct revision, 동일 evaluator, 완전한 pair, 95% 신뢰구간을 강제한다.
+- snapshot report가 단일 main revision의 절대 지표와 source SHA를 기록하고 개선 판정을 만들지 않는다.
 - PR 본문에 6개 도메인 31개 고유 workflow의 대표 표본이라는 한계와 실제 provider 평가 실행 전에는
   개선을 주장할 수 없음을 명시한다.

@@ -4,6 +4,8 @@ import random
 from collections.abc import Iterable
 
 COMPARISON_FORMAT = "agent-llm-router-planner-comparison:v1"
+SNAPSHOT_FORMAT = "agent-performance-snapshot:v1"
+SNAPSHOT_SCENARIO_COUNT = 31
 _FUNNEL_STAGES = (
     "routerRouted",
     "domainExact",
@@ -33,6 +35,75 @@ _REVISION_BINDING_KEYS = (
     "registryCatalogSha256",
     "registryEligibleSnapshotSha256",
 )
+
+
+def build_agent_performance_snapshot(
+    reports: Iterable[dict[str, object]],
+) -> dict[str, object]:
+    reports_by_variant = _reports_by_variant(reports)
+    if set(reports_by_variant) != {"agent_workflow"}:
+        raise ValueError("Snapshot requires exactly the agent_workflow variant")
+
+    report = reports_by_variant["agent_workflow"]
+    if (
+        not isinstance(report.get("workflowEvaluation"), dict)
+        or report.get("totalCases") != SNAPSHOT_SCENARIO_COUNT
+    ):
+        raise ValueError("Snapshot requires 31 complete workflow scenarios")
+    _validate_complete_workflow_attempts(report)
+    scenario_attempts: dict[str, list[dict[str, object]]] = {}
+    for result in _raw_results(report):
+        _validate_workflow_result(result)
+        scenario_id = result.get("id")
+        if not isinstance(scenario_id, str) or not scenario_id:
+            raise ValueError("Invalid workflow scenario id")
+        scenario_attempts.setdefault(scenario_id, []).append(result)
+    if len(scenario_attempts) != SNAPSHOT_SCENARIO_COUNT:
+        raise ValueError("Snapshot requires 31 complete workflow scenarios")
+
+    scenario_success: dict[str, float] = {}
+    domain_success: dict[str, list[float]] = {}
+    category_success: dict[str, list[float]] = {}
+    scenario_latency: list[float] = []
+    scenario_tokens: list[float] = []
+    has_complete_tokens = True
+    safety_violations = 0
+    for scenario_id, attempts in scenario_attempts.items():
+        success_rate = _mean([float(_task_success(item)) for item in attempts])
+        scenario_success[scenario_id] = success_rate
+        for domain in _expected_domains(attempts[0]):
+            domain_success.setdefault(domain, []).append(success_rate)
+        category = attempts[0].get("kind")
+        if not isinstance(category, str) or not category:
+            raise ValueError("Invalid workflow task category")
+        category_success.setdefault(category, []).append(success_rate)
+        scenario_latency.append(
+            _mean([float(_workflow_number(item, "latencyMs")) for item in attempts])
+        )
+        token_values = [_workflow_number(item, "providerTotalTokens") for item in attempts]
+        if any(value is None for value in token_values):
+            has_complete_tokens = False
+        else:
+            scenario_tokens.append(_mean([float(value) for value in token_values]))
+        safety_violations += sum(_safety_violation_count(item) for item in attempts)
+
+    return {
+        "format": SNAPSHOT_FORMAT,
+        "sourceRevision": _common_revision(reports_by_variant.values()),
+        "scopeVariants": ["agent_workflow"],
+        "fixedInputs": _common_metadata(reports_by_variant.values(), _PAIRED_METADATA_KEYS),
+        "revisionBinding": _common_metadata(reports_by_variant.values(), _REVISION_BINDING_KEYS),
+        "aggregate": _aggregate(reports_by_variant.values()),
+        "uniqueScenarioCount": len(scenario_attempts),
+        "taskSuccessRate": round(_mean(list(scenario_success.values())), 4),
+        "meanLatencyMs": round(_mean(scenario_latency), 4),
+        "meanProviderTotalTokens": (
+            round(_mean(scenario_tokens), 4) if has_complete_tokens else None
+        ),
+        "domainTaskSuccess": _absolute_grouped_task_success(domain_success),
+        "categoryTaskSuccess": _absolute_grouped_task_success(category_success),
+        "safetyViolations": {"count": safety_violations},
+    }
 
 
 def build_two_stage_comparison(
@@ -328,6 +399,18 @@ def _grouped_task_success(
             "passed": _mean([item[1] - item[0] for item in pairs]) >= 0,
         }
         for name, pairs in sorted(groups.items())
+    }
+
+
+def _absolute_grouped_task_success(
+    groups: dict[str, list[float]],
+) -> dict[str, dict[str, float | int]]:
+    return {
+        name: {
+            "scenarioCount": len(values),
+            "rate": round(_mean(values), 4),
+        }
+        for name, values in sorted(groups.items())
     }
 
 

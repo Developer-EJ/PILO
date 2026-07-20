@@ -1,15 +1,26 @@
+import json
+
 import pytest
 
-from app.agent_planner_comparison import build_two_stage_comparison
+from app.agent_planner_comparison import (
+    build_agent_performance_snapshot,
+    build_two_stage_comparison,
+)
+from scripts.snapshot_agent_planner_evaluations import main as snapshot_main
 
 
 def report(
-    variant: str, *, domain_count: int, tool_count: int, exact_count: int
+    variant: str,
+    *,
+    domain_count: int,
+    tool_count: int,
+    exact_count: int,
+    case_count: int = 10,
 ) -> dict[str, object]:
-    exact = exact_count / 10
-    tool = tool_count / 10
+    exact = exact_count / case_count
+    tool = tool_count / case_count
     results = []
-    for index in range(10):
+    for index in range(case_count):
         failure_reasons = (
             [] if index < exact_count else (["input"] if index < tool_count else ["tool"])
         )
@@ -24,24 +35,28 @@ def report(
             }
         )
     return {
-        "totalAttempts": 10,
+        "totalAttempts": case_count,
         "passedAttempts": exact_count,
         "exactAttemptRate": exact,
         "toolSelectionAccuracy": tool,
         "requiredInputAccuracy": 1.0,
         "routingFunnel": {
-            "toolSelectionAttempts": 10,
+            "toolSelectionAttempts": case_count,
             "stages": {
-                "routerRouted": {"count": 10, "conditionalRate": 1.0, "overallRate": 1.0},
+                "routerRouted": {
+                    "count": case_count,
+                    "conditionalRate": 1.0,
+                    "overallRate": 1.0,
+                },
                 "domainExact": {
                     "count": domain_count,
-                    "conditionalRate": domain_count / 10,
-                    "overallRate": domain_count / 10,
+                    "conditionalRate": domain_count / case_count,
+                    "overallRate": domain_count / case_count,
                 },
                 "capabilityExact": {
                     "count": domain_count,
                     "conditionalRate": 1.0,
-                    "overallRate": domain_count / 10,
+                    "overallRate": domain_count / case_count,
                 },
                 "toolExact": {
                     "count": tool_count,
@@ -97,13 +112,20 @@ def workflow_report(
     latency_ms: float,
     provider_tokens: int,
     variant: str = "multi_tool",
+    case_count: int = 10,
 ) -> dict[str, object]:
-    value = report(variant, domain_count=10, tool_count=10, exact_count=exact_count)
-    value["totalCases"] = 10
+    value = report(
+        variant,
+        domain_count=case_count,
+        tool_count=case_count,
+        exact_count=exact_count,
+        case_count=case_count,
+    )
+    value["totalCases"] = case_count
     value["metadata"]["sourceRevision"] = source_revision
     value["workflowEvaluation"] = {"taskSuccessRate": value["exactAttemptRate"]}
     value["multiToolWorkflows"] = {
-        "workflowAttempts": 10,
+        "workflowAttempts": case_count,
         "exactWorkflowAttempts": value["passedAttempts"],
         "exactWorkflowRate": value["exactAttemptRate"],
     }
@@ -142,6 +164,86 @@ def test_two_stage_comparison_pairs_inputs_and_reports_funnel_delta() -> None:
     assert result["improvementEvidence"]["uniqueScenarioCount"] == 0
     assert result["improvementEvidence"]["taskSuccess"]["confidenceInterval95"][0] == 0.0
     assert result["improvementEvidence"]["passed"] is False
+
+
+def test_agent_performance_snapshot_reports_absolute_workflow_metrics() -> None:
+    current = workflow_report(
+        31,
+        source_revision="main-revision",
+        latency_ms=123.5,
+        provider_tokens=456,
+        variant="agent_workflow",
+        case_count=31,
+    )
+    current["results"][0]["expected"]["evaluationDomains"] = ["drive"]
+    current["results"][0]["kind"] = "grounded_answer"
+    current["results"][1]["workflow"]["safetyViolations"] = ["unsupported_action"]
+
+    snapshot = build_agent_performance_snapshot([current])
+
+    assert snapshot["format"] == "agent-performance-snapshot:v1"
+    assert snapshot["sourceRevision"] == "main-revision"
+    assert snapshot["scopeVariants"] == ["agent_workflow"]
+    assert snapshot["uniqueScenarioCount"] == 31
+    assert snapshot["taskSuccessRate"] == 1.0
+    assert snapshot["meanLatencyMs"] == 123.5
+    assert snapshot["meanProviderTotalTokens"] == 456.0
+    assert snapshot["domainTaskSuccess"]["drive"]["rate"] == 1.0
+    assert snapshot["categoryTaskSuccess"]["grounded_answer"]["rate"] == 1.0
+    assert snapshot["safetyViolations"] == {"count": 1}
+    assert "passed" not in snapshot
+
+
+def test_snapshot_command_writes_metrics_without_a_pass_fail_gate(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    report_path = tmp_path / "agent-workflow.json"
+    output_path = tmp_path / "snapshot.json"
+    report_path.write_text(
+        json.dumps(
+            workflow_report(
+                31,
+                source_revision="main-revision",
+                latency_ms=123.5,
+                provider_tokens=456,
+                variant="agent_workflow",
+                case_count=31,
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "snapshot_agent_planner_evaluations.py",
+            "--report",
+            str(report_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    assert snapshot_main() == 0
+    snapshot = json.loads(output_path.read_text(encoding="utf-8"))
+    assert snapshot["taskSuccessRate"] == 1.0
+    assert "passed" not in snapshot
+
+
+@pytest.mark.parametrize("mutation", ("missing_workflow_summary", "thirty_cases"))
+def test_snapshot_rejects_incomplete_31_scenario_report(mutation: str) -> None:
+    current = workflow_report(
+        31 if mutation == "missing_workflow_summary" else 30,
+        source_revision="main-revision",
+        latency_ms=123.5,
+        provider_tokens=456,
+        variant="agent_workflow",
+        case_count=31 if mutation == "missing_workflow_summary" else 30,
+    )
+    if mutation == "missing_workflow_summary":
+        del current["workflowEvaluation"]
+
+    with pytest.raises(ValueError, match="31 complete workflow scenarios"):
+        build_agent_performance_snapshot([current])
 
 
 def test_two_stage_comparison_requires_distinct_revisions_and_same_evaluator() -> None:
