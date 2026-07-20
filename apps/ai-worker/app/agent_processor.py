@@ -1658,10 +1658,17 @@ def normalize_agent_planner_decision(
     strict_tool_selection: bool = False,
     completion_tool_names: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
-    continuation = _validated_sql_erd_inspect_continuation(
-        decision,
-        {tool.name for tool in job.tools},
-        completion_tool_names,
+    has_legacy_sql_erd_inspect = any(
+        tool.name == SQL_ERD_INSPECTION_TOOL_NAME for tool in job.tools
+    )
+    continuation = (
+        _validated_sql_erd_inspect_continuation(
+            decision,
+            {tool.name for tool in job.tools},
+            completion_tool_names,
+        )
+        if has_legacy_sql_erd_inspect
+        else None
     )
     decision = _normalize_calendar_relative_date_query(
         decision,
@@ -1701,7 +1708,11 @@ def normalize_agent_planner_decision(
     final_answer = _safe_text(decision.final_answer_draft, message)
     tool = tools_by_name.get(decision.tool_name or "")
     tool_input = decision.tool_input
-    if tool is not None and tool.name == SQL_ERD_FOCUS_TOOL_NAME:
+    if (
+        tool is not None
+        and tool.name == SQL_ERD_FOCUS_TOOL_NAME
+        and "sessionId" in tool.input_schema.get("required", [])
+    ):
         tool_input = _normalize_sql_erd_focus_input(tool_input, planning_context)
     missing_fields = tuple(decision.missing_fields)
     unsupported_reason = decision.unsupported_reason
@@ -1715,7 +1726,9 @@ def normalize_agent_planner_decision(
 
     if status == "tool_candidate" and tool is not None:
         missing_fields = _missing_required_tool_input_fields(tool, tool_input)
-        if tool.name == "focus_sql_erd_tables":
+        if tool.name == SQL_ERD_FOCUS_TOOL_NAME and "sessionId" in tool.input_schema.get(
+            "required", []
+        ):
             missing_fields = _missing_sql_erd_focus_fields(
                 tool_input,
                 missing_fields,
@@ -3842,25 +3855,13 @@ def _agent_planner_system_prompt(continuation_contract_enabled: bool = False) ->
         "targetMode, sessionId, workspaceId, userId, or currentUserId in generate_sql_erd input; "
         "the App Server "
         "resolves context and, when needed, asks the user whether to create or replace a session. "
-        "When the user asks to show or focus tables related to a feature in an existing ERD, use "
-        "inspect_sql_erd_schema first. Never invent SQLtoERD session IDs: provide an exact known "
-        "sessionId or title only when the user or request context identifies it, and let the App "
-        "Server ask the user to choose when multiple sessions remain. When clarification "
-        "candidates include selectionToken, copy the exact selected selectionToken into "
-        "sessionSelectionToken in the next inspect_sql_erd_schema call instead of retrying by "
-        "title. The inspection projection "
-        "uses compact table refs. Classify semantically direct matches as primary tables and only "
-        "meaningful direct FK neighbors as related tables; do not expand to two-hop neighbors by "
-        "default. Put semantically relevant tables without a direct FK in contextTableRefs only "
-        "when the inspection projection contains exact schema evidence such as a table or column "
-        "name, comment, data type, or enum value. Include that exact schema evidence in the "
-        "context table reason. Context tables do not imply a foreign key, so never invent "
-        "relation lines. "
-        "After a completed inspect_sql_erd_schema result, use focus_sql_erd_tables with "
-        "that exact sessionId, sessionRevision, and modelFingerprint, primaryTableRefs, "
-        "relatedTableRefs, contextTableRefs, confidence, "
-        "and one concise reason per selected ref. Do not derive refs from memory or a stale "
-        "result. "
+        "When the user asks to focus tables related to a feature in the current SQLtoERD screen, "
+        "use focus_sql_erd_tables once with only the user's concise featureQuery. The App Server "
+        "owns schema inspection, current session resolution, primary-table matching, direct FK "
+        "expansion, and stale-model validation. Never include or invent session IDs, revisions, "
+        "model fingerprints, table refs, relation refs, workspace IDs, or user IDs. Requests to "
+        "inspect an ERD outside the current SQLtoERD screen or to return a general raw schema "
+        "projection are unsupported. "
         "When contextSurface is pr_review, the App Server has already identified and revalidated "
         "the current immutable PR Review revision. If recommend_pr_review_focus is in the provided "
         "tool list, use it for requests about the current PR's key files, review priority, "

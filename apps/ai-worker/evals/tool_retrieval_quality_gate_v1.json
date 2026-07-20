@@ -1,17 +1,594 @@
 {
-  "version": "agent-tool-retrieval-quality-gate:v1",
-  "suiteVersion": "tool-retrieval-quality-suite:v1",
-  "topK": 8,
-  "schemaTokenBudget": 8000,
-  "registrySnapshot": {
-    "inventorySha256": "4d442509d64ae9a20695372dc3904b3ee1bded72072e85cbbf427c3e87c0e2be",
-    "catalogSha256": "b9cba09fae02de5ab8d49ab2563165a38fb345b217fde5ac57a8705eee8cc2c7",
-    "eligibleSnapshotSha256": "46b667635adc5e9d9337c76c8fbfcbefaef78af860ea8e8fc2b0e0273317063f"
+  "format": "agent-tool-retrieval-registry-snapshot:v1",
+  "inventory": {
+    "version": "agent-tool-inventory:v1",
+    "sha256": "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c",
+    "catalogVersion": "agent-tool-capabilities:v2",
+    "catalogSha256": "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c",
+    "totalTools": 35,
+    "totalSchemaBytes": 17686,
+    "totalEstimatedSchemaTokens": 4433,
+    "tools": [
+      {
+        "toolName": "approve_meeting_report_action_item",
+        "domain": "meeting",
+        "action": "approve_meeting_report_action_item",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "delivery"
+        ],
+        "schemaBytes": 380,
+        "estimatedSchemaTokens": 95,
+        "capabilityIds": [
+          "meeting.action_items.approve",
+          "meeting.action_items.transfer_and_approve"
+        ]
+      },
+      {
+        "toolName": "assign_board_issue_safely",
+        "domain": "board",
+        "action": "assign_board_issue_safely",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "issueNumber"
+        ],
+        "schemaBytes": 718,
+        "estimatedSchemaTokens": 180,
+        "capabilityIds": [
+          "board.issues.assign"
+        ]
+      },
+      {
+        "toolName": "create_board_issue",
+        "domain": "board",
+        "action": "create_board_issue",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "title"
+        ],
+        "schemaBytes": 448,
+        "estimatedSchemaTokens": 112,
+        "capabilityIds": [
+          "board.issues.create"
+        ]
+      },
+      {
+        "toolName": "create_calendar_event",
+        "domain": "calendar",
+        "action": "create_calendar_event",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "startDate",
+          "title"
+        ],
+        "schemaBytes": 513,
+        "estimatedSchemaTokens": 129,
+        "capabilityIds": [
+          "calendar.events.create"
+        ]
+      },
+      {
+        "toolName": "delegate_canvas_agent",
+        "domain": "canvas",
+        "action": "delegate_canvas_agent",
+        "operation": "write",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 62,
+        "estimatedSchemaTokens": 16,
+        "capabilityIds": [
+          "canvas.delegate",
+          "canvas.drive_images.import"
+        ]
+      },
+      {
+        "toolName": "diagnose_board_freshness",
+        "domain": "board",
+        "action": "diagnose_board_freshness",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 268,
+        "estimatedSchemaTokens": 67,
+        "capabilityIds": [
+          "board.briefing"
+        ]
+      },
+      {
+        "toolName": "dismiss_meeting_report_action_item",
+        "domain": "meeting",
+        "action": "dismiss_meeting_report_action_item",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 327,
+        "estimatedSchemaTokens": 82,
+        "capabilityIds": [
+          "meeting.action_items.dismiss"
+        ]
+      },
+      {
+        "toolName": "end_meeting_recording",
+        "domain": "meeting",
+        "action": "end_meeting_recording",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 286,
+        "estimatedSchemaTokens": 72,
+        "capabilityIds": [
+          "meeting.recording.end"
+        ]
+      },
+      {
+        "toolName": "find_action_items",
+        "domain": "meeting",
+        "action": "find_action_items",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 728,
+        "estimatedSchemaTokens": 182,
+        "capabilityIds": [
+          "meeting.action_items.approve",
+          "meeting.action_items.dismiss",
+          "meeting.action_items.list",
+          "meeting.action_items.transfer_and_approve",
+          "meeting.action_items.update"
+        ]
+      },
+      {
+        "toolName": "focus_sql_erd_tables",
+        "domain": "sql_erd",
+        "action": "focus_sql_erd_tables",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": "sql_erd",
+        "requiredInputFields": [
+          "featureQuery"
+        ],
+        "schemaBytes": 152,
+        "estimatedSchemaTokens": 38,
+        "capabilityIds": [
+          "sql_erd.inspect"
+        ]
+      },
+      {
+        "toolName": "generate_sql_erd",
+        "domain": "sql_erd",
+        "action": "generate_sql_erd",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "relations",
+          "requestedDialect",
+          "tables",
+          "title",
+          "unsupportedFeatures",
+          "version"
+        ],
+        "schemaBytes": 3317,
+        "estimatedSchemaTokens": 830,
+        "capabilityIds": [
+          "sql_erd.generate"
+        ]
+      },
+      {
+        "toolName": "get_active_meeting",
+        "domain": "meeting",
+        "action": "get_active_meeting",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 62,
+        "estimatedSchemaTokens": 16,
+        "capabilityIds": [
+          "meeting.control.leave",
+          "meeting.recording.end",
+          "meeting.recording.start"
+        ]
+      },
+      {
+        "toolName": "get_board_briefing",
+        "domain": "board",
+        "action": "get_board_briefing",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 268,
+        "estimatedSchemaTokens": 67,
+        "capabilityIds": [
+          "board.briefing"
+        ]
+      },
+      {
+        "toolName": "get_board_issue_context",
+        "domain": "board",
+        "action": "get_board_issue_context",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "issueNumber"
+        ],
+        "schemaBytes": 400,
+        "estimatedSchemaTokens": 100,
+        "capabilityIds": [
+          "board.issues.search"
+        ]
+      },
+      {
+        "toolName": "get_meeting_decision_evidence",
+        "domain": "meeting",
+        "action": "get_meeting_decision_evidence",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 760,
+        "estimatedSchemaTokens": 190,
+        "capabilityIds": [
+          "meeting.decision.evidence"
+        ]
+      },
+      {
+        "toolName": "get_meeting_participants",
+        "domain": "meeting",
+        "action": "get_meeting_participants",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 286,
+        "estimatedSchemaTokens": 72,
+        "capabilityIds": [
+          "meeting.participants.list"
+        ]
+      },
+      {
+        "toolName": "get_meeting_report",
+        "domain": "meeting",
+        "action": "get_meeting_report",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 713,
+        "estimatedSchemaTokens": 179,
+        "capabilityIds": [
+          "meeting.report.detail"
+        ]
+      },
+      {
+        "toolName": "join_meeting",
+        "domain": "meeting",
+        "action": "join_meeting",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 497,
+        "estimatedSchemaTokens": 125,
+        "capabilityIds": [
+          "meeting.control.join"
+        ]
+      },
+      {
+        "toolName": "leave_meeting",
+        "domain": "meeting",
+        "action": "leave_meeting",
+        "operation": "write",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 286,
+        "estimatedSchemaTokens": 72,
+        "capabilityIds": [
+          "meeting.control.leave"
+        ]
+      },
+      {
+        "toolName": "list_calendar_events",
+        "domain": "calendar",
+        "action": "list_calendar_events",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "end",
+          "start"
+        ],
+        "schemaBytes": 260,
+        "estimatedSchemaTokens": 65,
+        "capabilityIds": [
+          "calendar.events.list",
+          "calendar.events.update"
+        ]
+      },
+      {
+        "toolName": "list_meeting_reports",
+        "domain": "meeting",
+        "action": "list_meeting_reports",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 371,
+        "estimatedSchemaTokens": 93,
+        "capabilityIds": [
+          "meeting.decision.evidence",
+          "meeting.report.detail",
+          "meeting.report.regenerate",
+          "meeting.reports.list"
+        ]
+      },
+      {
+        "toolName": "list_meeting_rooms",
+        "domain": "meeting",
+        "action": "list_meeting_rooms",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 62,
+        "estimatedSchemaTokens": 16,
+        "capabilityIds": [
+          "meeting.control.start",
+          "meeting.rooms.list"
+        ]
+      },
+      {
+        "toolName": "move_board_issue_status",
+        "domain": "board",
+        "action": "move_board_issue_status",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "columnName",
+          "issueNumber"
+        ],
+        "schemaBytes": 474,
+        "estimatedSchemaTokens": 119,
+        "capabilityIds": [
+          "board.issues.move"
+        ]
+      },
+      {
+        "toolName": "recommend_pr_review_focus",
+        "domain": "pr_review",
+        "action": "recommend_pr_review_focus",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": "pr_review",
+        "requiredInputFields": [],
+        "schemaBytes": 144,
+        "estimatedSchemaTokens": 36,
+        "capabilityIds": [
+          "pr_review.focus"
+        ]
+      },
+      {
+        "toolName": "regenerate_meeting_report",
+        "domain": "meeting",
+        "action": "regenerate_meeting_report",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 713,
+        "estimatedSchemaTokens": 179,
+        "capabilityIds": [
+          "meeting.report.regenerate"
+        ]
+      },
+      {
+        "toolName": "resolve_board_context",
+        "domain": "board",
+        "action": "resolve_board_context",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 268,
+        "estimatedSchemaTokens": 67,
+        "capabilityIds": [
+          "board.briefing"
+        ]
+      },
+      {
+        "toolName": "resolve_meeting_resource",
+        "domain": "meeting",
+        "action": "resolve_meeting_resource",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "resourceType"
+        ],
+        "schemaBytes": 378,
+        "estimatedSchemaTokens": 95,
+        "capabilityIds": [
+          "meeting.control.join",
+          "meeting.participants.list"
+        ]
+      },
+      {
+        "toolName": "search_board_issues",
+        "domain": "board",
+        "action": "search_board_issues",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 543,
+        "estimatedSchemaTokens": 136,
+        "capabilityIds": [
+          "board.issues.assign",
+          "board.issues.move",
+          "board.issues.search"
+        ]
+      },
+      {
+        "toolName": "search_meeting_transcript",
+        "domain": "meeting",
+        "action": "search_meeting_transcript",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "query"
+        ],
+        "schemaBytes": 791,
+        "estimatedSchemaTokens": 198,
+        "capabilityIds": [
+          "meeting.evidence.search"
+        ]
+      },
+      {
+        "toolName": "search_workspace_documents",
+        "domain": "drive",
+        "action": "search_workspace_documents",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "auto",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "query"
+        ],
+        "schemaBytes": 189,
+        "estimatedSchemaTokens": 48,
+        "capabilityIds": [
+          "drive.documents.search"
+        ]
+      },
+      {
+        "toolName": "start_meeting_in_room",
+        "domain": "meeting",
+        "action": "start_meeting_in_room",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 482,
+        "estimatedSchemaTokens": 121,
+        "capabilityIds": [
+          "meeting.control.start"
+        ]
+      },
+      {
+        "toolName": "start_meeting_recording",
+        "domain": "meeting",
+        "action": "start_meeting_recording",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 286,
+        "estimatedSchemaTokens": 72,
+        "capabilityIds": [
+          "meeting.recording.start"
+        ]
+      },
+      {
+        "toolName": "summarize_meeting_report",
+        "domain": "meeting",
+        "action": "summarize_meeting_report",
+        "operation": "read",
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 1003,
+        "estimatedSchemaTokens": 251,
+        "capabilityIds": [
+          "meeting.report.summary"
+        ]
+      },
+      {
+        "toolName": "update_calendar_event",
+        "domain": "calendar",
+        "action": "update_calendar_event",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [
+          "changes",
+          "target"
+        ],
+        "schemaBytes": 571,
+        "estimatedSchemaTokens": 143,
+        "capabilityIds": [
+          "calendar.events.update"
+        ]
+      },
+      {
+        "toolName": "update_meeting_report_action_item",
+        "domain": "meeting",
+        "action": "update_meeting_report_action_item",
+        "operation": "write",
+        "riskLevel": "medium",
+        "executionMode": "confirmation_required",
+        "contextSurface": null,
+        "requiredInputFields": [],
+        "schemaBytes": 680,
+        "estimatedSchemaTokens": 170,
+        "capabilityIds": [
+          "meeting.action_items.transfer_and_approve",
+          "meeting.action_items.update"
+        ]
+      }
+    ]
   },
-  "privacySensitiveValues": [
-    "11111111-1111-4111-8111-111111111111",
-    "quality-gate-private-value"
-  ],
+  "eligibleSnapshotSha256": "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab",
   "eligibleToolSchemas": {
     "approve_meeting_report_action_item": {
       "type": "object",
@@ -315,155 +892,14 @@
     "focus_sql_erd_tables": {
       "type": "object",
       "required": [
-        "sessionId",
-        "sessionRevision",
-        "modelFingerprint",
-        "featureLabel",
-        "primaryTableRefs",
-        "relatedTableRefs",
-        "contextTableRefs",
-        "confidence",
-        "reasons"
+        "featureQuery"
       ],
       "additionalProperties": false,
       "properties": {
-        "sessionId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionRevision": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "modelFingerprint": {
-          "type": "string",
-          "pattern": "^fnv1a32:[0-9a-f]{8}$"
-        },
-        "featureLabel": {
+        "featureQuery": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
-        },
-        "primaryTableRefs": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 20,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "relatedTableRefs": {
-          "type": "array",
-          "maxItems": 30,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "contextTableRefs": {
-          "type": "array",
-          "maxItems": 20,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "confidence": {
-          "type": "string",
-          "enum": [
-            "high",
-            "medium",
-            "low"
-          ]
-        },
-        "reasons": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 70,
-          "items": {
-            "type": "object",
-            "required": [
-              "tableRef",
-              "reason"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "tableRef": {
-                "type": "string",
-                "pattern": "^t[1-9][0-9]*$"
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
-              },
-              "evidence": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 5,
-                "items": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "kind",
-                        "value"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "table_name",
-                            "table_comment",
-                            "column_name"
-                          ]
-                        },
-                        "value": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 240
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "kind",
-                        "columnName",
-                        "value"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "column_comment",
-                            "data_type",
-                            "enum_value"
-                          ]
-                        },
-                        "columnName": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 80
-                        },
-                        "value": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 240
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
+          "maxLength": 200
         }
       }
     },
@@ -956,33 +1392,6 @@
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
-        }
-      }
-    },
-    "inspect_sql_erd_schema": {
-      "type": "object",
-      "required": [
-        "featureQuery"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "featureQuery": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
-        },
-        "sessionId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionSelectionToken": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionTitle": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 120
         }
       }
     },
@@ -1607,7 +2016,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "b9cba09fae02de5ab8d49ab2563165a38fb345b217fde5ac57a8705eee8cc2c7",
+    "sha256": "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -2817,36 +3226,35 @@
         "id": "sql_erd.inspect",
         "domain": "sql_erd",
         "toolNames": [
-          "inspect_sql_erd_schema",
           "focus_sql_erd_tables"
         ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
+        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
         "mustNotUseFor": [
-          "schema 생성 요청"
+          "schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"
         ],
         "positiveExamples": [
-          "SQLtoERD schema나 특정 table을 살펴볼 때",
-          "SQLtoERD schema나 특정 table을 살펴볼 때 알려줘",
-          "SQLtoERDschema나특정table을살펴볼때",
-          "SQLtoERD schema나 특정 table을 살펴볼 때 부탁드려요",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘",
+          "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요",
           "sql_erd inspect 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때"
           },
           {
             "kind": "paraphrase",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때 알려줘"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘"
           },
           {
             "kind": "typo",
-            "utterance": "SQLtoERDschema나특정table을살펴볼때"
+            "utterance": "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때"
           },
           {
             "kind": "honorific",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때 부탁드려요"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -3702,34 +4110,24 @@
         "capabilityIds": [
           "sql_erd.inspect"
         ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
+        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
         "mustNotUseFor": [
-          "schema 생성 요청"
+          "schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"
         ],
         "acceptedSelectorFields": [
-          "confidence",
-          "contextTableRefs",
-          "featureLabel",
-          "modelFingerprint",
-          "primaryTableRefs",
-          "reasons",
-          "relatedTableRefs",
-          "sessionId",
-          "sessionRevision"
+          "featureQuery"
         ],
         "selectorKinds": [
           "sql_erd_session",
           "table_reference"
         ],
-        "prerequisiteToolNames": [
-          "inspect_sql_erd_schema"
-        ],
+        "prerequisiteToolNames": [],
         "followUpToolNames": [],
         "riskLevel": "low",
         "executionMode": "auto",
         "requiresConfirmation": false,
-        "contextSurface": null,
-        "inputSchemaSha256": "9b0145863eaccb522fa4cb152429e2c00f3d735e47be84e9054778523850ef92"
+        "contextSurface": "sql_erd",
+        "inputSchemaSha256": "c17f04b92ca6e69694f13f15159c73eeed5053c42e28fe0a8485b8244958a622"
       },
       {
         "toolName": "generate_sql_erd",
@@ -3955,38 +4353,6 @@
         "requiresConfirmation": false,
         "contextSurface": null,
         "inputSchemaSha256": "618ed357eb3772d671823acdc5817d1e99280dbcc68f92227b310ceabfd00dbb"
-      },
-      {
-        "toolName": "inspect_sql_erd_schema",
-        "domain": "sql_erd",
-        "action": "inspect_sql_erd_schema",
-        "operation": "read",
-        "capabilityIds": [
-          "sql_erd.inspect"
-        ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
-        "mustNotUseFor": [
-          "schema 생성 요청"
-        ],
-        "acceptedSelectorFields": [
-          "featureQuery",
-          "sessionId",
-          "sessionSelectionToken",
-          "sessionTitle"
-        ],
-        "selectorKinds": [
-          "sql_erd_session",
-          "table_reference"
-        ],
-        "prerequisiteToolNames": [],
-        "followUpToolNames": [
-          "focus_sql_erd_tables"
-        ],
-        "riskLevel": "low",
-        "executionMode": "contextual",
-        "requiresConfirmation": false,
-        "contextSurface": null,
-        "inputSchemaSha256": "5817d2cde0c54a1f3cdf2740a3abd070440e32774fa4ae408d6c93b518e391e4"
       },
       {
         "toolName": "join_meeting",
@@ -4585,336 +4951,5 @@
         "inputSchemaSha256": "fd67790a9ae6bf42a615584b05670bbaaddf560775a0d7c4268c41c30b7b35d3"
       }
     ]
-  },
-  "cases": [
-    {
-      "id": "canonical_calendar_list",
-      "kind": "canonical",
-      "prompt": "오늘 일정 보여줘",
-      "domain": "calendar",
-      "capabilityId": "calendar.events.list",
-      "requiredToolNames": [
-        "list_calendar_events"
-      ],
-      "expectedFallbackReason": null,
-      "expectedPlannerToolNames": [
-        "list_calendar_events"
-      ]
-    },
-    {
-      "id": "canonical_meeting_list",
-      "kind": "canonical",
-      "prompt": "최근 상태별 회의록 목록",
-      "domain": "meeting",
-      "capabilityId": "meeting.reports.list",
-      "requiredToolNames": [
-        "list_meeting_reports"
-      ],
-      "expectedFallbackReason": null,
-      "expectedPlannerToolNames": [
-        "list_meeting_reports"
-      ]
-    },
-    {
-      "id": "canonical_board_search",
-      "kind": "canonical",
-      "prompt": "현재 보드 이슈 맥락 확인",
-      "domain": "board",
-      "capabilityId": "board.issues.search",
-      "requiredToolNames": [
-        "get_board_issue_context",
-        "search_board_issues"
-      ],
-      "expectedFallbackReason": null,
-      "expectedPlannerToolNames": [
-        "get_board_issue_context",
-        "search_board_issues"
-      ]
-    },
-    {
-      "id": "held_out_calendar",
-      "kind": "held_out",
-      "prompt": "이번 주 일정 알려줘",
-      "domain": "calendar",
-      "capabilityId": "calendar.events.list",
-      "requiredToolNames": [
-        "list_calendar_events"
-      ],
-      "expectedFallbackReason": null,
-      "expectedPlannerToolNames": [
-        "list_calendar_events"
-      ]
-    },
-    {
-      "id": "held_out_meeting",
-      "kind": "held_out",
-      "prompt": "최근 회의록 목록",
-      "domain": "meeting",
-      "capabilityId": "meeting.reports.list",
-      "requiredToolNames": [
-        "list_meeting_reports"
-      ],
-      "expectedFallbackReason": null,
-      "expectedPlannerToolNames": [
-        "list_meeting_reports"
-      ]
-    },
-    {
-      "id": "canonical_meeting_decision_calendar_handoff",
-      "kind": "canonical",
-      "prompt": "최근 회의록에서, 결정사항 알려주고, 그거 일정에 추가해줘",
-      "domain": "meeting",
-      "capabilityId": "meeting.report.summary",
-      "requiredToolNames": [
-        "summarize_meeting_report",
-        "create_calendar_event"
-      ],
-      "expectedFallbackReason": "write_capability",
-      "expectedPlannerToolNames": [
-        "approve_meeting_report_action_item",
-        "assign_board_issue_safely",
-        "create_board_issue",
-        "create_calendar_event",
-        "delegate_canvas_agent",
-        "diagnose_board_freshness",
-        "dismiss_meeting_report_action_item",
-        "end_meeting_recording",
-        "find_action_items",
-        "focus_sql_erd_tables",
-        "generate_sql_erd",
-        "get_active_meeting",
-        "get_board_briefing",
-        "get_board_issue_context",
-        "get_meeting_decision_evidence",
-        "get_meeting_participants",
-        "get_meeting_report",
-        "inspect_sql_erd_schema",
-        "join_meeting",
-        "leave_meeting",
-        "list_calendar_events",
-        "list_meeting_reports",
-        "list_meeting_rooms",
-        "move_board_issue_status",
-        "recommend_pr_review_focus",
-        "regenerate_meeting_report",
-        "resolve_board_context",
-        "resolve_meeting_resource",
-        "search_board_issues",
-        "search_meeting_transcript",
-        "search_workspace_documents",
-        "start_meeting_in_room",
-        "start_meeting_recording",
-        "summarize_meeting_report",
-        "update_calendar_event",
-        "update_meeting_report_action_item"
-      ]
-    },
-    {
-      "id": "held_out_board",
-      "kind": "held_out",
-      "prompt": "현재 보드 이슈 맥락을 확인해줘",
-      "domain": "board",
-      "capabilityId": "board.issues.search",
-      "requiredToolNames": [
-        "get_board_issue_context",
-        "search_board_issues"
-      ],
-      "expectedFallbackReason": null,
-      "expectedPlannerToolNames": [
-        "get_board_issue_context",
-        "search_board_issues"
-      ]
-    },
-    {
-      "id": "adjacent_unsupported_delete",
-      "kind": "counterexample",
-      "prompt": "내일 일정 삭제",
-      "domain": null,
-      "capabilityId": null,
-      "requiredToolNames": [],
-      "expectedFallbackReason": "unsupported_capability",
-      "expectedPlannerToolNames": [
-        "approve_meeting_report_action_item",
-        "assign_board_issue_safely",
-        "create_board_issue",
-        "create_calendar_event",
-        "delegate_canvas_agent",
-        "diagnose_board_freshness",
-        "dismiss_meeting_report_action_item",
-        "end_meeting_recording",
-        "find_action_items",
-        "focus_sql_erd_tables",
-        "generate_sql_erd",
-        "get_active_meeting",
-        "get_board_briefing",
-        "get_board_issue_context",
-        "get_meeting_decision_evidence",
-        "get_meeting_participants",
-        "get_meeting_report",
-        "inspect_sql_erd_schema",
-        "join_meeting",
-        "leave_meeting",
-        "list_calendar_events",
-        "list_meeting_reports",
-        "list_meeting_rooms",
-        "move_board_issue_status",
-        "recommend_pr_review_focus",
-        "regenerate_meeting_report",
-        "resolve_board_context",
-        "resolve_meeting_resource",
-        "search_board_issues",
-        "search_meeting_transcript",
-        "search_workspace_documents",
-        "start_meeting_in_room",
-        "start_meeting_recording",
-        "summarize_meeting_report",
-        "update_calendar_event",
-        "update_meeting_report_action_item"
-      ]
-    },
-    {
-      "id": "write_capability_legacy_fallback",
-      "kind": "fallback",
-      "prompt": "새 일정을 생성할 때",
-      "domain": "calendar",
-      "capabilityId": "calendar.events.create",
-      "requiredToolNames": [
-        "create_calendar_event"
-      ],
-      "expectedFallbackReason": "write_capability",
-      "expectedPlannerToolNames": [
-        "approve_meeting_report_action_item",
-        "assign_board_issue_safely",
-        "create_board_issue",
-        "create_calendar_event",
-        "delegate_canvas_agent",
-        "diagnose_board_freshness",
-        "dismiss_meeting_report_action_item",
-        "end_meeting_recording",
-        "find_action_items",
-        "focus_sql_erd_tables",
-        "generate_sql_erd",
-        "get_active_meeting",
-        "get_board_briefing",
-        "get_board_issue_context",
-        "get_meeting_decision_evidence",
-        "get_meeting_participants",
-        "get_meeting_report",
-        "inspect_sql_erd_schema",
-        "join_meeting",
-        "leave_meeting",
-        "list_calendar_events",
-        "list_meeting_reports",
-        "list_meeting_rooms",
-        "move_board_issue_status",
-        "recommend_pr_review_focus",
-        "regenerate_meeting_report",
-        "resolve_board_context",
-        "resolve_meeting_resource",
-        "search_board_issues",
-        "search_meeting_transcript",
-        "search_workspace_documents",
-        "start_meeting_in_room",
-        "start_meeting_recording",
-        "summarize_meeting_report",
-        "update_calendar_event",
-        "update_meeting_report_action_item"
-      ]
-    },
-    {
-      "id": "low_confidence_mutation_safe",
-      "kind": "fallback",
-      "prompt": "quality-gate-private-value 11111111-1111-4111-8111-111111111111",
-      "domain": null,
-      "capabilityId": null,
-      "requiredToolNames": [],
-      "expectedFallbackReason": "no_metadata_match",
-      "expectedPlannerToolNames": [
-        "approve_meeting_report_action_item",
-        "assign_board_issue_safely",
-        "create_board_issue",
-        "create_calendar_event",
-        "delegate_canvas_agent",
-        "diagnose_board_freshness",
-        "dismiss_meeting_report_action_item",
-        "end_meeting_recording",
-        "find_action_items",
-        "focus_sql_erd_tables",
-        "generate_sql_erd",
-        "get_active_meeting",
-        "get_board_briefing",
-        "get_board_issue_context",
-        "get_meeting_decision_evidence",
-        "get_meeting_participants",
-        "get_meeting_report",
-        "inspect_sql_erd_schema",
-        "join_meeting",
-        "leave_meeting",
-        "list_calendar_events",
-        "list_meeting_reports",
-        "list_meeting_rooms",
-        "move_board_issue_status",
-        "recommend_pr_review_focus",
-        "regenerate_meeting_report",
-        "resolve_board_context",
-        "resolve_meeting_resource",
-        "search_board_issues",
-        "search_meeting_transcript",
-        "search_workspace_documents",
-        "start_meeting_in_room",
-        "start_meeting_recording",
-        "summarize_meeting_report",
-        "update_calendar_event",
-        "update_meeting_report_action_item"
-      ]
-    },
-    {
-      "id": "schema_budget_legacy_fallback",
-      "kind": "fallback",
-      "prompt": "특정 기간의 일정 목록",
-      "domain": null,
-      "capabilityId": null,
-      "requiredToolNames": [],
-      "expectedFallbackReason": "tool_schema_budget_exceeded",
-      "expectedPlannerToolNames": [
-        "approve_meeting_report_action_item",
-        "assign_board_issue_safely",
-        "create_board_issue",
-        "create_calendar_event",
-        "delegate_canvas_agent",
-        "diagnose_board_freshness",
-        "dismiss_meeting_report_action_item",
-        "end_meeting_recording",
-        "find_action_items",
-        "focus_sql_erd_tables",
-        "generate_sql_erd",
-        "get_active_meeting",
-        "get_board_briefing",
-        "get_board_issue_context",
-        "get_meeting_decision_evidence",
-        "get_meeting_participants",
-        "get_meeting_report",
-        "inspect_sql_erd_schema",
-        "join_meeting",
-        "leave_meeting",
-        "list_calendar_events",
-        "list_meeting_reports",
-        "list_meeting_rooms",
-        "move_board_issue_status",
-        "recommend_pr_review_focus",
-        "regenerate_meeting_report",
-        "resolve_board_context",
-        "resolve_meeting_resource",
-        "search_board_issues",
-        "search_meeting_transcript",
-        "search_workspace_documents",
-        "start_meeting_in_room",
-        "start_meeting_recording",
-        "summarize_meeting_report",
-        "update_calendar_event",
-        "update_meeting_report_action_item"
-      ],
-      "schemaTokenBudget": 1
-    }
-  ]
+  }
 }

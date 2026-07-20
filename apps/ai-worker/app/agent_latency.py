@@ -9,7 +9,7 @@ from time import monotonic
 LOGGER = logging.getLogger(__name__)
 
 SQL_ERD_SURFACE = "sql_erd"
-SQL_ERD_TOOL_NAMES = frozenset({"inspect_sql_erd_schema", "focus_sql_erd_tables"})
+SQL_ERD_TOOL_NAMES = frozenset({"focus_sql_erd_tables"})
 AGENT_LATENCY_STAGES = frozenset(
     {"queue_wait", "router", "planner", "execution_handoff", "planning_turn"}
 )

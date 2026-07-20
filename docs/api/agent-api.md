@@ -945,8 +945,7 @@ Status code: `200 OK`
 | `assign_board_issue_safely` | `medium` | 불가 | `GET .../assignee-options`, Agent 전용 내부 add/remove Board service |
 | `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
 | `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
-| `inspect_sql_erd_schema` | `low` | 가능 | session의 modelJson과 sourceText에서 bounded table/column/dataType/enum compact projection을 만들고 여러 session이면 사용자 선택을 요청 |
-| `focus_sql_erd_tables` | `low` | 가능 | inspect 결과의 compact ref, `modelFingerprint`, context schema evidence를 재검증해 일회성 `table_focus` resource ref 생성 |
+| `focus_sql_erd_tables` | `low` | 가능 | 현재 SQLtoERD session을 서버가 검사하고 feature query를 혼합 resolver로 해소해 일회성 `table_focus` resource ref 생성 |
 | `recommend_pr_review_focus` | `low` | 가능 | PR Review context의 immutable revision 안전 projection에서 핵심 검토 파일과 연결 파일을 추천 |
 | `delegate_canvas_agent` | `low` | 가능 | 사용자 원문과 검증된 Canvas context를 별도 Canvas Agent run으로 위임 |
 
@@ -975,35 +974,20 @@ Status code: `200 OK`
   title, dialect, table/relation count, warning code만 포함한다.
 - 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
   Frontend는 검증된 링크를 `ERD 및 DDL 열기`로 표시하고 자동으로 이동하지 않는다.
-- 기능 관련 테이블 집중 요청은 `inspect_sql_erd_schema`를 먼저 호출한다. input은 1~200자의
-  `featureQuery`와 선택적인 exact `sessionId`, 후보의 `sessionSelectionToken` 또는 `sessionTitle`이다.
-  대상 우선순위는 명시 ID, selection token, exact title, 현재 SQLtoERD request context,
-  Workspace의 유일한 session 순서다. 남은 session이 여러 개거나 없으면 mutation 없이
-  `needs_clarification`과 최대 5개 후보를 반환한다. 각 후보는 같은 title도 구분 가능한
-  `selectionToken`을 포함하고, 후속 호출은 선택한 값을 `sessionSelectionToken`으로 그대로 보낸다.
-  clarification 질문에는 정규화한 후보 title과 수정일의 번호 목록을 포함한다. Frontend는
-  `waiting_user_input` run의 최신 completed inspect clarification만 선택 버튼으로 표시하고,
-  title·수정일·table/relation count로 같은 title 후보를 구분한다. 버튼은 구조화된 `selection`을
-  기존 `/inputs` endpoint로 보내며 UUID를 사용자 bubble에 표시하지 않는다.
-- inspect 결과의 table은 `t1`, `t2` 형태의 요청별 compact ref로 표시한다. projection은 최대
-  9,000자이며 bounded column dataType과 보수적으로 확인한 enum 값은 포함할 수 있다. 내부
-  table/column ID와 sourceText, DDL, 전체 modelJson은 Agent step에 복제하지 않는다.
-- inspect 성공 output은 `sessionId`, 진단용 `sessionRevision`, compact ref 검증용
-  `modelFingerprint`를 포함한다.
-- `focus_sql_erd_tables`는 inspect 결과의 `sessionId`, `sessionRevision`, `modelFingerprint`, compact
-  `primaryTableRefs`·`relatedTableRefs`·`contextTableRefs`, confidence와 선택 table별 짧은 reason을
-  받는다. primary는
-  기능에 직접 해당하는 table이고 related는 primary와 직접 FK로 연결된 의미 있는 1-hop table만
-  허용한다. context는 직접 FK가 없어도 table/column 이름, comment, dataType, enum 값의 exact schema
-  evidence가 기능상 관련성을 뒷받침하는 table이다. 기본 2-hop 확장이나 특정 table 이름 하드코딩은
-  하지 않는다.
-- App Server는 현재 model fingerprint와 compact ref, 세 역할의 중복, primary-related 직접 FK와
-  context reason의 schema evidence를 다시 검증한다. 형식 오류·unknown ref·역할 겹침은 요청 전체를
-  거부하고, 선택적 context evidence만 확인되지 않으면 해당 context를 제외한 뒤
-  `ignoredContextTables`에 이유를 명시한다. layout/annotation 변경으로 revision만 증가한 경우에는
-  focus를 허용하고, 실제
-  modelJson 변경으로 fingerprint가 달라진 경우에만 `409 CONFLICT`와
-  `SQLtoERD model changed; inspect the schema again` 메시지로 거부해 inspect부터 다시 수행한다.
+- 기능 관련 테이블 집중 요청은 현재 `surface=sql_erd`에서 `focus_sql_erd_tables`를 한 번 호출한다.
+  공개 input은 1~200자의 `featureQuery`뿐이다. session ID, revision, fingerprint와 compact table ref는
+  Planner가 전달하거나 추측하지 않는다. SQLtoERD 화면 밖에서 임의 session을 검색하는 요청은
+  지원하지 않는다.
+- App Server는 request context의 session을 membership으로 조회하고 modelJson/sourceText에서 최대
+  9,000자의 bounded projection을 내부 생성한다. 내부 table/column ID, raw sourceText, DDL, 전체
+  modelJson은 Planner context나 provider payload에 복제하지 않는다.
+- 혼합 resolver는 먼저 table/schema 이름과 bounded comment·column·type·enum evidence의 결정적
+  일치를 검사한다. 명확한 결과가 없을 때만 bounded projection을 strict JSON schema LLM fallback에
+  전달한다. provider 결과의 ref와 중복을 서버가 다시 검증하며, primary의 직접 FK 1-hop table은
+  서버가 related로 확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
+- 0건·모호함·provider 장애·invalid ref는 focus resource 없이 `needs_clarification` 질문으로 끝난다.
+  성공 직전 같은 session을 다시 조회해 model fingerprint를 검증한다. layout/annotation으로 revision만
+  증가하면 최신 revision으로 허용하고, 실제 model 변경은 `409 CONFLICT`로 거부한다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   새 결과에는 `contextTableIds`도 포함하며, 이 필드가 없는 기존 metadata는 빈 배열로 해석한다.
@@ -1016,7 +1000,7 @@ Status code: `200 OK`
   revision 증가가 아니라 실제 modelJson 변경 때만 해제한다. `전체 보기`, session 변경, 새로고침으로
   집중 상태를 해제한다. relationIds는 실제 modelJson의 FK만 포함하며 context 선택은 가짜 관계선이나
   SQL FK를 만들지 않는다.
-- 이 두 tool과 UI는 session을 저장·수정하지 않는 read-only view다. 따라서 SQLtoERD revision,
+- 이 tool과 UI는 session을 저장·수정하지 않는 read-only view다. 따라서 SQLtoERD revision,
   writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
 - 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
   요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.

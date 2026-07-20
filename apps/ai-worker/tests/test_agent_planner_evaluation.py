@@ -811,7 +811,7 @@ def test_fixed_korean_suite_loads() -> None:
     suite = load_evaluation_suite(suite_path)
 
     assert suite.version == "agent-planner-korean:v1"
-    assert len(suite.cases) == 53
+    assert len(suite.cases) == 52
     assert {tool.name for tool in suite.job.tools} == {
         "list_calendar_events",
         "create_calendar_event",
@@ -844,7 +844,6 @@ def test_fixed_korean_suite_loads() -> None:
         "assign_board_issue_safely",
         "diagnose_board_freshness",
         "generate_sql_erd",
-        "inspect_sql_erd_schema",
         "focus_sql_erd_tables",
         "search_workspace_documents",
     }
@@ -892,16 +891,10 @@ def test_fixed_korean_suite_loads() -> None:
     assert expectations["meeting_recording_missing_id"].requires_confirmation is True
     assert expectations["sql_erd_generate"].tool_name == "generate_sql_erd"
     assert expectations["sql_erd_generate"].requires_confirmation is None
-    assert expectations["sql_erd_focus_payment_tables"].tool_name == "inspect_sql_erd_schema"
-    assert expectations["sql_erd_focus_payment_tables"].requires_confirmation is None
+    assert expectations["sql_erd_focus_payment_tables"].tool_name == "focus_sql_erd_tables"
+    assert expectations["sql_erd_focus_payment_tables"].requires_confirmation is False
     assert expectations["sql_erd_focus_payment_tables"].input_contains == {
         "featureQuery": "결제 기능"
-    }
-    assert expectations["sql_erd_select_session_token"].tool_name == "inspect_sql_erd_schema"
-    assert expectations["sql_erd_select_session_token"].requires_confirmation is None
-    assert expectations["sql_erd_select_session_token"].input_contains == {
-        "featureQuery": "결제 기능",
-        "sessionSelectionToken": "88888888-8888-4888-8888-888888888888",
     }
     assert expectations["sql_erd_missing_entities"].status == "needs_clarification"
     assert expectations["sql_erd_database_execution"].status == "unsupported"

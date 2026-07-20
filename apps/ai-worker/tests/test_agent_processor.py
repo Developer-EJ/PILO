@@ -5007,24 +5007,16 @@ def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> No
     assert "successful schema replacement" in prompt
 
 
-def test_sql_erd_table_focus_planner_contract_inspects_before_focusing() -> None:
+def test_sql_erd_table_focus_planner_contract_uses_server_owned_resolution() -> None:
     prompt = _agent_planner_system_prompt()
 
-    assert "inspect_sql_erd_schema" in prompt
     assert "focus_sql_erd_tables" in prompt
-    assert "compact table refs" in prompt
-    assert "direct FK neighbors" in prompt
-    assert "Never invent SQLtoERD session IDs" in prompt
-    assert "candidates include selectionToken" in prompt
-    assert "copy the exact selected selectionToken into sessionSelectionToken" in prompt
-    assert "completed inspect_sql_erd_schema result" in prompt
-    assert "sessionRevision" in prompt
-    assert "modelFingerprint" in prompt
-    assert "primaryTableRefs" in prompt
-    assert "relatedTableRefs" in prompt
-    assert "contextTableRefs" in prompt
-    assert "schema evidence" in prompt
-    assert "never invent relation lines" in prompt
+    assert "with only the user's concise featureQuery" in prompt
+    assert "App Server owns schema inspection" in prompt
+    assert "direct FK expansion" in prompt
+    assert "Never include or invent session IDs" in prompt
+    assert "table refs" in prompt
+    assert "outside the current SQLtoERD screen" in prompt
 
 
 def sql_erd_inspection_planning_context(*table_refs: str) -> str:
@@ -5040,6 +5032,38 @@ def sql_erd_inspection_planning_context(*table_refs: str) -> str:
             },
         }
     )
+
+
+def test_sql_erd_focus_single_tool_passes_only_feature_query() -> None:
+    focus_tool = tool_snapshot(
+        name="focus_sql_erd_tables",
+        description="현재 SQLtoERD session의 관련 table을 집중 보기로 만듭니다.",
+        inputSchema={
+            "type": "object",
+            "required": ["featureQuery"],
+            "additionalProperties": False,
+            "properties": {
+                "featureQuery": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                }
+            },
+        },
+    )
+    job = parse_agent_run_job_payload(agent_payload(tools=[focus_tool]))
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="focus_sql_erd_tables",
+            tool_input={"featureQuery": "회의 관련 핵심 테이블"},
+        ),
+        job,
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"featureQuery": "회의 관련 핵심 테이블"}
+    assert "sessionId" not in normalized.output_summary["input"]
 
 
 @pytest.mark.parametrize(

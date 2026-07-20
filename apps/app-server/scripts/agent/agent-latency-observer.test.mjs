@@ -62,7 +62,7 @@ const sanitized = buildAgentLatencyEvent({
   outcome: "unexpected",
   elapsedMs: -10,
   surface: "sql_erd",
-  toolName: "inspect_sql_erd_schema",
+  toolName: "focus_sql_erd_tables",
   failureType: "provider-secret-message"
 });
 assert.equal(sanitized.outcome, "failure");
