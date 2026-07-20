@@ -137,8 +137,12 @@ try {
   );
   const pendingRunId = randomUUID();
   await client.query(
-    `INSERT INTO agent_runs (id, workspace_id, requested_by_user_id, thread_id, prompt, timezone)
-     VALUES ($1, $2, $3, $4, '승인 대기 요청', 'Asia/Seoul')`,
+    `INSERT INTO agent_runs (
+       id, workspace_id, requested_by_user_id, thread_id, status, prompt, timezone
+     )
+     VALUES (
+       $1, $2, $3, $4, 'waiting_confirmation', '승인 대기 요청', 'Asia/Seoul'
+     )`,
     [pendingRunId, workspaceId, userId, pendingThreadId]
   );
   await client.query(
