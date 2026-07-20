@@ -24,7 +24,7 @@ export function PullRequestsCard({
     ? "PR을 불러오는 중입니다"
     : pullRequestsState.status === "error"
       ? "PR 상태를 확인할 수 없습니다"
-      : `${pullRequestsState.pullRequests.length}개의 open PR`;
+      : `${pullRequestsState.total}개의 open PR`;
 
   return (
     <DashboardCard

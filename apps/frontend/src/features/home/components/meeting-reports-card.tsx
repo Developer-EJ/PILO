@@ -28,7 +28,7 @@ export function MeetingReportsCard({
     ? "회의록을 불러오는 중입니다"
     : meetingReportsState.status === "error"
       ? "회의록 상태를 확인할 수 없습니다"
-      : `${meetingReportsState.reports.length}개의 최근 회의 기록`;
+      : `오늘 회의 ${meetingReportsState.todayCount}개`;
 
   return (
     <DashboardCard

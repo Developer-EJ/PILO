@@ -162,7 +162,7 @@ function ReadonlyCalendar({
                     {hiddenEventCount > 0 ? (
                       <span
                         aria-label={`${hiddenEventCount}개 일정 더 있음`}
-                        className="self-center rounded-full bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-semibold leading-none text-[#6b6f78]"
+                        className="self-center rounded-full bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-semibold leading-none text-[#656972]"
                       >
                         +{hiddenEventCount}
                       </span>

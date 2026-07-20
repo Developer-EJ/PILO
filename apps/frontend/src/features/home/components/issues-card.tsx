@@ -21,7 +21,7 @@ export function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
     ? "이슈를 불러오는 중입니다"
     : issuesState.status === "error"
       ? "이슈 상태를 확인할 수 없습니다"
-      : `${issuesState.issues.length}개의 open 이슈`;
+      : `${issuesState.total}개의 open 이슈`;
 
   return (
     <DashboardCard

@@ -308,7 +308,7 @@ export function MembersCard() {
                   <div className="flex items-center gap-1.5">
                     <Input
                       aria-label="초대 이메일"
-                      className="h-8 rounded-[9px] border-[#e7e9ee] bg-[#f8f9fb] text-[13px] text-[#202124] placeholder:text-[#9ba0aa]"
+                      className="h-8 rounded-[9px] border-[#e7e9ee] bg-[#f8f9fb] text-[13px] text-[#202124] placeholder:text-[#6b6f78]"
                       disabled={isInviteSubmitting}
                       inputMode="email"
                       onChange={(event) => setInviteEmail(event.target.value)}
@@ -398,7 +398,7 @@ export function MembersCard() {
                 className="flex w-full items-center gap-3 rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] px-2.5 py-2"
               >
                 <Avatar size="sm">
-                  <AvatarFallback className="bg-[#eef0ff] text-[#5865f2]">
+                  <AvatarFallback className="bg-[#eef0ff] text-[#4855d4]">
                     {getInitial(invitation.email)}
                   </AvatarFallback>
                 </Avatar>
@@ -616,7 +616,7 @@ function MemberPresenceList({
                   src={member.user.avatarUrl}
                 />
               ) : null}
-              <AvatarFallback className="bg-[#eef0ff] text-[#5865f2]">
+              <AvatarFallback className="bg-[#eef0ff] text-[#4855d4]">
                 {getInitial(member.user.name)}
               </AvatarFallback>
             </Avatar>
