@@ -4610,6 +4610,173 @@ def test_sql_erd_planner_workflow_constraint_forces_focus_after_inspection(
     assert "completed" in completed_schema["properties"]["status"]["enum"]
 
 
+def test_sql_erd_inspect_continuation_contract_is_disabled_by_default(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED", raising=False)
+
+    legacy_payload = {
+        "status": "tool_candidate",
+        "message": "SQLtoERD schema inspection is planned.",
+        "finalAnswerDraft": None,
+        "toolName": "inspect_sql_erd_schema",
+        "inputJson": "{}",
+        "requiresConfirmation": False,
+        "missingFields": [],
+        "unsupportedReason": None,
+    }
+
+    assert "continuationKind" not in _agent_planner_schema()["required"]
+    assert parse_agent_planner_output(json.dumps(legacy_payload)).continuation_kind is None
+
+
+@pytest.mark.parametrize(
+    ("continuation_kind", "expected_next_tool_name"),
+    [
+        ("sql_erd_inspect_focus", "focus_sql_erd_tables"),
+        ("sql_erd_inspect_complete", None),
+    ],
+)
+def test_sql_erd_inspect_continuation_contract_parses_and_summarizes_bounded_output(
+    monkeypatch,
+    continuation_kind: str,
+    expected_next_tool_name: str | None,
+) -> None:
+    monkeypatch.setenv("AGENT_SQL_ERD_INSPECT_FOCUS_ROUTER_BYPASS_ENABLED", "true")
+
+    payload = {
+        "status": "tool_candidate",
+        "message": "SQLtoERD schema inspection is planned.",
+        "finalAnswerDraft": None,
+        "toolName": "inspect_sql_erd_schema",
+        "inputJson": "{}",
+        "requiresConfirmation": False,
+        "missingFields": [],
+        "unsupportedReason": None,
+        "continuationKind": continuation_kind,
+    }
+
+    class FakeProviderError(Exception):
+        pass
+
+    class FakeResponses:
+        calls: list[dict[str, object]] = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(output_text=json.dumps(payload), usage=None)
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs) -> None:
+            self.responses = FakeResponses()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(
+            OpenAI=FakeOpenAI,
+            APIConnectionError=FakeProviderError,
+            APITimeoutError=FakeProviderError,
+            InternalServerError=FakeProviderError,
+            RateLimitError=FakeProviderError,
+        ),
+    )
+    tools = [
+        tool_snapshot(name="inspect_sql_erd_schema", executionMode="contextual"),
+        tool_snapshot(name="focus_sql_erd_tables", executionMode="contextual"),
+    ]
+    job = parse_agent_run_job_payload(agent_payload(tools=tools))
+    request = AgentPlanningRequest(
+        run_id=RUN_ID,
+        prompt="Inspect the SQLtoERD schema.",
+        timezone="Asia/Seoul",
+        current_date="2026-07-20",
+        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
+        tools=job.tools,
+        context_surface="sql_erd",
+        completion_tool_names=("focus_sql_erd_tables",),
+    )
+
+    decision = OpenAiAgentPlannerClient("test-key", "gpt-test", 45).plan(request)
+    normalized = normalize_agent_planner_decision(
+        decision,
+        job,
+        completion_tool_names=request.completion_tool_names,
+    )
+
+    call = FakeResponses.calls[0]
+    response_schema = call["text"]["format"]["schema"]
+    user_payload = json.loads(call["input"][1]["content"])
+    assert response_schema["required"][-1] == "continuationKind"
+    assert response_schema["properties"]["continuationKind"] == {
+        "type": ["string", "null"],
+        "enum": ["sql_erd_inspect_focus", "sql_erd_inspect_complete", None],
+    }
+    assert "continuationKind" in call["input"][0]["content"]
+    assert user_payload["continuationContract"] == {
+        "field": "continuationKind",
+        "allowedValues": ["sql_erd_inspect_focus", "sql_erd_inspect_complete", None],
+    }
+    assert normalized.output_summary["continuation"] == {
+        "kind": continuation_kind,
+        "prerequisiteToolName": "inspect_sql_erd_schema",
+        "nextToolName": expected_next_tool_name,
+    }
+
+
+@pytest.mark.parametrize(
+    ("continuation_kind", "status", "tool_name", "tool_names", "completion_tool_names"),
+    [
+        ("invalid", "tool_candidate", "inspect_sql_erd_schema", ["inspect_sql_erd_schema"], ()),
+        (
+            "sql_erd_inspect_focus",
+            "tool_candidate",
+            "focus_sql_erd_tables",
+            ["focus_sql_erd_tables"],
+            (),
+        ),
+        (
+            "sql_erd_inspect_focus",
+            "completed",
+            "inspect_sql_erd_schema",
+            ["inspect_sql_erd_schema"],
+            (),
+        ),
+        (
+            "sql_erd_inspect_focus",
+            "tool_candidate",
+            "inspect_sql_erd_schema",
+            ["inspect_sql_erd_schema"],
+            (),
+        ),
+    ],
+)
+def test_sql_erd_inspect_continuation_contract_rejects_invalid_combinations(
+    continuation_kind: str,
+    status: str,
+    tool_name: str,
+    tool_names: list[str],
+    completion_tool_names: tuple[str, ...],
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[tool_snapshot(name=name, executionMode="contextual") for name in tool_names]
+        )
+    )
+
+    with pytest.raises(AgentPlannerOutputError, match="continuation"):
+        normalize_agent_planner_decision(
+            planner_decision(
+                status=status,
+                tool_name=tool_name,
+                tool_input={},
+                continuation_kind=continuation_kind,
+            ),
+            job,
+            completion_tool_names=completion_tool_names,
+        )
+
+
 def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> None:
     prompt = _agent_planner_system_prompt()
 
