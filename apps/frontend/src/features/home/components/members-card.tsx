@@ -348,7 +348,7 @@ export function MembersCard() {
         icon={<Users className="size-4" />}
         title="팀 현황"
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
           {membersStatus === "loading" ? (
             <MemberCardMessage>멤버 불러오는 중</MemberCardMessage>
           ) : membersStatus === "error" ? (
@@ -486,7 +486,7 @@ function MemberPresencePanel({
   );
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <section className="flex min-h-0 flex-col">
       {onlineHeader}
       <MemberPresenceList
         expanded={selectedView === "online"}
@@ -563,13 +563,13 @@ function MemberPresenceList({
       className={[
         "grid min-h-0 overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out",
         expanded
-          ? "flex-1 grid-rows-[1fr] opacity-100"
-          : "shrink-0 grid-rows-[0fr] opacity-0"
+          ? "grid-rows-[1fr] opacity-100"
+          : "grid-rows-[0fr] opacity-0"
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="grid min-h-0 content-start gap-1 overflow-y-auto py-1.5 pr-1">
+      <div className="grid min-h-0 content-start gap-1 py-1.5">
         {members.length === 0 ? (
           <div className="rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-3 text-center text-[12px] text-[#6b6f78]">
             표시할 멤버가 없습니다
