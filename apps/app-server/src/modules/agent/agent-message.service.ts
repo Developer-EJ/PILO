@@ -735,7 +735,7 @@ export class AgentMessageService {
         ) VALUES (
           $1, $2, 'user', $3, 'info', 'run_cancelled',
           'Agent run cancelled',
-          jsonb_build_object('reason', $4, 'replacementRunId', $5::text),
+          jsonb_build_object('reason', $4::text, 'replacementRunId', $5::text),
           '[]'::jsonb
         )
       `,
@@ -776,12 +776,12 @@ export class AgentMessageService {
           $1, $2, 'app_server', $3, 'info', 'message_routed',
           'Agent message routed',
           jsonb_build_object(
-            'clientRequestId', $4,
-            'requestFingerprint', $5,
-            'outcome', $6,
-            'relationship', $7,
-            'confidence', $8,
-            'activeRunWasNull', $9,
+            'clientRequestId', $4::text,
+            'requestFingerprint', $5::text,
+            'outcome', $6::text,
+            'relationship', $7::text,
+            'confidence', $8::text,
+            'activeRunWasNull', $9::boolean,
             'resolvedActiveRunId', $10::text,
             'previousRunId', $11::text,
             'clarificationQuestion', $12::text
