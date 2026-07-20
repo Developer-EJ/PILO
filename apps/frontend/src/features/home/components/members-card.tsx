@@ -85,9 +85,15 @@ export function MembersCard() {
     : [];
   const canLeaveWorkspace = Boolean(activeWorkspace) && !canManageWorkspace;
   const teamStats = [
-    { label: "전체", value: members.length },
-    { label: "접속 중", value: onlineMembers.length },
-    { label: "오프라인", value: offlineMembers.length }
+    { label: "전체", value: membersStatus === "success" ? members.length : "–" },
+    {
+      label: "접속 중",
+      value: membersStatus === "success" ? onlineMembers.length : "–"
+    },
+    {
+      label: "오프라인",
+      value: membersStatus === "success" ? offlineMembers.length : "–"
+    }
   ];
 
   useEffect(() => {
@@ -323,10 +329,10 @@ export function MembersCard() {
                     <p className="text-[12px] text-destructive">{inviteError}</p>
                   ) : null}
                   {inviteStatus ? (
-                    <p className="text-[12px] text-[#747882]">{inviteStatus}</p>
+                    <p className="text-[12px] text-[#6b6f78]">{inviteStatus}</p>
                   ) : null}
                   {inviteUrl ? (
-                    <p className="break-all rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] p-2 text-[12px] text-[#747882]">
+                    <p className="break-all rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] p-2 text-[12px] text-[#6b6f78]">
                       {inviteUrl}
                     </p>
                   ) : null}
@@ -363,7 +369,7 @@ export function MembersCard() {
                 <p className="text-[17px] font-semibold leading-5 text-[#202124]">
                   {stat.value}
                 </p>
-                <p className="mt-1 text-[12px] leading-4 text-[#747882]">
+                <p className="mt-1 text-[12px] leading-4 text-[#6b6f78]">
                   {stat.label}
                 </p>
               </div>
@@ -400,7 +406,7 @@ export function MembersCard() {
                   <p className="truncate text-[13px] font-medium text-[#202124]">
                     {invitation.email}
                   </p>
-                  <p className="truncate text-[12px] text-[#747882]">
+                  <p className="truncate text-[12px] text-[#6b6f78]">
                     대기중
                   </p>
                 </div>
@@ -467,7 +473,7 @@ function MemberCardMessage({
   return (
     <div
       className={`flex min-h-0 flex-1 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] p-3 text-center text-[12px] font-medium ${
-        tone === "danger" ? "text-destructive" : "text-[#747882]"
+        tone === "danger" ? "text-destructive" : "text-[#6b6f78]"
       }`}
     >
       {children}
@@ -544,7 +550,7 @@ function MemberPresenceHeader({
     <button
       className={[
         "flex w-full shrink-0 items-center justify-between gap-3 rounded-[9px] px-2 py-2 text-left transition hover:bg-[#f6f7f9] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-        active ? "text-[#202124]" : "text-[#747882]"
+        active ? "text-[#202124]" : "text-[#6b6f78]"
       ]
         .filter(Boolean)
         .join(" ")}
@@ -591,7 +597,7 @@ function MemberPresenceList({
     >
       <div className="grid min-h-0 content-start gap-1 overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {members.length === 0 ? (
-          <div className="rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-3 text-center text-[12px] text-[#747882]">
+          <div className="rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-3 text-center text-[12px] text-[#6b6f78]">
             표시할 멤버가 없습니다
           </div>
         ) : null}
@@ -618,7 +624,7 @@ function MemberPresenceList({
               <p className="truncate text-[13px] font-medium text-[#202124]">
                 {member.user.name ?? "이름 없음"}
               </p>
-              <p className="truncate text-[12px] text-[#747882]">
+              <p className="truncate text-[12px] text-[#6b6f78]">
                 {formatWorkspaceRole(member.role)}
               </p>
             </div>

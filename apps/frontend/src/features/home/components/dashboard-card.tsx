@@ -55,14 +55,14 @@ export function DashboardCard({
       ) : null}
       <CardHeader className="relative z-10 gap-1.5 px-5 pt-5">
         <CardTitle className="flex items-center gap-2.5 text-[16px] font-semibold tracking-[-0.01em] text-[#202124]">
-          <span className="flex size-8 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#747882]">
+          <span className="flex size-8 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#6b6f78]">
             {icon}
           </span>
           <span className={titleClassName}>{title}</span>
           {titleAdornment}
         </CardTitle>
         {description ? (
-          <CardDescription className="text-[12px] leading-5 text-[#747882]">
+          <CardDescription className="text-[12px] leading-5 text-[#6b6f78]">
             {description}
           </CardDescription>
         ) : null}

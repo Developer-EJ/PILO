@@ -24,6 +24,11 @@ export function MeetingReportsCard({
   const router = useRouter();
   const visibleMeetingReports = meetingReportsState.reports.slice(0, 3);
   const isLoading = meetingReportsState.status === "loading";
+  const meetingReportDescription = isLoading
+    ? "회의록을 불러오는 중입니다"
+    : meetingReportsState.status === "error"
+      ? "회의록 상태를 확인할 수 없습니다"
+      : `${meetingReportsState.reports.length}개의 최근 회의 기록`;
 
   return (
     <DashboardCard
@@ -35,7 +40,7 @@ export function MeetingReportsCard({
       }
       className="min-h-[280px]"
       cursorTarget={{ id: "meeting-reports", label: "회의록", type: "home_card" }}
-      description={null}
+      description={meetingReportDescription}
       icon={<FileText className="size-4" />}
       title="최근 회의록"
     >
@@ -65,7 +70,7 @@ export function MeetingReportsCard({
               <p className="min-w-0 truncate text-[14px] font-medium leading-5 text-[#202124]">
                 {formatMeetingReportTitle(report)}
               </p>
-              <p className="mt-0.5 min-w-0 truncate text-[13px] leading-4 text-[#747882]">
+              <p className="mt-0.5 min-w-0 truncate text-[13px] leading-4 text-[#6b6f78]">
                 {report.summary?.trim() || getMeetingReportFallbackSummary(report)}
               </p>
             </button>

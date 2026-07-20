@@ -20,6 +20,11 @@ export function PullRequestsCard({
 }) {
   const visiblePullRequests = pullRequestsState.pullRequests.slice(0, 3);
   const isLoading = pullRequestsState.status === "loading";
+  const pullRequestDescription = isLoading
+    ? "PR을 불러오는 중입니다"
+    : pullRequestsState.status === "error"
+      ? "PR 상태를 확인할 수 없습니다"
+      : `${pullRequestsState.pullRequests.length}개의 open PR`;
 
   return (
     <DashboardCard
@@ -28,7 +33,7 @@ export function PullRequestsCard({
       }
       className="min-h-[280px]"
       cursorTarget={{ id: "pull-requests", label: "PR", type: "home_card" }}
-      description={null}
+      description={pullRequestDescription}
       icon={<GitPullRequest className="size-4" />}
       title="PR 리뷰"
     >
@@ -88,7 +93,7 @@ function PullRequestRow({ pullRequest }: { pullRequest: GithubPullRequest }) {
           tone={pullRequest.draft ? "muted" : "neutral"}
         />
       </div>
-      <p className="mt-1 min-w-0 truncate text-[13px] text-[#747882]">
+      <p className="mt-1 min-w-0 truncate text-[13px] text-[#6b6f78]">
         {pullRequest.headBranch} → {pullRequest.baseBranch} ·{" "}
         {pullRequest.changedFilesCount} files
       </p>

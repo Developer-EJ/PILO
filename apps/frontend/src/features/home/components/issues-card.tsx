@@ -17,6 +17,11 @@ export function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
   const visibleTodoIssues = issuesState.issues.slice(0, 3);
   const isLoading = issuesState.status === "loading";
   const isRecentMode = issuesState.mode === "recent";
+  const issueDescription = isLoading
+    ? "이슈를 불러오는 중입니다"
+    : issuesState.status === "error"
+      ? "이슈 상태를 확인할 수 없습니다"
+      : `${issuesState.issues.length}개의 open 이슈`;
 
   return (
     <DashboardCard
@@ -25,7 +30,7 @@ export function IssuesCard({ issuesState }: { issuesState: HomeIssuesState }) {
       }
       className="min-h-[280px]"
       cursorTarget={{ id: "issues", label: "이슈", type: "home_card" }}
-      description={null}
+      description={issueDescription}
       icon={<ListChecks className="size-4" />}
       title={isRecentMode ? "최근 이슈" : "내 이슈"}
       titleAdornment={

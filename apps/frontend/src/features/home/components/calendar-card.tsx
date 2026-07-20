@@ -70,14 +70,14 @@ function ReadonlyCalendar({
     >
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-5 pt-5">
         <div className="mb-3 flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#747882]">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] border border-[#e7e9ee] bg-[#f6f7f9] text-[#6b6f78]">
             <CalendarDays className="size-4" />
           </span>
           <div className="min-w-0">
             <p className="truncate text-[16px] font-semibold tracking-[-0.01em] text-[#202124]">
               향후 2주 일정
             </p>
-            <p className="truncate text-[12px] text-[#747882]">{calendarTitle}</p>
+            <p className="truncate text-[12px] text-[#6b6f78]">{calendarTitle}</p>
           </div>
           {calendarEventsStatus === "error" ? (
             <span
@@ -131,7 +131,7 @@ function ReadonlyCalendar({
                   type="button"
                 >
                   <span className="flex items-center justify-between gap-1">
-                    <span className="text-[11px] font-medium leading-none text-[#747882]">
+                    <span className="text-[11px] font-medium leading-none text-[#6b6f78]">
                       {calendarWeekdayLabels[date.getDay()]}
                     </span>
                     <span
@@ -162,7 +162,7 @@ function ReadonlyCalendar({
                     {hiddenEventCount > 0 ? (
                       <span
                         aria-label={`${hiddenEventCount}개 일정 더 있음`}
-                        className="self-center rounded-full bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-semibold leading-none text-[#747882]"
+                        className="self-center rounded-full bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-semibold leading-none text-[#6b6f78]"
                       >
                         +{hiddenEventCount}
                       </span>
@@ -176,11 +176,11 @@ function ReadonlyCalendar({
         <section className="mt-3 grid shrink-0 gap-2 border-t border-[#eceef2] pt-3 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center">
           <div>
             <p className="text-[13px] font-semibold text-[#202124]">오늘 일정</p>
-            <p className="mt-0.5 text-[12px] text-[#747882]">{todayValue}</p>
+            <p className="mt-0.5 text-[12px] text-[#6b6f78]">{todayValue}</p>
           </div>
           <div className="flex min-w-0 items-center gap-2 overflow-hidden">
             {calendarEventsStatus === "loading" ? (
-              <p className="text-[12px] text-[#747882]">일정을 불러오는 중입니다</p>
+              <p className="text-[12px] text-[#6b6f78]">일정을 불러오는 중입니다</p>
             ) : calendarEventsStatus === "error" ? (
               <p className="text-[12px] text-destructive">
                 오늘 일정을 불러오지 못했습니다
@@ -203,13 +203,13 @@ function ReadonlyCalendar({
                   </div>
                 ))}
                 {todayEvents.length > visibleTodayEvents.length ? (
-                  <span className="shrink-0 text-[12px] font-medium text-[#747882]">
+                  <span className="shrink-0 text-[12px] font-medium text-[#6b6f78]">
                     +{todayEvents.length - visibleTodayEvents.length}
                   </span>
                 ) : null}
               </>
             ) : (
-              <p className="text-[12px] text-[#747882]">
+              <p className="text-[12px] text-[#6b6f78]">
                 오늘 예정된 일정이 없습니다
               </p>
             )}

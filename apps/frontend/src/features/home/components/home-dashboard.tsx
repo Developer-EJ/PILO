@@ -68,7 +68,7 @@ export function HomeDashboard() {
             <h2 className="text-[18px] font-semibold tracking-[-0.01em] text-[#202124]">
               워크스페이스 현황
             </h2>
-            <p className="mt-1 text-[13px] text-[#747882]">
+            <p className="mt-1 text-[13px] text-[#6b6f78]">
               진행 중인 작업과 최근 기록을 한눈에 확인하세요.
             </p>
           </div>
