@@ -23,3 +23,26 @@ test("HomeDashboard는 시안형 섹션과 기존 바로가기를 조합한다",
     /grid-cols-\[minmax\(260px,0\.66fr\)_minmax\(0,1\.34fr\)\]/
   );
 });
+
+test("MembersCard는 기존 멤버 데이터로 팀 현황을 요약한다", async () => {
+  const source = await readHomeSource("./components/members-card.tsx");
+
+  assert.match(source, /title="팀 현황"/);
+  assert.match(source, /label: "전체"/);
+  assert.match(source, /label: "접속 중"/);
+  assert.match(source, /label: "오프라인"/);
+  assert.match(source, /members\.length/);
+  assert.match(source, /onlineMembers\.length/);
+  assert.match(source, /offlineMembers\.length/);
+});
+
+test("CalendarCard는 14일 전체와 기존 이동 계약을 유지한다", async () => {
+  const source = await readHomeSource("./components/calendar-card.tsx");
+
+  assert.match(source, /calendarDates\.map/);
+  assert.match(source, /grid-cols-7/);
+  assert.match(source, /grid-rows-2/);
+  assert.match(source, /오늘 일정/);
+  assert.match(source, /router\.push\(`\/calendar\?date=\$\{dateValue\}`\)/);
+  assert.doesNotMatch(source, /calendarDates\.slice\(0,\s*7\)/);
+});
