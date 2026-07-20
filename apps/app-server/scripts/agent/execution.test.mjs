@@ -383,6 +383,22 @@ class FakeAgentLoggingService {
   }
 }
 
+class FakeAgentLatencyObserver {
+  constructor() {
+    this.calls = [];
+    this.clock = 0;
+  }
+
+  start() {
+    this.clock += 10;
+    return this.clock;
+  }
+
+  observe(input) {
+    this.calls.push(input);
+  }
+}
+
 class FakeAgentOutboxPublisherService {
   constructor(error = null) {
     this.calls = [];
@@ -1004,7 +1020,9 @@ function createExecutionServiceWithRegistry(
   registry,
   {
     prompt = "이번 주 일정 알려줘",
-    timezone = "Asia/Seoul"
+    timezone = "Asia/Seoul",
+    requestContext = null,
+    latencyObserver = undefined
   } = {}
 ) {
   const state = {
@@ -1014,7 +1032,8 @@ function createExecutionServiceWithRegistry(
       requested_by_user_id: USER_ID,
       status: "running",
       prompt,
-      timezone
+      timezone,
+      request_context_json: requestContext
     },
     plannerStep: {
       id: STEP_ID,
@@ -1050,7 +1069,8 @@ function createExecutionServiceWithRegistry(
       undefined,
       undefined,
       outboxPublisherService,
-      candidateSelectionService
+      candidateSelectionService,
+      latencyObserver
     ),
     candidateSelectionService,
     confirmationService,
@@ -1068,7 +1088,8 @@ function createService({
   toolCallLimitReached = false,
   completedToolNames = [],
   publisherError = null,
-  candidateSelectionService = undefined
+  candidateSelectionService = undefined,
+  latencyObserver = undefined
 } = {}) {
   const state = {
     run: {
@@ -1107,14 +1128,16 @@ function createService({
       undefined,
       undefined,
       outboxPublisherService,
-      candidateSelectionService
+      candidateSelectionService,
+      latencyObserver
     ),
     workspaceService,
     database,
     loggingService,
     confirmationService,
     toolRegistryService,
-    outboxPublisherService
+    outboxPublisherService,
+    latencyObserver
   };
 }
 
@@ -1536,12 +1559,18 @@ function formatterMeetingReport(index, overrides = {}) {
 }
 
 {
+  const latencyObserver = new FakeAgentLatencyObserver();
   const { service, loggingService, outboxPublisherService } = createService({
     registryState: {
       postExecutionDisposition: "complete_run",
       name: "focus_sql_erd_tables"
     },
-    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
   });
 
   const result = await service.executeReadyRun(RUN_ID);
@@ -1554,6 +1583,26 @@ function formatterMeetingReport(index, overrides = {}) {
   );
   assert.equal(completion.input.postExecutionDisposition, "complete_run");
   assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+  assert.deepEqual(
+    latencyObserver.calls.map((call) => call.stage),
+    ["tool_preparation", "tool_execution", "tool_advance", "tool_turn"]
+  );
+  assert.equal(
+    latencyObserver.calls.every(
+      (call) =>
+        call.surface === "sql_erd" && call.toolName === "focus_sql_erd_tables"
+    ),
+    true
+  );
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({ latencyObserver });
+
+  await service.executeReadyRun(RUN_ID);
+
+  assert.deepEqual(latencyObserver.calls, []);
 }
 
 {
@@ -2103,6 +2152,7 @@ function formatterMeetingReport(index, overrides = {}) {
   );
 
   const selectedToken = SQL_ERD_SECOND_SESSION_ID;
+  const inspectLatencyObserver = new FakeAgentLatencyObserver();
   const resumedExecution = createExecutionServiceWithRegistry(
     plannerOutput({
       toolName: inspectDefinition.name,
@@ -2117,7 +2167,12 @@ function formatterMeetingReport(index, overrides = {}) {
     registry,
     {
       prompt: "Untitled ERD 세션을 선택했습니다.",
-      timezone: "Asia/Seoul"
+      timezone: "Asia/Seoul",
+      requestContext: {
+        surface: "sql_erd",
+        sessionId: SQL_ERD_SECOND_SESSION_ID
+      },
+      latencyObserver: inspectLatencyObserver
     }
   );
   await resumedExecution.service.executeLatestPlannedTool(
@@ -2130,6 +2185,10 @@ function formatterMeetingReport(index, overrides = {}) {
     (call) => call.method === "completeToolStepAndAdvance"
   ).input.outputSummary;
   assert.equal(resumedOutput.sessionId, SQL_ERD_SECOND_SESSION_ID);
+  assert.deepEqual(
+    inspectLatencyObserver.calls.map((call) => call.stage),
+    ["tool_preparation", "tool_execution", "tool_advance", "tool_turn"]
+  );
   assert.deepEqual(
     sqlErdService.calls
       .filter((call) => call.method === "getSession")

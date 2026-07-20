@@ -12,6 +12,7 @@ import {
   AgentRunPayload,
   type AgentExecutionLease
 } from "./agent-logging.service";
+import { AgentLatencyObserver } from "./agent-latency-observer";
 import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
@@ -122,7 +123,8 @@ export class AgentExecutionService {
     private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
     private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
     private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
-    private readonly agentCandidateSelectionService: AgentCandidateSelectionService
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService,
+    private readonly agentLatencyObserver?: AgentLatencyObserver
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -188,12 +190,48 @@ export class AgentExecutionService {
       };
     }
 
-    return this.executePlannerOutput(currentUserId, workspaceId, runId, {
-      plannerOutput: plannerStep.output_json,
-      prompt: context.prompt,
-      timezone: context.timezone,
-      requestContext: context.requestContext
-    });
+    const toolName =
+      typeof plannerStep.output_json.toolName === "string"
+        ? plannerStep.output_json.toolName
+        : "";
+    const requestContext =
+      context.requestContext === undefined
+        ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
+        : context.requestContext;
+    const toolTurnStartedAt = this.agentLatencyObserver?.start();
+    try {
+      const result = await this.executePlannerOutput(
+        currentUserId,
+        workspaceId,
+        runId,
+        {
+          plannerOutput: plannerStep.output_json,
+          prompt: context.prompt,
+          timezone: context.timezone,
+          requestContext
+        }
+      );
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName,
+        stage: "tool_turn",
+        outcome: this.latencyOutcome(result),
+        startedAt: toolTurnStartedAt
+      });
+      return result;
+    } catch (error) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName,
+        stage: "tool_turn",
+        outcome: "failure",
+        startedAt: toolTurnStartedAt,
+        failureType: "domain_error"
+      });
+      throw error;
+    }
   }
 
   async executePlannerOutput(
@@ -208,6 +246,7 @@ export class AgentExecutionService {
     }
   ): Promise<AgentExecutionResult> {
     const candidate = this.parsePlannerOutput(input.plannerOutput);
+    const preparationStartedAt = this.agentLatencyObserver?.start();
     const requestContext =
       input.requestContext === undefined
         ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
@@ -282,11 +321,20 @@ export class AgentExecutionService {
         requestContext,
         input.prompt,
         input.timezone,
-        postExecutionDisposition
+        postExecutionDisposition,
+        preparationStartedAt
       );
     }
 
     if (definition.executionMode === "confirmation_required") {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "success",
+        startedAt: preparationStartedAt
+      });
       return this.createConfirmation(
         currentUserId,
         workspaceId,
@@ -300,6 +348,14 @@ export class AgentExecutionService {
       );
     }
 
+    this.observeLatency({
+      runId,
+      requestContext,
+      toolName: definition.name,
+      stage: "tool_preparation",
+      outcome: "success",
+      startedAt: preparationStartedAt
+    });
     return this.executeAutoTool(
       currentUserId,
       workspaceId,
@@ -577,7 +633,8 @@ export class AgentExecutionService {
     prompt?: string,
     timezone?: string,
     postExecutionDisposition: AgentToolPostExecutionDisposition =
-      "continue_planning"
+      "continue_planning",
+    preparationStartedAt?: number
   ): Promise<AgentExecutionResult> {
     if (!definition.prepareExecution) {
       return this.failRun(currentUserId, workspaceId, runId, {
@@ -598,6 +655,17 @@ export class AgentExecutionService {
           },
           input
         );
+
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: this.isClarificationResult(preparation)
+          ? "clarification"
+          : "success",
+        startedAt: preparationStartedAt
+      });
 
       if (this.isClarificationResult(preparation)) {
         return this.completeClarification(
@@ -639,6 +707,15 @@ export class AgentExecutionService {
         postExecutionDisposition
       );
     } catch (error) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "domain_error"
+      });
       if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
         return {
           status: "skipped",
@@ -920,6 +997,9 @@ export class AgentExecutionService {
       };
     }
     const { step, lease } = claim;
+    const executionStartedAt = this.agentLatencyObserver?.start();
+    let executionCompleted = false;
+    let advanceStartedAt: number | undefined;
 
     try {
       const result = await this.executeWithLeaseHeartbeat(
@@ -936,6 +1016,16 @@ export class AgentExecutionService {
             validatedInput
           )
       );
+      executionCompleted = true;
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_execution",
+        outcome: "success",
+        startedAt: executionStartedAt
+      });
+      advanceStartedAt = this.agentLatencyObserver?.start();
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
 
@@ -953,6 +1043,14 @@ export class AgentExecutionService {
             executionLease: lease
           }
         );
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_advance",
+          outcome: "success",
+          startedAt: advanceStartedAt
+        });
         return { status: "skipped", reason: "already_started" };
       }
 
@@ -961,6 +1059,14 @@ export class AgentExecutionService {
         await this.agentGroundedAnswerOutboxPublisherService
           .publish(runId)
           .catch(() => undefined);
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_advance",
+          outcome: "success",
+          startedAt: advanceStartedAt
+        });
         return { status: "skipped", reason: "already_started" };
       }
 
@@ -986,6 +1092,16 @@ export class AgentExecutionService {
           executionLease: lease
         }
       );
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_advance",
+        outcome: advanced.run.status === "waiting_user_input"
+          ? "clarification"
+          : "success",
+        startedAt: advanceStartedAt
+      });
       if (advanced.queuedNextPlannerTurn) {
         await this.agentOutboxPublisherService
           .publishCreatedRun(runId)
@@ -997,6 +1113,15 @@ export class AgentExecutionService {
         ? { status: "completed", run: advanced.run }
         : { status: "waiting_user_input", run: advanced.run };
     } catch (error) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: executionCompleted ? "tool_advance" : "tool_execution",
+        outcome: "failure",
+        startedAt: executionCompleted ? advanceStartedAt : executionStartedAt,
+        failureType: "domain_error"
+      });
       const embeddingUnavailable = error instanceof EmbeddingTemporarilyUnavailableError;
       const errorCode = embeddingUnavailable
         ? error.code
@@ -1307,6 +1432,45 @@ export class AgentExecutionService {
         value
       )
     );
+  }
+
+  private observeLatency(input: {
+    runId: string;
+    requestContext: AgentRunRequestContext;
+    toolName: string;
+    stage: string;
+    outcome: string;
+    startedAt?: number;
+    failureType?: string;
+  }): void {
+    if (
+      !this.agentLatencyObserver ||
+      input.requestContext?.surface !== "sql_erd" ||
+      !["inspect_sql_erd_schema", "focus_sql_erd_tables"].includes(
+        input.toolName
+      )
+    ) {
+      return;
+    }
+    this.agentLatencyObserver.observe({
+      runId: input.runId,
+      stage: input.stage,
+      outcome: input.outcome,
+      startedAt: input.startedAt,
+      surface: "sql_erd",
+      toolName: input.toolName,
+      failureType: input.failureType
+    });
+  }
+
+  private latencyOutcome(result: AgentExecutionResult): string {
+    if (result.status === "failed") {
+      return "failure";
+    }
+    if (result.status === "waiting_user_input") {
+      return "clarification";
+    }
+    return "success";
   }
 
   private isPlainObject(value: unknown): value is AgentJsonObject {
