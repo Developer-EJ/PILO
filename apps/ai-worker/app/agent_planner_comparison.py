@@ -101,11 +101,9 @@ def _reports_by_variant(
 def _validate_paired_inputs(baseline: dict[str, object], candidate: dict[str, object]) -> None:
     baseline_metadata = _object(baseline.get("metadata"), "Missing baseline metadata")
     candidate_metadata = _object(candidate.get("metadata"), "Missing candidate metadata")
-    if (
-        baseline_metadata.get("evaluatorSha256") is None
-        or baseline_metadata.get("evaluatorSha256")
-        != candidate_metadata.get("evaluatorSha256")
-    ):
+    if baseline_metadata.get("evaluatorSha256") is None or baseline_metadata.get(
+        "evaluatorSha256"
+    ) != candidate_metadata.get("evaluatorSha256"):
         raise ValueError("Baseline and candidate must use the same evaluator")
     if any(
         baseline_metadata.get(key) is None
@@ -130,6 +128,14 @@ def _paired_improvement_evidence(
         for baseline_result, candidate_result in zip(
             baseline_results, candidate_results, strict=True
         ):
+            baseline_workflow = baseline_result.get("workflow")
+            candidate_workflow = candidate_result.get("workflow")
+            if (baseline_workflow is None) != (candidate_workflow is None):
+                raise ValueError("Baseline and candidate workflow results must be paired")
+            if baseline_workflow is None:
+                continue
+            _validate_workflow_result(baseline_result)
+            _validate_workflow_result(candidate_result)
             key = f"{variant}:{baseline_result.get('id')}"
             scenario_pairs.setdefault(key, []).append((baseline_result, candidate_result))
 
@@ -154,10 +160,14 @@ def _paired_improvement_evidence(
         baseline_safety += sum(_safety_violation_count(item[0]) for item in pairs)
         candidate_safety += sum(_safety_violation_count(item[1]) for item in pairs)
 
-    success_delta = [candidate_value - baseline_value for baseline_value, candidate_value in success_pairs]
+    success_delta = [
+        candidate_value - baseline_value for baseline_value, candidate_value in success_pairs
+    ]
     confidence_interval = _bootstrap_mean_confidence_interval(success_delta)
     latency = _paired_numeric_summary(latency_pairs)
-    tokens = _paired_numeric_summary(token_pairs)
+    tokens = (
+        _paired_numeric_summary(token_pairs) if len(token_pairs) == len(scenario_pairs) else None
+    )
     efficiency_passed = bool(
         (latency is not None and latency["delta"] < 0)
         or (tokens is not None and tokens["delta"] < 0)
@@ -204,6 +214,24 @@ def _task_success(result: dict[str, object]) -> bool:
     return passed
 
 
+def _validate_workflow_result(result: dict[str, object]) -> None:
+    workflow = _object(result.get("workflow"), "Invalid workflow evaluation result")
+    task_success = workflow.get("taskSuccess")
+    if not isinstance(task_success, bool) or task_success is not result.get("passed"):
+        raise ValueError("Invalid workflow task success result")
+    latency = workflow.get("latencyMs")
+    if not isinstance(latency, int | float) or isinstance(latency, bool) or latency < 0:
+        raise ValueError("Invalid workflow latency result")
+    tokens = workflow.get("providerTotalTokens")
+    if tokens is not None and (
+        not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0
+    ):
+        raise ValueError("Invalid workflow token result")
+    safety = workflow.get("safetyViolations")
+    if not isinstance(safety, list) or not all(isinstance(item, str) for item in safety):
+        raise ValueError("Invalid workflow safety result")
+
+
 def _scenario_numeric_pair(
     pairs: list[tuple[dict[str, object], dict[str, object]]], key: str
 ) -> tuple[float, float] | None:
@@ -211,8 +239,9 @@ def _scenario_numeric_pair(
     for baseline, candidate in pairs:
         baseline_value = _workflow_number(baseline, key)
         candidate_value = _workflow_number(candidate, key)
-        if baseline_value is not None and candidate_value is not None:
-            values.append((baseline_value, candidate_value))
+        if baseline_value is None or candidate_value is None:
+            return None
+        values.append((baseline_value, candidate_value))
     if not values:
         return None
     return _mean([item[0] for item in values]), _mean([item[1] for item in values])
@@ -256,9 +285,7 @@ def _bootstrap_mean_confidence_interval(values: list[float]) -> tuple[float, flo
     if not values:
         return (0.0, 0.0)
     generator = random.Random(17)
-    samples = sorted(
-        _mean([generator.choice(values) for _ in values]) for _ in range(2000)
-    )
+    samples = sorted(_mean([generator.choice(values) for _ in values]) for _ in range(2000))
     return round(samples[49], 4), round(samples[1949], 4)
 
 
@@ -284,7 +311,9 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     results = _attempt_results(report, attempts)
     passed_attempts = sum(item["passed"] is True for item in results)
     workflow_mode = isinstance(report.get("workflowEvaluation"), dict)
-    tool_results = results if workflow_mode else [item for item in results if _has_expected_tool(item)]
+    tool_results = (
+        results if workflow_mode else [item for item in results if _has_expected_tool(item)]
+    )
     input_results = (
         results if workflow_mode else [item for item in results if _has_expected_input(item)]
     )
@@ -292,12 +321,8 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
         tool_passed_attempts = _funnel_stage_count(stages, "toolExact")
         input_passed_attempts = _funnel_stage_count(stages, "requiredInputExact")
     else:
-        tool_passed_attempts = sum(
-            "tool" not in item["failureReasons"] for item in tool_results
-        )
-        input_passed_attempts = sum(
-            "input" not in item["failureReasons"] for item in input_results
-        )
+        tool_passed_attempts = sum("tool" not in item["failureReasons"] for item in tool_results)
+        input_passed_attempts = sum("input" not in item["failureReasons"] for item in input_results)
     tool_selection_attempts = _nonnegative_int(
         funnel.get("toolSelectionAttempts"), "Invalid tool selection attempt count"
     )

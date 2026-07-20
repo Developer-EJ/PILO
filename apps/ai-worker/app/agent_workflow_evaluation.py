@@ -8,7 +8,6 @@ from time import perf_counter
 
 from app.agent_processor import (
     AgentPlannerClient,
-    AgentProcessResult,
     AgentRouterClient,
     AgentRunContext,
     AgentRunJob,
@@ -78,9 +77,7 @@ def load_workflow_scenarios(catalog_path: Path) -> tuple[WorkflowScenario, ...]:
             requires_confirmation = stage.get("requiresConfirmation", False)
             if not isinstance(input_contains, dict) or not isinstance(output, dict) or not output:
                 raise ValueError("Workflow Tool stages require inputContains and output objects")
-            if requires_confirmation is not None and not isinstance(
-                requires_confirmation, bool
-            ):
+            if requires_confirmation is not None and not isinstance(requires_confirmation, bool):
                 raise ValueError("Workflow confirmation policy must be boolean or null")
             fixtures.append(
                 WorkflowToolFixture(
@@ -276,8 +273,7 @@ def _evaluate_workflow(
     capability_exact = not scenario.expected_capability_ids or (
         router_routed
         and all(
-            set(getattr(decision, "capability_ids", ()))
-            == set(scenario.expected_capability_ids)
+            set(getattr(decision, "capability_ids", ())) == set(scenario.expected_capability_ids)
             for decision in routing_decisions
         )
     )
@@ -492,8 +488,10 @@ def _required_string(value: dict[str, object], key: str) -> str:
 
 def _string_tuple(value: dict[str, object], key: str) -> tuple[str, ...]:
     items = value.get(key)
-    if not isinstance(items, list) or not items or not all(
-        isinstance(item, str) and item.strip() for item in items
+    if (
+        not isinstance(items, list)
+        or not items
+        or not all(isinstance(item, str) and item.strip() for item in items)
     ):
         raise ValueError(f"Workflow {key} must be a non-empty string array")
     return tuple(item.strip() for item in items)

@@ -88,9 +88,7 @@ def test_workflow_rejects_wrong_tool_output_or_terminal_state() -> None:
 
 
 def test_meeting_workflow_catalog_contains_real_tool_outputs() -> None:
-    scenarios = load_workflow_scenarios(
-        Path("evals/meeting_agent_capability_catalog_v1.json")
-    )
+    scenarios = load_workflow_scenarios(Path("evals/meeting_agent_capability_catalog_v1.json"))
 
     assert len(scenarios) == 6
     assert scenarios[0].fixtures[0].output
@@ -186,9 +184,11 @@ def _job():
             action="list",
             operation="read",
             capability_ids=(
-                "meeting.reports.list"
-                if tool.name == "list_meeting_reports"
-                else "calendar.events.list",
+                (
+                    "meeting.reports.list"
+                    if tool.name == "list_meeting_reports"
+                    else "calendar.events.list"
+                ),
             ),
             when_to_use="목록 조회",
             must_not_use_for=(),

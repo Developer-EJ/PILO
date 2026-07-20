@@ -173,9 +173,7 @@ def main() -> None:
         suite.job.tool_capability_catalog is None
     ):
         raise SystemExit("--tool-capability-catalog is required for routing evaluation")
-    workflow_mode = bool(
-        args.meeting_catalog and args.meeting_variant == "multi_tool"
-    )
+    workflow_mode = bool(args.meeting_catalog and args.meeting_variant == "multi_tool")
     if workflow_mode and (args.compare_shadow_retrieval or not args.llm_routing):
         raise SystemExit("multi_tool workflow evaluation requires --llm-routing")
     planner = OpenAiAgentPlannerClient(api_key, args.model, args.timeout_seconds)

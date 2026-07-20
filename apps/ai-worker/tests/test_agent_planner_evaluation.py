@@ -187,9 +187,7 @@ def test_evaluation_continues_after_one_router_output_failure(tmp_path) -> None:
                 "riskLevel": "low",
                 "executionMode": "auto",
                 "contextSurface": None,
-                "inputSchemaSha256": compute_input_schema_sha256(
-                    raw["tools"][0]["inputSchema"]
-                ),
+                "inputSchemaSha256": compute_input_schema_sha256(raw["tools"][0]["inputSchema"]),
             }
         ],
     }

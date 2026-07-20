@@ -25,7 +25,6 @@ from app.agent_processor import (
     parse_agent_run_job_payload,
     select_agent_planner_tools_for_routing,
 )
-from app.meeting_report_processor import InfrastructureError
 from app.agent_tool_retrieval import (
     DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
     TOOL_RETRIEVER_VERSION,
@@ -33,6 +32,7 @@ from app.agent_tool_retrieval import (
     parse_tool_capability_catalog,
     select_read_only_tool_shortlist,
 )
+from app.meeting_report_processor import InfrastructureError
 
 EVALUATION_RUN_ID = "00000000-0000-4000-8000-000000000001"
 EVALUATION_WORKSPACE_ID = "00000000-0000-4000-8000-000000000002"
@@ -633,9 +633,11 @@ def evaluate_case(
     failures = (
         ["runtime_failure"]
         if runtime_failure is not None
-        else ["planner_output"]
-        if planner_output_failure is not None
-        else _compare(case.expectation, actual)
+        else (
+            ["planner_output"]
+            if planner_output_failure is not None
+            else _compare(case.expectation, actual)
+        )
     )
     if shortlist_violation:
         for failure in ("tool", "shortlist_tool"):
@@ -723,7 +725,9 @@ def evaluate_case(
         retriever_version=(
             "agent-tool-llm-router:v1"
             if use_llm_routing
-            else TOOL_RETRIEVER_VERSION if retrieval else None
+            else TOOL_RETRIEVER_VERSION
+            if retrieval
+            else None
         ),
         current_date=current_date,
         timezone=timezone,

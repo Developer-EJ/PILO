@@ -107,7 +107,7 @@ def test_two_stage_comparison_pairs_inputs_and_reports_funnel_delta() -> None:
     assert result["variants"]["canonical"]["delta"]["conditionalToolAccuracy"] == 0.0111
     assert result["aggregate"]["baseline"]["endToEndExactRate"] == 0.8
     assert result["aggregate"]["candidate"]["endToEndExactRate"] == 0.9
-    assert result["improvementEvidence"]["uniqueScenarioCount"] == 10
+    assert result["improvementEvidence"]["uniqueScenarioCount"] == 0
     assert result["improvementEvidence"]["taskSuccess"]["confidenceInterval95"][0] == 0.0
     assert result["improvementEvidence"]["passed"] is False
 
@@ -147,7 +147,7 @@ def test_two_stage_comparison_reports_multi_tool_workflow_delta() -> None:
     assert result["aggregate"]["candidate"]["multiToolExactWorkflowRate"] == 0.9
 
 
-def test_workflow_comparison_accepts_task_level_results_and_requires_confident_efficiency_gain() -> None:
+def test_workflow_comparison_requires_confident_success_and_efficiency_gain() -> None:
     baseline = report("multi_tool", domain_count=10, tool_count=10, exact_count=1)
     candidate = report("multi_tool", domain_count=10, tool_count=10, exact_count=10)
     candidate["metadata"]["sourceRevision"] = "candidate-revision"
@@ -176,6 +176,7 @@ def test_workflow_comparison_accepts_task_level_results_and_requires_confident_e
     result = build_two_stage_comparison([baseline], [candidate])
     evidence = result["improvementEvidence"]
 
+    assert evidence["uniqueScenarioCount"] == 10
     assert evidence["taskSuccess"]["confidenceInterval95"][0] > 0
     assert evidence["latencyMs"]["delta"] == -100.0
     assert evidence["providerTotalTokens"]["delta"] == -20.0

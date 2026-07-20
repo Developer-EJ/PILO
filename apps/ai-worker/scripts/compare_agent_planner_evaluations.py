@@ -25,7 +25,7 @@ def main() -> int:
         json.dumps(comparison, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return 0
+    return 0 if comparison["improvementEvidence"]["passed"] is True else 1
 
 
 def _load(path: Path) -> dict[str, object]:

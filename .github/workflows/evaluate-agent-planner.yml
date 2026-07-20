@@ -15,22 +15,14 @@ on:
         options:
           - "5"
           - "10"
-      baseline_ref:
-        description: Trusted baseline source
+      baseline_sha:
+        description: Baseline commit SHA reachable from dev
         required: true
-        default: main
-        type: choice
-        options:
-          - main
-          - dev
-      candidate_ref:
-        description: Trusted candidate source
+        type: string
+      candidate_sha:
+        description: Unmerged PR HEAD commit SHA descending from the baseline
         required: true
-        default: dev
-        type: choice
-        options:
-          - dev
-          - main
+        type: string
 
 permissions:
   contents: read
@@ -51,21 +43,55 @@ jobs:
       - name: Checkout baseline evaluation source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.baseline_ref }}
+          ref: ${{ inputs.baseline_sha }}
           path: baseline
+          fetch-depth: 0
 
       - name: Checkout candidate evaluation source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.candidate_ref }}
+          ref: ${{ inputs.candidate_sha }}
           path: candidate
+          fetch-depth: 0
 
       - name: Resolve immutable evaluation revisions
         id: revisions
+        env:
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
-          echo "baseline_sha=$(git -C baseline rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "candidate_sha=$(git -C candidate rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if [[ "$BASELINE_SHA" == "$CANDIDATE_SHA" ]]; then
+            echo "baseline and candidate SHAs must be distinct" >&2
+            exit 1
+          fi
+          for target in baseline candidate; do
+            if [[ "$target" == "baseline" ]]; then
+              sha="$BASELINE_SHA"
+            else
+              sha="$CANDIDATE_SHA"
+            fi
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "$target SHA must be a lowercase 40-character commit SHA" >&2
+              exit 1
+            }
+            [[ "$(git -C "$target" rev-parse HEAD)" == "$sha" ]] || {
+              echo "$target checkout does not match the requested SHA" >&2
+              exit 1
+            }
+          done
+          if ! git -C baseline merge-base --is-ancestor \
+            "$BASELINE_SHA" refs/remotes/origin/dev; then
+            echo "baseline SHA is not reachable from dev" >&2
+            exit 1
+          fi
+          if ! git -C candidate merge-base --is-ancestor \
+            "$BASELINE_SHA" "$CANDIDATE_SHA"; then
+            echo "candidate SHA does not descend from baseline SHA" >&2
+            exit 1
+          fi
+          echo "baseline_sha=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -122,6 +148,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       max-parallel: 10
       matrix:
         target:
@@ -192,6 +219,7 @@ jobs:
           unset OPENAI_API_KEY
 
       - name: Upload evaluation shard
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-evaluation-${{ matrix.target }}-${{ matrix.variant }}
@@ -200,6 +228,7 @@ jobs:
           retention-days: 1
 
   compare:
+    if: ${{ always() && needs.prepare.result == 'success' }}
     needs:
       - prepare
       - evaluate
@@ -286,6 +315,7 @@ jobs:
             --output "$RUNNER_TEMP/phase4e-dev-readiness.json"
 
       - name: Upload evaluation result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: phase4e-dev-readiness-${{ inputs.current_date }}
