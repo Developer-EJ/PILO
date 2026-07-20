@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "4d13bc853b16e2e9a237966ad90294d497d8649963d731a3ff2a794ab716dd4e",
-    "catalogSha256": "3dc12f027c59570e9247586978cf5f402f3b7fa5c4889dfe5b89809f6253a6c7",
+    "inventorySha256": "d7a8715cddafa60d78480ce5270188e1532c9d0f8612d2307e84f289e2e5addf",
+    "catalogSha256": "72065f9227a853b4788299a28e114f97fe1c4c720768bd77f080d97a85035173",
     "eligibleSnapshotSha256": "c0c7f1a07e5ba6d3a946b562b77f0b2333383a4e4bb7fc610c5d09ea23650a84"
   },
   "privacySensitiveValues": [
@@ -1582,7 +1582,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "3dc12f027c59570e9247586978cf5f402f3b7fa5c4889dfe5b89809f6253a6c7",
+    "sha256": "72065f9227a853b4788299a28e114f97fe1c4c720768bd77f080d97a85035173",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -2005,7 +2005,6 @@
         "id": "meeting.report.summary",
         "domain": "meeting",
         "toolNames": [
-          "list_meeting_reports",
           "summarize_meeting_report"
         ],
         "whenToUse": "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때",
@@ -4069,15 +4068,13 @@
         "capabilityIds": [
           "meeting.reports.list",
           "meeting.report.detail",
-          "meeting.report.summary",
           "meeting.decision.evidence",
           "meeting.report.regenerate"
         ],
-        "whenToUse": "최신 N건 또는 기간별 회의록 목록을 조회할 때 특정 회의록의 상태나 상세를 확인할 때 회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때 특정 결정사항의 직접 근거를 확인할 때 실패한 회의록을 다시 생성할 때",
+        "whenToUse": "최신 N건 또는 기간별 회의록 목록을 조회할 때 특정 회의록의 상태나 상세를 확인할 때 특정 결정사항의 직접 근거를 확인할 때 실패한 회의록을 다시 생성할 때",
         "mustNotUseFor": [
           "단일 회의록 상세 또는 요약 요청",
           "회의록 목록만 필요한 요청",
-          "원문 근거 검색 요청",
           "일반 회의 대화 검색 요청",
           "회의록 조회 또는 요약 요청"
         ],
@@ -4096,8 +4093,7 @@
         "followUpToolNames": [
           "get_meeting_decision_evidence",
           "get_meeting_report",
-          "regenerate_meeting_report",
-          "summarize_meeting_report"
+          "regenerate_meeting_report"
         ],
         "riskLevel": "low",
         "executionMode": "auto",
@@ -4482,9 +4478,7 @@
         "selectorKinds": [
           "meeting_report"
         ],
-        "prerequisiteToolNames": [
-          "list_meeting_reports"
-        ],
+        "prerequisiteToolNames": [],
         "followUpToolNames": [],
         "riskLevel": "low",
         "executionMode": "contextual",
@@ -4647,7 +4641,6 @@
       "domain": "meeting",
       "capabilityId": "meeting.report.summary",
       "requiredToolNames": [
-        "list_meeting_reports",
         "summarize_meeting_report",
         "create_calendar_event"
       ],
