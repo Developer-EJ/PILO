@@ -229,6 +229,14 @@ function createService(
     {},
     githubAppClient
   );
+  const startGithubSyncRun = service.startGithubSyncRun.bind(service);
+  service.startGithubSyncRun = (...args) => {
+    if (args.length < 5 && (args[3] === undefined || args[3] === "manual")) {
+      return startGithubSyncRun(args[0], args[1], args[2], "manual", "legacy-test-key");
+    }
+
+    return startGithubSyncRun(...args);
+  };
 
   return {
     database,
@@ -718,7 +726,7 @@ function projectV2ItemApiItem(overrides = {}) {
   const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
     target: "repositories",
     installationId
-  });
+  }, "manual", "test-key");
 
   assert.deepEqual(syncRun, {
     id: syncRunId,

@@ -23,6 +23,10 @@ import {
 } from "@/features/github-integration/utils/github-connect-format";
 import { getGithubManualSyncActionMessage } from "@/features/github-integration/utils/github-manual-sync-status";
 import { createGithubManualSyncIdempotency } from "@/features/github-integration/utils/github-manual-sync-idempotency";
+import {
+  getGithubManualSyncCompletion,
+  getGithubManualSyncErrorMessage
+} from "@/features/github-integration/utils/github-manual-sync-error";
 import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 import { buildGithubSettingsReturnUrl } from "@/features/github-integration/utils/github-settings-entry";
 import {
@@ -128,7 +132,7 @@ function getErrorMessage(error: unknown) {
   return "GitHub 연동 정보를 불러오지 못했습니다.";
 }
 
-function getGithubManualSyncErrorMessage(error: unknown) {
+function getLegacyGithubManualSyncErrorMessage(error: unknown) {
   if (error instanceof GithubIntegrationApiError) {
     if (error.status === 429) {
       const retryAfterSeconds = error.retryAfterSeconds ?? 30;
@@ -900,12 +904,7 @@ export function GithubPanel() {
         setHasRunningSyncRun(true);
       }
     } catch (error) {
-      const completion =
-        error instanceof GithubIntegrationApiError
-          ? error.status === 429
-            ? "rate_limited"
-            : "definitive_failure"
-          : "transport_failure";
+      const completion = getGithubManualSyncCompletion(error);
       manualSyncIdempotencyRef.current.complete(body, completion);
       setActionError(getGithubManualSyncErrorMessage(error));
     } finally {
