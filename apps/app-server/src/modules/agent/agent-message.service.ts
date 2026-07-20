@@ -68,6 +68,7 @@ interface ActiveRunSnapshot extends QueryResultRow {
   updated_at: Date | string;
   pending_confirmation_id: string | null;
   confirmation_expires_at: Date | string | null;
+  candidate_state: string;
 }
 
 interface MessageRouteReplayRow extends QueryResultRow {
@@ -77,6 +78,8 @@ interface MessageRouteReplayRow extends QueryResultRow {
   relationship: string;
   previous_run_id: string | null;
   clarification_question: string | null;
+  active_run_was_null: string | null;
+  resolved_active_run_id: string | null;
 }
 
 interface TransactionOutcome {
@@ -136,7 +139,7 @@ export class AgentMessageService {
       input.clientRequestId
     );
     if (earlyReplay) {
-      if (earlyReplay.request_fingerprint !== this.requestFingerprint(input)) {
+      if (!this.isMatchingReplayRequest(earlyReplay, input)) {
         throw clientRequestIdConflict(
           "clientRequestId was already used for a different Agent message"
         );
@@ -173,6 +176,13 @@ export class AgentMessageService {
         input.activeRunId
       );
       this.assertSnapshotCanReceiveMessage(snapshot);
+    } else {
+      snapshot = await this.loadLatestWaitingRunSnapshot(
+        currentUserId,
+        workspaceId
+      );
+    }
+    if (snapshot) {
       decision = await this.decideRelationship(
         currentUserId,
         workspaceId,
@@ -294,19 +304,7 @@ export class AgentMessageService {
           input
         )
       );
-      if (
-        snapshot.status === "waiting_confirmation" &&
-        decision.relationship === "continuation"
-      ) {
-        return {
-          relationship: "ambiguous",
-          confidence: "medium",
-          reason: "일반 채팅 입력으로 confirmation을 승인할 수 없습니다.",
-          clarificationQuestion:
-            "기존 승인 대기를 유지할까요, 아니면 새 요청을 시작할까요?"
-        };
-      }
-      return decision;
+      return this.applyConfidencePolicy(snapshot, decision);
     } catch (error) {
       if (error instanceof AgentInputRelationshipUnavailableError) {
         throw agentMessageRoutingUnavailable(
@@ -337,7 +335,7 @@ export class AgentMessageService {
       input.clientRequestId
     );
     if (replay) {
-      if (replay.request_fingerprint !== fingerprint) {
+      if (!this.isMatchingReplayRequest(replay, input)) {
         throw clientRequestIdConflict(
           "clientRequestId was already used for a different Agent message"
         );
@@ -368,6 +366,9 @@ export class AgentMessageService {
         fingerprint,
         outcome: "started_new",
         relationship: "new_intent",
+        confidence: decision.confidence,
+        activeRunId: input.activeRunId,
+        resolvedActiveRunId: null,
         previousRunId: null,
         clarificationQuestion: null
       });
@@ -414,6 +415,9 @@ export class AgentMessageService {
         fingerprint,
         outcome: "continued",
         relationship: "continuation",
+        confidence: decision.confidence,
+        activeRunId: input.activeRunId,
+        resolvedActiveRunId: lockedRun.id,
         previousRunId: null,
         clarificationQuestion: null
       });
@@ -438,6 +442,9 @@ export class AgentMessageService {
         fingerprint,
         outcome: "needs_choice",
         relationship: "ambiguous",
+        confidence: decision.confidence,
+        activeRunId: input.activeRunId,
+        resolvedActiveRunId: lockedRun.id,
         previousRunId: null,
         clarificationQuestion
       });
@@ -467,6 +474,9 @@ export class AgentMessageService {
         fingerprint,
         outcome: "cancelled",
         relationship: "cancel",
+        confidence: decision.confidence,
+        activeRunId: input.activeRunId,
+        resolvedActiveRunId: lockedRun.id,
         previousRunId: null,
         clarificationQuestion: null
       });
@@ -515,6 +525,9 @@ export class AgentMessageService {
       fingerprint,
       outcome: "started_new",
       relationship: "new_intent",
+      confidence: decision.confidence,
+      activeRunId: input.activeRunId,
+      resolvedActiveRunId: lockedRun.id,
       previousRunId: lockedRun.id,
       clarificationQuestion: null
     });
@@ -583,6 +596,12 @@ export class AgentMessageService {
       run.pending_confirmation_id = confirmation?.id ?? null;
       run.confirmation_expires_at = confirmation?.expires_at ?? null;
     }
+    run.candidate_state = await this.loadCandidateState(
+      transaction,
+      currentUserId,
+      workspaceId,
+      run.id
+    );
     return run;
   }
 
@@ -734,6 +753,9 @@ export class AgentMessageService {
       fingerprint: string;
       outcome: AgentMessageOutcome;
       relationship: AgentInputRelationship;
+      confidence: AgentInputRelationshipDecision["confidence"];
+      activeRunId: string | null;
+      resolvedActiveRunId: string | null;
       previousRunId: string | null;
       clarificationQuestion: string | null;
     }
@@ -758,8 +780,11 @@ export class AgentMessageService {
             'requestFingerprint', $5,
             'outcome', $6,
             'relationship', $7,
-            'previousRunId', $8::text,
-            'clarificationQuestion', $9::text
+            'confidence', $8,
+            'activeRunWasNull', $9,
+            'resolvedActiveRunId', $10::text,
+            'previousRunId', $11::text,
+            'clarificationQuestion', $12::text
           ),
           '[]'::jsonb
         )
@@ -772,6 +797,9 @@ export class AgentMessageService {
         input.fingerprint,
         input.outcome,
         input.relationship,
+        input.confidence,
+        input.activeRunId === null,
+        input.resolvedActiveRunId,
         input.previousRunId,
         input.clarificationQuestion
       ]
@@ -792,7 +820,9 @@ export class AgentMessageService {
           log.metadata_json->>'outcome' AS outcome,
           log.metadata_json->>'relationship' AS relationship,
           log.metadata_json->>'previousRunId' AS previous_run_id,
-          log.metadata_json->>'clarificationQuestion' AS clarification_question
+          log.metadata_json->>'clarificationQuestion' AS clarification_question,
+          log.metadata_json->>'activeRunWasNull' AS active_run_was_null,
+          log.metadata_json->>'resolvedActiveRunId' AS resolved_active_run_id
         FROM agent_logs AS log
         JOIN agent_runs AS run
           ON run.id = log.run_id
@@ -825,6 +855,27 @@ export class AgentMessageService {
       clarificationQuestion: replay.clarification_question,
       publishRunId: null
     };
+  }
+
+  private isMatchingReplayRequest(
+    replay: MessageRouteReplayRow,
+    input: AgentMessageInput
+  ): boolean {
+    if (replay.request_fingerprint === this.requestFingerprint(input)) {
+      return true;
+    }
+    if (
+      replay.outcome !== "needs_choice" ||
+      replay.active_run_was_null !== "true" ||
+      !input.activeRunId ||
+      replay.resolved_active_run_id !== input.activeRunId
+    ) {
+      return false;
+    }
+    return (
+      replay.request_fingerprint ===
+      this.requestFingerprint({ ...input, activeRunId: null })
+    );
   }
 
   private async loadActiveRunSnapshot(
@@ -862,7 +913,125 @@ export class AgentMessageService {
       [runId, workspaceId, currentUserId]
     );
     if (!run) throw notFound("Agent run not found");
+    run.candidate_state = await this.loadCandidateState(
+      this.database,
+      currentUserId,
+      workspaceId,
+      run.id
+    );
     return run;
+  }
+
+  private async loadLatestWaitingRunSnapshot(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<ActiveRunSnapshot | null> {
+    const run = await this.database.queryOne<ActiveRunSnapshot>(
+      `
+        SELECT
+          run.id,
+          run.thread_id,
+          run.status,
+          run.prompt,
+          run.timezone,
+          run.request_context_json,
+          run.message,
+          run.expires_at,
+          run.updated_at,
+          confirmation.id AS pending_confirmation_id,
+          confirmation.expires_at AS confirmation_expires_at
+        FROM agent_runs AS run
+        LEFT JOIN LATERAL (
+          SELECT id, expires_at
+          FROM agent_confirmations
+          WHERE run_id = run.id
+            AND status = 'pending'
+            AND expires_at > now()
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) AS confirmation ON true
+        WHERE run.workspace_id = $1
+          AND run.requested_by_user_id = $2
+          AND run.expires_at > now()
+          AND (
+            (
+              run.status = 'waiting_user_input'
+              AND run.updated_at > now() - INTERVAL '24 hours'
+            )
+            OR (
+              run.status = 'waiting_confirmation'
+              AND confirmation.id IS NOT NULL
+            )
+          )
+        ORDER BY run.updated_at DESC, run.created_at DESC, run.id DESC
+        LIMIT 1
+      `,
+      [workspaceId, currentUserId]
+    );
+    if (!run) return null;
+    run.candidate_state = await this.loadCandidateState(
+      this.database,
+      currentUserId,
+      workspaceId,
+      run.id
+    );
+    return run;
+  }
+
+  private async loadCandidateState(
+    transaction: Pick<DatabaseTransaction, "queryOne">,
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<string> {
+    const state = await transaction.queryOne<{ candidate_state: string }>(
+      `
+        SELECT COALESCE(
+          string_agg(candidate.id::text, ',' ORDER BY candidate.id),
+          ''
+        ) AS candidate_state
+        FROM agent_candidate_selections AS candidate
+        WHERE candidate.run_id = $1
+          AND candidate.workspace_id = $2
+          AND candidate.requested_by_user_id = $3
+          AND candidate.consumed_at IS NULL
+          AND candidate.expires_at > now()
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+    return state?.candidate_state ?? "";
+  }
+
+  private applyConfidencePolicy(
+    snapshot: ActiveRunSnapshot,
+    decision: AgentInputRelationshipDecision
+  ): AgentInputRelationshipDecision {
+    if (
+      snapshot.status === "waiting_confirmation" &&
+      decision.relationship === "continuation"
+    ) {
+      return {
+        relationship: "ambiguous",
+        confidence: decision.confidence,
+        reason: "일반 채팅 입력으로 confirmation을 승인할 수 없습니다.",
+        clarificationQuestion:
+          "기존 승인 대기를 유지할까요, 아니면 새 요청을 시작할까요?"
+      };
+    }
+    const shouldAskForChoice =
+      (decision.relationship === "continuation" &&
+        decision.confidence === "low") ||
+      ((decision.relationship === "new_intent" ||
+        decision.relationship === "cancel") &&
+        decision.confidence !== "high");
+    if (!shouldAskForChoice) return decision;
+    return {
+      relationship: "ambiguous",
+      confidence: decision.confidence,
+      reason: "낮은 분류 신뢰도로 기존 Run 상태를 변경하지 않습니다.",
+      clarificationQuestion:
+        "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?"
+    };
   }
 
   private assertSnapshotCanReceiveMessage(snapshot: ActiveRunSnapshot): void {
@@ -900,7 +1069,8 @@ export class AgentMessageService {
       snapshot.status !== lockedRun.status ||
       new Date(snapshot.updated_at).getTime() !==
         new Date(lockedRun.updated_at).getTime() ||
-      snapshot.pending_confirmation_id !== lockedRun.pending_confirmation_id
+      snapshot.pending_confirmation_id !== lockedRun.pending_confirmation_id ||
+      snapshot.candidate_state !== lockedRun.candidate_state
     ) {
       throw agentMessageRoutingStale(
         "Agent run changed while classifying the message"

@@ -204,6 +204,10 @@ assert.match(agentChatWidget, /applyRoutedMessagePayload/);
 assert.match(agentChatWidget, /payload\.previousRun/);
 assert.match(agentChatWidget, /pollAgentRunUntilStop\(payload\.run/);
 assert.match(agentChatWidget, /handleRoutingChoice/);
+assert.match(
+  agentChatWidget,
+  /routingInput\.activeRunId \?\? payload\.run\?\.id \?\? null/
+);
 assert.match(agentChatWidget, /"continue_previous"/);
 assert.match(agentChatWidget, /"start_new"/);
 assert.match(agentChatWidget, /기존 작업 계속/);
@@ -211,6 +215,10 @@ assert.match(agentChatWidget, /새 요청 시작/);
 assert.match(agentChatWidget, /일반 메시지는 승인으로 처리되지 않습니다/);
 assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_DISABLED/);
 assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_UNAVAILABLE/);
+assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_STALE/);
+assert.match(agentChatWidget, /refreshRoutingTargetAfterStale/);
+assert.match(agentChatWidget, /agentApiClient\.getRun\(workspaceId, activeRunId/);
+assert.match(agentChatWidget, /최신 상태를 확인한 뒤 다시 요청해주세요/);
 assert.match(
   agentChatWidget,
   /if \(error instanceof AgentApiError \|\| isAbortError\(error\)\) throw error;[\s\S]*routeMessage/,

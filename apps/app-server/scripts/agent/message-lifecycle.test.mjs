@@ -84,9 +84,17 @@ class FakeDatabase {
             outcome: log.metadata.outcome,
             relationship: log.metadata.relationship,
             previous_run_id: log.metadata.previousRunId,
-            clarification_question: log.metadata.clarificationQuestion
+            clarification_question: log.metadata.clarificationQuestion,
+            active_run_was_null: String(log.metadata.activeRunWasNull),
+            resolved_active_run_id: log.metadata.resolvedActiveRunId
           }
         : null;
+    }
+    if (
+      text.includes("LEFT JOIN LATERAL") &&
+      text.includes("ORDER BY run.updated_at DESC")
+    ) {
+      return this.latestWaitingSnapshot(values[0], values[1]);
     }
     if (text.includes("LEFT JOIN LATERAL")) {
       return this.snapshot(values[0], values[1], values[2]);
@@ -97,6 +105,19 @@ class FakeDatabase {
           candidate.run_id === values[0] && candidate.status === "pending"
       );
       return confirmation ? { id: confirmation.id } : null;
+    }
+    if (text.includes("string_agg(candidate.id::text")) {
+      const candidateIds = this.state.candidates
+        .filter(
+          (candidate) =>
+            candidate.run_id === values[0] &&
+            !candidate.consumed_at &&
+            (!candidate.expires_at ||
+              new Date(candidate.expires_at).getTime() > Date.now())
+        )
+        .map((candidate) => candidate.id)
+        .sort();
+      return { candidate_state: candidateIds.join(",") };
     }
     if (text.includes("SELECT id, expires_at") && text.includes("FROM agent_confirmations")) {
       const confirmation = this.state.confirmations.find(
@@ -191,8 +212,11 @@ class FakeDatabase {
           requestFingerprint: values[4],
           outcome: values[5],
           relationship: values[6],
-          previousRunId: values[7],
-          clarificationQuestion: values[8]
+          confidence: values[7],
+          activeRunWasNull: values[8],
+          resolvedActiveRunId: values[9],
+          previousRunId: values[10],
+          clarificationQuestion: values[11]
         }
       });
       return { rowCount: 1 };
@@ -216,6 +240,43 @@ class FakeDatabase {
       pending_confirmation_id: confirmation?.id ?? null,
       confirmation_expires_at: confirmation?.expires_at ?? null
     };
+  }
+
+  latestWaitingSnapshot(workspaceId, currentUserId) {
+    const now = Date.now();
+    const runs = this.state.runs
+      .filter((run) => {
+        if (
+          run.workspace_id !== workspaceId ||
+          run.requested_by_user_id !== currentUserId ||
+          new Date(run.expires_at).getTime() <= now
+        ) {
+          return false;
+        }
+        if (run.status === "waiting_user_input") {
+          return new Date(run.updated_at).getTime() > now - 24 * 60 * 60 * 1000;
+        }
+        if (run.status !== "waiting_confirmation") return false;
+        return this.state.confirmations.some(
+          (confirmation) =>
+            confirmation.run_id === run.id &&
+            confirmation.status === "pending" &&
+            new Date(confirmation.expires_at).getTime() > now
+        );
+      })
+      .sort((left, right) => {
+        const updatedDifference =
+          new Date(right.updated_at).getTime() -
+          new Date(left.updated_at).getTime();
+        if (updatedDifference) return updatedDifference;
+        const createdDifference =
+          new Date(right.created_at).getTime() -
+          new Date(left.created_at).getTime();
+        return createdDifference || right.id.localeCompare(left.id);
+      });
+    return runs[0]
+      ? this.snapshot(runs[0].id, workspaceId, currentUserId)
+      : null;
   }
 }
 
@@ -524,6 +585,202 @@ function request(message, overrides = {}) {
   );
   assert.equal(cancellationLog.metadata.reason, "superseded_by_new_intent");
   assert.equal(cancellationLog.metadata.replacementRunId, state.runs[1].id);
+  assert.equal(
+    state.logs.find((log) => log.event_type === "message_routed").metadata
+      .confidence,
+    "high"
+  );
+}
+
+{
+  const olderRun = waitingRun({
+    id: "33333333-3333-4333-8333-333333333331",
+    updated_at: new Date(Date.now() - 10_000),
+    created_at: new Date(Date.now() - 20_000)
+  });
+  const state = createState(olderRun);
+  const newestRun = waitingRun({
+    id: "33333333-3333-4333-8333-333333333332",
+    updated_at: new Date(Date.now() - 1000),
+    created_at: new Date(Date.now() - 2000)
+  });
+  state.runs.push(newestRun);
+  state.outbox.push({ run_id: newestRun.id, status: "delivered", turn_sequence: 1 });
+  const { service } = createService(state);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("이번 주 일정 보여줘", {
+      activeRunId: null,
+      clientRequestId: "recover-latest-waiting-run"
+    })
+  );
+  assert.equal(result.outcome, "started_new");
+  assert.equal(result.previousRun.id, newestRun.id);
+  assert.equal(state.runs[0].status, "waiting_user_input");
+  assert.equal(state.runs[1].status, "cancelled");
+  assert.equal(result.run.id, state.runs[2].id);
+}
+
+{
+  const state = createState(waitingRun({ status: "completed" }));
+  const { service } = createService(state);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("일반 신규 요청", {
+      activeRunId: null,
+      clientRequestId: "no-eligible-waiting-run"
+    })
+  );
+  assert.equal(result.outcome, "started_new");
+  assert.equal(result.previousRun, null);
+  assert.equal(state.createdRunCount, 1);
+}
+
+{
+  const state = createState(
+    waitingRun({ status: "waiting_confirmation", prompt: "일정을 생성할까요?" })
+  );
+  state.confirmations.push({
+    id: CONFIRMATION_ID,
+    run_id: RUN_ID,
+    status: "pending",
+    expires_at: new Date(Date.now() + 60_000)
+  });
+  const { service } = createService(state);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("이번 주 일정 보여줘", {
+      activeRunId: null,
+      clientRequestId: "recover-waiting-confirmation"
+    })
+  );
+  assert.equal(result.outcome, "started_new");
+  assert.equal(result.previousRun.id, RUN_ID);
+  assert.equal(state.confirmations[0].status, "rejected");
+}
+
+for (const fixture of [
+  {
+    relationship: "continuation",
+    confidence: "medium",
+    expectedOutcome: "continued"
+  },
+  {
+    relationship: "continuation",
+    confidence: "low",
+    expectedOutcome: "needs_choice"
+  },
+  {
+    relationship: "new_intent",
+    confidence: "medium",
+    expectedOutcome: "needs_choice"
+  },
+  {
+    relationship: "new_intent",
+    confidence: "low",
+    expectedOutcome: "needs_choice"
+  },
+  {
+    relationship: "cancel",
+    confidence: "medium",
+    expectedOutcome: "needs_choice"
+  },
+  {
+    relationship: "cancel",
+    confidence: "low",
+    expectedOutcome: "needs_choice"
+  }
+]) {
+  const state = createState();
+  const relationshipService = {
+    async classify() {
+      return {
+        relationship: fixture.relationship,
+        confidence: fixture.confidence,
+        reason: "confidence 정책 테스트",
+        clarificationQuestion: null
+      };
+    }
+  };
+  const { service } = createService(state, relationshipService);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request(`confidence-${fixture.relationship}-${fixture.confidence}`)
+  );
+  assert.equal(result.outcome, fixture.expectedOutcome);
+  if (fixture.expectedOutcome === "needs_choice") {
+    assert.equal(state.runs[0].status, "waiting_user_input");
+    assert.equal(state.createdRunCount, 0);
+  }
+}
+
+{
+  const state = createState();
+  const relationshipService = {
+    async classify() {
+      state.runs[0].status = "completed";
+      state.runs[0].updated_at = new Date();
+      return {
+        relationship: "new_intent",
+        confidence: "high",
+        reason: "분류 중 상태 변경",
+        clarificationQuestion: null
+      };
+    }
+  };
+  const { service } = createService(state, relationshipService);
+  await assert.rejects(
+    service.routeMessage(
+      USER_ID,
+      WORKSPACE_ID,
+      request("분류 중 상태가 바뀌는 요청", {
+        clientRequestId: "stale-classification"
+      })
+    ),
+    (error) =>
+      error.getResponse().error.code === "AGENT_MESSAGE_ROUTING_STALE"
+  );
+  assert.equal(state.createdRunCount, 0);
+}
+
+{
+  const state = createState();
+  state.candidates.push({
+    id: "66666666-6666-4666-8666-666666666667",
+    run_id: RUN_ID,
+    resource_type: "meeting_report",
+    expires_at: new Date(Date.now() + 60_000),
+    consumed_at: null
+  });
+  const relationshipService = {
+    async classify() {
+      state.candidates[0].consumed_at = new Date();
+      return {
+        relationship: "new_intent",
+        confidence: "high",
+        reason: "분류 중 후보 소비",
+        clarificationQuestion: null
+      };
+    }
+  };
+  const { service } = createService(state, relationshipService);
+  await assert.rejects(
+    service.routeMessage(
+      USER_ID,
+      WORKSPACE_ID,
+      request("후보가 먼저 소비되는 경합", {
+        clientRequestId: "stale-candidate"
+      })
+    ),
+    (error) =>
+      error.getResponse().error.code === "AGENT_MESSAGE_ROUTING_STALE"
+  );
+  assert.equal(state.runs[0].status, "waiting_user_input");
+  assert.equal(state.createdRunCount, 0);
 }
 
 {
@@ -577,6 +834,24 @@ function request(message, overrides = {}) {
     request("그거", { disposition: "continue_previous" })
   );
   assert.equal(continued.outcome, "continued");
+}
+
+{
+  const state = createState();
+  const { service } = createService(state);
+  const input = request("그거", {
+    activeRunId: null,
+    clientRequestId: "recovered-ambiguous-choice"
+  });
+  const ambiguous = await service.routeMessage(USER_ID, WORKSPACE_ID, input);
+  assert.equal(ambiguous.outcome, "needs_choice");
+  const continued = await service.routeMessage(USER_ID, WORKSPACE_ID, {
+    ...input,
+    activeRunId: ambiguous.run.id,
+    disposition: "continue_previous"
+  });
+  assert.equal(continued.outcome, "continued");
+  assert.equal(continued.run.id, RUN_ID);
 }
 
 {

@@ -52,16 +52,15 @@ try {
       originalGoal: fixture.question,
       latestAssistantQuestion: fixture.question,
       waitingInputKind:
-        fixture.runStatus === "waiting_confirmation"
+        fixture.waitingInputKind ??
+        (fixture.runStatus === "waiting_confirmation"
           ? "confirmation"
-          : "clarification",
+          : "clarification"),
       timeline: [{ role: "assistant", content: fixture.question }],
       newMessage: fixture.message,
-      requestSurface: null,
-      hasCandidates: fixture.question.includes("회의록"),
-      candidateTypes: fixture.question.includes("회의록")
-        ? ["meeting_report"]
-        : [],
+      requestSurface: fixture.requestSurface ?? null,
+      hasCandidates: fixture.hasCandidates ?? false,
+      candidateTypes: fixture.candidateTypes ?? [],
       runStatus: fixture.runStatus ?? "waiting_user_input"
     });
 
@@ -84,4 +83,6 @@ try {
   else process.env.OPENAI_API_KEY = previousApiKey;
 }
 
-console.log(`agent input relationship tests passed (${cases.length} Korean fixtures)`);
+console.log(
+  `agent input relationship provider contract tests passed (${cases.length} Korean contexts)`
+);

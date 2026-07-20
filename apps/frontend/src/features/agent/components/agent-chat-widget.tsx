@@ -64,7 +64,7 @@ type AgentChatMessage = {
     clientRequestId: string;
     message: string;
     requestContext: AgentRunRequestContext;
-    targetMessageId: string;
+    targetMessageId: string | null;
     timezone: string;
   };
   run?: AgentRun;
@@ -573,7 +573,8 @@ export function AgentChatWidget() {
     }
 
     if (payload.outcome === "needs_choice" && payload.clarification) {
-      if (!routingInput.activeRunId || !targetMessageId) {
+      const activeRunId = routingInput.activeRunId ?? payload.run?.id ?? null;
+      if (!activeRunId) {
         throw new Error("Agent routing choice is missing its active run");
       }
       setMessages((currentMessages) =>
@@ -584,7 +585,7 @@ export function AgentChatWidget() {
                 content: payload.clarification?.question ?? message.content,
                 run: undefined,
                 routingChoice: {
-                  activeRunId: routingInput.activeRunId as string,
+                  activeRunId,
                   clientRequestId: routingInput.clientRequestId,
                   message: routingInput.message,
                   requestContext: routingInput.requestContext ?? null,
@@ -635,6 +636,36 @@ export function AgentChatWidget() {
       (error.code === "AGENT_MESSAGE_ROUTING_DISABLED" ||
         error.code === "AGENT_MESSAGE_ROUTING_UNAVAILABLE")
     );
+  }
+
+  async function refreshRoutingTargetAfterStale(
+    error: unknown,
+    workspaceId: string,
+    activeRunId: string | null,
+    targetMessageId: string | null,
+    signal: AbortSignal
+  ) {
+    if (
+      !(error instanceof AgentApiError) ||
+      error.code !== "AGENT_MESSAGE_ROUTING_STALE"
+    ) {
+      return false;
+    }
+    if (activeRunId && targetMessageId) {
+      try {
+        const payload = await agentApiClient.getRun(workspaceId, activeRunId, {
+          signal
+        });
+        updateAssistantMessage(
+          targetMessageId,
+          getAgentRunDisplayMessage(payload.run),
+          payload.run
+        );
+      } catch {
+        // The next idempotent message submission lets the server recover the latest wait.
+      }
+    }
+    return true;
   }
 
   async function appendRunInput(
@@ -742,9 +773,19 @@ export function AgentChatWidget() {
         return;
       }
 
+      const wasStale = await refreshRoutingTargetAfterStale(
+        error,
+        run.workspaceId,
+        run.id,
+        targetMessage.id,
+        abortController.signal
+      );
+
       updateAssistantMessage(
         assistantMessageId,
-        getAgentRequestErrorMessage(error),
+        wasStale
+          ? "다른 요청으로 대기 작업 상태가 변경되었습니다. 최신 상태를 확인한 뒤 다시 요청해주세요."
+          : getAgentRequestErrorMessage(error),
         null
       );
     } finally {
@@ -860,9 +901,18 @@ export function AgentChatWidget() {
       );
     } catch (error) {
       if (!isAbortError(error)) {
+        const wasStale = await refreshRoutingTargetAfterStale(
+          error,
+          workspaceId,
+          targetMessage?.run?.id ?? null,
+          targetMessage?.id ?? null,
+          abortController.signal
+        );
         updateAssistantMessage(
           assistantMessageId,
-          getAgentRequestErrorMessage(error),
+          wasStale
+            ? "다른 요청으로 대기 작업 상태가 변경되었습니다. 최신 상태를 확인한 뒤 다시 요청해주세요."
+            : getAgentRequestErrorMessage(error),
           null
         );
       }

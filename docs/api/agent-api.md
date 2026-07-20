@@ -492,7 +492,7 @@ Request:
 | `message` | Yes | 새 사용자 메시지. trim 후 1~4,000 bytes |
 | `timezone` | No | IANA timezone. 없으면 `Asia/Seoul` |
 | `clientRequestId` | Yes | routing 전체의 idempotency key. 최대 128 bytes |
-| `activeRunId` | Yes | UI가 대기 중으로 표시하는 run UUID 또는 `null` |
+| `activeRunId` | Yes | UI가 대기 중으로 표시하는 run UUID 또는 `null`. `null`이면 서버가 현재 scope의 최신 유효 대기 run을 복구 |
 | `requestContext` | No | run 생성 API와 같은 검증된 surface context 또는 `null` |
 | `disposition` | No | `auto`, `continue_previous`, `start_new`. 기본값 `auto` |
 | `selection` | No | 기존 `/inputs`와 같은 server-owned candidate selection. 버튼 선택 호환용 |
@@ -502,6 +502,12 @@ Request:
 `waiting_confirmation` 상태인지 확인한다. 관계 LLM 호출 뒤 transaction에서 run과 confirmation을 다시
 lock하고 `status`, `updatedAt`, pending confirmation을 재검증한다. 분류 중 상태가 바뀌면 stale 결과를
 적용하지 않고 `409 AGENT_MESSAGE_ROUTING_STALE`을 반환한다.
+
+`activeRunId=null`이면 서버는 같은 Workspace·요청 사용자의 만료되지 않은 유효 대기 run을
+`updatedAt DESC`, `createdAt DESC`, `id DESC` 순서로 하나 선택한다. `waiting_user_input`은 최근 24시간
+안에 갱신된 run만, `waiting_confirmation`은 아직 만료되지 않은 pending confirmation이 있는 run만
+대상이다. 복구한 run도 같은 relationship 분류와 transaction 재검증을 거친다. 서버는 이 과정에서 다른
+기존 대기 run을 일괄 취소하지 않는다. 유효한 대기 run이 없을 때만 일반 신규 run을 생성한다.
 
 ### Input relationship
 
@@ -529,6 +535,12 @@ credential 형태는 `[secret]`으로 치환한다. raw transcript, raw tool out
 - `waiting_confirmation`에서 일반 메시지가 continuation처럼 보이면 confirmation을 실행하지 않고
   `ambiguous` 선택을 요청한다. 독립 새 요청이면 pending confirmation을 `rejected` 처리하고 기존 run을
   취소한 뒤 replacement run을 만든다.
+
+LLM 분류는 confidence를 안전 경계로 사용한다. `continuation`은 `high` 또는 `medium`일 때만 같은 run을
+재개하고 `low`이면 `ambiguous`로 낮춘다. `new_intent`와 `cancel`은 `high`일 때만 기존 run을 변경하며,
+`medium` 또는 `low`이면 `ambiguous`로 낮춘다. 명시적 disposition과 서버가 검증한 candidate 선택에는 이
+LLM confidence 하한을 적용하지 않는다. `message_routed` log에는 최종 relationship과 classifier confidence를
+bounded metadata로 저장하며 provider payload나 입력 context 원문은 저장하지 않는다.
 
 `new_intent` transaction은 기존 run·pending confirmation을 lock하고, confirmation reject, 미소비 candidate
 소비 처리, pending/running step skip, outbox 실행 불가 처리, 기존 run terminal 전환, 같은 thread의 새 run과
@@ -586,8 +598,10 @@ ambiguity 응답의 `clarification`은 서버 질문과 다음 두 선택을 포
 
 Frontend는 최초 `message`, `activeRunId`, `requestContext`, `clientRequestId`를 메모리에 보관하고 선택한
 `disposition`만 바꿔 같은 endpoint에 재제출한다. 같은 `clientRequestId`의 ambiguity 결정 재제출은 허용하지만
-다른 message/context/active run으로 재사용하면 `409 CLIENT_REQUEST_ID_CONFLICT`다. 선택 UI는 영속 저장하지
-않으므로 새로고침하면 사라질 수 있으며, 기존 run의 상태는 바뀌지 않는다.
+다른 message/context/active run으로 재사용하면 `409 CLIENT_REQUEST_ID_CONFLICT`다. 단, 최초 request의
+`activeRunId`가 `null`이었다면 ambiguity 응답의 `run.id`를 선택 재제출의 `activeRunId`로 사용할 수 있다.
+서버는 최초 null fingerprint와 당시 해소한 run ID가 모두 일치할 때만 이 전환을 허용한다. 선택 UI는 영속
+저장하지 않으므로 새로고침하면 사라질 수 있으며, 기존 run의 상태는 바뀌지 않는다.
 
 ### Routing mode와 안전한 fallback
 
@@ -601,10 +615,27 @@ Frontend는 최초 `message`, `activeRunId`, `requestContext`, `clientRequestId`
 - Frontend는 위 disabled/unavailable code에서만 기존 `createRun` 또는 `/inputs`로 fallback한다.
 - timeout·연결 단절처럼 서버 수락 여부가 불명확하면 기존 endpoint를 호출하지 않는다. 같은
   `clientRequestId`로 새 endpoint만 재시도해 `message_routed` log 기반 idempotency replay를 받는다.
+- `409 AGENT_MESSAGE_ROUTING_STALE`이면 알려진 active run을 다시 조회해 화면 상태를 갱신하고, 사용자가
+  새 메시지를 다시 제출하도록 안내한다. stale 응답에서도 기존 endpoint로 fallback하지 않는다.
+
+`intent` mode를 활성화하기 전에는 App Server를 build한 뒤 실제 relationship model로 한국어 품질 gate를
+수동 실행한다. 이 평가는 외부 API 비용과 비결정성을 피하기 위해 CI에는 포함하지 않는다.
+
+```bash
+cd apps/app-server
+npm run build
+OPENAI_API_KEY=... node scripts/agent/evaluate-input-relationship.mjs
+```
+
+gate는 effective relationship 정확도 90% 이상과 잘못된 파괴 결정(`new_intent` 또는 `cancel`) 0건을 모두
+요구한다. `medium`/`low` 파괴 결과와 `low` continuation은 운영 정책과 동일하게 `ambiguous`로 평가한다.
 
 일반 신규 메시지는 최근 1시간 안의 같은 Workspace·사용자 thread를 재사용한다. pending confirmation이
 있는 thread는 1시간이 지나도 보존한다. 새 의도 replacement는 반드시 취소한 run의 thread를 사용한다.
 서로 다른 Workspace/사용자의 thread는 선택할 수 없다.
+
+이 routing 계약은 대기 중인 run만 대상으로 한다. `failed`를 포함한 terminal run은 재시작하거나 새 메시지의
+active run으로 복구하지 않는다. 실패 뒤 “다시 해줘” 문맥 복구는 별도 lifecycle 범위다.
 
 주요 오류:
 
