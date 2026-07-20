@@ -7732,7 +7732,15 @@ assert.match(sessionPage, /useSearchParams/);
 assert.match(sessionPage, /key=\{sessionId\}/);
 assert.doesNotMatch(sessionPage, /window\.location\.search/);
 assert.match(sessionPage, /sql-erd-full-bleed/);
-assert.match(sessionPage, /h-screen/);
+assert.match(
+  sessionPage,
+  /sql-erd-full-bleed h-full min-h-0 overflow-hidden/
+);
+assert.equal(
+  sessionPage.match(/flex h-full min-h-0 items-center justify-center/g)?.length,
+  2
+);
+assert.doesNotMatch(sessionPage, /h-screen/);
 assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
 assert.match(sessionRouteBridge, /import "tldraw\/tldraw\.css"/);
 assert.doesNotMatch(page, /-m-6/);
