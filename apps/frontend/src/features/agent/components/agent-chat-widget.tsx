@@ -44,6 +44,7 @@ import {
   subscribeCanvasAgentDelegationAdapter,
 } from "@/features/agent/canvas-delegation-context";
 import { readAgentRequestContext } from "@/features/agent/request-context";
+import { shouldFallbackToLegacyMessageApiCode } from "@/features/agent/message-routing-policy";
 import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
@@ -637,8 +638,7 @@ export function AgentChatWidget() {
   function shouldFallbackToLegacyMessageApi(error: unknown) {
     return (
       error instanceof AgentApiError &&
-      (error.code === "AGENT_MESSAGE_ROUTING_DISABLED" ||
-        error.code === "AGENT_MESSAGE_ROUTING_UNAVAILABLE")
+      shouldFallbackToLegacyMessageApiCode(error.code)
     );
   }
 

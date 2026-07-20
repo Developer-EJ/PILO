@@ -5,6 +5,7 @@ import {
   didAgentRunAcceptInput,
   getLatestAgentRunMessageSequence
 } from "./run-input-recovery.ts";
+import { shouldFallbackToLegacyMessageApiCode } from "./message-routing-policy.ts";
 import {
   presentCanvasAgentDelegationRunOnce,
   registerCanvasAgentDelegationAdapter
@@ -213,8 +214,16 @@ assert.match(agentChatWidget, /"start_new"/);
 assert.match(agentChatWidget, /기존 작업 계속/);
 assert.match(agentChatWidget, /새 요청 시작/);
 assert.match(agentChatWidget, /일반 메시지는 승인으로 처리되지 않습니다/);
-assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_DISABLED/);
-assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_UNAVAILABLE/);
+assert.match(agentChatWidget, /shouldFallbackToLegacyMessageApiCode/);
+assert.equal(
+  shouldFallbackToLegacyMessageApiCode("AGENT_MESSAGE_ROUTING_DISABLED"),
+  true
+);
+assert.equal(
+  shouldFallbackToLegacyMessageApiCode("AGENT_MESSAGE_ROUTING_UNAVAILABLE"),
+  false
+);
+assert.equal(shouldFallbackToLegacyMessageApiCode(undefined), false);
 assert.match(agentChatWidget, /AGENT_MESSAGE_ROUTING_STALE/);
 assert.match(agentChatWidget, /refreshRoutingTargetAfterStale/);
 assert.match(agentChatWidget, /agentApiClient\.getRun\(workspaceId, activeRunId/);

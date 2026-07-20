@@ -612,7 +612,9 @@ Frontend는 최초 `message`, `activeRunId`, `requestContext`, `clientRequestId`
   그대로 유지된다.
 - relationship provider가 명시적으로 사용할 수 없으면 새 endpoint는
   `503 AGENT_MESSAGE_ROUTING_UNAVAILABLE`을 반환한다.
-- Frontend는 위 disabled/unavailable code에서만 기존 `createRun` 또는 `/inputs`로 fallback한다.
+- Frontend는 의도적인 rollback을 나타내는 `AGENT_MESSAGE_ROUTING_DISABLED`에서만 기존 `createRun` 또는
+  `/inputs`로 fallback한다. `AGENT_MESSAGE_ROUTING_UNAVAILABLE`에서는 기존 run을 변경하지 않고 재시도를
+  안내한다.
 - timeout·연결 단절처럼 서버 수락 여부가 불명확하면 기존 endpoint를 호출하지 않는다. 같은
   `clientRequestId`로 새 endpoint만 재시도해 `message_routed` log 기반 idempotency replay를 받는다.
 - `409 AGENT_MESSAGE_ROUTING_STALE`이면 알려진 active run을 다시 조회해 화면 상태를 갱신하고, 사용자가

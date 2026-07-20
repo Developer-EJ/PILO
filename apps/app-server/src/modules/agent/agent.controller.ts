@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Post,
   Query,
@@ -38,6 +40,7 @@ export class AgentController {
   ) {}
 
   @Post("messages")
+  @HttpCode(HttpStatus.OK)
   async routeMessage(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,

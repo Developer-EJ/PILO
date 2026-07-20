@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const { HTTP_CODE_METADATA } = require("@nestjs/common/constants");
 const { AgentController } = require(
   "../../dist/modules/agent/agent.controller.js"
 );
@@ -23,6 +24,15 @@ const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
+
+assert.equal(
+  Reflect.getMetadata(
+    HTTP_CODE_METADATA,
+    AgentController.prototype.routeMessage
+  ),
+  200,
+  "POST /agent/messages must return the documented 200 OK status"
+);
 const contextualExecutionMigration = readFileSync(
   new URL(
     "../../../../db/migrations/078_add_agent_contextual_execution.sql",
