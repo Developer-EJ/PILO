@@ -12,6 +12,7 @@ const { SqlErdAgentToolsService } = require(
 const { buildAgentReadResultAnswer } = require(
   "../../dist/modules/agent/agent-read-result-formatter.js"
 );
+const { forbidden } = require("../../dist/common/api-error.js");
 const {
   buildSqlErdAgentSchemaProjection,
   createSqlErdModelFingerprint,
@@ -258,6 +259,42 @@ for (const testCase of resolverFixture.cases) {
     testCase.id
   );
 }
+
+const boundaryProjection = {
+  version: 1,
+  tables: [
+    { ref: "t1", name: "user", columns: [] },
+    { ref: "t2", name: "users", columns: [] },
+    { ref: "t3", name: "log", columns: [] },
+    { ref: "t4", name: "catalog", columns: [] }
+  ],
+  edges: [],
+  truncated: false
+};
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "users 테이블만 보여줘"
+  )?.primaryTableRefs,
+  ["t2"],
+  "an exact plural table name must not also select its singular neighbor"
+);
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "catalog 기능만 보여줘"
+  )?.primaryTableRefs,
+  ["t4"],
+  "a table name inside another word must not count as an exact match"
+);
+assert.deepEqual(
+  resolveDeterministicSqlErdTableFocus(
+    boundaryProjection,
+    "user와 users 테이블을 함께 보여줘"
+  )?.primaryTableRefs,
+  ["t1", "t2"],
+  "separately named tables in an explicit multi-table request must be preserved"
+);
 assert.deepEqual(
   focusProjection.tables.map((table) => [table.ref, table.name]),
   [
@@ -961,16 +998,39 @@ staleService.getSession = async () => {
 const staleFocusDefinition = new SqlErdAgentToolsService(staleService)
   .listDefinitions()
   .find((candidate) => candidate.name === "focus_sql_erd_tables");
-await assert.rejects(
-  () =>
-    staleFocusDefinition.execute(
-      focusContext,
-      staleFocusDefinition.validateInput({ featureQuery: "payments" })
-    ),
-  (error) =>
-    error.getStatus() === 409 &&
-    /model changed/i.test(error.getResponse().error.message)
+const staleResult = await staleFocusDefinition.execute(
+  focusContext,
+  staleFocusDefinition.validateInput({ featureQuery: "payments" })
 );
+assert.equal(staleResult.outputSummary.action, "needs_clarification");
+assert.equal(staleResult.outputSummary.reason, "schema_changed");
+assert.deepEqual(staleResult.resourceRefs, []);
+
+for (const revokedRead of [1, 2]) {
+  const revokedService = new FakeSqlErdService();
+  let readCount = 0;
+  revokedService.getSession = async () => {
+    readCount += 1;
+    if (readCount === revokedRead) {
+      throw forbidden("Workspace access denied");
+    }
+    return stableSession;
+  };
+  const revokedDefinition = new SqlErdAgentToolsService(revokedService)
+    .listDefinitions()
+    .find((candidate) => candidate.name === "focus_sql_erd_tables");
+  const revokedResult = await revokedDefinition.execute(
+    focusContext,
+    revokedDefinition.validateInput({ featureQuery: "payments" })
+  );
+  assert.equal(revokedResult.outputSummary.action, "needs_clarification");
+  assert.equal(revokedResult.outputSummary.reason, "session_unavailable");
+  assert.doesNotMatch(
+    revokedResult.outputSummary.question,
+    /forbidden|permission|workspace|session|403|404/i
+  );
+  assert.deepEqual(revokedResult.resourceRefs, []);
+}
 
 globalThis.fetch = originalFetch;
 if (originalApiKey === undefined) {

@@ -25,18 +25,27 @@ export function resolveDeterministicSqlErdTableFocus(
   projection: SqlErdAgentSchemaProjection,
   featureQuery: string
 ): SqlErdFocusResolution | null {
-  const normalizedQuery = normalize(featureQuery);
   const queryTerms = tokenize(featureQuery);
-  const exactNameRefs = projection.tables
-    .filter((table) => tableNameMatchesQuery(table.name, normalizedQuery, queryTerms))
-    .map((table) => table.ref)
-    .slice(0, MAX_PRIMARY_TABLES);
+  const exactNameRefs = resolveExactTableNameRefs(projection, featureQuery);
 
   if (exactNameRefs.length > 0) {
     return buildFocusedResolution(
       projection,
       featureQuery,
       exactNameRefs,
+      "high",
+      "deterministic"
+    );
+  }
+
+  const inflectionNameRefs = projection.tables
+    .filter((table) => tableNameMatchesInflection(table.name, queryTerms))
+    .map((table) => table.ref);
+  if (inflectionNameRefs.length === 1) {
+    return buildFocusedResolution(
+      projection,
+      featureQuery,
+      inflectionNameRefs,
       "high",
       "deterministic"
     );
@@ -131,17 +140,71 @@ function buildFocusedResolution(
   };
 }
 
-function tableNameMatchesQuery(
+function resolveExactTableNameRefs(
+  projection: SqlErdAgentSchemaProjection,
+  featureQuery: string
+): string[] {
+  const queryTerms = exactTokens(featureQuery);
+  const matches = projection.tables
+    .map((table) => {
+      const nameTerms = exactTokens(table.name);
+      return {
+        ref: table.ref,
+        nameTerms,
+        ranges: findPhraseRanges(queryTerms, nameTerms)
+      };
+    })
+    .filter((candidate) => candidate.ranges.length > 0);
+
+  return matches
+    .filter((candidate) =>
+      candidate.ranges.some(
+        ([start, end]) =>
+          !matches.some(
+            (other) =>
+              other.ref !== candidate.ref &&
+              other.nameTerms.length > candidate.nameTerms.length &&
+              other.ranges.some(
+                ([otherStart, otherEnd]) =>
+                  otherStart <= start && otherEnd >= end
+              )
+          )
+      )
+    )
+    .map((candidate) => candidate.ref)
+    .slice(0, MAX_PRIMARY_TABLES);
+}
+
+function findPhraseRanges(
+  queryTerms: string[],
+  nameTerms: string[]
+): Array<[number, number]> {
+  if (nameTerms.length === 0 || nameTerms.length > queryTerms.length) return [];
+  const ranges: Array<[number, number]> = [];
+  for (let start = 0; start <= queryTerms.length - nameTerms.length; start += 1) {
+    const matches = nameTerms.every((term, offset) => {
+      const queryTerm = queryTerms[start + offset];
+      return (
+        queryTerm === term ||
+        (offset === nameTerms.length - 1 &&
+          stripKoreanParticle(queryTerm) === term)
+      );
+    });
+    if (matches) ranges.push([start, start + nameTerms.length]);
+  }
+  return ranges;
+}
+
+function tableNameMatchesInflection(
   tableName: string,
-  normalizedQuery: string,
   queryTerms: Set<string>
 ): boolean {
-  const normalizedName = normalize(tableName);
-  if (normalizedName.length < 2) return false;
-  if (normalizedQuery.includes(normalizedName)) return true;
   const nameTerms = tokenize(tableName);
-  return [...nameTerms].every(
-    (term) => queryTerms.has(term) || queryTerms.has(singularize(term))
+  return (
+    nameTerms.size > 0 &&
+    [...nameTerms].every(
+      (term) => queryTerms.has(term) || queryTerms.has(singularize(term))
+    )
   );
 }
 
@@ -173,11 +236,21 @@ function matchedTermCount(value: string, queryTerms: Set<string>): number {
 
 function tokenize(value: string): Set<string> {
   return new Set(
-    normalize(value)
-      .split(" ")
+    exactTokens(value)
+      .map((term) => stripKoreanParticle(term))
       .map((term) => singularize(term))
       .filter((term) => term.length >= 2)
   );
+}
+
+function exactTokens(value: string): string[] {
+  return normalize(value)
+    .split(" ")
+    .filter((term) => term.length >= 2);
+}
+
+function stripKoreanParticle(value: string): string {
+  return value.replace(/(이랑|랑|와|과)$/u, "");
 }
 
 function normalize(value: string): string {

@@ -986,8 +986,10 @@ Status code: `200 OK`
   전달한다. provider 결과의 ref와 중복을 서버가 다시 검증하며, primary의 직접 FK 1-hop table은
   서버가 related로 확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
 - 0건·모호함·provider 장애·invalid ref는 focus resource 없이 `needs_clarification` 질문으로 끝난다.
-  성공 직전 같은 session을 다시 조회해 model fingerprint를 검증한다. layout/annotation으로 revision만
-  증가하면 최신 revision으로 허용하고, 실제 model 변경은 `409 CONFLICT`로 거부한다.
+  최초 조회 또는 실행 직전 재조회에서 session이 없거나 접근 권한이 사라진 경우에도 대상의 존재나
+  권한 상세를 노출하지 않는 `session_unavailable` clarification으로 끝낸다. 성공 직전 같은 session을
+  다시 조회해 model fingerprint를 검증하며, layout/annotation으로 revision만 증가하면 최신 revision으로
+  허용한다. 실제 model 변경은 resource 없이 `schema_changed` clarification으로 끝낸다.
 - 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
   `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
   새 결과에는 `contextTableIds`도 포함하며, 이 필드가 없는 기존 metadata는 빈 배열로 해석한다.

@@ -279,8 +279,10 @@ type FocusSqlErdTablesInput = {
   않는다.
 - 0건, 복수 의미, provider timeout/장애, malformed 또는 unknown ref는 focus resource를 만들지 않고
   `needs_clarification` 질문을 반환한다.
-- 성공 resource 생성 직전에 같은 session을 다시 읽고 model fingerprint를 비교한다. layout/annotation만
-  바뀌어 revision이 증가한 경우 최신 revision으로 허용하고, 실제 model이 바뀌면 `409 CONFLICT`다.
+- 성공 resource 생성 직전에 같은 session을 다시 읽고 model fingerprint를 비교한다. 최초 조회 또는
+  재조회에서 session이 없거나 접근 권한이 사라진 경우에는 대상의 존재나 권한 상세를 노출하지 않는
+  `session_unavailable` clarification을 반환한다. layout/annotation만 바뀌어 revision이 증가한 경우
+  최신 revision으로 허용하고, 실제 model이 바뀌면 resource 없이 `schema_changed` clarification을 반환한다.
 
 성공 resource ref:
 
@@ -307,8 +309,8 @@ type SqlErdTableFocusResourceRef = {
 };
 ```
 
-App Server는 실제 modelJson이 달라진 경우
-`SQLtoERD model changed; inspect the schema again` 메시지의 `409 CONFLICT`를 반환한다.
+App Server는 실제 modelJson이 달라진 경우 focus resource를 만들지 않고 `schema_changed`
+`needs_clarification`을 반환해 최신 schema 기준으로 다시 요청하도록 안내한다.
 Frontend는 기존 same-origin URL allowlist와 metadata를 모두 검증한 뒤 focus를 일회성
 `sessionStorage`와 same-page event로 전달한다. 최초 적용 시 `sessionRevision`과
 `modelFingerprint`를 모두 검증한다. 활성화된 뒤에는 layout/annotation 변경으로 증가한 revision은

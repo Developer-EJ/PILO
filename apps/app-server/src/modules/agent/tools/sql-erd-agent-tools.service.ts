@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { badRequest, conflict } from "../../../common/api-error";
+import { HttpException, Injectable } from "@nestjs/common";
+import { badRequest } from "../../../common/api-error";
 import type {
   SqlErdSchemaGenerationWarning,
   SqlErdSchemaSpecV1
@@ -471,11 +471,17 @@ export class SqlErdAgentToolsService {
     ) {
       throw badRequest("focus_sql_erd_tables requires SQLtoERD session context");
     }
-    const inspectedSession = await this.sqlErdService.getSession(
+    const inspectedSession = await this.readFocusSession(
       context.currentUserId,
       context.workspaceId,
       context.requestContext.sessionId
     );
+    if (!inspectedSession) {
+      return this.focusClarification(
+        "session_unavailable",
+        "현재 ERD를 확인할 수 없습니다. 화면을 새로고침한 뒤 다시 요청해주세요."
+      );
+    }
     const inspectedFingerprint = createSqlErdModelFingerprint(
       inspectedSession.modelJson
     );
@@ -500,14 +506,23 @@ export class SqlErdAgentToolsService {
       };
     }
 
-    const session = await this.sqlErdService.getSession(
+    const session = await this.readFocusSession(
       context.currentUserId,
       context.workspaceId,
       inspectedSession.id
     );
+    if (!session) {
+      return this.focusClarification(
+        "session_unavailable",
+        "현재 ERD를 확인할 수 없습니다. 화면을 새로고침한 뒤 다시 요청해주세요."
+      );
+    }
     const modelFingerprint = createSqlErdModelFingerprint(session.modelJson);
     if (modelFingerprint !== inspectedFingerprint) {
-      throw conflict("SQLtoERD model changed; request table focus again");
+      return this.focusClarification(
+        "schema_changed",
+        "ERD가 변경되었습니다. 최신 상태에서 집중 보기를 다시 요청해주세요."
+      );
     }
     const resolvedInput = this.toResolvedFocusInput(
       session.id,
@@ -736,6 +751,44 @@ export class SqlErdAgentToolsService {
       reason: "resolver_unavailable",
       question:
         "관련 테이블을 안전하게 확정하지 못했습니다. 집중할 테이블 이름을 알려주세요."
+    };
+  }
+
+  private async readFocusSession(
+    currentUserId: string,
+    workspaceId: string,
+    sessionId: string
+  ): Promise<SqlErdSessionPayload | null> {
+    try {
+      return await this.sqlErdService.getSession(
+        currentUserId,
+        workspaceId,
+        sessionId
+      );
+    } catch (error) {
+      if (
+        error instanceof HttpException &&
+        (error.getStatus() === 403 || error.getStatus() === 404)
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private focusClarification(
+    reason: "schema_changed" | "session_unavailable",
+    question: string
+  ): AgentToolExecutionResult {
+    return {
+      outputSummary: this.toAgentJsonObject({
+        action: "needs_clarification",
+        status: "needs_clarification",
+        reason,
+        question
+      }),
+      resourceRefs: [],
+      status: "needs_clarification"
     };
   }
 
