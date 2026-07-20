@@ -755,6 +755,19 @@ class FakeExecutionHandoffClient:
             raise self.error
 
 
+class FakeAgentLatencyObserver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.clock = 0.0
+
+    def start(self) -> float:
+        self.clock += 0.01
+        return self.clock
+
+    def observe(self, **input_value: object) -> None:
+        self.calls.append(input_value)
+
+
 class FakeGroundedAnswerHandoffClient:
     def __init__(self, context: dict[str, object]) -> None:
         self.context = context
@@ -933,6 +946,7 @@ def create_processor(
     execution_handoff_client: FakeExecutionHandoffClient | None = None,
     router_client: FakeRouterClient | None = None,
     tool_retrieval_mode: str | None = None,
+    latency_observer: FakeAgentLatencyObserver | None = None,
 ) -> AgentRunProcessor:
     return AgentRunProcessor(
         repository,
@@ -941,7 +955,168 @@ def create_processor(
         current_date_provider=lambda _timezone: date(2026, 7, 9),
         router_client=router_client,
         tool_retrieval_mode=tool_retrieval_mode,
+        latency_observer=latency_observer,
     )
+
+
+def sql_erd_focus_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
+    capability = {
+        "id": "sql_erd.tables.focus",
+        "domain": "sql_erd",
+        "toolNames": ["inspect_sql_erd_schema", "focus_sql_erd_tables"],
+        "whenToUse": "SQLtoERD에서 특정 기능 관련 테이블에 집중할 때",
+        "mustNotUseFor": ["SQLtoERD 외 화면 요청"],
+        "positiveExamples": [
+            "회의 관련 테이블만 집중적으로 보여줘",
+            "학생 관련 테이블에 집중해줘",
+            "결제 테이블만 선명하게 보여주ㅓ",
+            "회의 테이블만 보여주세요",
+            "ERD 집중 보기",
+        ],
+        "examples": [
+            {"kind": "canonical", "utterance": "회의 관련 테이블만 집중적으로 보여줘"},
+            {"kind": "paraphrase", "utterance": "학생 관련 테이블에 집중해줘"},
+            {"kind": "typo", "utterance": "결제 테이블만 선명하게 보여주ㅓ"},
+            {"kind": "honorific", "utterance": "회의 테이블만 보여주세요"},
+            {"kind": "abbreviation", "utterance": "ERD 집중 보기"},
+        ],
+        "selectorKinds": ["sql_erd_table_ref"],
+        "requiresConfirmation": False,
+        "availability": "supported",
+    }
+    descriptors = []
+    for tool in tools:
+        input_schema = tool["inputSchema"]
+        assert isinstance(input_schema, dict)
+        descriptors.append(
+            {
+                "toolName": tool["name"],
+                "domain": "sql_erd",
+                "action": tool["name"],
+                "operation": "read",
+                "capabilityIds": [capability["id"]],
+                "whenToUse": capability["whenToUse"],
+                "mustNotUseFor": capability["mustNotUseFor"],
+                "acceptedSelectorFields": list(input_schema["properties"]),
+                "selectorKinds": ["sql_erd_table_ref"],
+                "prerequisiteToolNames": (
+                    [] if tool["name"] == "inspect_sql_erd_schema" else ["inspect_sql_erd_schema"]
+                ),
+                "followUpToolNames": (
+                    ["focus_sql_erd_tables"]
+                    if tool["name"] == "inspect_sql_erd_schema"
+                    else []
+                ),
+                "riskLevel": "low",
+                "executionMode": tool["executionMode"],
+                "requiresConfirmation": False,
+                "contextSurface": "sql_erd",
+                "inputSchemaSha256": compute_input_schema_sha256(input_schema),
+            }
+        )
+    catalog = {
+        "version": "agent-tool-capabilities:v2",
+        "capabilities": [capability],
+        "descriptors": descriptors,
+    }
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
+def test_sql_erd_planning_emits_queue_router_planner_handoff_and_turn_latency() -> None:
+    tools = [
+        tool_snapshot(
+            name="inspect_sql_erd_schema",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["featureQuery"],
+                "additionalProperties": False,
+                "properties": {"featureQuery": {"type": "string"}},
+            },
+        ),
+        tool_snapshot(
+            name="focus_sql_erd_tables",
+            inputSchema={
+                "type": "object",
+                "required": ["featureQuery", "sessionRevision", "modelFingerprint", "primaryTableRefs"],
+                "additionalProperties": False,
+                "properties": {
+                    "featureQuery": {"type": "string"},
+                    "sessionRevision": {"type": "integer"},
+                    "modelFingerprint": {"type": "string"},
+                    "primaryTableRefs": {"type": "array"},
+                },
+            },
+        ),
+    ]
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt="회의 관련 테이블만 집중적으로 보여줘",
+            queue_wait_ms=37,
+        )
+    )
+    observer = FakeAgentLatencyObserver()
+    router_client = FakeRouterClient(
+        decision=routing_decision(
+            domains=("sql_erd",),
+            capability_ids=("sql_erd.tables.focus",),
+            provider_input_tokens=11,
+            provider_output_tokens=4,
+            provider_total_tokens=15,
+        )
+    )
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="inspect_sql_erd_schema",
+            tool_input={"featureQuery": "회의"},
+            provider_input_tokens=19,
+            provider_output_tokens=7,
+            provider_total_tokens=26,
+        )
+    )
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+        observer,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            requestContext={"surface": "sql_erd", "sessionId": SQL_ERD_SESSION_ID},
+            tools=tools,
+            toolCapabilityCatalog=sql_erd_focus_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert [call["stage"] for call in observer.calls] == [
+        "queue_wait",
+        "router",
+        "planner",
+        "execution_handoff",
+        "planning_turn",
+    ]
+    assert observer.calls[0]["elapsed_ms"] == 37
+    assert observer.calls[1]["provider_total_tokens"] == 15
+    assert observer.calls[2]["provider_total_tokens"] == 26
+    assert all(call["surface"] == "sql_erd" for call in observer.calls)
+    assert all(call["turn_sequence"] == 1 for call in observer.calls)
+
+
+def test_non_sql_erd_planning_does_not_emit_latency_events() -> None:
+    observer = FakeAgentLatencyObserver()
+    repository = FakeAgentRunRepository()
+    processor = create_processor(repository, latency_observer=observer)
+
+    processor.process_payload(agent_payload())
+
+    assert observer.calls == []
 
 
 def test_llm_router_then_planner_selects_calendar_tool() -> None:
