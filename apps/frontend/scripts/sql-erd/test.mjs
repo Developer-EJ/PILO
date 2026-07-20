@@ -7184,8 +7184,19 @@ assert.deepEqual(
     isSelected: false
   }),
   {
-    stroke: "rgba(37, 99, 235, 0.74)",
-    strokeWidth: 3
+    stroke: "rgba(37, 99, 235, 0.98)",
+    strokeWidth: 4
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
+    isHovered: true,
+    isSelected: false
+  }),
+  {
+    stroke: "rgba(37, 99, 235, 0.98)",
+    strokeWidth: 4
   }
 );
 assert.deepEqual(
