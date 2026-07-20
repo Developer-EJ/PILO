@@ -553,6 +553,15 @@ assert.match(mainShell, /<span className="truncate">\{activeFeature\.title\}<\/s
 assert.match(mainShell, /data-sqltoerd-workspace-header/);
 assert.match(mainShell, /href="\/home"/);
 assert.match(mainShell, /<Home className="size-4"/);
+assert.match(mainShell, /SqlErdSessionHeaderTitle/);
+assert.match(
+  mainShell,
+  /isSqlErdImmersiveRoute[\s\S]*?<SqlErdSessionHeaderTitle[\s\S]*?fallback=\{activeFeature\.title\}/
+);
+assert.match(
+  mainShell,
+  /<span className="truncate">\{activeFeature\.title\}<\/span>/
+);
 assert.match(mainShell, /function WorkspaceHeaderActions/);
 const sqlErdWorkspaceHeader = mainShell.slice(
   mainShell.lastIndexOf(

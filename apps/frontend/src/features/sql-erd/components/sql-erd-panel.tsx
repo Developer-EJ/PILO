@@ -214,6 +214,10 @@ import {
   type SqlErdNormalizedSqlPreview
 } from "@/features/sql-erd/utils/sql-diff-apply";
 import { cn } from "@/lib/utils";
+import {
+  clearSqlErdSessionHeaderTitle,
+  setSqlErdSessionHeaderTitle
+} from "@/features/sql-erd/session-header-title-store";
 
 const emptySqlErdViewSession: SqlErdViewSession = {
   id: null,
@@ -537,6 +541,14 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   );
   const sqlErdViewSession =
     sqlErdEditState.lastSuccessfulSnapshot;
+  useEffect(() => {
+    setSqlErdSessionHeaderTitle(
+      sessionId,
+      sqlErdViewSession.id === sessionId ? sqlErdViewSession.title : null
+    );
+
+    return () => clearSqlErdSessionHeaderTitle(sessionId);
+  }, [sessionId, sqlErdViewSession.id, sqlErdViewSession.title]);
   const [sessionLoadState, setSessionLoadState] =
     useState<SqlErdSessionLoadState>({
       label: "Loading",
