@@ -84,17 +84,6 @@ export function MembersCard() {
       )
     : [];
   const canLeaveWorkspace = Boolean(activeWorkspace) && !canManageWorkspace;
-  const teamStats = [
-    { label: "전체", value: membersStatus === "success" ? members.length : "–" },
-    {
-      label: "접속 중",
-      value: membersStatus === "success" ? onlineMembers.length : "–"
-    },
-    {
-      label: "오프라인",
-      value: membersStatus === "success" ? offlineMembers.length : "–"
-    }
-  ];
 
   useEffect(() => {
     let active = true;
@@ -275,7 +264,7 @@ export function MembersCard() {
   return (
     <>
       <DashboardCard
-        className="min-h-[430px]"
+        className="h-[430px] min-h-0"
         cursorTarget={{ id: "members", label: "멤버", type: "home_card" }}
         action={
           canManageWorkspace ? (
@@ -360,21 +349,6 @@ export function MembersCard() {
         title="팀 현황"
       >
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-          <div className="grid grid-cols-3 gap-2">
-            {teamStats.map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-[10px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-2.5 text-center"
-              >
-                <p className="text-[17px] font-semibold leading-5 text-[#202124]">
-                  {stat.value}
-                </p>
-                <p className="mt-1 text-[12px] leading-4 text-[#6b6f78]">
-                  {stat.label}
-                </p>
-              </div>
-            ))}
-          </div>
           {membersStatus === "loading" ? (
             <MemberCardMessage>멤버 불러오는 중</MemberCardMessage>
           ) : membersStatus === "error" ? (
@@ -595,7 +569,7 @@ function MemberPresenceList({
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="grid min-h-0 content-start gap-1 overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="grid min-h-0 content-start gap-1 overflow-y-auto py-1.5 pr-1">
         {members.length === 0 ? (
           <div className="rounded-[9px] border border-[#e7e9ee] bg-[#f8f9fb] px-2 py-3 text-center text-[12px] text-[#6b6f78]">
             표시할 멤버가 없습니다
