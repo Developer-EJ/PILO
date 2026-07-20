@@ -50,6 +50,9 @@ ALTER TABLE public.github_sync_manual_requests ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.github_sync_manual_requests FROM PUBLIC;
 
+REVOKE ALL ON TABLE public.github_sync_manual_requests
+  FROM anon, authenticated, service_role;
+
 COMMENT ON TABLE public.github_sync_manual_requests IS
   'Durable manual GitHub sync idempotency ledger scoped to one Workspace and requester.';
 

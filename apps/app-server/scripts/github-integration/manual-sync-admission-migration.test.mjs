@@ -20,12 +20,41 @@ assert.match(
 );
 assert.match(
   migration,
-  /FOREIGN KEY \(sync_run_id, workspace_id\)[\s\S]*REFERENCES public\.github_sync_runs \(id, workspace_id\)/i
+  /CONSTRAINT github_sync_manual_requests_idempotency_key_hash_check[\s\S]*CHECK \(idempotency_key_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/i
+);
+assert.match(
+  migration,
+  /CONSTRAINT github_sync_manual_requests_request_fingerprint_check[\s\S]*CHECK \(request_fingerprint ~ '\^\[0-9a-f\]\{64\}\$'\)/i
+);
+assert.match(
+  migration,
+  /FOREIGN KEY \(sync_run_id, workspace_id\)[\s\S]*REFERENCES public\.github_sync_runs \(id, workspace_id\)[\s\S]*ON DELETE CASCADE/i
+);
+assert.match(
+  migration,
+  /CREATE INDEX idx_github_sync_manual_requests_workspace_requester_created_at[\s\S]*ON public\.github_sync_manual_requests[\s\S]*\(\s*workspace_id,\s*requested_by_user_id,\s*created_at DESC\s*\)/i
+);
+assert.match(
+  migration,
+  /CREATE INDEX idx_github_sync_manual_requests_workspace_created_at[\s\S]*ON public\.github_sync_manual_requests \(workspace_id, created_at DESC\)/i
+);
+assert.match(
+  migration,
+  /CREATE INDEX idx_github_sync_manual_requests_sync_run_id[\s\S]*ON public\.github_sync_manual_requests \(sync_run_id\)/i
 );
 assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
 assert.match(
   migration,
   /REVOKE ALL ON TABLE public\.github_sync_manual_requests FROM PUBLIC/i
 );
+assert.match(
+  migration,
+  /REVOKE ALL ON TABLE public\.github_sync_manual_requests\s+FROM anon, authenticated, service_role/i
+);
+assert.doesNotMatch(
+  migration,
+  /^\s*(?:BEGIN|COMMIT|END|ROLLBACK|START\s+TRANSACTION|SET\s+TRANSACTION|SAVEPOINT|RELEASE)\b/im
+);
+assert.doesNotMatch(migration, /^\s*\\/m);
 
 console.log("GitHub manual sync admission migration contract tests passed");
