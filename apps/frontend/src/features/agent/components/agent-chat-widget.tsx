@@ -44,11 +44,14 @@ import {
   subscribeCanvasAgentDelegationAdapter,
 } from "@/features/agent/canvas-delegation-context";
 import { readAgentRequestContext } from "@/features/agent/request-context";
-import {
-  didAgentRunAcceptInput,
-  getLatestAgentRunMessageSequence
-} from "@/features/agent/run-input-recovery";
-import type { AgentRun, SubmitAgentRunInput } from "@/features/agent/types";
+import type {
+  AgentMessageDisposition,
+  AgentMessagePayload,
+  AgentRun,
+  AgentRunRequestContext,
+  RouteAgentMessageInput,
+  SubmitAgentRunInput
+} from "@/features/agent/types";
 import { enqueueMeetingConnectionAction } from "@/features/meeting/stores/meeting-connection-action-store";
 import { stageSqlErdAgentTableFocus } from "@/features/sql-erd/utils/agent-table-focus";
 import { cn } from "@/lib/utils";
@@ -56,6 +59,14 @@ import { cn } from "@/lib/utils";
 type AgentChatMessage = {
   id: string;
   content: string;
+  routingChoice?: {
+    activeRunId: string;
+    clientRequestId: string;
+    message: string;
+    requestContext: AgentRunRequestContext;
+    targetMessageId: string;
+    timezone: string;
+  };
   run?: AgentRun;
   role: "assistant" | "user";
 };
@@ -395,14 +406,23 @@ export function AgentChatWidget() {
       ),
     [messages]
   );
-  const waitingUserInputMessage = useMemo(
+  const activeWaitingMessage = useMemo(
     () =>
       [...messages]
         .reverse()
-        .find((message) => isRunAwaitingClarification(message.run)) ??
+        .find(
+          (message) =>
+            message.run?.status === "waiting_user_input" ||
+            (message.run?.status === "waiting_confirmation" &&
+              message.run.confirmation?.status === "pending")
+        ) ??
       null,
     [messages]
   );
+  const waitingUserInputMessage =
+    activeWaitingMessage?.run?.status === "waiting_user_input"
+      ? activeWaitingMessage
+      : null;
 
   useEffect(() => {
     return () => {
@@ -530,6 +550,93 @@ export function AgentChatWidget() {
     return currentRun;
   }, [agentApiClient, handleRunClientAction, updateAssistantMessage]);
 
+  async function applyRoutedMessagePayload(
+    payload: AgentMessagePayload,
+    assistantMessageId: string,
+    targetMessageId: string | null,
+    routingInput: RouteAgentMessageInput,
+    signal: AbortSignal
+  ) {
+    if (payload.previousRun && targetMessageId) {
+      updateAssistantMessage(
+        targetMessageId,
+        getAgentRunDisplayMessage(payload.previousRun),
+        payload.previousRun
+      );
+    } else if (payload.outcome === "continued" && targetMessageId) {
+      const targetMessage = messages.find(
+        (message) => message.id === targetMessageId
+      );
+      if (targetMessage) {
+        updateAssistantMessage(targetMessageId, targetMessage.content, null);
+      }
+    }
+
+    if (payload.outcome === "needs_choice" && payload.clarification) {
+      if (!routingInput.activeRunId || !targetMessageId) {
+        throw new Error("Agent routing choice is missing its active run");
+      }
+      setMessages((currentMessages) =>
+        currentMessages.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: payload.clarification?.question ?? message.content,
+                run: undefined,
+                routingChoice: {
+                  activeRunId: routingInput.activeRunId as string,
+                  clientRequestId: routingInput.clientRequestId,
+                  message: routingInput.message,
+                  requestContext: routingInput.requestContext ?? null,
+                  targetMessageId,
+                  timezone: routingInput.timezone ?? DEFAULT_AGENT_TIMEZONE
+                }
+              }
+            : message
+        )
+      );
+      return;
+    }
+
+    if (payload.outcome === "cancelled") {
+      if (payload.run && targetMessageId) {
+        updateAssistantMessage(
+          targetMessageId,
+          getAgentRunDisplayMessage(payload.run),
+          payload.run
+        );
+      }
+      updateAssistantMessage(
+        assistantMessageId,
+        payload.run?.message?.trim() || "기존 작업을 취소했습니다.",
+        null
+      );
+      return;
+    }
+
+    if (!payload.run) {
+      throw new Error("Agent message response did not include a run");
+    }
+    updateAssistantMessage(
+      assistantMessageId,
+      payload.outcome === "started_new" && payload.previousRun
+        ? "이전 작업을 종료하고 새 요청을 처리하고 있습니다."
+        : payload.outcome === "continued"
+          ? "기존 작업을 이어서 처리하고 있습니다."
+          : getAgentRunDisplayMessage(payload.run),
+      payload.run
+    );
+    await pollAgentRunUntilStop(payload.run, assistantMessageId, signal);
+  }
+
+  function shouldFallbackToLegacyMessageApi(error: unknown) {
+    return (
+      error instanceof AgentApiError &&
+      (error.code === "AGENT_MESSAGE_ROUTING_DISABLED" ||
+        error.code === "AGENT_MESSAGE_ROUTING_UNAVAILABLE")
+    );
+  }
+
   async function appendRunInput(
     targetMessage: AgentChatMessage,
     input: SubmitAgentRunInput
@@ -548,10 +655,7 @@ export function AgentChatWidget() {
 
     const userMessageId = createClientId("user-input");
     const assistantMessageId = createClientId("assistant");
-    const previousLatestMessageSequence = getLatestAgentRunMessageSequence(
-      run.messages ?? []
-    );
-    updateAssistantMessage(targetMessage.id, targetMessage.content, null);
+    const clientRequestId = createClientId("agent-message");
     setMessages((currentMessages) => [
       ...currentMessages,
       {
@@ -581,67 +685,60 @@ export function AgentChatWidget() {
     setBusyState("submitting");
 
     try {
-      const runPayload = await agentApiClient.submitRunInput(
-        run.workspaceId,
-        run.id,
-        { ...input, message: displayMessage },
-        { signal: abortController.signal }
-      );
-      await pollAgentRunUntilStop(
-        runPayload.run,
+      const requestContext = canvasDelegationAdapter
+        ? await canvasDelegationAdapter.buildRequestContext(isCanvasToolHelpMode)
+        : readAgentRequestContext(
+            window.location.pathname,
+            window.location.search
+          );
+      const routingInput: RouteAgentMessageInput = {
+        activeRunId: run.id,
+        clientRequestId,
+        disposition: "auto",
+        message: displayMessage,
+        requestContext,
+        selection: input.selection,
+        timezone: getBrowserTimezone()
+      };
+      let routedPayload: AgentMessagePayload;
+      try {
+        routedPayload = await agentApiClient.routeMessage(
+          run.workspaceId,
+          routingInput,
+          { signal: abortController.signal }
+        );
+      } catch (error) {
+        if (shouldFallbackToLegacyMessageApi(error)) {
+          const legacyPayload = await agentApiClient.submitRunInput(
+            run.workspaceId,
+            run.id,
+            { ...input, message: displayMessage },
+            { signal: abortController.signal }
+          );
+          updateAssistantMessage(targetMessage.id, targetMessage.content, null);
+          await pollAgentRunUntilStop(
+            legacyPayload.run,
+            assistantMessageId,
+            abortController.signal
+          );
+          return;
+        }
+        if (error instanceof AgentApiError || isAbortError(error)) throw error;
+        routedPayload = await agentApiClient.routeMessage(
+          run.workspaceId,
+          routingInput,
+          { signal: abortController.signal }
+        );
+      }
+      await applyRoutedMessagePayload(
+        routedPayload,
         assistantMessageId,
+        targetMessage.id,
+        routingInput,
         abortController.signal
       );
     } catch (error) {
       if (isAbortError(error)) {
-        return;
-      }
-
-      let refreshRun: AgentRun | null = null;
-      try {
-        const runPayload = await agentApiClient.getRun(
-          run.workspaceId,
-          run.id,
-          {
-            signal: abortController.signal
-          }
-        );
-        refreshRun = runPayload.run;
-      } catch (refreshError) {
-        if (isAbortError(refreshError)) {
-          return;
-        }
-      }
-
-      const inputWasAccepted = Boolean(
-        refreshRun &&
-          didAgentRunAcceptInput(
-            refreshRun.messages ?? [],
-            previousLatestMessageSequence,
-            displayMessage
-          )
-      );
-      if (
-        refreshRun &&
-        (inputWasAccepted || refreshRun.status !== "waiting_user_input")
-      ) {
-        try {
-          await pollAgentRunUntilStop(
-            refreshRun,
-            assistantMessageId,
-            abortController.signal
-          );
-        } catch (pollingError) {
-          if (isAbortError(pollingError)) {
-            return;
-          }
-
-          updateAssistantMessage(
-            assistantMessageId,
-            getAgentRequestErrorMessage(pollingError),
-            null
-          );
-        }
         return;
       }
 
@@ -658,7 +755,10 @@ export function AgentChatWidget() {
     }
   }
 
-  async function appendPrompt(prompt: string) {
+  async function appendPrompt(
+    prompt: string,
+    targetMessage: AgentChatMessage | null = null
+  ) {
     const trimmedPrompt = prompt.trim();
 
     if (!trimmedPrompt || isBusy || activeRunAbortControllerRef.current) {
@@ -667,7 +767,7 @@ export function AgentChatWidget() {
 
     const userMessageId = createClientId("user");
     const assistantMessageId = createClientId("assistant");
-    const clientRequestId = createClientId("agent-run");
+    const clientRequestId = createClientId("agent-message");
 
     setMessages((currentMessages) => [
       ...currentMessages,
@@ -704,27 +804,134 @@ export function AgentChatWidget() {
             window.location.pathname,
             window.location.search
           );
-      const createdRunPayload = await agentApiClient.createRun(
-        workspaceId,
-        {
-          clientRequestId,
-          prompt: trimmedPrompt,
-          timezone: getBrowserTimezone(),
-          requestContext
-        },
-        {
-          signal: abortController.signal
+      const routingInput: RouteAgentMessageInput = {
+        activeRunId: targetMessage?.run?.id ?? null,
+        clientRequestId,
+        disposition: "auto",
+        message: trimmedPrompt,
+        timezone: getBrowserTimezone(),
+        requestContext
+      };
+      let routedPayload: AgentMessagePayload;
+      try {
+        routedPayload = await agentApiClient.routeMessage(
+          workspaceId,
+          routingInput,
+          {
+            signal: abortController.signal
+          }
+        );
+      } catch (error) {
+        if (shouldFallbackToLegacyMessageApi(error)) {
+          const createdRunPayload = await agentApiClient.createRun(
+            workspaceId,
+            {
+              clientRequestId,
+              prompt: trimmedPrompt,
+              timezone: getBrowserTimezone(),
+              requestContext
+            },
+            {
+              signal: abortController.signal
+            }
+          );
+          await pollAgentRunUntilStop(
+            createdRunPayload.run,
+            assistantMessageId,
+            abortController.signal
+          );
+          return;
         }
-      );
-      await pollAgentRunUntilStop(
-        createdRunPayload.run,
+        if (error instanceof AgentApiError || isAbortError(error)) throw error;
+        routedPayload = await agentApiClient.routeMessage(
+          workspaceId,
+          routingInput,
+          {
+            signal: abortController.signal
+          }
+        );
+      }
+      await applyRoutedMessagePayload(
+        routedPayload,
         assistantMessageId,
+        targetMessage?.id ?? null,
+        routingInput,
         abortController.signal
       );
     } catch (error) {
       if (!isAbortError(error)) {
         updateAssistantMessage(
           assistantMessageId,
+          getAgentRequestErrorMessage(error),
+          null
+        );
+      }
+    } finally {
+      if (activeRunAbortControllerRef.current === abortController) {
+        activeRunAbortControllerRef.current = null;
+      }
+      setBusyState("idle");
+    }
+  }
+
+  async function handleRoutingChoice(
+    message: AgentChatMessage,
+    disposition: Exclude<AgentMessageDisposition, "auto">
+  ) {
+    const choice = message.routingChoice;
+    if (
+      !choice ||
+      !accessToken?.trim() ||
+      isBusy ||
+      activeRunAbortControllerRef.current
+    ) {
+      return;
+    }
+    const abortController = new AbortController();
+    activeRunAbortControllerRef.current = abortController;
+    setBusyState("submitting");
+    try {
+      const routingInput: RouteAgentMessageInput = {
+        activeRunId: choice.activeRunId,
+        clientRequestId: choice.clientRequestId,
+        disposition,
+        message: choice.message,
+        requestContext: choice.requestContext,
+        timezone: choice.timezone
+      };
+      let payload: AgentMessagePayload;
+      try {
+        payload = await agentApiClient.routeMessage(
+          workspaceId,
+          routingInput,
+          { signal: abortController.signal }
+        );
+      } catch (error) {
+        if (error instanceof AgentApiError || isAbortError(error)) throw error;
+        payload = await agentApiClient.routeMessage(
+          workspaceId,
+          routingInput,
+          { signal: abortController.signal }
+        );
+      }
+      setMessages((currentMessages) =>
+        currentMessages.map((currentMessage) =>
+          currentMessage.id === message.id
+            ? { ...currentMessage, routingChoice: undefined }
+            : currentMessage
+        )
+      );
+      await applyRoutedMessagePayload(
+        payload,
+        message.id,
+        choice.targetMessageId,
+        routingInput,
+        abortController.signal
+      );
+    } catch (error) {
+      if (!isAbortError(error)) {
+        updateAssistantMessage(
+          message.id,
           getAgentRequestErrorMessage(error),
           null
         );
@@ -923,7 +1130,7 @@ export function AgentChatWidget() {
       return;
     }
 
-    void appendPrompt(draft);
+    void appendPrompt(draft, activeWaitingMessage);
   }
 
   function handleDraftKeyDown(
@@ -942,7 +1149,7 @@ export function AgentChatWidget() {
       if (waitingUserInputMessage) {
         void appendRunInput(waitingUserInputMessage, { message: draft });
       } else {
-        void appendPrompt(draft);
+        void appendPrompt(draft, activeWaitingMessage);
       }
     }
   }
@@ -1039,6 +1246,34 @@ export function AgentChatWidget() {
                       >
                         {message.content}
                       </div>
+                      {message.routingChoice ? (
+                        <div className="mt-2 flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={hasActiveAgentRequest}
+                            onClick={() =>
+                              void handleRoutingChoice(
+                                message,
+                                "continue_previous"
+                              )
+                            }
+                          >
+                            기존 작업 계속
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={hasActiveAgentRequest}
+                            onClick={() =>
+                              void handleRoutingChoice(message, "start_new")
+                            }
+                          >
+                            새 요청 시작
+                          </Button>
+                        </div>
+                      ) : null}
                       {message.run?.status === "completed" ? (
                         <GroundedCitationList run={message.run} />
                       ) : null}
@@ -1117,7 +1352,7 @@ export function AgentChatWidget() {
                             { message: suggestion.prompt }
                           );
                         } else {
-                          void appendPrompt(suggestion.prompt);
+                          void appendPrompt(suggestion.prompt, activeWaitingMessage);
                         }
                       }}
                     >
@@ -1130,7 +1365,13 @@ export function AgentChatWidget() {
 
               {waitingUserInputMessage ? (
                 <p className="mb-2 text-xs text-slate-500">
-                  위 질문에 필요한 정보를 입력하면 같은 요청을 이어서 처리합니다.
+                  서버가 기존 작업의 추가 정보인지 새 요청인지 확인합니다.
+                </p>
+              ) : activeWaitingMessage?.run?.status ===
+                "waiting_confirmation" ? (
+                <p className="mb-2 text-xs text-slate-500">
+                  일반 메시지는 승인으로 처리되지 않습니다. 새 질문도 입력할 수
+                  있습니다.
                 </p>
               ) : null}
 
@@ -1141,7 +1382,7 @@ export function AgentChatWidget() {
                   aria-label="AI에게 보낼 메시지"
                   placeholder={
                     waitingUserInputMessage
-                      ? "추가 정보를 입력하세요"
+                      ? "추가 정보 또는 새 요청을 입력하세요"
                       : "메시지를 입력하세요"
                   }
                   className="min-h-9 flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-900 outline-none transition placeholder:text-slate-400 focus-visible:border-slate-400 focus-visible:ring-2 focus-visible:ring-slate-200"
