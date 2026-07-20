@@ -106,7 +106,9 @@ const GITHUB_CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   project_oauth_scope_missing:
     "GitHub ProjectV2 OAuth에는 project와 repo 권한이 모두 필요합니다. 다시 연결하세요.",
   token_exchange_failed:
-    "GitHub 인증 토큰을 발급받지 못했습니다. 다시 시도하세요."
+    "GitHub 인증 토큰을 발급받지 못했습니다. 다시 시도하세요.",
+  workspace_access_denied:
+    "Workspace Owner만 GitHub App 설치를 관리할 수 있습니다."
 };
 
 function requiresProjectOAuth(target: GithubSyncTarget) {
