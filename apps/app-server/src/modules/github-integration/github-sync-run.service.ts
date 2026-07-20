@@ -408,14 +408,13 @@ export class GithubSyncRunService {
         this.observability?.emitManualSyncAdmissionRejected("workspace", retryAfterSeconds);
         throw new GithubManualSyncRateLimitedError("workspace", retryAfterSeconds);
       }
-      const queued = await transaction.queryOne<{ total: string | number; retry_after_seconds: string | number }>(`
-        SELECT COUNT(*)::int AS total,
-          GREATEST(1, COALESCE(CEIL(EXTRACT(EPOCH FROM (MIN(job.created_at) + ($1 * interval '1 second') - now()))), 1))::int AS retry_after_seconds
+      const queued = await transaction.queryOne<{ total: string | number }>(`
+        SELECT COUNT(*)::int AS total
         FROM github_sync_jobs AS job
         INNER JOIN github_sync_runs AS run ON run.id=job.sync_run_id
-        WHERE run.trigger_source='manual' AND job.status='queued'`, [config.cooldownSeconds]);
+        WHERE run.trigger_source='manual' AND job.status='queued'`);
       if (this.toInteger(queued?.total ?? 0, "Invalid queued job count") >= config.maxQueuedJobs) {
-        const retryAfterSeconds = this.toInteger(queued?.retry_after_seconds ?? 1, "Invalid queue retry delay");
+        const retryAfterSeconds = config.cooldownSeconds;
         this.observability?.emitManualSyncQueueSaturated(retryAfterSeconds);
         throw new GithubManualSyncQueueSaturatedError(retryAfterSeconds);
       }

@@ -173,6 +173,21 @@ export class GithubIntegrationConfigService {
   }
 
   getGithubManualSyncAdmissionConfig(): GithubManualSyncAdmissionConfig {
+    const rateWindowSeconds = this.readPositiveIntegerEnv(
+      "GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS",
+      DEFAULT_GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS
+    );
+    const cooldownSeconds = this.readPositiveIntegerEnv(
+      "GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS",
+      DEFAULT_GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS
+    );
+
+    if (cooldownSeconds > rateWindowSeconds) {
+      throw badRequest(
+        "GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS must be less than or equal to GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS"
+      );
+    }
+
     return {
       userLimit: this.readPositiveIntegerEnv(
         "GITHUB_MANUAL_SYNC_USER_LIMIT",
@@ -182,14 +197,8 @@ export class GithubIntegrationConfigService {
         "GITHUB_MANUAL_SYNC_WORKSPACE_LIMIT",
         DEFAULT_GITHUB_MANUAL_SYNC_WORKSPACE_LIMIT
       ),
-      rateWindowSeconds: this.readPositiveIntegerEnv(
-        "GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS",
-        DEFAULT_GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS
-      ),
-      cooldownSeconds: this.readPositiveIntegerEnv(
-        "GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS",
-        DEFAULT_GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS
-      ),
+      rateWindowSeconds,
+      cooldownSeconds,
       maxQueuedJobs: this.readPositiveIntegerEnv(
         "GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS",
         DEFAULT_GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS

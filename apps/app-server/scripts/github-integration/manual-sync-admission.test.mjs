@@ -84,6 +84,13 @@ try {
     () => config.getGithubManualSyncAdmissionConfig(),
     (error) => error.getResponse().error.message === "GITHUB_MANUAL_SYNC_USER_LIMIT must be a positive integer"
   );
+  process.env.GITHUB_MANUAL_SYNC_USER_LIMIT = "5";
+  process.env.GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS = "30";
+  process.env.GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS = "31";
+  assert.throws(
+    () => config.getGithubManualSyncAdmissionConfig(),
+    (error) => error.getResponse().error.message === "GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS must be less than or equal to GITHUB_MANUAL_SYNC_RATE_WINDOW_SECONDS"
+  );
 } finally {
   for (const name of admissionEnvNames) {
     if (originalAdmissionEnv[name] === undefined) delete process.env[name];
@@ -131,7 +138,7 @@ const runRow = (id = "run-1") => ({
   created_count: 0, updated_count: 0, skipped_count: 0, error_message: null, cursor: {}
 });
 
-async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, userCooldown = null, workspaceCooldown = null, queuedTotal = 0, sharedQueue = null, failPrepare = false, assertManualLimitSql = false } = {}) {
+async function admitManual({ replay = null, active = [], userTotal = 0, workspaceTotal = 0, userCooldown = null, workspaceCooldown = null, queuedTotal = 0, sharedQueue = null, failPrepare = false, assertManualLimitSql = false, assertQueueSql = false } = {}) {
   const events = [];
   const database = {
     async queryOne(text) {
@@ -162,7 +169,13 @@ async function admitManual({ replay = null, active = [], userTotal = 0, workspac
               events.push(events.includes("user-limit") ? "workspace-limit" : "user-limit");
               return { total, window_retry_after_seconds: 19, cooldown_retry_after_seconds: events.includes("workspace-limit") ? workspaceCooldown : userCooldown };
             }
-            if (/FROM github_sync_jobs AS job/.test(text)) return { total: sharedQueue?.total ?? queuedTotal, retry_after_seconds: 7 };
+            if (/FROM github_sync_jobs AS job/.test(text)) {
+              if (assertQueueSql) {
+                assert.match(text, /SELECT COUNT\(\*\)::int AS total/);
+                assert.doesNotMatch(text, /created_at|retry_after_seconds/i);
+              }
+              return { total: sharedQueue?.total ?? queuedTotal };
+            }
             if (/INSERT INTO github_sync_runs/.test(text)) return runRow("new-run");
             throw new Error(`unexpected transaction query ${text}`);
           }
@@ -217,8 +230,8 @@ for (const options of [{ userCooldown: 23 }, { workspaceCooldown: 29 }]) {
   await assert.rejects(start, (error) => error.getStatus() === 429 && error.getResponse().error.details.retryAfterSeconds >= 1);
 }
 {
-  const { start } = await admitManual({ queuedTotal: 100 });
-  await assert.rejects(start, (error) => error.getStatus() === 503 && error.getResponse().error.details.retryAfterSeconds === 7);
+  const { start } = await admitManual({ queuedTotal: 100, assertQueueSql: true });
+  await assert.rejects(start, (error) => error.getStatus() === 503 && error.getResponse().error.details.retryAfterSeconds === 30);
 }
 {
   const sharedQueue = { total: 99 };
