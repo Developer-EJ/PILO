@@ -113,8 +113,54 @@ def _validate_paired_inputs(baseline: dict[str, object], candidate: dict[str, ob
         raise ValueError("Baseline and candidate must use the same fixed inputs")
     if baseline_metadata.get("suiteVersion") != candidate_metadata.get("suiteVersion"):
         raise ValueError("Baseline and candidate must use the same fixed inputs")
+    _validate_complete_workflow_attempts(baseline)
+    _validate_complete_workflow_attempts(candidate)
     if _attempt_signatures(baseline) != _attempt_signatures(candidate):
         raise ValueError("Baseline and candidate must use the same fixed inputs")
+
+
+def _validate_complete_workflow_attempts(report: dict[str, object]) -> None:
+    if not isinstance(report.get("workflowEvaluation"), dict):
+        return
+    metadata = _object(report.get("metadata"), "Missing evaluation metadata")
+    repetitions = metadata.get("repetitions")
+    total_cases = report.get("totalCases")
+    total_attempts = report.get("totalAttempts")
+    results = _raw_results(report)
+    if (
+        not isinstance(repetitions, int)
+        or isinstance(repetitions, bool)
+        or repetitions < 1
+        or not isinstance(total_cases, int)
+        or isinstance(total_cases, bool)
+        or total_cases < 1
+        or total_attempts != total_cases * repetitions
+        or len(results) != total_attempts
+    ):
+        raise ValueError("Evaluation report must contain complete unique workflow attempts")
+
+    attempts_by_scenario: dict[str, set[int]] = {}
+    signatures: set[tuple[str, int]] = set()
+    for result in results:
+        scenario_id = result.get("id")
+        attempt = result.get("attempt")
+        if (
+            not isinstance(scenario_id, str)
+            or not scenario_id
+            or not isinstance(attempt, int)
+            or isinstance(attempt, bool)
+            or not 1 <= attempt <= repetitions
+            or not isinstance(result.get("workflow"), dict)
+            or (scenario_id, attempt) in signatures
+        ):
+            raise ValueError("Evaluation report must contain complete unique workflow attempts")
+        signatures.add((scenario_id, attempt))
+        attempts_by_scenario.setdefault(scenario_id, set()).add(attempt)
+    expected_attempts = set(range(1, repetitions + 1))
+    if len(attempts_by_scenario) != total_cases or any(
+        attempts != expected_attempts for attempts in attempts_by_scenario.values()
+    ):
+        raise ValueError("Evaluation report must contain complete unique workflow attempts")
 
 
 def _paired_improvement_evidence(
@@ -172,7 +218,7 @@ def _paired_improvement_evidence(
         (latency is not None and latency["delta"] < 0)
         or (tokens is not None and tokens["delta"] < 0)
     )
-    safety_passed = candidate_safety == 0
+    safety_passed = baseline_safety == 0 and candidate_safety == 0
     success_passed = confidence_interval[0] > 0
     return {
         "uniqueScenarioCount": len(scenario_pairs),

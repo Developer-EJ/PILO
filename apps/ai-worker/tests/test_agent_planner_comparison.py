@@ -89,6 +89,36 @@ def report(
     }
 
 
+def workflow_report(
+    exact_count: int,
+    *,
+    source_revision: str,
+    latency_ms: float,
+    provider_tokens: int,
+) -> dict[str, object]:
+    value = report("multi_tool", domain_count=10, tool_count=10, exact_count=exact_count)
+    value["totalCases"] = 10
+    value["metadata"]["sourceRevision"] = source_revision
+    value["workflowEvaluation"] = {"taskSuccessRate": value["exactAttemptRate"]}
+    value["multiToolWorkflows"] = {
+        "workflowAttempts": 10,
+        "exactWorkflowAttempts": value["passedAttempts"],
+        "exactWorkflowRate": value["exactAttemptRate"],
+    }
+    for attempt in value["results"]:
+        attempt["expected"] = {
+            "domains": ["meeting"],
+            "capabilityIds": ["meeting.workflow"],
+        }
+        attempt["workflow"] = {
+            "taskSuccess": attempt["passed"],
+            "latencyMs": latency_ms,
+            "providerTotalTokens": provider_tokens,
+            "safetyViolations": [],
+        }
+    return value
+
+
 def test_two_stage_comparison_pairs_inputs_and_reports_funnel_delta() -> None:
     baseline = [report("canonical", domain_count=9, tool_count=8, exact_count=8)]
     candidate = [report("canonical", domain_count=10, tool_count=9, exact_count=9)]
@@ -148,30 +178,18 @@ def test_two_stage_comparison_reports_multi_tool_workflow_delta() -> None:
 
 
 def test_workflow_comparison_requires_confident_success_and_efficiency_gain() -> None:
-    baseline = report("multi_tool", domain_count=10, tool_count=10, exact_count=1)
-    candidate = report("multi_tool", domain_count=10, tool_count=10, exact_count=10)
-    candidate["metadata"]["sourceRevision"] = "candidate-revision"
-    for value, latency, tokens in (
-        (baseline, 200.0, 100),
-        (candidate, 100.0, 80),
-    ):
-        value["workflowEvaluation"] = {"taskSuccessRate": value["exactAttemptRate"]}
-        value["multiToolWorkflows"] = {
-            "workflowAttempts": 10,
-            "exactWorkflowAttempts": value["passedAttempts"],
-            "exactWorkflowRate": value["exactAttemptRate"],
-        }
-        for attempt in value["results"]:
-            attempt["expected"] = {
-                "domains": ["meeting"],
-                "capabilityIds": ["meeting.workflow"],
-            }
-            attempt["workflow"] = {
-                "taskSuccess": attempt["passed"],
-                "latencyMs": latency,
-                "providerTotalTokens": tokens,
-                "safetyViolations": [],
-            }
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=200.0,
+        provider_tokens=100,
+    )
+    candidate = workflow_report(
+        10,
+        source_revision="candidate-revision",
+        latency_ms=100.0,
+        provider_tokens=80,
+    )
 
     result = build_two_stage_comparison([baseline], [candidate])
     evidence = result["improvementEvidence"]
@@ -181,6 +199,52 @@ def test_workflow_comparison_requires_confident_success_and_efficiency_gain() ->
     assert evidence["latencyMs"]["delta"] == -100.0
     assert evidence["providerTotalTokens"]["delta"] == -20.0
     assert evidence["passed"] is True
+
+
+@pytest.mark.parametrize("mutation", ("duplicate", "missing"))
+def test_workflow_comparison_rejects_incomplete_attempt_pairs(mutation: str) -> None:
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=200.0,
+        provider_tokens=100,
+    )
+    candidate = workflow_report(
+        10,
+        source_revision="candidate-revision",
+        latency_ms=100.0,
+        provider_tokens=80,
+    )
+    if mutation == "duplicate":
+        for value in (baseline, candidate):
+            value["results"][-1]["id"] = value["results"][0]["id"]
+    else:
+        for value in (baseline, candidate):
+            value["results"].pop()
+
+    with pytest.raises(ValueError, match="complete unique workflow attempts"):
+        build_two_stage_comparison([baseline], [candidate])
+
+
+def test_workflow_comparison_rejects_safety_violation_on_either_revision() -> None:
+    baseline = workflow_report(
+        1,
+        source_revision="baseline-revision",
+        latency_ms=200.0,
+        provider_tokens=100,
+    )
+    candidate = workflow_report(
+        10,
+        source_revision="candidate-revision",
+        latency_ms=100.0,
+        provider_tokens=80,
+    )
+    baseline["results"][1]["workflow"]["safetyViolations"] = ["confirmation_policy"]
+
+    evidence = build_two_stage_comparison([baseline], [candidate])["improvementEvidence"]
+
+    assert evidence["safetyViolations"]["passed"] is False
+    assert evidence["passed"] is False
 
 
 def test_two_stage_comparison_rejects_different_fixture_inputs() -> None:
