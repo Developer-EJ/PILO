@@ -346,6 +346,32 @@ def select_pending_agent_planner_tools_for_routing(
     if catalog is None:
         raise AgentRouterOutputError("Agent router requires a valid capability catalog")
 
+    candidate_resume = _latest_meeting_candidate_resume(planning_context)
+    if candidate_resume is not None:
+        resource_type = candidate_resume.get("resourceType")
+        stored_goal_tool_name = candidate_resume.get("goalToolName")
+        clarification_tool_name = candidate_resume.get("clarificationToolName")
+        compatible_goal_tools = (
+            MEETING_GOAL_TOOLS_BY_RESOURCE_TYPE.get(resource_type, set())
+            if isinstance(resource_type, str)
+            else set()
+        )
+        resume_tool_name = (
+            clarification_tool_name
+            if isinstance(clarification_tool_name, str)
+            and clarification_tool_name in compatible_goal_tools
+            else (
+                stored_goal_tool_name
+                if clarification_tool_name == "resolve_meeting_resource"
+                and isinstance(stored_goal_tool_name, str)
+                and stored_goal_tool_name in compatible_goal_tools
+                else None
+            )
+        )
+        resumed_tools = tuple(tool for tool in selected_tools if tool.name == resume_tool_name)
+        if resumed_tools:
+            return resumed_tools
+
     completed_tool_names = _completed_planning_tool_names(planning_context)
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
     pending_names: set[str] = set()

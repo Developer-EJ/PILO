@@ -1374,6 +1374,50 @@ def test_routed_meeting_hybrid_chain_exposes_title_lookup_then_transcript_search
     assert exhausted == ()
 
 
+def test_routed_meeting_hybrid_chain_resumes_selected_duplicate_title() -> None:
+    tools = [
+        tool_snapshot(
+            name="list_meeting_reports",
+            inputSchema={
+                "type": "object",
+                "properties": {"reportTitle": {"type": "string"}},
+            },
+        ),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_hybrid_catalog(tools))
+    )
+    routing = routing_decision(
+        domains=("meeting",),
+        capability_ids=("meeting.report.hybrid_search",),
+    )
+    selected = select_agent_planner_tools_for_routing(job, routing)
+
+    pending = select_pending_agent_planner_tools_for_routing(
+        job,
+        routing,
+        selected,
+        (
+            'selected meeting candidate resume: {"clarificationToolName":'
+            '"search_meeting_transcript","goalToolName":"",'
+            '"resourceType":"meeting_report","toolInput":'
+            '{"query":"인증 방식 논의","reportTitle":"API 설계 회의"}}\n'
+            "user: 2번 후보를 선택할게"
+        ),
+    )
+
+    assert [tool.name for tool in pending] == ["search_meeting_transcript"]
+
+
 def test_routed_meeting_hybrid_chain_rejects_completion_after_title_lookup() -> None:
     tools = [
         tool_snapshot(

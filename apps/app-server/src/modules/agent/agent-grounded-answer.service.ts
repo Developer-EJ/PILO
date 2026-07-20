@@ -235,7 +235,12 @@ export class AgentGroundedAnswerService {
   }
 
   async completeWithoutSources(runId: string): Promise<void> {
-    await this.completeTerminalRun(runId, NO_RELEVANT_SOURCES_MESSAGE, "no_relevant_sources");
+    const context = await this.getContext(runId);
+    await this.completeTerminalRun(
+      runId,
+      this.noRelevantSourcesMessage(context?.retrievalContext),
+      "no_relevant_sources"
+    );
   }
 
   async completeSecurityRefusal(runId: string): Promise<void> {

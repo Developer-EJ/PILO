@@ -618,3 +618,44 @@ try {
   assert.match(contextQuery, /input_json->'retrievalContext'/);
   assert.doesNotMatch(contextQuery, /list_meeting_reports/);
 }
+
+{
+  const executed = [];
+  const database = {
+    async queryOne() {
+      return {
+        workspace_id: WORKSPACE_ID,
+        requested_by_user_id: USER_ID,
+        prompt: "'온보딩 주간회의'에서 배포 일정 찾아줘",
+        source_ids: [],
+        retrieval_context: {
+          requestedReportTitle: "온보딩 주간회의",
+          exactTitleMatchFound: false
+        }
+      };
+    },
+    async transaction(callback) {
+      return callback({
+        async queryOne() {
+          return { id: "77777777-7777-4777-8777-777777777777" };
+        },
+        async execute(text, values) {
+          executed.push({ text, values });
+          return 1;
+        }
+      });
+    }
+  };
+  const service = new AgentGroundedAnswerService(database, {
+    normalizeSourceIds(sourceIds) { return sourceIds; },
+    async loadAuthorizedSources() { return []; }
+  });
+
+  await service.completeWithoutSources("77777777-7777-4777-8777-777777777777");
+
+  const completedRun = executed.find((call) =>
+    call.text.includes("SET status = 'completed', final_answer")
+  );
+  assert.match(completedRun.values[1], /제목이 정확히 ‘온보딩 주간회의’인 회의록은 없었습니다/);
+  assert.match(completedRun.values[1], /전체 회의 내용에서도 질문과 관련된 근거를 찾지 못했습니다/);
+}
