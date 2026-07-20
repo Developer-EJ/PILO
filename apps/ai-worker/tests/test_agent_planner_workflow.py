@@ -21,3 +21,6 @@ def test_multi_tool_variant_uses_sequential_workflow_evaluator() -> None:
     assert 'args.meeting_variant == "multi_tool"' in script
     assert "evaluate_workflow_suite(" in script
     assert "build_workflow_evaluation_report(" in script
+    assert '"evaluatorSha256": _evaluator_sha256()' in script
+    assert 'Path("app/agent_workflow_evaluation.py")' in script
+    assert 'Path("app/agent_planner_comparison.py")' in script

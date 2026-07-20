@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Iterable
 
 COMPARISON_FORMAT = "agent-llm-router-planner-comparison:v1"
@@ -21,6 +22,7 @@ _PAIRED_METADATA_KEYS = (
     "repetitions",
     "retrievalTopK",
     "evaluationSeed",
+    "evaluatorSha256",
 )
 _REVISION_BINDING_KEYS = (
     "sourceRevision",
@@ -54,13 +56,17 @@ def build_two_stage_comparison(
             "delta": _summary_delta(baseline_summary, candidate_summary),
         }
 
+    baseline_revision = _common_revision(baseline.values())
+    candidate_revision = _common_revision(candidate.values())
+    if baseline_revision == candidate_revision:
+        raise ValueError("Baseline and candidate must use distinct revisions")
     baseline_aggregate = _aggregate(baseline.values())
     candidate_aggregate = _aggregate(candidate.values())
     return {
         "format": COMPARISON_FORMAT,
         "sameEvaluationInputs": True,
-        "baselineRevision": _common_revision(baseline.values()),
-        "candidateRevision": _common_revision(candidate.values()),
+        "baselineRevision": baseline_revision,
+        "candidateRevision": candidate_revision,
         "fixedInputs": _common_metadata(baseline.values(), _PAIRED_METADATA_KEYS),
         "baselineBinding": _common_metadata(baseline.values(), _REVISION_BINDING_KEYS),
         "candidateBinding": _common_metadata(candidate.values(), _REVISION_BINDING_KEYS),
@@ -70,6 +76,7 @@ def build_two_stage_comparison(
             "candidate": candidate_aggregate,
             "delta": _summary_delta(baseline_aggregate, candidate_aggregate),
         },
+        "improvementEvidence": _paired_improvement_evidence(baseline, candidate),
     }
 
 
@@ -94,6 +101,12 @@ def _reports_by_variant(
 def _validate_paired_inputs(baseline: dict[str, object], candidate: dict[str, object]) -> None:
     baseline_metadata = _object(baseline.get("metadata"), "Missing baseline metadata")
     candidate_metadata = _object(candidate.get("metadata"), "Missing candidate metadata")
+    if (
+        baseline_metadata.get("evaluatorSha256") is None
+        or baseline_metadata.get("evaluatorSha256")
+        != candidate_metadata.get("evaluatorSha256")
+    ):
+        raise ValueError("Baseline and candidate must use the same evaluator")
     if any(
         baseline_metadata.get(key) is None
         or baseline_metadata.get(key) != candidate_metadata.get(key)
@@ -104,6 +117,153 @@ def _validate_paired_inputs(baseline: dict[str, object], candidate: dict[str, ob
         raise ValueError("Baseline and candidate must use the same fixed inputs")
     if _attempt_signatures(baseline) != _attempt_signatures(candidate):
         raise ValueError("Baseline and candidate must use the same fixed inputs")
+
+
+def _paired_improvement_evidence(
+    baseline: dict[str, dict[str, object]],
+    candidate: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    scenario_pairs: dict[str, list[tuple[dict[str, object], dict[str, object]]]] = {}
+    for variant in sorted(baseline):
+        baseline_results = _raw_results(baseline[variant])
+        candidate_results = _raw_results(candidate[variant])
+        for baseline_result, candidate_result in zip(
+            baseline_results, candidate_results, strict=True
+        ):
+            key = f"{variant}:{baseline_result.get('id')}"
+            scenario_pairs.setdefault(key, []).append((baseline_result, candidate_result))
+
+    success_pairs: list[tuple[float, float]] = []
+    latency_pairs: list[tuple[float, float]] = []
+    token_pairs: list[tuple[float, float]] = []
+    baseline_safety = 0
+    candidate_safety = 0
+    for pairs in scenario_pairs.values():
+        success_pairs.append(
+            (
+                _mean([float(_task_success(item[0])) for item in pairs]),
+                _mean([float(_task_success(item[1])) for item in pairs]),
+            )
+        )
+        latency_pair = _scenario_numeric_pair(pairs, "latencyMs")
+        if latency_pair is not None:
+            latency_pairs.append(latency_pair)
+        token_pair = _scenario_numeric_pair(pairs, "providerTotalTokens")
+        if token_pair is not None:
+            token_pairs.append(token_pair)
+        baseline_safety += sum(_safety_violation_count(item[0]) for item in pairs)
+        candidate_safety += sum(_safety_violation_count(item[1]) for item in pairs)
+
+    success_delta = [candidate_value - baseline_value for baseline_value, candidate_value in success_pairs]
+    confidence_interval = _bootstrap_mean_confidence_interval(success_delta)
+    latency = _paired_numeric_summary(latency_pairs)
+    tokens = _paired_numeric_summary(token_pairs)
+    efficiency_passed = bool(
+        (latency is not None and latency["delta"] < 0)
+        or (tokens is not None and tokens["delta"] < 0)
+    )
+    safety_passed = candidate_safety == 0
+    success_passed = confidence_interval[0] > 0
+    return {
+        "uniqueScenarioCount": len(scenario_pairs),
+        "bootstrap": {"cluster": "scenario", "seed": 17, "resamples": 2000},
+        "taskSuccess": {
+            "baseline": round(_mean([item[0] for item in success_pairs]), 4),
+            "candidate": round(_mean([item[1] for item in success_pairs]), 4),
+            "delta": round(_mean(success_delta), 4),
+            "confidenceInterval95": list(confidence_interval),
+            "passed": success_passed,
+        },
+        "latencyMs": latency,
+        "providerTotalTokens": tokens,
+        "efficiencyPassed": efficiency_passed,
+        "safetyViolations": {
+            "baseline": baseline_safety,
+            "candidate": candidate_safety,
+            "delta": candidate_safety - baseline_safety,
+            "passed": safety_passed,
+        },
+        "passed": success_passed and efficiency_passed and safety_passed,
+    }
+
+
+def _raw_results(report: dict[str, object]) -> list[dict[str, object]]:
+    results = report.get("results")
+    if not isinstance(results, list):
+        raise ValueError("Evaluation report is missing attempt results")
+    return [_object(item, "Invalid evaluation attempt") for item in results]
+
+
+def _task_success(result: dict[str, object]) -> bool:
+    workflow = result.get("workflow")
+    if isinstance(workflow, dict) and isinstance(workflow.get("taskSuccess"), bool):
+        return workflow["taskSuccess"]
+    passed = result.get("passed")
+    if not isinstance(passed, bool):
+        raise ValueError("Invalid evaluation attempt result")
+    return passed
+
+
+def _scenario_numeric_pair(
+    pairs: list[tuple[dict[str, object], dict[str, object]]], key: str
+) -> tuple[float, float] | None:
+    values: list[tuple[float, float]] = []
+    for baseline, candidate in pairs:
+        baseline_value = _workflow_number(baseline, key)
+        candidate_value = _workflow_number(candidate, key)
+        if baseline_value is not None and candidate_value is not None:
+            values.append((baseline_value, candidate_value))
+    if not values:
+        return None
+    return _mean([item[0] for item in values]), _mean([item[1] for item in values])
+
+
+def _workflow_number(result: dict[str, object], key: str) -> float | None:
+    workflow = result.get("workflow")
+    if not isinstance(workflow, dict):
+        return None
+    value = workflow.get(key)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _safety_violation_count(result: dict[str, object]) -> int:
+    workflow = result.get("workflow")
+    if not isinstance(workflow, dict):
+        return 0
+    violations = workflow.get("safetyViolations")
+    if not isinstance(violations, list):
+        return 0
+    return len(violations)
+
+
+def _paired_numeric_summary(
+    pairs: list[tuple[float, float]],
+) -> dict[str, float] | None:
+    if not pairs:
+        return None
+    baseline = _mean([item[0] for item in pairs])
+    candidate = _mean([item[1] for item in pairs])
+    return {
+        "baseline": round(baseline, 4),
+        "candidate": round(candidate, 4),
+        "delta": round(candidate - baseline, 4),
+    }
+
+
+def _bootstrap_mean_confidence_interval(values: list[float]) -> tuple[float, float]:
+    if not values:
+        return (0.0, 0.0)
+    generator = random.Random(17)
+    samples = sorted(
+        _mean([generator.choice(values) for _ in values]) for _ in range(2000)
+    )
+    return round(samples[49], 4), round(samples[1949], 4)
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
 
 
 def _attempt_signatures(report: dict[str, object]) -> tuple[tuple[object, ...], ...]:
@@ -123,10 +283,21 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     attempts = _nonnegative_int(report.get("totalAttempts"), "Invalid attempt count")
     results = _attempt_results(report, attempts)
     passed_attempts = sum(item["passed"] is True for item in results)
-    tool_results = [item for item in results if _has_expected_tool(item)]
-    input_results = [item for item in results if _has_expected_input(item)]
-    tool_passed_attempts = sum("tool" not in item["failureReasons"] for item in tool_results)
-    input_passed_attempts = sum("input" not in item["failureReasons"] for item in input_results)
+    workflow_mode = isinstance(report.get("workflowEvaluation"), dict)
+    tool_results = results if workflow_mode else [item for item in results if _has_expected_tool(item)]
+    input_results = (
+        results if workflow_mode else [item for item in results if _has_expected_input(item)]
+    )
+    if workflow_mode:
+        tool_passed_attempts = _funnel_stage_count(stages, "toolExact")
+        input_passed_attempts = _funnel_stage_count(stages, "requiredInputExact")
+    else:
+        tool_passed_attempts = sum(
+            "tool" not in item["failureReasons"] for item in tool_results
+        )
+        input_passed_attempts = sum(
+            "input" not in item["failureReasons"] for item in input_results
+        )
     tool_selection_attempts = _nonnegative_int(
         funnel.get("toolSelectionAttempts"), "Invalid tool selection attempt count"
     )
@@ -145,8 +316,9 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     if reported_passed_attempts > attempts or reported_passed_attempts != passed_attempts:
         raise ValueError("Invalid passed attempt count")
     _validate_report_rate(report, "exactAttemptRate", exact_attempt_rate)
-    _validate_report_rate(report, "toolSelectionAccuracy", tool_selection_accuracy)
-    _validate_report_rate(report, "requiredInputAccuracy", required_input_accuracy)
+    if not workflow_mode:
+        _validate_report_rate(report, "toolSelectionAccuracy", tool_selection_accuracy)
+        _validate_report_rate(report, "requiredInputAccuracy", required_input_accuracy)
     summary: dict[str, float | int | None] = {
         "attempts": attempts,
         "passedAttempts": passed_attempts,
@@ -204,6 +376,11 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     summary["conditionalToolAccuracy"] = summary["toolExactConditionalRate"]
     summary["endToEndExactRate"] = summary["endToEndExactOverallRate"]
     return summary
+
+
+def _funnel_stage_count(stages: dict[str, object], stage_name: str) -> int:
+    stage = _object(stages.get(stage_name), f"Missing funnel stage: {stage_name}")
+    return _nonnegative_int(stage.get("count"), f"Invalid funnel count: {stage_name}")
 
 
 def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int | None]:

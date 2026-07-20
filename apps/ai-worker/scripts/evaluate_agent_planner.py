@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -23,6 +24,13 @@ from app.agent_workflow_evaluation import (
     build_workflow_evaluation_report,
     evaluate_workflow_suite,
     load_workflow_scenarios,
+)
+
+_EVALUATOR_SOURCE_PATHS = (
+    Path("app/agent_planner_evaluation.py"),
+    Path("app/agent_workflow_evaluation.py"),
+    Path("app/agent_planner_comparison.py"),
+    Path("scripts/evaluate_agent_planner.py"),
 )
 
 
@@ -241,6 +249,7 @@ def main() -> None:
         "retrievalTopK": args.retrieval_top_k,
         "retrieverVersion": TOOL_RETRIEVER_VERSION,
         "evaluationSeed": args.seed,
+        "evaluatorSha256": _evaluator_sha256(),
         "shardCount": args.shard_count,
         "shardIndex": args.shard_index,
         "timeoutSeconds": args.timeout_seconds,
@@ -274,6 +283,17 @@ def _git_revision() -> str:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+
+
+def _evaluator_sha256() -> str:
+    root = Path(__file__).parents[1]
+    digest = hashlib.sha256()
+    for relative_path in _EVALUATOR_SOURCE_PATHS:
+        digest.update(relative_path.as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((root / relative_path).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _registry_binding(path: Path | None) -> dict[str, str]:

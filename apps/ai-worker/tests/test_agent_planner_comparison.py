@@ -76,6 +76,7 @@ def report(
             "repetitions": 1,
             "retrievalTopK": 8,
             "evaluationSeed": 17,
+            "evaluatorSha256": "1" * 64,
             "suiteSha256": "b" * 64,
             "toolCapabilityCatalogFileSha256": "c" * 64,
             "registryInventorySha256": "d" * 64,
@@ -106,6 +107,23 @@ def test_two_stage_comparison_pairs_inputs_and_reports_funnel_delta() -> None:
     assert result["variants"]["canonical"]["delta"]["conditionalToolAccuracy"] == 0.0111
     assert result["aggregate"]["baseline"]["endToEndExactRate"] == 0.8
     assert result["aggregate"]["candidate"]["endToEndExactRate"] == 0.9
+    assert result["improvementEvidence"]["uniqueScenarioCount"] == 10
+    assert result["improvementEvidence"]["taskSuccess"]["confidenceInterval95"][0] == 0.0
+    assert result["improvementEvidence"]["passed"] is False
+
+
+def test_two_stage_comparison_requires_distinct_revisions_and_same_evaluator() -> None:
+    baseline = [report("canonical", domain_count=10, tool_count=10, exact_count=10)]
+    candidate = [report("canonical", domain_count=10, tool_count=10, exact_count=10)]
+
+    with pytest.raises(ValueError, match="distinct revisions"):
+        build_two_stage_comparison(baseline, candidate)
+
+    candidate[0]["metadata"]["sourceRevision"] = "candidate-revision"
+    candidate[0]["metadata"]["evaluatorSha256"] = "2" * 64
+
+    with pytest.raises(ValueError, match="same evaluator"):
+        build_two_stage_comparison(baseline, candidate)
 
 
 def test_two_stage_comparison_reports_multi_tool_workflow_delta() -> None:
@@ -127,6 +145,41 @@ def test_two_stage_comparison_reports_multi_tool_workflow_delta() -> None:
 
     assert result["variants"]["multi_tool"]["delta"]["multiToolExactWorkflowRate"] == 0.1
     assert result["aggregate"]["candidate"]["multiToolExactWorkflowRate"] == 0.9
+
+
+def test_workflow_comparison_accepts_task_level_results_and_requires_confident_efficiency_gain() -> None:
+    baseline = report("multi_tool", domain_count=10, tool_count=10, exact_count=1)
+    candidate = report("multi_tool", domain_count=10, tool_count=10, exact_count=10)
+    candidate["metadata"]["sourceRevision"] = "candidate-revision"
+    for value, latency, tokens in (
+        (baseline, 200.0, 100),
+        (candidate, 100.0, 80),
+    ):
+        value["workflowEvaluation"] = {"taskSuccessRate": value["exactAttemptRate"]}
+        value["multiToolWorkflows"] = {
+            "workflowAttempts": 10,
+            "exactWorkflowAttempts": value["passedAttempts"],
+            "exactWorkflowRate": value["exactAttemptRate"],
+        }
+        for attempt in value["results"]:
+            attempt["expected"] = {
+                "domains": ["meeting"],
+                "capabilityIds": ["meeting.workflow"],
+            }
+            attempt["workflow"] = {
+                "taskSuccess": attempt["passed"],
+                "latencyMs": latency,
+                "providerTotalTokens": tokens,
+                "safetyViolations": [],
+            }
+
+    result = build_two_stage_comparison([baseline], [candidate])
+    evidence = result["improvementEvidence"]
+
+    assert evidence["taskSuccess"]["confidenceInterval95"][0] > 0
+    assert evidence["latencyMs"]["delta"] == -100.0
+    assert evidence["providerTotalTokens"]["delta"] == -20.0
+    assert evidence["passed"] is True
 
 
 def test_two_stage_comparison_rejects_different_fixture_inputs() -> None:
