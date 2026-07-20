@@ -768,6 +768,24 @@ assert.deepEqual(focusDefinition.inputSchema.required, [
   "confidence",
   "reasons"
 ]);
+const focusEvidenceSchema =
+  focusDefinition.inputSchema.properties.reasons.items.properties.evidence.items;
+assert.deepEqual(
+  focusEvidenceSchema.oneOf.map((candidate) => ({
+    kinds: candidate.properties.kind.enum,
+    required: candidate.required
+  })),
+  [
+    {
+      kinds: ["table_name", "table_comment", "column_name"],
+      required: ["kind", "value"]
+    },
+    {
+      kinds: ["column_comment", "data_type", "enum_value"],
+      required: ["kind", "columnName", "value"]
+    }
+  ]
+);
 
 const inspectInput = inspectDefinition.validateInput({
   featureQuery: "결제 기능"
