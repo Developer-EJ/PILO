@@ -150,7 +150,7 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
     return {
         "multiTurnContextEvaluation": {
             "multiTurnContextResolutionRate": 0.5,
-            "multiTurnToolSelectionAccuracy": 0.5,
+            "multiTurnToolSelectionAccuracy": 0.0,
             "partialRate": 0.0,
             "inconclusiveRate": 0.0,
         },
@@ -163,6 +163,7 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
                 "judgeContextResolved": True,
                 "judgeFollowUpDelivered": True,
                 "failureReasons": [],
+                "toolSelectionPassed": False,
             }
         ],
         "metadata": {
@@ -186,6 +187,12 @@ def multiturn_report(*, evaluator_sha: str = "1" * 64) -> dict[str, object]:
             "evaluationSeed": 17,
         },
     }
+
+
+def test_multiturn_comparison_uses_direct_tool_selection_verdict() -> None:
+    comparison = build_multiturn_context_comparison(multiturn_report(), multiturn_report())
+
+    assert comparison["metrics"]["multiTurnToolSelectionAccuracy"]["baseline"] == 0.0
 
 
 def test_multiturn_comparison_rejects_changed_evaluator_provenance() -> None:

@@ -174,6 +174,8 @@ def _multiturn_conversation_scores(
             result.get("deterministicContinuationPassed"), bool
         ):
             raise ValueError("Invalid multi-turn deterministic result")
+        if not isinstance(result.get("toolSelectionPassed"), bool):
+            raise ValueError("Invalid multi-turn Tool selection verdict")
         grouped.setdefault(conversation_id, []).append(result)
     return {
         conversation_id: {
@@ -187,15 +189,7 @@ def _multiturn_conversation_scores(
                 ]
             ),
             "multiTurnToolSelectionAccuracy": _mean(
-                [
-                    float(
-                        not any(
-                            reason in {"unexpected_tool", "tool_sequence"}
-                            for reason in _string_list(item.get("failureReasons", []))
-                        )
-                    )
-                    for item in attempts
-                ]
+                [float(item["toolSelectionPassed"] is True) for item in attempts]
             ),
         }
         for conversation_id, attempts in grouped.items()

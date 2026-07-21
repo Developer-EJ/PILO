@@ -186,7 +186,20 @@ def test_catalog_follow_up_constraints_use_registered_tool_fields() -> None:
 def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> None:
     report = build_multiturn_context_report(
         (
-            MultiTurnEvaluationResult("meeting_01", 1, True, True, (), "pass", (), True, True),
+            MultiTurnEvaluationResult(
+                "meeting_01",
+                1,
+                True,
+                True,
+                (),
+                "pass",
+                (),
+                True,
+                True,
+                True,
+                ("list_meeting_reports",),
+                ("list_meeting_reports",),
+            ),
             MultiTurnEvaluationResult(
                 "drive_01",
                 1,
@@ -197,6 +210,9 @@ def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> 
                 ("judge_vote_split",),
                 True,
                 False,
+                False,
+                ("search_drive_files",),
+                (),
             ),
         )
     )
@@ -207,6 +223,29 @@ def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> 
     assert summary["inconclusiveRate"] == 0.5
     assert "conversationHistory" not in str(report)
     assert "toolInput" not in str(report)
+
+
+def test_report_counts_missing_tool_as_tool_selection_failure() -> None:
+    report = build_multiturn_context_report(
+        (
+            MultiTurnEvaluationResult(
+                "drive_missing_tool",
+                1,
+                False,
+                False,
+                ("tool_sequence", "runtime_failure"),
+                tool_selection_passed=False,
+                expected_tool_sequence=("search_drive_files",),
+                executed_tool_sequence=(),
+            ),
+        )
+    )
+
+    result = report["results"][0]
+    assert report["multiTurnContextEvaluation"]["multiTurnToolSelectionAccuracy"] == 0.0
+    assert result["toolSelectionPassed"] is False
+    assert result["expectedToolSequence"] == ["search_drive_files"]
+    assert result["executedToolSequence"] == []
 
 
 def test_missing_tool_call_is_not_a_tool_selection_success() -> None:

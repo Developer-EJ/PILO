@@ -360,10 +360,7 @@ def build_multiturn_context_report(
         result.deterministic_context_passed and result.judge_context_resolved is True
         for result in results
     )
-    tool_selection_correct = sum(
-        not any(reason in {"unexpected_tool", "tool_sequence"} for reason in result.failure_reasons)
-        for result in results
-    )
+    tool_selection_correct = sum(result.tool_selection_passed for result in results)
     partial = sum(result.judge_verdict == "partial" for result in results)
     inconclusive = sum(result.judge_verdict == "inconclusive" for result in results)
     failure_codes: dict[str, int] = {}
@@ -384,6 +381,9 @@ def build_multiturn_context_report(
             {
                 "id": result.conversation_id,
                 "attempt": result.attempt,
+                "toolSelectionPassed": result.tool_selection_passed,
+                "expectedToolSequence": list(result.expected_tool_sequence),
+                "executedToolSequence": list(result.executed_tool_sequence),
                 "deterministicContextPassed": result.deterministic_context_passed,
                 "deterministicContinuationPassed": result.deterministic_continuation_passed,
                 "judgeVerdict": result.judge_verdict,
@@ -391,10 +391,17 @@ def build_multiturn_context_report(
                 "judgeFollowUpDelivered": result.judge_follow_up_delivered,
                 "failureReasons": list(result.failure_reasons),
                 "judgeFailureCodes": list(result.judge_failure_codes),
+                "failureClassification": _failure_classification(result),
             }
             for result in results
         ],
     }
+
+
+def _failure_classification(result: MultiTurnEvaluationResult) -> str:
+    if result.failure_reasons or result.judge_verdict in {"fail", "partial"}:
+        return "agent_failure"
+    return "none"
 
 
 def _load_expected_context(raw_turn: dict[str, object], turn_index: int) -> ExpectedContext:
