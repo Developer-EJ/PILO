@@ -74,8 +74,50 @@ export type ViewerRevocationTask = DrainViewerIdentitiesInput;
 
 const RESERVE_SESSION_SCRIPT = `
 -- RESERVE_WORKSPACE_SCREEN_SHARE
-if redis.call("EXISTS", KEYS[1]) == 1 or redis.call("EXISTS", KEYS[2]) == 1 or redis.call("EXISTS", KEYS[5]) == 1 then
+local function validLifecycleOwner(sessionId, expectedWorkspaceId, expectedRoomName)
+  local encoded = redis.call("GET", ARGV[7] .. sessionId)
+  if not encoded then
+    return false
+  end
+  local decoded, session = pcall(cjson.decode, encoded)
+  if not decoded or type(session) ~= "table" or
+    session.sessionId ~= sessionId or
+    (session.status ~= "starting" and session.status ~= "active") or
+    type(session.workspaceId) ~= "string" or
+    type(session.sharerUserId) ~= "string" or
+    type(session.sharerDisplayName) ~= "string" or
+    (type(session.sharerAvatarUrl) ~= "string" and session.sharerAvatarUrl ~= cjson.null) or
+    type(session.sharerLiveKitIdentity) ~= "string" or
+    type(session.livekitRoomName) ~= "string" or
+    type(session.createdAt) ~= "string" or
+    (type(session.startedAt) ~= "string" and session.startedAt ~= cjson.null) then
+    return false
+  end
+  if expectedWorkspaceId ~= "" and session.workspaceId ~= expectedWorkspaceId then
+    return false
+  end
+  if expectedRoomName ~= "" and session.livekitRoomName ~= expectedRoomName then
+    return false
+  end
+  return true
+end
+
+if redis.call("EXISTS", KEYS[1]) == 1 or redis.call("EXISTS", KEYS[2]) == 1 then
   return 0
+end
+local workspaceOwner = redis.call("GET", KEYS[5])
+if workspaceOwner then
+  if validLifecycleOwner(workspaceOwner, ARGV[3], "") then
+    return 0
+  end
+  redis.call("DEL", KEYS[5])
+end
+local roomOwner = redis.call("GET", KEYS[6])
+if roomOwner then
+  if validLifecycleOwner(roomOwner, "", ARGV[6]) then
+    return 0
+  end
+  redis.call("DEL", KEYS[6])
 end
 redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
 redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[2])
@@ -308,7 +350,7 @@ for _ = 1, maxInvalidSkips do
   end
   local sessionId = sessionIds[1]
   local encoded = redis.call("GET", ARGV[3] .. sessionId)
-  local valid = false
+  local validSnapshot = false
   if encoded then
     local decoded, session = pcall(cjson.decode, encoded)
     if decoded and type(session) == "table" and
@@ -321,17 +363,30 @@ for _ = 1, maxInvalidSkips do
       type(session.sharerLiveKitIdentity) == "string" and
       type(session.livekitRoomName) == "string" and
       type(session.createdAt) == "string" and
-      type(session.startedAt) == "string" and
-      redis.call("GET", ARGV[4] .. session.workspaceId) == sessionId and
-      redis.call("GET", ARGV[5] .. session.livekitRoomName) == sessionId then
-      valid = true
+      type(session.startedAt) == "string" then
+      validSnapshot = true
     end
   end
-  if valid then
+  if validSnapshot then
+    local workspaceIndexKey = ARGV[4] .. session.workspaceId
+    local roomIndexKey = ARGV[5] .. session.livekitRoomName
+    local workspaceOwner = redis.call("GET", workspaceIndexKey)
+    local roomOwner = redis.call("GET", roomIndexKey)
+    if (not workspaceOwner or workspaceOwner == sessionId) and
+      (not roomOwner or roomOwner == sessionId) then
+      if not workspaceOwner then
+        redis.call("SET", workspaceIndexKey, sessionId)
+      end
+      if not roomOwner then
+        redis.call("SET", roomIndexKey, sessionId)
+      end
+      redis.call("ZADD", KEYS[1], ARGV[2], sessionId)
+      return encoded
+    end
     redis.call("ZADD", KEYS[1], ARGV[2], sessionId)
-    return encoded
+  else
+    redis.call("ZREM", KEYS[1], sessionId)
   end
-  redis.call("ZREM", KEYS[1], sessionId)
 end
 return false
 `;
@@ -505,7 +560,9 @@ export class ScreenShareStateService {
           String(SCREEN_SHARE_STATE_TTL_SECONDS),
           session.workspaceId,
           rollbackAttemptId,
-          session.sessionId
+          session.sessionId,
+          session.livekitRoomName,
+          "workspace-screen-share:lifecycle:v1:"
         ]
       })
     );

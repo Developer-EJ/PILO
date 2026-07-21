@@ -72,7 +72,54 @@ class FakeRedisClient {
     if (this.failEval) throw new Error("Redis eval failed");
     if (script.includes("RESERVE_WORKSPACE_SCREEN_SHARE")) {
       const [workspaceKey, roomKey, rollbackKey, lifecycleKey, lifecycleWorkspaceKey, lifecycleRoomKey] = options.keys;
-      if (this.has(workspaceKey) || this.has(roomKey) || this.has(lifecycleWorkspaceKey)) return 0;
+      if (this.has(workspaceKey) || this.has(roomKey)) return 0;
+      const validLifecycleOwner = (
+        sessionId,
+        expectedWorkspaceId,
+        expectedRoomName
+      ) => {
+        const encoded = this.values.get(`${options.arguments[6]}${sessionId}`);
+        let lifecycleSession = null;
+        try {
+          lifecycleSession = encoded ? JSON.parse(encoded) : null;
+        } catch {
+          lifecycleSession = null;
+        }
+        return (
+          lifecycleSession !== null &&
+          lifecycleSession.sessionId === sessionId &&
+          (lifecycleSession.status === "starting" ||
+            lifecycleSession.status === "active") &&
+          typeof lifecycleSession.workspaceId === "string" &&
+          typeof lifecycleSession.sharerUserId === "string" &&
+          typeof lifecycleSession.sharerDisplayName === "string" &&
+          (typeof lifecycleSession.sharerAvatarUrl === "string" ||
+            lifecycleSession.sharerAvatarUrl === null) &&
+          typeof lifecycleSession.sharerLiveKitIdentity === "string" &&
+          typeof lifecycleSession.livekitRoomName === "string" &&
+          typeof lifecycleSession.createdAt === "string" &&
+          (typeof lifecycleSession.startedAt === "string" ||
+            lifecycleSession.startedAt === null) &&
+          (!expectedWorkspaceId ||
+            lifecycleSession.workspaceId === expectedWorkspaceId) &&
+          (!expectedRoomName ||
+            lifecycleSession.livekitRoomName === expectedRoomName)
+        );
+      };
+      const workspaceOwner = this.values.get(lifecycleWorkspaceKey);
+      if (workspaceOwner) {
+        if (validLifecycleOwner(workspaceOwner, options.arguments[2], "")) {
+          return 0;
+        }
+        this.values.delete(lifecycleWorkspaceKey);
+      }
+      const roomOwner = this.values.get(lifecycleRoomKey);
+      if (roomOwner) {
+        if (validLifecycleOwner(roomOwner, "", options.arguments[5])) {
+          return 0;
+        }
+        this.values.delete(lifecycleRoomKey);
+      }
       const ttl = Number(options.arguments[1]);
       this.values.set(workspaceKey, options.arguments[0]);
       this.values.set(roomKey, options.arguments[2]);
@@ -235,7 +282,7 @@ class FakeRedisClient {
         } catch {
           session = null;
         }
-        const valid =
+        const validSnapshot =
           session !== null &&
           session.sessionId === sessionId &&
           session.status === "active" &&
@@ -247,16 +294,31 @@ class FakeRedisClient {
           typeof session.sharerLiveKitIdentity === "string" &&
           typeof session.livekitRoomName === "string" &&
           typeof session.createdAt === "string" &&
-          typeof session.startedAt === "string" &&
-          this.values.get(`${options.arguments[3]}${session.workspaceId}`) ===
-            sessionId &&
-          this.values.get(`${options.arguments[4]}${session.livekitRoomName}`) ===
-            sessionId;
-        if (valid) {
+          typeof session.startedAt === "string";
+        if (validSnapshot) {
+          const workspaceIndexKey =
+            `${options.arguments[3]}${session.workspaceId}`;
+          const roomIndexKey =
+            `${options.arguments[4]}${session.livekitRoomName}`;
+          const workspaceOwner = this.values.get(workspaceIndexKey);
+          const roomOwner = this.values.get(roomIndexKey);
+          if (
+            (workspaceOwner === undefined || workspaceOwner === sessionId) &&
+            (roomOwner === undefined || roomOwner === sessionId)
+          ) {
+            if (workspaceOwner === undefined) {
+              this.values.set(workspaceIndexKey, sessionId);
+            }
+            if (roomOwner === undefined) {
+              this.values.set(roomIndexKey, sessionId);
+            }
+            this.deadlines.set(sessionId, Number(options.arguments[1]));
+            return encoded;
+          }
           this.deadlines.set(sessionId, Number(options.arguments[1]));
-          return encoded;
+        } else {
+          this.deadlines.delete(sessionId);
         }
-        this.deadlines.delete(sessionId);
       }
       return null;
     }
@@ -593,6 +655,54 @@ try {
       "a deadline must become retryable after its lease expires"
     );
 
+    deadlineRedis.deadlines.delete(dueSession.sessionId);
+    const repairableSession = {
+      ...dueSession,
+      sessionId: "16161616-1616-4616-8616-161616161616",
+      workspaceId: "17171717-1717-4717-8717-171717171717",
+      livekitRoomName:
+        "pilo-screen-share-16161616-1616-4616-8616-161616161616"
+    };
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${repairableSession.sessionId}`,
+      JSON.stringify(repairableSession)
+    );
+    deadlineRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${repairableSession.workspaceId}`,
+      repairableSession.sessionId
+    );
+    deadlineRedis.deadlines.set(repairableSession.sessionId, 1);
+    assert.deepEqual(
+      await deadlineState.claimDueDeadline(1, 1_000),
+      repairableSession,
+      "a valid active snapshot with one missing ownership index must be repaired and claimed"
+    );
+    assert.equal(
+      deadlineRedis.values.get(
+        `workspace-screen-share:lifecycle-room:v1:${repairableSession.livekitRoomName}`
+      ),
+      repairableSession.sessionId
+    );
+    assert.equal(
+      (
+        await deadlineState.terminateIfCurrent({
+          workspaceId: repairableSession.workspaceId,
+          sessionId: repairableSession.sessionId,
+          livekitRoomName: repairableSession.livekitRoomName
+        })
+      )?.session.sessionId,
+      repairableSession.sessionId
+    );
+    assert.equal(
+      await deadlineState.terminateIfCurrent({
+        workspaceId: repairableSession.workspaceId,
+        sessionId: repairableSession.sessionId,
+        livekitRoomName: repairableSession.livekitRoomName
+      }),
+      null,
+      "the repaired deadline session must terminate only once"
+    );
+
     const poisonedMissingId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const poisonedMalformedId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     const poisonedIndexSession = {
@@ -651,8 +761,85 @@ try {
     assert.equal(deadlineRedis.deadlines.has(poisonedMissingId), false);
     assert.equal(deadlineRedis.deadlines.has(poisonedMalformedId), false);
     assert.equal(
-      deadlineRedis.deadlines.has(poisonedIndexSession.sessionId),
-      false
+      deadlineRedis.deadlines.get(poisonedIndexSession.sessionId),
+      1_000,
+      "a conflicting non-null owner must quarantine the deadline without deleting live state"
+    );
+    assert.equal(
+      deadlineRedis.values.get(
+        `workspace-screen-share:lifecycle-workspace:v1:${poisonedIndexSession.workspaceId}`
+      ),
+      "wrong-session"
+    );
+  }
+
+  {
+    const orphanRedis = new FakeRedisClient();
+    const orphanState = new TestScreenShareStateService(orphanRedis);
+    const candidate = {
+      ...session,
+      sessionId: "18181818-1818-4818-8818-181818181818",
+      workspaceId: "19191919-1919-4919-8919-191919191919",
+      livekitRoomName:
+        "pilo-screen-share-18181818-1818-4818-8818-181818181818"
+    };
+    const missingSnapshotId = "20202020-2020-4020-8020-202020202020";
+    const malformedSnapshotId = "21212121-2121-4121-8121-212121212121";
+    orphanRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${candidate.workspaceId}`,
+      missingSnapshotId
+    );
+    orphanRedis.values.set(
+      `workspace-screen-share:lifecycle-room:v1:${candidate.livekitRoomName}`,
+      malformedSnapshotId
+    );
+    orphanRedis.values.set(
+      `workspace-screen-share:lifecycle:v1:${malformedSnapshotId}`,
+      "{not-json"
+    );
+    assert.equal(
+      await orphanState.reserve(candidate, "orphan-recovery"),
+      true,
+      "missing or malformed lifecycle snapshots must not block reservation forever"
+    );
+
+    const crossWorkspaceRedis = new FakeRedisClient();
+    const crossWorkspaceState = new TestScreenShareStateService(
+      crossWorkspaceRedis
+    );
+    const otherWorkspaceSession = {
+      ...candidate,
+      sessionId: "22222222-2222-4222-8222-222222222220",
+      workspaceId: "23232323-2323-4323-8323-232323232323",
+      livekitRoomName:
+        "pilo-screen-share-22222222-2222-4222-8222-222222222220",
+      status: "active",
+      startedAt: "2026-07-18T00:00:01.000Z"
+    };
+    const otherSnapshotKey =
+      `workspace-screen-share:lifecycle:v1:${otherWorkspaceSession.sessionId}`;
+    crossWorkspaceRedis.values.set(
+      `workspace-screen-share:lifecycle-workspace:v1:${candidate.workspaceId}`,
+      otherWorkspaceSession.sessionId
+    );
+    crossWorkspaceRedis.values.set(
+      otherSnapshotKey,
+      JSON.stringify(otherWorkspaceSession)
+    );
+    crossWorkspaceRedis.deadlines.set(otherWorkspaceSession.sessionId, 123);
+    assert.equal(
+      await crossWorkspaceState.reserve(candidate, "cross-workspace-orphan"),
+      true
+    );
+    assert.equal(
+      crossWorkspaceRedis.values.get(otherSnapshotKey),
+      JSON.stringify(otherWorkspaceSession),
+      "orphan cleanup must not delete another workspace's valid snapshot"
+    );
+    assert.equal(
+      crossWorkspaceRedis.deadlines.get(otherWorkspaceSession.sessionId),
+      123,
+      "orphan cleanup must not delete another workspace's deadline"
     );
   }
 
