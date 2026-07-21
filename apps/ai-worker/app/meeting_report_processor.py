@@ -604,9 +604,7 @@ def _parse_grounded_content(
         "INVALID_ACTIVITY_EVIDENCE_INDEX",
     )
     transcript_references = (
-        [EvidenceReference(source_type, source_index, segment_indexes)]
-        if segment_indexes
-        else []
+        [EvidenceReference(source_type, source_index, segment_indexes)] if segment_indexes else []
     )
     activity_references = (
         [ActivityEvidenceReference(source_type, source_index, activity_indexes)]
