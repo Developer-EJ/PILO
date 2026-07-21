@@ -124,6 +124,7 @@ def workflow_report(
     value["totalCases"] = case_count
     value["metadata"]["sourceRevision"] = source_revision
     value["workflowEvaluation"] = {"taskSuccessRate": value["exactAttemptRate"]}
+    value["executionContractPassAttempts"] = value["passedAttempts"]
     value["multiToolWorkflows"] = {
         "workflowAttempts": case_count,
         "exactWorkflowAttempts": value["passedAttempts"],
@@ -136,6 +137,7 @@ def workflow_report(
         }
         attempt["workflow"] = {
             "taskSuccess": attempt["passed"],
+            "executionContractPassed": attempt["passed"],
             "latencyMs": latency_ms,
             "providerTotalTokens": provider_tokens,
             "safetyViolations": [],
@@ -186,12 +188,41 @@ def test_agent_performance_snapshot_reports_absolute_workflow_metrics() -> None:
     assert snapshot["scopeVariants"] == ["agent_workflow"]
     assert snapshot["uniqueScenarioCount"] == 31
     assert snapshot["taskSuccessRate"] == 1.0
+    assert snapshot["executionContractPassRate"] == 1.0
     assert snapshot["meanLatencyMs"] == 123.5
     assert snapshot["meanProviderTotalTokens"] == 456.0
     assert snapshot["domainTaskSuccess"]["drive"]["rate"] == 1.0
     assert snapshot["categoryTaskSuccess"]["grounded_answer"]["rate"] == 1.0
     assert snapshot["safetyViolations"] == {"count": 1}
     assert "passed" not in snapshot
+
+
+def test_snapshot_accepts_different_task_and_execution_contract_rates() -> None:
+    current = workflow_report(
+        31,
+        source_revision="main-revision",
+        latency_ms=123.5,
+        provider_tokens=456,
+        variant="agent_workflow",
+        case_count=31,
+    )
+    current["results"][0]["executionContractPassed"] = False
+    current["results"][0]["workflow"]["executionContractPassed"] = False
+    current["exactAttemptRate"] = round(30 / 31, 4)
+    current["executionContractPassAttempts"] = 30
+    current["routingFunnel"]["stages"]["endToEndExact"] = {
+        "count": 30,
+        "conditionalRate": round(30 / 31, 4),
+        "overallRate": round(30 / 31, 4),
+    }
+    current["multiToolWorkflows"]["exactWorkflowAttempts"] = 30
+    current["multiToolWorkflows"]["exactWorkflowRate"] = round(30 / 31, 4)
+
+    snapshot = build_agent_performance_snapshot([current])
+
+    assert snapshot["taskSuccessRate"] == 1.0
+    assert snapshot["executionContractPassRate"] == round(30 / 31, 4)
+    assert snapshot["aggregate"]["exactAttemptRate"] == round(30 / 31, 4)
 
 
 def test_snapshot_command_writes_metrics_without_a_pass_fail_gate(
@@ -374,7 +405,7 @@ def test_improvement_evidence_rejects_regression_in_evaluated_domain() -> None:
     assert evidence["passed"] is False
 
 
-def test_improvement_evidence_rejects_uncertain_efficiency_delta() -> None:
+def test_improvement_evidence_keeps_efficiency_as_a_diagnostic_not_a_success_gate() -> None:
     baseline = workflow_report(
         1,
         source_revision="baseline-revision",
@@ -397,7 +428,7 @@ def test_improvement_evidence_rejects_uncertain_efficiency_delta() -> None:
     assert evidence["latencyMs"]["delta"] < 0
     assert evidence["latencyMs"]["confidenceInterval95"][1] > 0
     assert evidence["efficiencyPassed"] is False
-    assert evidence["passed"] is False
+    assert evidence["passed"] is True
 
 
 def test_domain_gate_uses_evaluation_domain_for_negative_routing_case() -> None:

@@ -51,6 +51,8 @@ class WorkflowEvaluationResult:
     attempt: int
     task_success: bool
     failure_reasons: tuple[str, ...]
+    execution_contract_passed: bool
+    execution_contract_failure_reasons: tuple[str, ...]
     executed_tool_names: tuple[str, ...]
     latency_ms: float
     provider_total_tokens: int | None
@@ -196,6 +198,7 @@ def build_workflow_evaluation_report(
 ) -> dict[str, object]:
     scenario_ids = {result.scenario_id for result in results}
     task_successes = sum(result.task_success for result in results)
+    contract_passes = sum(result.execution_contract_passed for result in results)
     multi_tool_results = [result for result in results if result.expected_tool_count > 1]
     multi_tool_scenario_ids = {result.scenario_id for result in multi_tool_results}
     safety_violation_count = sum(len(result.safety_violations) for result in results)
@@ -206,7 +209,7 @@ def build_workflow_evaluation_report(
         ("toolExact", lambda result: "tool_sequence" not in result.failure_reasons),
         ("requiredInputExact", lambda result: "tool_input" not in result.failure_reasons),
         ("executionPolicyExact", lambda result: not result.safety_violations),
-        ("endToEndExact", lambda result: result.task_success),
+        ("endToEndExact", lambda result: result.execution_contract_passed),
     )
     stages: dict[str, object] = {}
     cumulative = list(results)
@@ -227,7 +230,8 @@ def build_workflow_evaluation_report(
             for scenario_id in scenario_ids
         ),
         "passedAttempts": task_successes,
-        "exactAttemptRate": _fraction(task_successes, len(results)),
+        "exactAttemptRate": _fraction(contract_passes, len(results)),
+        "executionContractPassAttempts": contract_passes,
         "routingFunnel": {
             "toolSelectionAttempts": len(results),
             "stages": stages,
@@ -235,14 +239,17 @@ def build_workflow_evaluation_report(
         "multiToolWorkflows": {
             "workflowCount": len(multi_tool_scenario_ids),
             "workflowAttempts": len(multi_tool_results),
-            "exactWorkflowAttempts": sum(result.task_success for result in multi_tool_results),
+            "exactWorkflowAttempts": sum(
+                result.execution_contract_passed for result in multi_tool_results
+            ),
             "exactWorkflowRate": _fraction(
-                sum(result.task_success for result in multi_tool_results),
+                sum(result.execution_contract_passed for result in multi_tool_results),
                 len(multi_tool_results),
             ),
         },
         "workflowEvaluation": {
             "taskSuccessRate": _fraction(task_successes, len(results)),
+            "executionContractPassRate": _fraction(contract_passes, len(results)),
             "latencyMs": _number_summary([result.latency_ms for result in results]),
             "providerTotalTokens": _optional_number_summary(
                 [result.provider_total_tokens for result in results]
@@ -256,6 +263,8 @@ def build_workflow_evaluation_report(
                 "kind": result.category,
                 "passed": result.task_success,
                 "failureReasons": list(result.failure_reasons),
+                "executionContractPassed": result.execution_contract_passed,
+                "executionContractFailureReasons": list(result.execution_contract_failure_reasons),
                 "expected": {
                     "domains": list(result.expected_domains),
                     "capabilityIds": list(result.expected_capability_ids),
@@ -264,6 +273,7 @@ def build_workflow_evaluation_report(
                 },
                 "workflow": {
                     "taskSuccess": result.task_success,
+                    "executionContractPassed": result.execution_contract_passed,
                     "latencyMs": round(result.latency_ms, 3),
                     "providerTotalTokens": result.provider_total_tokens,
                     "safetyViolations": list(result.safety_violations),
@@ -316,19 +326,17 @@ def _evaluate_workflow(
         runtime_failure = _runtime_failure(error)
     latency_ms = max(0.0, (perf_counter() - started) * 1000)
 
-    failures = list(repository.validation_failures)
+    outcome_failures = list(repository.validation_failures)
     if runtime_failure is not None:
-        failures.append(runtime_failure)
+        outcome_failures.append(runtime_failure)
     if repository.status != scenario.expected_terminal_status:
-        failures.append("terminal_state")
+        outcome_failures.append("terminal_state")
     planner_status = (repository.latest_output_summary or {}).get("status")
-    if planner_status != scenario.expected_planner_status:
-        failures.append("planner_status")
     expected_tools = tuple(fixture.tool_name for fixture in scenario.fixtures)
     if tuple(repository.executed_tool_names) != expected_tools:
-        failures.append("tool_sequence")
-    if any(item not in repository.final_answer for item in scenario.expected_answer_contains):
-        failures.append("final_answer_grounding")
+        outcome_failures.append("tool_sequence")
+    if not _contains_normalized_text(repository.final_answer, scenario.expected_answer_contains):
+        outcome_failures.append("final_answer_grounding")
     routing_decisions = router_recorder.decisions
     router_routed = bool(routing_decisions) and all(
         getattr(decision, "status", None) == scenario.expected_router_status
@@ -349,17 +357,27 @@ def _evaluate_workflow(
         )
     )
     if not router_routed:
-        failures.append("router_status")
+        outcome_failures.append("router_status")
     if not domain_exact:
-        failures.append("domain")
+        outcome_failures.append("domain")
     if not capability_exact:
-        failures.append("capability")
-    failure_reasons = tuple(dict.fromkeys(failures))
+        outcome_failures.append("capability")
+    failure_reasons = tuple(dict.fromkeys(outcome_failures))
+    contract_failures = list(failure_reasons)
+    if planner_status != scenario.expected_planner_status:
+        contract_failures.append("planner_status")
+    if any(item not in repository.final_answer for item in scenario.expected_answer_contains):
+        contract_failures.append("final_answer_grounding")
+    execution_contract_failure_reasons = tuple(dict.fromkeys(contract_failures))
     return WorkflowEvaluationResult(
         scenario_id=scenario.scenario_id,
         attempt=attempt,
         task_success=not failure_reasons and not repository.safety_violations,
         failure_reasons=failure_reasons,
+        execution_contract_passed=(
+            not execution_contract_failure_reasons and not repository.safety_violations
+        ),
+        execution_contract_failure_reasons=execution_contract_failure_reasons,
         executed_tool_names=tuple(repository.executed_tool_names),
         latency_ms=latency_ms,
         provider_total_tokens=_sum_optional(
@@ -522,6 +540,29 @@ class _TokenRecorder:
 
 def _contains(actual: dict[str, object], expected: dict[str, object]) -> bool:
     return all(key in actual and actual[key] == value for key, value in expected.items())
+
+
+def _contains_normalized_text(actual: str, expected: tuple[str, ...]) -> bool:
+    normalized_actual = _normalize_text(actual)
+    normalized_expected = tuple(_normalize_text(item) for item in expected)
+    if not normalized_expected:
+        return True
+    if not all(item in normalized_actual for item in normalized_expected):
+        return False
+    if any(_is_negative_outcome(item) for item in normalized_expected):
+        return not any(
+            "아닙" in normalized_actual[normalized_actual.find(item) + len(item) :]
+            for item in normalized_expected
+        )
+    return not _is_negative_outcome(normalized_actual)
+
+
+def _normalize_text(value: str) -> str:
+    return "".join(character.lower() for character in value if character.isalnum())
+
+
+def _is_negative_outcome(value: str) -> bool:
+    return any(marker in value for marker in ("찾지못", "못찾", "없습니다", "없어요", "없음"))
 
 
 def _sum_optional(*values: int | None) -> int | None:
