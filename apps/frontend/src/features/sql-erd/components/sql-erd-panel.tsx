@@ -852,11 +852,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     isSourceOpen &&
     !sourceLock.canEdit
       ? {
-          label: sourceLock.status === "acquiring" ? "Acquiring lock" : "Read only",
+          label: sourceLock.status === "acquiring" ? "잠금 확인 중" : "읽기 전용",
           message:
             sourceLock.status === "read_only"
-              ? sourceLock.message
-              : "Acquiring the SQL source lock.",
+              ? "SQL 소스 편집 잠금을 가져오지 못했습니다. 잠시 후 다시 시도합니다."
+              : "SQL 소스 편집 잠금을 가져오는 중입니다.",
           tone: "neutral" as const
         }
       : sourceStatus;
@@ -1662,7 +1662,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       setLayoutAutosaveRetryAttempt(0);
       setSessionLoadState({
         label: "저장 대기",
-        message: "Table layout changes will autosave",
+        message: "테이블 배치 변경 사항이 자동 저장됩니다.",
         tone: "neutral"
       });
     },
@@ -1709,7 +1709,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setLayoutAutosaveRetryAttempt(0);
         setSessionLoadState({
           label: "저장 대기",
-          message: "Canvas changes will sync as workspace operations",
+          message: "캔버스 변경 사항이 워크스페이스 작업으로 동기화됩니다.",
           tone: "neutral"
         });
         return true;
@@ -1745,7 +1745,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     }
     setSessionLoadState({
       label: "저장 중",
-      message: "Retrying pending SQLtoERD changes",
+      message: "보류 중인 SQLtoERD 변경 사항을 다시 저장하는 중입니다.",
       tone: "neutral"
     });
   }, [pendingLayoutAutosaveJson, pendingSourceAutosaveSnapshot]);
@@ -1837,7 +1837,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         );
         setSessionLoadState({
           label: "저장됨",
-          message: `Workspace session revision ${activeSession.revision}`,
+          message: `워크스페이스 세션 ${activeSession.revision}번 버전을 불러왔습니다.`,
           tone: "success"
         });
         hasLoadedSessionRef.current = true;
@@ -2032,7 +2032,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveBlockReason(null);
           setSessionLoadState({
             label: "저장됨",
-            message: "Workspace에 저장되었습니다.",
+            message: "워크스페이스에 저장되었습니다.",
             tone: "success"
           });
           return;
@@ -2094,7 +2094,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setLayoutAutosaveBlockReason(null);
         setSessionLoadState({
           label: "저장됨",
-          message: `Workspace session revision ${savedSession.revision}`,
+          message: `워크스페이스 세션 ${savedSession.revision}번 버전을 저장했습니다.`,
           tone: "success"
         });
       } catch (error) {
@@ -2253,7 +2253,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveRetryAttempt(0);
           setSessionLoadState({
             label: "저장됨",
-            message: "Workspace에 저장되었습니다.",
+            message: "워크스페이스에 저장되었습니다.",
             tone: "success"
           });
           return;
@@ -2307,7 +2307,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setLayoutAutosaveRetryAttempt(0);
         setSessionLoadState({
           label: "저장됨",
-          message: `Workspace session revision ${savedSession.revision}`,
+          message: `워크스페이스 세션 ${savedSession.revision}번 버전을 저장했습니다.`,
           tone: "success"
         });
       } catch (error) {
@@ -2748,7 +2748,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
             : sqlErdViewSession.writeProtocol === "operations_v1" &&
                 !sourceLock.canEdit
               ? sourceLock.status === "read_only"
-                ? sourceLock.message
+                ? "SQL 소스 편집 잠금을 가져오지 못했습니다. 잠시 후 다시 시도합니다."
                 : "SQL 편집 잠금을 확인하는 중입니다. 잠시 후 적용할 수 있습니다."
               : null
         }

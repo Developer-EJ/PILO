@@ -8100,7 +8100,15 @@ for (const englishStatusCopy of [
   "Autosaving table layout",
   "Table layout could not be autosaved. Retrying soon",
   "Reload session",
-  "Retry once"
+  "Retry once",
+  "Acquiring lock",
+  "Read only",
+  "Acquiring the SQL source lock.",
+  "Table layout changes will autosave",
+  "Canvas changes will sync as workspace operations",
+  "Retrying pending SQLtoERD changes",
+  "Workspace session revision",
+  "Workspace에 저장되었습니다."
 ]) {
   assert.doesNotMatch(
     panel,
@@ -8108,6 +8116,11 @@ for (const englishStatusCopy of [
     `사용자 노출 상태 문구는 한국어여야 합니다: ${englishStatusCopy}`
   );
 }
+assert.doesNotMatch(
+  panel,
+  /sourceLock\.status === "read_only"[\s\S]{0,80}\? sourceLock\.message/,
+  "source lock 서버 오류 문구를 사용자 상태에 그대로 노출하지 않는다"
+);
 assert.match(
   panel,
   /const isWriteProtocolMismatch =\s*layoutAutosaveBlockReason === "write_protocol_mismatch"/
@@ -8850,7 +8863,7 @@ assert.match(panel, /대상 컬럼/);
 assert.match(panel, /관계 의미/);
 assert.doesNotMatch(panel, /Workspace source operation/);
 assert.doesNotMatch(panel, /Workspace operation/);
-assert.match(panel, /Workspace에 저장되었습니다/);
+assert.match(panel, /워크스페이스에 저장되었습니다/);
 assert.doesNotMatch(panel, /기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로/);
 assert.match(panel, /변경 전/);
 assert.match(panel, /변경 후/);
