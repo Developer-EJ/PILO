@@ -1983,6 +1983,7 @@ class PgAgentRunRepository:
                 if job.turn_sequence > 1 and latest_user_message is not None
                 else None
             ),
+            thread_id=(str(row["thread_id"]) if row.get("thread_id") is not None else None),
         )
 
     def start_planner_step(self, job: AgentRunJob, context: AgentRunContext) -> str:

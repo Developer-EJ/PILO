@@ -11,6 +11,12 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.agent_graph import (
+    AgentGraphRuntime,
+    AgentGraphState,
+    agent_graph_config,
+    build_agent_run_graph,
+)
 from app.agent_latency import AgentLatencyObserver
 from app.agent_prompt_security import (
     PromptSecurityAssessment,
@@ -50,7 +56,6 @@ MEETING_REPORT_HYBRID_COMPOUND_CLARIFICATION_MESSAGE = (
 AGENT_GROUNDED_ANSWER_SECURITY_MESSAGE = (
     "회의 근거에 외부 지시로 보이는 내용이 포함되어 있어 답변을 안전하게 생성하지 않았습니다."
 )
-TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
 PLANNER_STATUSES = {
     "tool_candidate",
     "needs_clarification",
@@ -145,6 +150,7 @@ class AgentRunContext:
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
+    thread_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -796,6 +802,7 @@ class AgentRunProcessor:
         tool_retrieval_top_k: int = DEFAULT_TOOL_RETRIEVAL_TOP_K,
         tool_retrieval_schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
         latency_observer: AgentLatencyObserver | None = None,
+        graph_checkpointer: object | None = None,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
@@ -808,6 +815,7 @@ class AgentRunProcessor:
         self.tool_retrieval_top_k = tool_retrieval_top_k
         self.tool_retrieval_schema_token_budget = tool_retrieval_schema_token_budget
         self.latency_observer = latency_observer or AgentLatencyObserver()
+        self.graph = build_agent_run_graph(graph_checkpointer)
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
         try:
@@ -872,58 +880,79 @@ class AgentRunProcessor:
             if context is None:
                 return self._result(job, delete_message=True, reason="agent_run_not_found")
             latency_scope.queue_wait_ms = context.queue_wait_ms
-
-            status = context.status
-            if status in TERMINAL_AGENT_RUN_STATUSES:
-                return self._result(job, delete_message=True, reason="terminal_agent_run")
-
-            if status == "waiting_confirmation":
-                return self._result(
+            state = AgentGraphState(
+                thread_id=context.thread_id or job.run_id,
+                invocation_id=job.run_id,
+                run_status=context.status,
+                planner_turn_count=context.planner_turn_count,
+                planning_context=context.planning_context,
+                active_goal=context.latest_planner_tool_name,
+                pending_confirmation=context.status == "waiting_confirmation",
+                delete_message=True,
+                result_reason="",
+                result_run_id=job.run_id,
+            )
+            handlers = {
+                "terminal": lambda: self._result(
+                    job, delete_message=True, reason="terminal_agent_run"
+                ),
+                "waiting_confirmation": lambda: self._result(
                     job,
                     delete_message=True,
                     reason="agent_run_waiting_confirmation",
-                )
-
-            if status == "waiting_user_input":
-                return self._result(
+                ),
+                "waiting_user_input": lambda: self._result(
                     job,
                     delete_message=True,
                     reason="agent_run_waiting_user_input",
-                )
-
-            if status == "running":
-                latency_scope.targeted = context.latest_planner_tool_name == SQL_ERD_FOCUS_TOOL_NAME
-                return self._handoff_execution(
-                    job,
-                    retried=True,
-                    latency_scope=latency_scope,
-                )
-
-            if status != "planning":
-                return self._result(
+                ),
+                "running": lambda: self._resume_execution(job, context, latency_scope),
+                "unsupported_status": lambda: self._result(
                     job,
                     delete_message=True,
                     reason="agent_run_unsupported_status",
-                )
-
-            if context.planner_turn_count >= 5:
-                waiting = self.repository.wait_for_user_input(
-                    job.run_id,
-                    AGENT_PLANNER_TURN_LIMIT_MESSAGE,
-                )
-                return self._result(
-                    job,
-                    delete_message=True,
-                    reason=(
-                        "agent_planner_turn_limit_reached"
-                        if waiting
-                        else "agent_run_no_longer_planning"
-                    ),
-                )
-
-            return self._plan_run(job, context, latency_scope)
+                ),
+                "planner_turn_limit": lambda: self._handle_planner_turn_limit(job),
+                "planning": lambda: self._plan_run(job, context, latency_scope),
+            }
+            graph_state = self.graph.invoke(
+                state,
+                config=agent_graph_config(context.thread_id, job.run_id),
+                context=AgentGraphRuntime(handlers=handlers),
+            )
+            return AgentProcessResult(
+                delete_message=graph_state["delete_message"],
+                reason=graph_state["result_reason"],
+                run_id=graph_state["result_run_id"],
+            )
         finally:
             self.repository.release_run_lock(job.run_id)
+
+    def _resume_execution(
+        self,
+        job: AgentRunJob,
+        context: AgentRunContext,
+        latency_scope: _AgentLatencyScope,
+    ) -> AgentProcessResult:
+        latency_scope.targeted = context.latest_planner_tool_name == SQL_ERD_FOCUS_TOOL_NAME
+        return self._handoff_execution(
+            job,
+            retried=True,
+            latency_scope=latency_scope,
+        )
+
+    def _handle_planner_turn_limit(self, job: AgentRunJob) -> AgentProcessResult:
+        waiting = self.repository.wait_for_user_input(
+            job.run_id,
+            AGENT_PLANNER_TURN_LIMIT_MESSAGE,
+        )
+        return self._result(
+            job,
+            delete_message=True,
+            reason=(
+                "agent_planner_turn_limit_reached" if waiting else "agent_run_no_longer_planning"
+            ),
+        )
 
     def _plan_run(
         self,

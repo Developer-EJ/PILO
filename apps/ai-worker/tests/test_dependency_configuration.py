@@ -8,3 +8,9 @@ def test_requirements_use_cpu_only_pytorch() -> None:
 
     assert "--extra-index-url https://download.pytorch.org/whl/cpu" in requirements
     assert "torch==2.13.0+cpu" in requirements
+
+
+def test_requirements_include_langgraph() -> None:
+    requirements = REQUIREMENTS_PATH.read_text(encoding="utf-8").splitlines()
+
+    assert "langgraph>=1.2,<1.3" in requirements
