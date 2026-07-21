@@ -57,6 +57,7 @@ class MultiTurnTurn:
 class MultiTurnConversation:
     conversation_id: str
     turns: tuple[MultiTurnTurn, ...]
+    context_surface: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,7 +88,7 @@ class MultiTurnEvaluationResult:
 
 def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
     try:
-        payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+        payload = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as error:
         raise ValueError("Multi-turn catalog must contain valid JSON") from error
     if not isinstance(payload, dict) or not isinstance(payload.get("version"), str):
@@ -101,9 +102,12 @@ def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
         if not isinstance(raw_conversation, dict):
             raise ValueError("Multi-turn conversation must be an object")
         conversation_id = raw_conversation.get("id")
+        context_surface = raw_conversation.get("contextSurface")
         raw_turns = raw_conversation.get("turns")
         if not isinstance(conversation_id, str) or not conversation_id.strip():
             raise ValueError("Multi-turn conversation id is required")
+        if context_surface is not None and context_surface not in {"sql_erd", "pr_review"}:
+            raise ValueError("Multi-turn contextSurface is invalid")
         if not isinstance(raw_turns, list) or len(raw_turns) < 2:
             raise ValueError("Multi-turn conversation requires at least two turns")
         turns: list[MultiTurnTurn] = []
@@ -132,7 +136,9 @@ def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
                     expected_outcome=expected_outcome,
                 )
             )
-        conversations.append(MultiTurnConversation(conversation_id.strip(), tuple(turns)))
+        conversations.append(
+            MultiTurnConversation(conversation_id.strip(), tuple(turns), context_surface)
+        )
     if len({conversation.conversation_id for conversation in conversations}) != len(conversations):
         raise ValueError("Multi-turn conversation ids must be unique")
     return MultiTurnCatalog(payload["version"].strip(), tuple(conversations))
@@ -161,12 +167,13 @@ def evaluate_deterministic_continuation(
             continue
         if turn_index == 0:
             continue
-        context_ref = turn.expected_context.context_ref
-        if context_ref is None or not all(
-            _contains_context_reference(call.tool_input, context_ref) for call in calls
-        ):
-            failure_reasons.append("context_reference")
-            continue
+        if turn.expected_context.reference_kind == "prior_context_ref":
+            context_ref = turn.expected_context.context_ref
+            if context_ref is None or not all(
+                _contains_context_reference(call.tool_input, context_ref) for call in calls
+            ):
+                failure_reasons.append("context_reference")
+                continue
         if not all(
             _contains_mapping(call.tool_input, turn.expected_context.constraints) for call in calls
         ):
@@ -196,7 +203,12 @@ def evaluate_multiturn_conversation(
     timezone: str = "Asia/Seoul",
     attempt: int = 1,
 ) -> MultiTurnEvaluationResult:
-    repository = _MultiTurnReplayRepository(job, conversation.turns[0].user, timezone)
+    evaluation_job = (
+        replace(job, request_context={"surface": conversation.context_surface})
+        if conversation.context_surface is not None
+        else job
+    )
+    repository = _MultiTurnReplayRepository(evaluation_job, conversation.turns[0].user, timezone)
     handoff = _MultiTurnReplayHandoff(repository, conversation)
     processor = AgentRunProcessor(
         repository,
@@ -210,7 +222,10 @@ def evaluate_multiturn_conversation(
     for turn_index, turn in enumerate(conversation.turns):
         if turn_index > 0:
             repository.begin_turn(turn_index, turn.user)
-        turn_job = replace(job, turn_sequence=job.turn_sequence + turn_index)
+        turn_job = replace(
+            evaluation_job,
+            turn_sequence=evaluation_job.turn_sequence + turn_index,
+        )
         for _ in range(len(turn.expected_tools) + 2):
             try:
                 result = processor.process_job(turn_job)
@@ -290,10 +305,8 @@ def build_multiturn_context_report(
         result.deterministic_context_passed and result.judge_context_resolved is True
         for result in results
     )
-    continuation_success = sum(
-        result.deterministic_continuation_passed
-        and result.judge_verdict == "pass"
-        and result.judge_follow_up_delivered is True
+    tool_selection_correct = sum(
+        not any(reason in {"unexpected_tool", "tool_sequence"} for reason in result.failure_reasons)
         for result in results
     )
     partial = sum(result.judge_verdict == "partial" for result in results)
@@ -307,7 +320,7 @@ def build_multiturn_context_report(
             "conversationCount": len({result.conversation_id for result in results}),
             "attempts": attempts,
             "multiTurnContextResolutionRate": _fraction(context_resolved, attempts),
-            "multiTurnContinuationSuccessRate": _fraction(continuation_success, attempts),
+            "multiTurnToolSelectionAccuracy": _fraction(tool_selection_correct, attempts),
             "partialRate": _fraction(partial, attempts),
             "inconclusiveRate": _fraction(inconclusive, attempts),
             "failureCodeCounts": dict(sorted(failure_codes.items())),
@@ -338,6 +351,9 @@ def _load_expected_context(raw_turn: dict[str, object], turn_index: int) -> Expe
     constraints = raw_context.get("constraints")
     if not isinstance(reference_kind, str) or not reference_kind.strip():
         raise ValueError("Multi-turn expectedContext.referenceKind is required")
+    allowed_reference_kinds = {"none", "prior_context_ref", "prior_result_selector"}
+    if reference_kind.strip() not in allowed_reference_kinds:
+        raise ValueError("Multi-turn expectedContext.referenceKind is invalid")
     if not isinstance(constraints, dict):
         raise ValueError("Multi-turn expectedContext.constraints must be an object")
     if turn_index > 0 and (not isinstance(context_ref, str) or not context_ref.strip()):
@@ -346,6 +362,10 @@ def _load_expected_context(raw_turn: dict[str, object], turn_index: int) -> Expe
         raise ValueError("Multi-turn first turn expectedContext.referenceKind must be none")
     if turn_index == 0 and context_ref is not None:
         raise ValueError("Multi-turn first turn expectedContext.contextRef must be omitted")
+    if turn_index > 0 and reference_kind.strip() == "none":
+        raise ValueError(
+            "Multi-turn follow-up expectedContext.referenceKind must use prior context"
+        )
     return ExpectedContext(
         reference_kind=reference_kind.strip(),
         context_ref=context_ref.strip() if isinstance(context_ref, str) else None,
@@ -589,6 +609,8 @@ def _with_multiturn_judge(
             expected_context_transition=(
                 final_turn.expected_context.context_ref or "no prior context required"
             ),
+            tool_facts=_fixture_facts(final_turn.fixtures),
+            expected_outcome_facts=final_turn.expected_outcome.expected_facts,
             final_answer=repository.final_answers[-1] if repository.final_answers else "",
             deterministic_context_passed=result.deterministic_context_passed,
         ),
@@ -609,3 +631,14 @@ def _with_multiturn_judge(
 
 def _fraction(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0.0
+
+
+def _fixture_facts(fixtures: tuple[MultiTurnToolFixture, ...]) -> tuple[str, ...]:
+    facts: list[str] = []
+    for fixture in fixtures:
+        output = _thaw_json(fixture.output)
+        if not isinstance(output, dict):
+            continue
+        for key, value in output.items():
+            facts.append(f"{fixture.tool}.{key}: {json.dumps(value, ensure_ascii=False)}")
+    return tuple(facts)

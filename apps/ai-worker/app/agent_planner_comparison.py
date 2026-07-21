@@ -56,6 +56,16 @@ def build_multiturn_context_comparison(
         "currentDate",
         "timezone",
         "repetitions",
+        "evaluatorSha256",
+        "toolCapabilityCatalogFileSha256",
+        "toolSchemaVersion",
+        "registryInventorySha256",
+        "registryCatalogSha256",
+        "registryEligibleSnapshotSha256",
+        "model",
+        "routerModel",
+        "retrieverVersion",
+        "evaluationSeed",
     )
     for key in metadata_keys:
         if baseline_metadata.get(key) != candidate_metadata.get(key):
@@ -66,7 +76,7 @@ def build_multiturn_context_comparison(
         raise ValueError("Multi-turn reports must contain identical conversations")
     metric_names = (
         "multiTurnContextResolutionRate",
-        "multiTurnContinuationSuccessRate",
+        "multiTurnToolSelectionAccuracy",
     )
     metrics: dict[str, dict[str, float | list[float]]] = {}
     for metric_name in metric_names:
@@ -118,7 +128,7 @@ def build_multiturn_context_snapshot(report: dict[str, object]) -> dict[str, obj
             key: summary[key]
             for key in (
                 "multiTurnContextResolutionRate",
-                "multiTurnContinuationSuccessRate",
+                "multiTurnToolSelectionAccuracy",
                 "partialRate",
                 "inconclusiveRate",
             )
@@ -130,7 +140,7 @@ def _validate_multiturn_report(report: dict[str, object]) -> None:
     summary = _object(report.get("multiTurnContextEvaluation"), "Missing multi-turn summary")
     for key in (
         "multiTurnContextResolutionRate",
-        "multiTurnContinuationSuccessRate",
+        "multiTurnToolSelectionAccuracy",
         "partialRate",
         "inconclusiveRate",
     ):
@@ -176,12 +186,13 @@ def _multiturn_conversation_scores(
                     for item in attempts
                 ]
             ),
-            "multiTurnContinuationSuccessRate": _mean(
+            "multiTurnToolSelectionAccuracy": _mean(
                 [
                     float(
-                        item["deterministicContinuationPassed"] is True
-                        and item.get("judgeVerdict") == "pass"
-                        and item.get("judgeFollowUpDelivered") is True
+                        not any(
+                            reason in {"unexpected_tool", "tool_sequence"}
+                            for reason in _string_list(item.get("failureReasons", []))
+                        )
                     )
                     for item in attempts
                 ]
@@ -189,6 +200,12 @@ def _multiturn_conversation_scores(
         }
         for conversation_id, attempts in grouped.items()
     }
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("Invalid multi-turn failure reasons")
+    return value
 
 
 def build_agent_performance_snapshot(

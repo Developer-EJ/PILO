@@ -31,6 +31,8 @@ class MultiTurnJudgeEvidence:
     conversation_history: tuple[str, ...]
     tool_trace: tuple[str, ...]
     expected_context_transition: str
+    tool_facts: tuple[str, ...]
+    expected_outcome_facts: tuple[str, ...]
     final_answer: str
     deterministic_context_passed: bool
 
@@ -115,6 +117,8 @@ class OpenAiMultiTurnJudge:
                             "conversationHistory": evidence.conversation_history,
                             "toolTrace": evidence.tool_trace,
                             "expectedContextTransition": evidence.expected_context_transition,
+                            "toolFacts": evidence.tool_facts,
+                            "expectedOutcomeFacts": evidence.expected_outcome_facts,
                             "finalAnswer": evidence.final_answer,
                         },
                         ensure_ascii=False,
@@ -163,6 +167,8 @@ _OUTCOME_JUDGE_SCHEMA = {
 _MULTITURN_JUDGE_SYSTEM_PROMPT = (
     "Judge only the supplied evidence. Determine whether the final follow-up correctly "
     "resolves the prior conversational context and delivers the requested result. "
+    "Treat toolFacts and expectedOutcomeFacts as the only factual grounding source: a "
+    "follow-up that omits, contradicts, or invents a material fact must not pass. "
     "Do not infer unstated facts or reward wording."
 )
 _MULTITURN_JUDGE_SCHEMA = {

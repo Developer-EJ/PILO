@@ -27,6 +27,8 @@ def test_multiturn_judge_requires_a_pass_majority_and_deterministic_context_gate
         conversation_history=("Show the meeting report.", "What actions came from it?"),
         tool_trace=("list_meeting_reports", "find_action_items"),
         expected_context_transition="Use the prior report contextRef.",
+        tool_facts=("find_action_items.items: Write the proposal",),
+        expected_outcome_facts=("Write the proposal",),
         final_answer="The follow-up action is to write the proposal.",
         deterministic_context_passed=True,
     )
@@ -42,6 +44,8 @@ def test_multiturn_judge_requires_a_pass_majority_and_deterministic_context_gate
             conversation_history=evidence.conversation_history,
             tool_trace=evidence.tool_trace,
             expected_context_transition=evidence.expected_context_transition,
+            tool_facts=evidence.tool_facts,
+            expected_outcome_facts=evidence.expected_outcome_facts,
             final_answer=evidence.final_answer,
             deterministic_context_passed=False,
         ),
@@ -69,7 +73,7 @@ def test_multiturn_judge_marks_provider_error_or_vote_split_inconclusive() -> No
                 "}"
             )
 
-    evidence = MultiTurnJudgeEvidence(("a", "b"), (), "reference", "answer", True)
+    evidence = MultiTurnJudgeEvidence(("a", "b"), (), "reference", (), (), "answer", True)
 
     provider_error = judge_multiturn_context(evidence, FlakyJudge(("pass", "error", "pass")))
     split = judge_multiturn_context(evidence, FlakyJudge(("pass", "partial", "fail")))

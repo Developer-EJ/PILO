@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -46,7 +47,7 @@ def test_catalog_requires_context_reference_for_follow_up_turn(tmp_path: Path) -
               {
                 "user": "Does it contain action items?",
                 "expectedTools": ["find_action_items"],
-                "expectedContext": {"referenceKind": "prior_tool_result", "constraints": {}},
+                "expectedContext": {"referenceKind": "prior_context_ref", "constraints": {}},
                 "fixtures": [{"tool": "find_action_items", "output": {"items": []}}],
                 "expectedOutcome": {"deliveryRequired": true, "expectedFacts": []}
               }
@@ -90,7 +91,7 @@ def test_catalog_loads_immutable_fixture_outputs_for_a_follow_up_turn(tmp_path: 
                 "user": "Does it contain follow-up actions?",
                 "expectedTools": ["find_action_items"],
                 "expectedContext": {
-                  "referenceKind": "prior_tool_result",
+                  "referenceKind": "prior_context_ref",
                   "contextRef": "report-16",
                   "constraints": {"meetingReportId": "report-16"}
                 },
@@ -136,6 +137,49 @@ def test_frozen_catalog_covers_twelve_conversations_per_non_canvas_domain() -> N
         "sqltoerd": 12,
         "prreview": 12,
     }
+    for conversation in catalog.conversations:
+        follow_up = conversation.turns[1]
+        domain = conversation.conversation_id.split("_", maxsplit=1)[0]
+        if domain == "meeting":
+            if conversation.conversation_id == "meeting_07":
+                assert follow_up.expected_context.reference_kind == "prior_result_selector"
+                assert follow_up.expected_context.constraints == {"roomName": "Room A"}
+            else:
+                assert follow_up.expected_context.reference_kind == "prior_context_ref"
+                assert follow_up.expected_context.context_ref is not None
+                assert follow_up.expected_context.context_ref.startswith("ctx_")
+                assert len(follow_up.expected_context.context_ref) == 28
+        elif domain == "calendar":
+            assert follow_up.expected_context.constraints.keys() == {"start", "end"}
+        elif domain == "board":
+            assert follow_up.expected_context.constraints.keys() == {"issueNumber"}
+        elif domain == "drive":
+            assert follow_up.expected_context.constraints.keys() == {"query"}
+        elif domain == "sqltoerd":
+            assert conversation.context_surface == "sql_erd"
+            assert follow_up.expected_context.constraints.keys() == {"featureQuery"}
+        else:
+            assert conversation.context_surface == "pr_review"
+            assert follow_up.expected_context.constraints.keys() == {"focus"}
+
+
+def test_catalog_follow_up_constraints_use_registered_tool_fields() -> None:
+    root = Path(__file__).parents[1]
+    catalog = load_multiturn_catalog(root / "evals" / "agent_multiturn_context_v1.json")
+    registry = json.loads(
+        (root / "evals" / "tool_retrieval_quality_gate_v1.json").read_text(encoding="utf-8")
+    )
+    schemas = registry["eligibleToolSchemas"]
+
+    for conversation in catalog.conversations:
+        for turn in conversation.turns[1:]:
+            for tool_name in turn.expected_tools:
+                schema = schemas[tool_name]
+                assert set(turn.expected_context.constraints).issubset(schema["properties"]), (
+                    conversation.conversation_id,
+                    tool_name,
+                    turn.expected_context.constraints,
+                )
 
 
 def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> None:
@@ -158,7 +202,7 @@ def test_multiturn_report_emits_only_primary_rates_and_non_raw_diagnostics() -> 
 
     summary = report["multiTurnContextEvaluation"]
     assert summary["multiTurnContextResolutionRate"] == 1.0
-    assert summary["multiTurnContinuationSuccessRate"] == 0.5
+    assert summary["multiTurnToolSelectionAccuracy"] == 0.5
     assert summary["inconclusiveRate"] == 0.5
     assert "conversationHistory" not in str(report)
     assert "toolInput" not in str(report)
@@ -181,7 +225,7 @@ def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn()
                 user="Does it contain action items?",
                 expected_tools=("find_action_items",),
                 expected_context=ExpectedContext(
-                    "prior_tool_result", "report-16", {"contextRef": "report-16"}
+                    "prior_context_ref", "report-16", {"contextRef": "report-16"}
                 ),
                 fixtures=(MultiTurnToolFixture("find_action_items", {"items": []}),),
                 expected_outcome=ExpectedOutcome(True, ()),
@@ -200,6 +244,48 @@ def test_continuation_fails_when_right_tool_uses_context_from_a_different_turn()
     assert not result.deterministic_context_passed
     assert not result.deterministic_continuation_passed
     assert result.failure_reasons == ("context_reference",)
+
+
+def test_continuation_accepts_schema_valid_selector_derived_from_prior_result() -> None:
+    conversation = MultiTurnConversation(
+        conversation_id="board_context_selector",
+        turns=(
+            MultiTurnTurn(
+                user="Find the login issue.",
+                expected_tools=("search_board_issues",),
+                expected_context=ExpectedContext("none", None, {}),
+                fixtures=(
+                    MultiTurnToolFixture(
+                        "search_board_issues",
+                        {"issues": [{"issueNumber": "#1001", "title": "login issue"}]},
+                    ),
+                ),
+                expected_outcome=ExpectedOutcome(True, ("login issue",)),
+            ),
+            MultiTurnTurn(
+                user="Show its details.",
+                expected_tools=("get_board_issue_context",),
+                expected_context=ExpectedContext(
+                    "prior_result_selector", "board_1", {"issueNumber": "#1001"}
+                ),
+                fixtures=(
+                    MultiTurnToolFixture("get_board_issue_context", {"title": "login issue"}),
+                ),
+                expected_outcome=ExpectedOutcome(True, ("login issue",)),
+            ),
+        ),
+    )
+
+    result = evaluate_deterministic_continuation(
+        conversation,
+        (
+            MultiTurnEvaluationToolCall(0, "search_board_issues", {"query": "login"}),
+            MultiTurnEvaluationToolCall(1, "get_board_issue_context", {"issueNumber": "#1001"}),
+        ),
+    )
+
+    assert result.deterministic_context_passed
+    assert result.deterministic_continuation_passed
 
 
 def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
@@ -242,7 +328,7 @@ def test_replay_preserves_prior_tool_result_across_user_turns() -> None:
                 user="Does it contain action items?",
                 expected_tools=("find_action_items",),
                 expected_context=ExpectedContext(
-                    "prior_tool_result",
+                    "prior_context_ref",
                     "ctx_111111111111111111111111",
                     {"contextRef": "ctx_111111111111111111111111"},
                 ),

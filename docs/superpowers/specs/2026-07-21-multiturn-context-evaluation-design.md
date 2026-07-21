@@ -59,7 +59,7 @@ These gates report diagnostic failure categories such as `tool_sequence`, `conte
 
 The Judge evaluates only what cannot be determined from the structured Tool trace: whether free-form references and corrections were understood and whether the user received the relevant follow-up result.
 
-The Judge receives the conversation history, executed Tool trace, deterministic expected context transition, and final answer. Its strict JSON output is:
+The Judge receives the conversation history, executed Tool trace, deterministic expected context transition, final Tool fixture facts, expected outcome facts, and final answer. Its strict JSON output is:
 
 ```json
 {
@@ -78,11 +78,11 @@ It uses a separate fixed model, temperature 0, fixed prompt version, and three i
 The report has exactly two primary metrics:
 
 - **Multi-turn Context Resolution Rate**: deterministic gates pass and the Judge confirms that the current utterance correctly resolves prior conversational context.
-- **Multi-turn Continuation Success Rate**: context resolution passes, the required Tool sequence and constraints are correct, and the Judge confirms that the resulting information was delivered to the user.
+- **Multi-turn Tool Selection Accuracy**: every expected Tool in the fixed multi-turn sequence is selected in order. Tool-input selector correctness remains a deterministic prerequisite for the context metric.
 
 `partialRate`, `inconclusiveRate`, Tool sequence failures, context-reference failures, and constraint failures are diagnostics. Latency and tokens may be retained as non-primary operational diagnostics.
 
-The old broad `taskSuccessRate`, domain success tables, and execution-contract score are removed from the evaluation report and presentation. Tool selection is still observable inside the continuation-success gate and its failure breakdown.
+The old broad `taskSuccessRate`, domain success tables, and execution-contract score are removed from the evaluation report and presentation. Follow-up delivery is retained only as Judge diagnostic evidence, not as a headline metric.
 
 ## Comparison and Claims
 

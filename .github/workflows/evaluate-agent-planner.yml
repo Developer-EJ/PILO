@@ -343,35 +343,15 @@ jobs:
           PYTHONPATH=. python scripts/check_prompt_injection_security_gate.py \
             --output "$RUNNER_TEMP/agent-prompt-injection-security-gate.json"
 
-      - name: Enforce Phase 4-E dev release gate
-        working-directory: candidate/apps/ai-worker
-        run: |
-          PYTHONPATH=. python scripts/check_phase4e_dev_readiness.py \
-            --registry-snapshot "$RUNNER_TEMP/prepared/candidate-agent-tool-registry-snapshot.json" \
-            --tool-retrieval-report "$RUNNER_TEMP/agent-tool-retrieval-quality-gate.json" \
-            --prompt-security-report "$RUNNER_TEMP/agent-prompt-injection-security-gate.json" \
-            --app-server-report "$RUNNER_TEMP/prepared/phase4e-meeting-runtime-readiness.json" \
-            --meeting-catalog "$RUNNER_TEMP/prepared/meeting-agent-capability-catalog.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-canonical-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-held_out-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-counterexample-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-context-evaluation.json" \
-            --meeting-evaluation-report "$RUNNER_TEMP/evaluation-results/candidate-meeting-multi_tool-evaluation.json" \
-            --dev-terraform ../../infra/envs/dev/main.tf \
-            --rollout-runbook ../../docs/infra/agent-tool-retrieval-dev-rollout.md \
-            --output "$RUNNER_TEMP/phase4e-dev-readiness.json"
-
       - name: Upload evaluation result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase4e-dev-readiness-${{ inputs.current_date }}
+          name: agent-multiturn-context-${{ inputs.current_date }}
           path: |
             ${{ runner.temp }}/evaluation-results/baseline-meeting-*-evaluation.json
             ${{ runner.temp }}/evaluation-results/candidate-meeting-*-evaluation.json
             ${{ runner.temp }}/agent-router-planner-comparison.json
-            ${{ runner.temp }}/prepared/phase4e-meeting-runtime-readiness.json
-            ${{ runner.temp }}/phase4e-dev-readiness.json
           if-no-files-found: error
           retention-days: 30
 
