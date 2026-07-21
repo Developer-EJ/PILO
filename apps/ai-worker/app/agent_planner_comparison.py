@@ -187,6 +187,7 @@ def _multiturn_conversation_scores(
                 [
                     float(
                         item["deterministicContextPassed"] is True
+                        and item.get("judgeVerdict") == "pass"
                         and item.get("judgeContextResolved") is True
                     )
                     for item in attempts

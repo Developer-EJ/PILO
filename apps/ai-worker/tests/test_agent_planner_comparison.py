@@ -199,6 +199,15 @@ def test_multiturn_comparison_uses_direct_tool_selection_verdict() -> None:
     assert comparison["metrics"]["multiTurnToolSelectionAccuracy"]["baseline"] == 0.0
 
 
+def test_multiturn_comparison_requires_a_passing_judge_verdict_for_context() -> None:
+    partial_report = multiturn_report()
+    partial_report["results"][0]["judgeVerdict"] = "partial"
+
+    comparison = build_multiturn_context_comparison(partial_report, partial_report)
+
+    assert comparison["metrics"]["multiTurnContextResolutionRate"]["baseline"] == 0.0
+
+
 def test_multiturn_snapshot_preserves_pending_calibration_status() -> None:
     snapshot = build_multiturn_context_snapshot(multiturn_report())
 

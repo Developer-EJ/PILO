@@ -158,10 +158,16 @@ def evaluate_deterministic_continuation(
         tool_name for turn in conversation.turns for tool_name in turn.expected_tools
     )
     executed_tool_sequence = tuple(call.tool_name for call in tool_calls)
-    tool_selection_passed = expected_tool_sequence == executed_tool_sequence
     calls_by_turn: dict[int, list[MultiTurnEvaluationToolCall]] = {}
     for call in tool_calls:
         calls_by_turn.setdefault(call.turn_index, []).append(call)
+    tool_selection_passed = not any(
+        turn_index < 0 or turn_index >= len(conversation.turns) for turn_index in calls_by_turn
+    ) and all(
+        tuple(call.tool_name for call in calls_by_turn.get(turn_index, ()))
+        == turn.expected_tools
+        for turn_index, turn in enumerate(conversation.turns)
+    )
 
     for turn_index, turn in enumerate(conversation.turns):
         calls = calls_by_turn.get(turn_index, [])
@@ -262,6 +268,42 @@ def validate_multiturn_catalog_against_job(
                         "Multi-turn catalog selector is not in registered tool schema: "
                         f"{conversation.conversation_id} {tool_name} "
                         f"{sorted(unknown_selector_fields)}"
+                    )
+            if turn_index > 0:
+                prior_fixtures = conversation.turns[turn_index - 1].fixtures
+                if (
+                    turn.expected_context.reference_kind == "prior_context_ref"
+                    and turn.expected_context.context_ref is not None
+                    and not _fixtures_contain_value(
+                        prior_fixtures, turn.expected_context.context_ref
+                    )
+                ):
+                    raise ValueError(
+                        "Multi-turn catalog context reference is absent from prior fixture: "
+                        f"{conversation.conversation_id} turn {turn_index}"
+                    )
+                if (
+                    turn.expected_context.reference_kind == "prior_result_selector"
+                    and not all(
+                        _fixtures_contain_value(prior_fixtures, value)
+                        for value in turn.expected_context.constraints.values()
+                    )
+                ):
+                    raise ValueError(
+                        "Multi-turn catalog selector is absent from prior fixture: "
+                        f"{conversation.conversation_id} turn {turn_index}"
+                    )
+            if turn_index == len(conversation.turns) - 1:
+                fixture_facts = _fixture_text(turn.fixtures)
+                missing_facts = [
+                    fact
+                    for fact in turn.expected_outcome.expected_facts
+                    if fact not in fixture_facts
+                ]
+                if missing_facts:
+                    raise ValueError(
+                        "Multi-turn catalog expected fact is absent from final fixture: "
+                        f"{conversation.conversation_id} {missing_facts}"
                     )
 
 
@@ -379,7 +421,9 @@ def build_multiturn_context_report(
 ) -> dict[str, object]:
     attempts = len(results)
     context_resolved = sum(
-        result.deterministic_context_passed and result.judge_context_resolved is True
+        result.deterministic_context_passed
+        and result.judge_verdict == "pass"
+        and result.judge_context_resolved is True
         for result in results
     )
     tool_selection_correct = sum(result.tool_selection_passed for result in results)
@@ -534,6 +578,30 @@ def _contains_mapping(actual: Mapping[str, FrozenJson], expected: Mapping[str, F
         elif actual_value != expected_value:
             return False
     return True
+
+
+def _fixtures_contain_value(
+    fixtures: tuple[MultiTurnToolFixture, ...], value: FrozenJson
+) -> bool:
+    return any(_contains_fixture_value(fixture.output, value) for fixture in fixtures)
+
+
+def _contains_fixture_value(value: FrozenJson, expected: FrozenJson) -> bool:
+    if value == expected:
+        return True
+    if isinstance(value, str) and isinstance(expected, str) and expected in value:
+        return True
+    if isinstance(value, Mapping):
+        return any(_contains_fixture_value(item, expected) for item in value.values())
+    if isinstance(value, tuple):
+        return any(_contains_fixture_value(item, expected) for item in value)
+    return False
+
+
+def _fixture_text(fixtures: tuple[MultiTurnToolFixture, ...]) -> str:
+    return json.dumps(
+        _thaw_json(tuple(fixture.output for fixture in fixtures)), ensure_ascii=False
+    )
 
 
 class _MultiTurnReplayRepository:
