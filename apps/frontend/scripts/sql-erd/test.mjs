@@ -8078,7 +8078,7 @@ assert.match(panel, /getSqlErdSourceStatus/);
 assert.match(panel, /autosaveBlockReason: layoutAutosaveBlockReason/);
 assert.match(panel, /aria-live="polite"/);
 assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
-assert.match(panel, /"Save conflict"/);
+assert.match(panel, /"저장 충돌"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -8088,9 +8088,26 @@ assert.match(panel, /getLayoutAutosavePausedBanner/);
 assert.match(panel, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
 assert.match(panel, /write_protocol_mismatch/);
 assert.match(panel, /AutosavePausedBanner/);
-assert.match(panel, /Autosave paused/);
-assert.match(panel, /Reload session/);
-assert.match(panel, /Retry once/);
+assert.match(panel, /자동 저장 중지/);
+assert.match(panel, /세션 다시 불러오기/);
+assert.match(panel, /한 번 다시 시도/);
+for (const englishStatusCopy of [
+  "Loading workspace session",
+  "Reload this session before editing or saving changes.",
+  "Normalized SQL changes will autosave",
+  "Save conflict",
+  "Autosave paused",
+  "Autosaving table layout",
+  "Table layout could not be autosaved. Retrying soon",
+  "Reload session",
+  "Retry once"
+]) {
+  assert.doesNotMatch(
+    panel,
+    new RegExp(englishStatusCopy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    `사용자 노출 상태 문구는 한국어여야 합니다: ${englishStatusCopy}`
+  );
+}
 assert.match(
   panel,
   /const isWriteProtocolMismatch =\s*layoutAutosaveBlockReason === "write_protocol_mismatch"/

@@ -558,7 +558,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const [sessionLoadState, setSessionLoadState] =
     useState<SqlErdSessionLoadState>({
       label: "불러오는 중",
-      message: "Loading workspace session",
+      message: "워크스페이스 세션을 불러오는 중입니다.",
       tone: "neutral"
     });
   const [selectedSqlErdObject, setSelectedSqlErdObject] =
@@ -845,7 +845,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const sourcePanelStatus = isWriteProtocolMismatch
     ? {
         label: "읽기 전용",
-        message: "Reload this session before editing or saving changes.",
+        message: "편집하거나 변경 사항을 저장하기 전에 세션을 다시 불러오세요.",
         tone: "neutral" as const
       }
     : sqlErdViewSession.writeProtocol === "operations_v1" &&
@@ -1132,7 +1132,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setSelectedSqlErdObject({ type: "none" });
         setSessionLoadState({
           label: "저장 대기",
-          message: "Normalized SQL changes will autosave",
+          message: "정규화된 SQL 변경 사항이 자동 저장됩니다.",
           tone: "neutral"
         });
         onApplied(parsedSnapshot);
@@ -1788,7 +1788,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       setSessionLoadState({
         label: "불러오는 중",
-        message: "Loading workspace session",
+        message: "워크스페이스 세션을 불러오는 중입니다.",
         tone: "neutral"
       });
 
@@ -2127,8 +2127,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setSessionLoadState({
             label:
               autosaveBlockReason === "conflict"
-                ? "Save conflict"
-                : "Autosave paused",
+                ? "저장 충돌"
+                : "자동 저장 중지",
             message: getLayoutAutosavePausedBanner(autosaveBlockReason)
               .message,
             tone: "error"
@@ -2274,7 +2274,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
         setSessionLoadState({
           label: "저장 중",
-          message: "Autosaving table layout",
+          message: "테이블 배치를 자동 저장하는 중입니다.",
           tone: "neutral"
         });
 
@@ -2365,7 +2365,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setLayoutAutosaveRetryAttempt((currentAttempt) => currentAttempt + 1);
         setSessionLoadState({
           label: "저장 오류",
-          message: "Table layout could not be autosaved. Retrying soon",
+          message:
+            "테이블 배치를 자동 저장하지 못했습니다. 잠시 후 다시 시도합니다.",
           tone: "error"
         });
       } finally {
@@ -3843,7 +3844,7 @@ function AutosavePausedBanner({
     <div className="max-w-md rounded-md border border-destructive/30 bg-background/95 p-3 text-sm shadow-md backdrop-blur">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-destructive">Autosave paused</p>
+          <p className="font-semibold text-destructive">자동 저장 중지</p>
           <p className="mt-1 leading-5 text-muted-foreground">
             {banner.message}
           </p>
@@ -3855,7 +3856,7 @@ function AutosavePausedBanner({
               onClick={onRetryLayoutAutosaveOnce}
               type="button"
             >
-              Retry once
+              한 번 다시 시도
             </button>
           ) : null}
           <button
@@ -3863,7 +3864,7 @@ function AutosavePausedBanner({
             onClick={onReloadSession}
             type="button"
           >
-            Reload session
+            세션 다시 불러오기
           </button>
         </div>
       </div>
