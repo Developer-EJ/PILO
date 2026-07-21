@@ -3171,11 +3171,11 @@ const manualReloadFailureAction =
 assert.equal(manualReloadFailureAction.kind, "preserve_current");
 assert.equal(
   manualReloadFailureAction.sessionLoadState.label,
-  "Reload failed"
+  "다시 불러오기 실패"
 );
 assert.equal(
   manualReloadFailureAction.sessionLoadState.message,
-  "Workspace session could not be reloaded. Keep editing the current ERD or try reloading again."
+  "Workspace 세션을 다시 불러오지 못했습니다. 현재 ERD를 계속 편집하거나 다시 시도하세요."
 );
 
 const initialReloadFailureAction =
@@ -3188,8 +3188,8 @@ assert.deepEqual(initialReloadFailureAction.selectedSqlErdObject, {
   type: "none"
 });
 assert.deepEqual(initialReloadFailureAction.sessionLoadState, {
-  label: "Sample",
-  message: "Workspace session could not be loaded. Showing the built-in sample instead.",
+  label: "샘플",
+  message: "Workspace 세션을 불러오지 못해 기본 샘플을 표시합니다.",
   tone: "neutral"
 });
 assert.deepEqual(
@@ -3197,9 +3197,9 @@ assert.deepEqual(
     hasLoadedSession: false
   }),
   {
-    label: "Load failed",
+    label: "불러오기 실패",
     message:
-      "Workspace session could not be loaded. Try again or return to the session list.",
+      "Workspace 세션을 불러오지 못했습니다. 다시 시도하거나 세션 목록으로 돌아가세요.",
     tone: "error"
   }
 );
@@ -3351,7 +3351,7 @@ assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(1), 4000);
 assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(4), 30000);
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("conflict"), {
   canRetry: false,
-  message: "Workspace session changed. Reload the latest session before saving this layout.",
+  message: "Workspace 세션이 변경되었습니다. 이 layout을 저장하기 전에 최신 세션을 다시 불러오세요.",
   reason: "conflict"
 });
 assert.deepEqual(
@@ -3369,25 +3369,25 @@ assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("unauthorized"),
   {
     canRetry: false,
-    message: "Sign in again, then reload this SQLtoERD session.",
+    message: "다시 로그인한 뒤 SQLtoERD 세션을 불러오세요.",
     reason: "unauthorized"
   }
 );
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("forbidden"), {
   canRetry: false,
-  message: "You do not have permission to save this SQLtoERD session.",
+  message: "이 SQLtoERD 세션을 저장할 권한이 없습니다.",
   reason: "forbidden"
 });
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("not_found"), {
   canRetry: false,
-  message: "This SQLtoERD session was deleted or cannot be found. Reload the session.",
+  message: "SQLtoERD 세션이 삭제되었거나 존재하지 않습니다. 세션을 다시 불러오세요.",
   reason: "not_found"
 });
 assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("invalid_payload"),
   {
     canRetry: true,
-    message: "Current layout payload cannot be autosaved. Try moving a table again or reload the session.",
+    message: "현재 layout을 자동 저장할 수 없습니다. 테이블을 다시 이동하거나 세션을 다시 불러오세요.",
     reason: "invalid_payload"
   }
 );
@@ -3395,41 +3395,41 @@ assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("unknown_non_transient"),
   {
     canRetry: true,
-    message: "Autosave stopped after a non-retryable API error. Retry once or reload the session.",
+    message: "재시도할 수 없는 오류로 자동 저장이 중지되었습니다. 한 번 다시 시도하거나 세션을 다시 불러오세요.",
     reason: "unknown_non_transient"
   }
 );
 
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("EMPTY_SOURCE"),
-  "Enter at least one CREATE TABLE statement to generate an ERD."
+  "ERD를 생성하려면 CREATE TABLE 문을 하나 이상 입력하세요."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("UNSUPPORTED_DIALECT"),
-  "This SQL dialect is not supported yet. Choose PostgreSQL, MySQL, or SQLite."
+  "지원하지 않는 SQL dialect입니다. PostgreSQL, MySQL 또는 SQLite를 선택하세요."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("NO_CREATE_TABLE"),
-  "SQLtoERD MVP supports CREATE TABLE DDL. Add at least one CREATE TABLE statement."
+  "SQLtoERD는 CREATE TABLE DDL을 지원합니다. CREATE TABLE 문을 하나 이상 추가하세요."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("PARSE_FAILED"),
-  "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again."
+  "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요."
 );
 assert.deepEqual(statusCopyRuntime.getSqlErdSignInRequiredState(), {
-  label: "Sign in",
-  message: "Sign in to save this SQLtoERD session in the Workspace.",
+  label: "로그인 필요",
+  message: "SQLtoERD 세션을 Workspace에 저장하려면 로그인하세요.",
   tone: "error"
 });
 assert.deepEqual(statusCopyRuntime.getSqlErdWorkspaceSaveErrorState(), {
-  label: "Save error",
+  label: "저장 오류",
   message:
-    "Workspace session could not be autosaved. Check your connection; SQL changes will retry automatically.",
+    "Workspace 세션을 자동 저장하지 못했습니다. 연결을 확인하면 SQL 변경 사항을 자동으로 다시 저장합니다.",
   tone: "error"
 });
 const fallbackSourceStatus = {
-  label: "Workspace",
-  message: "Workspace session revision 7",
+  label: "저장됨",
+  message: "Workspace 세션 revision 7",
   tone: "success"
 };
 assert.deepEqual(
@@ -3457,8 +3457,8 @@ assert.deepEqual(
     sourceAutosaveState: "saving"
   }),
   {
-    label: "Waiting",
-    message: "Waiting to parse SQL changes",
+    label: "파싱 대기",
+    message: "SQL 변경 사항을 파싱할 때까지 기다리는 중입니다.",
     tone: "neutral"
   }
 );
@@ -3516,9 +3516,9 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Parse error",
+    label: "파싱 오류",
     message:
-      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+      "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요.",
     tone: "error"
   }
 );
@@ -3534,9 +3534,9 @@ assert.deepEqual(
     sourceAutosaveState: "retrying"
   }),
   {
-    label: "Save error",
+    label: "저장 재시도",
     message:
-      "Workspace session could not be autosaved. Retrying parsed SQL changes automatically.",
+      "Workspace 세션을 자동 저장하지 못해 파싱된 SQL 변경 사항을 다시 저장하는 중입니다.",
     tone: "error"
   }
 );
@@ -3553,8 +3553,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Parsing",
-    message: "Parsing SQL DDL",
+    label: "파싱 중",
+    message: "SQL DDL을 파싱하는 중입니다.",
     tone: "neutral"
   }
 );
@@ -3619,8 +3619,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Waiting",
-    message: "Waiting to parse SQL changes",
+    label: "파싱 대기",
+    message: "SQL 변경 사항을 파싱할 때까지 기다리는 중입니다.",
     tone: "neutral"
   }
 );
@@ -3636,8 +3636,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Parsing",
-    message: "Parsing SQL DDL",
+    label: "파싱 중",
+    message: "SQL DDL을 파싱하는 중입니다.",
     tone: "neutral"
   }
 );
@@ -3656,9 +3656,9 @@ assert.deepEqual(
     sourceAutosaveState: "saving"
   }),
   {
-    label: "Parse error",
+    label: "파싱 오류",
     message:
-      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+      "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요.",
     tone: "error"
   }
 );
@@ -3674,8 +3674,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Unsaved",
-    message: "Parsed SQL changes will autosave",
+    label: "저장 대기",
+    message: "파싱된 SQL 변경 사항을 자동 저장할 예정입니다.",
     tone: "neutral"
   }
 );
@@ -3691,8 +3691,8 @@ assert.deepEqual(
     sourceAutosaveState: "saving"
   }),
   {
-    label: "Saving",
-    message: "Autosaving parsed SQL changes",
+    label: "저장 중",
+    message: "파싱된 SQL 변경 사항을 자동 저장하는 중입니다.",
     tone: "neutral"
   }
 );
@@ -6130,6 +6130,104 @@ assert.deepEqual(
     }
   ]
 );
+const contextualDiffRows = sqlDiffApplyRuntime.createSqlErdSplitDiffRows(
+  Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n"),
+  Array.from({ length: 12 }, (_, index) =>
+    index === 5 ? "line 6 changed" : `line ${index + 1}`
+  ).join("\n")
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdContextualSplitDiffSections(
+    contextualDiffRows,
+    3
+  ),
+  [
+    { endIndex: 2, kind: "collapsed", rowCount: 2, startIndex: 0 },
+    { endIndex: 9, kind: "rows", startIndex: 2 },
+    { endIndex: 12, kind: "collapsed", rowCount: 3, startIndex: 9 }
+  ],
+  "split diff는 변경 행 앞뒤 3줄만 기본 표시한다"
+);
+const nearbyContextualDiffRows =
+  sqlDiffApplyRuntime.createSqlErdSplitDiffRows(
+    Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\n"),
+    Array.from({ length: 10 }, (_, index) =>
+      index === 3 || index === 6
+        ? `line ${index + 1} changed`
+        : `line ${index + 1}`
+    ).join("\n")
+  );
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdContextualSplitDiffSections(
+    nearbyContextualDiffRows,
+    1
+  ),
+  [
+    { endIndex: 2, kind: "collapsed", rowCount: 2, startIndex: 0 },
+    { endIndex: 8, kind: "rows", startIndex: 2 },
+    { endIndex: 10, kind: "collapsed", rowCount: 2, startIndex: 8 }
+  ],
+  "서로 맞닿는 diff 문맥 범위는 하나의 hunk로 합친다"
+);
+const largeDiffPage = sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+  [{ endIndex: 5000, kind: "rows", startIndex: 0 }],
+  0,
+  1200
+);
+assert.deepEqual(
+  largeDiffPage,
+  {
+    pageCount: 5,
+    pageIndex: 0,
+    rowEndOffset: 1200,
+    rowStartOffset: 0,
+    sections: [{ endIndex: 1200, kind: "rows", startIndex: 0 }],
+    totalVisibleRowCount: 5000
+  },
+  "대규모 전체 diff도 한 페이지에서 1,200행을 넘게 렌더링하지 않는다"
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+    [{ endIndex: 5000, kind: "rows", startIndex: 0 }],
+    99,
+    1200
+  ),
+  {
+    pageCount: 5,
+    pageIndex: 4,
+    rowEndOffset: 5000,
+    rowStartOffset: 4800,
+    sections: [{ endIndex: 5000, kind: "rows", startIndex: 4800 }],
+    totalVisibleRowCount: 5000
+  },
+  "마지막 전체 diff 페이지도 남은 행만 렌더링한다"
+);
+const contextualDiffPages = [
+  { endIndex: 100, kind: "collapsed", rowCount: 100, startIndex: 0 },
+  { endIndex: 110, kind: "rows", startIndex: 100 },
+  {
+    endIndex: 5000,
+    kind: "collapsed",
+    rowCount: 4890,
+    startIndex: 110
+  },
+  { endIndex: 5010, kind: "rows", startIndex: 5000 },
+  {
+    endIndex: 5200,
+    kind: "collapsed",
+    rowCount: 190,
+    startIndex: 5010
+  }
+];
+assert.deepEqual(
+  sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+    contextualDiffPages,
+    0,
+    10
+  ).sections,
+  contextualDiffPages.slice(0, 3),
+  "문맥 페이지 경계의 접힌 구간 버튼은 계속 접근할 수 있다"
+);
 const appliedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
   modelSqlPreview
 );
@@ -7640,7 +7738,7 @@ assert.deepEqual(oversizedSourceParseResult, {
 });
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("SOURCE_TOO_LARGE"),
-  "SQL source is too large. Keep it at or below 1 MiB and try again."
+  "SQL source가 너무 큽니다. 1 MiB 이하로 줄인 뒤 다시 시도하세요."
 );
 
 const exactLimitSourceParseResult =
@@ -7876,11 +7974,11 @@ assert.match(statusCopyUtils, /getSqlErdGenerateErrorMessage/);
 assert.match(statusCopyUtils, /getSqlErdSignInRequiredState/);
 assert.match(statusCopyUtils, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(statusCopyUtils, /getSqlErdSourceStatus/);
-assert.match(statusCopyUtils, /CREATE TABLE statement/);
+assert.match(statusCopyUtils, /CREATE TABLE 문/);
 assert.doesNotMatch(statusCopyUtils, /try Generate again/);
-assert.match(statusCopyUtils, /retry automatically/);
+assert.match(statusCopyUtils, /자동으로 다시 저장/);
 assert.match(statusCopyUtils, /"retrying"/);
-assert.match(statusCopyUtils, /Retrying parsed SQL changes automatically/);
+assert.match(statusCopyUtils, /파싱된 SQL 변경 사항을 다시 저장/);
 
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /sessionId=\{sessionId\}/);
@@ -7980,7 +8078,7 @@ assert.match(panel, /getSqlErdSourceStatus/);
 assert.match(panel, /autosaveBlockReason: layoutAutosaveBlockReason/);
 assert.match(panel, /aria-live="polite"/);
 assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
-assert.match(panel, /"Save conflict"/);
+assert.match(panel, /"저장 충돌"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
@@ -7990,9 +8088,39 @@ assert.match(panel, /getLayoutAutosavePausedBanner/);
 assert.match(panel, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
 assert.match(panel, /write_protocol_mismatch/);
 assert.match(panel, /AutosavePausedBanner/);
-assert.match(panel, /Autosave paused/);
-assert.match(panel, /Reload session/);
-assert.match(panel, /Retry once/);
+assert.match(panel, /자동 저장 중지/);
+assert.match(panel, /세션 다시 불러오기/);
+assert.match(panel, /한 번 다시 시도/);
+for (const englishStatusCopy of [
+  "Loading workspace session",
+  "Reload this session before editing or saving changes.",
+  "Normalized SQL changes will autosave",
+  "Save conflict",
+  "Autosave paused",
+  "Autosaving table layout",
+  "Table layout could not be autosaved. Retrying soon",
+  "Reload session",
+  "Retry once",
+  "Acquiring lock",
+  "Read only",
+  "Acquiring the SQL source lock.",
+  "Table layout changes will autosave",
+  "Canvas changes will sync as workspace operations",
+  "Retrying pending SQLtoERD changes",
+  "Workspace session revision",
+  "Workspace에 저장되었습니다."
+]) {
+  assert.doesNotMatch(
+    panel,
+    new RegExp(englishStatusCopy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    `사용자 노출 상태 문구는 한국어여야 합니다: ${englishStatusCopy}`
+  );
+}
+assert.doesNotMatch(
+  panel,
+  /sourceLock\.status === "read_only"[\s\S]{0,80}\? sourceLock\.message/,
+  "source lock 서버 오류 문구를 사용자 상태에 그대로 노출하지 않는다"
+);
 assert.match(
   panel,
   /const isWriteProtocolMismatch =\s*layoutAutosaveBlockReason === "write_protocol_mismatch"/
@@ -8168,6 +8296,8 @@ assert.doesNotMatch(panel, /\bHome\b/);
 assert.doesNotMatch(panel, /function SqlErdHomeNavigationButton/);
 assert.match(panel, /href="\/sql-erd"/);
 assert.match(panel, /세션 목록으로 이동/);
+assert.match(panel, /세션 목록/);
+assert.match(panel, /data-sqltoerd-session-list-footer/);
 assert.match(panel, /function CollapsedSourcePanel/);
 assert.doesNotMatch(panel, /href="\/home"/);
 assert.doesNotMatch(panel, /setIsSourceOpen\(window\.matchMedia/);
@@ -8189,6 +8319,7 @@ assert.match(panel, /languageCompartment\.of/);
 assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
+assert.match(panel, /placeholder\("SQL 문을 입력해주세요"\)/);
 assert.match(panel, /isDialectSelectDisabled=\{/);
 assert.match(panel, /!sourceLock\.canEdit/);
 assert.match(panel, /isSourceTextReadOnly=\{/);
@@ -8244,10 +8375,17 @@ assert.doesNotMatch(panel, /min-h-\[calc\(100vh-8\.5rem\)\]/);
 assert.doesNotMatch(panel, /rounded-lg border bg-background shadow-sm/);
 assert.doesNotMatch(panel, /bg-background\/95 px-4 backdrop-blur/);
 assert.match(panel, /상세 정보/);
-assert.match(panel, /선택 정보/);
+assert.doesNotMatch(panel, /선택 정보/);
+assert.doesNotMatch(panel, /선택된 항목이 없습니다/);
 assert.match(panel, /컬럼 정보/);
 assert.match(panel, /테이블 정보/);
-assert.match(panel, /관계 정보/);
+assert.match(panel, /외래 키 관계 정보/);
+assert.doesNotMatch(
+  panel,
+  /<InspectorSectionTitle>컬럼 정보<\/InspectorSectionTitle>/
+);
+assert.doesNotMatch(panel, /return `\$\{getTableDisplayName\(viewModel\.table\)\}\.\$\{viewModel\.column\.name\}`/);
+assert.doesNotMatch(panel, /return "외래 키 관계"/);
 assert.match(panel, /연결 관계/);
 assert.match(panel, /text-xl font-semibold/);
 assert.match(panel, /text-lg/);
@@ -8266,6 +8404,20 @@ assert.match(
 assert.match(panel, /modelJson=\{sqlErdViewSession\.modelJson\}/);
 assert.match(panel, /layoutJson=\{sqlErdViewSession\.layoutJson\}/);
 assert.match(panel, /label=\{sessionLoadState\.label\}/);
+assert.match(panel, /className="sr-only"/);
+assert.match(panel, /from "@\/components\/ui\/button"/);
+assert.match(panel, /from "@\/components\/ui\/card"/);
+assert.doesNotMatch(panel, /border-emerald-|bg-emerald-|text-emerald-/);
+assert.doesNotMatch(panel, /border-red-|bg-red-|text-red-/);
+assert.match(panel, /전체 SQL 보기/);
+assert.match(panel, /위 .*줄 펼치기|중간 .*줄 펼치기|아래 .*줄 펼치기/);
+assert.match(panel, /const SQL_ERD_DIFF_ROWS_PER_PAGE = 1200/);
+assert.match(
+  panel,
+  /const rows = useMemo\([\s\S]*?createSqlErdSplitDiffRows\(beforeSourceText, afterSourceText\)/
+);
+assert.match(panel, /paginateSqlErdSplitDiffSections/);
+assert.match(panel, /data-sqltoerd-diff-pagination/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
 
 assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
@@ -8395,6 +8547,14 @@ assert.match(
 );
 assert.match(
   canvasSurface,
+  /onFit: \(\) => \{[\s\S]*?fitSqlErdCanvas\(editor, \{[\s\S]*?enforceMinimumReadableZoom: false[\s\S]*?\}\);/
+);
+assert.match(
+  canvasSurface,
+  /const handleFitCanvas = useCallback\([\s\S]*?fitSqlErdCanvas\(editor, \{[\s\S]*?enforceMinimumReadableZoom: false[\s\S]*?\}\);/
+);
+assert.match(
+  canvasSurface,
   /const handleMount = useCallback\([\s\S]*?editor\.setCurrentTool\("select\.idle"\);[\s\S]*?resetSqlErdCanvas\(editor, shapes\);/
 );
 assert.match(canvasSurface, /selectedColumnId/);
@@ -8480,7 +8640,7 @@ assert.doesNotMatch(tableShape, /text-overflow/);
 assert.match(panel, /data-sqltoerd-inspector-toggle/);
 assert.match(
   panel,
-  /className="flex items-start justify-between gap-3 border-b px-5 py-5"[\s\S]*?data-sqltoerd-inspector-summary/
+  /className="flex min-h-16 items-start justify-between gap-3 border-b border-border bg-card px-5 py-4"[\s\S]*?data-sqltoerd-inspector-summary/
 );
 assert.match(
   panel,
@@ -8488,7 +8648,7 @@ assert.match(
 );
 assert.match(
   panel,
-  /className="inline-flex size-8[\s\S]*?data-sqltoerd-inspector-toggle/
+  /<Button[\s\S]*?data-sqltoerd-inspector-toggle/
 );
 assert.doesNotMatch(panel, /className="absolute top-1\/2 -left-/);
 
@@ -8703,7 +8863,7 @@ assert.match(panel, /대상 컬럼/);
 assert.match(panel, /관계 의미/);
 assert.doesNotMatch(panel, /Workspace source operation/);
 assert.doesNotMatch(panel, /Workspace operation/);
-assert.match(panel, /Workspace에 저장되었습니다/);
+assert.match(panel, /워크스페이스에 저장되었습니다/);
 assert.doesNotMatch(panel, /기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로/);
 assert.match(panel, /변경 전/);
 assert.match(panel, /변경 후/);

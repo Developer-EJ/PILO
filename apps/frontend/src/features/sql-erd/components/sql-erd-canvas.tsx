@@ -1210,7 +1210,7 @@ function SqlErdCanvasShapeSync({
     syncSqlErdCanvasContent({
       contentKey: canvasContentKey,
       onFit: () => {
-        fitSqlErdCanvas(editor);
+        fitSqlErdCanvas(editor, { enforceMinimumReadableZoom: false });
       },
       scheduleFit: (callback) => window.requestAnimationFrame(callback),
       state: contentSyncStateRef.current,
@@ -3656,7 +3656,7 @@ export function SqlErdCanvas({
     const editor = editorRef.current;
 
     if (editor) {
-      fitSqlErdCanvas(editor);
+      fitSqlErdCanvas(editor, { enforceMinimumReadableZoom: false });
     }
   }, []);
 

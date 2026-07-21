@@ -15,37 +15,37 @@ export function getSqlErdGenerateErrorMessage(
   errorCode: SqlErdGenerateErrorCode | string
 ) {
   if (errorCode === "EMPTY_SOURCE") {
-    return "Enter at least one CREATE TABLE statement to generate an ERD.";
+    return "ERD를 생성하려면 CREATE TABLE 문을 하나 이상 입력하세요.";
   }
 
   if (errorCode === "UNSUPPORTED_DIALECT") {
-    return "This SQL dialect is not supported yet. Choose PostgreSQL, MySQL, or SQLite.";
+    return "지원하지 않는 SQL dialect입니다. PostgreSQL, MySQL 또는 SQLite를 선택하세요.";
   }
 
   if (errorCode === "NO_CREATE_TABLE") {
-    return "SQLtoERD MVP supports CREATE TABLE DDL. Add at least one CREATE TABLE statement.";
+    return "SQLtoERD는 CREATE TABLE DDL을 지원합니다. CREATE TABLE 문을 하나 이상 추가하세요.";
   }
 
   if (errorCode === "SOURCE_TOO_LARGE") {
-    return "SQL source is too large. Keep it at or below 1 MiB and try again.";
+    return "SQL source가 너무 큽니다. 1 MiB 이하로 줄인 뒤 다시 시도하세요.";
   }
 
-  return "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.";
+  return "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요.";
 }
 
 export function getSqlErdSignInRequiredState(): SqlErdSessionLoadState {
   return {
-    label: "Sign in",
-    message: "Sign in to save this SQLtoERD session in the Workspace.",
+    label: "로그인 필요",
+    message: "SQLtoERD 세션을 Workspace에 저장하려면 로그인하세요.",
     tone: "error"
   };
 }
 
 export function getSqlErdWorkspaceSaveErrorState(): SqlErdSessionLoadState {
   return {
-    label: "Save error",
+    label: "저장 오류",
     message:
-      "Workspace session could not be autosaved. Check your connection; SQL changes will retry automatically.",
+      "Workspace 세션을 자동 저장하지 못했습니다. 연결을 확인하면 SQL 변경 사항을 자동으로 다시 저장합니다.",
     tone: "error"
   };
 }
@@ -71,7 +71,7 @@ export function getSqlErdSourceStatus({
 }): SqlErdSessionLoadState {
   if (parse.status === "error") {
     return {
-      label: "Parse error",
+      label: "파싱 오류",
       message: getSqlErdGenerateErrorMessage(
         parse.error?.code ?? "PARSE_FAILED"
       ),
@@ -81,16 +81,16 @@ export function getSqlErdSourceStatus({
 
   if (parse.status === "parsing") {
     return {
-      label: "Parsing",
-      message: "Parsing SQL DDL",
+      label: "파싱 중",
+      message: "SQL DDL을 파싱하는 중입니다.",
       tone: "neutral"
     };
   }
 
   if (isDraftDirty) {
     return {
-      label: "Waiting",
-      message: "Waiting to parse SQL changes",
+      label: "파싱 대기",
+      message: "SQL 변경 사항을 파싱할 때까지 기다리는 중입니다.",
       tone: "neutral"
     };
   }
@@ -101,25 +101,25 @@ export function getSqlErdSourceStatus({
 
   if (sourceAutosaveState === "retrying") {
     return {
-      label: "Save error",
+      label: "저장 재시도",
       message:
-        "Workspace session could not be autosaved. Retrying parsed SQL changes automatically.",
+        "Workspace 세션을 자동 저장하지 못해 파싱된 SQL 변경 사항을 다시 저장하는 중입니다.",
       tone: "error"
     };
   }
 
   if (sourceAutosaveState === "saving") {
     return {
-      label: "Saving",
-      message: "Autosaving parsed SQL changes",
+      label: "저장 중",
+      message: "파싱된 SQL 변경 사항을 자동 저장하는 중입니다.",
       tone: "neutral"
     };
   }
 
   if (sourceAutosaveState === "pending") {
     return {
-      label: "Unsaved",
-      message: "Parsed SQL changes will autosave",
+      label: "저장 대기",
+      message: "파싱된 SQL 변경 사항을 자동 저장할 예정입니다.",
       tone: "neutral"
     };
   }

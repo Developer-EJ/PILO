@@ -97,6 +97,22 @@ export type SqlErdSplitDiffRow = {
   before: SqlErdSplitDiffCell;
 };
 
+export type SqlErdContextualSplitDiffSection = {
+  endIndex: number;
+  kind: "collapsed" | "rows";
+  rowCount?: number;
+  startIndex: number;
+};
+
+export type SqlErdPaginatedSplitDiffSections = {
+  pageCount: number;
+  pageIndex: number;
+  rowEndOffset: number;
+  rowStartOffset: number;
+  sections: SqlErdContextualSplitDiffSection[];
+  totalVisibleRowCount: number;
+};
+
 export function createSqlErdNormalizedSqlPreview({
   layoutJson,
   modelJson,
@@ -275,6 +291,167 @@ export function createSqlErdSplitDiffRows(
 
   flushChangedRows();
   return rows;
+}
+
+export function createSqlErdContextualSplitDiffSections(
+  rows: readonly SqlErdSplitDiffRow[],
+  contextLines = 3
+): SqlErdContextualSplitDiffSection[] {
+  const normalizedContextLines = Math.max(0, Math.floor(contextLines));
+  const changedRowIndexes = rows.flatMap((row, index) =>
+    row.before.kind === "unchanged" && row.after.kind === "unchanged"
+      ? []
+      : [index]
+  );
+
+  if (!changedRowIndexes.length) {
+    return rows.length
+      ? [{ endIndex: rows.length, kind: "rows", startIndex: 0 }]
+      : [];
+  }
+
+  const visibleRanges = changedRowIndexes.reduce<
+    Array<{ endIndex: number; startIndex: number }>
+  >((ranges, changedRowIndex) => {
+    const nextRange = {
+      endIndex: Math.min(
+        rows.length,
+        changedRowIndex + normalizedContextLines + 1
+      ),
+      startIndex: Math.max(0, changedRowIndex - normalizedContextLines)
+    };
+    const previousRange = ranges.at(-1);
+
+    if (previousRange && nextRange.startIndex <= previousRange.endIndex) {
+      previousRange.endIndex = Math.max(
+        previousRange.endIndex,
+        nextRange.endIndex
+      );
+      return ranges;
+    }
+
+    ranges.push(nextRange);
+    return ranges;
+  }, []);
+  const sections: SqlErdContextualSplitDiffSection[] = [];
+  let cursor = 0;
+
+  for (const range of visibleRanges) {
+    if (cursor < range.startIndex) {
+      sections.push({
+        endIndex: range.startIndex,
+        kind: "collapsed",
+        rowCount: range.startIndex - cursor,
+        startIndex: cursor
+      });
+    }
+
+    sections.push({
+      endIndex: range.endIndex,
+      kind: "rows",
+      startIndex: range.startIndex
+    });
+    cursor = range.endIndex;
+  }
+
+  if (cursor < rows.length) {
+    sections.push({
+      endIndex: rows.length,
+      kind: "collapsed",
+      rowCount: rows.length - cursor,
+      startIndex: cursor
+    });
+  }
+
+  return sections;
+}
+
+export function paginateSqlErdSplitDiffSections(
+  sections: readonly SqlErdContextualSplitDiffSection[],
+  requestedPageIndex: number,
+  maxRowsPerPage: number
+): SqlErdPaginatedSplitDiffSections {
+  const normalizedMaxRowsPerPage = Math.max(
+    1,
+    Math.floor(Number.isFinite(maxRowsPerPage) ? maxRowsPerPage : 1)
+  );
+  const totalVisibleRowCount = sections.reduce(
+    (total, section) =>
+      section.kind === "rows"
+        ? total + Math.max(0, section.endIndex - section.startIndex)
+        : total,
+    0
+  );
+  const pageCount = Math.max(
+    1,
+    Math.ceil(totalVisibleRowCount / normalizedMaxRowsPerPage)
+  );
+  const normalizedRequestedPageIndex = Math.floor(
+    Number.isFinite(requestedPageIndex) ? requestedPageIndex : 0
+  );
+  const pageIndex = Math.min(
+    pageCount - 1,
+    Math.max(0, normalizedRequestedPageIndex)
+  );
+  const rowStartOffset = pageIndex * normalizedMaxRowsPerPage;
+  const rowEndOffset = Math.min(
+    totalVisibleRowCount,
+    rowStartOffset + normalizedMaxRowsPerPage
+  );
+  const pageSections: SqlErdContextualSplitDiffSection[] = [];
+  let visibleRowOffset = 0;
+
+  for (const section of sections) {
+    if (section.kind === "collapsed") {
+      if (
+        visibleRowOffset >= rowStartOffset &&
+        visibleRowOffset <= rowEndOffset
+      ) {
+        pageSections.push(section);
+      }
+      continue;
+    }
+
+    const sectionVisibleStartOffset = visibleRowOffset;
+    const sectionVisibleRowCount = Math.max(
+      0,
+      section.endIndex - section.startIndex
+    );
+    const sectionVisibleEndOffset =
+      sectionVisibleStartOffset + sectionVisibleRowCount;
+    const intersectionStartOffset = Math.max(
+      rowStartOffset,
+      sectionVisibleStartOffset
+    );
+    const intersectionEndOffset = Math.min(
+      rowEndOffset,
+      sectionVisibleEndOffset
+    );
+
+    if (intersectionStartOffset < intersectionEndOffset) {
+      const sectionOffset =
+        intersectionStartOffset - sectionVisibleStartOffset;
+      pageSections.push({
+        endIndex:
+          section.startIndex +
+          sectionOffset +
+          (intersectionEndOffset - intersectionStartOffset),
+        kind: "rows",
+        startIndex: section.startIndex + sectionOffset
+      });
+    }
+
+    visibleRowOffset = sectionVisibleEndOffset;
+  }
+
+  return {
+    pageCount,
+    pageIndex,
+    rowEndOffset,
+    rowStartOffset,
+    sections: pageSections,
+    totalVisibleRowCount
+  };
 }
 
 function splitSqlDiffLines(value: string) {
