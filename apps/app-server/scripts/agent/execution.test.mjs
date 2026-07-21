@@ -1748,6 +1748,31 @@ for (const testCase of [
 
 {
   const { service, loggingService } = createService({
+    completedToolNames: [],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.run.errorCode, "AGENT_TOOL_CHAIN_MISMATCH");
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "completeToolStepAndAdvance"
+    ),
+    false,
+    "an out-of-order tool must not execute"
+  );
+}
+
+{
+  const { service, loggingService } = createService({
     completedToolNames: ["list_calendar_events"],
     registryState: { name: "update_calendar_event" },
     planner: plannerOutput({

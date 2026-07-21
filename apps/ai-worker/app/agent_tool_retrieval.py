@@ -755,6 +755,8 @@ def _valid_v3_capability_contract(
     descriptors: tuple[ToolCapabilityDescriptor, ...],
     eligible_tool_schemas: dict[str, dict[str, object]],
 ) -> bool:
+    if not _capability_chains_are_acyclic(capabilities):
+        return False
     descriptor_by_tool_name = {descriptor.tool_name: descriptor for descriptor in descriptors}
     capability_ids = {capability.capability_id for capability in capabilities}
     for capability in capabilities:
@@ -823,6 +825,38 @@ def _valid_v3_capability_contract(
         ):
             return False
     return True
+
+
+def _capability_chains_are_acyclic(
+    capabilities: tuple[CapabilityDefinition, ...],
+) -> bool:
+    edges: dict[str, set[str]] = {}
+    for capability in capabilities:
+        if capability.availability != "supported":
+            continue
+        for source, target in zip(
+            capability.tool_names,
+            capability.tool_names[1:],
+            strict=False,
+        ):
+            edges.setdefault(source, set()).add(target)
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(tool_name: str) -> bool:
+        if tool_name in visiting:
+            return False
+        if tool_name in visited:
+            return True
+        visiting.add(tool_name)
+        if not all(visit(target) for target in edges.get(tool_name, set())):
+            return False
+        visiting.remove(tool_name)
+        visited.add(tool_name)
+        return True
+
+    return all(visit(tool_name) for tool_name in edges)
 
 
 def _parse_descriptor(value: object, *, strict_v2: bool = False) -> ToolCapabilityDescriptor:

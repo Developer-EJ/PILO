@@ -21,6 +21,7 @@ from app.agent_processor import (
     AgentRoutingRequest,
     AgentRunContext,
     AgentRunProcessor,
+    NextToolDecision,
     OpenAiAgentPlannerClient,
     OpenAiAgentRouterClient,
     _agent_planner_schema,
@@ -28,6 +29,7 @@ from app.agent_processor import (
     _agent_planner_user_prompt,
     _agent_router_schema,
     _agent_router_user_prompt,
+    compute_next_tool_decision,
     normalize_agent_planner_decision,
     normalize_agent_routing_decision,
     parse_agent_planner_output,
@@ -1432,6 +1434,102 @@ def test_llm_router_then_planner_selects_calendar_tool() -> None:
         "catalogSha256": tool_capability_catalog(tools)["sha256"],
         "selectedToolCount": 1,
     }
+    assert repository.completed_steps[0][2]["nextToolDecision"] == {
+        "version": "agent-next-tool-decision:v1",
+        "status": "allowed",
+        "candidateCount": 1,
+        "reasonCode": "single_capability_frontier",
+        "boundToolName": "list_calendar_events",
+        "requiresConfirmation": False,
+        "completedToolCount": 0,
+        "contextTargetDomain": None,
+        "contextStateSha256": None,
+    }
+
+
+def test_single_next_tool_is_code_bound_when_planner_selects_another_tool() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="update_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
+    ]
+    repository = FakeAgentRunRepository()
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="update_calendar_event",
+            tool_input={"start": "2026-07-20", "end": "2026-07-20"},
+        )
+    )
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        FakeRouterClient(),
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=calendar_list_update_catalog(tools))
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert repository.completed_steps[0][2]["toolName"] == "list_calendar_events"
+    assert planner_client.requests[0].next_tool_decision.bound_tool_name == ("list_calendar_events")
+
+
+def test_same_prompt_cycle_reuses_prior_routing_after_prerequisite() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="update_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+            inputSchema={
+                "type": "object",
+                "required": ["eventId", "changes"],
+                "properties": {
+                    "eventId": {"type": "string"},
+                    "changes": {"type": "object"},
+                },
+            },
+        ),
+    ]
+    prior_routing = routing_decision(capability_ids=("calendar.events.update",))
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            planning_context='tool list_calendar_events: {"items":[]}',
+            latest_routing=prior_routing,
+        )
+    )
+    router_client = FakeRouterClient(error=AssertionError("router must not be called"))
+    planner_client = FakePlannerClient(
+        decision=planner_decision(
+            tool_name="list_calendar_events",
+            tool_input={
+                "eventId": "7",
+                "changes": {"title": "updated"},
+            },
+        )
+    )
+    processor = create_processor(
+        repository,
+        planner_client,
+        FakeExecutionHandoffClient(),
+        router_client,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=calendar_list_update_catalog(tools))
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert router_client.requests == []
+    assert repository.completed_steps[0][2]["toolName"] == "update_calendar_event"
+    assert repository.completed_steps[0][2]["nextToolDecision"]["completedToolCount"] == 1
 
 
 def test_llm_router_low_confidence_asks_without_planner_or_handoff() -> None:
@@ -1652,10 +1750,70 @@ def test_routed_multistep_chain_ignores_previous_user_cycle_results() -> None:
         ),
     )
 
-    assert [tool.name for tool in pending] == [
-        "list_calendar_events",
-        "update_calendar_event",
+    assert [tool.name for tool in pending] == ["list_calendar_events"]
+
+
+def test_next_tool_decision_rejects_out_of_order_terminal_result() -> None:
+    tools = [
+        tool_snapshot(),
+        tool_snapshot(
+            name="update_calendar_event",
+            riskLevel="medium",
+            executionMode="confirmation_required",
+        ),
     ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=calendar_list_update_catalog(tools))
+    )
+    routing = routing_decision(capability_ids=("calendar.events.update",))
+    selected = select_agent_planner_tools_for_routing(job, routing)
+
+    with pytest.raises(AgentRouterOutputError, match="before its prerequisite"):
+        compute_next_tool_decision(
+            job,
+            routing,
+            selected,
+            'tool update_calendar_event: {"updated":true}',
+        )
+
+
+def test_next_tool_decision_rejects_completed_tool_replay() -> None:
+    tools = [tool_snapshot()]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+    routing = routing_decision()
+    selected = select_agent_planner_tools_for_routing(job, routing)
+
+    with pytest.raises(AgentRouterOutputError, match="completed tool replay"):
+        compute_next_tool_decision(
+            job,
+            routing,
+            selected,
+            ('tool list_calendar_events: {"items":[]}\n' 'tool list_calendar_events: {"items":[]}'),
+        )
+
+
+def test_next_tool_decision_rejects_cross_domain_resolved_target() -> None:
+    tools = [tool_snapshot()]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=tool_capability_catalog(tools))
+    )
+    routing = routing_decision()
+    selected = select_agent_planner_tools_for_routing(job, routing)
+    state = agent_context_state(1, domain="meeting", resource_type="meeting_report")
+    context_ref = state["resultSets"][0]["contextRef"]
+    resolution = resolve_agent_context(str(context_ref), state)
+    assert resolution.status == "resolved"
+
+    with pytest.raises(AgentRouterOutputError, match="outside the routed"):
+        compute_next_tool_decision(
+            job,
+            routing,
+            selected,
+            "",
+            context_resolution=resolution,
+        )
 
 
 def test_llm_router_rejects_schema_budget_overflow() -> None:
@@ -4475,6 +4633,35 @@ def test_agent_planner_schema_is_strict_closed_schema() -> None:
         "tool_candidate",
         "needs_clarification",
     ]
+    assert _agent_planner_schema(bound_tool_name="list_calendar_events")["properties"][
+        "toolName"
+    ] == {"type": "null"}
+
+
+def test_bound_next_tool_planner_payload_is_input_only() -> None:
+    tool = parse_agent_run_job_payload(agent_payload()).tools[0]
+    next_tool = NextToolDecision(
+        status="allowed",
+        tools=(tool,),
+        completed_tool_names=tuple(),
+        reason_code="single_capability_frontier",
+        bound_tool_name=tool.name,
+        requires_confirmation=False,
+    )
+    request = AgentPlanningRequest(
+        run_id=RUN_ID,
+        prompt="오늘 일정 보여줘",
+        timezone="Asia/Seoul",
+        current_date="2026-07-21",
+        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
+        tools=(tool,),
+        next_tool_decision=next_tool,
+    )
+
+    payload = json.loads(_agent_planner_user_prompt(request))
+
+    assert payload["nextToolDecision"]["boundToolName"] == tool.name
+    assert payload["nextToolDecision"]["candidateCount"] == 1
 
 
 def test_sql_erd_planner_contract_uses_structured_schema_without_raw_ddl() -> None:

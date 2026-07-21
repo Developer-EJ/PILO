@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from app.agent_processor import (
     AgentExecutionHandoffClient,
+    AgentRoutingDecision,
     AgentRunContext,
     AgentRunJob,
     AgentRunProcessor,
@@ -1805,6 +1806,7 @@ class PgAgentRunRepository:
               latest_planner.output_json->>'toolName' AS latest_planner_tool_name,
               latest_planner.output_json#>>'{decisionTrace,correlationId}'
                 AS latest_decision_correlation_id,
+              latest_planner.output_json->'toolRouting' AS latest_tool_routing,
               CASE
                 WHEN outbox.planning_started_at IS NULL THEN NULL
                 ELSE GREATEST(
@@ -2131,6 +2133,31 @@ class PgAgentRunRepository:
                         context_state_sources.append(PromptSecuritySource("context_state", value))
         planning_context = _build_bounded_agent_planning_context(memory)
         included_lines = set(planning_context.splitlines())
+        latest_tool_routing = row.get("latest_tool_routing")
+        latest_routing: AgentRoutingDecision | None = None
+        if isinstance(latest_tool_routing, dict):
+            domains = latest_tool_routing.get("domains")
+            capability_ids = latest_tool_routing.get("capabilityIds")
+            confidence = latest_tool_routing.get("confidence")
+            if (
+                latest_tool_routing.get("status") == "routed"
+                and isinstance(domains, list)
+                and domains
+                and all(isinstance(item, str) and item for item in domains)
+                and isinstance(capability_ids, list)
+                and capability_ids
+                and all(isinstance(item, str) and item for item in capability_ids)
+                and confidence in {"low", "medium", "high"}
+            ):
+                latest_routing = AgentRoutingDecision(
+                    status="routed",
+                    domains=tuple(domains),
+                    capability_ids=tuple(capability_ids),
+                    intent_summary="",
+                    confidence=str(confidence),
+                    clarification_question=None,
+                    unsupported_reason=None,
+                )
         return AgentRunContext(
             run_id=str(row["id"]),
             workspace_id=str(row["workspace_id"]),
@@ -2150,6 +2177,7 @@ class PgAgentRunRepository:
                 if row.get("latest_decision_correlation_id") is not None
                 else None
             ),
+            latest_routing=latest_routing,
             queue_wait_ms=(
                 int(row["queue_wait_ms"]) if row.get("queue_wait_ms") is not None else None
             ),

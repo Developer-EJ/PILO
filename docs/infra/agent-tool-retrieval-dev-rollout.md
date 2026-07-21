@@ -32,6 +32,9 @@
 
 Worker step의 `outputSummary.toolRouting`에는 mode, Router status, domains, capabilityIds, confidence,
 catalog version/SHA와 selected Tool count만 기록한다. raw 발화, tool input, resource ID, token은 기록하지 않는다.
+`outputSummary.nextToolDecision`에는 `agent-next-tool-decision:v1`, frontier 후보 수, reason code,
+단일 후보의 bound Tool 이름, confirmation 여부, completed Tool 수만 기록한다. 같은 prompt cycle에서
+`decisionTrace.router.reusedWithinPromptCycle=true`이면 Router provider를 다시 호출하지 않은 경로다.
 catalog integrity failure에서도 형식이 유효한 수신 catalog version/SHA는 trace에 남긴다. 형식 자체가
 유효하지 않은 값은 trace에 기록하지 않는다.
 

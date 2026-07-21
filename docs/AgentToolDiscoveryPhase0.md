@@ -2,7 +2,8 @@
 
 > 관련 Issue: [#1398](https://github.com/Developer-EJ/PILO/issues/1398),
 > [#1399](https://github.com/Developer-EJ/PILO/issues/1399),
-> [#1663](https://github.com/Developer-EJ/PILO/issues/1663)
+> [#1663](https://github.com/Developer-EJ/PILO/issues/1663),
+> [#1662](https://github.com/Developer-EJ/PILO/issues/1662)
 
 ## 목적과 경계
 
@@ -69,6 +70,22 @@ outbox가 immutable catalog snapshot을 Worker에 전달한다. Worker evaluator
 `--shadow-retrieval`은 metadata retrieval과 optional semantic rerank adapter로 topK schema를 만들고,
 낮은 confidence에서는 legacy all-eligible schema로 fallback한다. production planner 실행은 이 단계에서
 shortlist로 전환하지 않는다.
+
+## Capability chain dispatch
+
+`llm_router` mode에서는 Router가 고른 capability와 현재 사용자 발화 이후 성공한 Tool 결과로
+`agent-next-tool-decision:v1` frontier를 계산한다. 각 capability chain의 첫 미완료 Tool만 후보가 되며,
+선행 Tool이 없는 후속 결과, 완료 Tool 재호출, chain 밖 Tool, surface 밖 Tool은 fail-closed한다.
+
+후보가 하나이면 Planner response schema의 `toolName`은 `null`로 고정하고 Worker가 계산된 Tool을
+바인딩한다. 후보가 여러 개이면 frontier 후보 schema만 노출한다. App Server는 자동 실행 직전과
+confirmation 승인 직전에 같은 chain 순서를 다시 검사한다. catalog validator는 chain graph의 순환도
+거부한다.
+
+같은 사용자 prompt cycle에서 Tool 결과 뒤 이어지는 planning turn은 직전의 검증된 `toolRouting`을
+재사용한다. Resolver target domain이 routed capability와 다르거나 제외 constraint와 충돌하면
+frontier 계산 자체를 거부하고, 정상 target/constraint는 canonical fingerprint로 결정 입력에 포함한다.
+새 사용자 발화 이후에는 완료 상태와 routing을 새 cycle로 계산한다.
 
 ## 평가와 privacy
 

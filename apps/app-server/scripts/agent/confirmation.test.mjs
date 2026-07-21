@@ -804,6 +804,41 @@ function errorMessage(error) {
 {
   const state = {
     runs: [createRun()],
+    confirmations: [
+      createConfirmation({
+        tool_name: "update_calendar_event",
+        plan_json: createUpdatePlan()
+      })
+    ],
+    completedToolNames: [],
+    latestPlannerStep: {
+      output_json: {
+        toolRouting: {
+          capabilityIds: ["calendar.events.update"]
+        }
+      }
+    }
+  };
+  const { service, toolRegistryService } = createService(state);
+
+  const result = await service.approveConfirmation(
+    USER_ID,
+    WORKSPACE_ID,
+    RUN_ID,
+    CONFIRMATION_ID,
+    undefined
+  );
+  assert.equal(result.run.status, "failed");
+  assert.equal(
+    toolRegistryService.calls.some((call) => call.method === "execute"),
+    false,
+    "approval must revalidate capability prerequisites before execution"
+  );
+}
+
+{
+  const state = {
+    runs: [createRun()],
     confirmations: [createConfirmation()],
     toolCallLimitReached: true
   };

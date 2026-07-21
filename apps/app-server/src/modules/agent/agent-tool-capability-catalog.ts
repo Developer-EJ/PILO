@@ -258,6 +258,45 @@ export function isTerminalAgentCapabilityTool(
   );
 }
 
+export function getNextAgentCapabilityToolNames(
+  capabilityIds: readonly string[],
+  completedToolNames: readonly string[] = []
+): readonly string[] | null {
+  if (capabilityIds.length === 0) return null;
+  const chains = capabilityIds.map(getAgentCapabilityToolNames);
+  if (chains.some((chain) => chain === null || chain.length === 0)) return null;
+
+  const completed = new Set(completedToolNames);
+  if (completed.size !== completedToolNames.length) return null;
+  const allowed = new Set<string>();
+  for (const chain of chains) {
+    if (!chain) return null;
+    for (let index = 0; index < chain.length; index += 1) {
+      const toolName = chain[index];
+      if (completed.has(toolName)) {
+        if (!chain.slice(0, index).every((name) => completed.has(name))) {
+          return null;
+        }
+      }
+    }
+    const nextToolName = chain.find((toolName) => !completed.has(toolName));
+    if (nextToolName) allowed.add(nextToolName);
+  }
+  return [...allowed].sort();
+}
+
+export function isNextAgentCapabilityTool(
+  capabilityIds: readonly string[],
+  toolName: string,
+  completedToolNames: readonly string[] = []
+): boolean {
+  const allowed = getNextAgentCapabilityToolNames(
+    capabilityIds,
+    completedToolNames
+  );
+  return allowed !== null && allowed.includes(toolName);
+}
+
 export function buildAgentToolCapabilityCatalog(
   definitions: AgentToolDefinition<unknown>[]
 ): AgentToolCapabilityCatalogSnapshot {
@@ -584,6 +623,7 @@ export function validateAgentToolCapabilityCatalog(
       }
     }
   }
+  validateCapabilityChainAcyclic(capabilities);
   const capabilityById = new Map(
     capabilities.map((capability) => [capability.id, capability])
   );
@@ -741,6 +781,35 @@ export function validateAgentToolCapabilityCatalog(
   ) {
     throw new Error("Agent capability catalog contains an invalid tool descriptor");
   }
+}
+
+function validateCapabilityChainAcyclic(
+  capabilities: AgentCapabilityDefinition[]
+): void {
+  const edges = new Map<string, Set<string>>();
+  for (const capability of capabilities) {
+    if (capability.availability !== "supported") continue;
+    for (let index = 0; index < capability.toolNames.length - 1; index += 1) {
+      const from = capability.toolNames[index];
+      const to = capability.toolNames[index + 1];
+      const targets = edges.get(from) ?? new Set<string>();
+      targets.add(to);
+      edges.set(from, targets);
+    }
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (toolName: string): void => {
+    if (visiting.has(toolName)) {
+      throw new Error("Agent capability catalog contains a cyclic tool chain");
+    }
+    if (visited.has(toolName)) return;
+    visiting.add(toolName);
+    for (const target of edges.get(toolName) ?? []) visit(target);
+    visiting.delete(toolName);
+    visited.add(toolName);
+  };
+  for (const toolName of edges.keys()) visit(toolName);
 }
 
 function sameStringSet(

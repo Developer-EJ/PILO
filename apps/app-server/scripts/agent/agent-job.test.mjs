@@ -18,6 +18,8 @@ const { AgentDomainFeatureFlagService } = require(
 );
 const {
   buildAgentToolCapabilityCatalog,
+  getNextAgentCapabilityToolNames,
+  isNextAgentCapabilityTool,
   validateAgentToolCapabilityCatalog
 } = require(
   "../../dist/modules/agent/agent-tool-capability-catalog.js"
@@ -68,6 +70,35 @@ const originalEnv = {
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
   "234da88da04bc0ed10487aeb7edaacd156a93299edc725250c64a9c42af268ab";
+
+assert.deepEqual(
+  getNextAgentCapabilityToolNames(["calendar.events.update"], []),
+  ["list_calendar_events"]
+);
+assert.deepEqual(
+  getNextAgentCapabilityToolNames(
+    ["calendar.events.update"],
+    ["list_calendar_events"]
+  ),
+  ["update_calendar_event"]
+);
+assert.equal(
+  getNextAgentCapabilityToolNames(
+    ["calendar.events.update"],
+    ["update_calendar_event"]
+  ),
+  null,
+  "a terminal result without its prerequisite must fail closed"
+);
+assert.equal(
+  isNextAgentCapabilityTool(
+    ["calendar.events.update"],
+    "list_calendar_events",
+    ["list_calendar_events"]
+  ),
+  false,
+  "a completed tool must not be called again"
+);
 
 const payload = {
   jobType: "agent_run_requested",
@@ -447,7 +478,7 @@ const inventory = fullRegistry.listToolInventory();
         oneToolCatalog.descriptors,
         [calendarDefinition]
       ),
-    /invalid capability|chain contract/,
+    /invalid capability|chain contract|cyclic tool chain/,
     "duplicate tool names in a capability chain must fail closed"
   );
   assert.throws(
@@ -544,6 +575,29 @@ const inventory = fullRegistry.listToolInventory();
       ),
     /chain contract/,
     "unreachable registered tools must fail closed"
+  );
+  const fullDefinitions = fullRegistry.listDefinitions();
+  const fullCatalog = buildAgentToolCapabilityCatalog(fullDefinitions);
+  const calendarUpdate = fullCatalog.capabilities.find(
+    (capability) => capability.id === "calendar.events.update"
+  );
+  assert.ok(calendarUpdate);
+  assert.throws(
+    () =>
+      validateAgentToolCapabilityCatalog(
+        [
+          ...fullCatalog.capabilities,
+          {
+            ...calendarUpdate,
+            id: "calendar.events.cyclic_test",
+            toolNames: [...calendarUpdate.toolNames].reverse()
+          }
+        ],
+        fullCatalog.descriptors,
+        fullDefinitions
+      ),
+    /cyclic tool chain/,
+    "capability chain cycles must fail closed"
   );
 }
 

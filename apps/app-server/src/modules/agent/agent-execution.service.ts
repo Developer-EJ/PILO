@@ -15,6 +15,7 @@ import {
 import { AgentLatencyObserver } from "./agent-latency-observer";
 import {
   getAgentToolDomainAndOperation,
+  isNextAgentCapabilityTool,
   isTerminalAgentCapabilityTool
 } from "./agent-tool-capability-catalog";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
@@ -309,6 +310,20 @@ export class AgentExecutionService {
       candidate.capabilityIds.length > 0
         ? await this.findCompletedToolNames(runId)
         : [];
+    if (
+      candidate.capabilityIds.length > 0 &&
+      !isNextAgentCapabilityTool(
+        candidate.capabilityIds,
+        definition.name,
+        completedToolNames
+      )
+    ) {
+      return this.failRun(currentUserId, workspaceId, runId, {
+        errorCode: "AGENT_TOOL_CHAIN_MISMATCH",
+        errorMessage: "Agent tool is not the next allowed capability step",
+        message: "Agent tool sequence validation failed."
+      });
+    }
     const postExecutionDisposition: AgentToolPostExecutionDisposition =
       candidate.capabilityIds.length > 0
         ? isTerminalAgentCapabilityTool(
@@ -497,6 +512,15 @@ export class AgentExecutionService {
           AND step_type = 'tool'
           AND status = 'completed'
           AND tool_name IS NOT NULL
+          AND created_at >= COALESCE(
+            (
+              SELECT MAX(message.created_at)
+              FROM agent_run_messages AS message
+              WHERE message.run_id = $1
+                AND message.role = 'user'
+            ),
+            '-infinity'::timestamptz
+          )
       `,
       [runId]
     );

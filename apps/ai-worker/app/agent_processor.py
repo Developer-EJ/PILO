@@ -108,6 +108,7 @@ AGENT_PLANNER_OUTPUT_CLARIFICATION_MESSAGE = (
     "원하는 결과를 조금 더 구체적으로 알려주세요."
 )
 UNTRUSTED_COMPLETION_EVIDENCE_TOOL_NAME = "__trusted_capability_terminal_unavailable__"
+NEXT_TOOL_DECISION_VERSION = "agent-next-tool-decision:v1"
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ class AgentRunContext:
     queue_wait_ms: int | None = None
     latest_planner_tool_name: str | None = None
     latest_decision_correlation_id: str | None = None
+    latest_routing: AgentRoutingDecision | None = None
     planning_context: str = ""
     context_state: dict[str, object] | None = None
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
@@ -168,6 +170,7 @@ class AgentPlanningRequest:
     routing: AgentRoutingDecision | None = None
     completion_tool_names: tuple[str, ...] = ()
     workflow_incomplete: bool = False
+    next_tool_decision: NextToolDecision | None = None
 
 
 @dataclass(frozen=True)
@@ -200,6 +203,18 @@ class AgentPlannerToolSelection:
     tools: tuple[AgentToolSchema, ...]
     retrieval: ToolRetrievalResult | None
     used_shortlist: bool
+
+
+@dataclass(frozen=True)
+class NextToolDecision:
+    status: str
+    tools: tuple[AgentToolSchema, ...]
+    completed_tool_names: tuple[str, ...]
+    reason_code: str
+    bound_tool_name: str | None
+    requires_confirmation: bool | None
+    context_target_domain: str | None = None
+    context_state_sha256: str | None = None
 
 
 def select_agent_planner_tools(
@@ -345,21 +360,89 @@ def select_pending_agent_planner_tools_for_routing(
     selected_tools: tuple[AgentToolSchema, ...],
     planning_context: str,
 ) -> tuple[AgentToolSchema, ...]:
-    """Expose only the next unfinished tool in each routed capability chain."""
+    """Compatibility wrapper for the deterministic capability frontier."""
+    return compute_next_tool_decision(
+        job,
+        routing,
+        selected_tools,
+        planning_context,
+    ).tools
+
+
+def compute_next_tool_decision(
+    job: AgentRunJob,
+    routing: AgentRoutingDecision,
+    selected_tools: tuple[AgentToolSchema, ...],
+    planning_context: str,
+    *,
+    context_surface: str | None = None,
+    context_resolution: ContextResolution | None = None,
+) -> NextToolDecision:
+    """Calculate the reproducible next frontier for routed capability chains."""
     catalog = job.tool_capability_catalog
     if catalog is None:
         raise AgentRouterOutputError("Agent router requires a valid capability catalog")
 
-    completed_tool_names = _completed_planning_tool_names(planning_context)
-    if not completed_tool_names:
-        return selected_tools
-
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
-    pending_names: set[str] = set()
+    descriptor_by_name = {descriptor.tool_name: descriptor for descriptor in catalog.descriptors}
+    selected_names = {tool.name for tool in selected_tools}
+    selected_domains = set(routing.domains)
+    context_target_domain: str | None = None
+    context_state_sha256: str | None = None
+    if (
+        context_resolution is not None
+        and context_resolution.status == "resolved"
+        and context_resolution.target is not None
+    ):
+        context_target_domain = context_resolution.target.domain
+        if context_target_domain not in selected_domains:
+            raise AgentRouterOutputError(
+                "Agent context target is outside the routed capability domains"
+            )
+        constraints = dict(context_resolution.constraints)
+        excluded = constraints.get("excludedContextRefs", [])
+        if isinstance(excluded, list) and context_resolution.target.context_ref in excluded:
+            raise AgentRouterOutputError("Agent context target is excluded from the tool chain")
+        context_state_sha256 = canonical_sha256(
+            {
+                "targetDomain": context_target_domain,
+                "targetResourceType": context_resolution.target.resource_type,
+                "constraints": constraints,
+            }
+        )
+    completed_sequence = _planning_tool_result_sequence(planning_context)
+    completed_tool_names = set(completed_sequence)
+    if len(completed_sequence) != len(completed_tool_names):
+        raise AgentRouterOutputError("Agent capability chain contains a completed tool replay")
+
+    allowed_names: set[str] = set()
+    routed_names: set[str] = set()
     for capability_id in routing.capability_ids:
         capability = capability_by_id.get(capability_id)
-        if capability is None or capability.availability != "supported":
+        if (
+            capability is None
+            or capability.availability != "supported"
+            or not capability.tool_names
+        ):
             raise AgentRouterOutputError("Agent router selected an invalid capability")
+        if (
+            context_surface in {"canvas", "sql_erd", "pr_review"}
+            and capability.domain != context_surface
+        ):
+            raise AgentRouterOutputError("Agent capability is outside the context surface")
+        routed_names.update(capability.tool_names)
+        if not set(capability.tool_names).issubset(selected_names):
+            raise AgentRouterOutputError("Agent capability chain is outside the selected snapshot")
+        for index, tool_name in enumerate(capability.tool_names):
+            descriptor = descriptor_by_name.get(tool_name)
+            if descriptor is None or descriptor.domain != capability.domain:
+                raise AgentRouterOutputError("Agent router selected an invalid tool chain")
+            if tool_name in completed_tool_names and not set(
+                capability.tool_names[:index]
+            ).issubset(completed_tool_names):
+                raise AgentRouterOutputError(
+                    "Agent capability chain completed a tool before its prerequisite"
+                )
         next_tool_name = next(
             (
                 tool_name
@@ -369,9 +452,46 @@ def select_pending_agent_planner_tools_for_routing(
             None,
         )
         if next_tool_name is not None:
-            pending_names.add(next_tool_name)
+            allowed_names.add(next_tool_name)
 
-    return tuple(tool for tool in selected_tools if tool.name in pending_names)
+    unexpected_completed = completed_tool_names.intersection(selected_names - routed_names)
+    if unexpected_completed:
+        raise AgentRouterOutputError("Agent capability chain contains an out-of-chain result")
+
+    allowed_tools = tuple(tool for tool in selected_tools if tool.name in allowed_names)
+    if allowed_names and len(allowed_tools) != len(allowed_names):
+        raise AgentRouterOutputError("Agent capability frontier is outside the eligible snapshot")
+    if not allowed_tools:
+        return NextToolDecision(
+            status="terminal",
+            tools=tuple(),
+            completed_tool_names=tuple(sorted(completed_tool_names.intersection(routed_names))),
+            reason_code="all_terminal_tools_completed",
+            bound_tool_name=None,
+            requires_confirmation=None,
+            context_target_domain=context_target_domain,
+            context_state_sha256=context_state_sha256,
+        )
+
+    bound_tool_name = allowed_tools[0].name if len(allowed_tools) == 1 else None
+    return NextToolDecision(
+        status="allowed",
+        tools=allowed_tools,
+        completed_tool_names=tuple(sorted(completed_tool_names.intersection(routed_names))),
+        reason_code=(
+            "single_capability_frontier"
+            if bound_tool_name is not None
+            else "parallel_capability_frontier"
+        ),
+        bound_tool_name=bound_tool_name,
+        requires_confirmation=(
+            allowed_tools[0].execution_mode == "confirmation_required"
+            if bound_tool_name is not None
+            else None
+        ),
+        context_target_domain=context_target_domain,
+        context_state_sha256=context_state_sha256,
+    )
 
 
 def _completed_planning_tool_names(planning_context: str) -> set[str]:
@@ -380,6 +500,25 @@ def _completed_planning_tool_names(planning_context: str) -> set[str]:
         for line in _current_prompt_cycle_planning_lines(planning_context)
         if (match := re.match(r"^tool ([A-Za-z0-9_]+):", line)) is not None
     }
+
+
+def _planning_tool_result_sequence(planning_context: str) -> list[str]:
+    names: list[str] = []
+    prefix = "tool "
+    separator = ": "
+    for line in _current_prompt_cycle_planning_lines(planning_context):
+        if not line.startswith(prefix):
+            continue
+        tool_name, found, output_json = line[len(prefix) :].partition(separator)
+        if not found or not tool_name:
+            continue
+        try:
+            output = json.loads(output_json)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(output, dict):
+            names.append(tool_name)
+    return names
 
 
 def _has_incomplete_routed_workflow(
@@ -979,42 +1118,55 @@ class AgentRunProcessor:
             self._emit_queue_latency(job, latency_scope)
             routing: AgentRoutingDecision | None = None
             completion_tool_names: tuple[str, ...] = ()
+            next_tool_decision: NextToolDecision | None = None
             if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
                 if self.router_client is None or selection_job.tool_capability_catalog is None:
                     raise AgentRouterOutputError(
                         "Agent router configuration or capability catalog is missing"
                     )
+                reusable_routing = (
+                    context.latest_routing
+                    if _planning_tool_result_names(context.planning_context)
+                    else None
+                )
                 router_started_at = self.latency_observer.start()
-                try:
+                if reusable_routing is not None:
                     routing = normalize_agent_routing_decision(
-                        self.router_client.route(
-                            AgentRoutingRequest(
-                                prompt=context.prompt,
-                                timezone=context.timezone,
-                                current_date=current_date,
-                                catalog=selection_job.tool_capability_catalog,
-                                planning_context=context.planning_context,
-                                context_resolution=(
-                                    context_resolution
-                                    if context_resolution.status == "resolved"
-                                    else None
-                                ),
-                                context_surface=context_surface,
-                            )
-                        ),
+                        reusable_routing,
                         selection_job.tool_capability_catalog,
                         context_surface=context_surface,
                     )
-                except Exception as error:
-                    self._observe_latency(
-                        job,
-                        stage="router",
-                        outcome="failure",
-                        started_at=router_started_at,
-                        failure_type=_latency_failure_type(error),
-                        targeted=latency_scope.targeted,
-                    )
-                    raise
+                else:
+                    try:
+                        routing = normalize_agent_routing_decision(
+                            self.router_client.route(
+                                AgentRoutingRequest(
+                                    prompt=context.prompt,
+                                    timezone=context.timezone,
+                                    current_date=current_date,
+                                    catalog=selection_job.tool_capability_catalog,
+                                    planning_context=context.planning_context,
+                                    context_resolution=(
+                                        context_resolution
+                                        if context_resolution.status == "resolved"
+                                        else None
+                                    ),
+                                    context_surface=context_surface,
+                                )
+                            ),
+                            selection_job.tool_capability_catalog,
+                            context_surface=context_surface,
+                        )
+                    except Exception as error:
+                        self._observe_latency(
+                            job,
+                            stage="router",
+                            outcome="failure",
+                            started_at=router_started_at,
+                            failure_type=_latency_failure_type(error),
+                            targeted=latency_scope.targeted,
+                        )
+                        raise
                 routed_tool_names = {
                     tool_name
                     for capability in selection_job.tool_capability_catalog.capabilities
@@ -1025,20 +1177,21 @@ class AgentRunProcessor:
                     routed_tool_names & {SQL_ERD_FOCUS_TOOL_NAME}
                 )
                 self._emit_queue_latency(job, latency_scope)
-                self._observe_latency(
-                    job,
-                    stage="router",
-                    outcome=(
-                        "clarification"
-                        if routing.status == "needs_clarification"
-                        else "fallback" if routing.status == "unsupported" else "success"
-                    ),
-                    started_at=router_started_at,
-                    provider_input_tokens=routing.provider_input_tokens,
-                    provider_output_tokens=routing.provider_output_tokens,
-                    provider_total_tokens=routing.provider_total_tokens,
-                    targeted=latency_scope.targeted,
-                )
+                if reusable_routing is None:
+                    self._observe_latency(
+                        job,
+                        stage="router",
+                        outcome=(
+                            "clarification"
+                            if routing.status == "needs_clarification"
+                            else "fallback" if routing.status == "unsupported" else "success"
+                        ),
+                        started_at=router_started_at,
+                        provider_input_tokens=routing.provider_input_tokens,
+                        provider_output_tokens=routing.provider_output_tokens,
+                        provider_total_tokens=routing.provider_total_tokens,
+                        targeted=latency_scope.targeted,
+                    )
                 if routing.status == "needs_clarification":
                     _record_router_trace(decision_trace, routing)
                     return self._complete_routing_clarification(
@@ -1057,7 +1210,11 @@ class AgentRunProcessor:
                         prompt_security,
                         decision_trace,
                     )
-                _record_router_trace(decision_trace, routing)
+                _record_router_trace(
+                    decision_trace,
+                    routing,
+                    reused=reusable_routing is not None,
+                )
                 planner_tools = select_agent_planner_tools_for_routing(
                     selection_job,
                     routing,
@@ -1068,12 +1225,17 @@ class AgentRunProcessor:
                     selection_job.tool_capability_catalog,
                     routing,
                 )
-                planner_tools = select_pending_agent_planner_tools_for_routing(
+                next_tool_decision = compute_next_tool_decision(
                     selection_job,
                     routing,
                     planner_tools,
                     context.planning_context,
+                    context_surface=context_surface,
+                    context_resolution=(
+                        context_resolution if context_resolution.status == "resolved" else None
+                    ),
                 )
+                planner_tools = next_tool_decision.tools
                 planner_selection = AgentPlannerToolSelection(
                     tools=planner_tools,
                     retrieval=None,
@@ -1093,15 +1255,12 @@ class AgentRunProcessor:
                     planner_selection.retrieval,
                 )
             routed_workflow_completed = (
-                routing is not None
-                and bool(completion_tool_names)
-                and set(completion_tool_names).issubset(
-                    _planning_tool_result_names(context.planning_context)
-                )
+                next_tool_decision is not None and next_tool_decision.status == "terminal"
             )
             if not planner_tools and not routed_workflow_completed:
                 _record_next_tool_trace(
                     decision_trace,
+                    next_tool_decision,
                     planner_tools,
                     status="needs_clarification",
                 )
@@ -1138,7 +1297,12 @@ class AgentRunProcessor:
                     ),
                 )
             planner_job = replace(selection_job, tools=planner_tools)
-            _record_next_tool_trace(decision_trace, planner_tools, status="allowed")
+            _record_next_tool_trace(
+                decision_trace,
+                next_tool_decision,
+                planner_tools,
+                status=(next_tool_decision.status if next_tool_decision else "allowed"),
+            )
             workflow_incomplete = routing is not None and _has_incomplete_routed_workflow(
                 selection_job,
                 routing,
@@ -1163,7 +1327,12 @@ class AgentRunProcessor:
                         routing=routing,
                         completion_tool_names=completion_tool_names,
                         workflow_incomplete=workflow_incomplete,
+                        next_tool_decision=next_tool_decision,
                     )
+                )
+                decision = bind_agent_planner_tool_decision(
+                    decision,
+                    next_tool_decision,
                 )
                 if decision.tool_name == SQL_ERD_FOCUS_TOOL_NAME:
                     latency_scope.targeted = True
@@ -1220,6 +1389,8 @@ class AgentRunProcessor:
                     job,
                     len(planner_tools),
                 )
+                if next_tool_decision is not None:
+                    output_summary["nextToolDecision"] = _next_tool_observation(next_tool_decision)
             else:
                 output_summary["toolRetrieval"] = _tool_retrieval_observation(
                     self.tool_retrieval_mode,
@@ -3473,6 +3644,11 @@ class OpenAiAgentPlannerClient:
 
     def plan(self, request: AgentPlanningRequest) -> AgentPlannerDecision:
         completion_allowed = _agent_planner_completion_allowed(request)
+        bound_tool_name = (
+            request.next_tool_decision.bound_tool_name
+            if request.next_tool_decision is not None
+            else None
+        )
         response_schema = {
             "format": {
                 "type": "json_schema",
@@ -3481,6 +3657,7 @@ class OpenAiAgentPlannerClient:
                 "schema": _agent_planner_schema(
                     completion_allowed=completion_allowed,
                     workflow_incomplete=request.workflow_incomplete,
+                    bound_tool_name=bound_tool_name,
                 ),
             }
         }
@@ -3509,7 +3686,10 @@ class OpenAiAgentPlannerClient:
         output_text = _response_output_text(response)
         try:
             decision = _validate_agent_planner_provider_decision(
-                parse_agent_planner_output(output_text),
+                parse_agent_planner_output(
+                    output_text,
+                    bound_tool_name=bound_tool_name,
+                ),
                 request,
                 completion_allowed=completion_allowed,
             )
@@ -3526,7 +3706,10 @@ class OpenAiAgentPlannerClient:
                 raise AgentPlannerOutputError("Agent planner repair provider failure") from error
             responses.append(response)
             decision = _validate_agent_planner_provider_decision(
-                parse_agent_planner_output(_response_output_text(response)),
+                parse_agent_planner_output(
+                    _response_output_text(response),
+                    bound_tool_name=bound_tool_name,
+                ),
                 request,
                 completion_allowed=completion_allowed,
             )
@@ -3562,19 +3745,41 @@ def _validate_agent_planner_provider_decision(
     allowed_statuses = set(
         _agent_planner_schema(
             completion_allowed=completion_allowed,
-        )["properties"][
-            "status"
-        ]["enum"]
+            workflow_incomplete=request.workflow_incomplete,
+            bound_tool_name=(
+                request.next_tool_decision.bound_tool_name
+                if request.next_tool_decision is not None
+                else None
+            ),
+        )["properties"]["status"]["enum"]
     )
     if decision.status not in allowed_statuses:
         raise AgentPlannerOutputError("Agent planner returned a disallowed status")
+    decision = bind_agent_planner_tool_decision(decision, request.next_tool_decision)
     eligible_tool_names = {tool.name for tool in request.tools}
     if decision.status == "tool_candidate" and decision.tool_name not in eligible_tool_names:
         raise AgentPlannerOutputError("Agent planner selected a tool outside the shortlist")
     return decision
 
 
-def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
+def bind_agent_planner_tool_decision(
+    decision: AgentPlannerDecision,
+    next_tool_decision: NextToolDecision | None,
+) -> AgentPlannerDecision:
+    if (
+        decision.status != "tool_candidate"
+        or next_tool_decision is None
+        or next_tool_decision.bound_tool_name is None
+    ):
+        return decision
+    return replace(decision, tool_name=next_tool_decision.bound_tool_name)
+
+
+def parse_agent_planner_output(
+    output_text: str,
+    *,
+    bound_tool_name: str | None = None,
+) -> AgentPlannerDecision:
     if not isinstance(output_text, str) or not output_text.strip():
         raise AgentPlannerOutputError("Agent planner returned no output")
 
@@ -3611,7 +3816,7 @@ def parse_agent_planner_output(output_text: str) -> AgentPlannerDecision:
     tool_name = _planner_optional_string(payload, "toolName")
     tool_input = _parse_planner_input_json(
         _planner_optional_string(payload, "inputJson"),
-        tool_name=tool_name,
+        tool_name=bound_tool_name or tool_name,
     )
     requires_confirmation = payload["requiresConfirmation"]
     missing_fields = _planner_string_list(missing_fields_value)
@@ -3634,6 +3839,8 @@ def _agent_planner_system_prompt() -> str:
         "Return only JSON that matches the schema. "
         "When routing is present, use its validated domains, capabilityIds, and intentSummary "
         "to choose the next tool from the provided shortlist. "
+        "When nextToolDecision.boundToolName is present, code has already selected the tool. "
+        "Return null toolName and generate only its input and user-facing message. "
         "When workflowIncomplete is true, completed and unsupported are forbidden; choose the "
         "next provided tool or return needs_clarification when user input is still required. "
         "Choose only tools from the provided tool list. "
@@ -3808,6 +4015,11 @@ def _agent_planner_user_prompt(
         ),
         "completionAllowed": _agent_planner_completion_allowed(request),
         "workflowIncomplete": request.workflow_incomplete,
+        "nextToolDecision": (
+            _next_tool_observation(request.next_tool_decision)
+            if request.next_tool_decision is not None
+            else None
+        ),
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -3816,6 +4028,7 @@ def _agent_planner_schema(
     *,
     completion_allowed: bool = False,
     workflow_incomplete: bool = False,
+    bound_tool_name: str | None = None,
 ) -> dict[str, object]:
     statuses = (
         ["tool_candidate", "needs_clarification"]
@@ -3847,7 +4060,9 @@ def _agent_planner_schema(
             },
             "message": {"type": "string"},
             "finalAnswerDraft": {"type": ["string", "null"]},
-            "toolName": {"type": ["string", "null"]},
+            "toolName": (
+                {"type": "null"} if bound_tool_name is not None else {"type": ["string", "null"]}
+            ),
             "inputJson": {"type": ["string", "null"]},
             "requiresConfirmation": {"type": "boolean"},
             "missingFields": {
@@ -4033,6 +4248,8 @@ def _trace_correlation_id(trace: dict[str, object] | None) -> str | None:
 def _record_router_trace(
     trace: dict[str, object] | None,
     routing: AgentRoutingDecision,
+    *,
+    reused: bool = False,
 ) -> None:
     if trace is None:
         return
@@ -4044,12 +4261,14 @@ def _record_router_trace(
             "domains": list(routing.domains),
             "capabilityIds": list(routing.capability_ids),
             "confidence": routing.confidence,
+            "reusedWithinPromptCycle": reused,
         },
     )
 
 
 def _record_next_tool_trace(
     trace: dict[str, object] | None,
+    decision: NextToolDecision | None,
     tools: tuple[AgentToolSchema, ...],
     *,
     status: str,
@@ -4064,8 +4283,24 @@ def _record_next_tool_trace(
             "status": status,
             "allowedToolCount": len(tool_names),
             "allowedToolSetSha256": canonical_sha256(tool_names),
+            "reasonCode": decision.reason_code if decision is not None else None,
+            "boundToolName": decision.bound_tool_name if decision is not None else None,
         },
     )
+
+
+def _next_tool_observation(decision: NextToolDecision) -> dict[str, object]:
+    return {
+        "version": NEXT_TOOL_DECISION_VERSION,
+        "status": decision.status,
+        "candidateCount": len(decision.tools),
+        "reasonCode": decision.reason_code,
+        "boundToolName": decision.bound_tool_name,
+        "requiresConfirmation": decision.requires_confirmation,
+        "completedToolCount": len(decision.completed_tool_names),
+        "contextTargetDomain": decision.context_target_domain,
+        "contextStateSha256": decision.context_state_sha256,
+    }
 
 
 def _record_planner_trace(

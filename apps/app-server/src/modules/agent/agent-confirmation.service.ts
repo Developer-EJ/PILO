@@ -18,7 +18,10 @@ import {
 } from "./agent-logging.service";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
-import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
+import {
+  isNextAgentCapabilityTool,
+  isTerminalAgentCapabilityTool
+} from "./agent-tool-capability-catalog";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
@@ -784,6 +787,21 @@ export class AgentConfirmationService {
   ): Promise<AgentConfirmationActionPayload> {
     const { step, lease } = claim;
     try {
+      const capabilityIds = await this.findLatestPlannerCapabilityIds(runId);
+      const completedToolNames =
+        capabilityIds.length > 0
+          ? await this.findCompletedToolNames(runId)
+          : [];
+      if (
+        capabilityIds.length > 0 &&
+        !isNextAgentCapabilityTool(
+          capabilityIds,
+          toolExecution.definition.name,
+          completedToolNames
+        )
+      ) {
+        throw badRequest("Agent tool is not the next allowed capability step");
+      }
       const result = await this.executeWithLeaseHeartbeat(
         runId,
         lease,
@@ -800,11 +818,6 @@ export class AgentConfirmationService {
       );
       const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
-      const capabilityIds = await this.findLatestPlannerCapabilityIds(runId);
-      const completedToolNames =
-        capabilityIds.length > 0
-          ? await this.findCompletedToolNames(runId)
-          : [];
       const postExecutionDisposition: AgentToolPostExecutionDisposition =
         capabilityIds.length > 0
           ? isTerminalAgentCapabilityTool(
@@ -1042,6 +1055,15 @@ export class AgentConfirmationService {
           AND step_type = 'tool'
           AND status = 'completed'
           AND tool_name IS NOT NULL
+          AND created_at >= COALESCE(
+            (
+              SELECT MAX(message.created_at)
+              FROM agent_run_messages AS message
+              WHERE message.run_id = $1
+                AND message.role = 'user'
+            ),
+            '-infinity'::timestamptz
+          )
       `,
       [runId]
     );

@@ -486,6 +486,7 @@ def test_v2_catalog_rejects_selector_kind_drift() -> None:
         "confirmation_conflict",
         "missing_boundary",
         "unreachable_tool",
+        "cyclic_chain",
     ),
 )
 def test_v3_catalog_fails_closed_on_boundary_and_chain_drift(mutation: str) -> None:
@@ -511,6 +512,14 @@ def test_v3_catalog_fails_closed_on_boundary_and_chain_drift(mutation: str) -> N
         capability["requiresConfirmation"] = True
     elif mutation == "missing_boundary":
         capability["boundaryExamples"] = capability["boundaryExamples"][:-1]
+    elif mutation == "cyclic_chain":
+        update_capability = next(
+            item for item in payload["capabilities"] if item["id"] == "calendar.events.update"
+        )
+        reverse_capability = deepcopy(update_capability)
+        reverse_capability["id"] = "calendar.events.cyclic_test"
+        reverse_capability["toolNames"] = list(reversed(update_capability["toolNames"]))
+        payload["capabilities"].append(reverse_capability)
     else:
         descriptor["capabilityIds"] = []
     payload["sha256"] = compute_tool_capability_catalog_sha(
