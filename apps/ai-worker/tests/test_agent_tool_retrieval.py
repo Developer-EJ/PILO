@@ -261,7 +261,7 @@ def test_full_catalog_shortlists_calendar_list_for_common_date_queries(prompt: s
         (
             "현재 ERD 테이블 보여줘",
             "sql_erd.inspect",
-            {"inspect_sql_erd_schema", "focus_sql_erd_tables"},
+            {"focus_sql_erd_tables"},
         ),
         (
             "PR 리뷰 우선순위 보여줘",

@@ -67,7 +67,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "4d442509d64ae9a20695372dc3904b3ee1bded72072e85cbbf427c3e87c0e2be";
+  "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -113,8 +113,8 @@ const payload = {
   );
   assert.equal(
     sqlErdFocusEvaluation?.expected?.requiresConfirmation,
-    null,
-    "contextual SQLtoERD inspection must not require confirmation"
+    false,
+    "read-only SQLtoERD focus must not require confirmation"
   );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
@@ -144,7 +144,10 @@ const payload = {
   assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
-    [...actualSnapshot].map((tool) => tool.name).sort()
+    registry
+      .listDefinitionsForContext(null)
+      .map((definition) => definition.name)
+      .sort()
   );
   assert.equal(
     capabilityCatalog.descriptors.find(
@@ -261,13 +264,18 @@ const fullRegistry = new AgentToolRegistryService(
       .listDefinitionsForContext(sqlErdContext)
       .map((definition) => definition.name)
       .sort(),
-    ["focus_sql_erd_tables", "generate_sql_erd", "inspect_sql_erd_schema"],
+    ["focus_sql_erd_tables", "generate_sql_erd"],
     "a surface context must expose only tools owned by its domain"
   );
   assert.equal(
     fullRegistry.getDefinitionForContext("list_calendar_events", sqlErdContext),
     null,
     "execution lookup must enforce the same surface domain"
+  );
+  assert.equal(
+    fullRegistry.getDefinitionForContext("focus_sql_erd_tables", null),
+    null,
+    "SQLtoERD focus must not be shortlisted outside the current SQLtoERD screen"
   );
 }
 {
@@ -360,8 +368,8 @@ const inventory = fullRegistry.listToolInventory();
     AGENT_TOOL_INVENTORY_BASELINE_SHA256,
     "registered tool inventory drift must update the recorded legacy baseline"
   );
-  assert.equal(inventory.totalTools, 36);
-  assert.equal(inventory.tools.length, 36);
+  assert.equal(inventory.totalTools, 35);
+  assert.equal(inventory.tools.length, 35);
   assert.equal(
     inventory.tools.filter((tool) => tool.operation === "write").length,
     16

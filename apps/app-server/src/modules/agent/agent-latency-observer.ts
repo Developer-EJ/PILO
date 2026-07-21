@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 
 const SQL_ERD_TOOL_NAMES = new Set([
-  "inspect_sql_erd_schema",
   "focus_sql_erd_tables"
 ]);
 const LATENCY_STAGES = new Set([
