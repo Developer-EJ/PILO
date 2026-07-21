@@ -1540,9 +1540,7 @@ export class AgentExecutionService {
     if (
       !this.agentLatencyObserver ||
       input.requestContext?.surface !== "sql_erd" ||
-      !["inspect_sql_erd_schema", "focus_sql_erd_tables"].includes(
-        input.toolName
-      )
+      input.toolName !== "focus_sql_erd_tables"
     ) {
       return;
     }

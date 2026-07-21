@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "4d442509d64ae9a20695372dc3904b3ee1bded72072e85cbbf427c3e87c0e2be",
-    "catalogSha256": "b9cba09fae02de5ab8d49ab2563165a38fb345b217fde5ac57a8705eee8cc2c7",
-    "eligibleSnapshotSha256": "46b667635adc5e9d9337c76c8fbfcbefaef78af860ea8e8fc2b0e0273317063f"
+    "inventorySha256": "ce2deb6bc059fc89a09655ddc7afd0234ca39c35b6f344aa74c63d09ad79a63c",
+    "catalogSha256": "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c",
+    "eligibleSnapshotSha256": "f7f0a523e061086f1596da6b056daff1878d28f4c12b7d002a2e230e0235bbab"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -315,155 +315,14 @@
     "focus_sql_erd_tables": {
       "type": "object",
       "required": [
-        "sessionId",
-        "sessionRevision",
-        "modelFingerprint",
-        "featureLabel",
-        "primaryTableRefs",
-        "relatedTableRefs",
-        "contextTableRefs",
-        "confidence",
-        "reasons"
+        "featureQuery"
       ],
       "additionalProperties": false,
       "properties": {
-        "sessionId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionRevision": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "modelFingerprint": {
-          "type": "string",
-          "pattern": "^fnv1a32:[0-9a-f]{8}$"
-        },
-        "featureLabel": {
+        "featureQuery": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 100
-        },
-        "primaryTableRefs": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 20,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "relatedTableRefs": {
-          "type": "array",
-          "maxItems": 30,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "contextTableRefs": {
-          "type": "array",
-          "maxItems": 20,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^t[1-9][0-9]*$"
-          }
-        },
-        "confidence": {
-          "type": "string",
-          "enum": [
-            "high",
-            "medium",
-            "low"
-          ]
-        },
-        "reasons": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 70,
-          "items": {
-            "type": "object",
-            "required": [
-              "tableRef",
-              "reason"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "tableRef": {
-                "type": "string",
-                "pattern": "^t[1-9][0-9]*$"
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 240
-              },
-              "evidence": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 5,
-                "items": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "kind",
-                        "value"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "table_name",
-                            "table_comment",
-                            "column_name"
-                          ]
-                        },
-                        "value": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 240
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "kind",
-                        "columnName",
-                        "value"
-                      ],
-                      "additionalProperties": false,
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "column_comment",
-                            "data_type",
-                            "enum_value"
-                          ]
-                        },
-                        "columnName": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 80
-                        },
-                        "value": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 240
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
+          "maxLength": 200
         }
       }
     },
@@ -956,33 +815,6 @@
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
-        }
-      }
-    },
-    "inspect_sql_erd_schema": {
-      "type": "object",
-      "required": [
-        "featureQuery"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "featureQuery": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
-        },
-        "sessionId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionSelectionToken": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "sessionTitle": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 120
         }
       }
     },
@@ -1607,7 +1439,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "b9cba09fae02de5ab8d49ab2563165a38fb345b217fde5ac57a8705eee8cc2c7",
+    "sha256": "81b0fa0bc6d08c464f212a8ec7e4d107e6ebc187eed2aae068208f7d0892278c",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -2817,36 +2649,35 @@
         "id": "sql_erd.inspect",
         "domain": "sql_erd",
         "toolNames": [
-          "inspect_sql_erd_schema",
           "focus_sql_erd_tables"
         ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
+        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
         "mustNotUseFor": [
-          "schema 생성 요청"
+          "schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"
         ],
         "positiveExamples": [
-          "SQLtoERD schema나 특정 table을 살펴볼 때",
-          "SQLtoERD schema나 특정 table을 살펴볼 때 알려줘",
-          "SQLtoERDschema나특정table을살펴볼때",
-          "SQLtoERD schema나 특정 table을 살펴볼 때 부탁드려요",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘",
+          "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때",
+          "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요",
           "sql_erd inspect 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때"
           },
           {
             "kind": "paraphrase",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때 알려줘"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 알려줘"
           },
           {
             "kind": "typo",
-            "utterance": "SQLtoERDschema나특정table을살펴볼때"
+            "utterance": "현재SQLtoERDsession에서특정기능의핵심table과직접FK연결table을집중보기로살펴볼때"
           },
           {
             "kind": "honorific",
-            "utterance": "SQLtoERD schema나 특정 table을 살펴볼 때 부탁드려요"
+            "utterance": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -3702,34 +3533,24 @@
         "capabilityIds": [
           "sql_erd.inspect"
         ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
+        "whenToUse": "현재 SQLtoERD session에서 특정 기능의 핵심 table과 직접 FK 연결 table을 집중 보기로 살펴볼 때",
         "mustNotUseFor": [
-          "schema 생성 요청"
+          "schema 생성, SQL 실행 또는 session 밖 schema 조회 요청"
         ],
         "acceptedSelectorFields": [
-          "confidence",
-          "contextTableRefs",
-          "featureLabel",
-          "modelFingerprint",
-          "primaryTableRefs",
-          "reasons",
-          "relatedTableRefs",
-          "sessionId",
-          "sessionRevision"
+          "featureQuery"
         ],
         "selectorKinds": [
           "sql_erd_session",
           "table_reference"
         ],
-        "prerequisiteToolNames": [
-          "inspect_sql_erd_schema"
-        ],
+        "prerequisiteToolNames": [],
         "followUpToolNames": [],
         "riskLevel": "low",
         "executionMode": "auto",
         "requiresConfirmation": false,
-        "contextSurface": null,
-        "inputSchemaSha256": "9b0145863eaccb522fa4cb152429e2c00f3d735e47be84e9054778523850ef92"
+        "contextSurface": "sql_erd",
+        "inputSchemaSha256": "c17f04b92ca6e69694f13f15159c73eeed5053c42e28fe0a8485b8244958a622"
       },
       {
         "toolName": "generate_sql_erd",
@@ -3955,38 +3776,6 @@
         "requiresConfirmation": false,
         "contextSurface": null,
         "inputSchemaSha256": "618ed357eb3772d671823acdc5817d1e99280dbcc68f92227b310ceabfd00dbb"
-      },
-      {
-        "toolName": "inspect_sql_erd_schema",
-        "domain": "sql_erd",
-        "action": "inspect_sql_erd_schema",
-        "operation": "read",
-        "capabilityIds": [
-          "sql_erd.inspect"
-        ],
-        "whenToUse": "SQLtoERD schema나 특정 table을 살펴볼 때",
-        "mustNotUseFor": [
-          "schema 생성 요청"
-        ],
-        "acceptedSelectorFields": [
-          "featureQuery",
-          "sessionId",
-          "sessionSelectionToken",
-          "sessionTitle"
-        ],
-        "selectorKinds": [
-          "sql_erd_session",
-          "table_reference"
-        ],
-        "prerequisiteToolNames": [],
-        "followUpToolNames": [
-          "focus_sql_erd_tables"
-        ],
-        "riskLevel": "low",
-        "executionMode": "contextual",
-        "requiresConfirmation": false,
-        "contextSurface": null,
-        "inputSchemaSha256": "5817d2cde0c54a1f3cdf2740a3abd070440e32774fa4ae408d6c93b518e391e4"
       },
       {
         "toolName": "join_meeting",
@@ -4688,7 +4477,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4751,7 +4539,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4800,7 +4587,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4847,7 +4633,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
@@ -4894,7 +4679,6 @@
         "get_meeting_decision_evidence",
         "get_meeting_participants",
         "get_meeting_report",
-        "inspect_sql_erd_schema",
         "join_meeting",
         "leave_meeting",
         "list_calendar_events",
