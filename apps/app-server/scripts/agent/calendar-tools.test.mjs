@@ -116,14 +116,25 @@ class FakeCalendarService {
   }
 }
 
-function createRegistry() {
+function createRegistry(reference = { resourceType: "event", resourceId: "1" }) {
   const calendarService = new FakeCalendarService();
-  const calendarTools = new CalendarAgentToolsService(calendarService);
+  const threadContextService = {
+    calls: [],
+    async resolveCalendarEventReference(context, contextRef) {
+      this.calls.push({ context, contextRef });
+      return reference;
+    }
+  };
+  const calendarTools = new CalendarAgentToolsService(
+    calendarService,
+    threadContextService
+  );
   const registry = new AgentToolRegistryService(calendarTools);
 
   return {
     calendarService,
-    registry
+    registry,
+    threadContextService
   };
 }
 
@@ -175,6 +186,52 @@ function errorCode(error) {
       end: "2026-07-15"
     }
   });
+}
+
+{
+  const { calendarService, registry, threadContextService } = createRegistry();
+  const tool = registry.getDefinition("update_calendar_event");
+  const input = tool.validateInput({
+    target: { contextRef: "ctx_0123456789abcdef01234567" },
+    changes: {
+      startDate: "2026-07-22",
+      endDate: "2026-07-22"
+    }
+  });
+  const plan = await tool.buildConfirmation(context, input);
+
+  assert.equal(plan.toolName, "update_calendar_event");
+  assert.equal(plan.target.resourceId, "1");
+  assert.deepEqual(plan.after, {
+    startDate: "2026-07-22",
+    endDate: "2026-07-22"
+  });
+  assert.deepEqual(threadContextService.calls, [
+    {
+      context,
+      contextRef: "ctx_0123456789abcdef01234567"
+    }
+  ]);
+  assert.deepEqual(
+    calendarService.calls.map((call) => call.method),
+    ["getEvent"]
+  );
+}
+
+{
+  const { calendarService, registry } = createRegistry(null);
+  const tool = registry.getDefinition("update_calendar_event");
+  const result = await tool.buildConfirmation(
+    context,
+    tool.validateInput({
+      target: { contextRef: "ctx_0123456789abcdef01234567" },
+      changes: { title: "변경된 일정" }
+    })
+  );
+
+  assert.equal(result.kind, "needs_clarification");
+  assert.equal(result.outputSummary.selection, "none");
+  assert.equal(calendarService.calls.length, 0);
 }
 
 {

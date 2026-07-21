@@ -105,8 +105,13 @@ AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
 AGENT_THREAD_CONTEXT_MAX_RUNS = 6
 AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
 AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS = 12
-AGENT_THREAD_CONTEXT_SAFE_RESOURCE_TYPES = frozenset(
-    {"meeting", "meeting_report", "meeting_report_action_item"}
+AGENT_THREAD_CONTEXT_SAFE_RESOURCES = frozenset(
+    {
+        ("meeting", "meeting"),
+        ("meeting", "meeting_report"),
+        ("meeting", "meeting_report_action_item"),
+        ("calendar", "event"),
+    }
 )
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 LOCAL_APP_ENVS = {"local", "test", "development"}
@@ -402,8 +407,11 @@ def _agent_step_resource_context_lines(
     for index, reference in enumerate(resource_refs[:12]):
         if (
             not isinstance(reference, dict)
-            or reference.get("domain") != "meeting"
-            or reference.get("resourceType") not in AGENT_THREAD_CONTEXT_SAFE_RESOURCE_TYPES
+            or (
+                reference.get("domain"),
+                reference.get("resourceType"),
+            )
+            not in AGENT_THREAD_CONTEXT_SAFE_RESOURCES
             or not isinstance(reference.get("resourceId"), str)
             or not str(reference["resourceId"]).strip()
         ):
@@ -1852,9 +1860,11 @@ class PgAgentRunRepository:
                             break
                         if (
                             not isinstance(resource_ref, dict)
-                            or resource_ref.get("domain") != "meeting"
-                            or resource_ref.get("resourceType")
-                            not in AGENT_THREAD_CONTEXT_SAFE_RESOURCE_TYPES
+                            or (
+                                resource_ref.get("domain"),
+                                resource_ref.get("resourceType"),
+                            )
+                            not in AGENT_THREAD_CONTEXT_SAFE_RESOURCES
                             or not isinstance(resource_ref.get("resourceId"), str)
                             or not str(resource_ref["resourceId"]).strip()
                         ):

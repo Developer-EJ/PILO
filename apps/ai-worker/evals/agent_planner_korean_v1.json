@@ -85,7 +85,7 @@
     },
     {
       "name": "update_calendar_event",
-      "description": "Calendar 일정을 제목과 명시적 대상 날짜로 정확히 찾아 변경값으로 수정합니다. eventId를 입력하거나 노출하지 않습니다. 후보가 정확히 하나일 때만 현재값을 확인해 confirmation을 만들며, 후보가 없거나 여러 개면 수정하지 않고 더 구체적인 정보를 요청합니다.",
+      "description": "Calendar 일정을 이전 조회의 opaque contextRef 또는 제목과 명시적 대상 날짜로 정확히 찾아 변경값으로 수정합니다. eventId를 입력하거나 노출하지 않습니다. 후보가 정확히 하나일 때만 현재값을 확인해 confirmation을 만들며, 후보가 없거나 여러 개면 수정하지 않고 더 구체적인 정보를 요청합니다.",
       "riskLevel": "medium",
       "executionMode": "confirmation_required",
       "inputSchema": {
@@ -97,39 +97,56 @@
         "additionalProperties": false,
         "properties": {
           "target": {
-            "type": "object",
-            "required": [
-              "title",
-              "startDate",
-              "endDate"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "title": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 255
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "contextRef"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "contextRef": {
+                    "type": "string",
+                    "pattern": "^ctx_[0-9a-f]{24}$"
+                  }
+                }
               },
-              "startDate": {
-                "type": "string",
-                "format": "date"
-              },
-              "endDate": {
-                "type": "string",
-                "format": "date"
-              },
-              "isAllDay": {
-                "type": "boolean"
-              },
-              "startTime": {
-                "type": "string",
-                "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
-              },
-              "endTime": {
-                "type": "string",
-                "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+              {
+                "type": "object",
+                "required": [
+                  "title",
+                  "startDate",
+                  "endDate"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "isAllDay": {
+                    "type": "boolean"
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+                  },
+                  "endTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):([0-5]\\d)$"
+                  }
+                }
               }
-            }
+            ]
           },
           "changes": {
             "type": "object",

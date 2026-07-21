@@ -31,6 +31,11 @@ export interface AgentThreadMeetingReference {
   reportId?: string;
 }
 
+export interface AgentThreadCalendarEventReference {
+  resourceType: "event";
+  resourceId: string;
+}
+
 @Injectable()
 export class AgentThreadContextService {
   constructor(private readonly database: DatabaseService) {}
@@ -39,6 +44,25 @@ export class AgentThreadContextService {
     context: AgentToolContext,
     contextRef: string
   ): Promise<AgentThreadMeetingReference | null> {
+    return this.resolveReference(context, contextRef, (value) =>
+      this.readMeetingReference(value)
+    );
+  }
+
+  async resolveCalendarEventReference(
+    context: AgentToolContext,
+    contextRef: string
+  ): Promise<AgentThreadCalendarEventReference | null> {
+    return this.resolveReference(context, contextRef, (value) =>
+      this.readCalendarEventReference(value)
+    );
+  }
+
+  private async resolveReference<T>(
+    context: AgentToolContext,
+    contextRef: string,
+    readReference: (value: unknown) => T | null
+  ): Promise<T | null> {
     if (!CONTEXT_REF_PATTERN.test(contextRef)) return null;
     const rows = await this.database.query<ThreadResourceStepRow>(
       `
@@ -96,12 +120,12 @@ export class AgentThreadContextService {
     );
 
     let acceptedRefs = 0;
-    let resolved: AgentThreadMeetingReference | null = null;
+    let resolved: T | null = null;
     for (const row of rows) {
       if (!Array.isArray(row.resource_refs)) continue;
       for (const [index, candidate] of row.resource_refs.entries()) {
         if (acceptedRefs >= THREAD_CONTEXT_MAX_RESOURCE_REFS) return resolved;
-        const reference = this.readMeetingReference(candidate);
+        const reference = readReference(candidate);
         if (!reference) continue;
         acceptedRefs += 1;
         if (this.contextRef(row.thread_id, row.run_id, row.step_id, index) !== contextRef) {
@@ -151,6 +175,21 @@ export class AgentThreadContextService {
       return null;
     }
     return { resourceType, resourceId: value.resourceId, reportId };
+  }
+
+  private readCalendarEventReference(
+    value: unknown
+  ): AgentThreadCalendarEventReference | null {
+    if (!this.isObject(value)) return null;
+    if (
+      value.domain !== "calendar" ||
+      value.resourceType !== "event" ||
+      typeof value.resourceId !== "string" ||
+      value.resourceId.trim().length === 0
+    ) {
+      return null;
+    }
+    return { resourceType: "event", resourceId: value.resourceId };
   }
 
   private isObject(value: unknown): value is Record<string, unknown> {

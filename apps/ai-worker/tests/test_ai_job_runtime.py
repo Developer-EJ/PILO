@@ -46,6 +46,36 @@ def test_agent_tool_resource_refs_become_same_run_opaque_context_refs() -> None:
     }
 
 
+def test_calendar_event_resource_ref_becomes_same_run_opaque_context_ref() -> None:
+    lines = _agent_step_resource_context_lines(
+        thread_id="44444444-4444-4444-8444-444444444444",
+        run_id="33333333-3333-4333-8333-333333333333",
+        step_id="66666666-6666-4666-8666-666666666666",
+        step_order=2,
+        resource_refs=[
+            {
+                "domain": "calendar",
+                "resourceType": "event",
+                "resourceId": "1",
+                "label": "하하하",
+                "status": "available",
+            }
+        ],
+    )
+
+    assert len(lines) == 1
+    assert '"resourceId"' not in lines[0]
+    value = json.loads(lines[0].removeprefix("previous resource: "))
+    assert value == {
+        "contextRef": "ctx_060eb912f95414f3c2e7ac25",
+        "label": "하하하",
+        "ordinal": 1,
+        "resourceType": "event",
+        "status": "available",
+        "turn": 2,
+    }
+
+
 def test_meeting_report_list_planning_output_omits_raw_resource_ids() -> None:
     report_id = "77777777-7777-4777-8777-777777777777"
     meeting_id = "33333333-3333-4333-8333-333333333333"
@@ -1209,7 +1239,13 @@ def test_agent_repository_adds_completed_first_run_to_second_run_context() -> No
                             "resourceType": "meeting_report",
                             "resourceId": "report-6",
                             "label": "최근 회의",
-                        }
+                        },
+                        {
+                            "domain": "calendar",
+                            "resourceType": "event",
+                            "resourceId": "1",
+                            "label": "하하하",
+                        },
                     ],
                 }
             ],
@@ -1258,6 +1294,13 @@ def test_agent_repository_adds_completed_first_run_to_second_run_context() -> No
     assert resource["contextRef"].startswith("ctx_")
     assert len(resource["contextRef"]) == 28
     assert "report-6" not in context.planning_context
+    calendar_resource = next(
+        json.loads(line.removeprefix("previous resource: "))
+        for line in context.planning_context.splitlines()
+        if line.startswith("previous resource: ") and '"resourceType":"event"' in line
+    )
+    assert calendar_resource["label"] == "하하하"
+    assert '"resourceId"' not in context.planning_context
     assert len(context.planning_context.encode("utf-8")) <= 12 * 1024
     assert PromptSecuritySource("thread_user", "prompt-6") in context.untrusted_context_sources
     assert PromptSecuritySource("thread_assistant", "answer-6") in context.untrusted_context_sources

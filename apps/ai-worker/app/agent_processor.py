@@ -1711,6 +1711,12 @@ def normalize_agent_planner_decision(
         prompt=prompt,
         current_date=current_date,
     )
+    decision = _normalize_calendar_thread_context_reference(
+        decision,
+        job,
+        prompt=prompt,
+        planning_context=planning_context,
+    )
     decision = _normalize_meeting_report_relative_date_query(
         decision,
         job,
@@ -1920,20 +1926,80 @@ def _missing_calendar_update_fields(
     missing_fields: tuple[str, ...],
 ) -> tuple[str, ...]:
     missing = set(missing_fields)
-    event_id = input_value.get("eventId")
-    if (
-        not isinstance(event_id, str)
-        or not event_id.isascii()
-        or not event_id.isdigit()
-        or event_id.startswith("0")
-    ):
-        missing.add("eventId")
+    target = input_value.get("target")
+    valid_target = False
+    if isinstance(target, dict):
+        context_ref = target.get("contextRef")
+        valid_target = (
+            len(target) == 1
+            and isinstance(context_ref, str)
+            and re.fullmatch(r"ctx_[0-9a-f]{24}", context_ref) is not None
+        ) or all(
+            isinstance(target.get(field), str) and bool(str(target[field]).strip())
+            for field in ("title", "startDate", "endDate")
+        )
+    if not valid_target:
+        missing.add("target")
 
     changes = input_value.get("changes")
     if not isinstance(changes, dict) or not changes:
         missing.add("changes")
 
     return tuple(sorted(missing))
+
+
+def _normalize_calendar_thread_context_reference(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
+    if not (
+        re.search(
+            r"(?:그|이|저|선택한)\s*일정|방금\s*(?:본|보여준|선택한)?\s*일정",
+            normalized_prompt,
+        )
+        and re.search(r"변경|수정|바꿔|옮겨", normalized_prompt)
+        and any(tool.name == "update_calendar_event" for tool in job.tools)
+    ):
+        return decision
+
+    references = [
+        reference
+        for line in planning_context.splitlines()
+        if (reference := _calendar_context_reference_line(line)) is not None
+    ]
+    references = _latest_thread_context_references(references, "event")
+    if len(references) != 1:
+        return AgentPlannerDecision(
+            status="needs_clarification",
+            message="이전 대화의 Calendar 일정을 하나로 특정할 수 없습니다.",
+            final_answer_draft="변경할 일정의 제목이나 목록 순번을 알려주세요.",
+            tool_name=None,
+            tool_input={},
+            requires_confirmation=False,
+            missing_fields=("calendar_event_context",),
+            unsupported_reason=None,
+        )
+
+    tool_input = dict(decision.tool_input)
+    changes = tool_input.get("changes")
+    if not isinstance(changes, dict) or not changes:
+        return decision
+    tool_input.pop("eventId", None)
+    tool_input["target"] = {"contextRef": references[0]["contextRef"]}
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="이전 대화의 Calendar 일정을 사용합니다.",
+        final_answer_draft="이전 대화에서 확인한 일정을 다시 검증해 변경합니다.",
+        tool_name="update_calendar_event",
+        tool_input=tool_input,
+        requires_confirmation=True,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
 
 
 def _has_valid_uuid(value: object) -> bool:
@@ -2568,6 +2634,27 @@ def _meeting_context_reference_line(line: str) -> dict[str, object] | None:
     return None
 
 
+def _calendar_context_reference_line(line: str) -> dict[str, object] | None:
+    prefix = "previous resource: "
+    if not line.startswith(prefix):
+        return None
+    try:
+        value = json.loads(line[len(prefix) :])
+    except json.JSONDecodeError:
+        return None
+    if (
+        isinstance(value, dict)
+        and isinstance(value.get("turn"), int)
+        and isinstance(value.get("contextRef"), str)
+        and re.fullmatch(r"ctx_[0-9a-f]{24}", value["contextRef"])
+        and value.get("resourceType") == "event"
+        and isinstance(value.get("ordinal"), int)
+        and value["ordinal"] >= 1
+    ):
+        return value
+    return None
+
+
 def _latest_thread_context_references(
     references: list[dict[str, object]],
     resource_type: str,
@@ -3067,7 +3154,8 @@ def _clarification_answer(
         return "ERD 스키마 확인 결과가 없거나 오래되었습니다. 스키마를 다시 확인해주세요."
 
     labels = {
-        "eventId": "수정할 일정",
+        "target": "수정할 일정",
+        "calendar_event_context": "변경할 일정",
         "changes": "변경할 내용",
         "title": "일정 제목",
         "startDate": "시작 날짜",
@@ -3710,8 +3798,10 @@ def _agent_planner_system_prompt() -> str:
         "omit boardName and repositoryFullName so the App Server selects the active Board or "
         "the only Board. When the user does not explicitly name a column, omit columnName so "
         "the App Server uses Unmapped; do not ask the user for those defaults. "
-        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require "
-        "eventId and changes only; the server loads the current values for confirmation. "
+        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require target "
+        "and changes. For exactly one matching prior Calendar event, target must contain only its "
+        "opaque contextRef; otherwise use the explicit title, startDate, and endDate selector. "
+        "The server loads the current values for confirmation. "
         "For MeetingReport list requests, omit limit unless the user specifies a count; the "
         "App Server defaults it to the latest one by createdAt descending. For a MeetingReport "
         "detail or summary request, use get_meeting_report or summarize_meeting_report with "
@@ -3778,8 +3868,8 @@ def _agent_planner_system_prompt() -> str:
         "all-day choice rather than inferring isAllDay. "
         "For timed Calendar creation, omit endTime when the user gives only a start time so the "
         "Calendar default can apply; never set endTime equal to startTime. "
-        "When the user supplies a positive integer Calendar event ID with changes, use it and let "
-        "the App Server verify that the event exists in the Workspace. "
+        "Never request or submit a Calendar event ID. The App Server resolves a Calendar "
+        "contextRef inside the current thread, user, and Workspace boundary. "
         "Use generate_sql_erd when the user asks to generate an ERD, database schema, or SQL DDL "
         "from natural-language requirements. Its input must be one complete SqlErdSchemaSpecV1 "
         "object matching the provided schema; never return raw DDL as tool input. Always include "

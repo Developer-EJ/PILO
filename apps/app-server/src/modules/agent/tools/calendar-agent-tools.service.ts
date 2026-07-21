@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { HttpException, Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
 import {
   CalendarEventPayload,
@@ -14,6 +14,7 @@ import type {
   AgentToolDefinition,
   AgentToolExecutionResult
 } from "../types/agent-tool.types";
+import { AgentThreadContextService } from "../agent-thread-context.service";
 
 interface ListCalendarEventsInput {
   start: string;
@@ -32,7 +33,7 @@ interface CreateCalendarEventInput {
 }
 
 interface UpdateCalendarEventInput {
-  target: CalendarEventTarget;
+  target: CalendarEventTarget | CalendarEventContextTarget;
   changes: Partial<CreateCalendarEventInput>;
 }
 
@@ -51,10 +52,15 @@ interface CalendarEventTarget {
   endTime?: string;
 }
 
+interface CalendarEventContextTarget {
+  contextRef: string;
+}
+
 const DEFAULT_COLOR = "#3B82F6";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+const CONTEXT_REF_PATTERN = /^ctx_[0-9a-f]{24}$/;
 const FORBIDDEN_CALENDAR_BODY_FIELDS = [
   "workspaceId",
   "userId",
@@ -80,6 +86,7 @@ const RESOLVED_UPDATE_INPUT_FIELDS = [
   "expectedUpdatedAt"
 ];
 const UPDATE_TARGET_FIELDS = [
+  "contextRef",
   "title",
   "startDate",
   "endDate",
@@ -90,7 +97,10 @@ const UPDATE_TARGET_FIELDS = [
 
 @Injectable()
 export class CalendarAgentToolsService {
-  constructor(private readonly calendarService: CalendarService) {}
+  constructor(
+    private readonly calendarService: CalendarService,
+    private readonly agentThreadContextService: AgentThreadContextService
+  ) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [
@@ -186,7 +196,7 @@ export class CalendarAgentToolsService {
     return {
       name: "update_calendar_event",
       description:
-        "Calendar 일정을 제목과 명시적 대상 날짜로 정확히 찾아 변경값으로 수정합니다. eventId를 입력하거나 노출하지 않습니다. 후보가 정확히 하나일 때만 현재값을 확인해 confirmation을 만들며, 후보가 없거나 여러 개면 수정하지 않고 더 구체적인 정보를 요청합니다.",
+        "Calendar 일정을 이전 조회의 opaque contextRef 또는 제목과 명시적 대상 날짜로 정확히 찾아 변경값으로 수정합니다. eventId를 입력하거나 노출하지 않습니다. 후보가 정확히 하나일 때만 현재값을 확인해 confirmation을 만들며, 후보가 없거나 여러 개면 수정하지 않고 더 구체적인 정보를 요청합니다.",
       riskLevel: "medium",
       executionMode: "confirmation_required",
       inputSchema: {
@@ -195,35 +205,50 @@ export class CalendarAgentToolsService {
         additionalProperties: false,
         properties: {
           target: {
-            type: "object",
-            required: ["title", "startDate", "endDate"],
-            additionalProperties: false,
-            properties: {
-              title: {
-                type: "string",
-                minLength: 1,
-                maxLength: 255
+            oneOf: [
+              {
+                type: "object",
+                required: ["contextRef"],
+                additionalProperties: false,
+                properties: {
+                  contextRef: {
+                    type: "string",
+                    pattern: "^ctx_[0-9a-f]{24}$"
+                  }
+                }
               },
-              startDate: {
-                type: "string",
-                format: "date"
-              },
-              endDate: {
-                type: "string",
-                format: "date"
-              },
-              isAllDay: {
-                type: "boolean"
-              },
-              startTime: {
-                type: "string",
-                pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$"
-              },
-              endTime: {
-                type: "string",
-                pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$"
+              {
+                type: "object",
+                required: ["title", "startDate", "endDate"],
+                additionalProperties: false,
+                properties: {
+                  title: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 255
+                  },
+                  startDate: {
+                    type: "string",
+                    format: "date"
+                  },
+                  endDate: {
+                    type: "string",
+                    format: "date"
+                  },
+                  isAllDay: {
+                    type: "boolean"
+                  },
+                  startTime: {
+                    type: "string",
+                    pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$"
+                  },
+                  endTime: {
+                    type: "string",
+                    pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$"
+                  }
+                }
               }
-            }
+            ]
           },
           changes: {
             type: "object",
@@ -337,19 +362,24 @@ export class CalendarAgentToolsService {
     context: AgentToolContext,
     input: UpdateCalendarEventInput
   ): Promise<AgentConfirmationPlan | AgentToolClarificationResult> {
+    if (this.isContextTarget(input.target)) {
+      return this.buildContextUpdateConfirmation(context, input.target, input.changes);
+    }
+    const target = input.target;
+
     const candidates = (
       await this.calendarService.listEvents(
         context.currentUserId,
         context.workspaceId,
         {
-          start: input.target.startDate,
-          end: input.target.endDate
+          start: target.startDate,
+          end: target.endDate
         }
       )
-    ).filter((event) => this.matchesTarget(event, input.target));
+    ).filter((event) => this.matchesTarget(event, target));
 
     if (candidates.length !== 1) {
-      return this.buildUpdateClarification(input.target, candidates);
+      return this.buildUpdateClarification(target, candidates);
     }
 
     const event = await this.calendarService.getEvent(
@@ -358,10 +388,45 @@ export class CalendarAgentToolsService {
       String(candidates[0].id)
     );
 
-    if (!this.matchesTarget(event, input.target)) {
-      return this.buildUpdateClarification(input.target, []);
+    if (!this.matchesTarget(event, target)) {
+      return this.buildUpdateClarification(target, []);
     }
 
+    return this.toUpdateConfirmationPlan(event, input.changes);
+  }
+
+  private async buildContextUpdateConfirmation(
+    context: AgentToolContext,
+    target: CalendarEventContextTarget,
+    changes: Partial<CreateCalendarEventInput>
+  ): Promise<AgentConfirmationPlan | AgentToolClarificationResult> {
+    const reference = await this.agentThreadContextService.resolveCalendarEventReference(
+      context,
+      target.contextRef
+    );
+    if (!reference) {
+      return this.buildContextUpdateClarification(target);
+    }
+
+    try {
+      const event = await this.calendarService.getEvent(
+        context.currentUserId,
+        context.workspaceId,
+        reference.resourceId
+      );
+      return this.toUpdateConfirmationPlan(event, changes);
+    } catch (error) {
+      if (error instanceof HttpException && error.getStatus() === 404) {
+        return this.buildContextUpdateClarification(target);
+      }
+      throw error;
+    }
+  }
+
+  private toUpdateConfirmationPlan(
+    event: CalendarEventPayload,
+    changes: Partial<CreateCalendarEventInput>
+  ): AgentConfirmationPlan {
     return {
       toolName: "update_calendar_event",
       summary: `${event.title} 일정을 수정합니다.`,
@@ -371,14 +436,14 @@ export class CalendarAgentToolsService {
         resourceId: String(event.id)
       },
       before: this.toConfirmationBefore(event),
-      after: this.toCalendarBody(input.changes),
+      after: this.toCalendarBody(changes),
       call: {
         service: "CalendarService.updateEvent",
         method: "PATCH",
         path: "/api/v1/workspaces/{workspaceId}/calendar/events/{eventId}",
         eventId: String(event.id),
         expectedUpdatedAt: event.updatedAt,
-        body: this.toCalendarBody(input.changes)
+        body: this.toCalendarBody(changes)
       }
     };
   }
@@ -517,7 +582,24 @@ export class CalendarAgentToolsService {
     };
   }
 
-  private validateUpdateTarget(input: AgentJsonObject): CalendarEventTarget {
+  private validateUpdateTarget(
+    input: AgentJsonObject
+  ): CalendarEventTarget | CalendarEventContextTarget {
+    if (input.contextRef !== undefined) {
+      if (Object.keys(input).length !== 1) {
+        throw badRequest(
+          "Calendar update target contextRef must not be combined with exact fields"
+        );
+      }
+      if (
+        typeof input.contextRef !== "string" ||
+        !CONTEXT_REF_PATTERN.test(input.contextRef)
+      ) {
+        throw badRequest("Calendar update target.contextRef is invalid");
+      }
+      return { contextRef: input.contextRef };
+    }
+
     const startDate = this.requireDate(input.startDate, "target.startDate");
     const endDate = this.requireDate(input.endDate, "target.endDate");
     this.assertDateOrder(startDate, endDate);
@@ -553,6 +635,27 @@ export class CalendarAgentToolsService {
       },
       resourceRefs: candidates.map((event) => this.toResourceRef(event))
     };
+  }
+
+  private buildContextUpdateClarification(
+    target: CalendarEventContextTarget
+  ): AgentToolClarificationResult {
+    return {
+      kind: "needs_clarification",
+      outputSummary: {
+        status: "needs_clarification",
+        selection: "none",
+        target: { contextRef: target.contextRef },
+        candidateCount: 0
+      },
+      resourceRefs: []
+    };
+  }
+
+  private isContextTarget(
+    target: CalendarEventTarget | CalendarEventContextTarget
+  ): target is CalendarEventContextTarget {
+    return "contextRef" in target;
   }
 
   private matchesTarget(
