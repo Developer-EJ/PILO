@@ -21,10 +21,16 @@ const approvedRepairs = [
 const approvedPath = approvedRepairs[0].path;
 const approvedRepair = approvedRepairs[0];
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
-const baseContents = execFileSync("git", ["show", `origin/dev:${approvedPath}`], {
-  cwd: repositoryRoot,
-});
+const preRepairCommit = "aa861d13fa73a01d370c6b45a6e10853e100f129";
+const baseContents = execFileSync(
+  "git",
+  ["show", `${preRepairCommit}:${approvedPath}`],
+  { cwd: repositoryRoot },
+);
 const headContents = await readFile(path.join(repositoryRoot, approvedPath));
+
+assert.equal(sha256(baseContents), approvedRepair.baseSha256);
+assert.equal(sha256(headContents), approvedRepair.headSha256);
 
 function verifyWithManifest(manifest) {
   return verifyExistingMigrationRepair({

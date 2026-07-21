@@ -41,7 +41,7 @@ before executing baseline mode.
 
 ## Applying later migrations
 
-## Temporary migration-104 recovery
+### Temporary migration-104 recovery
 
 Issue #1637 permits only the exact migration-104 checksum transition. Operators
 must use the resulting dev merge commit SHA when running the recovery. Issue
