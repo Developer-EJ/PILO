@@ -546,13 +546,15 @@ Authorization: Bearer <access-token>
 ```
 
 완료된 Agent 결과에서 Meeting 회의록, Drive 문서 또는 SQLtoERD session 화면을 사용자가 직접 열 때
-사용한다. App Server는 `runId`와 `contextRef`가 같은 요청 사용자·Workspace·thread에 속하고 run/thread가
+사용한다. App Server는 해소 시점의 Workspace membership을 다시 검증하고, `runId`와
+`contextRef`가 같은 요청 사용자·Workspace·thread에 속하고 run/thread가
 만료되지 않았으며, reference가 최근 완료 tool 결과에 남아 있는지 다시 확인한다. 형식 오류, 다른 사용자나
 Workspace의 reference, 만료·stale reference, 지원하지 않는 domain/resource type은 모두 `404 NOT_FOUND`로
 fail-closed한다.
 
-응답의 `href`는 `/report`, `/files`, `/sql-erd/session` 중 하나인 allowlist된 상대 경로다. SQLtoERD의
-bounded table focus metadata가 유효하면 `focus`를 함께 반환하며, raw provider payload·credential·임의 URL은
+응답의 `href`는 `/report`, `/files`, `/sql-erd/session` 중 하나인 allowlist된 상대 경로다. SQLtoERD는
+`SqlErdService.getSession`으로 soft delete와 Workspace scope를 재검증한 활성 session에 한해 bounded table
+focus metadata가 유효하면 `focus`를 함께 반환하며, raw provider payload·credential·임의 URL은
 반환하지 않는다. 이 endpoint의 응답은 UI navigation 용도로만 사용하고 Agent planning 입력이나 후속
 Tool 호출에 다시 전달하지 않는다.
 

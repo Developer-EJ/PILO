@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { notFound } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
+import { SqlErdService } from "../sql-erd/sql-erd.service";
+import { WorkspaceService } from "../workspace/workspace.service";
 import type {
   AgentJsonObject,
   AgentResourceRef,
@@ -131,7 +133,11 @@ export interface AgentContextNavigationPayload {
 
 @Injectable()
 export class AgentThreadContextService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly workspaceService: WorkspaceService,
+    private readonly sqlErdService: SqlErdService
+  ) {}
 
   async resolveMeetingReference(
     context: AgentToolContext,
@@ -238,6 +244,10 @@ export class AgentThreadContextService {
     ) {
       throw notFound("Agent context navigation target not found");
     }
+    await this.workspaceService.assertWorkspaceAccess(
+      currentUserId,
+      workspaceId
+    );
 
     if (
       reference.domain === "meeting" &&
@@ -261,6 +271,11 @@ export class AgentThreadContextService {
       reference.domain === "sqltoerd" &&
       reference.resourceType === "session"
     ) {
+      await this.sqlErdService.getSession(
+        currentUserId,
+        workspaceId,
+        resourceId
+      );
       const focus = this.readSqlErdFocus(reference);
       return {
         kind: "sql_erd_session",

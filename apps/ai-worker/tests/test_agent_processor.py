@@ -1490,9 +1490,9 @@ def test_same_prompt_cycle_reuses_prior_routing_after_prerequisite() -> None:
             executionMode="confirmation_required",
             inputSchema={
                 "type": "object",
-                "required": ["eventId", "changes"],
+                "required": ["target", "changes"],
                 "properties": {
-                    "eventId": {"type": "string"},
+                    "target": {"type": "object"},
                     "changes": {"type": "object"},
                 },
             },
@@ -1510,7 +1510,10 @@ def test_same_prompt_cycle_reuses_prior_routing_after_prerequisite() -> None:
         decision=planner_decision(
             tool_name="list_calendar_events",
             tool_input={
-                "eventId": "7",
+                "target": {
+                    "title": "Weekly sync",
+                    "startDate": "2026-07-20",
+                },
                 "changes": {"title": "updated"},
             },
         )
@@ -3239,7 +3242,10 @@ def test_processor_waits_for_user_input_at_planner_turn_limit() -> None:
     ]
 
 
-def test_normalizer_blocks_calendar_update_without_event_id() -> None:
+def test_normalizer_accepts_calendar_update_with_resolved_opaque_target() -> None:
+    context_state = agent_context_state(1, domain="calendar", resource_type="event")
+    resolution = resolve_agent_context("그 일정", context_state)
+    assert resolution.status == "resolved"
     job = parse_agent_run_job_payload(
         agent_payload(
             tools=[
@@ -3250,9 +3256,12 @@ def test_normalizer_blocks_calendar_update_without_event_id() -> None:
                     executionMode="confirmation_required",
                     inputSchema={
                         "type": "object",
-                        "required": ["eventId", "changes"],
+                        "required": ["target", "changes"],
                         "additionalProperties": False,
-                        "properties": {},
+                        "properties": {
+                            "target": {"type": "object"},
+                            "changes": {"type": "object"},
+                        },
                     },
                 )
             ]
@@ -3265,12 +3274,15 @@ def test_normalizer_blocks_calendar_update_without_event_id() -> None:
             requires_confirmation=True,
         ),
         job,
+        context_resolution=resolution,
     )
 
-    assert normalized.status == "needs_clarification"
-    assert normalized.risk_level is None
-    assert normalized.output_summary["missingFields"] == ["eventId"]
-    assert "수정할 일정" in normalized.final_answer
+    assert normalized.status == "tool_candidate"
+    assert normalized.risk_level == "medium"
+    assert normalized.output_summary["input"] == {
+        "target": {"contextRef": resolution.target.context_ref},
+        "changes": {"startTime": "16:00"},
+    }
 
 
 def test_normalizer_asks_for_calendar_time_when_end_time_is_not_after_start_time() -> None:
@@ -4302,7 +4314,9 @@ def test_planner_prompt_preserves_calendar_tool_boundaries() -> None:
     assert "Calendar recurrence is not supported" in prompt
     assert "require an explicit all-day choice" in prompt
     assert "never set endTime equal to startTime" in prompt
-    assert "positive integer Calendar event ID" in prompt
+    assert "opaque target and changes only" in prompt
+    assert "Never ask for or emit a Calendar event ID" in prompt
+    assert "positive integer Calendar event ID" not in prompt
     assert "이번 주말" in prompt
     assert "다음 주 월요일" in prompt
     assert "다다음 주 화요일" in prompt

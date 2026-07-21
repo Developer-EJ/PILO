@@ -2298,15 +2298,11 @@ def _missing_calendar_update_fields(
     input_value: dict[str, object],
     missing_fields: tuple[str, ...],
 ) -> tuple[str, ...]:
-    missing = set(missing_fields)
-    event_id = input_value.get("eventId")
-    if (
-        not isinstance(event_id, str)
-        or not event_id.isascii()
-        or not event_id.isdigit()
-        or event_id.startswith("0")
-    ):
-        missing.add("eventId")
+    missing = {field for field in missing_fields if field != "eventId"}
+
+    target = input_value.get("target")
+    if not isinstance(target, dict) or not target:
+        missing.add("target")
 
     changes = input_value.get("changes")
     if not isinstance(changes, dict) or not changes:
@@ -3226,7 +3222,7 @@ def _clarification_answer(
         return "ERD 스키마 확인 결과가 없거나 오래되었습니다. 스키마를 다시 확인해주세요."
 
     labels = {
-        "eventId": "수정할 일정",
+        "target": "수정할 일정",
         "changes": "변경할 내용",
         "title": "일정 제목",
         "startDate": "시작 날짜",
@@ -3891,8 +3887,9 @@ def _agent_planner_system_prompt() -> str:
         "omit boardName and repositoryFullName so the App Server selects the active Board or "
         "the only Board. When the user does not explicitly name a column, omit columnName so "
         "the App Server uses Unmapped; do not ask the user for those defaults. "
-        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require "
-        "eventId and changes only; the server loads the current values for confirmation. "
+        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require an "
+        "opaque target and changes only; use target.contextRef for a resolved prior event, and "
+        "let the server load the current values for confirmation. "
         "For MeetingReport list requests, omit limit unless the user specifies a count; the "
         "App Server defaults it to the latest one by createdAt descending. For a MeetingReport "
         "detail or summary request, use get_meeting_report or summarize_meeting_report with "
@@ -3948,8 +3945,8 @@ def _agent_planner_system_prompt() -> str:
         "all-day choice rather than inferring isAllDay. "
         "For timed Calendar creation, omit endTime when the user gives only a start time so the "
         "Calendar default can apply; never set endTime equal to startTime. "
-        "When the user supplies a positive integer Calendar event ID with changes, use it and let "
-        "the App Server verify that the event exists in the Workspace. "
+        "Never ask for or emit a Calendar event ID. Resolve Calendar update targets from an "
+        "opaque contextRef or the registered human-readable target selector. "
         "Use generate_sql_erd when the user asks to generate an ERD, database schema, or SQL DDL "
         "from natural-language requirements. Its input must be one complete SqlErdSchemaSpecV1 "
         "object matching the provided schema; never return raw DDL as tool input. Always include "

@@ -72,6 +72,31 @@ class FakeCandidateDatabase {
   }
 }
 
+class FakeWorkspaceAccessService {
+  constructor(error = null) {
+    this.error = error;
+    this.calls = [];
+  }
+
+  async assertWorkspaceAccess(currentUserId, workspaceId) {
+    this.calls.push({ currentUserId, workspaceId });
+    if (this.error) throw this.error;
+  }
+}
+
+class FakeNavigationSqlErdService {
+  constructor(error = null) {
+    this.error = error;
+    this.calls = [];
+  }
+
+  async getSession(currentUserId, workspaceId, sessionId) {
+    this.calls.push({ currentUserId, workspaceId, sessionId });
+    if (this.error) throw this.error;
+    return { id: sessionId };
+  }
+}
+
 {
   const database = new FakeDatabase([
     {
@@ -234,6 +259,14 @@ class FakeCandidateDatabase {
       }
     }
   );
+  assert.equal(workspaceService.calls.length, 3);
+  assert.deepEqual(sqlErdService.calls, [
+    {
+      currentUserId: context.currentUserId,
+      workspaceId: context.workspaceId,
+      sessionId
+    }
+  ]);
   await assert.rejects(
     service.resolveNavigation(
       context.currentUserId,
@@ -243,6 +276,71 @@ class FakeCandidateDatabase {
     ),
     (error) => error?.getStatus?.() === 404
   );
+}
+
+{
+  const sessionId = "99999999-9999-4999-8999-999999999991";
+  const database = new FakeDatabase([
+    {
+      thread_id: threadId,
+      run_id: priorRunId,
+      step_id: stepId,
+      resource_refs: [
+        {
+          domain: "sqltoerd",
+          resourceType: "session",
+          resourceId: sessionId
+        }
+      ]
+    }
+  ]);
+  const revokedError = Object.assign(new Error("Workspace access denied"), {
+    getStatus: () => 403
+  });
+  const untouchedSqlErdService = new FakeNavigationSqlErdService();
+  const revokedService = new AgentThreadContextService(
+    database,
+    new FakeWorkspaceAccessService(revokedError),
+    untouchedSqlErdService
+  );
+
+  await assert.rejects(
+    revokedService.resolveNavigation(
+      context.currentUserId,
+      context.workspaceId,
+      context.runId,
+      contextRef(0)
+    ),
+    (error) => error?.getStatus?.() === 403
+  );
+  assert.equal(untouchedSqlErdService.calls.length, 0);
+
+  const deletedError = Object.assign(new Error("sqltoerd session not found"), {
+    getStatus: () => 404
+  });
+  const deletedSqlErdService = new FakeNavigationSqlErdService(deletedError);
+  const deletedService = new AgentThreadContextService(
+    database,
+    new FakeWorkspaceAccessService(),
+    deletedSqlErdService
+  );
+
+  await assert.rejects(
+    deletedService.resolveNavigation(
+      context.currentUserId,
+      context.workspaceId,
+      context.runId,
+      contextRef(0)
+    ),
+    (error) => error?.getStatus?.() === 404
+  );
+  assert.deepEqual(deletedSqlErdService.calls, [
+    {
+      currentUserId: context.currentUserId,
+      workspaceId: context.workspaceId,
+      sessionId
+    }
+  ]);
 }
 
 {
