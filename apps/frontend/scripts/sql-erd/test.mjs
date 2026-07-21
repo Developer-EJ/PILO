@@ -8480,6 +8480,14 @@ assert.doesNotMatch(tableShape, /text-overflow/);
 assert.match(panel, /data-sqltoerd-inspector-toggle/);
 assert.match(
   panel,
+  /className="flex items-start justify-between gap-3 border-b px-5 py-5"[\s\S]*?data-sqltoerd-inspector-summary/
+);
+assert.match(
+  panel,
+  /className="bg-background px-4"[\s\S]*?data-sqltoerd-inspector-column-summary/
+);
+assert.match(
+  panel,
   /className="inline-flex size-8[\s\S]*?data-sqltoerd-inspector-toggle/
 );
 assert.doesNotMatch(panel, /className="absolute top-1\/2 -left-/);
