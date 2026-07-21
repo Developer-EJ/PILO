@@ -37,6 +37,22 @@ class FakeDatabase {
   }
 }
 
+class FakeScopeDatabase {
+  constructor(scope, priorState = null) {
+    this.scope = scope;
+    this.priorState = priorState;
+    this.calls = [];
+  }
+
+  async queryOne(text, values) {
+    this.calls.push({ text, values });
+    if (text.includes("FROM agent_steps")) {
+      return this.priorState ? { context_state: this.priorState } : null;
+    }
+    return this.scope;
+  }
+}
+
 {
   const database = new FakeDatabase([
     {
@@ -105,4 +121,170 @@ class FakeDatabase {
     resourceId: actionItemId,
     reportId
   });
+}
+
+{
+  const currentStepId = "99999999-9999-4999-8999-999999999999";
+  const database = new FakeScopeDatabase({
+    thread_id: threadId,
+    run_id: context.runId,
+    step_id: currentStepId,
+    step_order: 4,
+    turn_sequence: 2
+  });
+  const service = new AgentThreadContextService(database);
+  const domains = [
+    "meeting",
+    "calendar",
+    "board",
+    "drive",
+    "sqltoerd",
+    "pr_review"
+  ];
+  const rawRefs = domains.map((domain, index) => ({
+    domain,
+    resourceType: `${domain}_resource`,
+    resourceId: `raw-resource-${index}`,
+    label: `${domain} result`,
+    url: `/private/${index}`,
+    metadata: { credential: `secret-${index}` }
+  }));
+  rawRefs.push(
+    ...Array.from({ length: 10 }, (_, index) => ({
+      domain: "calendar",
+      resourceType: "event",
+      resourceId: `overflow-${index}`,
+      label: "x".repeat(500)
+    }))
+  );
+
+  const state = await service.buildContextState(
+    context,
+    currentStepId,
+    "cross_domain_search",
+    rawRefs
+  );
+
+  assert.equal(state.version, 1);
+  assert.deepEqual(state.provenance, { turnSequence: 2, stepOrder: 4 });
+  assert.equal(state.resultSets.length, 12);
+  assert.deepEqual(
+    state.resultSets.slice(0, domains.length).map((reference) => reference.domain),
+    domains
+  );
+  assert.equal(Buffer.byteLength(state.resultSets.at(-1).label, "utf8") <= 300, true);
+  assert.match(state.resultSets[0].contextRef, /^ctx_[0-9a-f]{24}$/);
+  assert.equal(JSON.stringify(state).includes("raw-resource"), false);
+  assert.equal(JSON.stringify(state).includes("credential"), false);
+  assert.deepEqual(database.calls[0].values, [
+    context.runId,
+    context.workspaceId,
+    context.currentUserId,
+    currentStepId
+  ]);
+
+  const publicRefs = service.toPublicResourceRefs(
+    threadId,
+    context.runId,
+    currentStepId,
+    rawRefs
+  );
+  assert.equal(publicRefs.length, 12);
+  assert.equal(JSON.stringify(publicRefs).includes("raw-resource"), false);
+  assert.equal(JSON.stringify(publicRefs).includes("/private/"), false);
+}
+
+{
+  const currentStepId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const candidateContextRef = "ctx_1234567890abcdef12345678";
+  const service = new AgentThreadContextService(
+    new FakeScopeDatabase({
+      thread_id: threadId,
+      run_id: context.runId,
+      step_id: currentStepId,
+      step_order: 5,
+      turn_sequence: 3
+    })
+  );
+  const state = await service.buildContextState(
+    context,
+    currentStepId,
+    "find_meeting_reports",
+    [],
+    [
+      {
+        contextRef: candidateContextRef,
+        domain: "meeting",
+        resourceType: "meeting_report",
+        label: "Weekly sync",
+        status: "completed",
+        ordinal: 2,
+        generation: 42
+      }
+    ],
+    "clarification"
+  );
+
+  assert.deepEqual(state.resultSets, [
+    {
+      contextRef: candidateContextRef,
+      domain: "meeting",
+      resourceType: "meeting_report",
+      label: "Weekly sync",
+      status: "completed",
+      ordinal: 2,
+      generation: 42
+    }
+  ]);
+  assert.deepEqual(state.pendingState, { kind: "clarification" });
+}
+
+{
+  const priorContextRef = "ctx_abcdefabcdefabcdefabcdef";
+  const currentStepId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const database = new FakeScopeDatabase(
+    {
+      thread_id: threadId,
+      run_id: context.runId,
+      step_id: currentStepId,
+      step_order: 6,
+      turn_sequence: 3
+    },
+    {
+      version: 1,
+      resultSets: [
+        {
+          domain: "drive",
+          resourceType: "document",
+          contextRef: priorContextRef,
+          label: "Prior document",
+          ordinal: 1,
+          generation: 5,
+          resourceId: "must-not-survive"
+        }
+      ]
+    }
+  );
+  const service = new AgentThreadContextService(database);
+
+  const state = await service.buildContextState(
+    context,
+    currentStepId,
+    "list_calendar_events",
+    [
+      {
+        domain: "calendar",
+        resourceType: "event",
+        resourceId: "current-event",
+        label: "Current event"
+      }
+    ]
+  );
+
+  assert.deepEqual(
+    state.resultSets.map((reference) => reference.domain),
+    ["drive", "calendar"]
+  );
+  assert.equal(JSON.stringify(state).includes("must-not-survive"), false);
+  assert.equal(JSON.stringify(state).includes("current-event"), false);
 }

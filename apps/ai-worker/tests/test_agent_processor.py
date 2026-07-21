@@ -43,6 +43,11 @@ from app.agent_tool_retrieval import (
     compute_tool_capability_catalog_sha,
 )
 from app.meeting_report_processor import InfrastructureError
+from app.meeting_report_runtime import (
+    AGENT_THREAD_CONTEXT_MAX_BYTES,
+    _merge_agent_context_states,
+    _safe_agent_context_state,
+)
 
 RUN_ID = "33333333-3333-3333-3333-333333333333"
 USER_VISIBLE_UUID = "12345678-1234-4123-8123-123456789abc"
@@ -97,6 +102,32 @@ def run_context(**overrides: object) -> AgentRunContext:
         **overrides,
     }
     return AgentRunContext(**values)
+
+
+def agent_context_state(
+    turn_sequence: int,
+    *,
+    domain: str = "meeting",
+    count: int = 1,
+) -> dict[str, object]:
+    return {
+        "version": 1,
+        "provenance": {"turnSequence": turn_sequence, "stepOrder": turn_sequence},
+        "activeDomain": domain,
+        "resultSets": [
+            {
+                "domain": domain,
+                "resourceType": "result",
+                "contextRef": f"ctx_{turn_sequence:012x}{index:012x}",
+                "label": "result-" + ("x" * 400),
+                "ordinal": index + 1,
+                "generation": turn_sequence,
+                "resourceId": USER_VISIBLE_UUID,
+            }
+            for index in range(count)
+        ],
+        "lastToolState": {"toolName": "search", "outcome": "completed"},
+    }
 
 
 def planner_decision(**overrides: object) -> AgentPlannerDecision:
@@ -4578,3 +4609,63 @@ def test_completed_sql_erd_replacement_uses_deterministic_success_answer() -> No
     assert normalized.status == "completed"
     assert normalized.final_answer == "현재 SQLtoERD 세션의 스키마를 교체했습니다."
     assert normalized.output_summary["finalAnswerDraft"] == normalized.final_answer
+
+
+def test_agent_context_state_is_domain_and_size_bounded() -> None:
+    states = [agent_context_state(turn, count=3) for turn in range(1, 9)]
+    states.append(agent_context_state(9, domain="canvas", count=1))
+    selected_target = {
+        "contextRef": "ctx_000000000008000000000002",
+        "generation": 8,
+        "source": "candidate_button",
+    }
+
+    merged = _merge_agent_context_states(states, selected_target)
+
+    assert merged is not None
+    assert len(merged["resultSets"]) == 12
+    assert merged["selectedTarget"] == selected_target
+    serialized = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
+    assert len(serialized.encode("utf-8")) <= AGENT_THREAD_CONTEXT_MAX_BYTES
+    assert USER_VISIBLE_UUID not in serialized
+    assert "resourceId" not in serialized
+    assert all(reference["domain"] == "meeting" for reference in merged["resultSets"])
+
+
+def test_agent_context_state_rejects_invalid_reference_contract() -> None:
+    state = agent_context_state(1)
+    state["resultSets"] = [
+        {
+            "domain": "meeting",
+            "resourceType": "meeting_report",
+            "contextRef": USER_VISIBLE_UUID,
+            "label": "raw id",
+            "ordinal": 1,
+            "generation": 1,
+        }
+    ]
+
+    safe = _safe_agent_context_state(state)
+
+    assert safe is not None
+    assert safe["resultSets"] == []
+
+
+def test_agent_planner_prompt_includes_structured_context_state() -> None:
+    job = parse_agent_run_job_payload(agent_payload())
+    context_state = agent_context_state(1)
+    request = AgentPlanningRequest(
+        run_id=RUN_ID,
+        prompt="use the previous result",
+        timezone="Asia/Seoul",
+        current_date="2026-07-21",
+        tool_schema_version=AGENT_TOOL_SCHEMA_VERSION,
+        tools=job.tools,
+        planning_context="legacy text",
+        context_state=context_state,
+    )
+
+    payload = json.loads(_agent_planner_user_prompt(request))
+
+    assert payload["contextState"] == context_state
+    assert payload["planningContext"] == "legacy text"

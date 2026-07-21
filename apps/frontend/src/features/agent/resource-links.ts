@@ -18,6 +18,10 @@ type AgentSqlErdRequestContext = {
 
 export type StoredAgentCandidateSelection = {
   candidateSelectionId: string;
+  contextRef?: string;
+  domain?: string;
+  generation?: number;
+  ordinal?: number;
   resourceType: string;
   label: string;
   description: string | null;
@@ -84,6 +88,10 @@ export function getStoredAgentCandidateSelections(
   const candidates = rawCandidates.map((candidate) => {
     if (!isPlainObject(candidate)) return null;
     const candidateSelectionId = candidate.candidateSelectionId;
+    const contextRef = candidate.contextRef;
+    const domain = candidate.domain;
+    const generation = candidate.generation;
+    const ordinal = candidate.ordinal;
     const resourceType = candidate.resourceType;
     const label = normalizeCandidateTitle(candidate.label);
     const description = normalizeOptionalCandidateText(candidate.description, 1000);
@@ -92,6 +100,15 @@ export function getStoredAgentCandidateSelections(
       typeof candidateSelectionId !== "string" ||
       !UUID_PATTERN.test(candidateSelectionId) ||
       seenIds.has(candidateSelectionId) ||
+      (contextRef !== undefined &&
+        (typeof contextRef !== "string" ||
+          !/^ctx_[0-9a-f]{24}$/.test(contextRef))) ||
+      (domain !== undefined &&
+        (typeof domain !== "string" || !/^[a-z][a-z0-9_]{0,99}$/.test(domain))) ||
+      (generation !== undefined &&
+        (typeof generation !== "number" || !Number.isSafeInteger(generation))) ||
+      (ordinal !== undefined &&
+        (typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < 1)) ||
       !label ||
       typeof resourceType !== "string" ||
       !/^[a-z][a-z0-9_]{0,99}$/.test(resourceType)
@@ -101,6 +118,10 @@ export function getStoredAgentCandidateSelections(
     seenIds.add(candidateSelectionId);
     return {
       candidateSelectionId,
+      ...(typeof contextRef === "string" ? { contextRef } : {}),
+      ...(typeof domain === "string" ? { domain } : {}),
+      ...(typeof generation === "number" ? { generation } : {}),
+      ...(typeof ordinal === "number" ? { ordinal } : {}),
       resourceType,
       label,
       description,

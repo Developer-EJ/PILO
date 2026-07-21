@@ -65,6 +65,7 @@ assert.match(agentTypes, /export type AgentRunRequestContext/);
 assert.match(agentTypes, /surface: "canvas"/);
 assert.match(agentTypes, /canvasContext/);
 assert.match(agentTypes, /resourceId\?: string \| null/);
+assert.match(agentTypes, /contextRef\?: string \| null/);
 assert.match(agentTypes, /resourceType\?: string \| null/);
 assert.match(agentTypes, /kind: "choice"/);
 assert.match(agentTypes, /selectedChoiceId: string \| null/);

@@ -20,6 +20,7 @@ import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
 import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
+import { AgentThreadContextService } from "./agent-thread-context.service";
 import { EmbeddingTemporarilyUnavailableError } from "./grounding/query-embedding";
 import type {
   AgentJsonObject,
@@ -125,7 +126,8 @@ export class AgentExecutionService {
     private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
     private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
     private readonly agentCandidateSelectionService: AgentCandidateSelectionService,
-    private readonly agentLatencyObserver?: AgentLatencyObserver
+    private readonly agentLatencyObserver?: AgentLatencyObserver,
+    private readonly agentThreadContextService?: AgentThreadContextService
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
@@ -1014,11 +1016,20 @@ export class AgentExecutionService {
             }))
           )
       : [];
+    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
+    const contextState = await this.agentThreadContextService?.buildContextState(
+      candidateContext,
+      step.id,
+      definition.name,
+      resourceRefs,
+      candidateSelections,
+      "clarification"
+    );
     const outputSummary = this.sanitizeJsonObject({
       ...clarification.outputSummary,
-      ...(candidateSelections.length > 0 ? { candidateSelections } : {})
+      ...(candidateSelections.length > 0 ? { candidateSelections } : {}),
+      ...(contextState ? { agentContextState: contextState } : {})
     });
-    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
     const answer =
       typeof outputSummary.question === "string" && outputSummary.question.trim()
         ? outputSummary.question.trim()
@@ -1115,8 +1126,22 @@ export class AgentExecutionService {
         turnSequence
       });
       advanceStartedAt = this.agentLatencyObserver?.start();
-      const outputSummary = this.buildOutputSummary(result);
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
+      const contextState = await this.agentThreadContextService?.buildContextState(
+        {
+          currentUserId,
+          workspaceId,
+          runId,
+          requestContext
+        },
+        step.id,
+        definition.name,
+        resourceRefs
+      );
+      const outputSummary = this.sanitizeJsonObject({
+        ...this.buildOutputSummary(result),
+        ...(contextState ? { agentContextState: contextState } : {})
+      });
 
       if (result.status === "delegated") {
         await this.agentLoggingService.deferToolStep(

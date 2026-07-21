@@ -103,6 +103,16 @@ AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
 )
 AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
 AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
+AGENT_THREAD_CONTEXT_MAX_TURNS = 6
+AGENT_THREAD_CONTEXT_MAX_REFS = 12
+AGENT_SAFE_CONTEXT_DOMAINS = {
+    "meeting",
+    "calendar",
+    "board",
+    "drive",
+    "sqltoerd",
+    "pr_review",
+}
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
@@ -348,6 +358,119 @@ def _build_bounded_agent_planning_context(lines: list[str]) -> str:
         selected_reversed.append(line)
         total_bytes += line_bytes + separator_bytes
     return "\n".join(reversed(selected_reversed))
+
+
+def _safe_agent_context_state(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict) or value.get("version") != 1:
+        return None
+    provenance = value.get("provenance")
+    result_sets = value.get("resultSets")
+    last_tool_state = value.get("lastToolState")
+    if (
+        not isinstance(provenance, dict)
+        or not isinstance(provenance.get("turnSequence"), int)
+        or not isinstance(provenance.get("stepOrder"), int)
+        or not isinstance(result_sets, list)
+        or not isinstance(last_tool_state, dict)
+    ):
+        return None
+    safe_refs: list[dict[str, object]] = []
+    for reference in result_sets[:AGENT_THREAD_CONTEXT_MAX_REFS]:
+        if not isinstance(reference, dict):
+            continue
+        context_ref = reference.get("contextRef")
+        domain = reference.get("domain")
+        resource_type = reference.get("resourceType")
+        label = reference.get("label")
+        ordinal = reference.get("ordinal")
+        generation = reference.get("generation")
+        if (
+            not isinstance(context_ref, str)
+            or re.fullmatch(r"ctx_[0-9a-f]{24}", context_ref) is None
+            or not isinstance(domain, str)
+            or domain not in AGENT_SAFE_CONTEXT_DOMAINS
+            or not isinstance(resource_type, str)
+            or not isinstance(label, str)
+            or not isinstance(ordinal, int)
+            or not isinstance(generation, int)
+        ):
+            continue
+        safe_reference: dict[str, object] = {
+            "domain": _truncate_utf8(domain, 100),
+            "resourceType": _truncate_utf8(resource_type, 100),
+            "contextRef": context_ref,
+            "label": _truncate_utf8(label, 300),
+            "ordinal": ordinal,
+            "generation": generation,
+        }
+        status = reference.get("status")
+        if isinstance(status, str):
+            safe_reference["status"] = _truncate_utf8(status, 100)
+        safe_refs.append(safe_reference)
+    tool_name = last_tool_state.get("toolName")
+    outcome = last_tool_state.get("outcome")
+    if not isinstance(tool_name, str) or outcome not in {
+        "completed",
+        "clarification",
+        "confirmation",
+    }:
+        return None
+    state: dict[str, object] = {
+        "version": 1,
+        "provenance": {
+            "turnSequence": provenance["turnSequence"],
+            "stepOrder": provenance["stepOrder"],
+        },
+        "resultSets": safe_refs,
+        "lastToolState": {
+            "toolName": _truncate_utf8(tool_name, 200),
+            "outcome": outcome,
+        },
+    }
+    active_domain = value.get("activeDomain")
+    if isinstance(active_domain, str) and active_domain in AGENT_SAFE_CONTEXT_DOMAINS:
+        state["activeDomain"] = _truncate_utf8(active_domain, 100)
+    pending_state = value.get("pendingState")
+    if isinstance(pending_state, dict) and pending_state.get("kind") in {
+        "clarification",
+        "confirmation",
+    }:
+        state["pendingState"] = {"kind": pending_state["kind"]}
+    return state
+
+
+def _merge_agent_context_states(
+    values: list[object],
+    selected_target: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    states = [state for value in values if (state := _safe_agent_context_state(value))]
+    states = states[-AGENT_THREAD_CONTEXT_MAX_TURNS:]
+    if not states:
+        return None
+    refs: dict[str, dict[str, object]] = {}
+    for state in states:
+        for reference in state["resultSets"]:
+            if isinstance(reference, dict):
+                refs[str(reference["contextRef"])] = reference
+    bounded_refs = list(refs.values())[-AGENT_THREAD_CONTEXT_MAX_REFS:]
+    latest = states[-1]
+    merged: dict[str, object] = {
+        "version": 1,
+        "provenance": latest["provenance"],
+        "resultSets": bounded_refs,
+        "lastToolState": latest["lastToolState"],
+    }
+    for key in ("activeDomain", "pendingState"):
+        if key in latest:
+            merged[key] = latest[key]
+    if selected_target is not None:
+        merged["selectedTarget"] = selected_target
+    serialized = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
+    if _utf8_size(serialized) > AGENT_THREAD_CONTEXT_MAX_BYTES:
+        while bounded_refs and _utf8_size(serialized) > AGENT_THREAD_CONTEXT_MAX_BYTES:
+            bounded_refs.pop(0)
+            serialized = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
+    return merged
 
 
 @dataclass(frozen=True)
@@ -1716,12 +1839,16 @@ class PgAgentRunRepository:
         selected_candidate = self.connection.execute(
             """
             SELECT
+              candidate.id AS candidate_selection_id,
+              candidate.domain,
               candidate.resource_type,
               candidate.label,
               candidate.description,
               candidate.status,
               clarification_step.tool_name AS clarification_tool_name,
               clarification_step.input_json AS input_summary,
+              clarification_step.output_json->'candidateSelections'
+                AS candidate_selections,
               planner_step.output_json->'toolRetrieval'->>'primaryToolName'
                 AS goal_tool_name
             FROM agent_candidate_selections AS candidate
@@ -1741,7 +1868,6 @@ class PgAgentRunRepository:
             WHERE candidate.run_id = %s
               AND candidate.workspace_id = %s
               AND candidate.requested_by_user_id = %s
-              AND candidate.domain = 'meeting'
               AND candidate.consumed_at IS NOT NULL
               AND candidate.expires_at > now()
               AND NOT EXISTS (
@@ -1757,14 +1883,45 @@ class PgAgentRunRepository:
             """,
             (job.run_id, job.workspace_id, job.requested_by_user_id),
         ).fetchone()
+        selected_target: dict[str, object] | None = None
         if selected_candidate is not None:
+            candidate_selections = selected_candidate.get("candidate_selections")
+            candidate_selection_id = selected_candidate.get("candidate_selection_id")
+            if isinstance(candidate_selections, list):
+                selected_projection = next(
+                    (
+                        candidate
+                        for candidate in candidate_selections
+                        if isinstance(candidate, dict)
+                        and candidate.get("candidateSelectionId") == str(candidate_selection_id)
+                    ),
+                    None,
+                )
+                if isinstance(selected_projection, dict):
+                    context_ref = selected_projection.get("contextRef")
+                    generation = selected_projection.get("generation")
+                    if (
+                        isinstance(context_ref, str)
+                        and re.fullmatch(r"ctx_[0-9a-f]{24}", context_ref)
+                        and isinstance(generation, int)
+                    ):
+                        selected_target = {
+                            "contextRef": context_ref,
+                            "generation": generation,
+                            "source": "candidate_button",
+                        }
             resource_type = str(selected_candidate["resource_type"]).strip()
+            candidate_domain = str(selected_candidate.get("domain") or "meeting").strip()
             label = _truncate_utf8(str(selected_candidate["label"]).strip(), 300)
             description = selected_candidate["description"]
             status = selected_candidate["status"]
-            if resource_type and label:
+            if selected_target is None and resource_type and label:
                 details = [
-                    f"selected meeting resource type={resource_type}",
+                    (
+                        f"selected meeting resource type={resource_type}"
+                        if candidate_domain == "meeting"
+                        else f"selected candidate domain={candidate_domain} type={resource_type}"
+                    ),
                     f"label={label}",
                 ]
                 if isinstance(description, str) and description.strip():
@@ -1786,32 +1943,82 @@ class PgAgentRunRepository:
                             ),
                         )
                     )
-                input_summary = selected_candidate.get("input_summary")
-                tool_input = (
-                    input_summary.get("input")
-                    if isinstance(input_summary, dict)
-                    and isinstance(input_summary.get("input"), dict)
-                    else {}
-                )
-                resume_state = {
-                    "resourceType": resource_type,
-                    "goalToolName": (
-                        selected_candidate["goal_tool_name"]
-                        if isinstance(selected_candidate["goal_tool_name"], str)
-                        else ""
-                    ),
-                    "clarificationToolName": str(selected_candidate["clarification_tool_name"]),
-                    "toolInput": _safe_meeting_candidate_resume_input(tool_input),
-                }
-                memory.append(
-                    "selected meeting candidate resume: "
-                    + json.dumps(
-                        resume_state,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
+                if candidate_domain == "meeting":
+                    input_summary = selected_candidate.get("input_summary")
+                    tool_input = (
+                        input_summary.get("input")
+                        if isinstance(input_summary, dict)
+                        and isinstance(input_summary.get("input"), dict)
+                        else {}
                     )
-                )
+                    resume_state = {
+                        "resourceType": resource_type,
+                        "goalToolName": (
+                            selected_candidate["goal_tool_name"]
+                            if isinstance(selected_candidate["goal_tool_name"], str)
+                            else ""
+                        ),
+                        "clarificationToolName": str(selected_candidate["clarification_tool_name"]),
+                        "toolInput": _safe_meeting_candidate_resume_input(tool_input),
+                    }
+                    memory.append(
+                        "selected meeting candidate resume: "
+                        + json.dumps(
+                            resume_state,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                    )
+
+        prior_context_rows = self.connection.execute(
+            """
+            WITH current_run AS (
+              SELECT thread_id
+              FROM agent_runs
+              WHERE id = %s
+                AND workspace_id = %s
+                AND requested_by_user_id = %s
+                AND thread_id IS NOT NULL
+            ), recent_runs AS (
+              SELECT prior_run.id, prior_run.created_at
+              FROM agent_runs AS prior_run
+              INNER JOIN current_run ON current_run.thread_id = prior_run.thread_id
+              WHERE prior_run.id <> %s
+                AND prior_run.workspace_id = %s
+                AND prior_run.requested_by_user_id = %s
+                AND prior_run.status = 'completed'
+                AND prior_run.expires_at > now()
+              ORDER BY prior_run.created_at DESC, prior_run.id DESC
+              LIMIT %s
+            )
+            SELECT latest_context.context_state
+            FROM recent_runs
+            INNER JOIN LATERAL (
+              SELECT step.output_json->'agentContextState' AS context_state
+              FROM agent_steps AS step
+              WHERE step.run_id = recent_runs.id
+                AND step.step_type = 'tool'
+                AND step.status = 'completed'
+                AND step.output_json ? 'agentContextState'
+              ORDER BY step.step_order DESC, step.id DESC
+              LIMIT 1
+            ) AS latest_context ON TRUE
+            ORDER BY recent_runs.created_at DESC, recent_runs.id DESC
+            """,
+            (
+                job.run_id,
+                job.workspace_id,
+                job.requested_by_user_id,
+                job.run_id,
+                job.workspace_id,
+                job.requested_by_user_id,
+                AGENT_THREAD_CONTEXT_MAX_TURNS,
+            ),
+        ).fetchall()
+        context_state_values: list[object] = [
+            item["context_state"] for item in reversed(prior_context_rows)
+        ]
 
         timeline_rows = self.connection.execute(
             """
@@ -1856,9 +2063,24 @@ class PgAgentRunRepository:
             (job.run_id, job.run_id),
         ).fetchall()
         latest_user_message: str | None = None
+        latest_current_context_state: dict[str, object] | None = None
         for item in timeline_rows:
             if item["item_kind"] == "tool_step":
-                output = _serialize_agent_tool_output(str(item["tool_name"]), item["output_json"])
+                output_json = item["output_json"]
+                raw_context_state = (
+                    output_json.get("agentContextState") if isinstance(output_json, dict) else None
+                )
+                safe_context_state = _safe_agent_context_state(raw_context_state)
+                if safe_context_state is not None:
+                    latest_current_context_state = safe_context_state
+                    output = json.dumps(
+                        {"agentContextState": safe_context_state},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                else:
+                    output = _serialize_agent_tool_output(str(item["tool_name"]), output_json)
                 tool_line = f"tool {item['tool_name']}: {output}"
                 memory.append(tool_line)
                 untrusted_source_lines.append(
@@ -1872,6 +2094,22 @@ class PgAgentRunRepository:
                 if item["role"] == "user":
                     latest_user_message = content
 
+        if latest_current_context_state is not None:
+            context_state_values.append(latest_current_context_state)
+
+        context_state = _merge_agent_context_states(
+            context_state_values,
+            selected_target,
+        )
+        context_state_sources: list[PromptSecuritySource] = []
+        if context_state is not None:
+            for reference in context_state.get("resultSets", []):
+                if not isinstance(reference, dict):
+                    continue
+                for field in ("label", "status"):
+                    value = reference.get(field)
+                    if isinstance(value, str) and value:
+                        context_state_sources.append(PromptSecuritySource("context_state", value))
         planning_context = _build_bounded_agent_planning_context(memory)
         included_lines = set(planning_context.splitlines())
         return AgentRunContext(
@@ -1897,8 +2135,10 @@ class PgAgentRunRepository:
                 int(row["queue_wait_ms"]) if row.get("queue_wait_ms") is not None else None
             ),
             planning_context=planning_context,
-            untrusted_context_sources=tuple(
-                source for line, source in untrusted_source_lines if line in included_lines
+            context_state=context_state,
+            untrusted_context_sources=(
+                *(source for line, source in untrusted_source_lines if line in included_lines),
+                *context_state_sources,
             ),
             current_user_source=(
                 PromptSecuritySource("user_follow_up", latest_user_message)

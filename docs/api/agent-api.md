@@ -344,7 +344,7 @@ local timeout이 나도 recoverable run ID는 지우지 않는다. 다음 조회
 | `riskLevel` | Risk level \| null | step 위험도 |
 | `inputSummary` | object \| null | 저장 가능한 최소 입력 요약 |
 | `outputSummary` | object \| null | 저장 가능한 출력 요약 |
-| `resourceRefs` | array | 생성/수정/조회한 resource id와 표시 정보 |
+| `resourceRefs` | array | App Server가 발급한 opaque context reference와 표시 정보 |
 | `errorMessage` | string \| null | 고정된 안전한 실패 메시지. 내부 예외·stack·provider 응답은 포함하지 않음 |
 | `startedAt` | string \| null | ISO datetime |
 | `completedAt` | string \| null | ISO datetime |
@@ -360,19 +360,36 @@ tool step의 `resourceRefs`는 다음 bounded object 배열이다.
 | --- | --- | --- |
 | `domain` | string | resource 소유 도메인 |
 | `resourceType` | string | 도메인 안의 resource 종류 |
-| `resourceId` | string | 서버가 검증한 resource 식별자 |
+| `contextRef` | string | `ctx_` prefix의 opaque reference. 실제 resource ID로 해석하지 않음 |
 | `label` | string \| undefined | 사용자 표시용 짧은 이름 |
-| `url` | string \| undefined | 앱 내부에서 검증 후 사용할 상대 경로 |
 | `status` | string \| undefined | 생성·수정 등 bounded 결과 상태 |
-| `metadata` | object \| undefined | 화면 표시에 필요한 bounded metadata |
 
-클라이언트는 `url`을 그대로 신뢰하지 않는다. SQLtoERD session 링크는 run과 tool step이
-모두 `completed`일 때만 표시하고, `/sql-erd/session?sessionId={resourceId}`와 정확히
-일치하는 same-origin 상대 경로만 허용한다. 외부 origin, protocol-relative URL, 추가
-query/hash, 중복·불일치 session ID는 거부한다. 링크 표시는 자동 navigation을 발생시키지 않는다.
-`status=focused`인 SQLtoERD ref의 `metadata`는 아래 `table_focus` 계약을 추가로 검증한다.
-검증된 값은 URL에 넣지 않고 일회성 `sessionStorage`와 동일 페이지 event로만 전달하며,
-SQLtoERD 화면에서 소비한 즉시 제거한다.
+Meeting, Calendar, Board, Drive, SQLtoERD, PR Review의 실제 resource ID, provider URL,
+raw tool payload와 credential metadata는 App Server 내부 저장소에서만 해석한다. API 응답,
+SQS payload와 AI Worker/LLM 입력에는 전달하지 않는다. `contextRef`는 같은 thread, Workspace,
+요청 사용자와 유효 기간 범위에서만 다시 해소하며 stale·expired·consumed reference는 거부한다.
+Canvas Agent artifact resource 계약은 이번 변경 범위에서 제외한다.
+
+### AgentContextState
+
+completed tool step의 `outputSummary.agentContextState`는 `version = 1`인 bounded projection이다.
+최근 6 turn, 최대 12 reference, UTF-8 12 KiB까지만 다음 planning turn에 전달한다.
+같은 run의 다음 tool state는 직전 state의 유효 reference를 누적하고, 새 결과와 합친 뒤 오래된
+reference부터 제거한다. Worker는 최근 각 run의 마지막 state만 읽는다.
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `version` | `1` | context projection version |
+| `provenance` | object | server-owned `turnSequence`, `stepOrder` |
+| `activeDomain` | string \| undefined | 마지막 결과의 도메인 |
+| `resultSets` | array | `domain`, `resourceType`, `contextRef`, `label`, `ordinal`, `generation`, 선택적 `status`만 포함 |
+| `selectedTarget` | object \| undefined | 선택된 `contextRef`, `generation`, 선택 출처 |
+| `lastToolState` | object | 마지막 tool 이름과 `completed`/`clarification`/`confirmation` outcome |
+| `pendingState` | object \| undefined | 대기 중인 clarification 또는 confirmation |
+
+`label`과 `status`는 신뢰하지 않는 표시 데이터이며 실행 권한이나 resource identity의 근거로
+사용하지 않는다. 실제 resource 해소와 권한 재검증은 App Server repository/service transaction
+안에서만 수행한다.
 
 ### AgentConfirmation
 
@@ -781,6 +798,9 @@ Meeting resource 후보도 같은 공통 selection을 사용한다.
 - 하나의 completed clarification tool step이 하나의 candidate generation이다. App Server는 각 후보에
   1-based ordinal을 저장하며 버튼의 candidate ID와 “2번” 같은 자연어 ordinal을 같은 최신 generation에
   결합한다. 이전 generation, 범위를 벗어난 ordinal, 중복 후보는 사용할 수 없다.
+- `outputSummary.candidateSelections[]`는 기존 `candidateSelectionId`, `resourceType`, `label`,
+  `description`, `status`와 함께 `domain`, opaque `contextRef`, 1-based `ordinal`, server-owned
+  `generation`을 반환한다. 실제 candidate resource ID는 포함하지 않는다.
 - candidate ID는 후보 버튼 이외의 값으로 만들거나 resource ID로 해석하지 않는다. App Server는 같은
   transaction에서 `runId`, Workspace, 요청 사용자, 미소비 상태와 15분 TTL을 확인하고 한 번만 소비한다.
   생성 source인 최신 clarification tool step과도 일치해야 한다. resource reference와 Phase 2 selection
