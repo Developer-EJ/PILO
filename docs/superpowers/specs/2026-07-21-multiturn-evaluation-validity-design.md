@@ -29,7 +29,7 @@ Each serialized result contains only non-sensitive diagnostics: expected Tool se
 
 The frozen catalog uses supported Tool contracts and deterministic fixture facts. Representative Korean multi-turn cases must be reviewed against the product contract before freezing. Fixture data is desirable because it makes baseline/candidate comparisons reproducible; it must match the selector and context that the prior turn exposes.
 
-The Judge remains temperature 0 with three votes and only receives minimised Tool facts. Before Judge-derived context metrics are used externally, two human reviewers independently label at least 18 of 72 conversations (25%). The stored calibration record contains only case ID, each reviewer label, Judge label, and disagreement code. At least 80% reviewer agreement and at least 80% Judge agreement with the adjudicated label are required. Until then, the report labels the Judge metric `calibrationPending` and it is diagnostic only.
+The Judge remains temperature 0 with three votes and only receives minimised Tool facts. Before Judge-derived context metrics are used externally, two human reviewers independently label at least 18 of 72 conversations (25%). The stored calibration record contains only case ID, each reviewer label, Judge label, and disagreement code. At least 80% reviewer agreement and at least 80% Judge agreement with the adjudicated label are required. Until then, report and snapshot metadata set `judgeCalibrationStatus: "pending"`; the Judge-derived context metric is diagnostic only and must not be used as an external headline.
 
 ## Comparison Claim
 
