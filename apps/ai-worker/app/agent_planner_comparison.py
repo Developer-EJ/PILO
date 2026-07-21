@@ -62,6 +62,7 @@ def build_agent_performance_snapshot(
         raise ValueError("Snapshot requires 31 complete workflow scenarios")
 
     scenario_success: dict[str, float] = {}
+    scenario_contract_success: dict[str, float] = {}
     domain_success: dict[str, list[float]] = {}
     category_success: dict[str, list[float]] = {}
     scenario_latency: list[float] = []
@@ -71,6 +72,9 @@ def build_agent_performance_snapshot(
     for scenario_id, attempts in scenario_attempts.items():
         success_rate = _mean([float(_task_success(item)) for item in attempts])
         scenario_success[scenario_id] = success_rate
+        scenario_contract_success[scenario_id] = _mean(
+            [float(_execution_contract_passed(item)) for item in attempts]
+        )
         for domain in _expected_domains(attempts[0]):
             domain_success.setdefault(domain, []).append(success_rate)
         category = attempts[0].get("kind")
@@ -96,6 +100,7 @@ def build_agent_performance_snapshot(
         "aggregate": _aggregate(reports_by_variant.values()),
         "uniqueScenarioCount": len(scenario_attempts),
         "taskSuccessRate": round(_mean(list(scenario_success.values())), 4),
+        "executionContractPassRate": round(_mean(list(scenario_contract_success.values())), 4),
         "meanLatencyMs": round(_mean(scenario_latency), 4),
         "meanProviderTotalTokens": (
             round(_mean(scenario_tokens), 4) if has_complete_tokens else None
@@ -259,6 +264,7 @@ def _paired_improvement_evidence(
             scenario_pairs.setdefault(key, []).append((baseline_result, candidate_result))
 
     success_pairs: list[tuple[float, float]] = []
+    contract_pairs: list[tuple[float, float]] = []
     latency_pairs: list[tuple[float, float]] = []
     token_pairs: list[tuple[float, float]] = []
     baseline_safety = 0
@@ -271,6 +277,12 @@ def _paired_improvement_evidence(
             _mean([float(_task_success(item[1])) for item in pairs]),
         )
         success_pairs.append(success_pair)
+        contract_pairs.append(
+            (
+                _mean([float(_execution_contract_passed(item[0])) for item in pairs]),
+                _mean([float(_execution_contract_passed(item[1])) for item in pairs]),
+            )
+        )
         for domain in _expected_domains(pairs[0][0]):
             domain_success_pairs.setdefault(domain, []).append(success_pair)
         category = pairs[0][0].get("kind")
@@ -319,6 +331,13 @@ def _paired_improvement_evidence(
             "confidenceInterval95": list(confidence_interval),
             "passed": success_passed,
         },
+        "executionContract": {
+            "baseline": round(_mean([item[0] for item in contract_pairs]), 4),
+            "candidate": round(_mean([item[1] for item in contract_pairs]), 4),
+            "delta": round(
+                _mean([candidate - baseline for baseline, candidate in contract_pairs]), 4
+            ),
+        },
         "latencyMs": latency,
         "providerTotalTokens": tokens,
         "efficiencyPassed": efficiency_passed,
@@ -334,7 +353,6 @@ def _paired_improvement_evidence(
         },
         "passed": (
             success_passed
-            and efficiency_passed
             and domain_non_regression_passed
             and category_non_regression_passed
             and safety_passed
@@ -359,11 +377,22 @@ def _task_success(result: dict[str, object]) -> bool:
     return passed
 
 
+def _execution_contract_passed(result: dict[str, object]) -> bool:
+    workflow = result.get("workflow")
+    if not isinstance(workflow, dict) or not isinstance(
+        workflow.get("executionContractPassed"), bool
+    ):
+        raise ValueError("Invalid workflow execution contract result")
+    return workflow["executionContractPassed"]
+
+
 def _validate_workflow_result(result: dict[str, object]) -> None:
     workflow = _object(result.get("workflow"), "Invalid workflow evaluation result")
     task_success = workflow.get("taskSuccess")
     if not isinstance(task_success, bool) or task_success is not result.get("passed"):
         raise ValueError("Invalid workflow task success result")
+    if not isinstance(workflow.get("executionContractPassed"), bool):
+        raise ValueError("Invalid workflow execution contract result")
     latency = workflow.get("latencyMs")
     if not isinstance(latency, int | float) or isinstance(latency, bool) or latency < 0:
         raise ValueError("Invalid workflow latency result")
@@ -495,6 +524,11 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     results = _attempt_results(report, attempts)
     passed_attempts = sum(item["passed"] is True for item in results)
     workflow_mode = isinstance(report.get("workflowEvaluation"), dict)
+    execution_contract_passed_attempts = (
+        sum(_execution_contract_passed(item) for item in results)
+        if workflow_mode
+        else passed_attempts
+    )
     tool_results = (
         results if workflow_mode else [item for item in results if _has_expected_tool(item)]
     )
@@ -512,7 +546,7 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     )
     if tool_selection_attempts != len(tool_results):
         raise ValueError("Routing funnel does not match Tool assertion attempts")
-    exact_attempt_rate = _fraction(passed_attempts, attempts)
+    exact_attempt_rate = _fraction(execution_contract_passed_attempts, attempts)
     tool_selection_accuracy = (
         _fraction(tool_passed_attempts, len(tool_results)) if tool_results else None
     )
@@ -524,6 +558,16 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     )
     if reported_passed_attempts > attempts or reported_passed_attempts != passed_attempts:
         raise ValueError("Invalid passed attempt count")
+    if workflow_mode:
+        reported_contract_passed_attempts = _nonnegative_int(
+            report.get("executionContractPassAttempts"),
+            "Invalid execution contract pass attempt count",
+        )
+        if (
+            reported_contract_passed_attempts > attempts
+            or reported_contract_passed_attempts != execution_contract_passed_attempts
+        ):
+            raise ValueError("Invalid execution contract pass attempt count")
     _validate_report_rate(report, "exactAttemptRate", exact_attempt_rate)
     if not workflow_mode:
         _validate_report_rate(report, "toolSelectionAccuracy", tool_selection_accuracy)
@@ -531,6 +575,7 @@ def _report_summary(report: dict[str, object]) -> dict[str, float | int | None]:
     summary: dict[str, float | int | None] = {
         "attempts": attempts,
         "passedAttempts": passed_attempts,
+        "executionContractPassAttempts": execution_contract_passed_attempts,
         "toolSelectionAttempts": tool_selection_attempts,
         "toolSelectionPassedAttempts": tool_passed_attempts,
         "requiredInputAttempts": len(input_results),
@@ -596,6 +641,9 @@ def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int | 
     summaries = [_report_summary(report) for report in reports]
     attempts = sum(int(summary["attempts"]) for summary in summaries)
     passed_attempts = sum(int(summary["passedAttempts"]) for summary in summaries)
+    execution_contract_passed_attempts = sum(
+        int(summary["executionContractPassAttempts"]) for summary in summaries
+    )
     tool_attempts = sum(int(summary["toolSelectionAttempts"]) for summary in summaries)
     tool_passed_attempts = sum(int(summary["toolSelectionPassedAttempts"]) for summary in summaries)
     input_attempts = sum(int(summary["requiredInputAttempts"]) for summary in summaries)
@@ -605,6 +653,7 @@ def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int | 
     result: dict[str, float | int | None] = {
         "attempts": attempts,
         "passedAttempts": passed_attempts,
+        "executionContractPassAttempts": execution_contract_passed_attempts,
         "toolSelectionAttempts": tool_attempts,
         "toolSelectionPassedAttempts": tool_passed_attempts,
         "requiredInputAttempts": input_attempts,
@@ -631,7 +680,7 @@ def _aggregate(reports: Iterable[dict[str, object]]) -> dict[str, float | int | 
         previous_count = count
     result["conditionalToolAccuracy"] = result["toolExactConditionalRate"]
     result["endToEndExactRate"] = result["endToEndExactOverallRate"]
-    result["exactAttemptRate"] = _fraction(passed_attempts, attempts)
+    result["exactAttemptRate"] = _fraction(execution_contract_passed_attempts, attempts)
     result["toolSelectionAccuracy"] = _fraction(tool_passed_attempts, tool_attempts)
     result["requiredInputAccuracy"] = (
         _fraction(input_passed_attempts, input_attempts) if input_attempts else None

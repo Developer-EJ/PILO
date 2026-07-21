@@ -100,6 +100,60 @@ def test_workflow_rejects_wrong_tool_output_or_terminal_state() -> None:
     assert result.failure_reasons == ("final_answer_grounding",)
 
 
+def test_workflow_separates_user_task_outcome_from_strict_execution_contract() -> None:
+    scenario = replace(
+        _scenario(),
+        expected_answer_contains=("주간 회의록",),
+        expected_planner_status="tool_candidate",
+    )
+
+    result = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions(final_answer="주간-회의록을 찾았습니다.")),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+
+    assert result.task_success is True
+    assert result.failure_reasons == ()
+    assert result.execution_contract_passed is False
+    assert result.execution_contract_failure_reasons == (
+        "planner_status",
+        "final_answer_grounding",
+    )
+
+
+def test_workflow_rejects_answer_that_negates_expected_evidence() -> None:
+    scenario = replace(_scenario(), expected_answer_contains=("주간 회의록",))
+
+    result = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions(final_answer="주간 회의록을 찾지 못했습니다.")),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+
+    assert result.task_success is False
+    assert result.failure_reasons == ("final_answer_grounding",)
+
+
+def test_workflow_rejects_inverted_no_result_answer() -> None:
+    scenario = replace(_scenario(), expected_answer_contains=("찾지 못",))
+
+    result = evaluate_workflow_suite(
+        ScriptedPlanner(_successful_decisions(final_answer="관련 문서를 찾지 못한 것은 아닙니다.")),
+        ScriptedRouter(),
+        _job(),
+        (scenario,),
+        current_date="2026-07-21",
+    )[0]
+
+    assert result.task_success is False
+    assert result.failure_reasons == ("final_answer_grounding",)
+
+
 def test_workflow_accepts_expected_unsupported_router_outcome_without_tool() -> None:
     router = StaticRouter(
         AgentRoutingDecision(
