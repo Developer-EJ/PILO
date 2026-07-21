@@ -8466,10 +8466,15 @@ assert.match(tableShape, /pointerEvents: isFocusDimmed \? "none" : "all"/);
 assert.match(tableShape, /data-sqltoerd-table-focus-role/);
 assert.match(tableShape, /blur\(2px\)/);
 assert.match(tableShape, /justify-self-end/);
-assert.match(tableShape, /minmax\(max-content, 1fr\)/);
+assert.match(tableShape, /minmax\(0, 1fr\)/);
+assert.doesNotMatch(tableShape, /minmax\(max-content, 1fr\)/);
 assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);
 assert.doesNotMatch(tableShape, /gridTemplateColumns: `\$\{BADGE_COLUMN_WIDTH\}px max-content max-content`/);
-assert.doesNotMatch(tableShape, /truncate/);
+assert.match(
+  tableShape,
+  /className="min-w-0 w-full truncate justify-self-end whitespace-nowrap text-right text-slate-400"/
+);
+assert.match(tableShape, /title=\{column\.dataType\}/);
 assert.doesNotMatch(tableShape, /text-overflow/);
 
 assert.match(panel, /data-sqltoerd-inspector-toggle/);
