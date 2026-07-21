@@ -351,6 +351,24 @@ for (const eventName of [
 }
 
 {
+  const recovered = activeSession();
+  const harness = createWebhookHarness(recovered);
+  harness.state.isKnownScreenShareRoom = async roomName =>
+    roomName === recovered.livekitRoomName;
+  harness.state.getByRoom = async roomName =>
+    roomName === recovered.livekitRoomName ? recovered : null;
+  const event = webhookEvent("track_unpublished");
+  assert.equal(
+    await harness.handler.canHandle(event),
+    true,
+    "lifecycle-room ownership must route terminal webhooks without authority keys"
+  );
+  assert.equal((await harness.handler.handleVerifiedEvent(event)).status, "received");
+  assert.equal(harness.state.current, null);
+  assert.equal(harness.publisher.events.at(-1)?.event, "workspace-screen-share:ended");
+}
+
+{
   const harness = createWebhookHarness(activeSession());
   const event = webhookEvent("track_unpublished");
   harness.publisher.failures = 1;

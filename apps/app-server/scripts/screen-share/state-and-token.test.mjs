@@ -102,6 +102,16 @@ class FakeRedisClient {
       }
       if (this.values.get(roomKey) !== session.workspaceId) return null;
       if (session.status === "active") {
+        this.values.set(workspaceKey, value);
+        this.values.set(lifecycleKey, value);
+        this.values.set(lifecycleWorkspaceKey, session.sessionId);
+        this.values.set(lifecycleRoomKey, session.sessionId);
+        this.expiries.delete(workspaceKey);
+        this.expiries.delete(roomKey);
+        this.expiries.delete(lifecycleKey);
+        this.expiries.delete(lifecycleWorkspaceKey);
+        this.expiries.delete(lifecycleRoomKey);
+        this.deadlines.set(session.sessionId, Number(options.arguments[3]));
         this.values.delete(rollbackKey);
         this.expiries.delete(rollbackKey);
         return [value, "", ""];
@@ -361,7 +371,11 @@ class FakeRedisClient {
         ? options.keys[9]
         : options.keys[5];
       const authority = this.values.get(workspaceKey);
-      const value = authority ?? this.values.get(lifecycleKey);
+      const authorityRoomWorkspaceId = this.values.get(roomKey);
+      const useLifecycle = !authority || !authorityRoomWorkspaceId;
+      const value = useLifecycle
+        ? this.values.get(lifecycleKey)
+        : authority;
       if (!value) return null;
       const session = JSON.parse(value);
       if (
@@ -370,10 +384,15 @@ class FakeRedisClient {
         (script.includes("RELEASE_STARTING_WORKSPACE_SCREEN_SHARE") &&
           (session.status !== "starting" ||
             this.values.get(rollbackKey) !== options.arguments[2])) ||
-        (authority && this.values.get(roomKey) !== session.workspaceId) ||
-        (script.includes("END_WORKSPACE_SCREEN_SHARE") &&
+        (authority && authorityRoomWorkspaceId !== session.workspaceId) ||
+        (script.includes("END_WORKSPACE_SCREEN_SHARE") && useLifecycle &&
           (this.values.get(lifecycleWorkspaceKey) !== session.sessionId ||
-            this.values.get(lifecycleRoomKey) !== session.sessionId))
+            this.values.get(lifecycleRoomKey) !== session.sessionId)) ||
+        (script.includes("END_WORKSPACE_SCREEN_SHARE") && !useLifecycle &&
+          ((this.values.has(lifecycleWorkspaceKey) &&
+            this.values.get(lifecycleWorkspaceKey) !== session.sessionId) ||
+            (this.values.has(lifecycleRoomKey) &&
+              this.values.get(lifecycleRoomKey) !== session.sessionId)))
       ) {
         return null;
       }
@@ -520,7 +539,7 @@ try {
     `workspace-screen-share:workspace:v1:${session.workspaceId}`,
     JSON.stringify(replacement)
   );
-  assert.equal(await state.getByRoom(session.livekitRoomName), null);
+  assert.deepEqual(await state.getByRoom(session.livekitRoomName), session);
   redis.values.set(
     `workspace-screen-share:workspace:v1:${session.workspaceId}`,
     JSON.stringify(session)
@@ -532,7 +551,7 @@ try {
       workspaceId: "88888888-8888-4888-8888-888888888888"
     })
   );
-  assert.equal(await state.getByRoom(session.livekitRoomName), null);
+  assert.deepEqual(await state.getByRoom(session.livekitRoomName), session);
   redis.values.set(
     `workspace-screen-share:workspace:v1:${session.workspaceId}`,
     JSON.stringify(session)
@@ -592,6 +611,21 @@ try {
   redis.values.set(
     `workspace-screen-share:room:v1:${session.livekitRoomName}`,
     session.workspaceId
+  );
+  redis.values.delete(`workspace-screen-share:workspace:v1:${session.workspaceId}`);
+  assert.deepEqual(
+    await state.getByRoom(session.livekitRoomName),
+    activated.session,
+    "a surviving room authority without its workspace authority must fall through to lifecycle state"
+  );
+  assert.equal(
+    await state.isKnownScreenShareRoom(session.livekitRoomName),
+    true,
+    "lifecycle-room ownership must keep webhook routing enabled after authority loss"
+  );
+  redis.values.set(
+    `workspace-screen-share:workspace:v1:${session.workspaceId}`,
+    JSON.stringify(activated.session)
   );
   const viewerIdentity =
     `screen-share-viewer:${session.sessionId}:viewer-user:viewer-request`;
@@ -740,6 +774,84 @@ try {
       sessionId: session.sessionId
     }
   );
+
+  {
+    const authorityOnlyRedis = new FakeRedisClient();
+    const authorityOnlyState = new TestScreenShareStateService(authorityOnlyRedis);
+    const authorityOnlySession = {
+      ...session,
+      status: "active",
+      startedAt: "2026-07-18T00:00:01.000Z"
+    };
+    authorityOnlyRedis.values.set(
+      `workspace-screen-share:workspace:v1:${authorityOnlySession.workspaceId}`,
+      JSON.stringify(authorityOnlySession)
+    );
+    authorityOnlyRedis.values.set(
+      `workspace-screen-share:room:v1:${authorityOnlySession.livekitRoomName}`,
+      authorityOnlySession.workspaceId
+    );
+    assert.equal(
+      (
+        await authorityOnlyState.terminateIfCurrent({
+          workspaceId: authorityOnlySession.workspaceId,
+          sessionId: authorityOnlySession.sessionId,
+          livekitRoomName: authorityOnlySession.livekitRoomName
+        })
+      )?.session.sessionId,
+      authorityOnlySession.sessionId,
+      "authority-only active sessions must preserve the pre-deployment compare-safe end path"
+    );
+  }
+
+  {
+    const upgradeRedis = new FakeRedisClient();
+    const upgradeState = new TestScreenShareStateService(upgradeRedis);
+    const legacySession = {
+      ...session,
+      status: "active",
+      startedAt: "2026-07-18T00:00:01.000Z"
+    };
+    const legacyWorkspaceKey = `workspace-screen-share:workspace:v1:${legacySession.workspaceId}`;
+    const legacyRoomKey = `workspace-screen-share:room:v1:${legacySession.livekitRoomName}`;
+    upgradeRedis.values.set(legacyWorkspaceKey, JSON.stringify(legacySession));
+    upgradeRedis.values.set(legacyRoomKey, legacySession.workspaceId);
+    upgradeRedis.expiries.set(legacyWorkspaceKey, 12 * 60 * 60);
+    upgradeRedis.expiries.set(legacyRoomKey, 12 * 60 * 60);
+    const backfilled = await upgradeState.activate({
+      workspaceId: legacySession.workspaceId,
+      sessionId: legacySession.sessionId,
+      livekitRoomName: legacySession.livekitRoomName,
+      startedAt: "2026-07-18T00:00:02.000Z"
+    });
+    assert.deepEqual(backfilled?.session, legacySession);
+    assert.equal(backfilled?.outboxId, null, "backfill must not duplicate the started event");
+    assert.equal(
+      upgradeRedis.deadlines.get(legacySession.sessionId),
+      Date.parse(legacySession.startedAt) + 12 * 60 * 60 * 1000
+    );
+    assert.equal(upgradeRedis.expiries.has(legacyWorkspaceKey), false);
+    assert.equal(upgradeRedis.expiries.has(legacyRoomKey), false);
+    assert.deepEqual(
+      JSON.parse(
+        upgradeRedis.values.get(
+          `workspace-screen-share:lifecycle:v1:${legacySession.sessionId}`
+        )
+      ),
+      legacySession
+    );
+    assert.equal(
+      (
+        await upgradeState.terminateIfCurrent({
+          workspaceId: legacySession.workspaceId,
+          sessionId: legacySession.sessionId,
+          livekitRoomName: legacySession.livekitRoomName
+        })
+      )?.session.sessionId,
+      legacySession.sessionId,
+      "authority-only active sessions from before deployment must terminate compare-safely"
+    );
+  }
 
   {
     const reclaimRedis = new FakeRedisClient();
