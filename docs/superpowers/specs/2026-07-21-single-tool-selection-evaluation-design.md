@@ -15,9 +15,9 @@ Measure only whether the Canvas-excluded PILO Agent selects the correct single T
 
 ## Frozen Benchmark
 
-The committed v1 catalog contains 60 supported, information-sufficient Korean requests: ten per domain. Each case declares only a case ID, domain, user utterance, context surface where needed, and expected Tool name.
+The committed v1 catalog contains 120 supported, information-sufficient Korean requests: twenty per domain. Each case declares only a case ID, domain, user utterance, context surface where needed, and expected Tool name.
 
-The 60 cases are stratified across:
+The 120 cases are stratified across:
 
 - natural Korean paraphrases that do not name the Tool;
 - operation and qualifier distinctions within a domain;
@@ -39,7 +39,7 @@ The evaluator serializes only the case ID, expected Tool name, selected Tool nam
 
 `singleTurnToolSelectionAccuracy` is the fraction of all supported holdout attempts that meet the exact-selection contract.
 
-Baseline and candidate use the same catalog SHA, registry snapshot, Agent model configuration, current date, timezone, repetition count, and pinned evaluator revision. The workflow runs each case five times and compares paired case attempts. It reports the absolute accuracy, percentage-point delta, and a paired 95% bootstrap confidence interval.
+Baseline and candidate use the same catalog SHA, registry snapshot, Agent model configuration, current date, timezone, repetition count, and pinned evaluator revision. The workflow runs each case five times and compares paired results clustered by the same 120 case IDs. Repetitions reduce model variance but do not increase the benchmark's effective case count. The report includes absolute accuracy, percentage-point delta, and a clustered paired 95% bootstrap confidence interval.
 
 An external improvement claim is allowed only when the lower bound of the confidence interval is greater than zero. The permitted claim is limited to the frozen single-turn benchmark.
 
