@@ -142,7 +142,7 @@ try {
     [pendingRunId]
   );
   const pendingResult = await service.createRun(userId, workspaceId, { prompt: "승인 전 후속 요청" });
-  assert.notEqual(await threadIdFor(pendingResult.run.id), pendingThreadId);
+  assert.equal(await threadIdFor(pendingResult.run.id), pendingThreadId);
 
   await client.query("ROLLBACK");
   console.log("Agent thread PostgreSQL policy test passed");
