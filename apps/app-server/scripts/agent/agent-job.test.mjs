@@ -69,7 +69,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "292d3f0465b407e3dfebd0de889a45b61f3533ea86aca7f37286990a3b4dd441";
+  "b9fa6c51ed4a254904d90cd10c30b88b1be838ba9a355df70f9b966c3f8aa360";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -156,6 +156,12 @@ const payload = {
       (capability) => capability.id === "meeting.report.hybrid_search"
     )?.toolNames,
     ["list_meeting_reports", "search_meeting_transcript"]
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "calendar.events.get"
+    )?.toolNames,
+    ["get_calendar_event"]
   );
   assert.deepEqual(getAgentCapabilityToolNames("meeting.report.hybrid_search"), [
     "list_meeting_reports",
@@ -438,8 +444,8 @@ const inventory = fullRegistry.listToolInventory();
     AGENT_TOOL_INVENTORY_BASELINE_SHA256,
     "registered tool inventory drift must update the recorded legacy baseline"
   );
-  assert.equal(inventory.totalTools, 35);
-  assert.equal(inventory.tools.length, 35);
+  assert.equal(inventory.totalTools, 36);
+  assert.equal(inventory.tools.length, 36);
   assert.equal(
     inventory.tools.filter((tool) => tool.operation === "write").length,
     16

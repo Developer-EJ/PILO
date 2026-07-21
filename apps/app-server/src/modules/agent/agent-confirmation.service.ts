@@ -818,16 +818,15 @@ export class AgentConfirmationService {
           ? await this.findCompletedToolNames(runId)
           : [];
       const postExecutionDisposition: AgentToolPostExecutionDisposition =
-        capabilityIds.length > 0
-          ? isTerminalAgentCapabilityTool(
-              capabilityIds,
-              toolExecution.definition.name,
-              completedToolNames
-            )
-            ? "complete_run"
-            : "continue_planning"
-          : toolExecution.definition.postExecutionDisposition ??
-            "continue_planning";
+        toolExecution.definition.postExecutionDisposition ??
+        (capabilityIds.length > 0 &&
+        isTerminalAgentCapabilityTool(
+          capabilityIds,
+          toolExecution.definition.name,
+          completedToolNames
+        )
+          ? "complete_run"
+          : "continue_planning");
 
       const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
@@ -1036,13 +1035,21 @@ export class AgentConfirmationService {
       `,
       [runId]
     );
-    const toolRouting = row?.output_json?.toolRouting;
-    if (!this.isPlainObject(toolRouting) || !Array.isArray(toolRouting.capabilityIds)) {
-      return [];
+    for (const source of [
+      row?.output_json?.toolRouting,
+      row?.output_json?.toolRetrieval
+    ]) {
+      if (!this.isPlainObject(source) || !Array.isArray(source.capabilityIds)) {
+        continue;
+      }
+      const capabilityIds = source.capabilityIds.filter(
+        (value): value is string => typeof value === "string" && value.length > 0
+      );
+      if (capabilityIds.length > 0) {
+        return capabilityIds;
+      }
     }
-    return toolRouting.capabilityIds.filter(
-      (value): value is string => typeof value === "string" && value.length > 0
-    );
+    return [];
   }
 
   private async findCompletedToolNames(runId: string): Promise<string[]> {

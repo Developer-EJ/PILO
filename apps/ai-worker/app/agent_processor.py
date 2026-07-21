@@ -11,6 +11,12 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.agent_graph import (
+    AgentGraphRuntime,
+    AgentGraphState,
+    agent_graph_config,
+    build_agent_run_graph,
+)
 from app.agent_latency import AgentLatencyObserver
 from app.agent_prompt_security import (
     PromptSecurityAssessment,
@@ -50,7 +56,6 @@ MEETING_REPORT_HYBRID_COMPOUND_CLARIFICATION_MESSAGE = (
 AGENT_GROUNDED_ANSWER_SECURITY_MESSAGE = (
     "회의 근거에 외부 지시로 보이는 내용이 포함되어 있어 답변을 안전하게 생성하지 않았습니다."
 )
-TERMINAL_AGENT_RUN_STATUSES = {"completed", "failed", "cancelled"}
 PLANNER_STATUSES = {
     "tool_candidate",
     "needs_clarification",
@@ -145,6 +150,7 @@ class AgentRunContext:
     planning_context: str = ""
     untrusted_context_sources: tuple[PromptSecuritySource, ...] = ()
     current_user_source: PromptSecuritySource | None = None
+    thread_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -796,6 +802,7 @@ class AgentRunProcessor:
         tool_retrieval_top_k: int = DEFAULT_TOOL_RETRIEVAL_TOP_K,
         tool_retrieval_schema_token_budget: int = DEFAULT_TOOL_SHORTLIST_SCHEMA_TOKEN_BUDGET,
         latency_observer: AgentLatencyObserver | None = None,
+        graph_checkpointer: object | None = None,
     ) -> None:
         self.repository = repository
         self.planner_client = planner_client
@@ -808,6 +815,7 @@ class AgentRunProcessor:
         self.tool_retrieval_top_k = tool_retrieval_top_k
         self.tool_retrieval_schema_token_budget = tool_retrieval_schema_token_budget
         self.latency_observer = latency_observer or AgentLatencyObserver()
+        self.graph = build_agent_run_graph(graph_checkpointer)
 
     def process_payload(self, payload: dict[str, object]) -> AgentProcessResult:
         try:
@@ -872,58 +880,79 @@ class AgentRunProcessor:
             if context is None:
                 return self._result(job, delete_message=True, reason="agent_run_not_found")
             latency_scope.queue_wait_ms = context.queue_wait_ms
-
-            status = context.status
-            if status in TERMINAL_AGENT_RUN_STATUSES:
-                return self._result(job, delete_message=True, reason="terminal_agent_run")
-
-            if status == "waiting_confirmation":
-                return self._result(
+            state = AgentGraphState(
+                thread_id=context.thread_id or job.run_id,
+                invocation_id=job.run_id,
+                run_status=context.status,
+                planner_turn_count=context.planner_turn_count,
+                planning_context=context.planning_context,
+                active_goal=context.latest_planner_tool_name,
+                pending_confirmation=context.status == "waiting_confirmation",
+                delete_message=True,
+                result_reason="",
+                result_run_id=job.run_id,
+            )
+            handlers = {
+                "terminal": lambda: self._result(
+                    job, delete_message=True, reason="terminal_agent_run"
+                ),
+                "waiting_confirmation": lambda: self._result(
                     job,
                     delete_message=True,
                     reason="agent_run_waiting_confirmation",
-                )
-
-            if status == "waiting_user_input":
-                return self._result(
+                ),
+                "waiting_user_input": lambda: self._result(
                     job,
                     delete_message=True,
                     reason="agent_run_waiting_user_input",
-                )
-
-            if status == "running":
-                latency_scope.targeted = context.latest_planner_tool_name == SQL_ERD_FOCUS_TOOL_NAME
-                return self._handoff_execution(
-                    job,
-                    retried=True,
-                    latency_scope=latency_scope,
-                )
-
-            if status != "planning":
-                return self._result(
+                ),
+                "running": lambda: self._resume_execution(job, context, latency_scope),
+                "unsupported_status": lambda: self._result(
                     job,
                     delete_message=True,
                     reason="agent_run_unsupported_status",
-                )
-
-            if context.planner_turn_count >= 5:
-                waiting = self.repository.wait_for_user_input(
-                    job.run_id,
-                    AGENT_PLANNER_TURN_LIMIT_MESSAGE,
-                )
-                return self._result(
-                    job,
-                    delete_message=True,
-                    reason=(
-                        "agent_planner_turn_limit_reached"
-                        if waiting
-                        else "agent_run_no_longer_planning"
-                    ),
-                )
-
-            return self._plan_run(job, context, latency_scope)
+                ),
+                "planner_turn_limit": lambda: self._handle_planner_turn_limit(job),
+                "planning": lambda: self._plan_run(job, context, latency_scope),
+            }
+            graph_state = self.graph.invoke(
+                state,
+                config=agent_graph_config(context.thread_id, job.run_id),
+                context=AgentGraphRuntime(handlers=handlers),
+            )
+            return AgentProcessResult(
+                delete_message=graph_state["delete_message"],
+                reason=graph_state["result_reason"],
+                run_id=graph_state["result_run_id"],
+            )
         finally:
             self.repository.release_run_lock(job.run_id)
+
+    def _resume_execution(
+        self,
+        job: AgentRunJob,
+        context: AgentRunContext,
+        latency_scope: _AgentLatencyScope,
+    ) -> AgentProcessResult:
+        latency_scope.targeted = context.latest_planner_tool_name == SQL_ERD_FOCUS_TOOL_NAME
+        return self._handoff_execution(
+            job,
+            retried=True,
+            latency_scope=latency_scope,
+        )
+
+    def _handle_planner_turn_limit(self, job: AgentRunJob) -> AgentProcessResult:
+        waiting = self.repository.wait_for_user_input(
+            job.run_id,
+            AGENT_PLANNER_TURN_LIMIT_MESSAGE,
+        )
+        return self._result(
+            job,
+            delete_message=True,
+            reason=(
+                "agent_planner_turn_limit_reached" if waiting else "agent_run_no_longer_planning"
+            ),
+        )
 
     def _plan_run(
         self,
@@ -1063,9 +1092,10 @@ class AgentRunProcessor:
                     schema_token_budget=self.tool_retrieval_schema_token_budget,
                 )
                 planner_tools = planner_selection.tools
-                completion_tool_names = _retrieval_terminal_tool_names(
+                completion_tool_names = _retrieval_completion_tool_names(
                     selection_job.tool_capability_catalog,
                     planner_selection.retrieval,
+                    context.planning_context,
                 )
             routed_workflow_completed = (
                 routing is not None
@@ -1682,6 +1712,19 @@ def normalize_agent_planner_decision(
         prompt=prompt,
         current_date=current_date,
     )
+    decision = _normalize_calendar_detail_thread_context_reference(
+        decision,
+        job,
+        prompt=prompt,
+        planning_context=planning_context,
+    )
+    decision = _normalize_calendar_thread_context_reference(
+        decision,
+        job,
+        prompt=prompt,
+        current_date=current_date,
+        planning_context=planning_context,
+    )
     decision = _normalize_meeting_report_relative_date_query(
         decision,
         job,
@@ -1891,20 +1934,220 @@ def _missing_calendar_update_fields(
     missing_fields: tuple[str, ...],
 ) -> tuple[str, ...]:
     missing = set(missing_fields)
-    event_id = input_value.get("eventId")
-    if (
-        not isinstance(event_id, str)
-        or not event_id.isascii()
-        or not event_id.isdigit()
-        or event_id.startswith("0")
-    ):
-        missing.add("eventId")
+    target = input_value.get("target")
+    valid_target = False
+    if isinstance(target, dict):
+        context_ref = target.get("contextRef")
+        valid_target = (
+            len(target) == 1
+            and isinstance(context_ref, str)
+            and re.fullmatch(r"ctx_[0-9a-f]{24}", context_ref) is not None
+        ) or all(
+            isinstance(target.get(field), str) and bool(str(target[field]).strip())
+            for field in ("title", "startDate", "endDate")
+        )
+    if not valid_target:
+        missing.add("target")
 
     changes = input_value.get("changes")
     if not isinstance(changes, dict) or not changes:
         missing.add("changes")
 
     return tuple(sorted(missing))
+
+
+def _normalize_calendar_thread_context_reference(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+    current_date: str | None,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
+    ordinal = _calendar_event_ordinal(normalized_prompt)
+    if not (
+        (
+            ordinal is not None
+            or re.search(
+                r"(?:그|이|저|선택한)\s*일정|방금\s*(?:본|보여준|선택한)?\s*일정",
+                normalized_prompt,
+            )
+        )
+        and re.search(r"변경|수정|바꿔|옮겨", normalized_prompt)
+        and any(tool.name == "update_calendar_event" for tool in job.tools)
+    ):
+        return decision
+
+    if "update_calendar_event" in _planning_tool_result_names(planning_context):
+        return AgentPlannerDecision(
+            status="completed",
+            message="Calendar 일정 변경을 완료했습니다.",
+            final_answer_draft="일정 변경을 완료했습니다.",
+            tool_name=None,
+            tool_input={},
+            requires_confirmation=False,
+            missing_fields=(),
+            unsupported_reason=None,
+        )
+
+    references = [
+        reference
+        for line in planning_context.splitlines()
+        if (reference := _calendar_context_reference_line(line)) is not None
+    ]
+    references = _latest_thread_context_references(references, "event")
+    if ordinal is not None:
+        references = [reference for reference in references if reference.get("ordinal") == ordinal]
+    if len(references) != 1:
+        return AgentPlannerDecision(
+            status="needs_clarification",
+            message="이전 대화의 Calendar 일정을 하나로 특정할 수 없습니다.",
+            final_answer_draft="변경할 일정의 제목이나 목록 순번을 알려주세요.",
+            tool_name=None,
+            tool_input={},
+            requires_confirmation=False,
+            missing_fields=("calendar_event_context",),
+            unsupported_reason=None,
+        )
+
+    tool_input = dict(decision.tool_input)
+    changes = tool_input.get("changes")
+    normalized_changes = dict(changes) if isinstance(changes, dict) else {}
+    relative_date = _calendar_update_relative_weekday(prompt, current_date)
+    if relative_date is not None:
+        normalized_changes["startDate"] = relative_date.isoformat()
+        normalized_changes["endDate"] = relative_date.isoformat()
+    if not normalized_changes:
+        return decision
+    tool_input.pop("eventId", None)
+    tool_input["target"] = {"contextRef": references[0]["contextRef"]}
+    tool_input["changes"] = normalized_changes
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="이전 대화의 Calendar 일정을 사용합니다.",
+        final_answer_draft="이전 대화에서 확인한 일정을 다시 검증해 변경합니다.",
+        tool_name="update_calendar_event",
+        tool_input=tool_input,
+        requires_confirmation=True,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
+
+
+def _calendar_update_relative_weekday(prompt: str, current_date: str | None) -> date | None:
+    if current_date is None:
+        return None
+    try:
+        base_date = date.fromisoformat(current_date)
+    except ValueError:
+        return None
+
+    matches = list(
+        re.finditer(
+            r"(?:(이번|다음|다다음)\s*주\s*)?([월화수목금토일])요일",
+            prompt,
+        )
+    )
+    if len(matches) != 1:
+        return None
+
+    modifier, weekday_name = matches[0].groups()
+    weekday = "월화수목금토일".index(weekday_name)
+    if modifier is None:
+        return _next_weekday(base_date, weekday)
+
+    week_offset = {"이번": 0, "다음": 1, "다다음": 2}[modifier]
+    current_week_start = base_date - timedelta(days=base_date.weekday())
+    return current_week_start + timedelta(days=week_offset * 7 + weekday)
+
+
+def _normalize_calendar_detail_thread_context_reference(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+    planning_context: str,
+) -> AgentPlannerDecision:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
+    ordinal = _calendar_event_ordinal(normalized_prompt)
+    is_detail_request = bool(
+        "일정" in normalized_prompt
+        and (
+            ordinal is not None
+            or re.search(r"자세히|상세|정보|내용", normalized_prompt)
+            or re.search(
+                r"(?:그|이|저|선택한)\s*일정|방금\s*(?:본|보여준|선택한)?\s*일정",
+                normalized_prompt,
+            )
+        )
+        and not re.search(r"변경|수정|바꿔|옮겨|만들|생성|추가|등록|삭제|지워", normalized_prompt)
+    )
+    available_tool_names = {tool.name for tool in job.tools}
+    if not is_detail_request or "get_calendar_event" not in available_tool_names:
+        return decision
+
+    references = [
+        reference
+        for line in planning_context.splitlines()
+        if (reference := _calendar_context_reference_line(line)) is not None
+    ]
+    references = _latest_thread_context_references(references, "event")
+    selected_reference = _calendar_detail_context_reference(
+        references,
+        prompt=prompt,
+        planning_context=planning_context,
+    )
+    if selected_reference is None:
+        return _calendar_context_clarification()
+
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="이전 대화에서 선택한 Calendar 일정의 상세를 조회합니다.",
+        final_answer_draft="선택한 일정의 상세 정보를 확인합니다.",
+        tool_name="get_calendar_event",
+        tool_input={"contextRef": selected_reference["contextRef"]},
+        requires_confirmation=False,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
+
+
+def _calendar_detail_context_reference(
+    references: list[dict[str, object]],
+    *,
+    prompt: str,
+    planning_context: str,
+) -> dict[str, object] | None:
+    selector_texts = [
+        line[len("user: ") :]
+        for line in reversed(planning_context.splitlines())
+        if line.startswith("user: ")
+    ]
+    selector_texts.append(prompt)
+
+    seen: set[str] = set()
+    for selector_text in selector_texts:
+        normalized_selector = re.sub(r"\s+", " ", selector_text).strip().lower()
+        if not normalized_selector or normalized_selector in seen:
+            continue
+        seen.add(normalized_selector)
+
+        ordinal = _meeting_action_item_ordinal(normalized_selector)
+        if ordinal is not None:
+            matches = [reference for reference in references if reference.get("ordinal") == ordinal]
+            return matches[0] if len(matches) == 1 else None
+
+        label_matches = [
+            reference
+            for reference in references
+            if isinstance(reference.get("label"), str)
+            and re.sub(r"\s+", " ", str(reference["label"])).strip().lower() in normalized_selector
+        ]
+        if label_matches:
+            return label_matches[0] if len(label_matches) == 1 else None
+
+    return references[0] if len(references) == 1 else None
 
 
 def _has_valid_uuid(value: object) -> bool:
@@ -2539,6 +2782,46 @@ def _meeting_context_reference_line(line: str) -> dict[str, object] | None:
     return None
 
 
+def _calendar_context_reference_line(line: str) -> dict[str, object] | None:
+    prefix = "previous resource: "
+    if not line.startswith(prefix):
+        return None
+    try:
+        value = json.loads(line[len(prefix) :])
+    except json.JSONDecodeError:
+        return None
+    if (
+        isinstance(value, dict)
+        and isinstance(value.get("turn"), int)
+        and isinstance(value.get("contextRef"), str)
+        and re.fullmatch(r"ctx_[0-9a-f]{24}", value["contextRef"])
+        and value.get("resourceType") == "event"
+        and isinstance(value.get("ordinal"), int)
+        and value["ordinal"] >= 1
+    ):
+        return value
+    return None
+
+
+def _calendar_event_ordinal(prompt: str) -> int | None:
+    if "일정" not in prompt:
+        return None
+    return _meeting_action_item_ordinal(prompt)
+
+
+def _calendar_context_clarification() -> AgentPlannerDecision:
+    return AgentPlannerDecision(
+        status="needs_clarification",
+        message="이전 대화에서 Calendar 일정을 하나로 정할 수 없습니다.",
+        final_answer_draft="자세히 볼 일정의 목록 순번이나 제목을 알려주세요.",
+        tool_name=None,
+        tool_input={},
+        requires_confirmation=False,
+        missing_fields=("calendar_event_context",),
+        unsupported_reason=None,
+    )
+
+
 def _latest_thread_context_references(
     references: list[dict[str, object]],
     resource_type: str,
@@ -3038,7 +3321,8 @@ def _clarification_answer(
         return "ERD 스키마 확인 결과가 없거나 오래되었습니다. 스키마를 다시 확인해주세요."
 
     labels = {
-        "eventId": "수정할 일정",
+        "target": "수정할 일정",
+        "calendar_event_context": "변경할 일정",
         "changes": "변경할 내용",
         "title": "일정 제목",
         "startDate": "시작 날짜",
@@ -3681,8 +3965,13 @@ def _agent_planner_system_prompt() -> str:
         "omit boardName and repositoryFullName so the App Server selects the active Board or "
         "the only Board. When the user does not explicitly name a column, omit columnName so "
         "the App Server uses Unmapped; do not ask the user for those defaults. "
-        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require "
-        "eventId and changes only; the server loads the current values for confirmation. "
+        "Never invent Calendar event IDs or MeetingReport IDs. Calendar updates require target "
+        "and changes. For exactly one matching prior Calendar event, target must contain only its "
+        "opaque contextRef; otherwise use the explicit title, startDate, and endDate selector. "
+        "The server loads the current values for confirmation. "
+        "For a Calendar detail request that selects one event from a prior list, use "
+        "get_calendar_event with only that event's opaque contextRef. Never use a Meeting tool "
+        "for a Calendar event reference. "
         "For MeetingReport list requests, omit limit unless the user specifies a count; the "
         "App Server defaults it to the latest one by createdAt descending. For a MeetingReport "
         "detail or summary request, use get_meeting_report or summarize_meeting_report with "
@@ -3749,8 +4038,8 @@ def _agent_planner_system_prompt() -> str:
         "all-day choice rather than inferring isAllDay. "
         "For timed Calendar creation, omit endTime when the user gives only a start time so the "
         "Calendar default can apply; never set endTime equal to startTime. "
-        "When the user supplies a positive integer Calendar event ID with changes, use it and let "
-        "the App Server verify that the event exists in the Workspace. "
+        "Never request or submit a Calendar event ID. The App Server resolves a Calendar "
+        "contextRef inside the current thread, user, and Workspace boundary. "
         "Use generate_sql_erd when the user asks to generate an ERD, database schema, or SQL DDL "
         "from natural-language requirements. Its input must be one complete SqlErdSchemaSpecV1 "
         "object matching the provided schema; never return raw DDL as tool input. Always include "
@@ -3959,6 +4248,38 @@ def _retrieval_terminal_tool_names(
     return _capability_terminal_tool_names(catalog, capability_ids)
 
 
+def _retrieval_completion_tool_names(
+    catalog: ToolCapabilityCatalog | None,
+    retrieval: ToolRetrievalResult | None,
+    planning_context: str,
+) -> tuple[str, ...]:
+    terminal_names = _retrieval_terminal_tool_names(catalog, retrieval)
+    if catalog is None or retrieval is None:
+        return terminal_names
+
+    capability_ids = retrieval.selected_capability_ids
+    if not capability_ids and retrieval.primary_capability_id:
+        capability_ids = (retrieval.primary_capability_id,)
+    if not capability_ids:
+        return terminal_names
+
+    selected_capability_ids = set(capability_ids)
+    selected_tool_names = {
+        tool_name
+        for capability in catalog.capabilities
+        if capability.capability_id in selected_capability_ids
+        for tool_name in capability.tool_names
+    }
+    completed_tool_names = _planning_tool_result_names(planning_context)
+    if (
+        selected_tool_names
+        and completed_tool_names
+        and selected_tool_names.isdisjoint(completed_tool_names)
+    ):
+        return ()
+    return terminal_names
+
+
 def _safe_text(value: str | None, fallback: str) -> str:
     if isinstance(value, str) and value.strip():
         return USER_VISIBLE_UUID_PATTERN.sub("내부 식별자", value.strip())[:1000]
@@ -4061,6 +4382,7 @@ def _tool_retrieval_observation(
         "fallbackReason": retrieval.fallback_reason if retrieval else None,
         "candidateCount": retrieval.candidate_count if retrieval else 0,
         "confidenceBucket": retrieval.confidence_bucket if retrieval else "none",
+        "capabilityIds": list(retrieval.selected_capability_ids) if retrieval else [],
         "primaryCapabilityId": retrieval.primary_capability_id if retrieval else None,
         "primaryToolName": retrieval.primary_tool_name if retrieval else None,
         "catalogVersion": (

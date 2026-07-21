@@ -94,7 +94,7 @@ class FakeDatabase {
       text.includes("LEFT JOIN LATERAL") &&
       text.includes("ORDER BY run.updated_at DESC")
     ) {
-      return this.latestWaitingSnapshot(values[0], values[1]);
+      return this.latestWaitingSnapshot(values[0], values[1], values[2] ?? null);
     }
     if (text.includes("LEFT JOIN LATERAL")) {
       return this.snapshot(values[0], values[1], values[2]);
@@ -242,13 +242,14 @@ class FakeDatabase {
     };
   }
 
-  latestWaitingSnapshot(workspaceId, currentUserId) {
+  latestWaitingSnapshot(workspaceId, currentUserId, conversationId = null) {
     const now = Date.now();
     const runs = this.state.runs
       .filter((run) => {
         if (
           run.workspace_id !== workspaceId ||
           run.requested_by_user_id !== currentUserId ||
+          (conversationId !== null && run.thread_id !== conversationId) ||
           new Date(run.expires_at).getTime() <= now
         ) {
           return false;
@@ -289,6 +290,9 @@ class FakeAgentService {
   normalizeCreateRunBody(body) {
     return {
       prompt: body.prompt.trim(),
+      ...(Object.hasOwn(body, "conversationId")
+        ? { conversationId: body.conversationId }
+        : {}),
       timezone: body.timezone ?? "Asia/Seoul",
       clientRequestId: body.clientRequestId,
       requestContext: body.requestContext ?? null
@@ -336,6 +340,7 @@ class FakeAgentService {
     return {
       run: {
         id: run.id,
+        conversationId: run.thread_id,
         workspaceId: run.workspace_id,
         requestedByUserId: run.requested_by_user_id,
         clientRequestId: run.client_request_id,
@@ -384,7 +389,11 @@ class FakeLoggingService {
       id,
       workspace_id: workspaceId,
       requested_by_user_id: currentUserId,
-      thread_id: forcedThreadId ?? THREAD_ID,
+      thread_id:
+        forcedThreadId ??
+        (input.conversationId === null
+          ? "77777777-7777-4777-8777-777777777777"
+          : input.conversationId ?? THREAD_ID),
       client_request_id: input.clientRequestId,
       request_context_json: input.requestContext,
       status: "planning",
@@ -404,6 +413,7 @@ class FakeLoggingService {
   stored(run) {
     return {
       id: run.id,
+      conversationId: run.thread_id,
       workspaceId: run.workspace_id,
       requestedByUserId: run.requested_by_user_id,
       clientRequestId: run.client_request_id,
@@ -477,6 +487,7 @@ function createService(state, suppliedRelationshipService = null) {
 function request(message, overrides = {}) {
   return {
     message,
+    conversationId: THREAD_ID,
     timezone: "Asia/Seoul",
     clientRequestId: `request-${message}`,
     activeRunId: RUN_ID,
@@ -484,6 +495,25 @@ function request(message, overrides = {}) {
     disposition: "auto",
     ...overrides
   };
+}
+
+{
+  const state = createState(waitingRun({ status: "completed" }));
+  const { service } = createService(state);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("새 대화의 첫 요청", {
+      activeRunId: null,
+      clientRequestId: "explicit-new-conversation",
+      conversationId: null
+    })
+  );
+  assert.equal(result.outcome, "started_new");
+  assert.equal(
+    result.run.conversationId,
+    "77777777-7777-4777-8777-777777777777"
+  );
 }
 
 {
@@ -542,6 +572,114 @@ function request(message, overrides = {}) {
   );
   assert.equal(result.outcome, "continued");
   assert.equal(state.runs[0].status, "planning");
+}
+
+{
+  const budgetMessage =
+    "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.";
+  const state = createState(
+    waitingRun({
+      prompt: "내일 일정 알려줘",
+      message: budgetMessage,
+      messages: [{ role: "assistant", content: budgetMessage }]
+    })
+  );
+  const relationshipService = {
+    calls: [],
+    async classify(context) {
+      this.calls.push(context);
+      return {
+        relationship: "continuation",
+        confidence: "high",
+        reason: "provider가 일반 입력을 잘못 continuation으로 분류",
+        clarificationQuestion: null
+      };
+    }
+  };
+  const { service, publisher } = createService(state, relationshipService);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("하하하 일정의 날짜를 오늘로 바꿔줘", {
+      clientRequestId: "budget-exhausted-calendar-update"
+    })
+  );
+
+  assert.equal(result.outcome, "started_new");
+  assert.equal(result.relationship, "new_intent");
+  assert.equal(result.previousRun.status, "cancelled");
+  assert.equal(result.run.prompt, "하하하 일정의 날짜를 오늘로 바꿔줘");
+  assert.equal(result.run.conversationId, THREAD_ID);
+  assert.deepEqual(publisher.published, [result.run.id]);
+  assert.deepEqual(relationshipService.calls, []);
+}
+
+{
+  const budgetMessage =
+    "한 요청에서 계획할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.";
+  const state = createState(
+    waitingRun({
+      prompt: "긴 작업을 처리해줘",
+      message: budgetMessage,
+      messages: [{ role: "assistant", content: budgetMessage }]
+    })
+  );
+  const { service, agentService, relationshipService } = createService(state);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("남은 작업을 이어서 처리해줘", {
+      clientRequestId: "budget-exhausted-explicit-continuation"
+    })
+  );
+
+  assert.equal(result.outcome, "continued");
+  assert.equal(result.relationship, "continuation");
+  assert.equal(result.run.id, RUN_ID);
+  assert.equal(agentService.resumeCount, 1);
+  assert.deepEqual(relationshipService.calls, []);
+}
+
+{
+  const budgetMessage =
+    "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.";
+  const state = createState(
+    waitingRun({
+      prompt: "내일 일정 알려줘",
+      message: budgetMessage,
+      messages: [{ role: "assistant", content: budgetMessage }]
+    })
+  );
+  const relationshipService = {
+    calls: [],
+    async classify(context) {
+      this.calls.push(context);
+      return {
+        relationship: "ambiguous",
+        confidence: "low",
+        reason: "참조 대상이 모호합니다.",
+        clarificationQuestion:
+          "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?"
+      };
+    }
+  };
+  const { service } = createService(state, relationshipService);
+  const result = await service.routeMessage(
+    USER_ID,
+    WORKSPACE_ID,
+    request("그거", {
+      clientRequestId: "budget-exhausted-ambiguous-reference"
+    })
+  );
+
+  assert.equal(result.outcome, "needs_choice");
+  assert.equal(result.relationship, "ambiguous");
+  assert.equal(state.runs[0].status, "waiting_user_input");
+  assert.equal(relationshipService.calls.length, 1);
+  assert.equal(
+    relationshipService.calls[0].waitingInputKind,
+    "budget_exhausted"
+  );
 }
 
 {
@@ -686,7 +824,8 @@ function request(message, overrides = {}) {
   );
   assert.equal(result.outcome, "started_new");
   assert.equal(result.previousRun.id, RUN_ID);
-  assert.equal(state.confirmations[0].status, "rejected");
+  assert.equal(state.confirmations[0].status, "pending");
+  assert.equal(state.runs[0].status, "waiting_confirmation");
 }
 
 for (const fixture of [
@@ -703,12 +842,12 @@ for (const fixture of [
   {
     relationship: "new_intent",
     confidence: "medium",
-    expectedOutcome: "needs_choice"
+    expectedOutcome: "started_new"
   },
   {
     relationship: "new_intent",
     confidence: "low",
-    expectedOutcome: "needs_choice"
+    expectedOutcome: "started_new"
   },
   {
     relationship: "cancel",
@@ -911,8 +1050,9 @@ for (const fixture of [
     request("이번 주 일정 보여줘")
   );
   assert.equal(result.outcome, "started_new");
-  assert.equal(state.confirmations[0].status, "rejected");
-  assert.equal(state.runs[0].status, "cancelled");
+  assert.equal(state.confirmations[0].status, "pending");
+  assert.equal(state.runs[0].status, "waiting_confirmation");
+  assert.equal(state.runs[1].thread_id, THREAD_ID);
 }
 
 {
