@@ -164,8 +164,7 @@ def evaluate_deterministic_continuation(
     tool_selection_passed = not any(
         turn_index < 0 or turn_index >= len(conversation.turns) for turn_index in calls_by_turn
     ) and all(
-        tuple(call.tool_name for call in calls_by_turn.get(turn_index, ()))
-        == turn.expected_tools
+        tuple(call.tool_name for call in calls_by_turn.get(turn_index, ())) == turn.expected_tools
         for turn_index, turn in enumerate(conversation.turns)
     )
 
@@ -282,12 +281,9 @@ def validate_multiturn_catalog_against_job(
                         "Multi-turn catalog context reference is absent from prior fixture: "
                         f"{conversation.conversation_id} turn {turn_index}"
                     )
-                if (
-                    turn.expected_context.reference_kind == "prior_result_selector"
-                    and not all(
-                        _fixtures_contain_value(prior_fixtures, value)
-                        for value in turn.expected_context.constraints.values()
-                    )
+                if turn.expected_context.reference_kind == "prior_result_selector" and not all(
+                    _fixtures_contain_value(prior_fixtures, value)
+                    for value in turn.expected_context.constraints.values()
                 ):
                     raise ValueError(
                         "Multi-turn catalog selector is absent from prior fixture: "
@@ -580,9 +576,7 @@ def _contains_mapping(actual: Mapping[str, FrozenJson], expected: Mapping[str, F
     return True
 
 
-def _fixtures_contain_value(
-    fixtures: tuple[MultiTurnToolFixture, ...], value: FrozenJson
-) -> bool:
+def _fixtures_contain_value(fixtures: tuple[MultiTurnToolFixture, ...], value: FrozenJson) -> bool:
     return any(_contains_fixture_value(fixture.output, value) for fixture in fixtures)
 
 
@@ -599,9 +593,7 @@ def _contains_fixture_value(value: FrozenJson, expected: FrozenJson) -> bool:
 
 
 def _fixture_text(fixtures: tuple[MultiTurnToolFixture, ...]) -> str:
-    return json.dumps(
-        _thaw_json(tuple(fixture.output for fixture in fixtures)), ensure_ascii=False
-    )
+    return json.dumps(_thaw_json(tuple(fixture.output for fixture in fixtures)), ensure_ascii=False)
 
 
 class _MultiTurnReplayRepository:
