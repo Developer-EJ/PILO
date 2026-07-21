@@ -90,6 +90,9 @@ export function SqlErdSessionList() {
   );
   const [editingTitle, setEditingTitle] = useState("");
   const [savingSessionId, setSavingSessionId] = useState<string | null>(null);
+  const [viewingSessionTitle, setViewingSessionTitle] = useState<string | null>(
+    null
+  );
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
     null
   );
@@ -455,7 +458,21 @@ export function SqlErdSessionList() {
                         </form>
                       ) : (
                         <div className="flex min-w-0 items-center gap-1">
-                          <h2 className="truncate font-semibold">{session.title}</h2>
+                          <h2 className="min-w-0 flex-1">
+                            <button
+                              aria-label={`${session.title} 전체 제목 보기`}
+                              className="w-full truncate text-left font-semibold hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setViewingSessionTitle(session.title);
+                              }}
+                              title="전체 제목 보기"
+                              type="button"
+                            >
+                              {session.title}
+                            </button>
+                          </h2>
                           <button
                             aria-label={`${session.title} 제목 수정`}
                             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
@@ -531,6 +548,25 @@ export function SqlErdSessionList() {
             </button>
           </div>
         ) : null}
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setViewingSessionTitle(null);
+          }
+        }}
+        open={viewingSessionTitle !== null}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>세션 제목</DialogTitle>
+            <DialogDescription>전체 세션 제목입니다.</DialogDescription>
+          </DialogHeader>
+          <p className="break-words rounded-md border bg-muted/40 px-3 py-2 text-sm font-medium">
+            {viewingSessionTitle}
+          </p>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {
