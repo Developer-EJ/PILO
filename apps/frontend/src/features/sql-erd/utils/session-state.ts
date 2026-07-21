@@ -173,7 +173,7 @@ export function getLayoutAutosavePausedBanner(
     return {
       canRetry: false,
       message:
-        "Workspace session changed. Reload the latest session before saving this layout.",
+        "Workspace 세션이 변경되었습니다. 이 layout을 저장하기 전에 최신 세션을 다시 불러오세요.",
       reason
     };
   }
@@ -181,7 +181,7 @@ export function getLayoutAutosavePausedBanner(
   if (reason === "unauthorized") {
     return {
       canRetry: false,
-      message: "Sign in again, then reload this SQLtoERD session.",
+      message: "다시 로그인한 뒤 SQLtoERD 세션을 불러오세요.",
       reason
     };
   }
@@ -189,7 +189,7 @@ export function getLayoutAutosavePausedBanner(
   if (reason === "forbidden") {
     return {
       canRetry: false,
-      message: "You do not have permission to save this SQLtoERD session.",
+      message: "이 SQLtoERD 세션을 저장할 권한이 없습니다.",
       reason
     };
   }
@@ -198,7 +198,7 @@ export function getLayoutAutosavePausedBanner(
     return {
       canRetry: false,
       message:
-        "This SQLtoERD session was deleted or cannot be found. Reload the session.",
+        "SQLtoERD 세션이 삭제되었거나 존재하지 않습니다. 세션을 다시 불러오세요.",
       reason
     };
   }
@@ -207,7 +207,7 @@ export function getLayoutAutosavePausedBanner(
     return {
       canRetry: true,
       message:
-        "Current layout payload cannot be autosaved. Try moving a table again or reload the session.",
+        "현재 layout을 자동 저장할 수 없습니다. 테이블을 다시 이동하거나 세션을 다시 불러오세요.",
       reason
     };
   }
@@ -215,7 +215,7 @@ export function getLayoutAutosavePausedBanner(
   return {
     canRetry: true,
     message:
-      "Autosave stopped after a non-retryable API error. Retry once or reload the session.",
+      "재시도할 수 없는 오류로 자동 저장이 중지되었습니다. 한 번 다시 시도하거나 세션을 다시 불러오세요.",
     reason
   };
 }
@@ -230,9 +230,9 @@ export function getSqlErdSessionReloadFailureAction({
       kind: "fallback_to_sample",
       selectedSqlErdObject: { type: "none" },
       sessionLoadState: {
-        label: "Sample",
+        label: "샘플",
         message:
-          "Workspace session could not be loaded. Showing the built-in sample instead.",
+          "Workspace 세션을 불러오지 못해 기본 샘플을 표시합니다.",
         tone: "neutral"
       }
     };
@@ -241,9 +241,9 @@ export function getSqlErdSessionReloadFailureAction({
   return {
     kind: "preserve_current",
     sessionLoadState: {
-      label: "Reload failed",
+      label: "다시 불러오기 실패",
       message:
-        "Workspace session could not be reloaded. Keep editing the current ERD or try reloading again.",
+        "Workspace 세션을 다시 불러오지 못했습니다. 현재 ERD를 계속 편집하거나 다시 시도하세요.",
       tone: "error"
     }
   };
@@ -256,9 +256,9 @@ export function getSqlErdSessionLoadFailureState({
 }): SqlErdSessionLoadState {
   if (!hasLoadedSession) {
     return {
-      label: "Load failed",
+      label: "불러오기 실패",
       message:
-        "Workspace session could not be loaded. Try again or return to the session list.",
+        "Workspace 세션을 불러오지 못했습니다. 다시 시도하거나 세션 목록으로 돌아가세요.",
       tone: "error"
     };
   }

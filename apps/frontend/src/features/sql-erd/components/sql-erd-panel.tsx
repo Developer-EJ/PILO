@@ -30,7 +30,8 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
-  lineNumbers
+  lineNumbers,
+  placeholder
 } from "@codemirror/view";
 import {
   Database,
@@ -46,6 +47,9 @@ import {
   Undo2
 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -199,6 +203,7 @@ import {
 } from "@/features/sql-erd/utils/schema-mutation";
 import {
   createSqlErdGeneratedSqlParseError,
+  createSqlErdContextualSplitDiffSections,
   createSqlErdModelSqlHistory,
   createSqlErdNormalizedSqlPreview,
   createSqlErdSplitDiffRows,
@@ -550,7 +555,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [sessionId, sqlErdViewSession.id, sqlErdViewSession.title]);
   const [sessionLoadState, setSessionLoadState] =
     useState<SqlErdSessionLoadState>({
-      label: "Loading",
+      label: "불러오는 중",
       message: "Loading workspace session",
       tone: "neutral"
     });
@@ -837,7 +842,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   }, [sqlErdViewSession.id, sqlErdViewSession.layoutJson, sqlErdViewSession.revision]);
   const sourcePanelStatus = isWriteProtocolMismatch
     ? {
-        label: "Read only",
+        label: "읽기 전용",
         message: "Reload this session before editing or saving changes.",
         tone: "neutral" as const
       }
@@ -1124,7 +1129,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setSourceAutosaveRetryAttempt(0);
         setSelectedSqlErdObject({ type: "none" });
         setSessionLoadState({
-          label: "Unsaved",
+          label: "저장 대기",
           message: "Normalized SQL changes will autosave",
           tone: "neutral"
         });
@@ -1230,7 +1235,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       if (!result) {
         setSessionLoadState({
-          label: "Edit unavailable",
+          label: "편집 불가",
           message:
             "현재 SQL을 Generate하고 source 변경을 저장한 뒤 다시 시도하세요.",
           tone: "error"
@@ -1240,7 +1245,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       if (!result.ok) {
         setSessionLoadState({
-          label: "Edit blocked",
+          label: "편집 차단",
           message: getSchemaMutationFailureMessage(result.reason),
           tone: "error"
         });
@@ -1278,7 +1283,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       if (!result) {
         setSessionLoadState({
-          label: "Edit unavailable",
+          label: "편집 불가",
           message: "현재 SQL을 Generate하고 source 변경을 저장한 뒤 다시 시도하세요.",
           tone: "error"
         });
@@ -1287,7 +1292,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
       if (!result.ok) {
         setSessionLoadState({
-          label: "Edit blocked",
+          label: "편집 차단",
           message: getSchemaMutationFailureMessage(result.reason),
           tone: "error"
         });
@@ -1643,7 +1648,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       if (layoutAutosaveBlockReason) {
         setPendingLayoutAutosaveJson(layoutJson);
         setSessionLoadState({
-          label: "Autosave paused",
+          label: "자동 저장 중지",
           message: getLayoutAutosavePausedBanner(layoutAutosaveBlockReason)
             .message,
           tone: "error"
@@ -1654,7 +1659,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       setPendingLayoutAutosaveJson(layoutJson);
       setLayoutAutosaveRetryAttempt(0);
       setSessionLoadState({
-        label: "Unsaved",
+        label: "저장 대기",
         message: "Table layout changes will autosave",
         tone: "neutral"
       });
@@ -1701,7 +1706,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         ]);
         setLayoutAutosaveRetryAttempt(0);
         setSessionLoadState({
-          label: "Unsaved",
+          label: "저장 대기",
           message: "Canvas changes will sync as workspace operations",
           tone: "neutral"
         });
@@ -1737,7 +1742,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       setSourceAutosaveState("pending");
     }
     setSessionLoadState({
-      label: "Saving",
+      label: "저장 중",
       message: "Retrying pending SQLtoERD changes",
       tone: "neutral"
     });
@@ -1780,7 +1785,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       });
 
       setSessionLoadState({
-        label: "Loading",
+        label: "불러오는 중",
         message: "Loading workspace session",
         tone: "neutral"
       });
@@ -1829,7 +1834,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           activeParseResult.ok ? activeParseResult.sourceMap : null
         );
         setSessionLoadState({
-          label: "Workspace",
+          label: "저장됨",
           message: `Workspace session revision ${activeSession.revision}`,
           tone: "success"
         });
@@ -2024,7 +2029,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason(null);
           setSessionLoadState({
-            label: "Workspace",
+            label: "저장됨",
             message: "Workspace에 저장되었습니다.",
             tone: "success"
           });
@@ -2086,7 +2091,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         setLayoutAutosaveRetryAttempt(0);
         setLayoutAutosaveBlockReason(null);
         setSessionLoadState({
-          label: "Workspace",
+          label: "저장됨",
           message: `Workspace session revision ${savedSession.revision}`,
           tone: "success"
         });
@@ -2104,7 +2109,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setSourceAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason("write_protocol_mismatch");
           setSessionLoadState({
-            label: "Read only",
+            label: "읽기 전용",
             message: getLayoutAutosavePausedBanner("write_protocol_mismatch")
               .message,
             tone: "error"
@@ -2245,7 +2250,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           );
           setLayoutAutosaveRetryAttempt(0);
           setSessionLoadState({
-            label: "Workspace",
+            label: "저장됨",
             message: "Workspace에 저장되었습니다.",
             tone: "success"
           });
@@ -2266,7 +2271,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         });
 
         setSessionLoadState({
-          label: "Saving",
+          label: "저장 중",
           message: "Autosaving table layout",
           tone: "neutral"
         });
@@ -2299,7 +2304,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         );
         setLayoutAutosaveRetryAttempt(0);
         setSessionLoadState({
-          label: "Workspace",
+          label: "저장됨",
           message: `Workspace session revision ${savedSession.revision}`,
           tone: "success"
         });
@@ -2317,7 +2322,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason("write_protocol_mismatch");
           setSessionLoadState({
-            label: "Read only",
+            label: "읽기 전용",
             message: getLayoutAutosavePausedBanner("write_protocol_mismatch")
               .message,
             tone: "error"
@@ -2329,7 +2334,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason("conflict");
           setSessionLoadState({
-            label: "Autosave paused",
+            label: "자동 저장 중지",
             message: getLayoutAutosavePausedBanner("conflict").message,
             tone: "error"
           });
@@ -2343,7 +2348,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           setLayoutAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason(layoutAutosaveBlockReason);
           setSessionLoadState({
-            label: "Autosave paused",
+            label: "자동 저장 중지",
             message: getLayoutAutosavePausedBanner(layoutAutosaveBlockReason)
               .message,
             tone: "error"
@@ -2357,7 +2362,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
 
         setLayoutAutosaveRetryAttempt((currentAttempt) => currentAttempt + 1);
         setSessionLoadState({
-          label: "Save error",
+          label: "저장 오류",
           message: "Table layout could not be autosaved. Retrying soon",
           tone: "error"
         });
@@ -2861,35 +2866,89 @@ function SqlPreviewDiff({
   beforeSourceText: string;
 }) {
   const rows = createSqlErdSplitDiffRows(beforeSourceText, afterSourceText);
-  const visibleRows = rows.slice(0, 1200);
+  const contextualSections = createSqlErdContextualSplitDiffSections(rows, 3);
+  const [expandedGapKeys, setExpandedGapKeys] = useState<string[]>([]);
+  const [isShowingFullSql, setIsShowingFullSql] = useState(false);
+
+  useEffect(() => {
+    setExpandedGapKeys([]);
+    setIsShowingFullSql(false);
+  }, [afterSourceText, beforeSourceText]);
 
   return (
-    <div className="min-h-0 overflow-hidden rounded-md border">
-      <p className="border-b bg-muted/30 px-3 py-2 text-sm font-medium">
-        SQL diff
-      </p>
-      <div className="grid grid-cols-2 border-b bg-slate-900 text-xs font-medium text-slate-200">
-        <p className="border-r px-3 py-2">변경 전</p>
+    <div className="min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-3 py-2">
+        <p className="text-sm font-medium">SQL diff</p>
+        <Button
+          onClick={() => setIsShowingFullSql((current) => !current)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {isShowingFullSql ? "변경 부분만 보기" : "전체 SQL 보기"}
+        </Button>
+      </div>
+      <div className="grid grid-cols-2 border-b border-background/20 bg-foreground text-xs font-medium text-background">
+        <p className="border-r border-background/20 px-3 py-2">변경 전</p>
         <p className="px-3 py-2">변경 후</p>
       </div>
-      <div className="max-h-80 overflow-y-auto overflow-x-hidden bg-slate-950 font-mono text-xs leading-5 text-slate-100">
+      <div className="max-h-80 overflow-y-auto overflow-x-hidden bg-foreground font-mono text-xs leading-5 text-background">
         <div className="min-w-0">
-          {visibleRows.map((row, index) => (
-            <div
-              className="grid grid-cols-2 items-stretch"
-              key={`${index}-${row.before.lineNumber}-${row.after.lineNumber}`}
-            >
-              <SqlPreviewDiffCell cell={row.before} side="before" />
-              <SqlPreviewDiffCell cell={row.after} side="after" />
-            </div>
-          ))}
+          {(isShowingFullSql
+            ? [{ endIndex: rows.length, kind: "rows" as const, startIndex: 0 }]
+            : contextualSections
+          ).map((section) => {
+            const gapKey = `${section.startIndex}-${section.endIndex}`;
+
+            if (
+              section.kind === "collapsed" &&
+              !expandedGapKeys.includes(gapKey)
+            ) {
+              const gapLabel =
+                section.startIndex === 0
+                  ? `위 ${section.rowCount ?? 0}줄 펼치기`
+                  : section.endIndex === rows.length
+                    ? `아래 ${section.rowCount ?? 0}줄 펼치기`
+                    : `중간 ${section.rowCount ?? 0}줄 펼치기`;
+
+              return (
+                <div
+                  className="border-y border-background/15 bg-background/10 px-3 py-1.5 text-center"
+                  key={`collapsed-${gapKey}`}
+                >
+                  <Button
+                    className="text-background/75 hover:bg-background/10 hover:text-background"
+                    onClick={() =>
+                      setExpandedGapKeys((current) => [...current, gapKey])
+                    }
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {gapLabel}
+                  </Button>
+                </div>
+              );
+            }
+
+            return rows
+              .slice(section.startIndex, section.endIndex)
+              .map((row, sectionRowIndex) => {
+                const rowIndex = section.startIndex + sectionRowIndex;
+
+                return (
+                  <div
+                    className="grid grid-cols-2 items-stretch"
+                    key={`${rowIndex}-${row.before.lineNumber}-${row.after.lineNumber}`}
+                  >
+                    <SqlPreviewDiffCell cell={row.before} side="before" />
+                    <SqlPreviewDiffCell cell={row.after} side="after" />
+                  </div>
+                );
+              });
+          })}
         </div>
       </div>
-      {rows.length > visibleRows.length ? (
-        <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-          처음 {visibleRows.length.toLocaleString()}개 비교 행만 표시합니다.
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -2905,13 +2964,13 @@ function SqlPreviewDiffCell({
     <div
       className={cn(
         "grid min-h-5 grid-cols-[3.5rem_minmax(0,1fr)]",
-        side === "before" && "border-r border-slate-700",
-        cell.kind === "added" && "bg-emerald-500/20 text-emerald-100",
-        cell.kind === "removed" && "bg-rose-500/20 text-rose-100",
-        cell.kind === "empty" && "bg-slate-900/60"
+        side === "before" && "border-r border-background/20",
+        cell.kind === "added" && "bg-primary/25",
+        cell.kind === "removed" && "bg-destructive/30",
+        cell.kind === "empty" && "bg-background/5"
       )}
     >
-      <span className="select-none border-r border-slate-700 px-2 text-right text-slate-500">
+      <span className="select-none border-r border-background/20 px-2 text-right text-background/45">
         {cell.lineNumber ?? ""}
       </span>
       <code className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] px-2">
@@ -3017,50 +3076,52 @@ function SourcePanel({
 
   return (
     <aside
-      className="flex shrink-0 flex-col border-r bg-muted/20"
+      className="flex shrink-0 flex-col border-r border-border bg-background"
       id="source"
       style={{ width }}
     >
-      <div className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <SqlErdSessionListNavigationButton />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                SQL Source
-              </p>
-              <StatusPill
-                label={sessionLoadState.label}
-                tone={sessionLoadState.tone}
-              />
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {counts.tableCount} tables / {counts.relationCount}{" "}
-              relations
+      <div className="flex min-h-16 items-center justify-between gap-3 border-b border-border bg-card px-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              SQL Source
             </p>
+            <StatusPill
+              label={sessionLoadState.label}
+              tone={sessionLoadState.tone}
+            />
           </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {counts.tableCount} tables / {counts.relationCount} relations
+          </p>
         </div>
-        <button
+        <Button
           aria-label="Close source panel"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onClick={onToggle}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <PanelLeftClose className="size-4" />
-        </button>
+        </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 border-b p-3">
-        <SelectorLabel label="Format" value="SQL" />
-        <DialectSelect
-          disabled={isDialectSelectDisabled}
-          onChange={onDialectChange}
-          value={dialect}
-        />
+      <div className="border-b border-border bg-muted/20 p-3">
+        <Card
+          className="grid grid-cols-2 gap-2 border border-border bg-card p-3 shadow-sm"
+          size="sm"
+        >
+          <SelectorLabel label="Format" value="SQL" />
+          <DialectSelect
+            disabled={isDialectSelectDisabled}
+            onChange={onDialectChange}
+            value={dialect}
+          />
+        </Card>
       </div>
 
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
           <span className="text-xs font-medium text-muted-foreground">
             Source text
           </span>
@@ -3109,7 +3170,7 @@ function SourcePanel({
         </div>
         <p
           aria-live="polite"
-          className="border-b px-4 py-2 text-xs text-muted-foreground"
+          className="sr-only"
         >
           {sessionLoadState.message}
         </p>
@@ -3122,21 +3183,38 @@ function SourcePanel({
           value={sourceText}
         />
       </div>
+      <div
+        className="border-t border-border bg-background p-3"
+        data-sqltoerd-session-list-footer
+      >
+        <SqlErdSessionListNavigationButton showLabel />
+      </div>
     </aside>
   );
 }
 
-function SqlErdSessionListNavigationButton() {
+function SqlErdSessionListNavigationButton({
+  showLabel = false
+}: {
+  showLabel?: boolean;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Link
             aria-label="세션 목록으로 이동"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              buttonVariants({
+                size: showLabel ? "default" : "icon",
+                variant: "ghost"
+              }),
+              showLabel ? "w-full justify-start" : "shrink-0"
+            )}
             href="/sql-erd"
           >
             <ListIcon className="size-4" />
+            {showLabel ? <span>세션 목록</span> : null}
           </Link>
         }
       />
@@ -3147,21 +3225,25 @@ function SqlErdSessionListNavigationButton() {
 
 function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
   return (
-    <aside className="flex w-12 shrink-0 flex-col border-r bg-muted/20">
-      <div className="flex min-h-14 flex-col items-center justify-center border-b">
-        <SqlErdSessionListNavigationButton />
-      </div>
-      <button
+    <aside className="flex w-12 shrink-0 flex-col border-r border-border bg-background">
+      <Button
         aria-label="Open source panel"
-        className="flex flex-col items-center gap-3 py-3 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="h-auto w-full flex-1 flex-col justify-start gap-3 rounded-none py-3 text-muted-foreground"
         onClick={onToggle}
         type="button"
+        variant="ghost"
       >
         <PanelLeftOpen className="size-4" />
         <span className="text-xs font-medium [writing-mode:vertical-rl]">
           Source
         </span>
-      </button>
+      </Button>
+      <div
+        className="flex items-center justify-center border-t border-border py-2"
+        data-sqltoerd-session-list-footer
+      >
+        <SqlErdSessionListNavigationButton />
+      </div>
     </aside>
   );
 }
@@ -3218,6 +3300,7 @@ function SqlSourceEditor({
           bracketMatching(),
           highlightActiveLine(),
           highlightActiveLineGutter(),
+          placeholder("SQL 문을 입력해주세요"),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           languageCompartment.of(
             getSqlSourceEditorLanguageExtension(dialect)
@@ -3757,16 +3840,17 @@ function InspectorPanel({
 
   if (!isOpen) {
     return (
-      <aside className="flex w-12 shrink-0 flex-col items-center border-l bg-muted/20 py-2">
-        <button
+      <aside className="flex w-12 shrink-0 flex-col items-center border-l border-border bg-background py-2">
+        <Button
           aria-label="상세 정보 패널 열기"
-          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           data-sqltoerd-inspector-toggle
           onClick={onToggle}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <PanelRightOpen className="size-4" />
-        </button>
+        </Button>
         <span className="mt-2 text-xs font-medium text-muted-foreground [writing-mode:vertical-rl]">
           상세
         </span>
@@ -3776,21 +3860,18 @@ function InspectorPanel({
 
   return (
     <aside
-      className="relative flex shrink-0 flex-col border-l bg-background"
+      className="relative flex shrink-0 flex-col border-l border-border bg-muted/20"
       id="inspector"
       style={{ width }}
     >
       <div
-        className="flex items-start justify-between gap-3 border-b px-5 py-5"
+        className="flex min-h-16 items-start justify-between gap-3 border-b border-border bg-card px-5 py-4"
         data-sqltoerd-inspector-summary
       >
         {viewModel.type === "table" ? (
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-muted-foreground">
-              선택 정보
-            </p>
             <p
-              className="mt-3 truncate font-mono text-xl font-semibold text-foreground"
+              className="truncate font-mono text-xl font-semibold text-foreground"
               data-sqltoerd-inspector-table-name
             >
               {viewModel.title}
@@ -3809,10 +3890,7 @@ function InspectorPanel({
           </div>
         ) : (
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-muted-foreground">
-              선택 정보
-            </p>
-            <p className="mt-2 truncate text-lg font-semibold">
+            <p className="truncate text-lg font-semibold">
               {inspectorTitle}
             </p>
             {inspectorSubtitle ? (
@@ -3822,19 +3900,20 @@ function InspectorPanel({
             ) : null}
           </div>
         )}
-        <button
+        <Button
           aria-label="상세 정보 패널 닫기"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           data-sqltoerd-inspector-toggle
           onClick={onToggle}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <PanelRightClose className="size-4" />
-        </button>
+        </Button>
       </div>
 
       <div
-        className="flex flex-1 flex-col gap-6 overflow-auto p-5"
+        className="flex flex-1 flex-col gap-5 overflow-auto p-4"
         data-workspace-follow-surface="sql-erd-inspector"
       >
         <InspectorContent
@@ -3984,18 +4063,18 @@ function getInspectorSubtitle(viewModel: SqlErdInspectorViewModel) {
   }
 
   if (viewModel.type === "column") {
-    return `${getTableDisplayName(viewModel.table)}.${viewModel.column.name}`;
+    return null;
   }
 
   if (viewModel.type === "relation") {
-    return "외래 키 관계";
+    return null;
   }
 
   if (viewModel.type === "annotation") {
     return "SQL에 반영되지 않음";
   }
 
-  return "선택 없음";
+  return null;
 }
 
 function InspectorContent({
@@ -4087,17 +4166,14 @@ function InspectorContent({
   }
 
   return (
-    <div className="rounded-xl border border-dashed bg-muted/20 px-5 py-8 text-center">
+    <Card className="border border-dashed border-border bg-card px-5 py-8 text-center shadow-sm">
       <div className="mx-auto flex size-10 items-center justify-center rounded-lg border bg-background">
         <Database className="size-4 text-muted-foreground" />
       </div>
-      <p className="mt-4 text-sm font-semibold text-foreground">
-        선택된 항목이 없습니다
-      </p>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
         캔버스에서 항목을 선택하면 상세 정보를 확인할 수 있습니다
       </p>
-    </div>
+    </Card>
   );
 }
 
@@ -4331,8 +4407,7 @@ function ColumnInspector({
         {column.unique ? <ConstraintPill label="UQ" /> : null}
         {!column.nullable ? <ConstraintPill label="NN" /> : null}
       </div>
-      <InspectorSectionTitle>컬럼 정보</InspectorSectionTitle>
-      <div className="space-y-3 rounded-xl border bg-muted/10 p-4">
+      <Card className="space-y-3 border border-border bg-card p-4 shadow-sm">
         <label className="grid gap-1.5 text-sm font-medium">
           컬럼명
           <input
@@ -4395,7 +4470,7 @@ function ColumnInspector({
         >
           컬럼 삭제 SQL diff 보기
         </button>
-      </div>
+      </Card>
       <RelationList relations={viewModel.relations} />
       <div className="space-y-3 rounded-xl border bg-muted/10 p-4">
         <div className="flex items-center justify-between gap-3">
@@ -4670,7 +4745,7 @@ function RelationInspector({
 
   return (
     <>
-      <InspectorSectionTitle>관계 정보</InspectorSectionTitle>
+      <InspectorSectionTitle>외래 키 관계 정보</InspectorSectionTitle>
       <div className="space-y-2">
         <InspectorRow label="종류" value="foreign key" />
         <InspectorRow label="제약 조건" value={relation.constraintName ?? "-"} />
@@ -5124,16 +5199,21 @@ type StatusPillProps = {
 
 function StatusPill({ label, tone }: StatusPillProps) {
   return (
-    <span
+    <Badge
       className={cn(
-        "inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-medium",
-        tone === "success" &&
-          "border-emerald-200 bg-emerald-50 text-emerald-700",
-        tone === "error" && "border-red-200 bg-red-50 text-red-700",
-        tone === "neutral" && "border-border bg-background text-muted-foreground"
+        "h-6 px-2 text-[11px]",
+        tone === "success" && "bg-primary/10 text-primary",
+        tone === "neutral" && "text-muted-foreground"
       )}
+      variant={
+        tone === "error"
+          ? "destructive"
+          : tone === "success"
+            ? "secondary"
+            : "outline"
+      }
     >
       {label}
-    </span>
+    </Badge>
   );
 }
