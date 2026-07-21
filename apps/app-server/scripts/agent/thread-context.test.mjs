@@ -144,3 +144,31 @@ class FakeDatabase {
     reportId
   });
 }
+
+{
+  const database = new FakeDatabase([
+    {
+      thread_id: threadId,
+      run_id: priorRunId,
+      step_id: stepId,
+      resource_refs: [
+        {
+          domain: "calendar",
+          resourceType: "event",
+          resourceId: "1",
+          label: "하하하"
+        }
+      ]
+    }
+  ]);
+  const service = new AgentThreadContextService(database);
+
+  assert.deepEqual(
+    await service.resolveCalendarEventReference(context, contextRef(0)),
+    { resourceType: "event", resourceId: "1" }
+  );
+  assert.equal(
+    await service.resolveMeetingReference(context, contextRef(0)),
+    null
+  );
+}

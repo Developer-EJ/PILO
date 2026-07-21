@@ -102,7 +102,17 @@ AGENT_GROUNDED_ANSWER_RETRY_EXHAUSTED_ERROR_MESSAGE = (
     "회의록 근거 답변을 생성하지 못했습니다. 잠시 후 다시 시도해주세요."
 )
 AGENT_PLANNING_CONTEXT_MAX_CHARACTERS = 12_000
+AGENT_THREAD_CONTEXT_MAX_RUNS = 6
 AGENT_THREAD_CONTEXT_MAX_BYTES = 12 * 1024
+AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS = 12
+AGENT_THREAD_CONTEXT_SAFE_RESOURCES = frozenset(
+    {
+        ("meeting", "meeting"),
+        ("meeting", "meeting_report"),
+        ("meeting", "meeting_report_action_item"),
+        ("calendar", "event"),
+    }
+)
 AGENT_TOOL_OUTPUT_MAX_CHARACTERS = 3_000
 LOCAL_APP_ENVS = {"local", "test", "development"}
 MEETING_REPORT_FAILURE_STEPS = {
@@ -374,6 +384,12 @@ def _build_bounded_agent_planning_context(lines: list[str]) -> str:
     return "\n".join(reversed(selected_reversed))
 
 
+def _thread_context_line(kind: str, **values: object) -> str:
+    return f"previous {kind}: " + json.dumps(
+        values, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+
+
 def _agent_step_resource_context_lines(
     *,
     thread_id: object,
@@ -388,12 +404,14 @@ def _agent_step_resource_context_lines(
         return []
 
     lines: list[str] = []
-    safe_types = {"meeting", "meeting_report", "meeting_report_action_item"}
     for index, reference in enumerate(resource_refs[:12]):
         if (
             not isinstance(reference, dict)
-            or reference.get("domain") != "meeting"
-            or reference.get("resourceType") not in safe_types
+            or (
+                reference.get("domain"),
+                reference.get("resourceType"),
+            )
+            not in AGENT_THREAD_CONTEXT_SAFE_RESOURCES
             or not isinstance(reference.get("resourceId"), str)
             or not str(reference["resourceId"]).strip()
         ):
@@ -1777,6 +1795,114 @@ class PgAgentRunRepository:
 
         memory: list[str] = []
         untrusted_source_lines: list[tuple[str, PromptSecuritySource]] = []
+        thread_id = row["thread_id"]
+        if thread_id is not None:
+            thread_runs = self.connection.execute(
+                """
+                SELECT id, prompt, final_answer
+                FROM agent_runs
+                WHERE thread_id = %s
+                  AND id <> %s
+                  AND workspace_id = %s
+                  AND requested_by_user_id = %s
+                  AND status = 'completed'
+                  AND final_answer IS NOT NULL
+                  AND expires_at > now()
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+                """,
+                (
+                    thread_id,
+                    job.run_id,
+                    job.workspace_id,
+                    job.requested_by_user_id,
+                    AGENT_THREAD_CONTEXT_MAX_RUNS,
+                ),
+            ).fetchall()
+            thread_memory_newest: list[list[str]] = []
+            remaining_resource_refs = AGENT_THREAD_CONTEXT_MAX_RESOURCE_REFS
+            for newest_index, thread_run in enumerate(thread_runs):
+                turn = len(thread_runs) - newest_index
+                turn_lines: list[str] = []
+                prompt = _truncate_utf8(str(thread_run["prompt"]).strip(), 1000)
+                answer = _truncate_utf8(str(thread_run["final_answer"]).strip(), 2000)
+                if prompt:
+                    prompt_line = _thread_context_line("user", turn=turn, text=prompt)
+                    turn_lines.append(prompt_line)
+                    untrusted_source_lines.append(
+                        (prompt_line, PromptSecuritySource("thread_user", prompt))
+                    )
+                if answer:
+                    answer_line = _thread_context_line("assistant", turn=turn, text=answer)
+                    turn_lines.append(answer_line)
+                    untrusted_source_lines.append(
+                        (answer_line, PromptSecuritySource("thread_assistant", answer))
+                    )
+
+                ref_rows = self.connection.execute(
+                    """
+                    SELECT id, resource_refs
+                    FROM agent_steps
+                    WHERE run_id = %s
+                      AND step_type = 'tool'
+                      AND status = 'completed'
+                    ORDER BY step_order ASC, id ASC
+                    """,
+                    (thread_run["id"],),
+                ).fetchall()
+                resource_ordinals: dict[str, int] = {}
+                for ref_row in ref_rows:
+                    resource_refs = ref_row["resource_refs"]
+                    if not isinstance(resource_refs, list):
+                        continue
+                    for ref_index, resource_ref in enumerate(resource_refs):
+                        if remaining_resource_refs <= 0:
+                            break
+                        if (
+                            not isinstance(resource_ref, dict)
+                            or (
+                                resource_ref.get("domain"),
+                                resource_ref.get("resourceType"),
+                            )
+                            not in AGENT_THREAD_CONTEXT_SAFE_RESOURCES
+                            or not isinstance(resource_ref.get("resourceId"), str)
+                            or not str(resource_ref["resourceId"]).strip()
+                        ):
+                            continue
+                        resource_type = str(resource_ref["resourceType"])
+                        resource_ordinals[resource_type] = (
+                            resource_ordinals.get(resource_type, 0) + 1
+                        )
+                        context_ref_source = (
+                            f"{thread_id}:{thread_run['id']}:{ref_row['id']}:{ref_index}"
+                        )
+                        digest = hashlib.sha256(context_ref_source.encode()).hexdigest()
+                        resource_values: dict[str, object] = {
+                            "turn": turn,
+                            "contextRef": f"ctx_{digest[:24]}",
+                            "resourceType": resource_type,
+                            "ordinal": resource_ordinals[resource_type],
+                        }
+                        for key, limit in (("label", 300), ("status", 100)):
+                            value = resource_ref.get(key)
+                            if isinstance(value, str) and value.strip():
+                                resource_values[key] = _truncate_utf8(value.strip(), limit)
+                        resource_line = _thread_context_line("resource", **resource_values)
+                        turn_lines.append(resource_line)
+                        for key in ("label", "status"):
+                            source = resource_values.get(key)
+                            if isinstance(source, str) and source:
+                                untrusted_source_lines.append(
+                                    (
+                                        resource_line,
+                                        PromptSecuritySource("thread_resource", source),
+                                    )
+                                )
+                        remaining_resource_refs -= 1
+                thread_memory_newest.append(turn_lines)
+            for turn_lines in reversed(thread_memory_newest):
+                memory.extend(turn_lines)
+
         selected_candidate = self.connection.execute(
             """
             SELECT
@@ -1983,6 +2109,7 @@ class PgAgentRunRepository:
                 if job.turn_sequence > 1 and latest_user_message is not None
                 else None
             ),
+            thread_id=(str(row["thread_id"]) if row.get("thread_id") is not None else None),
         )
 
     def start_planner_step(self, job: AgentRunJob, context: AgentRunContext) -> str:

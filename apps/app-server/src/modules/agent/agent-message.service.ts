@@ -32,6 +32,16 @@ import type { AgentRunRequestContext } from "./types/agent-tool.types";
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const MAX_MESSAGE_BYTES = 4000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
+const BUDGET_EXHAUSTION_MESSAGE_MARKERS = [
+  "한 요청에서 실행할 수 있는 작업은 최대",
+  "한 요청에서 계획할 수 있는 작업은 최대"
+] as const;
+const EXPLICIT_CONTINUATION_PATTERN =
+  /(계속(?:해|해서|\s*진행)|이어서|이어\s*서|마저|남은\s*(?:내용|작업)|나머지|하던\s*(?:작업|요청)|다음\s*(?:단계|작업))/;
+const EXPLICIT_CANCELLATION_PATTERN =
+  /(취소|그만|중단|멈춰|필요\s*없|하지\s*마|됐어|됐습니다)/;
+const ACTIONABLE_REQUEST_PATTERN =
+  /(알려|보여|조회|찾|만들|추가|생성|변경|바꾸|바꿔|수정|옮기|이동|삭제|지우|요약|승인|반려|실행|시작|종료|열어|작성|보내|뭐야|뭔지|무엇|언제|어디|누구|몇)/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UUID_IN_TEXT_PATTERN =
@@ -48,6 +58,7 @@ type AgentMessageDisposition = "auto" | "continue_previous" | "start_new";
 
 interface AgentMessageInput {
   message: string;
+  conversationId?: string | null;
   timezone: string;
   clientRequestId: string;
   activeRunId: string | null;
@@ -175,11 +186,20 @@ export class AgentMessageService {
         workspaceId,
         input.activeRunId
       );
+      if (
+        input.conversationId === null ||
+        (input.conversationId && input.conversationId !== snapshot.thread_id)
+      ) {
+        throw agentMessageRoutingStale(
+          "Agent run does not belong to the active conversation"
+        );
+      }
       this.assertSnapshotCanReceiveMessage(snapshot);
-    } else {
+    } else if (input.conversationId !== null) {
       snapshot = await this.loadLatestWaitingRunSnapshot(
         currentUserId,
-        workspaceId
+        workspaceId,
+        input.conversationId
       );
     }
     if (snapshot) {
@@ -295,6 +315,14 @@ export class AgentMessageService {
       };
     }
 
+    const budgetExhaustionDecision = this.decideBudgetExhaustionRelationship(
+      snapshot,
+      input.message
+    );
+    if (budgetExhaustionDecision) {
+      return budgetExhaustionDecision;
+    }
+
     try {
       const decision = await this.relationshipService.classify(
         await this.buildRelationshipContext(
@@ -355,6 +383,9 @@ export class AgentMessageService {
         workspaceId,
         {
           prompt: input.message,
+          ...(input.conversationId === undefined
+            ? {}
+            : { conversationId: input.conversationId }),
           timezone: input.timezone,
           clientRequestId: input.clientRequestId,
           requestContext: input.requestContext
@@ -493,12 +524,14 @@ export class AgentMessageService {
     if (!lockedRun.thread_id) {
       throw agentMessageRoutingStale("Agent run thread is unavailable");
     }
-    await this.cancelRunStateInTransaction(
-      transaction,
-      lockedRun.id,
-      currentUserId,
-      "새 요청이 시작되어 이전 요청을 종료했습니다."
-    );
+    if (lockedRun.status === "waiting_user_input") {
+      await this.cancelRunStateInTransaction(
+        transaction,
+        lockedRun.id,
+        currentUserId,
+        "새 요청이 시작되어 이전 요청을 종료했습니다."
+      );
+    }
     const replacement = await this.agentLoggingService.createRunInTransaction(
       transaction,
       currentUserId,
@@ -511,14 +544,16 @@ export class AgentMessageService {
       },
       lockedRun.thread_id
     );
-    await this.insertCancellationLog(
-      transaction,
-      currentUserId,
-      workspaceId,
-      lockedRun.id,
-      "superseded_by_new_intent",
-      replacement.run.id
-    );
+    if (lockedRun.status === "waiting_user_input") {
+      await this.insertCancellationLog(
+        transaction,
+        currentUserId,
+        workspaceId,
+        lockedRun.id,
+        "superseded_by_new_intent",
+        replacement.run.id
+      );
+    }
     await this.insertRouteLog(transaction, workspaceId, replacement.run.id, {
       currentUserId,
       clientRequestId: input.clientRequestId,
@@ -924,7 +959,8 @@ export class AgentMessageService {
 
   private async loadLatestWaitingRunSnapshot(
     currentUserId: string,
-    workspaceId: string
+    workspaceId: string,
+    conversationId?: string
   ): Promise<ActiveRunSnapshot | null> {
     const run = await this.database.queryOne<ActiveRunSnapshot>(
       `
@@ -952,6 +988,7 @@ export class AgentMessageService {
         ) AS confirmation ON true
         WHERE run.workspace_id = $1
           AND run.requested_by_user_id = $2
+          AND ($3::uuid IS NULL OR run.thread_id = $3)
           AND run.expires_at > now()
           AND (
             (
@@ -966,7 +1003,7 @@ export class AgentMessageService {
         ORDER BY run.updated_at DESC, run.created_at DESC, run.id DESC
         LIMIT 1
       `,
-      [workspaceId, currentUserId]
+      [workspaceId, currentUserId, conversationId ?? null]
     );
     if (!run) return null;
     run.candidate_state = await this.loadCandidateState(
@@ -1021,9 +1058,7 @@ export class AgentMessageService {
     const shouldAskForChoice =
       (decision.relationship === "continuation" &&
         decision.confidence === "low") ||
-      ((decision.relationship === "new_intent" ||
-        decision.relationship === "cancel") &&
-        decision.confidence !== "high");
+      (decision.relationship === "cancel" && decision.confidence !== "high");
     if (!shouldAskForChoice) return decision;
     return {
       relationship: "ambiguous",
@@ -1032,6 +1067,47 @@ export class AgentMessageService {
       clarificationQuestion:
         "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?"
     };
+  }
+
+  private decideBudgetExhaustionRelationship(
+    snapshot: ActiveRunSnapshot,
+    message: string
+  ): AgentInputRelationshipDecision | null {
+    if (
+      snapshot.status !== "waiting_user_input" ||
+      !this.isBudgetExhaustionMessage(snapshot.message)
+    ) {
+      return null;
+    }
+    if (EXPLICIT_CONTINUATION_PATTERN.test(message)) {
+      return {
+        relationship: "continuation",
+        confidence: "high",
+        reason: "사용자가 budget 소진 후 기존 작업 계속을 명시했습니다.",
+        clarificationQuestion: null
+      };
+    }
+    if (EXPLICIT_CANCELLATION_PATTERN.test(message)) {
+      return null;
+    }
+    if (!ACTIONABLE_REQUEST_PATTERN.test(message)) {
+      return null;
+    }
+    return {
+      relationship: "new_intent",
+      confidence: "high",
+      reason: "budget 소진 대기 중 구체적인 새 작업 요청이 입력되었습니다.",
+      clarificationQuestion: null
+    };
+  }
+
+  private isBudgetExhaustionMessage(message: string | null): boolean {
+    return Boolean(
+      message &&
+        BUDGET_EXHAUSTION_MESSAGE_MARKERS.some((marker) =>
+          message.includes(marker)
+        )
+    );
   }
 
   private assertSnapshotCanReceiveMessage(snapshot: ActiveRunSnapshot): void {
@@ -1132,6 +1208,10 @@ export class AgentMessageService {
           ? "confirmation"
           : candidates.length > 0
             ? "candidate"
+            : this.isBudgetExhaustionMessage(
+                  latestAssistantQuestion ?? snapshot.message
+                )
+              ? "budget_exhausted"
             : latestAssistantQuestion
               ? "clarification"
               : "other",
@@ -1148,6 +1228,7 @@ export class AgentMessageService {
     if (!this.isRecord(body)) throw badRequest("Request body must be an object");
     const allowedFields = new Set([
       "message",
+      "conversationId",
       "timezone",
       "clientRequestId",
       "activeRunId",
@@ -1167,6 +1248,10 @@ export class AgentMessageService {
       throw badRequest("activeRunId is required and may be null");
     }
     const activeRunId = this.optionalUuid(body.activeRunId, "activeRunId");
+    const conversationId = this.optionalConversationUuid(
+      body.conversationId,
+      "conversationId"
+    );
     const disposition = body.disposition ?? "auto";
     if (
       disposition !== "auto" &&
@@ -1177,6 +1262,7 @@ export class AgentMessageService {
     }
     const normalizedRun = this.agentService.normalizeCreateRunBody({
       prompt: message,
+      ...(conversationId === undefined ? {} : { conversationId }),
       timezone: body.timezone,
       clientRequestId,
       requestContext: body.requestContext
@@ -1187,6 +1273,7 @@ export class AgentMessageService {
     });
     return {
       message,
+      ...(conversationId === undefined ? {} : { conversationId }),
       timezone: normalizedRun.timezone ?? DEFAULT_TIMEZONE,
       clientRequestId,
       activeRunId,
@@ -1201,6 +1288,10 @@ export class AgentMessageService {
       .update(
         JSON.stringify({
           activeRunId: input.activeRunId,
+          conversationId:
+            input.conversationId === undefined
+              ? "legacy"
+              : input.conversationId,
           clientRequestId: input.clientRequestId,
           message: input.message,
           requestContext: input.requestContext,
@@ -1229,6 +1320,14 @@ export class AgentMessageService {
       throw badRequest(`${field} must be a UUID or null`);
     }
     return value;
+  }
+
+  private optionalConversationUuid(
+    value: unknown,
+    field: string
+  ): string | null | undefined {
+    if (value === undefined) return undefined;
+    return this.optionalUuid(value, field);
   }
 
   private truncate(value: string, maxLength: number): string {

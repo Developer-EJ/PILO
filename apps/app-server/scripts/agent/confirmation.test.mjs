@@ -360,6 +360,7 @@ class FakeAgentToolRegistryService {
       riskLevel: this.state.definitionRiskLevel ?? "medium",
       executionMode:
         this.state.definitionExecutionMode ?? "confirmation_required",
+      postExecutionDisposition: this.state.definitionPostExecutionDisposition,
       validateInput: (input) => {
         this.calls.push({
           method: "validateInput",
@@ -759,7 +760,8 @@ function errorMessage(error) {
     confirmations: [createConfirmation()],
     latestPlannerStep: {
       output_json: {
-        toolRouting: {
+        toolRetrieval: {
+          mode: "shadow",
           capabilityIds: ["calendar.events.create"]
         }
       }
@@ -1021,6 +1023,7 @@ for (const body of [undefined, {}, { choiceId: "unknown" }]) {
 {
   const updatePlan = createUpdatePlan();
   const state = {
+    definitionPostExecutionDisposition: "complete_run",
     runs: [createRun()],
     confirmations: [
       createConfirmation({
@@ -1030,7 +1033,8 @@ for (const body of [undefined, {}, { choiceId: "unknown" }]) {
       })
     ]
   };
-  const { service, toolRegistryService } = createService(state);
+  const { service, toolRegistryService, loggingService, outboxPublisherService } =
+    createService(state);
   const result = await service.approveConfirmation(
     USER_ID,
     WORKSPACE_ID,
@@ -1039,8 +1043,13 @@ for (const body of [undefined, {}, { choiceId: "unknown" }]) {
     undefined
   );
 
-  assert.equal(result.run.status, "planning");
+  assert.equal(result.run.status, "completed");
   assert.equal(result.run.confirmation.status, "approved");
+  assert.equal(
+    loggingService.calls.at(-1).input.postExecutionDisposition,
+    "complete_run"
+  );
+  assert.deepEqual(outboxPublisherService.calls, []);
   assert.deepEqual(toolRegistryService.calls[2].input, {
     eventId: "77",
     changes: {

@@ -46,6 +46,36 @@ def test_agent_tool_resource_refs_become_same_run_opaque_context_refs() -> None:
     }
 
 
+def test_calendar_event_resource_ref_becomes_same_run_opaque_context_ref() -> None:
+    lines = _agent_step_resource_context_lines(
+        thread_id="44444444-4444-4444-8444-444444444444",
+        run_id="33333333-3333-4333-8333-333333333333",
+        step_id="66666666-6666-4666-8666-666666666666",
+        step_order=2,
+        resource_refs=[
+            {
+                "domain": "calendar",
+                "resourceType": "event",
+                "resourceId": "1",
+                "label": "하하하",
+                "status": "available",
+            }
+        ],
+    )
+
+    assert len(lines) == 1
+    assert '"resourceId"' not in lines[0]
+    value = json.loads(lines[0].removeprefix("previous resource: "))
+    assert value == {
+        "contextRef": "ctx_060eb912f95414f3c2e7ac25",
+        "label": "하하하",
+        "ordinal": 1,
+        "resourceType": "event",
+        "status": "available",
+        "turn": 2,
+    }
+
+
 def test_meeting_report_list_planning_output_omits_raw_resource_ids() -> None:
     report_id = "77777777-7777-4777-8777-777777777777"
     meeting_id = "33333333-3333-4333-8333-333333333333"
@@ -1181,11 +1211,11 @@ def test_agent_repository_preserves_complete_entries_from_large_general_tool_out
     assert len(tool_line[len(prefix) :]) <= 3_000
 
 
-def test_agent_repository_excludes_completed_thread_memory() -> None:
+def test_agent_repository_adds_completed_first_run_to_second_run_context() -> None:
     repository = object.__new__(PgAgentRunRepository)
     thread_runs = [
         {"id": f"run-{index}", "prompt": f"prompt-{index}", "final_answer": f"answer-{index}"}
-        for index in range(1, 7)
+        for index in range(6, 0, -1)
     ]
     connection = FakeAgentContextConnection(
         run_row={
@@ -1209,7 +1239,13 @@ def test_agent_repository_excludes_completed_thread_memory() -> None:
                             "resourceType": "meeting_report",
                             "resourceId": "report-6",
                             "label": "최근 회의",
-                        }
+                        },
+                        {
+                            "domain": "calendar",
+                            "resourceType": "event",
+                            "resourceId": "1",
+                            "label": "하하하",
+                        },
                     ],
                 }
             ],
@@ -1230,12 +1266,67 @@ def test_agent_repository_excludes_completed_thread_memory() -> None:
     context = repository.get_run_context(job)
 
     assert context is not None
-    assert context.planning_context == ""
-    assert context.untrusted_context_sources == ()
-    assert not any("AND status = 'completed'" in query for query, _ in connection.executed)
+    user_turns = [
+        json.loads(line.removeprefix("previous user: "))
+        for line in context.planning_context.splitlines()
+        if line.startswith("previous user: ")
+    ]
+    assistant_turns = [
+        json.loads(line.removeprefix("previous assistant: "))
+        for line in context.planning_context.splitlines()
+        if line.startswith("previous assistant: ")
+    ]
+    assert user_turns == [{"text": f"prompt-{index}", "turn": index} for index in range(1, 7)]
+    assert assistant_turns == [{"text": f"answer-{index}", "turn": index} for index in range(1, 7)]
+    resource_line = next(
+        line
+        for line in context.planning_context.splitlines()
+        if line.startswith("previous resource: ")
+    )
+    resource = json.loads(resource_line.removeprefix("previous resource: "))
+    assert resource == {
+        "contextRef": resource["contextRef"],
+        "label": "최근 회의",
+        "ordinal": 1,
+        "resourceType": "meeting_report",
+        "turn": 6,
+    }
+    assert resource["contextRef"].startswith("ctx_")
+    assert len(resource["contextRef"]) == 28
+    assert "report-6" not in context.planning_context
+    calendar_resource = next(
+        json.loads(line.removeprefix("previous resource: "))
+        for line in context.planning_context.splitlines()
+        if line.startswith("previous resource: ") and '"resourceType":"event"' in line
+    )
+    assert calendar_resource["label"] == "하하하"
+    assert '"resourceId"' not in context.planning_context
+    assert len(context.planning_context.encode("utf-8")) <= 12 * 1024
+    assert PromptSecuritySource("thread_user", "prompt-6") in context.untrusted_context_sources
+    assert PromptSecuritySource("thread_assistant", "answer-6") in context.untrusted_context_sources
+    assert PromptSecuritySource("thread_resource", "최근 회의") in context.untrusted_context_sources
+    thread_query, thread_values = next(
+        (query, values)
+        for query, values in connection.executed
+        if "SELECT id, prompt, final_answer" in query
+    )
+    assert "workspace_id = %s" in thread_query
+    assert "requested_by_user_id = %s" in thread_query
+    assert "status = 'completed'" in thread_query
+    assert "final_answer IS NOT NULL" in thread_query
+    assert "expires_at > now()" in thread_query
+    assert "ORDER BY created_at DESC, id DESC" in thread_query
+    assert thread_values == (
+        "thread-1",
+        job.run_id,
+        job.workspace_id,
+        job.requested_by_user_id,
+        6,
+    )
+    assert context.thread_id == "thread-1"
 
 
-def test_agent_repository_excludes_completed_thread_resources() -> None:
+def test_agent_repository_redacts_ids_and_limits_completed_thread_resources() -> None:
     repository = object.__new__(PgAgentRunRepository)
     exposed_uuid = "99999999-9999-4999-8999-999999999999"
     resource_refs = [
@@ -1282,11 +1373,14 @@ def test_agent_repository_excludes_completed_thread_resources() -> None:
     context = repository.get_run_context(job)
 
     assert context is not None
-    assert context.planning_context == ""
+    assert len(context.planning_context.encode("utf-8")) <= 12 * 1024
+    assert context.planning_context.count("previous resource: ") == 12
     assert exposed_uuid not in context.planning_context
+    assert "[resource]" in context.planning_context
+    assert "report-0" not in context.planning_context
 
 
-def test_agent_repository_excludes_completed_thread_text_with_credentials() -> None:
+def test_agent_repository_redacts_completed_thread_text_credentials() -> None:
     repository = object.__new__(PgAgentRunRepository)
     sensitive_values = [
         "sk-" + "proj-private-value",
@@ -1359,7 +1453,14 @@ def test_agent_repository_excludes_completed_thread_text_with_credentials() -> N
 
     assert context is not None
     assert all(value not in context.planning_context for value in sensitive_values)
-    assert context.planning_context == ""
+    assert "[secret]" in context.planning_context
+    assert "monkey=banana123" in context.planning_context
+    assert "public_key=public-material" in context.planning_context
+    assert all(
+        value not in source.text
+        for source in context.untrusted_context_sources
+        for value in sensitive_values
+    )
 
 
 def test_agent_repository_exposes_only_safe_selected_candidate_context() -> None:
