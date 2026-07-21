@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path
 from types import MappingProxyType
+
+from app.agent_processor import (
+    AgentPlannerClient,
+    AgentRouterClient,
+    AgentRunContext,
+    AgentRunJob,
+    AgentRunProcessor,
+)
 
 type FrozenJson = (
     None | bool | int | float | str | tuple[FrozenJson, ...] | Mapping[str, FrozenJson]
@@ -49,6 +58,22 @@ class MultiTurnConversation:
 class MultiTurnCatalog:
     version: str
     conversations: tuple[MultiTurnConversation, ...]
+
+
+@dataclass(frozen=True)
+class MultiTurnEvaluationToolCall:
+    turn_index: int
+    tool_name: str
+    tool_input: Mapping[str, FrozenJson]
+
+
+@dataclass(frozen=True)
+class MultiTurnEvaluationResult:
+    conversation_id: str
+    attempt: int
+    deterministic_context_passed: bool
+    deterministic_continuation_passed: bool
+    failure_reasons: tuple[str, ...]
 
 
 def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
@@ -102,6 +127,119 @@ def load_multiturn_catalog(catalog_path: Path) -> MultiTurnCatalog:
     if len({conversation.conversation_id for conversation in conversations}) != len(conversations):
         raise ValueError("Multi-turn conversation ids must be unique")
     return MultiTurnCatalog(payload["version"].strip(), tuple(conversations))
+
+
+def evaluate_deterministic_continuation(
+    conversation: MultiTurnConversation,
+    tool_calls: tuple[MultiTurnEvaluationToolCall, ...],
+    *,
+    attempt: int = 1,
+) -> MultiTurnEvaluationResult:
+    failure_reasons: list[str] = []
+    calls_by_turn: dict[int, list[MultiTurnEvaluationToolCall]] = {}
+    for call in tool_calls:
+        calls_by_turn.setdefault(call.turn_index, []).append(call)
+
+    for turn_index, turn in enumerate(conversation.turns):
+        calls = calls_by_turn.get(turn_index, [])
+        actual_tools = tuple(call.tool_name for call in calls)
+        if actual_tools != turn.expected_tools:
+            failure_reasons.append(
+                "unexpected_tool"
+                if set(actual_tools) - set(turn.expected_tools)
+                else "tool_sequence"
+            )
+            continue
+        if turn_index == 0:
+            continue
+        context_ref = turn.expected_context.context_ref
+        if context_ref is None or not all(
+            _contains_context_reference(call.tool_input, context_ref) for call in calls
+        ):
+            failure_reasons.append("context_reference")
+            continue
+        if not all(
+            _contains_mapping(call.tool_input, turn.expected_context.constraints)
+            for call in calls
+        ):
+            failure_reasons.append("context_constraints")
+
+    unique_failure_reasons = tuple(dict.fromkeys(failure_reasons))
+    return MultiTurnEvaluationResult(
+        conversation_id=conversation.conversation_id,
+        attempt=attempt,
+        deterministic_context_passed=not any(
+            reason in {"context_reference", "context_constraints"}
+            for reason in unique_failure_reasons
+        ),
+        deterministic_continuation_passed=not unique_failure_reasons,
+        failure_reasons=unique_failure_reasons,
+    )
+
+
+def evaluate_multiturn_conversation(
+    planner: AgentPlannerClient,
+    job: AgentRunJob,
+    conversation: MultiTurnConversation,
+    *,
+    current_date: str,
+    router: AgentRouterClient | None = None,
+    timezone: str = "Asia/Seoul",
+    attempt: int = 1,
+) -> MultiTurnEvaluationResult:
+    repository = _MultiTurnReplayRepository(job, conversation.turns[0].user, timezone)
+    handoff = _MultiTurnReplayHandoff(repository, conversation)
+    processor = AgentRunProcessor(
+        repository,
+        planner,
+        handoff,
+        current_date_provider=lambda _timezone: date.fromisoformat(current_date),
+        router_client=router,
+        tool_retrieval_mode="llm_router" if router is not None else "shadow",
+    )
+    runtime_failure = False
+    for turn_index, turn in enumerate(conversation.turns):
+        if turn_index > 0:
+            repository.begin_turn(turn_index, turn.user)
+        turn_job = replace(job, turn_sequence=job.turn_sequence + turn_index)
+        for _ in range(len(turn.expected_tools) + 2):
+            try:
+                result = processor.process_job(turn_job)
+            except Exception:
+                runtime_failure = True
+                break
+            if repository.status in {"completed", "failed", "cancelled", "waiting_user_input"}:
+                repository.last_process_reason = result.reason
+                break
+            if result.reason not in {
+                "agent_execution_handoff_completed",
+                "agent_execution_handoff_retried",
+            }:
+                runtime_failure = True
+                break
+        if runtime_failure or repository.status != "completed":
+            runtime_failure = True
+            break
+
+    result = evaluate_deterministic_continuation(
+        conversation,
+        tuple(repository.tool_calls),
+        attempt=attempt,
+    )
+    if not runtime_failure:
+        return result
+    failure_reasons = tuple(
+        dict.fromkeys(
+            (*result.failure_reasons, "runtime_failure", repository.last_process_reason)
+        )
+    )
+    return MultiTurnEvaluationResult(
+        conversation_id=result.conversation_id,
+        attempt=result.attempt,
+        deterministic_context_passed=result.deterministic_context_passed,
+        deterministic_continuation_passed=False,
+        failure_reasons=failure_reasons,
+    )
 
 
 def _load_expected_context(raw_turn: dict[str, object], turn_index: int) -> ExpectedContext:
@@ -176,3 +314,175 @@ def _freeze_json(value: object) -> FrozenJson:
     if isinstance(value, dict):
         return _freeze_mapping(value)
     raise ValueError("Multi-turn catalog values must be JSON values")
+
+
+def _contains_context_reference(value: Mapping[str, FrozenJson], context_ref: str) -> bool:
+    return any(
+        item == context_ref
+        or isinstance(item, Mapping)
+        and _contains_context_reference(item, context_ref)
+        or isinstance(item, tuple)
+        and any(
+            nested_item == context_ref
+            or isinstance(nested_item, Mapping)
+            and _contains_context_reference(nested_item, context_ref)
+            for nested_item in item
+        )
+        for item in value.values()
+    )
+
+
+def _contains_mapping(
+    actual: Mapping[str, FrozenJson], expected: Mapping[str, FrozenJson]
+) -> bool:
+    for key, expected_value in expected.items():
+        actual_value = actual.get(key)
+        if isinstance(expected_value, Mapping):
+            if not isinstance(actual_value, Mapping) or not _contains_mapping(
+                actual_value, expected_value
+            ):
+                return False
+        elif actual_value != expected_value:
+            return False
+    return True
+
+
+class _MultiTurnReplayRepository:
+    def __init__(self, job: AgentRunJob, prompt: str, timezone: str) -> None:
+        self.job = job
+        self.prompt = prompt
+        self.timezone = timezone
+        self.status = "planning"
+        self.planner_turn_count = 0
+        self.planning_context = f"user: {prompt}"
+        self.latest_planner_tool_name: str | None = None
+        self.latest_output_summary: dict[str, object] | None = None
+        self.final_answers: list[str] = []
+        self.current_turn_index = 0
+        self.tool_calls: list[MultiTurnEvaluationToolCall] = []
+        self.last_process_reason = "runtime_unknown"
+
+    def begin_turn(self, turn_index: int, prompt: str) -> None:
+        self.current_turn_index = turn_index
+        self.prompt = prompt
+        self.status = "planning"
+        self.planner_turn_count = 0
+        self.latest_planner_tool_name = None
+        self.latest_output_summary = None
+        self.planning_context = "\n".join((self.planning_context, f"user: {prompt}"))
+
+    def try_acquire_run_lock(self, _run_id: str) -> bool:
+        return True
+
+    def release_run_lock(self, _run_id: str) -> None:
+        return None
+
+    def get_run_context(self, _job: AgentRunJob) -> AgentRunContext:
+        return AgentRunContext(
+            run_id=self.job.run_id,
+            workspace_id=self.job.workspace_id,
+            requested_by_user_id=self.job.requested_by_user_id,
+            status=self.status,
+            prompt=self.prompt,
+            timezone=self.timezone,
+            planner_turn_count=self.planner_turn_count,
+            latest_planner_tool_name=self.latest_planner_tool_name,
+            planning_context=self.planning_context,
+        )
+
+    def start_planner_step(self, _job: AgentRunJob, _context: AgentRunContext) -> str:
+        self.planner_turn_count += 1
+        return f"multiturn-step-{self.current_turn_index}-{self.planner_turn_count}"
+
+    def complete_planner_step(
+        self,
+        _run_id: str,
+        _step_id: str,
+        output_summary: dict[str, object],
+    ) -> bool:
+        self.latest_output_summary = output_summary
+        tool_name = output_summary.get("toolName")
+        self.latest_planner_tool_name = tool_name if isinstance(tool_name, str) else None
+        return True
+
+    def fail_planner_step(self, *_args: object) -> None:
+        self.status = "failed"
+
+    def complete_run(
+        self,
+        _run_id: str,
+        final_answer: str,
+        _message: str,
+        _risk_level: str | None,
+    ) -> None:
+        self.status = "completed"
+        self.final_answers.append(final_answer)
+
+    def mark_tool_execution_ready(
+        self,
+        _run_id: str,
+        _message: str,
+        _risk_level: str,
+    ) -> None:
+        self.status = "running"
+
+    def mark_failed(self, *_args: object) -> None:
+        self.status = "failed"
+
+    def wait_for_user_input(self, _run_id: str, message: str) -> bool:
+        self.status = "waiting_user_input"
+        self.final_answers.append(message)
+        return True
+
+
+class _MultiTurnReplayHandoff:
+    def __init__(
+        self,
+        repository: _MultiTurnReplayRepository,
+        conversation: MultiTurnConversation,
+    ) -> None:
+        self.repository = repository
+        self.conversation = conversation
+
+    def execute(self, _run_id: str) -> None:
+        summary = self.repository.latest_output_summary or {}
+        tool_name = summary.get("toolName")
+        tool_input = summary.get("input")
+        if not isinstance(tool_name, str) or not isinstance(tool_input, dict):
+            self.repository.status = "failed"
+            return
+        turn = self.conversation.turns[self.repository.current_turn_index]
+        turn_calls = [
+            call
+            for call in self.repository.tool_calls
+            if call.turn_index == self.repository.current_turn_index
+        ]
+        fixture = turn.fixtures[len(turn_calls)] if len(turn_calls) < len(turn.fixtures) else None
+        self.repository.tool_calls.append(
+            MultiTurnEvaluationToolCall(
+                self.repository.current_turn_index,
+                tool_name,
+                _freeze_mapping(tool_input),
+            )
+        )
+        output = (
+            _thaw_json(fixture.output)
+            if fixture is not None and tool_name == fixture.tool
+            else {"error": "unexpected tool"}
+        )
+        output_json = json.dumps(output, ensure_ascii=False, separators=(",", ":"))
+        self.repository.planning_context = "\n".join(
+            (
+                self.repository.planning_context,
+                f"tool {tool_name}: {output_json}",
+            )
+        )
+        self.repository.status = "planning"
+
+
+def _thaw_json(value: FrozenJson) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
