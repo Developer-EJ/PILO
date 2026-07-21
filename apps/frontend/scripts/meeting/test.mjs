@@ -221,6 +221,14 @@ assert.match(meetingHook, /const canLoadReports = canLoad \|\| canLoadLocalMockR
 assert.match(meetingHook, /getLocalMeetingMockReportList/);
 assert.match(meetingHook, /isLocalMeetingMockReport/);
 assert.match(meetingHook, /localMeetingMockReportDetail/);
+assert.match(meetingHook, /localMeetingMockReportRef/);
+assert.match(meetingHook, /mutateLocalMockActionItem/);
+assert.match(meetingHook, /status: "APPROVED"/);
+assert.match(meetingHook, /status: "DISMISSED"/);
+assert.equal(
+  meetingHook.match(/isLocalMeetingMockReport\(reportId\)/g)?.length,
+  6
+);
 assert.match(meetingHook, /reloadCurrentMeeting/);
 assert.match(meetingHook, /meetingRoomId\?: string \| null/);
 assert.match(meetingHook, /usesRoomScopedApi/);

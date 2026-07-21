@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createMeetingApiClient } from "@/features/meeting/api/client";
 import {
@@ -14,7 +14,10 @@ import type {
   CurrentMeetingPayload,
   Meeting,
   MeetingRecording,
+  MeetingReportActionItem,
+  MeetingReportActionItemDelivery,
   MeetingReportActionItemDeliveryInput,
+  MeetingReportActionItemDeliveryResult,
   UpdateMeetingReportActionItemInput,
   UpdateMeetingReportContentInput,
   MeetingReportListQuery,
@@ -104,6 +107,31 @@ export function useMeetingWorkspaceData({
     useState<MeetingWorkspaceDataStatus>("idle");
   const [currentError, setCurrentError] = useState<Error | null>(null);
   const [reportsError, setReportsError] = useState<Error | null>(null);
+  const localMeetingMockReportRef = useRef(localMeetingMockReportDetail);
+
+  const mutateLocalMockActionItem = useCallback(
+    (
+      actionItemId: string,
+      mutation: (actionItem: MeetingReportActionItem) => MeetingReportActionItem
+    ) => {
+      const report = localMeetingMockReportRef.current;
+      const actionItems = report.actionItems ?? [];
+      const currentActionItem = actionItems.find((item) => item.id === actionItemId);
+      if (!currentActionItem) {
+        throw new Error("Mock meeting report action item could not be found");
+      }
+
+      const actionItem = mutation(currentActionItem);
+      localMeetingMockReportRef.current = {
+        ...report,
+        actionItems: actionItems.map((item) =>
+          item.id === actionItemId ? actionItem : item
+        )
+      };
+      return actionItem;
+    },
+    []
+  );
 
   const requireWorkspace = useCallback(() => {
     if (!canLoad) {
@@ -318,7 +346,7 @@ export function useMeetingWorkspaceData({
   const getMeetingReport = useCallback(
     async (reportId: string) => {
       if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
-        return { report: localMeetingMockReportDetail };
+        return { report: localMeetingMockReportRef.current };
       }
 
       return meetingClient.getMeetingReport(requireWorkspace(), reportId);
@@ -391,6 +419,30 @@ export function useMeetingWorkspaceData({
       actionItemId: string,
       body: UpdateMeetingReportActionItemInput
     ) => {
+      if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
+        const report = localMeetingMockReportRef.current;
+        const assignee =
+          body.assigneeUserId === undefined
+            ? undefined
+            : (report.actionItemAssignees ?? []).find(
+                (candidate) => candidate.userId === body.assigneeUserId
+              ) ?? null;
+        const updatedAt = new Date().toISOString();
+        return {
+          actionItem: mutateLocalMockActionItem(actionItemId, (actionItem) => ({
+            ...actionItem,
+            ...(body.title === undefined ? {} : { title: body.title }),
+            ...(body.description === undefined
+              ? {}
+              : { description: body.description }),
+            ...(body.priority === undefined ? {} : { priority: body.priority }),
+            ...(assignee === undefined ? {} : { assignee }),
+            updatedByUserId: "local-user-3",
+            updatedAt
+          }))
+        };
+      }
+
       return meetingClient.updateMeetingReportActionItem(
         requireWorkspace(),
         reportId,
@@ -398,18 +450,33 @@ export function useMeetingWorkspaceData({
         body
       );
     },
-    [meetingClient, requireWorkspace]
+    [meetingClient, mutateLocalMockActionItem, requireWorkspace]
   );
 
   const approveMeetingReportActionItem = useCallback(
     async (reportId: string, actionItemId: string) => {
+      if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
+        const approvedAt = new Date().toISOString();
+        return {
+          actionItem: mutateLocalMockActionItem(actionItemId, (actionItem) => ({
+            ...actionItem,
+            status: "APPROVED",
+            approvedByUserId: "local-user-3",
+            approvedAt,
+            dismissedByUserId: null,
+            dismissedAt: null,
+            updatedAt: approvedAt
+          }))
+        };
+      }
+
       return meetingClient.approveMeetingReportActionItem(
         requireWorkspace(),
         reportId,
         actionItemId
       );
     },
-    [meetingClient, requireWorkspace]
+    [meetingClient, mutateLocalMockActionItem, requireWorkspace]
   );
 
   const getMeetingReportActionItemDeliveryOptions = useCallback(
@@ -433,6 +500,64 @@ export function useMeetingWorkspaceData({
       actionItemId: string,
       body: MeetingReportActionItemDeliveryInput
     ) => {
+      if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
+        const deliveredAt = new Date().toISOString();
+        const currentActionItem = (
+          localMeetingMockReportRef.current.actionItems ?? []
+        ).find((item) => item.id === actionItemId);
+        if (!currentActionItem) {
+          throw new Error("Mock meeting report action item could not be found");
+        }
+
+        const targetResourceId = `local-${body.deliveryType}-${actionItemId}`;
+        const delivery: MeetingReportActionItemDelivery = {
+          deliveryType: body.deliveryType,
+          status: "COMPLETED",
+          errorCode: null,
+          draft: body,
+          targetResourceId,
+          calendarEvent:
+            body.deliveryType === "calendar_event"
+              ? {
+                  id: targetResourceId,
+                  title: body.calendar.title?.trim() || currentActionItem.title
+                }
+              : null,
+          piloIssue:
+            body.deliveryType === "pilo_issue"
+              ? {
+                  id: targetResourceId,
+                  title: body.issue.title?.trim() || currentActionItem.title,
+                  boardId: body.issue.boardId,
+                  columnId: body.issue.columnId,
+                  columnName:
+                    localMeetingMockActionItemDeliveryOptions.boards
+                      .find((board) => board.id === body.issue.boardId)
+                      ?.columns.find((column) => column.id === body.issue.columnId)
+                      ?.name ?? null
+                }
+              : null
+        };
+        mutateLocalMockActionItem(actionItemId, (actionItem) => ({
+          ...actionItem,
+          status: "APPROVED",
+          approvedByUserId: "local-user-3",
+          approvedAt: deliveredAt,
+          dismissedByUserId: null,
+          dismissedAt: null,
+          delivery,
+          updatedAt: deliveredAt
+        }));
+        return {
+          actionItemId,
+          deliveryType: body.deliveryType,
+          status: "COMPLETED",
+          ...(body.deliveryType === "calendar_event"
+            ? { calendarEventId: 1 }
+            : { piloIssueId: targetResourceId })
+        } satisfies MeetingReportActionItemDeliveryResult;
+      }
+
       return meetingClient.deliverMeetingReportActionItem(
         requireWorkspace(),
         reportId,
@@ -440,18 +565,33 @@ export function useMeetingWorkspaceData({
         body
       );
     },
-    [meetingClient, requireWorkspace]
+    [meetingClient, mutateLocalMockActionItem, requireWorkspace]
   );
 
   const dismissMeetingReportActionItem = useCallback(
     async (reportId: string, actionItemId: string) => {
+      if (canUseLocalMeetingMockData && isLocalMeetingMockReport(reportId)) {
+        const dismissedAt = new Date().toISOString();
+        return {
+          actionItem: mutateLocalMockActionItem(actionItemId, (actionItem) => ({
+            ...actionItem,
+            status: "DISMISSED",
+            approvedByUserId: null,
+            approvedAt: null,
+            dismissedByUserId: "local-user-3",
+            dismissedAt,
+            updatedAt: dismissedAt
+          }))
+        };
+      }
+
       return meetingClient.dismissMeetingReportActionItem(
         requireWorkspace(),
         reportId,
         actionItemId
       );
     },
-    [meetingClient, requireWorkspace]
+    [meetingClient, mutateLocalMockActionItem, requireWorkspace]
   );
 
   useEffect(() => {
