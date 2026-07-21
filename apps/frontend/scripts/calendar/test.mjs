@@ -85,6 +85,15 @@ assert.match(calendarPanel, /getCalendarWeekEventBars/);
 assert.match(calendarPanel, /getCalendarDateBarLayout/);
 assert.match(calendarPanel, /CalendarMonthPicker/);
 assert.match(calendarPanel, /<h1[^>]*>\s*캘린더\s*<\/h1>/);
+assert.ok(
+  calendarPanel.includes('data-calendar-month-navigation="true"'),
+  "월 이동 컨트롤을 식별할 수 있어야 한다"
+);
+assert.ok(
+  calendarPanel.indexOf('data-calendar-month-navigation="true"') <
+    calendarPanel.indexOf("<h1"),
+  "월 이동 컨트롤은 캘린더 제목보다 앞쪽 grid 영역에 있어야 한다"
+);
 assert.match(
   calendarPanel,
   /일정 수정[\s\S]*?className="border-t p-4 space-y-3"[\s\S]*?onRequestDelete/
