@@ -12,7 +12,8 @@
 
 - 실제 holdout은 저장소에 커밋하지 않는다.
 - Holdout은 120개, 6개 도메인별 20개, 대화당 2~4턴, `ko-KR`이어야 한다.
-- 첫 turn은 headline metric에서 제외한다.
+- 각 non-clarification turn은 단일 Tool만 기대하며 family 라벨과 실제 clarification/topic-return 구조가 일치해야 한다.
+- 첫 turn은 고정 fixture로 정상 setup하고 headline metric에서 제외한다.
 - Judge는 temperature 0, 3표 다수결을 유지한다.
 - S3 입력 SHA, evaluator SHA, registry/model/date/timezone/repetitions가 다른 비교는 거부한다.
 - 사용자 요청에 따라 test-first TDD는 생략하고 변경 경계별 최소 회귀 테스트만 수행한다.
@@ -42,6 +43,7 @@ class ExpectedContext:
     source_turn: int | None = None
     forbidden_tools: tuple[str, ...] = ()
     required_clarification_fields: tuple[str, ...] = ()
+    source_constraints: FrozenMapping | None = None
 
 @dataclass(frozen=True)
 class MultiTurnConversation:
@@ -53,7 +55,7 @@ class MultiTurnConversation:
 ```
 
 - [ ] v1 catalog는 기존 기본값으로 계속 읽고, `agent-korean-multiturn-holdout:v2`에는 `language=ko-KR`, 120개, 도메인별 20개, 2~4턴, 한국어 발화, scenario family 분포를 강제한다.
-- [ ] `sourceTurn < currentTurn`, fixture 근거, clarification의 빈 Tool/fixture와 필수 질문 필드를 preflight에서 검증한다.
+- [ ] `sourceTurn < currentTurn`, `sourceConstraints` fixture 근거, clarification의 빈 Tool/fixture와 필수 질문 필드를 preflight에서 검증한다.
 - [ ] 저장소에는 도메인별 2개인 12개 한국어 개발 사례만 추가하고 파일 이름과 metadata에 `dev`를 명시한다.
 - [ ] 최소 검증을 실행한다.
 
@@ -88,7 +90,7 @@ class MultiTurnFollowUpResult:
     failure_reasons: tuple[str, ...]
 ```
 
-- [ ] 각 follow-up 직후 해당 turn의 Tool trace, source fixture, terminal state와 최종 답변을 채점한다. clarification은 Tool 미호출과 `waiting_user_input`을 결정적으로 확인한다.
+- [ ] 첫 turn은 fixture와 기대 fact로 setup하고, 각 follow-up 직후 해당 turn의 Tool trace, source fixture, terminal state와 최종 답변을 채점한다. clarification은 Tool 미호출과 `waiting_user_input`을 결정적으로 확인한다.
 - [ ] replay `planningContext`에 `user`, `tool`, `assistant`를 운영 형식으로 누적하고 3턴 이상에서 이전 turn으로 복귀할 수 있게 한다.
 - [ ] report에 `koreanMultiTurnContextTaskSuccessRate`, `followUpToolSelectionAccuracy`, `priorContextArgumentAccuracy`를 추가한다. 기존 전체 sequence 값은 diagnostic으로 유지한다.
 - [ ] 최소 검증을 실행한다.
@@ -114,7 +116,7 @@ Expected: follow-up 채점, clarification, source turn, Judge fail-closed가 PAS
 {
   "format": "pilo-agent-multiturn-calibration:v1",
   "catalogSha256": "64 lowercase hex characters",
-  "judgeModel": "gpt-5.4-mini",
+  "judgeModel": "gpt-5.4",
   "judgePromptVersion": "agent-multiturn-context-judge:v1",
   "records": [
     {
@@ -130,7 +132,7 @@ Expected: follow-up 채점, clarification, source turn, Judge fail-closed가 PAS
 ```
 
 - [ ] 정확히 30개, 도메인별 5개, catalog ID 존재, model/prompt/SHA 일치를 검증한다.
-- [ ] reviewer raw agreement, Judge raw agreement, Judge-vs-adjudicated Cohen's kappa를 계산하고 각각 0.9, 0.9, 0.8 이상일 때만 `passed`로 만든다.
+- [ ] adjudicated `pass`/non-pass를 각각 최소 5개 요구하고 reviewer raw agreement, Judge raw agreement, Judge-vs-adjudicated Cohen's kappa를 계산해 각각 0.9, 0.9, 0.8 이상일 때만 `passed`로 만든다.
 - [ ] `evaluate_agent_planner.py`는 calibration path를 필수로 받고 계산 결과와 calibration SHA를 metadata에 기록한다. 수동 status 입력은 허용하지 않는다.
 - [ ] 최소 검증을 실행한다.
 
@@ -200,4 +202,3 @@ python -m pytest `
 - [ ] 변경 Python 파일에만 Ruff와 Black check를 실행하고 `python -m py_compile`을 실행한다.
 - [ ] `git diff --check`와 JSON parse를 확인한다.
 - [ ] 실제 S3 평가 실행 전 필요한 두 repository variable, OIDC Role의 `s3:GetObject`, 120개 holdout 객체와 30개 calibration 객체를 handoff에 명시한다.
-
