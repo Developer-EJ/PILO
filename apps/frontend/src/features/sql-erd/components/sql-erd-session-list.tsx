@@ -15,6 +15,16 @@ import {
 } from "lucide-react";
 
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -93,6 +103,8 @@ export function SqlErdSessionList() {
   const [viewingSessionTitle, setViewingSessionTitle] = useState<string | null>(
     null
   );
+  const [deleteSessionTarget, setDeleteSessionTarget] =
+    useState<SqltoerdSessionSummary | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
     null
   );
@@ -269,10 +281,6 @@ export function SqlErdSessionList() {
         return;
       }
 
-      if (!window.confirm(`“${session.title}” session을 삭제할까요?`)) {
-        return;
-      }
-
       setDeletingSessionId(session.id);
       setErrorMessage(null);
 
@@ -289,6 +297,7 @@ export function SqlErdSessionList() {
             : "Session을 삭제하지 못했습니다. 다시 시도해 주세요."
         );
         setDeletingSessionId(null);
+        setDeleteSessionTarget(null);
         return;
       }
 
@@ -296,6 +305,7 @@ export function SqlErdSessionList() {
         removeSqlErdSession(currentSessions, session.id)
       );
       setDeletingSessionId(null);
+      setDeleteSessionTarget(null);
       await loadSessions({
         failureMessage:
           "Session은 삭제됐지만 목록을 갱신하지 못했습니다. 다시 시도해 주세요."
@@ -517,7 +527,11 @@ export function SqlErdSessionList() {
                   aria-label={`${session.title} session 삭제`}
                   className="absolute right-3 top-3 z-10 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                   disabled={deletingSessionId !== null}
-                  onClick={() => void handleDeleteSession(session)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setDeleteSessionTarget(session);
+                  }}
                   type="button"
                 >
                   {deletingSessionId === session.id ? (
@@ -567,6 +581,52 @@ export function SqlErdSessionList() {
           </p>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open && deletingSessionId === null) {
+            setDeleteSessionTarget(null);
+          }
+        }}
+        open={deleteSessionTarget !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>세션을 삭제할까요?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-left">
+              <span className="block break-words font-medium text-foreground">
+                {deleteSessionTarget?.title}
+              </span>
+              <span className="block">
+                이 작업은 되돌릴 수 없습니다. 세션과 저장된 ERD가 삭제됩니다.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              aria-label="세션 삭제 취소"
+              disabled={deletingSessionId !== null}
+            >
+              취소
+            </AlertDialogCancel>
+            <AlertDialogAction
+              aria-label="세션 삭제 실행"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletingSessionId !== null || !deleteSessionTarget}
+              onClick={() => {
+                if (deleteSessionTarget) {
+                  void handleDeleteSession(deleteSessionTarget);
+                }
+              }}
+            >
+              {deletingSessionId !== null ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : null}
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog
         onOpenChange={(open) => {
