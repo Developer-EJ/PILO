@@ -210,6 +210,7 @@ import {
   createSqlErdVerifiedNormalizedSnapshot,
   isSqlErdNormalizedSqlPreviewCurrent,
   isSqlErdViewSessionCurrent,
+  paginateSqlErdSplitDiffSections,
   rebaseSqlErdNormalizedSqlPreviewAfterSave,
   recordSqlErdModelSqlHistory,
   redoSqlErdModelSqlHistory,
@@ -257,6 +258,7 @@ const PANEL_RESIZE_HANDLE_WIDTH = 4;
 const COLLAPSED_PANEL_BUTTON_WIDTH = 48;
 const PANEL_RESIZE_KEYBOARD_STEP = 24;
 const SQL_ERD_PARSE_TIMEOUT_MS = 5000;
+const SQL_ERD_DIFF_ROWS_PER_PAGE = 1200;
 
 type PendingSqlErdLayoutOperation = {
   clientOperationId: string;
@@ -2865,22 +2867,82 @@ function SqlPreviewDiff({
   afterSourceText: string;
   beforeSourceText: string;
 }) {
-  const rows = createSqlErdSplitDiffRows(beforeSourceText, afterSourceText);
-  const contextualSections = createSqlErdContextualSplitDiffSections(rows, 3);
+  const rows = useMemo(
+    () => createSqlErdSplitDiffRows(beforeSourceText, afterSourceText),
+    [afterSourceText, beforeSourceText]
+  );
+  const contextualSections = useMemo(
+    () => createSqlErdContextualSplitDiffSections(rows, 3),
+    [rows]
+  );
   const [expandedGapKeys, setExpandedGapKeys] = useState<string[]>([]);
   const [isShowingFullSql, setIsShowingFullSql] = useState(false);
+  const [diffPageIndex, setDiffPageIndex] = useState(0);
+  const visibleSections = useMemo(() => {
+    if (isShowingFullSql) {
+      return rows.length
+        ? [{ endIndex: rows.length, kind: "rows" as const, startIndex: 0 }]
+        : [];
+    }
+
+    const expandedGapKeySet = new Set(expandedGapKeys);
+    return contextualSections.map((section) =>
+      section.kind === "collapsed" &&
+      expandedGapKeySet.has(`${section.startIndex}-${section.endIndex}`)
+        ? {
+            endIndex: section.endIndex,
+            kind: "rows" as const,
+            startIndex: section.startIndex
+          }
+        : section
+    );
+  }, [contextualSections, expandedGapKeys, isShowingFullSql, rows.length]);
+  const paginatedDiff = useMemo(
+    () =>
+      paginateSqlErdSplitDiffSections(
+        visibleSections,
+        diffPageIndex,
+        SQL_ERD_DIFF_ROWS_PER_PAGE
+      ),
+    [diffPageIndex, visibleSections]
+  );
 
   useEffect(() => {
     setExpandedGapKeys([]);
+    setDiffPageIndex(0);
     setIsShowingFullSql(false);
   }, [afterSourceText, beforeSourceText]);
+
+  const handleExpandGap = useCallback(
+    (gapKey: string) => {
+      let visibleRowsBeforeGap = 0;
+
+      for (const section of visibleSections) {
+        if (`${section.startIndex}-${section.endIndex}` === gapKey) break;
+        if (section.kind === "rows") {
+          visibleRowsBeforeGap += section.endIndex - section.startIndex;
+        }
+      }
+
+      setExpandedGapKeys((current) =>
+        current.includes(gapKey) ? current : [...current, gapKey]
+      );
+      setDiffPageIndex(
+        Math.floor(visibleRowsBeforeGap / SQL_ERD_DIFF_ROWS_PER_PAGE)
+      );
+    },
+    [visibleSections]
+  );
 
   return (
     <div className="min-h-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-3 py-2">
         <p className="text-sm font-medium">SQL diff</p>
         <Button
-          onClick={() => setIsShowingFullSql((current) => !current)}
+          onClick={() => {
+            setDiffPageIndex(0);
+            setIsShowingFullSql((current) => !current);
+          }}
           size="sm"
           type="button"
           variant="ghost"
@@ -2894,16 +2956,10 @@ function SqlPreviewDiff({
       </div>
       <div className="max-h-80 overflow-y-auto overflow-x-hidden bg-foreground font-mono text-xs leading-5 text-background">
         <div className="min-w-0">
-          {(isShowingFullSql
-            ? [{ endIndex: rows.length, kind: "rows" as const, startIndex: 0 }]
-            : contextualSections
-          ).map((section) => {
+          {paginatedDiff.sections.map((section) => {
             const gapKey = `${section.startIndex}-${section.endIndex}`;
 
-            if (
-              section.kind === "collapsed" &&
-              !expandedGapKeys.includes(gapKey)
-            ) {
+            if (section.kind === "collapsed") {
               const gapLabel =
                 section.startIndex === 0
                   ? `위 ${section.rowCount ?? 0}줄 펼치기`
@@ -2918,9 +2974,7 @@ function SqlPreviewDiff({
                 >
                   <Button
                     className="text-background/75 hover:bg-background/10 hover:text-background"
-                    onClick={() =>
-                      setExpandedGapKeys((current) => [...current, gapKey])
-                    }
+                    onClick={() => handleExpandGap(gapKey)}
                     size="xs"
                     type="button"
                     variant="ghost"
@@ -2949,6 +3003,46 @@ function SqlPreviewDiff({
           })}
         </div>
       </div>
+      {paginatedDiff.pageCount > 1 ? (
+        <div
+          className="flex items-center justify-between gap-3 border-t border-border bg-card px-3 py-2"
+          data-sqltoerd-diff-pagination
+        >
+          <Button
+            disabled={paginatedDiff.pageIndex === 0}
+            onClick={() =>
+              setDiffPageIndex(Math.max(0, paginatedDiff.pageIndex - 1))
+            }
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            이전
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            {paginatedDiff.rowStartOffset + 1}-
+            {paginatedDiff.rowEndOffset.toLocaleString()} / {" "}
+            {paginatedDiff.totalVisibleRowCount.toLocaleString()}줄 · {" "}
+            {paginatedDiff.pageIndex + 1}/{paginatedDiff.pageCount} 페이지
+          </p>
+          <Button
+            disabled={paginatedDiff.pageIndex + 1 >= paginatedDiff.pageCount}
+            onClick={() =>
+              setDiffPageIndex(
+                Math.min(
+                  paginatedDiff.pageCount - 1,
+                  paginatedDiff.pageIndex + 1
+                )
+              )
+            }
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            다음
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

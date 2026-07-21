@@ -6169,6 +6169,65 @@ assert.deepEqual(
   ],
   "서로 맞닿는 diff 문맥 범위는 하나의 hunk로 합친다"
 );
+const largeDiffPage = sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+  [{ endIndex: 5000, kind: "rows", startIndex: 0 }],
+  0,
+  1200
+);
+assert.deepEqual(
+  largeDiffPage,
+  {
+    pageCount: 5,
+    pageIndex: 0,
+    rowEndOffset: 1200,
+    rowStartOffset: 0,
+    sections: [{ endIndex: 1200, kind: "rows", startIndex: 0 }],
+    totalVisibleRowCount: 5000
+  },
+  "대규모 전체 diff도 한 페이지에서 1,200행을 넘게 렌더링하지 않는다"
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+    [{ endIndex: 5000, kind: "rows", startIndex: 0 }],
+    99,
+    1200
+  ),
+  {
+    pageCount: 5,
+    pageIndex: 4,
+    rowEndOffset: 5000,
+    rowStartOffset: 4800,
+    sections: [{ endIndex: 5000, kind: "rows", startIndex: 4800 }],
+    totalVisibleRowCount: 5000
+  },
+  "마지막 전체 diff 페이지도 남은 행만 렌더링한다"
+);
+const contextualDiffPages = [
+  { endIndex: 100, kind: "collapsed", rowCount: 100, startIndex: 0 },
+  { endIndex: 110, kind: "rows", startIndex: 100 },
+  {
+    endIndex: 5000,
+    kind: "collapsed",
+    rowCount: 4890,
+    startIndex: 110
+  },
+  { endIndex: 5010, kind: "rows", startIndex: 5000 },
+  {
+    endIndex: 5200,
+    kind: "collapsed",
+    rowCount: 190,
+    startIndex: 5010
+  }
+];
+assert.deepEqual(
+  sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+    contextualDiffPages,
+    0,
+    10
+  ).sections,
+  contextualDiffPages.slice(0, 3),
+  "문맥 페이지 경계의 접힌 구간 버튼은 계속 접근할 수 있다"
+);
 const appliedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
   modelSqlPreview
 );
@@ -8322,6 +8381,13 @@ assert.doesNotMatch(panel, /border-emerald-|bg-emerald-|text-emerald-/);
 assert.doesNotMatch(panel, /border-red-|bg-red-|text-red-/);
 assert.match(panel, /전체 SQL 보기/);
 assert.match(panel, /위 .*줄 펼치기|중간 .*줄 펼치기|아래 .*줄 펼치기/);
+assert.match(panel, /const SQL_ERD_DIFF_ROWS_PER_PAGE = 1200/);
+assert.match(
+  panel,
+  /const rows = useMemo\([\s\S]*?createSqlErdSplitDiffRows\(beforeSourceText, afterSourceText\)/
+);
+assert.match(panel, /paginateSqlErdSplitDiffSections/);
+assert.match(panel, /data-sqltoerd-diff-pagination/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
 
 assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
