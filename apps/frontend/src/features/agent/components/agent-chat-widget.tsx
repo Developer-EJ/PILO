@@ -1478,7 +1478,7 @@ export function AgentChatWidget() {
           aria-labelledby={panelTitleId}
           className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-[420px] flex-col border-l border-slate-200 bg-white shadow-2xl shadow-slate-950/15"
         >
-          <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <header className="flex items-center border-b border-slate-200 bg-slate-50 px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white">
                   <Bot className="size-4" />
@@ -1504,41 +1504,43 @@ export function AgentChatWidget() {
                 </div>
               </div>
 
-              {canvasDelegationAdapter ? (
+              <div className="ml-auto flex items-center gap-1">
+                {canvasDelegationAdapter ? (
+                  <Button
+                    type="button"
+                    variant={isCanvasToolHelpMode ? "secondary" : "ghost"}
+                    size="sm"
+                    aria-pressed={isCanvasToolHelpMode}
+                    onClick={() => setIsCanvasToolHelpMode((current) => !current)}
+                    className="gap-1.5"
+                  >
+                    <Wrench className="size-3.5" />
+                    기능 설명
+                  </Button>
+                ) : null}
+
                 <Button
                   type="button"
-                  variant={isCanvasToolHelpMode ? "secondary" : "ghost"}
-                  size="sm"
-                  aria-pressed={isCanvasToolHelpMode}
-                  onClick={() => setIsCanvasToolHelpMode((current) => !current)}
-                  className="ml-auto gap-1.5"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="새 대화"
+                  title="새 대화"
+                  disabled={hasActiveAgentRequest}
+                  onClick={handleNewConversation}
                 >
-                  <Wrench className="size-3.5" />
-                  기능 설명
+                  <SquarePen className="size-4" />
                 </Button>
-              ) : null}
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="새 대화"
-                title="새 대화"
-                disabled={hasActiveAgentRequest}
-                onClick={handleNewConversation}
-              >
-                <SquarePen className="size-4" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label="AI 채팅 닫기"
-                onClick={() => setIsOpen(false)}
-              >
-                <X className="size-4" />
-              </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="AI 채팅 닫기"
+                  onClick={() => setIsOpen(false)}
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
           </header>
 
           <div
@@ -1688,7 +1690,7 @@ export function AgentChatWidget() {
                       ? "추가 정보 또는 새 요청을 입력하세요"
                       : "메시지를 입력하세요"
                   }
-                  className="min-h-9 flex-1 resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-900 outline-none transition placeholder:text-slate-400 focus-visible:border-slate-400 focus-visible:ring-2 focus-visible:ring-slate-200"
+                  className="min-h-11 flex-1 resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-[15px] leading-5 text-foreground shadow-xs outline-none transition placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleDraftKeyDown}
                   disabled={isBusy}
@@ -1696,6 +1698,7 @@ export function AgentChatWidget() {
                 <Button
                   type="submit"
                   size="icon-lg"
+                  className="size-11"
                   aria-label="AI에게 메시지 보내기"
                   disabled={!canSend}
                 >
