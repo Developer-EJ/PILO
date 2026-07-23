@@ -96,8 +96,8 @@ assert.match(
 );
 assert.match(
   githubPanel,
-  /selectProjectV2IdForRepository\(/,
-  "GitHub panel should use repository-aware ProjectV2 selection"
+  /activateDefaultGithubBoardForRepository\(/,
+  "GitHub panel should activate the repository-aware ProjectV2 selection"
 );
 assert.match(
   githubBoardSelection,
