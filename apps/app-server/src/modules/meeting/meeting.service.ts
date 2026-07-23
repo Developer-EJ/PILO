@@ -1723,13 +1723,29 @@ export class MeetingService {
     if (from !== null && to !== null && from >= to) {
       throw badRequest("from must be before to");
     }
-    const page = await this.listWorkspaceMeetingReportRows(
+    let page = await this.listWorkspaceMeetingReportRows(
       workspaceId,
       currentUserId,
       status,
       limit,
       { cursor, from, searchQuery: null, to, reportTitle, roomName }
     );
+    if (reportTitle !== null && page.reports.length === 0) {
+      page = await this.listWorkspaceMeetingReportRows(
+        workspaceId,
+        currentUserId,
+        status,
+        limit,
+        {
+          cursor,
+          from,
+          searchQuery: null,
+          to,
+          reportTitlePrefix: reportTitle,
+          roomName
+        }
+      );
+    }
     return {
       nextCursor: page.nextCursor,
       reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
@@ -3697,6 +3713,7 @@ export class MeetingService {
       searchQuery: string | null;
       to: string | null;
       reportTitle?: string | null;
+      reportTitlePrefix?: string | null;
       roomName?: string | null;
     }
   ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
@@ -3725,6 +3742,17 @@ export class MeetingService {
       filters.reportTitle === null || filters.reportTitle === undefined
         ? ""
         : `AND lower(regexp_replace(BTRIM(COALESCE(meeting_reports.user_title, meeting_reports.title)), '\\s+', ' ', 'g')) = $${values.push(filters.reportTitle)}`;
+    const reportTitlePrefixCondition =
+      filters.reportTitlePrefix === null || filters.reportTitlePrefix === undefined
+        ? ""
+        : (() => {
+            const titleParameter = `$${values.push(filters.reportTitlePrefix)}`;
+            const normalizedTitle =
+              "lower(regexp_replace(BTRIM(COALESCE(meeting_reports.user_title, meeting_reports.title)), '\\s+', ' ', 'g'))";
+            return `AND left(${normalizedTitle}, char_length(${titleParameter})) = ${titleParameter}
+              AND substring(${normalizedTitle} FROM char_length(${titleParameter}) + 1 FOR 1)
+                IN (' ', ':', '：', '-', '–', '—', '|', '/', '·')`;
+          })();
     const cursorCondition =
       filters.cursor === null
         ? ""
@@ -3811,6 +3839,7 @@ export class MeetingService {
           ${toCondition}
           ${roomNameCondition}
           ${reportTitleCondition}
+          ${reportTitlePrefixCondition}
           ${cursorCondition}
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
         LIMIT ${limitParameter}

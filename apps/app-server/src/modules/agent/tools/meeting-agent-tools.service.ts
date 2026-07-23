@@ -56,7 +56,7 @@ interface ListMeetingReportsInput {
   status?: MeetingReportStatus;
   from?: string;
   to?: string;
-  /** Agent-only exact selector. The Meeting REST API deliberately does not expose it. */
+  /** Agent-only exact-first title selector. The Meeting REST API deliberately does not expose it. */
   reportTitle?: string;
   /** Agent-only filter. The Meeting REST API deliberately does not expose it. */
   roomName?: string;
@@ -872,7 +872,7 @@ export class MeetingAgentToolsService {
   private searchMeetingTranscriptDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "search_meeting_transcript",
-      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 질문과 의미적으로 관련된 근거를 검색합니다. 특정 회의록 범위는 MeetingReport selector로 해소하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
+      description: "권한이 있는 MeetingReport의 발언 transcript와 안전한 실제 사용자 활동 evidence에서 literal keyword와 의미적으로 관련된 근거를 함께 검색합니다. 특정 회의록 범위는 MeetingReport selector로 해소하고, 출처 유형을 구분한 근거 기반 답변을 생성합니다.",
       riskLevel: "low",
       executionMode: "contextual",
       requiresGroundedAnswer: true,
@@ -1007,7 +1007,7 @@ export class MeetingAgentToolsService {
     return {
       name: "list_meeting_reports",
       description:
-        "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. reportTitle은 표시 제목 COALESCE(user_title, title)을 기존 정규화 규칙으로 exact 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
+        "Workspace MeetingReport 목록을 createdAt 내림차순으로 조회합니다. reportTitle은 표시 제목 COALESCE(user_title, title)을 기존 정규화 규칙으로 exact 우선 조회하고, exact 0건일 때만 구분자 경계의 제목 prefix 후보를 조회합니다. 기간과 개수를 생략하면 최신 회의록 1개를 반환합니다.",
       riskLevel: "low",
       executionMode: "auto",
       inputSchema: {
@@ -1025,7 +1025,7 @@ export class MeetingAgentToolsService {
             minLength: 1,
             maxLength: 500,
             description:
-              "Agent 전용 MeetingReport 표시 제목 exact selector. 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+              "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
           },
           roomName: { type: "string", minLength: 1, maxLength: 100 },
           limit: {

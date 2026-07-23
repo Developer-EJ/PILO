@@ -4,7 +4,7 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "d395ad947f1d08d350ec0741b09ff398fd15b964ac167e53f1058871b318a415",
+    "inventorySha256": "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92",
     "catalogSha256": "22c8f2586bf2a116d181f1bc93c7ec40b3f4ea1d122ab38fe3abc920d91802fa",
     "eligibleSnapshotSha256": "7034a1d2dda6889632b039292a42f62716fe433c6a0bc41004fe874be1ebcaad"
   },

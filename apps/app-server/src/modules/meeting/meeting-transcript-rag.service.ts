@@ -9,9 +9,44 @@ import {
 import { WorkspaceService } from "../workspace/workspace.service";
 
 const MAX_RESULTS = 5;
+const MAX_LEXICAL_TERMS = 8;
 const DIRECT_REFERENCE_DISTANCE_BOOST = 0.08;
 const SEMANTIC_DUPLICATE_DISTANCE = 0.12;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const LEXICAL_STOP_WORDS = new Set([
+  "관련",
+  "관한",
+  "관해",
+  "대해",
+  "논의",
+  "언급",
+  "발언",
+  "이야기",
+  "얘기",
+  "있었던",
+  "했던",
+  "나왔던",
+  "회의",
+  "회의록",
+  "미팅",
+  "내용",
+  "요약",
+  "결정",
+  "사항",
+  "찾아줘",
+  "알려줘",
+  "보여줘",
+  "해주세요",
+  "해줘",
+  "누가",
+  "무엇",
+  "뭐야",
+  "어떻게",
+  "왜",
+  "the",
+  "and",
+  "for"
+]);
 
 export interface MeetingTranscriptSearchInput { query: string; reportId?: string }
 export type MeetingEvidenceSourceType = "transcript" | "activity";
@@ -31,7 +66,10 @@ export interface MeetingEvidenceSource {
 }
 export type MeetingTranscriptSource = MeetingEvidenceSource;
 
-type CandidateSource = MeetingEvidenceSource & { distance: number };
+type CandidateSource = MeetingEvidenceSource & {
+  distance: number;
+  lexicalMatch: boolean;
+};
 
 @Injectable()
 export class MeetingTranscriptRagService {
@@ -44,22 +82,41 @@ export class MeetingTranscriptRagService {
     const embedding = await embedGroundingQuery(query);
     const vector = `[${embedding.join(",")}]`;
     const minimumSimilarity = meetingRagMinimumSimilarity();
+    const lexicalTerms = this.extractLexicalTerms(query);
     const [transcriptRows, activityRows] = await Promise.all([
-      this.database.query<{ id: string; meeting_report_id: string; started_at_ms: number; ended_at_ms: number; content: string; distance: number }>(`
+      this.database.query<{ id: string; meeting_report_id: string; started_at_ms: number; ended_at_ms: number; content: string; distance: number; lexical_match: boolean }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.started_at_ms, chunk.ended_at_ms, chunk.content,
-          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance
+          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance,
+          EXISTS (
+            SELECT 1
+            FROM unnest($7::text[]) lexical_term
+            WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+          ) AS lexical_match
         FROM meeting_report_transcript_chunks chunk
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
           AND ${this.latestCompletedTranscriptIndexWhere()}
-          AND 1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
-        ORDER BY chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
+          AND (
+            1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
+            OR EXISTS (
+              SELECT 1
+              FROM unnest($7::text[]) lexical_term
+              WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+            )
+          )
+        ORDER BY lexical_match DESC,
+          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
         LIMIT $5
-      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity]),
-      this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; distance: number; directly_referenced: boolean }>(`
+      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity, lexicalTerms]),
+      this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; distance: number; directly_referenced: boolean; lexical_match: boolean }>(`
         SELECT chunk.id, chunk.meeting_report_id, chunk.occurred_at, chunk.action, chunk.summary, chunk.content,
           chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance,
+          EXISTS (
+            SELECT 1
+            FROM unnest($7::text[]) lexical_term
+            WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+          ) AS lexical_match,
           EXISTS (
             SELECT 1
             FROM meeting_report_activity_evidence_references reference
@@ -72,15 +129,24 @@ export class MeetingTranscriptRagService {
         JOIN meetings meeting ON meeting.id = report.meeting_id
         WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
           AND ${this.latestCompletedActivityIndexWhere()}
-          AND 1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
-        ORDER BY chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
+          AND (
+            1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
+            OR EXISTS (
+              SELECT 1
+              FROM unnest($7::text[]) lexical_term
+              WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+            )
+          )
+        ORDER BY lexical_match DESC,
+          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
         LIMIT $5
-      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity])
+      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity, lexicalTerms])
     ]);
     const candidates: CandidateSource[] = [
-      ...transcriptRows.map((row) => ({ sourceId: `transcript:${row.id}`, sourceType: "transcript" as const, reportId: row.meeting_report_id, startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), content: row.content.slice(0, 600), directlyReferenced: false, distance: Number(row.distance) })),
-      ...activityRows.map((row) => ({ sourceId: `activity:${row.id}`, sourceType: "activity" as const, reportId: row.meeting_report_id, occurredAt: this.toIso(row.occurred_at), action: row.action, summary: row.summary.slice(0, 500), content: row.content.slice(0, 600), directlyReferenced: Boolean(row.directly_referenced), distance: Number(row.distance) }))
+      ...transcriptRows.map((row) => ({ sourceId: `transcript:${row.id}`, sourceType: "transcript" as const, reportId: row.meeting_report_id, startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), content: row.content.slice(0, 600), directlyReferenced: false, distance: Number(row.distance), lexicalMatch: Boolean(row.lexical_match) })),
+      ...activityRows.map((row) => ({ sourceId: `activity:${row.id}`, sourceType: "activity" as const, reportId: row.meeting_report_id, occurredAt: this.toIso(row.occurred_at), action: row.action, summary: row.summary.slice(0, 500), content: row.content.slice(0, 600), directlyReferenced: Boolean(row.directly_referenced), distance: Number(row.distance), lexicalMatch: Boolean(row.lexical_match) }))
     ].filter((candidate) =>
+      candidate.lexicalMatch ||
       passesRelevanceThreshold(1 - candidate.distance, minimumSimilarity)
     );
     const duplicatePairs = await this.findSemanticDuplicatePairs(
@@ -232,6 +298,9 @@ export class MeetingTranscriptRagService {
       groups.set(find(candidate.sourceId), group);
     }
     const compare = (left: CandidateSource, right: CandidateSource) => {
+      const lexicalDifference =
+        Number(right.lexicalMatch) - Number(left.lexicalMatch);
+      if (lexicalDifference !== 0) return lexicalDifference;
       const relevanceDifference = this.relevanceScore(left) - this.relevanceScore(right);
       return relevanceDifference || left.distance - right.distance || left.sourceId.localeCompare(right.sourceId);
     };
@@ -254,10 +323,32 @@ export class MeetingTranscriptRagService {
         selectedIds.add(candidate.sourceId);
       }
     }
-    return selected.map(({ distance, ...source }) => ({
+    return selected.map(({ distance, lexicalMatch: _lexicalMatch, ...source }) => ({
       ...source,
       score: 1 - distance
     }));
+  }
+
+  private extractLexicalTerms(query: string): string[] {
+    const normalized = query.toLocaleLowerCase("ko-KR");
+    const tokens = normalized.match(/[0-9a-z가-힣]+/g) ?? [];
+    const terms: string[] = [];
+    for (const token of tokens) {
+      const term = token.replace(
+        /(?:에서|으로|에게|부터|까지|처럼|보다|이라는|라는|이란|란|은|는|이|가|을|를|과|와|의)$/u,
+        ""
+      );
+      if (
+        term.length < 2 ||
+        LEXICAL_STOP_WORDS.has(term) ||
+        terms.includes(term)
+      ) {
+        continue;
+      }
+      terms.push(term);
+      if (terms.length === MAX_LEXICAL_TERMS) break;
+    }
+    return terms;
   }
 
   private relevanceScore(candidate: CandidateSource): number {
