@@ -30,8 +30,8 @@ import {
 import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integration/utils/github-project-oauth-scope";
 import { buildGithubSettingsReturnUrl } from "@/features/github-integration/utils/github-settings-entry";
 import {
-  resolveGithubActiveBoardSelection,
-  selectProjectV2IdForRepository
+  activateDefaultGithubBoardForRepository,
+  resolveGithubActiveBoardSelection
 } from "@/features/github-integration/utils/github-project-selection";
 import { collectGithubPages } from "@/features/github-integration/utils/github-page-collector";
 import {
@@ -213,12 +213,14 @@ export function GithubPanel() {
   const [selectedProjectV2Id, setSelectedProjectV2Id] = useState("");
   const [isSavingProjectV2Selections, setIsSavingProjectV2Selections] =
     useState(false);
+  const [activatingRepositoryId, setActivatingRepositoryId] = useState("");
   const [syncTarget, setSyncTarget] = useState<GithubSyncTarget>("full");
   const [repositoryQuery, setRepositoryQuery] = useState("");
   const [repositoryPage, setRepositoryPage] = useState(1);
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
   const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
   const selectedRepositoryIdRef = useRef("");
+  const isSavingProjectV2SelectionsRef = useRef(false);
   const manualSyncIdempotencyRef = useRef(createGithubManualSyncIdempotency());
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
@@ -283,32 +285,6 @@ export function GithubPanel() {
         page
       })
     );
-  }
-
-  async function loadGithubProjectV2s(repositoryId: string) {
-    try {
-      const projects = await listAllGithubProjectsV2(repositoryId);
-      if (selectedRepositoryIdRef.current !== repositoryId) {
-        return;
-      }
-
-      const nextProjectV2Id = selectProjectV2IdForRepository({
-        projects,
-        preferredProjectV2Id: selectedProjectV2Id,
-        repositoryId
-      });
-      setSnapshot((current) => ({
-        ...current,
-        projects,
-        projectsTotal: projects.length
-      }));
-      setSelectedProjectV2Id(nextProjectV2Id);
-    } catch (error) {
-      if (selectedRepositoryIdRef.current !== repositoryId) {
-        return;
-      }
-      throw error;
-    }
   }
 
   async function loadGithubIntegrationSnapshot(
@@ -564,6 +540,17 @@ export function GithubPanel() {
     removeGithubCallbackErrorFromUrl();
   }, [searchParams]);
 
+  function handleRefreshGithubIntegration() {
+    if (isSavingProjectV2SelectionsRef.current) {
+      return;
+    }
+
+    void loadGithubIntegrationSnapshot(
+      selectedRepositoryId,
+      selectedProjectV2Id
+    );
+  }
+
   async function handleStartGithubOAuth() {
     setRedirectAction("oauth");
     setActionError(null);
@@ -615,12 +602,12 @@ export function GithubPanel() {
   async function handleDiscoverGithubProjectV2(
     installationId: string,
     repositoryId = selectedRepositoryId
-  ) {
+  ): Promise<GithubProjectV2[] | null> {
     if (!workspaceId || !repositoryId) {
       setActionError(
         "저장소를 선택한 뒤 ProjectV2 동기화 범위를 관리할 수 있습니다."
       );
-      return;
+      return null;
     }
     setActionError(null);
     try {
@@ -632,21 +619,22 @@ export function GithubPanel() {
         }
       );
       if (selectedRepositoryIdRef.current !== repositoryId) {
-        return;
+        return null;
       }
       if (discovery.connectionRequired) {
-        setActionMessage(
+        setActionError(
           "개인 Project v2를 조회하려면 3단계에서 Project 작업 권한을 연결하세요."
         );
-        return;
+        return null;
       }
-      setSelectedInstallationId(installationId);
-      await loadGithubProjectV2s(repositoryId);
-    } catch (error) {
+      const projects = await listAllGithubProjectsV2(repositoryId);
       if (selectedRepositoryIdRef.current !== repositoryId) {
-        return;
+        return null;
       }
+      return projects;
+    } catch (error) {
       setActionError(getErrorMessage(error));
+      return null;
     }
   }
 
@@ -749,17 +737,77 @@ export function GithubPanel() {
 
   async function handleSelectRepository(repositoryId: string) {
     if (!workspaceId) return;
+    if (isSavingProjectV2SelectionsRef.current) return;
+
+    if (!isWorkspaceOwner) {
+      setActionError("Workspace Owner만 활성 Board를 변경할 수 있습니다.");
+      return;
+    }
+
     const repository = snapshot.repositories.find(
       (candidate) => candidate.id === repositoryId
     );
     if (!repository) return;
 
-    setSelectedRepositoryId(repositoryId);
+    isSavingProjectV2SelectionsRef.current = true;
+    snapshotRequestGateRef.current.invalidate();
+    setIsSavingProjectV2Selections(true);
+    setActivatingRepositoryId(repositoryId);
+    setActionError(null);
+    setActionMessage(null);
+    const previousRepositoryId = selectedRepositoryIdRef.current;
     selectedRepositoryIdRef.current = repositoryId;
-    setSelectedInstallationId(repository.installationId);
-    setSnapshot((current) => ({ ...current, projects: [], projectsTotal: 0 }));
-    setSelectedProjectV2Id("");
-    await handleDiscoverGithubProjectV2(repository.installationId, repositoryId);
+    let didActivateRepository = false;
+
+    try {
+      const projects = await handleDiscoverGithubProjectV2(
+        repository.installationId,
+        repositoryId
+      );
+      if (!projects) {
+        return;
+      }
+
+      const nextProjectV2Id = await activateDefaultGithubBoardForRepository({
+        projects,
+        preferredProjectV2Id: selectedProjectV2Id,
+        repositoryId,
+        activate: (source) =>
+          apiClient.activateWorkspaceBoardSource(workspaceId, source)
+      });
+
+      if (!nextProjectV2Id) {
+        setActionError(
+          "선택한 repository에 연결된 ProjectV2를 찾을 수 없습니다."
+        );
+        return;
+      }
+
+      setSelectedRepositoryId(repositoryId);
+      selectedRepositoryIdRef.current = repositoryId;
+      setSelectedInstallationId(repository.installationId);
+      setSnapshot((current) => ({
+        ...current,
+        projects,
+        projectsTotal: projects.length
+      }));
+      setSelectedProjectV2Id(nextProjectV2Id);
+      setActionMessage("활성 Board를 변경했습니다.");
+      didActivateRepository = true;
+      void refreshGithubSyncRuns().catch(() => undefined);
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      if (
+        !didActivateRepository &&
+        selectedRepositoryIdRef.current === repositoryId
+      ) {
+        selectedRepositoryIdRef.current = previousRepositoryId;
+      }
+      isSavingProjectV2SelectionsRef.current = false;
+      setIsSavingProjectV2Selections(false);
+      setActivatingRepositoryId("");
+    }
   }
 
   function clearRepositorySelection() {
@@ -792,7 +840,12 @@ export function GithubPanel() {
     if (!isWorkspaceOwner) {
       throw new Error("Workspace Owner만 활성 Board를 변경할 수 있습니다.");
     }
+    if (isSavingProjectV2SelectionsRef.current) {
+      throw new Error("활성 Board 변경이 진행 중입니다.");
+    }
 
+    isSavingProjectV2SelectionsRef.current = true;
+    snapshotRequestGateRef.current.invalidate();
     setIsSavingProjectV2Selections(true);
     setActionError(null);
     setActionMessage(null);
@@ -812,6 +865,7 @@ export function GithubPanel() {
       setActionError(getErrorMessage(error));
       throw error;
     } finally {
+      isSavingProjectV2SelectionsRef.current = false;
       setIsSavingProjectV2Selections(false);
     }
   }
@@ -935,12 +989,7 @@ export function GithubPanel() {
       onConfirmDeleteInstallation={() =>
         void handleConfirmDeleteGithubAppInstallation()
       }
-      onRefresh={() =>
-        void loadGithubIntegrationSnapshot(
-          selectedRepositoryId,
-          selectedProjectV2Id
-        )
-      }
+      onRefresh={handleRefreshGithubIntegration}
       onRepositoryPageChange={handleRepositoryPageChange}
       onRepositoryQueryChange={handleRepositoryQueryChange}
       onActivateProjectV2={handleActivateProjectV2}
@@ -970,6 +1019,7 @@ export function GithubPanel() {
       syncRuns={snapshot.syncRuns}
       syncRunsTotal={snapshot.syncRunsTotal}
       syncTarget={syncTarget}
+      activatingRepositoryId={activatingRepositoryId}
       isActivatingProjectV2={isSavingProjectV2Selections}
       isWorkspaceOwner={isWorkspaceOwner}
     />

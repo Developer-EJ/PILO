@@ -46,6 +46,7 @@ export type GithubConnectLayoutProps = {
   isDeletingInstallation: boolean;
   isInstallationDeleteRequested: boolean;
   isSyncing: boolean;
+  activatingRepositoryId: string;
   isActivatingProjectV2: boolean;
   isWorkspaceOwner: boolean;
   redirectAction: "oauth" | "installation" | "project_oauth" | null;
@@ -96,6 +97,7 @@ export function GithubConnectLayout({
   isDeletingInstallation,
   isInstallationDeleteRequested,
   isSyncing,
+  activatingRepositoryId,
   isActivatingProjectV2,
   isWorkspaceOwner,
   redirectAction,
@@ -159,7 +161,7 @@ export function GithubConnectLayout({
           isDisconnectingProjectOAuth={isDisconnectingProjectOAuth}
           isDeletingInstallation={isDeletingInstallation}
           isInstallationDeleteRequested={isInstallationDeleteRequested}
-          isLoading={isLoading}
+          isLoading={isLoading || isActivatingProjectV2}
           isWorkspaceOwner={isWorkspaceOwner}
           projectOAuth={projectOAuth}
           onCancelDeleteInstallation={onCancelDeleteInstallation}
@@ -177,7 +179,10 @@ export function GithubConnectLayout({
         <GithubConnectRepositories
           enabled={installations.length > 0}
           hasNextRepositoryPage={hasNextRepositoryPage}
+          activatingRepositoryId={activatingRepositoryId}
+          isActivating={isActivatingProjectV2}
           isLoading={isLoading}
+          isWorkspaceOwner={isWorkspaceOwner}
           onRepositoryPageChange={onRepositoryPageChange}
           onRepositoryQueryChange={onRepositoryQueryChange}
           onSelectRepository={onSelectRepository}
@@ -203,8 +208,8 @@ export function GithubConnectLayout({
         />
         <GithubConnectSync
           installations={installations}
-          isLoading={isLoading}
-          isSyncing={isSyncing}
+          isLoading={isLoading || isActivatingProjectV2}
+          isSyncing={isSyncing || isActivatingProjectV2}
           isWorkspaceOwner={isWorkspaceOwner}
           onStartSync={onStartSync}
           onSyncTargetChange={onSyncTargetChange}
