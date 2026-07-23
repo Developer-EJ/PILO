@@ -19,6 +19,6 @@ import { GoogleCalendarTokenEncryptionService } from "./google-calendar-token-en
     GoogleCalendarClient,
     GoogleCalendarTokenEncryptionService
   ],
-  exports: [CalendarService]
+  exports: [CalendarService, GoogleCalendarSyncService]
 })
 export class CalendarModule {}

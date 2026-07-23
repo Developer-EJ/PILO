@@ -193,17 +193,41 @@ Request Body:
 서버 규칙:
 
 - `confirmationText`가 정확히 `계정 탈퇴`가 아니면 `400 BAD_REQUEST`를 반환한다.
-- 현재 사용자가 owner인 Workspace가 있으면 `409 CONFLICT`와
-  소유 Workspace를 먼저 정리해야 한다는 메시지를 반환한다.
+- 현재 사용자가 member로 참여 중인 Workspace는 계정 탈퇴 transaction에서 자동으로
+  나간다.
+- 현재 사용자가 owner인 Workspace는 모두 잠근 뒤 기존 Workspace 삭제 blocker를
+  검사한다.
+  - Owner 본인 외의 member가 남아 있음
+  - active GitHub App installation이 있음
+  - 진행 중인 Meeting 또는 녹음이 있음
+  - `queued` 또는 `running` GitHub sync run이 있음
+- owner Workspace에 blocker가 하나라도 있으면 계정 탈퇴와 Workspace 삭제 요청을
+  모두 rollback하고 `409 CONFLICT`를 반환한다. 응답의 `error.details`에는
+  `blockedWorkspaces` 배열로 `workspaceId`, `name`, 다른 member 수 `memberCount`,
+  `reasons`를 포함한다. `reasons` 허용값은 `MEMBERS_REMAIN`,
+  `GITHUB_INSTALLATION_ACTIVE`, `MEETING_ACTIVE`, `SYNC_ACTIVE`다.
+- 다른 member와 blocker가 없는 owner Workspace는 같은 transaction에서 기존
+  Workspace 비동기 삭제 lifecycle을 자동으로 시작한다. 이미 `deleting` 상태인
+  Workspace는 기존 삭제 job을 그대로 사용한다.
 - 현재 사용자의 모든 `user_sessions`를 revoke한다.
 - 현재 사용자의 active GitHub OAuth connection은 token을 revoke/clear하고
   `revoked_at`을 기록한다. GitHub provider raw error나 token은 노출하지 않는다.
+- 현재 사용자의 Google Calendar OAuth state를 삭제하고, event sync를
+  `disconnected`로 전환하며, 미완료 sync outbox를 provider 호출 불가 상태로
+  종료한 뒤 `google_calendar_connections` row를 삭제한다. 이 과정에서 encrypted
+  access/refresh token을 로그나 API에 노출하지 않는다.
 - 현재 사용자의 Workspace member membership과 개인 Settings row를 삭제한다.
 - `users` row는 domain audit FK를 보존하기 위해 물리 삭제하지 않는다.
 - `users.name`은 `탈퇴한 사용자`, email/avatar/provider identity는 `null`,
   `active_workspace_id`는 `null`, `deleted_at`은 현재 시각으로 갱신한다.
 - 위 DB 변경은 하나의 transaction에서 처리한다. provider revoke 같은 외부 작업이
   필요하면 실패/재시도 정책을 별도로 적용하고 secret을 로그에 남기지 않는다.
+- Google Calendar provider 호출과 계정 탈퇴는 같은 사용자 lifecycle lock으로
+  직렬화한다. 탈퇴 transaction이 commit된 뒤에는 이미 claim된 sync outbox나 OAuth
+  callback도 provider를 호출하거나 connection credential을 다시 만들 수 없다.
+- `PATCH /me/profile`과 `PATCH /me/settings`는 active `users` row를 transaction
+  안에서 잠근 뒤 `user_settings`를 upsert한다. 이미 AuthGuard를 통과한 요청도 탈퇴
+  commit 뒤에는 Settings row를 다시 만들 수 없다.
 - transaction 안에서 삭제한 모든 member membership의 `workspace_id`를 수집하고,
   Workspace별 `workspace_membership_revocation_outbox` intent를 함께 적재한다. commit
   뒤 publisher가 각 intent를 `workspace:membership-revocations` channel의 exact V1
@@ -215,6 +239,10 @@ Request Body:
   다음 Chat fan-out 직전 batch membership recheck에서 탈퇴 사용자의 수신을 차단한다.
 - 성공 응답 뒤 Frontend는 local access token과 선택 Workspace를 삭제하고 로그인
   화면으로 이동한다.
+- 자동 삭제가 요청된 owner Workspace는 계정 탈퇴 성공 뒤 background worker가
+  cleanup을 완료하고 최종 hard delete한다. `users` row는 tombstone으로 남기 때문에
+  삭제 worker가 완료되기 전에 개인정보가 익명화되어도 FK와 audit identity는
+  유지된다.
 - 익명화 이후 같은 provider로 로그인하면 과거 계정을 복구하지 않고 새 사용자로
   가입한다.
 

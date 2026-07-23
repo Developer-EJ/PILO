@@ -252,6 +252,12 @@ export class WorkspaceDeletionService implements OnModuleInit, OnModuleDestroy {
             WHERE target.deletion_job_id = job.id
               AND target.status <> 'completed'
           )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM workspace_membership_revocation_outbox AS revocation
+            WHERE revocation.workspace_id = job.workspace_id
+              AND revocation.status <> 'delivered'
+          )
         ORDER BY job.requested_at ASC
         LIMIT $1
       `,
@@ -279,6 +285,12 @@ export class WorkspaceDeletionService implements OnModuleInit, OnModuleDestroy {
               FROM workspace_deletion_targets AS target
               WHERE target.deletion_job_id = job.id
                 AND target.status <> 'completed'
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM workspace_membership_revocation_outbox AS revocation
+              WHERE revocation.workspace_id = job.workspace_id
+                AND revocation.status <> 'delivered'
             )
           FOR UPDATE SKIP LOCKED
         `,
