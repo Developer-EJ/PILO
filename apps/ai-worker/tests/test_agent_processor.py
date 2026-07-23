@@ -30,6 +30,7 @@ from app.agent_processor import (
     _agent_router_system_prompt,
     _agent_router_user_prompt,
     _continued_agent_routing,
+    _explicit_meeting_report_titles,
     _normalize_meeting_report_search_routing,
     normalize_agent_planner_decision,
     normalize_agent_routing_decision,
@@ -2372,6 +2373,8 @@ def test_explicit_title_evidence_question_with_summary_format_uses_hybrid(
     "prompt",
     [
         '"온보딩 회의"에서 담당자를 찾고 "배포 회의"에서 지연 이유를 찾아줘',
+        "“온보딩 회의”와 “배포 회의”에서 배포 지연 이유를 찾아줘",
+        '"온보딩 회의", ‘배포 회의’ 및 “회고 회의”에서 결정 이유를 찾아줘',
         "제목이 ‘온보딩 회의’인 회의록의 발언과 "
         "제목이 ‘배포 회의’인 회의록의 결정 이유를 알려줘",
     ],
@@ -2406,6 +2409,38 @@ def test_multiple_explicit_report_titles_require_clarification(
     assert corrected.domains == ()
     assert corrected.capability_ids == ()
     assert "제목 하나" in (corrected.clarification_question or "")
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        (
+            "“온보딩 회의”와 “배포 회의”에서 배포 지연 이유를 찾아줘",
+            ("온보딩 회의", "배포 회의"),
+        ),
+        (
+            '"온보딩 회의", ‘배포 회의’ 및 “회고 회의”에서 결정 이유를 찾아줘',
+            ("온보딩 회의", "배포 회의", "회고 회의"),
+        ),
+        (
+            '"온보딩 회의" 그리고 "배포 회의"에서 담당자를 찾아줘',
+            ("온보딩 회의", "배포 회의"),
+        ),
+        (
+            '"온보딩 회의"에서 결정 이유를 찾고 "온보딩 회의"의 발언도 요약해줘',
+            ("온보딩 회의",),
+        ),
+        (
+            '"Redis"와 "Kafka" 중 무엇을 선택했는지 회의에서 찾아줘',
+            (),
+        ),
+    ],
+)
+def test_explicit_report_title_parser_respects_quote_boundaries(
+    prompt: str,
+    expected: tuple[str, ...],
+) -> None:
+    assert _explicit_meeting_report_titles(prompt) == expected
 
 
 def test_processor_does_not_search_workspace_for_multiple_explicit_titles() -> None:
@@ -2455,6 +2490,88 @@ def test_processor_does_not_search_workspace_for_multiple_explicit_titles() -> N
     assert handoff.calls == []
     assert repository.waiting_user_input_updates[0][0] == RUN_ID
     assert "제목 하나" in repository.waiting_user_input_updates[0][1]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "최근 출시 준비 회의의 첫 번째 결정 근거를 보여줘",
+        "회의록 결정사항의 직접 근거를 알려줘",
+        "그 결정의 근거를 회의록에서 확인해줘",
+        "회의의 2번 결정이 왜 나왔는지 알려줘",
+    ],
+)
+def test_direct_decision_evidence_requests_keep_routed_capability(
+    prompt: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+    original = AgentRoutingDecision(
+        status="routed",
+        domains=("meeting",),
+        capability_ids=("meeting.decision.evidence",),
+        intent_summary="결정 item에 직접 연결된 근거 조회",
+        confidence="high",
+        clarification_question=None,
+        unsupported_reason=None,
+    )
+
+    corrected = _normalize_meeting_report_search_routing(
+        original,
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert corrected == original
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_capability_id"),
+    [
+        (
+            "일반적으로 결정한 이유를 회의에서 찾아줘",
+            "meeting.evidence.search",
+        ),
+        (
+            "‘온보딩 회의’에서 배포 방식을 결정한 이유를 찾아줘",
+            "meeting.report.hybrid_search",
+        ),
+    ],
+)
+def test_general_decision_reason_requests_use_transcript_search(
+    prompt: str,
+    expected_capability_id: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.decision.evidence",),
+            intent_summary="결정 item에 직접 연결된 근거 조회",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert corrected.capability_ids == (expected_capability_id,)
 
 
 def test_processor_routes_content_discussion_to_workspace_search_from_other_surface() -> None:

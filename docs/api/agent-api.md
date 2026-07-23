@@ -1419,7 +1419,8 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   검증하고 `limit`을 제거한다.
 - 서로 다른 명시적 제목이 한 요청에 둘 이상 있으면 그중 하나를 임의 선택하거나 Workspace 전체 검색으로
   범위를 확대하지 않는다. 먼저 검색할 제목 하나를 사용자에게 선택받은 뒤 해당 제목의 hybrid workflow를
-  시작한다. 같은 제목을 문장 안에서 반복한 경우는 하나의 제목 후보로 정규화한다.
+  시작한다. `“A”와 “B”에서`, `“A”, “B” 및 “C”에서`처럼 접속된 따옴표 제목도 각각의 제목으로
+  분리하며, 같은 제목을 문장 안에서 반복한 경우는 하나의 제목 후보로 정규화한다.
 - `meeting.report.hybrid_search`와 `list_meeting_reports`를 사용하는 다른 capability를 한 요청에서 함께
   선택하면 서로 다른 목록 입력을 tool 이름만으로 구분할 수 없으므로 Router가 실행하지 않고 어떤 작업을
   먼저 처리할지 묻는다. 이 경계에서도 hybrid 제목 조회로 판정된 `list_meeting_reports` 입력의 `limit`은
@@ -1445,6 +1446,9 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   발언, 결정 이유, 담당자 같은 근거 요구가 함께 있으면 evidence search를 유지한다. 반대로 “회의록
   요약해줘”처럼 별도 근거 요구가 없는 목록, 상태, 제목 상세, 단순 요약 요청에는 transcript 검색을
   추가하지 않는다.
+- 순번이 있는 결정이나 “결정사항의 직접 근거”처럼 MeetingReport decision item에 직접 연결된 근거를
+  요구하면 Router가 선택한 `meeting.decision.evidence`를 유지한다. 반면 “왜 그렇게 결정했는지”처럼
+  일반 대화 맥락의 결정 이유를 묻는 요청은 제목 유무에 따라 evidence search 또는 hybrid search를 쓴다.
 - 최초 Router가 선택한 capability chain은 완료 전까지 기존 planner step의 서버 검증 routing metadata로
   이어간다. 다음 turn에는 Router를 다시 호출하지 않고 첫 번째 미완료 tool만 Planner에 노출하되 Planner
   LLM 호출 자체는 계속 수행한다. 관측 metadata는 최초 선택을 `initial_llm_router`, 이어진 실행을

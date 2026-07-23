@@ -3698,6 +3698,11 @@ def _normalize_meeting_report_search_routing(
 ) -> AgentRoutingDecision:
     if decision.status != "routed" or not _is_meeting_content_search_request(prompt):
         return decision
+    if (
+        "meeting.decision.evidence" in decision.capability_ids
+        and _is_direct_meeting_decision_evidence_request(prompt)
+    ):
+        return decision
 
     meeting_search_capability_ids = {
         MEETING_REPORT_HYBRID_CAPABILITY_ID,
@@ -3823,24 +3828,87 @@ def _is_meeting_content_search_request(prompt: str) -> bool:
     return topic_scope_cue is not None and request_cue is not None and simple_lookup_cue is None
 
 
+def _is_direct_meeting_decision_evidence_request(prompt: str) -> bool:
+    normalized = re.sub(r"\s+", " ", prompt).strip().lower()
+    ordinal = r"(?:첫\s*번째|두\s*번째|세\s*번째|네\s*번째|" r"\d+\s*(?:번|번째))"
+    return (
+        re.search(
+            rf"(?:{ordinal}\s*결정|결정(?:사항|항목)?\s*{ordinal})",
+            normalized,
+        )
+        is not None
+        or re.search(
+            r"결정(?:사항|항목|item)?(?:의)?\s*(?:직접\s*)?" r"(?:근거|evidence)",
+            normalized,
+        )
+        is not None
+        or re.search(
+            r"(?:해당|그|이|선택한)\s*결정(?:사항|항목)?(?:의)?\s*"
+            r"(?:직접\s*)?(?:근거|evidence)",
+            normalized,
+        )
+        is not None
+    )
+
+
 def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:
     normalized = re.sub(r"\s+", " ", prompt).strip()
     quote_pairs = (("‘", "’"), ("“", "”"), ('"', '"'), ("'", "'"))
-    candidates: list[str] = []
+    spans: list[tuple[int, int, str]] = []
     for opening, closing in quote_pairs:
         escaped_opening = re.escape(opening)
         escaped_closing = re.escape(closing)
-        patterns = (
-            rf"제목(?:이|은|는)?\s*{escaped_opening}(.{{1,500}}?){escaped_closing}",
-            rf"{escaped_opening}(.{{1,500}}?){escaped_closing}\s*(?:이라는|이란|인|의)?\s*"
-            r"(?:회의록|회의|미팅)",
-            rf"{escaped_opening}(.{{1,500}}?){escaped_closing}\s*(?:에서|의)",
+        excluded_delimiters = re.escape(opening if opening == closing else opening + closing)
+        pattern = re.compile(
+            rf"{escaped_opening}([^{excluded_delimiters}]{{1,500}}){escaped_closing}"
         )
-        for pattern in patterns:
-            for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
-                title = re.sub(r"\s+", " ", match.group(1)).strip()
-                if title and title not in candidates:
-                    candidates.append(title)
+        for match in pattern.finditer(normalized):
+            title = re.sub(r"\s+", " ", match.group(1)).strip()
+            if title:
+                spans.append((match.start(), match.end(), title))
+
+    spans.sort(key=lambda value: (value[0], value[1]))
+    explicit_indexes: set[int] = set()
+    for index, (start, end, _title) in enumerate(spans):
+        prefix = normalized[max(0, start - 24) : start]
+        suffix = normalized[end : min(len(normalized), end + 32)]
+        if re.search(
+            r"(?:회의록\s*)?제목(?:이|은|는)?\s*[:=]?\s*$",
+            prefix,
+            flags=re.IGNORECASE,
+        ) or re.match(
+            r"\s*(?:(?:이라는|라는|이란|란|인|의)?\s*"
+            r"(?:회의록|회의|미팅)|(?:각각\s*)?(?:에서|의))",
+            suffix,
+            flags=re.IGNORECASE,
+        ):
+            explicit_indexes.add(index)
+
+    connector_pattern = re.compile(
+        r"\s*(?:와|과|및|하고|그리고|,|·|/|&|또는|혹은)\s*",
+        flags=re.IGNORECASE,
+    )
+    group_start = 0
+    while group_start < len(spans):
+        group_end = group_start
+        while group_end + 1 < len(spans):
+            current_end = spans[group_end][1]
+            next_start = spans[group_end + 1][0]
+            if current_end > next_start or not connector_pattern.fullmatch(
+                normalized[current_end:next_start]
+            ):
+                break
+            group_end += 1
+        if group_end > group_start and any(
+            index in explicit_indexes for index in range(group_start, group_end + 1)
+        ):
+            explicit_indexes.update(range(group_start, group_end + 1))
+        group_start = group_end + 1
+
+    candidates: list[str] = []
+    for index, (_start, _end, title) in enumerate(spans):
+        if index in explicit_indexes and title not in candidates:
+            candidates.append(title)
     return tuple(candidates)
 
 
