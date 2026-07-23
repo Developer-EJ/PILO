@@ -4,8 +4,8 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "b9fa6c51ed4a254904d90cd10c30b88b1be838ba9a355df70f9b966c3f8aa360",
-    "catalogSha256": "f51a96ac00b82ec0732ac9d1993cfc5f530a88bbc6b04408e7b7beff1918bebb",
+    "inventorySha256": "aa12b34deb3e9a6835c313c3afab65f53b63d1492078fdba92f604adebac0fe3",
+    "catalogSha256": "867e46d9bc7b1530765b7b645f115b7cedfea0c61f800383d5ca507ef53329f2",
     "eligibleSnapshotSha256": "7034a1d2dda6889632b039292a42f62716fe433c6a0bc41004fe874be1ebcaad"
   },
   "privacySensitiveValues": [
@@ -1476,7 +1476,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "f51a96ac00b82ec0732ac9d1993cfc5f530a88bbc6b04408e7b7beff1918bebb",
+    "sha256": "867e46d9bc7b1530765b7b645f115b7cedfea0c61f800383d5ca507ef53329f2",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -1953,28 +1953,28 @@
           "단순 회의록 목록, 상태, 상세 또는 요약 조회"
         ],
         "positiveExamples": [
-          "온보딩 주간회의 MeetingReport 제목 범위 실제 발언 근거",
-          "API 설계 회의 MeetingReport 제목 인증 방식 transcript 근거",
-          "온보딩주간회의MeetingReport제목범위실제발언근거",
-          "온보딩 주간회의 MeetingReport 제목 범위 실제 발언 근거 부탁드려요",
+          "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+          "제목이 ‘API 설계 회의’인 회의록에서 인증 방식 논의를 찾아줘",
+          "‘온보딩주간회의’에서API배포일정을어떻게정했어?",
+          "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어? 부탁드려요",
           "meeting hybrid_search 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "온보딩 주간회의 MeetingReport 제목 범위 실제 발언 근거"
+            "utterance": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?"
           },
           {
             "kind": "paraphrase",
-            "utterance": "API 설계 회의 MeetingReport 제목 인증 방식 transcript 근거"
+            "utterance": "제목이 ‘API 설계 회의’인 회의록에서 인증 방식 논의를 찾아줘"
           },
           {
             "kind": "typo",
-            "utterance": "온보딩주간회의MeetingReport제목범위실제발언근거"
+            "utterance": "‘온보딩주간회의’에서API배포일정을어떻게정했어?"
           },
           {
             "kind": "honorific",
-            "utterance": "온보딩 주간회의 MeetingReport 제목 범위 실제 발언 근거 부탁드려요"
+            "utterance": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어? 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -2000,28 +2000,28 @@
           "결정 item에 직접 연결된 근거만 요청할 때"
         ],
         "positiveExamples": [
-          "배포 일정 지연 이유 회의 발언",
-          "API v2 언급 회의 대화",
-          "배포일정지연이유회의발언",
-          "배포 일정 지연 이유 회의 발언 부탁드려요",
+          "배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘",
+          "API v2를 언급한 회의 찾아줘",
+          "배포일정이미뤄진이유를논의했던회의록을찾아줘",
+          "배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘 부탁드려요",
           "meeting search 요청"
         ],
         "examples": [
           {
             "kind": "canonical",
-            "utterance": "배포 일정 지연 이유 회의 발언"
+            "utterance": "배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘"
           },
           {
             "kind": "paraphrase",
-            "utterance": "API v2 언급 회의 대화"
+            "utterance": "API v2를 언급한 회의 찾아줘"
           },
           {
             "kind": "typo",
-            "utterance": "배포일정지연이유회의발언"
+            "utterance": "배포일정이미뤄진이유를논의했던회의록을찾아줘"
           },
           {
             "kind": "honorific",
-            "utterance": "배포 일정 지연 이유 회의 발언 부탁드려요"
+            "utterance": "배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘 부탁드려요"
           },
           {
             "kind": "abbreviation",
@@ -4605,7 +4605,7 @@
     {
       "id": "canonical_meeting_hybrid_search",
       "kind": "canonical",
-      "prompt": "온보딩 주간회의 MeetingReport 제목 범위 실제 발언 근거",
+      "prompt": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
       "domain": "meeting",
       "capabilityId": "meeting.report.hybrid_search",
       "requiredToolNames": [
@@ -4665,7 +4665,7 @@
     {
       "id": "held_out_meeting_content_search",
       "kind": "held_out",
-      "prompt": "배포 일정이 미뤄진 이유가 나온 회의를 찾아줘",
+      "prompt": "배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘",
       "domain": "meeting",
       "capabilityId": "meeting.evidence.search",
       "requiredToolNames": [

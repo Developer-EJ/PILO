@@ -21,6 +21,11 @@ import type {
   AgentToolDefinition
 } from "./types/agent-tool.types";
 
+const AMBIENT_MEETING_SEARCH_TOOLS = new Set([
+  "list_meeting_reports",
+  "search_meeting_transcript"
+]);
+
 @Injectable()
 export class AgentToolRegistryService {
   private readonly definitions = new Map<string, AgentToolDefinition<unknown>>();
@@ -114,10 +119,15 @@ export class AgentToolRegistryService {
     requestContext: AgentRunRequestContext
   ): boolean {
     const requiredDomain = requestContext?.surface ?? null;
-    const toolDomain = getAgentToolDomainAndOperation(definition.name)?.domain ?? null;
+    const toolDescriptor = getAgentToolDomainAndOperation(definition.name);
+    const toolDomain = toolDescriptor?.domain ?? null;
+    const isAmbientMeetingSearch =
+      toolDomain === "meeting" &&
+      toolDescriptor?.operation === "read" &&
+      AMBIENT_MEETING_SEARCH_TOOLS.has(definition.name);
     return (
       this.domainFeatureFlags.isToolEnabled(definition.name) &&
-      (!requiredDomain || toolDomain === requiredDomain) &&
+      (!requiredDomain || toolDomain === requiredDomain || isAmbientMeetingSearch) &&
       (!definition.contextRequirement ||
         definition.contextRequirement.surface === requestContext?.surface)
     );

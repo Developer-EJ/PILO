@@ -92,6 +92,11 @@ interface PlannedToolCandidate {
   meetingReportHybridContext?: MeetingReportHybridContext;
 }
 
+interface MeetingReportHybridLookupContext extends AgentJsonObject {
+  requestedReportTitle: string;
+  selector: AgentJsonObject;
+}
+
 const RISK_LEVELS = ["low", "medium", "high"] as const;
 const EXECUTION_MODES = ["auto", "confirmation_required", "contextual"] as const;
 const LEGACY_MEETING_REPORT_SCHEMA_VERSION = "agent-tools:v6";
@@ -344,12 +349,16 @@ export class AgentExecutionService {
       });
     }
 
+    const meetingReportHybridLookup = this.normalizeMeetingReportHybridLookup(
+      candidate
+    );
+    const plannerInput = meetingReportHybridLookup?.input ?? candidate.input;
     const validatedInput = await this.validateToolInput(
       currentUserId,
       workspaceId,
       runId,
       definition,
-      candidate.input,
+      plannerInput,
       isLegacyMeetingReportPlan
     );
     if (!validatedInput.ok) {
@@ -428,8 +437,45 @@ export class AgentExecutionService {
       input.timezone,
       postExecutionDisposition,
       candidate.meetingReportHybridContext,
+      meetingReportHybridLookup?.context,
       input.turnSequence
     );
+  }
+
+  private normalizeMeetingReportHybridLookup(
+    candidate: PlannedToolCandidate
+  ): { input: AgentJsonObject; context: MeetingReportHybridLookupContext } | null {
+    if (
+      candidate.toolName !== "list_meeting_reports" ||
+      !candidate.capabilityIds.includes("meeting.report.hybrid_search")
+    ) {
+      return null;
+    }
+    const title = candidate.input.reportTitle;
+    if (
+      typeof title !== "string" ||
+      title.trim().length < 1 ||
+      title.trim().length > 500
+    ) {
+      throw badRequest("MeetingReport hybrid title lookup requires reportTitle");
+    }
+    const input = { ...candidate.input };
+    delete input.limit;
+    input.reportTitle = title.trim();
+    const selector: AgentJsonObject = {};
+    for (const field of ["reportTitle", "status", "from", "to", "roomName"] as const) {
+      const value = input[field];
+      if (typeof value === "string" && value.trim()) {
+        selector[field] = value.trim();
+      }
+    }
+    return {
+      input,
+      context: {
+        requestedReportTitle: title.trim(),
+        selector
+      }
+    };
   }
 
   private async findReadyPlannerStep(
@@ -856,6 +902,7 @@ export class AgentExecutionService {
         timezone,
         postExecutionDisposition,
         meetingReportHybridContext,
+        undefined,
         turnSequence
       );
     } catch (error) {
@@ -1128,6 +1175,7 @@ export class AgentExecutionService {
     postExecutionDisposition: AgentToolPostExecutionDisposition =
       "continue_planning",
     meetingReportHybridContext?: MeetingReportHybridContext,
+    meetingReportHybridLookupContext?: MeetingReportHybridLookupContext,
     turnSequence?: number
   ): Promise<AgentExecutionResult> {
     const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
@@ -1142,7 +1190,10 @@ export class AgentExecutionService {
           riskLevel: definition.riskLevel,
           executionMode: definition.executionMode,
           input: this.sanitizeJsonObject(plannerInput),
-          ...(meetingReportHybridContext ? { meetingReportHybridContext } : {})
+          ...(meetingReportHybridContext ? { meetingReportHybridContext } : {}),
+          ...(meetingReportHybridLookupContext
+            ? { meetingReportHybridLookup: meetingReportHybridLookupContext }
+            : {})
         }
       }
     );
@@ -1184,6 +1235,20 @@ export class AgentExecutionService {
       });
       advanceStartedAt = this.agentLatencyObserver?.start();
       const outputSummary = this.buildOutputSummary(result);
+      if (meetingReportHybridLookupContext) {
+        const count = outputSummary.count;
+        if (
+          typeof count !== "number" ||
+          !Number.isInteger(count) ||
+          count < 0
+        ) {
+          throw badRequest("MeetingReport hybrid title lookup count is invalid");
+        }
+        outputSummary.meetingReportHybridLookup = {
+          ...meetingReportHybridLookupContext,
+          exactMatchCount: count
+        };
+      }
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
 
       if (result.status === "delegated") {

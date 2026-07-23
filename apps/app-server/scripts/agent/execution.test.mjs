@@ -1174,6 +1174,7 @@ function formatterMeetingReport(index, overrides = {}) {
   return {
     reportId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     meetingId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    title: `회의록 제목 ${index}`,
     status: "COMPLETED",
     createdAt: `2026-07-${String(index).padStart(2, "0")}T00:00:00.000Z`,
     sections: [
@@ -1269,6 +1270,7 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.match(answer, /2026-07-08 09:00 · 완료/);
+  assert.match(answer, /회의록 · 회의록 제목 8/);
   assert.match(answer, /요약: 회의 요약 8/);
   assert.match(answer, /논의사항: 논의사항 8/);
   assert.match(answer, /결정사항: 결정사항 8/);
@@ -1358,6 +1360,7 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.match(answer, /회의록 6개/);
+  assert.match(answer, /회의록 제목 1/);
   assert.match(answer, /요약: 회의 요약 1/);
   assert.match(answer, /외 1개/);
   assert.doesNotMatch(answer, /회의 요약 6/);
@@ -1811,6 +1814,68 @@ for (const testCase of [
     (call) => call.method === "completeToolStepAndAdvance"
   );
   assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "list_meeting_reports",
+    input: { reportTitle: "  온보딩 주간회의  ", limit: 1 },
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    }
+  });
+  const { service, loggingService, toolRegistryService } = createService({
+    planner,
+    registryState: { name: "list_meeting_reports" }
+  });
+
+  await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  const validation = toolRegistryService.calls.find(
+    (call) => call.method === "validateInput"
+  );
+  assert.deepEqual(validation.input, { reportTitle: "온보딩 주간회의" });
+  const started = loggingService.calls.find(
+    (call) => call.method === "startNextToolStepIfAbsent"
+  );
+  assert.deepEqual(started.input.inputSummary.meetingReportHybridLookup, {
+    requestedReportTitle: "온보딩 주간회의",
+    selector: { reportTitle: "온보딩 주간회의" }
+  });
+  const completed = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.deepEqual(completed.input.outputSummary.meetingReportHybridLookup, {
+    requestedReportTitle: "온보딩 주간회의",
+    selector: { reportTitle: "온보딩 주간회의" },
+    exactMatchCount: 1
+  });
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "list_meeting_reports",
+    input: {},
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    }
+  });
+  const { service } = createService({
+    planner,
+    registryState: { name: "list_meeting_reports" }
+  });
+
+  await assert.rejects(
+    () =>
+      service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+        plannerOutput: planner
+      }),
+    (error) =>
+      error?.response?.error?.message ===
+      "MeetingReport hybrid title lookup requires reportTitle"
+  );
 }
 
 {

@@ -2037,21 +2037,62 @@ class PgAgentRunRepository:
               WHERE step.run_id = %s
                 AND step.step_type = 'tool'
                 AND step.status = 'completed'
+
+              UNION ALL
+
+              SELECT
+                COALESCE(step.completed_at, step.updated_at, step.created_at) AS occurred_at,
+                step.step_order AS item_order,
+                -1 AS kind_order,
+                'planner_step'::TEXT AS item_kind,
+                'assistant'::TEXT AS role,
+                NULL::TEXT AS content,
+                NULL::TEXT AS tool_name,
+                step.output_json,
+                step.id AS step_id,
+                NULL::JSONB AS resource_refs
+              FROM agent_steps AS step
+              WHERE step.run_id = %s
+                AND step.step_type = 'planner'
+                AND step.status = 'completed'
             ), recent_timeline AS (
               SELECT *
               FROM timeline
               ORDER BY occurred_at DESC, kind_order DESC, item_order DESC
-              LIMIT 17
+              LIMIT 25
             )
             SELECT item_kind, role, content, tool_name, output_json,
                    item_order, step_id, resource_refs
             FROM recent_timeline
             ORDER BY occurred_at ASC, kind_order ASC, item_order ASC
             """,
-            (job.run_id, job.run_id),
+            (job.run_id, job.run_id, job.run_id),
         ).fetchall()
         latest_user_message: str | None = None
         for item in timeline_rows:
+            if item["item_kind"] == "planner_step":
+                output_json = item.get("output_json")
+                tool_routing = (
+                    output_json.get("toolRouting") if isinstance(output_json, dict) else None
+                )
+                capability_ids = (
+                    tool_routing.get("capabilityIds") if isinstance(tool_routing, dict) else None
+                )
+                if (
+                    isinstance(capability_ids, list)
+                    and capability_ids
+                    and all(isinstance(value, str) and value for value in capability_ids)
+                ):
+                    memory.append(
+                        "routed workflow: "
+                        + json.dumps(
+                            {"capabilityIds": capability_ids},
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                    )
+                continue
             if item["item_kind"] == "tool_step":
                 tool_name = str(item["tool_name"])
                 output = _serialize_agent_tool_output(

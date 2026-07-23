@@ -76,6 +76,8 @@ TOOL_CAPABILITY_CATALOG_VERSION_PATTERN = re.compile(r"^agent-tool-capabilities:
 TOOL_CAPABILITY_CATALOG_SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 DEFAULT_TOOL_RETRIEVAL_TOP_K = 8
 MEETING_REPORT_HYBRID_CAPABILITY_ID = "meeting.report.hybrid_search"
+MEETING_EVIDENCE_SEARCH_CAPABILITY_ID = "meeting.evidence.search"
+MEETING_REPORT_LIST_CAPABILITY_ID = "meeting.reports.list"
 MEETING_REPORT_ID_TOOLS = {"get_meeting_report", "summarize_meeting_report"}
 MEETING_REPORT_TOOLS = {"list_meeting_reports", *MEETING_REPORT_ID_TOOLS}
 USER_VISIBLE_UUID_PATTERN = re.compile(
@@ -400,6 +402,57 @@ def _completed_planning_tool_names(planning_context: str) -> set[str]:
         for line in _current_prompt_cycle_planning_lines(planning_context)
         if (match := re.match(r"^tool ([A-Za-z0-9_]+):", line)) is not None
     }
+
+
+ROUTED_WORKFLOW_PREFIX = "routed workflow: "
+
+
+def _continued_agent_routing(
+    job: AgentRunJob,
+    planning_context: str,
+) -> AgentRoutingDecision | None:
+    catalog = job.tool_capability_catalog
+    if catalog is None:
+        return None
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    for line in reversed(planning_context.splitlines()):
+        if not line.startswith(ROUTED_WORKFLOW_PREFIX):
+            continue
+        try:
+            value = json.loads(line[len(ROUTED_WORKFLOW_PREFIX) :])
+        except (TypeError, ValueError):
+            continue
+        capability_ids = value.get("capabilityIds") if isinstance(value, dict) else None
+        if (
+            not isinstance(capability_ids, list)
+            or not capability_ids
+            or not all(isinstance(item, str) and item for item in capability_ids)
+        ):
+            continue
+        normalized_ids = tuple(dict.fromkeys(capability_ids))
+        capabilities = [capability_by_id.get(item) for item in normalized_ids]
+        if any(
+            capability is None or capability.availability != "supported"
+            for capability in capabilities
+        ):
+            continue
+        routing = AgentRoutingDecision(
+            status="routed",
+            domains=tuple(
+                dict.fromkeys(
+                    capability.domain for capability in capabilities if capability is not None
+                )
+            ),
+            capability_ids=normalized_ids,
+            intent_summary="이전 Planner turn에서 선택한 workflow를 계속 실행합니다.",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        )
+        if _has_incomplete_routed_workflow(job, routing, planning_context):
+            return routing
+        return None
+    return None
 
 
 def _has_incomplete_routed_workflow(
@@ -992,16 +1045,22 @@ class AgentRunProcessor:
             )
             self._emit_queue_latency(job, latency_scope)
             routing: AgentRoutingDecision | None = None
+            routing_source: str | None = None
             completion_tool_names: tuple[str, ...] = ()
             if self.tool_retrieval_mode == TOOL_RETRIEVAL_MODE_LLM_ROUTER:
                 if self.router_client is None or selection_job.tool_capability_catalog is None:
                     raise AgentRouterOutputError(
                         "Agent router configuration or capability catalog is missing"
                     )
-                router_started_at = self.latency_observer.start()
-                try:
-                    routing = normalize_agent_routing_decision(
-                        self.router_client.route(
+                routing = _continued_agent_routing(
+                    selection_job,
+                    context.planning_context,
+                )
+                if routing is None:
+                    routing_source = "initial_llm_router"
+                    router_started_at = self.latency_observer.start()
+                    try:
+                        routed_decision = self.router_client.route(
                             AgentRoutingRequest(
                                 prompt=context.prompt,
                                 timezone=context.timezone,
@@ -1010,20 +1069,42 @@ class AgentRunProcessor:
                                 planning_context=context.planning_context,
                                 context_surface=context_surface,
                             )
-                        ),
-                        selection_job.tool_capability_catalog,
-                        context_surface=context_surface,
-                    )
-                except Exception as error:
+                        )
+                        routing = normalize_agent_routing_decision(
+                            _normalize_meeting_report_search_routing(
+                                routed_decision,
+                                selection_job.tool_capability_catalog,
+                                prompt=context.prompt,
+                            ),
+                            selection_job.tool_capability_catalog,
+                            context_surface=context_surface,
+                        )
+                    except Exception as error:
+                        self._observe_latency(
+                            job,
+                            stage="router",
+                            outcome="failure",
+                            started_at=router_started_at,
+                            failure_type=_latency_failure_type(error),
+                            targeted=latency_scope.targeted,
+                        )
+                        raise
                     self._observe_latency(
                         job,
                         stage="router",
-                        outcome="failure",
+                        outcome=(
+                            "clarification"
+                            if routing.status == "needs_clarification"
+                            else "fallback" if routing.status == "unsupported" else "success"
+                        ),
                         started_at=router_started_at,
-                        failure_type=_latency_failure_type(error),
+                        provider_input_tokens=routing.provider_input_tokens,
+                        provider_output_tokens=routing.provider_output_tokens,
+                        provider_total_tokens=routing.provider_total_tokens,
                         targeted=latency_scope.targeted,
                     )
-                    raise
+                else:
+                    routing_source = "continued_workflow"
                 routed_tool_names = {
                     tool_name
                     for capability in selection_job.tool_capability_catalog.capabilities
@@ -1034,20 +1115,6 @@ class AgentRunProcessor:
                     routed_tool_names & {SQL_ERD_FOCUS_TOOL_NAME}
                 )
                 self._emit_queue_latency(job, latency_scope)
-                self._observe_latency(
-                    job,
-                    stage="router",
-                    outcome=(
-                        "clarification"
-                        if routing.status == "needs_clarification"
-                        else "fallback" if routing.status == "unsupported" else "success"
-                    ),
-                    started_at=router_started_at,
-                    provider_input_tokens=routing.provider_input_tokens,
-                    provider_output_tokens=routing.provider_output_tokens,
-                    provider_total_tokens=routing.provider_total_tokens,
-                    targeted=latency_scope.targeted,
-                )
                 if routing.status == "needs_clarification":
                     return self._complete_routing_clarification(
                         job,
@@ -1210,6 +1277,7 @@ class AgentRunProcessor:
                     routing,
                     job,
                     len(planner_tools),
+                    source=routing_source or "initial_llm_router",
                 )
             else:
                 output_summary["toolRetrieval"] = _tool_retrieval_observation(
@@ -1701,11 +1769,6 @@ def normalize_agent_planner_decision(
     completion_tool_names: tuple[str, ...] = (),
     routed_capability_ids: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
-    decision = _normalize_meeting_report_hybrid_title_lookup(
-        decision,
-        completion_tool_names=completion_tool_names,
-        routed_capability_ids=routed_capability_ids,
-    )
     decision = _normalize_calendar_relative_date_query(
         decision,
         job,
@@ -1731,6 +1794,12 @@ def normalize_agent_planner_decision(
         prompt=prompt,
         current_date=current_date,
         timezone=timezone,
+    )
+    decision = _normalize_meeting_report_hybrid_title_lookup(
+        decision,
+        prompt=prompt,
+        completion_tool_names=completion_tool_names,
+        routed_capability_ids=routed_capability_ids,
     )
     decision = _normalize_meeting_report_hybrid_search(
         decision,
@@ -2524,8 +2593,11 @@ def _pending_meeting_report_hybrid_lookup(
                 pending_output = None
                 pending_refs = []
             elif tool_name == "list_meeting_reports":
-                report_title = output.get("reportTitle")
-                count = output.get("count")
+                hybrid_lookup = output.get("meetingReportHybridLookup")
+                if not isinstance(hybrid_lookup, dict):
+                    continue
+                report_title = hybrid_lookup.get("requestedReportTitle")
+                count = hybrid_lookup.get("exactMatchCount")
                 if (
                     isinstance(report_title, str)
                     and report_title.strip()
@@ -2533,7 +2605,11 @@ def _pending_meeting_report_hybrid_lookup(
                     and isinstance(count, int)
                     and count >= 0
                 ):
-                    pending_output = output
+                    pending_output = {
+                        **output,
+                        "reportTitle": report_title.strip(),
+                        "count": count,
+                    }
                     pending_refs = []
                     collecting_refs = True
             continue
@@ -2567,23 +2643,63 @@ def _planning_tool_result_line(
 def _normalize_meeting_report_hybrid_title_lookup(
     decision: AgentPlannerDecision,
     *,
+    prompt: str,
     completion_tool_names: tuple[str, ...],
     routed_capability_ids: tuple[str, ...],
 ) -> AgentPlannerDecision:
-    hybrid_lookup_required = MEETING_REPORT_HYBRID_CAPABILITY_ID in routed_capability_ids or set(
-        completion_tool_names
-    ) == {"search_meeting_transcript"}
-    if (
-        decision.status != "tool_candidate"
-        or decision.tool_name != "list_meeting_reports"
-        or not hybrid_lookup_required
-        or not isinstance(decision.tool_input.get("reportTitle"), str)
-    ):
+    explicit_titles = _explicit_meeting_report_titles(prompt)
+    legacy_hybrid_lookup = (
+        not routed_capability_ids
+        and set(completion_tool_names) == {"search_meeting_transcript"}
+        and (
+            decision.tool_name == "list_meeting_reports"
+            or (decision.status == "needs_clarification" and len(explicit_titles) == 1)
+        )
+    )
+    hybrid_lookup_required = (
+        MEETING_REPORT_HYBRID_CAPABILITY_ID in routed_capability_ids or legacy_hybrid_lookup
+    )
+    if not hybrid_lookup_required:
+        return decision
+    if decision.status not in {"tool_candidate", "needs_clarification"}:
+        return decision
+    if decision.status == "tool_candidate" and decision.tool_name != "list_meeting_reports":
         return decision
 
-    tool_input = dict(decision.tool_input)
+    planner_title = decision.tool_input.get("reportTitle")
+    report_title = (
+        planner_title.strip() if isinstance(planner_title, str) and planner_title.strip() else None
+    )
+    if report_title is None and len(explicit_titles) == 1:
+        report_title = explicit_titles[0]
+
+    if report_title is None:
+        return AgentPlannerDecision(
+            status="needs_clarification",
+            message="회의록 제목 범위를 정확히 확인할 수 없습니다.",
+            final_answer_draft=(
+                "특정 제목의 회의록 내용을 찾으려면 회의록 제목을 따옴표로 감싸서 알려주세요."
+            ),
+            tool_name=None,
+            tool_input={},
+            requires_confirmation=False,
+            missing_fields=("meeting_report_title",),
+            unsupported_reason=None,
+        )
+
+    tool_input = dict(decision.tool_input) if decision.status == "tool_candidate" else {}
+    tool_input["reportTitle"] = report_title[:500]
     tool_input.pop("limit", None)
-    return replace(decision, tool_input=tool_input)
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="명시된 제목과 exact 일치하는 회의록을 먼저 확인합니다.",
+        final_answer_draft="회의록 제목 범위를 확인한 뒤 실제 내용 근거를 검색합니다.",
+        tool_name="list_meeting_reports",
+        tool_input=tool_input,
+        requires_confirmation=False,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
 
 
 def _meeting_hybrid_content_query(
@@ -3505,7 +3621,10 @@ def normalize_agent_routing_decision(
         if (
             capability is None
             or capability.availability != "supported"
-            or (required_domain is not None and capability.domain != required_domain)
+            or (
+                required_domain is not None
+                and capability.domain not in {required_domain, "meeting"}
+            )
         ):
             raise AgentRouterOutputError("Agent router selected an invalid capability")
         selected_capabilities.append(capability)
@@ -3569,6 +3688,95 @@ def normalize_agent_routing_decision(
         clarification_question=clarification_question,
         unsupported_reason=unsupported_reason,
     )
+
+
+def _normalize_meeting_report_search_routing(
+    decision: AgentRoutingDecision,
+    catalog: ToolCapabilityCatalog,
+    *,
+    prompt: str,
+) -> AgentRoutingDecision:
+    if decision.status != "routed" or not _is_meeting_content_search_request(prompt):
+        return decision
+
+    meeting_search_capability_ids = {
+        MEETING_REPORT_HYBRID_CAPABILITY_ID,
+        MEETING_EVIDENCE_SEARCH_CAPABILITY_ID,
+        MEETING_REPORT_LIST_CAPABILITY_ID,
+        "meeting.report.detail",
+    }
+    if not meeting_search_capability_ids.intersection(decision.capability_ids):
+        return decision
+
+    explicit_titles = _explicit_meeting_report_titles(prompt)
+    target_capability_id = (
+        MEETING_REPORT_HYBRID_CAPABILITY_ID
+        if len(explicit_titles) == 1
+        else MEETING_EVIDENCE_SEARCH_CAPABILITY_ID
+    )
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    target = capability_by_id.get(target_capability_id)
+    if target is None or target.availability != "supported":
+        return decision
+
+    normalized_ids = tuple(
+        dict.fromkeys(
+            target_capability_id if value in meeting_search_capability_ids else value
+            for value in decision.capability_ids
+        )
+    )
+    normalized_capabilities = [
+        capability_by_id[value] for value in normalized_ids if value in capability_by_id
+    ]
+    return replace(
+        decision,
+        domains=tuple(dict.fromkeys(capability.domain for capability in normalized_capabilities)),
+        capability_ids=normalized_ids,
+        intent_summary=(
+            "명시한 회의록 제목 범위에서 실제 발언과 활동 근거를 검색합니다."
+            if target_capability_id == MEETING_REPORT_HYBRID_CAPABILITY_ID
+            else "Workspace 전체 회의 내용에서 요청한 논의와 발언 근거를 검색합니다."
+        ),
+    )
+
+
+def _is_meeting_content_search_request(prompt: str) -> bool:
+    normalized = re.sub(r"\s+", " ", prompt).strip().lower()
+    if not re.search(r"(?:회의록|회의|미팅|meeting)", normalized):
+        return False
+    if re.search(r"(?:목록|상태|상세|열어|요약(?:해|만|을|해서)?)", normalized):
+        return False
+    content_cue = re.search(
+        r"(?:논의|언급|발언|대화|말(?:했|한|하던)|결정\s*(?:이유|근거|과정)|"
+        r"이유|어떻게\s*(?:정|결정)|담당자|누가|근거|transcript|activity)",
+        normalized,
+    )
+    search_cue = re.search(
+        r"(?:찾아|검색|어느\s*회의|어떤\s*회의|나온\s*회의|했던\s*회의|" r"있는\s*회의|알려|확인)",
+        normalized,
+    )
+    return content_cue is not None and search_cue is not None
+
+
+def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:
+    normalized = re.sub(r"\s+", " ", prompt).strip()
+    quote_pairs = (("‘", "’"), ("“", "”"), ('"', '"'), ("'", "'"))
+    candidates: list[str] = []
+    for opening, closing in quote_pairs:
+        escaped_opening = re.escape(opening)
+        escaped_closing = re.escape(closing)
+        patterns = (
+            rf"제목(?:이|은|는)?\s*{escaped_opening}(.{{1,500}}?){escaped_closing}",
+            rf"{escaped_opening}(.{{1,500}}?){escaped_closing}\s*(?:이라는|이란|인|의)?\s*"
+            r"(?:회의록|회의|미팅)",
+            rf"{escaped_opening}(.{{1,500}}?){escaped_closing}\s*(?:에서|의)",
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+                title = re.sub(r"\s+", " ", match.group(1)).strip()
+                if title and title not in candidates:
+                    candidates.append(title)
+    return tuple(candidates)
 
 
 def _meeting_report_hybrid_has_shared_lookup(
@@ -3691,7 +3899,9 @@ def _router_capabilities_for_surface(
     if required_domain is None:
         return catalog.capabilities
     return tuple(
-        capability for capability in catalog.capabilities if capability.domain == required_domain
+        capability
+        for capability in catalog.capabilities
+        if capability.domain in {required_domain, "meeting"}
     )
 
 
@@ -3706,8 +3916,9 @@ def _restrict_agent_job_to_context_surface(
     if catalog is None:
         return replace(job, tools=())
 
+    allowed_domains = {required_domain, "meeting"}
     capabilities = tuple(
-        capability for capability in catalog.capabilities if capability.domain == required_domain
+        capability for capability in catalog.capabilities if capability.domain in allowed_domains
     )
     capability_ids = {capability.capability_id for capability in capabilities}
     tool_names = {
@@ -3736,7 +3947,7 @@ def _restrict_agent_job_to_context_surface(
             ),
         )
         for descriptor in catalog.descriptors
-        if descriptor.domain == required_domain and descriptor.tool_name in tool_names
+        if descriptor.domain in allowed_domains and descriptor.tool_name in tool_names
     )
     return replace(
         job,
@@ -3753,6 +3964,8 @@ def _agent_routing_observation(
     routing: AgentRoutingDecision,
     job: AgentRunJob,
     selected_tool_count: int,
+    *,
+    source: str = "initial_llm_router",
 ) -> dict[str, object]:
     return {
         "mode": TOOL_RETRIEVAL_MODE_LLM_ROUTER,
@@ -3760,6 +3973,7 @@ def _agent_routing_observation(
         "domains": list(routing.domains),
         "capabilityIds": list(routing.capability_ids),
         "confidence": routing.confidence,
+        "source": source,
         "catalogVersion": (
             job.tool_capability_catalog.version if job.tool_capability_catalog else None
         ),

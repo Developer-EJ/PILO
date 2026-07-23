@@ -69,7 +69,7 @@ const originalEnv = {
 }
 
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "b9fa6c51ed4a254904d90cd10c30b88b1be838ba9a355df70f9b966c3f8aa360";
+  "aa12b34deb3e9a6835c313c3afab65f53b63d1492078fdba92f604adebac0fe3";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -335,19 +335,52 @@ const fullRegistry = new AgentToolRegistryService(
     surface: "sql_erd",
     sessionId: "77777777-7777-4777-8777-777777777777"
   };
-  assert.deepEqual(
-    fullRegistry
-      .listDefinitionsForContext(sqlErdContext)
-      .map((definition) => definition.name)
-      .sort(),
-    ["focus_sql_erd_tables", "generate_sql_erd"],
-    "a surface context must expose only tools owned by its domain"
-  );
+  const sqlErdContextToolNames = fullRegistry
+    .listDefinitionsForContext(sqlErdContext)
+    .map((definition) => definition.name)
+    .sort();
+  assert.ok(sqlErdContextToolNames.includes("focus_sql_erd_tables"));
+  assert.ok(sqlErdContextToolNames.includes("generate_sql_erd"));
+  assert.ok(sqlErdContextToolNames.includes("search_meeting_transcript"));
+  assert.ok(sqlErdContextToolNames.includes("list_meeting_reports"));
   assert.equal(
     fullRegistry.getDefinitionForContext("list_calendar_events", sqlErdContext),
     null,
     "execution lookup must enforce the same surface domain"
   );
+  assert.notEqual(
+    fullRegistry.getDefinitionForContext("search_meeting_transcript", sqlErdContext),
+    null,
+    "Workspace Meeting evidence search must remain available from every surface"
+  );
+  for (const requestContext of [
+    {
+      surface: "pr_review",
+      sessionId: "88888888-8888-4888-8888-888888888888"
+    },
+    {
+      surface: "canvas",
+      canvasId: "99999999-9999-4999-8999-999999999999",
+      canvasContext: {}
+    }
+  ]) {
+    assert.notEqual(
+      fullRegistry.getDefinitionForContext("list_meeting_reports", requestContext),
+      null
+    );
+    assert.notEqual(
+      fullRegistry.getDefinitionForContext(
+        "search_meeting_transcript",
+        requestContext
+      ),
+      null
+    );
+    assert.equal(
+      fullRegistry.getDefinitionForContext("join_meeting", requestContext),
+      null,
+      "only MeetingReport search tools are ambient outside the Meeting surface"
+    );
+  }
   assert.equal(
     fullRegistry.getDefinitionForContext("focus_sql_erd_tables", null),
     null,
