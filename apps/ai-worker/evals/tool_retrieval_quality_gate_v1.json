@@ -5,8 +5,8 @@
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
     "inventorySha256": "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92",
-    "catalogSha256": "22c8f2586bf2a116d181f1bc93c7ec40b3f4ea1d122ab38fe3abc920d91802fa",
-    "eligibleSnapshotSha256": "7034a1d2dda6889632b039292a42f62716fe433c6a0bc41004fe874be1ebcaad"
+    "catalogSha256": "186bb984659bc3fb67eaf68895fecacf91a953ea7ecf99956dbee4fd9a7ec482",
+    "eligibleSnapshotSha256": "13adc52ac165c9946c5ec66801aa2585fb0fcd5524c2917fe4f6330c83f67156"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -943,7 +943,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 500,
-          "description": "Agent 전용 MeetingReport 표시 제목 exact selector. 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+          "description": "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
         },
         "roomName": {
           "type": "string",
@@ -1476,7 +1476,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v2",
-    "sha256": "22c8f2586bf2a116d181f1bc93c7ec40b3f4ea1d122ab38fe3abc920d91802fa",
+    "sha256": "186bb984659bc3fb67eaf68895fecacf91a953ea7ecf99956dbee4fd9a7ec482",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -4080,7 +4080,7 @@
         "executionMode": "auto",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "0107292c0f5e822573e5332a500f4a9c237d03752cdd372db183dbaccf339b20"
+        "inputSchemaSha256": "b4d6fe5f72505c48b6bc40b3395f5582e2d5ab92d51790880d6de6fe83c7f4ac"
       },
       {
         "toolName": "list_meeting_rooms",

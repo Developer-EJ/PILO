@@ -37,16 +37,16 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
         "catalogVersion": "agent-tool-capabilities:v2",
         "catalogSha256": fixture.catalog.sha256,
         "eligibleSnapshotSha256": (
-            "7034a1d2dda6889632b039292a42f62716fe433c6a0bc41004fe874be1ebcaad"
+            "13adc52ac165c9946c5ec66801aa2585fb0fcd5524c2917fe4f6330c83f67156"
         ),
         "registryInventorySha256": (
             "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92"
         ),
         "registryCatalogSha256": (
-            "22c8f2586bf2a116d181f1bc93c7ec40b3f4ea1d122ab38fe3abc920d91802fa"
+            "186bb984659bc3fb67eaf68895fecacf91a953ea7ecf99956dbee4fd9a7ec482"
         ),
         "registryEligibleSnapshotSha256": (
-            "7034a1d2dda6889632b039292a42f62716fe433c6a0bc41004fe874be1ebcaad"
+            "13adc52ac165c9946c5ec66801aa2585fb0fcd5524c2917fe4f6330c83f67156"
         ),
         "modelVersion": "deterministic:no-provider",
         "retrieverVersion": "agent-tool-metadata-overlap:v5",
