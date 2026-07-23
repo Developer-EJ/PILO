@@ -1489,58 +1489,53 @@ export function MeetingPanel({ section = "room" }: { section?: MeetingSection })
                               </Tooltip>
                             </div>
                           ) : null}
-                          <Tooltip>
-                            <TooltipTrigger
-                              aria-label={
-                                isCurrentUser
-                                  ? hasKnownMicState
+                          {isCurrentUser ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                aria-label={
+                                  hasKnownMicState
                                     ? isMicEnabled
                                       ? "마이크 끄기"
                                       : "마이크 켜기"
                                     : "마이크 상태 대기"
-                                  : isMicEnabled
-                                    ? "마이크 켜짐"
-                                    : "원격 마이크 상태 대기"
-                              }
-                              className={cn(
-                                "flex size-9 items-center justify-center rounded-full border transition-colors",
-                                isMicEnabled
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-border bg-card text-muted-foreground",
-                                isCurrentUser &&
+                                }
+                                className={cn(
+                                  "flex size-9 items-center justify-center rounded-full border transition-colors",
+                                  isMicEnabled
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-border bg-card text-muted-foreground",
                                   hasKnownMicState &&
-                                  "cursor-pointer hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
-                              )}
-                              disabled={isCurrentUser && !hasKnownMicState}
-                              onClick={() => {
-                                if (!isCurrentUser || !hasKnownMicState) return;
+                                    "cursor-pointer hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                                )}
+                                disabled={!hasKnownMicState}
+                                onClick={() => {
+                                  if (!hasKnownMicState) return;
 
-                                void liveKitRoom
-                                  .setMicrophoneEnabled(!isMicEnabled)
-                                  .catch((error) => {
-                                    const message = getErrorMessage(error);
-                                    setActionError(message);
-                                    setToastMessage(message);
-                                  });
-                              }}
-                              type="button"
-                            >
-                              {isMicEnabled ? (
-                                <Mic className="size-4" />
-                              ) : (
-                                <MicOff className="size-4" />
-                              )}
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {isCurrentUser
-                                ? hasKnownMicState
+                                  void liveKitRoom
+                                    .setMicrophoneEnabled(!isMicEnabled)
+                                    .catch((error) => {
+                                      const message = getErrorMessage(error);
+                                      setActionError(message);
+                                      setToastMessage(message);
+                                    });
+                                }}
+                                type="button"
+                              >
+                                {isMicEnabled ? (
+                                  <Mic className="size-4" />
+                                ) : (
+                                  <MicOff className="size-4" />
+                                )}
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {hasKnownMicState
                                   ? isMicEnabled
                                     ? "클릭하여 마이크 끄기"
                                     : "클릭하여 마이크 켜기"
-                                  : "마이크 상태 대기"
-                                : "원격 마이크 상태는 LiveKit 이벤트 기준으로 표시됩니다."}
-                            </TooltipContent>
-                          </Tooltip>
+                                  : "마이크 상태 대기"}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : null}
                         </div>
                       );
                     })
