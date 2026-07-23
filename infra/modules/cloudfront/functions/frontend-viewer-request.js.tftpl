@@ -1,0 +1,51 @@
+var CANONICAL_FRONTEND_ORIGIN = ${canonical_frontend_origin_json};
+var LEGACY_REDIRECT_HOSTNAMES = ${legacy_redirect_hostnames_json};
+var LEGACY_REDIRECT_STATUS_CODE = ${legacy_redirect_status_code};
+
+function handler(event) {
+  var request = event.request;
+  var hostHeader = request.headers.host;
+  var host = hostHeader ? hostHeader.value.toLowerCase() : "";
+
+  if (LEGACY_REDIRECT_HOSTNAMES.indexOf(host) !== -1) {
+    var rawQueryString = request.rawQueryString();
+    var location = CANONICAL_FRONTEND_ORIGIN + request.uri;
+    if (rawQueryString !== undefined) {
+      location += "?" + rawQueryString;
+    }
+
+    return {
+      statusCode: LEGACY_REDIRECT_STATUS_CODE,
+      statusDescription:
+        LEGACY_REDIRECT_STATUS_CODE === 308 ? "Permanent Redirect" : "Found",
+      headers: {
+        location: { value: location },
+        "cache-control": { value: "no-store" },
+      },
+    };
+  }
+
+  var uri = request.uri;
+  if (uri === "" || uri === "/") {
+    request.uri = "/index.html";
+    return request;
+  }
+
+  if (uri.indexOf("/_next/") === 0) {
+    return request;
+  }
+
+  var lastSlashIndex = uri.lastIndexOf("/");
+  var lastSegment = uri.substring(lastSlashIndex + 1);
+  if (lastSegment.indexOf(".") !== -1) {
+    return request;
+  }
+
+  if (uri.charAt(uri.length - 1) === "/") {
+    request.uri = uri + "index.html";
+  } else {
+    request.uri = uri + "/index.html";
+  }
+
+  return request;
+}

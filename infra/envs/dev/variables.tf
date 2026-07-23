@@ -34,14 +34,47 @@ variable "frontend_domain_name" {
   default     = ""
 }
 
+variable "frontend_legacy_domain_names" {
+  description = "Legacy frontend domains served by CloudFront and redirected to the canonical frontend."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(distinct(var.frontend_legacy_domain_names)) == length(var.frontend_legacy_domain_names)
+    error_message = "frontend_legacy_domain_names must not contain duplicates."
+  }
+}
+
 variable "api_domain_name" {
   description = "API domain name, for example api.dev.pilo.example.com."
   type        = string
   default     = ""
 }
 
+variable "api_legacy_domain_names" {
+  description = "Legacy API domains that remain active on the existing ALB."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(distinct(var.api_legacy_domain_names)) == length(var.api_legacy_domain_names)
+    error_message = "api_legacy_domain_names must not contain duplicates."
+  }
+}
+
+variable "frontend_legacy_redirect_status_code" {
+  description = "CloudFront redirect status for legacy frontend domains."
+  type        = number
+  default     = 302
+
+  validation {
+    condition     = contains([302, 308], var.frontend_legacy_redirect_status_code)
+    error_message = "frontend_legacy_redirect_status_code must be 302 or 308."
+  }
+}
+
 variable "hosted_zone_id" {
-  description = "Route53 hosted zone id. Leave empty to skip DNS resources."
+  description = "Route53 hosted zone id. Required when create_dns_records is true."
   type        = string
   default     = ""
 }

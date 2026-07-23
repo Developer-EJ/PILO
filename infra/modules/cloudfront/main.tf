@@ -13,37 +13,13 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 resource "aws_cloudfront_function" "frontend_static_route_rewrite" {
   name    = "${var.name_prefix}-frontend-static-route-rewrite"
   runtime = "cloudfront-js-2.0"
-  comment = "Rewrite static export routes to route index files"
+  comment = "Redirect legacy frontend hosts and rewrite static export routes"
   publish = true
-  code    = <<-EOT
-function handler(event) {
-  var request = event.request;
-  var uri = request.uri;
-
-  if (uri === "" || uri === "/") {
-    request.uri = "/index.html";
-    return request;
-  }
-
-  if (uri.indexOf("/_next/") === 0) {
-    return request;
-  }
-
-  var lastSlashIndex = uri.lastIndexOf("/");
-  var lastSegment = uri.substring(lastSlashIndex + 1);
-  if (lastSegment.indexOf(".") !== -1) {
-    return request;
-  }
-
-  if (uri.charAt(uri.length - 1) === "/") {
-    request.uri = uri + "index.html";
-  } else {
-    request.uri = uri + "/index.html";
-  }
-
-  return request;
-}
-EOT
+  code = templatefile("${path.module}/functions/frontend-viewer-request.js.tftpl", {
+    canonical_frontend_origin_json = jsonencode(var.canonical_frontend_origin)
+    legacy_redirect_hostnames_json = jsonencode(var.legacy_redirect_hostnames)
+    legacy_redirect_status_code    = var.legacy_redirect_status_code
+  })
 }
 
 resource "aws_cloudfront_distribution" "frontend" {

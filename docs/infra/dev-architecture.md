@@ -370,6 +370,17 @@ GitHub Actions는 OIDC 기반으로 AWS IAM Role을 assume한다. 장기 AWS acc
 - `.github/workflows/deploy-realtime-server.yml`
 - `.github/workflows/deploy-ai-worker.yml`
 
+## Canonical/Legacy 도메인 라우팅
+
+- `pilo.my`, `dev.pilo.my`는 기존 CloudFront Distribution을 공유한다.
+- `dev.pilo.my`는 CloudFront viewer-request Function에서 `pilo.my`로 302 redirect한다. 안정화와 별도 승인 뒤에만 308로 전환한다.
+- `api.pilo.my`, `api.dev.pilo.my`는 기존 ALB를 공유하며 둘 다 API/Realtime 요청에 redirect 없이 응답한다.
+- `livekit.dev.pilo.my`, `turn.dev.pilo.my`는 기존 구성을 유지하며 이번 전환에서 변경하지 않는다.
+- LiveKit webhook `https://api.dev.pilo.my/api/v1/livekit/webhooks`도 유지한다.
+
+운영 순서, plan gate, smoke test와 rollback은
+[`production-domain-cutover-runbook.md`](./production-domain-cutover-runbook.md)를 따른다.
+
 배포 workflow는 required PR check로 사용하지 않는다. PR에서는 CI required checks를
 통과하고, `main` merge 이후 변경 경로에 맞는 배포 workflow가 실행된다.
 
