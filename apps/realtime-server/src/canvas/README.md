@@ -30,9 +30,6 @@ checkpoint version과 history를 한곳에서 소유한다. 하위 helper는 계
 - `preview/`: 이동·크기 변경·삭제 중인 shape의 임시 미리보기
 - `review-lock/`: PR Review conflict draft에서만 사용하는 임시 lock
 
-루트의 `canvas-*.ts` 파일은 기존 import를 깨뜨리지 않기 위한 compatibility
-re-export다. 새 코드는 역할별 하위 폴더의 실제 구현을 직접 import한다.
-
 ## classic Canvas 저장 원칙
 
 - shape patch는 서버 수신 순서대로 roomState와 history에 반영한다.

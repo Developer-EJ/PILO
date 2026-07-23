@@ -198,7 +198,9 @@ must not add JavaScript behavior or contradict user-authored content.
 `create_draft` is not available to new Canvas Agent runs. The legacy draft
 schema below is retained only so existing stored run/draft records and the
 legacy apply/discard endpoints remain readable during compatibility cleanup.
-AI Worker does not receive this schema or its Canvas generation tool catalog.
+AI Worker does not receive this schema or its Canvas generation tool catalog,
+and App Server no longer retains the draft generation, placement, or tool-step
+derivation path.
 
 Historically, generation requests received the bounded list of Canvas tools
 below. This list is no longer included in AI Worker prompts:
@@ -322,7 +324,8 @@ AI Worker also receives the bounded Canvas color palette:
 }
 ```
 
-App Server validates this plan before storing it as `CanvasDraftSpec`:
+Before generation was disabled, App Server validated this plan before storing
+it as `CanvasDraftSpec`:
 
 - maximum 16 nodes and 24 connections;
 - only the listed node/connection kinds are accepted;
@@ -336,21 +339,22 @@ App Server validates this plan before storing it as `CanvasDraftSpec`:
   nodes;
 - raw Tldraw shape JSON from AI Worker is ignored and never persisted.
 
-After validation, App Server may translate the whole draft to a nearby empty
+After validation, App Server could translate the whole draft to a nearby empty
 Canvas area. It checks existing Canvas shape bounding boxes around the current
 viewport and tries candidate positions in this order: visible viewport area,
 right/bottom outside the viewport, then nearby grid positions. If no empty
 candidate is found, it falls back to the stable viewport-relative default
 position instead of changing zoom or sending the draft far away.
 
-App Server converts the validated draft plan into `CanvasService.syncShapesBatch`
-operations when the requester applies the draft. The AI Worker decides layout
-intent and bounded coordinates; App Server owns raw shape creation and Canvas
-validation. `toolSteps` are derived from the validated draft so the frontend can
+When the requester applies a stored legacy draft, App Server converts its
+validated plan into `CanvasService.syncShapesBatch` operations. The historical
+AI Worker decided layout intent and bounded coordinates; App Server continues
+to own raw shape creation and Canvas validation. Stored `toolSteps` were derived
+from the validated draft so the frontend can
 show the requester-only Canvas AI pointer moving through the corresponding
 Canvas tools and placement targets.
 
-The client consumes `toolSteps` in order:
+The legacy client preview consumed `toolSteps` in order:
 
 ```text
 tool step    -> move the private pointer to the toolbar tool
@@ -358,21 +362,20 @@ place step   -> move the private pointer to the generated Canvas position
 connect step -> move the private pointer to the generated relationship area
 ```
 
-This animation is local preview/progress only. The actual Canvas mutation still
-happens only when the requester applies the draft.
+This animation was local preview/progress only. The actual Canvas mutation
+still happens only when the requester applies a stored legacy draft.
 
-When `presentationMode` is `background`, the server may still store the same
-draft and derived `toolSteps` for traceability, but clients must not play the
-private Canvas pointer/tool animation. This mode is intended for delegated PILO
-AI requests from outside the Canvas surface where the user should receive the
-Canvas AI final answer without seeing Canvas-local pointer movement.
+Historical records may contain `presentationMode = "background"` and derived
+`toolSteps`; clients must not play the private Canvas pointer/tool animation for
+those records.
 
 ## Disabled legacy connection contract
 
 `connect_shapes` is not available to new Canvas Agent runs. It is treated as a
 shape-creation action because it inserts a new arrow/line shape. App Server
 rejects any queued or externally supplied legacy `connect_shapes` step before
-it reaches the Canvas batch mutation path. The historical contract below is
+it reaches the Canvas batch mutation path. The dedicated connection batch
+generation implementation has been removed. The historical contract below is
 retained only as migration context.
 
 Historically, `connect_shapes` connected two shapes that already existed on the Canvas.
@@ -394,8 +397,8 @@ arrow payload, and `CanvasService.syncShapesBatch` call.
 
 - `connectionKind` is `arrow` by default and `line` when the user asks for a
   plain line.
-- When exactly two shapes are selected and the prompt says to connect them,
-  App Server can create this action without AI Worker planning.
+- Historically, when exactly two shapes were selected and the prompt requested
+  a connection, App Server could create this action without AI Worker planning.
 - The action creates one new connection shape. It does not modify or delete the
   two existing target shapes.
 - If the target shapes are not found, are the same shape, or semantic matching
