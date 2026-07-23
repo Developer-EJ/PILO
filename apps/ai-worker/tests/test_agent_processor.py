@@ -382,6 +382,45 @@ def meeting_search_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     return catalog
 
 
+def meeting_search_and_summary_catalog(
+    tools: list[dict[str, object]],
+) -> dict[str, object]:
+    catalog = meeting_search_catalog(tools)
+    examples = [
+        {"kind": "canonical", "utterance": "금요일 데일리 스크럼 내용 알려줘"},
+        {"kind": "paraphrase", "utterance": "백엔드 회의 내용을 정리해줘"},
+        {"kind": "typo", "utterance": "백엔드 회의 내욜 알려줘"},
+        {"kind": "honorific", "utterance": "금요일 데일리 스크럼 내용을 알려주세요"},
+        {"kind": "abbreviation", "utterance": "백엔드 회의 요약"},
+    ]
+    catalog["capabilities"].append(
+        {
+            "id": "meeting.report.summary",
+            "domain": "meeting",
+            "toolNames": ["summarize_meeting_report"],
+            "whenToUse": "특정 회의록의 요약 내용을 조회할 때",
+            "mustNotUseFor": ["원문 근거 검색", "회의록 목록"],
+            "positiveExamples": [example["utterance"] for example in examples],
+            "examples": examples,
+            "selectorKinds": ["meeting_report"],
+            "requiresConfirmation": False,
+            "availability": "supported",
+        }
+    )
+    for descriptor in catalog["descriptors"]:
+        if descriptor["toolName"] == "summarize_meeting_report":
+            descriptor["domain"] = "meeting"
+            descriptor["operation"] = "read"
+            descriptor["capabilityIds"] = ["meeting.report.summary"]
+            descriptor["selectorKinds"] = ["meeting_report"]
+            descriptor["whenToUse"] = "특정 회의록의 요약 내용을 조회할 때"
+            descriptor["mustNotUseFor"] = ["원문 근거 검색", "회의록 목록"]
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def calendar_and_meeting_read_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     catalog = tool_capability_catalog(tools)
     meeting_capability = catalog["capabilities"][1]
@@ -497,6 +536,16 @@ def test_planner_prompt_limits_prior_thread_resource_reuse() -> None:
     assert "Never provide assigneeUserId" in prompt
     assert "latest identical result list" in prompt
     assert "Never call the completed lookup tool again" in prompt
+
+
+def test_router_and_planner_prompts_distinguish_named_and_latest_meeting_summaries() -> None:
+    router_prompt = _agent_router_system_prompt()
+    planner_prompt = _agent_planner_system_prompt()
+
+    assert "금요일 데일리 스크럼 내용 알려줘" in router_prompt
+    assert "latest report without a title selector" in router_prompt
+    assert "pass that complete name as reportTitle" in planner_prompt
+    assert "최근 회의 요약과 결정사항" in planner_prompt
 
 
 def test_planner_prompt_finishes_action_item_transfer_before_approval() -> None:
@@ -2198,6 +2247,90 @@ def test_content_discussion_request_corrects_report_list_to_workspace_evidence_s
 
 
 @pytest.mark.parametrize(
+    ("prompt", "expected_title"),
+    [
+        ("금요일 데일리 스크럼 내용 알려줘", "금요일 데일리 스크럼"),
+        ("백엔드 회의 내용 알려줘", "백엔드 회의"),
+        ("금요일 데일리 스크럼 내용이 뭐야", "금요일 데일리 스크럼"),
+        ("금요일 데일리 스크럼 회의록 알려줘", "금요일 데일리 스크럼"),
+    ],
+)
+def test_natural_named_meeting_summary_corrects_list_routing(
+    prompt: str,
+    expected_title: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            inputSchema={"type": "object"},
+        ),
+        tool_snapshot(
+            name="summarize_meeting_report",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "properties": {"reportTitle": {"type": "string"}},
+            },
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_and_summary_catalog(tools),
+        )
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.reports.list",),
+            intent_summary="회의록 목록 조회",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert _explicit_meeting_report_titles(prompt) == (expected_title,)
+    assert corrected.capability_ids == ("meeting.report.summary",)
+
+
+def test_natural_named_meeting_evidence_request_uses_hybrid_routing() -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.reports.list",),
+            intent_summary="회의록 목록 조회",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt="백엔드 회의에서 배포 일정이 밀린 이유를 알려줘",
+    )
+
+    assert _explicit_meeting_report_titles("백엔드 회의에서 배포 일정이 밀린 이유를 알려줘") == (
+        "백엔드 회의",
+    )
+    assert corrected.capability_ids == ("meeting.report.hybrid_search",)
+
+
+@pytest.mark.parametrize(
     "prompt",
     [
         "배포 일정이 미뤄진 이유를 논의한 회의 내용을 요약해줘",
@@ -2274,6 +2407,7 @@ def test_natural_meeting_evidence_requests_correct_list_routing(
         "회의록 생성이 실패한 이유를 알려줘",
         "회의록 검색이 안 되는 원인을 확인해줘",
         "관련 회의록 목록 보여줘",
+        "최근 회의 요약과 결정사항 알려줘",
     ],
 )
 def test_simple_meeting_report_requests_keep_summary_or_lookup_routing(
@@ -2375,6 +2509,7 @@ def test_explicit_title_evidence_question_with_summary_format_uses_hybrid(
         '"온보딩 회의"에서 담당자를 찾고 "배포 회의"에서 지연 이유를 찾아줘',
         "“온보딩 회의”와 “배포 회의”에서 배포 지연 이유를 찾아줘",
         '"온보딩 회의", ‘배포 회의’ 및 “회고 회의”에서 결정 이유를 찾아줘',
+        "백엔드 회의와 프론트엔드 회의 내용 알려줘",
         "제목이 ‘온보딩 회의’인 회의록의 발언과 "
         "제목이 ‘배포 회의’인 회의록의 결정 이유를 알려줘",
     ],
@@ -2433,6 +2568,30 @@ def test_multiple_explicit_report_titles_require_clarification(
         (
             '"Redis"와 "Kafka" 중 무엇을 선택했는지 회의에서 찾아줘',
             (),
+        ),
+        (
+            "금요일 데일리 스크럼 내용 알려줘",
+            ("금요일 데일리 스크럼",),
+        ),
+        (
+            "백엔드 회의 내용 알려줘",
+            ("백엔드 회의",),
+        ),
+        (
+            "백엔드 회의에서 배포 일정이 밀린 이유를 알려줘",
+            ("백엔드 회의",),
+        ),
+        (
+            "최근 회의 요약과 결정사항 알려줘",
+            (),
+        ),
+        (
+            "금요일 회의 내용 알려줘",
+            (),
+        ),
+        (
+            "백엔드 회의와 프론트엔드 회의 내용 알려줘",
+            ("백엔드 회의", "프론트엔드 회의"),
         ),
     ],
 )
@@ -2626,6 +2785,145 @@ def test_processor_routes_content_discussion_to_workspace_search_from_other_surf
     assert [tool.name for tool in planner.requests[0].tools] == ["search_meeting_transcript"]
     assert planner.requests[0].routing.capability_ids == ("meeting.evidence.search",)
     assert repository.completed_steps[0][2]["toolRouting"]["source"] == ("initial_llm_router")
+    assert handoff.calls == [RUN_ID]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_title"),
+    [
+        ("금요일 데일리 스크럼 내용 알려줘", "금요일 데일리 스크럼"),
+        ("백엔드 회의 내용 알려줘", "백엔드 회의"),
+        ("금요일 데일리 스크럼 회의록 알려줘", "금요일 데일리 스크럼"),
+    ],
+)
+def test_processor_recovers_natural_named_summary_after_router_and_planner_misclassification(
+    prompt: str,
+    expected_title: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            inputSchema={"type": "object"},
+        ),
+        tool_snapshot(
+            name="summarize_meeting_report",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "reportTitle": {"type": "string"},
+                    "sections": {"type": "array"},
+                },
+            },
+        ),
+    ]
+    repository = FakeAgentRunRepository(context=run_context(prompt=prompt))
+    planner = FakePlannerClient(
+        decision=planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("reportTitle",),
+        )
+    )
+    router = FakeRouterClient(
+        decision=routing_decision(
+            domains=("meeting",),
+            capability_ids=("meeting.reports.list",),
+        )
+    )
+    handoff = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner,
+        handoff,
+        router,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_and_summary_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert len(router.requests) == 1
+    assert [tool.name for tool in planner.requests[0].tools] == ["summarize_meeting_report"]
+    assert planner.requests[0].routing.capability_ids == ("meeting.report.summary",)
+    assert repository.completed_steps[0][2]["input"] == {
+        "reportTitle": expected_title,
+    }
+    assert handoff.calls == [RUN_ID]
+
+
+def test_processor_replaces_prior_named_summary_scope_after_router_clarification() -> None:
+    prompt = "백엔드 회의 내용 알려줘"
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            inputSchema={"type": "object"},
+        ),
+        tool_snapshot(
+            name="summarize_meeting_report",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "reportTitle": {"type": "string"},
+                    "sections": {"type": "array"},
+                },
+            },
+        ),
+    ]
+    repository = FakeAgentRunRepository(
+        context=run_context(
+            prompt=prompt,
+            planning_context="assistant: 어느 금요일 데일리 스크럼을 말씀하시는지 알려주세요.",
+        )
+    )
+    planner = FakePlannerClient(
+        decision=planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("reportTitle",),
+        )
+    )
+    router = FakeRouterClient(
+        decision=routing_decision(
+            status="needs_clarification",
+            domains=(),
+            capability_ids=(),
+            clarification_question="어느 금요일 데일리 스크럼인지 알려주세요.",
+        )
+    )
+    handoff = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner,
+        handoff,
+        router,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_and_summary_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_execution_handoff_completed"
+    assert len(router.requests) == 1
+    assert planner.requests[0].routing.capability_ids == ("meeting.report.summary",)
+    assert repository.completed_steps[0][2]["input"] == {
+        "reportTitle": "백엔드 회의",
+    }
+    assert repository.completed_steps[0][2]["toolRouting"]["source"] == "initial_llm_router"
     assert handoff.calls == [RUN_ID]
 
 
@@ -4898,6 +5196,143 @@ def test_normalizer_clarifies_out_of_range_meeting_report_counts(prompt: str) ->
     assert normalized.status == "needs_clarification"
     assert normalized.output_summary["missingFields"] == ["meeting_report_limit"]
     assert "1건부터 100건" in normalized.final_answer
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_title"),
+    [
+        ("금요일 데일리 스크럼 내용 알려줘", "금요일 데일리 스크럼"),
+        ("백엔드 회의 내용 알려줘", "백엔드 회의"),
+        ("금요일 데일리 스크럼 내용이 뭐야", "금요일 데일리 스크럼"),
+        ("금요일 데일리 스크럼 회의록 알려줘", "금요일 데일리 스크럼"),
+    ],
+)
+def test_normalizer_recovers_natural_named_meeting_summary_selector(
+    prompt: str,
+    expected_title: str,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "sections": {"type": "array"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("meeting_report_date_range",),
+        ),
+        job,
+        prompt=prompt,
+        current_date="2026-07-23",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.summary",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "summarize_meeting_report"
+    assert normalized.output_summary["input"] == {"reportTitle": expected_title}
+
+
+def test_normalizer_replaces_model_invented_named_summary_selectors() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "from": {"type": "string"},
+                            "to": {"type": "string"},
+                            "sections": {"type": "array"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={
+                "reportTitle": "금요일 데일리 스크럼 내용",
+                "from": "2026-07-16T15:00:00.000Z",
+                "to": "2026-07-17T15:00:00.000Z",
+            },
+        ),
+        job,
+        prompt="금요일 데일리 스크럼 내용 알려줘",
+        current_date="2026-07-23",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.summary",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "reportTitle": "금요일 데일리 스크럼",
+    }
+
+
+def test_normalizer_keeps_latest_summary_and_decisions_unscoped() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "sections": {"type": "array"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={},
+        ),
+        job,
+        prompt="최근 회의 요약과 결정사항 알려줘",
+        current_date="2026-07-23",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.summary",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "summarize_meeting_report"
+    assert normalized.output_summary["input"] == {
+        "sections": ["summary", "decisions"],
+    }
 
 
 def test_normalizer_preserves_meeting_report_summary_with_relative_date_selector() -> None:
