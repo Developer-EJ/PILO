@@ -13,7 +13,17 @@ variable "frontend_domain_name" {
   default = ""
 }
 
+variable "frontend_subject_alternative_names" {
+  type    = list(string)
+  default = []
+}
+
 variable "api_domain_name" {
   type    = string
   default = ""
+}
+
+variable "api_subject_alternative_names" {
+  type    = list(string)
+  default = []
 }
