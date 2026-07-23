@@ -86,6 +86,7 @@ canonical 입력이 누출되지 않는다. init, plan 또는 show 실패 시 `t
 - ALB HTTPS certificate/listener 연결
 - ECS task definition environment 값
 - uploads S3 CORS origin
+- `terraform_data.dns_configuration` plan-time guard의 최초 생성
 
 RDS, Redis, S3 bucket, VPC, subnet, ECS cluster/service, LiveKit EC2/EIP/DNS의
 삭제 또는 replacement가 보이면 apply하지 않는다. 네트워크와 data-plane 리소스의
@@ -109,9 +110,9 @@ rollback 담당자를 포함한다. 승인 전에는 다음 절의 어떤 mutati
 dual-callback staging은 사용하지 않는다. 승인 뒤 다음 순서를 바꾸지 않는다.
 
 1. 현재 provider/repository 값을 rollback 기록에 남긴다. 정확한 현재 callback URL 5개, GitHub App webhook URL, 1절 repository variables 각각의 값, 기록 시각, 작업자와 provider 저장 화면을 기록한다.
-2. Google/GitHub OAuth/setup callback URL을 canonical 값으로 변경한다. 각 callback은 5절 순서대로 하나씩 변경하며, 한 callback의 저장과 검증이 성공한 뒤에만 다음 callback으로 이동한다. login callback은 실제 login, OAuth callback은 연결 완료, setup URL은 설치 화면 진입으로 검증한다. single-callback GitHub OAuth App은 legacy callback을 canonical callback으로 직접 교체한다.
+2. Google/GitHub OAuth/setup callback URL을 canonical 값으로 변경한다. 각 callback은 5절 순서대로 하나씩 변경한다. 각 callback은 provider 설정 화면에서 저장 확인만 하고 다음 callback으로 이동한다. 이 시점에는 `api.pilo.my`의 DNS/TLS가 아직 없을 수 있으므로 login, OAuth 연결, App 설치 같은 기능 검증을 시도하지 않는다. single-callback GitHub OAuth App은 legacy callback을 canonical callback으로 직접 교체한다.
 
-   callback 저장 또는 검증 실패 시 이미 변경한 callback을 변경의 역순으로 모두 복원하고 복원 결과를 검증한 뒤 8절 rollback 경계로 이동한다. 이 경우 Terraform plan을 apply하지 않는다.
+   callback 저장 실패 시 이미 변경한 callback을 변경의 역순으로 모두 복원하고 복원 결과를 확인한 뒤 8절 rollback 경계로 이동한다. 이 경우 Terraform plan을 apply하지 않는다.
 3. 승인된 저장 plan만 적용한다.
 
    ```powershell
@@ -151,32 +152,62 @@ dual-callback staging은 사용하지 않는다. 승인 뒤 다음 순서를 바
    ```
 
    Terraform output 해석과 일곱 서비스의 ECS `services-stable` waiter가 모두 성공한
-   뒤에만 다음 health/login 검증으로 이동한다.
-4. canonical/legacy API health와 login callback을 즉시 검증한다.
+   뒤에만 다음 health 검증으로 이동한다.
+4. canonical/legacy frontend와 API의 HTTP semantics를 검증한다.
 
    ```powershell
-   curl.exe -I https://pilo.my
-   if ($LASTEXITCODE -ne 0) { throw "canonical frontend health failed; 8절 rollback 경계로 이동" }
+   $canonicalFrontendStatus = curl.exe --silent --show-error --output NUL --max-redirs 0 --write-out "%{http_code}" https://pilo.my
+   if ($LASTEXITCODE -ne 0) { throw "canonical frontend request failed; 8절 rollback 경계로 이동" }
+   if (
+     $canonicalFrontendStatus -notmatch '^\d{3}$' -or
+     [int]$canonicalFrontendStatus -lt 200 -or
+     [int]$canonicalFrontendStatus -ge 300
+   ) {
+     throw "canonical frontend must return 2xx; got $canonicalFrontendStatus; 8절 rollback 경계로 이동"
+   }
 
-   curl.exe -I "https://dev.pilo.my/path?query=value"
-   if ($LASTEXITCODE -ne 0) { throw "legacy frontend health failed; 8절 rollback 경계로 이동" }
+   $legacyFrontendProbe = curl.exe --silent --show-error --output NUL --max-redirs 0 --write-out "%{http_code}|%{redirect_url}" "https://dev.pilo.my/path?query=value"
+   if ($LASTEXITCODE -ne 0) { throw "legacy frontend request failed; 8절 rollback 경계로 이동" }
+   $legacyFrontendParts = @($legacyFrontendProbe -split '\|', 2)
+   if (
+     $legacyFrontendParts.Count -ne 2 -or
+     $legacyFrontendParts[0] -ne '302' -or
+     $legacyFrontendParts[1] -ne 'https://pilo.my/path?query=value'
+   ) {
+     throw "legacy frontend must return exactly 302 with the canonical path/query Location; got $legacyFrontendProbe; 8절 rollback 경계로 이동"
+   }
 
-   curl.exe https://api.pilo.my/api/v1/health
-   if ($LASTEXITCODE -ne 0) { throw "canonical API health failed; 8절 rollback 경계로 이동" }
+   $canonicalApiStatus = curl.exe --silent --show-error --output NUL --max-redirs 0 --write-out "%{http_code}" https://api.pilo.my/api/v1/health
+   if ($LASTEXITCODE -ne 0) { throw "canonical API request failed; 8절 rollback 경계로 이동" }
+   if (
+     $canonicalApiStatus -notmatch '^\d{3}$' -or
+     [int]$canonicalApiStatus -lt 200 -or
+     [int]$canonicalApiStatus -ge 300
+   ) {
+     throw "canonical API must return 2xx; got $canonicalApiStatus; 8절 rollback 경계로 이동"
+   }
 
-   curl.exe https://api.dev.pilo.my/api/v1/health
-   if ($LASTEXITCODE -ne 0) { throw "legacy API health failed; 8절 rollback 경계로 이동" }
+   $legacyApiStatus = curl.exe --silent --show-error --output NUL --max-redirs 0 --write-out "%{http_code}" https://api.dev.pilo.my/api/v1/health
+   if ($LASTEXITCODE -ne 0) { throw "legacy API request failed; 8절 rollback 경계로 이동" }
+   if (
+     $legacyApiStatus -notmatch '^\d{3}$' -or
+     [int]$legacyApiStatus -lt 200 -or
+     [int]$legacyApiStatus -ge 300
+   ) {
+     throw "legacy API must return 2xx without redirect; got $legacyApiStatus; 8절 rollback 경계로 이동"
+   }
    ```
 
-   `pilo.my`의 TLS와 응답이 정상이어야 한다. `dev.pilo.my` 응답은 `302`이고
+   `pilo.my`의 TLS와 응답은 2xx여야 한다. `dev.pilo.my` 응답은 정확히 `302`이고
    `Location`은 정확히 `https://pilo.my/path?query=value`여야 한다. canonical과
-   legacy API health가 모두 성공하고 legacy API가 redirect하지 않아야 한다.
-   Google/GitHub login을 각각 실행해 canonical callback과 세션 생성을 확인한다.
-   apply, Terraform output 해석, ECS services-stable waiter 또는 health/login 검증이 실패하면
+   legacy API health는 모두 2xx여야 하며 legacy API는 redirect하지 않아야 한다.
+5. 4절 HTTP semantics 검증이 모두 성공한 뒤 canonical callback의 실제 OAuth/setup 흐름을 하나씩 검증한다. Google login, GitHub login, GitHub user OAuth, GitHub ProjectV2 OAuth, GitHub App setup 순서로 하나씩 실행하고 실제 login과 세션 생성, OAuth 연결 완료, 설치 화면 진입을 각 흐름에 맞게 확인한다.
+
+   apply, Terraform output 해석, ECS services-stable waiter 또는 health/OAuth 검증이 실패하면
    변경한 모든 callback을 기록한 legacy callback 값으로 역순 복원하고 복원 결과를 검증한
    뒤 8절 rollback 경계로 이동한다.
-5. canonical API health 성공 이후에만 GitHub App webhook을 canonical 값으로 변경한다. GitHub App webhook 저장과 test delivery가 모두 성공해야 다음 단계로 이동한다. GitHub App webhook 저장 또는 test delivery가 실패하면 이전 webhook을 즉시 복원하고 복원 test delivery를 확인한 뒤 8절 rollback 경계로 이동한다. 이 경우 repository variables는 변경하지 않는다.
-6. repository variables를 1절의 값으로 변경한다. 각 variable은 하나씩 업데이트한다. repository variable 업데이트가 실패하면 지금까지 변경한 variable을 기록한 값으로 변경의 역순으로 모두 복원하고 8절 rollback 경계로 이동한다. 이 경우 서비스와 Frontend를 배포하지 않는다. 모든 업데이트가 성공한 뒤에만 6절 순서로 재배포한다.
+6. canonical API health 성공 이후이며 callback 기능 검증도 성공한 뒤에만 GitHub App webhook을 canonical 값으로 변경한다. GitHub App webhook 저장과 test delivery가 모두 성공해야 다음 단계로 이동한다. GitHub App webhook 저장 또는 test delivery가 실패하면 이전 webhook을 즉시 복원하고 복원 test delivery를 확인한 뒤 8절 rollback 경계로 이동한다. 이 경우 repository variables는 변경하지 않는다.
+7. repository variables를 1절의 값으로 변경한다. 각 variable은 하나씩 업데이트한다. repository variable 업데이트가 실패하면 지금까지 변경한 variable을 기록한 값으로 변경의 역순으로 모두 복원하고 8절 rollback 경계로 이동한다. 이 경우 서비스와 Frontend를 배포하지 않는다. 모든 업데이트가 성공한 뒤에만 6절 순서로 재배포한다.
 
 LiveKit webhook은 이 순서 전체에서
 `https://api.dev.pilo.my/api/v1/livekit/webhooks`로 유지하며 변경하지 않는다.

@@ -28,6 +28,15 @@ data "aws_availability_zones" "available" {
 
 data "aws_caller_identity" "current" {}
 
+resource "terraform_data" "dns_configuration" {
+  lifecycle {
+    precondition {
+      condition     = !var.create_dns_records || trimspace(var.hosted_zone_id) != ""
+      error_message = "hosted_zone_id must be set when create_dns_records is true."
+    }
+  }
+}
+
 module "terraform_state" {
   source = "../../modules/terraform-state"
 

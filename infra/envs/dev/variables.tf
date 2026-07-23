@@ -68,7 +68,7 @@ variable "frontend_legacy_redirect_status_code" {
 }
 
 variable "hosted_zone_id" {
-  description = "Route53 hosted zone id. Leave empty to skip DNS resources."
+  description = "Route53 hosted zone id. Required when create_dns_records is true."
   type        = string
   default     = ""
 }

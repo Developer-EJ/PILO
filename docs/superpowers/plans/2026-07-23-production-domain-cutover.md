@@ -493,23 +493,23 @@ Replace the domain locals in `infra/envs/dev/main.tf` with:
   api_origin      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
 ```
 
-Add root invariants after the locals block:
+Add an always-evaluated Terraform 1.6-compatible plan-time DNS prerequisite after the
+root data sources:
 
 ```hcl
-check "frontend_domain_names_are_distinct" {
-  assert {
-    condition     = !contains(var.frontend_legacy_domain_names, var.frontend_domain_name)
-    error_message = "frontend_domain_name must not also be a legacy frontend domain."
-  }
-}
-
-check "api_domain_names_are_distinct" {
-  assert {
-    condition     = !contains(var.api_legacy_domain_names, var.api_domain_name)
-    error_message = "api_domain_name must not also be a legacy API domain."
+resource "terraform_data" "dns_configuration" {
+  lifecycle {
+    precondition {
+      condition     = !var.create_dns_records || trimspace(var.hosted_zone_id) != ""
+      error_message = "hosted_zone_id must be set when create_dns_records is true."
+    }
   }
 }
 ```
+
+Put canonical/legacy distinctness in blocking `lifecycle.precondition` blocks on the
+CloudFront and ALB ACM certificate resources. Do not use root `check` blocks because
+their failed assertions are warnings in the pinned Terraform version.
 
 - [ ] **Step 5: Wire CORS, certificates, CloudFront, and canonical ECS origins**
 
@@ -686,15 +686,15 @@ assert.match(
 );
 assert.match(
   workflow,
-  /TF_VAR_frontend_legacy_domain_names:\s*\$\{\{ vars\.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES \}\}/,
+  /TF_VAR_frontend_legacy_domain_names:\s*\$\{\{ vars\.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES \|\| '\[\]' \}\}/,
 );
 assert.match(
   workflow,
-  /TF_VAR_api_legacy_domain_names:\s*\$\{\{ vars\.TF_PLAN_API_LEGACY_DOMAIN_NAMES \}\}/,
+  /TF_VAR_api_legacy_domain_names:\s*\$\{\{ vars\.TF_PLAN_API_LEGACY_DOMAIN_NAMES \|\| '\[\]' \}\}/,
 );
 assert.match(
   workflow,
-  /TF_VAR_frontend_legacy_redirect_status_code:\s*\$\{\{ vars\.TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE \}\}/,
+  /TF_VAR_frontend_legacy_redirect_status_code:\s*\$\{\{ vars\.TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE \|\| '302' \}\}/,
 );
 ```
 
@@ -719,23 +719,19 @@ After the existing `Verify Terraform PR plan policy` step in `.github/workflows/
           node infra/tests/production-domain-cutover-contract.test.mjs
 ```
 
-- [ ] **Step 4: Pass and require the new Terraform plan variables**
+- [ ] **Step 4: Pass the new Terraform plan variables with safe bootstrap defaults**
 
 Add to the plan job `env`:
 
 ```yaml
-      TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES }}
-      TF_VAR_api_legacy_domain_names: ${{ vars.TF_PLAN_API_LEGACY_DOMAIN_NAMES }}
-      TF_VAR_frontend_legacy_redirect_status_code: ${{ vars.TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE }}
+      TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES || '[]' }}
+      TF_VAR_api_legacy_domain_names: ${{ vars.TF_PLAN_API_LEGACY_DOMAIN_NAMES || '[]' }}
+      TF_VAR_frontend_legacy_redirect_status_code: ${{ vars.TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE || '302' }}
 ```
 
-Add to `required_inputs`:
-
-```bash
-            TF_VAR_frontend_legacy_domain_names
-            TF_VAR_api_legacy_domain_names
-            TF_VAR_frontend_legacy_redirect_status_code
-```
+Do not add these three bootstrap inputs to `required_inputs`. The cutover runbook's saved
+plan supplies the approved legacy lists and redirect status with higher-precedence CLI
+`-var` arguments; the repository variables are registered only after canonical health.
 
 - [ ] **Step 5: Run both infrastructure contract tests**
 
@@ -869,6 +865,9 @@ Create `docs/infra/production-domain-cutover-runbook.md` with these sections and
 | `TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE` | `302` |
 
 실제 값을 바꾸기 전 현재 값을 기록한다. rollback 시 기록한 값을 복원한다.
+전환 전 plan job은 새 legacy/redirect repository variable이 없으면 `[]`, `[]`, `302`
+bootstrap 기본값을 사용한다. 실제 cutover saved plan은 승인된 CLI `-var` 값으로
+도메인 입력을 고정하고, repository variable은 canonical health 뒤에 등록한다.
 
 ## 2. Terraform plan gate
 
@@ -887,6 +886,7 @@ terraform -chdir=infra/envs/dev show -no-color tfplan-domain-cutover
 - ALB HTTPS certificate/listener 연결
 - ECS task definition environment 값
 - uploads S3 CORS origin
+- `terraform_data.dns_configuration` plan-time guard의 최초 생성
 
 RDS, Redis, S3 bucket, VPC, subnet, ECS cluster/service, LiveKit EC2/EIP/DNS의
 삭제나 replacement가 보이면 apply하지 않는다.
@@ -894,7 +894,10 @@ RDS, Redis, S3 bucket, VPC, subnet, ECS cluster/service, LiveKit EC2/EIP/DNS의
 ## 3. Apply 승인 지점
 
 Terraform plan을 사용자와 Infra/Realtime 담당자에게 공유한다. 명시적으로 승인받은
-저장된 plan만 적용한다.
+저장된 plan만 적용한다. 승인 뒤 먼저 callback 5개를 canonical 값으로 하나씩 변경하되
+provider 설정 화면에서 저장 성공만 확인한다. 아직 `api.pilo.my` DNS/TLS가 없을 수
+있으므로 이 시점에는 login/OAuth/setup 기능 검증을 하지 않는다. callback 저장 실패 시
+이미 변경한 값을 역순 복원하고 apply하지 않는다.
 
 ```powershell
 terraform -chdir=infra/envs/dev apply tfplan-domain-cutover
@@ -911,6 +914,8 @@ curl.exe https://api.dev.pilo.my/api/v1/health
 
 `dev.pilo.my` 응답은 `302`이고 `Location`은
 `https://pilo.my/path?query=value`여야 한다. 두 API health 주소는 모두 성공해야 한다.
+실제 runbook 명령은 canonical Frontend/API와 legacy API의 exact 2xx, legacy API의
+no-redirect, legacy Frontend의 exact `302`와 exact `Location`을 모두 검사한다.
 
 ## 5. OAuth와 GitHub App 설정
 
@@ -921,9 +926,11 @@ curl.exe https://api.dev.pilo.my/api/v1/health
 - GitHub App setup: `https://api.pilo.my/api/v1/github/installations/callback`
 - GitHub App webhook: `https://api.pilo.my/api/v1/github/webhooks`
 
-Google과 GitHub App은 가능한 경우 canonical callback을 legacy callback과 함께 등록한다.
-Regular GitHub OAuth App은 callback URL이 하나이므로 변경 직후 App Server와 Frontend를
-canonical origin으로 연속 배포한다.
+승인된 Terraform apply, 영향받는 ECS 서비스의 steady-state 대기, 4절 HTTP 검증이
+성공한 뒤 Google login, GitHub login, GitHub user OAuth, GitHub ProjectV2 OAuth,
+GitHub App setup을 하나씩 실제 검증한다. dual-callback staging은 사용하지 않는다.
+모든 callback 기능 검증이 성공한 뒤에만 GitHub App webhook을 canonical 값으로 바꾸고
+test delivery를 확인한다.
 
 ## 6. 애플리케이션 재배포 순서
 
@@ -1083,11 +1090,12 @@ Expected:
 
 Report the local/CI verification evidence and request explicit approval to:
 
-1. update GitHub repository variables,
-2. run the real backend Terraform plan,
-3. review the saved plan for replacements,
-4. apply the approved plan,
-5. update Google/GitHub callbacks and GitHub App webhook,
-6. redeploy and execute the runbook smoke tests.
+1. run the real backend Terraform plan with the approved CLI domain inputs,
+2. review the saved plan for replacements,
+3. record current provider/repository values and save canonical callback values,
+4. apply the approved plan and wait for ECS steady state,
+5. verify exact HTTP semantics and then the Google/GitHub callback flows,
+6. update the GitHub App webhook and repository variables,
+7. redeploy and execute the remaining runbook smoke tests.
 
 Do not run `terraform apply`, mutate provider callbacks, or change repository variables during this step.

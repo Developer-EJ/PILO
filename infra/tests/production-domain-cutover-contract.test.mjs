@@ -338,6 +338,11 @@ function verifyDocumentationContract(candidateDocuments) {
     /RDS[\s\S]*Redis[\s\S]*S3 bucket[\s\S]*VPC[\s\S]*subnet[\s\S]*ECS cluster\/service[\s\S]*LiveKit EC2\/EIP\/DNS[\s\S]*replacement[\s\S]*apply하지 않는다/,
     'The plan gate must forbid data-plane, network, service, and LiveKit replacements.',
   );
+  assert.match(
+    planGate,
+    /terraform_data\.dns_configuration[\s\S]*plan-time guard/,
+    'The plan allowlist must include the one-time DNS plan-time guard resource.',
+  );
 
   const applyGate = extractMarkdownSection(candidateRunbook, '3. Apply 승인 지점');
   assert.match(applyGate, /STOP HERE/);
@@ -396,7 +401,8 @@ function verifyDocumentationContract(candidateDocuments) {
       "$ecsServiceNames.'pr-review-ai-worker'",
       "$ecsServiceNames.'github-sync-worker'",
       'aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices',
-      'canonical/legacy API health와 login callback을 즉시 검증한다',
+      'canonical/legacy frontend와 API의 HTTP semantics를 검증한다',
+      'canonical callback의 실제 OAuth/setup 흐름을 하나씩 검증한다',
       'GitHub App webhook을 canonical 값으로 변경한다',
       repositoryMutationAction,
     ],
@@ -415,17 +421,37 @@ function verifyDocumentationContract(candidateDocuments) {
   );
   assert.match(
     maintenanceCutover,
-    /각 callback[\s\S]*저장과 검증[\s\S]*성공[\s\S]*다음 callback/,
-    'The callback stage must save and verify one callback before changing the next.',
+    /각 callback[\s\S]*provider 설정 화면[\s\S]*저장 확인[\s\S]*다음 callback/,
+    'The pre-apply callback stage must only confirm each provider save before continuing.',
+  );
+  const applyCommandIndex = maintenanceCutover.indexOf(
+    'terraform -chdir=infra/envs/dev apply tfplan-domain-cutover',
+  );
+  assert.notEqual(applyCommandIndex, -1, 'The cutover must include the approved apply command.');
+  const preApplyCutover = maintenanceCutover.slice(0, applyCommandIndex);
+  assert.match(
+    preApplyCutover,
+    /DNS\/TLS가 아직 없을 수 있으므로[\s\S]*기능 검증을 시도하지 않는다/,
+    'The pre-apply callback stage must explain why functional verification is deferred.',
+  );
+  assert.doesNotMatch(
+    preApplyCutover,
+    /실제 login 기능 검증|login callback은 실제 login|OAuth callback은 연결 완료|setup URL은 설치 화면 진입/,
+    'Pre-apply callback configuration must not require functional OAuth/login verification.',
   );
   assert.match(
     maintenanceCutover,
-    /callback 저장 또는 검증 실패[\s\S]*이미 변경한 callback[\s\S]*역순[\s\S]*복원[\s\S]*rollback 경계[\s\S]*apply하지 않는다/,
-    'Partial callback failure must reverse prior callback changes and skip apply.',
+    /callback 저장 실패[\s\S]*이미 변경한 callback[\s\S]*역순[\s\S]*복원[\s\S]*rollback 경계[\s\S]*apply하지 않는다/,
+    'Partial callback save failure must reverse prior callback changes and skip apply.',
   );
   assert.match(
     maintenanceCutover,
-    /apply, Terraform output 해석, ECS services-stable waiter 또는 health\/login 검증이 실패[\s\S]*legacy\s+callback[\s\S]*rollback 경계/,
+    /HTTP semantics[\s\S]*성공[\s\S]*Google login[\s\S]*GitHub login[\s\S]*GitHub user OAuth[\s\S]*GitHub ProjectV2 OAuth[\s\S]*GitHub App setup[\s\S]*하나씩[\s\S]*실제/,
+    'Functional callback verification must run one flow at a time after canonical health succeeds.',
+  );
+  assert.match(
+    maintenanceCutover,
+    /apply, Terraform output 해석, ECS services-stable waiter 또는 health\/OAuth 검증이 실패[\s\S]*legacy\s+callback[\s\S]*rollback 경계/,
   );
   assert.match(
     maintenanceCutover,
@@ -447,18 +473,26 @@ function verifyDocumentationContract(candidateDocuments) {
     /aws ecs wait services-stable --cluster \$ecsClusterName --services \$affectedEcsServices\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/,
     'The runbook must check the native ECS waiter exit code.',
   );
-  for (const [healthCommand, failureMessage] of [
-    ['curl.exe -I https://pilo.my', 'canonical frontend health'],
-    ['curl.exe -I "https://dev.pilo.my/path?query=value"', 'legacy frontend health'],
-    ['curl.exe https://api.pilo.my/api/v1/health', 'canonical API health'],
-    ['curl.exe https://api.dev.pilo.my/api/v1/health', 'legacy API health'],
+  assert.match(
+    maintenanceCutover,
+    /\$canonicalFrontendStatus\s*=\s*curl\.exe[^\r\n]*--write-out "%\{http_code\}" https:\/\/pilo\.my\r?\n\s*if \(\$LASTEXITCODE -ne 0\)[\s\S]*\$canonicalFrontendStatus -notmatch '\^\\d\{3\}\$'[\s\S]*\[int\]\$canonicalFrontendStatus -lt 200[\s\S]*\[int\]\$canonicalFrontendStatus -ge 300/,
+    'The canonical frontend probe must check curl exit status and require an exact 2xx status.',
+  );
+  assert.match(
+    maintenanceCutover,
+    /\$legacyFrontendProbe\s*=\s*curl\.exe[^\r\n]*--max-redirs 0[^\r\n]*--write-out "%\{http_code\}\|%\{redirect_url\}" "https:\/\/dev\.pilo\.my\/path\?query=value"\r?\n\s*if \(\$LASTEXITCODE -ne 0\)[\s\S]*\$legacyFrontendParts\[0\] -ne '302'[\s\S]*\$legacyFrontendParts\[1\] -ne 'https:\/\/pilo\.my\/path\?query=value'/,
+    'The legacy frontend probe must require exactly 302 and the exact path/query-preserving Location.',
+  );
+  for (const [statusVariable, healthUrl, failureMessage] of [
+    ['canonicalApiStatus', 'https://api.pilo.my/api/v1/health', 'canonical API health'],
+    ['legacyApiStatus', 'https://api.dev.pilo.my/api/v1/health', 'legacy API health'],
   ]) {
     assert.match(
       maintenanceCutover,
       new RegExp(
-        `${healthCommand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n\\s*if \\(\\$LASTEXITCODE -ne 0\\)`,
+        `\\$${statusVariable}\\s*=\\s*curl\\.exe[^\\r\\n]*--max-redirs 0[^\\r\\n]*--write-out "%\\{http_code\\}" ${healthUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n\\s*if \\(\\$LASTEXITCODE -ne 0\\)[\\s\\S]*\\$${statusVariable} -notmatch '\\^\\\\d\\{3\\}\\$'[\\s\\S]*\\[int\\]\\$${statusVariable} -lt 200[\\s\\S]*\\[int\\]\\$${statusVariable} -ge 300`,
       ),
-      `The runbook must check the native ${failureMessage} command exit code.`,
+      `The ${failureMessage} probe must reject redirects and require an exact 2xx status.`,
     );
   }
   assert.match(
@@ -620,6 +654,29 @@ function verifyProductionDomainCutoverContract(candidateSources) {
     candidateDevMain,
     /check\s+"(?:frontend|api)_domain_names_are_distinct"\s*\{/,
     'Canonical/legacy distinctness must not use advisory root check blocks.',
+  );
+
+  const dnsConfigurationGuard = extractBlock(
+    candidateDevMain,
+    'resource "terraform_data" "dns_configuration" {',
+  );
+  const dnsConfigurationLifecycle = extractBlock(dnsConfigurationGuard, 'lifecycle {');
+  const hostedZonePrecondition = extractBlock(dnsConfigurationLifecycle, 'precondition {');
+  assert.match(
+    hostedZonePrecondition,
+    /condition\s*=\s*!var\.create_dns_records\s*\|\|\s*trimspace\(var\.hosted_zone_id\)\s*!=\s*""/,
+    'DNS creation must be blocked at plan time when the hosted-zone ID is blank.',
+  );
+  assert.match(
+    hostedZonePrecondition,
+    /error_message\s*=\s*"hosted_zone_id must be set when create_dns_records is true\."/,
+  );
+
+  const hostedZoneVariable = extractBlock(candidateDevVariables, 'variable "hosted_zone_id" {');
+  assert.match(
+    hostedZoneVariable,
+    /description\s*=\s*"Route53 hosted zone id\. Required when create_dns_records is true\."/,
+    'The hosted-zone variable description must state the actual DNS creation prerequisite.',
   );
 
   const cloudfrontCertificate = extractBlock(
@@ -976,6 +1033,30 @@ expectMutationRejected({
 });
 
 expectMutationRejected({
+  name: 'hosted-zone plan-time guard removed with an advisory decoy',
+  sourceName: 'devMain',
+  mutate: (source) => source
+    .replace(
+      /resource "terraform_data" "dns_configuration" \{[\s\S]*?\n\}\n\n/,
+      '',
+    )
+    .replace(
+      'data "aws_availability_zones" "available" {',
+      [
+        'check "dns_configuration" {',
+        '  assert {',
+        '    condition     = !var.create_dns_records || trimspace(var.hosted_zone_id) != ""',
+        '    error_message = "hosted_zone_id must be set when create_dns_records is true."',
+        '  }',
+        '}',
+        '',
+        'data "aws_availability_zones" "available" {',
+      ].join('\n'),
+    ),
+  expectedFailure: /Missing HCL block: resource "terraform_data" "dns_configuration"/,
+});
+
+expectMutationRejected({
   name: 'hosted-zone prerequisite removed with a distant decoy',
   sourceName: 'tfvarsExample',
   mutate: (source) => source
@@ -1227,9 +1308,34 @@ expectDocumentationMutationRejected({
   mutate: (source) => source
     .replace('변경의 역순으로 모두 복원', '임의 순서로 복원')
     .concat(
-      '\n<!-- callback 저장 또는 검증 실패 시 이미 변경한 callback을 변경의 역순으로 모두 복원하고 rollback 경계로 이동하며 apply하지 않는다. -->\n',
+      '\n<!-- callback 저장 실패 시 이미 변경한 callback을 변경의 역순으로 모두 복원하고 rollback 경계로 이동하며 apply하지 않는다. -->\n',
     ),
-  expectedFailure: /Partial callback failure must reverse prior callback changes and skip apply/,
+  expectedFailure: /Partial callback save failure must reverse prior callback changes and skip apply/,
+});
+
+expectDocumentationMutationRejected({
+  name: 'functional OAuth verification moved before apply with an after-apply decoy',
+  documentName: 'runbook',
+  mutate: (source) => source
+    .replace(
+      '각 callback은 provider 설정 화면에서 저장 확인만 하고 다음 callback으로 이동한다.',
+      '각 callback은 provider 설정 화면에서 저장 확인한 직후 실제 login 기능 검증을 수행하고 다음 callback으로 이동한다.',
+    )
+    .concat(
+      '\n<!-- canonical health 성공 뒤 Google login, GitHub login, GitHub user OAuth, GitHub ProjectV2 OAuth, GitHub App setup을 하나씩 실제 기능 검증한다. -->\n',
+    ),
+  expectedFailure: /must not require functional OAuth\/login verification/,
+});
+
+expectDocumentationMutationRejected({
+  name: 'legacy frontend exact status and Location check weakened',
+  documentName: 'runbook',
+  mutate: (source) => source
+    .replace("$legacyFrontendParts[0] -ne '302'", "$legacyFrontendParts[0] -notmatch '^3'")
+    .concat(
+      "\n<!-- `$legacyFrontendParts[0] -ne '302'; `$legacyFrontendParts[1] -ne 'https://pilo.my/path?query=value' -->\n",
+    ),
+  expectedFailure: /must require exactly 302 and the exact path\/query-preserving Location/,
 });
 
 expectDocumentationMutationRejected({
