@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -69,6 +71,7 @@ export class WorkspaceController {
   }
 
   @Delete(":workspaceId")
+  @HttpCode(HttpStatus.ACCEPTED)
   async deleteWorkspace(
     @CurrentUserId() currentUserId: string,
     @Param("workspaceId") workspaceId: string,

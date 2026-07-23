@@ -16,8 +16,11 @@ const rlsMigration = await readFile(
   new URL("../../../../db/migrations/002_enable_all_deny_rls.sql", import.meta.url),
   "utf8"
 );
-const workspaceService = await readFile(
-  new URL("../../src/modules/workspace/workspace.service.ts", import.meta.url),
+const workspaceDeletionService = await readFile(
+  new URL(
+    "../../src/modules/workspace/workspace-deletion.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 
@@ -139,9 +142,12 @@ assert.match(migration, /TG_OP = 'DELETE'/);
 assert.match(migration, /pilo\.activity_log_tenant_purge/);
 assert.match(migration, /OLD\.actor_user_id IS NOT NULL/);
 assert.match(rlsMigration, /ALTER TABLE public\.activity_logs ENABLE ROW LEVEL SECURITY/);
-assert.match(workspaceService, /database\.transaction/);
-assert.match(workspaceService, /set_config\('pilo\.activity_log_tenant_purge', 'on', true\)/);
-assert.match(workspaceService, /DELETE FROM workspaces WHERE id = \$1/);
+assert.match(workspaceDeletionService, /database\.transaction/);
+assert.match(
+  workspaceDeletionService,
+  /set_config\('pilo\.activity_log_tenant_purge', 'on', true\)/
+);
+assert.match(workspaceDeletionService, /DELETE FROM workspaces/);
 
 console.log("Common Activity Log tests passed.");
 

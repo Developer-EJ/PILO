@@ -7,6 +7,7 @@ import {
   WorkspaceController,
   WorkspaceInvitationController
 } from "./workspace.controller";
+import { WorkspaceDeletionService } from "./workspace-deletion.service";
 import { WorkspaceService } from "./workspace.service";
 
 @Module({
@@ -20,7 +21,7 @@ import { WorkspaceService } from "./workspace.service";
     CurrentUserWorkspaceInvitationController,
     WorkspaceInvitationController
   ],
-  providers: [WorkspaceService],
+  providers: [WorkspaceService, WorkspaceDeletionService],
   exports: [WorkspaceService]
 })
 export class WorkspaceModule {}

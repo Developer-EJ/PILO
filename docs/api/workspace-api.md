@@ -32,8 +32,11 @@ Workspace 역할/멤버십과 email 초대 모델은
 - 도메인 API는 request body의 `workspaceId`, `userId`를 신뢰하지 않는다.
 - Workspace 접근 확인은 각 도메인에서 임시로 구현하지 않고 공통 layer를 사용한다.
 - Workspace 이름·아이콘 수정과 삭제는 owner membership만 허용한다.
-- Workspace 삭제는 DB의 Workspace FK cascade뿐 아니라 GitHub installation, object
-  storage, 실행 중인 background job 같은 외부 lifecycle을 함께 확인해야 한다.
+- Workspace 삭제 요청이 승인되면 `workspaces.deletion_status`를 `deleting`으로
+  전환한다. 삭제 중인 Workspace는 목록에서 제외하고 공통 접근 확인과 새 쓰기를
+  차단한다.
+- Workspace 삭제는 DB의 Workspace FK cascade뿐 아니라 Drive object와 Meeting 녹음
+  object를 durable cleanup job으로 정리한 뒤 최종 hard delete한다.
 
 ## API 목록
 
@@ -236,14 +239,15 @@ Request Body:
 }
 ```
 
-응답:
+응답: `202 Accepted`
 
 ```json
 {
   "success": true,
   "data": {
-    "deleted": true,
-    "workspaceId": "workspace_uuid"
+    "deletionRequested": true,
+    "workspaceId": "workspace_uuid",
+    "status": "deleting"
   }
 }
 ```
@@ -257,16 +261,55 @@ Request Body:
   Frontend는 삭제 확인창에 멤버를 먼저 제거하라는 경고를 표시한다.
 - active GitHub App installation, 진행 중인 Meeting, `queued` 또는 `running` GitHub
   sync run이 있으면 `409 CONFLICT`를 반환하고 Workspace를 삭제하지 않는다.
-- 삭제 transaction은 `workspaces` row를 삭제하고 Workspace FK의
-  `ON DELETE CASCADE`에 따라 membership, invitation과 domain row를 함께 삭제한다.
+- 삭제 요청 transaction은 Workspace row를 잠그고 blocker를 다시 확인한 다음
+  `workspace_deletion_jobs`와 `workspace_deletion_targets`에 cleanup 대상을 저장하고
+  Workspace를 `deleting`으로 전환한다.
+- cleanup 대상은 `drive_items.object_key`가 있는 모든 Drive 파일과
+  `meeting_recordings.audio_file_key`가 남아 있는 모든 Meeting 녹음이다. target type
+  기반 handler 구조를 사용하므로 이후 다른 외부 object 종류를 추가할 수 있다.
+- 아직 유효한 Drive presigned upload URL이 있으면 해당 `drive_uploads.expires_at`
+  이후에 object 삭제를 시도한다. 만료 뒤 삭제하여 삭제 완료 후 지연 업로드로
+  orphan object가 다시 생기는 것을 막는다.
+- S3 `DeleteObject`는 object가 이미 없어도 성공으로 취급하는 idempotent 작업이다.
+  실패한 target은 claim timeout과 capped backoff를 사용해 성공할 때까지 재시도한다.
+- 모든 cleanup target이 `completed`가 된 뒤에만 `workspaces` row를 최종 hard
+  delete한다. 이때 Workspace FK의 `ON DELETE CASCADE`에 따라 membership,
+  invitation과 domain row를 함께 삭제한다.
+- DB delete guard는 cleanup worker가 transaction-local finalize flag를 설정한
+  경우에만 `workspaces` hard delete를 허용하므로 다른 코드 경로가 lifecycle을
+  우회할 수 없다.
+- `deleting` Workspace는 `GET /workspaces`에서 반환하지 않는다. 상세 조회와 도메인
+  API 접근은 `409 CONFLICT`로 차단하며 DB write fence가 동시 요청과 background
+  writer의 새 Workspace 쓰기도 거부한다.
+- 같은 이름 확인값으로 삭제 요청을 다시 보내면 Workspace row가 남아 있는 동안
+  동일한 `202 Accepted` 응답을 반환한다. 최종 hard delete 뒤에는 `404 NOT_FOUND`다.
 - `users.active_workspace_id`와 `user_settings.default_workspace_id`는
-  `ON DELETE SET NULL`로 비워진다.
-- DB 밖의 object가 있으면 삭제 성공 전에 cleanup 또는 durable cleanup enqueue가
-  완료되어야 한다. cleanup 준비에 실패하면 Workspace DB row를 삭제하지 않는다.
-- 응답이나 로그에 provider token, secret, object storage credential을 노출하지 않는다.
-- 삭제 성공 뒤 Frontend는 AuthSession의 Workspace 목록을 새로고침한다. 다른 접근
-  가능 Workspace가 있으면 그 Workspace로 이동하고, 없으면 Workspace 생성
+  최종 hard delete 시 `ON DELETE SET NULL`로 비워진다.
+- GitHub provider의 repository, issue, pull request, ProjectV2 원본은 삭제하지 않는다.
+  기존 active GitHub installation blocker가 먼저 연결 해제를 요구한다.
+- object key, bucket, storage credential은 API 응답, Activity Log metadata, 일반
+  application log에 기록하지 않는다. object key는 private cleanup table에서만
+  worker 입력으로 사용한다.
+- `202 Accepted` 뒤 Frontend는 AuthSession의 Workspace 목록을 새로고침한다. 다른
+  접근 가능 Workspace가 있으면 그 Workspace로 이동하고, 없으면 Workspace 생성
   onboarding으로 이동한다.
+
+### Realtime/Redis 경계
+
+- 삭제 상태 전환 뒤 app-server의 공통 Workspace 접근 확인이 신규 HTTP/API
+  접근을 차단한다.
+- realtime-server의 Board, Chat, Canvas, Document, PDF collaboration, Meeting,
+  sqltoerd, GitHub source, Workspace presence join도 membership과 함께
+  `deletion_status = active`를 확인해 신규 입장을 차단한다.
+- active Meeting blocker는 진행 중인 Meeting/녹음 lifecycle과 삭제가 겹치지 않게
+  한다.
+- 현재 realtime-server의 Workspace room과 screen-share Redis key는 TTL 또는 기존
+  session 종료 lifecycle에 의존한다. Workspace 전체를 대상으로 하는 durable
+  revocation event와 key index가 없으므로 이번 API transaction에서 pattern scan
+  삭제하지 않는다.
+- 이미 입장한 socket의 즉시 퇴장과 Workspace별 Redis key 제거를 보장하려면 Infra/Realtime
+  계약에 `workspace.deleting` event와 indexed cleanup consumer를 추가해야 한다.
+  S3/DB 최종 삭제의 완료 조건에는 Redis ephemeral state를 포함하지 않는다.
 
 ## 도메인 API 사용 규칙
 

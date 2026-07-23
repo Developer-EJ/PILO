@@ -23,8 +23,14 @@ export function createGithubSourceAccessService(database?: RealtimeDatabase) {
       }
       return Boolean(
         await database.queryOne(
-          `SELECT workspace_id FROM workspace_members
-           WHERE workspace_id=$1::uuid AND user_id=$2::uuid LIMIT 1`,
+          `SELECT member.workspace_id
+           FROM workspace_members AS member
+           JOIN workspaces AS workspace
+             ON workspace.id = member.workspace_id
+            AND workspace.deletion_status = 'active'
+           WHERE member.workspace_id=$1::uuid
+             AND member.user_id=$2::uuid
+           LIMIT 1`,
           [workspaceId, context.userId]
         )
       );

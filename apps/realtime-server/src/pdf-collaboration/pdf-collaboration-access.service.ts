@@ -34,6 +34,9 @@ export function createPdfCollaborationAccessService({
           JOIN workspace_members wm
             ON wm.workspace_id = item.workspace_id
            AND wm.user_id = $3
+          JOIN workspaces AS workspace
+            ON workspace.id = item.workspace_id
+           AND workspace.deletion_status = 'active'
           WHERE item.workspace_id = $1
             AND item.id = $2
             AND item.item_type = 'file'

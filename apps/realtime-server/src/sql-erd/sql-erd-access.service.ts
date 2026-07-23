@@ -29,6 +29,9 @@ export function createSqlErdAccessService(
           JOIN workspace_members AS wm
             ON wm.workspace_id = s.workspace_id
            AND wm.user_id = $3
+          JOIN workspaces AS workspace
+            ON workspace.id = s.workspace_id
+           AND workspace.deletion_status = 'active'
           WHERE s.id = $1
             AND s.workspace_id = $2
             AND s.deleted_at IS NULL
