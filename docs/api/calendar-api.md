@@ -7,6 +7,12 @@
 > exponential-backoff retry up to five attempts. Disconnecting keeps existing Google
 > events.
 
+Account deletion additionally removes pending OAuth state and encrypted Calendar
+credentials, marks event sync rows disconnected, and terminally delivers unfinished
+outbox rows without a provider call. Provider calls and account deletion use the same
+per-user lifecycle lock, so no claimed outbox or OAuth callback can call Google or
+recreate credentials after account deletion commits.
+
 ## Google Calendar endpoints
 
 | Method | Endpoint | Description |

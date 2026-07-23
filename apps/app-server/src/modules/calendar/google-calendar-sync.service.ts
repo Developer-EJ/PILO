@@ -50,10 +50,17 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
   async startConnection(currentUserId: string, body: unknown): Promise<{ authorizeUrl: string }> {
     const returnPath = this.readReturnPath(body);
     const rawState = randomBytes(32).toString("base64url");
-    await this.database.execute(
-      `INSERT INTO google_calendar_oauth_states (state_hash, user_id, return_path, expires_at) VALUES ($1, $2, $3, $4)`,
-      [this.stateHash(rawState), currentUserId, returnPath, new Date(Date.now() + OAUTH_STATE_TTL_MS)]
-    );
+    await this.withAccountLifecycleLock(currentUserId, async connection => {
+      const user = await connection.queryOne<{ id: string }>(
+        `SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL`,
+        [currentUserId]
+      );
+      if (!user) throw badRequest("Current user is unavailable");
+      await connection.execute(
+        `INSERT INTO google_calendar_oauth_states (state_hash, user_id, return_path, expires_at) VALUES ($1, $2, $3, $4)`,
+        [this.stateHash(rawState), currentUserId, returnPath, new Date(Date.now() + OAUTH_STATE_TTL_MS)]
+      );
+    });
     const config = this.authConfig.getProviderConfig("google");
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", config.clientId);
@@ -74,20 +81,31 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
       `DELETE FROM google_calendar_oauth_states WHERE state_hash=$1 AND expires_at > now() RETURNING user_id, return_path`, [this.stateHash(rawState)]
     ));
     if (!state) throw badRequest("Invalid Google Calendar OAuth state");
-    const config = this.authConfig.getProviderConfig("google");
-    const token = await this.client.exchangeCode({ code, clientId: config.clientId, clientSecret: config.clientSecret, redirectUri: this.callbackUrl() });
-    if (!token.refreshToken) throw badRequest("Google Calendar refresh permission was not granted");
-    await this.database.execute(
-      `INSERT INTO google_calendar_connections (user_id, access_token_encrypted, refresh_token_encrypted, token_expires_at, revoked_at)
-       VALUES ($1,$2,$3,$4,NULL)
-       ON CONFLICT (user_id) DO UPDATE SET access_token_encrypted=EXCLUDED.access_token_encrypted, refresh_token_encrypted=EXCLUDED.refresh_token_encrypted, token_expires_at=EXCLUDED.token_expires_at, revoked_at=NULL, connected_at=now()`,
-      [state.user_id, this.encryption.encrypt(token.accessToken), this.encryption.encrypt(token.refreshToken), token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000) : null]
-    );
+    await this.withAccountLifecycleLock(state.user_id, async connection => {
+      const user = await connection.queryOne<{ id: string }>(
+        `SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL`,
+        [state.user_id]
+      );
+      if (!user) throw badRequest("Current user is unavailable");
+      const config = this.authConfig.getProviderConfig("google");
+      const token = await this.client.exchangeCode({ code, clientId: config.clientId, clientSecret: config.clientSecret, redirectUri: this.callbackUrl() });
+      if (!token.refreshToken) throw badRequest("Google Calendar refresh permission was not granted");
+      await connection.execute(
+        `INSERT INTO google_calendar_connections (user_id, access_token_encrypted, refresh_token_encrypted, token_expires_at, revoked_at)
+         VALUES ($1,$2,$3,$4,NULL)
+         ON CONFLICT (user_id) DO UPDATE SET access_token_encrypted=EXCLUDED.access_token_encrypted, refresh_token_encrypted=EXCLUDED.refresh_token_encrypted, token_expires_at=EXCLUDED.token_expires_at, revoked_at=NULL, connected_at=now()`,
+        [state.user_id, this.encryption.encrypt(token.accessToken), this.encryption.encrypt(token.refreshToken), token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000) : null]
+      );
+    });
     return state.return_path;
   }
 
   async listCalendars(currentUserId: string): Promise<GoogleCalendarItemPayload[]> {
-    return this.client.listCalendars(await this.accessToken(currentUserId));
+    return this.withAccountLifecycleLock(currentUserId, async connection =>
+      this.client.listCalendars(
+        await this.accessToken(currentUserId, undefined, connection)
+      )
+    );
   }
 
   async selectTargetCalendar(currentUserId: string, body: unknown): Promise<GoogleCalendarConnectionPayload> {
@@ -109,6 +127,42 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
         [currentUserId]
       );
     });
+  }
+
+  async lockAccountLifecycleInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<void> {
+    await transaction.execute("SELECT pg_advisory_xact_lock($1::bigint)", [
+      this.accountLifecycleLockKey(currentUserId)
+    ]);
+  }
+
+  async cleanupAccountInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<void> {
+    await transaction.execute(
+      `DELETE FROM google_calendar_oauth_states WHERE user_id=$1`,
+      [currentUserId]
+    );
+    await transaction.execute(
+      `UPDATE calendar_event_google_syncs
+       SET status='disconnected', last_error=NULL
+       WHERE connection_user_id=$1 AND status <> 'disconnected'`,
+      [currentUserId]
+    );
+    await transaction.execute(
+      `UPDATE calendar_google_sync_outbox
+       SET status='delivered', delivered_at=COALESCE(delivered_at, now()),
+           claim_token=NULL, claimed_at=NULL, error_code=NULL, error_message=NULL
+       WHERE connection_user_id=$1 AND status <> 'delivered'`,
+      [currentUserId]
+    );
+    await transaction.execute(
+      `DELETE FROM google_calendar_connections WHERE user_id=$1`,
+      [currentUserId]
+    );
   }
 
   async enableEventSync(currentUserId: string, workspaceId: string, event: CalendarGoogleSyncEvent): Promise<void> {
@@ -192,32 +246,47 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
   private async publishOne(id: string): Promise<void> {
     const claim = await this.claim(id); if (!claim) return;
     try {
-      await this.database.withAdvisoryLock(BigInt(claim.calendar_event_id), () => this.publishClaim(claim));
+      await this.withAccountLifecycleLock(claim.connection_user_id, connection =>
+        this.withEventLock(connection, BigInt(claim.calendar_event_id), () =>
+          this.publishClaim(claim, connection)
+        )
+      );
     } catch (error) { await this.retry(claim, error); }
   }
 
-  private async publishClaim(claim: OutboxClaim): Promise<void> {
+  private async publishClaim(
+    claim: OutboxClaim,
+    connection: DatabaseTransaction
+  ): Promise<void> {
+      const activeClaim = await connection.queryOne<{ id: string }>(
+        `SELECT id FROM calendar_google_sync_outbox
+         WHERE id=$1 AND status='publishing' AND claim_token=$2`,
+        [claim.id, claim.claim_token]
+      );
+      if (!activeClaim) return;
       const payload = this.payload(claim.payload);
-      const sync = await this.database.queryOne<SyncRow>(`SELECT google_event_id, google_calendar_id, status FROM calendar_event_google_syncs WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
+      const sync = await connection.queryOne<SyncRow>(`SELECT google_event_id, google_calendar_id, status FROM calendar_event_google_syncs WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
       if (claim.operation === "create") {
-        if (!sync || sync.status !== "active") return await this.deliverWithoutRemoteCall(claim);
+        if (!sync || sync.status !== "active") {
+          return await this.deliverWithoutRemoteCall(claim, connection);
+        }
       }
       if (!sync?.google_calendar_id) throw new Error("Google Calendar destination is unavailable");
-      const connection = await this.connection(claim.connection_user_id);
-      if (!connection || connection.revoked_at) throw new Error("Google Calendar connection is unavailable");
-      const token = await this.accessToken(claim.connection_user_id, connection);
+      const calendarConnection = await this.connection(claim.connection_user_id, connection);
+      if (!calendarConnection || calendarConnection.revoked_at) throw new Error("Google Calendar connection is unavailable");
+      const token = await this.accessToken(claim.connection_user_id, calendarConnection, connection);
       if (claim.operation === "create") {
         const remoteId = await this.client.insertEvent(token, sync.google_calendar_id, this.remoteEvent(payload));
-        await this.database.execute(`UPDATE calendar_event_google_syncs SET google_event_id=$2, last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id, remoteId]);
+        await connection.execute(`UPDATE calendar_event_google_syncs SET google_event_id=$2, last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id, remoteId]);
       } else if (claim.operation === "update") {
         if (!sync || sync.status !== "active" || !sync.google_event_id) throw new Error("Google Calendar event is not ready for update");
         await this.client.updateEvent(token, sync.google_calendar_id, sync.google_event_id, this.remoteEvent(payload));
-        await this.database.execute(`UPDATE calendar_event_google_syncs SET last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
+        await connection.execute(`UPDATE calendar_event_google_syncs SET last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
       } else if (sync?.google_event_id && claim.operation === "delete") {
         await this.client.deleteEvent(token, sync.google_calendar_id, sync.google_event_id);
-        await this.database.execute(`UPDATE calendar_event_google_syncs SET status='disconnected', last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
+        await connection.execute(`UPDATE calendar_event_google_syncs SET status='disconnected', last_synced_at=now(), last_error=NULL WHERE calendar_event_id=$1`, [claim.calendar_event_id]);
       }
-      await this.database.execute(`UPDATE calendar_google_sync_outbox SET status='delivered', delivered_at=now(), claim_token=NULL, claimed_at=NULL WHERE id=$1 AND claim_token=$2`, [claim.id, claim.claim_token]);
+      await connection.execute(`UPDATE calendar_google_sync_outbox SET status='delivered', delivered_at=now(), claim_token=NULL, claimed_at=NULL WHERE id=$1 AND claim_token=$2`, [claim.id, claim.claim_token]);
   }
 
   private async claim(id: string): Promise<OutboxClaim | null> {
@@ -249,8 +318,11 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
     if (status === "failed") await this.database.execute(`UPDATE calendar_event_google_syncs SET status='failed', last_error=$2 WHERE calendar_event_id=$1`, [claim.calendar_event_id, message]);
   }
 
-  private async deliverWithoutRemoteCall(claim: OutboxClaim): Promise<void> {
-    await this.database.execute(`UPDATE calendar_google_sync_outbox SET status='delivered', delivered_at=now(), claim_token=NULL, claimed_at=NULL WHERE id=$1 AND claim_token=$2`, [claim.id, claim.claim_token]);
+  private async deliverWithoutRemoteCall(
+    claim: OutboxClaim,
+    database: DatabaseTransaction = this.database
+  ): Promise<void> {
+    await database.execute(`UPDATE calendar_google_sync_outbox SET status='delivered', delivered_at=now(), claim_token=NULL, claimed_at=NULL WHERE id=$1 AND claim_token=$2`, [claim.id, claim.claim_token]);
   }
 
   private async enqueue(transaction: DatabaseTransaction, userId: string, eventId: number, operation: SyncOperation, event: CalendarGoogleSyncEvent): Promise<void> {
@@ -282,19 +354,49 @@ export class GoogleCalendarSyncService implements OnModuleInit, OnModuleDestroy 
     if (!requeued) throw badRequest("Google Calendar sync is not retryable");
   }
 
-  private async accessToken(userId: string, existing?: ConnectionRow): Promise<string> {
-    const connection = existing ?? await this.connection(userId);
+  private async accessToken(
+    userId: string,
+    existing?: ConnectionRow,
+    database: DatabaseTransaction = this.database
+  ): Promise<string> {
+    const connection = existing ?? await this.connection(userId, database);
     if (!connection || connection.revoked_at) throw badRequest("Google Calendar is not connected");
     const expiry = connection.token_expires_at ? new Date(connection.token_expires_at).getTime() : 0;
     if (expiry > Date.now() + 60_000) return this.encryption.decrypt(connection.access_token_encrypted);
     const config = this.authConfig.getProviderConfig("google");
     const refreshed = await this.client.refresh({ refreshToken: this.encryption.decrypt(connection.refresh_token_encrypted), clientId: config.clientId, clientSecret: config.clientSecret });
-    await this.database.execute(`UPDATE google_calendar_connections SET access_token_encrypted=$2, token_expires_at=$3 WHERE user_id=$1`, [userId, this.encryption.encrypt(refreshed.accessToken), refreshed.expiresIn ? new Date(Date.now() + refreshed.expiresIn * 1000) : null]);
+    await database.execute(`UPDATE google_calendar_connections SET access_token_encrypted=$2, token_expires_at=$3 WHERE user_id=$1`, [userId, this.encryption.encrypt(refreshed.accessToken), refreshed.expiresIn ? new Date(Date.now() + refreshed.expiresIn * 1000) : null]);
     return refreshed.accessToken;
   }
 
-  private connection(userId: string): Promise<ConnectionRow | null> { return this.database.queryOne<ConnectionRow>(`SELECT user_id, access_token_encrypted, refresh_token_encrypted, token_expires_at, target_calendar_id, target_calendar_summary, revoked_at FROM google_calendar_connections WHERE user_id=$1`, [userId]); }
+  private connection(userId: string, database: DatabaseTransaction = this.database): Promise<ConnectionRow | null> { return database.queryOne<ConnectionRow>(`SELECT user_id, access_token_encrypted, refresh_token_encrypted, token_expires_at, target_calendar_id, target_calendar_summary, revoked_at FROM google_calendar_connections WHERE user_id=$1`, [userId]); }
   private activeConnection(transaction: DatabaseTransaction, userId: string): Promise<ConnectionRow | null> { return transaction.queryOne<ConnectionRow>(`SELECT user_id, access_token_encrypted, refresh_token_encrypted, token_expires_at, target_calendar_id, target_calendar_summary, revoked_at FROM google_calendar_connections WHERE user_id=$1 AND revoked_at IS NULL FOR UPDATE`, [userId]); }
+  private withAccountLifecycleLock<T>(
+    userId: string,
+    callback: (connection: DatabaseTransaction) => Promise<T>
+  ): Promise<T> {
+    return this.database.withAdvisoryLock(
+      this.accountLifecycleLockKey(userId),
+      callback
+    );
+  }
+  private async withEventLock<T>(
+    connection: DatabaseTransaction,
+    eventId: bigint,
+    callback: () => Promise<T>
+  ): Promise<T> {
+    await connection.execute("SELECT pg_advisory_lock($1::bigint)", [eventId]);
+    try {
+      return await callback();
+    } finally {
+      await connection.execute("SELECT pg_advisory_unlock($1::bigint)", [eventId]);
+    }
+  }
+  private accountLifecycleLockKey(userId: string): bigint {
+    const hash = createHash("sha256").update(`calendar-account:${userId}`, "utf8").digest("hex");
+    const positive = BigInt(`0x${hash.slice(0, 16)}`) & 0x7fffffffffffffffn;
+    return -(positive + 1n);
+  }
   private callbackUrl(): string { const config = this.authConfig.getProviderConfig("google"); return `${config.apiPublicOrigin}${config.apiBasePath}/calendar/google/callback`; }
   private stateHash(value: string): string { return createHash("sha256").update(value, "utf8").digest("hex"); }
   private readReturnPath(body: unknown): string {

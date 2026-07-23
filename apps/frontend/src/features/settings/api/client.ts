@@ -35,13 +35,31 @@ export type UpdateSettingsInput = Pick<
   | "restoreLastWorkspace"
 >;
 
+export type AccountDeletionWorkspaceBlockerReason =
+  | "MEMBERS_REMAIN"
+  | "GITHUB_INSTALLATION_ACTIVE"
+  | "MEETING_ACTIVE"
+  | "SYNC_ACTIVE";
+
+export type AccountDeletionWorkspaceBlocker = {
+  workspaceId: string;
+  name: string;
+  memberCount: number;
+  reasons: AccountDeletionWorkspaceBlockerReason[];
+};
+
+export type AccountDeletionConflictDetails = {
+  blockedWorkspaces: AccountDeletionWorkspaceBlocker[];
+};
+
 type ApiSuccessResponse<T> = { success: true; data: T };
 
 export class SettingsApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    readonly code: string | null
+    readonly code: string | null,
+    readonly details: unknown = null
   ) {
     super(message);
     this.name = "SettingsApiError";
@@ -110,7 +128,8 @@ async function requestJson<T>(
     throw new SettingsApiError(
       error.message ?? "설정 요청을 처리하지 못했습니다.",
       response.status,
-      error.code
+      error.code,
+      error.details
     );
   }
   if (!isSuccess<T>(payload)) {
@@ -129,16 +148,21 @@ function isSuccess<T>(value: unknown): value is ApiSuccessResponse<T> {
   );
 }
 
-function readApiError(value: unknown): { code: string | null; message: string | null } {
+function readApiError(value: unknown): {
+  code: string | null;
+  details: unknown;
+  message: string | null;
+} {
   if (!value || typeof value !== "object" || !("error" in value)) {
-    return { code: null, message: null };
+    return { code: null, details: null, message: null };
   }
   const error = value.error;
   if (!error || typeof error !== "object") {
-    return { code: null, message: null };
+    return { code: null, details: null, message: null };
   }
   return {
     code: "code" in error && typeof error.code === "string" ? error.code : null,
+    details: "details" in error ? error.details : null,
     message:
       "message" in error && typeof error.message === "string"
         ? error.message
