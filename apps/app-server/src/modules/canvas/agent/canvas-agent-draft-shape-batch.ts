@@ -3,7 +3,6 @@ import type { SyncCanvasShapesBatchRequest } from "../contracts/canvas.types";
 import type {
   CanvasAgentDraftNode,
   CanvasAgentDraftNodeKind,
-  CanvasAgentShapeRow,
   CanvasDraftSpec
 } from "./canvas-agent.types";
 
@@ -116,104 +115,6 @@ export function canvasAgentDraftToShapeBatch(
   });
 
   return { operations };
-}
-
-export function createCanvasAgentConnectionBatch(input: {
-  clientOperationId: string;
-  connectionKind: "arrow" | "line";
-  from: CanvasAgentShapeRow;
-  label: string | null;
-  to: CanvasAgentShapeRow;
-}): SyncCanvasShapesBatchRequest {
-  const shapeId = shapeIdFor("arrow");
-  const fromPoint = shapeConnectionPoint(input.from, "end");
-  const toPoint = shapeConnectionPoint(input.to, "start");
-  const geometry = connectionShapeGeometry(fromPoint, toPoint);
-  const text = cleanText(input.label);
-
-  return {
-    operations: [
-      {
-        type: "create",
-        shapeId,
-        clientOperationId: input.clientOperationId,
-        payload: {
-          id: shapeId,
-          parentShapeId: null,
-          shapeType: "arrow",
-          title: null,
-          textContent: text || null,
-          x: geometry.x,
-          y: geometry.y,
-          width: geometry.width,
-          height: geometry.height,
-          rotation: 0,
-          zIndex: 90,
-          rawShape: {
-            id: shapeId,
-            type: "arrow",
-            parentId: "page:page",
-            x: geometry.x,
-            y: geometry.y,
-            rotation: 0,
-            props: {
-              dash: "draw",
-              size: "m",
-              fill: "none",
-              color: "black",
-              labelColor: "black",
-              bend: 0,
-              start: { type: "point", x: geometry.start.x, y: geometry.start.y },
-              end: { type: "point", x: geometry.end.x, y: geometry.end.y },
-              arrowheadStart: "none",
-              arrowheadEnd: input.connectionKind === "line" ? "none" : "arrow",
-              richText: richText(text)
-            },
-            meta: {
-              piloCanvasAgent: true,
-              piloCanvasAgentConnection: {
-                fromShapeId: input.from.id,
-                toShapeId: input.to.id
-              },
-              [PILO_ARROW_BINDINGS_META_KEY]: createArrowBindingSnapshots(shapeId, input.from.id, input.to.id)
-            }
-          }
-        }
-      }
-    ]
-  };
-}
-
-function connectionShapeGeometry(
-  fromPoint: { x: number; y: number },
-  toPoint: { x: number; y: number }
-): {
-  end: { x: number; y: number };
-  height: number;
-  start: { x: number; y: number };
-  width: number;
-  x: number;
-  y: number;
-} {
-  const x = Math.min(fromPoint.x, toPoint.x);
-  const y = Math.min(fromPoint.y, toPoint.y);
-  const width = Math.max(1, Math.abs(toPoint.x - fromPoint.x));
-  const height = Math.max(1, Math.abs(toPoint.y - fromPoint.y));
-
-  return {
-    end: {
-      x: toPoint.x - x,
-      y: toPoint.y - y
-    },
-    height,
-    start: {
-      x: fromPoint.x - x,
-      y: fromPoint.y - y
-    },
-    width,
-    x,
-    y
-  };
 }
 
 function createArrowBindingSnapshots(
@@ -520,17 +421,6 @@ function connectionPoint(node: CanvasAgentDraftNode, side: "start" | "end"): { x
   return {
     x: side === "start" ? node.x : node.x + node.width,
     y: node.y + node.height / 2
-  };
-}
-
-function shapeConnectionPoint(shape: CanvasAgentShapeRow, side: "start" | "end"): { x: number; y: number } {
-  const x = Number(shape.x);
-  const y = Number(shape.y);
-  const width = Number(shape.width ?? 180);
-  const height = Number(shape.height ?? 100);
-  return {
-    x: side === "start" ? x : x + width,
-    y: y + height / 2
   };
 }
 
