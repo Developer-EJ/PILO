@@ -79,15 +79,21 @@ class FakeDatabase {
   }
 }
 
-const transcript = (id, distance) => ({
+const transcript = (id, distance, lexicalMatch = false) => ({
   id,
   meeting_report_id: REPORT_ID,
   started_at_ms: 1000,
   ended_at_ms: 2000,
   content: "다음 주로 미루기로 했습니다.",
-  distance
+  distance,
+  lexical_match: lexicalMatch
 });
-const activity = (id, distance, directlyReferenced = true) => ({
+const activity = (
+  id,
+  distance,
+  directlyReferenced = true,
+  lexicalMatch = false
+) => ({
   id,
   meeting_report_id: REPORT_ID,
   occurred_at: "2026-07-16T01:00:00.000Z",
@@ -95,7 +101,8 @@ const activity = (id, distance, directlyReferenced = true) => ({
   summary: "디자인 리뷰 일정을 다음 주로 변경했습니다.",
   content: "실제 사용자 활동: 디자인 리뷰 일정을 다음 주로 변경했습니다.",
   distance,
-  directly_referenced: directlyReferenced
+  directly_referenced: directlyReferenced,
+  lexical_match: lexicalMatch
 });
 
 const originalFetch = globalThis.fetch;
@@ -141,8 +148,27 @@ try {
   assert.match(database.queries[1].text, /meeting_report_activity_evidence_embedding_jobs/);
   assert.match(database.queries[0].text, />= \$6/);
   assert.equal(database.queries[0].values[5], 0.23);
+  assert.deepEqual(database.queries[0].values[6], ["일정", "미뤄졌어"]);
+  assert.match(database.queries[0].text, /unnest\(\$7::text\[\]\)/);
+  assert.match(database.queries[1].text, /unnest\(\$7::text\[\]\)/);
   assert.match(database.queries[2].text, /transcript\.embedding OPERATOR\(extensions\.<=>\) activity\.embedding <= \$3/);
   assert.equal(workspaceService.calls.length, 1);
+
+  const lexicalDatabase = new FakeDatabase({
+    transcripts: [transcript(TRANSCRIPT_ID, 0.9, true)],
+    activities: []
+  });
+  const lexicalSources = await new MeetingTranscriptRagService(
+    lexicalDatabase,
+    workspaceService
+  ).search(USER_ID, WORKSPACE_ID, {
+    query: "지뢰 관련 논의가 있었던 회의 내용을 알려줘"
+  });
+  assert.deepEqual(
+    lexicalSources.map((source) => source.sourceId),
+    [`transcript:${TRANSCRIPT_ID}`]
+  );
+  assert.deepEqual(lexicalDatabase.queries[0].values[6], ["지뢰"]);
 
   const thresholdFirstSources = await new MeetingTranscriptRagService(new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.78)],

@@ -448,11 +448,22 @@ class FakeMeetingService {
       workspaceId,
       query
     });
-    const reports = query.reportTitle
-      ? this.reports.filter(
-          (report) => report.title.toLowerCase() === query.reportTitle.toLowerCase()
-        )
-      : this.reports;
+    let reports = this.reports;
+    if (query.reportTitle) {
+      const normalizedTitle = query.reportTitle.toLowerCase();
+      const exactReports = this.reports.filter(
+        (report) => report.title.toLowerCase() === normalizedTitle
+      );
+      reports = exactReports.length > 0
+        ? exactReports
+        : this.reports.filter((report) => {
+            const title = report.title.toLowerCase();
+            if (!title.startsWith(normalizedTitle)) return false;
+            return [" ", ":", "：", "-", "–", "—", "|", "/", "·"].includes(
+              title.slice(normalizedTitle.length, normalizedTitle.length + 1)
+            );
+          });
+    }
     return {
       reports: reports.slice(0, query.limit ?? reports.length).map((report) =>
         toSummaryReport(report)
@@ -1991,7 +2002,7 @@ function errorCode(error) {
     minLength: 1,
     maxLength: 500,
     description:
-      "Agent 전용 MeetingReport 표시 제목 exact selector. 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+      "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
   });
   const input = tool.validateInput({ reportTitle: "  Backend meeting  " });
   const result = await tool.execute(context, input);
@@ -2003,6 +2014,26 @@ function errorCode(error) {
   assert.equal(result.outputSummary.reportTitle, "Backend meeting");
   assert.equal(result.outputSummary.count, 1);
   assert.deepEqual(meetingService.calls[0].query, input);
+}
+
+{
+  const { meetingService, registry } = createRegistry();
+  meetingService.reports = [
+    createReport({
+      title: "금요일 데일리 스크럼: 워커 분리, 배포/롤백 검토"
+    })
+  ];
+  const tool = registry.getDefinition("list_meeting_reports");
+  const result = await tool.execute(
+    context,
+    tool.validateInput({ reportTitle: "금요일 데일리 스크럼" })
+  );
+
+  assert.equal(result.outputSummary.count, 1);
+  assert.equal(
+    result.outputSummary.reports[0].title,
+    "금요일 데일리 스크럼: 워커 분리, 배포/롤백 검토"
+  );
 }
 
 {

@@ -319,3 +319,12 @@ role에는 state object read와 lockfile 생성·해제, 현재 Terraform state 
 - 추가 AWS 리소스 생성 또는 변경
 - 비용 발생 리소스 중지 또는 삭제
 - Terraform state remote backend 전환
+
+## 운영 도메인 전환
+
+`pilo.my` 운영 도메인 전환은
+[`production-domain-cutover-runbook.md`](./production-domain-cutover-runbook.md)를 따른다.
+Terraform plan에서 기존 data-plane, 네트워크, 서비스 리소스의 replacement가 없음을
+확인하고, 실제 apply, repository variable 변경, OAuth/GitHub provider 변경은 명시적
+승인을 받은 뒤에만 수행한다. canonical API는 `api.pilo.my`이고
+`api.dev.pilo.my`는 redirect하지 않고 계속 활성 상태로 유지한다.

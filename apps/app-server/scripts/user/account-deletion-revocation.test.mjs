@@ -10,6 +10,7 @@ const workspaceIds = [
   "22222222-2222-4222-8222-222222222222",
   "33333333-3333-4333-8333-333333333333"
 ];
+const ownerWorkspaceIds = [workspaceIds[1]];
 
 function createDatabase({ failCommit = false, sequence }) {
   const database = {
@@ -95,15 +96,36 @@ function createGoogleCalendar(sequence) {
   };
 }
 
-function createWorkspaceService(sequence, blockedWorkspaces = []) {
+function createWorkspaceService(
+  sequence,
+  blockedWorkspaces = [],
+  workspaceIdsToDelete = ownerWorkspaceIds
+) {
   return {
     sweepRequests: 0,
     async prepareOwnedWorkspacesForAccountDeletion() {
       sequence.push("workspace:prepared");
       return {
         blockedWorkspaces,
+        workspaceIdsToDelete:
+          blockedWorkspaces.length === 0 ? workspaceIdsToDelete : [],
         shouldRequestSweep: blockedWorkspaces.length === 0
       };
+    },
+    async scheduleOwnedWorkspacesForAccountDeletion(
+      _transaction,
+      targetUserId,
+      targetWorkspaceIds
+    ) {
+      assert.equal(targetUserId, userId);
+      assert.deepEqual(targetWorkspaceIds, workspaceIdsToDelete);
+      assert.ok(
+        targetWorkspaceIds.every(workspaceId =>
+          sequence.includes(`revocation:enqueued:${workspaceId}`)
+        ),
+        "Workspace deletion must be scheduled after revocation outbox enqueue"
+      );
+      sequence.push("workspace:scheduled");
     },
     requestDeletionSweep() {
       sequence.push("workspace:sweep");
@@ -139,6 +161,11 @@ test("계정 탈퇴 transaction은 Calendar 정리와 Workspace 삭제 준비를
   assert.ok(sequence.indexOf("calendar:locked") < sequence.indexOf("user:locked"));
   assert.ok(sequence.indexOf("workspace:prepared") < sequence.indexOf("calendar:cleaned"));
   assert.ok(sequence.indexOf("calendar:cleaned") < sequence.indexOf("transaction:commit"));
+  assert.ok(
+    sequence.indexOf(`revocation:enqueued:${ownerWorkspaceIds[0]}`) <
+      sequence.indexOf("workspace:scheduled")
+  );
+  assert.ok(sequence.indexOf("workspace:scheduled") < sequence.indexOf("transaction:commit"));
   assert.equal(
     database.statements.some((text) => text.includes("UPDATE user_sessions")),
     true
@@ -330,8 +357,13 @@ function createRaceUserService(database) {
     },
     {
       async prepareOwnedWorkspacesForAccountDeletion() {
-        return { blockedWorkspaces: [], shouldRequestSweep: false };
+        return {
+          blockedWorkspaces: [],
+          workspaceIdsToDelete: [],
+          shouldRequestSweep: false
+        };
       },
+      async scheduleOwnedWorkspacesForAccountDeletion() {},
       requestDeletionSweep() {}
     }
   );

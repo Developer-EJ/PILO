@@ -2741,6 +2741,13 @@ def _meeting_hybrid_content_query(
     )
     query = re.sub(r"\s+", " ", query).strip(" ,.:;")
     query = re.sub(r"^(?:인\s*)?(?:에서|의)\s*", "", query)
+    if re.fullmatch(
+        r"(?:(?:회의|미팅|회의록)\s*)?"
+        r"(?:내용|요약|요점|핵심|논의\s*사항|결정\s*사항|후속\s*작업)",
+        query,
+        flags=re.IGNORECASE,
+    ):
+        query = ""
     return query[:1000] if query else report_title.strip()[:1000]
 
 

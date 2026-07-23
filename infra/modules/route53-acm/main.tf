@@ -5,12 +5,18 @@ locals {
 resource "aws_acm_certificate" "cloudfront" {
   count = local.enabled ? 1 : 0
 
-  provider          = aws.us_east_1
-  domain_name       = var.frontend_domain_name
-  validation_method = "DNS"
+  provider                  = aws.us_east_1
+  domain_name               = var.frontend_domain_name
+  subject_alternative_names = var.frontend_subject_alternative_names
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
+
+    precondition {
+      condition     = !contains(var.frontend_subject_alternative_names, var.frontend_domain_name)
+      error_message = "frontend_domain_name must not also be a legacy frontend domain."
+    }
   }
 }
 
@@ -43,11 +49,17 @@ resource "aws_acm_certificate_validation" "cloudfront" {
 resource "aws_acm_certificate" "alb" {
   count = local.enabled ? 1 : 0
 
-  domain_name       = var.api_domain_name
-  validation_method = "DNS"
+  domain_name               = var.api_domain_name
+  subject_alternative_names = var.api_subject_alternative_names
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
+
+    precondition {
+      condition     = !contains(var.api_subject_alternative_names, var.api_domain_name)
+      error_message = "api_domain_name must not also be a legacy API domain."
+    }
   }
 }
 

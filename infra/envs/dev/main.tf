@@ -18,8 +18,19 @@ locals {
     ManagedBy   = "terraform"
   }
 
+  frontend_domains = var.create_dns_records ? concat(
+    [var.frontend_domain_name],
+    var.frontend_legacy_domain_names,
+  ) : []
+  api_domains = var.create_dns_records ? concat(
+    [var.api_domain_name],
+    var.api_legacy_domain_names,
+  ) : []
+
   frontend_domain = var.create_dns_records ? var.frontend_domain_name : ""
   api_domain      = var.create_dns_records ? var.api_domain_name : ""
+  frontend_origin = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
+  api_origin      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
 }
 
 data "aws_availability_zones" "available" {
@@ -27,6 +38,15 @@ data "aws_availability_zones" "available" {
 }
 
 data "aws_caller_identity" "current" {}
+
+resource "terraform_data" "dns_configuration" {
+  lifecycle {
+    precondition {
+      condition     = !var.create_dns_records || trimspace(var.hosted_zone_id) != ""
+      error_message = "hosted_zone_id must be set when create_dns_records is true."
+    }
+  }
+}
 
 module "terraform_state" {
   source = "../../modules/terraform-state"
@@ -59,10 +79,10 @@ module "s3" {
   source = "../../modules/s3"
 
   name_prefix = local.name_prefix
-  uploads_cors_allowed_origins = compact([
-    "http://localhost:3000",
-    local.frontend_domain == "" ? "" : "https://${local.frontend_domain}",
-  ])
+  uploads_cors_allowed_origins = concat(
+    ["http://localhost:3000"],
+    [for domain in local.frontend_domains : "https://${domain}"],
+  )
 }
 
 module "livekit_host" {
@@ -87,10 +107,12 @@ module "route53_acm" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  create_dns_records   = var.create_dns_records
-  hosted_zone_id       = var.hosted_zone_id
-  frontend_domain_name = var.frontend_domain_name
-  api_domain_name      = var.api_domain_name
+  create_dns_records                 = var.create_dns_records
+  hosted_zone_id                     = var.hosted_zone_id
+  frontend_domain_name               = var.frontend_domain_name
+  frontend_subject_alternative_names = var.frontend_legacy_domain_names
+  api_domain_name                    = var.api_domain_name
+  api_subject_alternative_names      = var.api_legacy_domain_names
 }
 
 module "cloudfront" {
@@ -100,8 +122,11 @@ module "cloudfront" {
   frontend_bucket_name        = module.s3.frontend_bucket_name
   frontend_bucket_arn         = module.s3.frontend_bucket_arn
   frontend_bucket_domain_name = module.s3.frontend_bucket_regional_domain_name
-  aliases                     = local.frontend_domain == "" ? [] : [local.frontend_domain]
+  aliases                     = local.frontend_domains
   acm_certificate_arn         = module.route53_acm.cloudfront_certificate_arn
+  canonical_frontend_origin   = local.frontend_origin
+  legacy_redirect_hostnames   = var.frontend_legacy_domain_names
+  legacy_redirect_status_code = var.frontend_legacy_redirect_status_code
 }
 
 module "ecr" {
@@ -237,8 +262,8 @@ module "ecs" {
         GITHUB_MANUAL_SYNC_COOLDOWN_SECONDS    = tostring(var.github_manual_sync_cooldown_seconds)
         GITHUB_MANUAL_SYNC_MAX_QUEUED_JOBS     = tostring(var.github_manual_sync_max_queued_jobs)
         SQS_WORKSPACE_INDEXING_QUEUE_URL       = module.sqs.workspace_indexing_queue_url
-        FRONTEND_URL                           = local.frontend_domain == "" ? "" : "https://${local.frontend_domain}"
-        API_PUBLIC_ORIGIN                      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        FRONTEND_URL                           = local.frontend_origin
+        API_PUBLIC_ORIGIN                      = local.api_origin
         API_BASE_PATH                          = "/api/v1"
         LIVEKIT_RECORDING_MODE                 = "room_audio_only"
         LIVEKIT_EGRESS_S3_PREFIX               = "recordings/meetings"
@@ -288,8 +313,8 @@ module "ecs" {
         DATABASE_POOL_IDLE_TIMEOUT_MS       = "10000"
         DATABASE_POOL_CONNECTION_TIMEOUT_MS = "5000"
         DATABASE_APPLICATION_NAME           = "pilo-dev-realtime-server"
-        APP_SERVER_URL                      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}/api/v1" : "https://${local.api_domain}/api/v1"
-        SOCKET_IO_CORS_ORIGIN               = local.frontend_domain == "" ? "*" : "https://${local.frontend_domain}"
+        APP_SERVER_URL                      = "${local.api_origin}/api/v1"
+        SOCKET_IO_CORS_ORIGIN               = local.frontend_origin == "" ? "*" : local.frontend_origin
       }
       secrets = module.secrets.realtime_server_ecs_secrets
     }
@@ -320,13 +345,13 @@ module "ecs" {
         LEGACY_AGENT_DRAIN_ENABLED                = tostring(var.legacy_agent_drain_enabled)
         }, var.legacy_meeting_drain_enabled ? {
         S3_RECORDINGS_BUCKET                 = module.s3.uploads_bucket_name
-        MEETING_REPORT_EVENT_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_BASE_URL        = local.api_origin
         MEETING_REPORT_EVENT_TIMEOUT_SECONDS = "10"
         MEETING_REPORT_EVENT_MAX_ATTEMPTS    = "3"
         OPENAI_STT_MODEL                     = "whisper-1"
         OPENAI_MEETING_REPORT_MODEL          = "gpt-5.4-mini"
         } : {}, var.legacy_agent_drain_enabled ? {
-        AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        AGENT_EXECUTION_HANDOFF_BASE_URL        = local.api_origin
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS = tostring(local.agent_handoff_timeout_seconds)
       } : {})
       secrets = merge(
@@ -350,7 +375,7 @@ module "ecs" {
         AWS_REGION                                 = var.aws_region
         DATABASE_SSL                               = "true"
         SQS_AGENT_JOBS_QUEUE_URL                   = module.sqs.agent_jobs_queue_url
-        AGENT_EXECUTION_HANDOFF_BASE_URL           = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        AGENT_EXECUTION_HANDOFF_BASE_URL           = local.api_origin
         AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS    = tostring(local.agent_handoff_timeout_seconds)
         OPENAI_AGENT_PLANNER_TIMEOUT_MS            = tostring(local.agent_planner_timeout_ms)
         OPENAI_AGENT_ROUTER_TIMEOUT_MS             = tostring(local.agent_router_timeout_ms)
@@ -377,7 +402,7 @@ module "ecs" {
         DATABASE_SSL                             = "true"
         S3_RECORDINGS_BUCKET                     = module.s3.uploads_bucket_name
         SQS_MEETING_JOBS_QUEUE_URL               = module.sqs.meeting_jobs_queue_url
-        MEETING_REPORT_EVENT_BASE_URL            = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        MEETING_REPORT_EVENT_BASE_URL            = local.api_origin
         MEETING_REPORT_EVENT_TIMEOUT_SECONDS     = "10"
         MEETING_REPORT_EVENT_MAX_ATTEMPTS        = "3"
         OPENAI_STT_MODEL                         = "whisper-1"
@@ -401,7 +426,7 @@ module "ecs" {
         APP_ENV                                    = var.environment
         AWS_REGION                                 = var.aws_region
         SQS_PR_REVIEW_ANALYSIS_QUEUE_URL           = module.sqs.pr_review_analysis_queue_url
-        PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL        = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        PR_REVIEW_ANALYSIS_HANDOFF_BASE_URL        = local.api_origin
         PR_REVIEW_ANALYSIS_HANDOFF_TIMEOUT_SECONDS = "10"
         OPENAI_PR_REVIEW_MODEL                     = "gpt-5.5"
         OPENAI_PR_REVIEW_TIMEOUT_MS                = "180000"
@@ -450,7 +475,7 @@ module "ecs" {
         DATABASE_POOL_IDLE_TIMEOUT_MS       = "10000"
         DATABASE_POOL_CONNECTION_TIMEOUT_MS = "5000"
         DATABASE_APPLICATION_NAME           = "pilo-dev-github-sync-worker"
-        API_PUBLIC_ORIGIN                   = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
+        API_PUBLIC_ORIGIN                   = local.api_origin
         SQS_GITHUB_WEBHOOKS_QUEUE_URL       = module.sqs.github_webhooks_queue_url
         SQS_GITHUB_SYNC_JOBS_QUEUE_URL      = module.sqs.github_sync_jobs_queue_url
       }
@@ -505,11 +530,16 @@ module "pr_review_observability" {
   name_prefix = local.name_prefix
 }
 
+moved {
+  from = aws_route53_record.frontend[0]
+  to   = aws_route53_record.frontend["dev.pilo.my"]
+}
+
 resource "aws_route53_record" "frontend" {
-  count = var.create_dns_records ? 1 : 0
+  for_each = toset(local.frontend_domains)
 
   zone_id = var.hosted_zone_id
-  name    = var.frontend_domain_name
+  name    = each.value
   type    = "A"
 
   allow_overwrite = true
@@ -521,11 +551,16 @@ resource "aws_route53_record" "frontend" {
   }
 }
 
+moved {
+  from = aws_route53_record.api[0]
+  to   = aws_route53_record.api["api.dev.pilo.my"]
+}
+
 resource "aws_route53_record" "api" {
-  count = var.create_dns_records ? 1 : 0
+  for_each = toset(local.api_domains)
 
   zone_id = var.hosted_zone_id
-  name    = var.api_domain_name
+  name    = each.value
   type    = "A"
 
   allow_overwrite = true
