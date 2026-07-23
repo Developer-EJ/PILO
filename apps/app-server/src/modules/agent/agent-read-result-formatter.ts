@@ -876,7 +876,10 @@ function formatMeetingReportList(
   for (const report of displayedReports) {
     const createdAt = formatIsoDateTime(report.createdAt, input.timezone);
     const status = formatMeetingStatus(report.status);
-    answer.push(`- ${createdAt ? `${createdAt} · ` : ""}${status}`);
+    const title = readString(report.title) ?? "제목 없음";
+    answer.push(
+      `- ${title}${createdAt ? ` · ${createdAt}` : ""} · ${status}`
+    );
 
     if (readString(report.status) === "FAILED") {
       answer.push(`  ${formatUnavailableMeetingReport(report)}`);
@@ -907,8 +910,9 @@ function formatMeetingReportDetail(
 
   const createdAt = formatIsoDateTime(report.createdAt, input.timezone);
   const status = formatMeetingStatus(report.status);
+  const title = readString(report.title) ?? "제목 없음";
   const answer = [
-    `회의록${createdAt ? ` · ${createdAt}` : ""} · ${status}`
+    `회의록 · ${title}${createdAt ? ` · ${createdAt}` : ""} · ${status}`
   ];
   const selection = selectMeetingSections(input.prompt);
   const sectionKeys = selection.explicit

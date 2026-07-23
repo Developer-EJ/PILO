@@ -1078,9 +1078,9 @@ def test_agent_repository_builds_bounded_chronological_context() -> None:
     timeline_query, timeline_values = connection.executed[-1]
     assert "UNION ALL" in timeline_query
     assert "ORDER BY occurred_at DESC" in timeline_query
-    assert "LIMIT 17" in timeline_query
+    assert "LIMIT 25" in timeline_query
     assert "ORDER BY occurred_at ASC" in timeline_query
-    assert timeline_values == (job.run_id, job.run_id)
+    assert timeline_values == (job.run_id, job.run_id, job.run_id)
 
 
 def test_agent_repository_uses_only_latest_user_message_as_resumed_turn_security_source() -> None:
