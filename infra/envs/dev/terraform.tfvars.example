@@ -10,6 +10,8 @@ frontend_legacy_domain_names         = ["dev.pilo.my"]
 api_domain_name                      = "api.pilo.my"
 api_legacy_domain_names              = ["api.dev.pilo.my"]
 frontend_legacy_redirect_status_code = 302
+# Before planning, set hosted_zone_id to the existing pilo.my Route53 hosted-zone ID.
+# The empty value is intentional and is not runnable.
 hosted_zone_id                       = ""
 
 # Dev keeps NAT disabled. ECS tasks run in public subnets with public IPs.

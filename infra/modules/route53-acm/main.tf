@@ -12,6 +12,11 @@ resource "aws_acm_certificate" "cloudfront" {
 
   lifecycle {
     create_before_destroy = true
+
+    precondition {
+      condition     = !contains(var.frontend_subject_alternative_names, var.frontend_domain_name)
+      error_message = "frontend_domain_name must not also be a legacy frontend domain."
+    }
   }
 }
 
@@ -50,6 +55,11 @@ resource "aws_acm_certificate" "alb" {
 
   lifecycle {
     create_before_destroy = true
+
+    precondition {
+      condition     = !contains(var.api_subject_alternative_names, var.api_domain_name)
+      error_message = "api_domain_name must not also be a legacy API domain."
+    }
   }
 }
 

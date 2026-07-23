@@ -22,20 +22,6 @@ locals {
   api_origin      = local.api_domain == "" ? "http://${module.alb.alb_dns_name}" : "https://${local.api_domain}"
 }
 
-check "frontend_domain_names_are_distinct" {
-  assert {
-    condition     = !contains(var.frontend_legacy_domain_names, var.frontend_domain_name)
-    error_message = "frontend_domain_name must not also be a legacy frontend domain."
-  }
-}
-
-check "api_domain_names_are_distinct" {
-  assert {
-    condition     = !contains(var.api_legacy_domain_names, var.api_domain_name)
-    error_message = "api_domain_name must not also be a legacy API domain."
-  }
-}
-
 data "aws_availability_zones" "available" {
   state = "available"
 }

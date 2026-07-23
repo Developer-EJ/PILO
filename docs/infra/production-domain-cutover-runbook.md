@@ -22,6 +22,12 @@
 아래 표는 승인 뒤 사용할 목표값이다. 이 단계에서는 현재값 조회, 기록 또는 실제
 변경을 수행하지 않는다.
 
+전환 전 internal PR plan에서는 새 legacy/redirect repository variable이 등록되지 않으면
+각각 `[]`, `[]`, `302` bootstrap 기본값을 사용해 현재 single-host 구성을 모델링한다.
+실제 전환 plan은 2절의 일곱 CLI `-var` 값으로만 전환 도메인 입력을 고정한다.
+인프라 health 성공 뒤에는 canonical `TF_PLAN_*` 값을 먼저 등록하고, runtime `NEXT_PUBLIC_*`
+값을 등록한 다음에만 Frontend 재배포를 시작한다.
+
 | 이름 | 승인 후 설정할 값 |
 | --- | --- |
 | `NEXT_PUBLIC_PILO_APP_SERVER_URL` | `https://api.pilo.my` |
@@ -110,23 +116,65 @@ dual-callback staging은 사용하지 않는다. 승인 뒤 다음 순서를 바
 
    ```powershell
    terraform -chdir=infra/envs/dev apply tfplan-domain-cutover
+   if ($LASTEXITCODE -ne 0) { throw "terraform apply failed; 8절 rollback 경계로 이동" }
+
+   $ecsClusterName = terraform -chdir=infra/envs/dev output -raw ecs_cluster_name
+   if ($LASTEXITCODE -ne 0) { throw "ecs_cluster_name output failed; 8절 rollback 경계로 이동" }
+
+   $ecsServiceNamesJson = terraform -chdir=infra/envs/dev output -json ecs_service_names
+   if ($LASTEXITCODE -ne 0) { throw "ecs_service_names output failed; 8절 rollback 경계로 이동" }
+
+   try {
+     $ecsServiceNames = $ecsServiceNamesJson | ConvertFrom-Json -ErrorAction Stop
+   } catch {
+     throw "ecs_service_names output parsing failed; 8절 rollback 경계로 이동"
+   }
+
+   $affectedEcsServices = @(
+     $ecsServiceNames.'app-server'
+     $ecsServiceNames.'realtime-server'
+     $ecsServiceNames.'ai-worker'
+     $ecsServiceNames.'agent-worker'
+     $ecsServiceNames.'meeting-worker'
+     $ecsServiceNames.'pr-review-ai-worker'
+     $ecsServiceNames.'github-sync-worker'
+   )
+   if (
+     $affectedEcsServices.Count -ne 7 -or
+     @($affectedEcsServices | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -ne 0
+   ) {
+     throw "affected ECS service output resolution failed; 8절 rollback 경계로 이동"
+   }
+
+   aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices
+   if ($LASTEXITCODE -ne 0) { throw "ECS services-stable waiter failed; 8절 rollback 경계로 이동" }
    ```
 
+   Terraform output 해석과 일곱 서비스의 ECS `services-stable` waiter가 모두 성공한
+   뒤에만 다음 health/login 검증으로 이동한다.
 4. canonical/legacy API health와 login callback을 즉시 검증한다.
 
    ```powershell
    curl.exe -I https://pilo.my
+   if ($LASTEXITCODE -ne 0) { throw "canonical frontend health failed; 8절 rollback 경계로 이동" }
+
    curl.exe -I "https://dev.pilo.my/path?query=value"
+   if ($LASTEXITCODE -ne 0) { throw "legacy frontend health failed; 8절 rollback 경계로 이동" }
+
    curl.exe https://api.pilo.my/api/v1/health
+   if ($LASTEXITCODE -ne 0) { throw "canonical API health failed; 8절 rollback 경계로 이동" }
+
    curl.exe https://api.dev.pilo.my/api/v1/health
+   if ($LASTEXITCODE -ne 0) { throw "legacy API health failed; 8절 rollback 경계로 이동" }
    ```
 
    `pilo.my`의 TLS와 응답이 정상이어야 한다. `dev.pilo.my` 응답은 `302`이고
    `Location`은 정확히 `https://pilo.my/path?query=value`여야 한다. canonical과
    legacy API health가 모두 성공하고 legacy API가 redirect하지 않아야 한다.
    Google/GitHub login을 각각 실행해 canonical callback과 세션 생성을 확인한다.
-   apply 또는 health/login 검증이 실패하면 변경한 모든 callback을 기록한 legacy
-   callback 값으로 역순 복원하고 복원 결과를 검증한 뒤 8절 rollback 경계로 이동한다.
+   apply, Terraform output 해석, ECS services-stable waiter 또는 health/login 검증이 실패하면
+   변경한 모든 callback을 기록한 legacy callback 값으로 역순 복원하고 복원 결과를 검증한
+   뒤 8절 rollback 경계로 이동한다.
 5. canonical API health 성공 이후에만 GitHub App webhook을 canonical 값으로 변경한다. GitHub App webhook 저장과 test delivery가 모두 성공해야 다음 단계로 이동한다. GitHub App webhook 저장 또는 test delivery가 실패하면 이전 webhook을 즉시 복원하고 복원 test delivery를 확인한 뒤 8절 rollback 경계로 이동한다. 이 경우 repository variables는 변경하지 않는다.
 6. repository variables를 1절의 값으로 변경한다. 각 variable은 하나씩 업데이트한다. repository variable 업데이트가 실패하면 지금까지 변경한 variable을 기록한 값으로 변경의 역순으로 모두 복원하고 8절 rollback 경계로 이동한다. 이 경우 서비스와 Frontend를 배포하지 않는다. 모든 업데이트가 성공한 뒤에만 6절 순서로 재배포한다.
 

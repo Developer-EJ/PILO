@@ -112,29 +112,33 @@ function verifyWorkflowContract(candidateWorkflow) {
       'frontend legacy domains',
       'TF_VAR_frontend_legacy_domain_names',
       'TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES',
+      '[]',
     ],
     [
       'API legacy domains',
       'TF_VAR_api_legacy_domain_names',
       'TF_PLAN_API_LEGACY_DOMAIN_NAMES',
+      '[]',
     ],
     [
       'frontend legacy redirect status',
       'TF_VAR_frontend_legacy_redirect_status_code',
       'TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE',
+      '302',
     ],
   ];
 
-  for (const [name, variableName, repositoryVariable] of planMappings) {
-    assert.match(
-      planJob,
-      new RegExp(`${variableName}:\\s*\\$\\{\\{ vars\\.${repositoryVariable} \\}\\}`),
-      `Plan job must map the ${name} Terraform input from its repository variable.`,
+  for (const [name, variableName, repositoryVariable, bootstrapDefault] of planMappings) {
+    const exactMapping =
+      `${variableName}: \${{ vars.${repositoryVariable} || '${bootstrapDefault}' }}`;
+    assert.ok(
+      planJob.includes(exactMapping),
+      `Plan job must map the ${name} Terraform input with its exact safe bootstrap default.`,
     );
-    assert.match(
+    assert.doesNotMatch(
       requiredInputs,
       new RegExp(`^[ \\t]+${variableName}\\s*$`, 'm'),
-      `Plan job required_inputs must include ${variableName}.`,
+      `Plan job required_inputs must not include bootstrap input ${variableName}.`,
     );
   }
 }
@@ -207,6 +211,21 @@ function verifyDocumentationContract(candidateDocuments) {
   );
 
   const repositoryVariables = extractMarkdownSection(candidateRunbook, '1. Repository variables 준비');
+  assert.match(
+    repositoryVariables,
+    /전환 전 internal PR plan[\s\S]*등록되지 않으면[\s\S]*`\[\]`, `\[\]`, `302`/,
+    'The runbook must document the pre-cutover PR plan bootstrap defaults.',
+  );
+  assert.match(
+    repositoryVariables,
+    /실제 전환 plan[\s\S]*일곱 CLI `-var`/,
+    'The runbook must distinguish the seven explicit real-cutover CLI overrides.',
+  );
+  assert.match(
+    repositoryVariables,
+    /인프라 health 성공[\s\S]*canonical `TF_PLAN_\*`[\s\S]*runtime `NEXT_PUBLIC_\*`[\s\S]*Frontend 재배포/,
+    'The runbook must order canonical plan variables before runtime variables and redeployment.',
+  );
   assert.match(
     repositoryVariables,
     /\| `NEXT_PUBLIC_PILO_APP_SERVER_URL` \| `https:\/\/api\.pilo\.my` \|/,
@@ -368,6 +387,15 @@ function verifyDocumentationContract(candidateDocuments) {
       '현재 provider/repository 값을 rollback 기록에 남긴다',
       providerMutationAction,
       'terraform -chdir=infra/envs/dev apply tfplan-domain-cutover',
+      '$ecsClusterName = terraform -chdir=infra/envs/dev output -raw ecs_cluster_name',
+      "$ecsServiceNames.'app-server'",
+      "$ecsServiceNames.'realtime-server'",
+      "$ecsServiceNames.'ai-worker'",
+      "$ecsServiceNames.'agent-worker'",
+      "$ecsServiceNames.'meeting-worker'",
+      "$ecsServiceNames.'pr-review-ai-worker'",
+      "$ecsServiceNames.'github-sync-worker'",
+      'aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices',
       'canonical/legacy API health와 login callback을 즉시 검증한다',
       'GitHub App webhook을 canonical 값으로 변경한다',
       repositoryMutationAction,
@@ -397,8 +425,42 @@ function verifyDocumentationContract(candidateDocuments) {
   );
   assert.match(
     maintenanceCutover,
-    /apply 또는 health\/login 검증이 실패[\s\S]*legacy\s+callback[\s\S]*rollback 경계/,
+    /apply, Terraform output 해석, ECS services-stable waiter 또는 health\/login 검증이 실패[\s\S]*legacy\s+callback[\s\S]*rollback 경계/,
   );
+  assert.match(
+    maintenanceCutover,
+    /terraform -chdir=infra\/envs\/dev apply tfplan-domain-cutover\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/,
+    'The runbook must check the native Terraform apply exit code.',
+  );
+  assert.match(
+    maintenanceCutover,
+    /terraform -chdir=infra\/envs\/dev output -raw ecs_cluster_name\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/,
+    'The runbook must check the native Terraform cluster-output exit code.',
+  );
+  assert.match(
+    maintenanceCutover,
+    /terraform -chdir=infra\/envs\/dev output -json ecs_service_names\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/,
+    'The runbook must check the native Terraform service-output exit code.',
+  );
+  assert.match(
+    maintenanceCutover,
+    /aws ecs wait services-stable --cluster \$ecsClusterName --services \$affectedEcsServices\r?\n\s*if \(\$LASTEXITCODE -ne 0\)/,
+    'The runbook must check the native ECS waiter exit code.',
+  );
+  for (const [healthCommand, failureMessage] of [
+    ['curl.exe -I https://pilo.my', 'canonical frontend health'],
+    ['curl.exe -I "https://dev.pilo.my/path?query=value"', 'legacy frontend health'],
+    ['curl.exe https://api.pilo.my/api/v1/health', 'canonical API health'],
+    ['curl.exe https://api.dev.pilo.my/api/v1/health', 'legacy API health'],
+  ]) {
+    assert.match(
+      maintenanceCutover,
+      new RegExp(
+        `${healthCommand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n\\s*if \\(\\$LASTEXITCODE -ne 0\\)`,
+      ),
+      `The runbook must check the native ${failureMessage} command exit code.`,
+    );
+  }
   assert.match(
     maintenanceCutover,
     /canonical API health 성공 이후[\s\S]*GitHub App webhook[\s\S]*repository variables[\s\S]*재배포/,
@@ -504,6 +566,16 @@ function verifyDocumentationContract(candidateDocuments) {
     candidateSecrets,
     'GitHub Actions Variables',
   );
+  assert.match(
+    githubActionsVariables,
+    /전환 전 internal PR plan[\s\S]*등록되지 않으면[\s\S]*`\[\]`, `\[\]`, `302`/,
+    'The repository-variable guide must document the PR-plan bootstrap defaults.',
+  );
+  assert.match(
+    githubActionsVariables,
+    /실제 전환 plan[\s\S]*일곱 CLI `-var`[\s\S]*인프라 health 성공[\s\S]*canonical `TF_PLAN_\*`[\s\S]*runtime `NEXT_PUBLIC_\*`[\s\S]*Frontend 재배포/,
+    'The repository-variable guide must distinguish bootstrap, cutover, and post-health registration.',
+  );
   for (const repositoryVariable of [
     ['TF_PLAN_DOMAIN_NAME', 'pilo\\.my'],
     ['TF_PLAN_FRONTEND_DOMAIN_NAME', 'pilo\\.my'],
@@ -544,25 +616,40 @@ function verifyProductionDomainCutoverContract(candidateSources) {
     'api_domains must concatenate the canonical domain before all legacy domains.',
   );
 
-  const frontendInvariant = extractBlock(
+  assert.doesNotMatch(
     candidateDevMain,
-    'check "frontend_domain_names_are_distinct" {',
+    /check\s+"(?:frontend|api)_domain_names_are_distinct"\s*\{/,
+    'Canonical/legacy distinctness must not use advisory root check blocks.',
   );
+
+  const cloudfrontCertificate = extractBlock(
+    candidateAcmMain,
+    'resource "aws_acm_certificate" "cloudfront" {',
+  );
+  const cloudfrontLifecycle = extractBlock(cloudfrontCertificate, 'lifecycle {');
+  assert.match(cloudfrontLifecycle, /create_before_destroy\s*=\s*true/);
+  const frontendInvariant = extractBlock(cloudfrontLifecycle, 'precondition {');
   assert.match(
     frontendInvariant,
-    /condition\s*=\s*!contains\(var\.frontend_legacy_domain_names,\s*var\.frontend_domain_name\)/,
-    'frontend canonical/legacy invariant must reject the canonical domain in the legacy list.',
+    /condition\s*=\s*!contains\(var\.frontend_subject_alternative_names,\s*var\.frontend_domain_name\)/,
+    'CloudFront certificate must block the canonical frontend domain in its SAN list.',
   );
   assert.match(
     frontendInvariant,
     /error_message\s*=\s*"frontend_domain_name must not also be a legacy frontend domain\."/,
   );
 
-  const apiInvariant = extractBlock(candidateDevMain, 'check "api_domain_names_are_distinct" {');
+  const albCertificate = extractBlock(
+    candidateAcmMain,
+    'resource "aws_acm_certificate" "alb" {',
+  );
+  const albLifecycle = extractBlock(albCertificate, 'lifecycle {');
+  assert.match(albLifecycle, /create_before_destroy\s*=\s*true/);
+  const apiInvariant = extractBlock(albLifecycle, 'precondition {');
   assert.match(
     apiInvariant,
-    /condition\s*=\s*!contains\(var\.api_legacy_domain_names,\s*var\.api_domain_name\)/,
-    'API canonical/legacy invariant must reject the canonical domain in the legacy list.',
+    /condition\s*=\s*!contains\(var\.api_subject_alternative_names,\s*var\.api_domain_name\)/,
+    'ALB certificate must block the canonical API domain in its SAN list.',
   );
   assert.match(
     apiInvariant,
@@ -785,6 +872,12 @@ function verifyProductionDomainCutoverContract(candidateSources) {
     /^api_legacy_domain_names\s*=\s*\["api\.dev\.pilo\.my"\]$/m,
   );
   assert.match(candidateTfvarsExample, /^frontend_legacy_redirect_status_code\s*=\s*302$/m);
+  assert.match(candidateTfvarsExample, /^create_dns_records\s*=\s*true$/m);
+  assert.match(
+    candidateTfvarsExample,
+    /^# Before planning, set hosted_zone_id to the existing pilo\.my Route53 hosted-zone ID\.\r?\n# The empty value is intentional and is not runnable\.\r?\nhosted_zone_id\s*=\s*""$/m,
+    'The tfvars example must state the pilo.my hosted-zone prerequisite next to the empty value.',
+  );
 
   const ecsModule = extractBlock(candidateDevMain, 'module "ecs" {');
   assert.match(ecsModule, /subnet_ids\s*=\s*module\.network\.public_subnet_ids/);
@@ -845,12 +938,58 @@ expectMutationRejected({
 
 expectMutationRejected({
   name: 'missing frontend canonical/legacy invariant',
-  sourceName: 'devMain',
+  sourceName: 'acmMain',
   mutate: (source) => source.replace(
-    '    condition     = !contains(var.frontend_legacy_domain_names, var.frontend_domain_name)',
+    '      condition     = !contains(var.frontend_subject_alternative_names, var.frontend_domain_name)',
     '    condition     = true',
   ),
-  expectedFailure: /frontend canonical\/legacy invariant/,
+  expectedFailure: /CloudFront certificate must block the canonical frontend domain/,
+});
+
+expectMutationRejected({
+  name: 'missing API canonical/legacy blocking precondition',
+  sourceName: 'acmMain',
+  mutate: (source) => source.replace(
+    '      condition     = !contains(var.api_subject_alternative_names, var.api_domain_name)',
+    '      condition     = true',
+  ),
+  expectedFailure: /ALB certificate must block the canonical API domain/,
+});
+
+expectMutationRejected({
+  name: 'blocking precondition replaced with an advisory root check',
+  sourceName: 'devMain',
+  mutate: (source) => source.replace(
+    'data "aws_availability_zones" "available" {',
+    [
+      'check "frontend_domain_names_are_distinct" {',
+      '  assert {',
+      '    condition     = !contains(var.frontend_legacy_domain_names, var.frontend_domain_name)',
+      '    error_message = "frontend_domain_name must not also be a legacy frontend domain."',
+      '  }',
+      '}',
+      '',
+      'data "aws_availability_zones" "available" {',
+    ].join('\n'),
+  ),
+  expectedFailure: /must not use advisory root check blocks/,
+});
+
+expectMutationRejected({
+  name: 'hosted-zone prerequisite removed with a distant decoy',
+  sourceName: 'tfvarsExample',
+  mutate: (source) => source
+    .replace(
+      [
+        '# Before planning, set hosted_zone_id to the existing pilo.my Route53 hosted-zone ID.',
+        '# The empty value is intentional and is not runnable.',
+      ].join('\n'),
+      '# Set the hosted zone when available.',
+    )
+    .concat(
+      '\n# Before planning, set hosted_zone_id to the existing pilo.my Route53 hosted-zone ID.\n# The empty value is intentional and is not runnable.\n',
+    ),
+  expectedFailure: /must state the pilo\.my hosted-zone prerequisite next to the empty value/,
 });
 
 expectMutationRejected({
@@ -900,23 +1039,53 @@ expectWorkflowMutationRejected({
 });
 
 expectWorkflowMutationRejected({
-  name: 'plan mapping moved to the validation job as a decoy',
+  name: 'safe bootstrap default removed with a validation-job decoy',
   mutate: (source) => source
     .replace(
+      "      TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES || '[]' }}\n",
       '      TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES }}\n',
-      '',
     )
     .replace(
       '\n  plan:\n',
-      '\n    # TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES }}\n\n  plan:\n',
+      "\n    # TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES || '[]' }}\n\n  plan:\n",
     ),
-  expectedFailure: /Plan job must map the frontend legacy domains Terraform input/,
+  expectedFailure: /Plan job must map the frontend legacy domains Terraform input with its exact safe bootstrap default/,
 });
 
 expectWorkflowMutationRejected({
-  name: 'required input removed while its plan mapping remains as a decoy',
-  mutate: (source) => source.replace('            TF_VAR_api_legacy_domain_names\n', ''),
-  expectedFailure: /Plan job required_inputs must include TF_VAR_api_legacy_domain_names/,
+  name: 'API bootstrap list default changed to invalid Terraform syntax',
+  mutate: (source) => source.replace(
+    "      TF_VAR_api_legacy_domain_names: ${{ vars.TF_PLAN_API_LEGACY_DOMAIN_NAMES || '[]' }}",
+    "      TF_VAR_api_legacy_domain_names: ${{ vars.TF_PLAN_API_LEGACY_DOMAIN_NAMES || '' }}",
+  ),
+  expectedFailure: /Plan job must map the API legacy domains Terraform input with its exact safe bootstrap default/,
+});
+
+expectWorkflowMutationRejected({
+  name: 'redirect bootstrap default changed from a Terraform number string',
+  mutate: (source) => source.replace(
+    "      TF_VAR_frontend_legacy_redirect_status_code: ${{ vars.TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE || '302' }}",
+    "      TF_VAR_frontend_legacy_redirect_status_code: ${{ vars.TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE || 'temporary' }}",
+  ),
+  expectedFailure: /Plan job must map the frontend legacy redirect status Terraform input with its exact safe bootstrap default/,
+});
+
+expectWorkflowMutationRejected({
+  name: 'bootstrap input accidentally restored to required inputs',
+  mutate: (source) => source.replace(
+    '            TF_VAR_api_domain_name\n',
+    '            TF_VAR_api_domain_name\n            TF_VAR_api_legacy_domain_names\n',
+  ),
+  expectedFailure: /Plan job required_inputs must not include bootstrap input TF_VAR_api_legacy_domain_names/,
+});
+
+expectWorkflowMutationRejected({
+  name: 'safe bootstrap mapping removed from the plan job',
+  mutate: (source) => source.replace(
+      "      TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES || '[]' }}\n",
+      '',
+    ),
+  expectedFailure: /Plan job must map the frontend legacy domains Terraform input with its exact safe bootstrap default/,
 });
 
 function expectDocumentationMutationRejected({
@@ -977,6 +1146,35 @@ expectDocumentationMutationRejected({
     .replace("  -var 'create_dns_records=true' `\n", '')
     .concat('\n<!-- -var \'create_dns_records=true\' -->\n'),
   expectedFailure: /saved plan command must contain all exact high-precedence cutover arguments/i,
+});
+
+expectDocumentationMutationRejected({
+  name: 'ECS waiter removed with an out-of-section decoy',
+  documentName: 'runbook',
+  mutate: (source) => source
+    .replace(
+      '   aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices\n',
+      '',
+    )
+    .concat(
+      '\n<!-- aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices -->\n',
+    ),
+  expectedFailure: /approved maintenance-window cutover steps/i,
+});
+
+expectDocumentationMutationRejected({
+  name: 'ECS waiter moved after health and login checks',
+  documentName: 'runbook',
+  mutate: (source) => source
+    .replace(
+      '   aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices\n',
+      '',
+    )
+    .replace(
+      '5. canonical API health 성공 이후에만',
+      '   aws ecs wait services-stable --cluster $ecsClusterName --services $affectedEcsServices\n\n5. canonical API health 성공 이후에만',
+    ),
+  expectedFailure: /approved maintenance-window cutover steps/i,
 });
 
 expectDocumentationMutationRejected({
