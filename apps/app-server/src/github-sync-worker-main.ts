@@ -11,20 +11,28 @@ async function bootstrap(): Promise<void> {
   const worker = app.get(GithubSyncJobService);
   const observability = app.get(GithubSyncObservabilityService);
   let stopping = false;
-  const stop = () => { stopping = true; };
+  const stopSignal = new AbortController();
+  const stop = () => {
+    stopping = true;
+    stopSignal.abort();
+  };
   process.on("SIGTERM", stop); process.on("SIGINT", stop);
   await Promise.all([
     runGithubSyncWorkerLoop(
       "sync_jobs",
       () => worker.pollSyncJobQueueOnce(),
       observability,
-      () => stopping
+      () => stopping,
+      undefined,
+      stopSignal.signal
     ),
     runGithubSyncWorkerLoop(
       "webhooks",
       () => worker.pollWebhookQueueOnce(),
       observability,
-      () => stopping
+      () => stopping,
+      undefined,
+      stopSignal.signal
     )
   ]);
   await app.close();

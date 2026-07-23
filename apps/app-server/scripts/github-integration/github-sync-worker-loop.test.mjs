@@ -17,6 +17,84 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+async function nextTick() {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+{
+  let stopping = false;
+  let waitCalls = 0;
+
+  await runGithubSyncWorkerLoop(
+    "sync_jobs",
+    async () => {
+      stopping = true;
+      throw new Error("poll failed while shutdown was requested");
+    },
+    {
+      emitWorkerPollRetry() {}
+    },
+    () => stopping,
+    async () => {
+      waitCalls += 1;
+    }
+  );
+
+  assert.equal(
+    waitCalls,
+    0,
+    "the worker must not start retry backoff after stop was requested during a failed poll"
+  );
+}
+
+{
+  const stopSignal = new AbortController();
+  let stopping = false;
+  let retryWaitResolve;
+  let retryWaitStarted = false;
+
+  const loop = runGithubSyncWorkerLoop(
+    "sync_jobs",
+    async () => {
+      throw new Error("poll failed before shutdown");
+    },
+    {
+      emitWorkerPollRetry() {}
+    },
+    () => stopping,
+    async (_milliseconds, signal) => {
+      retryWaitStarted = true;
+      return new Promise((resolve) => {
+        retryWaitResolve = resolve;
+        signal?.addEventListener("abort", resolve, { once: true });
+      });
+    },
+    stopSignal.signal
+  );
+
+  await nextTick();
+
+  assert.equal(retryWaitStarted, true);
+  stopping = true;
+  stopSignal.abort();
+
+  const settled = await Promise.race([
+    loop.then(() => true),
+    nextTick().then(() => false)
+  ]);
+
+  if (!settled) {
+    retryWaitResolve();
+    await loop;
+  }
+
+  assert.equal(
+    settled,
+    true,
+    "the worker must interrupt retry backoff when stop is requested"
+  );
+}
+
 {
   const syncFirstPoll = deferred();
   const webhookFirstPoll = deferred();
@@ -97,14 +175,14 @@ function deferred() {
     () => webhookStopping
   );
 
-  await new Promise((resolve) => setImmediate(resolve));
+  await nextTick();
 
   assert.equal(syncMaxActive, 1);
   assert.equal(webhookMaxActive, 1);
   assert.equal(combinedActive, 2);
 
   syncFirstPoll.resolve();
-  await new Promise((resolve) => setImmediate(resolve));
+  await nextTick();
 
   assert.deepEqual(observerCalls, [{
     queueKind: "sync_jobs",
