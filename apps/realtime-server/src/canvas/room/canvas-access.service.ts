@@ -52,6 +52,9 @@ export function createCanvasAccessService(
           JOIN workspace_members wm
             ON wm.workspace_id = c.workspace_id
            AND wm.user_id = $3
+          JOIN workspaces AS workspace
+            ON workspace.id = c.workspace_id
+           AND workspace.deletion_status = 'active'
           LEFT JOIN pr_review_rooms AS review_room
             ON review_room.workspace_id = c.workspace_id
            AND review_room.canvas_id = c.id

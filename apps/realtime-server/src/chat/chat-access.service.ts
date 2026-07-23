@@ -13,10 +13,13 @@ export function createChatAccessService(database: RealtimeDatabase) {
       if (!context.userId || !UUID_PATTERN.test(workspaceId)) return false;
 
       const membership = await database.queryOne<{ id: string }>(
-        `SELECT id
-         FROM workspace_members
-         WHERE workspace_id = $1
-           AND user_id = $2
+        `SELECT member.id
+         FROM workspace_members AS member
+         JOIN workspaces AS workspace
+           ON workspace.id = member.workspace_id
+          AND workspace.deletion_status = 'active'
+         WHERE member.workspace_id = $1
+           AND member.user_id = $2
          LIMIT 1`,
         [workspaceId, context.userId],
       );

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./workspace/deletion-lifecycle.test.mjs";
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -413,7 +414,8 @@ assert.match(workspaceController, /@Patch\(":workspaceId"\)/);
 assert.match(workspaceController, /@Delete\(":workspaceId"\)/);
 assert.match(workspaceService, /us\.job_title AS user_job_title/);
 assert.match(workspaceService, /us\.bio AS user_bio/);
-assert.match(workspaceService, /DELETE FROM workspaces WHERE id = \$1/);
+assert.match(workspaceService, /INSERT INTO workspace_deletion_jobs/);
+assert.match(workspaceService, /deletion_status = 'deleting'/);
 assert.match(workspaceService, /other_member_exists/);
 assert.match(workspaceService, /user_id <> \$2/);
 assert.match(userSettingsMigration, /CREATE TABLE public\.user_settings/);

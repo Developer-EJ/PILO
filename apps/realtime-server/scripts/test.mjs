@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./workspace-deletion-access.test.mjs";
 import { readFile } from "node:fs/promises";
 
 const server = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
