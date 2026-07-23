@@ -236,10 +236,13 @@ export class GithubSyncJobService implements OnModuleDestroy {
     return result;
   }
 
-  async pollOnce(): Promise<void> {
-    await this.recoverWebhookOutbox();
+  async pollSyncJobQueueOnce(): Promise<void> {
     await this.enqueueDueProjectV2PollingSchedules();
     await this.pollQueue(this.requireEnv("SQS_GITHUB_SYNC_JOBS_QUEUE_URL"), "jobId", (id) => this.processSyncJob(id));
+  }
+
+  async pollWebhookQueueOnce(): Promise<void> {
+    await this.recoverWebhookOutbox();
     await this.pollQueue(this.requireEnv("SQS_GITHUB_WEBHOOKS_QUEUE_URL"), "deliveryId", (id) => this.processWebhookDelivery(id));
   }
 

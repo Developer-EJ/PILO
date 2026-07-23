@@ -17,48 +17,14 @@ const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 15_000;
 
 type GithubSyncWorkerWait = (milliseconds: number) => Promise<void>;
-type LegacyGithubSyncWorkerPoller = {
-  pollOnce(): Promise<void>;
-};
 
 export async function runGithubSyncWorkerLoop(
   queueKind: GithubSyncWorkerQueueKind,
   pollOnce: GithubSyncWorkerPollOnce,
   observer: GithubSyncWorkerPollObserver,
   isStopping: () => boolean,
-  wait?: GithubSyncWorkerWait
-): Promise<void>;
-export async function runGithubSyncWorkerLoop(
-  worker: LegacyGithubSyncWorkerPoller,
-  observer: GithubSyncWorkerPollObserver,
-  isStopping: () => boolean,
-  wait?: GithubSyncWorkerWait
-): Promise<void>;
-export async function runGithubSyncWorkerLoop(
-  queueKindOrWorker: GithubSyncWorkerQueueKind | LegacyGithubSyncWorkerPoller,
-  pollOnceOrObserver: GithubSyncWorkerPollOnce | GithubSyncWorkerPollObserver,
-  observerOrIsStopping: GithubSyncWorkerPollObserver | (() => boolean),
-  isStoppingOrWait?: (() => boolean) | GithubSyncWorkerWait,
-  wait?: GithubSyncWorkerWait
+  wait: GithubSyncWorkerWait = waitForRetry
 ): Promise<void> {
-  const queueKind =
-    typeof queueKindOrWorker === "string" ? queueKindOrWorker : "sync_jobs";
-  const pollOnce =
-    typeof queueKindOrWorker === "string"
-      ? (pollOnceOrObserver as GithubSyncWorkerPollOnce)
-      : () => queueKindOrWorker.pollOnce();
-  const observer =
-    typeof queueKindOrWorker === "string"
-      ? (observerOrIsStopping as GithubSyncWorkerPollObserver)
-      : (pollOnceOrObserver as GithubSyncWorkerPollObserver);
-  const isStopping =
-    typeof queueKindOrWorker === "string"
-      ? (isStoppingOrWait as () => boolean)
-      : (observerOrIsStopping as () => boolean);
-  const waitForDelay =
-    typeof queueKindOrWorker === "string"
-      ? wait ?? waitForRetry
-      : (isStoppingOrWait as GithubSyncWorkerWait | undefined) ?? waitForRetry;
   let retryDelayMs = INITIAL_RETRY_DELAY_MS;
 
   while (!isStopping()) {
@@ -71,7 +37,7 @@ export async function runGithubSyncWorkerLoop(
         retryDelayMs,
         classifyGithubSyncWorkerFailure(error)
       );
-      await waitForDelay(retryDelayMs);
+      await wait(retryDelayMs);
       retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
     }
   }

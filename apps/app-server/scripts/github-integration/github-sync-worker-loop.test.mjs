@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { runGithubSyncWorkerLoop } = require("../../dist/modules/github-integration/github-sync-worker-loop.js");
+const root = fileURLToPath(new URL("../../../..", import.meta.url));
 
 function deferred() {
   let resolve;
@@ -121,6 +124,21 @@ function deferred() {
   syncStopping = true;
   syncRetryWait.resolve();
   await syncLoop;
+}
+
+{
+  const workerMainSource = readFileSync(
+    `${root}/apps/app-server/src/github-sync-worker-main.ts`,
+    "utf8"
+  );
+
+  assert.equal(
+    workerMainSource.match(/Promise\.all\(/g)?.length ?? 0,
+    1,
+    "GitHub sync worker bootstrap must start both queue loops in one Promise.all"
+  );
+  assert.match(workerMainSource, /pollSyncJobQueueOnce/);
+  assert.match(workerMainSource, /pollWebhookQueueOnce/);
 }
 
 console.log("GitHub sync worker loop concurrency tests passed");

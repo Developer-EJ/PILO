@@ -248,7 +248,9 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
 
   assert.match(workerMain, /import \{ GithubSyncWorkerModule \} from "\.\/modules\/github-integration\/github-sync-worker\.module";/);
   assert.match(workerMain, /createApplicationContext\(GithubSyncWorkerModule/);
-  assert.match(workerMain, /runGithubSyncWorkerLoop\(worker, observability/);
+  assert.match(workerMain, /Promise\.all\(/);
+  assert.match(workerMain, /runGithubSyncWorkerLoop\(\s*"sync_jobs"[\s\S]*?pollSyncJobQueueOnce/);
+  assert.match(workerMain, /runGithubSyncWorkerLoop\(\s*"webhooks"[\s\S]*?pollWebhookQueueOnce/);
   assert.doesNotMatch(workerMain, /AppModule/);
   assert.match(workerModule, /imports: \[DatabaseModule\]/);
   for (const provider of [
@@ -456,20 +458,37 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
       claimDueSchedules: async () => [{ syncRunId: recoveredSyncRunId, requestedByUserId: userId }]
     }
   );
-  worker.recoverWebhookOutbox = async () => { events.push("recover-webhooks"); };
   worker.enqueueSyncJob = async (runId, requestedByUserId) => {
     events.push(`enqueue:${runId}:${requestedByUserId}`);
   };
   worker.pollQueue = async (queueUrl) => { events.push(`queue:${queueUrl}`); };
   process.env.SQS_GITHUB_SYNC_JOBS_QUEUE_URL = "sync-queue";
+
+  await worker.pollSyncJobQueueOnce();
+
+  assert.deepEqual(events, [
+    `enqueue:${recoveredSyncRunId}:${userId}`,
+    "queue:sync-queue"
+  ]);
+}
+
+{
+  const events = [];
+  const worker = new GithubSyncJobService(
+    { query: async () => [] },
+    {},
+    {},
+    {},
+    {}
+  );
+  worker.recoverWebhookOutbox = async () => { events.push("recover-webhooks"); };
+  worker.pollQueue = async (queueUrl) => { events.push(`queue:${queueUrl}`); };
   process.env.SQS_GITHUB_WEBHOOKS_QUEUE_URL = "webhook-queue";
 
-  await worker.pollOnce();
+  await worker.pollWebhookQueueOnce();
 
   assert.deepEqual(events, [
     "recover-webhooks",
-    `enqueue:${recoveredSyncRunId}:${userId}`,
-    "queue:sync-queue",
     "queue:webhook-queue"
   ]);
 }

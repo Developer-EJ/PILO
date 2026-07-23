@@ -13,7 +13,20 @@ async function bootstrap(): Promise<void> {
   let stopping = false;
   const stop = () => { stopping = true; };
   process.on("SIGTERM", stop); process.on("SIGINT", stop);
-  await runGithubSyncWorkerLoop(worker, observability, () => stopping);
+  await Promise.all([
+    runGithubSyncWorkerLoop(
+      "sync_jobs",
+      () => worker.pollSyncJobQueueOnce(),
+      observability,
+      () => stopping
+    ),
+    runGithubSyncWorkerLoop(
+      "webhooks",
+      () => worker.pollWebhookQueueOnce(),
+      observability,
+      () => stopping
+    )
+  ]);
   await app.close();
 }
 void bootstrap();
