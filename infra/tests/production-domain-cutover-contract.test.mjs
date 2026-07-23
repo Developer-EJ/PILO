@@ -11,6 +11,7 @@ const [
   acmMain,
   acmVariables,
   cloudfrontMain,
+  workflow,
 ] = await Promise.all([
   readFile(path.join(repoRoot, 'infra/envs/dev/main.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/envs/dev/variables.tf'), 'utf8'),
@@ -18,6 +19,7 @@ const [
   readFile(path.join(repoRoot, 'infra/modules/route53-acm/main.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/modules/route53-acm/variables.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/modules/cloudfront/main.tf'), 'utf8'),
+  readFile(path.join(repoRoot, '.github/workflows/terraform-validate.yml'), 'utf8'),
 ]);
 
 const sources = {
@@ -53,6 +55,73 @@ function extractBlock(source, header) {
 
 function assertExactMatchCount(source, pattern, expectedCount, message) {
   assert.equal([...source.matchAll(pattern)].length, expectedCount, message);
+}
+
+function extractYamlJob(source, jobName) {
+  const header = `  ${jobName}:\n`;
+  const headerIndex = source.indexOf(header);
+  assert.notEqual(headerIndex, -1, `Missing Terraform workflow job: ${jobName}`);
+
+  const bodyStart = headerIndex + header.length;
+  const nextJobMatch = /^  [^\s][^:\n]*:\s*$/m.exec(source.slice(bodyStart));
+  const bodyEnd = nextJobMatch ? bodyStart + nextJobMatch.index : source.length;
+
+  return source.slice(headerIndex, bodyEnd);
+}
+
+function extractRequiredInputs(planJob) {
+  const requiredInputsMatch = /required_inputs=\(\r?\n([\s\S]*?)\r?\n\s*\)/.exec(planJob);
+  assert.notEqual(requiredInputsMatch, null, 'Plan job must define a required_inputs array.');
+
+  return requiredInputsMatch[1];
+}
+
+function verifyWorkflowContract(candidateWorkflow) {
+  const validationJob = extractYamlJob(candidateWorkflow, 'terraform');
+  const planJob = extractYamlJob(candidateWorkflow, 'plan');
+  const requiredInputs = extractRequiredInputs(planJob);
+
+  assert.match(
+    validationJob,
+    /node infra\/tests\/cloudfront-frontend-viewer-request\.test\.mjs/,
+    'Terraform validation job must run the CloudFront viewer-request contract test.',
+  );
+  assert.match(
+    validationJob,
+    /node infra\/tests\/production-domain-cutover-contract\.test\.mjs/,
+    'Terraform validation job must run the production domain cutover contract test.',
+  );
+
+  const planMappings = [
+    [
+      'frontend legacy domains',
+      'TF_VAR_frontend_legacy_domain_names',
+      'TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES',
+    ],
+    [
+      'API legacy domains',
+      'TF_VAR_api_legacy_domain_names',
+      'TF_PLAN_API_LEGACY_DOMAIN_NAMES',
+    ],
+    [
+      'frontend legacy redirect status',
+      'TF_VAR_frontend_legacy_redirect_status_code',
+      'TF_PLAN_FRONTEND_LEGACY_REDIRECT_STATUS_CODE',
+    ],
+  ];
+
+  for (const [name, variableName, repositoryVariable] of planMappings) {
+    assert.match(
+      planJob,
+      new RegExp(`${variableName}:\\s*\\$\\{\\{ vars\\.${repositoryVariable} \\}\\}`),
+      `Plan job must map the ${name} Terraform input from its repository variable.`,
+    );
+    assert.match(
+      requiredInputs,
+      new RegExp(`^[ \\t]+${variableName}\\s*$`, 'm'),
+      `Plan job required_inputs must include ${variableName}.`,
+    );
+  }
 }
 
 function verifyProductionDomainCutoverContract(candidateSources) {
@@ -401,6 +470,55 @@ expectMutationRejected({
   sourceName: 'devVariables',
   mutate: (source) => source.replace('  default     = 302', '  default     = 308'),
   expectedFailure: /frontend legacy redirect status must default to 302/,
+});
+
+function expectWorkflowMutationRejected({ name, mutate, expectedFailure }) {
+  const mutatedWorkflow = mutate(workflow);
+  assert.notEqual(mutatedWorkflow, workflow, `${name} mutation must change the workflow.`);
+
+  let failure;
+  try {
+    verifyWorkflowContract(mutatedWorkflow);
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.ok(failure, `${name} mutation must be rejected by the workflow contract verifier.`);
+  assert.equal(failure.code, 'ERR_ASSERTION', `${name} must fail through a contract assertion.`);
+  assert.match(failure.message, expectedFailure, `${name} must fail at its intended guard.`);
+}
+
+verifyWorkflowContract(workflow);
+
+expectWorkflowMutationRejected({
+  name: 'validation command moved to the plan job as a decoy',
+  mutate: (source) => source
+    .replace('          node infra/tests/cloudfront-frontend-viewer-request.test.mjs\n', '')
+    .replace(
+      '  plan:\n',
+      '  plan:\n    # node infra/tests/cloudfront-frontend-viewer-request.test.mjs\n',
+    ),
+  expectedFailure: /Terraform validation job must run the CloudFront viewer-request contract test/,
+});
+
+expectWorkflowMutationRejected({
+  name: 'plan mapping moved to the validation job as a decoy',
+  mutate: (source) => source
+    .replace(
+      '      TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES }}\n',
+      '',
+    )
+    .replace(
+      '\n  plan:\n',
+      '\n    # TF_VAR_frontend_legacy_domain_names: ${{ vars.TF_PLAN_FRONTEND_LEGACY_DOMAIN_NAMES }}\n\n  plan:\n',
+    ),
+  expectedFailure: /Plan job must map the frontend legacy domains Terraform input/,
+});
+
+expectWorkflowMutationRejected({
+  name: 'required input removed while its plan mapping remains as a decoy',
+  mutate: (source) => source.replace('            TF_VAR_api_legacy_domain_names\n', ''),
+  expectedFailure: /Plan job required_inputs must include TF_VAR_api_legacy_domain_names/,
 });
 
 console.log('Production domain cutover Terraform contract is verified.');
