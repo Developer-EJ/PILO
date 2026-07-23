@@ -3189,6 +3189,14 @@ def _normalize_named_meeting_report_read_selector(
     titles = _explicit_meeting_report_titles(prompt)
     if len(titles) != 1:
         return decision
+    if (
+        decision.status == "needs_clarification"
+        and "meeting_report_date_range" in decision.missing_fields
+        and _has_unresolved_meeting_report_date_expression(
+            _meeting_report_prompt_without_report_titles(prompt)
+        )
+    ):
+        return decision
 
     available_tool_names = {tool.name for tool in job.tools}
     if "summarize_meeting_report" in available_tool_names:
@@ -3211,6 +3219,10 @@ def _normalize_named_meeting_report_read_selector(
         sections = decision.tool_input.get("sections")
         if tool_name == "summarize_meeting_report" and isinstance(sections, list):
             tool_input["sections"] = sections
+        for selector_key in ("from", "to"):
+            selector_value = decision.tool_input.get(selector_key)
+            if isinstance(selector_value, str) and selector_value.strip():
+                tool_input[selector_key] = selector_value
     tool_input["reportTitle"] = titles[0][:500]
     return AgentPlannerDecision(
         status="tool_candidate",
@@ -3301,9 +3313,11 @@ def _normalize_meeting_report_relative_date_query(
 
 def _is_meeting_report_read_request(prompt: str) -> bool:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
-    if not re.search(r"(?:회의록|미팅\s*(?:보고서|리포트)|meeting\s*report)", normalized_prompt):
-        return False
-    return bool(re.search(r"(?:보여|알려|조회|목록|확인|찾아|요약)", normalized_prompt))
+    explicit_report_request = re.search(
+        r"(?:회의록|미팅\s*(?:보고서|리포트)|meeting\s*report)",
+        normalized_prompt,
+    ) and re.search(r"(?:보여|알려|조회|목록|확인|찾아|요약)", normalized_prompt)
+    return bool(explicit_report_request or _is_named_meeting_report_summary_request(prompt))
 
 
 def _supported_meeting_report_selector(
@@ -3339,7 +3353,8 @@ def _supported_meeting_report_selector(
             timezone,
         )
 
-    if _has_unresolved_meeting_report_date_expression(normalized_prompt):
+    date_expression_prompt = _meeting_report_prompt_without_report_titles(normalized_prompt)
+    if _has_unresolved_meeting_report_date_expression(date_expression_prompt):
         return None
 
     if re.search(r"(?<![가-힣])지난\s*주(?!말)", normalized_prompt):
@@ -3446,6 +3461,13 @@ def _has_unresolved_meeting_report_date_expression(prompt: str) -> bool:
         or re.search(r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일", remaining_prompt)
         or re.search(r"\b\d+\s*(?:일|주|개월|달|년)\b", remaining_prompt)
     )
+
+
+def _meeting_report_prompt_without_report_titles(prompt: str) -> str:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
+    for report_title in _explicit_meeting_report_titles(normalized_prompt):
+        normalized_prompt = normalized_prompt.replace(report_title, " ", 1)
+    return re.sub(r"\s+", " ", normalized_prompt).strip()
 
 
 def _has_invalid_meeting_report_count_expression(prompt: str) -> bool:
@@ -4069,8 +4091,6 @@ _NATURAL_MEETING_TITLE_KIND = (
 
 def _natural_meeting_report_titles(prompt: str) -> tuple[str, ...]:
     normalized = re.sub(r"\s+", " ", prompt).strip()
-    if re.search(r"[\"'‘’“”]", normalized):
-        return ()
     patterns = (
         re.compile(
             rf"^(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND})\s*"
@@ -4102,6 +4122,7 @@ def _natural_meeting_report_titles(prompt: str) -> tuple[str, ...]:
             continue
         raw_title = re.sub(r"\s+", " ", match.group("title")).strip(" ,.:;\"'‘’“”")
         raw_title = re.sub(r"^(?:혹시|그러면|그럼|저기)\s+", "", raw_title)
+        raw_title = _strip_natural_meeting_title_date_prefix(raw_title)
         parts = [
             re.sub(r"\s+", " ", value).strip()
             for value in re.split(
@@ -4124,6 +4145,23 @@ def _natural_meeting_report_titles(prompt: str) -> tuple[str, ...]:
         if filtered:
             return tuple(dict.fromkeys(filtered))
     return ()
+
+
+def _strip_natural_meeting_title_date_prefix(value: str) -> str:
+    date_prefix = re.compile(
+        r"^(?:"
+        r"\d{4}-\d{1,2}-\d{1,2}|"
+        r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일|"
+        r"오늘|어제|내일|모레|글피|"
+        r"작년|올해|내년|"
+        r"(?:지지난|저저번|지난|저번|이번|다음|다다음)\s*"
+        r"(?:주말|주|달|월|년)|"
+        r"최근\s*7\s*일|며칠\s*전|"
+        r"(?:\d+|한|두|세|네)\s*(?:일|주|개월|달|년)\s*(?:전|후)"
+        r")\s+",
+        re.IGNORECASE,
+    )
+    return date_prefix.sub("", value, count=1).strip()
 
 
 def _is_generic_meeting_report_title_candidate(value: str) -> bool:

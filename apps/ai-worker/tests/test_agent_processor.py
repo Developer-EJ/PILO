@@ -2300,7 +2300,27 @@ def test_natural_named_meeting_summary_corrects_list_routing(
     assert corrected.capability_ids == ("meeting.report.summary",)
 
 
-def test_natural_named_meeting_evidence_request_uses_hybrid_routing() -> None:
+@pytest.mark.parametrize(
+    ("prompt", "expected_title"),
+    [
+        (
+            "백엔드 회의에서 배포 일정이 밀린 이유를 알려줘",
+            "백엔드 회의",
+        ),
+        (
+            '백엔드 회의에서 "OAuth"를 누가 제안했어?',
+            "백엔드 회의",
+        ),
+        (
+            "금요일 데일리 스크럼에서 “API v2”를 누가 언급했어?",
+            "금요일 데일리 스크럼",
+        ),
+    ],
+)
+def test_natural_named_meeting_evidence_request_uses_hybrid_routing(
+    prompt: str,
+    expected_title: str,
+) -> None:
     tools = [
         tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
         tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
@@ -2321,12 +2341,10 @@ def test_natural_named_meeting_evidence_request_uses_hybrid_routing() -> None:
             unsupported_reason=None,
         ),
         job.tool_capability_catalog,
-        prompt="백엔드 회의에서 배포 일정이 밀린 이유를 알려줘",
+        prompt=prompt,
     )
 
-    assert _explicit_meeting_report_titles("백엔드 회의에서 배포 일정이 밀린 이유를 알려줘") == (
-        "백엔드 회의",
-    )
+    assert _explicit_meeting_report_titles(prompt) == (expected_title,)
     assert corrected.capability_ids == ("meeting.report.hybrid_search",)
 
 
@@ -2579,6 +2597,22 @@ def test_multiple_explicit_report_titles_require_clarification(
         ),
         (
             "백엔드 회의에서 배포 일정이 밀린 이유를 알려줘",
+            ("백엔드 회의",),
+        ),
+        (
+            '백엔드 회의에서 "OAuth"를 누가 제안했어?',
+            ("백엔드 회의",),
+        ),
+        (
+            "금요일 데일리 스크럼에서 “API v2”를 누가 언급했어?",
+            ("금요일 데일리 스크럼",),
+        ),
+        (
+            "7월 18일 백엔드 회의 내용 알려줘",
+            ("백엔드 회의",),
+        ),
+        (
+            "내일 백엔드 회의 내용 알려줘",
             ("백엔드 회의",),
         ),
         (
@@ -5295,6 +5329,87 @@ def test_normalizer_replaces_model_invented_named_summary_selectors() -> None:
     }
 
 
+def test_normalizer_preserves_absolute_date_for_natural_named_summary() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={"reportTitle": "7월 18일 백엔드 회의"},
+        ),
+        job,
+        prompt="7월 18일 백엔드 회의 내용 알려줘",
+        current_date="2026-07-23",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.summary",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "from": "2026-07-17T15:00:00.000Z",
+        "to": "2026-07-18T15:00:00.000Z",
+        "reportTitle": "백엔드 회의",
+    }
+
+
+def test_normalizer_does_not_bypass_unresolved_date_for_natural_named_summary() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="summarize_meeting_report",
+                    description="MeetingReport 요약",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "reportTitle": {"type": "string"},
+                            "from": {"type": "string", "format": "date-time"},
+                            "to": {"type": "string", "format": "date-time"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="summarize_meeting_report",
+            tool_input={"reportTitle": "내일 백엔드 회의"},
+        ),
+        job,
+        prompt="내일 백엔드 회의 내용 알려줘",
+        current_date="2026-07-23",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.summary",),
+    )
+
+    assert normalized.status == "needs_clarification"
+    assert normalized.output_summary["missingFields"] == ["meeting_report_date_range"]
+    assert "날짜나 기간" in normalized.final_answer
+
+
 def test_normalizer_keeps_latest_summary_and_decisions_unscoped() -> None:
     job = parse_agent_run_job_payload(
         agent_payload(
@@ -5560,6 +5675,52 @@ def test_hybrid_title_lookup_recovers_explicit_quoted_title_after_other_normaliz
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["toolName"] == "list_meeting_reports"
     assert normalized.output_summary["input"] == {"reportTitle": "온보딩 주간회의"}
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_title"),
+    [
+        (
+            '백엔드 회의에서 "OAuth"를 누가 제안했어?',
+            "백엔드 회의",
+        ),
+        (
+            "금요일 데일리 스크럼에서 “API v2”를 누가 언급했어?",
+            "금요일 데일리 스크럼",
+        ),
+    ],
+)
+def test_hybrid_title_lookup_keeps_natural_title_with_quoted_content_term(
+    prompt: str,
+    expected_title: str,
+) -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            status="needs_clarification",
+            tool_name=None,
+            tool_input={},
+            missing_fields=("reportTitle",),
+        ),
+        job,
+        prompt=prompt,
+        current_date="2026-07-23",
+        completion_tool_names=("search_meeting_transcript",),
+        routed_capability_ids=("meeting.report.hybrid_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["toolName"] == "list_meeting_reports"
+    assert normalized.output_summary["input"] == {"reportTitle": expected_title}
 
 
 def test_hybrid_title_lookup_without_explicit_or_planner_title_never_lists_latest() -> None:
