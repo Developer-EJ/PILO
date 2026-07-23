@@ -3,6 +3,16 @@ export type CanvasRoomNameInput = {
   workspaceId: string;
 };
 
+export type SqlErdRoomNameInput = {
+  sessionId: string;
+  workspaceId: string;
+};
+
+export type DocumentRoomNameInput = {
+  documentId: string;
+  workspaceId: string;
+};
+
 export function createCanvasRoomName({
   canvasId,
   workspaceId,
@@ -10,6 +20,24 @@ export function createCanvasRoomName({
   return `workspace:${workspaceId}:canvas:${canvasId}`;
 }
 
+export function createSqlErdRoomName({
+  sessionId,
+  workspaceId,
+}: SqlErdRoomNameInput) {
+  return `workspace:${workspaceId}:sql-erd:${sessionId}`;
+}
+
+export function createDocumentYjsRoomName({
+  documentId,
+  workspaceId,
+}: DocumentRoomNameInput) {
+  return `workspace:${workspaceId}:document:${documentId}:yjs`;
+}
+
 export function createMeetingRoomName(workspaceId: string) {
   return `workspace:${workspaceId}:meeting`;
+}
+
+export function createMeetingNotificationUserRoomName(userId: string) {
+  return `user:${userId}:meeting-notifications`;
 }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
+import { ActivityLogService } from "../../common/activity-log.service";
 import { badRequest, notFound } from "../../common/api-error";
 import {
   DatabaseService,
@@ -8,7 +9,9 @@ import {
 import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubProjectV2WriteService } from "../github-integration/github-project-v2-write.service";
 import { boardConflict } from "./board-api-error";
+import { buildPiloIssueMovedActivityLog } from "./board-activity-log";
 import { rethrowBoardGithubWriteError } from "./board-github-write-error";
+import { BoardInvalidationPublisherService } from "./board-invalidation-publisher.service";
 import type { UpdateBoardIssueStatusRequest } from "./dto";
 import {
   BoardIssueStatusQueries,
@@ -37,11 +40,15 @@ export interface UpdateBoardIssueStatusResult {
 
 @Injectable()
 export class BoardIssueStatusService {
+  private readonly logger = new Logger(BoardIssueStatusService.name);
+
   constructor(
     private readonly boardIssueStatusQueries: BoardIssueStatusQueries,
     private readonly workspaceService: WorkspaceService,
     private readonly githubProjectV2WriteService: GithubProjectV2WriteService,
-    private readonly database: DatabaseService
+    private readonly database: DatabaseService,
+    private readonly activityLogService: ActivityLogService,
+    private readonly invalidationPublisher: BoardInvalidationPublisherService
   ) {}
 
   async updateBoardIssueStatus(
@@ -77,15 +84,27 @@ export class BoardIssueStatusService {
 
         this.assertGithubStatusTarget(target);
         await this.updateGithubStatus(currentUserId, target);
-        await this.boardIssueStatusQueries.transaction((transaction) =>
-          this.updateStatusCache(
+        const activityLog = buildPiloIssueMovedActivityLog({
+          actorUserId: currentUserId,
+          beforeUpdatedAt: target.updated_at,
+          boardId: normalizedBoardId,
+          from: target.column_id,
+          issueId: normalizedIssueId,
+          to: input.columnId,
+          workspaceId
+        });
+        await this.boardIssueStatusQueries.transaction(async (transaction) => {
+          await this.updateStatusCache(
             transaction,
             target,
             normalizedBoardId,
             normalizedIssueId,
             input.columnId
-          )
-        );
+          );
+          if (activityLog) {
+            await this.activityLogService.append(transaction, activityLog);
+          }
+        });
 
         return target.column_id;
       }
@@ -101,8 +120,22 @@ export class BoardIssueStatusService {
       throw notFound("Board issue not found");
     }
 
+    const mappedIssue = this.mapBoardIssue(issue);
+
+    try {
+      await this.invalidationPublisher.publishInvalidation({
+        workspaceId,
+        boardId: normalizedBoardId,
+        updatedAt: mappedIssue.updatedAt
+      });
+    } catch {
+      this.logger.warn(
+        `Board invalidation publish failed workspace_id=${workspaceId} board_id=${normalizedBoardId}`
+      );
+    }
+
     return {
-      issue: this.mapBoardIssue(issue),
+      issue: mappedIssue,
       previousColumnId
     };
   }

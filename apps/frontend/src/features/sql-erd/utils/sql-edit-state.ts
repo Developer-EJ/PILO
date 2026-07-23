@@ -6,6 +6,7 @@ import type {
 import type { SqltoerdDdlParseError } from "@/features/sql-erd/utils/ddl-parser";
 import {
   applySqltoerdLayoutPatch,
+  areSqlErdJsonValuesEqual,
   areSqltoerdLayoutsEqual
 } from "@/features/sql-erd/utils/model";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
@@ -75,6 +76,14 @@ export type SqlErdEditAction =
   | {
       snapshot: SqlErdViewSession;
       type: "source_autosave_saved";
+    }
+  | {
+      snapshot: SqlErdViewSession;
+      type: "operation_saved";
+    }
+  | {
+      snapshot: SqlErdViewSession;
+      type: "remote_snapshot_applied";
     }
   | {
       baseSnapshot: SqlErdViewSession;
@@ -247,6 +256,40 @@ export function reduceSqlErdEditState(
     };
   }
 
+  if (action.type === "operation_saved") {
+    if (
+      state.lastSuccessfulSnapshot.id !== action.snapshot.id ||
+      state.lastSuccessfulSnapshot.revision === null ||
+      action.snapshot.revision === null ||
+      action.snapshot.revision <= state.lastSuccessfulSnapshot.revision
+    ) {
+      return state;
+    }
+
+    return {
+      ...state,
+      lastSuccessfulSnapshot: action.snapshot
+    };
+  }
+
+  if (action.type === "remote_snapshot_applied") {
+    if (
+      state.lastSuccessfulSnapshot.id !== action.snapshot.id ||
+      state.lastSuccessfulSnapshot.revision === null ||
+      action.snapshot.revision === null ||
+      action.snapshot.revision <= state.lastSuccessfulSnapshot.revision
+    ) {
+      return state;
+    }
+
+    return {
+      draftDialect: action.snapshot.dialect,
+      draftSourceText: action.snapshot.sourceText,
+      lastSuccessfulSnapshot: action.snapshot,
+      parse: createIdleParseState(state.parse.requestSequence + 1)
+    };
+  }
+
   if (action.type === "normalized_sql_applied") {
     if (!isSameSqlErdSnapshot(state.lastSuccessfulSnapshot, action.baseSnapshot)) {
       return state;
@@ -343,7 +386,7 @@ function isSameSqlErdSnapshot(
     current.revision === candidate.revision &&
     current.dialect === candidate.dialect &&
     current.sourceText === candidate.sourceText &&
-    JSON.stringify(current.modelJson) === JSON.stringify(candidate.modelJson)
+    areSqlErdJsonValuesEqual(current.modelJson, candidate.modelJson)
   );
 }
 

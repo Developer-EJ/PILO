@@ -4,6 +4,8 @@ import {
   buildPrReviewConflictsApplyInput,
   createPrReviewConflictDraft,
   getPrReviewConflictDraftProgress,
+  applyPrReviewConflictMarkerChoice,
+  buildPrReviewConflictMarkerDraft,
   reconcilePrReviewConflictDrafts
 } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-drafts.ts";
 
@@ -60,8 +62,17 @@ const initialDrafts = reconcilePrReviewConflictDrafts(
   {}
 );
 
-assert.equal(initialDrafts.first.resolvedContent, firstFile.headContent);
-assert.equal(initialDrafts.second.resolvedContent, secondFile.headContent);
+assert.match(initialDrafts.first.resolvedContent, /<<<<<<< PR branch/);
+assert.match(initialDrafts.first.resolvedContent, />>>>>>> target branch/);
+assert.match(initialDrafts.second.resolvedContent, /<<<<<<< PR branch/);
+assert.equal(
+  applyPrReviewConflictMarkerChoice({
+    hunk: firstFile.hunks[0],
+    choice: "both",
+    value: initialDrafts.first.resolvedContent
+  }),
+  "const value = 2;\nconst value = 1;\n"
+);
 
 const preparedDrafts = {
   ...initialDrafts,
@@ -122,7 +133,7 @@ const refreshedDrafts = reconcilePrReviewConflictDrafts(
   preparedDrafts
 );
 assert.notEqual(refreshedDrafts.first, preparedDrafts.first);
-assert.equal(refreshedDrafts.first.resolvedContent, changedFirstFile.headContent);
+assert.match(refreshedDrafts.first.resolvedContent, /<<<<<<< PR branch/);
 assert.equal(refreshedDrafts.second, preparedDrafts.second);
 
 const markerDrafts = {
@@ -155,5 +166,64 @@ assert.equal(
 );
 
 assert.deepEqual(createPrReviewConflictDraft(firstFile).resolutionChoices, {});
+
+const multiHunkFile = {
+  ...firstFile,
+  reviewFileId: "multi",
+  headContent: "before\nincomingOne\nbetween\nincomingTwo\nafter",
+  hunks: [
+    {
+      ...firstFile.hunks[0],
+      id: "multi-one",
+      incomingStartLine: 2,
+      incomingText: "incomingOne",
+      currentText: "targetOne"
+    },
+    {
+      ...firstFile.hunks[0],
+      id: "multi-two",
+      incomingStartLine: 4,
+      incomingText: "incomingTwo",
+      currentText: "targetTwo"
+    }
+  ]
+};
+const partiallyResolvedContent = buildPrReviewConflictMarkerDraft(multiHunkFile, {
+  "multi-one": "resolvedOne"
+});
+assert.match(partiallyResolvedContent, /resolvedOne/);
+assert.match(partiallyResolvedContent, /<<<<<<< PR branch/);
+assert.equal(
+  getPrReviewConflictDraftProgress(analysis([multiHunkFile]), {
+    multi: {
+      ...createPrReviewConflictDraft(multiHunkFile),
+      resolvedContent: partiallyResolvedContent
+    }
+  }).allReady,
+  false
+);
+assert.equal(
+  buildPrReviewConflictsApplyInput(analysis([multiHunkFile]), {
+    multi: {
+      ...createPrReviewConflictDraft(multiHunkFile),
+      resolvedContent: partiallyResolvedContent
+    }
+  }),
+  null
+);
+assert.doesNotMatch(
+  buildPrReviewConflictMarkerDraft(multiHunkFile, {
+    "multi-one": "resolvedOne",
+    "multi-two": "resolvedTwo"
+  }),
+  /<<<<<<< PR branch/
+);
+assert.equal(
+  buildPrReviewConflictMarkerDraft(multiHunkFile, {
+    "multi-one": "",
+    "multi-two": "resolvedTwo"
+  }),
+  "before\nbetween\nresolvedTwo\nafter"
+);
 
 console.log("PR Review multi-file conflict draft tests passed");

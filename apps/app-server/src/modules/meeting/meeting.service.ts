@@ -31,6 +31,8 @@ import {
   type MeetingStateChange,
   type MeetingStateRealtimeEventInput
 } from "./meeting-state-realtime-publisher.service";
+import { MeetingNotificationService } from "./meeting-notification.service";
+import type { MeetingActionItemDeliveryInput } from "./meeting-action-item-delivery.service";
 
 type RecordingStatus = "RUNNING" | "COMPLETED" | "FAILED";
 type MeetingReportStatus =
@@ -41,7 +43,19 @@ type MeetingReportStatus =
   | "COMPLETED"
   | "FAILED";
 type MeetingReportFailedStep = "RECORDING" | "STT" | "LLM";
-type MeetingReportActionItemStatus = "PENDING" | "APPROVED" | "DISMISSED";
+type MeetingReportActionItemExtractionStatus =
+  | "PENDING"
+  | "PUBLISHING"
+  | "QUEUED"
+  | "PROCESSING"
+  | "COMPLETED"
+  | "FAILED";
+type MeetingReportActionItemStatus =
+  | "PENDING"
+  | "DELIVERING"
+  | "DELIVERY_FAILED"
+  | "APPROVED"
+  | "DISMISSED";
 
 interface MeetingRow extends QueryResultRow {
   id: string;
@@ -134,19 +148,43 @@ interface MeetingReportRow extends QueryResultRow {
   status: MeetingReportStatus;
   failed_step: MeetingReportFailedStep | null;
   error_message: string | null;
+  failure_code?: string | null;
+  failure_detail?: unknown;
+  title: string | null;
+  ai_title?: string | null;
+  user_title: string | null;
   summary: string | null;
   discussion_points: string | null;
+  ai_discussion_points?: string | null;
+  user_discussion_points: string | null;
   decisions: string | null;
+  ai_decisions?: string | null;
+  content_version: number | string;
+  content_edited_by_user_id: string | null;
+  content_edited_at: Date | string | null;
   action_item_candidates: unknown;
   retry_count: number | string;
   created_at: Date | string;
   updated_at: Date | string;
   participant_count?: number | string;
   participant_preview?: unknown;
+  can_delete?: boolean;
+  can_edit?: boolean;
+  action_item_extraction_status?: string | null;
+  action_item_extraction_failure_code?: string | null;
 }
 
 interface MeetingReportDetailRow extends MeetingReportRow {
   transcript_text: string | null;
+}
+
+interface MeetingReportDecisionItemRow extends QueryResultRow {
+  id: string;
+  source_index: number | string;
+  text: string;
+  user_text: string | null;
+  edited_by_user_id: string | null;
+  edited_at: Date | string | null;
 }
 
 interface MeetingReportActionItemRow extends QueryResultRow {
@@ -159,6 +197,7 @@ interface MeetingReportActionItemRow extends QueryResultRow {
   assignee_user_id: string | null;
   assignee_name: string | null;
   assignee_avatar_url: string | null;
+  action_item_candidates?: unknown;
   status: MeetingReportActionItemStatus;
   updated_by_user_id: string | null;
   approved_by_user_id: string | null;
@@ -167,6 +206,19 @@ interface MeetingReportActionItemRow extends QueryResultRow {
   dismissed_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  delivery_id?: string | null;
+  delivery_type?: "calendar_event" | "pilo_issue" | null;
+  delivery_status?: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | null;
+  delivery_error_code?: string | null;
+  delivery_draft_json?: unknown;
+  delivery_target_resource_id?: string | null;
+  calendar_event_id?: number | string | null;
+  calendar_event_title?: string | null;
+  pilo_issue_id?: number | string | null;
+  pilo_issue_title?: string | null;
+  pilo_issue_board_id?: number | string | null;
+  pilo_issue_column_id?: number | string | null;
+  pilo_issue_column_name?: string | null;
 }
 
 interface MeetingReportActionItemAssigneeRow extends QueryResultRow {
@@ -218,6 +270,12 @@ interface MeetingReportListQuery {
   q?: unknown;
   to?: unknown;
   limit?: unknown;
+}
+
+/** Internal Agent query. Keep reportTitle and roomName out of the public Meeting REST contract. */
+interface MeetingAgentReportListQuery extends MeetingReportListQuery {
+  reportTitle?: unknown;
+  roomName?: unknown;
 }
 
 interface MeetingReportCursor {
@@ -343,14 +401,30 @@ export interface MeetingReportSummaryPayload {
   status: MeetingReportStatus;
   failedStep: MeetingReportFailedStep | null;
   errorMessage: string | null;
+  title: string | null;
   summary: string | null;
   discussionPoints: string | null;
   decisions: string | null;
+  contentVersion: number;
+  contentEditedByUserId: string | null;
+  contentEditedAt: string | null;
   actionItemCandidates: unknown[];
+  actionItemExtraction?: MeetingReportActionItemExtractionPayload;
   retryCount: number;
   participantSummary: MeetingReportParticipantSummaryPayload;
+  canDelete?: boolean;
+  canEdit?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingReportActionItemExtractionPayload {
+  status: MeetingReportActionItemExtractionStatus;
+  errorMessage: string | null;
+}
+
+export interface MeetingReportActionItemExtractionRetryPayload {
+  actionItemExtraction: MeetingReportActionItemExtractionPayload;
 }
 
 export interface MeetingReportParticipantSummaryPayload {
@@ -365,10 +439,32 @@ export interface MeetingReportParticipantSummaryPayload {
 
 export interface MeetingReportDetailPayload extends MeetingReportSummaryPayload {
   transcriptText: string | null;
-  transcriptSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
+  evidenceSegments: Array<{ id: string; segmentIndex: number; startedAtMs: number; endedAtMs: number; text: string }>;
   evidence: Array<{ sourceType: string; sourceIndex: number; transcriptSegmentId: string }>;
+  activityEvidence: Array<{
+    id: string;
+    sourceIndex: number;
+    occurredAt: string;
+    action: string;
+    summary: string;
+    references: Array<{ sourceType: string; sourceIndex: number }>;
+  }>;
   actionItems: MeetingReportActionItemPayload[];
   actionItemAssignees: MeetingReportActionItemAssigneePayload[];
+  decisionItems: MeetingReportDecisionItemPayload[];
+}
+
+export interface MeetingReportDecisionItemPayload {
+  id: string;
+  sourceIndex: number;
+  text: string;
+  isUserEdited: boolean;
+  editedByUserId: string | null;
+  editedAt: string | null;
+}
+
+export interface MeetingReportContentMutationPayload {
+  report: MeetingReportDetailPayload;
 }
 
 export interface MeetingReportActionItemPayload {
@@ -378,14 +474,72 @@ export interface MeetingReportActionItemPayload {
   description: string;
   priority: "LOW" | "MEDIUM" | "HIGH";
   assignee: MeetingReportActionItemAssigneePayload | null;
+  deliverySuggestion: {
+    deliveryType: "calendar_event" | "pilo_issue";
+    calendar: {
+      isAllDay: boolean;
+      startDate: string;
+      endDate: string;
+      startTime: string | null;
+      endTime: string | null;
+    } | null;
+  } | null;
   status: MeetingReportActionItemStatus;
   updatedByUserId: string | null;
   approvedByUserId: string | null;
   approvedAt: string | null;
   dismissedByUserId: string | null;
   dismissedAt: string | null;
+  delivery: {
+    deliveryType: "calendar_event" | "pilo_issue";
+    status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+    errorCode: string | null;
+    draft: MeetingActionItemDeliveryInput | null;
+    targetResourceId: string | null;
+    calendarEvent: { id: string; title: string } | null;
+    piloIssue: {
+      id: string;
+      title: string;
+      boardId: string;
+      columnId: string;
+      columnName: string | null;
+    } | null;
+  } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MeetingAgentMeetingSearchQuery {
+  roomName?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface MeetingAgentMeetingSearchPayload {
+  meeting: MeetingPayload;
+  roomName: string;
+}
+
+export interface MeetingAgentActionItemSearchQuery {
+  reportId?: string;
+  assigneeUserId?: string;
+  status?: "PENDING" | "DELIVERING" | "DELIVERY_FAILED" | "APPROVED" | "DISMISSED";
+  title?: string;
+  from?: string;
+  to?: string;
+  sort?: "newest" | "oldest";
+  limit?: number;
+}
+
+export interface MeetingAgentActionItemSearchPayload {
+  id: string;
+  reportId: string;
+  sourceIndex: number;
+  title: string;
+  status: "PENDING" | "DELIVERING" | "DELIVERY_FAILED" | "APPROVED" | "DISMISSED";
+  assignee: MeetingReportActionItemAssigneePayload | null;
+  reportCreatedAt: string;
 }
 
 export interface MeetingReportActionItemAssigneePayload {
@@ -413,6 +567,11 @@ export interface StartMeetingPayload {
 
 export interface RecordingConsentInput {
   accepted: true;
+  policyVersion: string;
+}
+
+export interface RecordingConsentStatusPayload {
+  accepted: boolean;
   policyVersion: string;
 }
 
@@ -487,6 +646,10 @@ export interface MeetingReportRegenerationPayload {
   report: MeetingReportSummaryPayload;
 }
 
+export interface MeetingReportDeletionPayload {
+  deletedReportId: string;
+}
+
 const MAIN_MEETING_ROOM = "MAIN_MEETING_ROOM";
 const WORKSPACE_RECORDING_CONSENT_POLICY_VERSION = "v1";
 const UNIQUE_VIOLATION_CODE = "23505";
@@ -525,6 +688,7 @@ export class MeetingService {
     private readonly liveKitTokenService: LiveKitTokenService,
     private readonly liveKitEgressService: LiveKitEgressService,
     private readonly meetingReportJobService: MeetingReportJobService,
+    private readonly meetingNotificationService: MeetingNotificationService,
     private readonly meetingReportRealtimePublisher?: MeetingReportRealtimePublisherService,
     private readonly meetingStateRealtimePublisher?: MeetingStateRealtimePublisherService
   ) {}
@@ -639,6 +803,29 @@ export class MeetingService {
         },
         isDefault
       )
+    };
+  }
+
+  async getRecordingConsentStatus(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<RecordingConsentStatusPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const consent = await this.database.queryOne<{ accepted: boolean }>(
+      `
+        SELECT EXISTS (
+          SELECT 1
+          FROM workspace_recording_consents
+          WHERE workspace_id = $1::uuid
+            AND user_id = $2::uuid
+            AND policy_version = $3
+        ) AS accepted
+      `,
+      [workspaceId, currentUserId, WORKSPACE_RECORDING_CONSENT_POLICY_VERSION]
+    );
+    return {
+      accepted: consent?.accepted === true,
+      policyVersion: WORKSPACE_RECORDING_CONSENT_POLICY_VERSION
     };
   }
 
@@ -994,7 +1181,7 @@ export class MeetingService {
     const recordings = await this.listRecordingRows(meetingId);
     const reports = await this.listMeetingReportRows(meetingId);
     const participantCounts = await this.countParticipants(meetingId);
-    const currentUserParticipant = await this.findParticipant(
+    const currentUserParticipant = await this.findParticipantSummary(
       this.database,
       meetingId,
       currentUserId
@@ -1035,7 +1222,7 @@ export class MeetingService {
           throw notFound("Meeting not found");
         }
 
-        const existingParticipant = await this.findParticipant(
+        const existingParticipant = await this.findActiveParticipant(
           transaction,
           meetingId,
           currentUserId
@@ -1073,8 +1260,7 @@ export class MeetingService {
             : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
         const participant = await this.markParticipantLeft(
           transaction,
-          meetingId,
-          currentUserId
+          existingParticipant.id
         );
         const endedMeeting = shouldEndMeeting
           ? await this.endMeetingIfStillActive(transaction, workspaceId, meetingId)
@@ -1180,7 +1366,7 @@ export class MeetingService {
         ? { report: null, job: null }
         : await this.prepareReportForStoppedRecording(transaction, stoppedRecording);
 
-    await this.markParticipantLeft(transaction, meeting.id, participant.user_id);
+    await this.markParticipantLeft(transaction, participant.id);
 
     if (shouldEndMeeting) {
       await this.endMeetingIfStillActive(
@@ -1505,6 +1691,7 @@ export class MeetingService {
     }
     const page = await this.listWorkspaceMeetingReportRows(
       workspaceId,
+      currentUserId,
       status,
       limit,
       { cursor, from, searchQuery, to }
@@ -1516,6 +1703,203 @@ export class MeetingService {
     };
   }
 
+  async listReportsForAgent(
+    currentUserId: string,
+    workspaceId: string,
+    query: MeetingAgentReportListQuery
+  ): Promise<MeetingReportListPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const cursor = this.normalizeMeetingReportCursor(query.cursor);
+    const from = this.normalizeMeetingReportDate(query.from, "from");
+    const to = this.normalizeMeetingReportDate(query.to, "to");
+    const status = this.normalizeMeetingReportStatus(query.status);
+    const limit = this.normalizeAgentMeetingReportLimit(query.limit);
+    const reportTitle = query.reportTitle === undefined
+      ? null
+      : this.normalizeAgentResolutionText(String(query.reportTitle));
+    const roomName = query.roomName === undefined
+      ? null
+      : this.normalizeAgentResolutionText(String(query.roomName));
+    if (from !== null && to !== null && from >= to) {
+      throw badRequest("from must be before to");
+    }
+    const page = await this.listWorkspaceMeetingReportRows(
+      workspaceId,
+      currentUserId,
+      status,
+      limit,
+      { cursor, from, searchQuery: null, to, reportTitle, roomName }
+    );
+    return {
+      nextCursor: page.nextCursor,
+      reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
+    };
+  }
+
+  async listMeetingsForAgent(
+    currentUserId: string,
+    workspaceId: string,
+    query: MeetingAgentMeetingSearchQuery
+  ): Promise<{ meetings: MeetingAgentMeetingSearchPayload[] }> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const limit = this.agentResolutionLimit(query.limit);
+    const normalizedRoomName = query.roomName
+      ? this.normalizeAgentResolutionText(query.roomName)
+      : null;
+    const values: unknown[] = [workspaceId];
+    const roomNameCondition =
+      normalizedRoomName === null
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(meeting_rooms.name), '\\s+', ' ', 'g')) = $${values.push(normalizedRoomName)}`;
+    const fromCondition = query.from
+      ? `AND meetings.started_at >= $${values.push(query.from)}::timestamptz`
+      : "";
+    const toCondition = query.to
+      ? `AND meetings.started_at < $${values.push(query.to)}::timestamptz`
+      : "";
+    const rows = await this.database.query<
+      MeetingRow & { meeting_room_name: string }
+    >(
+      `
+        SELECT
+          meetings.id,
+          meetings.workspace_id,
+          meetings.room_key,
+          meetings.livekit_room_name,
+          meetings.created_by_id,
+          meetings.ended_by_id,
+          meetings.started_at,
+          meetings.ended_at,
+          meetings.created_at,
+          meetings.updated_at,
+          meeting_rooms.name AS meeting_room_name
+        FROM meetings
+        JOIN meeting_rooms
+          ON meeting_rooms.workspace_id = meetings.workspace_id
+          AND meeting_rooms.room_key = meetings.room_key
+        WHERE meetings.workspace_id = $1
+          ${roomNameCondition}
+          ${fromCondition}
+          ${toCondition}
+        ORDER BY meetings.started_at DESC, meetings.id ASC
+        LIMIT $${values.push(limit)}
+      `,
+      values
+    );
+    return {
+      meetings: rows.map((row) => ({
+        meeting: this.mapMeeting(row),
+        roomName: row.meeting_room_name
+      }))
+    };
+  }
+
+  async listActionItemsForAgent(
+    currentUserId: string,
+    workspaceId: string,
+    query: MeetingAgentActionItemSearchQuery
+  ): Promise<{ actionItems: MeetingAgentActionItemSearchPayload[] }> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (
+      (query.reportId !== undefined && !UUID_PATTERN.test(query.reportId)) ||
+      (query.assigneeUserId !== undefined && !UUID_PATTERN.test(query.assigneeUserId))
+    ) {
+      return { actionItems: [] };
+    }
+
+    const limit = this.agentResolutionLimit(query.limit);
+    const values: unknown[] = [workspaceId];
+    const reportCondition =
+      query.reportId === undefined
+        ? ""
+        : `AND action_items.meeting_report_id = $${values.push(query.reportId)}::uuid`;
+    const assigneeCondition =
+      query.assigneeUserId === undefined
+        ? ""
+        : `AND action_items.assignee_user_id = $${values.push(query.assigneeUserId)}::uuid`;
+    const statusCondition =
+      query.status === undefined
+        ? ""
+        : `AND action_items.status = $${values.push(query.status)}`;
+    const title = query.title
+      ? this.normalizeAgentResolutionText(query.title)
+      : null;
+    const titleCondition =
+      title === null
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(action_items.title), '\\s+', ' ', 'g')) LIKE '%' || $${values.push(title)} || '%'`;
+    const fromCondition =
+      query.from === undefined
+        ? ""
+        : `AND meeting_reports.created_at >= $${values.push(query.from)}::timestamptz`;
+    const toCondition =
+      query.to === undefined
+        ? ""
+        : `AND meeting_reports.created_at < $${values.push(query.to)}::timestamptz`;
+    const reportOrder = query.sort === "oldest" ? "ASC" : "DESC";
+    const rows = await this.database.query<
+      QueryResultRow & {
+        id: string;
+        meeting_report_id: string;
+        source_index: number | string;
+        title: string;
+        status: MeetingAgentActionItemSearchPayload["status"];
+        assignee_user_id: string | null;
+        assignee_name: string | null;
+        assignee_avatar_url: string | null;
+        report_created_at: Date | string;
+      }
+    >(
+      `
+        SELECT
+          action_items.id,
+          action_items.meeting_report_id,
+          action_items.source_index,
+          action_items.title,
+          action_items.status,
+          action_items.assignee_user_id,
+          users.name AS assignee_name,
+          users.avatar_url AS assignee_avatar_url,
+          meeting_reports.created_at AS report_created_at
+        FROM meeting_report_action_items AS action_items
+        JOIN meeting_reports
+          ON meeting_reports.id = action_items.meeting_report_id
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN users
+          ON users.id = action_items.assignee_user_id
+        WHERE meetings.workspace_id = $1
+          ${reportCondition}
+          ${assigneeCondition}
+          ${statusCondition}
+          ${titleCondition}
+          ${fromCondition}
+          ${toCondition}
+        ORDER BY meeting_reports.created_at ${reportOrder}, action_items.source_index ASC, action_items.id ASC
+        LIMIT $${values.push(limit)}
+      `,
+      values
+    );
+    return {
+      actionItems: rows.map((row) => ({
+        id: row.id,
+        reportId: row.meeting_report_id,
+        sourceIndex: Number(row.source_index),
+        title: row.title,
+        status: row.status,
+        assignee:
+          row.assignee_user_id === null
+            ? null
+            : {
+                userId: row.assignee_user_id,
+                name: row.assignee_name,
+                avatarUrl: row.assignee_avatar_url
+              },
+        reportCreatedAt: this.toIsoString(row.report_created_at)
+      }))
+    };
+  }
+
   async getReport(
     currentUserId: string,
     workspaceId: string,
@@ -1524,26 +1908,291 @@ export class MeetingService {
     await this.assertWorkspaceAccess(currentUserId, workspaceId);
     const report = await this.findMeetingReportDetailById(
       workspaceId,
-      reportId,
-      currentUserId
+      currentUserId,
+      reportId
     );
 
     if (report === null) {
       throw notFound("Meeting report not found");
     }
-    const [evidence, actionItems, actionItemAssignees] = await Promise.all([
+    const [
+      evidence,
+      activityEvidence,
+      actionItems,
+      actionItemAssignees,
+      decisionItems
+    ] = await Promise.all([
       this.listMeetingReportEvidence(report.id),
+      this.listMeetingReportActivityEvidence(report.id),
       this.listMeetingReportActionItems(report.id),
-      this.listMeetingReportActionItemAssignees(workspaceId)
+      this.listMeetingReportActionItemAssignees(workspaceId),
+      this.listMeetingReportDecisionItems(report.id)
     ]);
 
     return {
       report: this.mapMeetingReportDetail(report, {
         ...evidence,
+        activityEvidence,
         actionItems,
-        actionItemAssignees
+        actionItemAssignees,
+        decisionItems
       })
     };
+  }
+
+  async updateMeetingReportContent(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    body: unknown
+  ): Promise<MeetingReportContentMutationPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const patch = this.normalizeMeetingReportContentPatch(body);
+
+    await this.database.transaction(async (transaction) => {
+      const report = await transaction.queryOne<{
+        id: string;
+        status: MeetingReportStatus;
+        content_version: number | string;
+        can_edit: boolean;
+      }>(
+        `SELECT
+           meeting_reports.id,
+           meeting_reports.status,
+           meeting_reports.content_version,
+           (
+             EXISTS (
+               SELECT 1
+               FROM workspace_members
+               WHERE workspace_members.workspace_id = meetings.workspace_id
+                 AND workspace_members.user_id = $2
+                 AND workspace_members.role = 'owner'
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM meeting_participants
+               WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                 AND meeting_participants.user_id = $2
+             )
+           ) AS can_edit
+         FROM meeting_reports
+         JOIN meetings ON meetings.id = meeting_reports.meeting_id
+         WHERE meetings.workspace_id = $1
+           AND meeting_reports.id = $3
+         FOR UPDATE OF meeting_reports`,
+        [workspaceId, currentUserId, reportId]
+      );
+
+      if (report === null) {
+        throw notFound("Meeting report not found");
+      }
+      if (!report.can_edit) {
+        throw forbidden("Only the workspace owner or a meeting participant can edit this report");
+      }
+      if (report.status !== "COMPLETED") {
+        throw badRequest("Only completed meeting reports can be edited");
+      }
+      if (Number(report.content_version) !== patch.expectedVersion) {
+        throw conflict("Meeting report content was updated by another user");
+      }
+
+      if (patch.title !== undefined || patch.discussionPoints !== undefined) {
+        const updated = await transaction.queryOne<{ id: string }>(
+          `UPDATE meeting_reports
+           SET
+             user_title = COALESCE($2, user_title),
+             user_discussion_points = COALESCE($3, user_discussion_points),
+             updated_at = now()
+           WHERE id = $1
+           RETURNING id`,
+          [
+            report.id,
+            patch.title ?? null,
+            patch.discussionPoints ?? null
+          ]
+        );
+        if (updated === null) throw notFound("Meeting report not found");
+      }
+
+      if (patch.decisionItems.length) {
+        for (const item of patch.decisionItems) {
+          const updated = await transaction.queryOne<{ id: string }>(
+            `UPDATE meeting_report_decision_items
+             SET
+               user_text = $3,
+               edited_by_user_id = $4,
+               edited_at = now()
+             WHERE id = $1
+               AND meeting_report_id = $2
+             RETURNING id`,
+            [item.id, report.id, item.text, currentUserId]
+          );
+          if (updated === null) {
+            throw badRequest("Invalid meeting report decision item");
+          }
+        }
+      }
+
+      const updated = await transaction.queryOne<{ id: string }>(
+        `UPDATE meeting_reports
+         SET
+           content_version = content_version + 1,
+           content_edited_by_user_id = $2,
+           content_edited_at = now(),
+           updated_at = now()
+         WHERE id = $1
+         RETURNING id`,
+        [report.id, currentUserId]
+      );
+      if (updated === null) throw notFound("Meeting report not found");
+    });
+
+    const result = await this.getReport(currentUserId, workspaceId, reportId);
+    await this.publishMeetingReportEvent(reportId);
+    return result;
+  }
+
+  async retryMeetingReportActionItemExtraction(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportActionItemExtractionRetryPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    if (!UUID_PATTERN.test(reportId)) {
+      throw notFound("Meeting report not found");
+    }
+    const extraction = await this.database.queryOne<{
+      status: string;
+    }>(
+      `UPDATE meeting_report_action_item_extractions AS extraction
+       SET
+         status = 'pending',
+         attempt_count = 0,
+         next_attempt_at = now(),
+         claim_token = NULL,
+         claimed_at = NULL,
+         delivered_at = NULL,
+         completed_at = NULL,
+         failure_code = NULL,
+         failure_detail = NULL,
+         updated_at = now()
+       FROM meeting_reports AS reports
+       JOIN meetings ON meetings.id = reports.meeting_id
+       WHERE extraction.meeting_report_id = reports.id
+         AND reports.id = $2
+         AND meetings.workspace_id = $1
+         AND reports.status = 'COMPLETED'
+         AND extraction.status = 'failed'
+       RETURNING extraction.status`,
+      [workspaceId, reportId]
+    );
+    if (!extraction) {
+      throw badRequest("Meeting report follow-up tasks cannot be retried");
+    }
+    return {
+      actionItemExtraction: {
+        status: "PENDING",
+        errorMessage: null
+      }
+    };
+  }
+
+  private agentResolutionLimit(value: number | undefined): number {
+    if (!Number.isInteger(value) || value === undefined) {
+      return 4;
+    }
+    return Math.min(Math.max(value, 1), 20);
+  }
+
+  private normalizeAgentResolutionText(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
+  }
+
+  async getMeetingReportDecisionItem(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string,
+    sourceIndex: number
+  ): Promise<{ sourceIndex: number; text: string } | null> {
+    await this.getReport(currentUserId, workspaceId, reportId);
+    return this.database.queryOne<{ source_index: number; text: string }>(
+      `
+        SELECT source_index, COALESCE(user_text, text) AS text
+        FROM meeting_report_decision_items
+        WHERE meeting_report_id = $1
+          AND source_index = $2
+        LIMIT 1
+      `,
+      [reportId, sourceIndex]
+    ).then((row) =>
+      row ? { sourceIndex: row.source_index, text: row.text } : null
+    );
+  }
+
+  async deleteReport(
+    currentUserId: string,
+    workspaceId: string,
+    reportId: string
+  ): Promise<MeetingReportDeletionPayload> {
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    return this.database.transaction(async (transaction) => {
+      if (!UUID_PATTERN.test(reportId)) {
+        throw notFound("Meeting report not found");
+      }
+      const report = await transaction.queryOne<{
+        id: string;
+        status: MeetingReportStatus;
+        can_delete: boolean;
+      }>(
+        `SELECT
+           meeting_reports.id,
+           meeting_reports.status,
+           (
+             EXISTS (
+               SELECT 1
+               FROM workspace_members
+               WHERE workspace_members.workspace_id = meetings.workspace_id
+                 AND workspace_members.user_id = $2
+                 AND workspace_members.role = 'owner'
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM meeting_participants
+               WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                 AND meeting_participants.user_id = $2
+             )
+           ) AS can_delete
+         FROM meeting_reports
+         JOIN meetings ON meetings.id = meeting_reports.meeting_id
+         WHERE meetings.workspace_id = $1
+           AND meeting_reports.id = $3
+         FOR UPDATE OF meeting_reports`,
+        [workspaceId, currentUserId, reportId]
+      );
+
+      if (report === null) {
+        throw notFound("Meeting report not found");
+      }
+      if (!report.can_delete) {
+        throw forbidden("Only the workspace owner or a meeting participant can delete this report");
+      }
+      if (this.isMeetingReportInProgress(report.status)) {
+        throw badRequest("Meeting report is still processing");
+      }
+
+      const deleted = await transaction.queryOne<{ id: string }>(
+        `DELETE FROM meeting_reports
+         WHERE id = $1
+         RETURNING id`,
+        [report.id]
+      );
+      if (deleted === null) {
+        throw notFound("Meeting report not found");
+      }
+
+      return { deletedReportId: deleted.id };
+    });
   }
 
   async updateMeetingReportActionItem(
@@ -1725,10 +2374,21 @@ export class MeetingService {
           meeting_reports.status,
           meeting_reports.failed_step,
           meeting_reports.error_message,
+          meeting_reports.failure_code,
+          meeting_reports.failure_detail,
           meeting_reports.transcript_text,
+          meeting_reports.title AS ai_title,
+          COALESCE(meeting_reports.user_title, meeting_reports.title) AS title,
+          meeting_reports.user_title,
           meeting_reports.summary,
-          meeting_reports.discussion_points,
-          meeting_reports.decisions,
+          meeting_reports.discussion_points AS ai_discussion_points,
+          COALESCE(meeting_reports.user_discussion_points, meeting_reports.discussion_points) AS discussion_points,
+          meeting_reports.user_discussion_points,
+          meeting_reports.decisions AS ai_decisions,
+          COALESCE(decision_content.decisions, meeting_reports.decisions) AS decisions,
+          meeting_reports.content_version,
+          meeting_reports.content_edited_by_user_id,
+          meeting_reports.content_edited_at,
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
@@ -1738,6 +2398,11 @@ export class MeetingService {
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN LATERAL (
+          SELECT string_agg(COALESCE(user_text, text), E'\n' ORDER BY source_index) AS decisions
+          FROM meeting_report_decision_items
+          WHERE meeting_report_id = meeting_reports.id
+        ) AS decision_content ON true
         JOIN meeting_recordings
           ON meeting_recordings.id = meeting_reports.recording_id
           AND meeting_recordings.meeting_id = meeting_reports.meeting_id
@@ -1760,7 +2425,10 @@ export class MeetingService {
           status = 'QUEUED',
           failed_step = NULL,
           error_message = NULL,
+          failure_code = NULL,
+          failure_detail = NULL,
           transcript_text = NULL,
+          title = NULL,
           summary = NULL,
           discussion_points = NULL,
           decisions = NULL,
@@ -1776,9 +2444,17 @@ export class MeetingService {
           status,
           failed_step,
           error_message,
+          failure_code,
+          failure_detail,
+          COALESCE(user_title, title) AS title,
+          user_title,
           summary,
-          discussion_points,
+          COALESCE(user_discussion_points, discussion_points) AS discussion_points,
+          user_discussion_points,
           decisions,
+          content_version,
+          content_edited_by_user_id,
+          content_edited_at,
           action_item_candidates,
           retry_count,
           created_at,
@@ -1805,12 +2481,15 @@ export class MeetingService {
             status = $2::meeting_report_status,
             failed_step = $3::meeting_report_failed_step,
             error_message = $4,
-            transcript_text = $5,
-            summary = $6,
-            discussion_points = $7,
-            decisions = $8,
-            action_item_candidates = $9::jsonb,
-            retry_count = $10,
+            failure_code = $5,
+            failure_detail = $6::jsonb,
+            transcript_text = $7,
+            title = $8,
+            summary = $9,
+            discussion_points = $10,
+            decisions = $11,
+            action_item_candidates = $12::jsonb,
+            retry_count = $13,
             updated_at = now()
           WHERE id = $1
             AND status IN ('PROCESSING', 'QUEUED', 'TRANSCRIBING', 'SUMMARIZING')
@@ -1821,9 +2500,17 @@ export class MeetingService {
             status,
             failed_step,
             error_message,
+            failure_code,
+            failure_detail,
+            title,
+            user_title,
             summary,
             discussion_points,
             decisions,
+            user_discussion_points,
+            content_version,
+            content_edited_by_user_id,
+            content_edited_at,
             action_item_candidates,
             retry_count,
             created_at,
@@ -1834,10 +2521,13 @@ export class MeetingService {
           report.status,
           report.failed_step,
           report.error_message,
+          report.failure_code,
+          report.failure_detail == null ? null : JSON.stringify(report.failure_detail),
           report.transcript_text,
+          report.ai_title,
           report.summary,
-          report.discussion_points,
-          report.decisions,
+          report.ai_discussion_points,
+          report.ai_decisions,
           JSON.stringify(report.action_item_candidates ?? []),
           Number(report.retry_count)
         ]
@@ -2659,9 +3349,15 @@ export class MeetingService {
           status,
           failed_step,
           error_message,
+          title,
+          user_title,
           summary,
           discussion_points,
           decisions,
+          user_discussion_points,
+          content_version,
+          content_edited_by_user_id,
+          content_edited_at,
           action_item_candidates,
           retry_count,
           created_at,
@@ -2695,9 +3391,15 @@ export class MeetingService {
           status,
           failed_step,
           error_message,
+          title,
+          user_title,
           summary,
           discussion_points,
           decisions,
+          user_discussion_points,
+          content_version,
+          content_edited_by_user_id,
+          content_edited_at,
           action_item_candidates,
           retry_count,
           created_at,
@@ -2833,6 +3535,17 @@ export class MeetingService {
   private async publishMeetingStateEvent(
     input: MeetingStateRealtimeEventInput
   ): Promise<void> {
+    if (input.change === "ended") {
+      try {
+        await this.meetingNotificationService.cancelPendingInvitationsForMeeting(
+          input.meetingId
+        );
+      } catch {
+        this.logger.warn(
+          `Meeting invitation cancellation failed meeting_id=${input.meetingId}`
+        );
+      }
+    }
     await this.meetingStateRealtimePublisher?.publishStateUpdatedSafely(input);
   }
 
@@ -2859,6 +3572,7 @@ export class MeetingService {
             failed_step = 'STT',
             error_message = 'Meeting report job could not be enqueued',
             transcript_text = NULL,
+            title = NULL,
             summary = NULL,
             discussion_points = NULL,
             decisions = NULL,
@@ -2947,11 +3661,23 @@ export class MeetingService {
         SELECT
           meeting_reports.id, meeting_reports.meeting_id, meeting_reports.recording_id,
           meeting_reports.status, meeting_reports.failed_step, meeting_reports.error_message,
-          meeting_reports.summary, meeting_reports.discussion_points, meeting_reports.decisions,
+          COALESCE(meeting_reports.user_title, meeting_reports.title) AS title,
+          meeting_reports.user_title,
+          meeting_reports.summary,
+          COALESCE(meeting_reports.user_discussion_points, meeting_reports.discussion_points) AS discussion_points,
+          meeting_reports.user_discussion_points,
+          COALESCE(decision_content.decisions, meeting_reports.decisions) AS decisions,
+          meeting_reports.content_version, meeting_reports.content_edited_by_user_id,
+          meeting_reports.content_edited_at,
           meeting_reports.action_item_candidates, meeting_reports.retry_count,
           meeting_reports.created_at, meeting_reports.updated_at,
           ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
+        LEFT JOIN LATERAL (
+          SELECT string_agg(COALESCE(user_text, text), E'\n' ORDER BY source_index) AS decisions
+          FROM meeting_report_decision_items
+          WHERE meeting_report_id = meeting_reports.id
+        ) AS decision_content ON true
         ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meeting_reports.meeting_id = $1
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
@@ -2962,6 +3688,7 @@ export class MeetingService {
 
   private async listWorkspaceMeetingReportRows(
     workspaceId: string,
+    currentUserId: string,
     status: MeetingReportStatus | null,
     limit: number,
     filters: {
@@ -2969,9 +3696,11 @@ export class MeetingService {
       from: string | null;
       searchQuery: string | null;
       to: string | null;
+      reportTitle?: string | null;
+      roomName?: string | null;
     }
   ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
-    const values: unknown[] = [workspaceId];
+    const values: unknown[] = [workspaceId, currentUserId];
     const statusCondition =
       status === null
         ? ""
@@ -2979,7 +3708,7 @@ export class MeetingService {
     const searchCondition =
       filters.searchQuery === null
         ? ""
-        : `AND to_tsvector('simple', concat_ws(' ', COALESCE(meeting_reports.summary, ''), COALESCE(meeting_reports.discussion_points, ''), COALESCE(meeting_reports.decisions, ''), COALESCE(meeting_reports.action_item_candidates::text, ''), COALESCE(meeting_reports.error_message, ''))) @@ websearch_to_tsquery('simple', $${values.push(filters.searchQuery)})`;
+        : `AND to_tsvector('simple', concat_ws(' ', COALESCE(meeting_reports.user_title, meeting_reports.title, ''), COALESCE(meeting_reports.summary, ''), COALESCE(meeting_reports.user_discussion_points, meeting_reports.discussion_points, ''), COALESCE((SELECT string_agg(COALESCE(user_text, text), E'\n' ORDER BY source_index) FROM meeting_report_decision_items WHERE meeting_report_id = meeting_reports.id), meeting_reports.decisions, ''), COALESCE(meeting_reports.action_item_candidates::text, ''), COALESCE(meeting_reports.error_message, ''))) @@ websearch_to_tsquery('simple', $${values.push(filters.searchQuery)})`;
     const fromCondition =
       filters.from === null
         ? ""
@@ -2988,6 +3717,14 @@ export class MeetingService {
       filters.to === null
         ? ""
         : `AND meeting_reports.created_at < $${values.push(filters.to)}::timestamptz`;
+    const roomNameCondition =
+      filters.roomName === null || filters.roomName === undefined
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(meeting_rooms.name), '\\s+', ' ', 'g')) = $${values.push(filters.roomName)}`;
+    const reportTitleCondition =
+      filters.reportTitle === null || filters.reportTitle === undefined
+        ? ""
+        : `AND lower(regexp_replace(BTRIM(COALESCE(meeting_reports.user_title, meeting_reports.title)), '\\s+', ' ', 'g')) = $${values.push(filters.reportTitle)}`;
     const cursorCondition =
       filters.cursor === null
         ? ""
@@ -3007,23 +3744,73 @@ export class MeetingService {
           meeting_reports.status,
           meeting_reports.failed_step,
           meeting_reports.error_message,
+          COALESCE(meeting_reports.user_title, meeting_reports.title) AS title,
+          meeting_reports.user_title,
           meeting_reports.summary,
-          meeting_reports.discussion_points,
-          meeting_reports.decisions,
+          COALESCE(meeting_reports.user_discussion_points, meeting_reports.discussion_points) AS discussion_points,
+          meeting_reports.user_discussion_points,
+          COALESCE(decision_content.decisions, meeting_reports.decisions) AS decisions,
+          meeting_reports.content_version,
+          meeting_reports.content_edited_by_user_id,
+          meeting_reports.content_edited_at,
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
           meeting_reports.updated_at,
+          extraction.status AS action_item_extraction_status,
+          extraction.failure_code AS action_item_extraction_failure_code,
+          (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members
+              WHERE workspace_members.workspace_id = meetings.workspace_id
+                AND workspace_members.user_id = $2
+                AND workspace_members.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants
+              WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                AND meeting_participants.user_id = $2
+            )
+          ) AS can_delete,
+          (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members
+              WHERE workspace_members.workspace_id = meetings.workspace_id
+                AND workspace_members.user_id = $2
+                AND workspace_members.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants
+              WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                AND meeting_participants.user_id = $2
+            )
+          ) AS can_edit,
           ${this.meetingReportParticipantSummaryColumns()}
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN meeting_rooms
+          ON meeting_rooms.workspace_id = meetings.workspace_id
+          AND meeting_rooms.room_key = meetings.room_key
+        LEFT JOIN meeting_report_action_item_extractions AS extraction
+          ON extraction.meeting_report_id = meeting_reports.id
+        LEFT JOIN LATERAL (
+          SELECT string_agg(COALESCE(user_text, text), E'\n' ORDER BY source_index) AS decisions
+          FROM meeting_report_decision_items
+          WHERE meeting_report_id = meeting_reports.id
+        ) AS decision_content ON true
         ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
         WHERE meetings.workspace_id = $1
           ${statusCondition}
           ${searchCondition}
           ${fromCondition}
           ${toCondition}
+          ${roomNameCondition}
+          ${reportTitleCondition}
           ${cursorCondition}
         ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
         LIMIT ${limitParameter}
@@ -3047,8 +3834,8 @@ export class MeetingService {
 
   private async findMeetingReportDetailById(
     workspaceId: string,
-    reportId: string,
-    currentUserId: string
+    currentUserId: string,
+    reportId: string
   ): Promise<MeetingReportDetailRow | null> {
     if (!UUID_PATTERN.test(reportId)) {
       return null;
@@ -3064,38 +3851,68 @@ export class MeetingService {
           meeting_reports.failed_step,
           meeting_reports.error_message,
           meeting_reports.transcript_text,
+          COALESCE(meeting_reports.user_title, meeting_reports.title) AS title,
+          meeting_reports.user_title,
           meeting_reports.summary,
-          meeting_reports.discussion_points,
-          meeting_reports.decisions,
+          COALESCE(meeting_reports.user_discussion_points, meeting_reports.discussion_points) AS discussion_points,
+          meeting_reports.user_discussion_points,
+          COALESCE(decision_content.decisions, meeting_reports.decisions) AS decisions,
+          meeting_reports.content_version,
+          meeting_reports.content_edited_by_user_id,
+          meeting_reports.content_edited_at,
           meeting_reports.action_item_candidates,
           meeting_reports.retry_count,
           meeting_reports.created_at,
           meeting_reports.updated_at,
-          ${this.meetingReportParticipantSummaryColumns()}
-        FROM meeting_reports
-        JOIN meetings
-          ON meetings.id = meeting_reports.meeting_id
-        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
-        WHERE meetings.workspace_id = $1
-          AND meeting_reports.id = $2
-          AND (
+          extraction.status AS action_item_extraction_status,
+          extraction.failure_code AS action_item_extraction_failure_code,
+          (
             EXISTS (
               SELECT 1
               FROM workspace_members
               WHERE workspace_members.workspace_id = meetings.workspace_id
-                AND workspace_members.user_id = $3::uuid
+                AND workspace_members.user_id = $2
                 AND workspace_members.role = 'owner'
             )
             OR EXISTS (
               SELECT 1
               FROM meeting_participants
-              WHERE meeting_participants.meeting_id = meetings.id
-                AND meeting_participants.user_id = $3::uuid
+              WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                AND meeting_participants.user_id = $2
             )
-          )
+          ) AS can_delete,
+          (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members
+              WHERE workspace_members.workspace_id = meetings.workspace_id
+                AND workspace_members.user_id = $2
+                AND workspace_members.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants
+              WHERE meeting_participants.meeting_id = meeting_reports.meeting_id
+                AND meeting_participants.user_id = $2
+            )
+          ) AS can_edit,
+          ${this.meetingReportParticipantSummaryColumns()}
+        FROM meeting_reports
+        JOIN meetings
+          ON meetings.id = meeting_reports.meeting_id
+        LEFT JOIN meeting_report_action_item_extractions AS extraction
+          ON extraction.meeting_report_id = meeting_reports.id
+        LEFT JOIN LATERAL (
+          SELECT string_agg(COALESCE(user_text, text), E'\n' ORDER BY source_index) AS decisions
+          FROM meeting_report_decision_items
+          WHERE meeting_report_id = meeting_reports.id
+        ) AS decision_content ON true
+        ${this.meetingReportParticipantSummaryJoin("meeting_reports")}
+        WHERE meetings.workspace_id = $1
+          AND meeting_reports.id = $3
         LIMIT 1
       `,
-      [workspaceId, reportId, currentUserId]
+      [workspaceId, currentUserId, reportId]
     );
   }
 
@@ -3105,8 +3922,9 @@ export class MeetingService {
     const result = await this.database.queryOne<ParticipantCountRow>(
       `
         SELECT
-          COUNT(*)::int AS participant_count,
-          (COUNT(*) FILTER (WHERE left_at IS NULL))::int AS active_participant_count
+          COUNT(DISTINCT user_id)::int AS participant_count,
+          (COUNT(DISTINCT user_id) FILTER (WHERE left_at IS NULL))::int
+            AS active_participant_count
         FROM meeting_participants
         WHERE meeting_id = $1
       `,
@@ -3122,20 +3940,43 @@ export class MeetingService {
   private async listParticipantRows(meetingId: string): Promise<ParticipantRow[]> {
     return this.database.query<ParticipantRow>(
       `
+        WITH participant_summaries AS (
+          SELECT
+            meeting_id,
+            user_id,
+            MIN(joined_at) AS joined_at,
+            CASE
+              WHEN BOOL_OR(left_at IS NULL) THEN NULL
+              ELSE MAX(left_at)
+            END AS left_at,
+            (
+              ARRAY_AGG(
+                id
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS id,
+            (
+              ARRAY_AGG(
+                livekit_identity
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS livekit_identity
+          FROM meeting_participants
+          WHERE meeting_id = $1
+          GROUP BY meeting_id, user_id
+        )
         SELECT
-          meeting_participants.id,
-          meeting_participants.meeting_id,
-          meeting_participants.user_id,
-          meeting_participants.livekit_identity,
-          meeting_participants.joined_at,
-          meeting_participants.left_at,
+          participant_summaries.id,
+          participant_summaries.meeting_id,
+          participant_summaries.user_id,
+          participant_summaries.livekit_identity,
+          participant_summaries.joined_at,
+          participant_summaries.left_at,
           users.name AS user_name,
           users.avatar_url AS user_avatar_url
-        FROM meeting_participants
-        JOIN users
-          ON users.id = meeting_participants.user_id
-        WHERE meeting_participants.meeting_id = $1
-        ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+        FROM participant_summaries
+        JOIN users ON users.id = participant_summaries.user_id
+        ORDER BY participant_summaries.joined_at ASC, participant_summaries.id ASC
       `,
       [meetingId]
     );
@@ -3148,49 +3989,180 @@ export class MeetingService {
   ): Promise<ParticipantRow> {
     const participant = await executor.queryOne<ParticipantRow>(
       `
-        WITH upserted_participant AS (
+        WITH participant_lock AS (
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(
+              ($1::uuid)::text || ':' || ($2::uuid)::text,
+              0
+            )
+          )
+        ),
+        active_participant AS (
+          SELECT meeting_participants.*
+          FROM meeting_participants
+          CROSS JOIN participant_lock
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NULL
+          FOR UPDATE
+        ),
+        inserted_participant AS (
           INSERT INTO meeting_participants (
             meeting_id,
             user_id,
             livekit_identity
           )
-          VALUES (
-            $1::uuid,
-            $2::uuid,
-            'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text
-          )
-          ON CONFLICT (meeting_id, user_id)
-          DO UPDATE SET
-            joined_at = now(),
-            left_at = NULL,
-            livekit_identity = EXCLUDED.livekit_identity,
-            updated_at = now()
+          SELECT meeting_id, user_id, livekit_identity
+          FROM (
+            SELECT
+              $1::uuid AS meeting_id,
+              $2::uuid AS user_id,
+              'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text
+                AS livekit_identity
+          ) AS candidate
+          WHERE NOT EXISTS (SELECT 1 FROM active_participant)
+          ON CONFLICT DO NOTHING
           RETURNING *
+        ),
+        resolved_participant AS (
+          SELECT * FROM active_participant
+          UNION ALL
+          SELECT * FROM inserted_participant
         )
         SELECT
-          upserted_participant.id,
-          upserted_participant.meeting_id,
-          upserted_participant.user_id,
-          upserted_participant.livekit_identity,
-          upserted_participant.joined_at,
-          upserted_participant.left_at,
+          resolved_participant.id,
+          resolved_participant.meeting_id,
+          resolved_participant.user_id,
+          resolved_participant.livekit_identity,
+          resolved_participant.joined_at,
+          resolved_participant.left_at,
           users.name AS user_name,
           users.avatar_url AS user_avatar_url
-        FROM upserted_participant
+        FROM resolved_participant
         JOIN users
-          ON users.id = upserted_participant.user_id
+          ON users.id = resolved_participant.user_id
       `,
       [meetingId, currentUserId]
     );
 
-    if (!participant) {
+    if (participant) {
+      return participant;
+    }
+
+    // Before 072, the former global unique constraint rejects the insert above.
+    // This transaction already holds the participant advisory lock, so only that
+    // old-schema compatibility path can reactivate one latest closed row. After
+    // 072 the insert succeeds for a new session and this path is not used.
+    const reactivatedParticipant = await executor.queryOne<ParticipantRow>(
+      `
+        WITH active_participant AS (
+          SELECT *
+          FROM meeting_participants
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NULL
+          FOR UPDATE
+        ),
+        legacy_participant AS (
+          SELECT id
+          FROM meeting_participants
+          WHERE meeting_id = $1::uuid
+            AND user_id = $2::uuid
+            AND left_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM active_participant)
+          ORDER BY joined_at DESC, id DESC
+          LIMIT 1
+          FOR UPDATE
+        ),
+        reactivated_participant AS (
+          UPDATE meeting_participants
+          SET
+            joined_at = now(),
+            left_at = NULL,
+            livekit_identity =
+              'meeting-' || ($1::uuid)::text || '-user-' || ($2::uuid)::text,
+            updated_at = now()
+          WHERE id = (SELECT id FROM legacy_participant)
+          RETURNING *
+        ),
+        resolved_participant AS (
+          SELECT * FROM active_participant
+          UNION ALL
+          SELECT * FROM reactivated_participant
+        )
+        SELECT
+          resolved_participant.id,
+          resolved_participant.meeting_id,
+          resolved_participant.user_id,
+          resolved_participant.livekit_identity,
+          resolved_participant.joined_at,
+          resolved_participant.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM resolved_participant
+        JOIN users ON users.id = resolved_participant.user_id
+      `,
+      [meetingId, currentUserId]
+    );
+
+    if (!reactivatedParticipant) {
       throw badRequest("Meeting participant could not be saved");
     }
 
-    return participant;
+    return reactivatedParticipant;
   }
 
-  private async findParticipant(
+  private async findParticipantSummary(
+    executor: QueryOneExecutor,
+    meetingId: string,
+    currentUserId: string
+  ): Promise<ParticipantRow | null> {
+    return executor.queryOne<ParticipantRow>(
+      `
+        WITH participant_summary AS (
+          SELECT
+            meeting_id,
+            user_id,
+            MIN(joined_at) AS joined_at,
+            CASE
+              WHEN BOOL_OR(left_at IS NULL) THEN NULL
+              ELSE MAX(left_at)
+            END AS left_at,
+            (
+              ARRAY_AGG(
+                id
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS id,
+            (
+              ARRAY_AGG(
+                livekit_identity
+                ORDER BY (left_at IS NULL) DESC, joined_at DESC, id DESC
+              )
+            )[1] AS livekit_identity
+          FROM meeting_participants
+          WHERE meeting_id = $1
+            AND user_id = $2
+          GROUP BY meeting_id, user_id
+        )
+        SELECT
+          participant_summary.id,
+          participant_summary.meeting_id,
+          participant_summary.user_id,
+          participant_summary.livekit_identity,
+          participant_summary.joined_at,
+          participant_summary.left_at,
+          users.name AS user_name,
+          users.avatar_url AS user_avatar_url
+        FROM participant_summary
+        JOIN users ON users.id = participant_summary.user_id
+        LIMIT 1
+      `,
+      [meetingId, currentUserId]
+    );
+  }
+
+  private async findActiveParticipant(
     executor: QueryOneExecutor,
     meetingId: string,
     currentUserId: string
@@ -3207,10 +4179,10 @@ export class MeetingService {
           users.name AS user_name,
           users.avatar_url AS user_avatar_url
         FROM meeting_participants
-        JOIN users
-          ON users.id = meeting_participants.user_id
+        JOIN users ON users.id = meeting_participants.user_id
         WHERE meeting_participants.meeting_id = $1
           AND meeting_participants.user_id = $2
+          AND meeting_participants.left_at IS NULL
         LIMIT 1
       `,
       [meetingId, currentUserId]
@@ -3239,6 +4211,7 @@ export class MeetingService {
           ON users.id = meeting_participants.user_id
         WHERE meeting_participants.meeting_id = $1
           AND meeting_participants.livekit_identity = $2
+          AND meeting_participants.left_at IS NULL
         LIMIT 1
         ${options.lockParticipant === true ? "FOR UPDATE OF meeting_participants" : ""}
       `,
@@ -3251,7 +4224,7 @@ export class MeetingService {
     meetingId: string,
     currentUserId: string
   ): Promise<void> {
-    const participant = await this.findParticipant(
+    const participant = await this.findActiveParticipant(
       executor,
       meetingId,
       currentUserId
@@ -3354,21 +4327,17 @@ export class MeetingService {
 
   private async markParticipantLeft(
     executor: QueryOneExecutor,
-    meetingId: string,
-    currentUserId: string
+    participantId: string
   ): Promise<ParticipantRow> {
     const participant = await executor.queryOne<ParticipantRow>(
       `
         WITH updated_participant AS (
           UPDATE meeting_participants
           SET
-            left_at = COALESCE(left_at, now()),
-            updated_at = CASE
-              WHEN left_at IS NULL THEN now()
-              ELSE updated_at
-            END
-          WHERE meeting_id = $1
-            AND user_id = $2
+            left_at = now(),
+            updated_at = now()
+          WHERE id = $1
+            AND left_at IS NULL
           RETURNING *
         )
         SELECT
@@ -3384,7 +4353,7 @@ export class MeetingService {
         JOIN users
           ON users.id = updated_participant.user_id
       `,
-      [meetingId, currentUserId]
+      [participantId]
     );
 
     if (!participant) {
@@ -3740,6 +4709,7 @@ export class MeetingService {
   private mapMeetingReportSummary(
     report: MeetingReportRow
   ): MeetingReportSummaryPayload {
+    const actionItemExtraction = this.mapActionItemExtraction(report);
     return {
       id: report.id,
       meetingId: report.meeting_id,
@@ -3747,14 +4717,42 @@ export class MeetingService {
       status: report.status,
       failedStep: report.failed_step,
       errorMessage: report.error_message,
+      title: report.title,
       summary: report.summary,
       discussionPoints: report.discussion_points,
       decisions: report.decisions,
+      contentVersion: Number(report.content_version),
+      contentEditedByUserId: report.content_edited_by_user_id,
+      contentEditedAt: this.toNullableIsoString(report.content_edited_at),
       actionItemCandidates: this.toJsonArray(report.action_item_candidates),
+      ...(actionItemExtraction
+        ? { actionItemExtraction }
+        : {}),
       retryCount: Number(report.retry_count),
       participantSummary: this.mapMeetingReportParticipantSummary(report),
+      ...(typeof report.can_delete === "boolean"
+        ? { canDelete: report.can_delete }
+        : {}),
+      ...(typeof report.can_edit === "boolean"
+        ? { canEdit: report.can_edit }
+        : {}),
       createdAt: this.toIsoString(report.created_at),
       updatedAt: this.toIsoString(report.updated_at)
+    };
+  }
+
+  private mapActionItemExtraction(
+    report: MeetingReportRow
+  ): MeetingReportActionItemExtractionPayload | null {
+    const rawStatus = report.action_item_extraction_status;
+    if (typeof rawStatus !== "string") return null;
+    const status = rawStatus.toUpperCase() as MeetingReportActionItemExtractionStatus;
+    if (![
+      "PENDING", "PUBLISHING", "QUEUED", "PROCESSING", "COMPLETED", "FAILED"
+    ].includes(status)) return null;
+    return {
+      status,
+      errorMessage: status === "FAILED" ? "후속 작업을 생성하지 못했습니다." : null
     };
   }
 
@@ -3780,14 +4778,23 @@ export class MeetingService {
   private meetingReportParticipantSummaryJoin(reportAlias: string): string {
     return `LEFT JOIN LATERAL (
       SELECT
-        (SELECT COUNT(*)::int FROM meeting_participants WHERE meeting_id = ${reportAlias}.meeting_id) AS participant_count,
+        (SELECT COUNT(DISTINCT user_id)::int FROM meeting_participants WHERE meeting_id = ${reportAlias}.meeting_id) AS participant_count,
         (SELECT COALESCE(jsonb_agg(jsonb_build_object('userId', preview.user_id, 'name', preview.name, 'avatarUrl', preview.avatar_url) ORDER BY preview.joined_at ASC, preview.id ASC), '[]'::jsonb)
          FROM (
-           SELECT meeting_participants.id, meeting_participants.user_id, meeting_participants.joined_at, users.name, users.avatar_url
-           FROM meeting_participants
-           JOIN users ON users.id = meeting_participants.user_id
-           WHERE meeting_participants.meeting_id = ${reportAlias}.meeting_id
-           ORDER BY meeting_participants.joined_at ASC, meeting_participants.id ASC
+           SELECT first_session.id, first_session.user_id, first_session.joined_at, first_session.name, first_session.avatar_url
+           FROM (
+             SELECT DISTINCT ON (meeting_participants.user_id)
+               meeting_participants.id,
+               meeting_participants.user_id,
+               meeting_participants.joined_at,
+               users.name,
+               users.avatar_url
+             FROM meeting_participants
+             JOIN users ON users.id = meeting_participants.user_id
+             WHERE meeting_participants.meeting_id = ${reportAlias}.meeting_id
+             ORDER BY meeting_participants.user_id, meeting_participants.joined_at ASC, meeting_participants.id ASC
+           ) AS first_session
+           ORDER BY first_session.joined_at ASC, first_session.id ASC
            LIMIT 3
          ) AS preview) AS participant_preview
     ) AS participant_summary ON true`;
@@ -3847,7 +4854,9 @@ export class MeetingService {
       `SELECT action_items.id, action_items.meeting_report_id, action_items.source_index,
               action_items.title, action_items.description, action_items.priority,
               action_items.assignee_user_id, users.name AS assignee_name,
-              users.avatar_url AS assignee_avatar_url, action_items.status,
+              users.avatar_url AS assignee_avatar_url,
+              meeting_reports.action_item_candidates,
+              action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
               action_items.dismissed_at, action_items.created_at, action_items.updated_at
@@ -3968,6 +4977,111 @@ export class MeetingService {
     return normalized;
   }
 
+  private normalizeMeetingReportContentPatch(body: unknown): {
+    expectedVersion: number;
+    title?: string;
+    discussionPoints?: string;
+    decisionItems: Array<{ id: string; text: string }>;
+  } {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      throw badRequest("Meeting report patch must be an object");
+    }
+    const patch = body as Record<string, unknown>;
+    const allowed = new Set([
+      "expectedVersion",
+      "title",
+      "discussionPoints",
+      "decisionItems"
+    ]);
+    if (
+      Object.keys(patch).some((key) => !allowed.has(key)) ||
+      !Object.hasOwn(patch, "expectedVersion")
+    ) {
+      throw badRequest("Invalid meeting report patch");
+    }
+    if (
+      typeof patch.expectedVersion !== "number" ||
+      !Number.isInteger(patch.expectedVersion) ||
+      patch.expectedVersion < 1
+    ) {
+      throw badRequest("Invalid meeting report expectedVersion");
+    }
+
+    const normalized: {
+      expectedVersion: number;
+      title?: string;
+      discussionPoints?: string;
+      decisionItems: Array<{ id: string; text: string }>;
+    } = {
+      expectedVersion: patch.expectedVersion,
+      decisionItems: []
+    };
+    if (Object.hasOwn(patch, "title")) {
+      normalized.title = this.normalizeMeetingReportContentText(
+        patch.title,
+        "title",
+        500
+      );
+    }
+    if (Object.hasOwn(patch, "discussionPoints")) {
+      normalized.discussionPoints = this.normalizeMeetingReportContentText(
+        patch.discussionPoints,
+        "discussionPoints",
+        16000
+      );
+    }
+    if (Object.hasOwn(patch, "decisionItems")) {
+      if (!Array.isArray(patch.decisionItems) || !patch.decisionItems.length) {
+        throw badRequest("Meeting report decisionItems must be a non-empty array");
+      }
+      const seenIds = new Set<string>();
+      normalized.decisionItems = patch.decisionItems.map((value) => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          throw badRequest("Invalid meeting report decision item");
+        }
+        const item = value as Record<string, unknown>;
+        if (
+          Object.keys(item).length !== 2 ||
+          !Object.hasOwn(item, "id") ||
+          !Object.hasOwn(item, "text") ||
+          typeof item.id !== "string" ||
+          !UUID_PATTERN.test(item.id) ||
+          seenIds.has(item.id)
+        ) {
+          throw badRequest("Invalid meeting report decision item");
+        }
+        seenIds.add(item.id);
+        return {
+          id: item.id,
+          text: this.normalizeMeetingReportContentText(item.text, "decision text", 5000)
+        };
+      });
+    }
+    if (
+      normalized.title === undefined &&
+      normalized.discussionPoints === undefined &&
+      !normalized.decisionItems.length
+    ) {
+      throw badRequest("Meeting report patch must update content");
+    }
+    return normalized;
+  }
+
+  private normalizeMeetingReportContentText(
+    value: unknown,
+    field: string,
+    maxLength: number
+  ): string {
+    if (typeof value !== "string") {
+      throw badRequest(`Meeting report ${field} must be a string`);
+    }
+    const normalized = value.trim();
+    if (!normalized || Buffer.byteLength(normalized, "utf8") > maxLength) {
+      throw badRequest(`Invalid meeting report ${field}`);
+    }
+    return normalized;
+  }
+
   private normalizeActionItemText(value: unknown, field: string, maxLength: number): string {
     if (typeof value !== "string") throw badRequest(`Action item ${field} must be a string`);
     const normalized = value.trim();
@@ -3991,28 +5105,128 @@ export class MeetingService {
         name: actionItem.assignee_name,
         avatarUrl: actionItem.assignee_avatar_url
       },
+      deliverySuggestion: this.getActionItemDeliverySuggestion(actionItem),
       status: actionItem.status,
       updatedByUserId: actionItem.updated_by_user_id,
       approvedByUserId: actionItem.approved_by_user_id,
       approvedAt: this.toNullableIsoString(actionItem.approved_at),
       dismissedByUserId: actionItem.dismissed_by_user_id,
       dismissedAt: this.toNullableIsoString(actionItem.dismissed_at),
+      delivery: !actionItem.delivery_id ||
+        !actionItem.delivery_type ||
+        !actionItem.delivery_status
+        ? null
+        : {
+            deliveryType: actionItem.delivery_type,
+            status: actionItem.delivery_status,
+            errorCode: actionItem.delivery_error_code ?? null,
+            draft: this.toMeetingActionItemDeliveryDraft(
+              actionItem.delivery_draft_json,
+              actionItem.delivery_type
+            ),
+            targetResourceId: actionItem.delivery_target_resource_id ?? null,
+            calendarEvent: actionItem.calendar_event_id === null ||
+              actionItem.calendar_event_title === null
+              ? null
+              : {
+                  id: String(actionItem.calendar_event_id),
+                  title: actionItem.calendar_event_title ?? "일정"
+                },
+            piloIssue: actionItem.pilo_issue_id === null ||
+              actionItem.pilo_issue_title === null ||
+              actionItem.pilo_issue_board_id === null ||
+              actionItem.pilo_issue_column_id === null
+              ? null
+              : {
+                  id: String(actionItem.pilo_issue_id),
+                  title: actionItem.pilo_issue_title ?? "Issue",
+                  boardId: String(actionItem.pilo_issue_board_id),
+                  columnId: String(actionItem.pilo_issue_column_id),
+                  columnName: actionItem.pilo_issue_column_name ?? null
+                }
+          },
       createdAt: this.toIsoString(actionItem.created_at),
       updatedAt: this.toIsoString(actionItem.updated_at)
     };
   }
 
+  private getActionItemDeliverySuggestion(
+    actionItem: MeetingReportActionItemRow
+  ): MeetingReportActionItemPayload["deliverySuggestion"] {
+    const candidate = this.toJsonArray(actionItem.action_item_candidates)[
+      Number(actionItem.source_index)
+    ];
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+      return null;
+    }
+    const suggestion = (candidate as Record<string, unknown>).deliverySuggestion;
+    if (typeof suggestion !== "object" || suggestion === null || Array.isArray(suggestion)) {
+      return null;
+    }
+    const value = suggestion as Record<string, unknown>;
+    if (value.deliveryType === "pilo_issue") {
+      return { deliveryType: "pilo_issue", calendar: null };
+    }
+    if (value.deliveryType !== "calendar_event") return null;
+    const calendar = value.calendar;
+    if (typeof calendar !== "object" || calendar === null || Array.isArray(calendar)) {
+      return null;
+    }
+    const details = calendar as Record<string, unknown>;
+    if (
+      typeof details.isAllDay !== "boolean" ||
+      typeof details.startDate !== "string" ||
+      typeof details.endDate !== "string" ||
+      (details.startTime !== null && typeof details.startTime !== "string") ||
+      (details.endTime !== null && typeof details.endTime !== "string")
+    ) {
+      return null;
+    }
+    return {
+      deliveryType: "calendar_event",
+      calendar: {
+        isAllDay: details.isAllDay,
+        startDate: details.startDate,
+        endDate: details.endDate,
+        startTime: details.startTime,
+        endTime: details.endTime
+      }
+    };
+  }
+
   private mapMeetingReportDetail(report: MeetingReportDetailRow, evidence: {
-    transcriptSegments: MeetingReportDetailPayload["transcriptSegments"];
+    evidenceSegments: MeetingReportDetailPayload["evidenceSegments"];
     evidence: MeetingReportDetailPayload["evidence"];
+    activityEvidence: MeetingReportDetailPayload["activityEvidence"];
     actionItems: MeetingReportActionItemPayload[];
     actionItemAssignees: MeetingReportActionItemAssigneePayload[];
+    decisionItems: MeetingReportDecisionItemPayload[];
   }): MeetingReportDetailPayload {
     return {
       ...this.mapMeetingReportSummary(report),
       transcriptText: report.transcript_text,
       ...evidence
     };
+  }
+
+  private async listMeetingReportDecisionItems(
+    reportId: string
+  ): Promise<MeetingReportDecisionItemPayload[]> {
+    const rows = await this.database.query<MeetingReportDecisionItemRow>(
+      `SELECT id, source_index, text, user_text, edited_by_user_id, edited_at
+       FROM meeting_report_decision_items
+       WHERE meeting_report_id = $1
+       ORDER BY source_index ASC, id ASC`,
+      [reportId]
+    );
+    return rows.map((item) => ({
+      id: item.id,
+      sourceIndex: Number(item.source_index),
+      text: item.user_text ?? item.text,
+      isUserEdited: item.user_text !== null,
+      editedByUserId: item.edited_by_user_id,
+      editedAt: this.toNullableIsoString(item.edited_at)
+    }));
   }
 
   private async listMeetingReportActionItems(
@@ -4022,12 +5236,34 @@ export class MeetingService {
       `SELECT action_items.id, action_items.meeting_report_id, action_items.source_index,
               action_items.title, action_items.description, action_items.priority,
               action_items.assignee_user_id, users.name AS assignee_name,
-              users.avatar_url AS assignee_avatar_url, action_items.status,
+              users.avatar_url AS assignee_avatar_url,
+              meeting_reports.action_item_candidates,
+              action_items.status,
               action_items.updated_by_user_id, action_items.approved_by_user_id,
               action_items.approved_at, action_items.dismissed_by_user_id,
-              action_items.dismissed_at, action_items.created_at, action_items.updated_at
+              action_items.dismissed_at, action_items.created_at, action_items.updated_at,
+              delivery.id AS delivery_id, delivery.delivery_type, delivery.status AS delivery_status,
+              delivery.last_error_code AS delivery_error_code,
+              delivery.draft_json AS delivery_draft_json,
+              delivery.target_resource_id AS delivery_target_resource_id,
+              calendar_event.id AS calendar_event_id, calendar_event.title AS calendar_event_title,
+              pilo_issue.id AS pilo_issue_id, pilo_issue.title AS pilo_issue_title,
+              pilo_issue.board_id AS pilo_issue_board_id,
+              pilo_issue.column_id AS pilo_issue_column_id,
+              board_column.name AS pilo_issue_column_name
        FROM meeting_report_action_items AS action_items
+       JOIN meeting_reports
+         ON meeting_reports.id = action_items.meeting_report_id
        LEFT JOIN users ON users.id = action_items.assignee_user_id
+       LEFT JOIN meeting_report_action_item_deliveries AS delivery
+         ON delivery.action_item_id = action_items.id
+       LEFT JOIN calendar_events AS calendar_event
+         ON calendar_event.id = delivery.calendar_event_id
+       LEFT JOIN pilo_issues AS pilo_issue
+         ON pilo_issue.id = delivery.pilo_issue_id
+       LEFT JOIN board_columns AS board_column
+         ON board_column.id = pilo_issue.column_id
+        AND board_column.board_id = pilo_issue.board_id
        WHERE action_items.meeting_report_id = $1
        ORDER BY action_items.source_index ASC`,
       [reportId]
@@ -4054,22 +5290,68 @@ export class MeetingService {
     }));
   }
 
-  private async listMeetingReportEvidence(reportId: string): Promise<{ transcriptSegments: MeetingReportDetailPayload["transcriptSegments"]; evidence: MeetingReportDetailPayload["evidence"] }> {
+  private async listMeetingReportEvidence(reportId: string): Promise<{ evidenceSegments: MeetingReportDetailPayload["evidenceSegments"]; evidence: MeetingReportDetailPayload["evidence"] }> {
     const rows = await this.database.query<{ id: string; segment_index: number; started_at_ms: number; ended_at_ms: number; text: string; source_type: string | null; source_index: number | null; transcript_segment_id: string | null }>(`
       SELECT segments.id, segments.segment_index, segments.started_at_ms, segments.ended_at_ms, segments.text,
         evidence.source_type, evidence.source_index, evidence.transcript_segment_id
-      FROM meeting_report_transcript_segments segments
-      LEFT JOIN meeting_report_evidence evidence ON evidence.transcript_segment_id = segments.id
-      WHERE segments.meeting_report_id = $1
+      FROM meeting_report_evidence evidence
+      JOIN meeting_report_transcript_segments segments ON segments.id = evidence.transcript_segment_id
+      WHERE evidence.meeting_report_id = $1
       ORDER BY segments.segment_index ASC, evidence.source_type ASC, evidence.source_index ASC
     `, [reportId]);
-    const segmentMap = new Map<string, MeetingReportDetailPayload["transcriptSegments"][number]>();
+    const segmentMap = new Map<string, MeetingReportDetailPayload["evidenceSegments"][number]>();
     const references: MeetingReportDetailPayload["evidence"] = [];
     for (const row of rows) {
       segmentMap.set(row.id, { id: row.id, segmentIndex: Number(row.segment_index), startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), text: row.text });
       if (row.source_type !== null && row.source_index !== null && row.transcript_segment_id !== null) references.push({ sourceType: row.source_type, sourceIndex: Number(row.source_index), transcriptSegmentId: row.transcript_segment_id });
     }
-    return { transcriptSegments: [...segmentMap.values()], evidence: references };
+    return { evidenceSegments: [...segmentMap.values()], evidence: references };
+  }
+
+  private async listMeetingReportActivityEvidence(
+    reportId: string
+  ): Promise<MeetingReportDetailPayload["activityEvidence"]> {
+    const rows = await this.database.query<{
+      id: string;
+      source_index: number | string;
+      occurred_at: Date | string;
+      action: string;
+      summary: string;
+      source_type: string | null;
+      reference_source_index: number | string | null;
+    }>(
+      `SELECT activity_evidence.id, activity_evidence.source_index, activity_evidence.occurred_at,
+              activity_evidence.action::text AS action, activity_evidence.summary,
+              activity_references.source_type, activity_references.source_index AS reference_source_index
+       FROM meeting_report_activity_evidence AS activity_evidence
+       LEFT JOIN meeting_report_activity_evidence_references AS activity_references
+         ON activity_references.activity_evidence_id = activity_evidence.id
+        AND activity_references.meeting_report_id = activity_evidence.meeting_report_id
+       WHERE activity_evidence.meeting_report_id = $1
+       ORDER BY activity_evidence.occurred_at ASC, activity_evidence.source_index ASC,
+                activity_references.source_type ASC, activity_references.source_index ASC`,
+      [reportId]
+    );
+
+    const activityEvidence = new Map<string, MeetingReportDetailPayload["activityEvidence"][number]>();
+    for (const row of rows) {
+      const item = activityEvidence.get(row.id) ?? {
+        id: row.id,
+        sourceIndex: Number(row.source_index),
+        occurredAt: new Date(row.occurred_at).toISOString(),
+        action: row.action,
+        summary: row.summary,
+        references: []
+      };
+      if (row.source_type !== null && row.reference_source_index !== null) {
+        item.references.push({
+          sourceType: row.source_type,
+          sourceIndex: Number(row.reference_source_index)
+        });
+      }
+      activityEvidence.set(row.id, item);
+    }
+    return [...activityEvidence.values()];
   }
 
   private normalizeMeetingReportStatus(
@@ -4200,6 +5482,28 @@ export class MeetingService {
     return Math.min(integerLimit, MAX_MEETING_REPORT_LIMIT);
   }
 
+  /**
+   * Agent retrieval needs an exact bounded result count for selector resolution.
+   * Keep the public Meeting API's legacy 20-item minimum unchanged.
+   */
+  private normalizeAgentMeetingReportLimit(limit: unknown): number {
+    if (limit === undefined || limit === null || limit === "") {
+      return 1;
+    }
+    if (Array.isArray(limit)) {
+      throw badRequest("Agent meeting report limit must be a positive integer");
+    }
+    const rawLimit = typeof limit === "number" ? String(limit) : limit;
+    if (typeof rawLimit !== "string") {
+      throw badRequest("Agent meeting report limit must be a positive integer");
+    }
+    const parsed = Number(rawLimit.trim());
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEETING_REPORT_LIMIT) {
+      throw badRequest("Agent meeting report limit must be between 1 and 100");
+    }
+    return parsed;
+  }
+
   private toJsonArray(value: unknown): unknown[] {
     if (Array.isArray(value)) {
       return value;
@@ -4215,6 +5519,78 @@ export class MeetingService {
     }
 
     return [];
+  }
+
+  private toMeetingActionItemDeliveryDraft(
+    value: unknown,
+    deliveryType: "calendar_event" | "pilo_issue"
+  ): MeetingActionItemDeliveryInput | null {
+    const draft = this.toJsonObject(value);
+    if (!draft || draft.deliveryType !== deliveryType) return null;
+    if (deliveryType === "calendar_event") {
+      const calendar = this.toJsonObject(draft.calendar);
+      if (
+        !calendar ||
+        typeof calendar.startDate !== "string" ||
+        typeof calendar.endDate !== "string"
+      ) {
+        return null;
+      }
+      return {
+        deliveryType,
+        calendar: {
+          title: typeof calendar.title === "string" ? calendar.title : undefined,
+          description:
+            typeof calendar.description === "string" || calendar.description === null
+              ? calendar.description
+              : undefined,
+          color: typeof calendar.color === "string" ? calendar.color : undefined,
+          isAllDay: typeof calendar.isAllDay === "boolean" ? calendar.isAllDay : undefined,
+          startDate: calendar.startDate,
+          endDate: calendar.endDate,
+          startTime:
+            typeof calendar.startTime === "string" || calendar.startTime === null
+              ? calendar.startTime
+              : undefined,
+          endTime:
+            typeof calendar.endTime === "string" || calendar.endTime === null
+              ? calendar.endTime
+              : undefined
+        }
+      };
+    }
+    const issue = this.toJsonObject(draft.issue);
+    if (
+      !issue ||
+      typeof issue.boardId !== "string" ||
+      typeof issue.columnId !== "string"
+    ) {
+      return null;
+    }
+    return {
+      deliveryType,
+      issue: {
+        boardId: issue.boardId,
+        columnId: issue.columnId,
+        title: typeof issue.title === "string" ? issue.title : undefined,
+        body: typeof issue.body === "string" ? issue.body : undefined
+      }
+    };
+  }
+
+  private toJsonObject(value: unknown): Record<string, unknown> | null {
+    const parsed = typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value) as unknown;
+          } catch {
+            return null;
+          }
+        })()
+      : value;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
   }
 
   private isConstraintError(error: unknown, constraint: string): boolean {

@@ -1,5 +1,35 @@
 # Meeting API
 
+## Agent Meeting 근거 검색 안정성
+
+- Meeting Agent 검색은 각 MeetingReport의 최신 `completed` transcript hash와 activity-evidence hash에 속한 chunk만 사용한다.
+- cosine similarity가 Meeting 임계값보다 낮은 chunk는 직접 decision/action item 참조 여부와 관계없이 먼저 제외한다.
+- source가 없으면 관련 근거 없음으로 종료하며, query embedding timeout은 별도의 일시 장애로 처리한다.
+- 인덱싱 embedding 호출은 기본 30초 timeout과 최대 3회 시도를 사용한다. timeout·연결 오류·rate limit·5xx만 재시도하고, 잘못된 응답 개수·차원·비정상 숫자는 즉시 실패한다.
+- transcript 원문, Activity Log metadata, provider payload는 Agent step이나 citation registry에 저장하지 않는다.
+
+## Recording-linked Canvas activity
+
+`meeting_recording_activity_links` is the only association between a Meeting
+Recording and Canvas shape Activity Logs. The link preserves the Realtime
+server `captured_at` and `receive_seq`; these values are used by MeetingReport
+activity evidence ordering instead of the App Server insert time.
+
+This table is not required by Canvas occupancy at recording start. A user may
+enter Canvas later and still be captured. It is required because Realtime may
+merge edits for 3 seconds and force-flush after up to 30 seconds, so the
+Realtime receive time can differ from `activity_logs.occurred_at`. The link
+keeps the selected recording and original ordering stable across asynchronous
+persistence and retries.
+
+The App Server accepts a link only when the recording belongs to the supplied
+workspace, the captured time is inside `[started_at, ended_at)`, and the actor
+has a non-legacy `meeting_participants` session covering that instant. A
+RUNNING recording is row-locked during validation and append. If the actor has
+more than one active recording in the workspace, the batch item is ignored.
+The link table is server-only RLS and its recording/activity foreign keys use
+`ON DELETE CASCADE`.
+
 ## 범위
 
 Meeting API는 Workspace 안의 고정 회의 페이지를 담당한다.
@@ -28,6 +58,12 @@ Workspace에는 하나 이상의 MeetingRoom이 있다. 활성 방을 `created_a
 - API 응답에는 OAuth token, LiveKit secret, provider raw error를 노출하지 않는다.
 - LiveKit token은 입장용 임시 token이며 서버 저장 대상이 아니다.
 - LiveKit token 만료 시간은 발급 시점 기준 1시간이다.
+- Workspace membership이 철회되면 이미 가입한 Meeting Socket.IO room과 LiveKit
+  participant를 즉시 정리한다. 해당 사용자가 이미 발급받은 LiveKit token도
+  재입장에 사용할 수 없으며, participant·녹음·Meeting 종료 상태는 기존 LiveKit
+  departure webhook으로 보정한다. `removeParticipant`가 이미 없는 participant를
+  반환하면 webhook을 기다리지 않고 같은 idempotent Meeting reconciliation 경로로
+  `meeting_participants.left_at`과 파생 상태를 보정한다.
 
 성공 응답:
 
@@ -72,6 +108,9 @@ Workspace에는 하나 이상의 MeetingRoom이 있다. 활성 방을 `created_a
 - `Meeting.endedAt`은 회의방 생존 여부와 원본 audio retention 시점의 기준이다.
 - 원본 audio S3 object는 `Meeting.endedAt` 뒤 30일이 지나면 자동 purge한다. purge가 완료되면 Recording metadata의 `audioFileUrl`과 `audioFileKey`는 `null`이 된다.
 - raw transcript, transcript segment, summary, discussion point, decision, evidence, action item은 retention purge 대상이 아니며 기간 제한 없이 보존한다.
+- `meeting_participants`는 참여 이력이다. 참여 또는 재입장마다 새 session 행을 만들고, 같은 Meeting·사용자와 같은 Meeting·LiveKit identity에는 각각 active session이 하나만 존재할 수 있다.
+- MeetingReport의 Activity evidence는 Recording의 `[startedAt, endedAt)` 구간 안의 같은 Workspace `actorUserId` Activity Log 중, 그 사용자의 non-legacy participant session 하나가 `joinedAt <= occurredAt < leftAt`(아직 active면 `leftAt` 없음)을 만족할 때만 선택한다. 이전 단일-row 구조에서 생성된 legacy session은 실제 참여 구간을 복원할 수 없으므로 새 Activity snapshot 대상에서 제외한다.
+- Activity evidence에는 action, 발생 시각, 검증된 metadata summary만 snapshot한다. AI가 summary/discussion/decision/action item을 Activity로 뒷받침한 경우에만 해당 산출물 reference를 함께 저장한다. 원본 Activity Log row, metadata.data, token, provider raw payload는 MeetingReport 응답에 포함하지 않는다.
 - audio purge는 수동 API 없이 durable job으로 재시도한다. 처리 중인 MeetingReport 또는 report outbox가 audio를 참조하면 purge 후보에서 제외한다.
 - 마지막 active participant가 나가면 회의가 자동 종료될 수 있다.
 - Meeting과 Recording은 1:N 관계다. 같은 Meeting 안에서 녹음을 여러 번 시작하고 종료할 수 있다.
@@ -149,6 +188,10 @@ socket.emit("meeting:unsubscribe", { workspaceId });
 - socket 인증은 기존 Realtime bearer access token을 사용한다.
 - 가입 권한이 없거나 payload가 잘못되면 `meeting:error`를 받는다.
 - 가입 성공 시 `meeting:subscribed`를 받는다.
+- membership이 철회되면 서버는 해당 Workspace의 기존 `meeting:subscribe` room
+  가입을 즉시 해제한다. 별도의 browser event는 보내지 않으며, 재구독은
+  `forbidden`으로 거부된다. membership 검사와 `socket.join()` 사이에 철회가
+  도착한 in-flight subscribe도 room leave로 rollback하고 `forbidden`으로 거부한다.
 
 ### Socket.IO server → client
 
@@ -204,6 +247,23 @@ Redis 내부 payload는 fan-out workspace room을 결정하기 위해 `workspace
 browser에 전달하는 event에는 `workspaceId`, participant 목록, LiveKit token, 녹음 URL,
 transcript를 포함하지 않는다.
 
+## Meeting 알림·회의 초대
+
+MeetingReport가 `COMPLETED`가 되면 해당 Meeting의 참여 이력이 있는 사용자마다
+`meeting_report_completed` 알림을 한 번 생성한다. 현재 Workspace member에게만 제목과
+MeetingReport 화면 이동 권한을 제공한다. 이후 Workspace를 떠난 과거 참석자에게는
+회의 제목·본문·deep link 없이 완료 사실만 알리며, 기존 MeetingReport 접근 권한을
+넓히지 않는다.
+
+진행 중인 Meeting의 active participant는 Workspace Presence에서 온라인인 현재
+Workspace member 한 명에게 초대할 수 있다. 초대는 해당 Meeting이 종료되거나 초대자가
+취소할 때까지 `PENDING`이며, 수락 시 브라우저는 해당 Meeting에 참여하는 연결 절차를
+시작한다. 이미 종료됐거나 Workspace membership이 사라진 초대는 수락할 수 없다.
+
+알림 row는 DB source of truth이고, Redis `meeting:notification-events` 및
+`meeting:notification:created`·`meeting:notification:updated`는 Header 재조회 힌트일 뿐이다. browser event에는
+notification id와 생성 시각만 전달하며 본문·회의 제목·transcript는 전달하지 않는다.
+
 ### AI Worker → App Server 내부 callback
 
 ```http
@@ -254,12 +314,12 @@ workspace 정보나 상태값을 신뢰 경계 밖으로 전달하지 않는다.
 
 | Field | Type | 설명 |
 | --- | --- | --- |
-| `id` | string | 참여 정보 id |
+| `id` | string | 대표 참여 session id. active session이 있으면 그 id, 아니면 마지막 session id |
 | `meetingId` | string | 회의 id |
 | `userId` | string | 사용자 id |
-| `livekitIdentity` | string | LiveKit participant identity |
-| `joinedAt` | string | ISO datetime |
-| `leftAt` | string \| null | ISO datetime |
+| `livekitIdentity` | string | 대표 session의 LiveKit participant identity |
+| `joinedAt` | string | 해당 사용자의 이 Meeting 첫 입장 ISO datetime |
+| `leftAt` | string \| null | active session이 있으면 `null`, 아니면 마지막 퇴장 ISO datetime |
 | `isActive` | boolean | 현재 회의에 남아 있는지 여부 |
 | `user` | object | 화면 표시용 사용자 요약 |
 
@@ -303,21 +363,26 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `status` | `QUEUED` \| `TRANSCRIBING` \| `SUMMARIZING` \| `COMPLETED` \| `FAILED` \| `PROCESSING` | 회의록 상태. `PROCESSING`은 legacy 진행 상태 |
 | `failedStep` | `RECORDING` \| `STT` \| `LLM` \| null | 실패 단계 |
 | `errorMessage` | string \| null | 실패 메시지 |
-| `transcriptText` | string \| null | 상세 조회에서만 반환 |
-| `transcriptSegments` | array | 상세 조회에서만 반환. `id`, `segmentIndex`, `startedAtMs`, `endedAtMs`, `text`를 가진 timestamped transcript segment |
-| `evidence` | array | 상세 조회에서만 반환. `sourceType`, `sourceIndex`, `transcriptSegmentId`로 요약 산출물과 transcript segment를 연결 |
+| `transcriptText` | string \| null | 상세 조회에서만 반환. 시간별 segment가 아닌 전체 Transcript 텍스트다. 목록 응답에는 포함하지 않는다. |
+| `evidenceSegments` | array | 상세 조회에서만 반환. 요약·논의·결정·후속 작업의 근거로 연결된 `id`, `segmentIndex`, `startedAtMs`, `endedAtMs`, `text` segment만 포함한다. |
+| `evidence` | array | 상세 조회에서만 반환. `sourceType`, `sourceIndex`, `transcriptSegmentId`로 요약 산출물과 evidence segment를 연결 |
+| `activityEvidence` | array | 상세 조회에서만 반환. Transcript와 구분된 Activity 근거. `id`, `sourceIndex`, `occurredAt`, `action`, `summary`, `references[]`만 포함하며, reference는 이 Activity가 뒷받침한 `sourceType`, `sourceIndex`다. raw Activity Log metadata는 포함하지 않는다. |
 | `summary` | string \| null | 요약 |
 | `discussionPoints` | string \| null | 논의사항 |
 | `decisions` | string \| null | 결정사항 |
 | `actionItemCandidates` | array | 후속 작업 후보 |
-| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `status`, 승인·반려 audit 시각을 포함한다. |
+| `actionItemExtraction` | object (optional) | 후속 작업 추출 상태. `status`는 `PENDING` \| `PUBLISHING` \| `QUEUED` \| `PROCESSING` \| `COMPLETED` \| `FAILED`이고, `FAILED`일 때만 안전한 `errorMessage`를 포함한다. Migration 이전 회의록처럼 추출 row가 없으면 생략될 수 있다. 회의록 본문 `status`와 독립적이다. |
+| `actionItems` | array | 상세 조회에서만 반환. 저장된 후속 작업 검토 항목. `id`, `sourceIndex`, `title`, `description`, `priority`, `assignee`, `deliverySuggestion`, `status`, 승인·반려 audit과 `delivery`(선택 type/status·저장 draft·안전한 대상 요약)를 포함한다. `deliverySuggestion`은 AI가 근거에서 고른 기본 전달 type과, Calendar인 경우에만 안전하게 추출한 `isAllDay`, 날짜·시간 초안이다. 확정된 delivery가 아니며 사용자는 승인 전에 바꿀 수 있다. `delivery`는 internal idempotency key, claim token, provider raw response를 포함하지 않는다. |
 | `actionItemAssignees` | array | 상세 조회에서만 반환. 같은 Workspace의 지정 가능한 사용자 목록. `userId`, `name`, `avatarUrl`을 포함한다. |
 | `retryCount` | number | 재시도 횟수 |
-| `participantSummary` | object | 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 참여 시각 순서다. |
+| `participantSummary` | object | 중복 제거한 참석자 요약. `totalCount`, 대표 참석자 최대 3명의 `participants`, 추가 참석자 여부 `hasMore`를 포함한다. 대표 참석자는 첫 참여 시각 순서다. |
+| `canDelete` | boolean | 현재 사용자가 이 회의록을 삭제할 수 있는지. Workspace owner 또는 해당 회의의 참여자만 `true`다. |
 | `createdAt` | string | ISO datetime |
 | `updatedAt` | string | ISO datetime |
 
-목록 응답에는 긴 `transcriptText`를 포함하지 않는다. Workspace member는 목록·요약 metadata를 조회할 수 있지만, 상세 transcript·evidence·action item은 해당 Meeting의 현재 또는 과거 participant와 Workspace owner만 조회할 수 있다. 그 외 member에는 존재 여부를 숨기기 위해 `404 NOT_FOUND`를 반환한다.
+목록 응답에는 긴 `transcriptText`를 포함하지 않는다. Workspace member는 해당 Workspace의 모든 MeetingReport를 목록·상세에서 조회할 수 있다. 회의 참여 이력은 조회 조건이 아니다.
+
+LLM 처리 실패의 내부 진단 코드와 상세 정보는 운영 DB·제한된 운영 로그에서만 사용한다. API·Realtime event·Agent tool·브라우저에는 `failedStep`과 사용자용 `errorMessage`만 반환하며, provider payload, LLM output, transcript, prompt, token, stack trace는 저장하거나 노출하지 않는다.
 
 ## API 목록
 
@@ -333,6 +398,8 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `GET` | `/workspaces/{workspaceId}/meetings/current` | legacy `MAIN_MEETING_ROOM`의 현재 진행 중 회의 조회 |
 | `POST` | `/workspaces/{workspaceId}/meetings` | legacy `MAIN_MEETING_ROOM`에서 새 회의 시작 |
 | `POST` | `/workspaces/{workspaceId}/meetings/{meetingId}/participants/me` | 진행 중 회의 참여 또는 재입장 |
+| `POST` | `/workspaces/{workspaceId}/meetings/{meetingId}/invitations` | 현재 active participant가 온라인 Workspace member에게 회의 초대 |
+| `DELETE` | `/workspaces/{workspaceId}/meetings/{meetingId}/invitations/{invitationId}` | 초대자가 pending 회의 초대 취소 |
 | `GET` | `/workspaces/{workspaceId}/meetings/{meetingId}` | 회의 상세 조회 |
 | `DELETE` | `/workspaces/{workspaceId}/meetings/{meetingId}/participants/me` | 회의 나가기 |
 | `POST` | `/workspaces/{workspaceId}/meetings/{meetingId}/recordings` | 녹음 시작 |
@@ -342,11 +409,19 @@ Meeting 하나에는 여러 Recording이 있을 수 있다. API에서 `currentRe
 | `GET` | `/workspaces/{workspaceId}/meetings/{meetingId}/participants` | 회의 참여자 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/meeting-reports` | MeetingReport 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/meeting-reports/{reportId}` | MeetingReport 상세 조회 |
+| `PATCH` | `/workspaces/{workspaceId}/meeting-reports/{reportId}` | 완료된 MeetingReport 제목·논의사항·결정사항 수정 |
+| `DELETE` | `/workspaces/{workspaceId}/meeting-reports/{reportId}` | 완료·실패 MeetingReport 삭제 |
 | `GET` | `/workspaces/{workspaceId}/meetings/{meetingId}/reports` | 특정 회의의 MeetingReport 목록 조회 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/regeneration-jobs` | 실패한 회의록 재생성 요청 |
 | `PATCH` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}` | pending 후속 작업 수정 |
-| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve` | pending 후속 작업 승인 |
+| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve` | legacy 상태-only 승인 호환 endpoint (deprecated) |
+| `GET` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/delivery-options` | Pilo issue delivery용 Board·Column 선택지 조회 |
+| `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/deliveries` | Calendar 일정 또는 Pilo issue 하나를 생성하며 후속 작업 승인 |
 | `POST` | `/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss` | pending 후속 작업 반려 |
+| `GET` | `/me/meeting-notifications` | 현재 사용자의 Meeting 알림 목록 조회 |
+| `PATCH` | `/me/meeting-notifications/{notificationId}/read` | Meeting 알림 읽음 처리 |
+| `POST` | `/me/meeting-invitations/{invitationId}/accept` | 회의 초대 수락 후 참여 준비 정보 조회 |
+| `POST` | `/me/meeting-invitations/{invitationId}/decline` | 회의 초대 거절 |
 
 ## Endpoint 상세
 
@@ -507,7 +582,8 @@ Request body는 최초 동의가 필요한 경우에만 보낸다.
 }
 ```
 
-같은 사용자가 같은 회의에 다시 참여하면 기존 participant 기준으로 재입장한다.
+같은 사용자가 같은 회의에 다시 참여하면 새 participant session을 만든다. 이미 active인
+상태에서 재시도하면 같은 active session을 반환한다.
 LiveKit 입장 token은 참여 요청마다 다시 받을 수 있다.
 
 Response `data`:
@@ -534,8 +610,8 @@ Response `data`:
 | `meeting` | Meeting | 회의 정보 |
 | `currentRecording` | Recording \| null | 진행 중 녹음. 없으면 `null` |
 | `recordings` | Recording[] | 녹음 목록 |
-| `reports` | MeetingReport[] | 회의록 목록. `transcriptText` 제외 |
-| `participantCount` | number | 전체 참여자 수 |
+| `reports` | MeetingReport[] | 회의록 목록. Transcript 전문은 제공하지 않음 |
+| `participantCount` | number | 중복 제거한 전체 참여자 수 |
 | `activeParticipantCount` | number | 현재 active participant 수 |
 | `currentUserParticipant` | Participant \| null | 현재 사용자의 참여 정보 |
 
@@ -697,8 +773,9 @@ Response `data`:
 | --- | --- | --- |
 | `participants` | Participant[] | 회의 참석자 목록 |
 
-이 목록은 회의 참석 이력이다. 마이크 상태, 발화 상태, LiveKit connection state는
-포함하지 않는다.
+이 목록은 사용자별로 중복 제거한 회의 참석 요약이다. `joinedAt`은 첫 입장,
+`leftAt`은 active session이 없을 때 마지막 퇴장이다. 마이크 상태, 발화 상태,
+LiveKit connection state는 포함하지 않는다.
 
 주요 오류: `401`, `403`, `404`
 
@@ -715,7 +792,7 @@ Query:
 | `cursor` | No | 이전 응답의 `nextCursor`. 다음 페이지를 같은 정렬 기준으로 조회한다. 임의 값은 `400` |
 | `from` | No | `createdAt` 하한 ISO 8601 시각(포함) |
 | `to` | No | `createdAt` 상한 ISO 8601 시각(미포함) |
-| `q` | No | 요약, 논의, 결정, 액션 아이템 후보, 실패 사유를 대상으로 하는 서버 측 키워드 검색. raw `transcriptText`는 포함하지 않음 |
+| `q` | No | 요약, 논의, 결정, 액션 아이템 후보, 실패 사유를 대상으로 하는 서버 측 키워드 검색. raw Transcript는 포함하지 않음 |
 | `status` | No | `QUEUED`, `TRANSCRIBING`, `SUMMARIZING`, `COMPLETED`, `FAILED`, legacy `PROCESSING` |
 | `limit` | No | 반환 개수. 기본값 20, 최대 100 |
 
@@ -733,7 +810,7 @@ Response `data`:
 | Field | Type | 설명 |
 | --- | --- | --- |
 | `nextCursor` | string \| null | 다음 페이지 cursor. 다음 요청에 그대로 전달한다. |
-| `reports` | MeetingReport[] | 회의록 목록. `transcriptText` 제외 |
+| `reports` | MeetingReport[] | 회의록 목록. Transcript 전문 제외 |
 
 주요 오류: `400`, `401`, `403`
 
@@ -747,20 +824,101 @@ Response `data`:
 
 | Field | Type | 설명 |
 | --- | --- | --- |
-| `report` | MeetingReport | 회의록 상세. `transcriptText` 포함 |
+| `report` | MeetingReport | 회의록 상세. 전체 `transcriptText`와 근거 연결용 `evidenceSegments`를 포함 |
 
-실패한 MeetingReport도 상세 조회할 수 있다. Workspace member 전체는 회의록 목록과
-요약 metadata를 조회할 수 있지만, 이 상세 endpoint는 해당 Meeting의 현재 또는 과거
-participant와 Workspace owner만 조회할 수 있다. 권한이 없는 member에는 존재 여부를
-숨기기 위해 `404 NOT_FOUND`를 반환한다.
+Workspace member는 해당 Workspace의 모든 MeetingReport를 목록·상세에서 조회할 수 있다. 회의 참여 이력은 조회 조건이 아니다. 실패한 MeetingReport도 상세 조회할 수 있다.
 
 `actionItems`는 AI 후보를 Worker가 `PENDING` 상태로 저장한 검토 모델이다.
 `sourceIndex`는 원본 `actionItemCandidates`와 transcript evidence 연결에 사용한다.
-`PENDING`만 수정·승인·반려할 수 있고, `APPROVED`와 `DISMISSED`는 이 API에서
-종결 상태다. 승인 자체는 Calendar, Board, GitHub 등 외부 도메인을 생성·변경하지
-않는다.
+`PENDING`만 수정·반려할 수 있다. delivery 요청을 승인하면 Action Item은 외부 전달 결과와
+독립적으로 `APPROVED`가 된다. Calendar 일정 또는 Pilo issue 생성 상태는 `delivery.status`의
+`PENDING`·`RUNNING`·`COMPLETED`·`FAILED`로 따로 관리한다. 실패한 delivery는 승인 상태를
+되돌리지 않고 같은 draft·idempotency key로 재시도한다. legacy `DELIVERING`·`DELIVERY_FAILED`
+Action Item은 다음 재시도에서 `APPROVED`로 정규화한다. `DISMISSED`는 종결 상태다.
+
+회의록 본문(요약·논의·결정)과 후속 작업 추출은 분리된 비동기 lifecycle이다. 본문이
+유효하면 MeetingReport는 `COMPLETED`가 되며, 이후 `actionItemExtraction`이 `PENDING` →
+`QUEUED` → `PROCESSING` → `COMPLETED`로 진행한다. 후속 작업 후보의 evidence 검증 또는
+추출 자체가 실패해도 MeetingReport는 `FAILED`로 바뀌지 않고 extraction만 `FAILED`가 된다.
+`COMPLETED`와 빈 `actionItems`는 “검토할 후속 작업 없음”을, 진행 상태의 빈 배열은 아직
+추출 중임을 뜻한다.
 
 주요 오류: `401`, `403`, `404`
+
+### MeetingReport 내용 수정
+
+```http
+PATCH /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}
+Content-Type: application/json
+
+{
+  "expectedVersion": 3,
+  "title": "7월 제품 방향 회의",
+  "discussionPoints": "API v2 전환 범위와 배포 순서를 논의했다.",
+  "decisionItems": [
+    {
+      "id": "{decisionItemId}",
+      "text": "신규 API는 v2를 기본 경로로 제공한다."
+    }
+  ]
+}
+```
+
+`expectedVersion`은 상세·목록의 `contentVersion`이다. `title`, `discussionPoints`,
+`decisionItems` 중 하나 이상을 보낸다. `decisionItems`는 기존 항목 ID별 부분 수정이며,
+source index와 transcript/Activity evidence 연결은 바꾸지 않는다. 제목은 최대 500 bytes,
+논의사항은 16,000 bytes, 결정사항 항목은 5,000 bytes다.
+
+현재 Workspace member인 해당 Meeting 참석자 또는 Workspace owner만 `COMPLETED` report를
+수정할 수 있다. 다른 사용자가 먼저 저장해 version이 달라지면 `409 CONFLICT`를 반환한다.
+사용자 수정본은 AI가 report를 재생성해도 유지되고, Worker가 갱신하는 AI 원본과 transcript,
+Activity evidence, evidence reference는 이 API로 변경할 수 없다.
+
+Response `data`는 최신 `report` 상세다. `title`, `discussionPoints`, `decisions`는 사용자
+정본을 우선하고, `decisionItems[].isUserEdited`, `contentVersion`, `contentEditedByUserId`,
+`contentEditedAt`, `canEdit`으로 provenance와 편집 가능 여부를 제공한다.
+
+주요 오류: `400`, `401`, `403`, `404`, `409`
+
+### MeetingReport 삭제
+
+```http
+DELETE /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}
+```
+
+Workspace owner 또는 해당 Meeting의 참여자만 호출할 수 있다. 현재 Workspace member가 아닌 사용자는 호출할 수 없다. `COMPLETED` 또는 `FAILED` 상태만 삭제하며, 진행 중 상태는 `400`이다.
+
+삭제하면 MeetingReport와 종속 outbox, transcript segment, evidence, action item이 함께 삭제된다. 원본 Recording/audio와 이미 생성된 Calendar event는 유지한다.
+
+Response `data`:
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `deletedReportId` | string | 삭제된 회의록 id |
+
+주요 오류: `400`, `401`, `403`, `404`
+
+### 실패한 후속 작업 추출 재시도
+
+```http
+POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-item-extractions/retry
+```
+
+Request body 없음.
+
+Workspace member는 본문이 `COMPLETED`이고 후속 작업 extraction만 `FAILED`인 report에
+대해 추출을 다시 요청할 수 있다. 재시도는 기존 report 본문, transcript, Activity evidence를
+변경하지 않고 extraction을 `PENDING`으로 되돌린다. App Server outbox publisher가 같은
+report id의 SQS extraction job을 at-least-once로 전달하며, 중복 delivery는 report별 lock과
+상태 전이로 멱등 처리한다.
+
+Response `data`:
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `actionItemExtraction` | object | 재시도된 extraction 상태. `status`는 `PENDING` |
+
+주요 오류: `400` (본문 미완료 또는 extraction 재시도 불가), `401`, `403`, `404`
 
 ### MeetingReport 후속 작업 수정
 
@@ -787,16 +945,90 @@ Response `data`:
 | --- | --- | --- |
 | `actionItem` | object | 수정된 저장 action item |
 
-### MeetingReport 후속 작업 승인·반려
+### MeetingReport 후속 작업 delivery·반려
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/approve
 POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/dismiss
 ```
 
-Request body 없음. Workspace member가 `PENDING` item을 각각 `APPROVED` 또는
-`DISMISSED`로 한 번만 전이한다. 응답은 `{ actionItem }`이며 전이 사용자와 시각을
-저장한다. 이미 terminal 상태인 item은 `400`, 다른 Workspace/report item은 `404`다.
+`/approve`는 기존 frontend와 이미 열린 브라우저 탭을 위한 호환 endpoint다. Workspace member가
+`PENDING` item을 `APPROVED`로 전이하며, Calendar 일정이나 Pilo issue는 생성하지 않는다. 새 UI는
+`/deliveries`를 사용한다. 독립 배포 순서에서 `/deliveries`가 아직 없는 구 App Server를 만난 새 UI는
+`404`일 때 이 endpoint로 한 번 fallback하고, 대상 생성 없이 legacy 승인만 완료됐음을 표시한다. 이
+endpoint 제거는 모든 배포 환경의 `/deliveries` 전환이 완료된 다음 release에서만 수행한다.
+`/dismiss`는 Workspace member가 `PENDING` item을 `DISMISSED`로 한 번만 전이하며,
+응답은 `{ actionItem }`이다.
+
+```http
+GET /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/delivery-options
+```
+
+Workspace member가 Pilo issue delivery dialog에 필요한 `data.boards[]`를 조회한다. 각
+Board는 `id`, `name`, `columns[]`(`id`, `name`)만 포함한다. Board OAuth token, repository
+secret, raw provider metadata는 포함하지 않는다.
+
+목록은 Board 도메인의 생성 가능 read model을 그대로 사용한다. 실제 Board issue 생성
+직전 검증과 동일한 repository·ProjectV2 Status·Column Status option metadata 기준을
+통과한 Column만 반환하며, 유효한 Column이 하나도 없는 Board는 반환하지 않는다. Board
+이름이 같아도 이름으로 중복 제거하지 않고 Board id를 identity로 유지한다. Meeting
+도메인은 GitHub 또는 ProjectV2 metadata를 직접 조회하거나 판정하지 않는다.
+
+생성 가능한 대상이 없으면 오류 대신 HTTP `200`과 `data: { "boards": [] }`를 반환한다.
+이 경우 UI는 빈 select 대신 ProjectV2 Board 선택·동기화 안내를 표시하고 Pilo issue 생성
+버튼을 비활성화한다. Calendar 후속 일정 생성 흐름에는 이 목록의 빈 상태를 적용하지 않는다.
+
+```http
+POST /api/v1/workspaces/{workspaceId}/meeting-reports/{reportId}/action-items/{actionItemId}/deliveries
+Content-Type: application/json
+
+{
+  "deliveryType": "calendar_event",
+  "calendar": {
+    "title": "API 배포 일정",
+    "description": "회의 후속 작업",
+    "isAllDay": true,
+    "startDate": "2026-07-18",
+    "endDate": "2026-07-18"
+  }
+}
+```
+
+또는 Pilo issue 하나를 선택한다.
+
+```json
+{
+  "deliveryType": "pilo_issue",
+  "issue": {
+    "boardId": "12",
+    "columnId": "37",
+    "title": "API 배포 준비",
+    "body": "회의에서 합의한 후속 작업입니다."
+  }
+}
+```
+
+`deliveryType`은 `calendar_event` 또는 `pilo_issue` 중 하나이며 반대 type의 payload를 함께
+보낼 수 없다. Calendar는 `startDate`가 필수이고 `endDate`를 생략하면 `startDate`와 같은 날짜로
+정규화한다. 종일 일정에는 시간을 보내지 않으며, 시간 지정 시 `HH:MM` 형식의 `startTime`을 필수로
+받고 `endTime`을 생략하면 `startTime + 1시간`으로 정규화한다. Pilo issue는 같은 Workspace의 Board와 해당 Board Column을
+명시해야 한다. title/description/body를 생략하면 저장된 Action Item 내용을 기본값으로 쓴다.
+Action Item에 담당 Workspace member가 있고 그 사용자의 GitHub login이 연결돼 있으면, Pilo issue
+body에는 해당 login의 `@mention`을 덧붙인다. 이는 GitHub Issue assignee 변경이 아니라 본문 태그다.
+
+응답 `data`는 `actionItemId`, `deliveryType`, `status`(`COMPLETED` 또는 `FAILED`)와 성공 시
+`calendarEventId` 또는 `piloIssueId`, 실패 시 안전한 `errorCode`만 반환한다.
+`GITHUB_PROJECT_OAUTH_RECONNECT_REQUIRED`은 Pilo issue 생성에 필요한 GitHub ProjectV2 OAuth를
+`project`·`repo` 권한으로 다시 연결해야 함을 뜻한다. 실패는 HTTP 성공
+응답 안의 `FAILED` 결과로 저장되며 UI는 상세 재조회 뒤 재시도 상태를 표시한다. validation·소속·진행 중
+상태는 `400`, 다른 Workspace/report/action item은 `404`, Board OAuth 등 provider 오류는 안전한
+`FAILED.errorCode`로만 노출한다. 최초 요청자와 가장 최근 재시도자는 audit으로 남고, 같은 Workspace
+member는 저장된 동일 draft와 idempotency key로 재시도할 수 있다.
+승인 기록과 외부 전달 결과는 분리한다. 외부 전달이 실패해도 Action Item의 `APPROVED`와 최초
+승인자·승인 시각은 유지하며 UI는 승인 성공과 delivery 실패를 함께 표시한다. Calendar 생성과
+delivery 완료 기록은 한 DB transaction이고, Board 생성은 저장된 idempotency key를 재사용한다.
+이미 `COMPLETED`인 delivery의 재요청은 Board/Calendar를 다시 검증하거나 생성하지 않고 저장된
+target ID를 그대로 반환한다.
 
 ### 특정 회의의 MeetingReport 목록 조회
 
@@ -812,7 +1044,7 @@ Response `data`:
 
 | Field | Type | 설명 |
 | --- | --- | --- |
-| `reports` | MeetingReport[] | 특정 회의의 회의록 목록. `transcriptText` 제외 |
+| `reports` | MeetingReport[] | 특정 회의의 회의록 목록. Transcript 전문 제외 |
 
 주요 오류: `401`, `403`, `404`
 
@@ -828,7 +1060,9 @@ Request body 없음.
 `COMPLETED` 상태이고 `audioFileKey`가 있어 AI Worker가 다시 처리할 수 있는 경우만
 허용한다. 요청이 성공하면 MeetingReport는 다시 `QUEUED` 상태가 되고
 `retryCount`가 증가한다. 기존 실패 정보와 이전 산출물은 초기화한다. MVP 응답에는
-별도 `jobId`를 포함하지 않고, 긴 `transcriptText`도 포함하지 않는다.
+별도 `jobId`와 Transcript 전문은 포함하지 않는다.
+
+LLM output의 evidence 연결 정보가 내부 검증에 실패한 경우 Worker는 동일 transcript와 안전한 Activity evidence로 한 번만 보정 생성을 시도한다. 보정도 실패하면 최종 `FAILED`로 기록하며, 일반 OpenAI·SQS·network 인프라 오류의 기존 재시도 정책은 바꾸지 않는다.
 
 Meeting 종료 뒤 30일 retention purge가 완료되어 `audioFileKey`가 `null`인 경우에는
 기존 transcript·요약 등 MeetingReport 산출물은 계속 조회할 수 있지만, 원본 audio가 없어
@@ -869,4 +1103,3 @@ GET /api/v1/workspaces/{workspaceId}/meetings/{meetingId}/report
 - 브라우저 강제 종료, 네트워크 단절, 비정상 disconnect 보정
 - LiveKit Webhook 기반 participant 보정
 - realtime-server 기반 음성 송수신
-- 회의록 완료 후 참석자 notification

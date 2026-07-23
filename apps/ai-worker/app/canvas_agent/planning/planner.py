@@ -4,16 +4,20 @@ import json
 from typing import Any
 
 from app.canvas_agent.planning.prompts import system_prompt, user_prompt
-from app.canvas_agent.planning.tool_catalog import allowed_action_names_for_context
-from app.canvas_agent.types import CANVAS_AGENT_ACTIONS, CanvasAgentPlan, CanvasAgentRunContext
+from app.canvas_agent.planning.tool_catalog import allowed_intent_names_for_context
+from app.canvas_agent.types import (
+    CANVAS_AGENT_INTENTS,
+    CanvasAgentIntentClassification,
+    CanvasAgentRunContext,
+)
 from app.meeting_report_processor import InfrastructureError
 
 
-class CanvasAgentPlannerError(Exception):
+class CanvasAgentIntentClassifierError(Exception):
     pass
 
 
-class OpenAiCanvasAgentPlanner:
+class OpenAiCanvasAgentIntentClassifier:
     def __init__(self, api_key: str, model: str, timeout_seconds: float | None = None) -> None:
         from openai import OpenAI
 
@@ -23,8 +27,8 @@ class OpenAiCanvasAgentPlanner:
         self.client = OpenAI(**kwargs)
         self.model = model
 
-    def plan(self, context: CanvasAgentRunContext) -> CanvasAgentPlan:
-        allowed_actions = allowed_action_names_for_context(context)
+    def classify(self, context: CanvasAgentRunContext) -> CanvasAgentIntentClassification:
+        allowed_intents = allowed_intent_names_for_context(context)
         try:
             response = self.client.responses.create(
                 model=self.model,
@@ -35,76 +39,170 @@ class OpenAiCanvasAgentPlanner:
                 text={
                     "format": {
                         "type": "json_schema",
-                        "name": "canvas_agent_plan",
+                        "name": "canvas_agent_intent",
                         "strict": True,
-                        "schema": _schema(allowed_actions),
+                        "schema": _schema(allowed_intents),
                     }
                 },
             )
         except _retryable_errors() as error:
-            raise InfrastructureError("OpenAI Canvas Agent planner retryable failure") from error
+            raise InfrastructureError(
+                "OpenAI Canvas Agent intent classifier retryable failure"
+            ) from error
         except Exception as error:
-            raise CanvasAgentPlannerError("Canvas Agent planner provider failure") from error
+            raise CanvasAgentIntentClassifierError(
+                "Canvas Agent intent classifier provider failure"
+            ) from error
 
         output_text = getattr(response, "output_text", None)
         if not isinstance(output_text, str) or not output_text.strip():
             output_text = _extract_response_text(response)
 
-        return parse_canvas_agent_plan(output_text, allowed_actions)
+        classification = parse_canvas_agent_intent_classification(output_text, allowed_intents)
+        return _restrict_shape_ids_to_context(classification, context)
 
 
-def parse_canvas_agent_plan(
+def parse_canvas_agent_intent_classification(
     output_text: str,
-    allowed_actions: set[str] | None = None,
-) -> CanvasAgentPlan:
+    allowed_intents: set[str] | None = None,
+) -> CanvasAgentIntentClassification:
     if not isinstance(output_text, str) or not output_text.strip():
-        raise CanvasAgentPlannerError("Canvas Agent planner returned no output")
+        raise CanvasAgentIntentClassifierError("Canvas Agent intent classifier returned no output")
 
     try:
         payload = json.loads(output_text)
     except json.JSONDecodeError as error:
-        raise CanvasAgentPlannerError("Canvas Agent planner returned invalid JSON") from error
+        raise CanvasAgentIntentClassifierError(
+            "Canvas Agent intent classifier returned invalid JSON"
+        ) from error
 
     if not isinstance(payload, dict):
-        raise CanvasAgentPlannerError("Canvas Agent planner output must be an object")
+        raise CanvasAgentIntentClassifierError(
+            "Canvas Agent intent classifier output must be an object"
+        )
 
-    action_name = payload.get("actionName")
+    intent = payload.get("intent")
     message = payload.get("message")
-    input_json = payload.get("inputJson")
-    valid_actions = allowed_actions or CANVAS_AGENT_ACTIONS
-    if not isinstance(action_name, str) or action_name not in valid_actions:
-        raise CanvasAgentPlannerError("Canvas Agent planner action is invalid")
+    arguments = payload.get("arguments")
+    valid_intents = allowed_intents or CANVAS_AGENT_INTENTS
+    if not isinstance(intent, str) or intent not in valid_intents:
+        raise CanvasAgentIntentClassifierError("Canvas Agent intent is invalid")
     if not isinstance(message, str) or not message.strip():
-        raise CanvasAgentPlannerError("Canvas Agent planner message is invalid")
-    if not isinstance(input_json, str):
-        raise CanvasAgentPlannerError("Canvas Agent planner inputJson is invalid")
+        raise CanvasAgentIntentClassifierError("Canvas Agent intent message is invalid")
+    if not isinstance(arguments, dict):
+        raise CanvasAgentIntentClassifierError("Canvas Agent intent arguments are invalid")
 
-    try:
-        action_input = json.loads(input_json)
-    except json.JSONDecodeError as error:
-        raise CanvasAgentPlannerError("Canvas Agent planner inputJson must be JSON") from error
-    if not isinstance(action_input, dict):
-        raise CanvasAgentPlannerError("Canvas Agent planner inputJson must be an object")
+    sanitized_arguments = _sanitize_object(arguments)
+    if intent == "find_shapes":
+        query = sanitized_arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise CanvasAgentIntentClassifierError("Canvas Agent find_shapes query is required")
+        sanitized_arguments["query"] = query.strip()[:120]
+        shape_ids = sanitized_arguments.get("shapeIds")
+        sanitized_arguments["shapeIds"] = (
+            [item for item in shape_ids if isinstance(item, str)][:40]
+            if isinstance(shape_ids, list)
+            else []
+        )
+    elif intent == "import_drive_file":
+        query = sanitized_arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise CanvasAgentIntentClassifierError(
+                "Canvas Agent import_drive_file query is required"
+            )
+        sanitized_arguments = {"query": query.strip()[:120]}
+    elif intent == "generate_html":
+        sanitized_arguments = {}
+    elif intent == "chat":
+        context_scope = sanitized_arguments.get("contextScope")
+        if context_scope not in {"none", "selected_scene"}:
+            raise CanvasAgentIntentClassifierError("Canvas Agent chat contextScope is invalid")
+        reason_code = sanitized_arguments.get("reasonCode")
+        if reason_code not in {
+            "general_question",
+            "selection_question",
+            "follow_up_question",
+        }:
+            raise CanvasAgentIntentClassifierError("Canvas Agent chat reasonCode is invalid")
+        sanitized_arguments = {
+            "contextScope": context_scope,
+            "reasonCode": reason_code,
+        }
+    elif intent == "unsupported":
+        query = sanitized_arguments.get("query")
+        sanitized_arguments = {"query": query.strip()[:120] if isinstance(query, str) else ""}
 
-    return CanvasAgentPlan(
-        action_name=action_name,
-        input=_sanitize_object(action_input),
+    return CanvasAgentIntentClassification(
+        intent=intent,
+        arguments=sanitized_arguments,
         message=message.strip()[:1000],
     )
 
 
-def _schema(allowed_actions: set[str] | None = None) -> dict[str, object]:
-    valid_actions = allowed_actions or CANVAS_AGENT_ACTIONS
+def _schema(allowed_intents: set[str] | None = None) -> dict[str, object]:
+    valid_intents = allowed_intents or CANVAS_AGENT_INTENTS
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["actionName", "message", "inputJson"],
+        "required": ["intent", "message", "arguments"],
         "properties": {
-            "actionName": {"type": "string", "enum": sorted(valid_actions)},
+            "intent": {"type": "string", "enum": sorted(valid_intents)},
             "message": {"type": "string"},
-            "inputJson": {"type": "string"},
+            "arguments": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["query", "shapeIds", "contextScope", "reasonCode"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "shapeIds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 40,
+                    },
+                    "contextScope": {
+                        "type": "string",
+                        "enum": ["none", "selected_scene"],
+                    },
+                    "reasonCode": {"type": "string"},
+                },
+            },
         },
     }
+
+
+def _restrict_shape_ids_to_context(
+    classification: CanvasAgentIntentClassification,
+    context: CanvasAgentRunContext,
+) -> CanvasAgentIntentClassification:
+    if classification.intent != "find_shapes":
+        return classification
+
+    summaries = context.request_context.get("shapeSummaries")
+    allowed_ids = (
+        {
+            item.get("id")
+            for item in summaries
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if isinstance(summaries, list)
+        else set()
+    )
+    arguments = dict(classification.arguments)
+    shape_ids = arguments.get("shapeIds")
+    arguments["shapeIds"] = (
+        [
+            shape_id
+            for shape_id in shape_ids
+            if isinstance(shape_id, str) and shape_id in allowed_ids
+        ]
+        if isinstance(shape_ids, list)
+        else []
+    )
+    return CanvasAgentIntentClassification(
+        intent=classification.intent,
+        arguments=arguments,
+        message=classification.message,
+    )
 
 
 def _sanitize_object(value: dict[object, object]) -> dict[str, object]:

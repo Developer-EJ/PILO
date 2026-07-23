@@ -17,6 +17,10 @@ export class AgentPlannerService {
       return this.unsupported("unknown_intent", "요청 내용을 입력해주세요.");
     }
 
+    if (this.isBoardPrompt(prompt) && this.isBoardAssigneePrompt(prompt)) {
+      return this.planBoard(prompt);
+    }
+
     if (this.isHighRiskOrExcluded(prompt)) {
       return this.unsupported(
         "high_risk_or_excluded",
@@ -26,6 +30,10 @@ export class AgentPlannerService {
 
     if (this.isCalendarPrompt(prompt)) {
       return this.planCalendar(prompt);
+    }
+
+    if (this.isMeetingControlPrompt(prompt)) {
+      return this.planMeetingControl(prompt);
     }
 
     if (this.isMeetingReportPrompt(prompt)) {
@@ -108,7 +116,140 @@ export class AgentPlannerService {
     });
   }
 
+  private planMeetingControl(prompt: string): AgentPlannerResult {
+    if (this.includesAny(prompt, ["녹음 종료", "녹음 끝", "recording stop"])) {
+      return this.needsClarification({
+        intent: "meeting.end_recording",
+        toolName: "end_meeting_recording",
+        riskLevel: "medium",
+        missingFields: ["meeting"],
+        message: "녹음을 종료할 회의를 특정해야 합니다."
+      });
+    }
+    if (this.includesAny(prompt, ["녹음 시작", "recording start"])) {
+      return this.needsClarification({
+        intent: "meeting.start_recording",
+        toolName: "start_meeting_recording",
+        riskLevel: "medium",
+        missingFields: ["meeting"],
+        message: "녹음을 시작할 회의를 특정해야 합니다."
+      });
+    }
+    if (this.includesAny(prompt, ["나가", "퇴장", "leave"])) {
+      return this.needsClarification({
+        intent: "meeting.leave",
+        toolName: "leave_meeting",
+        riskLevel: "low",
+        missingFields: ["meeting"],
+        message: "나갈 회의를 특정해야 합니다."
+      });
+    }
+    if (this.includesAny(prompt, ["참여", "입장", "들어가", "join"])) {
+      return this.needsClarification({
+        intent: "meeting.join",
+        toolName: "join_meeting",
+        riskLevel: "medium",
+        missingFields: ["meeting"],
+        message: "참여할 회의를 특정해야 합니다."
+      });
+    }
+    return this.needsClarification({
+      intent: "meeting.start",
+      toolName: "start_meeting_in_room",
+      riskLevel: "medium",
+      missingFields: ["meeting_room"],
+      message: "회의를 시작할 방을 특정해야 합니다."
+    });
+  }
+
   private planBoard(prompt: string): AgentPlannerResult {
+    if (this.isBoardAssigneePrompt(prompt)) {
+      const missingFields: AgentPlannerMissingField[] = [];
+      if (!this.hasBoardIssueReference(prompt)) {
+        missingFields.push("board_issue");
+      }
+      if (!this.hasBoardAssigneeReference(prompt)) {
+        missingFields.push("board_assignee");
+      }
+      if (missingFields.length > 0) {
+        return this.needsClarification({
+          intent: "board.assign_issue",
+          toolName: "assign_board_issue_safely",
+          riskLevel: "medium",
+          missingFields,
+          message: "Board issue 담당자 변경에 필요한 정보가 더 필요합니다."
+        });
+      }
+      return this.toolCandidate({
+        intent: "board.assign_issue",
+        toolName: "assign_board_issue_safely",
+        riskLevel: "medium",
+        message: "Board issue 담당자 변경 후보로 분류했습니다."
+      });
+    }
+
+    if (
+      this.includesAny(prompt, ["최신", "freshness", "동기화 상태", "진단"])
+    ) {
+      return this.toolCandidate({
+        intent: "board.diagnose_freshness",
+        toolName: "diagnose_board_freshness",
+        riskLevel: "low",
+        message: "Board 최신성 진단 후보로 분류했습니다."
+      });
+    }
+
+    if (this.includesAny(prompt, ["브리핑", "전체 현황", "보드 현황", "board 현황"])) {
+      return this.toolCandidate({
+        intent: "board.get_briefing",
+        toolName: "get_board_briefing",
+        riskLevel: "low",
+        message: "Board 브리핑 후보로 분류했습니다."
+      });
+    }
+
+    if (
+      this.includesAny(prompt, [
+        "현재 board",
+        "active board",
+        "어느 board",
+        "어떤 board",
+        "board가 무엇",
+        "보드가 무엇"
+      ])
+    ) {
+      return this.toolCandidate({
+        intent: "board.resolve_context",
+        toolName: "resolve_board_context",
+        riskLevel: "low",
+        message: "Board 문맥 확인 후보로 분류했습니다."
+      });
+    }
+
+    if (
+      this.includesAny(prompt, ["생성", "만들", "추가", "등록"]) &&
+      this.includesAny(prompt, ["이슈", "issue"])
+    ) {
+      return this.toolCandidate({
+        intent: "board.create_issue",
+        toolName: "create_board_issue",
+        riskLevel: "medium",
+        message: "Board issue 생성 후보로 분류했습니다."
+      });
+    }
+
+    if (
+      this.hasBoardIssueReference(prompt) &&
+      this.includesAny(prompt, ["상세", "문맥", "맥락", "관련 pr", "pull request"])
+    ) {
+      return this.toolCandidate({
+        intent: "board.get_issue_context",
+        toolName: "get_board_issue_context",
+        riskLevel: "low",
+        message: "Board issue 문맥 조회 후보로 분류했습니다."
+      });
+    }
+
     if (
       this.includesAny(prompt, [
         "이동",
@@ -217,6 +358,20 @@ export class AgentPlannerService {
     return this.includesAny(prompt, ["회의록", "meeting report"]);
   }
 
+  private isMeetingControlPrompt(prompt: string): boolean {
+    return this.includesAny(prompt, [
+      "회의 시작",
+      "회의 참여",
+      "회의 입장",
+      "회의 나가",
+      "회의 퇴장",
+      "녹음 시작",
+      "녹음 종료",
+      "meeting",
+      "recording"
+    ]);
+  }
+
   private isBoardPrompt(prompt: string): boolean {
     return this.includesAny(prompt, ["이슈", "issue", "보드", "board"]);
   }
@@ -230,13 +385,9 @@ export class AgentPlannerService {
       "리뷰 제출",
       "라벨 변경",
       "label 변경",
-      "assignee 변경",
-      "담당자 변경",
       "마일스톤 변경",
       "milestone 변경",
       "due date 변경",
-      "녹음 시작",
-      "녹음 종료",
       "회의록 재생성"
     ]);
   }
@@ -277,6 +428,19 @@ export class AgentPlannerService {
       "review",
       "리뷰"
     ]);
+  }
+
+  private isBoardAssigneePrompt(prompt: string): boolean {
+    return (
+      this.includesAny(prompt, ["담당자", "assignee"]) &&
+      this.includesAny(prompt, ["추가", "배정", "지정", "제거", "해제", "빼"])
+    );
+  }
+
+  private hasBoardAssigneeReference(prompt: string): boolean {
+    return /(?:담당자|assignee)(?:로|에|에서)?\s*[a-z0-9_-]+|[a-z0-9_-]+(?:을|를)?\s*(?:담당자|assignee)/i.test(
+      prompt
+    );
   }
 
   private includesAny(value: string, needles: string[]): boolean {

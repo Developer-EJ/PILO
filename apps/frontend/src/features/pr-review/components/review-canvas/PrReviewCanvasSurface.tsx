@@ -14,13 +14,31 @@ import {
   getIndicesAbove,
   useEditor,
   type Editor,
-  type TLEventInfo,
   type TLShape,
   type TLShapeId,
   type TLShapePartial
 } from "tldraw";
+import { useValue } from "@tldraw/state-react";
+import {
+  ChevronDown,
+  Filter,
+  LayoutPanelTop,
+  RotateCcw
+} from "lucide-react";
 
 import { TldrawSurface } from "@/shared/tldraw/TldrawSurface";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
+import { PrReviewWorkspaceLocationAdapter } from "@/features/pr-review/pr-review-workspace-location-adapter";
 import type {
   CanvasRealtimeConfig,
   CanvasRealtimeIdentity,
@@ -33,6 +51,7 @@ import type {
   PrReviewConflictAnalysis,
   PrReviewDecisionUpdatedEvent,
   PrReviewFlowFile,
+  PrReviewRoomDeletedEvent,
   PrReviewRoomCanvas
 } from "@/features/pr-review/types";
 import {
@@ -77,26 +96,42 @@ import {
   type PrReviewCanvasFileShapeSnapshot
 } from "@/features/pr-review/components/review-canvas/pr-review-canvas-persistence";
 import {
-  createPrReviewFileNodeActivationGesture,
-  shouldActivatePrReviewFileNode,
-  updatePrReviewFileNodeActivationGesture,
-  type PrReviewFileNodeActivationGesture
+  registerPrReviewFileNodeActivationHandler
 } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
+import { getPrReviewFlowFileBounds } from "@/features/pr-review/components/review-canvas/pr-review-flow-group-drag";
+import {
+  preservePrReviewFlowLabelTranslation,
+  shouldRemoveCreatedPrReviewSystemShape
+} from "@/features/pr-review/components/review-canvas/pr-review-system-shape-policy";
+import type { PrReviewFollowSurfaceKey } from "@/features/pr-review/pr-review-follow-location";
+import {
+  buildPrReviewGraphPresentation,
+  createPrReviewFlowLayout,
+  findMissingPrReviewOrderEdges,
+  type PrReviewGraphFilter,
+  type PrReviewGraphNode,
+  type PrReviewGraphRelation
+} from "@/features/pr-review/components/review-canvas/pr-review-graph-exploration";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
 type PrReviewCanvasSurfaceProps = {
+  activeFollowSurface: PrReviewFollowSurfaceKey;
   apiClient: PrReviewApiClient;
   canvas: PrReviewCanvas;
   className?: string;
   conflictAnalysis?: PrReviewConflictAnalysis | null;
   onDecisionUpdated?: (event: PrReviewDecisionUpdatedEvent) => void;
-  onFileSelect?: (reviewFileId: string | null) => void;
+  onFileOpen?: (reviewFileId: string) => void;
+  onFollowSurfaceChange: (surface: PrReviewFollowSurfaceKey) => void;
+  onOpenedReviewFileChange: (reviewFileId: string | null) => void;
   onRealtimeRoomJoined?: () => void;
+  onRealtimeRoomDeleted?: (event: PrReviewRoomDeletedEvent) => void;
+  openedReviewFileId: string | null;
   preparedConflictFileIds?: Set<string>;
+  readOnly?: boolean;
   realtimeIdentity: CanvasRealtimeIdentity;
   reviewRoomId: string;
-  selectedReviewFileId?: string | null;
   workspaceId: string;
 };
 
@@ -147,7 +182,8 @@ const OPERATION_SYNC_ERROR_MESSAGE =
   "실시간 노드 동기화가 지연되고 있습니다. 재접속하면 최신 위치를 다시 불러옵니다.";
 
 const prReviewTldrawComponents = {
-  Background: PrReviewCanvasBackground
+  Background: PrReviewCanvasBackground,
+  ContextMenu: null
 };
 
 const prReviewShapeTypes = new Set<string>([
@@ -207,10 +243,12 @@ function createFileNodeShape(
       filePath: fileNodeData.filePath,
       fileStatus: file.fileStatus,
       roleSummary: fileNodeData.roleSummary,
+      roleType: fileNodeData.roleType,
       riskLevel: fileNodeData.riskLevel,
       reviewStatus: fileNodeData.reviewStatus,
       conflictState: conflictMetadata.conflictState,
-      conflictReason: conflictMetadata.conflictReason
+      conflictReason: conflictMetadata.conflictReason,
+      pinned: false
     }
   };
 }
@@ -574,11 +612,19 @@ function buildPrReviewCanvasShapes(
 }
 
 function buildStoredPrReviewCanvasShapes(
-  storedShapes: PrReviewCanvasShape[]
+  storedShapes: PrReviewCanvasShape[],
+  canvas: PrReviewCanvas
 ): TLShapePartial[] {
-  const systemShapes = storedShapes.filter(
-    (shape) =>
-      isPrReviewCanvasSystemShape(shape) && isRecord(shape.rawShape.props)
+  const roleTypeByReviewFileId = new Map(
+    canvas.flows.flatMap((flow) =>
+      flow.files.map((file) => [file.reviewFileId, file.roleType] as const)
+    )
+  );
+  const systemShapes = collapseStoredSemanticRelationShapes(
+    storedShapes.filter(
+      (shape) =>
+        isPrReviewCanvasSystemShape(shape) && isRecord(shape.rawShape.props)
+    )
   );
   const indexes = resolvePrReviewCanvasShapeIndexes(
     systemShapes.map((shape) => shape.rawShape.index),
@@ -588,7 +634,29 @@ function buildStoredPrReviewCanvasShapes(
     }
   );
 
-  return systemShapes.map((shape, shapeIndex) => {
+  const persistedShapes = systemShapes.map((shape, shapeIndex) => {
+    const props = { ...(shape.rawShape.props as Record<string, unknown>) };
+    if (
+      shape.shapeType === PR_REVIEW_FILE_NODE_SHAPE_TYPE &&
+      typeof props.roleType !== "string"
+    ) {
+      props.roleType =
+        typeof props.reviewFileId === "string"
+          ? (roleTypeByReviewFileId.get(props.reviewFileId) ?? "unknown")
+          : "unknown";
+    }
+    if (
+      shape.shapeType === PR_REVIEW_FILE_NODE_SHAPE_TYPE &&
+      typeof props.pinned !== "boolean"
+    ) {
+      props.pinned = false;
+    }
+    if (
+      shape.shapeType === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE &&
+      !Array.isArray(props.routePoints)
+    ) {
+      props.routePoints = [];
+    }
     const partial: TLShapePartial = {
       id: shape.id as TLShapeId,
       type: shape.shapeType,
@@ -596,7 +664,7 @@ function buildStoredPrReviewCanvasShapes(
       y: shape.y,
       rotation: shape.rotation,
       index: indexes[shapeIndex] as TLShape["index"],
-      props: { ...(shape.rawShape.props as Record<string, unknown>) }
+      props
     } as TLShapePartial;
 
     if (shape.parentShapeId?.startsWith("shape:")) {
@@ -605,6 +673,308 @@ function buildStoredPrReviewCanvasShapes(
 
     return partial;
   });
+
+  const restoredReviewOrderEdges = buildMissingStoredReviewOrderShapes(
+    canvas,
+    systemShapes
+  );
+
+  return [
+    ...buildStoredFlowLabelShapes(canvas, systemShapes),
+    ...restoredReviewOrderEdges,
+    ...persistedShapes
+  ];
+}
+
+function buildMissingStoredReviewOrderShapes(
+  canvas: PrReviewCanvas,
+  storedShapes: PrReviewCanvasShape[]
+): TLShapePartial<PrReviewRelationEdgeShape>[] {
+  const fileShapeByReviewFileId = new Map(
+    storedShapes.flatMap((shape) => {
+      const props = shape.rawShape.props;
+      if (
+        shape.shapeType !== PR_REVIEW_FILE_NODE_SHAPE_TYPE ||
+        !isRecord(props) ||
+        typeof props.reviewFileId !== "string" ||
+        typeof props.roomFileId !== "string" ||
+        typeof props.reviewRoomId !== "string" ||
+        typeof props.currentReviewSessionId !== "string"
+      ) {
+        return [];
+      }
+
+      return [
+        [
+          props.reviewFileId,
+          {
+            shape,
+            currentReviewSessionId: props.currentReviewSessionId,
+            reviewRoomId: props.reviewRoomId,
+            roomFileId: props.roomFileId
+          }
+        ] as const
+      ];
+    })
+  );
+  const storedRelations = storedShapes.flatMap((shape) => {
+    const props = shape.rawShape.props;
+    if (
+      shape.shapeType !== PR_REVIEW_RELATION_EDGE_SHAPE_TYPE ||
+      !isRecord(props) ||
+      typeof props.flowId !== "string" ||
+      typeof props.fromReviewFileId !== "string" ||
+      typeof props.toReviewFileId !== "string" ||
+      !isPrReviewRelationType(props.relationType)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        flowId: props.flowId,
+        fromReviewFileId: props.fromReviewFileId,
+        toReviewFileId: props.toReviewFileId,
+        relationTypes: [props.relationType]
+      }
+    ];
+  });
+  const missingEdges = findMissingPrReviewOrderEdges(
+    canvas.flows,
+    storedRelations
+  );
+
+  return missingEdges.flatMap((edge) => {
+    const from = fileShapeByReviewFileId.get(edge.fromReviewFileId);
+    const to = fileShapeByReviewFileId.get(edge.toReviewFileId);
+    if (!from || !to) {
+      return [];
+    }
+
+    const geometry = buildPrReviewRelationEdgeGeometry(
+      {
+        x: from.shape.x,
+        y: from.shape.y,
+        width: from.shape.width ?? NODE_WIDTH,
+        height: from.shape.height ?? NODE_HEIGHT
+      },
+      {
+        x: to.shape.x,
+        y: to.shape.y,
+        width: to.shape.width ?? NODE_WIDTH,
+        height: to.shape.height ?? NODE_HEIGHT
+      }
+    );
+
+    return [
+      {
+        id: createShapeId(
+          `pr-review-restored-order-${shapeIdSuffix(edge.flowId)}-${shapeIdSuffix(
+            edge.fromReviewFileId
+          )}-${shapeIdSuffix(edge.toReviewFileId)}`
+        ),
+        type: PR_REVIEW_RELATION_EDGE_SHAPE_TYPE,
+        x: geometry.x,
+        y: geometry.y,
+        props: {
+          w: geometry.width,
+          h: geometry.height,
+          startX: geometry.startX,
+          startY: geometry.startY,
+          endX: geometry.endX,
+          endY: geometry.endY,
+          routePoints: geometry.routePoints,
+          fromReviewFileId: edge.fromReviewFileId,
+          toReviewFileId: edge.toReviewFileId,
+          flowId: edge.flowId,
+          reason: "추천 리뷰 경로",
+          kind: "review_order",
+          reviewRoomId: from.reviewRoomId,
+          currentReviewSessionId: from.currentReviewSessionId,
+          fromRoomFileId: from.roomFileId,
+          toRoomFileId: to.roomFileId,
+          relationType: "review_order",
+          source: "fallback",
+          confidence: 100,
+          relationCount: 1,
+          relationDetails: [
+            {
+              relationType: "review_order",
+              source: "fallback",
+              confidence: 100,
+              reason: "추천 리뷰 경로"
+            }
+          ]
+        }
+      } satisfies TLShapePartial<PrReviewRelationEdgeShape>
+    ];
+  });
+}
+
+function buildStoredFlowLabelShapes(
+  canvas: PrReviewCanvas,
+  storedShapes: PrReviewCanvasShape[]
+): TLShapePartial<PrReviewFlowLabelShape>[] {
+  const fileShapeByReviewFileId = new Map(
+    storedShapes.flatMap((shape) => {
+      if (
+        shape.shapeType !== PR_REVIEW_FILE_NODE_SHAPE_TYPE ||
+        !isRecord(shape.rawShape.props) ||
+        typeof shape.rawShape.props.reviewFileId !== "string"
+      ) {
+        return [];
+      }
+      return [[shape.rawShape.props.reviewFileId, shape] as const];
+    })
+  );
+
+  return sortFlows(canvas.flows).flatMap((flow) => {
+    const fileShapes = flow.files.flatMap((file) => {
+      const shape = fileShapeByReviewFileId.get(file.reviewFileId);
+      return shape ? [shape] : [];
+    });
+    if (!fileShapes.length) {
+      return [];
+    }
+
+    const left = Math.min(...fileShapes.map((shape) => shape.x));
+    const top = Math.min(...fileShapes.map((shape) => shape.y));
+    const right = Math.max(
+      ...fileShapes.map((shape) => shape.x + (shape.width ?? NODE_WIDTH))
+    );
+    return [
+      createFlowLabelShape(
+        flow,
+        Math.max(CANVAS_PADDING_Y, top - FLOW_LABEL_HEIGHT - FLOW_HEADER_GAP),
+        Math.max(FLOW_LABEL_MIN_WIDTH, right - left)
+      )
+    ].map((shape) => ({ ...shape, x: left }));
+  });
+}
+
+function collapseStoredSemanticRelationShapes(
+  systemShapes: PrReviewCanvasShape[]
+): PrReviewCanvasShape[] {
+  const groups = new Map<string, PrReviewCanvasShape[]>();
+
+  for (const shape of systemShapes) {
+    const props = shape.rawShape.props;
+    if (
+      shape.shapeType !== PR_REVIEW_RELATION_EDGE_SHAPE_TYPE ||
+      !isRecord(props) ||
+      props.kind !== "semantic" ||
+      typeof props.flowId !== "string" ||
+      typeof props.fromRoomFileId !== "string" ||
+      typeof props.toRoomFileId !== "string"
+    ) {
+      continue;
+    }
+
+    const key = [props.flowId, props.fromRoomFileId, props.toRoomFileId].join(
+      "\u0000"
+    );
+    const group = groups.get(key) ?? [];
+    group.push(shape);
+    groups.set(key, group);
+  }
+
+  const firstShapeIds = new Set(
+    Array.from(groups.values()).map((group) => group[0]?.id).filter(Boolean)
+  );
+
+  return systemShapes.flatMap((shape) => {
+    if (!firstShapeIds.has(shape.id)) {
+      const props = shape.rawShape.props;
+      if (
+        shape.shapeType === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE &&
+        isRecord(props) &&
+        props.kind === "semantic"
+      ) {
+        return [];
+      }
+      return [shape];
+    }
+
+    const props = shape.rawShape.props;
+    if (!isRecord(props)) {
+      return [shape];
+    }
+    const key = [props.flowId, props.fromRoomFileId, props.toRoomFileId].join(
+      "\u0000"
+    );
+    const group = groups.get(key) ?? [shape];
+    const details = group
+      .map((candidate) => toStoredRelationDetail(candidate.rawShape.props))
+      .filter((detail): detail is PrReviewRelationEdgeShape["props"]["relationDetails"][number] =>
+        detail !== null
+      )
+      .sort((left, right) => right.confidence - left.confidence);
+    const primary = details[0];
+
+    if (!primary) {
+      return [shape];
+    }
+
+    return [
+      {
+        ...shape,
+        rawShape: {
+          ...shape.rawShape,
+          props: {
+            ...props,
+            relationType: primary.relationType,
+            source: primary.source,
+            confidence: primary.confidence,
+            reason: primary.reason,
+            relationCount: details.length,
+            relationDetails: details
+          }
+        }
+      }
+    ];
+  });
+}
+
+function toStoredRelationDetail(
+  rawProps: unknown
+): PrReviewRelationEdgeShape["props"]["relationDetails"][number] | null {
+  if (!isRecord(rawProps)) {
+    return null;
+  }
+  const { relationType, source, confidence, reason } = rawProps;
+  if (
+    !isPrReviewRelationType(relationType) ||
+    !isPrReviewRelationSource(source) ||
+    typeof confidence !== "number" ||
+    typeof reason !== "string"
+  ) {
+    return null;
+  }
+  return { relationType, source, confidence, reason };
+}
+
+function isPrReviewRelationType(
+  value: unknown
+): value is PrReviewRelationEdgeShape["props"]["relationType"] {
+  return (
+    value === "review_order" ||
+    value === "depends_on" ||
+    value === "tests" ||
+    value === "uses_api" ||
+    value === "passes_data_to" ||
+    value === "supports"
+  );
+}
+
+function isPrReviewRelationSource(
+  value: unknown
+): value is PrReviewRelationEdgeShape["props"]["source"] {
+  return (
+    value === "rule" ||
+    value === "ai" ||
+    value === "hybrid" ||
+    value === "fallback"
+  );
 }
 
 function isValidPrReviewCanvasIndex(index: string): boolean {
@@ -622,6 +992,56 @@ function isPrReviewRelationEdgeShape(
   return shape?.type === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
 }
 
+function getRelationTypes(shape: PrReviewRelationEdgeShape): string[] {
+  const details = shape.props.relationDetails;
+  if (details.length) {
+    return Array.from(new Set(details.map((detail) => detail.relationType)));
+  }
+
+  return [shape.props.relationType];
+}
+
+function getGraphNodes(editor: Editor): PrReviewGraphNode[] {
+  return editor.getCurrentPageShapes().flatMap((shape) => {
+    if (!isPrReviewFileNodeShape(shape)) {
+      return [];
+    }
+
+    return [
+      {
+        id: shape.id,
+        flowId: shape.props.flowId,
+        roomFileId: shape.props.roomFileId,
+        x: shape.x,
+        y: shape.y,
+        width: shape.props.w,
+        height: shape.props.h,
+        workflowOrder: shape.props.workflowOrder,
+        riskLevel: shape.props.riskLevel,
+        reviewStatus: shape.props.reviewStatus,
+        pinned: shape.props.pinned
+      }
+    ];
+  });
+}
+
+function getGraphRelations(editor: Editor): PrReviewGraphRelation[] {
+  return editor.getCurrentPageShapes().flatMap((shape) => {
+    if (!isPrReviewRelationEdgeShape(shape)) {
+      return [];
+    }
+
+    return [
+      {
+        id: shape.id,
+        fromRoomFileId: shape.props.fromRoomFileId,
+        toRoomFileId: shape.props.toRoomFileId,
+        relationTypes: getRelationTypes(shape)
+      }
+    ];
+  });
+}
+
 function toPrReviewFileShapeSnapshot(
   shape: PrReviewFileNodeShape
 ): PrReviewCanvasFileShapeSnapshot {
@@ -633,7 +1053,8 @@ function toPrReviewFileShapeSnapshot(
     index: shape.index,
     props: {
       w: shape.props.w,
-      h: shape.props.h
+      h: shape.props.h,
+      pinned: shape.props.pinned
     }
   };
 }
@@ -650,6 +1071,11 @@ function syncPrReviewFileNodeMetadata(
       flow.files.map((file) => [file.reviewFileId, file] as const)
     )
   );
+  const fileByPath = new Map(
+    canvas.flows.flatMap((flow) =>
+      flow.files.map((file) => [file.filePath, file] as const)
+    )
+  );
   const getConflictMetadata = createConflictMetadataResolver(
     conflictAnalysis,
     preparedConflictFileIds
@@ -659,7 +1085,11 @@ function syncPrReviewFileNodeMetadata(
       return [];
     }
 
-    const file = fileByReviewFileId.get(shape.props.reviewFileId);
+    const file =
+      fileByReviewFileId.get(shape.props.reviewFileId) ??
+      (shape.props.filePath
+        ? fileByPath.get(shape.props.filePath)
+        : undefined);
     if (!file) {
       return [];
     }
@@ -680,10 +1110,12 @@ function syncPrReviewFileNodeMetadata(
           filePath: file.fileNodeData.filePath,
           fileStatus: file.fileStatus,
           roleSummary: file.fileNodeData.roleSummary,
+          roleType: file.fileNodeData.roleType,
           riskLevel: file.fileNodeData.riskLevel,
           reviewStatus: file.fileNodeData.reviewStatus,
           conflictState: conflictMetadata.conflictState,
-          conflictReason: conflictMetadata.conflictReason
+          conflictReason: conflictMetadata.conflictReason,
+          pinned: shape.props.pinned
         }
       } satisfies TLShapePartial<PrReviewFileNodeShape>
     ];
@@ -703,7 +1135,8 @@ function syncPrReviewFileNodeMetadata(
 
 function updatePrReviewRelationGeometry(
   editor: Editor,
-  internalShapeUpdateRef: MutableRefObject<boolean>
+  internalShapeUpdateRef: MutableRefObject<boolean>,
+  preserveStoredRoutes = false
 ) {
   const fileByRoomFileId = new Map(
     editor
@@ -739,6 +1172,13 @@ function updatePrReviewRelationGeometry(
       }
     );
 
+    if (
+      preserveStoredRoutes &&
+      hasPrReviewRelationAnchors(shape, geometry)
+    ) {
+      return [];
+    }
+
     return [
       {
         id: shape.id,
@@ -752,7 +1192,8 @@ function updatePrReviewRelationGeometry(
           startX: geometry.startX,
           startY: geometry.startY,
           endX: geometry.endX,
-          endY: geometry.endY
+          endY: geometry.endY,
+          routePoints: geometry.routePoints
         }
       } satisfies TLShapePartial<PrReviewRelationEdgeShape>
     ];
@@ -768,6 +1209,98 @@ function updatePrReviewRelationGeometry(
   } finally {
     internalShapeUpdateRef.current = false;
   }
+}
+
+function updatePrReviewFlowLabelGeometry(
+  editor: Editor,
+  internalShapeUpdateRef: MutableRefObject<boolean>
+) {
+  const fileShapes = editor
+    .getCurrentPageShapes()
+    .filter(isPrReviewFileNodeShape)
+    .map((shape) => ({
+      flowId: shape.props.flowId,
+      x: shape.x,
+      y: shape.y,
+      width: shape.props.w,
+      height: shape.props.h
+    }));
+  const updates = editor.getCurrentPageShapes().flatMap((shape) => {
+    if (shape.type !== PR_REVIEW_FLOW_LABEL_SHAPE_TYPE) {
+      return [];
+    }
+
+    const bounds = getPrReviewFlowFileBounds({
+      fileShapes,
+      flowId: shape.props.flowId
+    });
+    if (!bounds) {
+      return [];
+    }
+
+    return [
+      {
+        id: shape.id,
+        type: PR_REVIEW_FLOW_LABEL_SHAPE_TYPE,
+        x: bounds.left,
+        y: Math.max(
+          CANVAS_PADDING_Y,
+          bounds.top - FLOW_LABEL_HEIGHT - FLOW_HEADER_GAP
+        ),
+        props: {
+          ...shape.props,
+          w: Math.max(FLOW_LABEL_MIN_WIDTH, bounds.right - bounds.left)
+        }
+      } satisfies TLShapePartial<PrReviewFlowLabelShape>
+    ];
+  });
+
+  if (!updates.length) {
+    return;
+  }
+
+  internalShapeUpdateRef.current = true;
+  try {
+    editor.updateShapes(updates);
+  } finally {
+    internalShapeUpdateRef.current = false;
+  }
+}
+
+function updatePrReviewDerivedGeometry(
+  editor: Editor,
+  internalShapeUpdateRef: MutableRefObject<boolean>,
+  preserveStoredRoutes = false
+) {
+  updatePrReviewRelationGeometry(
+    editor,
+    internalShapeUpdateRef,
+    preserveStoredRoutes
+  );
+  updatePrReviewFlowLabelGeometry(editor, internalShapeUpdateRef);
+}
+
+function hasPrReviewRelationAnchors(
+  shape: PrReviewRelationEdgeShape,
+  geometry: ReturnType<typeof buildPrReviewRelationEdgeGeometry>
+) {
+  const routePoints = shape.props.routePoints;
+  if (routePoints.length < 2) {
+    return false;
+  }
+
+  const first = routePoints[0];
+  const last = routePoints[routePoints.length - 1];
+  if (!first || !last) {
+    return false;
+  }
+
+  return (
+    Math.abs(shape.x + first.x - (geometry.x + geometry.startX)) < 1 &&
+    Math.abs(shape.y + first.y - (geometry.y + geometry.startY)) < 1 &&
+    Math.abs(shape.x + last.x - (geometry.x + geometry.endX)) < 1 &&
+    Math.abs(shape.y + last.y - (geometry.y + geometry.endY)) < 1
+  );
 }
 
 function initializeSyncedFileGeometry(
@@ -789,36 +1322,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function selectReviewFileNode(
-  editor: Editor,
-  reviewFileId: string | null | undefined
-) {
-  if (!reviewFileId) {
-    editor.selectNone();
-    return;
-  }
-
-  const fileNode = editor
-    .getCurrentPageShapes()
-    .find(
-      (shape) =>
-        isPrReviewFileNodeShape(shape) &&
-        shape.props.reviewFileId === reviewFileId
-    );
-
-  if (fileNode) {
-    editor.select(fileNode.id);
-    return;
-  }
-
-  editor.selectNone();
+function getStoredFileNodePinned(shape: PrReviewCanvasShape): boolean {
+  return isRecord(shape.rawShape.props) && shape.rawShape.props.pinned === true;
 }
 
 function resetPrReviewCanvas(
   editor: Editor,
   shapes: TLShapePartial[],
-  selectedReviewFileId: string | null | undefined,
   hydratingRef: MutableRefObject<boolean>,
+  internalShapeUpdateRef: MutableRefObject<boolean>,
   lastSyncedGeometryRef: MutableRefObject<Map<string, string>>
 ) {
   hydratingRef.current = true;
@@ -838,7 +1350,7 @@ function resetPrReviewCanvas(
     }
 
     editor.createShapes(shapes);
-    selectReviewFileNode(editor, selectedReviewFileId);
+    updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef, true);
     initializeSyncedFileGeometry(editor, lastSyncedGeometryRef);
   } finally {
     hydratingRef.current = false;
@@ -878,6 +1390,29 @@ function registerReviewShapePolicy(
   hydratingRef: MutableRefObject<boolean>,
   internalShapeUpdateRef: MutableRefObject<boolean>
 ) {
+  editor.sideEffects.registerAfterCreateHandler(
+    "shape",
+    (shape, source) => {
+      if (
+        !shouldRemoveCreatedPrReviewSystemShape({
+          hydrating: hydratingRef.current,
+          internalShapeUpdate: internalShapeUpdateRef.current,
+          isSystemShape: prReviewShapeTypes.has(shape.type),
+          source
+        })
+      ) {
+        return;
+      }
+
+      hydratingRef.current = true;
+      try {
+        editor.deleteShape(shape.id);
+      } finally {
+        hydratingRef.current = false;
+      }
+    }
+  );
+
   editor.sideEffects.registerBeforeChangeHandler("shape", (prev, next) => {
     if (hydratingRef.current || internalShapeUpdateRef.current) {
       return next;
@@ -895,6 +1430,13 @@ function registerReviewShapePolicy(
       };
     }
 
+    if (
+      prev.type === PR_REVIEW_FLOW_LABEL_SHAPE_TYPE &&
+      next.type === PR_REVIEW_FLOW_LABEL_SHAPE_TYPE
+    ) {
+      return preservePrReviewFlowLabelTranslation(prev, next);
+    }
+
     if (prReviewShapeTypes.has(next.type)) {
       return prev;
     }
@@ -910,76 +1452,44 @@ function registerReviewShapePolicy(
 }
 
 function PrReviewFileNodeActivationBridge({
-  onFileSelect
+  onFileOpen
 }: {
-  onFileSelect?: (reviewFileId: string | null) => void;
+  onFileOpen?: (reviewFileId: string) => void;
 }) {
   const editor = useEditor();
-  const gestureRef = useRef<PrReviewFileNodeActivationGesture | null>(null);
 
   useEffect(() => {
-    const handleEditorEvent = (event: TLEventInfo) => {
-      if (event.name === "cancel" || event.name === "interrupt") {
-        gestureRef.current = null;
-        return;
-      }
-
-      if (event.type !== "pointer") {
-        return;
-      }
-
-      if (event.name === "pointer_down") {
-        if (event.target === "shape" && isPrReviewFileNodeShape(event.shape)) {
-          gestureRef.current = createPrReviewFileNodeActivationGesture({
-            pointer: event.point,
-            reviewFileId: event.shape.props.reviewFileId,
-            shapeId: event.shape.id
-          });
-          return;
+    const unregisterActivationHandler =
+      registerPrReviewFileNodeActivationHandler(editor, {
+        onOpen: (reviewFileId) => {
+          onFileOpen?.(reviewFileId);
         }
-
-        gestureRef.current = null;
-        onFileSelect?.(null);
+      });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== "Enter") {
         return;
       }
 
-      const gesture = gestureRef.current;
-      if (!gesture) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("button, input, select, textarea, [contenteditable=true]")) {
         return;
       }
 
-      if (event.name === "pointer_move") {
-        gestureRef.current = updatePrReviewFileNodeActivationGesture(
-          gesture,
-          event.point
-        );
+      const selected = editor.getOnlySelectedShape();
+      if (!isPrReviewFileNodeShape(selected)) {
         return;
       }
 
-      if (event.name !== "pointer_up") {
-        return;
-      }
-
-      const completedGesture = updatePrReviewFileNodeActivationGesture(
-        gesture,
-        event.point
-      );
-      const currentShape = editor.getShape(completedGesture.shapeId as TLShapeId);
-      gestureRef.current = null;
-
-      if (
-        isPrReviewFileNodeShape(currentShape) &&
-        shouldActivatePrReviewFileNode(completedGesture)
-      ) {
-        onFileSelect?.(completedGesture.reviewFileId);
-      }
+      event.preventDefault();
+      onFileOpen?.(selected.props.reviewFileId);
     };
 
-    editor.on("event", handleEditorEvent);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      editor.off("event", handleEditorEvent);
+      window.removeEventListener("keydown", handleKeyDown);
+      unregisterActivationHandler();
     };
-  }, [editor, onFileSelect]);
+  }, [editor, onFileOpen]);
 
   return null;
 }
@@ -988,6 +1498,336 @@ type PrReviewCanvasPersistenceNotice = {
   message: string;
   tone: "info" | "error";
 } | null;
+
+type PrReviewFlowLayoutPreview = {
+  next: Map<string, { x: number; y: number }>;
+  previous: Map<string, { x: number; y: number }>;
+};
+
+const relationTypeLabels: Record<
+  PrReviewRelationEdgeShape["props"]["relationType"],
+  string
+> = {
+  review_order: "추천 리뷰 경로",
+  depends_on: "의존 관계",
+  tests: "테스트 관계",
+  uses_api: "API 사용",
+  passes_data_to: "데이터 전달",
+  supports: "지원 변경"
+};
+
+const relationSourceLabels: Record<
+  PrReviewRelationEdgeShape["props"]["source"],
+  string
+> = {
+  rule: "규칙 기반",
+  ai: "AI 보강",
+  hybrid: "규칙·AI 보강",
+  fallback: "기본 경로"
+};
+
+function getRelationConfidenceLabel(confidence: number) {
+  if (confidence >= 85) return "근거 강함";
+  if (confidence >= 70) return "근거 보통";
+  return "근거 제한적";
+}
+
+function PrReviewRelationInspector({ editor }: { editor: Editor | null }) {
+  const selectedRelation = useValue(
+    "pr-review-relation-inspector-selection",
+    () => {
+      if (!editor) return null;
+      const selected = editor.getOnlySelectedShape();
+      return isPrReviewRelationEdgeShape(selected) ? selected : null;
+    },
+    [editor]
+  );
+
+  if (!editor || !selectedRelation) {
+    return null;
+  }
+
+  const relationDetails =
+    selectedRelation.props.relationDetails.length > 0
+      ? selectedRelation.props.relationDetails
+      : [
+          {
+            relationType: selectedRelation.props.relationType,
+            source: selectedRelation.props.source,
+            confidence: selectedRelation.props.confidence,
+            reason: selectedRelation.props.reason
+          }
+        ];
+
+  return (
+    <aside
+      aria-label="선택한 파일 관계"
+      className="absolute bottom-5 left-5 z-20 w-[min(28rem,calc(100%-2.5rem))] rounded-md border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-700">
+        <span>{`선택한 관계 ${relationDetails.length}개`}</span>
+      </div>
+      <ul className="mt-2 space-y-3">
+        {relationDetails.map((detail, index) => (
+          <li
+            className="border-l-2 border-slate-200 pl-3 text-sm leading-6 text-slate-700"
+            key={`${detail.relationType}-${detail.source}-${detail.reason}-${index}`}
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-slate-600">
+              <span>{relationTypeLabels[detail.relationType]}</span>
+              <span className="text-slate-400">·</span>
+              <span>{relationSourceLabels[detail.source]}</span>
+              <span className="text-slate-400">·</span>
+              <span>{getRelationConfidenceLabel(detail.confidence)}</span>
+            </div>
+            <p className="mt-1 break-words">{detail.reason}</p>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+}
+
+type PrReviewGraphControlsProps = {
+  activeFlowId: string | null;
+  collapsedFlowIds: Set<string>;
+  focusedFlowId: string | null;
+  isReadOnly: boolean;
+  mode: PrReviewGraphFilter["mode"];
+  onArrangeFlow: () => void;
+  onApplyLayoutPreview: () => void;
+  onCancelLayoutPreview: () => void;
+  onClearFocusedFlow: () => void;
+  onFocusFlow: (flowId: string | null) => void;
+  onUnpinSelected: () => void;
+  onToggleCollapsedFlow: (flowId: string) => void;
+  onToggleMode: (mode: PrReviewGraphFilter["mode"]) => void;
+  relationTypes: Set<string>;
+  riskLevels: Set<PrReviewGraphNode["riskLevel"]>;
+  reviewStatuses: Set<PrReviewGraphNode["reviewStatus"]>;
+  setRelationTypes: (value: Set<string>) => void;
+  setRiskLevels: (value: Set<PrReviewGraphNode["riskLevel"]>) => void;
+  setReviewStatuses: (
+    value: Set<PrReviewGraphNode["reviewStatus"]>
+  ) => void;
+  selectedPinned: boolean;
+  layoutPreviewActive: boolean;
+  flows: PrReviewCanvasFlow[];
+};
+
+const relationFilterLabels = {
+  review_order: "추천 경로",
+  depends_on: "의존",
+  tests: "테스트",
+  uses_api: "API",
+  passes_data_to: "데이터",
+  supports: "지원"
+} as const;
+
+function toggleFilterValue<T>(values: Set<T>, value: T) {
+  const next = new Set(values);
+  if (next.has(value)) {
+    next.delete(value);
+  } else {
+    next.add(value);
+  }
+  return next;
+}
+
+function PrReviewGraphControls({
+  activeFlowId,
+  collapsedFlowIds,
+  focusedFlowId,
+  flows,
+  isReadOnly,
+  mode,
+  onArrangeFlow,
+  onApplyLayoutPreview,
+  onCancelLayoutPreview,
+  onClearFocusedFlow,
+  onFocusFlow,
+  onUnpinSelected,
+  onToggleCollapsedFlow,
+  onToggleMode,
+  relationTypes,
+  riskLevels,
+  reviewStatuses,
+  setRelationTypes,
+  setRiskLevels,
+  setReviewStatuses,
+  selectedPinned,
+  layoutPreviewActive
+}: PrReviewGraphControlsProps) {
+  return (
+    <div className="absolute right-5 top-5 z-20 flex items-center gap-2">
+      <Popover>
+        <PopoverTrigger
+          render={
+            <Button aria-label="그래프 탐색 설정" size="icon" variant="outline">
+              <Filter className="size-4" />
+            </Button>
+          }
+        />
+        <PopoverContent align="end" className="w-80 space-y-4 p-4">
+          <section>
+            <p className="text-sm font-semibold">관계 보기</p>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["all", "전체"],
+                  ["related", "선택 관계"],
+                  ["review_path", "추천 경로"]
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  onClick={() => onToggleMode(value)}
+                  size="sm"
+                  variant={mode === value ? "default" : "outline"}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <p className="text-sm font-semibold">관계 종류</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Object.entries(relationFilterLabels).map(([value, label]) => (
+                <Button
+                  key={value}
+                  onClick={() =>
+                    setRelationTypes(toggleFilterValue(relationTypes, value))
+                  }
+                  size="sm"
+                  variant={relationTypes.has(value) ? "default" : "outline"}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <p className="text-sm font-semibold">파일 상태</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(
+                [
+                  ["high", "위험 높음"],
+                  ["medium", "위험 중간"],
+                  ["low", "위험 낮음"],
+                  ["not_reviewed", "미판단"],
+                  ["discussion_needed", "논의 필요"]
+                ] as const
+              ).map(([value, label]) => {
+                const selected =
+                  value === "high" || value === "medium" || value === "low"
+                    ? riskLevels.has(value)
+                    : reviewStatuses.has(value);
+                return (
+                  <Button
+                    key={value}
+                    onClick={() => {
+                      if (value === "high" || value === "medium" || value === "low") {
+                        setRiskLevels(toggleFilterValue(riskLevels, value));
+                      } else {
+                        setReviewStatuses(toggleFilterValue(reviewStatuses, value));
+                      }
+                    }}
+                    size="sm"
+                    variant={selected ? "default" : "outline"}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </div>
+          </section>
+          <section>
+            <p className="text-sm font-semibold">Flow</p>
+            <div className="mt-2 space-y-1">
+              <Button
+                className="w-full justify-start"
+                onClick={onClearFocusedFlow}
+                size="sm"
+                variant={focusedFlowId === null ? "default" : "outline"}
+              >
+                모든 Flow 보기
+              </Button>
+              {flows.map((flow) => (
+                <div className="flex gap-1" key={flow.id}>
+                  <Button
+                    className="min-w-0 flex-1 justify-start truncate"
+                    onClick={() => onFocusFlow(flow.id)}
+                    size="sm"
+                    variant={focusedFlowId === flow.id ? "default" : "outline"}
+                  >
+                    {flow.title}
+                  </Button>
+                  <Button
+                    aria-label={`${flow.title} ${collapsedFlowIds.has(flow.id) ? "펼치기" : "접기"}`}
+                    onClick={() => onToggleCollapsedFlow(flow.id)}
+                    size="icon-sm"
+                    variant="outline"
+                  >
+                    <ChevronDown
+                      className={`size-4 transition-transform ${
+                        collapsedFlowIds.has(flow.id) ? "-rotate-90" : ""
+                      }`}
+                    />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        </PopoverContent>
+      </Popover>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              aria-label="현재 Flow 자동 정렬"
+              disabled={!activeFlowId || isReadOnly || layoutPreviewActive}
+              onClick={onArrangeFlow}
+              size="icon"
+              variant="outline"
+            >
+              <LayoutPanelTop className="size-4" />
+            </Button>
+          }
+        />
+        <TooltipContent>현재 Flow 자동 정렬</TooltipContent>
+      </Tooltip>
+      {layoutPreviewActive ? (
+        <div className="flex items-center gap-1 rounded-md border bg-white p-1 shadow-sm">
+          <Button onClick={onCancelLayoutPreview} size="sm" variant="ghost">
+            되돌리기
+          </Button>
+          <Button onClick={onApplyLayoutPreview} size="sm">
+            배치 적용
+          </Button>
+        </div>
+      ) : null}
+      {selectedPinned ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-label="선택 파일 고정 해제"
+                disabled={isReadOnly}
+                onClick={onUnpinSelected}
+                size="icon"
+                variant="outline"
+              >
+                <RotateCcw className="size-4" />
+              </Button>
+            }
+          />
+          <TooltipContent>선택 파일 고정 해제</TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
+}
 
 function PrReviewCanvasPersistenceBridge({
   apiClient,
@@ -1058,7 +1898,8 @@ function PrReviewCanvasPersistenceBridge({
           props: {
             ...current.props,
             w: latest.width ?? current.props.w,
-            h: latest.height ?? current.props.h
+            h: latest.height ?? current.props.h,
+            pinned: getStoredFileNodePinned(latest)
           }
         });
       } finally {
@@ -1074,7 +1915,7 @@ function PrReviewCanvasPersistenceBridge({
           )
         );
       }
-      updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+      updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef);
     }
 
     async function flushPendingShapes() {
@@ -1175,15 +2016,27 @@ function PrReviewCanvasPersistenceBridge({
         }
 
         let hasChangedFile = false;
+        const pinUpdates: TLShapePartial<PrReviewFileNodeShape>[] = [];
         for (const shape of editor.getCurrentPageShapes()) {
           if (!isPrReviewFileNodeShape(shape)) {
             continue;
           }
 
-          const snapshot = toPrReviewFileShapeSnapshot(shape);
+          let snapshot = toPrReviewFileShapeSnapshot(shape);
           const geometryKey = getPrReviewFileShapeGeometryKey(snapshot);
           if (lastSyncedGeometryRef.current.get(shape.id) === geometryKey) {
             continue;
+          }
+
+          if (!shape.props.pinned) {
+            pinUpdates.push({
+              id: shape.id,
+              type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+              props: {
+                ...shape.props,
+                pinned: true
+              }
+            });
           }
 
           pendingShapes.set(shape.id, snapshot);
@@ -1194,7 +2047,25 @@ function PrReviewCanvasPersistenceBridge({
           return;
         }
 
-        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+        if (pinUpdates.length) {
+          internalShapeUpdateRef.current = true;
+          try {
+            editor.updateShapes(pinUpdates);
+            for (const update of pinUpdates) {
+              const pinnedShape = editor.getShape(update.id);
+              if (isPrReviewFileNodeShape(pinnedShape)) {
+                pendingShapes.set(
+                  pinnedShape.id,
+                  toPrReviewFileShapeSnapshot(pinnedShape)
+                );
+              }
+            }
+          } finally {
+            internalShapeUpdateRef.current = false;
+          }
+        }
+
+        updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef);
         scheduleFlush();
       },
       { scope: "document", source: "user" }
@@ -1223,37 +2094,67 @@ function PrReviewCanvasPersistenceBridge({
 }
 
 export function PrReviewCanvasSurface({
+  activeFollowSurface,
   apiClient,
   canvas,
   className,
   conflictAnalysis,
   onDecisionUpdated,
-  onFileSelect,
+  onFileOpen,
+  onFollowSurfaceChange,
+  onOpenedReviewFileChange,
   onRealtimeRoomJoined,
+  onRealtimeRoomDeleted,
+  openedReviewFileId,
   preparedConflictFileIds = new Set<string>(),
+  readOnly: isReviewVersionStale = false,
   realtimeIdentity,
   reviewRoomId,
-  selectedReviewFileId,
   workspaceId
 }: PrReviewCanvasSurfaceProps) {
   const editorRef = useRef<Editor | null>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const allowFileGeometryRef = useRef(false);
   const hydratingRef = useRef(false);
   const internalShapeUpdateRef = useRef(false);
   const lastSyncedGeometryRef = useRef(new Map<string, string>());
   const storedShapeByIdRef = useRef(new Map<string, PrReviewCanvasShape>());
   const pendingRemoteOperationsRef = useRef<CanvasShapeOperationPayload[]>([]);
-  const selectedReviewFileIdRef = useRef<string | null>(
-    selectedReviewFileId ?? null
-  );
   const [storedShapes, setStoredShapes] = useState<
     PrReviewCanvasShape[] | null
   >(null);
   const [reviewRoom, setReviewRoom] = useState<PrReviewRoomCanvas | null>(null);
   const [persistenceNotice, setPersistenceNotice] =
     useState<PrReviewCanvasPersistenceNotice>(null);
+  const [graphMode, setGraphMode] = useState<PrReviewGraphFilter["mode"]>(
+    "all"
+  );
+  const [focusedFlowId, setFocusedFlowId] = useState<string | null>(null);
+  const [collapsedFlowIds, setCollapsedFlowIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [relationTypes, setRelationTypes] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [riskLevels, setRiskLevels] = useState<
+    Set<PrReviewGraphNode["riskLevel"]>
+  >(() => new Set());
+  const [reviewStatuses, setReviewStatuses] = useState<
+    Set<PrReviewGraphNode["reviewStatus"]>
+  >(() => new Set());
+  const [layoutPreview, setLayoutPreview] =
+    useState<PrReviewFlowLayoutPreview | null>(null);
   const persistedFileShapeEnabled = Boolean(
     storedShapes?.some(isPrReviewCanvasFileShape)
+  );
+  const selectedGraphFile = useValue(
+    "pr-review-graph-selected-file",
+    () => {
+      if (!editor) return null;
+      const selected = editor.getOnlySelectedShape();
+      return isPrReviewFileNodeShape(selected) ? selected : null;
+    },
+    [editor]
   );
   const fallbackShapes = useMemo(
     () =>
@@ -1265,8 +2166,8 @@ export function PrReviewCanvasSurface({
     [canvas, conflictAnalysis, preparedConflictFileIds]
   );
   const persistedShapes = useMemo(
-    () => buildStoredPrReviewCanvasShapes(storedShapes ?? []),
-    [storedShapes]
+    () => buildStoredPrReviewCanvasShapes(storedShapes ?? [], canvas),
+    [canvas, storedShapes]
   );
   const shapes = persistedFileShapeEnabled
     ? persistedShapes
@@ -1285,7 +2186,7 @@ export function PrReviewCanvasSurface({
       ),
       workspaceId
     }),
-    [realtimeIdentity, reviewRoom, workspaceId]
+    [realtimeIdentity, reviewRoom?.canvasId, workspaceId]
   );
   const catchUpCanvasOperations = useCallback(
     (afterSeq: number, signal: AbortSignal) => {
@@ -1361,7 +2262,8 @@ export function PrReviewCanvasSurface({
             props: {
               ...current.props,
               w: latest.width ?? current.props.w,
-              h: latest.height ?? current.props.h
+              h: latest.height ?? current.props.h,
+              pinned: getStoredFileNodePinned(latest)
             }
           });
         } finally {
@@ -1381,7 +2283,7 @@ export function PrReviewCanvasSurface({
       }
 
       if (geometryChanged) {
-        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
+        updatePrReviewDerivedGeometry(editor, internalShapeUpdateRef);
       }
     },
     [realtimeIdentity.currentUser?.userId]
@@ -1390,10 +2292,33 @@ export function PrReviewCanvasSurface({
     applyOperations: applyRemoteCanvasOperations,
     catchUpOperations: catchUpCanvasOperations,
     onDecisionUpdated,
-    onRoomJoined: onRealtimeRoomJoined
+    onRoomJoined: onRealtimeRoomJoined,
+    onRoomDeleted: onRealtimeRoomDeleted
   });
   const readOnly =
-    reviewRoom?.status === "completed" || canvasPresence.readOnly;
+    isReviewVersionStale || reviewRoom?.status === "completed" || canvasPresence.readOnly;
+  const selectedRoomFileId = selectedGraphFile?.props.roomFileId ?? null;
+  const activeFlowId = focusedFlowId ?? selectedGraphFile?.props.flowId ?? null;
+  const graphFilter = useMemo<PrReviewGraphFilter>(
+    () => ({
+      collapsedFlowIds,
+      focusedFlowId,
+      mode: graphMode,
+      relationTypes,
+      riskLevels,
+      reviewStatuses,
+      selectedRoomFileId
+    }),
+    [
+      collapsedFlowIds,
+      focusedFlowId,
+      graphMode,
+      relationTypes,
+      reviewStatuses,
+      riskLevels,
+      selectedRoomFileId
+    ]
+  );
   const handlePersistenceNotice = useCallback(
     (notice: PrReviewCanvasPersistenceNotice) => {
       setPersistenceNotice(notice);
@@ -1402,6 +2327,44 @@ export function PrReviewCanvasSurface({
   );
 
   allowFileGeometryRef.current = persistedFileShapeEnabled;
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
+    const presentation = buildPrReviewGraphPresentation(
+      getGraphNodes(editor),
+      getGraphRelations(editor),
+      graphFilter
+    );
+    const updates: TLShapePartial[] = editor.getCurrentPageShapes().flatMap((shape) => {
+      if (isPrReviewFileNodeShape(shape)) {
+        const opacity = presentation.nodeOpacityById.get(shape.id) ?? 1;
+        return shape.opacity === opacity
+          ? []
+          : [{ id: shape.id, type: shape.type, opacity } as TLShapePartial];
+      }
+      if (isPrReviewRelationEdgeShape(shape)) {
+        const opacity = presentation.edgeOpacityById.get(shape.id) ?? 1;
+        return shape.opacity === opacity
+          ? []
+          : [{ id: shape.id, type: shape.type, opacity } as TLShapePartial];
+      }
+      return [];
+    });
+
+    if (!updates.length) {
+      return;
+    }
+
+    internalShapeUpdateRef.current = true;
+    try {
+      editor.updateShapes(updates);
+    } finally {
+      internalShapeUpdateRef.current = false;
+    }
+  }, [editor, graphFilter, persistedShapes]);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1470,6 +2433,7 @@ export function PrReviewCanvasSurface({
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor;
+      setEditor(editor);
       editor.setCurrentTool("select.idle");
       registerReviewShapePolicy(
         editor,
@@ -1480,8 +2444,8 @@ export function PrReviewCanvasSurface({
       resetPrReviewCanvas(
         editor,
         shapes,
-        selectedReviewFileIdRef.current,
         hydratingRef,
+        internalShapeUpdateRef,
         lastSyncedGeometryRef
       );
       if (pendingRemoteOperationsRef.current.length) {
@@ -1495,7 +2459,6 @@ export function PrReviewCanvasSurface({
           preparedConflictFileIds,
           internalShapeUpdateRef
         );
-        updatePrReviewRelationGeometry(editor, internalShapeUpdateRef);
       }
     },
     [
@@ -1509,10 +2472,6 @@ export function PrReviewCanvasSurface({
   );
 
   useEffect(() => {
-    selectedReviewFileIdRef.current = selectedReviewFileId ?? null;
-  }, [selectedReviewFileId]);
-
-  useEffect(() => {
     if (!editorRef.current) {
       return;
     }
@@ -1520,8 +2479,8 @@ export function PrReviewCanvasSurface({
     resetPrReviewCanvas(
       editorRef.current,
       shapes,
-      selectedReviewFileIdRef.current,
       hydratingRef,
+      internalShapeUpdateRef,
       lastSyncedGeometryRef
     );
     if (persistedFileShapeEnabled) {
@@ -1530,10 +2489,6 @@ export function PrReviewCanvasSurface({
         canvas,
         conflictAnalysis,
         preparedConflictFileIds,
-        internalShapeUpdateRef
-      );
-      updatePrReviewRelationGeometry(
-        editorRef.current,
         internalShapeUpdateRef
       );
     }
@@ -1558,13 +2513,196 @@ export function PrReviewCanvasSurface({
     preparedConflictFileIds
   ]);
 
-  useEffect(() => {
-    if (!editorRef.current) {
+  const handleArrangeActiveFlow = useCallback(() => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !activeFlowId || readOnly) {
       return;
     }
 
-    selectReviewFileNode(editorRef.current, selectedReviewFileId);
-  }, [selectedReviewFileId]);
+    const positions = createPrReviewFlowLayout(
+      getGraphNodes(currentEditor),
+      getGraphRelations(currentEditor),
+      activeFlowId
+    );
+    if (!positions.size) {
+      setPersistenceNotice({
+        message: "고정되지 않은 파일이 없어 현재 Flow를 다시 정렬할 수 없습니다.",
+        tone: "info"
+      });
+      return;
+    }
+
+    const previous = new Map(
+      getGraphNodes(currentEditor)
+        .filter((node) => positions.has(node.id))
+        .map((node) => [node.id, { x: node.x, y: node.y }] as const)
+    );
+    const updates = Array.from(
+      positions,
+      ([id, position]) =>
+        ({
+          id: id as TLShapeId,
+          type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          x: position.x,
+          y: position.y
+        }) satisfies TLShapePartial<PrReviewFileNodeShape>
+    );
+    internalShapeUpdateRef.current = true;
+    try {
+      currentEditor.updateShapes(updates);
+      updatePrReviewDerivedGeometry(currentEditor, internalShapeUpdateRef);
+    } finally {
+      internalShapeUpdateRef.current = false;
+    }
+    setLayoutPreview({ next: positions, previous });
+    setPersistenceNotice({
+      message: "고정된 파일은 유지한 배치 미리보기입니다. 적용하면 함께 저장됩니다.",
+      tone: "info"
+    });
+  }, [activeFlowId, readOnly]);
+
+  const handleCancelLayoutPreview = useCallback(() => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !layoutPreview) {
+      return;
+    }
+
+    internalShapeUpdateRef.current = true;
+    try {
+      currentEditor.updateShapes(
+        Array.from(
+          layoutPreview.previous,
+          ([id, position]) =>
+            ({
+              id: id as TLShapeId,
+              type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+              x: position.x,
+              y: position.y
+            }) satisfies TLShapePartial<PrReviewFileNodeShape>
+        )
+      );
+      updatePrReviewDerivedGeometry(currentEditor, internalShapeUpdateRef);
+    } finally {
+      internalShapeUpdateRef.current = false;
+    }
+    setLayoutPreview(null);
+    setPersistenceNotice(null);
+  }, [layoutPreview]);
+
+  const handleApplyLayoutPreview = useCallback(async () => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !layoutPreview || readOnly) {
+      return;
+    }
+
+    try {
+      for (const shapeId of layoutPreview.next.keys()) {
+        const shape = currentEditor.getShape(shapeId as TLShapeId);
+        const stored = storedShapeByIdRef.current.get(shapeId);
+        if (!isPrReviewFileNodeShape(shape) || !stored || !isPrReviewCanvasFileShape(stored)) {
+          continue;
+        }
+        const snapshot = toPrReviewFileShapeSnapshot(shape);
+        const input = buildPrReviewFileShapeUpdateInput(
+          stored,
+          snapshot,
+          `pr-review-canvas-layout-${Date.now()}-${shapeId}`
+        );
+        const updated = await apiClient.updateReviewCanvasFileShape(
+          workspaceId,
+          shapeId,
+          input
+        );
+        storedShapeByIdRef.current.set(
+          shapeId,
+          applyPrReviewFileShapeUpdate(stored, input, updated.revision)
+        );
+        lastSyncedGeometryRef.current.set(
+          shapeId,
+          getPrReviewFileShapeGeometryKey(snapshot)
+        );
+      }
+      setLayoutPreview(null);
+      setPersistenceNotice({
+        message: "현재 Flow 배치를 저장했습니다.",
+        tone: "info"
+      });
+    } catch {
+      setPersistenceNotice({
+        message: "배치를 저장하지 못했습니다. 미리보기 상태에서 다시 시도해주세요.",
+        tone: "error"
+      });
+    }
+  }, [apiClient, layoutPreview, readOnly, workspaceId]);
+
+  const handleUnpinSelected = useCallback(async () => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !selectedGraphFile || readOnly) {
+      return;
+    }
+
+    const stored = storedShapeByIdRef.current.get(selectedGraphFile.id);
+    if (!stored || !isPrReviewCanvasFileShape(stored)) {
+      return;
+    }
+
+    const snapshot = {
+      ...toPrReviewFileShapeSnapshot(selectedGraphFile),
+      props: {
+        ...toPrReviewFileShapeSnapshot(selectedGraphFile).props,
+        pinned: false
+      }
+    };
+    const input = buildPrReviewFileShapeUpdateInput(
+      stored,
+      snapshot,
+      `pr-review-canvas-unpin-${Date.now()}`
+    );
+
+    try {
+      const updated = await apiClient.updateReviewCanvasFileShape(
+        workspaceId,
+        selectedGraphFile.id,
+        input
+      );
+      storedShapeByIdRef.current.set(
+        selectedGraphFile.id,
+        applyPrReviewFileShapeUpdate(stored, input, updated.revision)
+      );
+      hydratingRef.current = true;
+      try {
+        currentEditor.updateShape({
+          id: selectedGraphFile.id,
+          type: PR_REVIEW_FILE_NODE_SHAPE_TYPE,
+          props: { ...selectedGraphFile.props, pinned: false }
+        });
+      } finally {
+        hydratingRef.current = false;
+      }
+      lastSyncedGeometryRef.current.set(
+        selectedGraphFile.id,
+        getPrReviewFileShapeGeometryKey(snapshot)
+      );
+      setPersistenceNotice({ message: "선택 파일의 고정을 해제했습니다.", tone: "info" });
+    } catch {
+      setPersistenceNotice({
+        message: "파일 고정을 해제하지 못했습니다. 다시 시도해주세요.",
+        tone: "error"
+      });
+    }
+  }, [apiClient, readOnly, selectedGraphFile, workspaceId]);
+
+  const handleToggleCollapsedFlow = useCallback((flowId: string) => {
+    setCollapsedFlowIds((current) => {
+      const next = new Set(current);
+      if (next.has(flowId)) {
+        next.delete(flowId);
+      } else {
+        next.add(flowId);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <div className={`relative ${className ?? ""}`}>
@@ -1587,11 +2725,20 @@ export function PrReviewCanvasSurface({
         onMount={handleMount}
         shapeUtils={prReviewShapeUtils}
       >
+        <PrReviewWorkspaceLocationAdapter
+          activeFollowSurface={activeFollowSurface}
+          onFollowSurfaceChange={onFollowSurfaceChange}
+          onOpenedReviewFileChange={onOpenedReviewFileChange}
+          openedReviewFileId={openedReviewFileId}
+          reviewSessionId={canvas.reviewSessionId}
+        />
         <PrReviewCanvasRealtimeBridge
           presence={canvasPresence}
-          readOnly={readOnly}
+          readOnly={
+            readOnly || !persistedFileShapeEnabled || layoutPreview !== null
+          }
         />
-        <PrReviewFileNodeActivationBridge onFileSelect={onFileSelect} />
+        <PrReviewFileNodeActivationBridge onFileOpen={onFileOpen} />
         <PrReviewCanvasPersistenceBridge
           apiClient={apiClient}
           enabled={persistedFileShapeEnabled && !readOnly}
@@ -1604,6 +2751,31 @@ export function PrReviewCanvasSurface({
           workspaceId={workspaceId}
         />
       </TldrawSurface>
+      <PrReviewGraphControls
+        activeFlowId={activeFlowId}
+        collapsedFlowIds={collapsedFlowIds}
+        flows={canvas.flows}
+        focusedFlowId={focusedFlowId}
+        isReadOnly={readOnly}
+        mode={graphMode}
+        onArrangeFlow={handleArrangeActiveFlow}
+        onApplyLayoutPreview={() => void handleApplyLayoutPreview()}
+        onCancelLayoutPreview={handleCancelLayoutPreview}
+        onClearFocusedFlow={() => setFocusedFlowId(null)}
+        onFocusFlow={setFocusedFlowId}
+        onUnpinSelected={() => void handleUnpinSelected()}
+        onToggleCollapsedFlow={handleToggleCollapsedFlow}
+        onToggleMode={setGraphMode}
+        relationTypes={relationTypes}
+        reviewStatuses={reviewStatuses}
+        riskLevels={riskLevels}
+        setRelationTypes={setRelationTypes}
+        setReviewStatuses={setReviewStatuses}
+        setRiskLevels={setRiskLevels}
+        layoutPreviewActive={layoutPreview !== null}
+        selectedPinned={selectedGraphFile?.props.pinned === true}
+      />
+      <PrReviewRelationInspector editor={editor} />
     </div>
   );
 }

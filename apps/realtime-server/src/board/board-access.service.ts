@@ -2,6 +2,8 @@ import type { RealtimeDatabase } from "../database/database";
 import { parseBoardRoomRef } from "./board-payload.parser";
 import type { BoardRoomRef } from "./board-types";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export type BoardAccessContext = {
   token: string;
   userId: string;
@@ -12,12 +14,28 @@ export type BoardAccessService = {
     context: BoardAccessContext,
     room: BoardRoomRef,
   ) => Promise<boolean>;
+  canJoinWorkspace: (context: BoardAccessContext, workspaceId: string) => Promise<boolean>;
 };
 
 export function createBoardAccessService(
   database?: RealtimeDatabase,
 ): BoardAccessService {
   return {
+    async canJoinWorkspace(context, workspaceId) {
+      if (!context.userId || !UUID_PATTERN.test(workspaceId)) return false;
+      if (!database) return true;
+      return Boolean(await database.queryOne<{ id: string }>(
+        `SELECT member.workspace_id AS id
+         FROM workspace_members AS member
+         JOIN workspaces AS workspace
+           ON workspace.id = member.workspace_id
+          AND workspace.deletion_status = 'active'
+         WHERE member.workspace_id = $1::uuid
+           AND member.user_id = $2::uuid
+         LIMIT 1`,
+        [workspaceId, context.userId]
+      ));
+    },
     async canJoinBoard(context, room) {
       const canonicalRoom = parseBoardRoomRef(room);
 
@@ -36,6 +54,9 @@ export function createBoardAccessService(
           JOIN workspace_members wm
             ON wm.workspace_id = b.workspace_id
            AND wm.user_id = $3
+          JOIN workspaces AS workspace
+            ON workspace.id = b.workspace_id
+           AND workspace.deletion_status = 'active'
           WHERE b.workspace_id = $1
             AND b.id = $2::bigint
           LIMIT 1

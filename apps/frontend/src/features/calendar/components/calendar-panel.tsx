@@ -6,31 +6,42 @@ import {
   ChevronRight,
   Loader2,
   Pencil,
+  Plus,
   RefreshCw,
   Trash2,
   X
 } from "lucide-react";
-import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent
 } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuthSession } from "@/features/auth";
 import { createCalendarApiClient } from "@/features/calendar/api/client";
+import {
+  getCalendarDateBarLayout,
+  getCalendarWeekEventBars,
+  type CalendarEventBarSegment
+} from "@/features/calendar/calendar-event-bars";
+import { isCalendarMonthInRange } from "@/features/calendar/calendar-month-selection";
+import { CalendarWorkspaceLocationAdapter } from "@/features/calendar/calendar-workspace-location-adapter";
+import { CalendarMonthPicker } from "@/features/calendar/components/calendar-month-picker";
 import {
   formatCalendarDate,
   useCalendarMonthEvents
@@ -39,6 +50,8 @@ import type {
   CalendarEvent,
   CreateCalendarEventInput
 } from "@/features/calendar/types";
+import { PageCursorSurface } from "@/shared/page-cursor/PageCursorSurface";
+import { pageCursorTargetAttributes } from "@/shared/page-cursor/page-cursor-target";
 
 type CalendarFormState = {
   title: string;
@@ -68,6 +81,10 @@ type CalendarEventsDialogState = {
 } | null;
 
 const DEFAULT_EVENT_COLOR = "#3B82F6";
+const CALENDAR_EVENT_HEIGHT = 28;
+const CALENDAR_EVENT_GAP = 4;
+const CALENDAR_EVENT_LANE_HEIGHT =
+  CALENDAR_EVENT_HEIGHT + CALENDAR_EVENT_GAP;
 const CALENDAR_DRAFT_ACTION_SEARCH_PARAM = "calendarAction";
 const CALENDAR_SELECTED_DATE_SEARCH_PARAM = "date";
 const CALENDAR_DRAFT_SEARCH_PARAMS = [
@@ -118,10 +135,6 @@ function getCalendarGridDates(monthDate: Date) {
   return Array.from({ length: calendarGridCellCount }, (_, index) =>
     formatCalendarDate(addCalendarDays(gridStartDate, index))
   );
-}
-
-function formatMonthLabel(date: Date) {
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
 }
 
 function formatDateLabel(date: string) {
@@ -232,6 +245,10 @@ function getEventsForCalendarDate(events: CalendarEvent[], date: string) {
     .sort(compareCalendarEvents);
 }
 
+function isMultiDayCalendarEvent(event: CalendarEvent) {
+  return event.startDate < event.endDate;
+}
+
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
@@ -280,7 +297,7 @@ function CalendarEventChip({
     return (
       <span
         className={classNames(
-          "flex min-w-0 items-center rounded-md border px-1.5 py-1 text-xs font-medium shadow-sm",
+          "flex h-7 min-w-0 items-center rounded-md border px-2 text-xs font-medium shadow-sm",
           className
         )}
         style={getAllDayEventChipStyle(event)}
@@ -293,7 +310,7 @@ function CalendarEventChip({
   return (
     <span
       className={classNames(
-        "flex min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-foreground",
+        "flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground",
         className
       )}
     >
@@ -303,6 +320,44 @@ function CalendarEventChip({
       />
       <span className="truncate">{event.title}</span>
     </span>
+  );
+}
+
+function CalendarEventBar({
+  onOpen,
+  segment
+}: {
+  onOpen: (event: CalendarEvent) => void;
+  segment: CalendarEventBarSegment;
+}) {
+  const { event } = segment;
+
+  return (
+    <button
+      {...pageCursorTargetAttributes({
+        id: event.id,
+        label: event.title,
+        type: "calendar_event"
+      })}
+      type="button"
+      className={classNames(
+        "pointer-events-auto flex h-7 min-w-0 items-center border-y px-2 text-left text-xs font-medium shadow-sm transition hover:brightness-95 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        segment.continuesFromPreviousWeek
+          ? "rounded-l-none border-l-0"
+          : "ml-2 rounded-l-md border-l",
+        segment.continuesToNextWeek
+          ? "rounded-r-none border-r-0"
+          : "mr-2 rounded-r-md border-r"
+      )}
+      style={{
+        ...getAllDayEventChipStyle(event),
+        gridColumn: `${segment.startColumn} / ${segment.endColumn + 1}`,
+        gridRow: segment.lane + 1
+      }}
+      onClick={() => onOpen(event)}
+    >
+      <span className="truncate">{event.title}</span>
+    </button>
   );
 }
 
@@ -450,7 +505,7 @@ function CalendarEventFormFields({
   ) => void;
 }) {
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
+    <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
       <label className="grid gap-1.5 text-sm font-medium">
         제목
         <Input
@@ -465,8 +520,8 @@ function CalendarEventFormFields({
 
       <label className="grid gap-1.5 text-sm font-medium">
         설명
-        <textarea
-          className="min-h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        <Textarea
+          className="min-h-28 resize-none"
           value={formState.description}
           placeholder="메모를 남길 수 있습니다"
           onChange={(event) =>
@@ -477,13 +532,10 @@ function CalendarEventFormFields({
 
       <label className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-sm font-medium">
         <span>종일 일정</span>
-        <input
-          type="checkbox"
+        <Switch
           checked={formState.isAllDay}
-          className="size-4"
-          onChange={(event) =>
-            onFormChange("isAllDay", event.currentTarget.checked)
-          }
+          aria-label="종일 일정"
+          onCheckedChange={(checked) => onFormChange("isAllDay", checked)}
         />
       </label>
 
@@ -566,7 +618,7 @@ function CalendarEventFormFields({
   );
 }
 
-function CalendarEventSheet({
+function CalendarEventDialog({
   formError,
   formState,
   isSubmitting,
@@ -595,18 +647,44 @@ function CalendarEventSheet({
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  if (!mode) {
+    return null;
+  }
+
   return (
-    <Sheet open={Boolean(mode)} onOpenChange={(open) => !open && onClose()}>
-      {mode ? (
-        <SheetContent className="w-full sm:max-w-lg">
+    <Dialog
+      open
+      onOpenChange={(nextOpen) => !nextOpen && onClose()}
+    >
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[min(760px,calc(100dvh-2rem))] max-w-2xl gap-0 overflow-hidden rounded-xl bg-popover p-0 text-popover-foreground"
+      >
           {mode.type === "delete" ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <SheetHeader>
-                <SheetTitle>일정 삭제</SheetTitle>
-                <SheetDescription>
+              <DialogHeader className="border-b px-6 py-5 pr-14">
+                <DialogTitle className="text-xl font-semibold">
+                  일정 삭제
+                </DialogTitle>
+                <DialogDescription className="mt-1">
                   삭제한 일정은 되돌릴 수 없습니다.
-                </SheetDescription>
-              </SheetHeader>
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogClose
+                disabled={isSubmitting}
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-3 right-3"
+                    aria-label="일정 삭제 닫기"
+                  />
+                }
+              >
+                <X className="size-4" />
+              </DialogClose>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-2">
                 <div className="rounded-lg border bg-muted/20 p-3">
@@ -629,7 +707,7 @@ function CalendarEventSheet({
                 ) : null}
               </div>
 
-              <SheetFooter className="border-t">
+              <div className="border-t p-4">
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -651,16 +729,33 @@ function CalendarEventSheet({
                     삭제
                   </Button>
                 </div>
-              </SheetFooter>
+              </div>
             </div>
           ) : (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
-              <SheetHeader>
-                <SheetTitle>일정 수정</SheetTitle>
-                <SheetDescription>
+              <DialogHeader className="border-b px-6 py-5 pr-14">
+                <DialogTitle className="text-xl font-semibold">
+                  일정 수정
+                </DialogTitle>
+                <DialogDescription className="mt-1">
                   {formatDateLabel(formState.startDate)}
-                </SheetDescription>
-              </SheetHeader>
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogClose
+                disabled={isSubmitting}
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-3 right-3"
+                    aria-label="일정 수정 닫기"
+                  />
+                }
+              >
+                <X className="size-4" />
+              </DialogClose>
 
               <CalendarEventFormFields
                 formError={formError}
@@ -668,7 +763,7 @@ function CalendarEventSheet({
                 onFormChange={onFormChange}
               />
 
-              <SheetFooter className="border-t">
+              <div className="border-t p-4 space-y-3">
                 <Button
                   type="button"
                   variant="destructive"
@@ -697,12 +792,11 @@ function CalendarEventSheet({
                     저장
                   </Button>
                 </div>
-              </SheetFooter>
+              </div>
             </form>
           )}
-        </SheetContent>
-      ) : null}
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -727,24 +821,25 @@ function CalendarEventCreateDialog({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <DialogPrimitive.Root
+    <Dialog
       open={isOpen}
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
     >
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(620px,calc(100vh-2rem))] flex-col overflow-hidden rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[min(760px,calc(100dvh-2rem))] max-w-2xl gap-0 overflow-hidden rounded-xl bg-popover p-0 text-popover-foreground"
+      >
           <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmit}>
-            <div className="border-b p-4 pr-14">
-              <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+            <DialogHeader className="border-b px-6 py-5 pr-14">
+              <DialogTitle className="text-xl font-semibold">
                 새 일정
-              </DialogPrimitive.Title>
-              <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+              </DialogTitle>
+              <DialogDescription className="mt-1">
                 {formatDateLabel(formState.startDate)}
-              </DialogPrimitive.Description>
-            </div>
+              </DialogDescription>
+            </DialogHeader>
 
-            <DialogPrimitive.Close
+            <DialogClose
               disabled={isSubmitting}
               render={
                 <Button
@@ -757,7 +852,7 @@ function CalendarEventCreateDialog({
               }
             >
               <X className="size-4" />
-            </DialogPrimitive.Close>
+            </DialogClose>
 
             <CalendarEventFormFields
               formError={formError}
@@ -767,7 +862,7 @@ function CalendarEventCreateDialog({
 
             <div className="border-t p-4">
               <div className="flex gap-2">
-                <DialogPrimitive.Close
+                <DialogClose
                   disabled={isSubmitting}
                   render={
                     <Button
@@ -778,7 +873,7 @@ function CalendarEventCreateDialog({
                   }
                 >
                   취소
-                </DialogPrimitive.Close>
+                </DialogClose>
                 <Button
                   type="submit"
                   className="flex-1"
@@ -790,9 +885,8 @@ function CalendarEventCreateDialog({
               </div>
             </div>
           </form>
-        </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -801,44 +895,49 @@ function CalendarEventDetailDialog({
   isSubmitting,
   onClose,
   onOpenEdit,
-  onRequestDelete
+  onRetryGoogleSync,
+  onRequestDelete,
+  selectedDate
 }: {
   event: CalendarEvent | null;
   isSubmitting: boolean;
   onClose: () => void;
   onOpenEdit: (event: CalendarEvent) => void;
+  onRetryGoogleSync: (event: CalendarEvent) => void;
   onRequestDelete: (
     event: CalendarEvent,
     returnTo: Extract<CalendarSheetMode, { type: "delete" }>["returnTo"]
   ) => void;
+  selectedDate: string;
 }) {
   if (!event) {
     return null;
   }
 
   return (
-    <DialogPrimitive.Root
+    <Dialog
       open={Boolean(event)}
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
     >
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(620px,calc(100vh-2rem))] flex-col rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
-        <div className="flex items-start justify-between gap-3 border-b p-4">
-          <div className="min-w-0">
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[min(760px,calc(100dvh-2rem))] max-w-2xl gap-0 overflow-hidden rounded-xl bg-popover p-0 text-popover-foreground"
+      >
+        <div className="flex items-start justify-between gap-3 border-b px-6 py-5">
+          <DialogHeader className="min-w-0">
             <p className="text-sm font-medium text-muted-foreground">
               일정 상세
             </p>
-            <DialogPrimitive.Title
+            <DialogTitle
               className="mt-1 break-words font-heading text-xl font-semibold"
             >
               {event.title}
-            </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+            </DialogTitle>
+            <DialogDescription className="mt-1">
               {getEventDateLabel(event)}
-            </DialogPrimitive.Description>
-          </div>
-          <DialogPrimitive.Close
+            </DialogDescription>
+          </DialogHeader>
+          <DialogClose
             disabled={isSubmitting}
             render={
               <Button
@@ -850,7 +949,7 @@ function CalendarEventDetailDialog({
             }
           >
             <X />
-          </DialogPrimitive.Close>
+          </DialogClose>
         </div>
 
         <div
@@ -858,7 +957,12 @@ function CalendarEventDetailDialog({
           style={{ backgroundColor: event.color }}
         />
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div
+          className="flex-1 overflow-y-auto p-4"
+          data-workspace-follow-event-id={event.id}
+          data-workspace-follow-selected-date={selectedDate}
+          data-workspace-follow-surface="calendar-event-detail"
+        >
           <div className="flex items-start gap-3">
             <span
               className="mt-1 size-3 shrink-0 rounded-full"
@@ -871,6 +975,20 @@ function CalendarEventDetailDialog({
               </p>
             </div>
           </div>
+
+          {event.googleSync ? (
+            <div className="mt-4 rounded-lg border bg-muted/20 p-3 text-sm">
+              <p className="font-medium">
+                Google Calendar: {event.googleSync.status === "synced" ? "동기화됨" : event.googleSync.status === "pending" ? "동기화 대기 중" : "동기화 실패"}
+              </p>
+              {event.googleSync.status === "failed" ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">{event.googleSync.lastError || "Google Calendar 동기화에 실패했습니다."}</span>
+                  <Button type="button" size="sm" variant="outline" disabled={isSubmitting} onClick={() => onRetryGoogleSync(event)}>다시 시도</Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             <div className="grid gap-1">
@@ -917,7 +1035,7 @@ function CalendarEventDetailDialog({
             삭제
           </Button>
           <div className="flex gap-2">
-            <DialogPrimitive.Close
+            <DialogClose
               disabled={isSubmitting}
               render={
                 <Button
@@ -928,7 +1046,7 @@ function CalendarEventDetailDialog({
               }
             >
               닫기
-            </DialogPrimitive.Close>
+            </DialogClose>
             <Button
               type="button"
               className="flex-1 sm:flex-none"
@@ -940,9 +1058,8 @@ function CalendarEventDetailDialog({
             </Button>
           </div>
         </div>
-        </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -960,23 +1077,24 @@ function CalendarEventsDialog({
   }
 
   return (
-    <DialogPrimitive.Root
+    <Dialog
       open={Boolean(dialog)}
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
     >
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/35 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="fixed inset-x-3 bottom-3 z-50 flex max-h-[min(560px,calc(100vh-2rem))] flex-col rounded-lg border bg-background shadow-xl outline-none transition duration-150 data-ending-style:translate-y-2 data-ending-style:opacity-0 data-starting-style:translate-y-2 data-starting-style:opacity-0 sm:top-1/2 sm:left-1/2 sm:bottom-auto sm:w-[calc(100vw-2rem)] sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:data-ending-style:translate-y-0 sm:data-ending-style:scale-95 sm:data-starting-style:translate-y-0 sm:data-starting-style:scale-95">
-        <div className="flex items-start justify-between gap-3 border-b p-4">
-          <div className="min-w-0">
-            <DialogPrimitive.Title className="font-heading text-lg font-semibold">
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[min(640px,calc(100dvh-2rem))] max-w-xl gap-0 overflow-hidden rounded-xl bg-popover p-0 text-popover-foreground"
+      >
+        <div className="flex items-start justify-between gap-3 border-b px-6 py-5">
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="text-xl font-semibold">
               일정 목록
-            </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
+            </DialogTitle>
+            <DialogDescription className="mt-1">
               {formatDateLabel(dialog.date)} · {dialog.events.length}개 일정
-            </DialogPrimitive.Description>
-          </div>
-          <DialogPrimitive.Close
+            </DialogDescription>
+          </DialogHeader>
+          <DialogClose
             render={
               <Button
                 type="button"
@@ -987,10 +1105,14 @@ function CalendarEventsDialog({
             }
           >
             <X />
-          </DialogPrimitive.Close>
+          </DialogClose>
         </div>
 
-        <ul className="grid gap-2 overflow-y-auto p-4">
+        <ul
+          className="grid gap-2 overflow-y-auto p-4"
+          data-workspace-follow-selected-date={dialog.date}
+          data-workspace-follow-surface="calendar-events-dialog"
+        >
           {dialog.events.map((event) => (
             <li key={event.id}>
               <button
@@ -1011,14 +1133,14 @@ function CalendarEventsDialog({
             </li>
           ))}
         </ul>
-        </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export function CalendarPanel() {
   const authSession = useAuthSession();
+  const calendarGridRef = useRef<HTMLDivElement | null>(null);
   const [monthDate, setMonthDate] = useState(() =>
     startOfCalendarMonth(new Date())
   );
@@ -1034,9 +1156,9 @@ export function CalendarPanel() {
     createDefaultFormState(formatCalendarDate(new Date()))
   );
   const [formError, setFormError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const workspaceId = authSession?.activeWorkspaceId ?? "";
-  const monthLabel = formatMonthLabel(monthDate);
   const today = useMemo(() => formatCalendarDate(new Date()), []);
   const normalizedAccessToken = authSession?.accessToken.trim() ?? "";
   const calendarEvents = useCalendarMonthEvents({
@@ -1059,9 +1181,24 @@ export function CalendarPanel() {
       ),
     [calendarEvents.events, gridDates]
   );
+  const calendarEventsRef = useRef(calendarEvents.events);
+  const eventsByDateRef = useRef(eventsByDate);
+  calendarEventsRef.current = calendarEvents.events;
+  eventsByDateRef.current = eventsByDate;
+  const calendarWeeks = useMemo(
+    () => getCalendarWeekEventBars(calendarEvents.events, gridDates),
+    [calendarEvents.events, gridDates]
+  );
   const needsSignIn = !normalizedAccessToken;
   const isLoading = calendarEvents.status === "loading";
   const canUseCalendar = Boolean(workspaceId.trim() && normalizedAccessToken);
+  const handleWorkspaceLocationDate = useCallback((date: string | null) => {
+    if (!date) {
+      return;
+    }
+    setMonthDate(startOfCalendarMonth(parseCalendarDateInput(date)));
+    setSelectedDate(date);
+  }, []);
 
   useEffect(() => {
     const draftFormState = readCalendarDraftFormState(
@@ -1110,15 +1247,13 @@ export function CalendarPanel() {
   }, []);
 
   const goToMonth = useCallback((nextMonthDate: Date) => {
+    if (!isCalendarMonthInRange(nextMonthDate)) {
+      return;
+    }
+
     const nextMonthStart = startOfCalendarMonth(nextMonthDate);
     setMonthDate(nextMonthStart);
     setSelectedDate(formatCalendarDate(nextMonthStart));
-  }, []);
-
-  const goToToday = useCallback(() => {
-    const now = new Date();
-    setMonthDate(startOfCalendarMonth(now));
-    setSelectedDate(formatCalendarDate(now));
   }, []);
 
   const openCreateDialog = useCallback((date: string) => {
@@ -1198,6 +1333,33 @@ export function CalendarPanel() {
     setEventsDialog({ date, events });
   }, []);
 
+  const openWorkspaceEventById = useCallback(
+    (eventId: string) => {
+      const event = calendarEventsRef.current.find(
+        (candidate) => String(candidate.id) === eventId
+      );
+      if (!event) return false;
+      openDetailDialog(event);
+      return true;
+    },
+    [openDetailDialog]
+  );
+
+  const openWorkspaceEventsByDate = useCallback(
+    (date: string) => {
+      const events = eventsByDateRef.current.get(date) ?? [];
+      if (!events.length) return false;
+      openEventsDialog(date, events);
+      return true;
+    },
+    [openEventsDialog]
+  );
+
+  const closeWorkspaceReadOnlySurfaces = useCallback(() => {
+    setDetailEvent(null);
+    setEventsDialog(null);
+  }, []);
+
   const updateFormField = useCallback(
     <Field extends keyof CalendarFormState>(
       field: Field,
@@ -1247,6 +1409,7 @@ export function CalendarPanel() {
       await calendarEvents.reload();
     } catch (submitError) {
       setFormError(errorMessageFromUnknown(submitError));
+      setSyncNotice(errorMessageFromUnknown(submitError));
     } finally {
       setIsSubmitting(false);
     }
@@ -1312,49 +1475,54 @@ export function CalendarPanel() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-6.5rem)] flex-col gap-4">
-      <section id="month" className="flex min-h-0 flex-1 flex-col gap-4">
+    <PageCursorSurface
+      className="relative flex min-h-[calc(100vh-6.5rem)] flex-col bg-background p-3 sm:p-5"
+      enabled={canUseCalendar}
+      page="calendar"
+      workspaceId={workspaceId}
+    >
+      <CalendarWorkspaceLocationAdapter
+        gridRef={calendarGridRef}
+        onCloseReadOnlySurfaces={closeWorkspaceReadOnlySurfaces}
+        onOpenEventById={openWorkspaceEventById}
+        onOpenEventsByDate={openWorkspaceEventsByDate}
+        onSelectDate={handleWorkspaceLocationDate}
+      />
+      <section
+        id="month"
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
         <div className="grid gap-3 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label="이전 달"
-                onClick={() => goToMonth(shiftMonth(monthDate, -1))}
-              >
-                <ChevronLeft />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label="오늘이 포함된 달로 이동"
-                onClick={goToToday}
-              >
-                오늘
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label="다음 달"
-                onClick={() => goToMonth(shiftMonth(monthDate, 1))}
-              >
-                <ChevronRight />
-              </Button>
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {calendarEvents.events.length}개 일정
-            </span>
-          </div>
+          <div className="hidden lg:block" aria-hidden="true" />
 
           <h1
-            className="justify-self-start rounded-md px-2 py-1 text-left font-heading text-2xl font-semibold leading-tight outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring lg:justify-self-center"
-            onDoubleClick={goToToday}
+            className="flex items-center gap-1 lg:justify-self-center"
+            data-calendar-month-navigation="true"
           >
-            {monthLabel}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label="이전 달"
+              disabled={!isCalendarMonthInRange(shiftMonth(monthDate, -1))}
+              onClick={() => goToMonth(shiftMonth(monthDate, -1))}
+            >
+              <ChevronLeft />
+            </Button>
+            <CalendarMonthPicker
+              monthDate={monthDate}
+              onMonthChange={goToMonth}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label="다음 달"
+              disabled={!isCalendarMonthInRange(shiftMonth(monthDate, 1))}
+              onClick={() => goToMonth(shiftMonth(monthDate, 1))}
+            >
+              <ChevronRight />
+            </Button>
           </h1>
 
           <div className="flex flex-wrap items-center gap-2 lg:justify-end">
@@ -1373,6 +1541,11 @@ export function CalendarPanel() {
               새로고침
             </Button>
             <Button
+              {...pageCursorTargetAttributes({
+                id: "new-event",
+                label: "일정 추가",
+                type: "calendar_action"
+              })}
               id="new"
               type="button"
               size="sm"
@@ -1395,83 +1568,154 @@ export function CalendarPanel() {
             일정을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.
           </p>
         ) : null}
+        {syncNotice ? (
+          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {syncNotice}
+          </p>
+        ) : null}
 
-        <div className="min-h-0 flex-1 overflow-x-auto">
-          <div className="grid min-w-[760px] grid-cols-7 gap-1.5">
+        <div
+          ref={calendarGridRef}
+          className="min-h-0 flex-1 overflow-x-auto"
+          data-workspace-follow-selected-date={selectedDate}
+          data-workspace-follow-surface="calendar-grid"
+        >
+          <div className="grid min-w-[760px] grid-cols-7">
             {calendarWeekdayLabels.map((weekday) => (
               <div
                 key={weekday}
-                className="px-2 py-1 text-center text-xs font-semibold text-muted-foreground"
+                className="mx-0.75 px-2 py-1 text-center text-xs font-semibold text-muted-foreground"
               >
                 {weekday}
               </div>
             ))}
 
-            {gridDates.map((date) => {
-              const dateEvents = eventsByDate.get(date) ?? [];
-              const visibleEvents = dateEvents.slice(0, 3);
-              const hiddenEventCount = dateEvents.length - visibleEvents.length;
-              const isSelected = date === selectedDate;
-              const isToday = date === today;
-              const isCurrentMonth = isDateInMonth(date, monthDate);
+            {calendarWeeks.map((week) => (
+              <div
+                key={week.dates[0]}
+                className="relative col-span-7 grid grid-cols-7 pb-1.5"
+              >
+                {week.dates.map((date, dateIndex) => {
+                  const dateEvents = eventsByDate.get(date) ?? [];
+                  const dateBarLayout = getCalendarDateBarLayout(
+                    week.segments,
+                    dateIndex + 1
+                  );
+                  const singleDayEvents = dateEvents.filter(
+                    (event) => !isMultiDayCalendarEvent(event)
+                  );
+                  const visibleEvents = singleDayEvents.slice(0, 3);
+                  const hiddenEventCount =
+                    singleDayEvents.length - visibleEvents.length;
+                  const isSelected = date === selectedDate;
+                  const isToday = date === today;
+                  const isCurrentMonth = isDateInMonth(date, monthDate);
 
-              return (
-                <div
-                  key={date}
-                  className={classNames(
-                    "relative min-h-28 rounded-lg border bg-background p-2 text-left align-top transition sm:min-h-32",
-                    !isCurrentMonth && "bg-muted/20 text-muted-foreground",
-                    isSelected && "border-primary ring-2 ring-primary/80",
-                    isToday && !isSelected && "border-primary/40 bg-primary/5"
-                  )}
-                >
-                  <button
-                    type="button"
-                    className="absolute inset-0 z-0 rounded-lg hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={`${formatDateLabel(date)} 선택`}
-                    onClick={() => setSelectedDate(date)}
-                  />
-                  <div className="relative z-20 flex items-center justify-between">
-                    <span
+                  return (
+                    <div
+                      {...pageCursorTargetAttributes({
+                        id: date,
+                        label: formatDateLabel(date),
+                        type: "calendar_date"
+                      })}
+                      key={date}
                       className={classNames(
-                        "pointer-events-none inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold",
-                        isToday && "bg-primary text-primary-foreground"
+                        "relative mx-0.75 rounded-xl border bg-card p-2 text-left align-top transition",
+                        !isCurrentMonth && "bg-muted/20 text-muted-foreground",
+                        isToday && !isSelected && "border-primary/40 bg-primary/5"
                       )}
+                      style={{
+                        minHeight: `${128 + dateBarLayout.laneCount * CALENDAR_EVENT_LANE_HEIGHT}px`
+                      }}
                     >
-                      {formatCellDay(date)}
-                    </span>
-                  </div>
-                  <div className="relative z-20 mt-2 flex flex-col gap-1">
-                    {visibleEvents.map((event) => (
                       <button
-                        key={`${date}-${event.id}`}
                         type="button"
-                        className={classNames(
-                          "block min-w-0 rounded-md text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          event.isAllDay ? "hover:brightness-95" : "hover:bg-muted/40",
-                          !isCurrentMonth && "opacity-65"
-                        )}
-                        onClick={() => {
-                          setSelectedDate(date);
-                          openDetailDialog(event);
+                        className="absolute inset-0 z-0 hover:bg-muted/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`${formatDateLabel(date)} 선택`}
+                        onClick={() => setSelectedDate(date)}
+                        onDoubleClick={() => openCreateDialog(date)}
+                      />
+                      <div className="relative z-20 flex items-center justify-between">
+                        <span
+                          className={classNames(
+                            "pointer-events-none inline-flex size-6 items-center justify-center rounded-full text-xs font-semibold",
+                            isToday && "bg-primary text-primary-foreground"
+                          )}
+                        >
+                          {formatCellDay(date)}
+                        </span>
+                        {isSelected ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="size-6 rounded-full"
+                            aria-label={`${formatDateLabel(date)} 일정 추가`}
+                            onClick={() => openCreateDialog(date)}
+                          >
+                            <Plus />
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div
+                        className="relative z-20 flex flex-col gap-1"
+                        style={{
+                          marginTop: `${12 + dateBarLayout.laneCount * CALENDAR_EVENT_LANE_HEIGHT}px`
                         }}
                       >
-                        <CalendarEventChip event={event} />
-                      </button>
-                    ))}
-                    {hiddenEventCount > 0 ? (
-                      <button
-                        type="button"
-                        className="rounded-md px-1.5 py-0.5 text-left text-xs font-semibold text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => openEventsDialog(date, dateEvents)}
-                      >
-                        +{hiddenEventCount}
-                      </button>
-                    ) : null}
-                  </div>
+                        {visibleEvents.map((event) => (
+                          <button
+                            {...pageCursorTargetAttributes({
+                              id: event.id,
+                              label: event.title,
+                              type: "calendar_event"
+                            })}
+                            key={`${date}-${event.id}`}
+                            type="button"
+                            className={classNames(
+                              "block min-w-0 rounded-md text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                              event.isAllDay ? "hover:brightness-95" : "hover:bg-muted/40",
+                              !isCurrentMonth && "opacity-65"
+                            )}
+                            onClick={() => {
+                              setSelectedDate(date);
+                              openDetailDialog(event);
+                            }}
+                          >
+                            <CalendarEventChip event={event} />
+                          </button>
+                        ))}
+                        {hiddenEventCount > 0 ? (
+                          <button
+                            type="button"
+                            className="rounded-md px-1.5 py-0.5 text-left text-xs font-semibold text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => openEventsDialog(date, dateEvents)}
+                          >
+                            +{hiddenEventCount}
+                          </button>
+                        ) : null}
+                      </div>
+                      {isSelected ? (
+                        <div
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-0.5 z-40 rounded-[10px] ring-2 ring-inset ring-ring"
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
+
+                <div className="pointer-events-none absolute inset-x-0.75 top-11 z-30 grid grid-cols-7 auto-rows-7 gap-y-1 gap-x-1.5">
+                  {week.segments.map((segment) => (
+                    <CalendarEventBar
+                      key={`${segment.weekIndex}-${segment.event.id}`}
+                      segment={segment}
+                      onOpen={openDetailDialog}
+                    />
+                  ))}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -1497,10 +1741,25 @@ export function CalendarPanel() {
         isSubmitting={isSubmitting}
         onClose={() => setDetailEvent(null)}
         onOpenEdit={openEditSheet}
+        onRetryGoogleSync={(event) => {
+          setIsSubmitting(true);
+          setSyncNotice(null);
+          void calendarClient.retryGoogleSync(workspaceId, event.id)
+            .then(async () => {
+              setDetailEvent((currentEvent) => currentEvent && currentEvent.id === event.id
+                ? { ...currentEvent, googleSync: { status: "pending", lastError: null } }
+                : currentEvent
+              );
+              await calendarEvents.reload();
+            })
+            .catch((error) => setSyncNotice(errorMessageFromUnknown(error)))
+            .finally(() => setIsSubmitting(false));
+        }}
         onRequestDelete={requestDeleteSheet}
+        selectedDate={selectedDate}
       />
 
-      <CalendarEventSheet
+      <CalendarEventDialog
         formError={formError}
         formState={formState}
         isSubmitting={isSubmitting}
@@ -1512,6 +1771,6 @@ export function CalendarPanel() {
         onRequestDelete={requestDeleteSheet}
         onSubmit={handleEditEventSubmit}
       />
-    </div>
+    </PageCursorSurface>
   );
 }

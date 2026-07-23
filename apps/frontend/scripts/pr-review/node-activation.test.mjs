@@ -1,31 +1,73 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 const {
-  createPrReviewFileNodeActivationGesture,
-  shouldActivatePrReviewFileNode,
-  updatePrReviewFileNodeActivationGesture
+  activatePrReviewFileNode,
+  registerPrReviewFileNodeActivationHandler
 } = await import(
   "../../src/features/pr-review/components/review-canvas/pr-review-node-activation.ts"
 );
 
-const clickGesture = createPrReviewFileNodeActivationGesture({
-  pointer: { x: 100, y: 120 },
-  reviewFileId: "review-file-1",
-  shapeId: "shape:file-1"
-});
+const editor = {};
+const activatedReviewFileIds = [];
+const unregister = registerPrReviewFileNodeActivationHandler(
+  editor,
+  { onOpen: (reviewFileId) => activatedReviewFileIds.push(reviewFileId) }
+);
 
-assert.equal(shouldActivatePrReviewFileNode(clickGesture), true);
+activatePrReviewFileNode(editor, "review-file-1");
+assert.deepEqual(activatedReviewFileIds, ["review-file-1"]);
 
-const jitterGesture = updatePrReviewFileNodeActivationGesture(clickGesture, {
-  x: 103,
-  y: 124
-});
-assert.equal(shouldActivatePrReviewFileNode(jitterGesture), true);
+unregister();
+activatePrReviewFileNode(editor, "review-file-2");
+assert.deepEqual(activatedReviewFileIds, ["review-file-1"]);
 
-const draggedGesture = updatePrReviewFileNodeActivationGesture(clickGesture, {
-  x: 108,
-  y: 120
-});
-assert.equal(shouldActivatePrReviewFileNode(draggedGesture), false);
+const replacementEditor = {};
+const replacementActivations = [];
+const unregisterFirst = registerPrReviewFileNodeActivationHandler(
+  replacementEditor,
+  { onOpen: () => replacementActivations.push("first") }
+);
+const unregisterSecond = registerPrReviewFileNodeActivationHandler(
+  replacementEditor,
+  { onOpen: () => replacementActivations.push("second") }
+);
+
+unregisterFirst();
+activatePrReviewFileNode(replacementEditor, "review-file-3");
+assert.deepEqual(replacementActivations, ["second"]);
+
+unregisterSecond();
+
+const [fileNodeShapeUtil, canvasSurface] = await Promise.all([
+  readFile(
+    new URL(
+      "../../src/features/pr-review/components/review-canvas/PrReviewFileNodeShapeUtil.tsx",
+      import.meta.url
+    ),
+    "utf8"
+  ),
+  readFile(
+    new URL(
+      "../../src/features/pr-review/components/review-canvas/PrReviewCanvasSurface.tsx",
+      import.meta.url
+    ),
+    "utf8"
+  )
+]);
+
+assert.doesNotMatch(
+  fileNodeShapeUtil,
+  /override onClick\(shape: PrReviewFileNodeShape\)/
+);
+assert.match(
+  fileNodeShapeUtil,
+  /override onDoubleClick\(shape: PrReviewFileNodeShape\)/
+);
+assert.match(fileNodeShapeUtil, /aria-label="파일 보기"/);
+assert.match(
+  canvasSurface,
+  /window\.addEventListener\("keydown", handleKeyDown\)/
+);
 
 console.log("PR Review file node activation tests passed");

@@ -1,12 +1,21 @@
-import { Injectable } from "@nestjs/common";
+import { HttpStatus, Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import {
+  ApiError,
   badRequest,
-  conflict,
   forbidden,
   unauthorized
 } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
+import { GoogleCalendarSyncService } from "../calendar/google-calendar-sync.service";
+import {
+  AccountDeletionWorkspaceBlocker,
+  WorkspaceService
+} from "../workspace/workspace.service";
+import { WorkspaceMembershipRevocationOutboxService } from "../workspace-membership-revocation/workspace-membership-revocation-outbox.service";
 
 export type AvatarMode = "provider" | "custom" | "initials";
 
@@ -27,6 +36,10 @@ interface UserRow extends QueryResultRow {
   updated_at: Date | string;
 }
 
+interface DeletedWorkspaceMembershipRow extends QueryResultRow {
+  workspace_id: string;
+}
+
 interface ProfileSettingsRow extends QueryResultRow {
   display_name: string | null;
   job_title: string | null;
@@ -43,10 +56,6 @@ interface UserPresenceRow extends QueryResultRow {
 
 interface WorkspaceMembershipRow extends QueryResultRow {
   id: string;
-}
-
-interface CountRow extends QueryResultRow {
-  count: string;
 }
 
 export interface UserProfile {
@@ -83,6 +92,10 @@ export interface DeleteCurrentUserPayload {
   deleted: true;
 }
 
+export interface DeleteCurrentUserConflictDetails {
+  blockedWorkspaces: AccountDeletionWorkspaceBlocker[];
+}
+
 export interface UpdateCurrentUserPresenceRequest {
   activeWorkspaceId?: unknown;
 }
@@ -106,10 +119,22 @@ const PROFILE_FIELDS = new Set([
 
 @Injectable()
 export class UserService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly membershipRevocationOutbox: WorkspaceMembershipRevocationOutboxService,
+    private readonly googleCalendarSync: GoogleCalendarSyncService,
+    private readonly workspaceService: WorkspaceService
+  ) {}
 
   async getCurrentUser(currentUserId: string): Promise<UserProfile> {
-    const user = await this.database.queryOne<UserRow>(
+    return this.getCurrentUserFrom(this.database, currentUserId);
+  }
+
+  private async getCurrentUserFrom(
+    database: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<UserProfile> {
+    const user = await database.queryOne<UserRow>(
       `
         SELECT
           u.id,
@@ -145,71 +170,74 @@ export class UserService {
     request: UpdateCurrentUserProfileRequest | undefined
   ): Promise<UserProfile> {
     const input = this.readProfileRequest(request);
-    const current = await this.getProfileSettings(currentUserId);
-    const next = {
-      displayName:
-        "displayName" in input
-          ? this.readNullableText(input.displayName, "displayName", 100)
-          : current.display_name,
-      jobTitle:
-        "jobTitle" in input
-          ? this.readNullableText(input.jobTitle, "jobTitle", 100)
-          : current.job_title,
-      bio:
-        "bio" in input
-          ? this.readNullableText(input.bio, "bio", 500)
-          : current.bio,
-      avatarMode:
-        "avatarMode" in input
-          ? this.readAvatarMode(input.avatarMode)
-          : current.avatar_mode,
-      customAvatarUrl:
-        "customAvatarUrl" in input
-          ? this.readCustomAvatarUrl(input.customAvatarUrl)
-          : current.custom_avatar_url,
-      avatarColor:
-        "avatarColor" in input
-          ? this.readAvatarColor(input.avatarColor)
-          : current.avatar_color
-    };
+    return this.database.transaction(async transaction => {
+      await this.lockActiveUser(transaction, currentUserId);
+      const current = await this.getProfileSettings(transaction, currentUserId);
+      const next = {
+        displayName:
+          "displayName" in input
+            ? this.readNullableText(input.displayName, "displayName", 100)
+            : current.display_name,
+        jobTitle:
+          "jobTitle" in input
+            ? this.readNullableText(input.jobTitle, "jobTitle", 100)
+            : current.job_title,
+        bio:
+          "bio" in input
+            ? this.readNullableText(input.bio, "bio", 500)
+            : current.bio,
+        avatarMode:
+          "avatarMode" in input
+            ? this.readAvatarMode(input.avatarMode)
+            : current.avatar_mode,
+        customAvatarUrl:
+          "customAvatarUrl" in input
+            ? this.readCustomAvatarUrl(input.customAvatarUrl)
+            : current.custom_avatar_url,
+        avatarColor:
+          "avatarColor" in input
+            ? this.readAvatarColor(input.avatarColor)
+            : current.avatar_color
+      };
 
-    if (next.avatarMode === "custom" && !next.customAvatarUrl) {
-      throw badRequest("customAvatarUrl is required for custom avatar mode");
-    }
+      if (next.avatarMode === "custom" && !next.customAvatarUrl) {
+        throw badRequest("customAvatarUrl is required for custom avatar mode");
+      }
 
-    await this.database.execute(
-      `
-        INSERT INTO user_settings (
-          user_id,
-          display_name,
-          job_title,
-          bio,
-          avatar_mode,
-          custom_avatar_url,
-          avatar_color
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (user_id) DO UPDATE
-        SET
-          display_name = EXCLUDED.display_name,
-          job_title = EXCLUDED.job_title,
-          bio = EXCLUDED.bio,
-          avatar_mode = EXCLUDED.avatar_mode,
-          custom_avatar_url = EXCLUDED.custom_avatar_url,
-          avatar_color = EXCLUDED.avatar_color
-      `,
-      [
-        currentUserId,
-        next.displayName,
-        next.jobTitle,
-        next.bio,
-        next.avatarMode,
-        next.customAvatarUrl,
-        next.avatarColor
-      ]
-    );
+      await transaction.execute(
+        `
+          INSERT INTO user_settings (
+            user_id,
+            display_name,
+            job_title,
+            bio,
+            avatar_mode,
+            custom_avatar_url,
+            avatar_color
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (user_id) DO UPDATE
+          SET
+            display_name = EXCLUDED.display_name,
+            job_title = EXCLUDED.job_title,
+            bio = EXCLUDED.bio,
+            avatar_mode = EXCLUDED.avatar_mode,
+            custom_avatar_url = EXCLUDED.custom_avatar_url,
+            avatar_color = EXCLUDED.avatar_color
+        `,
+        [
+          currentUserId,
+          next.displayName,
+          next.jobTitle,
+          next.bio,
+          next.avatarMode,
+          next.customAvatarUrl,
+          next.avatarColor
+        ]
+      );
 
-    return this.getCurrentUser(currentUserId);
+      return this.getCurrentUserFrom(transaction, currentUserId);
+    });
   }
 
   async deleteCurrentUser(
@@ -220,61 +248,113 @@ export class UserService {
       throw badRequest("confirmationText must be 계정 탈퇴");
     }
 
-    const owned = await this.database.queryOne<CountRow>(
-      `
-        SELECT COUNT(*)::text AS count
-        FROM workspace_members
-        WHERE user_id = $1 AND role = 'owner'
-      `,
-      [currentUserId]
-    );
-    if (Number(owned?.count ?? "0") > 0) {
-      throw conflict("소유 중인 Workspace를 먼저 삭제하거나 소유권을 이전해주세요.");
-    }
+    const result = await this.database.transaction(
+      async transaction => {
+        await this.googleCalendarSync.lockAccountLifecycleInTransaction(
+          transaction,
+          currentUserId
+        );
+        await this.lockActiveUser(transaction, currentUserId);
+        const workspacePreparation =
+          await this.workspaceService.prepareOwnedWorkspacesForAccountDeletion(
+            transaction,
+            currentUserId
+          );
+        if (workspacePreparation.blockedWorkspaces.length > 0) {
+          throw new ApiError<DeleteCurrentUserConflictDetails>(
+            HttpStatus.CONFLICT,
+            "CONFLICT",
+            this.accountDeletionConflictMessage(
+              workspacePreparation.blockedWorkspaces
+            ),
+            {
+              blockedWorkspaces: workspacePreparation.blockedWorkspaces
+            }
+          );
+        }
 
-    await this.database.transaction(async (transaction) => {
-      await transaction.execute(
-        `
-          UPDATE user_sessions
-          SET revoked_at = COALESCE(revoked_at, now())
-          WHERE user_id = $1
-        `,
-        [currentUserId]
-      );
-      await transaction.execute(
-        `
-          UPDATE github_oauth_connections
-          SET access_token_encrypted = NULL, revoked_at = COALESCE(revoked_at, now())
-          WHERE user_id = $1
-        `,
-        [currentUserId]
-      );
-      await transaction.execute(
-        `DELETE FROM workspace_members WHERE user_id = $1`,
-        [currentUserId]
-      );
-      await transaction.execute(`DELETE FROM user_settings WHERE user_id = $1`, [
-        currentUserId
-      ]);
-      await transaction.execute(
-        `
-          UPDATE users
-          SET
-            name = '탈퇴한 사용자',
-            email = NULL,
-            avatar_url = NULL,
-            github_user_id = NULL,
-            github_login = NULL,
-            google_user_id = NULL,
-            google_connected_at = NULL,
-            google_revoked_at = now(),
-            active_workspace_id = NULL,
-            deleted_at = now()
-          WHERE id = $1 AND deleted_at IS NULL
-        `,
-        [currentUserId]
-      );
-    });
+        await this.googleCalendarSync.cleanupAccountInTransaction(
+          transaction,
+          currentUserId
+        );
+        await transaction.execute(
+          `
+            UPDATE user_sessions
+            SET revoked_at = COALESCE(revoked_at, now())
+            WHERE user_id = $1
+          `,
+          [currentUserId]
+        );
+        await transaction.execute(
+          `
+            UPDATE github_oauth_connections
+            SET access_token_encrypted = NULL, revoked_at = COALESCE(revoked_at, now())
+            WHERE user_id = $1
+          `,
+          [currentUserId]
+        );
+        const deletedMemberships =
+          await transaction.query<DeletedWorkspaceMembershipRow>(
+            `
+              DELETE FROM workspace_members
+              WHERE user_id = $1
+              RETURNING workspace_id
+            `,
+            [currentUserId]
+          );
+        await transaction.execute(
+          `DELETE FROM user_settings WHERE user_id = $1`,
+          [currentUserId]
+        );
+        await transaction.execute(
+          `
+            UPDATE users
+            SET
+              name = '탈퇴한 사용자',
+              email = NULL,
+              avatar_url = NULL,
+              github_user_id = NULL,
+              github_login = NULL,
+              google_user_id = NULL,
+              google_connected_at = NULL,
+              google_revoked_at = now(),
+              active_workspace_id = NULL,
+              deleted_at = now()
+            WHERE id = $1 AND deleted_at IS NULL
+          `,
+          [currentUserId]
+        );
+
+        const outboxIds = await Promise.all(
+          [...new Set(deletedMemberships.map(membership => membership.workspace_id))].map(
+            workspaceId =>
+              this.membershipRevocationOutbox.enqueueMembershipRevoked(
+                transaction,
+                workspaceId,
+                currentUserId
+              )
+          )
+        );
+        await this.workspaceService.scheduleOwnedWorkspacesForAccountDeletion(
+          transaction,
+          currentUserId,
+          workspacePreparation.workspaceIdsToDelete
+        );
+        return {
+          outboxIds,
+          shouldRequestWorkspaceSweep: workspacePreparation.shouldRequestSweep
+        };
+      }
+    );
+
+    await Promise.all(
+      result.outboxIds.map(outboxId =>
+        this.membershipRevocationOutbox.publishOutbox(outboxId)
+      )
+    );
+    if (result.shouldRequestWorkspaceSweep) {
+      this.workspaceService.requestDeletionSweep();
+    }
 
     return { deleted: true };
   }
@@ -309,10 +389,51 @@ export class UserService {
     };
   }
 
+  private async lockActiveUser(
+    transaction: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<void> {
+    const user = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM users
+        WHERE id = $1 AND deleted_at IS NULL
+        FOR UPDATE
+      `,
+      [currentUserId]
+    );
+    if (!user) {
+      throw unauthorized("Current user not found");
+    }
+  }
+
+  private accountDeletionConflictMessage(
+    blockedWorkspaces: AccountDeletionWorkspaceBlocker[]
+  ): string {
+    const workspaces = blockedWorkspaces.map(workspace => {
+      const blockers: string[] = [];
+      if (workspace.reasons.includes("MEMBERS_REMAIN")) {
+        blockers.push(`다른 멤버 ${workspace.memberCount}명`);
+      }
+      if (workspace.reasons.includes("GITHUB_INSTALLATION_ACTIVE")) {
+        blockers.push("GitHub App 연결");
+      }
+      if (workspace.reasons.includes("MEETING_ACTIVE")) {
+        blockers.push("진행 중인 회의");
+      }
+      if (workspace.reasons.includes("SYNC_ACTIVE")) {
+        blockers.push("진행 중인 동기화");
+      }
+      return `${workspace.name} (${blockers.join(", ")})`;
+    });
+    return `다음 Workspace를 먼저 정리해주세요: ${workspaces.join("; ")}`;
+  }
+
   private async getProfileSettings(
+    database: DatabaseTransaction,
     currentUserId: string
   ): Promise<ProfileSettingsRow> {
-    const row = await this.database.queryOne<ProfileSettingsRow>(
+    const row = await database.queryOne<ProfileSettingsRow>(
       `
         SELECT
           display_name,

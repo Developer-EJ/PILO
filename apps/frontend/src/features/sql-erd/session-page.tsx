@@ -1,30 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { SqlErdPanel } from "@/features/sql-erd/components/sql-erd-panel";
 import { readSqlErdSessionId } from "@/features/sql-erd/utils/session-navigation";
 
 export function SqlErdSessionPage() {
-  const [sessionId, setSessionId] = useState<string | null>();
+  return (
+    <Suspense fallback={<SqlErdSessionLoading />}>
+      <SqlErdSessionRoute />
+    </Suspense>
+  );
+}
 
-  useEffect(() => {
-    setSessionId(readSqlErdSessionId(window.location.search));
-  }, []);
-
-  if (sessionId === undefined) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        Session을 불러오는 중입니다.
-      </div>
-    );
-  }
+function SqlErdSessionRoute() {
+  const searchParams = useSearchParams();
+  const sessionId = readSqlErdSessionId(searchParams.toString());
 
   if (!sessionId) {
     return (
-      <div className="flex h-screen items-center justify-center bg-muted/20 px-6">
+      <div className="flex h-full min-h-0 items-center justify-center bg-muted/20 px-6">
         <div className="max-w-md rounded-xl border bg-background p-8 text-center shadow-sm">
           <h1 className="text-xl font-semibold">Session을 선택해 주세요</h1>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -44,8 +42,16 @@ export function SqlErdSessionPage() {
   }
 
   return (
-    <div className="sql-erd-full-bleed h-screen overflow-hidden">
-      <SqlErdPanel sessionId={sessionId} />
+    <div className="sql-erd-full-bleed h-full min-h-0 overflow-hidden">
+      <SqlErdPanel key={sessionId} sessionId={sessionId} />
+    </div>
+  );
+}
+
+function SqlErdSessionLoading() {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center bg-background text-sm text-muted-foreground">
+      Session을 불러오는 중입니다.
     </div>
   );
 }

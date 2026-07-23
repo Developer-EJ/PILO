@@ -4,11 +4,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const [workflow, iamModule, iamOutputs, devMain, devOutputs, deployChecklist, architecture, refreshAudit] = await Promise.all([
+const [
+  workflow,
+  iamModule,
+  iamOutputs,
+  devMain,
+  devVariables,
+  devTfvarsExample,
+  devOutputs,
+  deployChecklist,
+  architecture,
+  refreshAudit,
+] = await Promise.all([
   readFile(path.join(repoRoot, '.github/workflows/terraform-validate.yml'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/modules/iam/main.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/modules/iam/outputs.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/envs/dev/main.tf'), 'utf8'),
+  readFile(path.join(repoRoot, 'infra/envs/dev/variables.tf'), 'utf8'),
+  readFile(path.join(repoRoot, 'infra/envs/dev/terraform.tfvars.example'), 'utf8'),
   readFile(path.join(repoRoot, 'infra/envs/dev/outputs.tf'), 'utf8'),
   readFile(path.join(repoRoot, 'docs/infra/deploy-checklist.md'), 'utf8'),
   readFile(path.join(repoRoot, 'docs/infra/dev-architecture.md'), 'utf8'),
@@ -31,6 +44,21 @@ assert.match(planJob, /cancel-in-progress: false/);
 assert.match(planJob, /role-to-assume:\s*\$\{\{ vars\.AWS_TERRAFORM_PLAN_ROLE_ARN \}\}/);
 assert.doesNotMatch(planJob, /AWS_GITHUB_ACTIONS_ROLE_ARN/);
 assert.match(planJob, /terraform plan -input=false/);
+assert.match(
+  planJob,
+  /TF_VAR_sql_erd_operations_v1_enabled:\s*\$\{\{ vars\.TF_PLAN_SQL_ERD_OPERATIONS_V1_ENABLED \}\}/,
+);
+assert.match(planJob, /TF_VAR_sql_erd_operations_v1_enabled/);
+
+assert.match(
+  devVariables,
+  /variable "sql_erd_operations_v1_enabled"\s*\{[\s\S]*?type\s*=\s*bool[\s\S]*?default\s*=\s*false[\s\S]*?\}/,
+);
+assert.match(
+  devMain,
+  /SQL_ERD_OPERATIONS_V1_ENABLED\s*=\s*tostring\(var\.sql_erd_operations_v1_enabled\)/,
+);
+assert.match(devTfvarsExample, /sql_erd_operations_v1_enabled\s*=\s*false/);
 
 const deploymentTrustStart = iamModule.indexOf('data "aws_iam_policy_document" "github_actions_assume_role"');
 const deploymentTrustEnd = iamModule.indexOf('resource "aws_iam_role" "github_actions"', deploymentTrustStart);

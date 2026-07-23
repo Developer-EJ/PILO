@@ -1,4 +1,4 @@
-import { PostgreSQL } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, SQLite } from "@codemirror/lang-sql";
 import sqlParser from "node-sql-parser";
 
 import {
@@ -56,9 +56,17 @@ type MutableTableParseState = {
   columnsByName: Map<string, ErdColumn>;
 };
 
-type PostgreSqlSyntaxNode = ReturnType<
+type SqlSyntaxNode = ReturnType<
   typeof PostgreSQL.language.parser.parse
 >["topNode"];
+
+type PostgreSqlSyntaxNode = SqlSyntaxNode;
+
+type PostgreSqlParserSourceParts = {
+  declaredTypes: string[];
+  erdStatements: string[];
+  userDefinedTypeStatements: string[];
+};
 
 const parser = new Parser();
 
@@ -90,24 +98,35 @@ export function parseSqlDdlToErdModel(
   let astNodes: SqlParserAstNode[] | null = null;
   let resolvedDialect: SqltoerdResolvedDialect | null = null;
   let lastParseErrorMessage = "Failed to parse SQL DDL.";
+  let hasParserSource = false;
+  let hasParserError = false;
 
   for (const database of databases) {
     try {
-      const parserSourceText =
-        database === "postgresql"
-          ? preparePostgreSqlParserSource(sourceText)
-          : sourceText;
+      const parserSourceText = prepareParserSource(database, sourceText);
+      if (!parserSourceText.trim()) {
+        continue;
+      }
+      hasParserSource = true;
       const ast = parser.astify(parserSourceText, { database });
       astNodes = (Array.isArray(ast) ? ast : [ast]) as unknown as SqlParserAstNode[];
       resolvedDialect = database;
       break;
     } catch (error) {
+      hasParserError = true;
       lastParseErrorMessage =
         error instanceof Error ? error.message : lastParseErrorMessage;
     }
   }
 
   if (!astNodes || !resolvedDialect) {
+    if (!hasParserSource && !hasParserError) {
+      return createParseFailure(
+        "NO_CREATE_TABLE",
+        "SQLtoERD MVP parser expects one or more CREATE TABLE statements."
+      );
+    }
+
     return createParseFailure(
       "PARSE_FAILED",
       lastParseErrorMessage
@@ -175,34 +194,336 @@ export function isSqlErdSourceTextTooLarge(sourceText: string) {
   );
 }
 
-function preparePostgreSqlParserSource(sourceText: string) {
-  const declaredTypes = collectPostgreSqlUserDefinedTypeDeclarations(sourceText);
-
-  if (declaredTypes.length === 0) {
-    return sourceText;
+function prepareParserSource(
+  database: SqltoerdResolvedDialect,
+  sourceText: string
+) {
+  if (database === "postgresql") {
+    return preparePostgreSqlParserSource(sourceText);
   }
+
+  if (database === "mysql") {
+    return prepareMySqlParserSource(sourceText);
+  }
+
+  return prepareSqliteParserSource(sourceText);
+}
+
+function prepareMySqlParserSource(sourceText: string) {
+  return splitMySqlStatements(sourceText)
+    .filter(isMySqlErdStatement)
+    .map((statement) => `${statement};`)
+    .join("\n");
+}
+
+function splitMySqlStatements(sourceText: string) {
+  const statements: string[] = [];
+  let delimiter = ";";
+  let chunks: string[] = [];
+  let index = 0;
+  let lineStart = true;
+  let state:
+    | "normal"
+    | "single_quote"
+    | "double_quote"
+    | "backtick"
+    | "line_comment"
+    | "block_comment" = "normal";
+
+  const finishStatement = () => {
+    const statement = chunks.join("").trim();
+
+    if (statement) {
+      statements.push(statement);
+    }
+
+    chunks = [];
+  };
+
+  while (index < sourceText.length) {
+    if (state === "normal" && lineStart) {
+      const lineEnd = sourceText.indexOf("\n", index);
+      const line = sourceText.slice(
+        index,
+        lineEnd === -1 ? sourceText.length : lineEnd
+      );
+      const delimiterDirective =
+        /^\s*DELIMITER\s+(\S+)\s*$/i.exec(line);
+
+      if (delimiterDirective) {
+        finishStatement();
+        delimiter = delimiterDirective[1];
+        index = lineEnd === -1 ? sourceText.length : lineEnd + 1;
+        lineStart = true;
+        continue;
+      }
+    }
+
+    const character = sourceText[index];
+    const nextCharacter = sourceText[index + 1];
+
+    if (state === "line_comment") {
+      chunks.push(character);
+      index += 1;
+
+      if (character === "\n") {
+        state = "normal";
+        lineStart = true;
+      }
+      continue;
+    }
+
+    if (state === "block_comment") {
+      chunks.push(character);
+
+      if (character === "*" && nextCharacter === "/") {
+        chunks.push(nextCharacter);
+        index += 2;
+        state = "normal";
+      } else {
+        index += 1;
+      }
+
+      lineStart = character === "\n";
+      continue;
+    }
+
+    if (
+      state === "single_quote" ||
+      state === "double_quote" ||
+      state === "backtick"
+    ) {
+      const quote =
+        state === "single_quote" ? "'" : state === "double_quote" ? '"' : "`";
+      chunks.push(character);
+
+      if (character === "\\" && nextCharacter !== undefined) {
+        chunks.push(nextCharacter);
+        index += 2;
+        lineStart = nextCharacter === "\n";
+        continue;
+      }
+
+      if (character === quote && nextCharacter === quote) {
+        chunks.push(nextCharacter);
+        index += 2;
+        lineStart = false;
+        continue;
+      }
+
+      index += 1;
+      lineStart = character === "\n";
+
+      if (character === quote) {
+        state = "normal";
+      }
+      continue;
+    }
+
+    if (sourceText.startsWith(delimiter, index)) {
+      finishStatement();
+      index += delimiter.length;
+      lineStart = false;
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === "`") {
+      chunks.push(character);
+      state =
+        character === "'"
+          ? "single_quote"
+          : character === '"'
+            ? "double_quote"
+            : "backtick";
+      index += 1;
+      lineStart = false;
+      continue;
+    }
+
+    if (
+      character === "#" ||
+      (character === "-" &&
+        nextCharacter === "-" &&
+        (sourceText[index + 2] === undefined ||
+          /\s/.test(sourceText[index + 2])))
+    ) {
+      chunks.push(character);
+      state = "line_comment";
+      index += 1;
+      lineStart = false;
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "*") {
+      chunks.push(character, nextCharacter);
+      state = "block_comment";
+      index += 2;
+      lineStart = false;
+      continue;
+    }
+
+    chunks.push(character);
+    index += 1;
+    lineStart = character === "\n";
+  }
+
+  finishStatement();
+  return statements;
+}
+
+function isMySqlErdStatement(sourceText: string) {
+  const tree = MySQL.language.parser.parse(sourceText);
+  const rootCursor = tree.cursor();
+
+  if (!rootCursor.firstChild()) {
+    return false;
+  }
+
+  do {
+    if (rootCursor.name !== "Statement") {
+      continue;
+    }
+
+    return isErdDdlStatement(rootCursor.node, sourceText);
+  } while (rootCursor.nextSibling());
+
+  return false;
+}
+
+function prepareSqliteParserSource(sourceText: string) {
+  const tree = SQLite.language.parser.parse(sourceText);
+  const rootCursor = tree.cursor();
+  const erdStatements: string[] = [];
+
+  if (!rootCursor.firstChild()) {
+    return "";
+  }
+
+  do {
+    if (
+      rootCursor.name === "Statement" &&
+      isErdDdlStatement(rootCursor.node, sourceText)
+    ) {
+      erdStatements.push(
+        sourceText.slice(rootCursor.from, rootCursor.to).trim()
+      );
+    }
+  } while (rootCursor.nextSibling());
+
+  return erdStatements.join("\n");
+}
+
+function isErdDdlStatement(
+  statementNode: SqlSyntaxNode,
+  sourceText: string
+) {
+  const statementNodes = getErdDdlStatementNodes(statementNode);
+  let cursor = 0;
+  const firstKeyword = readErdDdlKeyword(
+    statementNodes[cursor],
+    sourceText
+  );
+
+  if (firstKeyword === "ALTER") {
+    return readErdDdlKeyword(statementNodes[cursor + 1], sourceText) === "TABLE";
+  }
+
+  if (firstKeyword !== "CREATE") {
+    return false;
+  }
+
+  cursor += 1;
+
+  while (
+    ["TEMP", "TEMPORARY"].includes(
+      readErdDdlKeyword(statementNodes[cursor], sourceText) ?? ""
+    )
+  ) {
+    cursor += 1;
+  }
+
+  return readErdDdlKeyword(statementNodes[cursor], sourceText) === "TABLE";
+}
+
+function getErdDdlStatementNodes(statementNode: SqlSyntaxNode) {
+  const cursor = statementNode.cursor();
+  const nodes: SqlSyntaxNode[] = [];
+
+  if (!cursor.firstChild()) {
+    return nodes;
+  }
+
+  do {
+    if (!cursor.name.endsWith("Comment")) {
+      nodes.push(cursor.node);
+    }
+  } while (cursor.nextSibling());
+
+  return nodes;
+}
+
+function readErdDdlKeyword(
+  node: SqlSyntaxNode | undefined,
+  sourceText: string
+) {
+  return node?.name === "Keyword"
+    ? sourceText.slice(node.from, node.to).toUpperCase()
+    : null;
+}
+
+function preparePostgreSqlParserSource(sourceText: string) {
+  const { declaredTypes, erdStatements } =
+    collectPostgreSqlParserSourceParts(sourceText);
 
   // node-sql-parser registers CREATE TYPE names but not CREATE DOMAIN names.
   // Register both in a parser-only prelude so table columns keep their original type.
-  const parserPrelude = declaredTypes
+  const parserTypeNames = [
+    ...new Set(
+      declaredTypes.flatMap((typeName) =>
+        typeName.includes('"')
+          ? [typeName]
+          : [typeName, typeName.toUpperCase()]
+      )
+    )
+  ];
+  const parserPrelude = parserTypeNames
     .map(
       (typeName) =>
         `CREATE TYPE ${typeName} AS ENUM ('__pilo_sqltoerd_parser_type__');`
     )
     .join("\n");
 
-  return `${parserPrelude}\n${sourceText}`;
+  return [parserPrelude, ...erdStatements].filter(Boolean).join("\n");
 }
 
 export function collectPostgreSqlUserDefinedTypeDeclarations(
   sourceText: string
 ) {
+  return collectPostgreSqlParserSourceParts(sourceText).declaredTypes;
+}
+
+export function collectPostgreSqlUserDefinedTypeStatements(
+  sourceText: string
+) {
+  return collectPostgreSqlParserSourceParts(sourceText)
+    .userDefinedTypeStatements;
+}
+
+function collectPostgreSqlParserSourceParts(
+  sourceText: string
+): PostgreSqlParserSourceParts {
   const tree = PostgreSQL.language.parser.parse(sourceText);
   const rootCursor = tree.cursor();
   const declaredTypes = new Map<string, string>();
+  const erdStatements: string[] = [];
+  const userDefinedTypeStatements: string[] = [];
 
   if (!rootCursor.firstChild()) {
-    return [];
+    return {
+      declaredTypes: [],
+      erdStatements,
+      userDefinedTypeStatements
+    };
   }
 
   do {
@@ -212,8 +533,24 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
 
     const statementNodes = getPostgreSqlStatementNodes(rootCursor.node);
     let cursor = 0;
+    const firstKeyword = readPostgreSqlKeyword(
+      statementNodes[cursor],
+      sourceText
+    );
 
-    if (readPostgreSqlKeyword(statementNodes[cursor], sourceText) !== "CREATE") {
+    if (firstKeyword === "ALTER") {
+      if (
+        readPostgreSqlKeyword(statementNodes[cursor + 1], sourceText) ===
+        "TABLE"
+      ) {
+        erdStatements.push(
+          sourceText.slice(rootCursor.from, rootCursor.to).trim()
+        );
+      }
+      continue;
+    }
+
+    if (firstKeyword !== "CREATE") {
       continue;
     }
 
@@ -226,10 +563,25 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
       cursor += 2;
     }
 
+    while (
+      ["TEMP", "TEMPORARY", "UNLOGGED"].includes(
+        readPostgreSqlKeyword(statementNodes[cursor], sourceText) ?? ""
+      )
+    ) {
+      cursor += 1;
+    }
+
     const declarationKind = readPostgreSqlKeyword(
       statementNodes[cursor],
       sourceText
     );
+
+    if (declarationKind === "TABLE") {
+      erdStatements.push(
+        sourceText.slice(rootCursor.from, rootCursor.to).trim()
+      );
+      continue;
+    }
 
     if (declarationKind !== "TYPE" && declarationKind !== "DOMAIN") {
       continue;
@@ -243,10 +595,17 @@ export function collectPostgreSqlUserDefinedTypeDeclarations(
         typeKey,
         sourceText.slice(typeNameNode.from, typeNameNode.to)
       );
+      userDefinedTypeStatements.push(
+        sourceText.slice(rootCursor.from, rootCursor.to).trim()
+      );
     }
   } while (rootCursor.nextSibling());
 
-  return [...declaredTypes.values()];
+  return {
+    declaredTypes: [...declaredTypes.values()],
+    erdStatements,
+    userDefinedTypeStatements
+  };
 }
 
 function getPostgreSqlStatementNodes(statementNode: PostgreSqlSyntaxNode) {
@@ -344,6 +703,13 @@ function resolveParserDatabases(
 function getAutoParserDatabases(
   sourceText: string
 ): SqltoerdResolvedDialect[] {
+  const hasMySqlDumpMarker =
+    /^\s*DELIMITER\s+\S+\s*$/im.test(sourceText) ||
+    /\/\*!\d{5}\s/.test(sourceText) ||
+    /^\s*(?:LOCK|UNLOCK)\s+TABLES\b/im.test(sourceText);
+  const hasSqliteDumpMarker =
+    /^\s*PRAGMA\b/im.test(sourceText) ||
+    /\bsqlite_sequence\b/i.test(sourceText);
   const hasMySqlMarker =
     /\b(?:AUTO_INCREMENT|UNSIGNED|UNIQUE\s+KEY|DATETIME)\b|\bENGINE\s*=|`[^`]+`/i.test(
       sourceText
@@ -356,6 +722,14 @@ function getAutoParserDatabases(
     /\b(?:AUTOINCREMENT|WITHOUT\s+ROWID|STRICT)\b|\bON\s+CONFLICT\b/i.test(
       sourceText
     );
+
+  if (hasMySqlDumpMarker) {
+    return ["mysql", "postgresql"];
+  }
+
+  if (hasSqliteDumpMarker) {
+    return ["sqlite", "postgresql", "mysql"];
+  }
 
   if (hasSqliteMarker && !hasMySqlMarker && !hasPostgreSqlMarker) {
     return ["sqlite", "postgresql", "mysql"];
@@ -692,23 +1066,43 @@ function formatDefaultValue(defaultDefinition: SqlParserAstNode | null) {
     return null;
   }
 
-  if (typeof value.value === "number") {
+  const valueType = readString(value.type)?.toLowerCase();
+
+  if (
+    valueType === "number" &&
+    (typeof value.value === "number" || typeof value.value === "string")
+  ) {
     return String(value.value);
   }
 
-  if (readString(value.type)?.toLowerCase() === "single_quote_string") {
+  if (valueType === "single_quote_string") {
     const stringValue = readString(value.value);
 
     return stringValue === null ? null : `'${stringValue.replaceAll("'", "''")}'`;
   }
 
-  if (readString(value.type)?.toLowerCase() === "function") {
-    const name = readFirstObject(value.name)?.name;
-    const functionName = Array.isArray(name)
-      ? name.map((part) => readString(part)).filter(Boolean).join(".")
-      : null;
+  if (valueType === "bool" && typeof value.value === "boolean") {
+    return value.value ? "TRUE" : "FALSE";
+  }
 
-    return functionName ? `${functionName}()` : null;
+  if (valueType === "null") {
+    return "NULL";
+  }
+
+  if (valueType === "function") {
+    const functionName = readArray(readObject(value.name)?.name)
+      .map((part) => readString(readObject(part)?.value))
+      .filter((part): part is string => Boolean(part))
+      .join(".")
+      .toUpperCase();
+
+    if (!functionName) {
+      return null;
+    }
+
+    return ["CURRENT_DATE", "CURRENT_TIMESTAMP"].includes(functionName)
+      ? functionName
+      : `${functionName}()`;
   }
 
   return readString(value.value);
@@ -719,7 +1113,13 @@ function formatColumnDataType(definition: SqlParserAstNode | null) {
     return "UNKNOWN";
   }
 
-  const dataType = readString(definition.dataType)?.toUpperCase() ?? "UNKNOWN";
+  const rawDataType = readString(definition.dataType) ?? "UNKNOWN";
+  const typeSchema = readString(definition.schema);
+  const dataType = typeSchema
+    ? `${typeSchema}.${rawDataType}`
+    : rawDataType.startsWith('"') && rawDataType.endsWith('"')
+      ? rawDataType
+      : rawDataType.toUpperCase();
   const length = readPrimitive(definition.length);
   const scale = readPrimitive(definition.scale);
   const suffix = readStringArray(definition.suffix)

@@ -1,10 +1,13 @@
 import { buildCanvasApiUrl, CanvasApiError } from "./canvas-api-client";
 import type {
+  CanvasAgentConversationContext,
   CanvasAgentDraft,
   CanvasAgentDraftApplyResult,
   CanvasAgentPresentationMode,
   CanvasAgentRun,
   CanvasAgentRunDetail,
+  CanvasAgentSelectedScene,
+  CanvasAgentShapeSummary,
   CanvasAgentViewport,
 } from "./canvas-agent-types";
 
@@ -62,8 +65,12 @@ export function createCanvasAgentClient() {
       canvasId: string,
       body: {
         prompt: string;
+        conversationContext?: CanvasAgentConversationContext;
         presentationMode?: CanvasAgentPresentationMode;
         selectedShapeIds: string[];
+        selectedScene: CanvasAgentSelectedScene | null;
+        selectedSceneError: string | null;
+        shapeSummaries: CanvasAgentShapeSummary[];
         toolHelpMode?: boolean;
         viewport: CanvasAgentViewport;
         clientRequestId: string;

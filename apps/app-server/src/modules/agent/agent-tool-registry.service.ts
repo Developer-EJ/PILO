@@ -2,7 +2,29 @@ import { Injectable } from "@nestjs/common";
 import { BoardAgentToolsService } from "./tools/board-agent-tools.service";
 import { CalendarAgentToolsService } from "./tools/calendar-agent-tools.service";
 import { MeetingAgentToolsService } from "./tools/meeting-agent-tools.service";
-import type { AgentToolDefinition } from "./types/agent-tool.types";
+import { SqlErdAgentToolsService } from "./tools/sql-erd-agent-tools.service";
+import { PrReviewAgentToolsService } from "./tools/pr-review-agent-tools.service";
+import { CanvasAgentDelegationToolsService } from "./tools/canvas-agent-delegation-tools.service";
+import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
+import {
+  buildAgentToolCapabilityCatalog,
+  getAgentToolDomainAndOperation,
+  type AgentToolCapabilityCatalogSnapshot
+} from "./agent-tool-capability-catalog";
+import {
+  buildAgentToolInventory,
+  type AgentToolInventorySnapshot
+} from "./agent-tool-inventory";
+import { AgentDomainFeatureFlagService } from "./agent-domain-feature-flag.service";
+import type {
+  AgentRunRequestContext,
+  AgentToolDefinition
+} from "./types/agent-tool.types";
+
+const AMBIENT_MEETING_SEARCH_TOOLS = new Set([
+  "list_meeting_reports",
+  "search_meeting_transcript"
+]);
 
 @Injectable()
 export class AgentToolRegistryService {
@@ -11,7 +33,13 @@ export class AgentToolRegistryService {
   constructor(
     calendarAgentToolsService?: CalendarAgentToolsService,
     meetingAgentToolsService?: MeetingAgentToolsService,
-    boardAgentToolsService?: BoardAgentToolsService
+    boardAgentToolsService?: BoardAgentToolsService,
+    sqlErdAgentToolsService?: SqlErdAgentToolsService,
+    prReviewAgentToolsService?: PrReviewAgentToolsService,
+    canvasAgentDelegationToolsService?: CanvasAgentDelegationToolsService,
+    driveAgentToolsService?: DriveAgentToolsService,
+    private readonly domainFeatureFlags: AgentDomainFeatureFlagService =
+      new AgentDomainFeatureFlagService()
   ) {
     if (calendarAgentToolsService) {
       this.registerMany(calendarAgentToolsService.listDefinitions());
@@ -24,14 +52,85 @@ export class AgentToolRegistryService {
     if (boardAgentToolsService) {
       this.registerMany(boardAgentToolsService.listDefinitions());
     }
+
+    if (sqlErdAgentToolsService) {
+      this.registerMany(sqlErdAgentToolsService.listDefinitions());
+    }
+
+    if (prReviewAgentToolsService) {
+      this.registerMany(prReviewAgentToolsService.listDefinitions());
+    }
+
+    if (canvasAgentDelegationToolsService) {
+      this.registerMany(canvasAgentDelegationToolsService.listDefinitions());
+    }
+
+    if (driveAgentToolsService) {
+      this.registerMany(driveAgentToolsService.listDefinitions());
+    }
   }
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
     return [...this.definitions.values()];
   }
 
+  listToolInventory(): AgentToolInventorySnapshot {
+    return buildAgentToolInventory(this.listDefinitions());
+  }
+
+  listDefinitionsForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolDefinition<unknown>[] {
+    return this.listDefinitions().filter((definition) =>
+      this.isAvailableForContext(definition, requestContext)
+    );
+  }
+
+  listCapabilityCatalogForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolCapabilityCatalogSnapshot {
+    return buildAgentToolCapabilityCatalog(
+      this.listDefinitionsForContext(requestContext)
+    );
+  }
+
+  listToolInventoryForContext(
+    requestContext: AgentRunRequestContext
+  ): AgentToolInventorySnapshot {
+    return buildAgentToolInventory(this.listDefinitionsForContext(requestContext));
+  }
+
   getDefinition(name: string): AgentToolDefinition<unknown> | null {
     return this.definitions.get(name) ?? null;
+  }
+
+  getDefinitionForContext(
+    name: string,
+    requestContext: AgentRunRequestContext
+  ): AgentToolDefinition<unknown> | null {
+    const definition = this.getDefinition(name);
+    return definition && this.isAvailableForContext(definition, requestContext)
+      ? definition
+      : null;
+  }
+
+  private isAvailableForContext(
+    definition: AgentToolDefinition<unknown>,
+    requestContext: AgentRunRequestContext
+  ): boolean {
+    const requiredDomain = requestContext?.surface ?? null;
+    const toolDescriptor = getAgentToolDomainAndOperation(definition.name);
+    const toolDomain = toolDescriptor?.domain ?? null;
+    const isAmbientMeetingSearch =
+      toolDomain === "meeting" &&
+      toolDescriptor?.operation === "read" &&
+      AMBIENT_MEETING_SEARCH_TOOLS.has(definition.name);
+    return (
+      this.domainFeatureFlags.isToolEnabled(definition.name) &&
+      (!requiredDomain || toolDomain === requiredDomain || isAmbientMeetingSearch) &&
+      (!definition.contextRequirement ||
+        definition.contextRequirement.surface === requestContext?.surface)
+    );
   }
 
   private registerMany(definitions: AgentToolDefinition<unknown>[]): void {

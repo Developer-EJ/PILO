@@ -48,11 +48,29 @@ Common realtime code belongs in `socket/`, `redis/`, `auth/`, `database/`, or
 Domain behavior belongs in `src/<domain>/`. Board room naming, Board access
 rules, and Board invalidation contracts stay in `src/board/` and
 `src/socket/board/`. Canvas room naming, Canvas access rules, cursor presence
-payloads, and Canvas operation broadcast contracts stay in `src/canvas/`.
+payloads, room-level loaded region state, and Canvas operation broadcast
+contracts stay in `src/canvas/`.
 
 Do not store cursor position or selection in PostgreSQL. Presence is realtime
 state only. Canvas shape state and operation catch-up remain App Server/API/DB
 responsibilities.
+
+Classic Canvas room loaded regions are realtime room state. They indicate which
+viewport bounds connected clients have already loaded, but absence from this
+state is never treated as deletion.
+
+Classic Canvas checkpoint persistence is also room state orchestration:
+realtime-server batches dirty room shapes and calls the existing App Server
+`/shapes/batch` boundary. It emits `canvas:room:checkpoint` with
+`saving`/`saved`/`delayed` status so clients can show save-delay UX without
+treating a transient checkpoint failure as lost work.
+
+Native document collaboration uses Hocuspocus rooms under `/sync/documents`.
+Realtime-server restores the latest Drive document snapshot when a room loads and
+is the only realtime checkpoint writer: Hocuspocus debounces merged Yjs state for
+one second before calling the existing App Server snapshot API. Browser clients
+only sync Yjs and awareness while this transport is configured. The authenticated
+bearer token remains in the in-memory Hocuspocus context and is never persisted.
 
 ## Runtime
 
@@ -67,6 +85,11 @@ Optional:
 - `REDIS_URL` to enable Socket.IO Redis adapter across multiple tasks.
 - `SOCKET_IO_CORS_ORIGIN` as a comma-separated frontend origin allowlist.
 - `REALTIME_SCOPE` for health/debug scope reporting.
+- `APP_SERVER_URL` for classic Canvas roomState checkpoint persistence through
+  the existing App Server `/shapes/batch` transaction boundary and native
+  document snapshot checkpoints.
+- `REALTIME_CANVAS_ACTIVITY_TOKEN` for the internal `/api/v1/internal/canvas/recording-activities/batch`
+  handoff. The same server-only secret must be configured on App Server.
 
 ## Verification
 

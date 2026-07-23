@@ -4,7 +4,10 @@ import { DatabaseModule } from "../../database/database.module";
 import { GithubIntegrationModule } from "../github-integration/github-integration.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { BoardController } from "./board.controller";
+import { ActiveBoardSourceService } from "./active-board-source.service";
+import { BoardSourcePublisherService } from "./board-source-publisher.service";
 import { BoardHydrationService } from "./board-hydration.service";
+import { BoardInvalidationPublisherService } from "./board-invalidation-publisher.service";
 import { BoardIssueAssigneeService } from "./board-issue-assignee.service";
 import { BoardIssueCreateService } from "./board-issue-create.service";
 import { BoardIssueCreateOperationService } from "./board-issue-create-operation.service";
@@ -19,13 +22,17 @@ import { BoardIssueUpdateQueries } from "./queries/board-issue-update.queries";
 import { BoardIssueCreateQueries } from "./queries/board-issue-create.queries";
 import { BoardIssueCreateOperationQueries } from "./queries/board-issue-create-operation.queries";
 import { BoardReadQueries } from "./queries/board-read.queries";
+import { ActiveBoardSourceQueries } from "./queries/active-board-source.queries";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule, GithubIntegrationModule],
   controllers: [BoardController],
   providers: [
     BoardService,
+    ActiveBoardSourceService,
+    BoardSourcePublisherService,
     BoardHydrationService,
+    BoardInvalidationPublisherService,
     BoardIssueCreateOperationService,
     BoardIssueCreateService,
     BoardIssueAssigneeService,
@@ -38,7 +45,8 @@ import { BoardReadQueries } from "./queries/board-read.queries";
     BoardIssueStatusQueries,
     BoardIssueUpdateQueries,
     BoardIssueAssigneeQueries,
-    BoardReadQueries
+    BoardReadQueries,
+    ActiveBoardSourceQueries
   ],
   exports: [BoardService]
 })

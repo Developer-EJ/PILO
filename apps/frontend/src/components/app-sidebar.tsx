@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronsUpDown,
   ChevronRight,
@@ -48,19 +48,34 @@ import {
   useSidebar
 } from "@/components/ui/sidebar";
 import { useAuthSession } from "@/features/auth";
-import { GithubSettingsStatus } from "@/features/github-integration/components/github-settings-status";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
+import { GithubPanel } from "@/features/github-integration/components/github-panel";
+import {
+  GITHUB_SETTINGS_QUERY_KEY,
+  GITHUB_SETTINGS_QUERY_VALUE,
+  isGithubSettingsEntry
+} from "@/features/github-integration/utils/github-settings-entry";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
 import type { FeatureNavigationItem } from "@/features/navigation-types";
-import { SettingsDialog } from "@/features/settings/components/user-settings-dialog";
+import {
+  SettingsDialog,
+  type SettingsDialogSectionId
+} from "@/features/settings/components/user-settings-dialog";
 import { cn } from "@/lib/utils";
 
 export type AppSidebarItem = Pick<
   FeatureNavigationItem,
-  "description" | "href" | "icon" | "id" | "items" | "title"
+  | "description"
+  | "href"
+  | "icon"
+  | "id"
+  | "items"
+  | "navigateOnTrigger"
+  | "title"
 >;
 
 type AppSidebarProps = {
+  itemBadges?: Record<string, number>;
   items: AppSidebarItem[];
   selectedItemId: string;
   onSelectItem?: (itemId: string) => void;
@@ -78,12 +93,15 @@ const ACTIVE_MEETING_LEAVE_FAILED_MESSAGE =
   "진행 중인 회의에서 나가지 못했습니다. 회의 상태를 확인한 뒤 다시 시도해주세요.";
 
 export function AppSidebar({
+  itemBadges,
   items,
   selectedItemId,
   onSelectItem
 }: AppSidebarProps) {
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, state: sidebarState } = useSidebar();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const authSession = useAuthSession();
   const meetingRuntime = useMeetingRuntime();
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState(0);
@@ -100,6 +118,8 @@ export function AppSidebar({
     "idle" | "logging-out" | "switching-workspace"
   >("idle");
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+  const [settingsInitialSection, setSettingsInitialSection] =
+    useState<SettingsDialogSectionId>("general");
   const [previewActiveWorkspaceId, setPreviewActiveWorkspaceId] = useState<
     string | null
   >(null);
@@ -153,20 +173,40 @@ export function AppSidebar({
       }
     : currentUser;
   const selectedItem = items.find((item) => item.id === selectedItemId);
+  const isGithubSettingsMarkerPresent = isGithubSettingsEntry(searchParams);
 
   useEffect(() => {
     setOpenMenuIds((currentOpenMenuIds) => ({
       ...currentOpenMenuIds,
       [selectedItemId]: true
     }));
-    setActiveSubItemHref(selectedItem?.href);
-  }, [selectedItem?.href, selectedItemId]);
+    const matchingSubItem = [...(selectedItem?.items ?? [])]
+      .sort((first, second) => second.href.length - first.href.length)
+      .find(
+        (subItem) =>
+          pathname === subItem.href || pathname.startsWith(`${subItem.href}/`)
+      );
+    setActiveSubItemHref(matchingSubItem?.href ?? selectedItem?.href);
+  }, [pathname, selectedItem?.href, selectedItem?.items, selectedItemId]);
+
+  useEffect(() => {
+    if (!isGithubSettingsMarkerPresent) {
+      return;
+    }
+
+    setSettingsInitialSection("github");
+    setIsSettingsDialogOpen(true);
+  }, [isGithubSettingsMarkerPresent]);
 
   const handleSelectItem = (
     itemId: string,
     href: string,
-    options: { closeMobile?: boolean } = {}
+    options: { closeMobile?: boolean; navigate?: boolean } = {}
   ) => {
+    if (options.navigate === false) {
+      return;
+    }
+
     onSelectItem?.(itemId);
     setActiveSubItemHref(href);
     router.push(href);
@@ -240,12 +280,28 @@ export function AppSidebar({
   };
 
   const openSettings = () => {
+    setSettingsInitialSection("general");
     setIsSettingsDialogOpen(true);
   };
 
-  const handleManageGithub = () => {
-    setIsSettingsDialogOpen(false);
-    router.push("/github");
+  const handleSettingsDialogOpenChange = (open: boolean) => {
+    setIsSettingsDialogOpen(open);
+
+    if (open || !isGithubSettingsMarkerPresent) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    if (
+      nextSearchParams.get(GITHUB_SETTINGS_QUERY_KEY) !==
+      GITHUB_SETTINGS_QUERY_VALUE
+    ) {
+      return;
+    }
+
+    nextSearchParams.delete(GITHUB_SETTINGS_QUERY_KEY);
+    const nextQuery = nextSearchParams.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
   };
   return (
     <>
@@ -358,6 +414,10 @@ export function AppSidebar({
                 const isActive = selectedItemId === item.id;
                 const isOpen = openMenuIds[item.id] ?? false;
                 const hasSubItems = item.items.length > 0;
+                const rawBadgeCount = itemBadges?.[item.id] ?? 0;
+                const badgeCount = Number.isFinite(rawBadgeCount)
+                  ? Math.max(0, Math.floor(rawBadgeCount))
+                  : 0;
 
                 if (!hasSubItems) {
                   return (
@@ -374,6 +434,10 @@ export function AppSidebar({
                         <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
                           <span className="truncate">{item.title}</span>
                         </div>
+                        <SidebarItemBadge
+                          badgeCount={badgeCount}
+                          title={item.title}
+                        />
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -392,7 +456,14 @@ export function AppSidebar({
                       open={isOpen}
                     >
                       <CollapsibleTrigger
-                        onClick={() => handleSelectItem(item.id, item.href)}
+                        onClick={() =>
+                          handleSelectItem(item.id, item.href, {
+                            navigate:
+                              item.id === "voice-chat" && sidebarState === "collapsed"
+                                ? true
+                                : item.navigateOnTrigger
+                          })
+                        }
                         render={
                           <SidebarMenuButton
                             aria-current={isActive ? "page" : undefined}
@@ -407,6 +478,10 @@ export function AppSidebar({
                         <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
                           <span className="truncate">{item.title}</span>
                         </div>
+                        <SidebarItemBadge
+                          badgeCount={badgeCount}
+                          title={item.title}
+                        />
                         <ChevronRight
                           className={cn(
                             "ml-auto size-4 transition-transform group-data-[collapsible=icon]:hidden",
@@ -543,15 +618,11 @@ export function AppSidebar({
         avatarUrl={displayUser.avatarUrl}
         canManageWorkspace={activeWorkspace.role === "owner"}
         email={displayUser.email}
+        initialSection={settingsInitialSection}
         joinedAt={displayUser.createdAt}
-        githubContent={
-          <GithubSettingsStatus
-            canManageWorkspace={activeWorkspace.role === "owner"}
-            onManage={handleManageGithub}
-          />
-        }
+        githubContent={<GithubPanel />}
         name={displayUser.name}
-        onOpenChange={setIsSettingsDialogOpen}
+        onOpenChange={handleSettingsDialogOpenChange}
         open={isSettingsDialogOpen}
       />
     </>
@@ -572,4 +643,31 @@ function getUserInitials(name: string | null, email: string | null) {
 
 function getWorkspaceInitial(name: string) {
   return name.trim().slice(0, 1).toUpperCase() || "W";
+}
+
+function SidebarItemBadge({
+  badgeCount,
+  title
+}: {
+  badgeCount: number;
+  title: string;
+}) {
+  if (badgeCount <= 0) return null;
+
+  return (
+    <>
+      <span
+        aria-label={`${title} 읽지 않은 메시지 ${badgeCount}개`}
+        className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-5 text-primary-foreground group-data-[collapsible=icon]:hidden"
+        role="status"
+      >
+        {badgeCount > 99 ? "99+" : badgeCount}
+      </span>
+      <span
+        aria-label={`${title} 읽지 않은 메시지 ${badgeCount}개`}
+        className="absolute right-1.5 top-1.5 hidden size-2 rounded-full bg-primary group-data-[collapsible=icon]:block"
+        role="status"
+      />
+    </>
+  );
 }

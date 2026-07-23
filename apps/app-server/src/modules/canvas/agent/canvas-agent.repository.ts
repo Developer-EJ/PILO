@@ -1,15 +1,19 @@
 import { Injectable } from "@nestjs/common";
 import { DatabaseService } from "../../../database/database.service";
 import type {
+  CanvasAgentShapeAncestorRow,
   CanvasAgentDraftRow,
   CanvasAgentRunRow,
   CanvasAgentShapeRow,
   CanvasAgentStepRow,
-  CanvasDraftSpec,
   CanvasAgentActionName,
   CanvasAgentRequestContext,
   CanvasAgentRunStatus
 } from "./canvas-agent.types";
+import {
+  CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE,
+  CANVAS_AGENT_GENERIC_FAILURE_MESSAGE
+} from "./canvas-agent.constants";
 
 @Injectable()
 export class CanvasAgentRepository {
@@ -41,7 +45,9 @@ export class CanvasAgentRepository {
     clientRequestId: string | null;
     context: CanvasAgentRequestContext;
     currentUserId: string;
+    parentAgentRunId: string | null;
     prompt: string;
+    source: "canvas_chat" | "general_agent_delegate";
     workspaceId: string;
   }): Promise<CanvasAgentRunRow> {
     const run = await this.database.queryOne<CanvasAgentRunRow>(
@@ -50,6 +56,7 @@ export class CanvasAgentRepository {
           workspace_id,
           canvas_id,
           requested_by_user_id,
+          parent_agent_run_id,
           source,
           status,
           prompt,
@@ -58,13 +65,15 @@ export class CanvasAgentRepository {
           client_request_id,
           result_json
         )
-        VALUES ($1, $2, $3, 'canvas_chat', 'queued', $4, $5::jsonb, $6, $7, '{}'::jsonb)
+        VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7::jsonb, $8, $9, '{}'::jsonb)
         RETURNING *
       `,
       [
         input.workspaceId,
         input.canvasId,
         input.currentUserId,
+        input.parentAgentRunId,
+        input.source,
         input.prompt,
         JSON.stringify(input.context),
         input.canvasRevision,
@@ -77,6 +86,24 @@ export class CanvasAgentRepository {
     }
 
     return run;
+  }
+
+  async isOwnedParentAgentRun(
+    parentAgentRunId: string,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<boolean> {
+    const row = await this.database.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+      `,
+      [parentAgentRunId, workspaceId, currentUserId]
+    );
+    return Boolean(row);
   }
 
   async findRunForRequester(
@@ -145,7 +172,8 @@ export class CanvasAgentRepository {
 
     return this.database.query<CanvasAgentShapeRow>(
       `
-        SELECT id, title, text_content, shape_type, x, y, width, height, revision, raw_shape
+        SELECT id, title, text_content, shape_type, x, y, width, height,
+          parent_shape_id, rotation, revision, raw_shape
         FROM canvas_freeform_shapes
         WHERE canvas_id = $1
           AND id = ANY($2::text[])
@@ -156,29 +184,72 @@ export class CanvasAgentRepository {
     );
   }
 
-  async searchShapes(
+  async findShapeAncestors(
     canvasId: string,
-    query: string,
-    limit = 20
-  ): Promise<CanvasAgentShapeRow[]> {
-    const normalized = query.trim();
-    if (!normalized) return [];
+    shapeIds: string[]
+  ): Promise<CanvasAgentShapeAncestorRow[]> {
+    if (!shapeIds.length) return [];
 
-    return this.database.query<CanvasAgentShapeRow>(
+    return this.database.query<CanvasAgentShapeAncestorRow>(
       `
-        SELECT id, title, text_content, shape_type, x, y, width, height, revision, raw_shape
-        FROM canvas_freeform_shapes
-        WHERE canvas_id = $1
-          AND deleted_at IS NULL
-          AND (
-            COALESCE(title, '') ILIKE '%' || $2 || '%'
-            OR COALESCE(text_content, '') ILIKE '%' || $2 || '%'
-            OR shape_type ILIKE '%' || $2 || '%'
-          )
-        ORDER BY updated_at DESC, id ASC
-        LIMIT $3
+        WITH RECURSIVE shape_ancestors AS (
+          SELECT
+            target.id AS source_shape_id,
+            parent.id,
+            parent.title,
+            parent.text_content,
+            parent.shape_type,
+            parent.x,
+            parent.y,
+            parent.width,
+            parent.height,
+            parent.parent_shape_id,
+            parent.rotation,
+            parent.revision,
+            parent.raw_shape,
+            1 AS depth,
+            ARRAY[target.id, parent.id]::text[] AS path
+          FROM canvas_freeform_shapes target
+          JOIN canvas_freeform_shapes parent
+            ON parent.canvas_id = target.canvas_id
+           AND parent.id = target.parent_shape_id
+           AND parent.deleted_at IS NULL
+          WHERE target.canvas_id = $1
+            AND target.id = ANY($2::text[])
+            AND target.deleted_at IS NULL
+
+          UNION ALL
+
+          SELECT
+            ancestors.source_shape_id,
+            parent.id,
+            parent.title,
+            parent.text_content,
+            parent.shape_type,
+            parent.x,
+            parent.y,
+            parent.width,
+            parent.height,
+            parent.parent_shape_id,
+            parent.rotation,
+            parent.revision,
+            parent.raw_shape,
+            ancestors.depth + 1,
+            ancestors.path || parent.id
+          FROM shape_ancestors ancestors
+          JOIN canvas_freeform_shapes parent
+            ON parent.canvas_id = $1
+           AND parent.id = ancestors.parent_shape_id
+           AND parent.deleted_at IS NULL
+          WHERE ancestors.depth < 12
+            AND NOT parent.id = ANY(ancestors.path)
+        )
+        SELECT source_shape_id, id, title, text_content, shape_type, x, y,
+          width, height, parent_shape_id, rotation, revision, raw_shape, depth
+        FROM shape_ancestors
+        ORDER BY array_position($2::text[], source_shape_id), depth DESC
       `,
-      [canvasId, normalized, limit]
+      [canvasId, shapeIds]
     );
   }
 
@@ -242,7 +313,7 @@ export class CanvasAgentRepository {
     );
   }
 
-  async claimNextPendingStep(): Promise<{
+  async claimNextPendingStep(runId: string | null = null): Promise<{
     run: CanvasAgentRunRow;
     step: CanvasAgentStepRow;
   } | null> {
@@ -255,6 +326,7 @@ export class CanvasAgentRepository {
             INNER JOIN canvas_agent_runs r ON r.id = s.run_id
             WHERE s.status = 'pending'
               AND r.status = 'executing'
+              AND ($1::uuid IS NULL OR r.id = $1)
             ORDER BY s.created_at ASC
             FOR UPDATE OF s SKIP LOCKED
             LIMIT 1
@@ -264,7 +336,8 @@ export class CanvasAgentRepository {
           FROM candidate
           WHERE s.id = candidate.id
           RETURNING s.*
-        `
+        `,
+        [runId]
       );
       if (!step) return null;
 
@@ -324,33 +397,35 @@ export class CanvasAgentRepository {
     );
   }
 
-  async markRunDraftReady(
-    runId: string,
-    summary: string,
-    result: Record<string, unknown>
-  ): Promise<void> {
-    await this.database.execute(
-      `
-        UPDATE canvas_agent_runs
-        SET status = 'draft_ready', result_summary = $2, result_json = $3::jsonb,
-          error_code = NULL, error_message = NULL
-        WHERE id = $1
-          AND status NOT IN ('cancelled', 'expired')
-      `,
-      [runId, summary, JSON.stringify(result)]
-    );
-  }
-
   async failRun(runId: string, message: string): Promise<void> {
+    const safeMessage = message.slice(0, 4096);
+    const userMessage =
+      safeMessage === CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE
+        ? CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE
+        : CANVAS_AGENT_GENERIC_FAILURE_MESSAGE;
     await this.database.execute(
       `
         UPDATE canvas_agent_runs
         SET status = 'failed', error_code = 'CANVAS_AGENT_FAILED', error_message = $2,
-          result_summary = 'Canvas AI 작업을 완료하지 못했습니다.', completed_at = now()
+          result_summary = $3,
+          result_json = jsonb_set(
+            COALESCE(result_json, '{}'::jsonb),
+            '{progress}',
+            jsonb_build_object(
+              'message', $3,
+              'highlightedShapeIds', '[]'::jsonb,
+              'loadRootShapeIds', '[]'::jsonb,
+              'targetViewport', NULL,
+              'toolTarget', NULL,
+              'toolTargetLabel', NULL
+            ),
+            true
+          ),
+          completed_at = now()
         WHERE id = $1
           AND status NOT IN ('completed', 'cancelled', 'expired')
       `,
-      [runId, message.slice(0, 4096)]
+      [runId, safeMessage, userMessage]
     );
   }
 
@@ -392,26 +467,6 @@ export class CanvasAgentRepository {
     );
   }
 
-  async createDraft(input: {
-    canvasId: string;
-    currentUserId: string;
-    runId: string;
-    spec: CanvasDraftSpec;
-  }): Promise<CanvasAgentDraftRow> {
-    const draft = await this.database.queryOne<CanvasAgentDraftRow>(
-      `
-        INSERT INTO canvas_agent_drafts (
-          run_id, canvas_id, created_by_user_id, status, draft_spec_json
-        )
-        VALUES ($1, $2, $3, 'preview', $4::jsonb)
-        RETURNING *
-      `,
-      [input.runId, input.canvasId, input.currentUserId, JSON.stringify(input.spec)]
-    );
-    if (!draft) throw new Error("Canvas Agent draft could not be created");
-    return draft;
-  }
-
   async findDraftForRequester(
     currentUserId: string,
     workspaceId: string,
@@ -451,11 +506,20 @@ export class CanvasAgentRepository {
   async discardDraft(draftId: string): Promise<CanvasAgentDraftRow | null> {
     return this.database.queryOne<CanvasAgentDraftRow>(
       `
-        UPDATE canvas_agent_drafts
-        SET status = 'discarded'
+        DELETE FROM canvas_agent_drafts
         WHERE id = $1
           AND status = 'preview'
-        RETURNING *
+        RETURNING
+          id,
+          run_id,
+          canvas_id,
+          created_by_user_id,
+          'discarded'::text AS status,
+          draft_spec_json,
+          applied_shape_ids,
+          created_at,
+          applied_at,
+          expires_at
       `,
       [draftId]
     );

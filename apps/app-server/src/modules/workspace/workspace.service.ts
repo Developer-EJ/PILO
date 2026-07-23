@@ -2,7 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, conflict, forbidden, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
+import { WorkspaceMembershipRevocationOutboxService } from "../workspace-membership-revocation/workspace-membership-revocation-outbox.service";
+import { WorkspaceDeletionService } from "./workspace-deletion.service";
 
 export type WorkspaceRole = "owner" | "member";
 type WorkspaceInvitationStatus = "pending" | "accepted" | "revoked" | "expired";
@@ -13,6 +18,7 @@ interface WorkspaceRow extends QueryResultRow {
   icon: string | null;
   owner_user_id: string | null;
   role: WorkspaceRole | null;
+  deletion_status: "active" | "deleting";
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -71,9 +77,29 @@ interface CountRow extends QueryResultRow {
 
 interface WorkspaceDeletionBlockerRow extends QueryResultRow {
   other_member_exists: boolean;
+  other_member_count: number;
   github_installation_exists: boolean;
   active_meeting_exists: boolean;
   active_sync_exists: boolean;
+}
+
+export type AccountDeletionWorkspaceBlockerReason =
+  | "MEMBERS_REMAIN"
+  | "GITHUB_INSTALLATION_ACTIVE"
+  | "MEETING_ACTIVE"
+  | "SYNC_ACTIVE";
+
+export interface AccountDeletionWorkspaceBlocker {
+  workspaceId: string;
+  name: string;
+  memberCount: number;
+  reasons: AccountDeletionWorkspaceBlockerReason[];
+}
+
+export interface AccountDeletionWorkspacePreparation {
+  blockedWorkspaces: AccountDeletionWorkspaceBlocker[];
+  workspaceIdsToDelete: string[];
+  shouldRequestSweep: boolean;
 }
 
 export interface WorkspacePayload {
@@ -144,7 +170,8 @@ export interface DeleteWorkspaceRequest {
 }
 
 export interface DeleteWorkspacePayload {
-  deleted: true;
+  deletionRequested: true;
+  status: "deleting";
   workspaceId: string;
 }
 
@@ -193,7 +220,11 @@ const FRONTEND_DEFAULT_ORIGIN = "http://localhost:3000";
 
 @Injectable()
 export class WorkspaceService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly membershipRevocationOutbox: WorkspaceMembershipRevocationOutboxService,
+    private readonly workspaceDeletion: WorkspaceDeletionService
+  ) {}
 
   async createWorkspace(
     currentUserId: string,
@@ -213,6 +244,7 @@ export class WorkspaceService {
             icon,
             owner_user_id,
             'owner'::text AS role,
+            'active'::text AS deletion_status,
             created_at,
             updated_at
         `,
@@ -244,12 +276,14 @@ export class WorkspaceService {
           w.icon,
           w.owner_user_id,
           wm.role,
+          w.deletion_status,
           w.created_at,
           w.updated_at
         FROM workspace_members wm
         JOIN workspaces w
           ON w.id = wm.workspace_id
         WHERE wm.user_id = $1
+          AND w.deletion_status = 'active'
         ORDER BY wm.joined_at ASC, w.created_at ASC
       `,
       [currentUserId]
@@ -298,58 +332,170 @@ export class WorkspaceService {
     workspaceId: string,
     request: DeleteWorkspaceRequest | undefined
   ): Promise<DeleteWorkspacePayload> {
-    const workspace = await this.assertWorkspaceOwnerAccess(
-      currentUserId,
-      workspaceId
-    );
-    if (!request || request.confirmationName !== workspace.name) {
-      throw badRequest("confirmationName must match the current Workspace name");
+    if (!UUID_PATTERN.test(workspaceId)) {
+      throw notFound("Workspace not found");
     }
 
-    const blockers = await this.database.queryOne<WorkspaceDeletionBlockerRow>(
+    const result = await this.database.transaction(async transaction => {
+      const workspace = await transaction.queryOne<WorkspaceRow>(
+        `
+          SELECT
+            w.id,
+            w.name,
+            w.icon,
+            w.owner_user_id,
+            wm.role,
+            w.deletion_status,
+            w.created_at,
+            w.updated_at
+          FROM workspaces AS w
+          LEFT JOIN workspace_members AS wm
+            ON wm.workspace_id = w.id
+           AND wm.user_id = $2
+          WHERE w.id = $1
+          FOR UPDATE OF w
+        `,
+        [workspaceId, currentUserId]
+      );
+
+      if (!workspace) {
+        throw notFound("Workspace not found");
+      }
+      if (workspace.role !== "owner") {
+        throw forbidden("Workspace owner access required");
+      }
+      if (!request || request.confirmationName !== workspace.name) {
+        throw badRequest("confirmationName must match the current Workspace name");
+      }
+      if (workspace.deletion_status === "deleting") {
+        return {
+          deletionRequested: true,
+          status: "deleting",
+          workspaceId
+        } as const;
+      }
+
+      const blockers =
+        await this.readWorkspaceDeletionBlockers(
+          transaction,
+          workspaceId,
+          currentUserId
+        );
+
+      const messages: string[] = [];
+      if (blockers?.other_member_exists) {
+        messages.push(
+          "Workspace에 다른 멤버가 남아 있습니다. 멤버를 모두 제거한 뒤 삭제해주세요."
+        );
+      }
+      if (blockers?.github_installation_exists) {
+        messages.push("GitHub App 연결을 먼저 해제해주세요.");
+      }
+      if (blockers?.active_meeting_exists) {
+        messages.push("진행 중인 회의를 먼저 종료해주세요.");
+      }
+      if (blockers?.active_sync_exists) {
+        messages.push("진행 중인 동기화 작업이 끝난 뒤 다시 시도해주세요.");
+      }
+      if (messages.length > 0) {
+        throw conflict(messages.join(" "));
+      }
+
+      await this.enqueueWorkspaceDeletionInTransaction(
+        transaction,
+        workspaceId,
+        currentUserId
+      );
+
+      return {
+        deletionRequested: true,
+        status: "deleting",
+        workspaceId
+      } as const;
+    });
+
+    this.workspaceDeletion.requestSweep();
+    return result;
+  }
+
+  async prepareOwnedWorkspacesForAccountDeletion(
+    transaction: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<AccountDeletionWorkspacePreparation> {
+    const ownedWorkspaces = await transaction.query<WorkspaceRow>(
       `
         SELECT
-          EXISTS (
-            SELECT 1
-            FROM workspace_members
-            WHERE workspace_id = $1 AND user_id <> $2
-          ) AS other_member_exists,
-          EXISTS (
-            SELECT 1 FROM github_installations WHERE workspace_id = $1
-          ) AS github_installation_exists,
-          EXISTS (
-            SELECT 1 FROM meetings WHERE workspace_id = $1 AND ended_at IS NULL
-          ) AS active_meeting_exists,
-          EXISTS (
-            SELECT 1
-            FROM github_sync_runs
-            WHERE workspace_id = $1 AND status IN ('queued', 'running')
-          ) AS active_sync_exists
+          w.id,
+          w.name,
+          w.icon,
+          w.owner_user_id,
+          wm.role,
+          w.deletion_status,
+          w.created_at,
+          w.updated_at
+        FROM workspaces AS w
+        JOIN workspace_members AS wm
+          ON wm.workspace_id = w.id
+        WHERE wm.user_id = $1
+          AND wm.role = 'owner'
+        ORDER BY w.id
+        FOR UPDATE OF w
       `,
-      [workspaceId, currentUserId]
+      [currentUserId]
     );
+    const blockedWorkspaces: AccountDeletionWorkspaceBlocker[] = [];
 
-    const messages: string[] = [];
-    if (blockers?.other_member_exists) {
-      messages.push(
-        "Workspace에 다른 멤버가 남아 있습니다. 멤버를 모두 제거한 뒤 삭제해주세요."
+    for (const workspace of ownedWorkspaces) {
+      if (workspace.deletion_status === "deleting") continue;
+      const blockers = await this.readWorkspaceDeletionBlockers(
+        transaction,
+        workspace.id,
+        currentUserId
+      );
+      const reasons = this.workspaceDeletionBlockerReasons(blockers);
+      if (reasons.length > 0) {
+        blockedWorkspaces.push({
+          workspaceId: workspace.id,
+          name: workspace.name,
+          memberCount: Number(blockers?.other_member_count ?? 0),
+          reasons
+        });
+      }
+    }
+
+    if (blockedWorkspaces.length > 0) {
+      return {
+        blockedWorkspaces,
+        workspaceIdsToDelete: [],
+        shouldRequestSweep: false
+      };
+    }
+
+    return {
+      blockedWorkspaces: [],
+      workspaceIdsToDelete: ownedWorkspaces
+        .filter(workspace => workspace.deletion_status === "active")
+        .map(workspace => workspace.id),
+      shouldRequestSweep: ownedWorkspaces.length > 0
+    };
+  }
+
+  async scheduleOwnedWorkspacesForAccountDeletion(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceIds: string[]
+  ): Promise<void> {
+    for (const workspaceId of workspaceIds) {
+      await this.enqueueWorkspaceDeletionInTransaction(
+        transaction,
+        workspaceId,
+        currentUserId
       );
     }
-    if (blockers?.github_installation_exists) {
-      messages.push("GitHub App 연결을 먼저 해제해주세요.");
-    }
-    if (blockers?.active_meeting_exists) {
-      messages.push("진행 중인 회의를 먼저 종료해주세요.");
-    }
-    if (blockers?.active_sync_exists) {
-      messages.push("진행 중인 동기화 작업이 끝난 뒤 다시 시도해주세요.");
-    }
-    if (messages.length > 0) {
-      throw conflict(messages.join(" "));
-    }
+  }
 
-    await this.database.execute(`DELETE FROM workspaces WHERE id = $1`, [workspaceId]);
-    return { deleted: true, workspaceId };
+  requestDeletionSweep(): void {
+    this.workspaceDeletion.requestSweep();
   }
 
   async getWorkspace(
@@ -364,6 +510,9 @@ export class WorkspaceService {
 
     if (!workspace.role) {
       throw forbidden("Workspace access denied");
+    }
+    if (workspace.deletion_status === "deleting") {
+      throw conflict("Workspace deletion is in progress");
     }
 
     return this.mapWorkspace(workspace, currentUserId);
@@ -446,7 +595,7 @@ export class WorkspaceService {
     await this.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
     this.validateUserId(targetUserId);
 
-    await this.database.transaction(async (transaction) => {
+    const outboxId = await this.database.transaction(async (transaction) => {
       const membership = await transaction.queryOne<WorkspaceMemberRow>(
         `
           SELECT
@@ -514,7 +663,15 @@ export class WorkspaceService {
         `,
         [workspaceId, targetUserId]
       );
+
+      return this.membershipRevocationOutbox.enqueueMembershipRevoked(
+        transaction,
+        workspaceId,
+        targetUserId
+      );
     });
+
+    await this.membershipRevocationOutbox.publishOutbox(outboxId);
 
     return {
       removed: true
@@ -531,14 +688,24 @@ export class WorkspaceService {
       throw badRequest("Workspace owner cannot leave own workspace");
     }
 
-    await this.database.execute(
-      `
-        DELETE FROM workspace_members
-        WHERE workspace_id = $1
-          AND user_id = $2
-      `,
-      [workspaceId, currentUserId]
-    );
+    const outboxId = await this.database.transaction(async transaction => {
+      await transaction.execute(
+        `
+          DELETE FROM workspace_members
+          WHERE workspace_id = $1
+            AND user_id = $2
+        `,
+        [workspaceId, currentUserId]
+      );
+
+      return this.membershipRevocationOutbox.enqueueMembershipRevoked(
+        transaction,
+        workspaceId,
+        currentUserId
+      );
+    });
+
+    await this.membershipRevocationOutbox.publishOutbox(outboxId);
 
     return {
       removed: true
@@ -750,6 +917,7 @@ export class WorkspaceService {
         WHERE lower(wi.email) = $1
           AND wi.status = 'pending'
           AND wm.id IS NULL
+          AND w.deletion_status = 'active'
         ORDER BY wi.created_at DESC
       `,
       [userEmail, currentUserId]
@@ -789,6 +957,7 @@ export class WorkspaceService {
           JOIN workspaces w
             ON w.id = wi.workspace_id
           WHERE wi.id = $1
+            AND w.deletion_status = 'active'
           FOR UPDATE OF wi
         `,
         [invitationId]
@@ -828,6 +997,12 @@ export class WorkspaceService {
             updated_at
           FROM workspace_invitations
           WHERE id = $1
+            AND EXISTS (
+              SELECT 1
+              FROM workspaces
+              WHERE workspaces.id = workspace_invitations.workspace_id
+                AND workspaces.deletion_status = 'active'
+            )
           FOR UPDATE
         `,
         [invitationId]
@@ -1056,6 +1231,7 @@ export class WorkspaceService {
           w.icon,
           w.owner_user_id,
           wm.role,
+          w.deletion_status,
           w.created_at,
           w.updated_at
         FROM workspaces w
@@ -1077,6 +1253,140 @@ export class WorkspaceService {
     };
   }
 
+  private readWorkspaceDeletionBlockers(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<WorkspaceDeletionBlockerRow | null> {
+    return transaction.queryOne<WorkspaceDeletionBlockerRow>(
+      `
+        SELECT
+          EXISTS (
+            SELECT 1
+            FROM workspace_members
+            WHERE workspace_id = $1 AND user_id <> $2
+          ) AS other_member_exists,
+          (
+            SELECT COUNT(*)::integer
+            FROM workspace_members
+            WHERE workspace_id = $1 AND user_id <> $2
+          ) AS other_member_count,
+          EXISTS (
+            SELECT 1 FROM github_installations WHERE workspace_id = $1
+          ) AS github_installation_exists,
+          EXISTS (
+            SELECT 1
+            FROM meetings
+            WHERE workspace_id = $1 AND ended_at IS NULL
+          ) OR EXISTS (
+            SELECT 1
+            FROM meeting_recordings AS recording
+            JOIN meetings AS meeting
+              ON meeting.id = recording.meeting_id
+            WHERE meeting.workspace_id = $1
+              AND recording.status = 'RUNNING'
+          ) AS active_meeting_exists,
+          EXISTS (
+            SELECT 1
+            FROM github_sync_runs
+            WHERE workspace_id = $1 AND status IN ('queued', 'running')
+          ) AS active_sync_exists
+      `,
+      [workspaceId, currentUserId]
+    );
+  }
+
+  private workspaceDeletionBlockerReasons(
+    blockers: WorkspaceDeletionBlockerRow | null
+  ): AccountDeletionWorkspaceBlockerReason[] {
+    const reasons: AccountDeletionWorkspaceBlockerReason[] = [];
+    if (blockers?.other_member_exists) reasons.push("MEMBERS_REMAIN");
+    if (blockers?.github_installation_exists) {
+      reasons.push("GITHUB_INSTALLATION_ACTIVE");
+    }
+    if (blockers?.active_meeting_exists) reasons.push("MEETING_ACTIVE");
+    if (blockers?.active_sync_exists) reasons.push("SYNC_ACTIVE");
+    return reasons;
+  }
+
+  private async enqueueWorkspaceDeletionInTransaction(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<void> {
+    const deletionJob = await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO workspace_deletion_jobs (
+          workspace_id,
+          requested_by_user_id
+        )
+        VALUES ($1, $2)
+        RETURNING id
+      `,
+      [workspaceId, currentUserId]
+    );
+    if (!deletionJob) {
+      throw new Error("Workspace deletion job could not be created");
+    }
+
+    await transaction.execute(
+      `
+        INSERT INTO workspace_deletion_targets (
+          deletion_job_id,
+          workspace_id,
+          target_type,
+          source_id,
+          object_key,
+          next_attempt_at
+        )
+        SELECT
+          $2,
+          drive_item.workspace_id,
+          'drive_object',
+          drive_item.id,
+          drive_item.object_key,
+          GREATEST(now(), COALESCE(drive_upload.expires_at, now()))
+        FROM drive_items AS drive_item
+        LEFT JOIN drive_uploads AS drive_upload
+          ON drive_upload.drive_item_id = drive_item.id
+         AND drive_upload.workspace_id = drive_item.workspace_id
+        WHERE drive_item.workspace_id = $1
+          AND drive_item.object_key IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+          $2,
+          meeting.workspace_id,
+          'meeting_recording',
+          recording.id,
+          recording.audio_file_key,
+          now()
+        FROM meetings AS meeting
+        JOIN meeting_recordings AS recording
+          ON recording.meeting_id = meeting.id
+        WHERE meeting.workspace_id = $1
+          AND recording.audio_file_key IS NOT NULL
+
+        ON CONFLICT (deletion_job_id, object_key) DO NOTHING
+      `,
+      [workspaceId, deletionJob.id]
+    );
+
+    await transaction.execute(
+      `
+        UPDATE workspaces
+        SET
+          deletion_status = 'deleting',
+          deletion_requested_at = now(),
+          deletion_requested_by_user_id = $2
+        WHERE id = $1
+          AND deletion_status = 'active'
+      `,
+      [workspaceId, currentUserId]
+    );
+  }
+
   private async findWorkspaceForUser(
     currentUserId: string,
     workspaceId: string
@@ -1093,6 +1403,7 @@ export class WorkspaceService {
           w.icon,
           w.owner_user_id,
           wm.role,
+          w.deletion_status,
           w.created_at,
           w.updated_at
         FROM workspaces w
@@ -1132,6 +1443,7 @@ export class WorkspaceService {
         JOIN workspaces w
           ON w.id = wi.workspace_id
         WHERE wi.token_hash = $1
+          AND w.deletion_status = 'active'
       `,
       [tokenHash]
     );

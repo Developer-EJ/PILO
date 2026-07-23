@@ -1,7 +1,13 @@
 import json
+import sys
+from types import SimpleNamespace
 
+import app.shared_ai_worker_runtime as shared_ai_worker_runtime
 from app.agent_worker_runtime import AgentWorkerSettings, create_agent_dispatcher
 from app.job_dispatcher import JobDispatcher
+from app.meeting_action_item_extraction_processor import (
+    MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+)
 from app.meeting_report_processor import ProcessResult
 from app.meeting_worker_runtime import (
     MeetingWorkerSettings,
@@ -15,9 +21,19 @@ from app.shared_ai_worker_runtime import (
     SharedAiWorkerSettings,
     create_shared_dispatcher,
 )
+from app.worker import supported_jobs
 
 
 class FakeMeetingReportProcessor:
+    def process_payload(self, _payload: dict[str, object]) -> ProcessResult:
+        return ProcessResult(
+            delete_message=True,
+            reason="completed",
+            report_id="report-1",
+        )
+
+
+class FakeActionItemExtractionProcessor:
     def process_payload(self, _payload: dict[str, object]) -> ProcessResult:
         return ProcessResult(
             delete_message=True,
@@ -41,7 +57,9 @@ def test_meeting_worker_uses_only_dedicated_queue_environment(monkeypatch) -> No
 
 
 def test_meeting_dispatcher_has_no_agent_or_pr_review_processor() -> None:
-    dispatcher = create_meeting_dispatcher(FakeMeetingReportProcessor())
+    dispatcher = create_meeting_dispatcher(
+        FakeMeetingReportProcessor(), FakeActionItemExtractionProcessor()
+    )
 
     assert isinstance(dispatcher, JobDispatcher)
     assert dispatcher.agent_run_processor is None
@@ -49,9 +67,33 @@ def test_meeting_dispatcher_has_no_agent_or_pr_review_processor() -> None:
     assert dispatcher.pr_review_analysis_processor is None
 
 
+def test_meeting_dispatcher_handles_action_item_extraction_job() -> None:
+    dispatcher = create_meeting_dispatcher(
+        FakeMeetingReportProcessor(), FakeActionItemExtractionProcessor()
+    )
+
+    result = dispatcher.process_message(
+        json.dumps(
+            {
+                "jobType": MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+                "reportId": "report-1",
+            }
+        )
+    )
+
+    assert result.delete_message is True
+    assert result.reason == "completed"
+    assert result.job_type == MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE
+
+
+def test_worker_reports_action_item_extraction_as_supported_job() -> None:
+    assert MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE in supported_jobs()
+
+
 def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch) -> None:
     monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_CANVAS_HTML_TIMEOUT_MS", "180000")
     monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_BASE_URL", raising=False)
     monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
     monkeypatch.delenv("SQS_MEETING_JOBS_QUEUE_URL", raising=False)
@@ -61,6 +103,104 @@ def test_shared_ai_worker_does_not_require_meeting_queue_environment(monkeypatch
     assert settings.sqs_queue_url == "https://sqs.example.com/ai-jobs"
     assert settings.legacy_meeting_drain_enabled is False
     assert settings.legacy_agent_drain_enabled is False
+    assert settings.openai_canvas_html_timeout_seconds == 180.0
+
+
+def test_shared_ai_worker_wires_meeting_transcript_embedding_processor(monkeypatch) -> None:
+    monkeypatch.setenv("SQS_AI_JOBS_QUEUE_URL", "https://sqs.example.com/ai-jobs")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_CANVAS_HTML_TIMEOUT_MS", "210000")
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_BASE_URL", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=lambda *_args, **_kwargs: object()),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime, "PgCanvasAgentRepository", lambda *_args: object()
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "PgMeetingTranscriptEmbeddingRepository",
+        lambda *_args: "meeting-transcript-repository",
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "PgMeetingActivityEvidenceEmbeddingRepository",
+        lambda *_args: "meeting-activity-evidence-repository",
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiAgentPlannerClient",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiAgentRouterClient",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiCanvasAgentIntentClassifier",
+        lambda *_args: object(),
+    )
+    html_generator_args: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiCanvasAgentHtmlGenerator",
+        lambda *_args: html_generator_args.append(_args) or object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiCanvasAgentChatResponder",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "LocalSentenceTransformerCanvasEmbedder",
+        lambda: object(),
+    )
+    monkeypatch.setattr(shared_ai_worker_runtime, "CanvasSemanticRouter", lambda *_args: object())
+    monkeypatch.setattr(shared_ai_worker_runtime, "CanvasAgentProcessor", lambda *_args: object())
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "CanvasEmbeddingProcessor",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "OpenAiTranscriptEmbedder",
+        lambda api_key, model_name, timeout_seconds: (
+            api_key,
+            model_name,
+            timeout_seconds,
+        ),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "MeetingTranscriptEmbeddingProcessor",
+        lambda repository, embedder: (repository, embedder),
+    )
+    monkeypatch.setattr(
+        shared_ai_worker_runtime,
+        "MeetingActivityEvidenceEmbeddingProcessor",
+        lambda repository, embedder: (repository, embedder),
+    )
+
+    worker = shared_ai_worker_runtime.create_shared_ai_worker()
+
+    assert html_generator_args == [("test-key", "gpt-5.4-mini", 210.0)]
+    assert worker.meeting_transcript_embedding_processor == (
+        "meeting-transcript-repository",
+        ("test-key", "text-embedding-3-small", 30.0),
+    )
+    assert worker.settings.meeting_transcript_embedding_jobs_per_tick == 10
+    assert worker.meeting_activity_evidence_embedding_processor == (
+        "meeting-activity-evidence-repository",
+        ("test-key", "text-embedding-3-small", 30.0),
+    )
 
 
 def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:
@@ -74,14 +214,19 @@ def test_agent_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None
     settings = AgentWorkerSettings.from_env()
 
     assert settings.sqs_queue_url == "https://sqs.example.com/agent-jobs"
+    assert settings.visibility_timeout_seconds == 180
+    assert settings.visibility_heartbeat_seconds == 45
+    assert settings.openai_agent_router_model == settings.openai_agent_planner_model
 
 
 def test_agent_worker_dispatcher_has_no_meeting_or_pr_review_processor() -> None:
-    dispatcher = create_agent_dispatcher(object())
+    grounded_answer_processor = object()
+    dispatcher = create_agent_dispatcher(object(), grounded_answer_processor)
 
     assert dispatcher.meeting_report_processor is None
     assert dispatcher.canvas_agent_processor is None
     assert dispatcher.pr_review_analysis_processor is None
+    assert dispatcher.grounded_answer_processor is grounded_answer_processor
 
 
 def test_pr_review_worker_uses_only_dedicated_queue_environment(monkeypatch) -> None:

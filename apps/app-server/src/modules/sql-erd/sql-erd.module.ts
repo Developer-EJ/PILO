@@ -4,11 +4,12 @@ import { DatabaseModule } from "../../database/database.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { SqlErdSessionController } from "./sql-erd.controller";
 import { SqlErdService } from "./sql-erd.service";
+import { SqlErdOperationPublisherService } from "./sql-erd-operation-publisher.service";
 
 @Module({
   imports: [CommonModule, DatabaseModule, WorkspaceModule],
   controllers: [SqlErdSessionController],
-  providers: [SqlErdService],
+  providers: [SqlErdOperationPublisherService, SqlErdService],
   exports: [SqlErdService]
 })
 export class SqlErdModule {}

@@ -1,12 +1,53 @@
-import type { TLShape } from "tldraw";
+import type { Editor, TLShape } from "tldraw";
 
 import { isSqlErdAnnotationShape } from "@/features/sql-erd/shapes/sql-erd-annotation-shape";
 import { isSqlErdFrameShape } from "@/features/sql-erd/shapes/sql-erd-frame-shape";
 import { isSqlErdNoteShape } from "@/features/sql-erd/shapes/sql-erd-note-shape";
 import { isSqlErdTextShape } from "@/features/sql-erd/shapes/sql-erd-text-shape";
+import { isSqlErdStrokeShape } from "@/features/sql-erd/shapes/sql-erd-stroke-shape";
 import { isSqlErdRelationShape } from "@/features/sql-erd/shapes/sql-erd-relation-shape";
 import { isSqlErdTableShape } from "@/features/sql-erd/shapes/sql-erd-table-shape";
-import type { SqlErdSelection } from "@/features/sql-erd/types";
+import type {
+  SqlErdSelection,
+  SqltoerdModelJsonV1
+} from "@/features/sql-erd/types";
+
+export function shouldHandleSqlErdSchemaDeleteShortcut({
+  isEditableTarget,
+  key,
+  selection
+}: {
+  isEditableTarget: boolean;
+  key: string;
+  selection: SqlErdSelection;
+}) {
+  return (
+    !isEditableTarget &&
+    (key === "Delete" || key === "Backspace") &&
+    (selection.type === "table" ||
+      selection.type === "column" ||
+      selection.type === "relation")
+  );
+}
+
+export function getSqlErdContextRelationIds(
+  modelJson: SqltoerdModelJsonV1,
+  selection: SqlErdSelection
+) {
+  if (selection.type !== "table") {
+    return new Set<string>();
+  }
+
+  return new Set(
+    modelJson.schema.relations
+      .filter(
+        (relation) =>
+          relation.fromTableId === selection.tableId ||
+          relation.toTableId === selection.tableId
+      )
+      .map((relation) => relation.id)
+  );
+}
 
 export function areSqlErdSelectionsEqual(
   left: SqlErdSelection,
@@ -37,6 +78,35 @@ export function areSqlErdSelectionsEqual(
   if (left.type === "text" && right.type === "text") return left.textId === right.textId;
 
   return true;
+}
+
+export function resolveSqlErdTableInteractionSelection({
+  isShapeSelected,
+  selection,
+  tableId
+}: {
+  isShapeSelected: boolean;
+  selection: SqlErdSelection;
+  tableId: string;
+}) {
+  if (!isShapeSelected) {
+    return {
+      selectedColumnId: null,
+      selectedState: "none" as const
+    };
+  }
+
+  if (selection.type === "column" && selection.tableId === tableId) {
+    return {
+      selectedColumnId: selection.columnId,
+      selectedState: "column" as const
+    };
+  }
+
+  return {
+    selectedColumnId: null,
+    selectedState: "table" as const
+  };
 }
 
 export function getSqlErdSelectionFromSelectedShapes(
@@ -85,4 +155,109 @@ export function getSqlErdSelectionFromSelectedShapes(
   }
 
   return { type: "none" };
+}
+
+export type SqlErdDeleteBatch = {
+  tableIds: string[];
+  relationIds: string[];
+  deleteLinkIds: string[];
+  deleteNoteIds: string[];
+  deleteFrameIds: string[];
+  deleteTextIds: string[];
+  deleteStrokeIds: string[];
+};
+
+export function getSqlErdDeleteBatchFromSelectedShapes(
+  selectedShapes: TLShape[]
+): SqlErdDeleteBatch {
+  const tableIds = new Set<string>();
+  const relationIds = new Set<string>();
+  const deleteLinkIds = new Set<string>();
+  const deleteNoteIds = new Set<string>();
+  const deleteFrameIds = new Set<string>();
+  const deleteTextIds = new Set<string>();
+  const deleteStrokeIds = new Set<string>();
+
+  for (const shape of selectedShapes) {
+    if (isSqlErdTableShape(shape)) tableIds.add(shape.props.tableId);
+    else if (isSqlErdRelationShape(shape)) relationIds.add(shape.props.relationId);
+    else if (isSqlErdAnnotationShape(shape)) deleteLinkIds.add(shape.props.annotationId);
+    else if (isSqlErdNoteShape(shape)) deleteNoteIds.add(shape.props.noteId);
+    else if (isSqlErdFrameShape(shape)) deleteFrameIds.add(shape.props.frameId);
+    else if (isSqlErdTextShape(shape)) deleteTextIds.add(shape.props.textId);
+    else if (isSqlErdStrokeShape(shape)) deleteStrokeIds.add(shape.props.strokeId);
+  }
+
+  return {
+    deleteFrameIds: [...deleteFrameIds],
+    deleteLinkIds: [...deleteLinkIds],
+    deleteNoteIds: [...deleteNoteIds],
+    deleteStrokeIds: [...deleteStrokeIds],
+    deleteTextIds: [...deleteTextIds],
+    relationIds: [...relationIds],
+    tableIds: [...tableIds]
+  };
+}
+
+export function selectSqlErdCanvasShapeAtPoint(
+  editor: Pick<
+    Editor,
+    "getSelectedShapeIds" | "getShapeAtPoint" | "selectNone" | "setSelectedShapes"
+  >,
+  point: { x: number; y: number },
+  options: {
+    clearOnMiss?: boolean;
+    toggle?: boolean;
+  } = {}
+) {
+  const shape = editor.getShapeAtPoint(point, {
+    hitInside: true,
+    hitLabels: true,
+    hitLocked: true
+  });
+
+  if (
+    !shape ||
+    !(
+      isSqlErdAnnotationShape(shape) ||
+      isSqlErdFrameShape(shape) ||
+      isSqlErdNoteShape(shape) ||
+      isSqlErdTextShape(shape) ||
+      isSqlErdRelationShape(shape) ||
+      isSqlErdTableShape(shape)
+    )
+  ) {
+    if (options.clearOnMiss) {
+      editor.selectNone();
+    }
+    return false;
+  }
+
+  if (!options.toggle) {
+    editor.setSelectedShapes([shape.id]);
+    return true;
+  }
+
+  const selectedShapeIds = Array.from(editor.getSelectedShapeIds());
+  editor.setSelectedShapes(
+    selectedShapeIds.includes(shape.id)
+      ? selectedShapeIds.filter((shapeId) => shapeId !== shape.id)
+      : [...selectedShapeIds, shape.id]
+  );
+  return true;
+}
+
+export function isSqlErdCanvasBackgroundPoint(
+  editor: Pick<Editor, "getShapeAtPoint"> & {
+    overlays: Pick<Editor["overlays"], "getOverlayAtPoint">;
+  },
+  point: { x: number; y: number }
+) {
+  return (
+    !editor.getShapeAtPoint(point, {
+      hitInside: true,
+      hitLabels: true,
+      hitLocked: true
+    }) && !editor.overlays.getOverlayAtPoint(point)
+  );
 }

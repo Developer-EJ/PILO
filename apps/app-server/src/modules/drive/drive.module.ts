@@ -2,14 +2,26 @@ import { Module } from "@nestjs/common";
 import { CommonModule } from "../../common/common.module";
 import { DatabaseModule } from "../../database/database.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
+import { WorkspaceIndexingModule } from "../workspace-indexing/workspace-indexing.module";
 import { DriveController } from "./drive.controller";
 import { DriveStorageService } from "./drive-storage.service";
 import { DriveService } from "./drive.service";
+import { DocumentEmbeddingService } from "./document-embedding.service";
+import { DocumentEmbeddingOutboxPublisherService } from "./document-embedding-outbox-publisher.service";
+import { DocumentSearchService } from "./document-search.service";
+import { DocumentService } from "./document.service";
 
 @Module({
-  imports: [CommonModule, DatabaseModule, WorkspaceModule],
+  imports: [CommonModule, DatabaseModule, WorkspaceModule, WorkspaceIndexingModule],
   controllers: [DriveController],
-  providers: [DriveService, DriveStorageService],
-  exports: [DriveService]
+  providers: [
+    DocumentService,
+    DocumentEmbeddingService,
+    DocumentEmbeddingOutboxPublisherService,
+    DocumentSearchService,
+    DriveService,
+    DriveStorageService
+  ],
+  exports: [DocumentService, DocumentSearchService, DriveService]
 })
 export class DriveModule {}

@@ -5,10 +5,15 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.agent_processor import (
+    AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
     AGENT_RUN_REQUESTED_JOB_TYPE,
     AgentProcessResult,
 )
 from app.canvas_agent.types import CANVAS_AGENT_JOB_TYPE, CanvasAgentProcessResult
+from app.meeting_action_item_extraction_processor import (
+    MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+    MeetingActionItemExtractionProcessor,
+)
 from app.meeting_report_processor import InfrastructureError, ProcessResult
 from app.pr_review_analysis_processor import (
     PR_REVIEW_ANALYSIS_JOB_TYPE,
@@ -47,11 +52,17 @@ class JobDispatcher:
         self,
         meeting_report_processor: MeetingReportProcessorLike | None = None,
         agent_run_processor: AgentRunProcessorLike | None = None,
+        grounded_answer_processor: AgentRunProcessorLike | None = None,
         canvas_agent_processor: CanvasAgentProcessorLike | None = None,
         pr_review_analysis_processor: PrReviewAnalysisProcessorLike | None = None,
+        meeting_action_item_extraction_processor: (
+            MeetingActionItemExtractionProcessor | None
+        ) = None,
     ) -> None:
         self.meeting_report_processor = meeting_report_processor
+        self.meeting_action_item_extraction_processor = meeting_action_item_extraction_processor
         self.agent_run_processor = agent_run_processor
+        self.grounded_answer_processor = grounded_answer_processor
         self.canvas_agent_processor = canvas_agent_processor
         self.pr_review_analysis_processor = pr_review_analysis_processor
 
@@ -74,8 +85,14 @@ class JobDispatcher:
             if normalized_job_type == MEETING_REPORT_JOB_TYPE:
                 return self._process_meeting_report(payload)
 
+            if normalized_job_type == MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE:
+                return self._process_meeting_action_item_extraction(payload)
+
             if normalized_job_type == AGENT_RUN_REQUESTED_JOB_TYPE:
                 return self._process_agent_run(payload)
+
+            if normalized_job_type == AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE:
+                return self._process_grounded_answer(payload)
 
             if normalized_job_type == CANVAS_AGENT_JOB_TYPE:
                 return self._process_canvas_agent(payload)
@@ -110,6 +127,24 @@ class JobDispatcher:
             resource_id=result.report_id,
         )
 
+    def _process_meeting_action_item_extraction(
+        self, payload: dict[str, object]
+    ) -> JobProcessResult:
+        processor = self.meeting_action_item_extraction_processor
+        if processor is None:
+            return JobProcessResult(
+                delete_message=False,
+                reason="meeting_action_item_extraction_processor_unavailable",
+                job_type=MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+            )
+        result = processor.process_payload(payload)
+        return JobProcessResult(
+            delete_message=result.delete_message,
+            reason=result.reason,
+            job_type=MEETING_ACTION_ITEM_EXTRACTION_JOB_TYPE,
+            resource_id=result.report_id,
+        )
+
     def _process_agent_run(self, payload: dict[str, object]) -> JobProcessResult:
         if self.agent_run_processor is None:
             return JobProcessResult(
@@ -122,6 +157,21 @@ class JobDispatcher:
             delete_message=result.delete_message,
             reason=result.reason,
             job_type=AGENT_RUN_REQUESTED_JOB_TYPE,
+            resource_id=result.run_id,
+        )
+
+    def _process_grounded_answer(self, payload: dict[str, object]) -> JobProcessResult:
+        if self.grounded_answer_processor is None:
+            return JobProcessResult(
+                delete_message=False,
+                reason="grounded_answer_processor_unavailable",
+                job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
+            )
+        result = self.grounded_answer_processor.process_payload(payload)
+        return JobProcessResult(
+            delete_message=result.delete_message,
+            reason=result.reason,
+            job_type=AGENT_GROUNDED_ANSWER_REQUESTED_JOB_TYPE,
             resource_id=result.run_id,
         )
 

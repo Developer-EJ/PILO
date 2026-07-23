@@ -280,6 +280,34 @@ DELETE /api/v1/workspaces/{workspaceId}/members/me
 - 나가기 후 접근 가능한 Workspace가 없으면 사용자는 onboarding 필요 상태가 될 수
   있다. 서버가 기본 Workspace를 자동 생성하지 않는다.
 
+## Membership 제거 후 Realtime 접근 회수
+
+member 제거, Workspace 나가기, 계정 탈퇴는 membership delete와 같은 transaction 안에
+`workspace_membership_revocation_outbox` delivery intent를 만든다. commit 뒤 publisher는
+intent를 claim해 `workspace:membership-revocations` internal Redis channel에 exact V1
+`membership.revoked` event를 발행한다. Event에는 UUID `workspaceId`, UUID `userId`,
+canonical ISO `occurredAt`이 포함된다.
+
+Redis 연결 또는 publish가 실패하면 outbox intent는 `pending`으로 되돌아가 bounded
+backoff로 재시도한다. claim lease가 만료된 `publishing` intent도 다시 claim할 수 있다.
+따라서 Redis 실패는 이미 commit된 membership 제거를 rollback하거나 성공 API 응답을
+바꾸지 않으며, transaction이 실패한 경우에는 delivery intent와 event가 모두 남지
+않는다.
+
+Realtime Server는 event를 받으면 해당 사용자의 모든 Chat tab을 Workspace Chat room과
+target user room에서 제거한다. 같은 event를 SQLtoERD handler에도 전달해 해당
+Workspace의 모든 SQLtoERD room과 in-memory presence를 정리하고, 사용자가 보유한
+`sql_erd_session_source_locks` row를 즉시 삭제한다. SQLtoERD socket은 같은 연결에서
+철회된 Workspace에 다시 join하거나 presence를 전송할 수 없다. 다른 사용자와 다른
+Workspace의 room·presence·source lock은 유지한다. room leave가 하나라도 실패하면
+해당 socket을 강제 종료한다. Meeting Socket.IO room과 Workspace presence도 같은 event로
+정리한다. 철회 event가 DB membership 확인과 room join 사이에 도착하면 Realtime Server는
+socket/workspace fence를 기록해 진행 중인 Meeting·presence join을 rollback하고 이후
+event를 거부한다.
+Redis event가 유실되어도 Chat fan-out 직전의 batch membership recheck가 제거된 사용자의
+수신을 차단한다. SQLtoERD의 HTTP operation, source lock, source publish 경로는 각
+요청에서 Workspace membership을 다시 검증한다.
+
 ## 초대 목록 조회
 
 ```http

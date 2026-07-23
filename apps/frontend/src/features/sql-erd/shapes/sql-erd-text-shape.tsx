@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useValue } from "@tldraw/state-react";
 import {
   HTMLContainer,
   Rectangle2d,
+  resizeBox,
   ShapeUtil,
   T,
+  useEditor,
   type TLBaseShape,
+  type TLResizeInfo,
   type TLShape
 } from "tldraw";
 
@@ -71,8 +75,14 @@ export class SqlErdTextShapeUtil extends ShapeUtil<SqlErdTextShape> {
     return false;
   }
 
+  override hideRotateHandle() { return true; }
+
   override canResize() {
     return true;
+  }
+
+  override onResize(shape: SqlErdTextShape, info: TLResizeInfo<SqlErdTextShape>) {
+    return resizeBox(shape, info, { minWidth: 80, minHeight: 40 });
   }
 
   override getDefaultProps(): SqlErdTextShape["props"] {
@@ -105,8 +115,14 @@ export class SqlErdTextShapeUtil extends ShapeUtil<SqlErdTextShape> {
 }
 
 function SqlErdTextBox({ shape }: { shape: SqlErdTextShape }) {
+  const editor = useEditor();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState(shape.props.text);
+  const isSelected = useValue(
+    `sqltoerd-text-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
 
   useEffect(() => setDraft(shape.props.text), [shape.props.text]);
 
@@ -128,6 +144,10 @@ function SqlErdTextBox({ shape }: { shape: SqlErdTextShape }) {
     }
   }
 
+  function handlePointerDown(event: PointerEvent<HTMLTextAreaElement>) {
+    event.stopPropagation();
+  }
+
   return (
     <HTMLContainer style={{ height: shape.props.h, width: shape.props.w }}>
       <textarea
@@ -138,7 +158,9 @@ function SqlErdTextBox({ shape }: { shape: SqlErdTextShape }) {
         onBlur={commit}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={handleKeyDown}
+        onPointerDown={handlePointerDown}
         ref={textareaRef}
+        style={{ pointerEvents: isSelected ? "auto" : "none" }}
         value={draft}
       />
     </HTMLContainer>

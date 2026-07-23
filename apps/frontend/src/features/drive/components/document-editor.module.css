@@ -1,0 +1,562 @@
+.documentPage {
+  width: 100%;
+  max-width: 60rem;
+  margin-inline: auto;
+  padding: 0 clamp(1rem, 4vw, 2rem) 4rem;
+}
+
+.documentHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+
+.documentStateHeader {
+  padding-bottom: 1.25rem;
+}
+
+.documentTitleGroup {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.documentTitle {
+  overflow-wrap: anywhere;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.documentTitleButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  overflow-wrap: anywhere;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.documentTitleButton:hover {
+  color: var(--muted-foreground);
+  cursor: text;
+}
+
+.inlineTitleEditor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.inlineTitleInput {
+  height: auto;
+  flex: 1 1 14rem;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.inlineTitleError {
+  width: 100%;
+  color: var(--destructive);
+  font-size: 0.75rem;
+}
+
+.documentStatus {
+  min-height: 1.25rem;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.documentActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.inlineAlert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--destructive) 20%, transparent);
+  border-radius: 0.375rem;
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  padding: 0.5rem 0.75rem;
+  color: var(--destructive);
+  font-size: 0.875rem;
+}
+
+.editorSurface {
+  margin-top: 1rem;
+}
+
+.commandStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.375rem 0;
+}
+
+.editor {
+  display: block;
+}
+
+.emptyEditor :global(.tiptap p:first-child::before) {
+  color: var(--muted-foreground);
+  content: "입력하려면 /";
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.slashMenu {
+  position: fixed;
+  z-index: 60;
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: min(24rem, calc(100vh - 2rem));
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--popover);
+  padding: 0.25rem;
+  box-shadow: 0 12px 30px color-mix(in srgb, black 16%, transparent);
+}
+
+.bubbleMenu {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--popover);
+  padding: 0.25rem;
+  box-shadow: 0 12px 30px color-mix(in srgb, black 16%, transparent);
+}
+
+.blockHandle {
+  display: flex;
+  align-items: center;
+}
+
+.slashMenuOption,
+.slashMenuOptionActive {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  padding: 0.5rem;
+  color: inherit;
+  text-align: left;
+}
+
+.slashMenuOption {
+  cursor: pointer;
+}
+
+.slashMenuOption:hover,
+.slashMenuOptionActive {
+  background: var(--muted);
+}
+
+.slashMenuSearch {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.375rem 0.5rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.slashMenuSearch input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  outline: none;
+}
+
+.slashMenuEmpty {
+  margin: 0;
+  padding: 0.75rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.slashMenuIcon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted-foreground);
+}
+
+.slashMenuCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.slashMenuLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.slashMenuDescription {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileAttachment {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+}
+
+.fileAttachmentIcon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--muted-foreground);
+}
+
+.fileAttachmentDetails {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.fileAttachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.fileAttachmentMeta,
+.fileAttachmentMuted,
+.fileAttachmentUnavailable {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.fileAttachmentUnavailable {
+  color: var(--destructive);
+}
+
+.fileAttachmentActions {
+  display: flex;
+  flex: none;
+  gap: 0.125rem;
+}
+
+.pdfPreviewSurface {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.pdfCollaborationLayout {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.pdfCollaborationToolbar,
+.pdfCollaborationControls,
+.pdfCollaborationPresence {
+  display: flex;
+  align-items: center;
+}
+
+.pdfCollaborationToolbar {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  padding: 0.375rem 0.5rem;
+}
+
+.pdfCollaborationControls {
+  gap: 0.125rem;
+}
+
+.pdfColorSwatch {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--foreground) 30%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.pdfColorSwatch:hover {
+  transform: scale(1.08);
+}
+
+.pdfColorSwatchActive {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.pdfPageCounter {
+  min-width: 4.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.pdfCollaborationPresence {
+  min-width: 0;
+  flex: 1 1 10rem;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.pdfCollaborationPresence > svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+
+.pdfCollaborationMember {
+  overflow: hidden;
+  max-width: 7.5rem;
+  border-radius: 0.25rem;
+  background: var(--muted);
+  padding: 0.125rem 0.375rem;
+  text-overflow: ellipsis;
+}
+
+.pdfCollaborationViewport {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: start center;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.pdfPageFrame {
+  position: relative;
+  flex: none;
+  max-width: 100%;
+  background: white;
+  box-shadow: 0 3px 12px color-mix(in srgb, black 18%, transparent);
+}
+
+.pdfPageFrame :global(.react-pdf__Document),
+.pdfPageFrame :global(.react-pdf__Page) {
+  line-height: 0;
+}
+
+.pdfPageFrame :global(.react-pdf__Page__canvas) {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.pdfPreviewImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+.pdfAnnotationLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.pdfRemotePointer {
+  position: absolute;
+  z-index: 2;
+  max-width: 9rem;
+  transform: translate(0.35rem, 0.35rem);
+  border-radius: 0.25rem;
+  background: var(--foreground);
+  padding: 0.125rem 0.375rem;
+  color: var(--background);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdfPreviewState {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+@media (max-width: 40rem) {
+  .pdfCollaborationPresence {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .pdfCollaborationViewport {
+    padding: 0.5rem;
+  }
+}
+
+.loadingState,
+.errorState {
+  display: flex;
+  min-height: 16rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.errorState {
+  flex-direction: column;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.editor :global(.tiptap) {
+  min-height: 20rem;
+  padding: 1.5rem 1rem 1.5rem 2rem;
+  outline: none;
+}
+
+.editor :global(.collaboration-carets__caret) {
+  position: relative;
+  margin-right: -1px;
+  margin-left: -1px;
+  border-right: 1px solid;
+  border-left: 1px solid;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.editor :global(.collaboration-carets__label) {
+  position: absolute;
+  top: -1.5em;
+  left: -1px;
+  border-radius: 0.1875rem 0.1875rem 0.1875rem 0;
+  padding: 0.1rem 0.3rem;
+  color: white;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 600;
+  line-height: normal;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.editor :global(.tiptap > * + *) {
+  margin-top: 0.875rem;
+}
+
+.editor :global(.tiptap h1) {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.editor :global(.tiptap h2) {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.editor :global(.tiptap h3) {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.editor :global(.tiptap ul),
+.editor :global(.tiptap ol) {
+  padding-left: 1.5rem;
+}
+
+.editor :global(.tiptap ul) {
+  list-style: disc;
+}
+
+.editor :global(.tiptap ol) {
+  list-style: decimal;
+}
+
+.editor :global(.tiptap blockquote) {
+  border-left: 3px solid var(--border);
+  color: var(--muted-foreground);
+  padding-left: 1rem;
+}
+
+.editor :global(.tiptap pre) {
+  background: var(--muted);
+  border-radius: 0.375rem;
+  overflow-x: auto;
+  padding: 0.875rem;
+}
+
+.editor :global(.tiptap code) {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.875em;
+}
+
+.editor :global(.tiptap hr) {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
+}

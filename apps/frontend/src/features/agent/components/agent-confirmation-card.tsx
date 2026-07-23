@@ -1,12 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Clock3, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type {
   AgentConfirmation,
   AgentConfirmationPlan,
-  AgentRiskLevel
+  AgentConfirmationStatus
 } from "@/features/agent/types";
 import { cn } from "@/lib/utils";
 
@@ -16,20 +17,15 @@ type AgentConfirmationCardProps = {
   isApproving?: boolean;
   isRejecting?: boolean;
   nowMs: number;
-  onApprove: () => void;
+  onApprove: (choiceId?: string) => void;
   onReject: () => void;
 };
 
-const riskLevelLabels: Record<AgentRiskLevel, string> = {
-  high: "High",
-  low: "Low",
-  medium: "Medium"
-};
-
-const riskLevelClassNames: Record<AgentRiskLevel, string> = {
-  high: "border-red-200 bg-red-50 text-red-700",
-  low: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  medium: "border-amber-200 bg-amber-50 text-amber-700"
+const confirmationStatusLabels: Record<AgentConfirmationStatus, string> = {
+  pending: "선택 대기",
+  approved: "승인됨",
+  rejected: "거절됨",
+  expired: "만료됨"
 };
 
 function formatDateTime(value: string) {
@@ -73,14 +69,40 @@ function formatPlanValue(value: unknown): string {
   }
 }
 
+function isInternalPlanKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  return [
+    "id",
+    "resourceid",
+    "userid",
+    "reportid",
+    "meetingid",
+    "eventid",
+    "actionitemid",
+    "boardid",
+    "columnid",
+    "idempotencykey",
+    "path",
+    "method",
+    "service",
+    "input",
+    "call"
+  ].some((part) => normalized === part || normalized.endsWith(part));
+}
+
 function renderObjectSummary(value: Record<string, unknown> | null) {
-  if (!value || Object.keys(value).length === 0) {
+  const entries = value
+    ? Object.entries(value).filter(([key]) => !isInternalPlanKey(key))
+    : [];
+
+  if (entries.length === 0) {
     return <p className="text-xs text-slate-500">표시할 값이 없습니다.</p>;
   }
 
   return (
     <dl className="space-y-1.5">
-      {Object.entries(value).map(([key, entryValue]) => (
+      {entries.map(([key, entryValue]) => (
         <div
           key={key}
           className="grid grid-cols-[minmax(72px,0.45fr)_minmax(0,1fr)] gap-2 text-xs"
@@ -98,6 +120,30 @@ function renderObjectSummary(value: Record<string, unknown> | null) {
 }
 
 function getTargetLabel(plan: AgentConfirmationPlan) {
+  const label =
+    plan.target.label ??
+    plan.target.name ??
+    plan.target.title ??
+    plan.target.boardName ??
+    plan.target.roomName;
+  if (typeof label === "string" && label.trim()) {
+    return label.trim();
+  }
+
+  const beforeTitle =
+    plan.kind === "choice" || !plan.before
+      ? null
+      : plan.before.title;
+  if (typeof beforeTitle === "string" && beforeTitle.trim()) {
+    return beforeTitle.trim();
+  }
+
+  const afterTitle =
+    plan.kind === "choice" || !plan.after ? null : plan.after.title;
+  if (typeof afterTitle === "string" && afterTitle.trim()) {
+    return afterTitle.trim();
+  }
+
   const domain = formatPlanValue(plan.target.domain);
   const resourceType = formatPlanValue(plan.target.resourceType);
 
@@ -118,6 +164,15 @@ export function AgentConfirmationCard({
   onReject
 }: AgentConfirmationCardProps) {
   const plan = confirmation.plan;
+  const isChoicePlan = plan?.kind === "choice";
+  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(
+    confirmation.selectedChoiceId
+  );
+
+  useEffect(() => {
+    setSelectedChoiceId(confirmation.selectedChoiceId);
+  }, [confirmation.id, confirmation.selectedChoiceId]);
+
   const expiresAtMs = new Date(confirmation.expiresAt).getTime();
   const isExpired =
     Number.isFinite(expiresAtMs) && confirmation.status === "pending"
@@ -125,21 +180,17 @@ export function AgentConfirmationCard({
       : confirmation.status === "expired";
   const isPending = confirmation.status === "pending" && !isExpired;
   const actionDisabled = disabled || !isPending || isApproving || isRejecting;
-  const statusLabel = isExpired ? "expired" : confirmation.status;
+  const approveDisabled =
+    actionDisabled || (isChoicePlan && !selectedChoiceId);
+  const statusLabel = confirmationStatusLabels[
+    isExpired ? "expired" : confirmation.status
+  ];
   const summary = plan?.summary?.trim() || "승인이 필요한 작업입니다.";
 
   return (
     <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white text-slate-900">
       <div className="border-b border-slate-200 bg-slate-50 px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-semibold",
-              riskLevelClassNames[confirmation.riskLevel]
-            )}
-          >
-            {riskLevelLabels[confirmation.riskLevel]}
-          </span>
           <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
             <Clock3 className="size-3" />
             {formatDateTime(confirmation.expiresAt)}
@@ -156,36 +207,53 @@ export function AgentConfirmationCard({
       {plan ? (
         <div className="space-y-3 px-3 py-3">
           <div className="grid gap-1.5 text-xs">
-            <span className="font-semibold text-slate-500">Tool</span>
-            <span className="min-w-0 break-words rounded-md bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-700">
-              {plan.toolName}
-            </span>
-          </div>
-
-          <div className="grid gap-1.5 text-xs">
-            <span className="font-semibold text-slate-500">Target</span>
+            <span className="font-semibold text-slate-500">작업 대상</span>
             <span className="min-w-0 break-words text-slate-800">
               {getTargetLabel(plan)}
             </span>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="min-w-0 rounded-md border border-slate-200 p-2">
-              <p className="mb-2 text-xs font-semibold text-slate-500">Before</p>
-              {renderObjectSummary(plan.before)}
-            </div>
-            <div className="min-w-0 rounded-md border border-slate-200 p-2">
-              <p className="mb-2 text-xs font-semibold text-slate-500">After</p>
-              {renderObjectSummary(plan.after)}
-            </div>
-          </div>
+          {plan.kind === "choice" ? (
+            <div className="grid gap-2" role="group" aria-label="실행 방식 선택">
+              {plan.choices.map((choice) => {
+                const isSelected = selectedChoiceId === choice.id;
 
-          <details className="rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-600">
-            <summary className="cursor-pointer font-medium">
-              실행 호출 정보
-            </summary>
-            <div className="mt-2">{renderObjectSummary(plan.call)}</div>
-          </details>
+                return (
+                  <button
+                    aria-pressed={isSelected}
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-left transition-colors",
+                      isSelected
+                        ? "border-blue-500 bg-blue-50 text-blue-900"
+                        : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+                    )}
+                    disabled={disabled || !isPending || isApproving || isRejecting}
+                    key={choice.id}
+                    onClick={() => setSelectedChoiceId(choice.id)}
+                    type="button"
+                  >
+                    <span className="block text-sm font-medium">{choice.label}</span>
+                    {choice.description ? (
+                      <span className="mt-1 block text-xs text-slate-500">
+                        {choice.description}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 rounded-md border border-slate-200 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-500">Before</p>
+                {renderObjectSummary(plan.before)}
+              </div>
+              <div className="min-w-0 rounded-md border border-slate-200 p-2">
+                <p className="mb-2 text-xs font-semibold text-slate-500">After</p>
+                {renderObjectSummary(plan.after)}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="px-3 py-3 text-sm text-slate-600">
@@ -203,8 +271,8 @@ export function AgentConfirmationCard({
       <div className="flex flex-col gap-2 border-t border-slate-200 px-3 py-3 sm:flex-row">
         <Button
           className="w-full sm:flex-1"
-          disabled={actionDisabled}
-          onClick={onApprove}
+          disabled={approveDisabled}
+          onClick={() => onApprove(selectedChoiceId ?? undefined)}
           size="sm"
           type="button"
         >

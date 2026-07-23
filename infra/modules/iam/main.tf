@@ -1,5 +1,6 @@
 locals {
   github_oidc_enabled                      = var.github_owner != "" && var.github_repo != ""
+  db_migration_publisher_oidc_enabled      = local.github_oidc_enabled && var.db_migration_publisher_repository_arn != ""
   s3_object_arns                           = [for arn in var.s3_bucket_arns : "${arn}/*"]
   terraform_plan_state_object_arn          = "${var.terraform_plan_state_bucket_arn}/${var.terraform_plan_state_key}"
   terraform_plan_state_lockfile_object_arn = "${local.terraform_plan_state_object_arn}.tflock"
@@ -203,6 +204,31 @@ resource "aws_iam_role_policy" "pr_review_ai_worker_task" {
   })
 }
 
+resource "aws_iam_role" "workspace_indexer_worker_task" {
+  name               = "${var.name_prefix}-workspace-indexer-worker-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
+}
+
+resource "aws_iam_role_policy" "workspace_indexer_worker_task" {
+  name = "${var.name_prefix}-workspace-indexer-worker-task-policy"
+  role = aws_iam_role.workspace_indexer_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ChangeMessageVisibility"
+      ]
+      Resource = var.workspace_indexer_worker_queue_arns
+    }]
+  })
+}
+
 resource "aws_iam_role" "github_sync_worker_task" {
   name               = "${var.name_prefix}-github-sync-worker-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
@@ -218,7 +244,7 @@ resource "aws_iam_role_policy" "github_sync_worker_task" {
     }, {
     Effect   = "Allow"
     Action   = ["sqs:SendMessage"]
-    Resource = var.github_webhooks_queue_arn
+    Resource = var.github_sync_worker_queue_arns
   }] })
 }
 
@@ -473,9 +499,75 @@ resource "aws_iam_role_policy" "github_actions_pass_roles" {
           aws_iam_role.app_server_task.arn,
           aws_iam_role.realtime_server_task.arn,
           aws_iam_role.ai_worker_task.arn,
+          aws_iam_role.workspace_indexer_worker_task.arn,
           aws_iam_role.github_sync_worker_task.arn,
         ]
       }
+    ]
+  })
+}
+
+data "aws_iam_policy_document" "github_actions_db_migration_publisher_assume_role" {
+  count = local.db_migration_publisher_oidc_enabled ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github[0].arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/dev"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_actions_db_migration_publisher" {
+  count = local.db_migration_publisher_oidc_enabled ? 1 : 0
+
+  name               = "${var.name_prefix}-db-migration-publisher-role"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_db_migration_publisher_assume_role[0].json
+}
+
+resource "aws_iam_role_policy" "github_actions_db_migration_publisher" {
+  count = local.db_migration_publisher_oidc_enabled ? 1 : 0
+
+  name = "${var.name_prefix}-db-migration-publisher-ecr-push"
+  role = aws_iam_role.github_actions_db_migration_publisher[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "GetEcrAuthorizationToken"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "PushMigrationRunnerImage"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:CompleteLayerUpload",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart",
+        ]
+        Resource = var.db_migration_publisher_repository_arn
+      },
     ]
   })
 }

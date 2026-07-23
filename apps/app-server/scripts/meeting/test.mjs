@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./delivery-options-contract.test.mjs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -21,12 +22,113 @@ const meetingStateRealtimePublisher = await readFile(
   ),
   "utf8"
 );
+const meetingServiceSource = await readFile(
+  new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
+  "utf8"
+);
+const meetingControllerSource = await readFile(
+  new URL("../../src/modules/meeting/meeting.controller.ts", import.meta.url),
+  "utf8"
+);
+const meetingActionItemDeliverySource = await readFile(
+  new URL(
+    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const participantSessionMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/072_convert_meeting_participants_to_session_history.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingReportFailureDiagnosticsMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/084_add_meeting_report_failure_diagnostics.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingReportContentEditsMigration = await readFile(
+  new URL(
+    "../../../../db/migrations/097_add_meeting_report_content_edits.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 
 assert.match(meetingStateRealtimePublisher, /MEETING_STATE_REDIS_CHANNEL = "meeting:state-events"/);
 assert.match(meetingStateRealtimePublisher, /event: "meeting:state:updated"/);
 assert.match(meetingStateRealtimePublisher, /publishStateUpdatedSafely/);
 assert.match(meetingStateRealtimePublisher, /recording_started/);
 assert.match(meetingStateRealtimePublisher, /recording_failed/);
+assert.match(meetingServiceSource, /WITH active_participant AS/);
+assert.match(
+  meetingServiceSource,
+  /active_participant AS \(\s+SELECT meeting_participants\.\*/s
+);
+assert.match(
+  meetingControllerSource,
+  /action-items\/:actionItemId\/delivery-options/,
+  "Meeting API must provide Board and Column delivery options without a frontend Board dependency"
+);
+assert.match(
+  meetingControllerSource,
+  /action-items\/:actionItemId\/deliveries/,
+  "Meeting API must expose the composite action item delivery command"
+);
+assert.match(
+  meetingActionItemDeliverySource,
+  /last_attempted_by_user_id = \$3[\s\S]*?last_attempted_at = now\(\)/,
+  "Any Workspace member retry must record the most recent delivery claimant"
+);
+assert.doesNotMatch(
+  meetingActionItemDeliverySource,
+  /delivery\.requested_by_user_id !== currentUserId/,
+  "Delivery retries must not be restricted to the original requester"
+);
+assert.match(
+  meetingActionItemDeliverySource,
+  /withAssigneeMention\([\s\S]*?assignee_github_login/,
+  "Pilo issue delivery must preserve the action item body and append the linked GitHub mention"
+);
+assert.match(
+  meetingServiceSource,
+  /getActionItemDeliverySuggestion/,
+  "Meeting detail must expose the AI delivery suggestion for the approval UI"
+);
+assert.match(meetingServiceSource, /ON CONFLICT DO NOTHING/);
+assert.match(meetingServiceSource, /pg_advisory_xact_lock/);
+assert.match(meetingServiceSource, /legacy_participant AS/);
+assert.match(meetingServiceSource, /ORDER BY joined_at DESC, id DESC\s+LIMIT 1/s);
+assert.match(meetingServiceSource, /WHERE id = \(SELECT id FROM legacy_participant\)/);
+assert.match(meetingServiceSource, /AND meeting_participants\.left_at IS NULL/);
+assert.match(
+  meetingServiceSource,
+  /WHERE id = \$1\s+AND left_at IS NULL/
+);
+assert.match(meetingServiceSource, /COUNT\(DISTINCT user_id\)::int/);
+assert.match(meetingServiceSource, /SELECT DISTINCT ON \(meeting_participants\.user_id\)/);
+assert.match(participantSessionMigration, /is_legacy_session boolean NOT NULL DEFAULT false/);
+assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_code TEXT/);
+assert.match(meetingReportContentEditsMigration, /ADD COLUMN title TEXT/);
+assert.match(meetingReportContentEditsMigration, /ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1/);
+assert.match(meetingReportContentEditsMigration, /ADD COLUMN user_text TEXT/);
+assert.match(meetingReportContentEditsMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(meetingControllerSource, /@Patch\("meeting-reports\/:reportId"\)/);
+assert.match(meetingServiceSource, /updateMeetingReportContent/);
+assert.match(meetingServiceSource, /content_version = content_version \+ 1/);
+assert.match(meetingServiceSource, /Only the workspace owner or a meeting participant can edit this report/);
+assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_detail JSONB/);
+assert.match(meetingReportFailureDiagnosticsMigration, /failure_detail - ARRAY\['category', 'retryable', 'providerStatusCode'\]/);
+assert.match(meetingServiceSource, /failure_code = NULL/);
+assert.match(meetingServiceSource, /failure_detail = NULL/);
+assert.match(participantSessionMigration, /UPDATE meeting_participants\s+SET is_legacy_session = true/s);
+assert.match(participantSessionMigration, /DROP CONSTRAINT IF EXISTS unique_meeting_participant/);
+assert.match(participantSessionMigration, /unique_active_meeting_participant/);
+assert.match(participantSessionMigration, /unique_active_meeting_livekit_identity/);
 
 const currentUserId = "11111111-1111-1111-1111-111111111111";
 const workspaceId = "22222222-2222-2222-2222-222222222222";
@@ -35,6 +137,7 @@ const participantId = "44444444-4444-4444-4444-444444444444";
 const recordingId = "55555555-5555-5555-5555-555555555555";
 const secondRecordingId = "66666666-6666-6666-6666-666666666666";
 const reportId = "77777777-7777-7777-7777-777777777777";
+const decisionItemId = "abababab-abab-abab-abab-abababababab";
 const actionItemId = "12121212-1212-1212-1212-121212121212";
 const otherUserId = "88888888-8888-8888-8888-888888888888";
 const otherParticipantId = "99999999-9999-9999-9999-999999999999";
@@ -43,6 +146,54 @@ const createdAt = new Date("2026-07-05T00:00:01.000Z");
 const updatedAt = new Date("2026-07-05T00:00:02.000Z");
 const leftAt = new Date("2026-07-05T00:10:00.000Z");
 const endedAt = new Date("2026-07-05T00:10:01.000Z");
+
+{
+  const service = Object.create(MeetingService.prototype);
+  const suggestion = service.mapMeetingReportActionItem({
+    id: actionItemId,
+    source_index: 0,
+    title: "7월 18일 일정 조정",
+    description: "7월 18일 14시에 일정 조정 내용을 확인한다.",
+    priority: "MEDIUM",
+    assignee_user_id: null,
+    assignee_name: null,
+    assignee_avatar_url: null,
+    action_item_candidates: [{
+      deliverySuggestion: {
+        deliveryType: "calendar_event",
+        calendar: {
+          isAllDay: false,
+          startDate: "2026-07-18",
+          endDate: "2026-07-18",
+          startTime: "14:00",
+          endTime: null
+        }
+      }
+    }],
+    status: "PENDING",
+    updated_by_user_id: null,
+    approved_by_user_id: null,
+    approved_at: null,
+    dismissed_by_user_id: null,
+    dismissed_at: null,
+    delivery_id: null,
+    delivery_type: null,
+    delivery_status: null,
+    created_at: createdAt,
+    updated_at: updatedAt
+  }).deliverySuggestion;
+
+  assert.deepEqual(suggestion, {
+    deliveryType: "calendar_event",
+    calendar: {
+      isAllDay: false,
+      startDate: "2026-07-18",
+      endDate: "2026-07-18",
+      startTime: "14:00",
+      endTime: null
+    }
+  });
+}
 
 function meetingReportEventContext(token) {
   return {
@@ -422,9 +573,17 @@ function meetingReportRow(overrides = {}) {
     status: "COMPLETED",
     failed_step: null,
     error_message: null,
+    failure_code: null,
+    failure_detail: null,
+    title: "회의록 제목",
+    user_title: null,
     summary: "요약",
     discussion_points: "논의사항",
+    user_discussion_points: null,
     decisions: "결정사항",
+    content_version: 1,
+    content_edited_by_user_id: null,
+    content_edited_at: null,
     action_item_candidates: [{ title: "후속 작업" }],
     retry_count: 0,
     created_at: createdAt,
@@ -462,6 +621,12 @@ function meetingReportRegenerationRow(overrides = {}) {
       status: "FAILED",
       failed_step: "STT",
       error_message: "STT failed safely",
+      failure_code: "INVALID_OUTPUT",
+      failure_detail: {
+        category: "invalid_output",
+        retryable: false,
+        providerStatusCode: null
+      },
       summary: "이전 요약",
       discussion_points: "이전 논의사항",
       decisions: "이전 결정사항",
@@ -469,6 +634,9 @@ function meetingReportRegenerationRow(overrides = {}) {
       retry_count: 1
     }),
     transcript_text: "이전 전문",
+    ai_title: "회의록 제목",
+    ai_discussion_points: "이전 논의사항",
+    ai_decisions: "이전 결정사항",
     recording_status: "COMPLETED",
     recording_audio_file_key: `recordings/meetings/workspaces/${workspaceId}/meetings/${meetingId}/recordings/${recordingId}.mp3`,
     ...overrides
@@ -522,6 +690,15 @@ async function assertConflict(action, messagePattern) {
   await assert.rejects(action, (error) => {
     assert.equal(error.getStatus(), 409);
     assert.equal(error.getResponse().error.code, "CONFLICT");
+    assert.match(error.getResponse().error.message, messagePattern);
+    return true;
+  });
+}
+
+async function assertForbidden(action, messagePattern) {
+  await assert.rejects(action, (error) => {
+    assert.equal(error.getStatus(), 403);
+    assert.equal(error.getResponse().error.code, "FORBIDDEN");
     assert.match(error.getResponse().error.message, messagePattern);
     return true;
   });
@@ -627,19 +804,17 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryOneRows: [
         (text, values) => {
-          assert.match(text, /workspace_members\.role = 'owner'/);
-          assert.match(text, /meeting_participants\.user_id = \$3::uuid/);
-          assert.deepEqual(values, [workspaceId, reportId, otherUserId]);
-          return null;
+          assert.doesNotMatch(text, /meeting_participants\.user_id = \$3/);
+          assert.deepEqual(values, [workspaceId, otherUserId, reportId]);
+          return meetingReportRow({ transcript_text: "다른 멤버도 조회 가능" });
         }
       ]
     })
   );
 
-  await assertNotFound(
-    () => service.getReport(otherUserId, workspaceId, reportId),
-    /Meeting report not found/
-  );
+  const result = await service.getReport(otherUserId, workspaceId, reportId);
+
+  assert.equal(result.report.id, reportId);
 }
 
 {
@@ -957,12 +1132,13 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /WITH[\s\S]*active_participant AS/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
           assert.match(text, /\$1::uuid/);
           assert.match(text, /\$2::uuid/);
           assert.match(text, /\(\$1::uuid\)::text/);
           assert.match(text, /\(\$2::uuid\)::text/);
-          assert.match(text, /left_at = NULL/);
+          assert.match(text, /AND left_at IS NULL/);
           assert.deepEqual(values, [meetingId, currentUserId]);
           return participantRow();
         }
@@ -994,6 +1170,41 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const { service, liveKitTokenService } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        currentMeetingRow({
+          recording_id: null,
+          recording_meeting_id: null,
+          recording_status: null,
+          recording_started_at: null
+        }),
+        text => {
+          assert.match(text, /CROSS JOIN participant_lock/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
+          return null;
+        },
+        text => {
+          assert.match(text, /legacy_participant AS/);
+          assert.match(text, /ORDER BY joined_at DESC, id DESC\s+LIMIT 1/s);
+          assert.match(text, /WHERE id = \(SELECT id FROM legacy_participant\)/);
+          assert.doesNotMatch(
+            text,
+            /reactivated_participant AS \([\s\S]*WHERE meeting_id = \$1::uuid/s
+          );
+          return participantRow();
+        }
+      ]
+    })
+  );
+
+  const joined = await service.joinMeeting(currentUserId, workspaceId, meetingId);
+
+  assert.equal(joined.participant.id, participantId);
+  assert.equal(liveKitTokenService.calls.length, 1);
+}
+
+{
   const { service, workspaceService, liveKitTokenService } = createSubject(
     new FakeDatabase({
       queryOneRows: [
@@ -1011,12 +1222,13 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /ON CONFLICT \(meeting_id, user_id\)/);
+          assert.match(text, /WITH[\s\S]*active_participant AS/);
+          assert.match(text, /ON CONFLICT DO NOTHING/);
           assert.match(text, /\$1::uuid/);
           assert.match(text, /\$2::uuid/);
           assert.match(text, /\(\$1::uuid\)::text/);
           assert.match(text, /\(\$2::uuid\)::text/);
-          assert.match(text, /left_at = NULL/);
+          assert.match(text, /AND left_at IS NULL/);
           assert.deepEqual(values, [meetingId, otherUserId]);
           return participantRow({
             id: otherParticipantId,
@@ -1960,13 +2172,13 @@ async function assertError(action, messagePattern) {
           });
         },
         (text, values) => {
-          assert.match(text, /COUNT\(\*\)::int AS participant_count/);
+          assert.match(text, /COUNT\(DISTINCT user_id\)::int AS participant_count/);
           assert.match(text, /left_at IS NULL/);
           assert.deepEqual(values, [meetingId]);
           return participantCountRow("0", "0");
         },
         (text, values) => {
-          assert.match(text, /meeting_participants\.user_id = \$2/);
+          assert.match(text, /AND user_id = \$2/);
           assert.deepEqual(values, [meetingId, currentUserId]);
           return null;
         }
@@ -2057,9 +2269,9 @@ async function assertError(action, messagePattern) {
           assert.match(text, /JOIN meetings/);
           assert.match(text, /meetings\.workspace_id = \$1/);
           assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
-          assert.match(text, /LIMIT \$2/);
+          assert.match(text, /LIMIT \$3/);
           assert.doesNotMatch(text, /transcript_text/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [
             meetingReportRow({
               status: "FAILED",
@@ -2085,13 +2297,77 @@ async function assertError(action, messagePattern) {
 }
 
 {
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(
+            text,
+            /lower\(regexp_replace\(BTRIM\(COALESCE\(meeting_reports\.user_title, meeting_reports\.title\)\), '\\s\+', ' ', 'g'\)\) = \$3/
+          );
+          assert.match(text, /LIMIT \$4/);
+          assert.deepEqual(values, [
+            workspaceId,
+            currentUserId,
+            "backend meeting",
+            2
+          ]);
+          return [
+            meetingReportRow({
+              id: reportId,
+              title: "Backend meeting",
+              user_title: "Backend meeting"
+            })
+          ];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReportsForAgent(currentUserId, workspaceId, {
+    reportTitle: "  Backend   Meeting  ",
+    limit: 1
+  });
+
+  assert.equal(database.queries.length, 1);
+  assert.equal(result.reports[0].title, "Backend meeting");
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
+          assert.match(text, /LEFT JOIN meeting_rooms/);
+          assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 2]);
+          return [
+            meetingReportRow({ id: reportId }),
+            meetingReportRow({ id: "88888888-8888-4888-8888-888888888888" })
+          ];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReportsForAgent(currentUserId, workspaceId, {
+    limit: 1
+  });
+
+  assert.equal(database.queries.length, 1);
+  assert.equal(result.reports.length, 1);
+  assert.equal(result.reports[0].id, reportId);
+}
+
+{
   const { service } = createSubject(
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /meeting_reports\.status = \$2/);
-          assert.match(text, /LIMIT \$3/);
-          assert.deepEqual(values, [workspaceId, "FAILED", 101]);
+          assert.match(text, /meeting_reports\.status = \$3/);
+          assert.match(text, /LIMIT \$4/);
+          assert.deepEqual(values, [workspaceId, currentUserId, "FAILED", 101]);
           return [];
         }
       ]
@@ -2111,8 +2387,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [];
         }
       ]
@@ -2131,8 +2407,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 101]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 101]);
           return [];
         }
       ]
@@ -2151,8 +2427,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [];
         }
       ]
@@ -2171,8 +2447,8 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
-          assert.match(text, /LIMIT \$2/);
-          assert.deepEqual(values, [workspaceId, 21]);
+          assert.match(text, /LIMIT \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, 21]);
           return [];
         }
       ]
@@ -2197,13 +2473,14 @@ async function assertError(action, messagePattern) {
       queryRows: [
         (text, values) => {
           assert.match(text, /to_tsvector\('simple'/);
-          assert.match(text, /websearch_to_tsquery\('simple', \$2\)/);
-          assert.match(text, /meeting_reports\.created_at >= \$3::timestamptz/);
-          assert.match(text, /meeting_reports\.created_at < \$4::timestamptz/);
-          assert.match(text, /meeting_reports\.id > \$6::uuid/);
-          assert.match(text, /LIMIT \$7/);
+          assert.match(text, /websearch_to_tsquery\('simple', \$3\)/);
+          assert.match(text, /meeting_reports\.created_at >= \$4::timestamptz/);
+          assert.match(text, /meeting_reports\.created_at < \$5::timestamptz/);
+          assert.match(text, /meeting_reports\.id > \$7::uuid/);
+          assert.match(text, /LIMIT \$8/);
           assert.deepEqual(values, [
             workspaceId,
+            currentUserId,
             "회의록 검색",
             "2026-07-01T00:00:00.000Z",
             "2026-08-01T00:00:00.000Z",
@@ -2301,12 +2578,10 @@ async function assertError(action, messagePattern) {
           assert.match(text, /FROM meeting_reports/);
           assert.match(text, /JOIN meetings/);
           assert.match(text, /meeting_reports\.transcript_text/);
-          assert.match(text, /meeting_reports\.id = \$2/);
-          assert.match(text, /workspace_members\.role = 'owner'/);
-          assert.match(text, /meeting_participants\.user_id = \$3::uuid/);
-          assert.deepEqual(values, [workspaceId, reportId, currentUserId]);
+          assert.match(text, /meeting_reports\.id = \$3/);
+          assert.deepEqual(values, [workspaceId, currentUserId, reportId]);
           return meetingReportRow({
-            transcript_text: "회의 원문",
+            transcript_text: "회의 원문 전체",
             action_item_candidates: JSON.stringify([{ title: "후속 작업" }])
           });
         }
@@ -2318,12 +2593,227 @@ async function assertError(action, messagePattern) {
 
   assert.deepEqual(workspaceService.calls, [{ userId: currentUserId, workspaceId }]);
   assert.equal(result.report.id, reportId);
-  assert.equal(result.report.transcriptText, "회의 원문");
-  assert.deepEqual(result.report.transcriptSegments, []);
+  assert.equal(result.report.transcriptText, "회의 원문 전체");
+  assert.deepEqual(result.report.evidenceSegments, []);
   assert.deepEqual(result.report.evidence, []);
+  assert.deepEqual(result.report.activityEvidence, []);
   assert.deepEqual(result.report.actionItems, []);
   assert.deepEqual(result.report.actionItemAssignees, []);
   assert.deepEqual(result.report.actionItemCandidates, [{ title: "후속 작업" }]);
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /FOR UPDATE OF meeting_reports/);
+          assert.match(text, /workspace_members\.role = 'owner'/);
+          assert.match(text, /FROM meeting_participants/);
+          assert.deepEqual(values, [workspaceId, currentUserId, reportId]);
+          return {
+            id: reportId,
+            status: "COMPLETED",
+            content_version: "2",
+            can_edit: true
+          };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_reports/);
+          assert.match(text, /user_title = COALESCE\(\$2, user_title\)/);
+          assert.match(
+            text,
+            /user_discussion_points = COALESCE\(\$3, user_discussion_points\)/
+          );
+          assert.deepEqual(values, [reportId, "사용자 제목", "사용자 논의사항"]);
+          return { id: reportId };
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_report_decision_items/);
+          assert.match(text, /AND meeting_report_id = \$2/);
+          assert.deepEqual(values, [
+            decisionItemId,
+            reportId,
+            "사용자 결정사항",
+            currentUserId
+          ]);
+          return { id: decisionItemId };
+        },
+        (text, values) => {
+          assert.match(text, /content_version = content_version \+ 1/);
+          assert.deepEqual(values, [reportId, currentUserId]);
+          return { id: reportId };
+        },
+        () =>
+          meetingReportRow({
+            title: "사용자 제목",
+            user_title: "사용자 제목",
+            discussion_points: "사용자 논의사항",
+            user_discussion_points: "사용자 논의사항",
+            content_version: 3,
+            content_edited_by_user_id: currentUserId,
+            can_edit: true
+          })
+      ]
+    })
+  );
+
+  const result = await service.updateMeetingReportContent(
+    currentUserId,
+    workspaceId,
+    reportId,
+    {
+      expectedVersion: 2,
+      title: "사용자 제목",
+      discussionPoints: "사용자 논의사항",
+      decisionItems: [{ id: decisionItemId, text: "사용자 결정사항" }]
+    }
+  );
+
+  assert.equal(database.transactionCommitted, true);
+  assert.equal(result.report.title, "사용자 제목");
+  assert.equal(result.report.discussionPoints, "사용자 논의사항");
+  assert.equal(result.report.contentVersion, 3);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        {
+          id: reportId,
+          status: "COMPLETED",
+          content_version: 1,
+          can_edit: false
+        }
+      ]
+    })
+  );
+
+  await assertForbidden(
+    () =>
+      service.updateMeetingReportContent(currentUserId, workspaceId, reportId, {
+        expectedVersion: 1,
+        title: "권한 없는 수정"
+      }),
+    /Only the workspace owner or a meeting participant/
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        {
+          id: reportId,
+          status: "COMPLETED",
+          content_version: 2,
+          can_edit: true
+        }
+      ]
+    })
+  );
+
+  await assertConflict(
+    () =>
+      service.updateMeetingReportContent(currentUserId, workspaceId, reportId, {
+        expectedVersion: 1,
+        title: "오래된 수정"
+      }),
+    /updated by another user/
+  );
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        {
+          id: reportId,
+          status: "COMPLETED",
+          content_version: 1,
+          can_edit: true
+        },
+        (text, values) => {
+          assert.match(text, /UPDATE meeting_report_decision_items/);
+          assert.deepEqual(values, [
+            decisionItemId,
+            reportId,
+            "다른 회의의 결정사항",
+            currentUserId
+          ]);
+          return null;
+        }
+      ]
+    })
+  );
+
+  await assertBadRequest(
+    () =>
+      service.updateMeetingReportContent(currentUserId, workspaceId, reportId, {
+        expectedVersion: 1,
+        decisionItems: [{ id: decisionItemId, text: "다른 회의의 결정사항" }]
+      }),
+    /Invalid meeting report decision item/
+  );
+  assert.equal(database.transactionRolledBack, true);
+}
+
+assert.match(meetingServiceSource, /FROM meeting_report_activity_evidence/);
+assert.match(meetingServiceSource, /activityEvidence/);
+assert.match(meetingServiceSource, /AS activity_references/);
+assert.doesNotMatch(meetingServiceSource, /AS references\b/);
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [
+        (text, values) => {
+          assert.match(text, /workspace_members\.role = 'owner'/);
+          assert.match(text, /FROM meeting_participants/);
+          assert.match(text, /FOR UPDATE OF meeting_reports/);
+          assert.deepEqual(values, [workspaceId, currentUserId, reportId]);
+          return { id: reportId, status: "COMPLETED", can_delete: true };
+        },
+        (text, values) => {
+          assert.match(text, /DELETE FROM meeting_reports/);
+          assert.deepEqual(values, [reportId]);
+          return { id: reportId };
+        }
+      ]
+    })
+  );
+
+  const result = await service.deleteReport(currentUserId, workspaceId, reportId);
+
+  assert.deepEqual(result, { deletedReportId: reportId });
+  assert.equal(database.transactionCommitted, true);
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [{ id: reportId, status: "COMPLETED", can_delete: false }]
+    })
+  );
+
+  await assert.rejects(
+    () => service.deleteReport(currentUserId, workspaceId, reportId),
+    error => error.getStatus() === 403
+  );
+}
+
+{
+  const { service } = createSubject(
+    new FakeDatabase({
+      queryOneRows: [{ id: reportId, status: "SUMMARIZING", can_delete: true }]
+    })
+  );
+
+  await assertBadRequest(
+    () => service.deleteReport(currentUserId, workspaceId, reportId),
+    /still processing/
+  );
 }
 
 {
@@ -2513,6 +3003,8 @@ async function assertError(action, messagePattern) {
           assert.match(text, /status = 'QUEUED'/);
           assert.match(text, /failed_step = NULL/);
           assert.match(text, /error_message = NULL/);
+          assert.match(text, /failure_code = NULL/);
+          assert.match(text, /failure_detail = NULL/);
           assert.match(text, /transcript_text = NULL/);
           assert.match(text, /action_item_candidates = '\[\]'::jsonb/);
           assert.match(text, /retry_count = retry_count \+ 1/);
@@ -2678,15 +3170,25 @@ async function assertError(action, messagePattern) {
           assert.match(text, /UPDATE meeting_reports/);
           assert.match(text, /status = \$2::meeting_report_status/);
           assert.match(text, /failed_step = \$3::meeting_report_failed_step/);
-          assert.match(text, /action_item_candidates = \$9::jsonb/);
-          assert.match(text, /retry_count = \$10/);
+          assert.match(text, /failure_code = \$5/);
+          assert.match(text, /failure_detail = \$6::jsonb/);
+          assert.match(text, /title = \$8/);
+          assert.match(text, /action_item_candidates = \$12::jsonb/);
+          assert.match(text, /retry_count = \$13/);
           assert.match(text, /AND status IN/);
           assert.deepEqual(values, [
             reportId,
             "FAILED",
             "STT",
             "STT failed safely",
+            "INVALID_OUTPUT",
+            JSON.stringify({
+              category: "invalid_output",
+              retryable: false,
+              providerStatusCode: null
+            }),
             "이전 전문",
+            "회의록 제목",
             "이전 요약",
             "이전 논의사항",
             "이전 결정사항",
@@ -2799,7 +3301,10 @@ async function assertError(action, messagePattern) {
         (text, values) => {
           assert.match(text, /FROM meeting_participants/);
           assert.match(text, /JOIN users/);
-          assert.match(text, /ORDER BY meeting_participants\.joined_at ASC/);
+          assert.match(text, /WITH participant_summaries AS/);
+          assert.match(text, /MIN\(joined_at\) AS joined_at/);
+          assert.match(text, /BOOL_OR\(left_at IS NULL\)/);
+          assert.match(text, /ORDER BY participant_summaries\.joined_at ASC/);
           assert.doesNotMatch(text, /email|token|secret/i);
           assert.deepEqual(values, [meetingId]);
           return [

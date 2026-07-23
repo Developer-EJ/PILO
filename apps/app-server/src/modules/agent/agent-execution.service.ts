@@ -9,10 +9,21 @@ import {
 } from "./agent-confirmation.service";
 import {
   AgentLoggingService,
-  AgentRunPayload
+  AgentRunPayload,
+  type AgentExecutionLease
 } from "./agent-logging.service";
+import { AgentLatencyObserver } from "./agent-latency-observer";
+import { isTerminalAgentCapabilityTool } from "./agent-tool-capability-catalog";
 import { buildAgentReadResultAnswer } from "./agent-read-result-formatter";
 import { AgentToolRegistryService } from "./agent-tool-registry.service";
+import {
+  AgentGroundedAnswerService,
+  type MeetingReportHybridContext
+} from "./agent-grounded-answer.service";
+import { AgentGroundedAnswerOutboxPublisherService } from "./agent-grounded-answer-outbox-publisher.service";
+import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
+import { EmbeddingTemporarilyUnavailableError } from "./grounding/query-embedding";
 import type {
   AgentJsonObject,
   AgentJsonPrimitive,
@@ -23,7 +34,10 @@ import type {
   AgentToolDefinition,
   AgentToolClarificationResult,
   AgentToolExecutionMode,
-  AgentToolExecutionResult
+  AgentToolExecutionResult,
+  AgentToolPostExecutionDisposition,
+  AgentRunRequestContext,
+  AgentToolPreparationResult
 } from "./types/agent-tool.types";
 
 export type AgentExecutionResult =
@@ -34,6 +48,10 @@ export type AgentExecutionResult =
   | {
       status: "waiting_confirmation";
       confirmation: AgentConfirmationPayload;
+    }
+  | {
+      status: "waiting_user_input";
+      run: AgentRunPayload;
     }
   | {
       status: "failed";
@@ -54,6 +72,8 @@ interface AgentExecutionRunRow extends AgentRunRow {
   workspace_id: string;
   requested_by_user_id: string;
   timezone: string;
+  request_context_json: AgentRunRequestContext;
+  turn_sequence: number | string;
 }
 
 interface AgentPlannerStepRow extends QueryResultRow {
@@ -63,14 +83,27 @@ interface AgentPlannerStepRow extends QueryResultRow {
 
 interface PlannedToolCandidate {
   toolName: string;
+  toolSchemaVersion: string;
   input: AgentJsonObject;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
-  requiresConfirmation: boolean;
+  requiresConfirmation: boolean | null;
+  capabilityIds: string[];
+  meetingReportHybridContext?: MeetingReportHybridContext;
+}
+
+interface MeetingReportHybridLookupContext extends AgentJsonObject {
+  requestedReportTitle: string;
+  selector: AgentJsonObject;
 }
 
 const RISK_LEVELS = ["low", "medium", "high"] as const;
-const EXECUTION_MODES = ["auto", "confirmation_required"] as const;
+const EXECUTION_MODES = ["auto", "confirmation_required", "contextual"] as const;
+const LEGACY_MEETING_REPORT_SCHEMA_VERSION = "agent-tools:v6";
+const EXECUTION_HEARTBEAT_SECONDS = positiveIntegerEnvironment(
+  "AGENT_EXECUTION_HEARTBEAT_SECONDS",
+  30
+);
 const FORBIDDEN_JSON_KEY_PARTS = [
   "authorization",
   "cookie",
@@ -84,6 +117,11 @@ const FORBIDDEN_JSON_KEY_PARTS = [
   "transcripttext"
 ];
 
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 @Injectable()
 export class AgentExecutionService {
   constructor(
@@ -91,15 +129,29 @@ export class AgentExecutionService {
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
     private readonly agentConfirmationService: AgentConfirmationService,
-    private readonly agentToolRegistryService: AgentToolRegistryService
+    private readonly agentToolRegistryService: AgentToolRegistryService,
+    private readonly agentGroundedAnswerService: AgentGroundedAnswerService,
+    private readonly agentGroundedAnswerOutboxPublisherService: AgentGroundedAnswerOutboxPublisherService,
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService,
+    private readonly agentLatencyObserver?: AgentLatencyObserver
   ) {}
 
   async executeReadyRun(runId: string): Promise<AgentExecutionResult> {
+    const toolTurnStartedAt = this.agentLatencyObserver?.start();
     const run = await this.database.queryOne<AgentExecutionRunRow>(
       `
-        SELECT id, workspace_id, requested_by_user_id, status, prompt, timezone
-        FROM agent_runs
-        WHERE id = $1
+        SELECT
+          run.id,
+          run.workspace_id,
+          run.requested_by_user_id,
+          run.status,
+          run.prompt,
+          run.timezone,
+          run.request_context_json,
+          run.planner_turn_count AS turn_sequence
+        FROM agent_runs AS run
+        WHERE run.id = $1
       `,
       [runId]
     );
@@ -114,7 +166,10 @@ export class AgentExecutionService {
       run.id,
       {
         prompt: run.prompt,
-        timezone: run.timezone
+        timezone: run.timezone,
+        requestContext: run.request_context_json,
+        toolTurnStartedAt,
+        turnSequence: Number(run.turn_sequence)
       }
     );
   }
@@ -123,8 +178,16 @@ export class AgentExecutionService {
     currentUserId: string,
     workspaceId: string,
     runId: string,
-    context: { prompt?: string; timezone?: string } = {}
+    context: {
+      prompt?: string;
+      timezone?: string;
+      requestContext?: AgentRunRequestContext;
+      toolTurnStartedAt?: number;
+      turnSequence?: number;
+    } = {}
   ): Promise<AgentExecutionResult> {
+    const toolTurnStartedAt =
+      context.toolTurnStartedAt ?? this.agentLatencyObserver?.start();
     const plannerStep = await this.findReadyPlannerStep(
       currentUserId,
       workspaceId,
@@ -145,11 +208,50 @@ export class AgentExecutionService {
       };
     }
 
-    return this.executePlannerOutput(currentUserId, workspaceId, runId, {
-      plannerOutput: plannerStep.output_json,
-      prompt: context.prompt,
-      timezone: context.timezone
-    });
+    const toolName =
+      typeof plannerStep.output_json.toolName === "string"
+        ? plannerStep.output_json.toolName
+        : "";
+    const requestContext =
+      context.requestContext === undefined
+        ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
+        : context.requestContext;
+    try {
+      const result = await this.executePlannerOutput(
+        currentUserId,
+        workspaceId,
+        runId,
+        {
+          plannerOutput: plannerStep.output_json,
+          prompt: context.prompt,
+          timezone: context.timezone,
+          requestContext,
+          turnSequence: context.turnSequence
+        }
+      );
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName,
+        stage: "tool_turn",
+        outcome: this.latencyOutcome(result),
+        startedAt: toolTurnStartedAt,
+        turnSequence: context.turnSequence
+      });
+      return result;
+    } catch (error) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName,
+        stage: "tool_turn",
+        outcome: "failure",
+        startedAt: toolTurnStartedAt,
+        failureType: "domain_error",
+        turnSequence: context.turnSequence
+      });
+      throw error;
+    }
   }
 
   async executePlannerOutput(
@@ -160,22 +262,68 @@ export class AgentExecutionService {
       plannerOutput: AgentJsonObject;
       prompt?: string;
       timezone?: string;
+      requestContext?: AgentRunRequestContext;
+      turnSequence?: number;
     }
   ): Promise<AgentExecutionResult> {
     const candidate = this.parsePlannerOutput(input.plannerOutput);
-    const definition = this.agentToolRegistryService.getDefinition(
-      candidate.toolName
+    const preparationStartedAt = this.agentLatencyObserver?.start();
+    const requestContext =
+      input.requestContext === undefined
+        ? await this.findRunRequestContext(currentUserId, workspaceId, runId)
+        : input.requestContext;
+    const definition = this.agentToolRegistryService.getDefinitionForContext(
+      candidate.toolName,
+      requestContext
     );
 
     if (!definition) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: candidate.toolName,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
-        errorCode: "AGENT_TOOL_NOT_EXECUTABLE",
-        errorMessage: "Agent tool is not registered",
-        message: "요청을 처리할 수 있는 Agent 도구가 없습니다."
+        errorCode: "AGENT_TOOL_CONTEXT_UNAVAILABLE",
+        errorMessage: "Agent tool is unavailable for this context",
+        message: "현재 화면에서는 요청을 처리할 수 있는 Agent 도구가 없습니다."
       });
     }
+    const completedToolNames =
+      candidate.capabilityIds.length > 0
+        ? await this.findCompletedToolNames(runId)
+        : [];
+    const postExecutionDisposition: AgentToolPostExecutionDisposition =
+      definition.postExecutionDisposition ??
+      (candidate.capabilityIds.length > 0 &&
+      isTerminalAgentCapabilityTool(
+        candidate.capabilityIds,
+        definition.name,
+        completedToolNames
+      )
+        ? "complete_run"
+        : "continue_planning");
 
-    if (!this.matchesRegistry(candidate, definition)) {
+    const isLegacyMeetingReportPlan = this.isLegacyMeetingReportPlan(
+      candidate,
+      definition
+    );
+    if (!this.matchesRegistry(candidate, definition) && !isLegacyMeetingReportPlan) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: candidate.toolName,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_PLAN_MISMATCH",
         errorMessage: "Agent tool plan does not match registry metadata",
@@ -184,6 +332,16 @@ export class AgentExecutionService {
     }
 
     if (definition.riskLevel === "high") {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
+      });
       return this.failRun(currentUserId, workspaceId, runId, {
         errorCode: "AGENT_TOOL_HIGH_RISK",
         errorMessage: "High-risk Agent tool execution is not supported",
@@ -191,40 +349,133 @@ export class AgentExecutionService {
       });
     }
 
+    const meetingReportHybridLookup = this.normalizeMeetingReportHybridLookup(
+      candidate
+    );
+    const plannerInput = meetingReportHybridLookup?.input ?? candidate.input;
     const validatedInput = await this.validateToolInput(
       currentUserId,
       workspaceId,
       runId,
       definition,
-      candidate.input
+      plannerInput,
+      isLegacyMeetingReportPlan
     );
     if (!validatedInput.ok) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error",
+        turnSequence: input.turnSequence
+      });
       return validatedInput.result;
     }
 
+    if (definition.executionMode === "contextual" && !validatedInput.isLegacyAdapter) {
+      return this.executeContextualTool(
+        currentUserId,
+        workspaceId,
+        runId,
+        definition,
+        validatedInput.input,
+        validatedInput.plannerInput,
+        requestContext,
+        input.prompt,
+        input.timezone,
+        postExecutionDisposition,
+        candidate.meetingReportHybridContext,
+        preparationStartedAt,
+        input.turnSequence
+      );
+    }
+
     if (definition.executionMode === "confirmation_required") {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "success",
+        startedAt: preparationStartedAt,
+        turnSequence: input.turnSequence
+      });
       return this.createConfirmation(
         currentUserId,
         workspaceId,
         runId,
         definition,
         validatedInput.input,
-        candidate.input,
+        validatedInput.plannerInput,
+        requestContext,
         input.prompt,
         input.timezone
       );
     }
 
+    this.observeLatency({
+      runId,
+      requestContext,
+      toolName: definition.name,
+      stage: "tool_preparation",
+      outcome: "success",
+      startedAt: preparationStartedAt,
+      turnSequence: input.turnSequence
+    });
     return this.executeAutoTool(
       currentUserId,
       workspaceId,
       runId,
       definition,
       validatedInput.input,
-      candidate.input,
+      validatedInput.plannerInput,
+      requestContext,
       input.prompt,
-      input.timezone
+      input.timezone,
+      postExecutionDisposition,
+      candidate.meetingReportHybridContext,
+      meetingReportHybridLookup?.context,
+      input.turnSequence
     );
+  }
+
+  private normalizeMeetingReportHybridLookup(
+    candidate: PlannedToolCandidate
+  ): { input: AgentJsonObject; context: MeetingReportHybridLookupContext } | null {
+    if (
+      candidate.toolName !== "list_meeting_reports" ||
+      !candidate.capabilityIds.includes("meeting.report.hybrid_search")
+    ) {
+      return null;
+    }
+    const title = candidate.input.reportTitle;
+    if (
+      typeof title !== "string" ||
+      title.trim().length < 1 ||
+      title.trim().length > 500
+    ) {
+      throw badRequest("MeetingReport hybrid title lookup requires reportTitle");
+    }
+    const input = { ...candidate.input };
+    delete input.limit;
+    input.reportTitle = title.trim();
+    const selector: AgentJsonObject = {};
+    for (const field of ["reportTitle", "status", "from", "to", "roomName"] as const) {
+      const value = input[field];
+      if (typeof value === "string" && value.trim()) {
+        selector[field] = value.trim();
+      }
+    }
+    return {
+      input,
+      context: {
+        requestedReportTitle: title.trim(),
+        selector
+      }
+    };
   }
 
   private async findReadyPlannerStep(
@@ -254,6 +505,46 @@ export class AgentExecutionService {
     }
 
     return this.findLatestPlannerStep(runId);
+  }
+
+  private async findCompletedToolNames(runId: string): Promise<string[]> {
+    const rows = await this.database.query<{ tool_name: string }>(
+      `
+        SELECT DISTINCT tool_name
+        FROM agent_steps
+        WHERE run_id = $1
+          AND step_type = 'tool'
+          AND status = 'completed'
+          AND tool_name IS NOT NULL
+      `,
+      [runId]
+    );
+    return rows.map((row) => row.tool_name);
+  }
+
+  private async findRunRequestContext(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<AgentRunRequestContext> {
+    const run = await this.database.queryOne<{
+      request_context_json: AgentRunRequestContext;
+    }>(
+      `
+        SELECT request_context_json
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+
+    if (!run) {
+      throw notFound("Agent run not found");
+    }
+
+    return run.request_context_json ?? null;
   }
 
   private async findLatestPlannerStep(
@@ -287,10 +578,12 @@ export class AgentExecutionService {
           FROM agent_steps
           WHERE run_id = $1
             AND step_type = 'tool'
+            AND status = 'running'
         ) OR EXISTS (
           SELECT 1
           FROM agent_confirmations
           WHERE run_id = $1
+            AND status = 'pending'
         ) AS started
       `,
       [runId]
@@ -305,11 +598,15 @@ export class AgentExecutionService {
     }
 
     const toolName = this.readNonEmptyString(output.toolName, "toolName");
+    const toolSchemaVersion = this.readNonEmptyString(
+      output.toolSchemaVersion,
+      "toolSchemaVersion"
+    );
     const riskLevel = this.readRiskLevel(output.riskLevel);
     const executionMode = this.readExecutionMode(output.executionMode);
-    const requiresConfirmation = this.readBoolean(
+    const requiresConfirmation = this.readConfirmationRequirement(
       output.requiresConfirmation,
-      "requiresConfirmation"
+      executionMode
     );
     const toolInputValidation = this.readNonEmptyString(
       output.toolInputValidation,
@@ -320,17 +617,82 @@ export class AgentExecutionService {
       throw badRequest("Agent planner output requires App Server validation");
     }
 
-    if ((executionMode === "confirmation_required") !== requiresConfirmation) {
-      throw badRequest("Agent planner confirmation metadata is inconsistent");
-    }
-
+    const routedCapabilityIds = this.readCapabilityIds(output.toolRouting);
+    const capabilityIds =
+      routedCapabilityIds.length > 0
+        ? routedCapabilityIds
+        : this.readRetrievalCapabilityIds(output.toolRetrieval);
     return {
       toolName,
+      toolSchemaVersion,
       input: this.readPlainObject(output.input, "input"),
       riskLevel,
       executionMode,
-      requiresConfirmation
+      requiresConfirmation,
+      capabilityIds,
+      ...this.readMeetingReportHybridContext(
+        output.meetingReportHybridContext,
+        toolName,
+        capabilityIds
+      )
     };
+  }
+
+  private readMeetingReportHybridContext(
+    value: AgentJsonValue | undefined,
+    toolName: string,
+    capabilityIds: string[]
+  ): { meetingReportHybridContext?: MeetingReportHybridContext } {
+    if (value === undefined) return {};
+    if (
+      toolName !== "search_meeting_transcript" ||
+      !capabilityIds.includes("meeting.report.hybrid_search") ||
+      !this.isPlainObject(value) ||
+      Object.keys(value).sort().join(",") !== "exactMatchCount,requestedReportTitle"
+    ) {
+      throw badRequest("MeetingReport hybrid context is invalid");
+    }
+    const title = value.requestedReportTitle;
+    const count = value.exactMatchCount;
+    if (
+      typeof title !== "string" ||
+      title.trim().length < 1 ||
+      title.trim().length > 500 ||
+      typeof count !== "number" ||
+      !Number.isInteger(count) ||
+      count < 0
+    ) {
+      throw badRequest("MeetingReport hybrid context is invalid");
+    }
+    return {
+      meetingReportHybridContext: {
+        requestedReportTitle: title.trim(),
+        exactMatchCount: count
+      }
+    };
+  }
+
+  private readCapabilityIds(value: AgentJsonValue | undefined): string[] {
+    if (!this.isPlainObject(value) || !Array.isArray(value.capabilityIds)) {
+      return [];
+    }
+    return value.capabilityIds.filter(
+      (item): item is string => typeof item === "string" && item.length > 0
+    );
+  }
+
+  private readRetrievalCapabilityIds(
+    value: AgentJsonValue | undefined
+  ): string[] {
+    const capabilityIds = this.readCapabilityIds(value);
+    if (!this.isPlainObject(value)) {
+      return capabilityIds;
+    }
+    const primaryCapabilityId = value.primaryCapabilityId;
+    return typeof primaryCapabilityId === "string" &&
+      capabilityIds.includes(primaryCapabilityId)
+      ? [primaryCapabilityId]
+      : capabilityIds;
   }
 
   private matchesRegistry(
@@ -344,16 +706,47 @@ export class AgentExecutionService {
     );
   }
 
+  private isLegacyMeetingReportPlan(
+    candidate: PlannedToolCandidate,
+    definition: AgentToolDefinition<unknown>
+  ): boolean {
+    if (
+      candidate.toolSchemaVersion !== LEGACY_MEETING_REPORT_SCHEMA_VERSION ||
+      candidate.toolName !== definition.name
+    ) {
+      return false;
+    }
+    const matchesLegacyMetadata =
+      definition.name === "regenerate_meeting_report"
+        ? candidate.riskLevel === "medium" &&
+          candidate.executionMode === "confirmation_required" &&
+          candidate.requiresConfirmation === true
+        : [
+              "get_meeting_report",
+              "summarize_meeting_report",
+              "find_action_items",
+              "get_meeting_decision_evidence"
+            ].includes(definition.name) &&
+          candidate.riskLevel === "low" &&
+          candidate.executionMode === "auto" &&
+          candidate.requiresConfirmation === false;
+    if (!matchesLegacyMetadata) return false;
+    return definition.adaptLegacyPlannerInput?.(candidate.input) !== null;
+  }
+
   private async validateToolInput(
     currentUserId: string,
     workspaceId: string,
     runId: string,
     definition: AgentToolDefinition<unknown>,
-    input: AgentJsonObject
+    input: AgentJsonObject,
+    allowLegacyAdapter: boolean
   ): Promise<
     | {
         ok: true;
         input: unknown;
+        plannerInput: AgentJsonObject;
+        isLegacyAdapter: boolean;
       }
     | {
         ok: false;
@@ -363,9 +756,24 @@ export class AgentExecutionService {
     try {
       return {
         ok: true,
-        input: definition.validateInput(input)
+        input: definition.validateInput(input),
+        plannerInput: input,
+        isLegacyAdapter: false
       };
     } catch (error) {
+      const legacyInput = allowLegacyAdapter
+        ? definition.adaptLegacyPlannerInput?.(input)
+        : null;
+      if (legacyInput !== null && legacyInput !== undefined) {
+        return {
+          ok: true,
+          input: legacyInput,
+          plannerInput: {
+            compatibility: "legacy_persisted_planner_input"
+          },
+          isLegacyAdapter: true
+        };
+      }
       return {
         ok: false,
         result: await this.failRun(currentUserId, workspaceId, runId, {
@@ -380,6 +788,177 @@ export class AgentExecutionService {
     }
   }
 
+  private async executeContextualTool(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    definition: AgentToolDefinition<unknown>,
+    input: unknown,
+    plannerInput: AgentJsonObject,
+    requestContext: AgentRunRequestContext,
+    prompt?: string,
+    timezone?: string,
+    postExecutionDisposition: AgentToolPostExecutionDisposition =
+      "continue_planning",
+    meetingReportHybridContext?: MeetingReportHybridContext,
+    preparationStartedAt?: number,
+    turnSequence?: number
+  ): Promise<AgentExecutionResult> {
+    if (!definition.prepareExecution) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: "validation_error",
+        turnSequence
+      });
+      return this.failRun(currentUserId, workspaceId, runId, {
+        errorCode: "AGENT_TOOL_PREPARATION_UNAVAILABLE",
+        errorMessage: "Contextual Agent tool preparation is not available",
+        message: "Agent 도구 실행 방법을 결정하지 못했습니다."
+      });
+    }
+
+    let preparationReturned = false;
+    try {
+      const preparation: AgentToolPreparationResult =
+        await definition.prepareExecution(
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext
+          },
+          input
+        );
+      preparationReturned = true;
+
+      if (this.isClarificationResult(preparation)) {
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_preparation",
+          outcome: "clarification",
+          startedAt: preparationStartedAt,
+          turnSequence
+        });
+        return this.completeClarification(
+          currentUserId,
+          workspaceId,
+          runId,
+          definition,
+          plannerInput,
+          preparation,
+          prompt,
+          timezone
+        );
+      }
+
+      if (preparation.kind === "confirmation") {
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_preparation",
+          outcome: "success",
+          startedAt: preparationStartedAt,
+          turnSequence
+        });
+        return this.createConfirmationFromPlan(
+          currentUserId,
+          workspaceId,
+          runId,
+          definition,
+          preparation.plan
+        );
+      }
+
+      if (preparation.kind !== "execute") {
+        throw badRequest("Agent tool preparation result is invalid");
+      }
+
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "success",
+        startedAt: preparationStartedAt,
+        turnSequence
+      });
+      return this.executeAutoTool(
+        currentUserId,
+        workspaceId,
+        runId,
+        definition,
+        input,
+        plannerInput,
+        requestContext,
+        prompt,
+        timezone,
+        postExecutionDisposition,
+        meetingReportHybridContext,
+        undefined,
+        turnSequence
+      );
+    } catch (error) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_preparation",
+        outcome: "failure",
+        startedAt: preparationStartedAt,
+        failureType: preparationReturned ? "validation_error" : "domain_error",
+        turnSequence
+      });
+      if (this.isAgentErrorCode(error, "CONFIRMATION_NOT_PENDING")) {
+        return {
+          status: "skipped",
+          reason: "already_started"
+        };
+      }
+
+      return this.failRun(currentUserId, workspaceId, runId, {
+        errorCode: "AGENT_TOOL_PREPARATION_FAILED",
+        errorMessage: this.toSafeErrorMessage(
+          error,
+          "Contextual Agent tool preparation failed"
+        ),
+        message: "Agent 도구 실행 방법을 결정하지 못했습니다."
+      });
+    }
+  }
+
+  private async createConfirmationFromPlan(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    definition: AgentToolDefinition<unknown>,
+    plan: AgentConfirmationPlan
+  ): Promise<AgentExecutionResult> {
+    const confirmation = await this.agentConfirmationService.createConfirmation(
+      currentUserId,
+      workspaceId,
+      {
+        runId,
+        toolName: definition.name,
+        riskLevel: definition.riskLevel,
+        summary: plan.summary,
+        plan
+      }
+    );
+
+    return {
+      status: "waiting_confirmation",
+      confirmation
+    };
+  }
+
   private async createConfirmation(
     currentUserId: string,
     workspaceId: string,
@@ -387,6 +966,7 @@ export class AgentExecutionService {
     definition: AgentToolDefinition<unknown>,
     input: unknown,
     plannerInput: AgentJsonObject,
+    requestContext: AgentRunRequestContext,
     prompt?: string,
     timezone?: string
   ): Promise<AgentExecutionResult> {
@@ -403,7 +983,8 @@ export class AgentExecutionService {
         {
           currentUserId,
           workspaceId,
-          runId
+          runId,
+          requestContext
         },
         input
       );
@@ -487,34 +1068,97 @@ export class AgentExecutionService {
       };
     }
 
-    const outputSummary = this.sanitizeJsonObject(clarification.outputSummary);
-    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
-    await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
+    const candidateContext = {
+      currentUserId,
+      workspaceId,
       runId,
-      stepId: step.id,
-      outputSummary,
-      resourceRefs
+      requestContext: await this.findRunRequestContext(
+        currentUserId,
+        workspaceId,
+        runId
+      )
+    };
+    const candidateSelections = clarification.candidateResources?.length
+      ? clarification.candidateResources.every(
+          ({ reference }) => !reference.domain || reference.domain === "meeting"
+        )
+        ? await this.agentCandidateSelectionService.createMeetingCandidates(
+            candidateContext,
+            step.id,
+            clarification.candidateResources.map(({ reference, candidate }) => ({
+              reference: {
+                resourceType: reference.resourceType as
+                  | "meeting_room"
+                  | "meeting"
+                  | "meeting_report"
+                  | "workspace_member"
+                  | "meeting_report_action_item",
+                resourceId: reference.resourceId,
+                ...(reference.reportId ? { reportId: reference.reportId } : {})
+              },
+              candidate: {
+                resourceType: reference.resourceType as
+                  | "meeting_room"
+                  | "meeting"
+                  | "meeting_report"
+                  | "workspace_member"
+                  | "meeting_report_action_item",
+                label: candidate.label,
+                description: candidate.description,
+                status: candidate.status
+              }
+            }))
+          )
+        : await this.agentCandidateSelectionService.createCandidates(
+            candidateContext,
+            step.id,
+            clarification.candidateResources.map(({ reference, candidate }) => ({
+              reference: {
+                domain: reference.domain ?? "meeting",
+                resourceType: reference.resourceType,
+                resourceId: reference.resourceId,
+                ...(reference.reportId ? { reportId: reference.reportId } : {})
+              },
+              candidate: {
+                label: candidate.label,
+                description: candidate.description,
+                status: candidate.status
+              }
+            }))
+          )
+      : [];
+    const outputSummary = this.sanitizeJsonObject({
+      ...clarification.outputSummary,
+      ...(candidateSelections.length > 0 ? { candidateSelections } : {})
     });
-    const run = await this.agentLoggingService.completeRun(
+    const resourceRefs = this.sanitizeResourceRefs(clarification.resourceRefs);
+    const answer =
+      typeof outputSummary.question === "string" && outputSummary.question.trim()
+        ? outputSummary.question.trim()
+        : buildAgentReadResultAnswer({
+            toolName: definition.name,
+            outputSummary,
+            resourceRefs,
+            prompt,
+            timezone
+          });
+    const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
       currentUserId,
       workspaceId,
       {
         runId,
+        stepId: step.id,
+        outputSummary,
+        resourceRefs,
         riskLevel: definition.riskLevel,
-        finalAnswer: buildAgentReadResultAnswer({
-          toolName: definition.name,
-          outputSummary,
-          resourceRefs,
-          prompt,
-          timezone
-        }),
-        message: "수정할 일정을 특정할 정보가 더 필요합니다."
+        waitingMessage: answer,
+        postExecutionDisposition: "wait_for_user_input"
       }
     );
 
     return {
-      status: "completed",
-      run
+      status: "waiting_user_input",
+      run: advanced.run
     };
   }
 
@@ -525,10 +1169,16 @@ export class AgentExecutionService {
     definition: AgentToolDefinition<unknown>,
     validatedInput: unknown,
     plannerInput: AgentJsonObject,
+    requestContext: AgentRunRequestContext,
     prompt?: string,
-    timezone?: string
+    timezone?: string,
+    postExecutionDisposition: AgentToolPostExecutionDisposition =
+      "continue_planning",
+    meetingReportHybridContext?: MeetingReportHybridContext,
+    meetingReportHybridLookupContext?: MeetingReportHybridLookupContext,
+    turnSequence?: number
   ): Promise<AgentExecutionResult> {
-    const step = await this.agentLoggingService.startNextToolStepIfAbsent(
+    const claim = await this.agentLoggingService.startNextToolExecutionClaimIfAbsent(
       currentUserId,
       workspaceId,
       {
@@ -539,78 +1189,208 @@ export class AgentExecutionService {
           toolName: definition.name,
           riskLevel: definition.riskLevel,
           executionMode: definition.executionMode,
-          input: this.sanitizeJsonObject(plannerInput)
+          input: this.sanitizeJsonObject(plannerInput),
+          ...(meetingReportHybridContext ? { meetingReportHybridContext } : {}),
+          ...(meetingReportHybridLookupContext
+            ? { meetingReportHybridLookup: meetingReportHybridLookupContext }
+            : {})
         }
       }
     );
-    if (!step) {
+    if (!claim) {
       return {
         status: "skipped",
         reason: "already_started"
       };
     }
+    const { step, lease } = claim;
+    const executionStartedAt = this.agentLatencyObserver?.start();
+    let executionCompleted = false;
+    let advanceStartedAt: number | undefined;
 
     try {
-      const result = await definition.execute(
-        {
-          currentUserId,
-          workspaceId,
-          runId
-        },
-        validatedInput
+      const result = await this.executeWithLeaseHeartbeat(
+        runId,
+        lease,
+        () =>
+          definition.execute(
+            {
+              currentUserId,
+              workspaceId,
+              runId,
+              requestContext
+            },
+            validatedInput
+          )
       );
+      executionCompleted = true;
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_execution",
+        outcome: "success",
+        startedAt: executionStartedAt,
+        turnSequence
+      });
+      advanceStartedAt = this.agentLatencyObserver?.start();
       const outputSummary = this.buildOutputSummary(result);
+      if (meetingReportHybridLookupContext) {
+        const count = outputSummary.count;
+        if (
+          typeof count !== "number" ||
+          !Number.isInteger(count) ||
+          count < 0
+        ) {
+          throw badRequest("MeetingReport hybrid title lookup count is invalid");
+        }
+        outputSummary.meetingReportHybridLookup = {
+          ...meetingReportHybridLookupContext,
+          exactMatchCount: count
+        };
+      }
       const resourceRefs = this.sanitizeResourceRefs(result.resourceRefs);
 
-      await this.agentLoggingService.completeStep(currentUserId, workspaceId, {
-        runId,
-        stepId: step.id,
-        outputSummary,
-        resourceRefs
-      });
+      if (result.status === "delegated") {
+        await this.agentLoggingService.deferToolStep(
+          currentUserId,
+          workspaceId,
+          {
+            runId,
+            stepId: step.id,
+            outputSummary,
+            resourceRefs,
+            riskLevel: definition.riskLevel,
+            message: "Canvas AI가 요청을 처리하고 있습니다.",
+            executionLease: lease
+          }
+        );
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_advance",
+          outcome: "success",
+          startedAt: advanceStartedAt,
+          turnSequence
+        });
+        return { status: "skipped", reason: "already_started" };
+      }
 
-      const run = await this.agentLoggingService.completeRun(
+      if (definition.requiresGroundedAnswer) {
+        await this.agentGroundedAnswerService.completeToolAndQueue({
+          currentUserId,
+          workspaceId,
+          runId,
+          stepId: step.id,
+          outputSummary,
+          resourceRefs,
+          groundingSources: result.groundingSources,
+          meetingReportHybridContext,
+          executionLease: lease
+        });
+        await this.agentGroundedAnswerOutboxPublisherService
+          .publish(runId)
+          .catch(() => undefined);
+        this.observeLatency({
+          runId,
+          requestContext,
+          toolName: definition.name,
+          stage: "tool_advance",
+          outcome: "success",
+          startedAt: advanceStartedAt,
+          turnSequence
+        });
+        return { status: "skipped", reason: "already_started" };
+      }
+
+      const advanced = await this.agentLoggingService.completeToolStepAndAdvance(
         currentUserId,
         workspaceId,
         {
           runId,
+          stepId: step.id,
+          outputSummary,
+          resourceRefs,
           riskLevel: definition.riskLevel,
-          finalAnswer: buildAgentReadResultAnswer({
-            toolName: definition.name,
-            outputSummary,
-            resourceRefs,
-            prompt,
-            timezone
-          }),
-          message: "요청을 완료했습니다."
+          waitingMessage: postExecutionDisposition === "complete_run"
+            ? buildAgentReadResultAnswer({
+                toolName: definition.name,
+                outputSummary,
+                resourceRefs,
+                prompt,
+                timezone
+              })
+            : "한 요청에서 실행할 수 있는 작업은 최대 5회입니다. 다음 요청에서 계속 진행할 내용을 알려주세요.",
+          postExecutionDisposition,
+          executionLease: lease
         }
       );
-
-      return {
-        status: "completed",
-        run
-      };
-    } catch (error) {
-      const safeMessage = this.toSafeErrorMessage(
-        error,
-        "Agent tool execution failed"
-      );
-
-      await this.agentLoggingService.failStep(currentUserId, workspaceId, {
+      this.observeLatency({
         runId,
-        stepId: step.id,
-        errorCode: "AGENT_TOOL_EXECUTION_FAILED",
-        errorMessage: safeMessage
+        requestContext,
+        toolName: definition.name,
+        stage: "tool_advance",
+        outcome: advanced.run.status === "waiting_user_input"
+          ? "clarification"
+          : "success",
+        startedAt: advanceStartedAt,
+        turnSequence
       });
+      if (advanced.queuedNextPlannerTurn) {
+        await this.agentOutboxPublisherService
+          .publishCreatedRun(runId)
+          .catch(() => undefined);
+        return { status: "skipped", reason: "already_started" };
+      }
+
+      return advanced.run.status === "completed"
+        ? { status: "completed", run: advanced.run }
+        : { status: "waiting_user_input", run: advanced.run };
+    } catch (error) {
+      this.observeLatency({
+        runId,
+        requestContext,
+        toolName: definition.name,
+        stage: executionCompleted ? "tool_advance" : "tool_execution",
+        outcome: "failure",
+        startedAt: executionCompleted ? advanceStartedAt : executionStartedAt,
+        failureType: "domain_error",
+        turnSequence
+      });
+      const embeddingUnavailable = error instanceof EmbeddingTemporarilyUnavailableError;
+      const errorCode = embeddingUnavailable
+        ? error.code
+        : "AGENT_TOOL_EXECUTION_FAILED";
+      const safeMessage = embeddingUnavailable
+        ? error.message
+        : this.toSafeErrorMessage(error, "Agent tool execution failed");
+
+      const failedStep = await this.agentLoggingService.failStep(
+        currentUserId,
+        workspaceId,
+        {
+          runId,
+          stepId: step.id,
+          errorCode,
+          errorMessage: safeMessage,
+          executionLease: lease
+        }
+      );
+      if (failedStep.status === "completed") {
+        return { status: "skipped", reason: "already_started" };
+      }
 
       const run = await this.agentLoggingService.failRun(
         currentUserId,
         workspaceId,
         {
           runId,
-          errorCode: "AGENT_TOOL_EXECUTION_FAILED",
+          errorCode,
           errorMessage: safeMessage,
-          message: "Agent tool을 실행하지 못했습니다."
+          message: embeddingUnavailable
+            ? "근거 검색이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
+            : "Agent tool을 실행하지 못했습니다."
         }
       );
 
@@ -632,8 +1412,49 @@ export class AgentExecutionService {
     return outputSummary;
   }
 
+  private async executeWithLeaseHeartbeat<T>(
+    runId: string,
+    lease: AgentExecutionLease,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let leaseLost = false;
+    let heartbeatInFlight: Promise<void> | null = null;
+    const heartbeat = setInterval(() => {
+      if (heartbeatInFlight) {
+        return;
+      }
+      heartbeatInFlight = this.agentLoggingService
+        .heartbeatExecutionLease(runId, lease)
+        .then((renewed) => {
+          if (!renewed) {
+            leaseLost = true;
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          heartbeatInFlight = null;
+        });
+    }, EXECUTION_HEARTBEAT_SECONDS * 1000);
+
+    try {
+      const result = await operation();
+      if (heartbeatInFlight) {
+        await heartbeatInFlight;
+      }
+      if (leaseLost) {
+        throw new Error("Agent execution lease was fenced");
+      }
+      return result;
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
+
   private isClarificationResult(
-    input: AgentToolClarificationResult | AgentConfirmationPlan
+    input:
+      | AgentToolClarificationResult
+      | AgentConfirmationPlan
+      | AgentToolPreparationResult
   ): input is AgentToolClarificationResult {
     return "kind" in input && input.kind === "needs_clarification";
   }
@@ -738,7 +1559,10 @@ export class AgentExecutionService {
     if (this.isPlainObject(input)) {
       const sanitized: AgentJsonObject = {};
       for (const [key, value] of Object.entries(input)) {
-        if (this.isForbiddenJsonKey(key)) {
+        if (
+          this.isForbiddenJsonKey(key) &&
+          !this.isSafeSelectionToken(key, value)
+        ) {
           continue;
         }
 
@@ -787,6 +1611,31 @@ export class AgentExecutionService {
     return value;
   }
 
+  private readConfirmationRequirement(
+    value: unknown,
+    executionMode: AgentToolExecutionMode
+  ): boolean | null {
+    if (executionMode === "contextual") {
+      if (value !== null) {
+        throw badRequest("Agent planner confirmation metadata is inconsistent");
+      }
+
+      return null;
+    }
+
+    const requiresConfirmation = this.readBoolean(
+      value,
+      "requiresConfirmation"
+    );
+    if (
+      (executionMode === "confirmation_required") !== requiresConfirmation
+    ) {
+      throw badRequest("Agent planner confirmation metadata is inconsistent");
+    }
+
+    return requiresConfirmation;
+  }
+
   private readRiskLevel(value: unknown): AgentRiskLevel {
     const riskLevel = this.readNonEmptyString(value, "riskLevel");
     if (!RISK_LEVELS.some((level) => level === riskLevel)) {
@@ -808,6 +1657,56 @@ export class AgentExecutionService {
   private isForbiddenJsonKey(key: string): boolean {
     const normalized = key.replace(/[_-]/g, "").toLowerCase();
     return FORBIDDEN_JSON_KEY_PARTS.some((part) => normalized.includes(part));
+  }
+
+  private isSafeSelectionToken(key: string, value: unknown): boolean {
+    const normalized = key.replace(/[_-]/g, "").toLowerCase();
+    return (
+      normalized === "selectiontoken" &&
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+      )
+    );
+  }
+
+  private observeLatency(input: {
+    runId: string;
+    requestContext: AgentRunRequestContext;
+    toolName: string;
+    stage: string;
+    outcome: string;
+    startedAt?: number;
+    failureType?: string;
+    turnSequence?: number;
+  }): void {
+    if (
+      !this.agentLatencyObserver ||
+      input.requestContext?.surface !== "sql_erd" ||
+      input.toolName !== "focus_sql_erd_tables"
+    ) {
+      return;
+    }
+    this.agentLatencyObserver.observe({
+      runId: input.runId,
+      stage: input.stage,
+      outcome: input.outcome,
+      startedAt: input.startedAt,
+      surface: "sql_erd",
+      toolName: input.toolName,
+      failureType: input.failureType,
+      turnSequence: input.turnSequence
+    });
+  }
+
+  private latencyOutcome(result: AgentExecutionResult): string {
+    if (result.status === "failed") {
+      return "failure";
+    }
+    if (result.status === "waiting_user_input") {
+      return "clarification";
+    }
+    return "success";
   }
 
   private isPlainObject(value: unknown): value is AgentJsonObject {

@@ -18,6 +18,10 @@ export type CalendarEvent = {
   createdByUser: CalendarEventUser;
   createdAt: string;
   updatedAt: string;
+  googleSync: {
+    status: "pending" | "synced" | "failed";
+    lastError: string | null;
+  } | null;
 };
 
 export type ListCalendarEventsQuery = {
@@ -31,7 +35,7 @@ export type CreateCalendarEventInput = {
   color?: string;
   isAllDay?: boolean;
   startDate: string;
-  endDate: string;
+  endDate?: string;
   startTime?: string | null;
   endTime?: string | null;
 };

@@ -1,0 +1,33 @@
+import type { TLCreateShapePartial, TLShape } from "tldraw";
+
+export type PiloCanvasFreeformShape = TLCreateShapePartial<TLShape>;
+
+export type PiloCanvasLocalShapeChange = {
+  changedShapeIds: string[];
+  deletedShapeIds: string[];
+  isFreehandDrawing: boolean;
+};
+
+export type PiloCanvasLocalInteractionState = {
+  activeMutationShapeIds: string[];
+  currentToolId: string;
+  editingShapeId: string | null;
+  focusedGroupId: string | null;
+  isFreehandDrawing: boolean;
+  isFocused: boolean;
+  selectedShapeIds: string[];
+};
+
+export type PiloCanvasViewSetting = {
+  zoom: number;
+  viewportX: number;
+  viewportY: number;
+};
+
+export type PiloCanvasViewportBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zoom: number;
+};

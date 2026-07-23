@@ -49,6 +49,9 @@ const prReviewModule = await readSource(
 const prReviewService = await readSource(
   "../../src/modules/pr-review/pr-review.service.ts"
 );
+const prReviewActivityLog = await readSource(
+  "../../src/modules/pr-review/pr-review-activity-log.ts"
+);
 const prReviewCanvasMaterializer = await readSource(
   "../../src/modules/pr-review/pr-review-canvas-materializer.ts"
 );
@@ -111,6 +114,8 @@ assert.match(prReviewService, /assertPullRequestReviewable\(pullRequest\)/);
 assert.match(prReviewService, /github_closed_at/);
 assert.match(prReviewService, /merged_at/);
 assert.match(prReviewService, /Pull request is closed or merged/);
+assert.match(prReviewService, /syncReviewRoomLifecycle/);
+assert.match(prReviewService, /Completed PR Review room is read-only/);
 assert.match(prReviewService, /lockForShare \? "FOR SHARE" : ""/);
 assert.match(
   prReviewApi,
@@ -156,6 +161,14 @@ assert.match(
 assert.match(
   prReviewController,
   /@Post\("review-files\/:reviewFileId\/conflict-suggestion"\)/
+);
+assert.match(
+  prReviewController,
+  /@Get\("review-files\/:reviewFileId\/conflict-draft"\)/
+);
+assert.match(
+  prReviewController,
+  /@Patch\("review-files\/:reviewFileId\/conflict-draft"\)/
 );
 assert.match(prReviewController, /@Body\(\) body: unknown/);
 assert.match(
@@ -204,6 +217,10 @@ assert.match(
   /applyGithubPullRequestConflictResolutions/
 );
 assert.match(prReviewService, /applyReviewSessionConflictResolutions/);
+assert.match(prReviewService, /updateReviewFileConflictDraft/);
+assert.match(prReviewService, /pr_review_conflict_drafts/);
+assert.match(prReviewService, /PrReviewConflictDraftSuggestionState/);
+assert.match(prReviewService, /readConflictDraftSuggestionState/);
 assert.match(prReviewService, /Review session conflict file set is stale/);
 assert.match(
   prReviewApi,
@@ -242,6 +259,9 @@ assert.match(prReviewService, /pr_review_sessions/);
 assert.match(prReviewService, /pr_review_rooms/);
 assert.match(prReviewService, /pr_review_room_files/);
 assert.match(prReviewService, /createSuccessorReviewRevisionAfterConflictApply/);
+assert.match(prReviewService, /activateReusableReviewSession/);
+assert.match(prReviewService, /SET current_session_id = \$2/);
+assert.match(prReviewService, /review_file\.room_file_id/);
 assert.match(prReviewService, /review_files/);
 assert.match(prReviewService, /review_flows/);
 assert.match(prReviewService, /review_flow_files/);
@@ -493,6 +513,72 @@ assert.match(prReviewApi, /공유 Review Room/);
 assert.match(prReviewApi, /review-rooms\/\{reviewRoomId\}\/revisions/);
 assert.match(prReviewApi, /pr-review:decision:updated/);
 
+const prReviewActivityActions = [
+  "pr_review_session_created",
+  "file_review_decision_created",
+  "review_submission_submitted",
+  "review_submission_failed",
+  "pr_review_conflict_resolution_applied",
+  "pr_review_pull_request_merged"
+];
+const prReviewActivityLogContractMatch = prReviewApi.match(
+  /## Server-side Activity Log 규칙[\s\S]*?(?=\n## )/
+);
+assert.ok(prReviewActivityLogContractMatch);
+const prReviewActivityLogContract = prReviewActivityLogContractMatch[0];
+
+for (const action of prReviewActivityActions) {
+  assert.match(prReviewActivityLog, new RegExp(`"${action}"`));
+  assert.match(prReviewActivityLogContract, new RegExp("`" + action + "`"));
+}
+
+assert.match(prReviewActivityLogContract, /request\/response shape[\s\S]*?변경하지 않는다/);
+assert.match(prReviewActivityLogContract, /합류와 기존 revision 재사용은[\s\S]*?기록하지 않는다/);
+assert.match(prReviewActivityLogContract, /실제 file decision 변경[\s\S]*?기록한다/);
+assert.match(prReviewActivityLogContract, /submission[\s\S]*?terminal[\s\S]*?기록한다/);
+assert.match(prReviewActivityLogContract, /conflict apply[\s\S]*?merge 성공[\s\S]*?기록한다/);
+assert.match(
+  prReviewActivityLogContract,
+  /PR Review는 `meetingId`와 `recordingId`를 소유하지 않으며[^\n]*Activity Log[^\n]*저장하지 않는다/
+);
+assert.match(prReviewActivityLogContract, /민감[^\n]*원문 payload[^\n]*저장하지 않는다/);
+assert.match(prReviewActivityLogContract, /stable dedupe/);
+assert.match(prReviewActivityLogContract, /merge commit SHA[\s\S]*?복구와 dedupe/);
+assert.match(
+  prReviewActivityLogContract,
+  /GitHub PR merge[\s\S]*?local room\/activity transaction[\s\S]*?실패[\s\S]*?숨기지 않고[\s\S]*?API error/
+);
+assert.match(prReviewActivityLogContract, /conflict apply[\s\S]*?sync_required/);
+
+const conflictApplyContract = prReviewApi.match(
+  /## Conflict Resolution Apply[\s\S]*?(?=\n## )/
+)?.[0];
+const mergeContract = prReviewApi.match(
+  /## GitHub PR Merge 실행[\s\S]*?(?=\n## )/
+)?.[0];
+assert.ok(conflictApplyContract);
+assert.ok(mergeContract);
+assert.match(
+  conflictApplyContract,
+  /Activity Log append transaction[\s\S]*?sync_required[\s\S]*?API error[\s\S]*?`commitSha`/
+);
+assert.match(
+  mergeContract,
+  /local room completion\/Activity Log transaction[\s\S]*?API error[\s\S]*?`mergeCommitSha`/
+);
+
+assert.match(prReviewService, /ActivityLogService/);
+assert.match(prReviewService, /this\.activityLogService\.append\(/);
+const prReviewActivityProduction = `${prReviewService}\n${prReviewActivityLog}`;
+assert.doesNotMatch(
+  prReviewActivityProduction,
+  /INSERT\s+INTO\s+(?:public\.)?activity_logs/i
+);
+assert.doesNotMatch(
+  prReviewActivityProduction,
+  /\b(?:meetingId|recordingId)\b/
+);
+
 assert.match(databaseService, /DatabaseTransaction/);
 assert.match(databaseService, /async transaction/);
 assert.match(databaseService, /BEGIN/);
@@ -509,14 +595,19 @@ await import("./conflict-status-refresh.test.mjs");
 await import("./decision-progress.test.mjs");
 await import("./decision-concurrency.test.mjs");
 await import("./decision-realtime-publisher.test.mjs");
+await import("./review-room-delete-realtime.test.mjs");
+await import("./room-realtime-publisher.test.mjs");
 await import("./submission.test.mjs");
 await import("./async-analysis-enqueue.test.mjs");
 await import("./analysis-input-handoff.test.mjs");
 await import("./analysis-result-handoff.test.mjs");
 await import("./analysis-job-recovery.test.mjs");
 await import("./analysis-retry.test.mjs");
+await import("./review-session-reuse.test.mjs");
 await import("./github-file-pagination.test.mjs");
 await import("./semantic-graph-contract.test.mjs");
 await import("./semantic-graph-candidates.test.mjs");
 await import("./semantic-graph-validator.test.mjs");
+await import("./review-priority.test.mjs");
 await import("./canvas-materializer.test.mjs");
+await import("./activity-log.test.mjs");

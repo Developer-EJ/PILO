@@ -32,6 +32,14 @@ const githubIntegrationApi = await readFile(
   new URL("../../../../docs/api/github-integration-api.md", import.meta.url),
   "utf8"
 );
+const apiIndex = await readFile(
+  new URL("../../../../docs/api/README.md", import.meta.url),
+  "utf8"
+);
+const githubIntegrationReadme = await readFile(
+  new URL("../../src/modules/github-integration/README.md", import.meta.url),
+  "utf8"
+);
 
 const githubIntegrationDirectory = new URL(
   "../../src/modules/github-integration/",
@@ -143,6 +151,30 @@ assert.match(githubIntegrationApi, /github_callback_error=installation_not_acces
 assert.match(githubIntegrationApi, /github_oauth_error=account_already_connected/);
 assert.match(githubIntegrationApi, /progressPercent/);
 assert.match(githubIntegrationApi, /progressStage/);
+assert.match(
+  githubIntegrationApi,
+  /"tokenScope": "read:user,user:email,project,repo"/
+);
+for (const contract of [apiIndex, githubIntegrationApi, githubIntegrationReadme]) {
+  assert.match(contract, /read:user user:email project repo/);
+  assert.match(contract, /project(?:`)?\s*(?:and|\+)\s*(?:`)?repo[\s\S]{0,80}scopes?/i);
+}
+assert.match(
+  githubIntegrationApi,
+  /existing `project`-only connections[\s\S]{0,120}reconnect/i
+);
+assert.match(
+  githubIntegrationApi,
+  /Board issue create[\s\S]{0,160}purpose=project_v2/i
+);
+assert.match(
+  githubIntegrationApi,
+  /Board issue update[\s\S]{0,200}purpose=app_user[\s\S]{0,200}PR Review[\s\S]{0,120}purpose=app_user/i
+);
+assert.match(
+  githubIntegrationApi,
+  /repo scope grants broad read\/write access[\s\S]{0,120}private repositories/i
+);
 assert.deepEqual(directoryNames.sort(), ["dto", "queries", "types"]);
 
 const tscScript = fileURLToPath(
@@ -158,13 +190,17 @@ execFileSync(process.execPath, [tscScript, "-p", "tsconfig.build.json"], {
 
 await import("./board-invalidation.test.mjs");
 await import("./oauth.test.mjs");
+await import("./oauth-token-refresh.test.mjs");
 await import("./oauth-connection.test.mjs");
 await import("./installation.test.mjs");
+await import("./project-v2-reconnect-identity-migration.test.mjs");
+await import("./project-v2-reconnect-identity-postgres.test.mjs");
 await import("./github-app-client.test.mjs");
 await import("./issue-assignees.test.mjs");
 await import("./callback-redirect.test.mjs");
 await import("./source-read.test.mjs");
 await import("./project-v2.test.mjs");
+await import("./personal-project-v2-discovery-auth.test.mjs");
 await import("./project-v2-selection.service.test.mjs");
 await import("./project-v2-selection-contract.test.mjs");
 await import("./project-v2-selection-full-sync.test.mjs");
@@ -174,6 +210,8 @@ await import("./review-submission.test.mjs");
 await import("./conflict-merge.test.mjs");
 await import("./sync-progress.test.mjs");
 await import("./sync-runs.test.mjs");
+await import("./manual-sync-admission.test.mjs");
+await import("./manual-sync-controller-facade.test.mjs");
 await import("./source-sync-repository-selection.test.mjs");
 await import("./repository-scoped-project-v2.test.mjs");
 await import("./async-sync-worker.test.mjs");

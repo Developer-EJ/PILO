@@ -69,8 +69,17 @@ const setupPool = new Pool({ connectionString: databaseUrl });
 const databaseA = new DatabaseService();
 const databaseB = new DatabaseService();
 const workspaceService = new IntegrationWorkspaceService();
-const serviceA = new SqlErdService(databaseA, workspaceService);
-const serviceB = new SqlErdService(databaseB, workspaceService);
+const activityLogService = { async append() {} };
+const serviceA = new SqlErdService(
+  databaseA,
+  workspaceService,
+  activityLogService
+);
+const serviceB = new SqlErdService(
+  databaseB,
+  workspaceService,
+  activityLogService
+);
 
 try {
   const [{ pid: pidA }, { pid: pidB }] = await Promise.all([
@@ -121,9 +130,54 @@ async function seedFixtures() {
 }
 
 async function cleanupFixtures() {
-  await setupPool.query("DELETE FROM workspaces WHERE id = ANY($1::uuid[])", [
-    Object.values(workspaceIds)
-  ]);
+  const deletionLifecycle = await setupPool.query(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'workspaces'
+          AND column_name = 'deletion_status'
+      ) AS enabled
+    `
+  );
+  if (deletionLifecycle.rows[0].enabled) {
+    const client = await setupPool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+          UPDATE workspaces
+          SET
+            deletion_status = 'deleting',
+            deletion_requested_at = now()
+          WHERE id = ANY($1::uuid[])
+            AND deletion_status = 'active'
+        `,
+        [Object.values(workspaceIds)]
+      );
+      await client.query(
+        "SELECT set_config('pilo.activity_log_tenant_purge', 'on', true)"
+      );
+      await client.query(
+        "SELECT set_config('pilo.workspace_deletion_finalize', 'on', true)"
+      );
+      await client.query(
+        "DELETE FROM workspaces WHERE id = ANY($1::uuid[])",
+        [Object.values(workspaceIds)]
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  } else {
+    await setupPool.query("DELETE FROM workspaces WHERE id = ANY($1::uuid[])", [
+      Object.values(workspaceIds)
+    ]);
+  }
   await setupPool.query("DELETE FROM users WHERE id = $1", [userId]);
 }
 

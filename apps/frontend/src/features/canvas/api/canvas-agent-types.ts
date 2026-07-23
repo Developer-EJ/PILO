@@ -5,11 +5,84 @@ export type CanvasAgentViewport = {
   height: number;
 };
 
+export type CanvasAgentShapeSummary = {
+  id: string;
+  shapeType: string;
+  title: string | null;
+  text: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type CanvasAgentSelectedSceneShape = {
+  id: string;
+  shapeType: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  depth: number;
+  title: string | null;
+  text: string | null;
+  assetRef: string | null;
+  style: Record<string, string | number | boolean | null>;
+};
+
+export type CanvasAgentSelectedScene = {
+  selectionMode: "frame" | "multi-selection";
+  bounds: { width: number; height: number };
+  rootShapeIds: string[];
+  shapes: CanvasAgentSelectedSceneShape[];
+  options: {
+    styleMode: "faithful";
+    responsive: false;
+    includeJavaScript: false;
+  };
+};
+
+export type CanvasAgentHtmlArtifact = {
+  kind: "html";
+  title: string;
+  html: string;
+  sourceShapeIds: string[];
+};
+
+export type CanvasAgentClientAction = {
+  type: "insert_drive_file";
+  file: {
+    fileId: string;
+    fileName: string;
+    mimeType: string;
+  };
+};
+
 export type CanvasAgentPresentationMode = "interactive" | "background";
+
+export type CanvasAgentConversationMessage = {
+  role: "assistant" | "user";
+  content: string;
+};
+
+export type CanvasAgentConversationContext = {
+  messages: CanvasAgentConversationMessage[];
+  lastTask: {
+    draftId: string | null;
+    draftTitle: string | null;
+    prompt: string;
+    status: string;
+    summary: string | null;
+  } | null;
+};
 
 export type CanvasAgentProgress = {
   message: string;
   highlightedShapeIds: string[];
+  loadRootShapeIds?: string[];
   targetViewport: CanvasAgentViewport | null;
   toolTarget: string | null;
   toolTargetLabel: string | null;
@@ -34,6 +107,8 @@ export type CanvasAgentRun = {
   summary: string | null;
   canvasRevision: number | null;
   progress: CanvasAgentProgress | null;
+  artifact: CanvasAgentHtmlArtifact | null;
+  clientAction: CanvasAgentClientAction | null;
   createdAt: string;
   completedAt: string | null;
   expiresAt: string;

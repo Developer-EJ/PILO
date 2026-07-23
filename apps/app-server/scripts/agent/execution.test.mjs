@@ -23,6 +23,12 @@ const { MeetingAgentToolsService } = require(
 const { BoardAgentToolsService } = require(
   "../../dist/modules/agent/tools/board-agent-tools.service.js"
 );
+const { BoardContextResolverService } = require(
+  "../../dist/modules/agent/tools/board-context-resolver.service.js"
+);
+const { SqlErdAgentToolsService } = require(
+  "../../dist/modules/agent/tools/sql-erd-agent-tools.service.js"
+);
 const { badRequest } = require("../../dist/common/api-error.js");
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -31,12 +37,15 @@ const RUN_ID = "33333333-3333-3333-3333-333333333333";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
 const REPORT_ID = "66666666-6666-4666-8666-666666666666";
+const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
+const SQL_ERD_SECOND_SESSION_ID = "88888888-8888-4888-8888-888888888888";
 
 function plannerOutput(overrides = {}) {
   return {
     status: "tool_candidate",
     message: "Calendar 일정 조회 후보입니다.",
     finalAnswerDraft: "일정 조회 계획을 만들었습니다.",
+    toolSchemaVersion: "agent-tools:v7",
     toolName: "list_calendar_events",
     riskLevel: "low",
     executionMode: "auto",
@@ -84,12 +93,25 @@ class FakeWorkspaceService {
 }
 
 class FakeDatabaseService {
-  constructor(state) {
+  constructor(state, timeline = []) {
     this.state = state;
     this.calls = [];
+    this.timeline = timeline;
+  }
+
+  async query(text) {
+    this.timeline.push("db:query");
+    this.calls.push({ text, values: [] });
+    if (text.includes("SELECT DISTINCT tool_name")) {
+      return (this.state.completedToolNames ?? []).map((tool_name) => ({
+        tool_name
+      }));
+    }
+    throw new Error(`Unhandled query: ${text}`);
   }
 
   async queryOne(text, values = []) {
+    this.timeline.push("db:queryOne");
     this.calls.push({ text, values });
 
     if (text.includes(" AS started")) {
@@ -98,10 +120,25 @@ class FakeDatabaseService {
       };
     }
 
-    if (text.includes("SELECT id, workspace_id, requested_by_user_id, status")) {
+    if (
+      text.includes("requested_by_user_id") &&
+      text.includes("prompt") &&
+      text.includes("request_context_json")
+    ) {
       const [runId] = values;
       const run = this.state.run;
       return run && run.id === runId ? run : null;
+    }
+
+    if (text.includes("SELECT request_context_json")) {
+      const [runId, workspaceId, currentUserId] = values;
+      const run = this.state.run;
+      return run &&
+        run.id === runId &&
+        run.workspace_id === workspaceId &&
+        run.requested_by_user_id === currentUserId
+        ? { request_context_json: run.request_context_json ?? null }
+        : null;
     }
 
     if (text.includes("FROM agent_runs")) {
@@ -144,6 +181,31 @@ class FakeAgentLoggingService {
     };
   }
 
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId,
+    workspaceId,
+    input
+  ) {
+    const step = await this.startNextToolStepIfAbsent(
+      currentUserId,
+      workspaceId,
+      input
+    );
+    return step
+      ? {
+          step,
+          lease: {
+            token: "66666666-6666-4666-8666-666666666666",
+            generation: 1
+          }
+        }
+      : null;
+  }
+
+  async heartbeatExecutionLease() {
+    return true;
+  }
+
   async completeStep(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "completeStep",
@@ -156,6 +218,55 @@ class FakeAgentLoggingService {
       id: input.stepId,
       runId: input.runId,
       status: "completed"
+    };
+  }
+
+  async completeToolStepAndAdvance(currentUserId, workspaceId, input) {
+    this.calls.push({
+      method: "completeToolStepAndAdvance",
+      currentUserId,
+      workspaceId,
+      input
+    });
+
+    const disposition = input.postExecutionDisposition ?? "continue_planning";
+    const queuedNextPlannerTurn =
+      disposition === "continue_planning" &&
+      this.state.toolCallLimitReached !== true;
+    const status =
+      disposition === "complete_run"
+        ? "completed"
+        : queuedNextPlannerTurn
+          ? "planning"
+          : "waiting_user_input";
+    return {
+      step: {
+        id: input.stepId,
+        runId: input.runId,
+        status: "completed"
+      },
+      run: {
+        id: input.runId,
+        workspaceId,
+        requestedByUserId: currentUserId,
+        clientRequestId: null,
+        status,
+        riskLevel: input.riskLevel ?? null,
+        prompt: "이번 주 일정 알려줘",
+        timezone: "Asia/Seoul",
+        message: queuedNextPlannerTurn
+          ? "다음 작업을 확인하고 있습니다."
+          : input.waitingMessage,
+        finalAnswer: status === "completed" ? input.waitingMessage : null,
+        errorCode: null,
+        errorMessage: null,
+        expiresAt: "2026-08-09T00:00:00.000Z",
+        completedAt:
+          status === "completed" ? "2026-07-10T00:00:00.000Z" : null,
+        createdAt: "2026-07-10T00:00:00.000Z",
+        updatedAt: "2026-07-10T00:00:00.000Z"
+      },
+      queuedNextPlannerTurn
     };
   }
 
@@ -202,6 +313,50 @@ class FakeAgentLoggingService {
     };
   }
 
+  async queueNextPlannerTurn(currentUserId, workspaceId, input) {
+    this.calls.push({ method: "queueNextPlannerTurn", currentUserId, workspaceId, input });
+    return {
+      id: input.runId,
+      workspaceId,
+      requestedByUserId: currentUserId,
+      clientRequestId: null,
+      status: "planning",
+      riskLevel: input.riskLevel,
+      prompt: "이번 주 일정 알려줘",
+      timezone: "Asia/Seoul",
+      message: "다음 작업을 확인하고 있습니다.",
+      finalAnswer: null,
+      errorCode: null,
+      errorMessage: null,
+      expiresAt: "2026-08-09T00:00:00.000Z",
+      completedAt: null,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    };
+  }
+
+  async waitForUserInput(currentUserId, workspaceId, input) {
+    this.calls.push({ method: "waitForUserInput", currentUserId, workspaceId, input });
+    return {
+      id: input.runId,
+      workspaceId,
+      requestedByUserId: currentUserId,
+      clientRequestId: null,
+      status: "waiting_user_input",
+      riskLevel: input.riskLevel ?? null,
+      prompt: "이번 주 일정 알려줘",
+      timezone: "Asia/Seoul",
+      message: input.message,
+      finalAnswer: input.message,
+      errorCode: null,
+      errorMessage: null,
+      expiresAt: "2026-08-09T00:00:00.000Z",
+      completedAt: null,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      updatedAt: "2026-07-10T00:00:00.000Z"
+    };
+  }
+
   async failRun(currentUserId, workspaceId, input) {
     this.calls.push({
       method: "failRun",
@@ -228,6 +383,36 @@ class FakeAgentLoggingService {
       createdAt: "2026-07-10T00:00:00.000Z",
       updatedAt: "2026-07-10T00:00:00.000Z"
     };
+  }
+}
+
+class FakeAgentLatencyObserver {
+  constructor(timeline = []) {
+    this.calls = [];
+    this.clock = 0;
+    this.timeline = timeline;
+  }
+
+  start() {
+    this.timeline.push("latency:start");
+    this.clock += 10;
+    return this.clock;
+  }
+
+  observe(input) {
+    this.calls.push(input);
+  }
+}
+
+class FakeAgentOutboxPublisherService {
+  constructor(error = null) {
+    this.calls = [];
+    this.error = error;
+  }
+
+  async publishCreatedRun(runId) {
+    this.calls.push(runId);
+    if (this.error) throw this.error;
   }
 }
 
@@ -278,6 +463,7 @@ class FakeAgentToolRegistryService {
       description: "fake tool",
       riskLevel,
       executionMode,
+      postExecutionDisposition: this.state.postExecutionDisposition,
       inputSchema: {},
       validateInput: (input) => {
         this.calls.push({ method: "validateInput", input });
@@ -297,6 +483,12 @@ class FakeAgentToolRegistryService {
             this.calls.push({ method: "buildConfirmation", input });
             return confirmationPlan();
           },
+      prepareExecution: this.state.prepareExecution
+        ? async (context, input) => {
+            this.calls.push({ method: "prepareExecution", context, input });
+            return this.state.prepareExecution;
+          }
+        : undefined,
       execute: async (context, input) => {
         this.calls.push({ method: "execute", context, input });
 
@@ -310,7 +502,8 @@ class FakeAgentToolRegistryService {
             transcriptText: "must-not-leak",
             nested: {
               visible: "ok",
-              token: "must-not-leak"
+              token: "must-not-leak",
+              selectionToken: "must-not-leak"
             }
           },
           resourceRefs: [
@@ -329,6 +522,16 @@ class FakeAgentToolRegistryService {
         };
       }
     };
+  }
+
+  getDefinitionForContext(name, requestContext) {
+    this.calls.push({ method: "getDefinitionForContext", name, requestContext });
+
+    if (this.state.contextUnavailable) {
+      return null;
+    }
+
+    return this.getDefinition(name);
   }
 }
 
@@ -368,6 +571,10 @@ function createSmokeReport(overrides = {}) {
     discussionPoints: "논의사항",
     decisions: "결정사항",
     actionItemCandidates: [],
+    actionItems: [],
+    evidence: [],
+    evidenceSegments: [],
+    activityEvidence: [],
     retryCount: 0,
     createdAt: "2026-07-10T00:00:00.000Z",
     updatedAt: "2026-07-10T00:00:00.000Z",
@@ -411,6 +618,21 @@ class SmokeCalendarService {
     return createSmokeEvent(body);
   }
 
+  normalizeCreateEventInput(body) {
+    const startDate = body.startDate;
+    const isAllDay = body.isAllDay ?? !body.startTime;
+    return {
+      title: body.title,
+      description: body.description ?? null,
+      color: body.color ?? "#3B82F6",
+      isAllDay,
+      startDate,
+      endDate: body.endDate ?? startDate,
+      startTime: isAllDay ? null : body.startTime ?? null,
+      endTime: isAllDay ? null : body.endTime ?? "16:00"
+    };
+  }
+
   async updateEvent(currentUserId, workspaceId, eventId, body) {
     this.calls.push({
       method: "updateEvent",
@@ -445,6 +667,130 @@ class SmokeCalendarService {
   assert.doesNotMatch(answer, /주간 회의|resourceId|1/);
 }
 
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_meeting_rooms",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      count: 2,
+      hasMore: false,
+      rooms: [
+        {
+          roomId: "room-1",
+          name: "기본 회의실",
+          isDefault: true,
+          currentMeeting: {
+            meetingId: "meeting-1",
+            startedAt: "2026-07-10T00:00:00.000Z",
+            activeParticipantCount: 3,
+            durationSec: 3660,
+            recording: { status: "RUNNING" }
+          }
+        },
+        {
+          roomId: "room-2",
+          name: "디자인 회의실",
+          isDefault: false,
+          currentMeeting: null
+        }
+      ]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /회의방 2개/);
+  assert.match(answer, /기본 회의실 · 진행 중 · 3명 참여 · 1시간 1분 경과 · 녹음 중/);
+  assert.match(answer, /시작 2026-07-10 09:00/);
+  assert.match(answer, /디자인 회의실 · 진행 중인 회의 없음/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "list_meeting_rooms",
+    outputSummary: {
+      count: 0,
+      hasMore: false,
+      rooms: []
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "조회 가능한 회의방이 없습니다.");
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_active_meeting",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      active: true,
+      meeting: {
+        meetingId: "meeting-1",
+        startedAt: "2026-07-10T00:00:00.000Z"
+      },
+      meetingRoom: {
+        roomId: "room-1",
+        name: "기본 회의실",
+        isDefault: true
+      },
+      durationSec: 300
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /기본 회의실 회의에 참여 중입니다/);
+  assert.match(answer, /진행 시간: 5분/);
+  assert.match(answer, /시작: 2026-07-10 09:00/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_active_meeting",
+    outputSummary: {
+      active: false,
+      meeting: null,
+      meetingRoom: null,
+      durationSec: null
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "현재 참여 중인 회의가 없습니다.");
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_participants",
+    outputSummary: {
+      count: 2,
+      hasMore: false,
+      participants: [
+        { name: "진호", isActive: true },
+        { name: "은재", isActive: false }
+      ]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /참여자 2명/);
+  assert.match(answer, /진호 · 참여 중/);
+  assert.match(answer, /은재 · 퇴장/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_participants",
+    outputSummary: {
+      count: 0,
+      hasMore: false,
+      participants: []
+    },
+    resourceRefs: []
+  });
+
+  assert.equal(answer, "참여자가 없습니다.");
+}
+
 class SmokeMeetingService {
   constructor() {
     this.calls = [];
@@ -475,6 +821,42 @@ class SmokeMeetingService {
       report: this.report
     };
   }
+
+  async listActionItemsForAgent(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listActionItemsForAgent",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return { actionItems: this.report.actionItems };
+  }
+
+  async getMeetingReportDecisionItem(
+    currentUserId,
+    workspaceId,
+    reportId,
+    decisionIndex
+  ) {
+    this.calls.push({
+      method: "getMeetingReportDecisionItem",
+      currentUserId,
+      workspaceId,
+      reportId,
+      decisionIndex
+    });
+    return { decisionIndex, text: "결정사항" };
+  }
+
+  async requestReportRegeneration(currentUserId, workspaceId, reportId) {
+    this.calls.push({
+      method: "requestReportRegeneration",
+      currentUserId,
+      workspaceId,
+      reportId
+    });
+    return { report: { ...this.report, status: "QUEUED" } };
+  }
 }
 
 class SmokeBoardService {
@@ -484,7 +866,18 @@ class SmokeBoardService {
       {
         id: "99999999-9999-4999-8999-999999999999",
         name: "제품 개발",
-        repository: { fullName: "Developer-EJ/PILO" }
+        repository: {
+          id: "repository-id",
+          fullName: "Developer-EJ/PILO",
+          htmlUrl: "https://github.com/Developer-EJ/PILO"
+        },
+        project: {
+          id: "project-id",
+          title: "제품 개발",
+          projectNumber: 1,
+          githubProjectNodeId: "PVT_test",
+          url: "https://github.com/orgs/Developer-EJ/projects/1"
+        }
       }
     ];
     this.issues = [
@@ -498,6 +891,15 @@ class SmokeBoardService {
         htmlUrl: "https://github.com/Developer-EJ/PILO/issues/729"
       }
     ];
+  }
+
+  async getActiveBoardSource(currentUserId, workspaceId) {
+    this.calls.push({
+      method: "getActiveBoardSource",
+      currentUserId,
+      workspaceId
+    });
+    return null;
   }
 
   async listBoards(currentUserId, workspaceId, query) {
@@ -523,20 +925,97 @@ class SmokeBoardService {
   }
 }
 
+class SmokeSqlErdService {
+  constructor() {
+    this.calls = [];
+    this.sessions = [
+      {
+        id: SQL_ERD_SESSION_ID,
+        title: "Untitled ERD",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+        tableCount: 4,
+        relationCount: 3,
+        revision: 1,
+        modelJson: {
+          version: 1,
+          schema: {
+            tables: [
+              {
+                id: "table-orders",
+                name: "orders",
+                columns: []
+              }
+            ],
+            relations: []
+          }
+        }
+      },
+      {
+        id: SQL_ERD_SECOND_SESSION_ID,
+        title: "Untitled ERD",
+        updatedAt: "2026-07-17T00:00:00.000Z",
+        tableCount: 3,
+        relationCount: 2,
+        revision: 2,
+        modelJson: {
+          version: 1,
+          schema: {
+            tables: [
+              {
+                id: "table-payments",
+                name: "payments",
+                columns: []
+              }
+            ],
+            relations: []
+          }
+        }
+      }
+    ];
+  }
+
+  async listSessions(currentUserId, workspaceId, query) {
+    this.calls.push({
+      method: "listSessions",
+      currentUserId,
+      workspaceId,
+      query
+    });
+    return {
+      items: this.sessions,
+      nextCursor: null
+    };
+  }
+
+  async getSession(currentUserId, workspaceId, sessionId) {
+    this.calls.push({
+      method: "getSession",
+      currentUserId,
+      workspaceId,
+      sessionId
+    });
+    return this.sessions.find((session) => session.id === sessionId);
+  }
+}
+
 function createSmokeRegistry() {
   const calendarService = new SmokeCalendarService();
   const meetingService = new SmokeMeetingService();
   const boardService = new SmokeBoardService();
+  const sqlErdService = new SmokeSqlErdService();
+  const boardContextResolver = new BoardContextResolverService(boardService);
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService(calendarService),
     new MeetingAgentToolsService(meetingService),
-    new BoardAgentToolsService(boardService)
+    new BoardAgentToolsService(boardService, boardContextResolver),
+    new SqlErdAgentToolsService(sqlErdService)
   );
 
   return {
     calendarService,
     meetingService,
     boardService,
+    sqlErdService,
     registry
   };
 }
@@ -546,7 +1025,9 @@ function createExecutionServiceWithRegistry(
   registry,
   {
     prompt = "이번 주 일정 알려줘",
-    timezone = "Asia/Seoul"
+    timezone = "Asia/Seoul",
+    requestContext = null,
+    latencyObserver = undefined
   } = {}
 ) {
   const state = {
@@ -555,8 +1036,10 @@ function createExecutionServiceWithRegistry(
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: "running",
+      turn_sequence: 1,
       prompt,
-      timezone
+      timezone,
+      request_context_json: requestContext
     },
     plannerStep: {
       id: STEP_ID,
@@ -564,9 +1047,26 @@ function createExecutionServiceWithRegistry(
     }
   };
   const workspaceService = new FakeWorkspaceService();
-  const database = new FakeDatabaseService(state);
+  const database = new FakeDatabaseService(
+    state,
+    latencyObserver?.timeline ?? []
+  );
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
+  const outboxPublisherService = new FakeAgentOutboxPublisherService();
+  const candidateSelectionService = {
+    calls: [],
+    async createCandidates(context, toolStepId, candidates) {
+      this.calls.push({ context, toolStepId, candidates });
+      return candidates.map(({ reference, candidate }, index) => ({
+        candidateSelectionId: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1).padStart(12, "0")}`,
+        resourceType: reference.resourceType,
+        label: candidate.label,
+        description: candidate.description,
+        status: candidate.status
+      }));
+    }
+  };
 
   return {
     service: new AgentExecutionService(
@@ -574,8 +1074,14 @@ function createExecutionServiceWithRegistry(
       workspaceService,
       loggingService,
       confirmationService,
-      registry
+      registry,
+      undefined,
+      undefined,
+      outboxPublisherService,
+      candidateSelectionService,
+      latencyObserver
     ),
+    candidateSelectionService,
     confirmationService,
     loggingService,
     workspaceService
@@ -586,7 +1092,13 @@ function createService({
   registryState = {},
   runStatus = "running",
   planner = plannerOutput(),
-  executionStarted = false
+  executionStarted = false,
+  requestContext = null,
+  toolCallLimitReached = false,
+  completedToolNames = [],
+  publisherError = null,
+  candidateSelectionService = undefined,
+  latencyObserver = undefined
 } = {}) {
   const state = {
     run: {
@@ -594,20 +1106,30 @@ function createService({
       workspace_id: WORKSPACE_ID,
       requested_by_user_id: USER_ID,
       status: runStatus,
+      turn_sequence: 1,
       prompt: "이번 주 일정 알려줘",
-      timezone: "Asia/Seoul"
+      timezone: "Asia/Seoul",
+      request_context_json: requestContext
     },
     plannerStep: {
       id: STEP_ID,
       output_json: planner
     },
-    executionStarted
+    executionStarted,
+    toolCallLimitReached,
+    completedToolNames
   };
   const workspaceService = new FakeWorkspaceService();
-  const database = new FakeDatabaseService(state);
+  const database = new FakeDatabaseService(
+    state,
+    latencyObserver?.timeline ?? []
+  );
   const loggingService = new FakeAgentLoggingService(state);
   const confirmationService = new FakeAgentConfirmationService();
   const toolRegistryService = new FakeAgentToolRegistryService(registryState);
+  const outboxPublisherService = new FakeAgentOutboxPublisherService(
+    publisherError
+  );
 
   return {
     service: new AgentExecutionService(
@@ -615,13 +1137,20 @@ function createService({
       workspaceService,
       loggingService,
       confirmationService,
-      toolRegistryService
+      toolRegistryService,
+      undefined,
+      undefined,
+      outboxPublisherService,
+      candidateSelectionService,
+      latencyObserver
     ),
     workspaceService,
     database,
     loggingService,
     confirmationService,
-    toolRegistryService
+    toolRegistryService,
+    outboxPublisherService,
+    latencyObserver
   };
 }
 
@@ -645,6 +1174,7 @@ function formatterMeetingReport(index, overrides = {}) {
   return {
     reportId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     meetingId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    title: `회의록 제목 ${index}`,
     status: "COMPLETED",
     createdAt: `2026-07-${String(index).padStart(2, "0")}T00:00:00.000Z`,
     sections: [
@@ -664,6 +1194,25 @@ function formatterMeetingReport(index, overrides = {}) {
     },
     ...overrides
   };
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "focus_sql_erd_tables",
+    outputSummary: {
+      action: "focused",
+      title: "PILO",
+      featureLabel: "로그",
+      primaryTables: [{ name: "activity_logs" }],
+      relatedTables: [{ name: "users" }]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /로그 관련 집중 보기 결과를 준비했습니다/);
+  assert.doesNotMatch(answer, /집중 표시했습니다/);
+  assert.match(answer, /핵심 테이블: activity_logs/);
+  assert.match(answer, /관련 테이블: users/);
 }
 
 {
@@ -721,6 +1270,7 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.match(answer, /2026-07-08 09:00 · 완료/);
+  assert.match(answer, /회의록 · 회의록 제목 8/);
   assert.match(answer, /요약: 회의 요약 8/);
   assert.match(answer, /논의사항: 논의사항 8/);
   assert.match(answer, /결정사항: 결정사항 8/);
@@ -810,6 +1360,7 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.match(answer, /회의록 6개/);
+  assert.match(answer, /회의록 제목 1/);
   assert.match(answer, /요약: 회의 요약 1/);
   assert.match(answer, /외 1개/);
   assert.doesNotMatch(answer, /회의 요약 6/);
@@ -843,6 +1394,50 @@ function formatterMeetingReport(index, overrides = {}) {
 
   assert.match(answer, /생성 중/);
   assert.match(answer, /회의록을 생성하고 있습니다/);
+}
+
+{
+  const providerError = "provider raw error must not be shown";
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_report",
+    outputSummary: {
+      report: formatterMeetingReport(8, {
+        status: "FAILED",
+        retryCount: 2,
+        failure: { failedStep: "SUMMARIZING", errorMessage: providerError },
+        sections: [],
+        actionItems: []
+      })
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /생성 실패/);
+  assert.match(answer, /실패 단계: SUMMARIZING/);
+  assert.match(answer, /재시도 2회/);
+  assert.match(answer, /재생성 가능 여부/);
+  assert.doesNotMatch(answer, /provider raw error/);
+}
+
+{
+  const answer = buildAgentReadResultAnswer({
+    toolName: "get_meeting_participants",
+    timezone: "Asia/Seoul",
+    outputSummary: {
+      count: 1,
+      participants: [
+        {
+          name: "진호",
+          isActive: false,
+          joinedAt: "2026-07-08T00:00:00.000Z",
+          leftAt: "2026-07-08T01:00:00.000Z"
+        }
+      ]
+    },
+    resourceRefs: []
+  });
+
+  assert.match(answer, /진호 · 퇴장 · 입장 2026-07-08 09:00 · 퇴장 2026-07-08 10:00/);
 }
 
 {
@@ -887,13 +1482,13 @@ function formatterMeetingReport(index, overrides = {}) {
   const { service, loggingService, workspaceService } = createService();
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
 }
 
@@ -916,19 +1511,18 @@ function formatterMeetingReport(index, overrides = {}) {
 
   const result = await service.executeReadyRun(RUN_ID);
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
   assert.equal(database.calls.length, 4);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput", "execute"]
+    ["getDefinitionForContext", "getDefinition", "validateInput", "execute"]
   );
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
   assert.equal(
     "providerRawResponse" in loggingService.calls[0].input.inputSummary.input,
@@ -944,10 +1538,428 @@ function formatterMeetingReport(index, overrides = {}) {
     false
   );
   assert.equal(
+    "selectionToken" in loggingService.calls[1].input.outputSummary.nested,
+    false
+  );
+  assert.equal(
     "token" in loggingService.calls[1].input.resourceRefs[0].metadata,
     false
   );
-  assert.match(loggingService.calls[2].input.finalAnswer, /관련 리소스 1개/);
+  assert.equal(
+    loggingService.calls[1].method,
+    "completeToolStepAndAdvance"
+  );
+}
+
+{
+  const {
+    service,
+    loggingService,
+    toolRegistryService,
+    outboxPublisherService
+  } = createService({ toolCallLimitReached: true });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
+  );
+  assert.equal(
+    toolRegistryService.calls.filter((call) => call.method === "execute").length,
+    1
+  );
+  assert.deepEqual(outboxPublisherService.calls, []);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service, database, loggingService, outboxPublisherService } = createService({
+    registryState: {
+      postExecutionDisposition: "complete_run",
+      name: "focus_sql_erd_tables"
+    },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+  assert.match(completion.input.waitingMessage, /focus_sql_erd_tables 실행을 완료했습니다/);
+  assert.deepEqual(
+    latencyObserver.calls.map((call) => call.stage),
+    ["tool_preparation", "tool_execution", "tool_advance", "tool_turn"]
+  );
+  assert.equal(
+    latencyObserver.calls.every(
+      (call) =>
+        call.surface === "sql_erd" &&
+        call.toolName === "focus_sql_erd_tables" &&
+        call.turnSequence === 1
+    ),
+    true
+  );
+  assert.equal(latencyObserver.timeline[0], "latency:start");
+  assert.match(database.calls[0].text, /planner_turn_count AS turn_sequence/);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({ latencyObserver });
+
+  await service.executeReadyRun(RUN_ID);
+
+  assert.deepEqual(latencyObserver.calls, []);
+}
+
+{
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: {
+      name: "focus_sql_erd_tables",
+      validationError: badRequest("invalid focus input")
+    },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" }),
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.equal(preparationEvents.length, 1);
+  assert.equal(preparationEvents[0].outcome, "failure");
+  assert.equal(preparationEvents[0].failureType, "validation_error");
+}
+
+for (const testCase of [
+  {
+    name: "context unavailable",
+    registryState: { contextUnavailable: true },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  },
+  {
+    name: "registry mismatch",
+    registryState: { riskLevel: "medium" },
+    planner: plannerOutput({ toolName: "focus_sql_erd_tables" })
+  },
+  {
+    name: "high risk",
+    registryState: { riskLevel: "high" },
+    planner: plannerOutput({
+      toolName: "focus_sql_erd_tables",
+      riskLevel: "high"
+    })
+  },
+  {
+    name: "contextual preparation unavailable",
+    registryState: { executionMode: "contextual" },
+    planner: plannerOutput({
+      toolName: "focus_sql_erd_tables",
+      executionMode: "contextual",
+      requiresConfirmation: null
+    })
+  }
+]) {
+  const latencyObserver = new FakeAgentLatencyObserver();
+  const { service } = createService({
+    registryState: testCase.registryState,
+    planner: testCase.planner,
+    requestContext: {
+      surface: "sql_erd",
+      sessionId: SQL_ERD_SESSION_ID
+    },
+    latencyObserver
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed", testCase.name);
+  const preparationEvents = latencyObserver.calls.filter(
+    (call) => call.stage === "tool_preparation"
+  );
+  assert.deepEqual(
+    preparationEvents.map(({ outcome, failureType }) => ({ outcome, failureType })),
+    [{ outcome: "failure", failureType: "validation_error" }],
+    testCase.name
+  );
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRouting: {
+        capabilityIds: ["calendar.events.list"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.run.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRetrieval: {
+        mode: "shadow",
+        capabilityIds: ["calendar.events.list"],
+        primaryCapabilityId: "calendar.events.list",
+        primaryToolName: "list_calendar_events"
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    planner: plannerOutput({
+      toolRetrieval: {
+        mode: "shadow",
+        capabilityIds: ["calendar.events.get"],
+        primaryCapabilityId: "calendar.events.get",
+        primaryToolName: "get_calendar_event"
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "skipped");
+  assert.equal(outboxPublisherService.calls.length, 1);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "continue_planning");
+}
+
+{
+  const { service, loggingService, outboxPublisherService } = createService({
+    registryState: {
+      name: "get_calendar_event",
+      postExecutionDisposition: "complete_run"
+    },
+    planner: plannerOutput({
+      toolName: "get_calendar_event",
+      toolRetrieval: {
+        mode: "shadow",
+        capabilityIds: ["calendar.events.get", "calendar.events.list"],
+        primaryCapabilityId: "calendar.events.list",
+        primaryToolName: "list_calendar_events"
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(outboxPublisherService.calls, []);
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const { service, loggingService } = createService({
+    completedToolNames: ["list_calendar_events"],
+    registryState: { name: "update_calendar_event" },
+    planner: plannerOutput({
+      toolName: "update_calendar_event",
+      toolRouting: {
+        capabilityIds: ["calendar.events.update"]
+      }
+    })
+  });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "completed");
+  const completion = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.equal(completion.input.postExecutionDisposition, "complete_run");
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "list_meeting_reports",
+    input: { reportTitle: "  온보딩 주간회의  ", limit: 1 },
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    }
+  });
+  const { service, loggingService, toolRegistryService } = createService({
+    planner,
+    registryState: { name: "list_meeting_reports" }
+  });
+
+  await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  const validation = toolRegistryService.calls.find(
+    (call) => call.method === "validateInput"
+  );
+  assert.deepEqual(validation.input, { reportTitle: "온보딩 주간회의" });
+  const started = loggingService.calls.find(
+    (call) => call.method === "startNextToolStepIfAbsent"
+  );
+  assert.deepEqual(started.input.inputSummary.meetingReportHybridLookup, {
+    requestedReportTitle: "온보딩 주간회의",
+    selector: { reportTitle: "온보딩 주간회의" }
+  });
+  const completed = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  );
+  assert.deepEqual(completed.input.outputSummary.meetingReportHybridLookup, {
+    requestedReportTitle: "온보딩 주간회의",
+    selector: { reportTitle: "온보딩 주간회의" },
+    exactMatchCount: 1
+  });
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "list_meeting_reports",
+    input: {},
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    }
+  });
+  const { service } = createService({
+    planner,
+    registryState: { name: "list_meeting_reports" }
+  });
+
+  await assert.rejects(
+    () =>
+      service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+        plannerOutput: planner
+      }),
+    (error) =>
+      error?.response?.error?.message ===
+      "MeetingReport hybrid title lookup requires reportTitle"
+  );
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "search_meeting_transcript",
+    input: { query: "API 배포 일정" },
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    },
+    meetingReportHybridContext: {
+      requestedReportTitle: "온보딩 주간회의",
+      exactMatchCount: 0
+    }
+  });
+  const { service, loggingService } = createService({
+    planner,
+    completedToolNames: ["list_meeting_reports"],
+    registryState: { name: "search_meeting_transcript" }
+  });
+
+  await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  const started = loggingService.calls.find(
+    (call) => call.method === "startNextToolStepIfAbsent"
+  );
+  assert.deepEqual(started.input.inputSummary.meetingReportHybridContext, {
+    requestedReportTitle: "온보딩 주간회의",
+    exactMatchCount: 0
+  });
+  assert.deepEqual(started.input.inputSummary.input, { query: "API 배포 일정" });
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "search_meeting_transcript",
+    input: { query: "API 배포 일정" },
+    toolRouting: {
+      capabilityIds: ["meeting.report.hybrid_search"]
+    },
+    meetingReportHybridContext: {
+      requestedReportTitle: " ",
+      exactMatchCount: 0
+    }
+  });
+  const { service } = createService({
+    planner,
+    registryState: { name: "search_meeting_transcript" }
+  });
+
+  await assert.rejects(
+    () => service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+      plannerOutput: planner
+    }),
+    (error) =>
+      error?.response?.error?.message ===
+      "MeetingReport hybrid context is invalid"
+  );
+}
+
+{
+  const publisherError = new Error("SQS publish failed");
+  const {
+    service,
+    loggingService,
+    outboxPublisherService
+  } = createService({ publisherError });
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "already_started");
+  assert.deepEqual(outboxPublisherService.calls, [RUN_ID]);
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
+  );
+  assert.equal(
+    loggingService.calls.some(
+      (call) => call.method === "failStep" || call.method === "failRun"
+    ),
+    false
+  );
 }
 
 {
@@ -961,6 +1973,35 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(result.reason, "already_started");
   assert.deepEqual(loggingService.calls, []);
   assert.deepEqual(toolRegistryService.calls, []);
+}
+
+{
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const { service, loggingService, toolRegistryService } = createService({
+    requestContext,
+    registryState: {
+      contextUnavailable: true
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: plannerOutput(),
+    requestContext
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.run.errorCode, "AGENT_TOOL_CONTEXT_UNAVAILABLE");
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    ["getDefinitionForContext"]
+  );
+  assert.deepEqual(
+    loggingService.calls.map((call) => call.method),
+    ["failRun"]
+  );
 }
 
 {
@@ -997,10 +2038,215 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.deepEqual(loggingService.calls, []);
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput", "buildConfirmation"]
+    [
+      "getDefinitionForContext",
+      "getDefinition",
+      "validateInput",
+      "buildConfirmation"
+    ]
   );
   assert.equal(confirmationService.calls[0].input.toolName, "create_calendar_event");
   assert.equal(confirmationService.calls[0].input.riskLevel, "medium");
+}
+
+{
+  const planner = plannerOutput({
+    toolName: "contextual_schema_fixture",
+    executionMode: "contextual",
+    requiresConfirmation: null
+  });
+  const { service, toolRegistryService, confirmationService } = createService({
+    planner,
+    registryState: {
+      name: "contextual_schema_fixture",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "execute"
+      }
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "already_started");
+  assert.deepEqual(
+    toolRegistryService.calls.map((call) => call.method),
+    [
+      "getDefinitionForContext",
+      "getDefinition",
+      "validateInput",
+      "prepareExecution",
+      "execute"
+    ]
+  );
+  assert.equal(toolRegistryService.calls[3].context.requestContext, null);
+  assert.equal(toolRegistryService.calls[4].context.requestContext, null);
+  assert.deepEqual(confirmationService.calls, []);
+}
+
+{
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const choicePlan = {
+    kind: "choice",
+    toolName: "contextual_schema_fixture",
+    summary: "Choose where to create the schema",
+    target: {
+      domain: "sql_erd"
+    },
+    call: {
+      action: "generate_schema"
+    },
+    choices: [
+      {
+        id: "new_session",
+        label: "Create new session",
+        input: {
+          mode: "new_session"
+        }
+      },
+      {
+        id: "replace_schema",
+        label: "Replace current schema",
+        input: {
+          mode: "replace_schema",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      }
+    ]
+  };
+  const planner = plannerOutput({
+    toolName: "contextual_schema_fixture",
+    executionMode: "contextual",
+    requiresConfirmation: null
+  });
+  const { service, toolRegistryService, confirmationService } = createService({
+    planner,
+    requestContext,
+    registryState: {
+      name: "contextual_schema_fixture",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "confirmation",
+        plan: choicePlan
+      }
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_confirmation");
+  assert.deepEqual(toolRegistryService.calls[3].context.requestContext, requestContext);
+  assert.deepEqual(confirmationService.calls[0].input.plan, choicePlan);
+}
+
+{
+  const resourceId = "99999999-9999-4999-8999-999999999999";
+  const candidateSelectionService = {
+    calls: [],
+    async createMeetingCandidates(context, toolStepId, candidates) {
+      this.calls.push({ context, toolStepId, candidates });
+      return [
+        {
+          candidateSelectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          resourceType: "workspace_member",
+          label: "김진호",
+          description: "member · ji*******@example.com",
+          status: null
+        }
+      ];
+    }
+  };
+  const planner = plannerOutput({
+    toolName: "resolve_meeting_resource",
+    executionMode: "contextual",
+    requiresConfirmation: null,
+    input: {
+      resourceType: "workspace_member",
+      displayName: "김진호"
+    }
+  });
+  const { service, loggingService } = createService({
+    planner,
+    candidateSelectionService,
+    registryState: {
+      name: "resolve_meeting_resource",
+      executionMode: "contextual",
+      prepareExecution: {
+        kind: "needs_clarification",
+        outputSummary: {
+          status: "needs_clarification",
+          question: "김진호 중 한 명을 선택해 주세요."
+        },
+        resourceRefs: [],
+        candidateResources: [
+          {
+            reference: {
+              resourceType: "workspace_member",
+              resourceId
+            },
+            candidate: {
+              resourceType: "workspace_member",
+              label: "김진호",
+              description: "member · ji*******@example.com",
+              status: null
+            }
+          }
+        ]
+      }
+    }
+  });
+
+  const result = await service.executePlannerOutput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    plannerOutput: planner
+  });
+
+  assert.equal(result.status, "waiting_user_input");
+  assert.deepEqual(candidateSelectionService.calls, [
+    {
+      context: {
+        currentUserId: USER_ID,
+        workspaceId: WORKSPACE_ID,
+        runId: RUN_ID,
+        requestContext: null
+      },
+      toolStepId: STEP_ID,
+      candidates: [
+        {
+          reference: {
+            resourceType: "workspace_member",
+            resourceId
+          },
+          candidate: {
+            resourceType: "workspace_member",
+            label: "김진호",
+            description: "member · ji*******@example.com",
+            status: null
+          }
+        }
+      ]
+    }
+  ]);
+  const outputSummary = loggingService.calls.find(
+    (call) => call.method === "completeToolStepAndAdvance"
+  ).input.outputSummary;
+  assert.deepEqual(outputSummary.candidateSelections, [
+    {
+      candidateSelectionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      resourceType: "workspace_member",
+      label: "김진호",
+      description: "member · ji*******@example.com",
+      status: null
+    }
+  ]);
+  assert.equal(JSON.stringify(outputSummary).includes(resourceId), false);
 }
 
 {
@@ -1015,14 +2261,14 @@ function formatterMeetingReport(index, overrides = {}) {
   });
 
   assert.equal(result.status, "failed");
-  assert.equal(result.run.errorCode, "AGENT_TOOL_NOT_EXECUTABLE");
+  assert.equal(result.run.errorCode, "AGENT_TOOL_CONTEXT_UNAVAILABLE");
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
     ["failRun"]
   );
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition"]
+    ["getDefinitionForContext", "getDefinition"]
   );
 }
 
@@ -1062,7 +2308,7 @@ function formatterMeetingReport(index, overrides = {}) {
   assert.equal(loggingService.calls[0].input.errorMessage, "start is required");
   assert.deepEqual(
     toolRegistryService.calls.map((call) => call.method),
-    ["getDefinition", "validateInput"]
+    ["getDefinitionForContext", "getDefinition", "validateInput"]
   );
 }
 
@@ -1100,14 +2346,43 @@ function formatterMeetingReport(index, overrides = {}) {
 
   assert.deepEqual(registeredToolNames, [
     "list_calendar_events",
+    "get_calendar_event",
     "create_calendar_event",
     "update_calendar_event",
+    "list_meeting_rooms",
+    "resolve_meeting_resource",
+    "get_active_meeting",
+    "get_meeting_participants",
+    "start_meeting_in_room",
+    "join_meeting",
+    "leave_meeting",
+    "start_meeting_recording",
+    "end_meeting_recording",
     "list_meeting_reports",
     "get_meeting_report",
     "summarize_meeting_report",
-    "search_board_issues"
+    "search_meeting_transcript",
+    "find_action_items",
+    "get_meeting_decision_evidence",
+    "update_meeting_report_action_item",
+    "dismiss_meeting_report_action_item",
+    "approve_meeting_report_action_item",
+    "regenerate_meeting_report",
+    "search_board_issues",
+    "move_board_issue_status",
+    "get_board_issue_context",
+    "create_board_issue",
+    "resolve_board_context",
+    "get_board_briefing",
+    "assign_board_issue_safely",
+    "diagnose_board_freshness",
+    "generate_sql_erd",
+    "focus_sql_erd_tables"
   ]);
-  assert.equal(registry.getDefinition("move_board_issue_status"), null);
+  assert.equal(
+    registry.getDefinition("move_board_issue_status").executionMode,
+    "confirmation_required"
+  );
 }
 
 {
@@ -1176,15 +2451,20 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.run.status, "completed");
-  assert.match(result.run.finalAnswer, /여러 개/);
+  assert.equal(result.status, "waiting_user_input");
+  assert.equal(result.run.status, "waiting_user_input");
+  assert.equal(result.run.finalAnswer, null);
+  assert.match(result.run.message, /여러 개/);
   assert.equal(confirmationService.calls.length, 0);
   assert.deepEqual(
     loggingService.calls.map((call) => call.method),
-    ["startNextToolStepIfAbsent", "completeStep", "completeRun"]
+    ["startNextToolStepIfAbsent", "completeToolStepAndAdvance"]
   );
   assert.equal(loggingService.calls[1].input.outputSummary.selection, "multiple");
+  assert.equal(
+    loggingService.calls[1].input.postExecutionDisposition,
+    "wait_for_user_input"
+  );
 }
 
 {
@@ -1221,8 +2501,8 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
-  assert.deepEqual(boardService.calls[1], {
+  assert.equal(result.status, "skipped");
+  assert.deepEqual(boardService.calls[2], {
     method: "listBoardIssues",
     currentUserId: USER_ID,
     workspaceId: WORKSPACE_ID,
@@ -1236,7 +2516,18 @@ function formatterMeetingReport(index, overrides = {}) {
   boardService.boards.push({
     id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     name: "운영",
-    repository: { fullName: "Developer-EJ/PILO" }
+    repository: {
+      id: "repository-id-2",
+      fullName: "Developer-EJ/PILO",
+      htmlUrl: "https://github.com/Developer-EJ/PILO"
+    },
+    project: {
+      id: "project-id-2",
+      title: "운영",
+      projectNumber: 2,
+      githubProjectNodeId: "PVT_test_2",
+      url: "https://github.com/orgs/Developer-EJ/projects/2"
+    }
   });
   const tool = registry.getDefinition("search_board_issues");
   const result = await tool.execute(
@@ -1246,7 +2537,7 @@ function formatterMeetingReport(index, overrides = {}) {
 
   assert.equal(result.status, "needs_clarification");
   assert.equal(result.outputSummary.selection, "required");
-  assert.equal(boardService.calls.length, 1);
+  assert.equal(boardService.calls.length, 2);
 }
 
 {
@@ -1272,8 +2563,7 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.run.status, "completed");
+  assert.equal(result.status, "skipped");
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
@@ -1328,6 +2618,7 @@ function formatterMeetingReport(index, overrides = {}) {
   const { service, loggingService } = createExecutionServiceWithRegistry(
     plannerOutput({
       toolName: "summarize_meeting_report",
+      toolSchemaVersion: "agent-tools:v6",
       riskLevel: "low",
       executionMode: "auto",
       requiresConfirmation: false,
@@ -1345,17 +2636,92 @@ function formatterMeetingReport(index, overrides = {}) {
   const result = await service.executeReadyRun(RUN_ID);
   const outputSummary = loggingService.calls[1].input.outputSummary;
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "skipped");
+  assert.deepEqual(loggingService.calls[0].input.inputSummary.input, {
+    compatibility: "legacy_persisted_planner_input"
+  });
+  assert.doesNotMatch(
+    JSON.stringify(loggingService.calls[0].input.inputSummary),
+    new RegExp(REPORT_ID)
+  );
   assert.equal(meetingService.calls[0].method, "getReport");
   assert.equal(outputSummary.report.reportId, REPORT_ID);
   assert.equal("transcript" in outputSummary.report, false);
-  assert.match(result.run.finalAnswer, /결정사항: 결정사항/);
-  assert.doesNotMatch(result.run.finalAnswer, /요약:/);
-  assert.doesNotMatch(result.run.finalAnswer, /논의사항:/);
   assert.doesNotMatch(
     JSON.stringify(outputSummary),
     /Agent smoke test must not persist transcript text/
   );
+}
+
+for (const legacyTool of [
+  { name: "find_action_items", input: { reportId: REPORT_ID } },
+  {
+    name: "get_meeting_decision_evidence",
+    input: { reportId: REPORT_ID, decisionIndex: 0 }
+  }
+]) {
+  const { registry } = createSmokeRegistry();
+  const { service, loggingService } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: legacyTool.name,
+      toolSchemaVersion: "agent-tools:v6",
+      riskLevel: "low",
+      executionMode: "auto",
+      requiresConfirmation: false,
+      input: legacyTool.input
+    }),
+    registry
+  );
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "skipped");
+  assert.deepEqual(loggingService.calls[0].input.inputSummary.input, {
+    compatibility: "legacy_persisted_planner_input"
+  });
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const { service, loggingService } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "summarize_meeting_report",
+      toolSchemaVersion: "agent-tools:v7",
+      riskLevel: "low",
+      executionMode: "contextual",
+      requiresConfirmation: null,
+      input: { reportId: REPORT_ID }
+    }),
+    registry
+  );
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "failed");
+  assert.equal(
+    loggingService.calls.at(-1).input.errorCode,
+    "AGENT_TOOL_VALIDATION_FAILED"
+  );
+}
+
+{
+  const { registry } = createSmokeRegistry();
+  const { service } = createExecutionServiceWithRegistry(
+    plannerOutput({
+      toolName: "regenerate_meeting_report",
+      toolSchemaVersion: "agent-tools:v6",
+      riskLevel: "medium",
+      executionMode: "confirmation_required",
+      requiresConfirmation: true,
+      input: { reportId: REPORT_ID }
+    }),
+    registry
+  );
+
+  const result = await service.executeReadyRun(RUN_ID);
+
+  assert.equal(result.status, "waiting_confirmation");
+  assert.equal(result.confirmation.plan.call.input.reportId, REPORT_ID);
 }
 
 {
@@ -1379,10 +2745,9 @@ function formatterMeetingReport(index, overrides = {}) {
     RUN_ID
   );
 
-  assert.equal(result.status, "completed");
-  assert.equal(boardService.calls[0].method, "listBoards");
-  assert.equal(boardService.calls[1].method, "listBoardIssues");
-  assert.match(result.run.finalAnswer, /제품 개발 Board 이슈 1개/);
-  assert.match(result.run.finalAnswer, /#729/);
+  assert.equal(result.status, "skipped");
+  assert.equal(boardService.calls[0].method, "getActiveBoardSource");
+  assert.equal(boardService.calls[1].method, "listBoards");
+  assert.equal(boardService.calls[2].method, "listBoardIssues");
   assert.equal(loggingService.calls[1].input.outputSummary.issues[0].title, "Board read/search tool adapter");
 }

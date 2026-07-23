@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
@@ -6,15 +7,21 @@ import {
   DatabaseTransaction
 } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { clientRequestIdConflict } from "./agent-api-error";
+import {
+  agentConversationUnavailable,
+  clientRequestIdConflict
+} from "./agent-api-error";
 import type {
   AgentJsonObject,
   AgentResourceRef,
-  AgentRiskLevel
+  AgentRiskLevel,
+  AgentRunRequestContext,
+  AgentToolPostExecutionDisposition
 } from "./types/agent-tool.types";
 
 export type AgentRunStatus =
   | "planning"
+  | "waiting_user_input"
   | "waiting_confirmation"
   | "running"
   | "completed"
@@ -40,8 +47,10 @@ export type AgentLogLevel = "debug" | "info" | "warn" | "error";
 
 export interface CreateAgentRunInput {
   prompt: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId?: string | null;
+  requestContext?: AgentRunRequestContext;
   message?: string;
 }
 
@@ -79,6 +88,7 @@ export interface FailAgentStepInput {
   stepId: string;
   errorCode?: string | null;
   errorMessage: string;
+  executionLease?: AgentExecutionLease;
 }
 
 export interface CompleteAgentRunInput {
@@ -100,11 +110,60 @@ export interface CancelAgentRunInput {
   message: string;
 }
 
+export interface WaitForAgentUserInput {
+  runId: string;
+  message: string;
+  riskLevel?: AgentRiskLevel | null;
+}
+
+export interface QueueNextAgentPlannerTurnInput {
+  runId: string;
+  riskLevel?: AgentRiskLevel | null;
+}
+
+export interface CompleteAgentToolStepAndAdvanceInput
+  extends CompleteAgentStepInput {
+  riskLevel?: AgentRiskLevel | null;
+  waitingMessage: string;
+  postExecutionDisposition?: AgentToolPostExecutionDisposition;
+  executionLease?: AgentExecutionLease;
+}
+
+export interface CompleteAgentToolStepAndAdvanceResult {
+  step: AgentStepPayload;
+  run: AgentRunPayload;
+  queuedNextPlannerTurn: boolean;
+}
+
+export interface AgentExecutionLease {
+  token: string;
+  generation: number;
+}
+
+export interface AgentToolExecutionClaim {
+  step: AgentStepPayload;
+  lease: AgentExecutionLease;
+}
+
+export interface DeferAgentToolStepInput extends CompleteAgentStepInput {
+  message: string;
+  riskLevel?: AgentRiskLevel | null;
+  executionLease?: AgentExecutionLease;
+}
+
+export interface SettleDelegatedAgentToolInput extends CompleteAgentStepInput {
+  finalAnswer: string;
+  childStatus: "completed" | "failed" | "cancelled" | "expired";
+  errorMessage?: string | null;
+}
+
 export interface AgentRunPayload {
   id: string;
+  conversationId: string;
   workspaceId: string;
   requestedByUserId: string | null;
   clientRequestId: string | null;
+  requestContext: AgentRunRequestContext;
   status: AgentRunStatus;
   riskLevel: AgentRiskLevel | null;
   prompt: string;
@@ -140,9 +199,11 @@ export interface AgentStepPayload {
 
 interface AgentRunRow extends QueryResultRow {
   id: string;
+  thread_id: string;
   workspace_id: string;
   requested_by_user_id: string | null;
   client_request_id: string | null;
+  request_context_json: AgentRunRequestContext;
   status: AgentRunStatus;
   risk_level: AgentRiskLevel | null;
   prompt: string;
@@ -155,6 +216,10 @@ interface AgentRunRow extends QueryResultRow {
   completed_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  execution_lease_token: string | null;
+  execution_lease_generation: number | string;
+  execution_lease_expires_at: Date | string | null;
+  execution_heartbeat_at: Date | string | null;
 }
 
 interface AgentStepRow extends QueryResultRow {
@@ -178,6 +243,10 @@ interface AgentStepRow extends QueryResultRow {
 
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const DEFAULT_RUN_MESSAGE = "요청을 분석하고 있습니다.";
+const EXECUTION_LEASE_SECONDS = positiveIntegerEnvironment(
+  "AGENT_EXECUTION_LEASE_SECONDS",
+  180
+);
 
 const INPUT_JSON_MAX_BYTES = 32768;
 const OUTPUT_JSON_MAX_BYTES = 65536;
@@ -198,6 +267,11 @@ const FORBIDDEN_JSON_KEY_PARTS = [
   "transcripttext"
 ];
 
+function positiveIntegerEnvironment(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 @Injectable()
 export class AgentLoggingService {
   constructor(
@@ -212,15 +286,106 @@ export class AgentLoggingService {
   ): Promise<CreateAgentRunResult> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
+    return this.database.transaction((transaction) =>
+      this.createRunInTransaction(
+        transaction,
+        currentUserId,
+        workspaceId,
+        input
+      )
+    );
+  }
+
+  async createRunInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    input: CreateAgentRunInput,
+    forcedThreadId?: string
+  ): Promise<CreateAgentRunResult> {
     const prompt = this.normalizeRequiredText(input.prompt, "prompt");
     const timezone = this.normalizeRequiredText(
       input.timezone ?? DEFAULT_TIMEZONE,
       "timezone"
     );
     const clientRequestId = this.normalizeOptionalText(input.clientRequestId);
+    const requestContext = input.requestContext ?? null;
     const message = input.message ?? DEFAULT_RUN_MESSAGE;
 
-    return this.database.transaction(async (transaction) => {
+    if (clientRequestId) {
+      const existing = await this.findRunByClientRequest(
+        transaction,
+        workspaceId,
+        currentUserId,
+        clientRequestId
+      );
+
+      if (existing) {
+        return this.mapIdempotentRun(
+          existing,
+          prompt,
+          timezone,
+          requestContext,
+          input.conversationId
+        );
+      }
+    }
+
+    const threadId = forcedThreadId
+      ? await this.lockOwnedThread(
+          transaction,
+          workspaceId,
+          currentUserId,
+          forcedThreadId
+        )
+      : input.conversationId === null
+        ? await this.createThread(transaction, workspaceId, currentUserId)
+        : input.conversationId
+          ? await this.lockOwnedThread(
+              transaction,
+              workspaceId,
+              currentUserId,
+              input.conversationId
+            )
+          : await this.selectOrCreateThread(
+              transaction,
+              workspaceId,
+              currentUserId
+            );
+
+    const run = await transaction.queryOne<AgentRunRow>(
+      `
+          INSERT INTO agent_runs (
+            workspace_id,
+            requested_by_user_id,
+            thread_id,
+            client_request_id,
+            request_context_json,
+            status,
+            prompt,
+            timezone,
+            message
+          )
+          VALUES ($1, $2, $3, $4, $5, 'planning', $6, $7, $8)
+          ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
+          WHERE client_request_id IS NOT NULL
+            AND requested_by_user_id IS NOT NULL
+          DO NOTHING
+          RETURNING *
+      `,
+      [
+        workspaceId,
+        currentUserId,
+        threadId,
+        clientRequestId,
+        requestContext,
+        prompt,
+        timezone,
+        message
+      ]
+    );
+
+    if (!run) {
       if (clientRequestId) {
         const existing = await this.findRunByClientRequest(
           transaction,
@@ -230,87 +395,167 @@ export class AgentLoggingService {
         );
 
         if (existing) {
-          return this.mapIdempotentRun(existing, prompt, timezone);
-        }
-      }
-
-      const run = await transaction.queryOne<AgentRunRow>(
-        `
-          INSERT INTO agent_runs (
-            workspace_id,
-            requested_by_user_id,
-            client_request_id,
-            status,
+          return this.mapIdempotentRun(
+            existing,
             prompt,
             timezone,
-            message
-          )
-          VALUES ($1, $2, $3, 'planning', $4, $5, $6)
-          ON CONFLICT (workspace_id, requested_by_user_id, client_request_id)
-          WHERE client_request_id IS NOT NULL
-            AND requested_by_user_id IS NOT NULL
-          DO NOTHING
-          RETURNING *
-        `,
-        [workspaceId, currentUserId, clientRequestId, prompt, timezone, message]
-      );
-
-      if (!run) {
-        if (clientRequestId) {
-          const existing = await this.findRunByClientRequest(
-            transaction,
-            workspaceId,
-            currentUserId,
-            clientRequestId
+            requestContext,
+            input.conversationId
           );
-
-          if (existing) {
-            return this.mapIdempotentRun(existing, prompt, timezone);
-          }
         }
-
-        throw new Error("Agent run could not be created");
       }
 
-      await this.insertLog(transaction, {
-        workspaceId,
-        runId: run.id,
-        actorType: "user",
-        actorUserId: currentUserId,
-        level: "info",
-        eventType: "run_created",
-        message: "Agent run created",
-        metadata: {
-          promptLength: prompt.length,
-          timezone,
-          hasClientRequestId: Boolean(clientRequestId)
-        },
-        resourceRefs: []
-      });
+      throw new Error("Agent run could not be created");
+    }
 
-      await transaction.execute(
-        `
-          INSERT INTO agent_run_outbox (run_id, workspace_id)
-          VALUES ($1, $2)
-        `,
-        [run.id, workspaceId]
-      );
-
-      return {
-        run: this.mapRun(run),
-        created: true
-      };
+    await this.insertLog(transaction, {
+      workspaceId,
+      runId: run.id,
+      actorType: "user",
+      actorUserId: currentUserId,
+      level: "info",
+      eventType: "run_created",
+      message: "Agent run created",
+      metadata: {
+        promptLength: prompt.length,
+        timezone,
+        hasClientRequestId: Boolean(clientRequestId)
+      },
+      resourceRefs: []
     });
+
+    await transaction.execute(
+      `
+        INSERT INTO agent_run_outbox (run_id, workspace_id)
+        VALUES ($1, $2)
+      `,
+      [run.id, workspaceId]
+    );
+
+    return {
+      run: this.mapRun(run),
+      created: true
+    };
+  }
+
+  private async selectOrCreateThread(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<string> {
+    await transaction.execute(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+      [`agent-thread:${workspaceId}:${currentUserId}`]
+    );
+
+    const existing = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT thread.id
+        FROM agent_threads AS thread
+        WHERE thread.workspace_id = $1
+          AND thread.requested_by_user_id = $2
+          AND thread.expires_at > now()
+          AND (
+            thread.last_activity_at > now() - INTERVAL '1 hour'
+            OR EXISTS (
+              SELECT 1
+              FROM agent_runs AS run
+              JOIN agent_confirmations AS confirmation
+                ON confirmation.run_id = run.id
+              WHERE run.thread_id = thread.id
+                AND run.workspace_id = $1
+                AND run.requested_by_user_id = $2
+                AND run.status = 'waiting_confirmation'
+                AND confirmation.status = 'pending'
+                AND confirmation.expires_at > now()
+            )
+          )
+        ORDER BY
+          EXISTS (
+            SELECT 1
+            FROM agent_runs AS run
+            JOIN agent_confirmations AS confirmation
+              ON confirmation.run_id = run.id
+            WHERE run.thread_id = thread.id
+              AND run.status = 'waiting_confirmation'
+              AND confirmation.status = 'pending'
+              AND confirmation.expires_at > now()
+          ) DESC,
+          thread.last_activity_at DESC,
+          thread.id DESC
+        LIMIT 1
+        FOR UPDATE OF thread
+      `,
+      [workspaceId, currentUserId]
+    );
+
+    return (
+      existing?.id ?? this.createThread(transaction, workspaceId, currentUserId)
+    );
+  }
+
+  private async lockOwnedThread(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string,
+    threadId: string
+  ): Promise<string> {
+    const thread = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM agent_threads
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+          AND expires_at > now()
+        FOR UPDATE
+      `,
+      [threadId, workspaceId, currentUserId]
+    );
+    if (!thread) {
+      throw agentConversationUnavailable(
+        "대화가 만료되었거나 사용할 수 없습니다. 새 대화를 시작해주세요."
+      );
+    }
+    return thread.id;
+  }
+
+  private async createThread(
+    transaction: DatabaseTransaction,
+    workspaceId: string,
+    currentUserId: string
+  ): Promise<string> {
+    const created = await transaction.queryOne<{ id: string }>(
+      `
+        INSERT INTO agent_threads (workspace_id, requested_by_user_id)
+        VALUES ($1, $2)
+        RETURNING id
+      `,
+      [workspaceId, currentUserId]
+    );
+    if (!created) throw new Error("Agent thread could not be created");
+    return created.id;
   }
 
   private mapIdempotentRun(
     run: AgentRunRow,
     prompt: string,
-    timezone: string
+    timezone: string,
+    requestContext: AgentRunRequestContext,
+    conversationId?: string | null
   ): CreateAgentRunResult {
-    if (run.prompt !== prompt || run.timezone !== timezone) {
+    if (
+      run.prompt !== prompt ||
+      run.timezone !== timezone ||
+      !this.isSameRequestContext(run.request_context_json, requestContext)
+    ) {
       throw clientRequestIdConflict(
         "clientRequestId was already used for a different Agent run"
+      );
+    }
+    if (conversationId && run.thread_id !== conversationId) {
+      throw clientRequestIdConflict(
+        "clientRequestId was already used in a different Agent conversation"
       );
     }
 
@@ -318,6 +563,32 @@ export class AgentLoggingService {
       run: this.mapRun(run),
       created: false
     };
+  }
+
+  private isSameRequestContext(
+    left: AgentRunRequestContext,
+    right: AgentRunRequestContext
+  ): boolean {
+    if (left === null || right === null) {
+      return left === right;
+    }
+
+    if (left.surface !== right.surface) {
+      return false;
+    }
+
+    if (left.surface === "canvas" && right.surface === "canvas") {
+      return (
+        left.canvasId === right.canvasId &&
+        JSON.stringify(left.canvasContext) === JSON.stringify(right.canvasContext)
+      );
+    }
+
+    return (
+      left.surface !== "canvas" &&
+      right.surface !== "canvas" &&
+      left.sessionId === right.sessionId
+    );
   }
 
   async startStep(
@@ -405,6 +676,7 @@ export class AgentLoggingService {
           FROM agent_steps
           WHERE run_id = $1
             AND step_type = 'tool'
+            AND status = 'running'
           LIMIT 1
         `,
         [input.runId]
@@ -432,11 +704,164 @@ export class AgentLoggingService {
     });
   }
 
+  async startNextToolExecutionClaimIfAbsent(
+    currentUserId: string,
+    workspaceId: string,
+    input: Omit<StartNextAgentStepInput, "type">
+  ): Promise<AgentToolExecutionClaim | null> {
+    const inputSummary = this.assertSafeObject(
+      input.inputSummary ?? {},
+      INPUT_JSON_MAX_BYTES,
+      "step input"
+    );
+
+    return this.database.transaction(async (transaction) => {
+      await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const existing = await transaction.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM agent_steps
+          WHERE run_id = $1
+            AND step_type = 'tool'
+            AND status = 'running'
+          LIMIT 1
+        `,
+        [input.runId]
+      );
+      if (existing) {
+        return null;
+      }
+
+      const lease = await this.acquireExecutionLease(transaction, input.runId);
+      const nextOrder = await transaction.queryOne<{
+        next_order: number | string;
+      }>(
+        `SELECT COALESCE(MAX(step_order), 0) + 1 AS next_order FROM agent_steps WHERE run_id = $1`,
+        [input.runId]
+      );
+      const step = await this.insertRunningStep(transaction, workspaceId, {
+        ...input,
+        type: "tool",
+        order: Number(nextOrder?.next_order ?? 1),
+        inputSummary
+      });
+      return { step, lease };
+    });
+  }
+
+  async waitForUserInput(
+    currentUserId: string,
+    workspaceId: string,
+    input: WaitForAgentUserInput
+  ): Promise<AgentRunPayload> {
+    const message = this.normalizeRequiredText(input.message, "message");
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const nextSequence = await transaction.queryOne<{ sequence: number | string }>(
+        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+        [input.runId]
+      );
+      await transaction.execute(
+        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+        [input.runId, Number(nextSequence?.sequence ?? 1), message]
+      );
+      const updated = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'waiting_user_input',
+              risk_level = COALESCE($2, risk_level),
+              message = $3,
+              final_answer = NULL,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status IN ('planning', 'running')
+          RETURNING *
+        `,
+        [run.id, input.riskLevel ?? null, message]
+      );
+      if (!updated) throw new Error("Agent run could not wait for user input");
+      return this.mapRun(updated);
+    });
+  }
+
+  /**
+   * A completed tool is not necessarily the end of an Agent run.  Re-open the
+   * same run for one bounded planner turn, and re-arm its existing outbox row.
+   */
+  async queueNextPlannerTurn(
+    currentUserId: string,
+    workspaceId: string,
+    input: QueueNextAgentPlannerTurnInput
+  ): Promise<AgentRunPayload | null> {
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      const updated = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'planning',
+              tool_call_count = tool_call_count + 1,
+              risk_level = COALESCE($2, risk_level),
+              message = '다음 작업을 확인하고 있습니다.',
+              final_answer = NULL,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+            AND tool_call_count < 4
+          RETURNING *
+        `,
+        [run.id, input.riskLevel ?? null]
+      );
+      if (!updated) {
+        return null;
+      }
+
+      const outbox = await transaction.queryOne<{ id: string }>(
+        `
+          UPDATE agent_run_outbox
+          SET status = 'pending',
+              attempt_count = 0,
+              next_attempt_at = now(),
+              claim_token = NULL,
+              claimed_at = NULL,
+              delivered_at = NULL,
+              error_code = NULL,
+              error_message = NULL,
+              turn_sequence = turn_sequence + 1,
+              planning_started_at = now(),
+              reason = 'tool_result'
+          WHERE run_id = $1
+          RETURNING id
+        `,
+        [run.id]
+      );
+      if (!outbox) {
+        throw new Error("Agent run outbox could not be re-armed");
+      }
+      return this.mapRun(updated);
+    });
+  }
+
   async createToolExecutionClaim(
     transaction: DatabaseTransaction,
     workspaceId: string,
     input: Omit<StartNextAgentStepInput, "type" | "order">
-  ): Promise<AgentStepPayload> {
+  ): Promise<AgentToolExecutionClaim> {
     const inputSummary = this.assertSafeObject(
       input.inputSummary ?? {},
       INPUT_JSON_MAX_BYTES,
@@ -451,12 +876,35 @@ export class AgentLoggingService {
       [input.runId]
     );
 
-    return this.insertRunningStep(transaction, workspaceId, {
+    const lease = await this.acquireExecutionLease(transaction, input.runId);
+    const step = await this.insertRunningStep(transaction, workspaceId, {
       ...input,
       type: "tool",
       order: Number(nextOrder?.next_order ?? 1),
       inputSummary
     });
+    return { step, lease };
+  }
+
+  async heartbeatExecutionLease(
+    runId: string,
+    lease: AgentExecutionLease
+  ): Promise<boolean> {
+    const row = await this.database.queryOne<{ id: string }>(
+      `
+        UPDATE agent_runs
+        SET execution_heartbeat_at = now(),
+            execution_lease_expires_at = now() + ($4 * INTERVAL '1 second'),
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'running'
+          AND execution_lease_token = $2::uuid
+          AND execution_lease_generation = $3
+        RETURNING id
+      `,
+      [runId, lease.token, lease.generation, EXECUTION_LEASE_SECONDS]
+    );
+    return row !== null;
   }
 
   async completeStep(
@@ -529,6 +977,468 @@ export class AgentLoggingService {
     });
   }
 
+  async deferToolStep(
+    currentUserId: string,
+    workspaceId: string,
+    input: DeferAgentToolStepInput
+  ): Promise<AgentStepPayload> {
+    const outputSummary = this.assertSafeObject(
+      input.outputSummary ?? {},
+      OUTPUT_JSON_MAX_BYTES,
+      "step output"
+    );
+    const resourceRefs = this.assertSafeResourceRefs(
+      input.resourceRefs ?? [],
+      RESOURCE_REFS_MAX_BYTES,
+      "step resource refs"
+    );
+    const message = this.normalizeRequiredText(input.message, "deferred message");
+
+    return this.database.transaction(async (transaction) => {
+      const run = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      if (run.status !== "running") {
+        throw new Error("Agent run is not running");
+      }
+      if (
+        input.executionLease &&
+        (run.execution_lease_token !== input.executionLease.token ||
+          Number(run.execution_lease_generation) !==
+            input.executionLease.generation)
+      ) {
+        throw new Error("Agent execution lease was fenced");
+      }
+      const step = await transaction.queryOne<AgentStepRow>(
+        `
+          UPDATE agent_steps
+          SET output_json = $3,
+              resource_refs = $4::jsonb,
+              error_code = NULL,
+              error_message = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND run_id = $2
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.stepId,
+          input.runId,
+          outputSummary,
+          this.serializeResourceRefs(resourceRefs)
+        ]
+      );
+      if (!step) {
+        throw notFound("Agent step not found");
+      }
+      await transaction.execute(
+        `
+          UPDATE agent_runs
+          SET message = $2,
+              risk_level = COALESCE($3, risk_level),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+        `,
+        [input.runId, message, input.riskLevel ?? null]
+      );
+      return this.mapStep(step);
+    });
+  }
+
+  async settleDelegatedToolStep(
+    currentUserId: string,
+    workspaceId: string,
+    input: SettleDelegatedAgentToolInput
+  ): Promise<boolean> {
+    const outputSummary = this.assertSafeObject(
+      input.outputSummary ?? {},
+      OUTPUT_JSON_MAX_BYTES,
+      "step output"
+    );
+    const finalAnswer = this.normalizeRequiredText(
+      input.finalAnswer,
+      "delegated final answer"
+    );
+    const errorMessage = input.errorMessage
+      ? this.normalizeRequiredText(input.errorMessage, "delegated error message")
+      : finalAnswer;
+
+    return this.database.transaction(async (transaction) => {
+      const run = await transaction.queryOne<AgentRunRow>(
+        `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+          FOR UPDATE
+        `,
+        [input.runId, workspaceId, currentUserId]
+      );
+      if (!run || run.status !== "running") {
+        return false;
+      }
+
+      const completed = input.childStatus === "completed";
+      const step = await transaction.queryOne<AgentStepRow>(
+        `
+          UPDATE agent_steps
+          SET status = $3,
+              output_json = $4,
+              error_code = CASE WHEN $5::boolean THEN NULL ELSE 'CANVAS_AGENT_DELEGATION_FAILED' END,
+              error_message = CASE WHEN $5::boolean THEN NULL ELSE $6 END,
+              completed_at = now(),
+              updated_at = now()
+          WHERE id = $1
+            AND run_id = $2
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.stepId,
+          input.runId,
+          completed ? "completed" : "failed",
+          outputSummary,
+          completed,
+          errorMessage
+        ]
+      );
+      if (!step) {
+        return false;
+      }
+
+      const settledRun = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = $2,
+              message = $3,
+              final_answer = CASE WHEN $4::boolean THEN $3 ELSE NULL END,
+              error_code = CASE WHEN $4::boolean THEN NULL ELSE 'CANVAS_AGENT_DELEGATION_FAILED' END,
+              error_message = CASE WHEN $4::boolean THEN NULL ELSE $5 END,
+              completed_at = now(),
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.runId,
+          completed ? "completed" : "failed",
+          finalAnswer,
+          completed,
+          errorMessage
+        ]
+      );
+      if (!settledRun) {
+        throw new Error("Delegated Agent run could not be settled");
+      }
+
+      await this.insertLog(transaction, {
+        workspaceId,
+        runId: input.runId,
+        stepId: step.id,
+        actorType: "app_server",
+        actorUserId: null,
+        level: completed ? "info" : "error",
+        eventType: completed
+          ? "canvas_delegation_completed"
+          : "canvas_delegation_failed",
+        message: completed
+          ? "Canvas Agent delegation completed"
+          : "Canvas Agent delegation failed",
+        metadata: { childStatus: input.childStatus },
+        resourceRefs: step.resource_refs
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Persist a successful tool result and its next durable run state in one
+   * transaction. This prevents a process crash from leaving an externally
+   * completed tool attached to a still-running planner generation.
+   */
+  async completeToolStepAndAdvance(
+    currentUserId: string,
+    workspaceId: string,
+    input: CompleteAgentToolStepAndAdvanceInput
+  ): Promise<CompleteAgentToolStepAndAdvanceResult> {
+    const outputSummary = this.assertSafeObject(
+      input.outputSummary ?? {},
+      OUTPUT_JSON_MAX_BYTES,
+      "step output"
+    );
+    const resourceRefs = this.assertSafeResourceRefs(
+      input.resourceRefs ?? [],
+      RESOURCE_REFS_MAX_BYTES,
+      "step resource refs"
+    );
+    const waitingMessage = this.normalizeRequiredText(
+      input.waitingMessage,
+      "waiting message"
+    );
+    const postExecutionDisposition =
+      input.postExecutionDisposition ?? "continue_planning";
+
+    return this.database.transaction(async (transaction) => {
+      const lockedRun = await this.findOwnedRunForUpdate(transaction, {
+        currentUserId,
+        workspaceId,
+        runId: input.runId
+      });
+      if (lockedRun.status !== "running") {
+        throw new Error("Agent run is not running");
+      }
+      if (
+        input.executionLease &&
+        (lockedRun.execution_lease_token !== input.executionLease.token ||
+          Number(lockedRun.execution_lease_generation) !==
+            input.executionLease.generation)
+      ) {
+        throw new Error("Agent execution lease was fenced");
+      }
+
+      const step = await transaction.queryOne<AgentStepRow>(
+        `
+          UPDATE agent_steps
+          SET status = 'completed',
+              output_json = $3,
+              resource_refs = $4::jsonb,
+              error_code = NULL,
+              error_message = NULL,
+              completed_at = now()
+          WHERE id = $1
+            AND run_id = $2
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.stepId,
+          input.runId,
+          outputSummary,
+          this.serializeResourceRefs(resourceRefs)
+        ]
+      );
+      if (!step) {
+        throw notFound("Agent step not found");
+      }
+
+      await this.insertLog(transaction, {
+        workspaceId,
+        runId: input.runId,
+        stepId: step.id,
+        actorType: "app_server",
+        actorUserId: null,
+        level: "info",
+        eventType: "step_completed",
+        message: "Agent step completed",
+        metadata: {
+          stepOrder: step.step_order,
+          stepType: step.step_type,
+          toolName: step.tool_name
+        },
+        resourceRefs
+      });
+
+      if (postExecutionDisposition === "complete_run") {
+        const completedRun = await transaction.queryOne<AgentRunRow>(
+          `
+            UPDATE agent_runs
+            SET status = 'completed',
+                tool_call_count = LEAST(tool_call_count + 1, 5),
+                risk_level = COALESCE($2, risk_level),
+                message = $3,
+                final_answer = $3,
+                error_code = NULL,
+                error_message = NULL,
+                completed_at = now(),
+                execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND status = 'running'
+              AND (
+                $4::uuid IS NULL
+                OR (
+                  execution_lease_token = $4::uuid
+                  AND execution_lease_generation = $5
+                )
+              )
+            RETURNING *
+          `,
+          [
+            input.runId,
+            input.riskLevel ?? null,
+            waitingMessage,
+            input.executionLease?.token ?? null,
+            input.executionLease?.generation ?? 0
+          ]
+        );
+        if (!completedRun) {
+          throw new Error("Agent run completion was fenced");
+        }
+        const nextSequence = await transaction.queryOne<{
+          sequence: number | string;
+        }>(
+          `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+          [input.runId]
+        );
+        await transaction.execute(
+          `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+          [input.runId, Number(nextSequence?.sequence ?? 1), waitingMessage]
+        );
+        await this.insertLog(transaction, {
+          workspaceId,
+          runId: input.runId,
+          actorType: "app_server",
+          actorUserId: null,
+          level: "info",
+          eventType: "run_completed",
+          message: "Agent run completed",
+          metadata: {
+            finalAnswerLength: waitingMessage.length
+          },
+          resourceRefs
+        });
+        return {
+          step: this.mapStep(step),
+          run: this.mapRun(completedRun),
+          queuedNextPlannerTurn: false
+        };
+      }
+
+      if (postExecutionDisposition === "continue_planning") {
+        const planningRun = await transaction.queryOne<AgentRunRow>(
+          `
+            UPDATE agent_runs
+            SET status = 'planning',
+                tool_call_count = tool_call_count + 1,
+                risk_level = COALESCE($2, risk_level),
+                message = '다음 작업을 확인하고 있습니다.',
+                final_answer = NULL,
+                error_code = NULL,
+                error_message = NULL,
+                completed_at = NULL,
+                execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND status = 'running'
+              AND tool_call_count < 4
+            RETURNING *
+          `,
+          [input.runId, input.riskLevel ?? null]
+        );
+        if (planningRun) {
+          const outbox = await transaction.queryOne<{ id: string }>(
+            `
+              UPDATE agent_run_outbox
+              SET status = 'pending',
+                  attempt_count = 0,
+                  next_attempt_at = now(),
+                  claim_token = NULL,
+                  claimed_at = NULL,
+                  delivered_at = NULL,
+                  error_code = NULL,
+                  error_message = NULL,
+                  turn_sequence = turn_sequence + 1,
+                  planning_started_at = now(),
+                  reason = 'tool_result'
+              WHERE run_id = $1
+              RETURNING id
+            `,
+            [input.runId]
+          );
+          if (!outbox) {
+            throw new Error("Agent run outbox could not be re-armed");
+          }
+          return {
+            step: this.mapStep(step),
+            run: this.mapRun(planningRun),
+            queuedNextPlannerTurn: true
+          };
+        }
+      }
+
+      const waitingRun = await transaction.queryOne<AgentRunRow>(
+        `
+          UPDATE agent_runs
+          SET status = 'waiting_user_input',
+              tool_call_count = LEAST(
+                tool_call_count + CASE WHEN $4::boolean THEN 0 ELSE 1 END,
+                5
+              ),
+              risk_level = COALESCE($2, risk_level),
+              message = $3,
+              final_answer = NULL,
+              completed_at = NULL,
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL,
+              updated_at = now()
+          WHERE id = $1
+            AND status = 'running'
+          RETURNING *
+        `,
+        [
+          input.runId,
+          input.riskLevel ?? null,
+          waitingMessage,
+          postExecutionDisposition === "wait_for_user_input"
+        ]
+      );
+      if (!waitingRun) {
+        throw new Error("Agent run could not wait for user input");
+      }
+      const nextSequence = await transaction.queryOne<{
+        sequence: number | string;
+      }>(
+        `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+        [input.runId]
+      );
+      await transaction.execute(
+        `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'assistant', $3)`,
+        [input.runId, Number(nextSequence?.sequence ?? 1), waitingMessage]
+      );
+      return {
+        step: this.mapStep(step),
+        run: this.mapRun(waitingRun),
+        queuedNextPlannerTurn: false
+      };
+    });
+  }
+
+  async getOwnedRun(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string
+  ): Promise<AgentRunPayload> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    const run = await this.database.queryOne<AgentRunRow>(
+      `
+        SELECT *
+        FROM agent_runs
+        WHERE id = $1
+          AND workspace_id = $2
+          AND requested_by_user_id = $3
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+    if (!run) {
+      throw notFound("Agent run not found");
+    }
+    return this.mapRun(run);
+  }
+
   async failStep(
     currentUserId: string,
     workspaceId: string,
@@ -541,11 +1451,29 @@ export class AgentLoggingService {
     const errorCode = this.normalizeOptionalText(input.errorCode);
 
     return this.database.transaction(async (transaction) => {
-      await this.findOwnedRunForUpdate(transaction, {
+      const lockedRun = await this.findOwnedRunForUpdate(transaction, {
         currentUserId,
         workspaceId,
         runId: input.runId
       });
+      if (["completed", "failed", "cancelled"].includes(lockedRun.status)) {
+        const terminalStep = await transaction.queryOne<AgentStepRow>(
+          `SELECT * FROM agent_steps WHERE id = $1 AND run_id = $2`,
+          [input.stepId, input.runId]
+        );
+        if (!terminalStep) {
+          throw notFound("Agent step not found");
+        }
+        return this.mapStep(terminalStep);
+      }
+      if (
+        input.executionLease &&
+        (lockedRun.execution_lease_token !== input.executionLease.token ||
+          Number(lockedRun.execution_lease_generation) !==
+            input.executionLease.generation)
+      ) {
+        throw new Error("Agent execution lease was fenced");
+      }
 
       const step = await transaction.queryOne<AgentStepRow>(
         `
@@ -556,13 +1484,41 @@ export class AgentLoggingService {
               completed_at = now()
           WHERE id = $1
             AND run_id = $2
+            AND status = 'running'
           RETURNING *
         `,
         [input.stepId, input.runId, errorCode, errorMessage]
       );
 
       if (!step) {
-        throw notFound("Agent step not found");
+        const terminalStep = await transaction.queryOne<AgentStepRow>(
+          `SELECT * FROM agent_steps WHERE id = $1 AND run_id = $2`,
+          [input.stepId, input.runId]
+        );
+        if (!terminalStep) {
+          throw notFound("Agent step not found");
+        }
+        return this.mapStep(terminalStep);
+      }
+
+      if (input.executionLease) {
+        await transaction.execute(
+          `
+            UPDATE agent_runs
+            SET execution_lease_token = NULL,
+                execution_lease_expires_at = NULL,
+                execution_heartbeat_at = NULL,
+                updated_at = now()
+            WHERE id = $1
+              AND execution_lease_token = $2::uuid
+              AND execution_lease_generation = $3
+          `,
+          [
+            input.runId,
+            input.executionLease.token,
+            input.executionLease.generation
+          ]
+        );
       }
 
       await this.insertLog(transaction, {
@@ -613,7 +1569,10 @@ export class AgentLoggingService {
               final_answer = $5,
               error_code = NULL,
               error_message = NULL,
-              completed_at = now()
+              completed_at = now(),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL
           WHERE id = $1
             AND workspace_id = $2
             AND status = 'running'
@@ -675,7 +1634,10 @@ export class AgentLoggingService {
               message = $3,
               error_code = $4,
               error_message = $5,
-              completed_at = now()
+              completed_at = now(),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL
           WHERE id = $1
             AND workspace_id = $2
           RETURNING *
@@ -730,7 +1692,10 @@ export class AgentLoggingService {
           UPDATE agent_runs
           SET status = 'cancelled',
               message = $3,
-              completed_at = now()
+              completed_at = now(),
+              execution_lease_token = NULL,
+              execution_lease_expires_at = NULL,
+              execution_heartbeat_at = NULL
           WHERE id = $1
             AND workspace_id = $2
           RETURNING *
@@ -828,6 +1793,40 @@ export class AgentLoggingService {
     });
 
     return this.mapStep(step);
+  }
+
+  private async acquireExecutionLease(
+    transaction: DatabaseTransaction,
+    runId: string
+  ): Promise<AgentExecutionLease> {
+    const token = randomUUID();
+    const row = await transaction.queryOne<{
+      execution_lease_generation: number | string;
+    }>(
+      `
+        UPDATE agent_runs
+        SET execution_lease_token = $2::uuid,
+            execution_lease_generation = execution_lease_generation + 1,
+            execution_heartbeat_at = now(),
+            execution_lease_expires_at = now() + ($3 * INTERVAL '1 second'),
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'running'
+          AND (
+            execution_lease_token IS NULL
+            OR execution_lease_expires_at <= now()
+          )
+        RETURNING execution_lease_generation
+      `,
+      [runId, token, EXECUTION_LEASE_SECONDS]
+    );
+    if (!row) {
+      throw new Error("Agent execution lease could not be acquired");
+    }
+    return {
+      token,
+      generation: Number(row.execution_lease_generation)
+    };
   }
 
   private async findOwnedRunForUpdate(
@@ -974,13 +1973,23 @@ export class AgentLoggingService {
       if (
         FORBIDDEN_JSON_KEY_PARTS.some((forbidden) =>
           normalizedKey.includes(forbidden)
-        )
+        ) && !this.isSafeSelectionToken(normalizedKey, entry)
       ) {
         throw badRequest(`${path} contains forbidden key: ${key}`);
       }
 
       this.walkJson(entry, `${path}.${key}`);
     });
+  }
+
+  private isSafeSelectionToken(key: string, value: unknown): boolean {
+    return (
+      key === "selectiontoken" &&
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+      )
+    );
   }
 
   private assertJsonSize(value: unknown, maxBytes: number, label: string): void {
@@ -1019,9 +2028,11 @@ export class AgentLoggingService {
   private mapRun(run: AgentRunRow): AgentRunPayload {
     return {
       id: run.id,
+      conversationId: run.thread_id,
       workspaceId: run.workspace_id,
       requestedByUserId: run.requested_by_user_id,
       clientRequestId: run.client_request_id,
+      requestContext: run.request_context_json,
       status: run.status,
       riskLevel: run.risk_level,
       prompt: run.prompt,

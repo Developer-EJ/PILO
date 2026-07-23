@@ -4,40 +4,79 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, TLShapeId } from "tldraw";
 import { createCanvasAgentClient } from "../api/canvas-agent-client";
 import type {
+  CanvasAgentConversationContext,
   CanvasAgentDraft,
   CanvasAgentPresentationMode,
   CanvasAgentProgress,
   CanvasAgentRun,
+  CanvasAgentSelectedScene,
   CanvasAgentViewport,
 } from "../api/canvas-agent-types";
 import {
   dispatchCanvasAgentToolTarget,
+  readCanvasAgentToolHelpOverview,
   resolveCanvasAgentToolTarget,
 } from "./canvas-agent-tool-targets";
+import {
+  focusCanvasAgentResult,
+  getCanvasAgentReadyShapeIds,
+} from "./canvas-agent-camera";
+import { insertCanvasAgentHtmlArtifact } from "./canvas-agent-html-insertion";
+import { completeCanvasAgentFocusProgress } from "./canvas-agent-progress";
+import { buildCanvasAgentShapeSummaries } from "./canvas-agent-shape-context";
+import {
+  buildCanvasAgentSelectedScene,
+  CanvasAgentSelectedSceneError,
+} from "./canvas-agent-selected-scene";
 
 const ACTIVE_STATUSES = new Set(["queued", "planning", "executing"]);
 const COMPLETED_PROGRESS_HIDE_DELAY_MS = 8000;
 const LONG_RUNNING_NOTICE_DELAY_MS = 25_000;
+const FOCUS_RETRY_DELAYS_MS = [700, 1_400, 2_800] as const;
+function buildLastTaskContext(run: CanvasAgentRun | null, draft: CanvasAgentDraft | null) {
+  if (!run) return null;
+  return {
+    draftId: draft?.id ?? null,
+    draftTitle: draft?.spec.title ?? null,
+    prompt: run.prompt,
+    status: run.status,
+    summary: run.summary ?? run.message ?? null,
+  };
+}
 
 export function useCanvasAgent({
   canvasId,
   editor,
   enabled,
   onApplied,
+  onDriveFileInsert,
+  onFrameSubtreeRequest,
   workspaceId,
 }: {
   canvasId: string;
   editor: Editor | null;
   enabled: boolean;
   onApplied: () => void;
+  onDriveFileInsert: (file: {
+    fileId: string;
+    fileName: string;
+    mimeType: string;
+  }, runId: string) => boolean;
+  onFrameSubtreeRequest?: (frameId: string) => Promise<void> | void;
   workspaceId: string;
 }) {
   const client = useMemo(() => createCanvasAgentClient(), []);
   const [run, setRun] = useState<CanvasAgentRun | null>(null);
   const [draft, setDraft] = useState<CanvasAgentDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
   const runIdRef = useRef<string | null>(null);
+  const selectedSceneByRunIdRef = useRef(new Map<string, CanvasAgentSelectedScene>());
+  const insertedHtmlArtifactRunIdsRef = useRef(new Set<string>());
+  const insertedDriveFileRunIdsRef = useRef(new Set<string>());
+  const focusRetryTimerRef = useRef<number | null>(null);
   const progressHideTimerRef = useRef<number | null>(null);
+  const progressPresentationVersionRef = useRef(0);
   const longRunningTimerRef = useRef<number | null>(null);
   const [visibleProgress, setVisibleProgress] = useState<CanvasAgentProgress | null>(null);
 
@@ -53,56 +92,152 @@ export function useCanvasAgent({
     longRunningTimerRef.current = null;
   }, []);
 
+  const clearFocusRetryTimer = useCallback(() => {
+    if (focusRetryTimerRef.current === null) return;
+    window.clearTimeout(focusRetryTimerRef.current);
+    focusRetryTimerRef.current = null;
+  }, []);
+
   const presentRun = useCallback(
     (nextRun: CanvasAgentRun) => {
       setRun(nextRun);
+      if (
+        nextRun.presentationMode !== "background" &&
+        nextRun.clientAction?.type === "insert_drive_file" &&
+        !insertedDriveFileRunIdsRef.current.has(nextRun.id) &&
+        onDriveFileInsert(nextRun.clientAction.file, nextRun.id)
+      ) {
+        insertedDriveFileRunIdsRef.current.add(nextRun.id);
+      }
+      if (
+        editor &&
+        nextRun.artifact?.kind === "html" &&
+        !insertedHtmlArtifactRunIdsRef.current.has(nextRun.id)
+      ) {
+        const selectedScene = selectedSceneByRunIdRef.current.get(nextRun.id);
+        if (selectedScene) {
+          const insertion = insertCanvasAgentHtmlArtifact(
+            editor,
+            nextRun.id,
+            nextRun.artifact,
+            selectedScene,
+          );
+          if (insertion) {
+            insertedHtmlArtifactRunIdsRef.current.add(nextRun.id);
+            selectedSceneByRunIdRef.current.delete(nextRun.id);
+          }
+        }
+      }
       const progress = nextRun.presentationMode === "background" ? null : nextRun.progress;
+      const progressPresentationVersion =
+        progressPresentationVersionRef.current + 1;
+      progressPresentationVersionRef.current = progressPresentationVersion;
       clearProgressHideTimer();
       if (!ACTIVE_STATUSES.has(nextRun.status)) {
         clearLongRunningTimer();
       }
-      setVisibleProgress(progress);
-      if (progress && !ACTIVE_STATUSES.has(nextRun.status)) {
-        progressHideTimerRef.current = window.setTimeout(() => {
-          setVisibleProgress((currentProgress) =>
-            currentProgress === progress ? null : currentProgress,
-          );
-          progressHideTimerRef.current = null;
+      const scheduleCompletedProgressHide = () => {
+        if (!progress || ACTIVE_STATUSES.has(nextRun.status)) return;
+
+        clearProgressHideTimer();
+        const timer = window.setTimeout(() => {
+          if (
+            progressPresentationVersionRef.current ===
+            progressPresentationVersion
+          ) {
+            setVisibleProgress(null);
+          }
+          if (progressHideTimerRef.current === timer) {
+            progressHideTimerRef.current = null;
+          }
         }, COMPLETED_PROGRESS_HIDE_DELAY_MS);
-      }
+        progressHideTimerRef.current = timer;
+      };
+      setVisibleProgress(progress);
+      scheduleCompletedProgressHide();
+      clearFocusRetryTimer();
       if (!editor || !progress) return;
 
       if (progress.toolTarget) {
         dispatchCanvasAgentToolTarget(progress.toolTarget);
       }
-      if (progress.highlightedShapeIds.length) {
-        editor.select(...(progress.highlightedShapeIds as TLShapeId[]));
-      }
-      if (progress.targetViewport) {
-        editor.zoomToBounds(
-          {
-            x: progress.targetViewport.x,
-            y: progress.targetViewport.y,
-            w: progress.targetViewport.width,
-            h: progress.targetViewport.height,
-          },
-          { animation: { duration: 500 } },
+      const focusProgressResult = (attempt = 0) => {
+        if (runIdRef.current !== nextRun.id) return;
+        const loadedShapeIds = getCanvasAgentReadyShapeIds(
+          editor,
+          progress.highlightedShapeIds,
         );
+        if (loadedShapeIds.length) {
+          editor.select(...(loadedShapeIds as TLShapeId[]));
+        }
+        const usedLoadedBounds = focusCanvasAgentResult(
+          editor,
+          loadedShapeIds,
+          null,
+        );
+        if (usedLoadedBounds) {
+          setVisibleProgress(
+            completeCanvasAgentFocusProgress(
+              progress,
+              "검색 결과로 이동했습니다.",
+            ),
+          );
+          scheduleCompletedProgressHide();
+        } else if (
+          progress.highlightedShapeIds.length &&
+          attempt < FOCUS_RETRY_DELAYS_MS.length
+        ) {
+          focusRetryTimerRef.current = window.setTimeout(() => {
+            focusRetryTimerRef.current = null;
+            focusProgressResult(attempt + 1);
+          }, FOCUS_RETRY_DELAYS_MS[attempt]);
+        } else if (progress.highlightedShapeIds.length) {
+          setVisibleProgress(
+            completeCanvasAgentFocusProgress(
+              progress,
+              "검색 결과는 찾았지만 화면에 불러오지 못했습니다.",
+            ),
+          );
+          scheduleCompletedProgressHide();
+        }
+      };
+      if (progress.targetViewport) {
+        focusCanvasAgentResult(editor, [], progress.targetViewport);
+      }
+      const loadRootShapeIds = progress.loadRootShapeIds ?? [];
+      if (loadRootShapeIds.length && onFrameSubtreeRequest) {
+        void Promise.allSettled(
+          loadRootShapeIds.map((shapeId) => onFrameSubtreeRequest(shapeId)),
+        ).then(() => focusProgressResult());
+      } else if (progress.targetViewport || progress.highlightedShapeIds.length) {
+        focusProgressResult();
       }
     },
-    [clearLongRunningTimer, clearProgressHideTimer, editor],
+    [
+      clearFocusRetryTimer,
+      clearLongRunningTimer,
+      clearProgressHideTimer,
+      editor,
+      onDriveFileInsert,
+      onFrameSubtreeRequest,
+    ],
   );
 
   const submit = useCallback(
     async (
       prompt: string,
-      options?: { presentationMode?: CanvasAgentPresentationMode; toolHelpMode?: boolean },
+      options?: {
+        conversationContext?: Pick<CanvasAgentConversationContext, "messages">;
+        presentationMode?: CanvasAgentPresentationMode;
+        toolHelpMode?: boolean;
+      },
     ) => {
       if (!editor) {
         setError("Canvas API 연결 후 Canvas AI를 사용할 수 있습니다.");
         return;
       }
       setError(null);
+      setLocalMessage(null);
       setRun(null);
       setDraft(null);
       clearProgressHideTimer();
@@ -135,6 +270,31 @@ export function useCanvasAgent({
                   toolTargetLabel: toolResolution.tool.label,
                 }
               : null,
+            artifact: null,
+            clientAction: null,
+            createdAt: now,
+            completedAt: now,
+            expiresAt: now,
+          });
+          return;
+        }
+
+        const overview = readCanvasAgentToolHelpOverview(prompt);
+        if (overview) {
+          const now = new Date().toISOString();
+          presentRun({
+            id: `local-canvas-agent-${crypto.randomUUID()}`,
+            workspaceId,
+            canvasId,
+            presentationMode: "interactive",
+            status: "completed",
+            prompt,
+            message: overview,
+            summary: overview,
+            canvasRevision: null,
+            progress: null,
+            artifact: null,
+            clientAction: null,
             createdAt: now,
             completedAt: now,
             expiresAt: now,
@@ -156,6 +316,8 @@ export function useCanvasAgent({
           summary: message,
           canvasRevision: null,
           progress: null,
+          artifact: null,
+          clientAction: null,
           createdAt: now,
           completedAt: now,
           expiresAt: now,
@@ -175,16 +337,62 @@ export function useCanvasAgent({
         width: viewportBounds.w,
         height: viewportBounds.h,
       };
+      const conversationContext: CanvasAgentConversationContext | undefined =
+        (options?.conversationContext || run)
+          ? {
+              messages: options?.conversationContext?.messages ?? [],
+              lastTask: buildLastTaskContext(run, draft),
+            }
+          : undefined;
       try {
+        let selectedScene: CanvasAgentSelectedScene | null = null;
+        let selectedSceneError: string | null = null;
+        try {
+          selectedScene = buildCanvasAgentSelectedScene(editor);
+        } catch (sceneError) {
+          if (
+            sceneError instanceof CanvasAgentSelectedSceneError
+            && sceneError.missingFrameIds.length
+            && onFrameSubtreeRequest
+          ) {
+            setLocalMessage("선택 영역을 불러오는 중입니다.");
+            try {
+              await Promise.all(
+                sceneError.missingFrameIds.map((frameId) => onFrameSubtreeRequest(frameId)),
+              );
+              await waitForCanvasEditorHydration();
+              selectedScene = buildCanvasAgentSelectedScene(editor);
+            } catch (hydrationError) {
+              selectedSceneError = hydrationError instanceof CanvasAgentSelectedSceneError
+                ? hydrationError.message
+                : "선택 영역을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+            } finally {
+              setLocalMessage(null);
+            }
+          } else {
+            selectedSceneError = sceneError instanceof CanvasAgentSelectedSceneError
+              ? sceneError.message
+              : "선택 영역을 코드 생성용으로 읽지 못했습니다.";
+          }
+        }
+        const shapeSummaries = buildCanvasAgentShapeSummaries(editor);
+        const selectedShapeIds = editor.getSelectedShapeIds().map(String);
         const result = await client.createRun(workspaceId, canvasId, {
           prompt,
+          conversationContext,
           presentationMode: options?.presentationMode ?? "interactive",
-          selectedShapeIds: editor.getSelectedShapeIds().map(String),
+          selectedShapeIds,
+          selectedScene,
+          selectedSceneError,
+          shapeSummaries: selectedShapeIds.length ? shapeSummaries.slice(0, 20) : shapeSummaries,
           viewport,
           toolHelpMode: options?.toolHelpMode === true,
           clientRequestId: crypto.randomUUID(),
         });
         runIdRef.current = result.run.id;
+        if (selectedScene) {
+          selectedSceneByRunIdRef.current.set(result.run.id, selectedScene);
+        }
         presentRun(result.run);
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : "Canvas AI 요청에 실패했습니다.");
@@ -195,9 +403,12 @@ export function useCanvasAgent({
       clearLongRunningTimer,
       clearProgressHideTimer,
       client,
+      draft,
       editor,
       enabled,
+      onFrameSubtreeRequest,
       presentRun,
+      run,
       workspaceId,
     ],
   );
@@ -211,6 +422,17 @@ export function useCanvasAgent({
       setError(requestError instanceof Error ? requestError.message : "Canvas AI 작업을 취소하지 못했습니다.");
     }
   }, [canvasId, client, presentRun, workspaceId]);
+
+  const adoptRun = useCallback(
+    (nextRun: CanvasAgentRun, selectedScene: CanvasAgentSelectedScene | null) => {
+      runIdRef.current = nextRun.id;
+      if (selectedScene) {
+        selectedSceneByRunIdRef.current.set(nextRun.id, selectedScene);
+      }
+      presentRun(nextRun);
+    },
+    [presentRun],
+  );
 
   const applyDraft = useCallback(async () => {
     if (!draft) return;
@@ -285,20 +507,33 @@ export function useCanvasAgent({
   }, [clearLongRunningTimer, runStatus]);
 
   useEffect(() => () => {
+    clearFocusRetryTimer();
     clearProgressHideTimer();
     clearLongRunningTimer();
-  }, [clearLongRunningTimer, clearProgressHideTimer]);
+  }, [clearFocusRetryTimer, clearLongRunningTimer, clearProgressHideTimer]);
+
+  const message = error
+    ?? localMessage
+    ?? run?.progress?.message
+    ?? run?.message
+    ?? null;
 
   return {
     applyDraft,
+    adoptRun,
     cancel,
     discardDraft,
     draft: draft?.status === "preview" ? draft : null,
     error,
     isRunning: run ? ACTIVE_STATUSES.has(run.status) : false,
-    message: error ?? run?.progress?.message ?? run?.message ?? null,
+    message,
+    artifact: run?.artifact ?? null,
     progress: visibleProgress,
     presentationMode: run?.presentationMode ?? "interactive",
     submit,
   };
+}
+
+function waitForCanvasEditorHydration() {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 120));
 }

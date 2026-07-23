@@ -5,13 +5,16 @@
 Agent API는 Workspace 안에서 자연어 요청을 Agent run으로 생성하고, AI Worker의
 계획/답변 생성 결과와 App Server의 tool 실행 상태를 조회하는 API다.
 
-1차 Agent MVP는 완전 자율 실행이 아니라 확인 기반 업무 Agent다.
+1차 Agent MVP는 위험한 쓰기만 확인하는 업무 Agent다. 한 run 안에서는 tool 결과를
+이어서 계획하고, 부족한 정보만 사용자에게 질문한다.
 
 - 자연어 채팅 입력
 - 현재 active Workspace 문맥 사용
 - Calendar 일정 조회, 생성, 수정
 - MeetingReport 목록/상세 조회와 요약
-- Board issue 검색
+- Board 문맥 확인, issue 검색·상세 문맥, briefing·최신성 진단
+- Board issue 생성, Status 이동, 담당자 추가·제거
+- Canvas 요청을 별도 Canvas Agent run으로 위임하고 그 결과를 그대로 전달
 - write tool 실행 전 confirmation
 - Agent run, step, confirmation 조회
 - 실패 사유와 실행 결과 요약 조회
@@ -28,8 +31,9 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
   규칙은 각 도메인 문서와 owner 기준을 따른다.
 - 기존 Calendar, Board, Meeting API의 endpoint, request, response, status code, auth
   rule을 바꾸면 Agent 작업이 아니라 해당 도메인의 API 계약 변경으로 취급한다.
-- `agent_runs`, `agent_steps`, `agent_confirmations`, `agent_logs` 같은 신규 테이블이
-  필요하므로 구현 전 DB Schema owner 확인이 필요하다.
+- `agent_threads`, `agent_runs`, `agent_steps`, `agent_confirmations`, `agent_logs`, outbox와 candidate
+  저장소를 사용한다. 이 API의 lifecycle routing은 기존 schema만 사용하며, column·index·RLS 변경이
+  필요하면 구현 전 DB Schema owner 확인이 필요하다.
 
 ## 공통 규칙
 
@@ -43,15 +47,42 @@ Workspace 상태 변경은 기존 도메인 service/API 계약을 따른다.
 - Agent 응답과 저장 데이터에는 provider raw response, token, secret, 복호화된 credential을 포함하지 않는다.
 - Agent run 보존 기간은 생성 시점부터 30일이다. 목록·상세 조회는 현재 사용자와
   Workspace 범위에서 만료된 run을 최대 100건씩 삭제한다.
+- Agent thread는 서버가 생성하고 소유한다. API는 이를 `conversationId`로 노출하며, 클라이언트는 서버가
+  응답한 값만 같은 채팅의 다음 요청에 다시 보낼 수 있다. `conversationId=null`은 새 대화의 첫 요청이다.
+- 같은 채팅에서는 후속 질문, 새 업무, 다른 도메인 요청 모두 같은 `conversationId`에 새 run으로 저장한다.
+  사용자가 명시적으로 “새 대화”를 선택할 때만 다음 요청에 `null`을 보내 새 thread를 만든다.
+- `conversationId`를 생략한 구형 클라이언트에만 `agent_threads.last_activity_at` 1시간 기준의 기존 자동
+  선택을 적용한다. 1시간 기준은 명시적인 conversation 경계를 바꾸지 않는다.
+- pending confirmation은 같은 conversation의 독립 새 요청으로 취소하지 않는다. 기존 승인 대기를
+  보존한 채 새 run을 만들며, 승인·거절 또는 만료는 기존 confirmation lifecycle로 처리한다.
 - 1차는 streaming 없이 polling으로 run 상태를 조회한다.
-- `clientRequestId`는 선택값이며, 같은 Workspace와 요청자 안에서 run 생성 재시도 idempotency key로 사용한다.
+- 기존 run 생성 API의 `clientRequestId`는 선택값이다. 통합 메시지 API에서는 필수이며, 같은
+  Workspace와 요청자 안에서 관계 판정·취소·run 생성 전체의 idempotency key로 사용한다.
+- `requestContext`는 선택값이며, `null`, 서버가 현재 Workspace의 활성 session으로 재검증한
+  `{ "surface": "sql_erd", "sessionId": "uuid" }`, `{ "surface": "pr_review", "sessionId": "uuid" }`,
+  또는 현재 Canvas 화면이 만든 `{ "surface": "canvas", "canvasId": "uuid", "canvasContext": object }`를
+  허용한다. SQLtoERD/PR Review context는 2 KiB 이내이며 Canvas context는 선택 장면을 포함해 192 KiB 이내다.
 
 ## 처리 구조
 
 Agent run 생성 transaction은 run과 planning-job outbox intent를 함께 저장한다. App Server는
-저장 직후 publisher를 깨워 SQS AI job 발행을 시도하고, 60초 recovery sweep으로 미발행 intent와
-stale publisher claim을 재시도한다. AI Worker는 LLM을 호출해 intent, tool plan, 최종 답변 생성을
-담당한다.
+저장 직후 publisher를 깨워 SQS AI job 발행을 시도하고, 15초 recovery sweep으로 미발행 intent와
+stale publisher claim을 재시도한다. 같은 15초 sweep은 current outbox turn의 server-owned
+`planning_started_at`부터 240초를 넘기면 현재
+`turnSequence`를 확인한 뒤 safe `failed`로 terminalize한다. 따라서 SQS 전달 실패, Worker 미소비,
+retryable planner 장애 어느 경우에도 run이 무기한 `planning`에 남지 않는다. AI Worker는 LLM을
+호출해 intent, tool plan, 최종 답변 생성을 담당한다.
+
+`agent_run_requested` SQS payload는 `runId`, `workspaceId`, `requestedByUserId`, immutable
+`requestContext`, `toolSchemaVersion`, tool schema snapshot을 포함한다. `requestContext`는 클라이언트의
+원본 자기신고가 아니라 App Server가 검증해 `agent_runs.request_context_json`에 저장한 값이다.
+Canvas의 큰 `canvasContext`는 App Server의 위임 Tool에서만 사용하고 AI Worker에는
+`{ "surface": "canvas", "canvasId": "uuid" }`만 전달한다.
+planning job은 새 turn마다 별도 outbox row를 만들지 않는다. 기존 run당 한 행인
+`agent_run_outbox`를 pending으로 rearm하면서 `turn_sequence`를 증가시키고, `reason`을
+`run_created`, `user_input`, `tool_result` 중 하나로 기록한다. SQS payload에도 같은
+`turnSequence`를 넣으며, AI Worker는 현재 outbox generation과 일치하지 않는 지연 job을 실행하지
+않는다.
 
 domain tool 실행은 read-only tool과 write tool 모두 App Server가 담당한다. AI Worker는
 Calendar, Board, Meeting 도메인 service를 직접 호출하거나 도메인 DB를 직접 수정하지 않는다.
@@ -61,12 +92,13 @@ write tool은 App Server가 저장된 confirmation plan을 검증한 뒤 기존 
 Frontend
   -> App Server Agent API
     -> Agent run + outbox intent 저장 (same transaction)
-    -> 즉시 publisher wake / 60초 recovery sweep
+    -> 즉시 publisher wake / 15초 recovery sweep / 240초 planning deadline
     -> SQS AI job enqueue (at-least-once)
       -> AI Worker LLM planning/answer generation
       -> App Server internal execution handoff
     -> App Server domain tool execution
       -> CalendarService / BoardService / MeetingService
+      -> CanvasAgentService (delegated child run)
 ```
 
 AI Worker가 `tool_candidate` planner 결과를 저장하면 인증된 내부 handoff로 App Server에 실행을
@@ -74,18 +106,158 @@ AI Worker가 `tool_candidate` planner 결과를 저장하면 인증된 내부 ha
 confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API가 아니며 사용자 bearer token을
 받지 않는다.
 
+LLM Router가 반환한 `domains`는 신뢰 경계가 아니다. Worker는 검증된 `capabilityIds`에서 domain 집합을
+다시 계산해 canonicalize하므로 strict JSON schema를 만족한 domain/capability 불일치가 run을 즉시
+실패시키지 않는다. capability chain이 여러 tool로 구성되면 완료된 tool 결과는 bounded
+`planningContext`에 저장하고, 다음 planner turn에는 각 capability의 다음 미완료 tool만 노출한다.
+각 capability의 terminal tool이 성공하면 App Server가 결과를 `finalAnswer`로 저장하고 즉시
+`completed`로 전환한다. 따라서 단일 tool 요청은 성공 뒤 planner로 되돌아가지 않는다.
+metadata retrieval 경로도 검증된 `capabilityIds`와 실제 planner tool이 같은 catalog chain에 속할
+때에만 동일한 terminal 판정을 사용한다. unsupported capability는 사용자의 명시적인 intent cue가
+일치할 때만 지원 불가로 판정하며 날짜·도메인 단어의 겹침만으로 정상 조회를 가로채지 않는다.
+`meeting.report.hybrid_search`는 예외가 아니라 동일한 일반 chain 규칙을 사용하며,
+`list_meeting_reports`가 prerequisite, `search_meeting_transcript`가 terminal tool이다.
+
+`delegate_canvas_agent`가 실행되면 일반 Agent run은 `running`을 유지하고 Canvas Agent child run의
+terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt를 수정하거나 요약하지 않고 child run에
+전달하며 `source=general_agent_delegate`, `parentAgentRunId=일반 Agent run id`로 연결한다. child run이
+완료되면 Canvas Agent의 `resultSummary`를 두 번째 LLM 호출 없이 일반 Agent의 `finalAnswer`에 그대로
+복사한다. 실패·취소도 child 상태에 맞춰 일반 Agent run을 terminal 상태로 정리한다.
+
+일반 Agent run 조회는 연결된 Canvas Agent child run이 `executing`이면 해당 run의 대기 중 action을
+명시적으로 진행한 뒤 terminal 결과를 즉시 정산한다. 주기적인 완료 감시는 유실·재시작 복구용으로
+계속 유지하지만, PILO AI의 응답 완료가 새로운 Canvas AI 요청에 의존해서는 안 된다.
+
+`search_meeting_transcript`는 read-only tool이지만 일반 formatter로 즉시 완료하지 않는다. App Server가
+현재 사용자 권한으로 query embedding과 pgvector 검색을 수행한다. 검색 대상은 current transcript chunk와
+`meeting_report_activity_evidence`의 안전한 snapshot(`occurredAt`, `action`, `summary`) chunk다. raw
+`activity_logs.metadata`, 원본 도메인 객체, transcript 전문은 RAG table·outbox·SQS·Agent run/step/log에
+저장하지 않는다. App Server는 namespaced source ID(`transcript:<uuid>`, `activity:<uuid>`)만 가진
+`agent_grounded_answer_outbox`를 저장한다. AI Worker는 내부 인증 endpoint에서만 bounded evidence excerpt를
+일회성으로 받아 두 번째 LLM 호출을 수행한다. 직접 decision/action item에 연결된 Activity evidence에는 제한된
+relevance boost만 적용한다. 두 source type이 모두 있으면 transcript와 Activity를 각각 최소 한 건씩 보존하고,
+후보 chunk 사이 cosine distance가 0.12 이하인 경우에는 의미 중복 group 안에서 source type별 최상위 후보만
+남긴다. 따라서 직접 연결된 Activity가 많아도 transcript가 전부 밀려나지 않으며, 같은 근거를 여러 chunk가
+차지하지 않는다. final citation은 outbox source ID의 부분집합만 허용하며, answer step에는 source type과 안전한
+시간/summary metadata만 저장해 UI가 구분 표시한다.
+Grounded-answer job 발행은 최대 5회 시도하며, 재시도 소진 시 outbox·pending answer step·run을 같은
+transaction에서 `failed`로 전환한다. 생성 후 300초가 지난 pending/publishing/delivered outbox도 15초
+sweep에서 terminal 처리하므로 Worker 종료나 handoff 유실이 run을 영구 `running`으로 남기지 않는다.
+
 ## 실행 모델
 
-- 1차는 `one prompt = one agent run`으로 시작한다.
-- true multi-turn memory, 장기 thread, 예약 실행은 1차 범위가 아니다.
+### Meeting·Drive 근거 답변 안전 계약
+
+- `search_meeting_transcript`와 `search_workspace_documents`는 read-only grounded-answer Tool이다.
+- App Server는 query embedding 호출을 기본 10초로 제한한다. timeout·연결 오류·429·5xx는 `no_relevant_sources`와 구분되는 일시적 embedding 장애로 처리한다.
+- 관련도 임계값은 boost, 중복 제거, source 다양성 보정 전에 적용한다. DEV 기준은 Meeting `0.23`, Drive `0.27`이며 점수는 내부 진단에만 사용하고 사용자 응답에는 노출하지 않는다.
+- Tool 결과가 0건이면 answer LLM과 grounded-answer outbox를 만들지 않고 `no_relevant_sources` 안내로 즉시 완료한다.
+- 근거가 있으면 App Server가 매 실행마다 opaque `citationId`를 발급한다. Worker는 제공된 ID 중 최소 1개를 인용해야 하며, 누락되거나 알 수 없는 ID면 같은 근거로 한 번만 재생성한다. 두 번째도 실패하면 citation 검증 실패 안내로 종료한다.
+- grounded-answer Tool이 실제 조회한 `groundingSources[].resourceRef`는 Tool이 명시적으로 반환한
+  `resourceRefs`와 합쳐 step에 저장한다. `domain + resourceType + resourceId`가 같은 reference는 한 번만
+  저장하며, 문서 원문·excerpt·embedding 점수는 resource reference에 포함하지 않는다.
+- 보안 거절과 citation 검증 실패는 일반 grounded-answer 완료 API와 분리된 서버 소유 완료 경로를 사용한다.
+
+- 하나의 `agent_run` 안에서는 사용자 추가 입력, assistant 질문, bounded tool 결과를 발생 시각·순서가
+  보존된 하나의 timeline으로 기억한다. 같은 서버 소유 thread의 새 run에는 최근 완료 run의 사용자 prompt,
+  사용자에게 표시된 final answer, 안전한 resource ref만 bounded context로 추가한다. raw tool input/output,
+  transcript, Activity Log metadata, provider payload·token·secret은 thread context에 넣지 않는다.
+- thread context는 최근 완료 run 6개, UTF-8 12 KiB, 안전한 Meeting·Calendar resource reference
+  12개로 제한한다.
+  prompt와 final answer의 UUID는 `[resource]`로 치환하고, resource는 `resourceType`, 1-based `ordinal`,
+  bounded label/status와 `ctx_` prefix의 opaque `contextRef`만 planner에 전달한다. 내부 `resourceId`와
+  action item의 report 관계는 planner projection에 포함하지 않는다. 알려진 API key·provider token·JWT·
+  authorization 값·credential assignment·private key block은 `[secret]`으로 치환한다. 같은 timestamp의
+  run은 `createdAt DESC, id DESC`로 정렬해 Worker projection과 App Server 해소 순서를 고정한다.
+- `contextRef`는 현재 run에서 먼저 완료된 tool step과, 현재 run과 같은 thread·Workspace·요청 사용자의
+  최근 완료 run tool step에서만 해소한다.
+  App Server는 해소된 Meeting·Calendar resource를 현재 사용자 권한으로 다시 검증한다. 0개, 여러 개, 다른 type,
+  stale reference는 실행이나 confirmation을 만들지 않고 clarification으로 종료한다.
+- Meeting action item write는 `actionItemContextRef` 하나 또는 `reportContextRef`와 1-based `ordinal`을
+  받는다. 해소 뒤에도 기존 confirmation을 만들고 승인 시 저장된 report/action item과 권한·상태를 다시
+  검증한다. 직전 목록 순번은 같은 filter/sort 결과에 포함된 `actionItemContextRef`로 고정하며, 목록에 없는
+  순번이나 0/N·stale·다른 Workspace reference는 confirmation을 만들지 않는다. action item 담당자 변경은
+  `assigneeSelf`, `assigneeDisplayName`, `clearAssignee` 또는 선택된 Workspace member candidate만 받으며
+  planner-facing schema에 `assigneeUserId`를 노출하지 않는다. 배포 중 저장된 `agent-tools:v6`의
+  MeetingReport raw ID planner step은
+  `get_meeting_report`, `summarize_meeting_report`, `find_action_items`,
+  `get_meeting_decision_evidence`, `regenerate_meeting_report`에 한해 server-only compatibility adapter로
+  실행한다. 새 `agent-tools:v8` planner output은 같은 raw ID를 제출해도 adapter를 사용할 수 없다.
+  이미 만들어진 confirmation plan은 저장된 raw ID를 승인 시점에 다시 검증한 뒤에만 실행한다.
+- `find_action_items`, `get_meeting_decision_evidence`, `regenerate_meeting_report`도 planner-facing
+  `reportId`를 받지 않고 공통 MeetingReport selector의 `contextRef`를 App Server에서 해소한다.
+  `find_action_items`는 report selector를 생략하면 현재 Workspace 전체를 검색하며, optional
+  `contextRef`/선택된 report candidate, `assigneeSelf`/`assigneeDisplayName`/선택된 member candidate,
+  action item `status`, 부분 일치 `title`, `[from, to)` report 생성 기간, `newest|oldest` sort와
+  `1..20` limit을 조합한다. 결과 ordinal은 해당 응답의 정렬된 동일 결과 집합에서만 유효하다.
+- Frontend는 현재 채팅의 `conversationId`와 bounded 표시 메시지를 사용자·Workspace별로 저장해 새로고침
+  뒤 복원한다. “새 대화”를 선택하면 로컬 대화 상태를 즉시 초기화하고, 다음 요청을
+  `conversationId=null`로 보내 서버가 새 thread를 생성하게 한다. thread UUID의 발급과 Workspace·사용자
+  소유권 검증은 항상 App Server가 담당한다. 공식 Frontend는 `POST .../agent/messages` 요청마다
+  `conversationId`를 UUID 또는 명시적 `null`로 반드시 직렬화하며, 필드 생략을 사용하는 구형 클라이언트
+  fallback에 의존하지 않는다.
+- 한 번의 사용자 입력으로 시작한 요청 구간에서 planner turn과 tool 실행은 각각 최대 5회다.
+  한도를 넘기면 실패시키지 않고 다음 요청을 받기 위해 `waiting_user_input`으로 전환한다.
+  사용자가 `POST .../inputs`로 보완 입력을 제출하면 다음 요청 구간의 두 budget은 0부터 다시 시작한다.
+  이 budget 대기는 missing field clarification과 구분한다. 사용자가 `계속`, `이어서`처럼 기존 목표 재개를
+  명시한 경우에만 같은 run을 재개하고, 그 밖의 구체적인 작업 요청은 기존 run을 종료한 뒤 같은 thread의
+  새 run으로 시작한다.
+- planner의 `needs_clarification` 결과는 terminal 완료가 아니다. assistant 질문을 저장하고 run을
+  `waiting_user_input`으로 전환한다.
+- `requestContext.surface`가 `canvas`, `sql_erd`, `pr_review`이면 App Server의 planning snapshot과 실행
+  registry, AI Worker의 모든 retrieval mode는 해당 surface domain을 우선한다. 다만 Workspace 회의록
+  조회·검색은 어느 화면에서도 가능한 공통 read 기능이므로 `list_meeting_reports`와
+  `search_meeting_transcript` 및 이 둘로 완성되는 Meeting capability도 함께 노출한다. 그 밖의 Meeting
+  tool과 다른 domain은 planner와 실행 단계로 전달하지 않는다.
+- `surface=sql_erd`에서 LLM Router는 요청의 resource effect를 의미적으로 구분한다. 이미 존재하는 현재
+  session의 table을 조회·필터링·집중 표시하는 요청은 `sql_erd.inspect`, 자연어 요구사항으로 새
+  ERD·schema·DDL을 설계하거나 생성하는 요청은 `sql_erd.generate`다. 생성 요청은 SQL 원문을 요구하지
+  않는다. 요청 효과가 명시적이면 두 capability 중 하나를 다시 고르게 하는 clarification을 만들지 않는다.
+  이 의미 판정 뒤에도 capability ID, domain, surface, tool chain, execution mode와 confirmation은 catalog와
+  App Server가 결정적으로 재검증한다.
+- router가 선택한 capability의 tool 범위는 해당 capability의 명시적 `toolNames` chain만 사용한다.
+  여러 capability에서 집계된 descriptor의 `followUpToolNames`를 closure로 확장하지 않으므로 read-only
+  capability가 인접 write tool을 planner shortlist에 포함시키지 않는다.
+- planner는 같은 run의 마지막 사용자 입력 이후 선택된 capability의 마지막 tool 결과가 모두 저장된 뒤에만
+  `completed`를 반환할 수 있다. 이전 사용자 입력 구간의 결과, tool 실행 결과가 없는 경우, prerequisite
+  read 결과만 있는 경우에는 `completed` schema를 제공하지 않으며, 후처리에서 status가 완료로 바뀌어도
+  같은 최종 증거 검사를 적용한다. catalog 누락이나 low-confidence fallback처럼 신뢰할 capability terminal을
+  계산할 수 없는 경우에도 `completed`를 열지 않고 안전한 clarification으로 전환한다.
+- Router/Planner JSON은 안전한 공백·Markdown JSON fence 정규화를 먼저 적용한 뒤 required field,
+  additional property, field type과 semantic 선택을 strict schema와 동일하게 검증한다. 여전히 형식이
+  잘못되면 같은 model, catalog, surface, shortlist와 response schema로 최대 한 번만 repair한다. repair
+  뒤에도 검증되지 않으면 내부 오류를 공개하지 않고 안전한 질문과 함께 `waiting_user_input`으로 전환한다.
+- `waiting_user_input`은 24시간 뒤 `cancelled` 처리한다. 사용자는 새 요청으로 재개한다.
 - read-only 요청은 confirmation 없이 자동 실행할 수 있다.
+- tool `executionMode`는 `auto`, `confirmation_required`, `contextual` 중 하나다.
+- `contextual` tool은 저장된 `requestContext`를 기준으로 App Server의 `prepareExecution`이 즉시 실행,
+  confirmation, clarification 중 하나를 결정한다. AI Worker는 이 모드의 `requiresConfirmation`을
+  `null`로 기록한다.
+- `search_meeting_transcript`는 `query`와 선택 MeetingReport selector를 받는다. selector가 있으면
+  App Server가 단일 report를 해소·재검증한 뒤 해당 report의 current transcript chunk와 Activity evidence
+  chunk만 합쳐 최대 5개 검색한다. selector가 없으면 Workspace 전체에서 현재 사용자에게 허용된 report만
+  검색한다. 두 source type이 모두 있으면 최소 한 건씩 포함하며, 의미 중복 chunk는 source type별 대표만
+  포함한다. Meeting 근거가 있으면 질문과 bounded Meeting 근거를 조합해 같은 Workspace의 Drive 문서를
+  최대 3개 추가 검색하며, Drive 관련도 임계값을 통과한 문서만 답변 근거와 링크로 제공한다. Drive query
+  embedding이 일시적으로 실패하거나 응답이 유효하지 않으면 Meeting 근거만으로 계속 처리한다. 결과가
+  없으면 LLM answer phase를 호출하지 않는다.
 - write 요청은 `waiting_confirmation` 상태의 run과 pending confirmation을 만든다.
 - 사용자가 승인하면 서버는 confirmation에 저장된 plan만 실행한다.
-- 승인 transaction은 `running` tool step을 execution claim으로 함께 만든다. 승인 직후 process가
-  중단돼도 tool step이 없는 `running` run을 남기지 않는다.
-- AI Worker는 60초마다 2분 이상 stale인 승인 execution을 확인한다. `running` tool step이 남아 있으면
-  domain tool을 재실행하지 않고 safe failure로 terminal 상태를 만든다.
+- 자동/승인 tool 실행은 모두 `running` step과 180초 execution lease를 같은 transaction에서 claim한다.
+  App Server는 30초 heartbeat로 lease를 갱신하고, 완료·실패 write는 token과 단조 증가 generation이
+  일치할 때만 허용한다. 승인 write와 stale recovery가 경합해도 늦은 process는 fencing된다.
+- AI Worker는 60초마다 만료된 execution lease를 확인한다. 정확히 같은 token/generation의 `running`
+  tool step만 실패시키고 run을 terminal 처리하며, domain tool을 자동 재실행하지 않는다.
+- Worker가 planner 도중 종료되면 SQS visibility heartbeat가 멈추고 message가 다시 전달된다. run advisory
+  lock을 새 process가 획득한 뒤 이전 delivery의 orphan `running` planner step을 실패 처리하고 새 step을
+  시작한다. terminal run 또는 이전 turn message는 도구를 다시 실행하지 않고 삭제한다.
+- 같은 recovery 호출은 5분 lease가 만료된 Meeting action-item delivery를 `FAILED`로 전환한다.
+  Action Item의 `APPROVED` 상태와 최초 승인 audit은 유지하며, Board delivery 재시도는 최초 요청자,
+  저장된 draft, idempotency key를 재사용한다. 이미 완료된 delivery는 외부 write를 반복하지 않고
+  저장된 target을 반환한다.
 - 사용자가 거절하거나 confirmation이 만료되면 write tool은 실행하지 않는다.
+- Meeting Action Item confirmation은 생성 당시의 `status`와 `updatedAt`을 서버 plan에 저장한다.
+  승인 시 값이 달라졌으면 오래된 변경을 실행하지 않고 새 confirmation 생성을 요구한다.
 - confirmation 만료 시간은 생성 시점 기준 15분이다.
 - 목록·상세 조회 전에 서버는 만료된 pending confirmation을 `expired`로 전환하고,
   해당 `waiting_confirmation` run을 `cancelled`로 전환한다.
@@ -114,15 +286,28 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 
 | 값 | 의미 |
 | --- | --- |
-| `planning` | run이 생성됐고 AI Worker가 요청을 해석하거나 tool plan을 만드는 중 |
+| `planning` | run이 생성됐고 AI Worker가 요청을 해석하거나 tool plan을 만드는 중(최대 240초) |
+| `waiting_user_input` | 추가 정보 또는 최대 실행 횟수 이후의 다음 요청을 기다리는 중 |
 | `waiting_confirmation` | write tool 실행 전 사용자 확인을 기다리는 중 |
 | `running` | 승인된 tool 실행 또는 최종 답변 생성 중 |
 | `completed` | read-only 답변 또는 write 실행 결과가 완료됨 |
 | `failed` | 실행 중 복구 불가능한 실패가 발생함 |
-| `cancelled` | 사용자가 confirmation을 거절했거나 confirmation 만료로 실행이 취소됨 |
+| `cancelled` | confirmation 거절·만료, 명시적 사용자 취소 또는 `waiting_user_input`에서 새 의도 전환으로 실행이 종료됨 |
+
+`cancelled`는 terminal status이며 재시작하지 않는다. 새 의도 전환은 오류가 아니므로 `errorCode`와
+`errorMessage`를 `null`로 두고, `run_cancelled` log의 `metadata.reason`에
+`cancelled_by_user` 또는 `superseded_by_new_intent`를 저장한다. replacement run이 있으면 같은 metadata의
+`replacementRunId`에 새 run ID를 저장한다. 취소된 미완료 run의 요구사항·tool state는 thread memory source가
+아니며, thread context는 계속 `completed` run만 사용한다.
 
 `planning`은 outbox publisher가 SQS 발행을 재시도하는 상태와, SQS enqueue 이후 AI Worker가 아직
-처리하지 않은 queued 상태를 포함한다.
+처리하지 않은 queued 상태를 포함한다. App Server는 15초마다 current outbox turn의
+`planning_started_at`를 점검하며 240초를 넘긴 turn만 `AGENT_PLANNING_TIMEOUT`으로 실패 처리한다.
+따라서 terminal 전이는 turn 시작 후 최대 약 255초(240초 deadline + 다음 15초 sweep) 안에 일어난다. 이 처리에는 pending/running planner step
+정리와 privacy-safe `planning_timeout` log가 포함되며, 이전 turn의 지연 SQS message는 새 turn을
+terminalize할 수 없다. Frontend는 run 전체가 아니라 연속된 `planning` 구간만 270초까지 polling하며,
+local timeout이 나도 recoverable run ID는 지우지 않는다. 다음 조회에서 backend terminal 상태를 우선
+표시하고 사용자에게 재시도를 안내한다.
 
 ### AgentStep status
 
@@ -148,8 +333,8 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 | 값 | 의미 | 정책 |
 | --- | --- | --- |
 | `low` | 조회, 요약, 문맥 수집 | 자동 실행 가능 |
-| `medium` | Calendar 생성/수정, Board status 이동 | confirmation 필요 |
-| `high` | 삭제, PR Review 제출, 외부 GitHub metadata 변경 | 1차 Agent API에서 실행하지 않음 |
+| `medium` | Calendar 생성/수정, Board issue 생성·status 이동·담당자 변경 | confirmation 필요 |
+| `high` | 삭제, PR Review 제출, 승인되지 않은 외부 GitHub metadata 변경 | 1차 Agent API에서 실행하지 않음 |
 
 ## Payload
 
@@ -158,16 +343,18 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 | Field | Type | 설명 |
 | --- | --- | --- |
 | `id` | string | Agent run id |
+| `conversationId` | string | 같은 UI 채팅과 LangGraph `thread_id`를 식별하는 서버 발급 UUID |
 | `workspaceId` | string | Workspace id |
 | `requestedByUserId` | string | 요청 사용자 id |
 | `clientRequestId` | string \| null | run 생성 재시도 방지용 idempotency key |
+| `requestContext` | object \| null | 서버 검증을 거쳐 저장된 화면 context snapshot |
 | `status` | AgentRun status | run 상태 |
 | `riskLevel` | Risk level \| null | run에서 확인된 최고 위험도 |
 | `prompt` | string | 사용자 입력 원문 |
 | `timezone` | string | 상대 날짜 해석 기준 timezone |
 | `message` | string \| null | 현재 상태를 설명하는 짧은 메시지 |
 | `finalAnswer` | string \| null | 최종 답변. 완료 전이면 null |
-| `errorMessage` | string \| null | 사용자에게 보여줄 안전한 실패 메시지 |
+| `errorMessage` | string \| null | 사용자에게 보여줄 고정된 안전한 실패 메시지. provider·Router·Planner 내부 오류는 포함하지 않음 |
 | `expiresAt` | string | ISO datetime. 생성 후 30일 |
 | `createdAt` | string | ISO datetime |
 | `updatedAt` | string | ISO datetime |
@@ -189,12 +376,34 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 | `inputSummary` | object \| null | 저장 가능한 최소 입력 요약 |
 | `outputSummary` | object \| null | 저장 가능한 출력 요약 |
 | `resourceRefs` | array | 생성/수정/조회한 resource id와 표시 정보 |
-| `errorMessage` | string \| null | 안전한 실패 메시지 |
+| `errorMessage` | string \| null | 고정된 안전한 실패 메시지. 내부 예외·stack·provider 응답은 포함하지 않음 |
 | `startedAt` | string \| null | ISO datetime |
 | `completedAt` | string \| null | ISO datetime |
 
 `inputSummary`와 `outputSummary`에는 긴 원문, transcript, provider raw, token, secret을
 포함하지 않는다.
+
+### AgentResourceRef
+
+tool step의 `resourceRefs`는 다음 bounded object 배열이다.
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `domain` | string | resource 소유 도메인 |
+| `resourceType` | string | 도메인 안의 resource 종류 |
+| `resourceId` | string | 서버가 검증한 resource 식별자 |
+| `label` | string \| undefined | 사용자 표시용 짧은 이름 |
+| `url` | string \| undefined | 앱 내부에서 검증 후 사용할 상대 경로 |
+| `status` | string \| undefined | 생성·수정 등 bounded 결과 상태 |
+| `metadata` | object \| undefined | 화면 표시에 필요한 bounded metadata |
+
+클라이언트는 `url`을 그대로 신뢰하지 않는다. SQLtoERD session 링크는 run과 tool step이
+모두 `completed`일 때만 표시하고, `/sql-erd/session?sessionId={resourceId}`와 정확히
+일치하는 same-origin 상대 경로만 허용한다. 외부 origin, protocol-relative URL, 추가
+query/hash, 중복·불일치 session ID는 거부한다. 링크 표시는 자동 navigation을 발생시키지 않는다.
+`status=focused`인 SQLtoERD ref의 `metadata`는 아래 `table_focus` 계약을 추가로 검증한다.
+검증된 값은 URL에 넣지 않고 일회성 `sessionStorage`와 동일 페이지 event로만 전달하며,
+SQLtoERD 화면에서 소비한 즉시 제거한다.
 
 ### AgentConfirmation
 
@@ -210,8 +419,11 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 | `rejectedAt` | string \| null | ISO datetime |
 | `createdAt` | string | ISO datetime |
 | `updatedAt` | string | ISO datetime |
+| `selectedChoiceId` | string \| null | choice plan 승인 시 원자적으로 저장된 선택 ID |
 
 ### AgentConfirmationPlan
+
+기존 approval plan과 choice plan의 union이다. `kind`가 없으면 기존 approval plan으로 해석한다.
 
 | Field | Type | 설명 |
 | --- | --- | --- |
@@ -221,6 +433,17 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 | `before` | object \| null | 현재 값 요약. 생성 작업이면 null 가능 |
 | `after` | object | 변경 예정 값 |
 | `call` | object | 내부 실행에 필요한 method/path 또는 service action 요약 |
+
+choice plan은 다음 필드를 사용한다.
+
+| Field | Type | 설명 |
+| --- | --- | --- |
+| `kind` | `choice` | 선택형 confirmation discriminator |
+| `toolName` | string | 실행할 Agent tool 이름 |
+| `summary` | string | 사용자에게 보여줄 선택 요청 요약 |
+| `target` | object | 대상 domain/resource 요약 |
+| `call` | object | 선택 후 내부 실행 action 요약 |
+| `choices` | array | 1~10개 선택지. 각 항목은 고유한 `id`, `label`, 실행용 `input`을 가진다. |
 
 `plan`은 승인 시 서버가 그대로 실행하는 기준이다. 클라이언트는 approve 요청에서 실행
 값을 다시 보내지 않는다.
@@ -257,11 +480,210 @@ confirmation을 중복 생성하지 않는다. 이 내부 endpoint는 public API
 
 | Method | Endpoint | 설명 |
 | --- | --- | --- |
+| `POST` | `/workspaces/{workspaceId}/agent/messages` | 새 입력을 기존 run continuation 또는 같은 thread의 새 run으로 안전하게 routing |
 | `POST` | `/workspaces/{workspaceId}/agent/runs` | 자연어 prompt로 Agent run 생성 |
 | `GET` | `/workspaces/{workspaceId}/agent/runs` | 현재 Workspace의 Agent run 목록 조회 |
 | `GET` | `/workspaces/{workspaceId}/agent/runs/{runId}` | Agent run 상세 조회 |
+| `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/inputs` | `waiting_user_input` run에 추가 입력 전달 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/approve` | confirmation 승인 후 저장된 plan 실행 |
 | `POST` | `/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/reject` | confirmation 거절 |
+
+기존 `/agent/runs`, `/runs/{runId}/inputs`, confirmation approve/reject endpoint는 유지하며 의미를
+바꾸지 않는다.
+
+## 통합 메시지 routing
+
+```http
+POST /api/v1/workspaces/{workspaceId}/agent/messages
+```
+
+Request:
+
+```json
+{
+  "message": "이번 주 일정을 보여줘",
+  "conversationId": "agent_conversation_uuid",
+  "timezone": "Asia/Seoul",
+  "clientRequestId": "agent-message-20260720-0001",
+  "activeRunId": "waiting_agent_run_uuid",
+  "requestContext": null,
+  "disposition": "auto"
+}
+```
+
+| Field | Required | 설명 |
+| --- | --- | --- |
+| `message` | Yes | 새 사용자 메시지. trim 후 1~4,000 bytes |
+| `conversationId` | No | 서버가 직전 run에 응답한 conversation UUID, 또는 새 대화의 첫 요청을 뜻하는 `null`. 생략은 구형 클라이언트 호환용 |
+| `timezone` | No | IANA timezone. 없으면 `Asia/Seoul` |
+| `clientRequestId` | Yes | routing 전체의 idempotency key. 최대 128 bytes |
+| `activeRunId` | Yes | UI가 대기 중으로 표시하는 run UUID 또는 `null`. `null`이고 conversation UUID가 있으면 해당 conversation의 최신 유효 대기 run만 복구 |
+| `requestContext` | No | run 생성 API와 같은 검증된 surface context 또는 `null` |
+| `disposition` | No | `auto`, `continue_previous`, `start_new`. 기본값 `auto` |
+| `selection` | No | 기존 `/inputs`와 같은 server-owned candidate selection. 버튼 선택 호환용 |
+
+클라이언트는 내부 `threadId`를 임의로 만들거나 보낼 수 없고, 서버가 발급한 `conversationId`만 echo한다.
+서버는 conversation이 현재 Workspace와 요청 사용자에 속하는지 검증한다. `activeRunId`도 같은 conversation에
+속하고, 만료되지 않았으며, 현재 `waiting_user_input` 또는 유효한 pending confirmation이 있는
+`waiting_confirmation` 상태인지 확인한다. 관계 LLM 호출 뒤 transaction에서 run과 confirmation을 다시
+lock하고 `status`, `updatedAt`, pending confirmation을 재검증한다. 분류 중 상태가 바뀌면 stale 결과를
+적용하지 않고 `409 AGENT_MESSAGE_ROUTING_STALE`을 반환한다.
+
+`activeRunId=null`이고 conversation UUID가 있으면 서버는 그 conversation의 만료되지 않은 유효 대기 run을
+`updatedAt DESC`, `createdAt DESC`, `id DESC` 순서로 하나 선택한다. `waiting_user_input`은 최근 24시간
+안에 갱신된 run만, `waiting_confirmation`은 아직 만료되지 않은 pending confirmation이 있는 run만
+대상이다. 복구한 run도 같은 relationship 분류와 transaction 재검증을 거친다. 서버는 이 과정에서 다른
+conversation의 대기 run을 선택하거나 취소하지 않는다. `conversationId=null`이면 기존 대기 run을 복구하지
+않고 새 thread의 첫 run을 생성한다. 유효한 대기 run이 없으면 같은 conversation의 일반 신규 run을 생성한다.
+
+### Input relationship
+
+`disposition=auto`일 때 App Server는 strict structured-output relationship router에 bounded context만
+전달해 다음 중 하나로 분류한다.
+
+| relationship | 처리 |
+| --- | --- |
+| `continuation` | 같은 run에 user message를 append하고 budget을 초기화한 뒤 outbox `turnSequence`를 증가시켜 `reason=user_input`으로 `planning` 재개 |
+| `new_intent` | 같은 conversation에 새 run 생성. `waiting_user_input`은 기존 run을 취소하고, `waiting_confirmation`은 승인 대기를 보존 |
+| `cancel` | 기존 run만 `cancelled`로 끝내며 새 run은 만들지 않음 |
+| `ambiguous` | 기존 run과 confirmation을 변경하지 않고 한 번의 선택 질문 반환 |
+
+router context는 기존 run 원래 목표, 최신 assistant 질문, 대기 입력 종류, 최근 user/assistant message 최대
+8개, 새 message, request surface, 후보 유무·종류와 run status로 제한한다. 각 timeline message는 500자,
+원래 목표와 새 message는 1,000자로 제한한다. provider 전송 전에 UUID는 `[resource]`, 알려진 token·secret·
+credential 형태는 `[secret]`으로 치환한다. raw transcript, raw tool output, provider payload, token·secret,
+내부 resource ID와 이전 run 전체 내용은 전달하지 않는다.
+
+다음 결정 규칙은 LLM보다 우선한다.
+
+- server-owned candidate 버튼 selection과 유효한 최신 candidate ordinal은 `continuation`이다.
+- `disposition=continue_previous`는 `continuation`, `disposition=start_new`는 `new_intent`다.
+- confirmation 승인·거절은 기존 confirmation endpoint로만 처리한다. 일반 채팅은 승인으로 해석하지 않는다.
+- `waiting_confirmation`에서 일반 메시지가 continuation처럼 보이면 confirmation을 실행하지 않고
+  모호한 참조에 대해서만 clarification을 요청한다. 독립 새 요청이면 pending confirmation과 기존 run을
+  보존하고 같은 conversation에 새 run을 만든다.
+
+LLM 분류는 confidence를 안전 경계로 사용한다. `continuation`은 `high` 또는 `medium`일 때만 같은 run을
+재개하고 `low`이면 `ambiguous`로 낮춘다. `new_intent`는 기존 confirmation을 파괴하지 않으므로 confidence와
+관계없이 새 run으로 전환한다. `cancel`은 `high`일 때만 기존 run을 변경하며 `medium` 또는 `low`이면
+`ambiguous`로 낮춘다. 명시적 disposition과 서버가 검증한 candidate 선택에는 이
+LLM confidence 하한을 적용하지 않는다. `message_routed` log에는 최종 relationship과 classifier confidence를
+bounded metadata로 저장하며 provider payload나 입력 context 원문은 저장하지 않는다.
+
+`waiting_user_input`의 `new_intent` transaction은 기존 run을 lock하고, 미소비 candidate 소비 처리,
+pending/running step skip, outbox 실행 불가 처리, 기존 run terminal 전환, 같은 thread의 새 run과 새 outbox
+생성, 두 log 저장을 원자적으로 수행한다. 기존 run에는
+`"새 요청이 시작되어 이전 요청을 종료했습니다."`를 assistant message와 run message로 저장하고
+`errorCode/errorMessage=null`을 유지한다. `run_cancelled` metadata는
+`reason=superseded_by_new_intent`, `replacementRunId=<newRunId>`다. Worker는 기존 terminal/fencing 검증으로
+늦은 SQS message나 stale execution을 실행하지 않는다.
+
+`waiting_confirmation`의 `new_intent` transaction은 confirmation을 reject하거나 기존 run을 terminal로
+바꾸지 않는다. 같은 thread에 새 run과 outbox를 만들고 UI가 기존 approval card를 계속 표시할 수 있도록
+`previousRun`에 보존된 run을 반환한다.
+
+### 응답
+
+모든 성공 응답은 `200 OK`이며 다음 envelope를 사용한다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "outcome": "started_new",
+    "relationship": "new_intent",
+    "run": {
+      "id": "replacement_agent_run_uuid",
+      "status": "planning"
+    },
+    "previousRun": {
+      "id": "cancelled_agent_run_uuid",
+      "status": "cancelled",
+      "message": "새 요청이 시작되어 이전 요청을 종료했습니다.",
+      "errorMessage": null
+    },
+    "clarification": null
+  }
+}
+```
+
+`run`과 `previousRun`은 Run 상세 조회의 `run`과 같은 전체 shape이며 경우에 따라 `null`이다.
+
+| outcome | relationship | `run` | `previousRun` | 의미 |
+| --- | --- | --- | --- | --- |
+| `continued` | `continuation` | 재개한 기존 run | `null` | 같은 run 재개 또는 confirmation 대기 보존 |
+| `started_new` | `new_intent` | 새 run | 취소되거나 confirmation을 보존한 기존 run 또는 `null` | 같은 conversation의 새 run 생성 |
+| `needs_choice` | `ambiguous` | 상태를 바꾸지 않은 기존 run | `null` | 사용자 선택 필요 |
+| `cancelled` | `cancel` | 취소된 기존 run | `null` | 명시적 취소 완료 |
+
+ambiguity 응답의 `clarification`은 서버 질문과 다음 두 선택을 포함한다.
+
+```json
+{
+  "question": "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?",
+  "choices": [
+    { "disposition": "continue_previous", "label": "기존 작업 계속" },
+    { "disposition": "start_new", "label": "새 요청 시작" }
+  ]
+}
+```
+
+Frontend는 최초 `message`, `conversationId`, `activeRunId`, `requestContext`, `clientRequestId`를 메모리에 보관하고 선택한
+`disposition`만 바꿔 같은 endpoint에 재제출한다. 같은 `clientRequestId`의 ambiguity 결정 재제출은 허용하지만
+다른 message/context/active run으로 재사용하면 `409 CLIENT_REQUEST_ID_CONFLICT`다. 단, 최초 request의
+`activeRunId`가 `null`이었다면 ambiguity 응답의 `run.id`를 선택 재제출의 `activeRunId`로 사용할 수 있다.
+서버는 최초 null fingerprint와 당시 해소한 run ID가 모두 일치할 때만 이 전환을 허용한다. 선택 UI는 영속
+저장하지 않으므로 새로고침하면 사라질 수 있으며, 기존 run의 상태는 바뀌지 않는다.
+
+### Routing mode와 안전한 fallback
+
+`AGENT_MESSAGE_ROUTING_MODE=legacy|intent`로 rollout한다. 기본값은 `legacy`다.
+
+- `intent`: 위 relationship routing을 사용한다.
+- `legacy`: 새 endpoint가 `503 AGENT_MESSAGE_ROUTING_DISABLED`를 반환하고 기존 run/input endpoint의 의미는
+  그대로 유지된다.
+- relationship provider가 명시적으로 사용할 수 없으면 새 endpoint는
+  `503 AGENT_MESSAGE_ROUTING_UNAVAILABLE`을 반환한다.
+- Frontend는 의도적인 rollback을 나타내는 `AGENT_MESSAGE_ROUTING_DISABLED`에서만 기존 `createRun` 또는
+  `/inputs`로 fallback한다. `AGENT_MESSAGE_ROUTING_UNAVAILABLE`에서는 기존 run을 변경하지 않고 재시도를
+  안내한다.
+- timeout·연결 단절처럼 서버 수락 여부가 불명확하면 기존 endpoint를 호출하지 않는다. 같은
+  `clientRequestId`로 새 endpoint만 재시도해 `message_routed` log 기반 idempotency replay를 받는다.
+- `409 AGENT_MESSAGE_ROUTING_STALE`이면 알려진 active run을 다시 조회해 화면 상태를 갱신하고, 사용자가
+  새 메시지를 다시 제출하도록 안내한다. stale 응답에서도 기존 endpoint로 fallback하지 않는다.
+
+`intent` mode를 활성화하기 전에는 App Server를 build한 뒤 실제 relationship model로 한국어 품질 gate를
+수동 실행한다. 이 평가는 외부 API 비용과 비결정성을 피하기 위해 CI에는 포함하지 않는다.
+
+```bash
+cd apps/app-server
+npm run build
+OPENAI_API_KEY=... node scripts/agent/evaluate-input-relationship.mjs
+```
+
+gate는 effective relationship 정확도 90% 이상과 잘못된 파괴 결정(`new_intent` 또는 `cancel`) 0건을 모두
+요구한다. `medium`/`low` cancel과 `low` continuation은 운영 정책과 동일하게 `ambiguous`로 평가하고,
+`new_intent`는 confidence와 관계없이 자동 전환으로 평가한다.
+
+일반 신규 메시지는 전달된 `conversationId`의 thread를 재사용한다. field를 생략한 구형 클라이언트만 최근
+1시간 안의 같은 Workspace·사용자 thread를 자동 선택한다. 새 의도 replacement는 기존 run의 thread를
+사용하며, 서로 다른 Workspace/사용자의 conversation은 선택할 수 없다.
+
+이 routing 계약은 대기 중인 run만 대상으로 한다. `failed`를 포함한 terminal run은 재시작하거나 새 메시지의
+active run으로 복구하지 않는다. 실패 뒤 “다시 해줘” 문맥 복구는 별도 lifecycle 범위다.
+
+주요 오류:
+
+| HTTP | Code | 상황 |
+| --- | --- | --- |
+| `400` | `BAD_REQUEST` | request shape, message, timezone, disposition이 잘못됨 |
+| `403` | `FORBIDDEN` | Workspace 또는 request context 접근 불가 |
+| `404` | `NOT_FOUND` | `activeRunId`가 현재 scope에 없음 |
+| `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 key를 다른 routing request에 사용 |
+| `409` | `AGENT_CONVERSATION_UNAVAILABLE` | conversation이 만료됐거나 현재 scope에서 사용할 수 없음 |
+| `409` | `AGENT_MESSAGE_ROUTING_STALE` | 분류 중 run/confirmation 상태가 변경됨 |
+| `503` | `AGENT_MESSAGE_ROUTING_DISABLED` | routing mode가 `legacy` |
+| `503` | `AGENT_MESSAGE_ROUTING_UNAVAILABLE` | relationship classifier를 사용할 수 없음 |
 
 ## Run 생성
 
@@ -274,16 +696,23 @@ Request:
 ```json
 {
   "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
+  "conversationId": null,
   "timezone": "Asia/Seoul",
-  "clientRequestId": "agent-run-20260707-0001"
+  "clientRequestId": "agent-run-20260707-0001",
+  "requestContext": {
+    "surface": "sql_erd",
+    "sessionId": "sql_erd_session_uuid"
+  }
 }
 ```
 
 | Field | Required | 설명 |
 | --- | --- | --- |
 | `prompt` | Yes | 사용자 자연어 요청. 빈 문자열 불가 |
+| `conversationId` | No | 기존 conversation UUID 또는 새 대화의 첫 요청을 뜻하는 `null`. 생략은 구형 클라이언트 호환용 |
 | `timezone` | No | IANA timezone. 없으면 `Asia/Seoul` |
 | `clientRequestId` | No | 클라이언트가 재시도 방지를 위해 보내는 idempotency key. 최대 128 bytes |
+| `requestContext` | No | `null`, SQLtoERD/PR Review context 또는 Canvas context. Canvas는 최대 192 KiB, 그 외는 최대 2 KiB |
 
 서버 규칙:
 
@@ -291,16 +720,25 @@ Request:
 - `prompt`는 trim 후 저장한다.
 - `timezone`이 없으면 `Asia/Seoul`을 저장한다.
 - `clientRequestId`가 있으면 같은 Workspace와 요청자가 같은 key로 만든 run을 중복 생성하지 않는다.
-- 같은 `clientRequestId`, `prompt`, `timezone`으로 재시도하면 기존 run을 반환하고 새 outbox intent를 만들지 않는다.
-- 같은 `clientRequestId`로 다른 `prompt` 또는 `timezone`을 보내면 `409 CLIENT_REQUEST_ID_CONFLICT`를 반환한다.
+- 클라이언트는 서버가 응답한 `conversationId`만 다시 보낼 수 있다. UUID면 App Server가 현재
+  Workspace·요청 사용자 소유권과 만료를 검증해 같은 thread를 사용하고, `null`이면 새 thread를 만든다.
+  field를 생략한 구형 요청에만 1시간 기준 자동 선택을 적용한다.
+- `requestContext.surface`는 `sql_erd`, `pr_review`, `canvas`만 허용한다. SQLtoERD/PR Review는 UUID
+  `sessionId`만, Canvas는 UUID `canvasId`와 plain-object `canvasContext`만 허용한다.
+- App Server는 SQLtoERD session, PR Review session 또는 freeform Canvas가 현재 Workspace에 속하고
+  유효한지 재검증한다.
+- 같은 `clientRequestId`, `prompt`, `timezone`, `requestContext`로 재시도하면 기존 run을 반환하고 새 outbox intent를 만들지 않는다.
+- 같은 `clientRequestId`로 다른 `prompt`, `timezone` 또는 `requestContext`를 보내면 `409 CLIENT_REQUEST_ID_CONFLICT`를 반환한다.
 - 새 run은 `planning` 상태와 pending outbox intent를 같은 transaction으로 생성한다.
 - App Server는 생성 직후 publisher를 깨워 Agent planning job 발행을 시도한다. SQS 발행 오류도 새 run의
   `201 Created` 응답을 바꾸지 않으며 run은 `planning`을 유지한다.
-- publisher는 1, 2, 4, 8, 16분 backoff로 최대 5회 재시도한다. 재시도 소진 후에만 run을 safe `failed`로
-  전환하고 Agent log에 운영용 event를 남긴다.
-- AI Worker planner의 infrastructure failure는 원본 SQS queue에서 세 번째 수신까지 재시도한다. 세 번째
-  수신에서 `planning` run과 남은 planner step을 safe `failed`로 전환하는 DB transaction이 성공할 때만
-  메시지를 삭제한다. 이 transaction도 실패하면 메시지는 삭제하지 않아 DLQ 보관함으로 이동한다.
+- publisher는 최초 즉시 시도 뒤 1, 2, 4, 8분 backoff로 최대 5회 시도하지만, 그 재시도는 240초 planning deadline을
+  연장하지 않는다. `planning_started_at` 기준 deadline sweep이 먼저 현재 turn을 safe `failed`로 전환하고 Agent log에 운영용 event를
+  남긴다.
+- AI Worker planner의 infrastructure failure는 원본 SQS queue에서 세 번째 수신까지 재시도한다. Agent 전용
+  SQS visibility는 180초이고 처리 중 45초마다 연장한다. 재시도 중에도 App Server의 240초 turn deadline이 run과 남은 planner step을 safe
+  `failed`로 전환한다. 세 번째 수신 terminalizer는 deadline보다 먼저 도달한 경우에만 보조로 동작하며,
+  transaction이 실패하면 메시지는 삭제하지 않아 DLQ 보관함으로 이동한다.
 - SQS send 성공 뒤 publisher 상태 저장 전에 process가 종료되면 같은 job이 다시 발행될 수 있다. AI Worker의
   run lock과 상태 전이가 중복 planner 실행을 막는다.
 - 클라이언트는 응답의 `run.id`로 상세 조회를 polling한다.
@@ -313,9 +751,14 @@ Request:
   "data": {
     "run": {
       "id": "agent_run_uuid",
+      "conversationId": "agent_conversation_uuid",
       "workspaceId": "workspace_uuid",
       "requestedByUserId": "user_uuid",
       "clientRequestId": "agent-run-20260707-0001",
+      "requestContext": {
+        "surface": "sql_erd",
+        "sessionId": "sql_erd_session_uuid"
+      },
       "status": "planning",
       "riskLevel": null,
       "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
@@ -344,6 +787,7 @@ Status code: 새 run 생성은 `201 Created`, 기존 run idempotent 반환은 `2
 | `401` | `UNAUTHORIZED` | 인증 없음 또는 만료 |
 | `403` | `FORBIDDEN` | Workspace 접근 불가 |
 | `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 clientRequestId로 다른 요청을 보냄 |
+| `409` | `AGENT_CONVERSATION_UNAVAILABLE` | conversation이 만료됐거나 현재 scope에서 사용할 수 없음 |
 | `503` | `SERVICE_UNAVAILABLE` | Agent run storage 사용 불가 |
 
 ## Run 목록 조회
@@ -376,6 +820,7 @@ Query:
     "runs": [
       {
         "id": "agent_run_uuid",
+        "conversationId": "agent_conversation_uuid",
         "workspaceId": "workspace_uuid",
         "requestedByUserId": "user_uuid",
         "clientRequestId": "agent-run-20260707-0001",
@@ -420,6 +865,8 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
 - 현재 사용자가 생성한 run만 조회할 수 있다.
 - run은 path의 `workspaceId`에 속해야 한다.
 - 이 조회는 새로운 tool execution을 시작하거나 기존 tool step의 실행 상태를 변경하지 않는다.
+- `messages`는 같은 run에 append된 `user`, `assistant` message를 `sequence ASC`로 반환한다.
+  step과 함께 표시하는 클라이언트는 각 항목의 생성·완료 시각을 기준으로 시간 순서를 유지한다.
 - 다만 request-time lifecycle 정책에 따라 만료된 pending confirmation을 `expired`로 전환하고,
   해당 `waiting_confirmation` run을 `cancelled`로 전환할 수 있다.
 - 같은 lifecycle에서 현재 사용자·Workspace의 30일 경과 run을 최대 100건 삭제할 수 있다.
@@ -432,12 +879,13 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
   "data": {
     "run": {
       "id": "agent_run_uuid",
+      "conversationId": "agent_conversation_uuid",
       "workspaceId": "workspace_uuid",
       "requestedByUserId": "user_uuid",
       "clientRequestId": "agent-run-20260707-0001",
       "status": "waiting_confirmation",
       "riskLevel": "medium",
-      "prompt": "내일 오후 3시에 주간 회의 일정 만들어줘.",
+      "prompt": "오후 3시에 주간 회의 일정 만들어줘.",
       "timezone": "Asia/Seoul",
       "message": "일정 생성 전 확인이 필요합니다.",
       "finalAnswer": null,
@@ -446,6 +894,22 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
       "createdAt": "2026-07-07T00:00:00.000Z",
       "updatedAt": "2026-07-07T00:00:03.000Z",
       "completedAt": null,
+      "messages": [
+        {
+          "id": "agent_message_uuid_1",
+          "sequence": 1,
+          "role": "assistant",
+          "content": "어느 날짜의 오후 3시인지 알려주세요.",
+          "createdAt": "2026-07-07T00:00:02.000Z"
+        },
+        {
+          "id": "agent_message_uuid_2",
+          "sequence": 2,
+          "role": "user",
+          "content": "내일 오후 3시로 해줘",
+          "createdAt": "2026-07-07T00:00:03.000Z"
+        }
+      ],
       "steps": [
         {
           "id": "agent_step_uuid",
@@ -510,24 +974,105 @@ GET /api/v1/workspaces/{workspaceId}/agent/runs/{runId}
 
 주요 오류: `401`, `403`, `404`
 
+## 추가 입력 전달
+
+```http
+POST /api/v1/workspaces/{workspaceId}/agent/runs/{runId}/inputs
+```
+
+Request:
+
+```json
+{ "message": "금요일 오후 3시로 해줘" }
+```
+
+후보 버튼을 선택하면 기존 endpoint에 server-owned candidate ID를 추가한다.
+
+```json
+{
+  "message": "결제 ERD 세션을 선택했습니다.",
+  "selection": {
+    "kind": "candidate",
+    "candidateSelectionId": "agent_candidate_selection_uuid"
+  }
+}
+```
+
+Meeting resource 후보도 같은 공통 selection을 사용한다.
+
+```json
+{
+  "message": "김진호 후보를 선택했습니다.",
+  "selection": {
+    "kind": "candidate",
+    "candidateSelectionId": "agent_candidate_selection_uuid"
+  }
+}
+```
+
+- `waiting_user_input` 상태인 본인 run에만 전달할 수 있다.
+- `message`는 trim 후 1~4,000 bytes여야 한다.
+- `selection`은 정확히 `{ kind: "candidate", candidateSelectionId: "uuid" }`를 사용한다. 배포 중
+  생성된 기존 run을 위해 `sql_erd_session`과 `meeting_candidate` 입력은 호환 경로로만 유지한다.
+- 하나의 completed clarification tool step이 하나의 candidate generation이다. App Server는 각 후보에
+  1-based ordinal을 저장하며 버튼의 candidate ID와 “2번” 같은 자연어 ordinal을 같은 최신 generation에
+  결합한다. 이전 generation, 범위를 벗어난 ordinal, 중복 후보는 사용할 수 없다.
+- candidate ID는 후보 버튼 이외의 값으로 만들거나 resource ID로 해석하지 않는다. App Server는 같은
+  transaction에서 `runId`, Workspace, 요청 사용자, 미소비 상태와 15분 TTL을 확인하고 한 번만 소비한다.
+  생성 source인 최신 clarification tool step과도 일치해야 한다. resource reference와 Phase 2 selection
+  token은 `agent_candidate_selections` 서버 저장소에만 두며,
+  browser, Agent message, SQS, provider prompt에는 넣지 않는다. 선택 직전 resource 존재와 Workspace
+  접근을 재검증하지 못하면 run을 재개하거나 tool을 실행하지 않는다.
+- 선택 message의 표시 제목은 request 값을 신뢰하지 않고 서버가 저장한 후보 label로 다시 만든다.
+  SQLtoERD의 내부 planning memory에는 재검증된 session reference를 canonical marker로 보존하지만
+  `submitRunInput`과 이후 run 조회의 `messages[].content`에는 marker나 resource ID를 반환하지 않는다.
+- 서버는 같은 run의 append-only memory에 저장한 뒤 `planning`으로 되돌린다. 같은 transaction에서
+  planner/tool budget을 새 요청 구간 기준 0으로 초기화하고, 기존 `agent_run_outbox`의
+  `turn_sequence`를 증가시켜 `reason = 'user_input'`인 pending turn으로 rearm한다.
+- 선택한 resource reference가 필요한 Meeting tool은 raw ID를 받지 않는다. 회의방은
+  `start_meeting_in_room.useSelectedMeetingRoomCandidate: true`, Meeting은
+  `useSelectedMeetingCandidate: true`, 회의록은 `useSelectedMeetingReportCandidate: true`를 쓰며,
+  후속작업은 `useSelectedMeetingActionItemCandidate: true`, Workspace 구성원은
+  `useSelectedWorkspaceMemberCandidate: true`를 쓴다. App Server가 같은 run의 최신 소비 후보를
+  resource type별로 다시 검증해 tool input에 주입한다.
+- Meeting 후보를 정상 소비하면 생성 source인 clarification step과 직전 retrieval의 terminal tool을
+  server-owned resume state로 연결한다. 완료된 lookup tool은 다시 호출하지 않고 원래 read/write tool로
+  진행한다. 여러 selector가 모호하면 한 번에 하나만 선택하며, 다음 selector도 모호하면 write 또는
+  confirmation을 만들기 전에 다시 `waiting_user_input`으로 멈춘다. resume 뒤 completed tool step이
+  생기면 해당 선택 상태는 재사용하지 않는다.
+- 24시간이 지나면 run은 `cancelled` 처리되며, 새 run으로 요청해야 한다.
+
 ## Confirmation 승인
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/agent/runs/{runId}/confirmations/{confirmationId}/approve
 ```
 
-Request body 없음.
+기존 approval plan은 request body가 없거나 빈 object여야 한다.
+
+choice plan은 다음 body로 정확히 하나의 선택지를 보낸다.
+
+```json
+{
+  "choiceId": "replace_schema"
+}
+```
 
 서버 규칙:
 
 - confirmation은 `pending` 상태여야 한다.
 - confirmation은 만료되지 않아야 한다.
 - 서버는 저장된 `plan`만 실행한다.
-- approve 요청 body에 실행 값, 변경 값, resource id를 받지 않는다.
-- non-empty body가 오면 `400 BAD_REQUEST`를 반환한다.
+- approval plan의 approve 요청에는 실행 값, 변경 값, resource id를 받지 않는다.
+- choice plan은 저장된 `choices[].id` 중 하나만 허용하며, 선택지의 저장된 `input`만 실행한다.
+- 선택한 `choiceId`는 confirmation의 `selectedChoiceId`로 승인 상태와 같은 transaction에서 저장한다.
+- approval plan의 non-empty body, choice plan의 누락·미등록 choiceId·추가 field는 `400 BAD_REQUEST`다.
 - 실행 전 Workspace 접근 권한을 다시 확인한다.
 - write tool은 기존 도메인 service/API 계약을 따른다.
 - 실행 성공 후 step에는 출력 요약, resource id, 상태만 저장한다.
+- `create_board_issue`가 `502` 또는 처리 중인 `409`처럼 재시도 가능한 오류로 실패하면, 승인된 confirmation은 감사 이력으로 남기고 같은 run에 동일한 plan과 idempotency key를 가진 새 pending confirmation을 생성한다. 이를 승인하면 기존 Board 생성 checkpoint에서 재개한다.
+- `assign_board_issue_safely`에도 같은 재시도 정책을 적용한다. 새 pending confirmation은 승인된 추가·제거 delta를 보존하며, 승인하면 cache된 전체 담당자 목록을 재생하지 않고 해당 delta를 다시 시도한다.
+- 영구적인 `400`, `403`, `404` 오류에는 새 confirmation을 만들지 않고 run을 `failed`로 끝낸다.
 
 응답:
 
@@ -618,33 +1163,192 @@ Status code: `200 OK`
 | Tool | 위험도 | 자동 실행 | 기존 도메인 계약 |
 | --- | --- | --- | --- |
 | `list_calendar_events` | `low` | 가능 | `GET /workspaces/{workspaceId}/calendar/events` |
+| `get_calendar_event` | `low` | 가능 | 이전 목록의 opaque `contextRef`를 검증한 뒤 `GET /workspaces/{workspaceId}/calendar/events/{eventId}` |
 | `create_calendar_event` | `medium` | 불가 | `POST /workspaces/{workspaceId}/calendar/events` |
 | `update_calendar_event` | `medium` | 불가 | `PATCH /workspaces/{workspaceId}/calendar/events/{eventId}` |
-| `list_meeting_reports` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports` |
+| `list_meeting_rooms` | `low` | 가능 | Workspace 회의방과 방별 현재 Meeting·녹음 상태를 조회한다. |
+| `get_active_meeting` | `low` | 가능 | 현재 사용자의 active Meeting과 회의방, 경과 시간을 조회한다. |
+| `get_meeting_participants` | `low` | 조건부 | 현재 참여 Meeting 또는 `roomName` selector로 내부 해소 후 참여자를 조회한다. |
+| `list_meeting_reports` | `low` | 가능 | Agent 내부 `MeetingService.listReportsForAgent`; 공개 Meeting REST API는 변경하지 않는다. |
 | `get_meeting_report` | `low` | 가능 | `GET /workspaces/{workspaceId}/meeting-reports/{reportId}` |
-| `summarize_meeting_report` | `low` | 가능 | MeetingReport 조회 결과를 요약한다. transcript 전문은 저장하지 않는다. |
+| `summarize_meeting_report` | `low` | 가능 | `sections` selector로 요청한 요약·논의사항·결정사항·후속 작업만 bounded projection으로 반환한다. transcript 전문은 저장하지 않는다. |
+| `search_meeting_transcript` | `low` | 가능 | 권한 있는 transcript source를 검색하고 grounded-answer 경로를 시작한다. |
 | `search_board_issues` | `low` | 가능 | `GET /workspaces/{workspaceId}/boards/{boardId}/issues` |
+| `move_board_issue_status` | `medium` | 불가 | `PATCH /workspaces/{workspaceId}/boards/{boardId}/issues/{issueId}/status` |
+| `get_board_issue_context` | `low` | 가능 | Board issue 상세와 동기화된 관련 PR cache 조회 |
+| `create_board_issue` | `medium` | 불가 | `POST /workspaces/{workspaceId}/boards/{boardId}/issues` |
+| `resolve_board_context` | `low` | 가능 | 명시 Board → active Board → 유일한 Board 순서로 대상 확인 |
+| `get_board_briefing` | `low` | 가능 | Board 상세, column, filter option의 사실 기반 요약 |
+| `assign_board_issue_safely` | `medium` | 불가 | `GET .../assignee-options`, Agent 전용 내부 add/remove Board service |
+| `diagnose_board_freshness` | `low` | 가능 | active source, Board/issue/PR cache freshness와 Unmapped 진단 |
+| `generate_sql_erd` | `medium` | 상황별 | `SqlErdSchemaSpecV1`을 검증해 새 session을 만들거나 현재 operations_v1 session의 schema를 교체 |
+| `focus_sql_erd_tables` | `low` | 가능 | 현재 SQLtoERD session을 서버가 검사하고 feature query를 혼합 resolver로 해소해 일회성 `table_focus` resource ref 생성 |
+| `recommend_pr_review_focus` | `low` | 가능 | PR Review context의 immutable revision 안전 projection에서 핵심 검토 파일과 연결 파일을 추천 |
+| `delegate_canvas_agent` | `low` | 가능 | 사용자 원문과 검증된 Canvas context를 별도 Canvas Agent run으로 위임 |
+
+> `assign_board_issue_safely`는 공개 assignee option 조회 계약을 사용하지만, 실행은 내부 add/remove
+> Board service 경로를 사용한다. 별도의 공개 endpoint는 추가하지 않는다.
 
 ## 도메인별 실행 규칙
+
+### SQLtoERD
+
+- `sql_erd.inspect`는 현재 `surface=sql_erd` session을 변경하지 않는 read-only 집중 보기 계약이며
+  `focus_sql_erd_tables`만 shortlist에 포함한다. `sql_erd.generate`는 자연어 요구사항으로 새 schema를
+  설계하거나 현재 schema 교체 후보를 만드는 mutation 계약이며 `generate_sql_erd`만 포함한다.
+  두 capability의 의미 선택은 LLM Router가 수행하지만, 서로의 tool을 실행할 수 없도록 catalog chain과
+  실행 registry가 fail-closed로 제한한다.
+- `generate_sql_erd`는 완성된 DDL 문자열이 아니라 전체 `SqlErdSchemaSpecV1` object만
+  planner input으로 받는다. App Server가 같은 schema를 다시 검증하고 DDL·modelJson·layoutJson을
+  결정적으로 생성하며 실제 데이터베이스에는 실행하지 않는다.
+- planner input에는 `targetMode`, `sessionId`, `workspaceId`, `userId`, `currentUserId`를 넣지 않는다.
+  현재 사용자·Workspace·run은 `AgentToolContext`에서만 주입한다.
+- SQLtoERD request context가 없으면 새 session을 즉시 생성한다. context가 있으면 App Server가
+  session 접근과 write protocol을 다시 검증한다. `snapshot` session에서는 `new_session`만 제공하고,
+  `operations_v1` session에서는 `replace_current`도 제공한다. 클라이언트는 선택한 `choiceId`만 보내며
+  저장된 schemaSpec과 session ID는 서버가 복원한다.
+- `replace_current` confirmation plan에는 App Server가 조회한 session revision과 model fingerprint를
+  server-owned 상태 token으로 저장한다. 승인 실행 transaction에서 session row를 잠근 뒤 두 값 중
+  하나라도 현재 상태와 다르면 `409 CONFLICT`로 거부하며 snapshot, operation, Activity Log를 만들지
+  않는다. token이 없는 기존 pending confirmation도 실행하지 않는다. 같은 Agent run의 완료된 operation
+  재시도는 기존 결과를 먼저 반환한다.
+- 결과 step에는 sourceText, DDL, modelJson, layoutJson을 저장하지 않는다. `outputSummary`는 action,
+  title, dialect, table/relation count, warning code만 포함한다.
+- 생성·교체된 session은 `domain=sqltoerd`, `resourceType=session` resource ref 하나로 반환한다.
+  Frontend는 검증된 링크를 `ERD 및 DDL 열기`로 표시하고 자동으로 이동하지 않는다.
+- 기능 관련 테이블 집중 요청은 현재 `surface=sql_erd`에서 `focus_sql_erd_tables`를 한 번 호출한다.
+  공개 input은 1~200자의 `featureQuery`뿐이다. session ID, revision, fingerprint와 compact table ref는
+  Planner가 전달하거나 추측하지 않는다. SQLtoERD 화면 밖에서 임의 session을 검색하는 요청은
+  지원하지 않는다.
+- App Server는 request context의 session을 membership으로 조회하고 modelJson/sourceText에서 최대
+  9,000자의 bounded projection을 내부 생성한다. 내부 table/column ID, raw sourceText, DDL, 전체
+  modelJson은 Planner context나 provider payload에 복제하지 않는다.
+- 혼합 resolver의 결정적 경로는 projection에서 이름이 잘리지 않은 단일 table 또는 단일
+  schema-qualified table이 제한된 직접 집중 보기 긍정 문법으로 정확히 요청된 경우에만 사용한다.
+  동일한 table 이름이 여러 schema에 있으면 schema가 명시되지 않은 요청을 확정하지 않는다.
+  복수 table, 제외·부정, 의미 해석이나 추가 수식이 필요한 요청은 결정적으로 확정하지 않고 bounded
+  comment·column·type·enum evidence를 포함한 projection과 `featureQuery`를 strict JSON schema LLM
+  fallback에 전달한다. projection은 이름이 잘린 table의 compact ref를 `truncatedTableRefs`로 표시한다.
+  provider 결과의 ref가 현재 projection에 존재하고 중복되지 않는지 서버가 다시 검증하며, primary의
+  직접 FK 1-hop table은 서버가 related로 확장한다. 기본 2-hop 확장과 가짜 relation은 만들지 않는다.
+- 0건·모호함·provider 장애·invalid ref는 focus resource 없이 `needs_clarification` 질문으로 끝난다.
+  최초 조회 또는 실행 직전 재조회에서 session이 없거나 접근 권한이 사라진 경우에도 대상의 존재나
+  권한 상세를 노출하지 않는 `session_unavailable` clarification으로 끝낸다. 성공 직전 같은 session을
+  다시 조회해 model fingerprint와 이번 resolver가 실제로 본 canonical projection evidence fingerprint를
+  검증한다. model 의미 또는 projection에 포함된 comment·column·type·enum evidence가 바뀌면 resource
+  없이 `schema_changed` clarification으로 끝낸다. layout/annotation 변경이나 resolver evidence에 영향을
+  주지 않는 source 공백·포맷 변경으로 revision만 증가하면 최신 revision으로 허용한다.
+- 성공 결과는 `status=focused`, `metadata.version=1`, `view=table_focus`, `sessionRevision`, `modelFingerprint`,
+  `featureLabel`, `primaryTableIds`, `relatedTableIds`, `relationIds`, `confidence`를 가진 resource ref다.
+  새 결과에는 `contextTableIds`도 포함하며, 이 필드가 없는 기존 metadata는 빈 배열로 해석한다.
+  도구 성공 시 step의 resource ref와 run을 한 트랜잭션에서 저장하고 run은 `completed`가 된다.
+  Frontend는 완료된 run의 resource ref가 현재 SQLtoERD session과 같을 때 한 번 자동 적용하고,
+  다른 session이면 자동 이동하거나 적용하지 않는다. 자동 적용 여부와 무관하게 `집중 보기 열기`
+  링크를 유지해 사용자가 수동으로 열거나 다시 적용할 수 있게 한다. 적용된 화면은 핵심·직접 관련·문맥
+  table을 역할별로 강조하고 나머지 table/relation을 흐리게 하며 선택·transform·delete를
+  막는다. 최초 적용 시 revision과 model fingerprint를 검증하고, 활성화된 뒤에는 layout/annotation
+  revision 증가가 아니라 실제 modelJson 변경 때만 해제한다. `전체 보기`, session 변경, 새로고침으로
+  집중 상태를 해제한다. relationIds는 실제 modelJson의 FK만 포함하며 context 선택은 가짜 관계선이나
+  SQL FK를 만들지 않는다.
+- 이 tool과 UI는 session을 저장·수정하지 않는 read-only view다. 따라서 SQLtoERD revision,
+  writer lease, autosave와 Activity Log를 만들지 않으며 blur는 접근 제어나 보안 경계가 아니다.
+- 지원 범위를 벗어난 schema 기능은 `unsupportedFeatures`에 명시한다. DB 실행·배포만 요구하는
+  요청은 `unsupported`이며, 요구 entity/table 정보가 없으면 먼저 clarification을 요청한다.
+
+#### Dev Agent CORS preflight 진단
+
+브라우저에서 Agent 답변 뒤 `No 'Access-Control-Allow-Origin' header`가 발생하면 토큰이나 request
+body를 보내기 전에 실제 배포 endpoint의 OPTIONS 응답을 확인한다.
+
+```powershell
+node apps/app-server/scripts/agent/cors-preflight-smoke.mjs --url "https://api.dev.pilo.my/api/v1/workspaces/<workspaceId>/agent/runs" --origin "https://dev.pilo.my"
+```
+
+스크립트는 status와 `Access-Control-Allow-*` header만 출력하며 인증 정보나 response body를
+출력하지 않는다. `ok=true`면 preflight 계약은 정상이므로 브라우저 Network 탭에서 실제 실패
+request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=false`면 App Server 코드를 임의로
+완화하지 않고 dev gateway와 배포 환경의 origin 전달 및 OPTIONS routing부터 점검한다.
+
+### PR Review
+
+- `requestContext`는 `null`, `{ "surface": "sql_erd", "sessionId": "uuid" }`, 또는
+  `{ "surface": "pr_review", "sessionId": "uuid" }`이다. App Server는 run 생성 시 현재 사용자의
+  Workspace 접근 권한과 `pr_review_sessions -> pr_review_rooms.workspace_id` 소속을 다시 검증한다.
+  URL의 `sessionId`는 힌트일 뿐 신뢰하지 않는다.
+- Tool registry는 선택 사항인 `contextRequirement: { surface }` metadata를 가진다. 선언이 없는 Tool은
+  global Tool이고, 선언이 있는 Tool은 같은 surface의 run에만 schema snapshot으로 전달하며 실행 직전에도
+  같은 조건을 다시 확인한다. Tool 이름으로 surface 조건을 하드코딩하지 않는다.
+- `recommend_pr_review_focus`는 `surface=pr_review`인 run에서만 사용 가능한 read-only contextual Tool이다.
+  입력은 선택 `focus` (`api`, `backend`, `frontend`, `test`)뿐이며, session ID나 Workspace ID를 받지 않는다.
+- Tool은 해당 revision의 파일 경로, 역할, 위험도, 변경 요약, 검토 포인트, 검토 상태와 파일 관계만 읽는다.
+  raw diff, 코드 원문, 사용자 comment, provider payload는 planner input·step output·log에 포함하지 않는다.
+- revision이 `analyzing` 또는 `failed`이면 추천을 만들지 않고 분석 완료 또는 재시도 안내를 반환한다.
+  읽기 전용이므로 confirmation과 Activity Log는 만들지 않는다. 기존 Agent run/tool step 실행 이력은 유지한다.
+
+### Canvas delegation
+
+- PILO AI는 요청이 Canvas 작업인지까지만 판단하며, Canvas 내부의 기능 설명·도형 검색·HTML 생성 분류는
+  `CanvasAgentService`가 시작한 Canvas Agent run이 담당한다.
+- `delegate_canvas_agent` input은 빈 object만 허용한다. `prompt`, 사용자 ID, Workspace ID, Canvas ID,
+  Canvas 이름, 선택 도형 또는 viewport를 planner가 다시 작성해 넣을 수 없다.
+- 현재 Canvas request context가 있으면 App Server는 그 `canvasId`가 같은 Workspace의
+  `board_type=freeform`, `engine_type=classic` Canvas인지 재검증하고 위임 대상으로 우선 사용한다.
+- Canvas request context가 없으면 Workspace의 유일한 `board_type=freeform`, `engine_type=classic`
+  Canvas를 서버에서 조회해 대상으로 사용한다. 0개 또는 복수이면 child run을 만들지 않고 Canvas 화면을
+  열거나 대상 Canvas 화면에서 다시 요청하도록 사용자용 clarification으로 종료한다.
+- App Server는 일반 Agent run의 최신 user message를 그대로 child run의 prompt로 사용한다. Canvas 화면에서
+  받은 `selectedShapeIds`, `selectedScene`, loaded shape summary, viewport, `toolHelpMode`는 검증된
+  `canvasContext`에서만 복원한다.
+- Canvas 화면에서 PILO AI의 `기능 설명` 버튼을 누른 요청만 `toolHelpMode=true`다. 다른 화면에는 버튼을
+  노출하지 않고, 일반 모드의 같은 단어는 Canvas 도형 검색으로 처리한다.
+- child run resource ref는 `domain=canvas`, `resourceType=canvas_agent_run`이다. 일반 Agent frontend는
+  `/canvas?canvasId={canvasId}&canvasAgentRunId={runId}` 형식의 검증된 링크를 만들고, child 상세를
+  조회해 HTML artifact가 있으면 동일한 sandbox preview/copy UI를 표시한다. `clientActionType`은
+  `insert_drive_file` 같은 bounded action taxonomy만 포함하며 파일 payload는 일반 Agent step에 복사하지
+  않는다.
+- 같은 Canvas editor가 활성화돼 있으면 delegated child run을 Canvas 결과 presenter에 전달한다. 따라서
+  도형 focus와 HTML code block/connector 삽입은 기존 Classic Canvas roomState patch 흐름을 그대로 사용한다.
+  Canvas 밖의 `find_shapes`는 사용자가 링크를 누른 경우에만 child run의 저장된 viewport와 shape id로
+  일회성 focus를 수행한다. `import_drive_file`은 링크 문구를 `캔버스에 추가하고 열기`로 표시하고,
+  사용자가 누른 뒤 파일 권한을 재검증한 경우에만 기존 editor/realtime patch 흐름으로 `file_node`를
+  생성한다. 링크를 누르기 전에는 Canvas를 수정하지 않는다.
 
 ### Calendar
 
 - Agent는 Calendar event 생성/수정 시 `workspaceId`, `createdBy`를 body로 보내지 않는다.
 - `workspaceId`는 path에서 오고, `createdBy`는 현재 로그인 사용자에서 온다.
-- `update_calendar_event` planner input은 `target`과 `changes`만 받는다. `target`에는 제목과
-  명시적 대상 날짜 범위가 필요하며, 시간·종일 여부는 선택적 exact filter다. `eventId`는 planner
-  input과 사용자 답변에 포함하지 않는다.
+- `get_calendar_event`는 같은 thread의 이전 Calendar 목록에서 하나로 선택된 event의 opaque
+  `contextRef`만 받는다. App Server는 `domain=calendar`, `resourceType=event`, Workspace와 요청 사용자를
+  다시 검증한 뒤 기존 Calendar 상세 조회 service를 호출한다. raw `eventId`는 planner input이나 최종
+  답변에 노출하지 않으며, 상세 조회가 성공하면 같은 도구를 반복하지 않고 run을 완료한다.
+- `update_calendar_event` planner input은 `target`과 `changes`만 받는다. 직전 Calendar 조회에서
+  정확히 하나로 특정된 event를 가리킬 때 `target`은 해당 server-owned opaque `contextRef`만 받는다.
+  그 외에는 제목과 명시적 대상 날짜 범위가 필요하며, 시간·종일 여부는 선택적 exact filter다.
+  `eventId`는 planner input과 사용자 답변에 포함하지 않는다.
+- 직전 Calendar 목록의 순번으로 수정 대상을 지정하면 AI Worker는 같은 thread의 최신 목록에서 해당
+  1-based ordinal 하나만 선택해 planner가 제출한 `target`을 server-owned `contextRef`로 교정한다.
+  `금요일`, `이번 주 금요일`, `다음 주 금요일` 같은 단일 요일 표현은 run의 `currentDate`를 기준으로
+  날짜를 계산해 `startDate`와 `endDate`에 동일하게 적용한다. 순번이 범위를 벗어나거나 요일 표현이
+  여러 개여서 모호하면 confirmation을 만들지 않고 clarification으로 종료한다.
+- Calendar `contextRef`는 현재 run에서 먼저 완료된 tool step 또는 같은 thread·Workspace·요청 사용자의
+  최근 완료 run에 저장된 `domain=calendar`, `resourceType=event` reference에서만 해소한다. App Server는
+  해소한 event를 현재 사용자 권한으로 다시 조회하고, 0개·stale·다른 type이면 confirmation과 write 없이
+  clarification으로 종료한다.
 - App Server는 현재 사용자·Workspace의 대상 날짜 범위에서 제목(공백 정리·대소문자 무시)과 날짜,
   선택 시간·종일 여부가 모두 일치하는 후보만 만든다. fuzzy matching이나 LLM 추측으로 event를
   선택하지 않는다.
 - 후보가 정확히 하나일 때에만 App Server가 내부 eventId로 현재 event를 다시 조회해 confirmation의
   `before`를 만든다. 후보가 없거나 여러 개이면 confirmation과 write 없이 run을 완료하고, 제목·대상
   날짜·시간을 더 구체적으로 적어 다시 요청하도록 안내한다.
+- update confirmation plan에는 App Server가 조회한 event의 `updatedAt`을 server-owned 상태 token으로
+  저장한다. 승인 실행 transaction에서 event row를 잠근 뒤 현재 `updatedAt`과 다르면 `409 CONFLICT`로
+  거부하며 일정 변경, Activity Log, Google Calendar sync intent를 만들지 않는다. token이 없는 기존
+  pending confirmation도 fail-closed 처리한다. 공개 Calendar PATCH request에는 이 token을 추가하지 않는다.
 - Calendar 상대 날짜 조회는 run의 `currentDate`와 사용자 timezone을 기준으로 계산한다.
   `이번 주말`은 현재 날짜에서 아직 완전히 지나지 않은 가장 가까운 토요일·일요일이며, 토요일에는
   당일을 포함하고 일요일에는 다음 주말을 사용한다. `다음 주 월요일`은 바로 다가오는 월요일,
   `다다음 주 화요일`은 바로 다가오는 화요일보다 한 주 뒤의 화요일로 해석한다.
-- 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간` 정규화를 따른다.
+- Calendar 생성에서 `endDate`가 없으면 `startDate`와 같은 날짜로, 시간 지정 일정에서 `endTime`이 없으면 Calendar API의 `startTime + 1시간`으로 정규화해 confirmation과 실행에 같은 값을 사용한다. 종일 일정에는 시간을 넣지 않는다.
 - `list_calendar_events`는 날짜 범위만 지원한다. 제목·키워드·참석자·현재 시각 조건을 요청하면
   해당 조건을 무시하고 조회하지 않으며, 현재 Agent 범위에서 지원하지 않는다고 안내한다.
 - 시간 지정 일정의 `endTime`이 `startTime`과 같거나 같은 날짜에서 더 이르면 confirmation을 만들지 않고
@@ -653,29 +1357,151 @@ Status code: `200 OK`
   지원하지 않는다. 해당 run은 `unsupported`으로 완료하고, 단일 일정으로 축소하거나 confirmation을
   만들지 않는다.
 - 시작일과 종료일이 다른 Calendar 생성 요청에서 `isAllDay`, `startTime`, `endTime`이 모두 없으면
-  종일 여부 또는 시간 정보가 필요하다. 해당 run은 `needs_clarification`으로 완료하고 confirmation을
-  만들지 않는다. 명시적 `isAllDay: true` 또는 시간 입력이 있으면 기존 생성 후보 규칙을 따른다.
+  종일 여부 또는 시간 정보가 필요하다. planner의 `needs_clarification` 질문을 message에 저장하고
+  해당 run을 `waiting_user_input`으로 전환하며 confirmation은 만들지 않는다. 사용자가 `/inputs`에
+  명시적 `isAllDay: true` 또는 시간 입력을 보내면 같은 run의 다음 planner turn에서 기존 생성 후보
+  규칙을 따른다.
 - 일정 삭제는 1차 Agent tool이 아니다.
 
-### MeetingReport
+### Meeting·MeetingReport
 
+- `list_meeting_rooms`는 현재 Workspace의 활성 MeetingRoom을 최대 100개까지 반환하고, 각 방의
+  current Meeting·현재 Recording 상태를 요약한다. LiveKit room name, token, audio key는 반환하지 않는다.
+- `get_active_meeting`은 현재 사용자의 모든 Workspace 기준 active Meeting을 조회한다. active Meeting이
+  있으면 Meeting 시작 시각과 현재 시각으로 계산한 `durationSec`을 반환하며, 없으면 `active: false`를 반환한다.
+- Meeting control/read selector는 public planner input에서 UUID를 받지 않는다. `current: true`,
+  `roomName`, 또는 같은 run의 후보 버튼으로 소비한 selector만 허용하며 selector가 생략되면 현재 사용자의
+  active Meeting을 사용한다. active Meeting이 없거나 `roomName`이 여러 Meeting에 해당하면 실행하지 않고
+  후보 버튼 clarification을 반환한다.
+- `get_meeting_participants`는 해소된 Meeting의 사용자별 중복 제거된 현재·과거 참여자 요약을 최대 100명까지
+  반환한다. LiveKit identity·연결 상태는 반환하지 않는다.
+- `start_meeting_in_room`, `join_meeting`은 confirmation 뒤 기존 MeetingService를 호출하고,
+  LiveKit token 대신 20초 제한의 일회성 `connect_meeting` client action만 step output에 저장한다.
+  Frontend는 만료되지 않은 action을 한 번만 소비해 Meeting 화면으로 이동하고, 기존 audio preflight를
+  통과한 뒤 join API에서 새 LiveKit token을 받아 연결한다. token은 Agent 응답·URL·영구 저장소에
+  전달하거나 보관하지 않는다.
+- `leave_meeting`은 selector가 생략된 명시적 나가기 요청도 현재 사용자의 active Meeting으로 해소해 자동
+  실행한다. 마지막 참여자면 Meeting 도메인의 기존 녹음 종료·회의 종료·회의록 생성 규칙이 그대로 적용된다.
+- `start_meeting_recording`, `end_meeting_recording`은 confirmation 뒤 해소된 Meeting에 실행한다. 녹음
+  종료 tool은 서버가 current recording을 다시 조회한다.
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
-- report ID 없는 넓은 조회(예: `지난 회의 결정사항 보여줘`)는 `list_meeting_reports`에 `limit: 1`을
-  사용한다. Meeting domain의 `created_at DESC, id ASC` 정렬에 따라 같은 Workspace의 최신 report 하나를
-  조회하고, 요청한 범주만 답변에 표시한다.
-- 특정 MeetingReport 상세/요약은 UUID `reportId`가 필요하다. 현재 one prompt = one run에서는 후보
-  선택을 이어갈 수 없으므로 ID 없는 특정 상세 요청은 `unsupported`로 완료한다.
+- `list_meeting_reports`는 `from`, `to`, `status`, Agent 내부 `reportTitle`, `roomName`, `limit`을
+  지원한다. `reportTitle`은 1~500자의 Agent 전용 exact selector이며
+  `COALESCE(user_title, title)`에 기존 `MeetingService`의 앞뒤 공백 제거, 연속 공백 축약, 대소문자
+  정규화를 그대로 적용한다. status/date/roomName/limit과 조합할 수 있다. 제목 selector 없이 기간과
+  개수를 생략하면 `createdAt DESC, id ASC` 정렬의 최신 report 1개를 반환한다. `reportTitle`과
+  `roomName`은 Agent 내부 도메인 조회 전용이며 공개 Meeting REST API의 request/response/endpoint는
+  변경하지 않는다.
+- 특정 MeetingReport 상세/요약도 UUID `reportId`를 받지 않는다. selector는 `[from, to)`, `status`,
+  Agent 내부 `roomName`과 표시 제목 exact match용 `reportTitle`을 조합할 수 있다. `roomName`은 회의가 열린
+  회의방 이름이고 `reportTitle`은 `COALESCE(user_title, title)`로 계산한 회의록 제목이므로 서로 대체하지
+  않는다. selector가 없으면 최신 report 1개를 해소하고, filter 결과가 여러 개면 같은 run의 후보 버튼으로
+  선택을 요청한다. 후보 label은 요약문 대신 회의록 제목을 사용한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
-- 녹음 시작, 녹음 종료, 회의록 재생성 요청은 1차 Agent tool이 아니다.
+- `search_meeting_transcript`는 `query`와 선택 MeetingReport selector를 받는다. raw `reportId`는
+  planner-facing schema에 허용하지 않는다. transcript 원문과 raw Activity Log를 Agent run/step에 저장하지
+  않고, 권한 있는 namespaced source ID만 grounded-answer 경로에 전달한다. 검색 근거가 된 MeetingReport는
+  항상 `/report?reportId=...` 링크를 제공하고, 관련도 임계값을 통과한 Drive 문서가 있으면
+  `/files?documentId=...` 링크도 함께 제공한다. 링크 resource ref에는 원문이나 excerpt를 저장하지 않는다.
+- 명시적인 회의록 제목과 실제 발언·결정 이유·Activity 내용 질문이 함께 있으면 Router는
+  `meeting.report.hybrid_search`를 선택한다. Planner는 먼저 `list_meeting_reports({ reportTitle })`로
+  exact 조회하고, 첫 Planner turn에는 이 prerequisite만 노출한다. 조회 완료 뒤 다음 turn에는
+  `search_meeting_transcript`만 노출하며, 제목 결과만으로 질문에 답하거나 완료하지 않는다. exact 1건이면 같은 tool step이 만든
+  서버 소유 opaque `contextRef`로 `search_meeting_transcript`를 이어 호출한다. planner-facing input은
+  raw `reportId`를 받거나 생성하지 않는다. Hybrid prerequisite에서는 모델이 `limit`을 제출해도 제거해
+  동일 제목 후보를 임의의 1건으로 축소하지 않는다. 제목 조회 결과와 그 step의 `contextRef`는 하나의
+  workflow block으로 취급하므로 중간에 다른 도메인 tool이 실행돼도 검색 범위를 잃지 않는다.
+- Hybrid 첫 단계는 non-empty `reportTitle`을 반드시 요구한다. Planner가 빠뜨린 경우에도 따옴표 제목,
+  `제목이 “…”인`, `“…” 회의록에서`처럼 경계가 명확한 단일 제목만 사용자 문장에서 복구한다. 복수이거나
+  불명확하면 clarification으로 종료하며 `list_meeting_reports({})`나 `limit: 1` 최신 회의록 조회로
+  대체하지 않는다. App Server도 같은 capability와 `list_meeting_reports` 조합을 실행 직전에 다시
+  검증하고 `limit`을 제거한다.
+- 서로 다른 명시적 제목이 한 요청에 둘 이상 있으면 그중 하나를 임의 선택하거나 Workspace 전체 검색으로
+  범위를 확대하지 않는다. 먼저 검색할 제목 하나를 사용자에게 선택받은 뒤 해당 제목의 hybrid workflow를
+  시작한다. `“A”와 “B”에서`, `“A”, “B” 및 “C”에서`처럼 접속된 따옴표 제목도 각각의 제목으로
+  분리하며, 같은 제목을 문장 안에서 반복한 경우는 하나의 제목 후보로 정규화한다.
+- `meeting.report.hybrid_search`와 `list_meeting_reports`를 사용하는 다른 capability를 한 요청에서 함께
+  선택하면 서로 다른 목록 입력을 tool 이름만으로 구분할 수 없으므로 Router가 실행하지 않고 어떤 작업을
+  먼저 처리할지 묻는다. 이 경계에서도 hybrid 제목 조회로 판정된 `list_meeting_reports` 입력의 `limit`은
+  제거해 동일 제목 다건을 임의의 1건으로 축소하지 않는다.
+- exact 제목 결과가 0건이면 오류나 사용자 입력 대기로 전환하지 않고
+  `count: 0, reports: []`로 완료한다. Planner는 같은 run에서 report selector 없이 Workspace 범위
+  `search_meeting_transcript`를 호출한다. 별도 내용 질문은 제목·날짜·명령 표현을 제거한 content-focused
+  query를 사용하고, 제목만 남는 경우에만 제목 문자열로 fallback할 수 있다. 근거가 발견된 최종 답변에는
+  정확한 제목이 없어서 Workspace 전체 내용 검색으로 전환했다는 사실을 자연스럽게 밝힌다. 이 fallback
+  정보는 해당 search step과 answer step에 서버 소유 metadata로 직접 연결하며, run의 다른 `count: 0`
+  목록 조회로 추론하지 않는다. 검색 근거도 0건이면 정확한 제목이 없었다는 사실과 Workspace 전체에서도
+  관련 근거를 찾지 못했다는 사실을 함께 안내한다.
+- exact 제목 결과가 여러 건이면 `search_meeting_transcript`의 기존 MeetingReport candidate selection을
+  사용해 날짜, 상태, 제목과 bounded 설명을 보여주고 사용자가 하나를 고르게 한다. 최초 exact 조회에
+  명시한 `from`, `to`, `status`, `roomName`은 후보 조회에도 그대로 유지한다. 선택 전에는 서로 다른
+  회의록의 내용을 합치지 않는다. 선택 뒤에는 `useSelectedMeetingReportCandidate=true`로 원래 검색을
+  재개한다.
+- 명확한 제목 후보가 없는 주제·발언·결정·이유·담당자 내용 검색은 `meeting.evidence.search`로
+  `search_meeting_transcript`를 직접 호출하며 제목 조회를 선행하지 않는다. 예를 들어 현재 화면과 무관하게
+  “배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘”는 Workspace 범위 transcript/Activity 검색이다.
+  Router가 이를 목록 조회로 분류해도 내용 검색 판정이 명확하면 evidence search로 보정하며, 최신 회의록
+  1건을 대신 조회하지 않는다. `요약해줘`, `정리해줘`, `핵심만 알려줘`는 답변 형식일 뿐이므로 논의,
+  발언, 결정 이유, 담당자 같은 근거 요구가 함께 있으면 evidence search를 유지한다. 반대로 “회의록
+  요약해줘”처럼 별도 근거 요구가 없는 목록, 상태, 제목 상세, 단순 요약 요청에는 transcript 검색을
+  추가하지 않는다.
+- 순번이 있는 결정이나 “결정사항의 직접 근거”처럼 MeetingReport decision item에 직접 연결된 근거를
+  요구하면 Router가 선택한 `meeting.decision.evidence`를 유지한다. 반면 “왜 그렇게 결정했는지”처럼
+  일반 대화 맥락의 결정 이유를 묻는 요청은 제목 유무에 따라 evidence search 또는 hybrid search를 쓴다.
+- 최초 Router가 선택한 capability chain은 완료 전까지 기존 planner step의 서버 검증 routing metadata로
+  이어간다. 다음 turn에는 Router를 다시 호출하지 않고 첫 번째 미완료 tool만 Planner에 노출하되 Planner
+  LLM 호출 자체는 계속 수행한다. 관측 metadata는 최초 선택을 `initial_llm_router`, 이어진 실행을
+  `continued_workflow`로 구분한다. Hybrid list 결과는 일반 `count: 0` 출력이 아니라 해당 step에 저장한
+  서버 소유 `meetingReportHybridLookup` metadata가 있을 때만 후속 검색 범위와 fallback 근거로 인정한다.
+- transcript/Activity 근거가 없으면 제목이나 MeetingReport summary를 근거처럼 사용해 실제 발언이나
+  결정 이유를 추론하지 않고, 관련 근거를 찾지 못했다고 답한다. 기존 grounded citation 검증과 검색된
+  MeetingReport resource link 경로는 그대로 유지한다.
+- 실패한 회의록 재생성은 `regenerate_meeting_report` confirmation 뒤 요청할 수 있다.
 
 ### Board
 
-- Agent는 Board issue 검색만 할 수 있다. Board가 하나면 자동 선택하고, 여러 Board이면
-  `boardName`을 정확히 지정해야 한다. 이름이 없거나 모호하면 임의로 선택하지 않고 후보를
-  안내한다.
+- 모든 Board tool은 planner input의 `workspaceId`, `boardId`, `issueId`, `columnId`,
+  `idempotencyKey`, 사용자 식별자 주입을 거절한다. Workspace와 현재 사용자는 run context에서만
+  가져오며 기존 `BoardService`가 권한과 resource 범위를 다시 검증한다.
+- Board 선택은 exact `boardName` 또는 `repositoryFullName`으로 명시한 Board, Workspace의 active
+  Board, Workspace의 유일한 Board 순서다. 명시 조건이 없고 active Board도 없는데 Board가 여러
+  개이면 최대 5개 후보를 안내하고 임의로 선택하지 않는다.
+- Board issue 대상은 planner가 제공한 GitHub `issueNumber`(`#134` 또는 `134`)를 exact match해
+  내부 `issueId`를 해석한다. planner input이나 사용자 답변에 내부 ID를 요구하지 않는다.
 - 검색은 `search`, `state`(`open`/`closed`), `label`, `assignee`, `limit` 필터만 지원한다.
-- Board 상세 조회와 모든 Board write는 현재 Agent tool이 아니다.
+- `get_board_issue_context`는 issue body를 최대 2,000자로 제한하고 label, assignee,
+  ProjectV2 field를 최대 10개씩 표시한다. 관련 PR은 동기화된 cache의 issue 번호·URL heuristic
+  결과이며 최대 5개만 표시한다. GitHub API를 새로 호출하거나 확정 관계로 표현하지 않는다.
+- `get_board_briefing`은 전체/open/closed 카드 수, column·state·label·assignee 분포와 마지막
+  sync 사실만 반환한다. 데이터에 없는 우선순위, 병목 원인, 개인 성과를 추론하지 않는다.
+- `resolve_board_context`, `search_board_issues`, `get_board_issue_context`,
+  `get_board_briefing`, `diagnose_board_freshness`는 `low` read-only tool로 confirmation 없이
+  실행한다.
+- `move_board_issue_status`는 GitHub issue 번호와 exact `columnName`을 받는다. confirmation
+  직전에 현재 issue와 column을 다시 읽고 `previousColumnId`를 저장하며, 승인 실행은 Board API의
+  stale column `409 CONFLICT` 규칙을 그대로 사용한다.
+- `create_board_issue`는 `title`, 선택 `body`, 선택 exact `columnName`을 지원한다. Board selector가
+  없으면 Workspace active Board를 사용하고, active Board가 없으면 유일한 Board만 자동 선택한다.
+  Board가 여러 개이면 후보를 안내하며 임의로 선택하지 않는다. `columnName`이 없으면
+  `normalizedName=unmapped`이고 `githubStatusOptionId=null`인 로컬 Unmapped Column이 정확히 하나일
+  때만 기본값으로 사용한다. 이 Column이 없거나 모호하면 write 없이 GitHub repository 연결과
+  ProjectV2 Board 선택·동기화 상태를 확인하도록 안내한다. 명시한 Board, repository, Column은 기존
+  exact match 규칙을 유지한다. confirmation plan에 자동 선택된 Board와 Column을 표시하고
+  `agent:{runId}:create_board_issue` 형식의 안정적인 idempotency key를 저장하며, approve와 재시도에서
+  같은 key로 기존 Board issue 생성 계약을 호출한다. 최종 Board API 검증은 그대로 유지한다.
+  label, assignee, milestone 지정은 생성 범위가 아니다.
+- `assign_board_issue_safely` planner input은 GitHub issue 번호와 선택 `addAssignees`,
+  `removeAssignees`를 받는다. App Server는 현재 전체 assignee를 다시 읽고 repository의 live
+  assignable 후보를 검증한 뒤 confirmation에 유지·추가·제거·최종 전체 목록을 표시한다. 승인 후에는
+  confirmation에 저장된 추가·제거 delta만 사용하며, 추가 대상은 live 후보로 다시 검증한 뒤 제거,
+  추가 순서로 실행한다. GitHub의 최종 응답으로 issue cache 두 곳을 갱신한다. 이 실행 경로는 Agent
+  전용 내부 Board service이며 공개 Board PATCH 계약은 바꾸지 않는다.
+- `diagnose_board_freshness`는 active Board 여부, Board hydration 상태와 시각, 최대 20개 issue의
+  `lastSyncedAt`, 해당 표본에서 발견된 관련 PR cache의 `lastSyncedAt`, `Unmapped` 카드 수를
+  반환한다. 전체 issue가 20개보다 많으면 표본 범위를 함께 표시하며 sync를 시작하지 않는다.
+- Board write 세 tool은 모두 `medium`, `confirmation_required`다. clarification, reject, expiry에서는
+  GitHub나 ProjectV2 write를 실행하지 않는다.
 - provider raw error, token, secret은 응답과 로그에 노출하지 않는다.
 
 ## 오류 응답
@@ -701,9 +1527,12 @@ Status code: `200 OK`
 | `409` | `CONFIRMATION_NOT_PENDING` | confirmation 상태가 pending이 아님 |
 | `409` | `CONFIRMATION_EXPIRED` | confirmation이 만료됨 |
 | `409` | `CLIENT_REQUEST_ID_CONFLICT` | 같은 clientRequestId로 다른 요청을 보냄 |
+| `409` | `AGENT_MESSAGE_ROUTING_STALE` | message 분류 중 active run 또는 confirmation 상태가 변경됨 |
 | `422` | `UNPROCESSABLE_REQUEST` | 자연어 요청을 실행 가능한 tool plan으로 해석할 수 없음 |
 | `502` | `BAD_GATEWAY` | 외부 provider 실패. raw error는 노출하지 않음 |
 | `503` | `SERVICE_UNAVAILABLE` | AI job queue 또는 AI Worker 처리를 시작할 수 없음 |
+| `503` | `AGENT_MESSAGE_ROUTING_DISABLED` | `AGENT_MESSAGE_ROUTING_MODE=legacy`로 통합 endpoint가 비활성화됨 |
+| `503` | `AGENT_MESSAGE_ROUTING_UNAVAILABLE` | input relationship classifier를 사용할 수 없음 |
 
 ## MVP 제외
 
@@ -711,16 +1540,13 @@ Status code: `200 OK`
 - PR Review session 조회
 - GitHub sync 제안/실행
 - PR Review 자동 제출
-- GitHub issue label/assignee/milestone/due date 변경
+- GitHub issue label/milestone/due date 변경
 - Board due date 자동 변경
-- Canvas 자유 편집 자동 생성/수정 (일반 Agent 범위). Canvas 전용 요청은
+- Canvas 자유 편집 자동 생성/수정. 일반 Agent의 Canvas 요청은
   `docs/api/canvas-agent-api.md`의 별도 Canvas Agent 계약만 사용하며, Calendar,
   Issue, PR, Meeting 등 외부 도메인 도구에는 접근하지 않는다.
-- Meeting 녹음 시작/종료
-- MeetingReport 재생성 요청
 - Calendar 일정 삭제
 - 자동 rollback
 - 장기 workflow orchestration
-- multi-turn thread memory
 - streaming UI
 - 정교한 eval 체계

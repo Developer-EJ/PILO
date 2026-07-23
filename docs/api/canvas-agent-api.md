@@ -2,10 +2,13 @@
 
 ## Scope
 
-Canvas Agent API creates and tracks asynchronous AI work that is limited to one
-Workspace Canvas. It supports finding Canvas shapes, moving the current user's
-viewport, preparing design or code-block drafts, and applying or discarding a
-draft.
+Canvas Agent API creates and tracks asynchronous server-side AI work that is
+limited to one Workspace Canvas. It explains Canvas functionality, finds
+existing Canvas shapes, moves the current user's viewport, and can generate a
+copyable static HTML/CSS artifact from an explicit Canvas selection. It also
+answers general questions and provides read-only analysis or advice about an
+explicit Canvas selection. New runs do not create, connect, update, delete, or
+duplicate Canvas shapes.
 
 Canvas Agent is restricted to Canvas actions. Calendar, Issue, PR, Meeting,
 and every other external-domain resource are excluded from this API: it does
@@ -14,16 +17,20 @@ not read, create, update, delete, or represent them as Canvas shapes.
 ## Ownership and boundaries
 
 - Canvas domain owns this API and `canvas_agent_*` tables.
-- App Server validates Workspace and Canvas access, validates each action, and
-  performs persisted Canvas mutations through `CanvasService`.
-- AI Worker only chooses the next bounded Canvas action. It must not directly
-  mutate Canvas tables or call Canvas domain services.
-- The schema reserves `parentAgentRunId` for a future general-Agent-to-Canvas
-  delegation path. That integration is not exposed by this API yet, and it must
-  remain Canvas-only when added.
-- The requester alone can read, cancel, apply, or discard their Canvas Agent
-  runs and drafts.
-- AI Worker provider payloads, full raw shapes, tokens, secrets, and credentials
+- App Server validates Workspace and Canvas access and validates each action.
+  Canvas Agent does not directly perform persisted Canvas mutations; a validated
+  Drive import may return a client action that the active Canvas applies through
+  its normal realtime shape path.
+- AI Worker classifies the request into a bounded Canvas intent and extracts
+  typed arguments. It must not choose an arbitrary executable action, mutate
+  Canvas tables, or call Canvas domain services.
+- General PILO Agent delegation uses the internal `CanvasAgentService` contract
+  with `parentAgentRunId` and `source=general_agent_delegate`. These fields are
+  server-owned and are not accepted from the public Canvas Agent create body.
+- The requester alone can read or cancel their Canvas Agent runs. Legacy draft
+  apply/discard endpoints remain available only for previews created before the
+  read-only action restriction.
+- AI Worker provider payloads, full raw Canvas snapshots, tokens, secrets, and credentials
   are never returned or stored in these API payloads.
 
 ## Common rules
@@ -34,59 +41,169 @@ not read, create, update, delete, or represent them as Canvas shapes.
 - `workspaceId`, `canvasId`, and requester identity are taken from the path and
   authenticated session, never from the request body.
 - A Canvas Agent request is asynchronous. The create endpoint returns without
-  waiting for AI Worker planning to finish.
-- Canvas Agent has no confirmation table. A draft is not persisted to the
-  Canvas until its requester calls the apply endpoint.
-- A run is retained for 7 days and a preview draft for 24 hours.
+  waiting for AI Worker intent classification to finish.
+- A run is retained for 7 days. New runs do not create preview drafts.
 
 ## Processing model
 
 ```text
 Frontend -> App Server Canvas Agent API -> Canvas Agent run + SQS job
-  -> AI Worker: one next-action decision
-  -> App Server: validate and execute Canvas action
-  -> result saved to run/step, optionally enqueue next bounded step
-  -> draft preview or completed result
+  -> AI Worker: intent classification with typed arguments
+     + one HTML generation call only for generate_html
+     + one read-only conversational response call only for chat
+  -> route_intent step
+  -> App Server: validate the intent and execute its registered Canvas handler
+  -> result saved to run/step
+  -> completed conversation/explanation/search/navigation result or static HTML artifact
 ```
 
-For a shape-finding request, Canvas Agent uses this bounded cost-saving route:
+The same runtime also accepts internal delegation from PILO Agent:
 
 ```text
-local shape-search prototype embedding classifier
-  -> Canvas-only pgvector shape search when the prompt is clearly looking for an existing shape
-  -> Canvas-only pgvector search for each side when the prompt clearly connects two existing shapes
-  -> GPT Planner when the prompt is not a shape search, retrieval is absent, or the result is ambiguous
+PILO Agent planner -> delegate_canvas_agent App Server tool
+  -> prefer the active classic freeform Canvas, otherwise resolve the Workspace's single classic freeform Canvas, and keep the latest user prompt unchanged
+  -> CanvasAgentService creates a child run
+     (source=general_agent_delegate, parentAgentRunId=PILO Agent run id)
+  -> normal Canvas Agent routing and handlers
+  -> child resultSummary copied verbatim to the parent Agent finalAnswer
+```
+
+The parent Agent does not call the Canvas planner directly and does not classify
+Canvas sub-intents. When the child produces an HTML artifact, PILO AI fetches the
+same child-run detail and renders the same sandboxed preview/copy experience. If
+the matching Canvas editor is currently active, the existing Canvas presenter may
+also create the code block and bound connector through the normal roomState patch
+path; outside that Canvas, delegation remains non-mutating.
+
+For a shape-finding request, Canvas Agent uses this bounded route:
+
+```text
+Structured GPT intent classification over a bounded client shape summary
+  -> use matching currently loaded shape ids when present
+  -> workspace-and-current-Canvas-scoped DB title/text search otherwise
+  -> current-Canvas-only pgvector search when DB text search returns no result
+  -> App Server find_shapes handler
 ```
 
 - The embedding Worker indexes only `shape_type`, `title`, and `text_content`.
   It never embeds full `raw_shape`, layout, bindings, styles, or provider data.
+- Shapes currently loaded in the requester's tldraw store are sent as bounded,
+  advisory summaries. This lets newly created or not-yet-checkpointed shapes be
+  found without waiting for the DB checkpoint or embedding refresh flow.
+- A pre-checkpoint shape outside the requester's loaded regions is not included
+  in that snapshot. It becomes searchable after it is loaded by the client or
+  after the normal checkpoint writes it to DB.
+- DB retrieval first searches only active shapes whose Canvas matches both the
+  run `workspaceId` and `canvasId`. The bounded title/text search returns at
+  most four rows and never scans shapes from another Workspace or Canvas. Only
+  when that search returns no result does the router try pgvector; a missing or
+  ambiguous embedding match remains an empty result.
 - The configured local model is `intfloat/multilingual-e5-small` (384
   dimensions). Queries use `query: ` and indexed Canvas text uses `passage: `.
-- The first-pass shape-search classifier uses fixed local prototype examples.
-  The default pgvector shape-result thresholds are shape similarity `0.78` and
-  winner margin `0.08`. A missing or ambiguous local match falls through to
-  GPT Planner.
-- Direct shape-search matches are returned as `find_shapes` with
+- The default pgvector shape-result thresholds are shape similarity `0.78` and
+  winner margin `0.08`. A missing or ambiguous embedding match produces an
+  empty `find_shapes` result after the structured intent classification.
+- Normal mode exposes `chat`, `find_shapes`, `generate_html`,
+  `import_drive_file`, and `unsupported`. The classifier
+  returns `{ intent, arguments }`; App Server stores it in a `route_intent`
+  step and maps it to the registered handler. Adding a future
+  intent also requires an App Server handler and validation.
+
+For `chat`, the classifier returns `contextScope=none` for a self-contained
+general question and `contextScope=selected_scene` only when the user refers to
+the explicit current selection. A selection that happens to exist does not
+affect an unrelated general answer. The Worker makes one additional response
+call for `chat`; App Server accepts only a bounded answer and completes the run
+with `artifact=null`, no resource references, no confirmation, and no Canvas
+mutation. If a selection-scoped question has no complete selected scene, the
+run returns a bounded selection clarification without calling the responder.
+
+The chat responder receives bounded recent `conversationContext` and, only for
+`selected_scene`, an anonymized scene. Raw shape ids are replaced with
+request-local references and asset references are omitted. Canvas text is
+untrusted data rather than instructions. The responder must not claim that it
+changed or executed anything and must not expose UUIDs, tokens, credentials,
+provider payloads, or hidden prompts. PILO AI delegation displays the same
+validated summary verbatim.
+
+For `import_drive_file`, the classifier extracts only a bounded natural-language
+query. App Server searches active `ready` image files under the run's own
+`workspaceId`; it never trusts a Workspace id produced by the model and never
+lists S3 objects. The initial retrieval uses normalized Drive file names and
+folder paths. A single confident result produces an `insert_drive_file` client
+action containing only `fileId`, `fileName`, and `mimeType`. Missing results
+return a bounded explanation, while ambiguous results list up to three file
+names and require a more specific request. The Frontend applies a confident
+action through the normal Classic Canvas `file_node` placement path. The shape
+stores the stable Drive file id and obtains a fresh authorized preview URL when
+rendered, so roomState, history, and checkpoint synchronization remain intact.
+
+For `generate_html`, the Frontend sends only a bounded, normalized
+`selectedScene`; it never sends raw tldraw records. A selected frame includes
+all recursively loaded descendants. Multiple selected roots are normalized
+against a virtual root whose bounds are the union of the selection. The
+Frontend first reads the active editor/roomState-reflected store and recursively
+hydrates persisted frame children through the existing Canvas shape API. If a
+frame's known child count is still incomplete, `selectedSceneError` is sent and
+the run completes without generating a partial artifact.
+
+The AI Worker produces one complete static HTML document with inline CSS. The
+App Server rejects JavaScript, event handlers, active embedded content, and
+oversized output. The Frontend previews the artifact in a sandboxed iframe and
+offers copying the same validated HTML. After receiving the complete artifact,
+the Frontend also creates one `pilo-code-block` beside the selected source area
+with the validated HTML as its code, then binds a connector between the selected
+root shape and the code block. Both records use the normal Classic Canvas shape
+patch path, so they enter roomState, room history, and checkpoint persistence and
+the connector follows either bound shape when it moves. Repeated polling of the
+same run must not insert duplicates. The AI Worker and App Server never write
+these Canvas records directly, no Canvas draft is created, and generated HTML
+does not include JavaScript behavior.
+
+HTML generation uses a dedicated `OPENAI_CANVAS_HTML_TIMEOUT_MS` budget instead
+of the shorter shared planner timeout. Dev configures it to 180 seconds and caps
+the provider response at 32000 output tokens. A provider timeout terminally
+fails the run with a bounded retry message instead of leaving it in `planning`
+for the SQS visibility retry interval.
+
+For HTML generation, `styleMode: faithful` means structural fidelity rather
+than literal Canvas pixel reproduction. The generator preserves hierarchy,
+section order, relative proportions, meaningful overlap, and user-authored
+text, then lays the result out as a browser-filling product UI with grid/flex.
+An explicit visual style in the user's prompt takes precedence. When no style
+is requested, the default is a bright, restrained, Toss-inspired Korean fintech
+visual language. The generator may add concise static example labels, cards,
+values, inputs, and buttons needed to complete the selected sections, but it
+must not add JavaScript behavior or contradict user-authored content.
+- Client-summary and embedding matches are classified as `find_shapes` with
   `focusResult: true`, so the client can move the requester-only Canvas AI
   pointer, zoom to the matching shape area, and highlight the result. Separate
   local `select_shapes` or `focus_viewport` intent classification is not used
   for first-pass routing.
-- Direct existing-shape connection requests such as `A랑 B 연결해줘` may be
-  split into two semantic shape queries. If both sides have confident,
-  different matches, AI Worker returns `connect_shapes`; if either side is
-  ambiguous, the request falls through to GPT Planner.
-
-- Each AI Worker decision can choose exactly one action.
+- Each AI Worker result contains exactly one allowed intent.
 - App Server limits a run to its configured maximum number of steps.
-- Deterministic toolbar-help actions can skip AI Worker planning only when the
+- Deploy App Server support for `route_intent` before deploying the AI Worker
+  classifier. App Server retains the legacy read-only action handlers so jobs
+  produced by the previous Worker remain executable during rollout.
+- Deterministic toolbar-help actions skip AI Worker classification only when the
   request explicitly uses tool-help mode.
-- A draft is generated from `CanvasDraftSpec`; the AI Worker must not generate
-  raw Tldraw shapes.
+- In normal mode the bounded classifier can select `chat`, `find_shapes`,
+  `generate_html`, `import_drive_file`, or `unsupported`. Only `generate_html` with a complete
+  explicit selection can produce a static artifact. Only a validated
+  `import_drive_file` result can request the reversible insertion of an existing
+  authorized Drive image.
 
-## Canvas generation plan contract
+## Disabled legacy generation contract
 
-For generation requests, AI Worker receives the bounded list of Canvas tools
-that PILO can create. It should compose only with these tools:
+`create_draft` is not available to new Canvas Agent runs. The legacy draft
+schema below is retained only so existing stored run/draft records and the
+legacy apply/discard endpoints remain readable during compatibility cleanup.
+AI Worker does not receive this schema or its Canvas generation tool catalog,
+and App Server no longer retains the draft generation, placement, or tool-step
+derivation path.
+
+Historically, generation requests received the bounded list of Canvas tools
+below. This list is no longer included in AI Worker prompts:
 
 | Tool | Source | Draft node/connection kind | Persisted shape |
 | --- | --- | --- | --- |
@@ -207,7 +324,8 @@ AI Worker also receives the bounded Canvas color palette:
 }
 ```
 
-App Server validates this plan before storing it as `CanvasDraftSpec`:
+Before generation was disabled, App Server validated this plan before storing
+it as `CanvasDraftSpec`:
 
 - maximum 16 nodes and 24 connections;
 - only the listed node/connection kinds are accepted;
@@ -221,21 +339,22 @@ App Server validates this plan before storing it as `CanvasDraftSpec`:
   nodes;
 - raw Tldraw shape JSON from AI Worker is ignored and never persisted.
 
-After validation, App Server may translate the whole draft to a nearby empty
+After validation, App Server could translate the whole draft to a nearby empty
 Canvas area. It checks existing Canvas shape bounding boxes around the current
 viewport and tries candidate positions in this order: visible viewport area,
 right/bottom outside the viewport, then nearby grid positions. If no empty
 candidate is found, it falls back to the stable viewport-relative default
 position instead of changing zoom or sending the draft far away.
 
-App Server converts the validated draft plan into `CanvasService.syncShapesBatch`
-operations when the requester applies the draft. The AI Worker decides layout
-intent and bounded coordinates; App Server owns raw shape creation and Canvas
-validation. `toolSteps` are derived from the validated draft so the frontend can
+When the requester applies a stored legacy draft, App Server converts its
+validated plan into `CanvasService.syncShapesBatch` operations. The historical
+AI Worker decided layout intent and bounded coordinates; App Server continues
+to own raw shape creation and Canvas validation. Stored `toolSteps` were derived
+from the validated draft so the frontend can
 show the requester-only Canvas AI pointer moving through the corresponding
 Canvas tools and placement targets.
 
-The client consumes `toolSteps` in order:
+The legacy client preview consumed `toolSteps` in order:
 
 ```text
 tool step    -> move the private pointer to the toolbar tool
@@ -243,18 +362,23 @@ place step   -> move the private pointer to the generated Canvas position
 connect step -> move the private pointer to the generated relationship area
 ```
 
-This animation is local preview/progress only. The actual Canvas mutation still
-happens only when the requester applies the draft.
+This animation was local preview/progress only. The actual Canvas mutation
+still happens only when the requester applies a stored legacy draft.
 
-When `presentationMode` is `background`, the server may still store the same
-draft and derived `toolSteps` for traceability, but clients must not play the
-private Canvas pointer/tool animation. This mode is intended for delegated PILO
-AI requests from outside the Canvas surface where the user should receive the
-Canvas AI final answer without seeing Canvas-local pointer movement.
+Historical records may contain `presentationMode = "background"` and derived
+`toolSteps`; clients must not play the private Canvas pointer/tool animation for
+those records.
 
-## Existing shape connection contract
+## Disabled legacy connection contract
 
-`connect_shapes` is for connecting two shapes that already exist on the Canvas.
+`connect_shapes` is not available to new Canvas Agent runs. It is treated as a
+shape-creation action because it inserts a new arrow/line shape. App Server
+rejects any queued or externally supplied legacy `connect_shapes` step before
+it reaches the Canvas batch mutation path. The dedicated connection batch
+generation implementation has been removed. The historical contract below is
+retained only as migration context.
+
+Historically, `connect_shapes` connected two shapes that already existed on the Canvas.
 Embedding is used only to identify the two shape ids. The App Server owns the
 write operation, endpoint authorization, coordinate calculation, raw Tldraw
 arrow payload, and `CanvasService.syncShapesBatch` call.
@@ -273,30 +397,33 @@ arrow payload, and `CanvasService.syncShapesBatch` call.
 
 - `connectionKind` is `arrow` by default and `line` when the user asks for a
   plain line.
-- When exactly two shapes are selected and the prompt says to connect them,
-  App Server can create this action without AI Worker planning.
+- Historically, when exactly two shapes were selected and the prompt requested
+  a connection, App Server could create this action without AI Worker planning.
 - The action creates one new connection shape. It does not modify or delete the
   two existing target shapes.
 - If the target shapes are not found, are the same shape, or semantic matching
   is ambiguous, the action is not executed automatically.
 
-## Deterministic toolbar-help route
+## Tool-help mode route
 
-Before AI Worker planning, App Server may route built-in Canvas toolbar/help
-requests by keyword only when `toolHelpMode` is `true`. Normal Canvas AI chat
-does not use App Server keyword matching for shape search, selection,
-organization, drafts, or code generation.
+Before AI Worker classification, App Server routes built-in Canvas toolbar/help
+requests only when `toolHelpMode` is `true`. In this mode, tool
+location/explanation matching and the Canvas tool overview are handled directly
+without AI Worker classification. When `toolHelpMode` is `false`, App Server
+does not run toolbar/help, mutation, chat, or shape-search keyword routing; the
+request proceeds through the normal bounded intent classifier.
 
 | Intent | Keywords and examples | Action |
 | --- | --- | --- |
 | Find a Canvas toolbar tool | `도구`, `툴`, `툴바`, `기능`, `버튼`, `아이콘`, `어디`, `위치`, `찾아줘`, `보여줘`, `알려줘`, `사용법`, `어떻게` plus a known tool name<br>`메모 도구 어디 있어?`, `색상 변경 기능 알려줘`, `프레임은 어떻게 써?` | `find_canvas_tool` with `progress.toolTarget` |
 
-External-domain words can still appear as ordinary Canvas text search terms.
-For example, `이슈 메모 찾아줘` may search Canvas shape text through the
-AI Worker shape-search classifier. App Server does not reject external-domain
-phrases by keyword before planning; requests outside the Canvas action schema
-fall through the normal AI Worker route and must still resolve to bounded
-Canvas-only actions or a `finish` response.
+External-domain words can still appear in an ordinary Canvas shape query.
+For example, `이슈 메모 찾아줘` searches the loaded shape summaries and
+current Canvas embedding index for an existing
+Canvas item; it does not read the Issue domain. App Server does not reject
+external-domain words by keyword before classification. The classifier may use
+`find_shapes` for Canvas content, `chat` for a read-only general explanation, or
+`unsupported` when fulfilling the request requires access to an external domain.
 
 Basic Canvas tool discovery uses `progress.toolTarget` so the client can move
 the requester-only Canvas AI pointer to the matching toolbar button and draw a
@@ -343,15 +470,15 @@ Basic Canvas tool targets:
 | Value | Meaning |
 | --- | --- |
 | `queued` | Run was created and is waiting for an App Server or AI Worker step. |
-| `planning` | AI Worker is selecting the next Canvas action. |
-| `executing` | App Server is validating or executing the selected action. |
-| `draft_ready` | A requester-only preview draft is ready. |
+| `planning` | AI Worker is classifying the Canvas intent and extracting typed arguments. |
+| `executing` | App Server is validating and executing the classified intent handler. |
+| `draft_ready` | Legacy status for a requester-only preview created before generation was disabled. |
 | `completed` | The requested work finished. |
 | `failed` | The run cannot continue because of an unrecoverable error. |
 | `cancelled` | The requester cancelled the run. |
 | `expired` | The retention period elapsed. |
 
-### CanvasAgentDraft status
+### Legacy CanvasAgentDraft status
 
 | Value | Meaning |
 | --- | --- |
@@ -367,8 +494,8 @@ Basic Canvas tool targets:
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs` | Create an asynchronous Canvas Agent run. |
 | `GET` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs/{runId}` | Get a requester-owned run and bounded step summaries. |
 | `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-runs/{runId}/cancel` | Cancel a queued, planning, or executing run. |
-| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/apply` | Apply a requester-owned preview draft to the Canvas. |
-| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/discard` | Discard a requester-owned preview draft. |
+| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/apply` | Legacy compatibility: apply a requester-owned preview created before generation was disabled. |
+| `POST` | `/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/discard` | Legacy compatibility: discard a requester-owned preview created before generation was disabled. |
 
 ## Create Canvas Agent run
 
@@ -380,8 +507,49 @@ Request:
 
 ```json
 {
-  "prompt": "선택한 메모를 발표용 흐름도로 정리해줘",
-  "selectedShapeIds": ["shape:note-1", "shape:note-2"],
+  "prompt": "선택한 대시보드를 HTML로 만들어줘",
+  "selectedShapeIds": ["shape:frame-1"],
+  "shapeSummaries": [
+    {
+      "id": "shape:frame-1",
+      "shapeType": "frame",
+      "title": "대시보드",
+      "text": null,
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900
+    }
+  ],
+  "selectedScene": {
+    "selectionMode": "frame",
+    "bounds": { "width": 1440, "height": 900 },
+    "rootShapeIds": ["shape:frame-1"],
+    "shapes": [
+      {
+        "id": "shape:frame-1",
+        "shapeType": "frame",
+        "parentId": null,
+        "x": 0,
+        "y": 0,
+        "width": 1440,
+        "height": 900,
+        "rotation": 0,
+        "zIndex": 0,
+        "depth": 0,
+        "title": "대시보드",
+        "text": null,
+        "assetRef": null,
+        "style": { "backgroundColor": "#ffffff" }
+      }
+    ],
+    "options": {
+      "styleMode": "faithful",
+      "responsive": false,
+      "includeJavaScript": false
+    }
+  },
+  "selectedSceneError": null,
   "viewport": {
     "x": 0,
     "y": 0,
@@ -390,17 +558,34 @@ Request:
   },
   "presentationMode": "interactive",
   "toolHelpMode": false,
-  "clientRequestId": "canvas-ai-20260710-0001"
+  "conversationContext": {
+    "messages": [
+      { "role": "user", "content": "이 화면을 코드로 옮길 수 있어?" },
+      { "role": "assistant", "content": "코드로 만들 영역을 선택해 주세요." }
+    ],
+    "lastTask": {
+      "prompt": "이 화면을 코드로 옮길 수 있어?",
+      "status": "completed",
+      "summary": "코드로 만들 영역을 선택해 주세요.",
+      "draftId": null,
+      "draftTitle": null
+    }
+  },
+  "clientRequestId": "canvas-ai-html-20260717-0001"
 }
 ```
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `prompt` | Yes | Trimmed user request, 1 to 32768 bytes. |
-| `selectedShapeIds` | No | Current Canvas selection. Every id must belong to the path Canvas. |
+| `selectedShapeIds` | No | Current Canvas selection, up to 160 ids. |
+| `shapeSummaries` | No | Up to 120 bounded summaries from the requester's currently loaded tldraw shapes. Selected and visible shapes should be ordered first. These summaries are advisory and may be used only for read-only search, highlight, and viewport focus. |
+| `selectedScene` | No | Up to 160 normalized selected shapes and 50000 bytes. Required for `generate_html`; omitted when there is no selection or the snapshot is incomplete. Coordinates are relative to the real or virtual root bounds. |
+| `selectedSceneError` | No | Bounded client-side selection/hydration error. A `generate_html` intent returns this message without producing partial HTML. |
 | `viewport` | No | Current visible Canvas bounds used only to create minimal planning context. |
-| `presentationMode` | No | `interactive` shows requester-only progress, pointer, and `toolSteps` playback on the Canvas surface. `background` creates the run/draft without Canvas pointer playback. Defaults to `interactive`. |
-| `toolHelpMode` | No | When `true`, route the prompt to the built-in Canvas toolbar/help dictionary instead of Canvas content search or planner routing. Defaults to `false`. |
+| `presentationMode` | No | `interactive` shows requester-only progress, pointer, highlight, and viewport focus on the Canvas surface. `background` suppresses automatic Canvas-local playback. A requester who explicitly opens a validated `canvasAgentRunId` deep link can still consume its search focus or Drive insertion once. Defaults to `interactive`. |
+| `toolHelpMode` | No | When `true`, route the prompt only to built-in Canvas toolbar/help guidance. When `false`, classify among general or selection-scoped chat, existing-shape search, Workspace Drive image import, selected-scene HTML generation, and unsupported mutation or external-domain requests. Defaults to `false`. |
+| `conversationContext` | No | Short-lived same-panel chat memory. `messages` contains up to 10 recent user/assistant messages, and `lastTask` can describe the previous Canvas Agent run for follow-up prompts such as “why?”, “another way?”, or an explicit retry. The current prompt remains authoritative. Legacy draft id/title fields remain nullable for compatibility. |
 | `clientRequestId` | No | Stable retry idempotency key, up to 128 bytes. |
 
 Server rules:
@@ -408,14 +593,19 @@ Server rules:
 - The server checks Workspace membership and Canvas ownership before creating a run.
 - The server captures the Canvas `latestOpSeq` as `canvasRevision`.
 - Built-in tool/help matching is only deterministic when `toolHelpMode` is
-  `true`. Normal Canvas AI chat requests continue through Canvas content
-  search, semantic routing, or planner routing.
+  `true`. Normal Canvas AI requests continue through Canvas content search,
+  semantic retrieval, or structured intent classification.
+- `conversationContext` is advisory context only. The current `prompt` remains
+  authoritative, and the server stores the context inside the run `context_json`
+  without requiring a DB schema change.
 - Repeating the same requester, Canvas, and `clientRequestId` returns the
   existing run and does not enqueue another job.
 - Reusing a `clientRequestId` with different request content returns
   `409 CLIENT_REQUEST_ID_CONFLICT`.
-- The App Server constructs a bounded shape summary before enqueueing an AI job;
-  it must not send a complete raw Canvas snapshot by default.
+- The Frontend constructs bounded search summaries and a separate normalized
+  selected scene. It must not send `rawShape`, bindings, asset bodies, or a
+  complete Canvas snapshot. The App Server validates counts, byte sizes,
+  hierarchy, style primitives, ids, and bounds.
 
 Response: `202 Accepted`
 
@@ -429,7 +619,7 @@ Response: `202 Accepted`
       "canvasId": "canvas_uuid",
       "presentationMode": "interactive",
       "status": "queued",
-      "prompt": "선택한 메모를 발표용 흐름도로 정리해줘",
+      "prompt": "선택한 대시보드를 HTML로 만들어줘",
       "message": "Canvas AI 요청을 준비하고 있습니다.",
       "createdAt": "2026-07-10T00:00:00.000Z",
       "completedAt": null
@@ -460,10 +650,12 @@ resource ids, not raw shape payloads or AI provider output.
       "workspaceId": "workspace_uuid",
       "canvasId": "canvas_uuid",
       "presentationMode": "interactive",
-      "status": "draft_ready",
-      "prompt": "선택한 메모를 발표용 흐름도로 정리해줘",
-      "summary": "메모 2개를 발표용 흐름도 초안으로 정리했습니다.",
+      "status": "completed",
+      "prompt": "로그인 메모 찾아줘",
+      "summary": "임베딩 검색으로 ‘로그인 메모’ 관련 도형 2개를 찾았습니다.",
       "canvasRevision": 103,
+      "artifact": null,
+      "clientAction": null,
       "createdAt": "2026-07-10T00:00:00.000Z",
       "completedAt": null
     },
@@ -471,23 +663,69 @@ resource ids, not raw shape payloads or AI provider output.
       {
         "id": "canvas_agent_step_uuid",
         "order": 1,
-        "actionName": "create_draft",
+        "actionName": "route_intent",
         "status": "completed",
-        "resourceRefs": ["canvas_agent_draft_uuid"],
+        "resourceRefs": ["shape:login", "shape:auth"],
         "completedAt": "2026-07-10T00:00:03.000Z"
       }
     ],
-    "drafts": [
-      {
-        "id": "canvas_agent_draft_uuid",
-        "status": "preview",
-        "summary": "문제 → 해결 → 기대 효과 흐름",
-        "expiresAt": "2026-07-11T00:00:03.000Z"
-      }
-    ]
+    "drafts": []
   }
 }
 ```
+
+For a completed `generate_html` run, `run.artifact` is returned as:
+
+```json
+{
+  "kind": "html",
+  "title": "대시보드",
+  "html": "<!doctype html><html>...</html>",
+  "sourceShapeIds": ["shape:frame-1", "shape:title-1"]
+}
+```
+
+The Frontend uses `sourceShapeIds` together with the submitted
+`selectedScene.rootShapeIds` to place the code block to the right of the source
+bounds. A real selected frame is preferred as the connector target; for a
+multi-selection without a frame, the first selected root is used. If the source
+records are no longer loaded, the artifact remains available in chat for preview
+and copy, but no partial Canvas insertion is attempted.
+
+For a completed and unambiguous `import_drive_file` run, `run.clientAction` is:
+
+```json
+{
+  "type": "insert_drive_file",
+  "file": {
+    "fileId": "drive_item_uuid",
+    "fileName": "PILO 로고.png",
+    "mimeType": "image/png"
+  }
+}
+```
+
+The action never contains an S3 bucket, object key, credential, or presigned
+URL. A Canvas deep link carries only `canvasId` and `canvasAgentRunId`. The
+requesting client reads the requester-only run, revalidates the Drive file by
+requesting a fresh preview grant, and creates the `file_node` through its
+ordinary editor/realtime path. The file node uses a deterministic shape id
+derived from the run id, so refreshes or repeated link clicks converge on the
+same roomState record instead of creating duplicates. The consumed run query is
+removed after a successful insertion.
+
+For a completed `find_shapes` run opened through the same deep link, the client
+first focuses `run.progress.targetViewport` so lazy loading can hydrate the
+area. `run.progress.loadRootShapeIds` contains the validated top-level frame ids
+whose descendants must be hydrated before focusing a nested result. The client
+loads those frame subtrees, retries `highlightedShapeIds`, selects only the
+matched shapes that are loaded, and centers their actual combined editor bounds.
+The App Server fallback viewport composes the stored parent translations and
+rotations, but `editor.getShapePageBounds()` remains authoritative after load.
+If matched shapes are too far apart for a useful combined viewport, progress
+focuses the highest-ranked result while `resourceRefs` retains every match.
+This explicit navigation does not change the automatic playback rule for
+`presentationMode=background`.
 
 Main errors: `401 UNAUTHORIZED`, `403 FORBIDDEN`, `404 CANVAS_AGENT_RUN_NOT_FOUND`.
 
@@ -516,7 +754,7 @@ Response: `200 OK`
 }
 ```
 
-## Apply Canvas Agent draft
+## Apply legacy Canvas Agent draft
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/apply
@@ -530,7 +768,8 @@ Request:
 }
 ```
 
-The requester can apply only a `preview` draft. App Server validates the draft,
+New runs cannot create this preview. For compatibility, the requester can apply
+only an existing `preview` draft. App Server validates the draft,
 checks that referenced source shapes still exist, and persists resulting shapes
 through the existing Canvas batch mutation flow.
 
@@ -558,14 +797,14 @@ Main errors: `400 BAD_REQUEST`, `401 UNAUTHORIZED`, `403 FORBIDDEN`,
 `404 CANVAS_AGENT_DRAFT_NOT_FOUND`, `409 CANVAS_AGENT_DRAFT_STALE`,
 `409 CANVAS_AGENT_DRAFT_NOT_PREVIEW`.
 
-## Discard Canvas Agent draft
+## Discard legacy Canvas Agent draft
 
 ```http
 POST /api/v1/workspaces/{workspaceId}/canvases/{canvasId}/agent-drafts/{draftId}/discard
 ```
 
-Only the requester can discard a `preview` draft. Discarding a draft does not
-change Canvas shapes.
+New runs cannot create this preview. Only the requester can discard an existing
+legacy `preview` draft. Discarding a draft does not change Canvas shapes.
 
 Response: `200 OK`
 
@@ -585,29 +824,49 @@ Response: `200 OK`
 
 The requesting Canvas client polls the run detail endpoint while a run is
 non-terminal. A response may include `progress` with a message, highlighted
-shape ids, and an optional target viewport. The client renders any virtual
-pointer, selection highlight, and preview locally; it does not publish those
-values through shared Canvas presence or store pointer coordinates in the DB.
-For generated drafts, the response may also include `draft.spec.toolSteps`;
-those steps are derived from validated Canvas nodes/connections and can be used
-only for requester-local creation animation.
+shape ids, optional root frame ids to hydrate, and an optional target viewport.
+For shape search, a DB match reports that the result is loading until the target
+exists in the editor. The client reports focus completion only after it can
+derive actual editor bounds; a bounded retry timeout does not claim that screen
+navigation succeeded. The client renders any virtual pointer and selection
+highlight locally; it does not publish those values through shared Canvas
+presence or store pointer coordinates in the DB.
 
-## Initial action set
+When an authorized requester polls an `executing` run, App Server also attempts
+to claim and execute that run's pending action before returning the refreshed
+detail. The periodic action sweep remains a recovery fallback, so completion
+does not depend on another Canvas Agent request waking the executor.
+
+## Intent and executor set
 
 ```text
-find_shapes
-select_shapes
-focus_viewport
-connect_shapes
-create_draft
-find_canvas_tool
-finish
+AI Worker intent:
+  chat
+  find_shapes
+  generate_html
+  import_drive_file
+  unsupported
+
+App Server executor actions:
+  route_intent
+  find_canvas_tool
+  finish
+
+Legacy read-only executor compatibility:
+  find_shapes
+  select_shapes
+  focus_viewport
 ```
 
-`apply_draft` and `discard_draft` are requester-only API operations, not AI
-Worker-planned actions.
+`route_intent.input_json` stores the classified `intent` and typed `arguments`.
+App Server owns the mapping from that intent to an executable Canvas handler.
 
-New Canvas actions require an input/output schema, App Server validation and
-executor, and documentation update. Canvas Agent actions must stay Canvas-only;
-adding Calendar, Issue, PR, Meeting, or any external-domain read/write/Canvas
-representation is out of scope for this API.
+`connect_shapes` and `create_draft` are rejected by both AI Worker
+classification and App Server execution. Legacy `apply_draft` and
+`discard_draft` remain
+requester-only compatibility API operations, not AI Worker-classified intents.
+
+New Canvas intents require an input/output schema, App Server validation and
+registered executor, tests, and documentation update. Canvas Agent intents must
+stay Canvas-only; adding Calendar, Issue, PR, Meeting, or any external-domain
+read/write/Canvas representation is out of scope for this API.

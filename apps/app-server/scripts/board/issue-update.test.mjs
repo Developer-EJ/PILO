@@ -10,10 +10,13 @@ const {
   BoardIssueUpdateService
 } = require("../../dist/modules/board/board-issue-update.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
-const { forbidden } = require("../../dist/common/api-error.js");
+const { badRequest, forbidden } = require("../../dist/common/api-error.js");
 const {
   GithubIssueAssigneeValidationError
 } = require("../../dist/modules/github-integration/github-issue-assignee.error.js");
+const {
+  GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+} = require("../../dist/modules/github-integration/github-oauth-refresh.error.js");
 
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
@@ -134,15 +137,49 @@ class FakeGithubIssueWriteService {
       })
     };
   }
+
+  async updateIssueAssigneesDelta(input) {
+    this.calls.push({ method: "updateIssueAssigneesDelta", ...input });
+    if (this.error) {
+      throw this.error;
+    }
+    if (this.fail) {
+      throw new Error("raw provider failure");
+    }
+
+    return {
+      assigneesApplied: this.assigneesApplied,
+      issue: githubIssuePayload({
+        assignees: (
+          this.assigneesApplied ? ["alice", ...input.add] : []
+        ).map((login) => ({
+          login,
+          avatar_url: `https://avatar.test/${login}`
+        }))
+      })
+    };
+  }
+}
+
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ input, transaction });
+  }
 }
 
 function createSubject(database, githubIssueWriteService = new FakeGithubIssueWriteService()) {
   const workspaceService = new FakeWorkspaceService();
   const updateQueries = new BoardIssueUpdateQueries(database);
+  const activityLogService = new FakeActivityLogService();
   const updateService = new BoardIssueUpdateService(
     updateQueries,
     workspaceService,
-    githubIssueWriteService
+    githubIssueWriteService,
+    activityLogService
   );
   const service = new BoardService(
     undefined,
@@ -153,6 +190,7 @@ function createSubject(database, githubIssueWriteService = new FakeGithubIssueWr
   );
 
   return {
+    activityLogService,
     database,
     githubIssueWriteService,
     service,
@@ -264,8 +302,13 @@ function githubIssuePayload(overrides = {}) {
       }
     ]
   });
-  const { database: db, githubIssueWriteService, service, workspaceService } =
-    createSubject(database);
+  const {
+    activityLogService,
+    database: db,
+    githubIssueWriteService,
+    service,
+    workspaceService
+  } = createSubject(database);
 
   const result = await service.updateBoardIssue(
     currentUserId,
@@ -294,6 +337,17 @@ function githubIssuePayload(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(activityLogService.calls[0].transaction, db.transactions[0]);
+  assert.equal(activityLogService.calls[0].input.action, "pilo_issue_updated");
+  assert.deepEqual(activityLogService.calls[0].input.metadata.data, {
+    boardId,
+    changedFields: ["title", "body", "state", "assignees"]
+  });
+  assert.doesNotMatch(
+    JSON.stringify(activityLogService.calls[0].input),
+    /Updated issue title|Updated issue body/
+  );
   assert.ok(
     db.queries.some((query) =>
       /UPDATE github_issues[\s\S]*title[\s\S]*body[\s\S]*state/i.test(query.text)
@@ -316,6 +370,27 @@ function githubIssuePayload(overrides = {}) {
       singleSelectName: "High"
     }
   ]);
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [
+      updateTargetRow(),
+      updatedIssueRow({ title: "Old issue title" })
+    ],
+    queryRows: [[projectFieldRow()]]
+  });
+  const { activityLogService, service } = createSubject(database);
+
+  await service.updateBoardIssue(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    { title: "Old issue title" }
+  );
+
+  assert.equal(activityLogService.calls.length, 0);
 }
 
 {
@@ -664,4 +739,267 @@ for (const { input, message, name } of [
   );
 
   assert.equal(db.transactions.length, 0);
+}
+{
+  const finalAssignees = [
+    { login: "alice", avatar_url: "https://avatar.test/alice" },
+    { login: "carol", avatar_url: "https://avatar.test/carol" }
+  ];
+  const database = new FakeDatabase({
+    queryOneRows: [
+      updateTargetRow({
+        assignees: [{ login: "alice" }, { login: "bob" }]
+      }),
+      updatedIssueRow({ assignees: finalAssignees })
+    ],
+    queryRows: [[projectFieldRow()]]
+  });
+  const {
+    activityLogService,
+    database: db,
+    githubIssueWriteService,
+    service,
+    workspaceService
+  } = createSubject(database);
+
+  const result = await service.updateBoardIssueAssigneesDelta(
+    currentUserId,
+    workspaceId,
+    boardId,
+    issueId,
+    {
+      addAssignees: ["carol"],
+      removeAssignees: ["bob"]
+    }
+  );
+
+  assert.deepEqual(workspaceService.calls, [
+    { userId: currentUserId, workspaceId }
+  ]);
+  assert.deepEqual(githubIssueWriteService.calls, [
+    {
+      method: "updateIssueAssigneesDelta",
+      add: ["carol"],
+      currentUserId,
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      remove: ["bob"],
+      repo: "PILO"
+    }
+  ]);
+  assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.deepEqual(activityLogService.calls[0].input.metadata.data, {
+    boardId,
+    changedFields: ["assignees"]
+  });
+  assert.ok(
+    db.queries.some((query) =>
+      /UPDATE github_issues[\s\S]*assignees/i.test(query.text)
+    )
+  );
+  assert.ok(
+    db.queries.some((query) =>
+      /UPDATE pilo_issues[\s\S]*assignees/i.test(query.text)
+    )
+  );
+  assert.deepEqual(
+    result.issue.assignees.map((item) => item.login),
+    ["alice", "carol"]
+  );
+}
+
+{
+  const database = new FakeDatabase({
+    queryOneRows: [null]
+  });
+  const { database: db, githubIssueWriteService, service } =
+    createSubject(database);
+
+  await assert.rejects(
+    () =>
+      service.updateBoardIssueAssigneesDelta(
+        currentUserId,
+        workspaceId,
+        boardId,
+        issueId,
+        {
+          addAssignees: ["carol"],
+          removeAssignees: []
+        }
+      ),
+    (error) => error.getStatus() === 404
+  );
+
+  assert.equal(githubIssueWriteService.calls.length, 0);
+  assert.equal(db.transactions.length, 0);
+}
+
+const { GithubAppClient: BoardTestGithubAppClient } = require(
+  "../../dist/modules/github-integration/github-app.client.js"
+);
+const {
+  BoardIssueAssigneeQueries: BoardTestIssueAssigneeQueries
+} = require("../../dist/modules/board/queries/board-issue-assignee.queries.js");
+const {
+  BoardIssueAssigneeService: BoardTestIssueAssigneeService
+} = require("../../dist/modules/board/board-issue-assignee.service.js");
+
+async function captureGithub401(operation) {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ message: "provider detail" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+  try {
+    try {
+      await operation(new BoardTestGithubAppClient());
+    } catch (error) {
+      assert.equal(calls, 1, "HTTP 401 must not be retried");
+      return error;
+    }
+    assert.fail("Expected GitHub operation to reject");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function assertBoardReconnectError(error) {
+  assert.equal(error.getStatus(), 400);
+  assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+  assert.notEqual(error.getResponse().error.code, "BAD_GATEWAY");
+  assert.equal(
+    error.getResponse().error.message,
+    "GitHub OAuth connection is invalid; reconnect is required"
+  );
+  return true;
+}
+
+function assertBoardProactiveReconnectError(error) {
+  assert.equal(error.getStatus(), 400);
+  assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+  assert.equal(
+    error.getResponse().error.message,
+    GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE
+  );
+  return true;
+}
+
+{
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({
+    error: badRequest(GITHUB_OAUTH_RECONNECTION_REQUIRED_MESSAGE)
+  });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { title: "Reconnect proactively" }
+    ),
+    assertBoardProactiveReconnectError
+  );
+}
+
+{
+  const github401 = await captureGithub401((client) =>
+    client.updateRepositoryIssue({
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      title: "Reconnect required",
+      userAccessToken: "user-oauth-token"
+    })
+  );
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({ error: github401 });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssue(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { title: "Reconnect required" }
+    ),
+    assertBoardReconnectError
+  );
+}
+
+{
+  const github401 = await captureGithub401((client) =>
+    client.addRepositoryIssueAssignees({
+      assignees: ["carol"],
+      issueNumber: 203,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-oauth-token"
+    })
+  );
+  const database = new FakeDatabase({ queryOneRows: [updateTargetRow()] });
+  const githubIssueWriteService = new FakeGithubIssueWriteService({ error: github401 });
+  const { service } = createSubject(database, githubIssueWriteService);
+
+  await assert.rejects(
+    () => service.updateBoardIssueAssigneesDelta(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId,
+      { addAssignees: ["carol"], removeAssignees: [] }
+    ),
+    assertBoardReconnectError
+  );
+}
+
+{
+  const github401 = await captureGithub401((client) =>
+    client.listRepositoryAssignees({
+      owner: "Developer-EJ",
+      repo: "PILO",
+      userAccessToken: "user-oauth-token"
+    })
+  );
+  const database = new FakeDatabase({
+    queryOneRows: [{
+      repository_owner_login: "Developer-EJ",
+      repository_name: "PILO"
+    }]
+  });
+  const assigneeService = new BoardTestIssueAssigneeService(
+    new BoardTestIssueAssigneeQueries(database),
+    new FakeWorkspaceService(),
+    {
+      async listAssignableUsers() {
+        throw github401;
+      }
+    }
+  );
+  const service = new BoardService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    assigneeService
+  );
+
+  await assert.rejects(
+    () => service.listBoardIssueAssigneeOptions(
+      currentUserId,
+      workspaceId,
+      boardId,
+      issueId
+    ),
+    assertBoardReconnectError
+  );
 }

@@ -23,7 +23,10 @@ import {
   MeetingRoomListPayload,
   MeetingRoomMutationPayload,
   MeetingReportDetailResponsePayload,
+  MeetingReportContentMutationPayload,
+  MeetingReportDeletionPayload,
   MeetingReportActionItemMutationPayload,
+  MeetingReportActionItemExtractionRetryPayload,
   MeetingReportListPayload,
   MeetingReportRegenerationPayload,
   MeetingService,
@@ -32,11 +35,21 @@ import {
   StartRecordingPayload,
   StartMeetingPayload
 } from "./meeting.service";
+import {
+  MeetingActionItemDeliveryOptionsPayload,
+  MeetingActionItemDeliveryPayload,
+  MeetingActionItemDeliveryService
+} from "./meeting-action-item-delivery.service";
+import { MeetingNotificationService } from "./meeting-notification.service";
 
 @Controller("workspaces/:workspaceId")
 @UseGuards(AuthGuard)
 export class MeetingController {
-  constructor(private readonly meetingService: MeetingService) {}
+  constructor(
+    private readonly meetingService: MeetingService,
+    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
+    private readonly meetingNotificationService: MeetingNotificationService
+  ) {}
 
   @Get("meeting-rooms")
   async listMeetingRooms(
@@ -265,6 +278,40 @@ export class MeetingController {
     return apiResponse(result);
   }
 
+  @Post("meetings/:meetingId/invitations")
+  async createInvitation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingId") meetingId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<{ invitationId: string; status: "PENDING" }>> {
+    return apiResponse(
+      await this.meetingNotificationService.createInvitation(
+        currentUserId,
+        workspaceId,
+        meetingId,
+        body
+      )
+    );
+  }
+
+  @Delete("meetings/:meetingId/invitations/:invitationId")
+  async cancelInvitation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("meetingId") meetingId: string,
+    @Param("invitationId") invitationId: string
+  ): Promise<ApiSuccessResponse<{ invitationId: string; status: "CANCELLED" }>> {
+    return apiResponse(
+      await this.meetingNotificationService.cancelInvitation(
+        currentUserId,
+        workspaceId,
+        meetingId,
+        invitationId
+      )
+    );
+  }
+
   @Get("meeting-reports")
   async listReports(
     @CurrentUserId() currentUserId: string,
@@ -301,6 +348,34 @@ export class MeetingController {
     return apiResponse(result);
   }
 
+  @Patch("meeting-reports/:reportId")
+  async updateReportContent(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingReportContentMutationPayload>> {
+    return apiResponse(
+      await this.meetingService.updateMeetingReportContent(
+        currentUserId,
+        workspaceId,
+        reportId,
+        body
+      )
+    );
+  }
+
+  @Delete("meeting-reports/:reportId")
+  async deleteReport(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string
+  ): Promise<ApiSuccessResponse<MeetingReportDeletionPayload>> {
+    return apiResponse(
+      await this.meetingService.deleteReport(currentUserId, workspaceId, reportId)
+    );
+  }
+
   @Patch("meeting-reports/:reportId/action-items/:actionItemId")
   async updateReportActionItem(
     @CurrentUserId() currentUserId: string,
@@ -333,6 +408,42 @@ export class MeetingController {
         workspaceId,
         reportId,
         actionItemId
+      )
+    );
+  }
+
+  @Get("meeting-reports/:reportId/action-items/:actionItemId/delivery-options")
+  async getReportActionItemDeliveryOptions(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string
+  ): Promise<ApiSuccessResponse<MeetingActionItemDeliveryOptionsPayload>> {
+    return apiResponse(
+      await this.meetingActionItemDeliveryService.listIssueDeliveryOptions(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId
+      )
+    );
+  }
+
+  @Post("meeting-reports/:reportId/action-items/:actionItemId/deliveries")
+  async deliverReportActionItem(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string,
+    @Param("actionItemId") actionItemId: string,
+    @Body() body: unknown
+  ): Promise<ApiSuccessResponse<MeetingActionItemDeliveryPayload>> {
+    return apiResponse(
+      await this.meetingActionItemDeliveryService.deliver(
+        currentUserId,
+        workspaceId,
+        reportId,
+        actionItemId,
+        body
       )
     );
   }
@@ -380,5 +491,20 @@ export class MeetingController {
       reportId
     );
     return apiResponse(result);
+  }
+
+  @Post("meeting-reports/:reportId/action-item-extractions/retry")
+  async retryReportActionItemExtraction(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("reportId") reportId: string
+  ): Promise<ApiSuccessResponse<MeetingReportActionItemExtractionRetryPayload>> {
+    return apiResponse(
+      await this.meetingService.retryMeetingReportActionItemExtraction(
+        currentUserId,
+        workspaceId,
+        reportId
+      )
+    );
   }
 }

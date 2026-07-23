@@ -10,6 +10,10 @@ from app.canvas_agent.types import (
     CanvasSemanticShapeMatch,
 )
 
+CODE_GENERATION_FAILURE_MESSAGE = "코드 생성 중 오류가 났어요. 다시 시도해 주세요."
+CODE_GENERATION_TIMEOUT_MESSAGE = "코드 생성 시간이 초과됐어요. 다시 시도해 주세요."
+GENERIC_FAILURE_MESSAGE = "Canvas AI 작업을 완료하지 못했습니다."
+
 
 class PgCanvasAgentRepository:
     def __init__(self, database_url: str, database_ssl: bool) -> None:
@@ -69,6 +73,15 @@ class PgCanvasAgentRepository:
                 "resourceRefs": _json_list(previous["resource_refs"]),
             }
 
+        request_context = _json_object(row["context_json"])
+        selected_shape_ids = _string_list(request_context.get("selectedShapeIds"))[:12]
+        client_shape_summaries = _json_list(request_context.get("shapeSummaries"))
+        if selected_shape_ids and not client_shape_summaries:
+            request_context["selectedShapeSummaries"] = self._selected_shape_summaries(
+                str(row["canvas_id"]),
+                selected_shape_ids,
+            )
+
         return CanvasAgentRunContext(
             run_id=str(row["id"]),
             workspace_id=str(row["workspace_id"]),
@@ -76,18 +89,50 @@ class PgCanvasAgentRepository:
             requested_by_user_id=str(row["requested_by_user_id"]),
             status=str(row["status"]),
             prompt=str(row["prompt"]),
-            request_context=_json_object(row["context_json"]),
+            request_context=request_context,
             previous_action=previous_action,
         )
 
-    def create_planned_action(
+    def _selected_shape_summaries(
+        self,
+        canvas_id: str,
+        shape_ids: list[str],
+    ) -> list[dict[str, object]]:
+        if not shape_ids:
+            return []
+        rows = self.connection.execute(
+            """
+            SELECT id, title, text_content, shape_type, raw_shape
+            FROM canvas_freeform_shapes
+            WHERE canvas_id = %s
+              AND deleted_at IS NULL
+              AND (
+                id = ANY(%s::text[])
+                OR raw_shape->>'parentId' = ANY(%s::text[])
+              )
+            ORDER BY
+              CASE WHEN id = ANY(%s::text[]) THEN 0 ELSE 1 END,
+              array_position(%s::text[], COALESCE(raw_shape->>'parentId', id)),
+              id
+            LIMIT 40
+            """,
+            (canvas_id, shape_ids, shape_ids, shape_ids, shape_ids),
+        ).fetchall()
+
+        return [_shape_summary(row) for row in rows]
+
+    def create_classified_intent(
         self,
         context: CanvasAgentRunContext,
-        action_name: str,
-        action_input: dict[str, object],
+        intent: str,
+        arguments: dict[str, object],
         message: str,
         model_name: str,
     ) -> None:
+        action_input = {
+            "intent": intent,
+            "arguments": arguments,
+        }
         self.connection.execute(
             """
             WITH next_step AS (
@@ -106,7 +151,7 @@ class PgCanvasAgentRepository:
             (
                 context.run_id,
                 context.run_id,
-                action_name,
+                "route_intent",
                 json.dumps(action_input, ensure_ascii=False),
                 model_name,
             ),
@@ -125,7 +170,7 @@ class PgCanvasAgentRepository:
                     {
                         "progress": {
                             "message": message,
-                            "highlightedShapeIds": _shape_ids(action_input),
+                            "highlightedShapeIds": _shape_ids(arguments),
                             "targetViewport": None,
                         }
                     },
@@ -163,16 +208,41 @@ class PgCanvasAgentRepository:
         )
 
     def mark_failed(self, run_id: str, error_message: str) -> None:
+        safe_error_message = error_message[:4096]
+        user_message = (
+            safe_error_message
+            if safe_error_message
+            in {CODE_GENERATION_FAILURE_MESSAGE, CODE_GENERATION_TIMEOUT_MESSAGE}
+            else GENERIC_FAILURE_MESSAGE
+        )
         self.connection.execute(
             """
             UPDATE canvas_agent_runs
             SET status = 'failed', error_code = 'CANVAS_AGENT_PLANNER_FAILED',
-                error_message = %s, result_summary = 'Canvas AI 작업을 완료하지 못했습니다.',
+                error_message = %s,
+                result_summary = %s,
+                result_json = jsonb_set(
+                    COALESCE(result_json, '{}'::jsonb),
+                    '{progress}',
+                    jsonb_build_object(
+                        'message', %s,
+                        'highlightedShapeIds', '[]'::jsonb,
+                        'targetViewport', NULL,
+                        'toolTarget', NULL,
+                        'toolTargetLabel', NULL
+                    ),
+                    true
+                ),
                 completed_at = now()
             WHERE id = %s
               AND status NOT IN ('completed', 'cancelled', 'expired', 'draft_ready')
             """,
-            (error_message[:4096], run_id),
+            (
+                safe_error_message,
+                user_message,
+                user_message,
+                run_id,
+            ),
         )
 
     def fail_planning_after_retry_exhaustion(self, run_id: str) -> bool:
@@ -185,12 +255,28 @@ class PgCanvasAgentRepository:
                 SET status = 'failed',
                     error_code = 'CANVAS_AGENT_PLANNER_RETRY_EXHAUSTED',
                     error_message = 'Canvas AI request could not be planned. Please try again.',
-                    result_summary = 'Canvas AI 작업을 완료하지 못했습니다.',
+                    result_summary = %s,
+                    result_json = jsonb_set(
+                        COALESCE(result_json, '{}'::jsonb),
+                        '{progress}',
+                        jsonb_build_object(
+                            'message', %s,
+                            'highlightedShapeIds', '[]'::jsonb,
+                            'targetViewport', NULL,
+                            'toolTarget', NULL,
+                            'toolTargetLabel', NULL
+                        ),
+                        true
+                    ),
                     completed_at = now()
                 WHERE id = %s
                   AND status IN ('queued', 'planning')
                 """,
-                (run_id,),
+                (
+                    GENERIC_FAILURE_MESSAGE,
+                    GENERIC_FAILURE_MESSAGE,
+                    run_id,
+                ),
             )
             return cursor.rowcount > 0
         finally:
@@ -212,6 +298,82 @@ class PgCanvasAgentRepository:
             (workspace_id, canvas_id),
         ).fetchone()
         return row is not None
+
+    def search_text_shapes(
+        self,
+        workspace_id: str,
+        canvas_id: str,
+        query: str,
+        limit: int = 4,
+    ) -> list[CanvasSemanticShapeMatch]:
+        normalized = query.strip()
+        if not normalized:
+            return []
+
+        exact_pattern = f"%{_escape_like(normalized)}%"
+        term_patterns = [f"%{_escape_like(term)}%" for term in _search_terms(normalized)]
+        rows = self.connection.execute(
+            """
+            WITH scoped_shapes AS MATERIALIZED (
+              SELECT
+                shape.id,
+                shape.updated_at,
+                concat_ws(
+                  ' ',
+                  COALESCE(shape.title, ''),
+                  COALESCE(shape.text_content, ''),
+                  shape.shape_type
+                ) AS searchable_text
+              FROM canvas_freeform_shapes shape
+              INNER JOIN canvas board ON board.id = shape.canvas_id
+              WHERE board.workspace_id = %s
+                AND board.id = %s
+                AND board.board_type = 'freeform'
+                AND shape.canvas_id = %s
+                AND shape.deleted_at IS NULL
+            )
+            SELECT
+              id,
+              CASE
+                WHEN searchable_text ILIKE %s ESCAPE '\\' THEN 1.0
+                WHEN cardinality(%s::text[]) > 0
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM unnest(%s::text[]) AS search_term(pattern)
+                    WHERE searchable_text NOT ILIKE search_term.pattern ESCAPE '\\'
+                  ) THEN 0.95
+                ELSE 0.8
+              END AS similarity
+            FROM scoped_shapes
+            WHERE searchable_text ILIKE %s ESCAPE '\\'
+              OR EXISTS (
+                SELECT 1
+                FROM unnest(%s::text[]) AS search_term(pattern)
+                WHERE searchable_text ILIKE search_term.pattern ESCAPE '\\'
+              )
+            ORDER BY similarity DESC, updated_at DESC, id ASC
+            LIMIT %s
+            """,
+            (
+                workspace_id,
+                canvas_id,
+                canvas_id,
+                exact_pattern,
+                term_patterns,
+                term_patterns,
+                exact_pattern,
+                term_patterns,
+                max(1, min(limit, 20)),
+            ),
+        ).fetchall()
+
+        return [
+            CanvasSemanticShapeMatch(
+                shape_id=str(row["id"]),
+                similarity=float(row["similarity"]),
+            )
+            for row in rows
+        ]
 
     def search_semantic_shapes(
         self,
@@ -248,9 +410,9 @@ class PgCanvasAgentRepository:
             )
             SELECT
               shape_id,
-              1 - (embedding <=> %s::extensions.vector) AS similarity
+              1 - (embedding OPERATOR(extensions.<=>) %s::extensions.vector) AS similarity
             FROM canvas_embeddings
-            ORDER BY embedding <=> %s::extensions.vector
+            ORDER BY embedding OPERATOR(extensions.<=>) %s::extensions.vector
             LIMIT %s
             """,
             (
@@ -452,6 +614,49 @@ class PgCanvasAgentRepository:
         )
 
 
+def _shape_summary(row: dict[str, object]) -> dict[str, object]:
+    raw_shape = _json_object(row.get("raw_shape"))
+    props = _json_object(raw_shape.get("props"))
+    parent_id = raw_shape.get("parentId")
+    title = _clean_text(
+        row.get("title") or props.get("fileName") or props.get("name") or props.get("title")
+    )
+    text = _clean_text(
+        row.get("text_content")
+        or props.get("text")
+        or props.get("label")
+        or props.get("placeholder")
+    )
+    summary: dict[str, object] = {
+        "id": str(row.get("id", "")),
+        "shapeType": str(row.get("shape_type", "")),
+    }
+    if isinstance(parent_id, str) and parent_id:
+        summary["parentId"] = parent_id[:120]
+    if title:
+        summary["title"] = title[:160]
+    if text:
+        summary["text"] = text[:800]
+
+    code = _clean_text(props.get("code"))
+    if code:
+        summary["codePreview"] = code[:1000]
+
+    return summary
+
+
+def _clean_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
 def _json_object(value: object) -> dict[str, object]:
     if isinstance(value, dict):
         return {str(key): item for key, item in value.items()}
@@ -482,6 +687,43 @@ def _shape_ids(action_input: dict[str, object]) -> list[str]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, str)][:40]
     return []
+
+
+def _search_terms(query: str) -> list[str]:
+    stop_words = {
+        "canvas",
+        "shape",
+        "캔버스",
+        "쉐입",
+        "도형",
+        "메모",
+        "노트",
+        "찾아",
+        "찾아줘",
+        "검색",
+        "검색해",
+        "검색해줘",
+        "보여",
+        "보여줘",
+        "어디",
+        "위치",
+        "이동",
+        "가줘",
+        "있는",
+        "관련",
+    }
+    terms: list[str] = []
+    for term in query.replace("/", " ").replace("_", " ").split():
+        normalized = term.strip(" \t\n\r\"'`“”‘’.,!?()[]{}")
+        if len(normalized) < 2 or normalized.lower() in stop_words:
+            continue
+        if normalized not in terms:
+            terms.append(normalized[:80])
+    return terms[:12]
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _advisory_lock_key(value: str) -> int:

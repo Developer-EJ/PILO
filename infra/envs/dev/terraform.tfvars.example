@@ -2,6 +2,9 @@ project_name = "pilo"
 environment  = "dev"
 aws_region   = "ap-northeast-2"
 
+# Keep false through the pre-cutover deployment and rollback rehearsal.
+sql_erd_operations_v1_enabled = false
+
 # Existing dev resources serve the canonical and legacy PILO domains.
 create_dns_records                   = true
 domain_name                          = "pilo.my"
@@ -20,6 +23,14 @@ ecs_assign_public_ip  = true
 
 github_owner = "Developer-EJ"
 github_repo  = "PILO"
+
+# Manual GitHub sync admission. All values must be positive; runtime also
+# requires the cooldown not to exceed the rate window.
+github_manual_sync_user_limit          = 5
+github_manual_sync_workspace_limit     = 10
+github_manual_sync_rate_window_seconds = 600
+github_manual_sync_cooldown_seconds    = 30
+github_manual_sync_max_queued_jobs     = 100
 
 # Dev images are available in ECR, so each service runs one task by default.
 app_server_desired_count            = 1

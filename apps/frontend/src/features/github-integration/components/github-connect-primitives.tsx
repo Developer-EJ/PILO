@@ -1,6 +1,12 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import {
+  ChevronDown,
+  FolderGit2,
+  GitBranch,
+  PanelsTopLeft,
+  RefreshCcw
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import {
@@ -8,10 +14,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type PanelProps = {
   title: string;
+  tone?: "connection" | "repository" | "project" | "sync";
   subtitle?: string;
   icon?: ReactNode;
   action?: ReactNode;
@@ -34,6 +44,7 @@ const pillClassNames: Record<PillTone, string> = {
 
 export function GithubConnectPanel({
   title,
+  tone = "connection",
   subtitle,
   icon,
   action,
@@ -45,26 +56,41 @@ export function GithubConnectPanel({
 }: PanelProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const panelClassName = cn(
-    "rounded-[8px] border border-[#d9dee8] bg-white shadow-[0_18px_45px_rgba(15,20,34,0.08)]",
+    "relative overflow-hidden gap-0 rounded-[10px] border border-[#e2e6ec] bg-white py-0 shadow-[0_10px_28px_rgba(15,20,34,0.08)] ring-0",
     className
   );
   const headerClassName = cn(
-    "flex items-start justify-between gap-4 px-5 py-4",
-    (!collapsible || isOpen) && "border-b border-[#eef1f6]"
+    "relative z-10 flex items-start justify-between gap-4 px-5 py-4",
+    (!collapsible || isOpen) && "border-b border-[#edf0f4]"
+  );
+  const decorationByTone = {
+    connection: <GitBranch className="-right-5 -top-6 size-28 text-[#e8ecfa]" />,
+    repository: <FolderGit2 className="right-3 top-3 size-20 -rotate-6 text-[#edf0f5]" />,
+    project: <PanelsTopLeft className="-right-4 top-5 size-24 text-[#f0eee9]" />,
+    sync: <RefreshCcw className="-bottom-5 -right-4 size-28 text-[#e5f1e9]" />
+  }[tone];
+  const decoration = (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 opacity-90 [&>svg]:absolute"
+      data-github-panel-decoration={tone}
+    >
+      {decorationByTone}
+    </span>
   );
   const header = (
-    <div className={headerClassName}>
+    <CardHeader className={headerClassName}>
       <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-[15px] font-semibold text-[#101828]">
+        <h2 className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
           {icon ? (
-            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[#f0f4ff] text-[#3157d5]">
+            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
               {icon}
             </span>
           ) : null}
           <span className="truncate">{title}</span>
         </h2>
         {subtitle ? (
-          <p className="mt-1 text-[13px] leading-5 text-[#687184]">
+          <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
             {subtitle}
           </p>
         ) : null}
@@ -75,7 +101,14 @@ export function GithubConnectPanel({
           {collapsible ? (
             <CollapsibleTrigger
               aria-label={`${title} 섹션 접기/펼치기`}
-              className="inline-flex size-8 items-center justify-center rounded-[8px] border border-[#d9dee8] bg-white text-[#687184] transition-colors hover:bg-[#f7f8fb] hover:text-[#101828] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3157d5]/30"
+              render={
+                <Button
+                  className="text-muted-foreground"
+                  size="icon"
+                  type="button"
+                  variant="outline"
+                />
+              }
               type="button"
             >
               <ChevronDown
@@ -88,29 +121,35 @@ export function GithubConnectPanel({
           ) : null}
         </div>
       ) : null}
-    </div>
+    </CardHeader>
   );
 
   if (collapsible) {
     return (
-      <section className={panelClassName}>
+      <Card className={panelClassName}>
+        {decoration}
         <Collapsible onOpenChange={setIsOpen} open={isOpen}>
           {header}
           {isOpen ? (
-            <CollapsibleContent className={cn("px-5 py-4", contentClassName)}>
-              {children}
+            <CollapsibleContent>
+              <CardContent className={cn("relative z-10 px-5 py-4", contentClassName)}>
+                {children}
+              </CardContent>
             </CollapsibleContent>
           ) : null}
         </Collapsible>
-      </section>
+      </Card>
     );
   }
 
   return (
-    <section className={panelClassName}>
+    <Card className={panelClassName}>
+      {decoration}
       {header}
-      <div className={cn("px-5 py-4", contentClassName)}>{children}</div>
-    </section>
+      <CardContent className={cn("relative z-10 px-5 py-4", contentClassName)}>
+        {children}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -124,15 +163,16 @@ export function GithubConnectPill({
   className?: string;
 }) {
   return (
-    <span
+    <Badge
       className={cn(
-        "inline-flex h-6 items-center rounded-full border px-2.5 text-[12px] font-semibold",
+        "h-6 rounded-full px-2.5 text-[12px] font-semibold",
         pillClassNames[tone],
         className
       )}
+      variant="outline"
     >
       {children}
-    </span>
+    </Badge>
   );
 }
 

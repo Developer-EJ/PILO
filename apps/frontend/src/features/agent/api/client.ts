@@ -1,7 +1,11 @@
 import type {
   AgentConfirmationActionPayload,
+  AgentConfirmationApproveInput,
+  AgentMessagePayload,
   AgentRunDetailPayload,
-  CreateAgentRunInput
+  CreateAgentRunInput,
+  RouteAgentMessageInput,
+  SubmitAgentRunInput
 } from "@/features/agent/types";
 
 const API_BASE_PATH = "/api/v1";
@@ -208,8 +212,16 @@ function agentRunsPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/agent/runs` as const;
 }
 
+function agentMessagesPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/agent/messages` as const;
+}
+
 function agentRunPath(workspaceId: string, runId: string) {
   return `${agentRunsPath(workspaceId)}/${encodeURIComponent(runId)}` as const;
+}
+
+function agentRunInputsPath(workspaceId: string, runId: string) {
+  return `${agentRunPath(workspaceId, runId)}/inputs` as const;
 }
 
 function agentConfirmationPath(
@@ -235,6 +247,24 @@ export function createAgentApiClient({
   };
 
   return {
+    async routeMessage(
+      workspaceId: string,
+      body: RouteAgentMessageInput,
+      options: AgentRequestOptions = {}
+    ) {
+      return requestAgentData<AgentMessagePayload>(
+        agentMessagesPath(workspaceId),
+        withJsonBody(
+          { ...body, conversationId: body.conversationId ?? null },
+          {
+            method: "POST",
+            signal: options.signal
+          }
+        ),
+        requestOptions
+      );
+    },
+
     async createRun(
       workspaceId: string,
       body: CreateAgentRunInput,
@@ -265,18 +295,40 @@ export function createAgentApiClient({
       );
     },
 
+    async submitRunInput(
+      workspaceId: string,
+      runId: string,
+      body: SubmitAgentRunInput,
+      options: AgentRequestOptions = {}
+    ) {
+      return requestAgentData<AgentRunDetailPayload>(
+        agentRunInputsPath(workspaceId, runId),
+        withJsonBody(body, {
+          method: "POST",
+          signal: options.signal
+        }),
+        requestOptions
+      );
+    },
+
     async approveConfirmation(
       workspaceId: string,
       runId: string,
       confirmationId: string,
+      body?: AgentConfirmationApproveInput,
       options: AgentRequestOptions = {}
     ) {
       return requestAgentData<AgentConfirmationActionPayload>(
         agentConfirmationPath(workspaceId, runId, confirmationId, "approve"),
-        {
-          method: "POST",
-          signal: options.signal
-        },
+        body
+          ? withJsonBody(body, {
+              method: "POST",
+              signal: options.signal
+            })
+          : {
+              method: "POST",
+              signal: options.signal
+            },
         requestOptions
       );
     },

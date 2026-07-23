@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
@@ -45,6 +46,7 @@ import {
   type createPrReviewApiClient
 } from "@/features/pr-review/api/client";
 import { PrReviewCanvasSurface } from "@/features/pr-review/components/review-canvas/PrReviewCanvasSurface";
+import { PrReviewRoomDeleteButton } from "@/features/pr-review/components/pr-review-room-delete-button";
 import { PrReviewFileDiffDrawer } from "@/features/pr-review/components/review-canvas/PrReviewFileDiffDrawer";
 import { PrReviewSubmitReviewModal } from "@/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal";
 import { getPrReviewErrorMessage } from "@/features/pr-review/pr-review-error-message";
@@ -53,17 +55,20 @@ import {
   applyDecisionUpdateToSummary
 } from "@/features/pr-review/realtime/pr-review-decision-sync";
 import {
+  applyPrReviewConflictDraftResolutionState,
   buildPrReviewConflictsApplyInput,
   createPrReviewConflictDraft,
   getPrReviewConflictDraftProgress,
   isPrReviewConflictDraftReady,
   reconcilePrReviewConflictDrafts,
+  toPrReviewConflictDraftResolutionState,
   type PrReviewConflictDraft,
   type PrReviewConflictDraftMap
 } from "@/features/pr-review/components/review-canvas/pr-review-conflict-drafts";
 import type {
   PrReviewCanvas,
   PrReviewConflictAnalysis,
+  PrReviewConflictDraftResolutionState,
   PrReviewConflictsApplyResult,
   PrReviewConflictFile,
   PrReviewConflictStatus,
@@ -77,13 +82,19 @@ import type {
   PrReviewUnsupportedConflictFile
 } from "@/features/pr-review/types";
 import type { CanvasRealtimeIdentity } from "@/shared/canvas-realtime/canvas-realtime-types";
+import { usePrReviewGithubSourceInvalidation } from "@/features/pr-review/realtime/usePrReviewGithubSourceInvalidation";
+import { createPrReviewPullRequestRefreshCoordinator } from "@/features/pr-review/realtime/pr-review-pull-request-refresh";
+import type { PrReviewFollowSurfaceKey } from "@/features/pr-review/pr-review-follow-location";
+import { useWorkspacePresence } from "@/shared/workspace-presence/workspace-presence-provider";
 
 type PrReviewApiClient = ReturnType<typeof createPrReviewApiClient>;
 
 type PrReviewCanvasShellProps = {
   apiClient: PrReviewApiClient;
+  backLabel: string;
   onBackToSelection: () => void;
   onGoToGithub: () => void;
+  onReviewRoomDeleted: () => void;
   onReviewSessionCreated: (session: PrReviewSession) => void;
   pullRequest: PrReviewPullRequest | PrReviewPullRequestDetail | null;
   realtimeIdentity: CanvasRealtimeIdentity;
@@ -101,6 +112,7 @@ type ConflictAnalysisLoadStatus =
 type MergeStatus = "idle" | "merging" | "merged" | "error";
 type ConflictApplyStatus = "idle" | "applying" | "applied" | "error";
 type GithubReconnectStatus = "idle" | "opening" | "opened" | "error";
+type RevisionStartStatus = "idle" | "starting" | "error";
 type LoadCanvasDataOptions = {
   quiet?: boolean;
 };
@@ -110,6 +122,7 @@ const DETAIL_PANEL_MAX_WIDTH = 620;
 const DETAIL_PANEL_DEFAULT_WIDTH = 440;
 const CONFLICT_STATUS_POLL_INTERVAL_MS = 2_000;
 const CONFLICT_STATUS_POLL_MAX_ATTEMPTS = 5;
+const PULL_REQUEST_HEAD_POLL_INTERVAL_MS = 30_000;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -263,12 +276,22 @@ function isGithubOAuthReconnectError(error: unknown) {
 function getMergeDisabledReason(input: {
   conflictStatus: PrReviewConflictStatus;
   isPullRequestMerged: boolean;
+  isPullRequestClosed: boolean;
+  isReviewVersionStale: boolean;
   loadStatus: CanvasLoadStatus;
   pullRequestState: "open" | "closed";
   reviewSubmitted: boolean;
 }): string | null {
   if (input.loadStatus !== "ready") {
     return "Review data is still loading";
+  }
+
+  if (input.isReviewVersionStale) {
+    return "A newer commit was detected. Start the latest version analysis first.";
+  }
+
+  if (input.isPullRequestClosed) {
+    return "This pull request is closed and the review room is read-only.";
   }
 
   if (input.isPullRequestMerged) {
@@ -292,8 +315,10 @@ function getMergeDisabledReason(input: {
 
 export function PrReviewCanvasShell({
   apiClient,
+  backLabel,
   onBackToSelection,
   onGoToGithub,
+  onReviewRoomDeleted,
   onReviewSessionCreated,
   pullRequest,
   realtimeIdentity,
@@ -314,9 +339,12 @@ export function PrReviewCanvasShell({
     string | null
   >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedReviewFileId, setSelectedReviewFileId] = useState<
+  const [openedReviewFileId, setOpenedReviewFileId] = useState<
     string | null
   >(null);
+  const [activeFollowSurface, setActiveFollowSurface] =
+    useState<PrReviewFollowSurfaceKey>("pr-review-diff");
+  const { reportManualInteraction } = useWorkspacePresence();
   const [latestDecisionUpdate, setLatestDecisionUpdate] =
     useState<PrReviewDecisionUpdatedEvent | null>(null);
   const [isSubmitReviewModalOpen, setIsSubmitReviewModalOpen] = useState(false);
@@ -343,6 +371,80 @@ export function PrReviewCanvasShell({
   const [githubReconnectMessage, setGithubReconnectMessage] = useState<
     string | null
   >(null);
+  const [latestPullRequest, setLatestPullRequest] = useState(pullRequest);
+  const [revisionStartStatus, setRevisionStartStatus] =
+    useState<RevisionStartStatus>("idle");
+  const [revisionStartError, setRevisionStartError] = useState<string | null>(
+    null
+  );
+  const conflictDraftSaveTimersRef = useRef<
+    Record<string, number | undefined>
+  >({});
+  const refreshPullRequestRef = useRef<() => void | Promise<unknown>>(
+    () => undefined
+  );
+
+  useEffect(() => {
+    setLatestPullRequest(pullRequest);
+  }, [pullRequest]);
+
+  const refreshPullRequest = useCallback(
+    () => refreshPullRequestRef.current(),
+    []
+  );
+
+  const handleOpenedReviewFileChange = useCallback(
+    (reviewFileId: string | null) => {
+      if (reviewFileId && reviewFileId !== openedReviewFileId) {
+        setActiveFollowSurface("pr-review-diff");
+      }
+      setOpenedReviewFileId(reviewFileId);
+    },
+    [openedReviewFileId]
+  );
+
+  const handleFollowSurfaceInteraction = useCallback(
+    (surface: PrReviewFollowSurfaceKey) => {
+      setActiveFollowSurface(surface);
+      reportManualInteraction();
+    },
+    [reportManualInteraction]
+  );
+
+  usePrReviewGithubSourceInvalidation({
+    authToken: realtimeIdentity.authToken,
+    pullRequestId: session.pullRequestId,
+    refreshPullRequest,
+    workspaceId
+  });
+
+  useEffect(() => {
+    if (!workspaceId || !session.pullRequestId) {
+      refreshPullRequestRef.current = () => undefined;
+      return;
+    }
+
+    const coordinator = createPrReviewPullRequestRefreshCoordinator({
+      apply: setLatestPullRequest,
+      load: () => apiClient.getPullRequest(workspaceId, session.pullRequestId)
+    });
+    const requestRefresh = () => coordinator.refresh();
+    refreshPullRequestRef.current = requestRefresh;
+
+    void requestRefresh();
+    const intervalId = window.setInterval(
+      () => void requestRefresh(),
+      PULL_REQUEST_HEAD_POLL_INTERVAL_MS
+    );
+
+    return () => {
+      window.clearInterval(intervalId);
+      coordinator.dispose();
+      if (refreshPullRequestRef.current === requestRefresh) {
+        refreshPullRequestRef.current = () => undefined;
+      }
+    };
+  }, [apiClient, session.pullRequestId, workspaceId]);
 
   const loadCanvasData = useCallback(async (options: LoadCanvasDataOptions = {}) => {
     const quiet = options.quiet ?? false;
@@ -434,6 +536,54 @@ export function PrReviewCanvasShell({
       reconcilePrReviewConflictDrafts(conflictAnalysis, currentDrafts)
     );
   }, [conflictAnalysis, session.id]);
+
+  useEffect(() => {
+    if (!conflictAnalysis || conflictAnalysis.reviewSessionId !== session.id) {
+      return;
+    }
+
+    let cancelled = false;
+    void Promise.all(
+      conflictAnalysis.files.map(async file => ({
+        file,
+        draft: await apiClient.getReviewFileConflictDraft(
+          workspaceId,
+          file.reviewFileId
+        )
+      }))
+    )
+      .then(entries => {
+        if (cancelled) return;
+        setConflictDrafts(currentDrafts => {
+          const nextDrafts = reconcilePrReviewConflictDrafts(
+            conflictAnalysis,
+            currentDrafts
+          );
+          for (const { file, draft } of entries) {
+            if (!draft || draft.sourceHeadBlobSha !== file.headBlobSha) continue;
+            nextDrafts[file.reviewFileId] = {
+              ...applyPrReviewConflictDraftResolutionState(
+                nextDrafts[file.reviewFileId],
+                draft.resolutionState
+              ),
+              sourceHeadBlobSha: draft.sourceHeadBlobSha,
+              resolvedContent: draft.resolvedContent,
+              draftVersion: draft.draftVersion,
+              updatedByUserId: draft.updatedByUserId,
+              updatedAt: draft.updatedAt
+            };
+          }
+          return nextDrafts;
+        });
+      })
+      .catch(() => {
+        // The initial marker draft remains usable when a persisted draft is unavailable.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, conflictAnalysis, session.id, workspaceId]);
 
   const handleDecisionSaved = useCallback(
     (
@@ -545,7 +695,7 @@ export function PrReviewCanvasShell({
     [session.id]
   );
 
-  const handleRealtimeRoomRejoined = useCallback(() => {
+  const handleRealtimeRoomJoined = useCallback(() => {
     void loadCanvasData({ quiet: true });
   }, [loadCanvasData]);
 
@@ -558,16 +708,103 @@ export function PrReviewCanvasShell({
       setConflictApplyStatus("idle");
       setConflictApplyError(null);
       setConflictApplyResult(null);
+
+      const currentTimer = conflictDraftSaveTimersRef.current[reviewFileId];
+      if (currentTimer) {
+        window.clearTimeout(currentTimer);
+      }
+      conflictDraftSaveTimersRef.current[reviewFileId] = window.setTimeout(() => {
+        void apiClient
+          .updateReviewFileConflictDraft(workspaceId, reviewFileId, {
+            sourceHeadBlobSha: draft.sourceHeadBlobSha,
+            resolvedContent: draft.resolvedContent,
+            resolutionState: toPrReviewConflictDraftResolutionState(draft),
+            expectedDraftVersion: draft.draftVersion
+          })
+          .then(savedDraft => {
+            setConflictDrafts(currentDrafts => {
+              const currentDraft = currentDrafts[reviewFileId];
+              if (!currentDraft || currentDraft.resolvedContent !== draft.resolvedContent) {
+                return currentDrafts;
+              }
+              return {
+                ...currentDrafts,
+                [reviewFileId]: {
+                  ...currentDraft,
+                  draftVersion: savedDraft.draftVersion,
+                  updatedByUserId: savedDraft.updatedByUserId,
+                  updatedAt: savedDraft.updatedAt
+                }
+              };
+            });
+          })
+          .catch(error => {
+            setConflictApplyStatus("error");
+            setConflictApplyError(getConflictApplyErrorMessage(error));
+          });
+      }, 500);
     },
-    []
+    [apiClient, workspaceId]
   );
+
+  useEffect(() => () => {
+    for (const timer of Object.values(conflictDraftSaveTimersRef.current)) {
+      if (timer) window.clearTimeout(timer);
+    }
+  }, []);
+
+  const handleRemoteConflictDraftUpdated = useCallback(
+    (remoteDraft: {
+      reviewFileId: string;
+      sourceHeadBlobSha: string;
+      resolvedContent: string;
+      resolutionState: PrReviewConflictDraftResolutionState;
+      draftVersion: number;
+      updatedByUserId: string;
+      updatedAt: string;
+    }) => {
+      setConflictDrafts(currentDrafts => {
+        const currentDraft = currentDrafts[remoteDraft.reviewFileId];
+        if (
+          currentDraft &&
+          currentDraft.sourceHeadBlobSha === remoteDraft.sourceHeadBlobSha &&
+          currentDraft.draftVersion >= remoteDraft.draftVersion
+        ) {
+          return currentDrafts;
+        }
+        const file = conflictAnalysis?.files.find(
+          candidate => candidate.reviewFileId === remoteDraft.reviewFileId
+        );
+        if (!currentDraft && !file) return currentDrafts;
+        return {
+          ...currentDrafts,
+          [remoteDraft.reviewFileId]: {
+            ...applyPrReviewConflictDraftResolutionState(
+              currentDraft ?? createPrReviewConflictDraft(file!),
+              remoteDraft.resolutionState
+            ),
+            sourceHeadBlobSha: remoteDraft.sourceHeadBlobSha,
+            resolvedContent: remoteDraft.resolvedContent,
+            draftVersion: remoteDraft.draftVersion,
+            updatedByUserId: remoteDraft.updatedByUserId,
+            updatedAt: remoteDraft.updatedAt
+          }
+        };
+      });
+    },
+    [conflictAnalysis]
+  );
+
+  const handleRemoteConflictDraftInvalidated = useCallback(() => {
+    void loadCanvasData({ quiet: true });
+  }, [loadCanvasData]);
 
   const headBranch =
     canvas?.headBranch ??
     summary?.headBranch ??
-    pullRequest?.headBranch ??
+    latestPullRequest?.headBranch ??
     session.headSha.slice(0, 7);
-  const baseBranch = canvas?.baseBranch ?? summary?.baseBranch ?? pullRequest?.baseBranch ?? "-";
+  const baseBranch = canvas?.baseBranch ?? summary?.baseBranch ?? latestPullRequest?.baseBranch ?? "-";
   const reviewedCount =
     canvas?.reviewedCount ?? summary?.reviewedCount ?? session.reviewedCount;
   const totalFileCount =
@@ -591,15 +828,15 @@ export function PrReviewCanvasShell({
       ),
     [conflictAnalysis]
   );
-  const selectedConflictFile = selectedReviewFileId
-    ? contentConflictByFileId.get(selectedReviewFileId) ?? null
+  const selectedConflictFile = openedReviewFileId
+    ? contentConflictByFileId.get(openedReviewFileId) ?? null
     : null;
   const selectedConflictDraft = selectedConflictFile
     ? conflictDrafts[selectedConflictFile.reviewFileId] ??
       createPrReviewConflictDraft(selectedConflictFile)
     : null;
-  const selectedUnsupportedConflictFile = selectedReviewFileId
-    ? unsupportedConflictByFileId.get(selectedReviewFileId) ?? null
+  const selectedUnsupportedConflictFile = openedReviewFileId
+    ? unsupportedConflictByFileId.get(openedReviewFileId) ?? null
     : null;
   const conflictDraftProgress = useMemo(
     () => getPrReviewConflictDraftProgress(conflictAnalysis, conflictDrafts),
@@ -627,7 +864,11 @@ export function PrReviewCanvasShell({
     [preparedConflictFileIdKey]
   );
   const conflictApplyDisabledReason =
-    conflictStatus !== "conflicted"
+    latestPullRequest?.state === "closed"
+      ? "닫힌 PR에는 Conflict 해결안을 적용할 수 없습니다."
+      : latestPullRequest?.headSha && latestPullRequest.headSha !== session.headSha
+      ? "새 커밋이 감지되어 이전 버전에는 Conflict 해결안을 적용할 수 없습니다."
+      : conflictStatus !== "conflicted"
       ? "적용할 Conflict가 없습니다."
       : conflictAnalysisStatus !== "ready" || !conflictAnalysis
         ? "Conflict 분석이 끝난 뒤 적용할 수 있습니다."
@@ -641,15 +882,22 @@ export function PrReviewCanvasShell({
                 )}개 파일의 해결안을 더 준비해 주세요.`
               : null;
   const reviewSubmitted = (summary?.status ?? session.status) === "submitted";
-  const pullRequestState = summary?.pullRequestState ?? pullRequest?.state ?? "open";
+  const isReviewVersionStale = Boolean(
+    latestPullRequest?.headSha && latestPullRequest.headSha !== session.headSha
+  );
+  const isPullRequestClosed = latestPullRequest?.state === "closed";
+  const isReviewReadOnly = isReviewVersionStale || isPullRequestClosed;
+  const pullRequestState = latestPullRequest?.state ?? summary?.pullRequestState ?? "open";
   const pullRequestMergedAt =
-    summary?.pullRequestMergedAt ?? getPullRequestMergedAt(pullRequest);
+    summary?.pullRequestMergedAt ?? getPullRequestMergedAt(latestPullRequest);
   const isPullRequestMerged =
     pullRequestState === "closed" && Boolean(pullRequestMergedAt);
   const expectedMergeHeadSha = summary?.headSha ?? session.headSha;
   const mergeDisabledReason = getMergeDisabledReason({
     conflictStatus,
     isPullRequestMerged,
+    isPullRequestClosed,
+    isReviewVersionStale,
     loadStatus,
     pullRequestState,
     reviewSubmitted
@@ -688,15 +936,35 @@ export function PrReviewCanvasShell({
   }, [conflictStatus, loadCanvasData, loadStatus]);
 
   async function createNewReviewSession() {
-    const pullRequestId = summary?.pullRequestId ?? session.pullRequestId;
-    const nextSession = await apiClient.createReviewSession(
+    const result = await apiClient.createReviewRoomRevision(
       workspaceId,
-      pullRequestId
+      session.reviewRoomId
     );
 
     setIsSubmitReviewModalOpen(false);
-    setSelectedReviewFileId(null);
-    onReviewSessionCreated(nextSession);
+    setOpenedReviewFileId(null);
+    onReviewSessionCreated(result.revision);
+  }
+
+  async function startLatestReviewVersion() {
+    if (revisionStartStatus === "starting") {
+      return;
+    }
+
+    setRevisionStartStatus("starting");
+    setRevisionStartError(null);
+
+    try {
+      const result = await apiClient.createReviewRoomRevision(
+        workspaceId,
+        session.reviewRoomId
+      );
+      setOpenedReviewFileId(null);
+      onReviewSessionCreated(result.revision);
+    } catch (error) {
+      setRevisionStartStatus("error");
+      setRevisionStartError(getErrorMessage(error));
+    }
   }
 
   function startPanelResize(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -724,6 +992,9 @@ export function PrReviewCanvasShell({
   }
 
   async function handleMergeReviewSession() {
+    if (isReviewReadOnly) {
+      return;
+    }
     setMergeStatus("merging");
     setMergeError(null);
 
@@ -754,7 +1025,11 @@ export function PrReviewCanvasShell({
   }
 
   async function handleApplyConflictResolutions() {
-    if (!conflictAnalysis || conflictApplyStatus === "applying") {
+    if (
+      isReviewReadOnly ||
+      !conflictAnalysis ||
+      conflictApplyStatus === "applying"
+    ) {
       return;
     }
 
@@ -799,6 +1074,16 @@ export function PrReviewCanvasShell({
     }
   }
 
+  function openConflictApplyConfirm() {
+    setConflictApplyError(null);
+    setConflictApplyResult(null);
+    setConflictApplyStatus("idle");
+    setConflictApplyRequiresGithubReconnect(false);
+    setGithubReconnectStatus("idle");
+    setGithubReconnectMessage(null);
+    setIsConflictApplyConfirmOpen(true);
+  }
+
   async function handleReconnectGithubOAuth() {
     const reconnectWindow = window.open(
       "about:blank",
@@ -835,70 +1120,51 @@ export function PrReviewCanvasShell({
   return (
     <div className="fixed inset-0 z-[60] flex flex-col overflow-hidden bg-slate-50 text-slate-950">
       <header className="flex h-16 shrink-0 items-center gap-3 overflow-x-auto border-b border-slate-200 bg-white px-4">
-        <Button onClick={onBackToSelection} type="button" variant="outline">
-          <ArrowLeft className="size-4" />
-          PR 선택으로 돌아가기
-        </Button>
-        <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
-          <GitBranch className="size-4 shrink-0 text-slate-500" />
-          <span className="max-w-44 truncate">{headBranch}</span>
-          <span className="text-slate-400">→</span>
-          <span className="max-w-32 truncate">{baseBranch}</span>
+        <div className="flex min-w-0 items-center gap-3">
+          <Button onClick={onBackToSelection} type="button" variant="outline">
+            <ArrowLeft className="size-4" />
+            {backLabel}
+          </Button>
+          <PrReviewRoomDeleteButton
+            apiClient={apiClient}
+            onDeleted={onReviewRoomDeleted}
+            reviewRoomId={session.reviewRoomId}
+            workspaceId={workspaceId}
+          />
+          <div className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium">
+            <GitBranch className="size-4 shrink-0 text-slate-500" />
+            <span className="max-w-44 truncate">{headBranch}</span>
+            <span className="text-slate-400">→</span>
+            <span className="max-w-32 truncate">{baseBranch}</span>
+          </div>
         </div>
-        <div className="hidden h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm md:flex">
+        <div className="hidden h-10 shrink-0 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm md:flex">
           <GitPullRequest className="size-4 text-blue-600" />
           <span>리뷰 진행률</span>
           <strong>{progressLabel}</strong>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <span
             className={cn(
-              "inline-flex h-10 items-center rounded-full border px-3 text-sm font-medium",
+              "inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium",
               getConflictClassName(conflictStatus)
             )}
           >
             {getConflictLabel(conflictStatus)}
-          </span>
-          {conflictStatus === "conflicted" ? (
-            <>
-              <span className="inline-flex h-10 items-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700">
-                해결 준비&nbsp;
+            {conflictStatus === "conflicted" ? (
+              <span className="border-l border-current/20 pl-2 text-xs font-semibold">
+                해결&nbsp;
                 <strong>
                   {formatNumber(conflictDraftProgress.ready)} /{" "}
                   {formatNumber(conflictDraftProgress.total)}
                 </strong>
               </span>
-              <Tooltip>
-                <TooltipTrigger render={<span />}>
-                  <Button
-                    disabled={
-                      Boolean(conflictApplyDisabledReason) ||
-                      conflictApplyStatus === "applying"
-                    }
-                    onClick={() => {
-                      setConflictApplyError(null);
-                      setConflictApplyResult(null);
-                      setConflictApplyStatus("idle");
-                      setConflictApplyRequiresGithubReconnect(false);
-                      setGithubReconnectStatus("idle");
-                      setGithubReconnectMessage(null);
-                      setIsConflictApplyConfirmOpen(true);
-                    }}
-                    type="button"
-                  >
-                    <GitMerge className="size-4" />
-                    GitHub에 전체 적용
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {conflictApplyDisabledReason ??
-                    "준비한 모든 Conflict 파일을 merge commit 하나로 적용합니다."}
-                </TooltipContent>
-              </Tooltip>
-            </>
-          ) : null}
+            ) : null}
+          </span>
           <Button
-            disabled={loadStatus !== "ready" || reviewSubmitted}
+            disabled={
+              loadStatus !== "ready" || reviewSubmitted || isReviewReadOnly
+            }
             onClick={() => setIsSubmitReviewModalOpen(true)}
             type="button"
           >
@@ -947,6 +1213,56 @@ export function PrReviewCanvasShell({
         </div>
       </header>
 
+      {isPullRequestClosed ? (
+        <section className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-3 text-slate-900">
+            <AlertCircle className="mt-0.5 size-5 shrink-0 text-slate-600" />
+            <div>
+              <p className="text-sm font-semibold">
+                {isPullRequestMerged ? "PR이 병합되었습니다" : "PR이 닫혔습니다"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-700">
+                이 리뷰 공간은 참고용 읽기 전용입니다. 파일 판단, Conflict 적용, Review 제출과 Merge를 할 수 없습니다.
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : isReviewVersionStale ? (
+        <section className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex min-w-0 items-start gap-3 text-amber-950">
+            <AlertCircle className="mt-0.5 size-5 shrink-0 text-amber-700" />
+            <div>
+              <p className="text-sm font-semibold">새 커밋이 감지되었습니다</p>
+              <p className="mt-1 text-xs leading-5 text-amber-900">
+                현재 리뷰 버전은 읽기 전용입니다. 최신 버전 분석을 시작하면 새 리뷰 버전으로 이동합니다.
+              </p>
+              <p className="mt-1 font-mono text-xs text-amber-800">
+                {session.headSha.slice(0, 7)} -&gt; {latestPullRequest?.headSha?.slice(0, 7)}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <Button
+              disabled={revisionStartStatus === "starting"}
+              onClick={() => void startLatestReviewVersion()}
+              type="button"
+            >
+              {revisionStartStatus === "starting" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RefreshCcw className="size-4" />
+              )}
+              최신 버전 분석 시작
+            </Button>
+            {revisionStartError ? (
+              <span className="max-w-80 text-right text-xs font-medium text-rose-700">
+                {revisionStartError}
+              </span>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       <main className="flex min-h-0 flex-1">
         <section className="relative min-w-0 flex-1 overflow-hidden">
           {loadStatus === "loading" || loadStatus === "idle" ? (
@@ -960,6 +1276,7 @@ export function PrReviewCanvasShell({
             (conflictAnalysisStatus === "error" ||
               conflictAnalysisStatus === "stale") ? (
             <ConflictAnalysisFailureState
+              backLabel={backLabel}
               message={conflictAnalysisError}
               onBack={onBackToSelection}
               onRetry={() => void loadCanvasData()}
@@ -973,24 +1290,29 @@ export function PrReviewCanvasShell({
                 status={conflictAnalysisStatus}
               />
               <PrReviewCanvasSurface
+                activeFollowSurface={activeFollowSurface}
                 apiClient={apiClient}
                 canvas={canvas}
                 className="h-full w-full"
                 conflictAnalysis={conflictAnalysis}
                 onDecisionUpdated={handleRealtimeDecisionUpdated}
-                onFileSelect={setSelectedReviewFileId}
-                onRealtimeRoomJoined={handleRealtimeRoomRejoined}
+                onFileOpen={handleOpenedReviewFileChange}
+                onFollowSurfaceChange={setActiveFollowSurface}
+                onOpenedReviewFileChange={handleOpenedReviewFileChange}
+                onRealtimeRoomJoined={handleRealtimeRoomJoined}
+                onRealtimeRoomDeleted={onReviewRoomDeleted}
+                openedReviewFileId={openedReviewFileId}
                 preparedConflictFileIds={preparedConflictFileIds}
+                readOnly={isReviewReadOnly}
                 realtimeIdentity={realtimeIdentity}
                 reviewRoomId={session.reviewRoomId}
-                selectedReviewFileId={selectedReviewFileId}
                 workspaceId={workspaceId}
               />
             </>
           ) : (
             <CanvasEmptyState />
           )}
-          {selectedReviewFileId &&
+          {openedReviewFileId &&
           !(
             conflictStatus === "conflicted" &&
             (conflictAnalysisStatus === "error" ||
@@ -998,18 +1320,29 @@ export function PrReviewCanvasShell({
           ) ? (
             <PrReviewFileDiffDrawer
               apiClient={apiClient}
-              baseBranch={summary?.baseBranch ?? pullRequest?.baseBranch ?? null}
+              baseBranch={summary?.baseBranch ?? latestPullRequest?.baseBranch ?? null}
               conflictAnalysisErrorMessage={conflictAnalysisError}
               conflictAnalysisStatus={conflictAnalysisStatus}
+              conflictApplyDisabledReason={conflictApplyDisabledReason}
+              conflictApplyProgress={conflictDraftProgress}
               conflictDraft={selectedConflictDraft}
               conflictFile={selectedConflictFile}
-              headBranch={summary?.headBranch ?? pullRequest?.headBranch ?? null}
+              headBranch={summary?.headBranch ?? latestPullRequest?.headBranch ?? null}
+              isReviewRoomCompleted={isPullRequestClosed}
+              isReviewVersionStale={isReviewVersionStale}
               isReviewSessionConflicted={conflictStatus === "conflicted"}
-              onClose={() => setSelectedReviewFileId(null)}
+              onClose={() => handleOpenedReviewFileChange(null)}
+              onOpenConflictApply={openConflictApplyConfirm}
               onConflictDraftChange={handleConflictDraftChange}
+              onRemoteConflictDraftUpdated={handleRemoteConflictDraftUpdated}
+              onRemoteConflictDraftInvalidated={handleRemoteConflictDraftInvalidated}
               onDecisionSaved={handleDecisionSaved}
+              onFollowSurfaceInteraction={handleFollowSurfaceInteraction}
               remoteDecisionUpdate={latestDecisionUpdate}
-              reviewFileId={selectedReviewFileId}
+              realtimeIdentity={realtimeIdentity}
+              reviewFileId={openedReviewFileId}
+              reviewRoomId={session.reviewRoomId}
+              reviewSessionId={session.id}
               unsupportedConflictFile={selectedUnsupportedConflictFile}
               workspaceId={workspaceId}
             />
@@ -1030,7 +1363,7 @@ export function PrReviewCanvasShell({
           style={{ width: detailPanelWidth }}
         >
           <ReviewDetailPanel
-            pullRequest={pullRequest}
+            pullRequest={latestPullRequest}
             session={session}
             summary={summary}
           />
@@ -1046,7 +1379,7 @@ export function PrReviewCanvasShell({
           onSubmitted={() => {
             void loadCanvasData({ quiet: true });
           }}
-          pullRequest={pullRequest}
+          pullRequest={latestPullRequest}
           session={session}
           workspaceId={workspaceId}
         />
@@ -1060,12 +1393,16 @@ export function PrReviewCanvasShell({
           }
         }}
       >
-        <AlertDialogContent size="default">
+        <AlertDialogContent
+          className="z-[90]"
+          overlayClassName="z-[90]"
+          size="default"
+        >
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-amber-50 text-amber-700">
               <GitMerge className="size-5" />
             </AlertDialogMedia>
-            <AlertDialogTitle>Conflict 해결안 전체 적용</AlertDialogTitle>
+            <AlertDialogTitle>Conflict 해결안 적용</AlertDialogTitle>
             <AlertDialogDescription>
               준비한 모든 파일을 PR head와 base를 부모로 갖는 merge commit
               하나로 적용합니다. 일부 파일만 적용되지는 않습니다.
@@ -1197,10 +1534,10 @@ export function PrReviewCanvasShell({
                     <GitMerge className="size-4" />
                   )}
                   {conflictApplyStatus === "applying"
-                    ? "전체 적용 중"
+                    ? "해결안 적용 중"
                     : conflictApplyRequiresGithubReconnect
-                      ? "GitHub에 다시 적용"
-                      : "GitHub에 전체 적용"}
+                      ? "Conflict 해결안 다시 적용"
+                      : "Conflict 해결안 적용"}
                 </AlertDialogAction>
               </>
             )}
@@ -1216,7 +1553,11 @@ export function PrReviewCanvasShell({
           }
         }}
       >
-        <AlertDialogContent size="default">
+        <AlertDialogContent
+          className="z-[90]"
+          overlayClassName="z-[90]"
+          size="default"
+        >
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-blue-50 text-blue-700">
               <GitMerge className="size-5" />
@@ -1237,7 +1578,7 @@ export function PrReviewCanvasShell({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={mergeStatus === "merging"}
+              disabled={mergeStatus === "merging" || isReviewReadOnly}
               onClick={(event) => {
                 event.preventDefault();
                 void handleMergeReviewSession();
@@ -1316,11 +1657,13 @@ function ConflictAnalysisNotice({
 }
 
 function ConflictAnalysisFailureState({
+  backLabel,
   message,
   onBack,
   onRetry,
   stale
 }: {
+  backLabel: string;
   message: string | null;
   onBack: () => void;
   onRetry: () => void;
@@ -1342,7 +1685,7 @@ function ConflictAnalysisFailureState({
           {stale ? (
             <Button onClick={onBack} type="button" variant="outline">
               <ArrowLeft className="size-4" />
-              PR 목록으로 돌아가기
+              {backLabel}
             </Button>
           ) : (
             <Button onClick={onRetry} type="button" variant="outline">

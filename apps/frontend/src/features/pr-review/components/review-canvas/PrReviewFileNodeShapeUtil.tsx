@@ -1,5 +1,6 @@
 "use client";
 
+import { type MouseEvent, type PointerEvent, useState } from "react";
 import {
   HTMLContainer,
   Polyline2d,
@@ -8,11 +9,17 @@ import {
   ShapeUtil,
   T,
   Vec,
+  useEditor,
+  useValue,
   type TLBaseShape,
-  type TLShape
+  type TLShape,
+  type TLShapeId
 } from "tldraw";
+import { AlertTriangle, FileSearch, LockKeyhole } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { getPrReviewFlowDragShapeIds } from "@/features/pr-review/components/review-canvas/pr-review-flow-group-drag";
+import { activatePrReviewFileNode } from "@/features/pr-review/components/review-canvas/pr-review-node-activation";
 import type {
   PrReviewFileRoleType,
   PrReviewFileRiskLevel,
@@ -42,10 +49,12 @@ export type PrReviewFileNodeShapeProps = {
   filePath: string;
   fileStatus: PrReviewFileStatus;
   roleSummary: string | null;
+  roleType: PrReviewFileRoleType;
   riskLevel: PrReviewFileRiskLevel;
   reviewStatus: PrReviewFileReviewStatus;
   conflictState: "none" | "unresolved" | "ready" | "unsupported";
   conflictReason: string | null;
+  pinned: boolean;
 };
 
 export type PrReviewFlowEdgeShapeProps = {
@@ -62,7 +71,26 @@ export type PrReviewFlowEdgeShapeProps = {
   kind: "review_order" | "semantic";
 };
 
+export type PrReviewEdgeRoutePoint = {
+  x: number;
+  y: number;
+};
+
+export type PrReviewRelationDetail = {
+  relationType:
+    | "review_order"
+    | "depends_on"
+    | "tests"
+    | "uses_api"
+    | "passes_data_to"
+    | "supports";
+  source: "rule" | "ai" | "hybrid" | "fallback";
+  confidence: number;
+  reason: string;
+};
+
 export type PrReviewRelationEdgeShapeProps = PrReviewFlowEdgeShapeProps & {
+  routePoints: PrReviewEdgeRoutePoint[];
   reviewRoomId: string;
   currentReviewSessionId: string;
   fromRoomFileId: string;
@@ -76,6 +104,8 @@ export type PrReviewRelationEdgeShapeProps = PrReviewFlowEdgeShapeProps & {
     | "supports";
   source: "rule" | "ai" | "hybrid" | "fallback";
   confidence: number;
+  relationCount: number;
+  relationDetails: PrReviewRelationDetail[];
 };
 
 export type PrReviewRoleLaneShapeProps = {
@@ -243,14 +273,126 @@ const conflictBadgeClasses: Record<
 function getEdgePathData(
   shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
 ) {
+  return getEdgeRoutePoints(shape)
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+}
+
+function getEdgeRoutePoints(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
+): PrReviewEdgeRoutePoint[] {
+  if (
+    isPrReviewRelationEdgeShapeValue(shape) &&
+    shape.props.routePoints.length >= 2
+  ) {
+    return shape.props.routePoints;
+  }
+
   const { startX, startY, endX, endY } = shape.props;
   if (startX === endX || startY === endY) {
-    return `M ${startX} ${startY} L ${endX} ${endY}`;
+    return [
+      { x: startX, y: startY },
+      { x: endX, y: endY }
+    ];
   }
 
   const midX = startX + (endX - startX) / 2;
+  return [
+    { x: startX, y: startY },
+    { x: midX, y: startY },
+    { x: midX, y: endY },
+    { x: endX, y: endY }
+  ];
+}
 
-  return `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}`;
+function isPrReviewRelationEdgeShapeValue(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape
+): shape is PrReviewRelationEdgeShape {
+  return shape.type === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
+}
+
+function isPrReviewRelationEdgeShape(
+  shape: TLShape | null | undefined
+): shape is PrReviewRelationEdgeShape {
+  return shape?.type === PR_REVIEW_RELATION_EDGE_SHAPE_TYPE;
+}
+
+function useRelationEndpointHighlight(roomFileId: string | null) {
+  const editor = useEditor();
+  return useValue(
+    `pr-review-relation-endpoint-${roomFileId ?? "none"}`,
+    () => {
+      if (!roomFileId) return "none" as const;
+      const selected = editor.getOnlySelectedShape();
+      if (!isPrReviewRelationEdgeShape(selected)) return "none" as const;
+      if (selected.props.fromRoomFileId === roomFileId) return "from" as const;
+      if (selected.props.toRoomFileId === roomFileId) return "to" as const;
+      return "none" as const;
+    },
+    [editor, roomFileId]
+  );
+}
+
+function useFocusedRelationEndpoint() {
+  const editor = useEditor();
+  return useValue(
+    "pr-review-relation-focus-endpoint",
+    () => {
+      const selected = editor.getOnlySelectedShape();
+      return isPrReviewFileNodeShape(selected)
+        ? selected.props.roomFileId
+        : null;
+    },
+    [editor]
+  );
+}
+
+function getRelationTypeLabel(
+  relationType: PrReviewRelationEdgeShapeProps["relationType"]
+) {
+  const labels: Record<PrReviewRelationEdgeShapeProps["relationType"], string> = {
+    review_order: "추천 리뷰 경로",
+    depends_on: "의존 관계",
+    tests: "테스트 관계",
+    uses_api: "API 사용",
+    passes_data_to: "데이터 전달",
+    supports: "지원 변경"
+  };
+  return labels[relationType];
+}
+
+function getEdgeVisualStyle(
+  shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape,
+  isHovered: boolean,
+  isSelected: boolean,
+  isDimmed = false
+) {
+  const emphasis = isDimmed ? 0.12 : isSelected ? 1 : isHovered ? 0.9 : 0.72;
+  if (!isPrReviewRelationEdgeShapeValue(shape)) {
+    return {
+      stroke: `rgba(37, 99, 235, ${emphasis})`,
+      strokeDasharray: undefined,
+      strokeWidth: isDimmed ? 1.5 : isSelected ? 4 : isHovered ? 3.5 : 3
+    };
+  }
+
+  const relationStyles: Record<
+    PrReviewRelationEdgeShapeProps["relationType"],
+    { stroke: string; strokeDasharray?: string }
+  > = {
+    review_order: { stroke: "37, 99, 235" },
+    depends_on: { stroke: "109, 40, 217", strokeDasharray: "10 6" },
+    tests: { stroke: "5, 150, 105", strokeDasharray: "5 5" },
+    uses_api: { stroke: "8, 145, 178", strokeDasharray: "12 6" },
+    passes_data_to: { stroke: "217, 119, 6", strokeDasharray: "3 5" },
+    supports: { stroke: "71, 85, 105", strokeDasharray: "2 6" }
+  };
+  const style = relationStyles[shape.props.relationType];
+  return {
+    stroke: `rgba(${style.stroke}, ${emphasis})`,
+    strokeDasharray: style.strokeDasharray,
+    strokeWidth: isDimmed ? 1.25 : isSelected ? 4 : isHovered ? 3 : 2
+  };
 }
 
 export function isPrReviewFileNodeShape(
@@ -260,8 +402,23 @@ export function isPrReviewFileNodeShape(
 }
 
 function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
+  const editor = useEditor();
+  const isSelected = useValue(
+    `pr-review-file-node-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
   const conflictState =
     shape.props.conflictState === "none" ? null : shape.props.conflictState;
+  const relationEndpointHighlight = useRelationEndpointHighlight(
+    shape.props.roomFileId
+  );
+
+  function handleOpenFile(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    activatePrReviewFileNode(editor, shape.props.reviewFileId);
+  }
 
   return (
     <HTMLContainer
@@ -270,18 +427,56 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
     >
       <article
         className={cn(
-          "flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
+          "relative flex h-full w-full flex-col justify-between rounded-md border-2 px-4 py-3 shadow-sm",
           conflictState
             ? conflictNodeClasses[conflictState]
-            : riskNodeClasses[shape.props.riskLevel]
+            : riskNodeClasses[shape.props.riskLevel],
+          relationEndpointHighlight === "from"
+            ? "ring-2 ring-violet-400 ring-offset-2"
+            : relationEndpointHighlight === "to"
+              ? "ring-2 ring-cyan-400 ring-offset-2"
+              : undefined
         )}
       >
+        {isSelected ? (
+          <button
+            aria-label="파일 보기"
+            className={cn(
+              "absolute top-3 flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600",
+              conflictState === "unresolved" ? "right-12" : "right-3"
+            )}
+            onClick={handleOpenFile}
+            onPointerDown={(event) => event.stopPropagation()}
+            title="파일 보기"
+            type="button"
+          >
+            <FileSearch aria-hidden="true" className="size-4" />
+          </button>
+        ) : null}
+        {conflictState === "unresolved" ? (
+          <span
+            aria-label="해결이 필요한 Conflict"
+            className="pointer-events-none absolute right-3 top-3 flex size-7 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm"
+            title={shape.props.conflictReason ?? "해결이 필요한 Conflict"}
+          >
+            <AlertTriangle aria-hidden="true" className="size-4" />
+          </span>
+        ) : null}
+        {shape.props.pinned ? (
+          <span
+            aria-label="고정된 파일 노드"
+            className="pointer-events-none absolute bottom-3 right-3 text-slate-400"
+            title="직접 옮긴 파일입니다. 자동 정렬에서 위치를 유지합니다."
+          >
+            <LockKeyhole aria-hidden="true" className="size-3.5" />
+          </span>
+        ) : null}
         <div className="flex min-w-0 items-start gap-3">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white">
             {shape.props.workflowOrder}
           </span>
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-slate-950">
+            <h3 className="truncate text-base font-semibold text-slate-950">
               {shape.props.fileName}
             </h3>
             <p className="mt-1 truncate text-xs text-slate-500">
@@ -294,7 +489,7 @@ function PrReviewFileNode({ shape }: { shape: PrReviewFileNodeShape }) {
             {shape.props.roleSummary || fileStatusLabels[shape.props.fileStatus]}
           </span>
           <div className="flex shrink-0 items-center gap-1">
-            {conflictState ? (
+            {conflictState && conflictState !== "unresolved" ? (
               <span
                 className={cn(
                   "rounded-full border px-2 py-0.5 font-semibold",
@@ -333,39 +528,120 @@ function PrReviewFlowEdge({
 }: {
   shape: PrReviewFlowEdgeShape | PrReviewRelationEdgeShape;
 }) {
+  const editor = useEditor();
+  const [isHovered, setIsHovered] = useState(false);
+  const isSelected = useValue(
+    `pr-review-edge-selected-${shape.id}`,
+    () => editor.getOnlySelectedShape()?.id === shape.id,
+    [editor, shape.id]
+  );
   const path = getEdgePathData(shape);
+  const isRelation = isPrReviewRelationEdgeShapeValue(shape);
+  const focusedRoomFileId = useFocusedRelationEndpoint();
+  const isDimmed = Boolean(
+    isRelation &&
+      focusedRoomFileId &&
+      shape.props.fromRoomFileId !== focusedRoomFileId &&
+      shape.props.toRoomFileId !== focusedRoomFileId
+  );
+  const visualStyle = getEdgeVisualStyle(
+    shape,
+    isHovered,
+    isSelected,
+    isDimmed
+  );
   const arrowSize = 7;
-  const { endX, endY, startX, startY } = shape.props;
-  const horizontalDirection = endX >= startX ? 1 : -1;
-  const verticalDirection = endY === startY ? 0 : endY > startY ? 1 : -1;
+  const routePoints = getEdgeRoutePoints(shape);
+  const endpoint = routePoints[routePoints.length - 1];
+  const previousPoint = routePoints[routePoints.length - 2];
+  const horizontalDirection = endpoint.x >= previousPoint.x ? 1 : -1;
+  const verticalDirection =
+    endpoint.y === previousPoint.y ? 0 : endpoint.y > previousPoint.y ? 1 : -1;
   const arrowPoints =
     verticalDirection === 0
-      ? `${endX},${endY} ${endX - arrowSize * horizontalDirection},${endY - arrowSize} ${endX - arrowSize * horizontalDirection},${endY + arrowSize}`
-      : `${endX},${endY} ${endX - arrowSize},${endY - arrowSize * verticalDirection} ${endX + arrowSize},${endY - arrowSize * verticalDirection}`;
+      ? `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y - arrowSize} ${endpoint.x - arrowSize * horizontalDirection},${endpoint.y + arrowSize}`
+      : `${endpoint.x},${endpoint.y} ${endpoint.x - arrowSize},${endpoint.y - arrowSize * verticalDirection} ${endpoint.x + arrowSize},${endpoint.y - arrowSize * verticalDirection}`;
+  const hoverSummary = isRelation
+    ? shape.props.relationCount > 1
+      ? `관계 ${shape.props.relationCount}개 · ${getRelationTypeLabel(shape.props.relationType)}`
+      : `${getRelationTypeLabel(shape.props.relationType)} · ${shape.props.reason}`
+    : shape.props.reason;
+  const relationBadgePoint = routePoints[Math.floor(routePoints.length / 2)];
+
+  function handleClick(event: MouseEvent<SVGPathElement>) {
+    event.stopPropagation();
+    editor.select(shape.id);
+  }
 
   return (
-    <SVGContainer style={{ overflow: "visible" }}>
+    <SVGContainer
+      style={{
+        height: shape.props.h,
+        overflow: "visible",
+        pointerEvents: "auto",
+        width: shape.props.w
+      }}
+    >
       <path
         d={path}
         fill="none"
-        stroke={
-          shape.props.kind === "review_order"
-            ? "rgba(37, 99, 235, 0.78)"
-            : "rgba(71, 85, 105, 0.52)"
-        }
-        strokeDasharray={shape.props.kind === "semantic" ? "8 7" : undefined}
+        onClick={handleClick}
+        onPointerEnter={() => setIsHovered(true)}
+        onPointerLeave={() => setIsHovered(false)}
+        pointerEvents="stroke"
+        stroke="transparent"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={shape.props.kind === "review_order" ? "3" : "2"}
-      />
+        strokeWidth={16}
+      >
+        <title>{hoverSummary}</title>
+      </path>
+      <path
+        d={path}
+        fill="none"
+        pointerEvents="none"
+        stroke={visualStyle.stroke}
+        strokeDasharray={visualStyle.strokeDasharray}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={visualStyle.strokeWidth}
+      >
+        <title>{hoverSummary}</title>
+      </path>
       <polygon
-        fill={
-          shape.props.kind === "review_order"
-            ? "rgba(37, 99, 235, 0.78)"
-            : "rgba(71, 85, 105, 0.58)"
-        }
+        fill={visualStyle.stroke}
+        pointerEvents="none"
         points={arrowPoints}
       />
+      {isRelation && shape.props.relationCount > 1 ? (
+        <g
+          aria-label={`관계 ${shape.props.relationCount}개`}
+          opacity={isDimmed ? 0.4 : 1}
+          pointerEvents="none"
+          transform={`translate(${relationBadgePoint.x}, ${relationBadgePoint.y})`}
+        >
+          <rect
+            fill="rgba(255, 255, 255, 0.96)"
+            height="20"
+            rx="10"
+            stroke={visualStyle.stroke}
+            strokeWidth="1.5"
+            width="42"
+            x="-21"
+            y="-10"
+          />
+          <text
+            dominantBaseline="middle"
+            fill="rgb(30, 41, 59)"
+            fontSize="11"
+            fontWeight="700"
+            textAnchor="middle"
+            y="1"
+          >
+            {`${shape.props.relationCount}개`}
+          </text>
+        </g>
+      ) : null}
     </SVGContainer>
   );
 }
@@ -406,17 +682,50 @@ function PrReviewRoleLane({ shape }: { shape: PrReviewRoleLaneShape }) {
 }
 
 function PrReviewFlowLabel({ shape }: { shape: PrReviewFlowLabelShape }) {
+  const editor = useEditor();
+
+  function handlePointerDownCapture(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || editor.getInstanceState().isReadonly) {
+      return;
+    }
+
+    const fileShapes = editor
+      .getCurrentPageShapes()
+      .filter(isPrReviewFileNodeShape)
+      .map((fileShape) => ({
+        id: String(fileShape.id),
+        flowId: fileShape.props.flowId,
+        pinned: fileShape.props.pinned
+      }));
+    const shapeIds = getPrReviewFlowDragShapeIds({
+      fileShapes,
+      flowId: shape.props.flowId,
+      flowLabelShapeId: String(shape.id)
+    });
+
+    editor.select(...shapeIds.map((shapeId) => shapeId as TLShapeId));
+  }
+
   return (
-    <HTMLContainer style={{ width: shape.props.w, height: shape.props.h }}>
-      <div className="flex h-full min-w-0 flex-col justify-center overflow-hidden">
-        <p className="text-xs font-semibold uppercase text-blue-600">
+    <HTMLContainer
+      className="cursor-move"
+      onPointerDownCapture={handlePointerDownCapture}
+      style={{ width: shape.props.w, height: shape.props.h }}
+    >
+      <div className="grid h-full min-w-0 grid-cols-[auto_minmax(220px,0.7fr)_minmax(320px,1.3fr)] items-center gap-6 overflow-hidden">
+        <p className="whitespace-nowrap text-sm font-semibold uppercase text-blue-600">
           Flow {shape.props.sortOrder} · {shape.props.fileCount}개 파일
         </p>
-        <h2 className="mt-1 line-clamp-2 break-words text-lg font-semibold leading-6 text-slate-950">
+        <h2
+          className={cn(
+            "line-clamp-2 min-w-0 break-keep text-2xl font-semibold leading-8 text-slate-950",
+            shape.props.description ? undefined : "col-span-2"
+          )}
+        >
           {shape.props.title}
         </h2>
         {shape.props.description ? (
-          <p className="mt-2 line-clamp-2 break-words text-sm leading-5 text-slate-600">
+          <p className="line-clamp-2 min-w-0 break-keep text-base leading-6 text-slate-600">
             {shape.props.description}
           </p>
         ) : null}
@@ -472,6 +781,15 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
     filePath: T.string,
     fileStatus: T.literalEnum("added", "modified", "deleted", "renamed"),
     roleSummary: T.nullable(T.string),
+    roleType: T.literalEnum(
+      "entry",
+      "core_logic",
+      "api_contract",
+      "ui_state",
+      "verification",
+      "support",
+      "unknown"
+    ),
     riskLevel: T.literalEnum("high", "medium", "low", "unknown"),
     reviewStatus: T.literalEnum(
       "not_reviewed",
@@ -485,7 +803,8 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       "ready",
       "unsupported"
     ),
-    conflictReason: T.nullable(T.string)
+    conflictReason: T.nullable(T.string),
+    pinned: T.boolean
   };
 
   override canBind() {
@@ -512,10 +831,12 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
       filePath: "",
       fileStatus: "modified",
       roleSummary: null,
+      roleType: "unknown",
       riskLevel: "unknown",
       reviewStatus: "not_reviewed",
       conflictState: "none",
-      conflictReason: null
+      conflictReason: null,
+      pinned: false
     };
   }
 
@@ -529,6 +850,10 @@ export class PrReviewFileNodeShapeUtil extends ShapeUtil<PrReviewFileNodeShape> 
 
   override component(shape: PrReviewFileNodeShape) {
     return <PrReviewFileNode shape={shape} />;
+  }
+
+  override onDoubleClick(shape: PrReviewFileNodeShape) {
+    activatePrReviewFileNode(this.editor, shape.props.reviewFileId);
   }
 
   override getIndicatorPath(shape: PrReviewFileNodeShape) {
@@ -629,6 +954,7 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
     startY: T.number,
     endX: T.number,
     endY: T.number,
+    routePoints: T.arrayOf(T.object({ x: T.number, y: T.number })),
     fromReviewFileId: T.string,
     toReviewFileId: T.string,
     flowId: T.string,
@@ -647,7 +973,23 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
       "supports"
     ),
     source: T.literalEnum("rule", "ai", "hybrid", "fallback"),
-    confidence: T.number
+    confidence: T.number,
+    relationCount: T.number,
+    relationDetails: T.arrayOf(
+      T.object({
+        relationType: T.literalEnum(
+          "review_order",
+          "depends_on",
+          "tests",
+          "uses_api",
+          "passes_data_to",
+          "supports"
+        ),
+        source: T.literalEnum("rule", "ai", "hybrid", "fallback"),
+        confidence: T.number,
+        reason: T.string
+      })
+    )
   };
 
   override canBind() {
@@ -674,6 +1016,7 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
       startY: 0,
       endX: 1,
       endY: 1,
+      routePoints: [],
       fromReviewFileId: "",
       toReviewFileId: "",
       flowId: "",
@@ -685,27 +1028,15 @@ export class PrReviewRelationEdgeShapeUtil extends ShapeUtil<PrReviewRelationEdg
       toRoomFileId: "",
       relationType: "depends_on",
       source: "hybrid",
-      confidence: 0
+      confidence: 0,
+      relationCount: 1,
+      relationDetails: []
     };
   }
 
   override getGeometry(shape: PrReviewRelationEdgeShape) {
-    const { startX, startY, endX, endY } = shape.props;
-    if (startX === endX || startY === endY) {
-      return new Polyline2d({
-        points: [new Vec(startX, startY), new Vec(endX, endY)]
-      });
-    }
-
-    const midX = startX + (endX - startX) / 2;
-
     return new Polyline2d({
-      points: [
-        new Vec(startX, startY),
-        new Vec(midX, startY),
-        new Vec(midX, endY),
-        new Vec(endX, endY)
-      ]
+      points: getEdgeRoutePoints(shape).map((point) => new Vec(point.x, point.y))
     });
   }
 

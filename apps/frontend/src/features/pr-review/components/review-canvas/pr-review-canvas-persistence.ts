@@ -22,6 +22,7 @@ export type PrReviewCanvasFileShapeSnapshot = {
   props: {
     w: number;
     h: number;
+    pinned: boolean;
   };
 };
 
@@ -34,6 +35,7 @@ export type PrReviewRelationEdgeGeometry = {
   startY: number;
   endX: number;
   endY: number;
+  routePoints: Array<{ x: number; y: number }>;
 };
 
 export function isPrReviewCanvasSystemShape(shape: PrReviewCanvasShape) {
@@ -56,7 +58,8 @@ export function getPrReviewFileShapeGeometryKey(
     shape.y,
     shape.index,
     shape.props.w,
-    shape.props.h
+    shape.props.h,
+    shape.props.pinned
   ].join("\u0000");
 }
 
@@ -84,6 +87,7 @@ export function buildPrReviewFileShapeUpdateInput(
   rawShape.index = currentShape.index;
   rawProps.w = width;
   rawProps.h = height;
+  rawProps.pinned = currentShape.props.pinned;
   rawShape.props = rawProps;
 
   if (parentShapeId) {
@@ -200,6 +204,18 @@ export function buildPrReviewRelationEdgeGeometry(
 
   const x = Math.min(startX, endX);
   const y = Math.min(startY, endY);
+  const routePoints =
+    startX === endX || startY === endY
+      ? [
+          { x: startX - x, y: startY - y },
+          { x: endX - x, y: endY - y }
+        ]
+      : [
+          { x: startX - x, y: startY - y },
+          { x: startX + (endX - startX) / 2 - x, y: startY - y },
+          { x: startX + (endX - startX) / 2 - x, y: endY - y },
+          { x: endX - x, y: endY - y }
+        ];
 
   return {
     x,
@@ -209,7 +225,8 @@ export function buildPrReviewRelationEdgeGeometry(
     startX: startX - x,
     startY: startY - y,
     endX: endX - x,
-    endY: endY - y
+    endY: endY - y,
+    routePoints
   };
 }
 

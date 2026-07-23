@@ -8,8 +8,11 @@ import {
   updatePrReviewConflictSuggestion
 } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-resolution.ts";
 import {
-  createPrReviewConflictDraft
+  applyPrReviewConflictDraftResolutionState,
+  createPrReviewConflictDraft,
+  toPrReviewConflictDraftResolutionState
 } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-drafts.ts";
+import { mergePrReviewConflictDraft } from "../../src/features/pr-review/components/review-canvas/pr-review-conflict-draft-merge.ts";
 
 const file = {
   reviewFileId: "review-file",
@@ -54,6 +57,23 @@ const file = {
 };
 
 const baseDraft = createPrReviewConflictDraft(file);
+assert.deepEqual(toPrReviewConflictDraftResolutionState(baseDraft), {
+  resolutionChoices: {},
+  acceptedAiResolvedTexts: {},
+  manualResolvedTexts: {},
+  suggestion: null,
+  isCustomized: false
+});
+
+const restoredHunkDraft = applyPrReviewConflictDraftResolutionState(baseDraft, {
+  resolutionChoices: { "hunk-1": "pr" },
+  acceptedAiResolvedTexts: {},
+  manualResolvedTexts: {},
+  suggestion: null,
+  isCustomized: false
+});
+assert.deepEqual(restoredHunkDraft.resolutionChoices, { "hunk-1": "pr" });
+assert.equal(restoredHunkDraft.isCustomized, false);
 const mixedDraft = {
   ...baseDraft,
   resolutionChoices: {
@@ -126,11 +146,18 @@ assert.deepEqual(
   suggestionOnlyDraft.acceptedAiResolvedTexts,
   mixedDraft.acceptedAiResolvedTexts
 );
+assert.deepEqual(suggestionOnlyDraft.suggestion, {
+  status: "suggested",
+  aiSummary: "summary",
+  aiSuggestion: "suggestion",
+  resolvedHunks: suggestion.resolvedHunks,
+  validationMessages: []
+});
 
 const appliedDraft = applyAllPrReviewConflictSuggestion(
   file,
   suggestionOnlyDraft,
-  suggestion
+  suggestionOnlyDraft.suggestion
 );
 assert.deepEqual(appliedDraft.resolutionChoices, {
   "hunk-1": "ai",
@@ -145,5 +172,28 @@ assert.equal(
   "before\nnew-ai-one\nmiddle\nnew-ai-two\nafter"
 );
 assert.equal(appliedDraft.manualResolvedTexts["hunk-1"], "manual-one");
+
+assert.deepEqual(
+  mergePrReviewConflictDraft({
+    previousGeneratedContent: "alpha\nbeta\ngamma",
+    currentContent: "alpha\nbeta\ngamma\nmanual-note",
+    nextGeneratedContent: "alpha\nnext-beta\ngamma"
+  }),
+  {
+    kind: "clean",
+    resolvedContent: "alpha\nnext-beta\ngamma\nmanual-note"
+  }
+);
+const overlappingMerge = mergePrReviewConflictDraft({
+  previousGeneratedContent: "alpha\nbeta\ngamma",
+  currentContent: "alpha\nmanual-beta\ngamma",
+  nextGeneratedContent: "alpha\nnext-beta\ngamma"
+});
+assert.equal(overlappingMerge.kind, "overlap");
+if (overlappingMerge.kind === "overlap") {
+  assert.equal(overlappingMerge.overlapCount, 1);
+  assert.equal(overlappingMerge.preserveManualContent, "alpha\nmanual-beta\ngamma");
+  assert.equal(overlappingMerge.useSelectionContent, "alpha\nnext-beta\ngamma");
+}
 
 console.log("PR Review hunk manual resolution tests passed");

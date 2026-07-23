@@ -2,6 +2,8 @@ import { createSign } from "node:crypto";
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
+import { GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE } from "./github-oauth-refresh.error";
+import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
 import { GithubSyncObservabilityService } from "./github-sync-observability.service";
 
 export interface GithubAppInstallationLookupRequest {
@@ -36,6 +38,12 @@ export class GithubGraphqlRateLimitError extends ApiError {
 
 export function isGithubGraphqlRateLimitError(error: unknown): boolean {
   return error instanceof GithubGraphqlRateLimitError && error[githubGraphqlRateLimitErrorMarker] === true;
+}
+
+export class GithubSourceSnapshotNotFoundError extends Error {
+  constructor() {
+    super("GitHub source snapshot was not found");
+  }
 }
 
 export interface GithubAppInstallationDetails {
@@ -89,6 +97,11 @@ export interface GithubRepositoryIssuesRequest
   repo: string;
 }
 
+export interface GithubRepositoryIssueLookupRequest
+  extends GithubRepositoryIssuesRequest {
+  issueNumber: number;
+}
+
 export interface GithubRepositoryPullRequestsRequest
   extends GithubAppInstallationTokenRequest {
   owner: string;
@@ -109,6 +122,14 @@ export interface GithubRepositoryIssueUpdateRequest
   title?: string;
   body?: string;
   state?: "open" | "closed";
+}
+
+export interface GithubRepositoryIssueAssigneesUpdateRequest
+  extends GithubProjectV2UserAccessTokenRequest {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  assignees: string[];
 }
 
 export interface GithubRepositoryAssigneesRequest
@@ -443,8 +464,6 @@ const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_READ_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS = 30_000;
-const GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE =
-  "GitHub ProjectV2 OAuth connection must be reconnected with project scope";
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
   "GitHub ProjectV2 owner could not be resolved";
 const GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE =
@@ -1210,6 +1229,28 @@ export class GithubAppClient {
     return issues;
   }
 
+  async getRepositoryIssue(
+    input: GithubRepositoryIssueLookupRequest
+  ): Promise<GithubIssueApiItem> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}`
+    );
+    const payload = await this.fetchJsonWithToken(
+      url,
+      installationToken.token,
+      "GitHub issue lookup failed",
+      undefined,
+      true
+    );
+
+    if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
+      throw badRequest("GitHub issue lookup failed");
+    }
+
+    return payload;
+  }
+
   async updateRepositoryIssue(
     input: GithubRepositoryIssueUpdateRequest
   ): Promise<GithubIssueApiItem> {
@@ -1250,6 +1291,10 @@ export class GithubAppClient {
       throw badRequest("GitHub issue update failed");
     }
 
+    if (response.status === 401) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
+    }
+
     if (response.status === 403) {
       throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
     }
@@ -1261,6 +1306,68 @@ export class GithubAppClient {
     const payload = await this.readJson(response, "GitHub issue update failed");
     if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
       throw badRequest("GitHub issue update failed");
+    }
+
+    return payload;
+  }
+
+  async addRepositoryIssueAssignees(
+    input: GithubRepositoryIssueAssigneesUpdateRequest
+  ): Promise<GithubIssueApiItem> {
+    return this.updateRepositoryIssueAssignees(input, "POST");
+  }
+
+  async removeRepositoryIssueAssignees(
+    input: GithubRepositoryIssueAssigneesUpdateRequest
+  ): Promise<GithubIssueApiItem> {
+    return this.updateRepositoryIssueAssignees(input, "DELETE");
+  }
+
+  private async updateRepositoryIssueAssignees(
+    input: GithubRepositoryIssueAssigneesUpdateRequest,
+    method: "POST" | "DELETE"
+  ): Promise<GithubIssueApiItem> {
+    if (!input.userAccessToken) {
+      throw badRequest("GitHub OAuth connection is required");
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/assignees`,
+        {
+          method,
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${input.userAccessToken}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          body: JSON.stringify({ assignees: input.assignees })
+        }
+      );
+    } catch {
+      throw badRequest("GitHub issue assignee update failed");
+    }
+
+    if (response.status === 401) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
+    }
+
+    if (response.status === 403) {
+      throw forbidden(GITHUB_ISSUE_WRITE_PERMISSION_ERROR_MESSAGE);
+    }
+
+    if (!response.ok) {
+      throw badRequest("GitHub issue assignee update failed");
+    }
+
+    const payload = await this.readJson(
+      response,
+      "GitHub issue assignee update failed"
+    );
+    if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
+      throw badRequest("GitHub issue assignee update failed");
     }
 
     return payload;
@@ -1292,7 +1399,9 @@ export class GithubAppClient {
           url,
           input.userAccessToken,
           "GitHub issue assignee lookup failed",
-          controller.signal
+          controller.signal,
+          false,
+          true
         );
         if (
           !Array.isArray(payload) ||
@@ -1344,6 +1453,10 @@ export class GithubAppClient {
       );
     } catch {
       throw badRequest("GitHub issue create failed");
+    }
+
+    if (response.status === 401) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
     }
 
     if (response.status === 403) {
@@ -1707,33 +1820,7 @@ export class GithubAppClient {
   async getPullRequest(
     input: GithubPullRequestLookupRequest
   ): Promise<GithubPullRequestApiDetails> {
-    const installationToken = await this.createInstallationAccessToken(input);
-    let response: Response;
-    try {
-      response = await fetch(
-        `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls/${input.pullNumber}`,
-        {
-          headers: {
-            Accept: "application/vnd.github+json",
-            Authorization: `Bearer ${installationToken.token}`,
-            "X-GitHub-Api-Version": GITHUB_API_VERSION
-          }
-        }
-      );
-    } catch {
-      throw badRequest("GitHub pull request lookup failed");
-    }
-
-    if (!response.ok) {
-      throw badRequest("GitHub pull request lookup failed");
-    }
-
-    const payload = await this.readJson(response, "GitHub pull request lookup failed");
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      throw badRequest("GitHub pull request lookup failed");
-    }
-
-    const pullRequest = payload as GithubPullRequestApiItem;
+    const pullRequest = await this.getPullRequestSnapshot(input, false);
     if (
       typeof pullRequest.changed_files !== "number" ||
       typeof pullRequest.additions !== "number" ||
@@ -1799,6 +1886,35 @@ export class GithubAppClient {
       headRepositoryName,
       headRepositoryFullName
     };
+  }
+
+  async getPullRequestWebhookSnapshot(
+    input: GithubPullRequestLookupRequest
+  ): Promise<GithubPullRequestApiItem> {
+    return this.getPullRequestSnapshot(input, true);
+  }
+
+  private async getPullRequestSnapshot(
+    input: GithubPullRequestLookupRequest,
+    sourceNotFoundError: boolean
+  ): Promise<GithubPullRequestApiItem> {
+    const installationToken = await this.createInstallationAccessToken(input);
+    const url = new URL(
+      `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/pulls/${input.pullNumber}`
+    );
+    const payload = await this.fetchJsonWithToken(
+      url,
+      installationToken.token,
+      "GitHub pull request lookup failed",
+      undefined,
+      sourceNotFoundError
+    );
+
+    if (!this.isPullRequestPayload(payload)) {
+      throw badRequest("GitHub pull request lookup failed");
+    }
+
+    return payload;
   }
 
   async getRepositoryMergeBase(
@@ -2324,7 +2440,7 @@ export class GithubAppClient {
       context?.tokenSource === "user" &&
       errors.some((error) => this.isProjectV2ScopeError(error))
     ) {
-      return GITHUB_PROJECT_V2_OAUTH_SCOPE_ERROR_MESSAGE;
+      return GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE;
     }
 
     if (errors.some((error) => this.isProjectV2OwnerResolutionError(error))) {
@@ -2972,7 +3088,9 @@ export class GithubAppClient {
     url: URL,
     token: string,
     errorMessage: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    sourceNotFoundError = false,
+    userTokenOperation = false
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -2986,6 +3104,14 @@ export class GithubAppClient {
       });
     } catch {
       throw badRequest(errorMessage);
+    }
+
+    if (response.status === 404 && sourceNotFoundError) {
+      throw new GithubSourceSnapshotNotFoundError();
+    }
+
+    if (response.status === 401 && userTokenOperation) {
+      throw badRequest(GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE);
     }
 
     if (!response.ok) {

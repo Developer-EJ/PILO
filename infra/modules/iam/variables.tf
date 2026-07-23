@@ -20,6 +20,12 @@ variable "ecr_repository_arns" {
   type = list(string)
 }
 
+variable "db_migration_publisher_repository_arn" {
+  description = "ECR repository ARN that the dev-only DB migration publisher may push to."
+  type        = string
+  default     = ""
+}
+
 variable "s3_bucket_arns" {
   type = list(string)
 }
@@ -44,6 +50,11 @@ variable "meeting_worker_queue_arns" {
 
 variable "pr_review_ai_worker_queue_arns" {
   description = "Queues consumed by the PR Review-only worker."
+  type        = list(string)
+}
+
+variable "workspace_indexer_worker_queue_arns" {
+  description = "Queues consumed by the Workspace indexing worker."
   type        = list(string)
 }
 

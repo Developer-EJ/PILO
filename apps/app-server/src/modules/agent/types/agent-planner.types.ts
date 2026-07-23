@@ -15,8 +15,19 @@ export type AgentPlannerIntent =
   | "calendar.update_event"
   | "meeting_report.list"
   | "meeting_report.summarize"
+  | "meeting.start"
+  | "meeting.join"
+  | "meeting.leave"
+  | "meeting.start_recording"
+  | "meeting.end_recording"
   | "board.search_issues"
   | "board.move_issue_status"
+  | "board.get_issue_context"
+  | "board.create_issue"
+  | "board.resolve_context"
+  | "board.get_briefing"
+  | "board.assign_issue"
+  | "board.diagnose_freshness"
   | "unsupported";
 
 export type AgentPlannerToolName =
@@ -25,15 +36,30 @@ export type AgentPlannerToolName =
   | "update_calendar_event"
   | "list_meeting_reports"
   | "summarize_meeting_report"
+  | "start_meeting_in_room"
+  | "join_meeting"
+  | "leave_meeting"
+  | "start_meeting_recording"
+  | "end_meeting_recording"
   | "search_board_issues"
-  | "move_board_issue_status";
+  | "move_board_issue_status"
+  | "get_board_issue_context"
+  | "create_board_issue"
+  | "resolve_board_context"
+  | "get_board_briefing"
+  | "assign_board_issue_safely"
+  | "diagnose_board_freshness";
 
 export type AgentPlannerMissingField =
   | "calendar_event_title"
   | "calendar_event_time"
   | "calendar_event_target"
+  | "meeting_room"
+  | "meeting"
   | "board_issue"
-  | "board_column";
+  | "board_column"
+  | "board_issue_title"
+  | "board_assignee";
 
 export type AgentPlannerUnsupportedReason =
   | "high_risk_or_excluded"
@@ -48,7 +74,7 @@ export interface AgentPlannerToolCandidate {
   toolName: AgentPlannerToolName;
   riskLevel: AgentRiskLevel;
   executionMode: AgentToolExecutionMode;
-  requiresConfirmation: boolean;
+  requiresConfirmation: boolean | null;
   inputSummary: AgentToolInputSummary;
   toolInputValidation: "tool_adapter_required";
 }

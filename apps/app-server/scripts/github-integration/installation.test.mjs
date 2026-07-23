@@ -8,8 +8,10 @@ const { GithubIntegrationService } = require("../../dist/modules/github-integrat
 const { GithubAppInstallationStateService } = require("../../dist/modules/github-integration/github-app-installation-state.service.js");
 const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
 const { GithubOAuthClient } = require("../../dist/modules/github-integration/github-oauth.client.js");
+const { GithubOAuthInstallationLookupError } = require("../../dist/modules/github-integration/github-oauth-installation-lookup.error.js");
 const { GithubTokenEncryptionService } = require("../../dist/modules/github-integration/github-token-encryption.service.js");
 const { GithubSyncJobEnqueueError } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { forbidden } = require("../../dist/common/api-error.js");
 
 class FakeDatabase {
   constructor({ oneRows = [], rows = [], handlers = {} } = {}) {
@@ -64,6 +66,7 @@ class FakeWorkspaceService {
 
   async assertWorkspaceOwnerAccess(currentUserId, workspaceId) {
     this.ownerChecks.push({ currentUserId, workspaceId });
+    if (this.ownerError) throw this.ownerError;
     return {
       id: workspaceId,
       name: "Engineering",
@@ -82,8 +85,8 @@ class FakeGithubSyncRunService {
     this.calls = [];
   }
 
-  async startGithubSyncRun(currentUserId, workspaceId, input) {
-    this.calls.push({ currentUserId, workspaceId, input });
+  async startGithubSyncRun(currentUserId, workspaceId, input, triggerSource) {
+    this.calls.push({ currentUserId, workspaceId, input, triggerSource });
     if (this.error) {
       throw this.error;
     }
@@ -132,6 +135,24 @@ const connectedGithubOAuthRow = {
   revoked_at: null
 };
 
+{
+  const database = new FakeDatabase({ oneRows: [connectedGithubOAuthRow] });
+  const workspaceService = new FakeWorkspaceService();
+  workspaceService.ownerError = forbidden("Workspace owner access is required");
+  let installationLookupCalled = false;
+  const service = createService({
+    database,
+    workspaceService,
+    githubOAuthClient: { async assertUserInstallationLookupSupported() { installationLookupCalled = true; } }
+  });
+  await assert.rejects(
+    () => service.startGithubAppInstallation(currentUserId, workspaceId, { returnUrl: "https://pilo.test/github" }),
+    error => error.getStatus() === 403
+  );
+  assert.deepEqual(database.queries, []);
+  assert.equal(installationLookupCalled, false);
+}
+
 function createService({
   database,
   workspaceService,
@@ -177,7 +198,8 @@ function createService({
     returnUrl: "https://pilo.test/workspaces/11111111-1111-4111-8111-111111111111/github"
   });
 
-  assert.deepEqual(workspaceService.accessChecks, [{ currentUserId, workspaceId }]);
+  assert.deepEqual(workspaceService.ownerChecks, [{ currentUserId, workspaceId }]);
+  assert.deepEqual(workspaceService.accessChecks, []);
   assert.match(database.queries[0].text, /access_token_encrypted/i);
   assert.deepEqual(database.queries[0].values, [currentUserId, "app_user"]);
 
@@ -228,6 +250,26 @@ function createService({
 }
 
 {
+  const database = new FakeDatabase({ oneRows: [connectedGithubOAuthRow] });
+  const service = createService({
+    database,
+    githubOAuthClient: {
+      async assertUserInstallationLookupSupported() {
+        throw new GithubOAuthInstallationLookupError("reconnect_required");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.startGithubAppInstallation(currentUserId, workspaceId, { returnUrl: "https://pilo.test/github" }),
+    (error) =>
+      error?.response?.error?.code === "GITHUB_OAUTH_RECONNECT_REQUIRED" &&
+      error?.response?.error?.message === "GitHub OAuth reconnection is required"
+  );
+  assert.equal(database.queries.some(({ text }) => /UPDATE github_oauth_connections/i.test(text)), false);
+}
+
+{
   const service = createService({
     database: new FakeDatabase({
       oneRows: [
@@ -248,6 +290,45 @@ function createService({
     (error) =>
       error?.response?.error?.message === "GitHub OAuth connection is required"
   );
+}
+
+for (const scenario of [
+  { name: "401", status: 401, headers: {}, expected: "reconnect_required" },
+  { name: "non-rate-limit 403", status: 403, headers: {}, expected: "reconnect_required" },
+  { name: "rate-limit 403", status: 403, headers: { "x-ratelimit-remaining": "0" }, expected: "transient" },
+  { name: "429", status: 429, headers: { "retry-after": "30" }, expected: "transient" },
+  { name: "5xx", status: 503, headers: {}, expected: "transient" }
+]) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ message: scenario.name }), {
+    status: scenario.status,
+    headers: { "content-type": "application/json", ...scenario.headers }
+  });
+  try {
+    await assert.rejects(
+      () => new GithubOAuthClient().assertUserInstallationLookupSupported({ accessToken: "new-token" }),
+      (error) => error instanceof GithubOAuthInstallationLookupError && error.failure === scenario.expected,
+      scenario.name
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+for (const scenario of ["network", "malformed"]) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = scenario === "network"
+    ? async () => { throw new Error("provider detail"); }
+    : async () => new Response("not-json", { status: 200 });
+  try {
+    await assert.rejects(
+      () => new GithubOAuthClient().assertUserInstallationLookupSupported({ accessToken: "new-token" }),
+      (error) => error instanceof GithubOAuthInstallationLookupError && error.failure === "transient",
+      scenario
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 {
@@ -422,7 +503,8 @@ function createService({
     input: {
       installationId: "33333333-3333-4333-8333-333333333333",
       target: "source"
-    }
+    },
+    triggerSource: "automatic"
   }]);
 }
 
@@ -735,7 +817,8 @@ for (const {
     input: {
       installationId: "33333333-3333-4333-8333-333333333333",
       target: "source"
-    }
+    },
+    triggerSource: "automatic"
   }]);
 }
 

@@ -6,6 +6,14 @@ import {
   notFound
 } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
+import {
+  GithubOAuthRefreshRejectedError,
+  GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE
+} from "./github-oauth-refresh.error";
+import { toGithubOAuthExpiryIso } from "./github-oauth-token-expiry";
+import { GithubOAuthInstallationLookupError } from "./github-oauth-installation-lookup.error";
+
+const GITHUB_OAUTH_TOKEN_REFRESH_TIMEOUT_MS = 10_000;
 
 export interface GithubOAuthTokenRequest {
   code: string;
@@ -17,6 +25,22 @@ export interface GithubOAuthTokenRequest {
 export interface GithubOAuthTokenResponse {
   accessToken: string;
   scope: string | null;
+  refreshToken: string | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
+}
+
+export interface GithubOAuthRefreshTokenRequest {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+export interface GithubOAuthRefreshTokenResponse
+  extends GithubOAuthTokenResponse {
+  refreshToken: string;
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
 }
 
 export interface GithubAuthenticatedUser {
@@ -159,10 +183,100 @@ export class GithubOAuthClient {
       throw badRequest("GitHub OAuth token exchange failed");
     }
 
+    const nowEpochMs = Date.now();
+
     return {
       accessToken: payload.access_token,
-      scope: typeof payload.scope === "string" ? payload.scope : null
+      scope: typeof payload.scope === "string" ? payload.scope : null,
+      refreshToken:
+        typeof payload.refresh_token === "string" && payload.refresh_token
+          ? payload.refresh_token
+          : null,
+      accessTokenExpiresAt: toGithubOAuthExpiryIso(
+        payload.expires_in,
+        nowEpochMs
+      ),
+      refreshTokenExpiresAt: toGithubOAuthExpiryIso(
+        payload.refresh_token_expires_in,
+        nowEpochMs
+      )
     };
+  }
+
+  async refreshAccessToken(
+    input: GithubOAuthRefreshTokenRequest
+  ): Promise<GithubOAuthRefreshTokenResponse> {
+    const body = new URLSearchParams({
+      client_id: input.clientId,
+      client_secret: input.clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: input.refreshToken
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      GITHUB_OAUTH_TOKEN_REFRESH_TIMEOUT_MS
+    );
+    try {
+      let response: Response;
+      try {
+        response = await fetch("https://github.com/login/oauth/access_token", {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body,
+          signal: controller.signal
+        });
+      } catch {
+        throw badRequest(GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE);
+      }
+
+      if (response.status >= 400 && response.status < 500) {
+        throw new GithubOAuthRefreshRejectedError();
+      }
+      if (!response.ok) {
+        throw badRequest(GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE);
+      }
+
+      const payload = await this.readJson(
+        response,
+        GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE
+      );
+      if (!this.isTokenPayload(payload)) {
+        throw badRequest(GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE);
+      }
+
+      const nowEpochMs = Date.now();
+      const accessTokenExpiresAt = toGithubOAuthExpiryIso(
+        payload.expires_in,
+        nowEpochMs
+      );
+      const refreshTokenExpiresAt = toGithubOAuthExpiryIso(
+        payload.refresh_token_expires_in,
+        nowEpochMs
+      );
+      if (
+        typeof payload.refresh_token !== "string" ||
+        !payload.refresh_token ||
+        !accessTokenExpiresAt ||
+        !refreshTokenExpiresAt
+      ) {
+        throw badRequest(GITHUB_OAUTH_TOKEN_REFRESH_FAILED_MESSAGE);
+      }
+
+      return {
+        accessToken: payload.access_token,
+        scope: typeof payload.scope === "string" ? payload.scope : null,
+        refreshToken: payload.refresh_token,
+        accessTokenExpiresAt,
+        refreshTokenExpiresAt
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async getAuthenticatedUser(accessToken: string): Promise<GithubAuthenticatedUser> {
@@ -488,22 +602,33 @@ export class GithubOAuthClient {
         }
       });
     } catch {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw new GithubOAuthInstallationLookupError("transient");
     }
 
-    if (response.status === 401 || response.status === 403) {
-      throw badRequest(
-        "GitHub App user access token is required for installation lookup"
+    if (response.status === 401) {
+      throw new GithubOAuthInstallationLookupError("reconnect_required");
+    }
+
+    if (response.status === 403) {
+      const rateLimited = response.headers?.get("x-ratelimit-remaining") === "0" ||
+        response.headers?.has("retry-after") === true;
+      throw new GithubOAuthInstallationLookupError(
+        rateLimited ? "transient" : "reconnect_required"
       );
     }
 
     if (!response.ok) {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw new GithubOAuthInstallationLookupError("transient");
     }
 
-    const payload = await this.readInstallationJson(response);
+    let payload: unknown;
+    try {
+      payload = await this.readInstallationJson(response);
+    } catch {
+      throw new GithubOAuthInstallationLookupError("transient");
+    }
     if (!this.isUserInstallationsPayload(payload)) {
-      throw badRequest("GitHub OAuth installation lookup failed");
+      throw new GithubOAuthInstallationLookupError("transient");
     }
 
     return payload;
@@ -512,6 +637,9 @@ export class GithubOAuthClient {
   private isTokenPayload(value: unknown): value is {
     access_token: string;
     scope?: string;
+    refresh_token?: unknown;
+    expires_in?: unknown;
+    refresh_token_expires_in?: unknown;
   } {
     return (
       typeof value === "object" &&

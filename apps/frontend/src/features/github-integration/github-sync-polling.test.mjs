@@ -177,8 +177,8 @@ const githubPanel = await readFile(
   new URL("./components/github-panel.tsx", import.meta.url),
   "utf8"
 );
-const githubConnectSidebar = await readFile(
-  new URL("./components/github-connect-sidebar.tsx", import.meta.url),
+const githubConnectSync = await readFile(
+  new URL("./components/github-connect-sync.tsx", import.meta.url),
   "utf8"
 );
 const githubConnectPrimitives = await readFile(
@@ -194,11 +194,36 @@ assert.match(githubPanel, /clear:\s*\(timer\) => clearTimeout/);
 assert.match(githubPanel, /apiClient\.listGithubSyncRuns/);
 assert.match(githubPanel, /status:\s*"running"/);
 assert.match(githubPanel, /status:\s*"queued"/);
+assert.match(
+  githubPanel,
+  /apiClient\.listGithubSyncRuns\(workspaceId, \{\s*status:\s*"queued",\s*limit:\s*1\s*\}\)/,
+  "queued-run detection must continue to include every trigger source"
+);
+assert.match(
+  githubPanel,
+  /apiClient\.listGithubSyncRuns\(workspaceId, \{\s*status:\s*"running",\s*limit:\s*1\s*\}\)/,
+  "running-run detection must continue to include every trigger source"
+);
+assert.match(
+  githubPanel,
+  /apiClient\.listGithubSyncRuns\(workspaceId, \{\s*triggerSource:\s*"manual",\s*limit:\s*8\s*\}\)/,
+  "visible history must request only manual sync runs"
+);
 assert.match(githubPanel, /createGithubSyncRequestGate/);
 assert.match(githubPanel, /createGithubSyncPollLoop/);
 assert.match(githubPanel, /syncPollingError/);
 
-assert.match(githubConnectSidebar, /getGithubSyncProgress/);
-assert.match(githubConnectSidebar, /getGithubSyncProgressStageLabel/);
-assert.match(githubConnectSidebar, /\{progress\}%/);
+assert.match(githubConnectSync, /getGithubSyncProgress/);
+assert.match(githubConnectSync, /getGithubSyncProgressStageLabel/);
+assert.match(githubConnectSync, /title="최근 수동 실행"/);
+assert.match(githubConnectSync, /수동 동기화 기록/);
+assert.match(githubConnectSync, /아직 수동 동기화 기록이 없습니다\./);
+assert.match(githubConnectSync, /조회 \{syncRun\.fetchedCount\}/);
+assert.match(githubConnectSync, /추가 \{syncRun\.createdCount\}/);
+assert.match(githubConnectSync, /업데이트\{" "\}/);
+assert.match(
+  githubConnectSync,
+  /isGithubSyncActiveStatus\(syncRun\.status\) \? \([\s\S]*?<GithubConnectProgress value=\{progress\} \/>[\s\S]*?\{progress\}%[\s\S]*?\) : null/,
+  "progress must render only for queued or running sync runs"
+);
 assert.match(githubConnectPrimitives, /aria-valuenow=\{value\}/);

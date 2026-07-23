@@ -26,12 +26,20 @@ output "pr_review_ai_worker_task_role_arn" {
   value = aws_iam_role.pr_review_ai_worker_task.arn
 }
 
+output "workspace_indexer_worker_task_role_arn" {
+  value = aws_iam_role.workspace_indexer_worker_task.arn
+}
+
 output "github_sync_worker_task_role_arn" {
   value = aws_iam_role.github_sync_worker_task.arn
 }
 
 output "github_actions_role_arn" {
   value = try(aws_iam_role.github_actions[0].arn, "")
+}
+
+output "github_actions_db_migration_publisher_role_arn" {
+  value = try(aws_iam_role.github_actions_db_migration_publisher[0].arn, "")
 }
 
 output "github_actions_terraform_plan_role_arn" {

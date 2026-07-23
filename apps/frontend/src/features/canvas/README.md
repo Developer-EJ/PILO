@@ -11,43 +11,54 @@ API contract: `docs/api/canvas-api.md`
 저장되는 PILO freeform canvas는 아래 순서로 조합한다.
 
 ```text
-WorkspaceCanvas -> PiloCanvasRuntime -> PiloTldrawCanvas -> TldrawSurface
+WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 ```
 
 - `WorkspaceCanvas`: `/canvas` 화면, toolbar, board 선택과 생성 흐름
-- `engine/runtime/PiloCanvasRuntime`: Canvas board hydration, local/API 저장 모드, shape sync queue
-- `engine/surface/PiloTldrawCanvas`: Canvas 전용 shape, placement, overlay, editor action 조립
+- `engine/runtime/ClassicCanvasRuntime`: Canvas board hydration, local/API 저장 모드, shape sync queue
+- `engine/editor/CanvasEditor`: Canvas 전용 shape, placement, overlay, editor action 조립
 - `TldrawSurface`: `src/shared/tldraw`의 순수 tldraw rendering surface
 
 `src/shared/tldraw`를 사용하지만, PILO freeform Canvas의 source of truth는 Canvas
 도메인에 남는다. 즉 저장, hydration, sync queue, Canvas API/DB 흐름은
 `src/features/canvas/`가 소유한다.
 
-`engine/` 하위 폴더는 책임별로 나눈다.
+주요 폴더는 사용자가 코드를 따라가기 쉬운 책임 단위로 나눈다.
 
-- `types.ts`: engine 내부에서 공유하는 freeform shape/view setting 타입
-- `runtime/`: 저장, hydration, sync queue, local/API mode
-- `surface/`: Canvas 전용 tldraw surface 조립, 배경, state reporter
-- `shapes/`: shape 등록, shape factory, shape type guard, shape별 ShapeUtil/UI
-- `interactions/`: placement, smart guide, selection stacking
-- `assets/`: image/video asset 생성과 복원
-- `realtime/`: freeform Canvas 전용 room presence, lock, preview, operation catch-up hook
+- `components/screen/`: 화면 배치, toolbar, dialog, runtime 선택
+- `engine/canvas-engine-types.ts`: engine 내부에서 공유하는 shape/view 타입
+- `engine/runtime/`: 저장, hydration, sync queue, local/API mode
+- `engine/editor/`: Canvas 전용 tldraw editor 조립, 배경, reporter, overlay
+- `engine/shapes/`: shape 등록, shape factory, shape type guard, shape별 ShapeUtil/UI
+- `engine/interactions/`: placement, smart guide, selection stacking
+- `engine/assets/`: image/video asset 생성과 복원
+- `collaboration/`: room presence, preview, operation catch-up hook
+- `persistence/`: local storage, shape diff, batch queue와 retry
+- `imports/`: 파일과 폴더 탐색, 코드 파일 검증과 import 데이터 생성
+- `integrations/`: Canvas가 다른 도메인의 안정적인 식별자를 참조하는 연결 adapter
 
-`shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
+`integrations/drive/`는 Drive 파일 선택과 preview URL 발급을 Canvas 언어로 변환한다.
+roomState에는 `fileId`, 파일명, MIME type만 남기고 presigned URL과 파일 원문은
+브라우저 메모리에서만 사용한다.
+
+`engine/shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
 분리한다. `PiloCodeBlockShapeUtil`은 shape props schema, geometry, resize,
 component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-block 하위
 컴포넌트/타입 파일에서 담당한다.
 
-`runtime/`은 `PiloCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
+`engine/runtime/`은 `ClassicCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
 
-- `useCanvasRuntimeHydration`: board 변경 시 초기 shape와 view setting 복원
+- `useCanvasRuntimeHydration`: board 변경 시 초기 shape 복원과 고정 시작 카메라 reset
 - `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
 - `useCanvasViewportQueries`: viewport shape summary 조회와 shape detail lazy loading
-- `useCanvasViewSettingPersistence`: zoom, viewportX, viewportY 저장
-- `useCanvasApiLifecycle`: Canvas enter/leave, unmount 시 queue flush와 pending view setting sync
+- `useCanvasApiLifecycle`: Canvas enter/leave와 unmount 시 shape queue flush
 - `CanvasZoomControls`: smart guide와 zoom controls UI
 - `canvas-runtime-utils`: runtime hook들이 공유하는 순수 계산 helper와 query key
 - `canvas-runtime-types`: runtime 내부 client/storage mode 타입
+
+Classic Canvas 카메라는 협업 저장 상태로 취급하지 않는다. 진입과 새로고침 시 실제
+tldraw 편집 viewport의 정중앙에 Canvas 좌표 `(0, 0)`을 배치하고 100% zoom으로
+시작한다. 사용 중 pan/zoom은 자유롭게 유지하며 `zoomToFit`은 별도 사용자 액션이다.
 
 `api/` 하위 폴더는 Canvas API client 경계를 책임별로 나눈다.
 
@@ -57,9 +68,14 @@ component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-bl
 - `canvas-normalizers.ts`: API/mock 응답을 Canvas runtime 입력 형태로 정규화
 - `canvas-types.ts`: API client와 mock client가 공유하는 타입
 
-`agent/`는 Canvas AI run 생성·polling·개인 초안 적용/폐기 상태를 담당한다.
-Canvas AI의 가상 포인터, 도형 강조, 초안 preview는 현재 사용자 브라우저에서만
-렌더링하며 Canvas presence나 shape persistence queue에는 넣지 않는다.
+`agent/`는 Canvas AI run 생성·polling, 선택 영역 직렬화, HTML artifact 표시를
+담당한다. HTML 생성이 완료되면 선택 영역 오른쪽에 artifact 전체 내용을 가진
+`pilo-code-block`을 만들고 선택 root와 양방향 binding된 연결선을 함께 생성한다.
+이 shape와 binding은 일반 tldraw 편집과 같은 reporter/shape patch 경로를 타므로
+roomState, room history, checkpoint와 다른 참여자 화면에 반영된다. run id를 shape
+meta에 기록해 같은 완료 응답을 polling으로 여러 번 받아도 중복 생성하지 않는다.
+Canvas AI의 가상 포인터와 검색 결과 강조는 계속 현재 사용자 브라우저에서만
+렌더링하며 presence나 shape persistence queue에는 넣지 않는다.
 
 `TldrawSurface`는 Canvas API/DB 저장 흐름을 소유하지 않는다. PR Review 같은 다른
 도메인은 필요한 경우 이 surface만 가져가고, 자기 도메인 payload와 source of
@@ -95,9 +111,21 @@ Canvas의 아래 흐름은 Canvas 도메인 전용이다.
 - Canvas Socket.IO protocol, client 생성기와 remote cursor overlay는
   `src/shared/canvas-realtime/`에서 Canvas와 PR Review가 함께 사용한다.
 - freeform Canvas의 presence, lock, preview, operation catch-up 조립은
-  `src/features/canvas/realtime/`에 남는다.
-- `PiloCanvasRuntime`은 socket state를 만들고, `PiloTldrawCanvas`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
+  `src/features/canvas/collaboration/`에 남는다.
+- `ClassicCanvasRuntime`은 socket state를 만들고, `CanvasEditor`는 `TldrawSurface` child에서 `useEditor()` 기반 cursor 좌표, selection, edit intent를 report한다.
 - cursor 좌표, selection, `editingShapeId`, `editingMode` presence는 DB에 저장하지 않는다.
+- remote shape preview는 `collaboration/canvas-remote-shape-preview-store`의 외부 store에서
+  관리해 preview packet마다 `ClassicCanvasRuntime` 전체를 다시 렌더링하지 않는다.
+- draw/highlight/line/arrow의 미확정 preview는 tldraw document store에 넣지 않고
+  `OnTheCanvas` world-space overlay에서 Canvas 좌표로 렌더링한다. pan/zoom은 tldraw의
+  camera transform을 그대로 상속하며, pointer가 끝난 뒤 확정된 shape patch만 document
+  store에 적용한다.
+- 기존 shape의 이동·크기 변경 preview는 remote change로 document store에 반영하되,
+  로컬 사용자가 실제 조작 중인 동일 shape만 shape별 대기열에서 보호한다.
+- Canvas 우측 상단 좌표 HUD는 현재 tldraw viewport 정중앙의 Canvas 좌표를 표시한다.
+  포인터 이동에는 반응하지 않고 카메라 이동, zoom, 편집 영역 크기 변경에만 갱신된다.
+  HUD를 누르면 작은 shadcn Popover에서 X/Y 좌표를 입력할 수 있다. Enter 또는
+  Popover 바깥 클릭 시 현재 zoom을 유지한 채 해당 좌표를 화면 정중앙으로 이동한다.
 - local UI Preview의 fake session은 realtime-server DB session 검증을 통과하지 않으므로 presence를 켜지 않는다.
 - `src/shared/tldraw/TldrawSurface`는 presence를 소유하지 않는다. PR Review는 공통 Socket
   transport와 cursor overlay를 사용하되 room 입장과 Presence 보고는 PR Review feature에서

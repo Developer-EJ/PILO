@@ -1,6 +1,6 @@
 import { QueryResultRow } from "pg";
 
-export type DriveItemType = "folder" | "file";
+export type DriveItemType = "folder" | "file" | "document";
 export type DriveUploadStatus = "pending" | "ready" | "failed" | null;
 export type DriveUploadAttemptStatus =
   | "pending"
@@ -65,6 +65,27 @@ export interface DriveDownloadUrlPayload {
   expiresAt: string;
 }
 
+export interface DrivePreviewUrlPayload {
+  file: DriveItemPayload;
+  previewUrl: string;
+  expiresAt: string;
+}
+
+export interface CanvasDriveFileSearchMatch {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  path: string;
+  score: number;
+}
+
+export interface CanvasDriveFileSearchRow extends QueryResultRow {
+  id: string;
+  name: string;
+  mime_type: string;
+  path_text: string;
+}
+
 export interface DriveItemRow extends QueryResultRow {
   id: string;
   workspace_id: string;
@@ -119,9 +140,15 @@ export interface NormalizedCreateDriveFolderInput
   name: string;
 }
 
-export interface NormalizedUpdateDriveItemInput {
-  name: string;
-}
+export type NormalizedUpdateDriveItemInput =
+  | {
+      type: "rename";
+      name: string;
+    }
+  | {
+      type: "move";
+      parentId: string | null;
+    };
 
 export interface NormalizedCreateDriveUploadUrlInput
   extends NormalizedDriveParentInput {

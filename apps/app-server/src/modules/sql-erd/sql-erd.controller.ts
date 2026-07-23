@@ -15,13 +15,27 @@ import { AuthGuard } from "../../common/auth.guard";
 import { CurrentUserId } from "../../common/current-user.decorator";
 import { SqlErdService } from "./sql-erd.service";
 import {
+  CreateSqlErdOperationRequest,
+  AcquireSqlErdSourceLockRequest,
   CreateSqlErdSessionRequest,
   DeleteSqlErdSessionQuery,
+  ListSqlErdOperationsQuery,
   ListSqlErdSessionsQuery,
+  SqlErdOperationListPayload,
+  SqlErdOperationWritePayload,
   SQL_ERD_REQUEST_BODY_LIMIT_BYTES,
+  SQL_ERD_SOURCE_PUBLISH_BODY_LIMIT_BYTES,
   SqlErdDeletedSessionPayload,
   SqlErdSessionListPayload,
   SqlErdSessionPayload,
+  SqlErdSourceLockPayload,
+  SqlErdSourcePublishPayload,
+  SqlErdSourceSnapshotPayload,
+  ReleaseSqlErdSourceLockRequest,
+  RenewSqlErdSourceLockRequest,
+  SourcePublishRequest,
+  SourceSnapshotBatchQuery,
+  UpdateSqlErdSessionMetadataRequest,
   UpdateSqlErdSessionRequest
 } from "./sql-erd.types";
 
@@ -73,6 +87,40 @@ export class SqlErdSessionController {
     return apiResponse(session);
   }
 
+  @Get("sql-erd-sessions/:sessionId/operations")
+  async listOperations(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Query() query: ListSqlErdOperationsQuery
+  ): Promise<ApiSuccessResponse<SqlErdOperationListPayload>> {
+    const operations = await this.sqlErdService.listOperations(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      query
+    );
+
+    return apiResponse(operations);
+  }
+
+  @Get("sql-erd-sessions/:sessionId/source-snapshots")
+  async listSourceSnapshots(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Query() query: SourceSnapshotBatchQuery
+  ): Promise<ApiSuccessResponse<SqlErdSourceSnapshotPayload[]>> {
+    return apiResponse(
+      await this.sqlErdService.listSourceSnapshots(
+        currentUserId,
+        workspaceId,
+        sessionId,
+        query
+      )
+    );
+  }
+
   @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
   @Post("sql-erd-session")
   async createSession(
@@ -106,6 +154,68 @@ export class SqlErdSessionController {
   }
 
   @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Post("sql-erd-sessions/:sessionId/operations")
+  async createOperation(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: CreateSqlErdOperationRequest
+  ): Promise<ApiSuccessResponse<SqlErdOperationWritePayload>> {
+    const operation = await this.sqlErdService.createOperation(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      body
+    );
+
+    return apiResponse(operation);
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Post("sql-erd-sessions/:sessionId/source-lock")
+  async acquireSourceLock(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: AcquireSqlErdSourceLockRequest
+  ): Promise<ApiSuccessResponse<SqlErdSourceLockPayload>> {
+    return apiResponse(
+      await this.sqlErdService.acquireSourceLock(currentUserId, workspaceId, sessionId, body)
+    );
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Patch("sql-erd-sessions/:sessionId/source-lock")
+  async renewSourceLock(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: RenewSqlErdSourceLockRequest
+  ): Promise<ApiSuccessResponse<SqlErdSourceLockPayload>> {
+    return apiResponse(
+      await this.sqlErdService.renewSourceLock(currentUserId, workspaceId, sessionId, body)
+    );
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_SOURCE_PUBLISH_BODY_LIMIT_BYTES })
+  @Post("sql-erd-sessions/:sessionId/source-snapshots")
+  async publishSourceSnapshot(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: SourcePublishRequest
+  ): Promise<ApiSuccessResponse<SqlErdSourcePublishPayload>> {
+    return apiResponse(
+      await this.sqlErdService.publishSourceSnapshot(
+        currentUserId,
+        workspaceId,
+        sessionId,
+        body
+      )
+    );
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
   @Patch("sql-erd-session/:sessionId")
   async updateSession(
     @CurrentUserId() currentUserId: string,
@@ -114,6 +224,24 @@ export class SqlErdSessionController {
     @Body() body: UpdateSqlErdSessionRequest
   ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
     const session = await this.sqlErdService.updateSession(
+      currentUserId,
+      workspaceId,
+      sessionId,
+      body
+    );
+
+    return apiResponse(session);
+  }
+
+  @RouteConfig({ bodyLimit: SQL_ERD_REQUEST_BODY_LIMIT_BYTES })
+  @Patch("sql-erd-sessions/:sessionId/metadata")
+  async updateSessionMetadata(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: UpdateSqlErdSessionMetadataRequest
+  ): Promise<ApiSuccessResponse<SqlErdSessionPayload>> {
+    const session = await this.sqlErdService.updateSessionMetadata(
       currentUserId,
       workspaceId,
       sessionId,
@@ -156,6 +284,17 @@ export class SqlErdSessionController {
     );
 
     return apiResponse(result);
+  }
+
+  @Delete("sql-erd-sessions/:sessionId/source-lock")
+  async releaseSourceLock(
+    @CurrentUserId() currentUserId: string,
+    @Param("workspaceId") workspaceId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() body: ReleaseSqlErdSourceLockRequest
+  ): Promise<ApiSuccessResponse<null>> {
+    await this.sqlErdService.releaseSourceLock(currentUserId, workspaceId, sessionId, body);
+    return apiResponse(null);
   }
 
   @Delete("sql-erd-sessions/:sessionId")

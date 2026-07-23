@@ -3,11 +3,17 @@ import type {
   CreateDriveUploadUrlInput,
   CreateDriveUploadUrlPayload,
   CompleteDriveUploadInput,
+  CreateDocumentInput,
+  CreateDocumentPayload,
   DeleteDriveItemPayload,
+  DocumentBootstrapPayload,
   DriveDownloadUrlPayload,
+  DrivePreviewUrlPayload,
   DriveItem,
   DriveListPayload,
   ListDriveItemsQuery,
+  SaveDocumentSnapshotInput,
+  SaveDocumentSnapshotPayload,
   UpdateDriveItemInput
 } from "@/features/drive/types";
 
@@ -225,6 +231,14 @@ function driveFoldersPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/drive/folders` as const;
 }
 
+function driveDocumentsPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/drive/documents` as const;
+}
+
+function driveDocumentPath(workspaceId: string, documentId: string) {
+  return `${driveDocumentsPath(workspaceId)}/${encodeURIComponent(documentId)}` as const;
+}
+
 function driveUploadUrlPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(
     workspaceId
@@ -334,6 +348,34 @@ export function createDriveApiClient({
       );
     },
 
+    async createDocument(workspaceId: string, body: CreateDocumentInput = {}) {
+      return requestDriveData<CreateDocumentPayload>(
+        driveDocumentsPath(workspaceId),
+        withJsonBody(body, { method: "POST" }),
+        requestOptions
+      );
+    },
+
+    async getDocument(workspaceId: string, documentId: string) {
+      return requestDriveData<DocumentBootstrapPayload>(
+        driveDocumentPath(workspaceId, documentId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async saveDocumentSnapshot(
+      workspaceId: string,
+      documentId: string,
+      body: SaveDocumentSnapshotInput
+    ) {
+      return requestDriveData<SaveDocumentSnapshotPayload>(
+        `${driveDocumentPath(workspaceId, documentId)}/snapshot`,
+        withJsonBody(body, { method: "PUT" }),
+        requestOptions
+      );
+    },
+
     async createUploadUrl(
       workspaceId: string,
       body: CreateDriveUploadUrlInput
@@ -360,6 +402,14 @@ export function createDriveApiClient({
     async createDownloadUrl(workspaceId: string, fileId: string) {
       return requestDriveData<DriveDownloadUrlPayload>(
         `${driveFilePath(workspaceId, fileId)}/download-url`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async createPreviewUrl(workspaceId: string, fileId: string) {
+      return requestDriveData<DrivePreviewUrlPayload>(
+        `${driveFilePath(workspaceId, fileId)}/preview-url`,
         undefined,
         requestOptions
       );

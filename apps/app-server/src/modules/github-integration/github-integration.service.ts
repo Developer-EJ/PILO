@@ -1,6 +1,6 @@
 ﻿import { Injectable, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
-import { badRequest, notFound, unauthorized } from "../../common/api-error";
+import { notFound, unauthorized } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { GithubAppClient } from "./github-app.client";
@@ -27,6 +27,7 @@ import { GithubSourceReadService } from "./github-source-read.service";
 import { GithubSyncExecutorService } from "./github-sync-executor.service";
 import { GithubSyncJobService } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
+import { readGithubManualSyncIdempotencyKey } from "./github-manual-sync-admission";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubWebhookService } from "./github-webhook.service";
 import type {
@@ -109,6 +110,7 @@ export class GithubIntegrationService {
   private readonly githubReviewSubmissionService: GithubReviewSubmissionService;
   private readonly githubWebhookService: GithubWebhookService;
   private readonly githubSyncRunService: GithubSyncRunService;
+  private readonly githubOAuthConnectionService: GithubOAuthConnectionService;
 
   constructor(
     private readonly database: DatabaseService,
@@ -152,10 +154,20 @@ export class GithubIntegrationService {
     @Optional()
     githubSyncJobService?: GithubSyncJobService,
     @Optional()
-    githubBoardInvalidationPublisher?: GithubBoardInvalidationPublisherService
+    githubBoardInvalidationPublisher?: GithubBoardInvalidationPublisherService,
+    @Optional()
+    githubOAuthConnectionService?: GithubOAuthConnectionService
   ) {
     const callbackStateService =
       githubCallbackStateService ?? new GithubCallbackStateService(database);
+    this.githubOAuthConnectionService =
+      githubOAuthConnectionService ??
+      new GithubOAuthConnectionService(
+        database,
+        tokenEncryptionService,
+        configService,
+        githubOAuthClient
+      );
     this.githubOAuthIntegrationService =
       githubOAuthIntegrationService ??
       new GithubOAuthIntegrationService(
@@ -434,40 +446,35 @@ export class GithubIntegrationService {
   ): Promise<GithubRepositoryCollaboratorStatusPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
 
-    const [oauthRow, repository] = await Promise.all([
-      new GithubOAuthConnectionService(this.database, this.tokenEncryptionService, this.configService).getOptionalActiveConnection(currentUserId, "app_user"),
-      this.database.queryOne<GithubRepositoryAccessRow>(
-        `
-          SELECT
-            id,
-            owner_login,
-            name,
-            full_name
-          FROM github_repositories
-          WHERE workspace_id = $1
-            AND id = $2
-        `,
-        [workspaceId, repositoryId]
-      )
-    ]);
+    const repository = await this.database.queryOne<GithubRepositoryAccessRow>(
+      `
+        SELECT
+          id,
+          owner_login,
+          name,
+          full_name
+        FROM github_repositories
+        WHERE workspace_id = $1
+          AND id = $2
+      `,
+      [workspaceId, repositoryId]
+    );
 
     if (!repository) {
       throw notFound("GitHub repository not found");
     }
 
-    if (
-      !oauthRow
-    ) {
-      throw badRequest("GitHub OAuth connection is required");
-    }
-
-    const accessToken = oauthRow.accessToken;
+    const oauthConnection =
+      await this.githubOAuthConnectionService.getActiveConnection(
+        currentUserId,
+        "app_user"
+      );
     const { permission } =
       await this.githubOAuthClient.getRepositoryCollaboratorPermission({
-        accessToken,
+        accessToken: oauthConnection.accessToken,
         owner: repository.owner_login,
         repo: repository.name,
-        username: oauthRow.githubLogin
+        username: oauthConnection.githubLogin
       });
 
     return {
@@ -475,7 +482,7 @@ export class GithubIntegrationService {
         id: repository.id,
         fullName: repository.full_name
       },
-      githubLogin: oauthRow.githubLogin,
+      githubLogin: oauthConnection.githubLogin,
       permission,
       hasAccess: Boolean(permission && permission !== "none"),
       checkedAt: new Date().toISOString()
@@ -730,12 +737,16 @@ export class GithubIntegrationService {
   async startGithubSyncRun(
     currentUserId: string,
     workspaceId: string,
-    input: StartGithubSyncRunRequest | undefined
+    input: StartGithubSyncRunRequest | undefined,
+    idempotencyKey: string | undefined
   ): Promise<GithubSyncRunPayload> {
+    const manualIdempotencyKey = readGithubManualSyncIdempotencyKey(idempotencyKey);
     return this.githubSyncRunService.startGithubSyncRun(
       currentUserId,
       workspaceId,
-      input
+      input,
+      "manual",
+      manualIdempotencyKey
     );
   }
 

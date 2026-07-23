@@ -4,6 +4,15 @@
 
 GitHub App user OAuth (`app_user`) and Personal ProjectV2 OAuth (`project_v2`) are independent, purpose-specific connections. Disconnecting a connection revokes that purpose's credential and releases the GitHub account for a new connection by another PILO user. PR Review, merge, conflict resolution, installation access checks, and collaborator checks use only `app_user`; personal ProjectV2 operations use only `project_v2`.
 
+ProjectV2 OAuth authorize scope is exactly `read:user user:email project repo`.
+The callback and every ProjectV2 runtime consumer require both project and repo scopes.
+Existing `project`-only connections are not upgraded in place and must reconnect.
+Board issue create uses the ProjectV2 OAuth connection (`purpose=project_v2`) for
+repository issue creation. Board issue update and assignee changes or lookups keep
+the GitHub App user OAuth connection (`purpose=app_user`), and PR Review also keeps
+the GitHub App user OAuth connection (`purpose=app_user`). The repo scope grants broad read/write access
+to public and private repositories available to the connected GitHub user.
+
 GitHub Integration OAuth credentials are stored only in `github_oauth_connections`, separated by `purpose` (`app_user` or `project_v2`). The dev cutover is intentionally incompatible: while all GitHub execution paths are stopped, apply the connection-table migration, invalidate legacy OAuth tokens, and remove legacy OAuth columns from `users` before deploying the new App Server and sync worker. `users.github_user_id` and `users.github_login` remain GitHub login identities. The dev rollout has four App OAuth reconnection targets, including three ProjectV2 OAuth reconnection targets.
 
 External callback, setup, and webhook URLs MUST include the `/api/v1` base path. For example:
@@ -46,7 +55,7 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 | 용도 | 인증 주체 | 저장 위치 |
 | --- | --- | --- |
 | Repository/Issue/PR와 organization ProjectV2 조회와 동기화 | GitHub App installation token | `github_installations` |
-| personal ProjectV2 read/write and sync | regular GitHub OAuth App token with `project` scope | `github_oauth_connections` (`purpose=project_v2`) |
+| personal ProjectV2 read/write and sync, Board issue create | regular GitHub OAuth App token with `project` and `repo` scopes | `github_oauth_connections` (`purpose=project_v2`) |
 | GitHub Review 제출 | 현재 사용자의 GitHub App user OAuth token | `github_oauth_connections` (`purpose=app_user`) |
 | PR Review conflict resolution apply commit | 현재 사용자의 GitHub App user OAuth token | `github_oauth_connections` (`purpose=app_user`) |
 | PR Review merge action | 현재 사용자의 GitHub App user OAuth token | `github_oauth_connections` (`purpose=app_user`) |
@@ -54,13 +63,50 @@ PR 리뷰 세션, 파일별 리뷰 판단, Kanban board cache hydrate, GitHub is
 
 GitHub token은 복호화된 상태로 응답하거나 로그에 남기지 않는다.
 
+### OAuth token refresh lifecycle
+
+### App user OAuth recovery
+
+Before an `app_user` OAuth callback replaces an active connection, the server verifies
+that the newly issued token can call GitHub's user-installations capability. The active
+connection is retained when validation fails. A `401` or a non-rate-limited `403` from
+that capability is reconnect-required; rate limits, provider `5xx`, network, and malformed
+responses are retryable and do not revoke or replace credentials.
+Installation preflight returns the domain error code
+`GITHUB_OAUTH_RECONNECT_REQUIRED` when reconnect is required; clients must branch on
+that code rather than the human-readable message.
+
+OAuth starts capture an opaque HMAC generation for the current connection in signed callback
+state. The callback may replace the connection only when that generation is still current,
+so a delayed callback cannot overwrite a newer successful connection. Workspace onboarding carries the bounded
+`github_oauth_recovery=1` return-url marker through OAuth and installation callbacks. It
+auto-starts at most one recovery attempt; later failures provide manual retry or exit.
+
+`github_oauth_connections`의 `refresh_token_encrypted`,
+`access_token_expires_at`, `refresh_token_expires_at`은 모두 nullable metadata다.
+Access token expiry가 현재 시각으로부터 5분 이내이면 서버는 connection row를
+transaction 안에서 `FOR UPDATE`로 잠그고 expiry를 다시 확인한 뒤 access/refresh token을
+원자적으로 rotation한다.
+
+기존 connection처럼 access token expiry가 `NULL`이면 서버는 proactive refresh를 하지 않고
+기존 access token을 GitHub가 `401`로 거절할 때까지 사용한다. 이 legacy connection은
+`GitHub OAuth connection is invalid; reconnect is required`를 받으면 사용자가 다시 연결해야 한다.
+Refresh token이 없거나 만료됐거나 GitHub refresh endpoint가 `4xx`로 거절하면 서버는 저장된
+access token, refresh token, scope, expiry metadata를 모두 지우고 connection을 revoke한 뒤
+`GitHub OAuth reconnection is required`를 반환한다. Network 오류, GitHub `5xx`, malformed
+success response 같은 transient refresh 실패는 connection을 revoke하지 않으며 transaction을
+rollback해 기존 credential을 보존한다.
+
+Access token, refresh token, 암호화된 token 값과 provider refresh payload는 API 응답이나
+로그에 노출하지 않는다.
+
 ProjectV2 OAuth is intentionally separate from `/me/github/oauth/start`.
 `/me/github/oauth/start` remains the GitHub App user authorization flow used for
 installation lookup and PR review submission. Personal ProjectV2 discovery and
 ProjectV2 item status writes use `/me/github/project-oauth/start`, which
-requests `read:user user:email project` and stores the encrypted token in
+requests `read:user user:email project repo` and stores the encrypted token in
 `github_oauth_connections` (`purpose=project_v2`). The callback rejects tokens whose
-scope does not include `project`. If the user already has an active
+scope does not include both `project` and `repo`. If the user already has an active
 `/me/github/oauth/start` connection, the ProjectV2 OAuth callback also rejects a
 different GitHub login with
 `GitHub ProjectV2 OAuth account must match GitHub OAuth account`.
@@ -148,8 +194,11 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   충돌 처리하고 다른 Workspace의 row를 재할당하지 않는다.
 - `full` sync는 허용 저장소를 먼저 갱신한 뒤 각 저장소의 GitHub Projects 탭과 같은
   GitHub GraphQL `repository(owner, name).projectsV2`로 Projects v2를 발견한다.
-  organization ProjectV2는 GitHub App installation token을 사용하고, personal
-  ProjectV2는 현재 사용자의 ProjectV2 OAuth token을 사용한다. 발견한
+  이 repository Projects list는 same owner as that repository인 ProjectV2만 포함한다.
+  User repository owner가 active ProjectV2 OAuth GitHub login과 일치하면 installation
+  metadata is `Organization`이어도 user token을 사용한다. actual Organization repository
+  owner 또는 Organization installation의 legacy cache처럼 owner type을 알 수 없는
+  repository는 installation-token fallback을 유지한다. 발견한
   ProjectV2는 `github_projects_v2`에 upsert하고, GitHub repository node id와
   현재 처리 중인 저장소에 대해서만 `github_project_v2_repositories` 관계를 갱신한다.
   ProjectV2 item sync는 GitHub ProjectV2 repository 연결 목록이 불완전한 경우에도
@@ -166,12 +215,12 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
 - personal ProjectV2 discovery and sync require an active ProjectV2 OAuth
   connection from `/me/github/project-oauth/start`. The ProjectV2 OAuth account
   must match the personal ProjectV2 owner and `github_oauth_connections.token_scope` (`purpose=project_v2`)
-  must include `project`. Missing connection fails the sync run with
+  must include both `project` and `repo`. Missing connection fails the sync run with
   `GitHub ProjectV2 OAuth connection is required for personal ProjectV2 sync`.
   Owner mismatch fails with
   `GitHub ProjectV2 OAuth account does not match this personal ProjectV2 owner`.
   Missing scope fails with
-  `GitHub ProjectV2 OAuth connection must be reconnected with project scope`.
+  `GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes`.
   GraphQL permission failure with a ProjectV2 OAuth token is reported as
   `GitHub ProjectV2 OAuth token lacks permission to read personal ProjectV2`.
   GitHub owner resolution failure remains
@@ -188,23 +237,32 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   ProjectV2s remain webhook-driven and are not added to personal polling
   schedules.
 - GitHub webhook receiver는 delivery 수신과 검증 결과를 `github_webhook_deliveries`에 기록한다. 실제 GitHub source table 동기화는 sync run 또는 별도 background worker가 담당한다.
+- `issues`, `pull_request`, PR의 `issue_comment`, `pull_request_review`,
+  `pull_request_review_comment` webhook은 payload를 locator와 변경 신호로만 사용한다.
+  worker는 GitHub App installation token으로 해당 Issue 또는 PR의 최신 REST snapshot을
+  다시 조회한 뒤 `github_issues` 또는 `github_pull_requests`를 갱신한다.
+  `projects_v2_item`은 기존 organization ProjectV2 item 전용 reconcile을 유지하고,
+  personal ProjectV2는 기존 polling schedule을 유지한다.
 - GitHub App installation 삭제는 GitHub 원격 `DELETE /app/installations/{installation_id}`를
   App JWT로 호출한 뒤 local `github_installations` row를 삭제한다. GitHub가 `404`를
   반환하면 이미 원격에서 삭제된 상태로 보고 local cleanup을 진행한다.
-- GitHub App installation 삭제 시 `github_projects_v2` 계열 cache는 FK cascade로
-  삭제된다. `github_repositories`, `github_issues`, `github_pull_requests`, PR review
-  기록은 과거 cache로 남기며, repository 목록 API는 현재 active installation에 연결된
-  repository만 반환한다. 같은 Workspace에서 재설치 후 full sync가 같은
-  `github_repository_id`를 다시 발견하면 해당 Workspace 안의 기존 repository cache
-  `installation_id`가 새 installation으로 갱신된다.
+- GitHub App installation 삭제 시 `github_repositories.installation_id`와
+  `github_projects_v2.installation_id`는 `NULL`로 분리한다. repository, ProjectV2,
+  repository-ProjectV2 link, field/item, Board cache는 과거 identity를 보존하지만 active
+  installation이 아니므로 active repository 목록, installation-scoped sync, Board write
+  대상에는 포함하지 않는다.
+- 같은 Workspace에서 재설치 후 sync가 같은 `github_repository_id`와
+  `github_project_node_id`를 다시 발견하면 workspace-scoped upsert가 보존된 repository와
+  ProjectV2 row의 `installation_id`를 새 installation으로 갱신한다. 기존 link와
+  `(project_v2_id, repository_id)` Board hydration identity를 재사용하므로 반복 재연결도
+  새 Board row를 만들지 않는다.
 
 ## 공통 조회/페이지네이션 규칙
 
 - 모든 `/workspaces/{workspaceId}/github/*` 조회 API는 PILO bearer token과
   Workspace 접근 권한을 요구한다.
-- `DELETE /workspaces/{workspaceId}/github/installations/{installationId}`만
-  Workspace owner 권한을 요구한다. Installation 시작, 목록, 원본 조회, sync run
-  조회/시작은 Workspace 접근 권한을 사용한다.
+- GitHub App installation 시작·삭제와 수동 sync run 시작은 Workspace owner만 할 수
+  있다. Installation 목록, 원본 조회, sync run 조회는 Workspace 접근 권한을 사용한다.
 - 페이지네이션 query는 `page`, `limit`을 사용한다. `page`와 `limit`은 양의 정수여야
   하며 `limit` 최대값은 `100`이다.
 - repository 목록, ProjectV2 목록, sync run 목록, PR file 목록의 기본 `limit`은
@@ -225,7 +283,7 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
 | `GET` | `/github/oauth/callback` | GitHub OAuth callback |
 | `DELETE` | `/me/github` | 현재 사용자의 GitHub App user OAuth 연결 해제 |
 | `GET` | `/me/github/project-oauth` | ProjectV2 OAuth connection status |
-| `POST` | `/me/github/project-oauth/start` | ProjectV2 OAuth authorization URL with `project` scope |
+| `POST` | `/me/github/project-oauth/start` | ProjectV2 OAuth authorization URL with `read:user user:email project repo` scope set |
 | `GET` | `/github/project-oauth/callback` | ProjectV2 OAuth callback |
 | `DELETE` | `/me/github/project-oauth` | Disconnect ProjectV2 OAuth token |
 | `POST` | `/workspaces/{workspaceId}/github/installations/start` | GitHub App user access token 검증 후 GitHub App 설치 URL 생성 |
@@ -268,7 +326,7 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
     "connected": true,
     "githubUserId": 123456,
     "githubLogin": "octocat",
-    "tokenScope": "read:user,user:email,project",
+    "tokenScope": "read:user,user:email,project,repo",
     "githubConnectedAt": "2026-07-07T12:00:00.000Z",
     "githubRevokedAt": null
   }
@@ -387,9 +445,16 @@ GET /api/v1/workspaces/{workspaceId}/github/projects-v2?repositoryId=repository_
 | `ownerLogin` | GitHub owner login exact match |
 | `closed` | `true`면 closed ProjectV2도 포함. 생략 또는 `false`면 `closed=false`만 반환 |
 | `q` | `title`, `shortDescription` 부분 검색 |
+| `management` | `true`면 repository에 연결된 미선택 ProjectV2도 포함. active installation cache만 반환 |
 | `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
 
-ProjectV2 목록은 `ownerLogin ASC, projectNumber ASC, id ASC`로 정렬한다.
+ProjectV2 목록은 `management=true`를 포함해 항상 `installation_id IS NOT NULL`인 active
+installation cache만 반환하며 `ownerLogin ASC, projectNumber ASC, id ASC`로 정렬한다.
+installation 삭제 뒤 identity 보존을 위해 남은 disconnected ProjectV2 cache는 공개 목록에
+포함하지 않는다. ProjectV2 상세, access status, field, status option, kanban, item read도
+active installation 연결을 요구하며 disconnected id에는 `404 NOT_FOUND`와
+`GitHub ProjectV2 not found`를 반환한다. 공개 payload의 `installationId`는 계속 문자열이며
+`null`을 반환하지 않는다.
 
 Repository PR 목록:
 
@@ -413,6 +478,7 @@ Sync run 목록:
 | --- | --- |
 | `target` | `source`, `repositories`, `issues`, `pull_requests`, `project_v2`, `project_v2_fields`, `project_v2_items`, `full` |
 | `status` | `queued`, `running`, `success`, `failed` |
+| `triggerSource` | `manual`, `automatic`, `legacy` |
 | `repositoryId` | 특정 repository 관련 run만 조회 |
 | `projectV2Id` | 특정 ProjectV2 관련 run만 조회 |
 | `page`, `limit` | 기본 `1`, `20`; 최대 limit `100` |
@@ -440,6 +506,11 @@ durable job을 발행한 뒤 `202 Accepted`를 즉시 반환한다. worker가
 반환한다. 요청 validation, Workspace 범위, installation/repository/project lookup 실패도
 일반 API error로 반환한다.
 
+수동 API가 만든 run의 `triggerSource`는 `manual`이다. 설치 callback, ProjectV2
+선택/Board 활성화, ProjectV2 polling이 만든 run은 `automatic`이며, migration 이전
+기존 기록은 출처를 추정하지 않고 `legacy`로 보존한다. 사용자용 최근 이력은
+`triggerSource=manual`로 조회한다.
+
 `202 Accepted` 응답 예시:
 
 ```json
@@ -449,6 +520,7 @@ durable job을 발행한 뒤 `202 Accepted`를 즉시 반환한다. worker가
     "id": "sync_run_uuid",
     "target": "full",
     "status": "queued",
+    "triggerSource": "manual",
     "installationId": "installation_uuid",
     "repositoryId": "repository_uuid",
     "projectV2Id": "project_v2_uuid",
@@ -538,9 +610,13 @@ Content-Type: application/json
 
 `repositoryId`는 필수이며, 요청 workspace의 `installationId`에 속한 repository여야 한다.
 서버는 해당 repository와 연결된 ProjectV2 metadata와 repository link를 탐색해 저장한 뒤,
-그 repository 범위의 ProjectV2만 반환한다. Organization installation은 GitHub App
-installation token을 사용한다. Personal installation은 현재 사용자의 ProjectV2 OAuth
-connection(`purpose=project_v2`)과 `project` scope가 필요하다.
+그 repository 범위의 ProjectV2만 반환한다. repository Projects list는 해당 repository와
+같은 owner의 ProjectV2만 포함한다. User repository owner가 active ProjectV2 OAuth GitHub
+login과 일치하면 installation metadata가 `Organization`이어도 user token을 사용하며, 실제
+Organization repository owner 또는 Organization installation의 owner type을 알 수 없는
+legacy cache는 installation-token fallback을 유지한다. Personal owner에
+user token을 사용할 때는 현재 사용자의 ProjectV2 OAuth connection(`purpose=project_v2`)과
+`project` and `repo` scopes가 모두 필요하다.
 이 endpoint는 인증된 PILO 사용자의 workspace 접근 권한이 필요하다.
 
 성공 응답:
@@ -732,13 +808,40 @@ github_app_authorization
 - signature가 유효하지 않으면 delivery를 `failed`로 기록하고 `400 BAD_REQUEST`를 반환한다.
 - 이미 같은 `delivery_id` row가 있고 상태가 `received` 또는 `ignored`이면 신규 insert나 overwrite 없이 기존 row를 반환한다.
 - `projects_v2_item`은 `action`, `githubInstallationId`, `projectV2NodeId`, `projectItemNodeId`를 정규화해 delivery row에 함께 보관한다. 필수 context가 없거나 선택된 organization ProjectV2가 아니면 queue publication 전에 `ignored`로 기록하고 `processedAt`을 기록한다. `ignored` delivery는 SQS 또는 GitHub GraphQL 작업을 예약하지 않는다.
+- `issues`, `pull_request`, PR의 `issue_comment`, `pull_request_review`,
+  `pull_request_review_comment`는 installation id, repository id, Issue/PR number만
+  durable locator로 보관한다. 일반 Issue의 `issue_comment`처럼 현재 source cache에 영향을
+  주지 않는 delivery와 필수 locator가 없는 delivery는 `ignored`로 기록한다.
+  DB schema를 확장하지 않는 범위에서 기존 nullable delivery column을 재사용하며,
+  `github_installation_id`에는 installation id, `project_v2_node_id`에는 GitHub repository id,
+  `project_item_node_id`에는 Issue/PR number를 문자열로 저장한다. 이 해석은
+  `event_name`이 source event일 때만 적용하고 `projects_v2_item`의 기존 의미는 바꾸지 않는다.
+- Source webhook worker는 delivery event에 따라 Issue 또는 PR handler로 dispatch한다.
+  payload 본문을 source 값으로 저장하지 않고 GitHub REST detail을 다시 조회한다. Issue는
+  제목, 본문, 상태, label, 담당자, milestone을 포함한 snapshot을 저장한다. PR은 제목,
+  본문, state, draft, merged 상태, head SHA, 파일·addition·deletion·commit·comment count를
+  포함한 snapshot을 저장한다. `pull_request`의 `synchronize` action도 같은 경로를 사용한다.
+- Issue reconcile 뒤 해당 Issue를 포함하는 기존 Board만 다시 hydrate한다. DB reconcile이
+  성공한 뒤 Redis/Socket.IO invalidation을 best-effort로 발행하며, Redis 장애는 이미 성공한
+  source DB reconcile을 실패로 되돌리지 않는다.
+- 같은 installation, repository, source type, Issue/PR number의 reconcile은 transaction-level
+  PostgreSQL advisory lock으로 직렬화한다. lock을 획득한 뒤 REST snapshot을 조회하고,
+  upsert와 delivery 완료 기록이 commit된 후에만 invalidation을 발행한다.
+- Targeted REST detail이 `404`를 반환하면 권한 제거와 원격 삭제를 안전하게 구분할 수
+  없으므로 local source row를 삭제하지 않는다. 해당 delivery는 terminal로 완료하고 기존
+  cache를 유지한다. 따라서 `issues.deleted`도 현재 범위에서는 기존 Issue cache를 유지하며,
+  Issue/PR 원격 삭제 동기화는 지원하지 않는다. 그 외 일시적 lookup/reconcile 실패는
+  delivery retry 대상이다.
 - A selected `projects_v2_item` delivery는 먼저 내부 pending publication marker를 가진 `received`로 기록한 뒤 `SQS_GITHUB_WEBHOOKS_QUEUE_URL`에 `deliveryId`를 queue한다. 이때 `received`는 선택된 delivery가 비동기 reconcile에 수락되었다는 의미이며, source table 동기화 완료를 의미하지 않는다. pending/publishing marker는 receiver 응답의 `received` message를 바꾸지 않으며 raw payload나 token을 포함하지 않는다.
 - Publication은 delivery별 publishing lease를 원자적으로 claim한 publisher만 수행한다. SQS send가 성공한 뒤 그 publisher의 guarded acknowledgement가 marker와 lease를 해제한다. send, acknowledgement, 또는 release가 실패하면 pending marker 또는 만료 가능한 publishing lease가 남아 recovery 대상이 되므로 `received` delivery가 unqueued 상태로 고립되지 않는다. Lease 만료 뒤의 duplicate publication은 worker delivery claim/idempotency로 안전하게 처리된다.
 - worker는 선택 상태를 다시 확인한 뒤 `processing` lease와 함께 delivery를 claim하고, `attempt_count`를 증가시킨다. 성공하면 lease를 해제하고 내부 완료 상태인 `processed`로 기록한다. An unselected queued delivery is internally processed without GitHub GraphQL.
 - claim된 worker는 delivery의 remote installation과 ProjectV2 node에 일치하는 모든 선택 repository target을 다시 조회한다. Each target is one selected `github_project_v2_selections` `(repository_id, project_v2_id)` tuple, and its repository context is retained through Board hydration. One GitHub GraphQL target-item fetch is fanned out to all matching selected repository targets under the one delivery lease; `processed`는 모든 target reconcile 또는 archive가 성공한 뒤에만 기록한다. 선택 target이 남아 있지 않으면 GraphQL 없이 delivery를 `processed`로 완료한다.
 - The worker performs a projectItemNodeId-only GitHub GraphQL source-of-truth fetch. target item이 있으면 해당 item cache를 reconcile한다. For a missing target, the worker archives the matching local item before it hydrates the existing Board cache.
 - ProjectV2 item field values are a current GitHub snapshot: values absent from a fetched item are deleted from its local cache before the remaining values are upserted and before Board hydration.
-- 처리 실패 시 worker는 lease를 해제해 `received`로 되돌리고 SQS `retry`를 요청한다. A reconcile-failed delivery retains the existing lease column as a six-minute SQS redrive cooldown; recovery republishes it only after that cooldown expires (or when a legacy row has no lease), while SQS redelivery remains the primary retry path. lease 해제도 실패하면 lease 만료 뒤 recovery가 다시 queue할 수 있다.
+- 처리 실패 시 worker는 delivery를 `received`로 되돌리고 기존 lease column에 6분 cooldown을
+  기록한다. cooldown이 만료된 delivery만 DB recovery가 다시 queue할 수 있으며, legacy row처럼
+  lease가 없는 delivery도 recovery 대상이다. lease 갱신에 실패한 경우에는 기존 processing
+  lease가 만료된 뒤 DB recovery가 다시 queue할 수 있다.
 - 그 밖의 지원 event는 `received`로 기록한다. 지원하지 않는 event는 오류 없이 `ignored`로 기록하고 `processedAt`을 기록한다.
 
 Webhook endpoint의 공개 응답 shape은 계속 `GithubWebhookDeliveryPayload`이다. `received`와
@@ -760,6 +863,40 @@ Webhook endpoint의 공개 응답 shape은 계속 `GithubWebhookDeliveryPayload`
 }
 ```
 
+### GitHub source Socket.IO invalidation
+
+Socket.IO client는 PILO bearer token으로 연결한 뒤 아래 event로 Workspace source room을
+구독하거나 해제한다. Realtime Server는 `workspace_members`를 조회해 Workspace 접근 권한을
+확인한 뒤에만 room join을 허용한다.
+
+```text
+client -> github:source:subscribe   { workspaceId }
+client -> github:source:unsubscribe { workspaceId }
+server -> github:source:subscribed  { workspaceId }
+server -> github:source:invalidated GithubSourceInvalidation
+server -> github:source:error       SocketError
+```
+
+`GithubSourceInvalidation`:
+
+```json
+{
+  "workspaceId": "workspace_uuid",
+  "repositoryId": "repository_uuid",
+  "sourceType": "pull_request",
+  "sourceId": "pull_request_uuid",
+  "sourceNumber": 24,
+  "updatedAt": "2026-07-16T00:00:00.000Z"
+}
+```
+
+`sourceType`은 `issue` 또는 `pull_request`다. event는 변경된 source의 식별자만 전달하는
+invalidation이며 GitHub source payload가 아니다. PR Review client는 event 값을 화면 state에
+merge하지 않고 기존 REST 조회를 다시 호출한다. Board는 generic source event를 구독하지 않고,
+Issue hydrate 뒤 발행되는 기존 `board:invalidated`를 통해 한 번만 REST 재조회한다. PR Review는
+재접속 시에도 REST snapshot을 재조회하며, 유실된 event 복구를 위해 기존 polling을 fallback으로
+유지한다.
+
 ### GitHub App installation 삭제
 
 ```text
@@ -780,6 +917,11 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - GitHub가 `202`를 반환하면 local `github_installations` row를 삭제한다.
 - GitHub가 `404`를 반환하면 이미 원격에서 삭제된 상태로 보고 local
   `github_installations` row를 삭제한다.
+- local row 삭제는 repository와 ProjectV2의 `installation_id`만 `NULL`로 분리하며,
+  repository, ProjectV2, repository-ProjectV2 link와 Board identity는 보존한다.
+  disconnected cache는 새 installation sync가 같은 remote identity를 다시 발견해 두
+  `installation_id`를 같은 active installation으로 재결합할 때까지 sync와 Board issue
+  생성 대상이 아니다.
 - GitHub가 `401`, `403`, `5xx` 등 실패 응답을 반환하거나 네트워크 오류가 발생하면
   provider raw error를 노출하지 않고 safe error를 반환하며 local row는 유지한다.
 - API 응답이나 로그에 GitHub App private key, JWT, installation token, 사용자 OAuth
@@ -818,9 +960,9 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
   `github_oauth_connections.token_scope` (`purpose=app_user`) is stored for diagnostics/display only and is not a
   mandatory ProjectV2 access precondition.
 - `POST /me/github/project-oauth/start` creates a regular GitHub OAuth App
-  authorization URL with `read:user user:email project`. Its callback stores
+  authorization URL with `read:user user:email project repo`. Its callback stores
   `github_oauth_connections` (`purpose=project_v2`) and requires the returned scope
-  to include `project`.
+  to include both `project` and `repo`.
 - All start endpoints also create a server-side callback state row and set an
   HttpOnly `SameSite=Lax` binding cookie scoped to `{API_BASE_PATH}/github`.
 - Browser clients must call the start endpoints with credentials included, and
@@ -834,7 +976,7 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 - `GET /github/project-oauth/callback` requires a valid signed ProjectV2 OAuth
   state, the matching browser binding cookie, and an unexpired unconsumed
   server-side state row. The server consumes the state row before exchanging the
-  GitHub OAuth code and rejects returned tokens without `project` scope.
+  GitHub OAuth code and rejects returned tokens without both `project` and `repo` scopes.
 - `GET /github/installations/callback` requires a valid signed GitHub App
   installation state, the matching browser binding cookie, and an unexpired
   unconsumed server-side state row. The server consumes the state row before
@@ -873,7 +1015,7 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
   - `github_callback_error=token_exchange_failed`: GitHub OAuth token exchange
     failed.
   - `github_callback_error=project_oauth_scope_missing`: ProjectV2 OAuth token
-    was returned without the required `project` scope.
+    was returned without the required `project` and `repo` scopes.
   - `github_callback_error=project_oauth_account_mismatch`: ProjectV2 OAuth
     account does not match the connected GitHub OAuth account.
   - `github_callback_error=installation_not_accessible`: callback installation
@@ -889,9 +1031,22 @@ DELETE /api/v1/workspaces/{workspaceId}/github/installations/{installationId}
 ## Asynchronous sync execution
 
 Manual `POST /workspaces/{workspaceId}/github/sync-runs` returns `202 Accepted`.
-It creates a `queued` run and publishes a durable `github-sync-jobs` message; a worker
-performs the transition `queued → running → success|failed`. A queue-publish failure
-marks the run failed and returns an API error instead of leaving a stranded queued run.
+It requires an `Idempotency-Key` header containing exactly 1-128 raw printable ASCII
+bytes. Leading and trailing printable ASCII spaces are preserved and distinct. The
+server stores only its lowercase SHA-256 hash. A replay with the same manual-sync scope
+returns the original run; a compatible active run is reused. Both `202` replay/reuse
+responses do not create or enqueue another job. Reusing a key with a different scope
+returns `409 GITHUB_SYNC_IDEMPOTENCY_CONFLICT`.
+
+New manual runs are admitted only for the Workspace owner and are limited per user and
+per Workspace, with a cooldown; these limits do not apply to automatic, webhook, polling,
+or legacy sync. `400` is returned for a missing or invalid `Idempotency-Key`. A rejected
+manual rate limit returns `429 GITHUB_SYNC_RATE_LIMITED` with safe `limitScope` and
+`retryAfterSeconds` details. Global manual queue saturation returns
+`503 GITHUB_SYNC_QUEUE_SATURATED` with only safe retry advice; clients should retry after
+the indicated delay and must not infer queue depth. A queue-publish failure after a newly
+created durable run marks that run failed and returns an API error instead of leaving a
+stranded queued run.
 
 ## ProjectV2 setup and selected sync scope
 
@@ -900,9 +1055,11 @@ Issues, and pull requests, and redirects with the `github_installation_id` query
 The client does not request PRs or ProjectV2 data until a repository is selected. It must then
 call `POST /workspaces/{workspaceId}/github/installations/{installationId}/projects-v2/discovery`
 with `{ "repositoryId": "..." }`. Discovery stores ProjectV2 metadata and repository links;
-its result and subsequent ProjectV2 lists are limited to that repository. Organization
-installations use the installation token; a personal installation without a valid matching
-Project OAuth token with `project` scope returns:
+its result and subsequent ProjectV2 lists are limited to that repository and its owner. A
+User repository owner matching the active ProjectV2 OAuth GitHub login uses the user token even
+when installation metadata is `Organization`; an actual Organization repository owner or legacy
+Organization-installation cache without owner type retains installation-token fallback. A personal owner without a valid matching Project OAuth token with
+both `project` and `repo` scopes returns:
 
 ```json
 {
@@ -958,5 +1115,5 @@ not publish the same pending delivery at the same time. A normally received
 delivery without the pending marker is never republished by recovery or by a
 duplicate webhook request. An expired publishing or `processing` lease is
 eligible for recovery and requeue. A `received` delivery with the
-`GitHub ProjectV2 webhook reconcile failed` marker is recoverable when queue
-retries end.
+`GitHub ProjectV2 webhook reconcile failed` 또는
+`GitHub source webhook reconcile failed` marker is recoverable by DB recovery after its cooldown expires.

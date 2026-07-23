@@ -8,11 +8,13 @@ import { HttpStatus, Injectable, Logger, OnModuleDestroy, Optional } from "@nest
 import { QueryResultRow } from "pg";
 import { ApiError, badRequest } from "../../common/api-error";
 import { DatabaseService } from "../../database/database.service";
+import type { DatabaseTransaction } from "../../database/database.service";
 import { GithubIntegrationConfigService } from "./github-integration-config.service";
 import { GithubGraphqlRateLimitError, isGithubGraphqlRateLimitError } from "./github-app.client";
 import { GithubProjectV2PollingService } from "./github-project-v2-polling.service";
 import { GithubProjectV2SyncTokenService } from "./github-project-v2-sync-token.service";
-import { GithubProjectV2WebhookReconcileService } from "./github-project-v2-webhook-reconcile.service";
+import { readGithubRepositoryOwnerType } from "./github-repository-owner";
+import { GithubWebhookDeliveryDispatcherService } from "./github-webhook-delivery-dispatcher.service";
 import {
   GithubSyncExecutorService,
   type GithubSyncInstallationRow,
@@ -57,6 +59,12 @@ export class GithubSyncJobEnqueueError extends ApiError {
   }
 }
 
+export interface PreparedGithubSyncJob {
+  id: string;
+  syncRunId: string;
+  leaseGeneration: string;
+}
+
 @Injectable()
 export class GithubSyncJobService implements OnModuleDestroy {
   private readonly logger = new Logger(GithubSyncJobService.name);
@@ -68,7 +76,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
     private readonly configService: GithubIntegrationConfigService,
     private readonly executor: GithubSyncExecutorService,
     private readonly tokenService: GithubProjectV2SyncTokenService,
-    private readonly webhookReconcileService: GithubProjectV2WebhookReconcileService,
+    private readonly webhookReconcileService: GithubWebhookDeliveryDispatcherService,
     private readonly pollingService?: GithubProjectV2PollingService,
     @Optional() private readonly observability?: GithubSyncObservabilityService
   ) {}
@@ -78,7 +86,21 @@ export class GithubSyncJobService implements OnModuleDestroy {
     requestedByUserId: string,
     options?: { skipIfRunIsNoLongerQueued?: boolean }
   ): Promise<boolean> {
-    const job = await this.database.queryOne<{ id: string; lease_generation: string }>(
+    const job = await this.prepareSyncJob(this.database, syncRunId, requestedByUserId);
+    if (!job) {
+      if (options?.skipIfRunIsNoLongerQueued) return false;
+      throw badRequest("GitHub sync job could not be created");
+    }
+    await this.publishPreparedSyncJob(job);
+    return true;
+  }
+
+  async prepareSyncJob(
+    database: Pick<DatabaseService, "queryOne"> | Pick<DatabaseTransaction, "queryOne">,
+    syncRunId: string,
+    requestedByUserId: string
+  ): Promise<PreparedGithubSyncJob | null> {
+    const job = await database.queryOne<{ id: string; lease_generation: string }>(
       `WITH locked_polling_schedule AS MATERIALIZED (
         SELECT schedule.active_sync_run_id
         FROM github_project_v2_polling_schedules AS schedule
@@ -120,20 +142,19 @@ export class GithubSyncJobService implements OnModuleDestroy {
        RETURNING id, lease_generation`,
       [syncRunId, requestedByUserId]
     );
-    if (!job) {
-      if (options?.skipIfRunIsNoLongerQueued) return false;
-      throw badRequest("GitHub sync job could not be created");
-    }
+    return job ? { id: job.id, syncRunId, leaseGeneration: job.lease_generation } : null;
+  }
+
+  async publishPreparedSyncJob(job: PreparedGithubSyncJob): Promise<void> {
     try {
       await this.client().send(new SendMessageCommand({
         QueueUrl: this.requireEnv("SQS_GITHUB_SYNC_JOBS_QUEUE_URL"),
         MessageBody: JSON.stringify({ jobId: job.id })
       }));
     } catch {
-      await this.failEnqueue(syncRunId, job.id, job.lease_generation);
-      throw new GithubSyncJobEnqueueError(syncRunId);
+      await this.failEnqueue(job.syncRunId, job.id, job.leaseGeneration);
+      throw new GithubSyncJobEnqueueError(job.syncRunId);
     }
-    return true;
   }
 
   async enqueueWebhookDelivery(deliveryId: string): Promise<void> {
@@ -157,6 +178,8 @@ export class GithubSyncJobService implements OnModuleDestroy {
       const token = await this.tokenService.resolvePersonalProjectV2UserAccessToken({
         currentUserId: job.requested_by_user_id,
         installation,
+        repositoryOwnerLogin: repository?.owner_login ?? null,
+        repositoryOwnerType: readGithubRepositoryOwnerType(repository?.raw),
         requiresProjectV2Access: ["full", "project_v2", "project_v2_fields", "project_v2_items"].includes(job.target)
       });
       const summary = await this.executor.runGithubSyncTarget(job.target, {
@@ -591,7 +614,7 @@ export class GithubSyncJobService implements OnModuleDestroy {
     });
   }
   private installation(workspaceId: string, id: string): Promise<GithubSyncInstallationRow | null> { return this.database.queryOne(`SELECT id, workspace_id, github_installation_id, account_login, account_type FROM github_installations WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
-  private repository(workspaceId: string, id: string): Promise<GithubSyncRepositoryContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name FROM github_repositories WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
+  private repository(workspaceId: string, id: string): Promise<GithubSyncRepositoryContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_node_id, owner_login, name, full_name, raw FROM github_repositories WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private project(workspaceId: string, id: string): Promise<GithubSyncProjectV2ContextRow | null> { return this.database.queryOne(`SELECT id, workspace_id, installation_id, github_project_node_id FROM github_projects_v2 WHERE workspace_id=$1 AND id=$2`, [workspaceId, id]); }
   private client(): GithubSqsClient { if (!this.sqs) this.sqs = new SQSClient({ region: this.requireEnv("AWS_REGION"), endpoint: process.env.SQS_ENDPOINT?.trim() || undefined }); return this.sqs; }
   private requireEnv(name: string): string { const value = process.env[name]?.trim(); if (!value) throw badRequest(`GitHub queue configuration is missing: ${name}`); return value; }

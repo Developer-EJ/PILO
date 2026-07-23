@@ -11,6 +11,7 @@ import type {
   PrReviewCanvasShape,
   PrReviewCanvasViewportQuery,
   PrReviewConflictAnalysis,
+  PrReviewConflictDraft,
   PrReviewConflictSuggestion,
   PrReviewFile,
   PrReviewFileDiff,
@@ -21,12 +22,15 @@ import type {
   PrReviewMergeResult,
   PrReviewRepository,
   PrReviewRoomCanvas,
+  PrReviewRoomList,
+  PrReviewRoomStart,
   PrReviewSession,
   PrReviewSessionResult,
   PrReviewSubmission,
   PrReviewSummary,
   SubmitPrReviewSessionInput,
   UpdatePrReviewCanvasFileShapeInput,
+  UpdatePrReviewConflictDraftInput,
   UpdatePrReviewFileDecisionInput
 } from "@/features/pr-review/types";
 import type { CanvasOperationsCatchupPayload } from "@/shared/canvas-realtime/canvas-realtime-types";
@@ -474,6 +478,33 @@ export function createPrReviewApiClient({
       );
     },
 
+    async createReviewRoomRevision(workspaceId: string, reviewRoomId: string) {
+      return requestPrReviewData<PrReviewRoomStart>(
+        `${reviewRoomGithubPath(workspaceId, reviewRoomId)}/revisions`,
+        { method: "POST" },
+        requestOptions
+      );
+    },
+
+    async listReviewRooms(
+      workspaceId: string,
+      init?: Pick<RequestInit, "signal">
+    ) {
+      return requestPrReviewData<PrReviewRoomList>(
+        workspaceGithubPath(workspaceId, "/review-rooms"),
+        init,
+        requestOptions
+      );
+    },
+
+    async deleteReviewRoom(workspaceId: string, reviewRoomId: string) {
+      return requestPrReviewData<{ deleted: true }>(
+        reviewRoomGithubPath(workspaceId, reviewRoomId),
+        { method: "DELETE" },
+        requestOptions
+      );
+    },
+
     async listReviewCanvasShapes(
       workspaceId: string,
       canvasId: string,
@@ -585,6 +616,26 @@ export function createPrReviewApiClient({
           body: input ? JSON.stringify(input) : undefined,
           method: "POST"
         },
+        requestOptions
+      );
+    },
+
+    async getReviewFileConflictDraft(workspaceId: string, reviewFileId: string) {
+      return requestPrReviewData<PrReviewConflictDraft | null>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-draft`,
+        undefined,
+        requestOptions
+      );
+    },
+
+    async updateReviewFileConflictDraft(
+      workspaceId: string,
+      reviewFileId: string,
+      input: UpdatePrReviewConflictDraftInput
+    ) {
+      return requestPrReviewData<PrReviewConflictDraft>(
+        `${reviewFileGithubPath(workspaceId, reviewFileId)}/conflict-draft`,
+        { body: JSON.stringify(input), method: "PATCH" },
         requestOptions
       );
     },

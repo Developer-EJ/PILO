@@ -2,20 +2,27 @@
 
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowDownWideNarrow,
+  ArrowUpWideNarrow,
+  CalendarPlus,
+  Check,
   CheckCircle2,
   Clock3,
   FileText,
   ListChecks,
   Loader2,
+  MousePointerClick,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Search,
+  Users,
   X,
   XCircle
 } from "lucide-react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,24 +33,37 @@ import {
   type MeetingReportRealtimeEvent
 } from "@/features/meeting/hooks/use-meeting-report-realtime";
 import type { MeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
+import { MeetingReportWorkspaceLocationAdapter } from "@/features/meeting/meeting-workspace-location-adapter";
+import { createMeetingReportRequestGuard } from "@/features/meeting/meeting-workspace-location";
 import type {
   MeetingReportActionItem,
-  MeetingReportActionItemAssignee,
+  MeetingReportActionItemDeliveryInput,
+  MeetingReportActionItemDeliveryOptions,
   MeetingReportDetail,
+  MeetingReportDecisionItem,
   MeetingReportStatus,
   MeetingReportSummary,
+  UpdateMeetingReportContentInput,
   UpdateMeetingReportActionItemInput
 } from "@/features/meeting/types";
+import {
+  hasPiloIssueDeliverySelection,
+  hasPiloIssueDeliveryTarget,
+  resolvePiloIssueDeliverySelection,
+  saveThenDeliverActionItem
+} from "@/features/meeting/utils/action-item-delivery-flow";
 import { cn } from "@/lib/utils";
 
 export type MeetingReportStatusFilter = "ALL" | MeetingReportStatus;
 
 type MeetingReportSectionProps = {
+  currentPage: number;
   hasPreviousPage: boolean;
   meetingData: MeetingWorkspaceData;
   nextCursor: string | null;
   onListFiltersChange: (filters: { from: string; q: string; to: string }) => void;
   onNextPage: () => void;
+  onPageChange: (page: number) => void;
   onPreviousPage: () => void;
   onStatusFilterChange: (status: MeetingReportStatusFilter) => void;
   onToastMessage: (message: string) => void;
@@ -51,17 +71,14 @@ type MeetingReportSectionProps = {
 };
 
 type ReportDetailStatus = "idle" | "loading" | "success" | "error";
-
-function readInitialMeetingReportId() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return new URLSearchParams(window.location.search).get("reportId")?.trim() || null;
-}
+type ReportDetailView = "detail" | "transcript";
+type ReportSortDirection = "newest" | "oldest";
 
 type MeetingReportTranscriptSegment = NonNullable<
-  MeetingReportDetail["transcriptSegments"]
+  MeetingReportDetail["evidenceSegments"]
+>[number];
+type MeetingReportActivityEvidence = NonNullable<
+  MeetingReportDetail["activityEvidence"]
 >[number];
 
 const REPORT_POLL_INTERVAL_MS = 10000;
@@ -77,12 +94,19 @@ const REPORT_STATUS_FILTERS: Array<{
 
 function getReportRequestErrorMessage(error: unknown) {
   if (error instanceof MeetingApiError && error.status === 404) {
-    return "이 회의록의 상세 transcript는 회의 참석자와 Workspace owner만 볼 수 있습니다.";
+    return "회의록 상세를 찾을 수 없습니다. 삭제되었거나 더 이상 사용할 수 없는 회의록일 수 있습니다.";
   }
 
   return error instanceof Error
     ? error.message
     : "회의록 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
+}
+
+function getReportIdFromLocation() {
+  if (typeof window === "undefined") return null;
+
+  const reportId = new URLSearchParams(window.location.search).get("reportId");
+  return reportId?.trim() || null;
 }
 
 function toDayBoundary(value: string, boundary: "start" | "end") {
@@ -116,20 +140,25 @@ function formatReportDateTime(value: string | null | undefined) {
 }
 
 
-function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt">) {
-  return `${formatReportDateTime(report.createdAt)} 회의록`;
+function formatReportTitle(report: Pick<MeetingReportSummary, "createdAt" | "title">) {
+  return report.title?.trim() || `${formatReportDateTime(report.createdAt)} 회의록`;
 }
 
-function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+function getReportParticipantSummaryText(report: MeetingReportSummary) {
   const summary = report.participantSummary;
   if (!summary || summary.totalCount === 0) return null;
   const names = summary.participants
     .map((participant) => participant.name?.trim() || "이름 없음")
     .join(", ");
+  return `${summary.totalCount}명${names ? ` · ${names}` : ""}${summary.hasMore ? " 외" : ""}`;
+}
+
+function ReportParticipantSummary({ report }: { report: MeetingReportSummary }) {
+  const summaryText = getReportParticipantSummaryText(report);
+  if (!summaryText) return null;
   return (
     <span className="text-xs text-muted-foreground">
-      참석 {summary.totalCount}명{names ? ` · ${names}` : ""}
-      {summary.hasMore ? " 외" : ""}
+      참석 {summaryText}
     </span>
   );
 }
@@ -307,7 +336,7 @@ function getEvidenceSegments(
   const seenSegmentIds = new Set<string>();
   const segments: MeetingReportTranscriptSegment[] = [];
 
-  for (const segment of report.transcriptSegments ?? []) {
+  for (const segment of report.evidenceSegments ?? []) {
     segmentsById.set(segment.id, segment);
   }
 
@@ -329,107 +358,494 @@ function getEvidenceSegments(
   return segments.sort((left, right) => left.segmentIndex - right.segmentIndex);
 }
 
+function getActivityEvidence(
+  report: MeetingReportDetail,
+  sourceType: string,
+  sourceIndex?: number
+) {
+  return (report.activityEvidence ?? [])
+    .filter((activity) => activity.references.some((reference) => (
+      reference.sourceType === sourceType &&
+      (sourceIndex === undefined || reference.sourceIndex === sourceIndex)
+    )))
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+}
+
 function EvidenceTimeButtons({
+  activityEvidence = [],
+  onActivitySelect,
   onSelect,
   segments
 }: {
-  onSelect: (segment: MeetingReportTranscriptSegment) => void;
+  activityEvidence?: MeetingReportActivityEvidence[];
+  onActivitySelect?: (activityEvidence: MeetingReportActivityEvidence[]) => void;
+  onSelect?: (segment: MeetingReportTranscriptSegment) => void;
   segments: MeetingReportTranscriptSegment[];
 }) {
-  if (!segments.length) return null;
+  if ((!segments.length || !onSelect) && !activityEvidence.length) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <span className="font-medium text-muted-foreground">근거</span>
-      {segments.map((segment) => {
+      {onSelect ? segments.map((segment) => {
         const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
         return (
           <button
             key={segment.id}
             type="button"
             className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/40 px-2 font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={`${timestamp} transcript 근거로 이동`}
+            aria-label={`${timestamp} transcript 근거 보기`}
             onClick={() => onSelect(segment)}
           >
             <Clock3 className="size-3" />
-            {timestamp}
+            시간 {timestamp}
           </button>
         );
-      })}
+      }) : null}
+      {activityEvidence.length && onActivitySelect ? (
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/40 px-2 font-medium text-muted-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`연결된 활동 근거 ${activityEvidence.length}건 보기`}
+          onClick={() => onActivitySelect(activityEvidence)}
+        >
+          <MousePointerClick className="size-3" />
+          활동 {activityEvidence.length}건
+        </button>
+      ) : null}
     </div>
   );
 }
 
-function TranscriptSegmentViewer({
-  activeSegmentId,
-  onSelect,
-  registerSegment,
-  segments
+function InlineEvidencePanels({
+  activityEvidence = [],
+  evidenceSegment,
+  onActivityEvidenceClose,
+  onEvidenceSegmentClose,
+  sourceLabel
 }: {
-  activeSegmentId: string | null;
-  onSelect: (segment: MeetingReportTranscriptSegment) => void;
-  registerSegment: (id: string, element: HTMLButtonElement | null) => void;
-  segments: MeetingReportTranscriptSegment[];
+  activityEvidence?: MeetingReportActivityEvidence[];
+  evidenceSegment: MeetingReportTranscriptSegment | null;
+  onActivityEvidenceClose: () => void;
+  onEvidenceSegmentClose: () => void;
+  sourceLabel: string;
 }) {
   return (
-    <section className="grid gap-2">
-      <h3 className="font-heading text-base font-semibold">Transcript</h3>
-      <ul className="grid gap-2">
-        {segments.map((segment) => {
-          const isActive = segment.id === activeSegmentId;
-          const timestamp = formatTranscriptTimestamp(segment.startedAtMs);
-          return (
-            <li key={segment.id}>
-              <button
-                ref={(element) => registerSegment(segment.id, element)}
-                type="button"
-                aria-current={isActive ? "true" : undefined}
-                className={cn(
-                  "w-full scroll-mt-6 rounded-lg border bg-background p-3 text-left text-sm leading-6 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isActive && "border-primary bg-primary/10 ring-1 ring-primary/30"
-                )}
-                onClick={() => onSelect(segment)}
-              >
-                <span className="mb-1 block text-xs font-semibold text-muted-foreground">
-                  {timestamp} - {formatTranscriptTimestamp(segment.endedAtMs)}
-                </span>
-                <span className="whitespace-pre-wrap break-words">{segment.text}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+    <>
+      {evidenceSegment ? (
+        <section className="grid gap-2 rounded-lg border border-sky-200 bg-background/70 p-3 dark:border-sky-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">근거 Transcript</p>
+            <Button type="button" size="sm" variant="ghost" onClick={onEvidenceSegmentClose}>
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {formatTranscriptTimestamp(evidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(evidenceSegment.endedAtMs)}
+          </p>
+          <p className="whitespace-pre-wrap break-words text-base leading-6">
+            {evidenceSegment.text}
+          </p>
+        </section>
+      ) : null}
+      {activityEvidence.length ? (
+        <section className="grid gap-2 rounded-lg border border-sky-200 bg-background/70 p-3 dark:border-sky-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">활동 근거</p>
+            <Button type="button" size="sm" variant="ghost" onClick={onActivityEvidenceClose}>
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {sourceLabel}과 연결된 Workspace 활동 {activityEvidence.length}건
+          </p>
+          <ul className="grid gap-2">
+            {activityEvidence.map((activity) => (
+              <li key={activity.id} className="rounded-md border bg-background p-3 text-base">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words leading-6">
+                  {activity.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
   );
 }
 
 function ReportTextBlock({
+  activityEvidence = [],
+  asList = false,
   emptyLabel,
   evidenceSegments = [],
-  onEvidenceSelect,
   title,
   value
 }: {
+  activityEvidence?: MeetingReportActivityEvidence[];
+  asList?: boolean;
   emptyLabel: string;
   evidenceSegments?: MeetingReportTranscriptSegment[];
-  onEvidenceSelect?: (segment: MeetingReportTranscriptSegment) => void;
   title: string;
   value: string | null;
 }) {
+  const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
+  >(null);
+  const [activityEvidenceOpen, setActivityEvidenceOpen] = useState(false);
+  const listItems = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
   return (
     <section className="grid gap-2">
-      <h3 className="font-heading text-base font-semibold">{title}</h3>
-      <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-sm leading-6">
-        {value?.trim() || (
+      <h3 className="font-heading text-xl font-semibold">{title}</h3>
+      <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-base leading-6">
+        {asList && listItems.length ? (
+          <ul className="list-disc space-y-2 pl-5">
+            {listItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+          </ul>
+        ) : value?.trim() ? (
+          value
+        ) : (
           <span className="text-muted-foreground">{emptyLabel}</span>
         )}
       </div>
-      {onEvidenceSelect ? (
+      {evidenceSegments.length || activityEvidence.length ? (
         <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={() => setActivityEvidenceOpen((open) => !open)}
           segments={evidenceSegments}
-          onSelect={onEvidenceSelect}
+          onSelect={(segment) => setSelectedEvidenceSegment((current) => (
+            current?.id === segment.id ? null : segment
+          ))}
         />
       ) : null}
+      <InlineEvidencePanels
+        activityEvidence={activityEvidenceOpen ? activityEvidence : []}
+        evidenceSegment={selectedEvidenceSegment}
+        onActivityEvidenceClose={() => setActivityEvidenceOpen(false)}
+        onEvidenceSegmentClose={() => setSelectedEvidenceSegment(null)}
+        sourceLabel={title}
+      />
+    </section>
+  );
+}
+
+function EditableReportTextBlock({
+  activityEvidence = [],
+  asList = false,
+  editable,
+  emptyLabel,
+  evidenceSegments = [],
+  onSave,
+  saving,
+  singleLine = false,
+  title,
+  value
+}: {
+  activityEvidence?: MeetingReportActivityEvidence[];
+  asList?: boolean;
+  editable: boolean;
+  emptyLabel: string;
+  evidenceSegments?: MeetingReportTranscriptSegment[];
+  onSave: (value: string) => Promise<void>;
+  saving: boolean;
+  singleLine?: boolean;
+  title: string;
+  value: string | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const [selectedEvidenceSegment, setSelectedEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
+  >(null);
+  const [activityEvidenceOpen, setActivityEvidenceOpen] = useState(false);
+  const listItems = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
+
+  const save = async () => {
+    const nextValue = draft.trim();
+    if (!nextValue) return;
+    await onSave(nextValue);
+    setEditing(false);
+  };
+
+  return (
+    <section className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-heading text-xl font-semibold">{title}</h3>
+        {editable && !editing ? (
+          <Button
+            aria-label={`${title} 수정`}
+            title={`${title} 수정`}
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil />
+          </Button>
+        ) : null}
+      </div>
+      {editing ? (
+        <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+          {singleLine ? (
+            <Input
+              aria-label={`${title} 수정`}
+              disabled={saving}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          ) : (
+            <textarea
+              aria-label={`${title} 수정`}
+              className="min-h-32 rounded-md border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              disabled={saving}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => {
+              setDraft(value ?? "");
+              setEditing(false);
+            }}>
+              취소
+            </Button>
+            <Button type="button" size="sm" disabled={saving || !draft.trim()} onClick={() => void save()}>
+              {saving ? <Loader2 className="animate-spin" /> : null}
+              저장
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-24 whitespace-pre-wrap break-words rounded-lg border bg-background p-3 text-base leading-6">
+          {asList && listItems.length ? (
+            <ul className="list-disc space-y-2 pl-5">
+              {listItems.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+            </ul>
+          ) : value?.trim() ? (
+            value
+          ) : (
+            <span className="text-muted-foreground">{emptyLabel}</span>
+          )}
+        </div>
+      )}
+      {evidenceSegments.length || activityEvidence.length ? (
+        <EvidenceTimeButtons
+          activityEvidence={activityEvidence}
+          onActivitySelect={() => setActivityEvidenceOpen((open) => !open)}
+          segments={evidenceSegments}
+          onSelect={(segment) => setSelectedEvidenceSegment((current) => (
+            current?.id === segment.id ? null : segment
+          ))}
+        />
+      ) : null}
+      <InlineEvidencePanels
+        activityEvidence={activityEvidenceOpen ? activityEvidence : []}
+        evidenceSegment={selectedEvidenceSegment}
+        onActivityEvidenceClose={() => setActivityEvidenceOpen(false)}
+        onEvidenceSegmentClose={() => setSelectedEvidenceSegment(null)}
+        sourceLabel={title}
+      />
+    </section>
+  );
+}
+
+function DecisionItemsBlock({
+  activityEvidenceForItem,
+  editable,
+  emptyLabel,
+  evidenceForItem,
+  onSave,
+  saving,
+  items
+}: {
+  activityEvidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportActivityEvidence[];
+  editable: boolean;
+  emptyLabel: string;
+  evidenceForItem: (item: MeetingReportDecisionItem) => MeetingReportTranscriptSegment[];
+  onSave: (item: MeetingReportDecisionItem, text: string) => Promise<void>;
+  saving: boolean;
+  items: MeetingReportDecisionItem[];
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    itemId: string;
+    segment: MeetingReportTranscriptSegment;
+  } | null>(null);
+  const [activityEvidenceOpenItemId, setActivityEvidenceOpenItemId] = useState<
+    string | null
+  >(null);
+
+  return (
+    <section className="grid gap-2">
+      <h3 className="font-heading text-xl font-semibold">결정사항</h3>
+      {items.length ? (
+        <ul className="grid gap-2">
+          {items.map((item) => {
+            const editing = editingId === item.id;
+            const activityEvidence = activityEvidenceForItem(item);
+            const evidenceSegments = evidenceForItem(item);
+            return (
+              <li key={item.id} className="grid gap-2 rounded-lg border bg-background p-3 text-base leading-6">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">결정 {item.sourceIndex + 1}</span>
+                  {editable && !editing ? (
+                    <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => {
+                      setEditingId(item.id);
+                      setDraft(item.text);
+                    }}>
+                      <Pencil /> 수정
+                    </Button>
+                  ) : null}
+                </div>
+                {editing ? (
+                  <>
+                    <textarea
+                      aria-label={`결정 ${item.sourceIndex + 1} 수정`}
+                      className="min-h-24 rounded-md border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      disabled={saving}
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setEditingId(null)}>취소</Button>
+                      <Button type="button" size="sm" disabled={saving || !draft.trim()} onClick={() => void onSave(item, draft.trim()).then(() => setEditingId(null))}>
+                        {saving ? <Loader2 className="animate-spin" /> : null}
+                        저장
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{item.text}</p>
+                )}
+                <EvidenceTimeButtons
+                  activityEvidence={activityEvidence}
+                  onActivitySelect={() => setActivityEvidenceOpenItemId((current) => (
+                    current === item.id ? null : item.id
+                  ))}
+                  segments={evidenceSegments}
+                  onSelect={(segment) => setSelectedEvidence((current) => (
+                    current?.itemId === item.id && current.segment.id === segment.id
+                      ? null
+                      : { itemId: item.id, segment }
+                  ))}
+                />
+                <InlineEvidencePanels
+                  activityEvidence={
+                    activityEvidenceOpenItemId === item.id ? activityEvidence : []
+                  }
+                  evidenceSegment={
+                    selectedEvidence?.itemId === item.id
+                      ? selectedEvidence.segment
+                      : null
+                  }
+                  onActivityEvidenceClose={() => setActivityEvidenceOpenItemId(null)}
+                  onEvidenceSegmentClose={() => setSelectedEvidence(null)}
+                  sourceLabel={`결정 ${item.sourceIndex + 1}`}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="min-h-24 rounded-lg border bg-background p-3 text-base leading-6 text-muted-foreground">
+          {emptyLabel}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DecisionTextItemsBlock({
+  activityEvidenceForItem,
+  emptyLabel,
+  evidenceForItem,
+  value
+}: {
+  activityEvidenceForItem: (sourceIndex: number) => MeetingReportActivityEvidence[];
+  emptyLabel: string;
+  evidenceForItem: (sourceIndex: number) => MeetingReportTranscriptSegment[];
+  value: string | null;
+}) {
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    sourceIndex: number;
+    segment: MeetingReportTranscriptSegment;
+  } | null>(null);
+  const [activityEvidenceOpenSourceIndex, setActivityEvidenceOpenSourceIndex] = useState<
+    number | null
+  >(null);
+  const items = (value ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean);
+
+  return (
+    <section className="grid gap-2">
+      <h3 className="font-heading text-xl font-semibold">결정사항</h3>
+      {items.length ? (
+        <ul className="grid gap-2">
+          {items.map((item, sourceIndex) => {
+            const activityEvidence = activityEvidenceForItem(sourceIndex);
+            const evidenceSegments = evidenceForItem(sourceIndex);
+            return (
+            <li
+              key={`${item}-${sourceIndex}`}
+              className="grid gap-2 rounded-lg border bg-background p-3 text-base leading-6"
+            >
+              <span className="text-xs font-medium text-muted-foreground">
+                결정 {sourceIndex + 1}
+              </span>
+              <p className="whitespace-pre-wrap break-words">{item}</p>
+              <EvidenceTimeButtons
+                activityEvidence={activityEvidence}
+                onActivitySelect={() => setActivityEvidenceOpenSourceIndex((current) => (
+                  current === sourceIndex ? null : sourceIndex
+                ))}
+                onSelect={(segment) => setSelectedEvidence((current) => (
+                  current?.sourceIndex === sourceIndex && current.segment.id === segment.id
+                    ? null
+                    : { sourceIndex, segment }
+                ))}
+                segments={evidenceSegments}
+              />
+              <InlineEvidencePanels
+                activityEvidence={
+                  activityEvidenceOpenSourceIndex === sourceIndex
+                    ? activityEvidence
+                    : []
+                }
+                evidenceSegment={
+                  selectedEvidence?.sourceIndex === sourceIndex
+                    ? selectedEvidence.segment
+                    : null
+                }
+                onActivityEvidenceClose={() => setActivityEvidenceOpenSourceIndex(null)}
+                onEvidenceSegmentClose={() => setSelectedEvidence(null)}
+                sourceLabel={`결정 ${sourceIndex + 1}`}
+              />
+            </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="min-h-24 rounded-lg border bg-background p-3 text-base leading-6 text-muted-foreground">
+          {emptyLabel}
+        </div>
+      )}
     </section>
   );
 }
@@ -437,142 +853,507 @@ function ReportTextBlock({
 function getActionItemStatusLabel(status: MeetingReportActionItem["status"]) {
   if (status === "APPROVED") return "승인됨";
   if (status === "DISMISSED") return "반려됨";
+  if (status === "DELIVERING") return "생성 중";
+  if (status === "DELIVERY_FAILED") return "생성 실패";
   return "검토 대기";
+}
+
+function getActionItemDeliveryErrorMessage(errorCode: string | null) {
+  if (errorCode === "FORBIDDEN") return "연결된 서비스에 접근할 수 없습니다.";
+  if (errorCode === "NOT_FOUND") return "선택한 대상 정보를 찾을 수 없습니다.";
+  return "생성에 실패했습니다. 입력을 확인한 뒤 다시 시도해주세요.";
 }
 
 function ActionItemReviewCard({
   actionItem,
-  assignees,
+  actionItemAssignees,
+  activityEvidence,
   busy,
   evidenceSegments,
-  onApprove,
+  onDeliver,
   onDismiss,
-  onEvidenceSelect,
+  onLoadIssueDeliveryOptions,
   onSave
 }: {
   actionItem: MeetingReportActionItem;
-  assignees: MeetingReportActionItemAssignee[];
+  actionItemAssignees: MeetingReportDetail["actionItemAssignees"];
+  activityEvidence: MeetingReportActivityEvidence[];
   busy: boolean;
   evidenceSegments: MeetingReportTranscriptSegment[];
-  onApprove: () => void;
+  onDeliver: (input: MeetingReportActionItemDeliveryInput) => Promise<void>;
   onDismiss: () => void;
-  onEvidenceSelect: (segment: MeetingReportTranscriptSegment) => void;
-  onSave: (body: UpdateMeetingReportActionItemInput) => void;
+  onLoadIssueDeliveryOptions: () => Promise<MeetingReportActionItemDeliveryOptions>;
+  onSave: (body: UpdateMeetingReportActionItemInput) => Promise<boolean>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [deliveryType, setDeliveryType] = useState<"calendar_event" | "pilo_issue">(
+    actionItem.deliverySuggestion?.deliveryType ?? "pilo_issue"
+  );
   const [title, setTitle] = useState(actionItem.title);
   const [description, setDescription] = useState(actionItem.description);
   const [priority, setPriority] = useState(actionItem.priority);
-  const [assigneeUserId, setAssigneeUserId] = useState(
-    actionItem.assignee?.userId ?? ""
-  );
+  const [assigneeUserId, setAssigneeUserId] = useState(actionItem.assignee?.userId ?? "");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [isAllDay, setIsAllDay] = useState(true);
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [issueOptions, setIssueOptions] =
+    useState<MeetingReportActionItemDeliveryOptions | null>(null);
+  const [selectedBoardId, setSelectedBoardId] = useState("");
+  const [selectedColumnId, setSelectedColumnId] = useState("");
+  const [deliveryOptionsError, setDeliveryOptionsError] = useState<string | null>(null);
+  const [loadingIssueOptions, setLoadingIssueOptions] = useState(false);
+  const [activityEvidenceOpen, setActivityEvidenceOpen] = useState(false);
+  const [actionItemEvidenceSegment, setActionItemEvidenceSegment] = useState<
+    MeetingReportTranscriptSegment | null
+  >(null);
   const pending = actionItem.status === "PENDING";
+  const retryingDelivery = actionItem.status === "DELIVERY_FAILED";
+  const selectedBoard = issueOptions?.boards.find((board) => board.id === selectedBoardId);
+  const hasIssueDeliveryTarget = issueOptions
+    ? hasPiloIssueDeliveryTarget(issueOptions)
+    : false;
+  const hasIssueDeliverySelection = issueOptions
+    ? hasPiloIssueDeliverySelection(
+        issueOptions,
+        selectedBoardId,
+        selectedColumnId
+      )
+    : false;
+  const hasStaleIssueDeliverySelection = Boolean(
+    issueOptions &&
+    hasIssueDeliveryTarget &&
+    (selectedBoardId || selectedColumnId) &&
+    !hasIssueDeliverySelection
+  );
 
   useEffect(() => {
     setTitle(actionItem.title);
     setDescription(actionItem.description);
     setPriority(actionItem.priority);
     setAssigneeUserId(actionItem.assignee?.userId ?? "");
+    setEditing(false);
+    setActivityEvidenceOpen(false);
+    setActionItemEvidenceSegment(null);
+    const draft = actionItem.status === "DELIVERY_FAILED" ? actionItem.delivery?.draft : null;
+    const suggestion = actionItem.deliverySuggestion;
+    if (draft?.deliveryType === "calendar_event") {
+      setDeliveryType("calendar_event");
+      setStartDate(draft.calendar.startDate);
+      setEndDate(draft.calendar.endDate ?? draft.calendar.startDate);
+      setIsAllDay(draft.calendar.isAllDay ?? true);
+      setStartTime(draft.calendar.startTime ?? "");
+      setEndTime(draft.calendar.endTime ?? "");
+      return;
+    }
+    if (draft?.deliveryType === "pilo_issue") {
+      setDeliveryType("pilo_issue");
+      setSelectedBoardId(draft.issue.boardId);
+      setSelectedColumnId(draft.issue.columnId);
+      return;
+    }
+    if (suggestion?.deliveryType === "calendar_event" && suggestion.calendar) {
+      setDeliveryType("calendar_event");
+      setStartDate(suggestion.calendar.startDate);
+      setEndDate(suggestion.calendar.endDate);
+      setIsAllDay(suggestion.calendar.isAllDay);
+      setStartTime(suggestion.calendar.startTime ?? "");
+      setEndTime(suggestion.calendar.endTime ?? "");
+      return;
+    }
+    setDeliveryType("pilo_issue");
+    setStartDate("");
+    setEndDate("");
+    setIsAllDay(true);
+    setStartTime("");
+    setEndTime("");
+    setSelectedBoardId("");
+    setSelectedColumnId("");
   }, [actionItem]);
 
+  async function loadIssueDeliveryOptions(
+    preferredBoardId = selectedBoardId,
+    preferredColumnId = selectedColumnId
+  ) {
+    setDeliveryOptionsError(null);
+    setIssueOptions(null);
+    setLoadingIssueOptions(true);
+    try {
+      const options = await onLoadIssueDeliveryOptions();
+      const selection = resolvePiloIssueDeliverySelection(
+        options,
+        preferredBoardId,
+        preferredColumnId
+      );
+      setIssueOptions(options);
+      setSelectedBoardId(selection.boardId);
+      setSelectedColumnId(selection.columnId);
+    } catch (error) {
+      setDeliveryOptionsError(getReportRequestErrorMessage(error));
+    } finally {
+      setLoadingIssueOptions(false);
+    }
+  }
+
+  async function selectDeliveryType(nextType: "calendar_event" | "pilo_issue") {
+    if (!editing) return;
+
+    setDeliveryType(nextType);
+    setDeliveryOptionsError(null);
+    if (nextType !== "pilo_issue" || issueOptions || loadingIssueOptions) return;
+    await loadIssueDeliveryOptions();
+  }
+
+  function changeBoard(boardId: string) {
+    setSelectedBoardId(boardId);
+    const board = issueOptions?.boards.find((option) => option.id === boardId);
+    setSelectedColumnId(board?.columns[0]?.id ?? "");
+  }
+
+  async function beginEditing() {
+    setEditing(true);
+    if (deliveryType === "pilo_issue") {
+      await loadIssueDeliveryOptions();
+    }
+  }
+
+  function getActionItemPatch(): UpdateMeetingReportActionItemInput {
+    return {
+      title: title.trim(),
+      description: description.trim(),
+      priority,
+      assigneeUserId: assigneeUserId || null
+    };
+  }
+
+  function hasUnsavedActionItemChanges(patch: UpdateMeetingReportActionItemInput) {
+    return (
+      patch.title !== actionItem.title ||
+      patch.description !== actionItem.description ||
+      patch.priority !== actionItem.priority ||
+      patch.assigneeUserId !== (actionItem.assignee?.userId ?? null)
+    );
+  }
+
+  async function submitApproval() {
+    const patch = getActionItemPatch();
+    if (!patch.title || !patch.description) return;
+    let delivery: MeetingReportActionItemDeliveryInput;
+    if (deliveryType === "calendar_event") {
+      if (!startDate || (!isAllDay && !startTime)) return;
+      delivery = {
+        deliveryType,
+        calendar: {
+          title: patch.title,
+          description: patch.description,
+          isAllDay,
+          startDate,
+          // Keep the field optional in the UI while remaining compatible with
+          // app-server versions that still require endDate in delivery input.
+          endDate: endDate || startDate,
+          startTime: isAllDay ? null : startTime || null,
+          endTime: isAllDay ? null : endTime || null
+        }
+      };
+    } else {
+      if (!hasIssueDeliverySelection) return;
+      delivery = {
+        deliveryType,
+        issue: {
+          boardId: selectedBoardId,
+          columnId: selectedColumnId,
+          title: patch.title,
+          body: patch.description
+        }
+      };
+    }
+    await saveThenDeliverActionItem({
+      needsSave: pending && hasUnsavedActionItemChanges(patch),
+      save: () => onSave(patch),
+      deliver: () => onDeliver(delivery)
+    });
+  }
+
   return (
-    <li className="grid gap-3 rounded-lg border bg-background p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+    <li className="grid gap-3 rounded-2xl border border-border bg-muted/50 p-4 text-base">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
           {getActionItemStatusLabel(actionItem.status)}
         </span>
-        <span className="text-xs text-muted-foreground">
-          AI 후보 #{actionItem.sourceIndex + 1}
-        </span>
+        {pending && !editing ? (
+          <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+            {deliveryType === "calendar_event" ? "일정" : "이슈"}
+          </span>
+        ) : null}
+        {!editing ? (
+          <span className="text-sm text-muted-foreground">
+            AI 후보 #{actionItem.sourceIndex + 1}
+          </span>
+        ) : null}
+        {pending && editing ? (
+          <div aria-label="생성 대상 선택" className="ml-auto flex rounded-md border bg-background p-0.5">
+            <Button type="button" size="sm" variant={deliveryType === "calendar_event" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("calendar_event")}>
+              일정
+            </Button>
+            <Button type="button" size="sm" variant={deliveryType === "pilo_issue" ? "default" : "ghost"} className="h-7 px-2 text-xs" disabled={busy || loadingIssueOptions} onClick={() => void selectDeliveryType("pilo_issue")}>
+              {loadingIssueOptions ? <Loader2 className="animate-spin" /> : null}
+              이슈
+            </Button>
+          </div>
+        ) : null}
       </div>
 
-      {pending ? (
+      {editing && pending ? (
         <div className="grid gap-2">
-          <Input
-            aria-label="후속 작업 제목"
-            disabled={busy}
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-          <textarea
-            aria-label="후속 작업 설명"
-            className="min-h-20 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            disabled={busy}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <select
-              aria-label="후속 작업 우선순위"
-              className="h-9 rounded-md border bg-background px-3 text-sm"
-              disabled={busy}
-              value={priority}
-              onChange={(event) => setPriority(event.target.value as typeof priority)}
-            >
-              <option value="HIGH">높음</option>
-              <option value="MEDIUM">보통</option>
-              <option value="LOW">낮음</option>
-            </select>
-            <select
-              aria-label="후속 작업 담당자"
-              className="h-9 rounded-md border bg-background px-3 text-sm"
-              disabled={busy}
-              value={assigneeUserId}
-              onChange={(event) => setAssigneeUserId(event.target.value)}
-            >
-              <option value="">담당자 미지정</option>
-              {assignees.map((assignee) => (
-                <option key={assignee.userId} value={assignee.userId}>
-                  {assignee.name?.trim() || "이름 없음"}
-                </option>
-              ))}
-            </select>
-          </div>
+          <Input className="text-base" aria-label="후속 작업 제목" disabled={busy} value={title} onChange={(event) => setTitle(event.target.value)} />
+          <textarea aria-label="후속 작업 설명" className="min-h-20 rounded-md border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={busy} value={description} onChange={(event) => setDescription(event.target.value)} />
         </div>
       ) : (
         <div>
           <p className="break-words font-medium text-foreground">{actionItem.title}</p>
-          <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">
-            {actionItem.description}
-          </p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {getActionPriorityLabel(actionItem.priority)} · {actionItem.assignee?.name?.trim() || "담당자 미지정"}
-          </p>
+          <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{actionItem.description}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{getActionPriorityLabel(actionItem.priority)} · {actionItem.assignee?.name?.trim() || "담당자 미지정"}</p>
         </div>
       )}
 
-      {evidenceSegments.length ? (
-        <EvidenceTimeButtons segments={evidenceSegments} onSelect={onEvidenceSelect} />
+      {!editing && (evidenceSegments.length || activityEvidence.length) ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <EvidenceTimeButtons
+            activityEvidence={activityEvidence}
+            onActivitySelect={() => setActivityEvidenceOpen((open) => !open)}
+            segments={evidenceSegments}
+            onSelect={(segment) => setActionItemEvidenceSegment((current) => (
+              current?.id === segment.id ? null : segment
+            ))}
+          />
+          {pending ? (
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 px-3"
+                disabled={busy}
+                onClick={() => onDismiss()}
+              >
+                <X />
+                반려
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 px-3"
+                disabled={busy}
+                onClick={() => void beginEditing()}
+              >
+                <Pencil />
+                수정
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 bg-sky-600 px-3 text-white hover:bg-sky-700"
+                disabled={busy}
+                onClick={() => void beginEditing()}
+              >
+                <Check />
+                승인
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
-      {pending ? (
+      {actionItemEvidenceSegment ? (
+        <section className="grid gap-2 rounded-lg border border-sky-200 bg-background/70 p-3 dark:border-sky-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">근거 Transcript</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setActionItemEvidenceSegment(null)}
+            >
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            {formatTranscriptTimestamp(actionItemEvidenceSegment.startedAtMs)} - {formatTranscriptTimestamp(actionItemEvidenceSegment.endedAtMs)}
+          </p>
+          <p className="whitespace-pre-wrap break-words text-base leading-6">
+            {actionItemEvidenceSegment.text}
+          </p>
+        </section>
+      ) : null}
+
+      {activityEvidenceOpen && activityEvidence.length ? (
+        <section className="grid gap-2 rounded-lg border border-violet-200 bg-background/70 p-3 dark:border-violet-900/60">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-foreground">활동 근거</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setActivityEvidenceOpen(false)}
+            >
+              닫기
+            </Button>
+          </div>
+          <p className="text-xs font-semibold text-muted-foreground">
+            후속 작업 {actionItem.sourceIndex + 1}과 연결된 Workspace 활동 {activityEvidence.length}건
+          </p>
+          <ul className="grid gap-2">
+            {activityEvidence.map((activity) => (
+              <li key={activity.id} className="rounded-md border bg-background p-3 text-base">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {formatReportDateTime(activity.occurredAt)} · {activity.action}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words leading-6">
+                  {activity.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {actionItem.delivery ? (
+        <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">
+            {actionItem.delivery.deliveryType === "calendar_event" ? "일정" : "Pilo issue"} 전달 · {actionItem.delivery.status}
+          </p>
+          {actionItem.delivery.calendarEvent ? (
+            <p className="mt-1">일정 생성됨: {actionItem.delivery.calendarEvent.title}</p>
+          ) : null}
+          {actionItem.delivery.piloIssue ? (
+            <p className="mt-1">
+              Issue 생성됨: {actionItem.delivery.piloIssue.title}
+              {actionItem.delivery.piloIssue.columnName
+                ? ` · ${actionItem.delivery.piloIssue.columnName}`
+                : ""}
+            </p>
+          ) : null}
+          {actionItem.delivery.status === "FAILED" ? (
+            <p className="mt-1 text-destructive">
+              {getActionItemDeliveryErrorMessage(actionItem.delivery.errorCode)}
+            </p>
+          ) : null}
+          {actionItem.delivery.status === "COMPLETED" &&
+          !actionItem.delivery.calendarEvent &&
+          !actionItem.delivery.piloIssue ? (
+            <p className="mt-1">생성된 대상은 삭제되었거나 더 이상 조회할 수 없습니다.</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {editing ? (
+        <div className="grid gap-3">
+          {deliveryType === "calendar_event" ? (
+            <div className="grid gap-2 rounded-md border bg-background/70 p-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                시작 날짜
+                <Input type="date" disabled={busy} value={startDate} onChange={(event) => {
+                  const nextStartDate = event.target.value;
+                  setEndDate((currentEndDate) => currentEndDate === startDate ? nextStartDate : currentEndDate);
+                  setStartDate(nextStartDate);
+                }} />
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                종료 날짜 (비우면 시작 날짜)
+                <Input type="date" disabled={busy} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+              </label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={isAllDay} disabled={busy} onChange={(event) => setIsAllDay(event.target.checked)} />
+                종일 일정
+              </label>
+              {!isAllDay ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Input aria-label="시작 시간" type="time" disabled={busy} value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                  <Input aria-label="종료 시간" type="time" disabled={busy} value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid gap-3 rounded-md border bg-background/70 p-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select aria-label="우선순위 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={priority} onChange={(event) => setPriority(event.target.value as MeetingReportActionItem["priority"])}>
+                  <option value="LOW">낮음</option><option value="MEDIUM">보통</option><option value="HIGH">높음</option>
+                </select>
+                <select aria-label="담당자 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy} value={assigneeUserId} onChange={(event) => setAssigneeUserId(event.target.value)}>
+                  <option value="">담당자 미지정</option>
+                  {(actionItemAssignees ?? []).map((assignee) => <option key={assignee.userId} value={assignee.userId}>{assignee.name?.trim() || "이름 없음"}</option>)}
+                </select>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {loadingIssueOptions ? (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    생성 가능한 Board와 Column을 불러오는 중입니다.
+                  </p>
+                ) : issueOptions && !hasIssueDeliveryTarget ? (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    생성 가능한 대상이 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board를 동기화한 뒤 다시 시도해주세요.
+                  </p>
+                ) : (
+                  <>
+                    <select aria-label="Board 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || retryingDelivery} value={selectedBoardId} onChange={(event) => changeBoard(event.target.value)}>
+                      <option value="">Board 선택</option>
+                      {issueOptions?.boards.map((board) => <option key={board.id} value={board.id}>{board.name}</option>)}
+                    </select>
+                    <select aria-label="Column 선택" className="h-9 rounded-md border bg-background px-3 text-sm" disabled={busy || !selectedBoard || retryingDelivery} value={selectedColumnId} onChange={(event) => setSelectedColumnId(event.target.value)}>
+                      <option value="">Column 선택</option>
+                      {selectedBoard?.columns.map((column) => <option key={column.id} value={column.id}>{column.name}</option>)}
+                    </select>
+                    {hasStaleIssueDeliverySelection ? (
+                      <p className="text-xs text-muted-foreground sm:col-span-2">
+                        선택한 Board 또는 Column을 사용할 수 없습니다. GitHub repository 연결과 metadata를 확인하고 ProjectV2 Board와 Column을 동기화한 뒤 다시 시도해주세요.
+                      </p>
+                    ) : null}
+                  </>
+                )}
+                {deliveryOptionsError ? <p className="text-xs text-destructive sm:col-span-2">{deliveryOptionsError}</p> : null}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <EvidenceTimeButtons
+              segments={evidenceSegments}
+              onSelect={(segment) => setActionItemEvidenceSegment((current) => (
+                current?.id === segment.id ? null : segment
+              ))}
+            />
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>취소</Button>
+              <Button type="button" size="sm" className="bg-sky-600 text-white hover:bg-sky-700" disabled={busy || !title.trim() || !description.trim() || (deliveryType === "calendar_event" ? !startDate || (!isAllDay && !startTime) : !hasIssueDeliverySelection)} onClick={() => void submitApproval()}>
+                {busy ? <Loader2 className="animate-spin" /> : null}
+                승인
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pending && !editing && !evidenceSegments.length && !activityEvidence.length ? (
         <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => onDismiss()}
-          >
+          <Button type="button" size="sm" variant="outline" className="h-9 px-3" disabled={busy} onClick={() => onDismiss()}>
+            <X />
             반려
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy || !title.trim() || !description.trim()}
-            onClick={() =>
-              onSave({
-                title: title.trim(),
-                description: description.trim(),
-                priority,
-                assigneeUserId: assigneeUserId || null
-              })
-            }
-          >
-            수정 저장
+          <Button type="button" size="sm" variant="outline" className="h-9 px-3" disabled={busy} onClick={() => void beginEditing()}>
+            <Pencil />
+            수정
           </Button>
-          <Button type="button" size="sm" disabled={busy} onClick={() => onApprove()}>
+          <Button type="button" size="sm" className="h-9 bg-sky-600 px-3 text-white hover:bg-sky-700" disabled={busy} onClick={() => void beginEditing()}>
+            <Check />
             승인
+          </Button>
+        </div>
+      ) : null}
+      {actionItem.status === "DELIVERY_FAILED" ? (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" disabled={busy} onClick={() => void beginEditing()}>
+            다시 시도
           </Button>
         </div>
       ) : null}
@@ -584,42 +1365,62 @@ function MeetingReportDetailModal({
   detailError,
   detailStatus,
   mutatingActionItemId,
-  onApproveActionItem,
+  onDeliverActionItem,
   onClose,
+  onDelete,
   onDismissActionItem,
+  onLoadIssueDeliveryOptions,
   onRegenerate,
+  onRetryActionItemExtraction,
   onUpdateActionItem,
+  onUpdateContent,
   open,
+  deleting,
   regenerating,
+  retryingActionItemExtraction,
+  updatingContent,
   report
 }: {
   detailError: string | null;
   detailStatus: ReportDetailStatus;
   mutatingActionItemId: string | null;
-  onApproveActionItem: (actionItem: MeetingReportActionItem) => void;
+  onDeliverActionItem: (
+    actionItem: MeetingReportActionItem,
+    input: MeetingReportActionItemDeliveryInput
+  ) => Promise<void>;
   onClose: () => void;
+  onDelete: (report: MeetingReportSummary) => void;
   onDismissActionItem: (actionItem: MeetingReportActionItem) => void;
+  onLoadIssueDeliveryOptions: (
+    actionItem: MeetingReportActionItem
+  ) => Promise<MeetingReportActionItemDeliveryOptions>;
   onRegenerate: (report: MeetingReportSummary) => void;
+  onRetryActionItemExtraction: (report: MeetingReportSummary) => void;
   onUpdateActionItem: (
     actionItem: MeetingReportActionItem,
     body: UpdateMeetingReportActionItemInput
-  ) => void;
+  ) => Promise<boolean>;
+  onUpdateContent: (body: UpdateMeetingReportContentInput) => Promise<void>;
   open: boolean;
+  deleting: boolean;
   regenerating: boolean;
+  retryingActionItemExtraction: boolean;
+  updatingContent: boolean;
   report: MeetingReportDetail | null;
 }) {
   const actionItems = report?.actionItems ?? [];
-  const transcriptSegmentRefs = useRef(
-    new Map<string, HTMLButtonElement>()
-  );
-  const [activeTranscriptSegmentId, setActiveTranscriptSegmentId] = useState<
-    string | null
-  >(null);
-  const transcriptSegments = report?.transcriptSegments ?? [];
+  const [detailView, setDetailView] = useState<ReportDetailView>("detail");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const actionItemsWithEvidence = report
     ? actionItems.map((item, index) => ({
         item,
         evidenceSegments: getEvidenceSegments(
+          report,
+          "action_item",
+          item.sourceIndex
+        ),
+        activityEvidence: getActivityEvidence(
           report,
           "action_item",
           item.sourceIndex
@@ -628,34 +1429,50 @@ function MeetingReportDetailModal({
     : [];
 
   useEffect(() => {
-    setActiveTranscriptSegmentId(null);
-  }, [report?.id, report?.transcriptSegments]);
+    setDetailView("detail");
+    setEditingTitle(false);
+    setTitleDraft(report?.title ?? "");
+  }, [report?.id, report?.evidenceSegments, report?.activityEvidence]);
 
-  function registerTranscriptSegment(
-    segmentId: string,
-    element: HTMLButtonElement | null
-  ) {
-    if (element) {
-      transcriptSegmentRefs.current.set(segmentId, element);
-    } else {
-      transcriptSegmentRefs.current.delete(segmentId);
+  useEffect(() => {
+    if (!editingTitle) {
+      setTitleDraft(report?.title ?? "");
     }
+  }, [editingTitle, report?.title]);
+
+  function startTitleEdit() {
+    if (!report?.canEdit || report.status !== "COMPLETED") return;
+    setTitleDraft(report.title ?? "");
+    setEditingTitle(true);
   }
 
-  function selectTranscriptSegment(segment: MeetingReportTranscriptSegment) {
-    setActiveTranscriptSegmentId(segment.id);
-    const element = transcriptSegmentRefs.current.get(segment.id);
-    if (!element) return;
+  async function saveTitle() {
+    if (!report) return;
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) return;
 
-    element.scrollIntoView({ behavior: "smooth", block: "center" });
-    element.focus({ preventScroll: true });
+    await onUpdateContent({
+      expectedVersion: report.contentVersion,
+      title: nextTitle
+    });
+    setEditingTitle(false);
   }
 
   const summaryEvidence = report ? getEvidenceSegments(report, "summary") : [];
   const discussionEvidence = report
     ? getEvidenceSegments(report, "discussion")
     : [];
-  const decisionEvidence = report ? getEvidenceSegments(report, "decision") : [];
+  const summaryActivityEvidence = report
+    ? getActivityEvidence(report, "summary")
+    : [];
+  const discussionActivityEvidence = report
+    ? getActivityEvidence(report, "discussion")
+    : [];
+  const decisionItems = report?.decisionItems ?? [];
+  const canEditContent = Boolean(report?.canEdit && report.status === "COMPLETED");
+  const participantSummaryText = report
+    ? getReportParticipantSummaryText(report)
+    : null;
 
   return (
     <DialogPrimitive.Root
@@ -667,11 +1484,8 @@ function MeetingReportDetailModal({
         <DialogPrimitive.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(988px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-[1080px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-2xl shadow-slate-950/20 outline-none transition duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
           <div className="border-b p-5 pr-14">
             <DialogPrimitive.Title className="font-heading text-lg font-semibold">
-              회의록 상세
+              {detailView === "transcript" ? "Transcript 전문" : "회의록 상세"}
             </DialogPrimitive.Title>
-            <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">
-              {report ? formatReportDateTime(report.createdAt) : "불러오는 중"}
-            </DialogPrimitive.Description>
           </div>
 
           <DialogPrimitive.Close
@@ -688,7 +1502,11 @@ function MeetingReportDetailModal({
             <X className="size-4" />
           </DialogPrimitive.Close>
 
-          <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div
+            className="flex-1 overflow-y-auto px-5 py-5"
+            data-workspace-follow-report-id={report?.id}
+            data-workspace-follow-surface="meeting-content"
+          >
             {detailStatus === "loading" && !report ? (
               <div className="grid gap-4">
                 <Skeleton className="h-28 rounded-lg" />
@@ -700,59 +1518,146 @@ function MeetingReportDetailModal({
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
                 {detailError ?? "회의록 상세를 불러오지 못했습니다."}
               </div>
+            ) : report && detailView === "transcript" ? (
+              <section className="grid gap-4">
+                <Button
+                  type="button"
+                  className="justify-self-start"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDetailView("detail")}
+                >
+                  <ArrowLeft />
+                  회의록 상세로 돌아가기
+                </Button>
+                <div className="grid gap-2">
+                  <h2 className="font-heading text-lg font-semibold">Transcript 전문</h2>
+                  {report.transcriptText?.trim() ? (
+                    <p className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 text-base leading-7">
+                      {report.transcriptText}
+                    </p>
+                  ) : (
+                    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      표시할 Transcript가 없습니다.
+                    </p>
+                  )}
+                </div>
+              </section>
             ) : report ? (
               <div className="grid gap-5">
-                <section className="grid gap-4 rounded-lg border bg-muted/20 p-4">
+                <section className="grid gap-5 border-b pb-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-muted-foreground">
-                        회의 날짜
-                      </p>
-                      <h2 className="mt-1 break-words font-heading text-xl font-semibold">
-                        {formatReportTitle(report)}
-                      </h2>
+                      {editingTitle ? (
+                        <form
+                          className="flex min-w-0 items-center gap-1"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveTitle();
+                          }}
+                        >
+                          <Input
+                            aria-label="회의록 제목 수정"
+                            autoFocus
+                            className="h-10 min-w-0 text-2xl font-semibold"
+                            disabled={updatingContent}
+                            onChange={(event) => setTitleDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                setEditingTitle(false);
+                              }
+                            }}
+                            value={titleDraft}
+                          />
+                          <Button
+                            aria-label="회의록 제목 저장"
+                            disabled={updatingContent || !titleDraft.trim()}
+                            size="icon-sm"
+                            type="submit"
+                            variant="ghost"
+                          >
+                            {updatingContent ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <Check />
+                            )}
+                          </Button>
+                          <Button
+                            aria-label="회의록 제목 수정 취소"
+                            disabled={updatingContent}
+                            onClick={() => setEditingTitle(false)}
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <X />
+                          </Button>
+                        </form>
+                      ) : (
+                        <div className="flex min-w-0 items-center gap-2">
+                          <h2
+                            className="break-words font-heading text-2xl font-semibold"
+                            onDoubleClick={startTitleEdit}
+                          >
+                            {report.title?.trim() || formatReportTitle(report)}
+                          </h2>
+                          {canEditContent ? (
+                            <Button
+                              aria-label="회의록 제목 수정"
+                              onClick={startTitleEdit}
+                              size="icon-sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Pencil />
+                            </Button>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                     <ReportStatusPill status={report.status} />
                   </div>
 
-                  <dl className="grid gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        실패 단계
-                      </dt>
-                      <dd className="mt-1">
-                        {getReportFailedStepLabel(report.failedStep)}
-                      </dd>
+                  <dl className="flex min-w-0 flex-wrap items-center gap-y-3 text-sm md:flex-nowrap">
+                    <div className="flex shrink-0 items-center gap-2 pr-4">
+                      <CalendarPlus className="size-4 text-muted-foreground" />
+                      <dt className="font-medium text-muted-foreground">생성일</dt>
+                      <dd>{formatReportDateTime(report.createdAt)}</dd>
                     </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        재생성 횟수
-                      </dt>
-                      <dd className="mt-1">{report.retryCount}회</dd>
+                    <div className="flex shrink-0 items-center gap-2 sm:border-l sm:pl-4 sm:pr-4">
+                      <RefreshCw className="size-4 text-muted-foreground" />
+                      <dt className="font-medium text-muted-foreground">수정일</dt>
+                      <dd>{formatReportDateTime(report.updatedAt)}</dd>
                     </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        생성일
-                      </dt>
-                      <dd className="mt-1">
-                        {formatReportDateTime(report.createdAt)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">참석자</dt>
-                      <dd className="mt-1">
-                        <ReportParticipantSummary report={report} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="font-medium text-muted-foreground">
-                        수정일
-                      </dt>
-                      <dd className="mt-1">
-                        {formatReportDateTime(report.updatedAt)}
+                    <div className="flex min-w-0 items-center gap-2 sm:border-l sm:pl-4">
+                      <Users className="size-4 shrink-0 text-muted-foreground" />
+                      <dt className="shrink-0 font-medium text-muted-foreground">참석자</dt>
+                      <dd
+                        className="min-w-0 truncate"
+                        title={participantSummaryText ?? "참석자 정보 없음"}
+                      >
+                        {participantSummaryText ?? "정보 없음"}
                       </dd>
                     </div>
                   </dl>
+
+                  {report.failedStep || report.retryCount > 0 ? (
+                    <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                      {report.failedStep ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="font-medium">실패 단계</dt>
+                          <dd>{getReportFailedStepLabel(report.failedStep)}</dd>
+                        </div>
+                      ) : null}
+                      {report.retryCount > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <dt className="font-medium">재생성 횟수</dt>
+                          <dd>{report.retryCount}회</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  ) : null}
 
                   {report.errorMessage ? (
                     <div className="rounded-lg border border-destructive/30 bg-background p-3 text-sm text-destructive">
@@ -762,61 +1667,123 @@ function MeetingReportDetailModal({
                 </section>
 
                 <ReportTextBlock
+                  activityEvidence={summaryActivityEvidence}
                   emptyLabel={
                     isReportInProgress(report.status)
                       ? "회의록을 생성하는 중입니다."
                       : "등록된 요약이 없습니다."
                   }
                   evidenceSegments={summaryEvidence}
-                  onEvidenceSelect={selectTranscriptSegment}
                   title="요약"
                   value={report.summary}
                 />
 
-                <ReportTextBlock
+                <EditableReportTextBlock
+                  activityEvidence={discussionActivityEvidence}
+                  editable={canEditContent}
                   emptyLabel={
                     isReportInProgress(report.status)
                       ? "논의사항을 정리하는 중입니다."
                       : "등록된 논의사항이 없습니다."
                   }
                   evidenceSegments={discussionEvidence}
-                  onEvidenceSelect={selectTranscriptSegment}
+                  onSave={(discussionPoints) => onUpdateContent({
+                    expectedVersion: report.contentVersion,
+                    discussionPoints
+                  })}
+                  saving={updatingContent}
                   title="논의사항"
                   value={report.discussionPoints}
                 />
 
-                <ReportTextBlock
-                  emptyLabel={
-                    isReportInProgress(report.status)
-                      ? "결정사항을 정리하는 중입니다."
-                      : "등록된 결정사항이 없습니다."
-                  }
-                  evidenceSegments={decisionEvidence}
-                  onEvidenceSelect={selectTranscriptSegment}
-                  title="결정사항"
-                  value={report.decisions}
-                />
+                {decisionItems.length ? (
+                  <DecisionItemsBlock
+                    activityEvidenceForItem={(item) => getActivityEvidence(
+                      report,
+                      "decision",
+                      item.sourceIndex
+                    )}
+                    editable={canEditContent}
+                    emptyLabel={
+                      isReportInProgress(report.status)
+                        ? "결정사항을 정리하는 중입니다."
+                        : "등록된 결정사항이 없습니다."
+                    }
+                    evidenceForItem={(item) => getEvidenceSegments(report, "decision", item.sourceIndex)}
+                    items={decisionItems}
+                    onSave={(item, text) => onUpdateContent({
+                      expectedVersion: report.contentVersion,
+                      decisionItems: [{ id: item.id, text }]
+                    })}
+                    saving={updatingContent}
+                  />
+                ) : (
+                  <DecisionTextItemsBlock
+                    activityEvidenceForItem={(sourceIndex) => getActivityEvidence(
+                      report,
+                      "decision",
+                      sourceIndex
+                    )}
+                    emptyLabel={
+                      isReportInProgress(report.status)
+                        ? "결정사항을 정리하는 중입니다."
+                        : "등록된 결정사항이 없습니다."
+                    }
+                    evidenceForItem={(sourceIndex) => getEvidenceSegments(
+                      report,
+                      "decision",
+                      sourceIndex
+                    )}
+                    value={report.decisions}
+                  />
+                )}
 
-                <section className="grid gap-2">
-                  <h3 className="font-heading text-base font-semibold">후속 작업</h3>
+                <section className="mt-8 grid gap-3 border-t-2 border-border/70 pt-8">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h3 className="font-heading text-xl font-semibold">후속 작업</h3>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-300">
+                      ✨ AI 추천
+                    </span>
+                  </div>
                   {actionItems.length ? (
                     <ul className="grid gap-2">
                       {actionItemsWithEvidence.map(
-                        ({ evidenceSegments, item }) => (
+                        ({ activityEvidence, evidenceSegments, item }) => (
                           <ActionItemReviewCard
                             key={item.id}
                             actionItem={item}
-                            assignees={report.actionItemAssignees ?? []}
+                            actionItemAssignees={report.actionItemAssignees}
+                            activityEvidence={activityEvidence}
                             busy={mutatingActionItemId === item.id}
                             evidenceSegments={evidenceSegments}
-                            onApprove={() => onApproveActionItem(item)}
+                            onDeliver={(input) => onDeliverActionItem(item, input)}
                             onDismiss={() => onDismissActionItem(item)}
-                            onEvidenceSelect={selectTranscriptSegment}
+                            onLoadIssueDeliveryOptions={() => onLoadIssueDeliveryOptions(item)}
                             onSave={(body) => onUpdateActionItem(item, body)}
                           />
                         )
                       )}
                     </ul>
+                  ) : report.actionItemExtraction?.status === "FAILED" ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                      <p className="text-destructive">
+                        {report.actionItemExtraction.errorMessage ?? "후속 작업을 생성하지 못했습니다."}
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={retryingActionItemExtraction}
+                        onClick={() => onRetryActionItemExtraction(report)}
+                      >
+                        {retryingActionItemExtraction ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                        후속 작업 다시 생성
+                      </Button>
+                    </div>
+                  ) : report.actionItemExtraction && ["PENDING", "PUBLISHING", "QUEUED", "PROCESSING"].includes(report.actionItemExtraction.status) ? (
+                    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      회의록은 완료되었습니다. 후속 작업을 추출하는 중입니다.
+                    </p>
                   ) : (
                     <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                       검토할 후속 작업이 없습니다.
@@ -824,43 +1791,57 @@ function MeetingReportDetailModal({
                   )}
                 </section>
 
-                {transcriptSegments.length ? (
-                  <TranscriptSegmentViewer
-                    activeSegmentId={activeTranscriptSegmentId}
-                    registerSegment={registerTranscriptSegment}
-                    segments={transcriptSegments}
-                    onSelect={selectTranscriptSegment}
-                  />
-                ) : (
-                  <ReportTextBlock
-                    emptyLabel={
-                      isReportInProgress(report.status)
-                        ? "음성 텍스트를 정리하는 중입니다."
-                        : "등록된 transcript가 없습니다."
-                    }
-                    title="Transcript"
-                    value={report.transcriptText}
-                  />
-                )}
               </div>
             ) : null}
           </div>
 
-          {report?.status === "FAILED" ? (
+          {report ? (
             <div className="mt-auto flex flex-col gap-2 border-t p-4 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={regenerating}
-                onClick={() => onRegenerate(report)}
-              >
-                {regenerating ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <RotateCcw />
-                )}
-                재생성 요청
-              </Button>
+              {detailView === "transcript" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDetailView("detail")}
+                >
+                  <ArrowLeft />
+                  회의록 상세로 돌아가기
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDetailView("transcript")}
+                >
+                  <FileText />
+                  Transcript 전문 보기
+                </Button>
+              )}
+              {detailView === "detail" && report.canDelete ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={deleting}
+                  onClick={() => onDelete(report)}
+                >
+                  {deleting ? <Loader2 className="animate-spin" /> : <X />}
+                  회의록 삭제
+                </Button>
+              ) : null}
+              {detailView === "detail" && report.status === "FAILED" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={regenerating || deleting}
+                  onClick={() => onRegenerate(report)}
+                >
+                  {regenerating ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <RotateCcw />
+                  )}
+                  재생성 요청
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </DialogPrimitive.Popup>
@@ -870,11 +1851,13 @@ function MeetingReportDetailModal({
 }
 
 export function MeetingReportSection({
+  currentPage,
   hasPreviousPage,
   meetingData,
   nextCursor,
   onListFiltersChange,
   onNextPage,
+  onPageChange,
   onPreviousPage,
   onStatusFilterChange,
   onToastMessage,
@@ -882,20 +1865,26 @@ export function MeetingReportSection({
 }: MeetingReportSectionProps) {
   const {
     accessToken,
-    approveMeetingReportActionItem,
     canLoad,
+    deleteMeetingReport,
+    deliverMeetingReportActionItem,
     dismissMeetingReportActionItem,
     getMeetingReport,
+    getMeetingReportActionItemDeliveryOptions,
     regenerateMeetingReport,
+    retryMeetingReportActionItemExtraction,
     reloadReports,
     reports,
     reportsError,
     reportsStatus,
-    updateMeetingReportActionItem
+    updateMeetingReportActionItem,
+    updateMeetingReportContent
   } = meetingData;
   const [searchQuery, setSearchQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [sortDirection, setSortDirection] =
+    useState<ReportSortDirection>("newest");
   const [selectedReport, setSelectedReport] =
     useState<MeetingReportDetail | null>(null);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -904,18 +1893,40 @@ export function MeetingReportSection({
   const [detailError, setDetailError] = useState<string | null>(null);
   const [regeneratingReportId, setRegeneratingReportId] =
     useState<string | null>(null);
+  const [retryingActionItemExtractionReportId, setRetryingActionItemExtractionReportId] =
+    useState<string | null>(null);
   const [mutatingActionItemId, setMutatingActionItemId] =
     useState<string | null>(null);
-  const [initialReportId] = useState(readInitialMeetingReportId);
-  const [openedInitialReportId, setOpenedInitialReportId] = useState<
-    string | null
-  >(null);
+  const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
+  const [updatingReportContent, setUpdatingReportContent] = useState(false);
+  const openedDeepLinkReportIdRef = useRef<string | null>(null);
+  const reportDetailRequestGuardRef = useRef(
+    createMeetingReportRequestGuard()
+  );
 
   const hasProcessingReport = reports.some((report) =>
     isReportInProgress(report.status)
   );
+  const pageNumbers = Array.from(
+    { length: currentPage + (nextCursor ? 1 : 0) },
+    (_, index) => index + 1
+  );
   const isInitialLoading = reportsStatus === "loading" && reports.length === 0;
   const showError = reportsStatus === "error" && reports.length === 0;
+  const sortedReports = useMemo(
+    () =>
+      [...reports].sort((left, right) => {
+        const timeDifference =
+          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+
+        if (timeDifference !== 0) {
+          return sortDirection === "newest" ? -timeDifference : timeDifference;
+        }
+
+        return left.id.localeCompare(right.id);
+      }),
+    [reports, sortDirection]
+  );
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -936,6 +1947,7 @@ export function MeetingReportSection({
         silent?: boolean;
       } = {}
     ) => {
+      const request = reportDetailRequestGuardRef.current.begin(reportId);
       if (!options.silent) {
         setDetailStatus("loading");
       }
@@ -943,10 +1955,16 @@ export function MeetingReportSection({
 
       try {
         const result = await getMeetingReport(reportId);
+        if (!reportDetailRequestGuardRef.current.isCurrent(request)) {
+          return null;
+        }
         setSelectedReport(result.report);
         setDetailStatus("success");
         return result.report;
       } catch (error) {
+        if (!reportDetailRequestGuardRef.current.isCurrent(request)) {
+          return null;
+        }
         const message = getReportRequestErrorMessage(error);
         setDetailError(message);
         setDetailStatus("error");
@@ -959,35 +1977,40 @@ export function MeetingReportSection({
   const handleOpenReport = useCallback(
     (report: MeetingReportSummary) => {
       setSelectedReportId(report.id);
-      setSelectedReport({
-        ...report,
-        transcriptText: null
-      });
+      setSelectedReport({ ...report, transcriptText: null });
       void loadReportDetail(report.id);
     },
     [loadReportDetail]
   );
 
+  const handleOpenReportById = useCallback(
+    (reportId: string) => {
+      setSelectedReportId(reportId);
+      setSelectedReport(null);
+      void loadReportDetail(reportId);
+    },
+    [loadReportDetail]
+  );
+
+  useEffect(() => {
+    if (!canLoad) return;
+
+    const reportId = getReportIdFromLocation();
+    if (!reportId || openedDeepLinkReportIdRef.current === reportId) return;
+
+    openedDeepLinkReportIdRef.current = reportId;
+    setSelectedReportId(reportId);
+    setSelectedReport(null);
+    void loadReportDetail(reportId);
+  }, [canLoad, loadReportDetail]);
+
   const handleCloseReport = useCallback(() => {
+    reportDetailRequestGuardRef.current.invalidate();
     setSelectedReportId(null);
     setSelectedReport(null);
     setDetailStatus("idle");
     setDetailError(null);
   }, []);
-
-  useEffect(() => {
-    if (
-      !canLoad ||
-      !initialReportId ||
-      openedInitialReportId === initialReportId
-    ) {
-      return;
-    }
-
-    setOpenedInitialReportId(initialReportId);
-    setSelectedReportId(initialReportId);
-    void loadReportDetail(initialReportId);
-  }, [canLoad, initialReportId, loadReportDetail, openedInitialReportId]);
 
   const handleRegenerateReport = useCallback(
     async (report: MeetingReportSummary) => {
@@ -1005,10 +2028,7 @@ export function MeetingReportSection({
           onStatusFilterChange("ALL");
         }
 
-        setSelectedReport({
-          ...result.report,
-          transcriptText: null
-        });
+        setSelectedReport({ ...result.report, transcriptText: null });
 
         if (selectedReportId === report.id) {
           await loadReportDetail(report.id, { silent: true });
@@ -1029,29 +2049,48 @@ export function MeetingReportSection({
     ]
   );
 
-  const handleActionItemMutation = useCallback(
-    async (
-      actionItem: MeetingReportActionItem,
-      action: "approve" | "dismiss" | "update",
-      body?: UpdateMeetingReportActionItemInput
-    ) => {
+  const handleDeleteReport = useCallback(
+    async (report: MeetingReportSummary) => {
+      if (!window.confirm("이 회의록을 삭제할까요? 삭제된 회의록은 복구할 수 없습니다.")) {
+        return;
+      }
+      setDeletingReportId(report.id);
+      try {
+        await deleteMeetingReport(report.id);
+        handleCloseReport();
+        onToastMessage("회의록을 삭제했습니다.");
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setDeletingReportId(null);
+      }
+    },
+    [deleteMeetingReport, handleCloseReport, onToastMessage]
+  );
+
+  const handleRetryActionItemExtraction = useCallback(
+    async (report: MeetingReportSummary) => {
+      setRetryingActionItemExtractionReportId(report.id);
+      try {
+        await retryMeetingReportActionItemExtraction(report.id);
+        onToastMessage("후속 작업 생성을 다시 요청했습니다.");
+        await loadReportDetail(report.id, { silent: true });
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setRetryingActionItemExtractionReportId(null);
+      }
+    },
+    [loadReportDetail, onToastMessage, retryMeetingReportActionItemExtraction]
+  );
+
+  const handleDismissActionItem = useCallback(
+    async (actionItem: MeetingReportActionItem) => {
       if (!selectedReport) return;
       setMutatingActionItemId(actionItem.id);
       try {
-        if (action === "approve") {
-          await approveMeetingReportActionItem(selectedReport.id, actionItem.id);
-          onToastMessage("후속 작업을 승인했습니다.");
-        } else if (action === "dismiss") {
-          await dismissMeetingReportActionItem(selectedReport.id, actionItem.id);
-          onToastMessage("후속 작업을 반려했습니다.");
-        } else if (body) {
-          await updateMeetingReportActionItem(
-            selectedReport.id,
-            actionItem.id,
-            body
-          );
-          onToastMessage("후속 작업을 수정했습니다.");
-        }
+        await dismissMeetingReportActionItem(selectedReport.id, actionItem.id);
+        onToastMessage("후속 작업을 반려했습니다.");
         await loadReportDetail(selectedReport.id, { silent: true });
       } catch (error) {
         onToastMessage(getReportRequestErrorMessage(error));
@@ -1060,13 +2099,97 @@ export function MeetingReportSection({
       }
     },
     [
-      approveMeetingReportActionItem,
       dismissMeetingReportActionItem,
       loadReportDetail,
       onToastMessage,
-      selectedReport,
-      updateMeetingReportActionItem
+      selectedReport
     ]
+  );
+
+  const handleUpdateActionItem = useCallback(
+    async (
+      actionItem: MeetingReportActionItem,
+      body: UpdateMeetingReportActionItemInput
+    ) => {
+      if (!selectedReport) return false;
+      setMutatingActionItemId(actionItem.id);
+      try {
+        await updateMeetingReportActionItem(selectedReport.id, actionItem.id, body);
+        await loadReportDetail(selectedReport.id, { silent: true });
+        return true;
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+        return false;
+      } finally {
+        setMutatingActionItemId(null);
+      }
+    },
+    [loadReportDetail, onToastMessage, selectedReport, updateMeetingReportActionItem]
+  );
+
+  const handleUpdateReportContent = useCallback(
+    async (body: UpdateMeetingReportContentInput) => {
+      if (!selectedReport) return;
+      setUpdatingReportContent(true);
+      try {
+        const result = await updateMeetingReportContent(selectedReport.id, body);
+        setSelectedReport(result.report);
+        onToastMessage("회의록 내용을 저장했습니다.");
+      } catch (error) {
+        onToastMessage(
+          error instanceof MeetingApiError && error.status === 409
+            ? "다른 사용자가 먼저 수정했습니다. 최신 회의록을 다시 불러왔습니다."
+            : getReportRequestErrorMessage(error)
+        );
+        await loadReportDetail(selectedReport.id, { silent: true });
+      } finally {
+        setUpdatingReportContent(false);
+      }
+    },
+    [loadReportDetail, onToastMessage, selectedReport, updateMeetingReportContent]
+  );
+
+  const handleActionItemDelivery = useCallback(
+    async (
+      actionItem: MeetingReportActionItem,
+      input: MeetingReportActionItemDeliveryInput
+    ) => {
+      if (!selectedReport) return;
+      setMutatingActionItemId(actionItem.id);
+      try {
+        const result = await deliverMeetingReportActionItem(
+          selectedReport.id,
+          actionItem.id,
+          input
+        );
+        onToastMessage(
+          result.status === "COMPLETED"
+            ? "후속 작업을 생성하고 승인했습니다."
+            : result.status === "LEGACY_APPROVED"
+              ? "서버 호환 모드로 기존 승인만 완료했습니다. 대상 생성은 App Server 배포 후 사용할 수 있습니다."
+              : "생성에 실패했습니다. 같은 설정으로 다시 시도할 수 있습니다."
+        );
+        await loadReportDetail(selectedReport.id, { silent: true });
+      } catch (error) {
+        onToastMessage(getReportRequestErrorMessage(error));
+      } finally {
+        setMutatingActionItemId(null);
+      }
+    },
+    [deliverMeetingReportActionItem, loadReportDetail, onToastMessage, selectedReport]
+  );
+
+  const handleLoadIssueDeliveryOptions = useCallback(
+    async (actionItem: MeetingReportActionItem) => {
+      if (!selectedReport) {
+        throw new Error("회의록 상세를 찾을 수 없습니다.");
+      }
+      return getMeetingReportActionItemDeliveryOptions(
+        selectedReport.id,
+        actionItem.id
+      );
+    },
+    [getMeetingReportActionItemDeliveryOptions, selectedReport]
   );
 
   useEffect(() => {
@@ -1117,6 +2240,11 @@ export function MeetingReportSection({
       id="report"
       className="grid min-h-[calc(100vh-8rem)] content-start gap-5 rounded-xl border bg-card p-4 sm:p-6"
     >
+      <MeetingReportWorkspaceLocationAdapter
+        closeReport={handleCloseReport}
+        openReport={handleOpenReportById}
+        selectedReportId={selectedReportId}
+      />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="font-heading text-2xl font-semibold">회의록</h2>
@@ -1139,35 +2267,37 @@ export function MeetingReportSection({
         </Button>
       </div>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 rounded-lg border bg-muted/20 p-2 sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 rounded-lg border bg-muted/20 p-2 xl:flex-row xl:items-center">
+        <div className="grid w-full min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_9rem] xl:flex-1">
+          <div className="relative min-w-0 xl:min-w-48">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-9 pl-9"
+              placeholder="회의록 검색"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          </div>
+
           <Input
-            className="h-9 pl-9"
-            placeholder="회의록 검색"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            aria-label="회의록 시작일"
+            className="h-9 w-full"
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+          />
+          <Input
+            aria-label="회의록 종료일"
+            className="h-9 w-full"
+            type="date"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
           />
         </div>
 
-        <Input
-          aria-label="회의록 시작일"
-          className="h-9 sm:w-36"
-          type="date"
-          value={fromDate}
-          onChange={(event) => setFromDate(event.target.value)}
-        />
-        <Input
-          aria-label="회의록 종료일"
-          className="h-9 sm:w-36"
-          type="date"
-          value={toDate}
-          onChange={(event) => setToDate(event.target.value)}
-        />
+        <div className="hidden h-6 w-px bg-border xl:block" />
 
-        <div className="hidden h-6 w-px bg-border sm:block" />
-
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+        <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:shrink-0 xl:flex-nowrap">
           {REPORT_STATUS_FILTERS.map((filter) => (
             <Button
               key={filter.value}
@@ -1179,10 +2309,24 @@ export function MeetingReportSection({
               {filter.label}
             </Button>
           ))}
-          <span className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-background px-2.5 text-xs font-medium text-muted-foreground">
-            <ArrowDownWideNarrow className="size-3.5" />
-            최신순
-          </span>
+          <Button
+            aria-label={`회의록 정렬: ${sortDirection === "newest" ? "최신순" : "오래된순"}`}
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setSortDirection((current) =>
+                current === "newest" ? "oldest" : "newest"
+              )
+            }
+          >
+            {sortDirection === "newest" ? (
+              <ArrowDownWideNarrow />
+            ) : (
+              <ArrowUpWideNarrow />
+            )}
+            {sortDirection === "newest" ? "최신순" : "오래된순"}
+          </Button>
         </div>
       </div>
 
@@ -1200,7 +2344,7 @@ export function MeetingReportSection({
         </div>
       ) : null}
 
-      <div className="mx-auto min-h-96 w-full max-w-5xl rounded-lg border bg-muted/20 p-3 sm:p-5">
+      <div className="mx-auto w-full max-w-5xl">
         {isInitialLoading ? (
           <ReportListSkeleton />
         ) : showError ? (
@@ -1225,31 +2369,31 @@ export function MeetingReportSection({
             </div>
           </div>
         ) : reports.length ? (
-          <ul className="mx-auto grid w-full max-w-4xl gap-3">
-            {reports.map((report) => (
+          <ul className="grid w-full gap-3">
+            {sortedReports.map((report) => (
               <li
                 key={report.id}
-                className="grid gap-3 rounded-lg border bg-background p-4 transition hover:border-primary/30 hover:bg-muted/30 sm:grid-cols-[minmax(0,1fr)_auto]"
+                className="grid gap-4 rounded-lg border bg-background p-5 transition hover:border-primary/30 hover:bg-muted/30 sm:grid-cols-[minmax(0,1fr)_auto]"
               >
                 <button
                   type="button"
                   className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => handleOpenReport(report)}
                 >
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <FileText className="size-4 shrink-0 text-muted-foreground" />
-                    <h3 className="truncate font-heading text-base font-semibold">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                    <FileText className="size-5 shrink-0 text-muted-foreground" />
+                    <h3 className="truncate font-heading text-2xl font-semibold">
                       {formatReportTitle(report)}
                     </h3>
                   </div>
-                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-muted-foreground">
                     {report.summary?.trim() ||
                       report.errorMessage?.trim() ||
                       (isReportInProgress(report.status)
                         ? "회의록을 생성하는 중입니다."
                         : "등록된 요약이 없습니다.")}
                   </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <ReportStatusPill status={report.status} />
                     <span className="rounded-full border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                       {formatReportDateTime(report.createdAt)}
@@ -1266,7 +2410,7 @@ export function MeetingReportSection({
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-3">
+                  <div className="mt-4">
                     <ReportProgress status={report.status} />
                   </div>
                 </button>
@@ -1315,7 +2459,7 @@ export function MeetingReportSection({
         )}
       </div>
 
-      <div className="mx-auto flex w-full max-w-5xl justify-end gap-2">
+      <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-center gap-2">
         <Button
           disabled={reportsStatus === "loading" || !hasPreviousPage}
           type="button"
@@ -1324,6 +2468,18 @@ export function MeetingReportSection({
         >
           이전
         </Button>
+        {pageNumbers.map((page) => (
+          <Button
+            key={page}
+            aria-current={page === currentPage ? "page" : undefined}
+            disabled={reportsStatus === "loading" || page === currentPage}
+            type="button"
+            variant={page === currentPage ? "default" : "outline"}
+            onClick={() => onPageChange(page)}
+          >
+            {page}
+          </Button>
+        ))}
         <Button
           disabled={reportsStatus === "loading" || !nextCursor}
           type="button"
@@ -1335,6 +2491,7 @@ export function MeetingReportSection({
       </div>
 
       <MeetingReportDetailModal
+        deleting={deletingReportId === selectedReport?.id}
         detailError={detailError}
         detailStatus={detailStatus}
         mutatingActionItemId={mutatingActionItemId}
@@ -1343,18 +2500,23 @@ export function MeetingReportSection({
           Boolean(selectedReport?.id) &&
           regeneratingReportId === selectedReport?.id
         }
+        retryingActionItemExtraction={
+          Boolean(selectedReport?.id) &&
+          retryingActionItemExtractionReportId === selectedReport?.id
+        }
+        updatingContent={updatingReportContent}
         report={selectedReport}
-        onApproveActionItem={(actionItem) =>
-          void handleActionItemMutation(actionItem, "approve")
-        }
+        onDeliverActionItem={handleActionItemDelivery}
         onClose={handleCloseReport}
+        onDelete={(report) => void handleDeleteReport(report)}
         onDismissActionItem={(actionItem) =>
-          void handleActionItemMutation(actionItem, "dismiss")
+          void handleDismissActionItem(actionItem)
         }
+        onLoadIssueDeliveryOptions={handleLoadIssueDeliveryOptions}
         onRegenerate={(report) => void handleRegenerateReport(report)}
-        onUpdateActionItem={(actionItem, body) =>
-          void handleActionItemMutation(actionItem, "update", body)
-        }
+        onRetryActionItemExtraction={(report) => void handleRetryActionItemExtraction(report)}
+        onUpdateActionItem={handleUpdateActionItem}
+        onUpdateContent={handleUpdateReportContent}
       />
     </section>
   );

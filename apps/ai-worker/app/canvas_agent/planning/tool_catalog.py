@@ -153,53 +153,64 @@ AVAILABLE_CANVAS_COLORS: list[dict[str, str]] = [
     },
 ]
 
-ALLOWED_ACTIONS: list[dict[str, object]] = [
+ALLOWED_INTENTS: list[dict[str, object]] = [
     {
-        "name": "find_canvas_tool",
-        "input": {"toolTarget": "toolbar.memo", "toolTargetLabel": "Memo"},
+        "name": "chat",
+        "arguments": {
+            "query": "empty string",
+            "shapeIds": "empty array",
+            "contextScope": "none or selected_scene",
+            "reasonCode": "general_question, selection_question, or follow_up_question",
+        },
     },
     {
         "name": "find_shapes",
-        "input": {"query": "short keyword", "continuePlanning": "boolean"},
-    },
-    {"name": "select_shapes", "input": {"shapeIds": ["shape id"]}},
-    {"name": "focus_viewport", "input": {"shapeIds": ["shape id"]}},
-    {
-        "name": "connect_shapes",
-        "input": {
-            "fromShapeId": "source existing shape id",
-            "toShapeId": "target existing shape id",
-            "connectionKind": "arrow or line",
-            "label": "optional short label",
+        "arguments": {
+            "query": "concise existing Canvas content to search for",
+            "shapeIds": "matching loaded shape ids or an empty array",
+            "contextScope": "none",
+            "reasonCode": "shape_search",
         },
     },
     {
-        "name": "create_draft",
-        "input": {
-            "kind": "diagram or code",
-            "title": "short title",
-            "summary": "short summary",
-            "style": "short style",
-            "sourceShapeIds": ["optional selected shape id"],
-            "nodes": ["Canvas nodes using only availableCanvasTools"],
-            "connections": ["Canvas node connections using arrow or line"],
-            "recommendedColors": ["Chosen colors from availableCanvasColors with usage"],
+        "name": "generate_html",
+        "arguments": {
+            "query": "empty string",
+            "shapeIds": "empty array",
+            "contextScope": "selected_scene",
+            "reasonCode": "html_generation",
         },
     },
-    {"name": "finish", "input": {"summary": "short result"}},
+    {
+        "name": "import_drive_file",
+        "arguments": {
+            "query": "concise name or description of an existing Workspace Drive image",
+            "shapeIds": "empty array",
+            "contextScope": "none",
+            "reasonCode": "drive_file_import",
+        },
+    },
+    {
+        "name": "unsupported",
+        "arguments": {
+            "query": "concise unsupported request",
+            "shapeIds": "empty array",
+            "contextScope": "none",
+            "reasonCode": "unsupported_mutation or external_domain_action",
+        },
+    },
 ]
 
 
-def allowed_actions_for_context(context: CanvasAgentRunContext) -> list[dict[str, object]]:
-    if context.request_context.get("toolHelpMode") is True:
-        return ALLOWED_ACTIONS
+def allowed_intents_for_context(context: CanvasAgentRunContext) -> list[dict[str, object]]:
+    # Tool-help mode is handled deterministically by App Server. Every request
+    # reaching the AI Worker is classified before an App Server handler runs.
+    return ALLOWED_INTENTS
 
-    return [action for action in ALLOWED_ACTIONS if action.get("name") != "find_canvas_tool"]
 
-
-def allowed_action_names_for_context(context: CanvasAgentRunContext) -> set[str]:
+def allowed_intent_names_for_context(context: CanvasAgentRunContext) -> set[str]:
     return {
-        str(action["name"])
-        for action in allowed_actions_for_context(context)
-        if isinstance(action.get("name"), str)
+        str(intent["name"])
+        for intent in allowed_intents_for_context(context)
+        if isinstance(intent.get("name"), str)
     }

@@ -4,10 +4,12 @@ import { agentJobUnavailable } from "./agent-api-error";
 import type {
   AgentRiskLevel,
   AgentToolExecutionMode,
-  AgentToolInputSchema
+  AgentToolInputSchema,
+  AgentPlannerRequestContext
 } from "./types/agent-tool.types";
+import type { AgentToolCapabilityCatalogSnapshot } from "./agent-tool-capability-catalog";
 
-export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v1";
+export const AGENT_TOOL_SCHEMA_VERSION = "agent-tools:v8";
 
 export interface AgentToolSchemaSnapshotItem {
   name: string;
@@ -22,8 +24,16 @@ export interface AgentRunRequestedJobPayload {
   runId: string;
   workspaceId: string;
   requestedByUserId: string;
+  requestContext: AgentPlannerRequestContext;
+  turnSequence: number;
   toolSchemaVersion: string;
   tools: AgentToolSchemaSnapshotItem[];
+  toolCapabilityCatalog?: AgentToolCapabilityCatalogSnapshot;
+}
+
+export interface AgentGroundedAnswerRequestedJobPayload {
+  jobType: "agent_grounded_answer_requested";
+  runId: string;
 }
 
 interface AgentJobConfig {
@@ -56,6 +66,12 @@ export class AgentJobService implements OnModuleDestroy {
     } catch {
       throw agentJobUnavailable("Agent job could not be enqueued");
     }
+  }
+
+  async enqueueAgentGroundedAnswerRequestedJob(payload: AgentGroundedAnswerRequestedJobPayload): Promise<void> {
+    const config = this.getConfig();
+    try { await this.getSqsClient(config).send(new SendMessageCommand({ QueueUrl: config.queueUrl, MessageBody: JSON.stringify(payload) })); }
+    catch { throw agentJobUnavailable("Agent grounded answer job could not be enqueued"); }
   }
 
   onModuleDestroy(): void {

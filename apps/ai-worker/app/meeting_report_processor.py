@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
+
+from app.meeting_document_evidence import DocumentChangeEvidence
 
 MAX_TRANSCRIPTION_FILE_BYTES = 25_000_000
 MAX_ACTION_ITEM_TITLE_BYTES = 500
@@ -33,6 +35,15 @@ class MeetingReportJob:
 
 
 @dataclass(frozen=True)
+class ActivityEvidence:
+    activity_log_id: str
+    source_index: int
+    occurred_at: str
+    action: str
+    summary: str
+
+
+@dataclass(frozen=True)
 class MeetingReportContext:
     report_id: str
     meeting_id: str
@@ -40,6 +51,8 @@ class MeetingReportContext:
     report_status: str
     recording_status: str
     recording_audio_file_key: str | None
+    activity_evidence: list[ActivityEvidence] = field(default_factory=list)
+    document_change_evidence: list[DocumentChangeEvidence] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -51,8 +64,30 @@ class AudioObjectMetadata:
 class ActionItemCandidate:
     title: str
     description: str
-    assignee_user_id: None
+    assignee_user_id: str | None
     priority: str
+    delivery_suggestion: ActionItemDeliverySuggestion
+
+
+@dataclass(frozen=True)
+class ActionItemDeliverySuggestion:
+    delivery_type: str
+    calendar: ActionItemCalendarSuggestion | None
+
+
+@dataclass(frozen=True)
+class ActionItemCalendarSuggestion:
+    is_all_day: bool
+    start_date: str
+    end_date: str
+    start_time: str | None
+    end_time: str | None
+
+
+@dataclass(frozen=True)
+class ActionItemAssignee:
+    user_id: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -71,14 +106,25 @@ class EvidenceReference:
 
 
 @dataclass(frozen=True)
+class ActivityEvidenceReference:
+    source_type: str
+    source_index: int
+    activity_indexes: list[int]
+
+
+@dataclass(frozen=True)
 class GeneratedMeetingReport:
     transcript_text: str
+    title: str
     summary: str
     discussion_points: str
     decisions: str
     action_item_candidates: list[ActionItemCandidate]
     transcript_segments: list[TranscriptSegment]
     evidence: list[EvidenceReference]
+    activity_evidence: list[ActivityEvidence] = field(default_factory=list)
+    activity_evidence_references: list[ActivityEvidenceReference] = field(default_factory=list)
+    decision_items: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -100,6 +146,36 @@ class ProviderBusinessError(Exception):
     """Non-retryable provider failure that should be saved on the MeetingReport."""
 
 
+class EvidenceValidationError(ProviderBusinessError):
+    """A retryable-once semantic evidence contract violation from a model response."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        messages = {
+            "MISSING_ACTION_ITEM_EVIDENCE": "Missing required evidence",
+            "INVALID_TRANSCRIPT_SEGMENT_INDEX": "Invalid evidence segment",
+            "INVALID_ACTIVITY_EVIDENCE_INDEX": "Invalid Activity evidence index",
+            "INVALID_EVIDENCE_SOURCE_INDEX": "Invalid singleton evidence",
+            "INVALID_EVIDENCE_FORMAT": "Invalid evidence reference",
+        }
+        super().__init__(message or messages[code])
+        self.code = code
+
+
+@dataclass(frozen=True)
+class MeetingReportFailureDiagnostic:
+    code: str
+    category: str
+    retryable: bool
+    provider_status_code: int | None
+
+    def detail(self) -> dict[str, str | bool | int | None]:
+        return {
+            "category": self.category,
+            "retryable": self.retryable,
+            "providerStatusCode": self.provider_status_code,
+        }
+
+
 class MeetingReportRepository(Protocol):
     def try_acquire_report_lock(self, report_id: str) -> bool: ...
 
@@ -109,7 +185,14 @@ class MeetingReportRepository(Protocol):
 
     def mark_progress(self, report_id: str, status: str) -> None: ...
 
-    def mark_failed(self, report_id: str, failed_step: str, error_message: str) -> None: ...
+    def mark_failed(
+        self,
+        report_id: str,
+        failed_step: str,
+        error_message: str,
+        failure_code: str | None = None,
+        failure_detail: dict[str, str | bool | int | None] | None = None,
+    ) -> None: ...
 
     def mark_completed(self, report_id: str, report: GeneratedMeetingReport) -> None: ...
 
@@ -124,7 +207,11 @@ class MeetingReportAiClient(Protocol):
     def transcribe(self, audio_file_path: str) -> list[TranscriptSegment]: ...
 
     def generate_report(
-        self, transcript_text: str, transcript_segments: list[TranscriptSegment]
+        self,
+        transcript_text: str,
+        transcript_segments: list[TranscriptSegment],
+        activity_evidence: list[ActivityEvidence],
+        document_change_evidence: list[DocumentChangeEvidence],
     ) -> GeneratedMeetingReport: ...
 
 
@@ -280,12 +367,40 @@ class MeetingReportProcessor:
 
             try:
                 transcript_text = "\n".join(segment.text for segment in transcript_segments)
-                report = self.ai_client.generate_report(transcript_text, transcript_segments)
-            except ProviderBusinessError:
+                generate_core_report = getattr(self.ai_client, "generate_core_report", None)
+                if callable(generate_core_report):
+                    report = generate_core_report(
+                        transcript_text,
+                        transcript_segments,
+                        context.activity_evidence,
+                        context.document_change_evidence,
+                    )
+                else:
+                    report = self.ai_client.generate_report(
+                        transcript_text,
+                        transcript_segments,
+                        context.activity_evidence,
+                        context.document_change_evidence,
+                    )
+            except ProviderBusinessError as error:
+                diagnostic, error_type = _safe_llm_failure_details(error)
+                LOGGER.warning(
+                    "meeting report LLM generation failed report_id=%s recording_id=%s "
+                    "retry_count=%s failure_code=%s error_category=%s error_type=%s status_code=%s",
+                    job.report_id,
+                    job.recording_id,
+                    job.retry_count,
+                    diagnostic.code,
+                    diagnostic.category,
+                    error_type,
+                    diagnostic.provider_status_code,
+                )
                 self.repository.mark_failed(
                     job.report_id,
                     REPORT_FAILED_STEP_LLM,
                     SAFE_LLM_ERROR,
+                    diagnostic.code,
+                    diagnostic.detail(),
                 )
                 self._publish_report_updated(job.report_id)
                 return self._result(job, delete_message=True, reason="llm_failed")
@@ -317,7 +432,12 @@ class MeetingReportProcessor:
 
 
 def parse_generated_report_json(
-    raw_text: str, transcript_text: str, transcript_segments: list[TranscriptSegment]
+    raw_text: str,
+    transcript_text: str,
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence] | None = None,
+    *,
+    include_action_items: bool = True,
 ) -> GeneratedMeetingReport:
     try:
         payload = json.loads(raw_text)
@@ -328,25 +448,192 @@ def parse_generated_report_json(
         raise ProviderBusinessError("Invalid meeting report payload")
 
     summary = _require_payload_string(payload, "summary")
+    title = payload.get("title", summary)
+    if not isinstance(title, str) or not title.strip():
+        raise ProviderBusinessError("Invalid title")
+    title = title.strip()
+    if len(title.encode("utf-8")) > 500:
+        raise ProviderBusinessError("Invalid meeting report title")
     discussion_points = _require_payload_string(payload, "discussionPoints")
     decisions = _require_payload_string(payload, "decisions")
+    decision_items = _parse_decision_items(payload.get("decisionItems"), decisions)
     raw_action_items = payload.get("actionItemCandidates")
 
     if not isinstance(raw_action_items, list):
         raise ProviderBusinessError("Invalid action item candidates")
 
-    action_items = [_parse_action_item(item) for item in raw_action_items]
-    evidence = _parse_evidence(payload.get("evidence"), transcript_segments, len(action_items))
+    action_items = (
+        [_parse_action_item(item) for item in raw_action_items] if include_action_items else []
+    )
+    evidence = _parse_evidence(
+        (
+            _without_action_item_references(payload.get("evidence"))
+            if not include_action_items
+            else payload.get("evidence")
+        ),
+        transcript_segments,
+        len(action_items),
+        len(decision_items),
+    )
+    activity_evidence_references = _parse_activity_evidence_references(
+        (
+            _without_action_item_references(payload.get("activityEvidenceReferences", []))
+            if not include_action_items
+            else payload.get("activityEvidenceReferences", [])
+        ),
+        activity_evidence or [],
+        len(action_items),
+        len(decision_items),
+    )
+    _require_action_item_evidence(action_items, evidence, activity_evidence_references)
 
     return GeneratedMeetingReport(
         transcript_text=transcript_text,
+        title=title,
         summary=summary,
         discussion_points=discussion_points,
         decisions=decisions,
         action_item_candidates=action_items,
         transcript_segments=transcript_segments,
         evidence=evidence,
+        activity_evidence=list(activity_evidence or []),
+        activity_evidence_references=activity_evidence_references,
+        decision_items=decision_items,
     )
+
+
+def parse_generated_core_report_json(
+    raw_text: str,
+    transcript_text: str,
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence] | None = None,
+) -> GeneratedMeetingReport:
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as error:
+        raise ProviderBusinessError("Invalid meeting report JSON") from error
+
+    if not isinstance(payload, dict):
+        raise ProviderBusinessError("Invalid meeting report payload")
+
+    title = _require_payload_string(payload, "title")
+    if len(title.encode("utf-8")) > 500:
+        raise ProviderBusinessError("Invalid meeting report title")
+
+    activities = list(activity_evidence or [])
+    summary, summary_evidence, summary_activity_references = _parse_grounded_content(
+        payload.get("summary"),
+        "summary",
+        0,
+        transcript_segments,
+        activities,
+    )
+    discussion_points, discussion_evidence, discussion_activity_references = (
+        _parse_grounded_content(
+            payload.get("discussionPoints"),
+            "discussion",
+            0,
+            transcript_segments,
+            activities,
+        )
+    )
+
+    raw_decisions = payload.get("decisions")
+    if not isinstance(raw_decisions, dict):
+        raise ProviderBusinessError("Invalid decisions")
+    decisions = _require_payload_string(raw_decisions, "text")
+    raw_decision_items = raw_decisions.get("items")
+    if not isinstance(raw_decision_items, list) or not raw_decision_items:
+        raise ProviderBusinessError("Invalid decision items")
+
+    decision_items: list[str] = []
+    decision_evidence: list[EvidenceReference] = []
+    decision_activity_references: list[ActivityEvidenceReference] = []
+    for source_index, raw_item in enumerate(raw_decision_items):
+        item, evidence, activity_references = _parse_grounded_content(
+            raw_item,
+            "decision",
+            source_index,
+            transcript_segments,
+            activities,
+        )
+        if len(item.encode("utf-8")) > 5_000:
+            raise ProviderBusinessError("Invalid decision item")
+        decision_items.append(item)
+        decision_evidence.extend(evidence)
+        decision_activity_references.extend(activity_references)
+
+    return GeneratedMeetingReport(
+        transcript_text=transcript_text,
+        title=title,
+        summary=summary,
+        discussion_points=discussion_points,
+        decisions=decisions,
+        action_item_candidates=[],
+        transcript_segments=transcript_segments,
+        evidence=[*summary_evidence, *discussion_evidence, *decision_evidence],
+        activity_evidence=activities,
+        activity_evidence_references=[
+            *summary_activity_references,
+            *discussion_activity_references,
+            *decision_activity_references,
+        ],
+        decision_items=decision_items,
+    )
+
+
+def _parse_grounded_content(
+    value: object,
+    source_type: str,
+    source_index: int,
+    transcript_segments: list[TranscriptSegment],
+    activity_evidence: list[ActivityEvidence],
+) -> tuple[str, list[EvidenceReference], list[ActivityEvidenceReference]]:
+    if not isinstance(value, dict):
+        raise ProviderBusinessError("Invalid grounded meeting report content")
+
+    text = _require_payload_string(value, "text")
+    segment_indexes = _parse_inline_evidence_indexes(
+        value.get("segmentIndexes"),
+        {segment.segment_index for segment in transcript_segments},
+        "INVALID_TRANSCRIPT_SEGMENT_INDEX",
+    )
+    activity_indexes = _parse_inline_evidence_indexes(
+        value.get("activityIndexes"),
+        {item.source_index for item in activity_evidence},
+        "INVALID_ACTIVITY_EVIDENCE_INDEX",
+    )
+    transcript_references = (
+        [EvidenceReference(source_type, source_index, segment_indexes)] if segment_indexes else []
+    )
+    activity_references = (
+        [ActivityEvidenceReference(source_type, source_index, activity_indexes)]
+        if activity_indexes
+        else []
+    )
+    return text, transcript_references, activity_references
+
+
+def _parse_inline_evidence_indexes(
+    value: object,
+    valid_indexes: set[int],
+    invalid_index_code: str,
+) -> list[int]:
+    if not isinstance(value, list):
+        raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
+    if not all(isinstance(index, int) and index in valid_indexes for index in value):
+        raise EvidenceValidationError(invalid_index_code)
+    return list(dict.fromkeys(value))
+
+
+def _without_action_item_references(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    return [
+        item
+        for item in value
+        if not isinstance(item, dict) or item.get("sourceType") != "action_item"
+    ]
 
 
 def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
@@ -357,6 +644,20 @@ def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
                 "description": item.description,
                 "assigneeUserId": item.assignee_user_id,
                 "priority": item.priority,
+                "deliverySuggestion": {
+                    "deliveryType": item.delivery_suggestion.delivery_type,
+                    "calendar": (
+                        None
+                        if item.delivery_suggestion.calendar is None
+                        else {
+                            "isAllDay": item.delivery_suggestion.calendar.is_all_day,
+                            "startDate": item.delivery_suggestion.calendar.start_date,
+                            "endDate": item.delivery_suggestion.calendar.end_date,
+                            "startTime": item.delivery_suggestion.calendar.start_time,
+                            "endTime": item.delivery_suggestion.calendar.end_time,
+                        }
+                    ),
+                },
             }
             for item in action_items
         ],
@@ -364,14 +665,17 @@ def serialize_action_items(action_items: list[ActionItemCandidate]) -> str:
     )
 
 
-def _parse_action_item(value: object) -> ActionItemCandidate:
+def _parse_action_item(
+    value: object, allowed_assignee_ids: set[str] | None = None
+) -> ActionItemCandidate:
     if not isinstance(value, dict):
         raise ProviderBusinessError("Invalid action item")
 
     title = _require_action_item_text(value, "title", MAX_ACTION_ITEM_TITLE_BYTES)
     description = _require_action_item_text(value, "description", MAX_ACTION_ITEM_DESCRIPTION_BYTES)
     priority = _require_payload_string(value, "priority")
-    if "assigneeUserId" not in value:
+    raw_assignee_user_id = value.get("assigneeUserId")
+    if raw_assignee_user_id is not None and not isinstance(raw_assignee_user_id, str):
         raise ProviderBusinessError("Invalid action item assignee")
 
     if priority not in {"LOW", "MEDIUM", "HIGH"}:
@@ -380,21 +684,90 @@ def _parse_action_item(value: object) -> ActionItemCandidate:
     return ActionItemCandidate(
         title=title,
         description=description,
-        assignee_user_id=None,
+        assignee_user_id=(
+            raw_assignee_user_id
+            if isinstance(raw_assignee_user_id, str)
+            and allowed_assignee_ids is not None
+            and raw_assignee_user_id in allowed_assignee_ids
+            else None
+        ),
         priority=priority,
+        delivery_suggestion=_parse_action_item_delivery_suggestion(value.get("deliverySuggestion")),
     )
 
 
+def _parse_action_item_delivery_suggestion(value: object) -> ActionItemDeliverySuggestion:
+    # Older completed reports do not carry a suggestion. They remain safely
+    # deliverable as a Pilo issue rather than inventing a calendar date.
+    if value is None:
+        return ActionItemDeliverySuggestion("pilo_issue", None)
+    if not isinstance(value, dict):
+        raise ProviderBusinessError("Invalid action item delivery suggestion")
+    delivery_type = value.get("deliveryType")
+    if delivery_type == "pilo_issue":
+        if value.get("calendar") is not None:
+            raise ProviderBusinessError("Invalid action item issue suggestion")
+        return ActionItemDeliverySuggestion("pilo_issue", None)
+    if delivery_type != "calendar_event" or not isinstance(value.get("calendar"), dict):
+        raise ProviderBusinessError("Invalid action item calendar suggestion")
+    calendar = value["calendar"]
+    is_all_day = calendar.get("isAllDay")
+    start_date = calendar.get("startDate")
+    end_date = calendar.get("endDate")
+    start_time = calendar.get("startTime")
+    end_time = calendar.get("endTime")
+    if (
+        not isinstance(is_all_day, bool)
+        or not _is_iso_date(start_date)
+        or not _is_iso_date(end_date)
+        or end_date < start_date
+        or (start_time is not None and not _is_hhmm_time(start_time))
+        or (end_time is not None and not _is_hhmm_time(end_time))
+        or (is_all_day and (start_time is not None or end_time is not None))
+        or (not is_all_day and start_time is None)
+    ):
+        raise ProviderBusinessError("Invalid action item calendar suggestion")
+    return ActionItemDeliverySuggestion(
+        "calendar_event",
+        ActionItemCalendarSuggestion(is_all_day, start_date, end_date, start_time, end_time),
+    )
+
+
+def _is_iso_date(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 10:
+        return False
+    try:
+        from datetime import date
+
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def _is_hhmm_time(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 5:
+        return False
+    try:
+        from datetime import time
+
+        return time.fromisoformat(value).strftime("%H:%M") == value
+    except ValueError:
+        return False
+
+
 def _parse_evidence(
-    value: object, segments: list[TranscriptSegment], action_item_count: int
+    value: object,
+    segments: list[TranscriptSegment],
+    action_item_count: int,
+    decision_count: int,
 ) -> list[EvidenceReference]:
     if not isinstance(value, list):
-        raise ProviderBusinessError("Invalid evidence")
+        raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
     valid_indexes = {segment.segment_index for segment in segments}
     segment_indexes_by_source: dict[tuple[str, int], list[int]] = {}
     for item in value:
         if not isinstance(item, dict):
-            raise ProviderBusinessError("Invalid evidence reference")
+            raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
         source_type = _require_payload_string(item, "sourceType")
         source_index = item.get("sourceIndex")
         segment_indexes = item.get("segmentIndexes")
@@ -403,13 +776,18 @@ def _parse_evidence(
             or not isinstance(source_index, int)
             or not isinstance(segment_indexes, list)
         ):
-            raise ProviderBusinessError("Invalid evidence reference")
+            raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
+        if source_type in {"summary", "discussion"} and source_index != 0:
+            raise EvidenceValidationError(
+                "INVALID_EVIDENCE_SOURCE_INDEX",
+                "Invalid singleton evidence",
+            )
+        if source_type == "decision" and not 0 <= source_index < decision_count:
+            raise EvidenceValidationError("INVALID_EVIDENCE_SOURCE_INDEX")
         if source_type == "action_item" and not 0 <= source_index < action_item_count:
-            raise ProviderBusinessError("Invalid action item evidence")
+            raise EvidenceValidationError("INVALID_EVIDENCE_SOURCE_INDEX")
         if not all(isinstance(index, int) and index in valid_indexes for index in segment_indexes):
-            raise ProviderBusinessError("Invalid evidence segment")
-        if source_type in {"decision", "action_item"} and not segment_indexes:
-            raise ProviderBusinessError("Missing required evidence")
+            raise EvidenceValidationError("INVALID_TRANSCRIPT_SEGMENT_INDEX")
         source = (source_type, source_index)
         unique_segment_indexes = segment_indexes_by_source.setdefault(source, [])
         for segment_index in segment_indexes:
@@ -419,17 +797,158 @@ def _parse_evidence(
         EvidenceReference(source_type, source_index, segment_indexes)
         for (source_type, source_index), segment_indexes in segment_indexes_by_source.items()
     ]
-    required_sources = {("decision", 0)} | {
-        ("action_item", index) for index in range(action_item_count)
-    }
-    provided_sources = {
+    return references
+
+
+def _parse_activity_evidence_references(
+    value: object,
+    activity_evidence: list[ActivityEvidence],
+    action_item_count: int,
+    decision_count: int,
+) -> list[ActivityEvidenceReference]:
+    if not isinstance(value, list):
+        raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
+    valid_indexes = {item.source_index for item in activity_evidence}
+    activity_indexes_by_source: dict[tuple[str, int], list[int]] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
+        source_type = _require_payload_string(item, "sourceType")
+        source_index = item.get("sourceIndex")
+        activity_indexes = item.get("activityIndexes")
+        if (
+            source_type not in {"summary", "discussion", "decision", "action_item"}
+            or not isinstance(source_index, int)
+            or not isinstance(activity_indexes, list)
+        ):
+            raise EvidenceValidationError("INVALID_EVIDENCE_FORMAT")
+        if source_type in {"summary", "discussion"} and source_index != 0:
+            raise EvidenceValidationError(
+                "INVALID_EVIDENCE_SOURCE_INDEX",
+                "Invalid singleton Activity evidence",
+            )
+        if source_type == "decision" and not 0 <= source_index < decision_count:
+            raise EvidenceValidationError("INVALID_EVIDENCE_SOURCE_INDEX")
+        if source_type == "action_item" and not 0 <= source_index < action_item_count:
+            raise EvidenceValidationError("INVALID_EVIDENCE_SOURCE_INDEX")
+        if not all(isinstance(index, int) and index in valid_indexes for index in activity_indexes):
+            raise EvidenceValidationError("INVALID_ACTIVITY_EVIDENCE_INDEX")
+        source = (source_type, source_index)
+        unique_activity_indexes = activity_indexes_by_source.setdefault(source, [])
+        for activity_index in activity_indexes:
+            if activity_index not in unique_activity_indexes:
+                unique_activity_indexes.append(activity_index)
+    return [
+        ActivityEvidenceReference(source_type, source_index, activity_indexes)
+        for (source_type, source_index), activity_indexes in activity_indexes_by_source.items()
+    ]
+
+
+def _parse_decision_items(value: object, decisions: str) -> list[str]:
+    if value is None:
+        return [decisions]
+    if not isinstance(value, list) or not value:
+        raise ProviderBusinessError("Invalid decision items")
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ProviderBusinessError("Invalid decision item")
+        normalized = item.strip()
+        if not normalized or len(normalized.encode("utf-8")) > 5000:
+            raise ProviderBusinessError("Invalid decision item")
+        items.append(normalized)
+    return items
+
+
+def _require_action_item_evidence(
+    action_items: list[ActionItemCandidate],
+    transcript_evidence: list[EvidenceReference],
+    activity_evidence: list[ActivityEvidenceReference],
+) -> None:
+    transcript_sources = {
         (reference.source_type, reference.source_index)
-        for reference in references
+        for reference in transcript_evidence
         if reference.segment_indexes
     }
-    if not required_sources.issubset(provided_sources):
-        raise ProviderBusinessError("Missing required evidence")
-    return references
+    activity_sources = {
+        (reference.source_type, reference.source_index)
+        for reference in activity_evidence
+        if reference.activity_indexes
+    }
+    required_sources = {("action_item", index) for index in range(len(action_items))}
+    if not required_sources.issubset(transcript_sources | activity_sources):
+        raise EvidenceValidationError("MISSING_ACTION_ITEM_EVIDENCE")
+
+
+def _safe_llm_failure_details(
+    error: ProviderBusinessError,
+) -> tuple[MeetingReportFailureDiagnostic, str]:
+    cause = error.__cause__
+    error_type = type(cause if cause is not None else error).__name__
+    status_code = getattr(cause, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = None
+
+    error_message = str(error)
+    if isinstance(error, EvidenceValidationError):
+        return (
+            MeetingReportFailureDiagnostic(
+                code=error.code,
+                category="invalid_evidence",
+                retryable=False,
+                provider_status_code=None,
+            ),
+            error_type,
+        )
+    if error_message == "OpenAI LLM business failure":
+        return (
+            MeetingReportFailureDiagnostic(
+                code="OPENAI_API_ERROR",
+                category="openai_api_error",
+                retryable=False,
+                provider_status_code=status_code,
+            ),
+            error_type,
+        )
+    if error_message == "OpenAI LLM returned no text":
+        return (
+            MeetingReportFailureDiagnostic(
+                code="EMPTY_OUTPUT",
+                category="empty_output",
+                retryable=False,
+                provider_status_code=None,
+            ),
+            error_type,
+        )
+    if error_message == "Invalid meeting report JSON":
+        return (
+            MeetingReportFailureDiagnostic(
+                code="INVALID_JSON",
+                category="invalid_json",
+                retryable=False,
+                provider_status_code=None,
+            ),
+            error_type,
+        )
+    if "evidence" in error_message.lower():
+        return (
+            MeetingReportFailureDiagnostic(
+                code="INVALID_EVIDENCE_FORMAT",
+                category="invalid_evidence",
+                retryable=False,
+                provider_status_code=None,
+            ),
+            error_type,
+        )
+    return (
+        MeetingReportFailureDiagnostic(
+            code="INVALID_OUTPUT",
+            category="invalid_output",
+            retryable=False,
+            provider_status_code=None,
+        ),
+        error_type,
+    )
 
 
 def _require_string(payload: dict[str, object], key: str) -> str:

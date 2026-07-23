@@ -4,13 +4,19 @@ from dataclasses import dataclass
 
 CANVAS_AGENT_JOB_TYPE = "canvas_agent_step_requested"
 CANVAS_AGENT_SCHEMA_VERSION = "canvas-agent:v1"
+CANVAS_AGENT_INTENTS = {
+    "chat",
+    "find_shapes",
+    "generate_html",
+    "import_drive_file",
+    "unsupported",
+}
 CANVAS_AGENT_ACTIONS = {
+    "route_intent",
     "find_canvas_tool",
     "find_shapes",
     "select_shapes",
     "focus_viewport",
-    "connect_shapes",
-    "create_draft",
     "finish",
 }
 TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "expired", "draft_ready"}
@@ -38,9 +44,9 @@ class CanvasAgentRunContext:
 
 
 @dataclass(frozen=True)
-class CanvasAgentPlan:
-    action_name: str
-    input: dict[str, object]
+class CanvasAgentIntentClassification:
+    intent: str
+    arguments: dict[str, object]
     message: str
 
 

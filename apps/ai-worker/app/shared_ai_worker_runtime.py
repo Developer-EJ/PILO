@@ -5,21 +5,30 @@ import os
 from dataclasses import dataclass
 
 from app.agent_processor import (
+    AgentGroundedAnswerProcessor,
     AgentRunProcessor,
     OpenAiAgentPlannerClient,
+    OpenAiAgentRouterClient,
 )
 from app.canvas_agent.embedding_processor import CanvasEmbeddingProcessor
 from app.canvas_agent.embeddings import LocalSentenceTransformerCanvasEmbedder
-from app.canvas_agent.planning.planner import OpenAiCanvasAgentPlanner
+from app.canvas_agent.planning.chat_responder import OpenAiCanvasAgentChatResponder
+from app.canvas_agent.planning.html_generator import OpenAiCanvasAgentHtmlGenerator
+from app.canvas_agent.planning.planner import OpenAiCanvasAgentIntentClassifier
 from app.canvas_agent.processor import CanvasAgentProcessor
 from app.canvas_agent.repository import PgCanvasAgentRepository
 from app.canvas_agent.routing.semantic_router import CanvasSemanticRouter
 from app.job_dispatcher import JobDispatcher
+from app.meeting_activity_evidence_embedding_processor import (
+    MeetingActivityEvidenceEmbeddingProcessor,
+)
 from app.meeting_report_processor import MeetingReportProcessor
 from app.meeting_report_runtime import (
     DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
     DEFAULT_AGENT_STALE_EXECUTION_SWEEP_INTERVAL_SECONDS,
     DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
+    DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK,
+    DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_MODEL,
     DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
     DEFAULT_VISIBILITY_TIMEOUT_SECONDS,
     DEFAULT_WAIT_TIME_SECONDS,
@@ -27,7 +36,9 @@ from app.meeting_report_runtime import (
     HttpMeetingReportEventPublisher,
     OpenAiMeetingReportClient,
     PgAgentRunRepository,
+    PgMeetingActivityEvidenceEmbeddingRepository,
     PgMeetingReportRepository,
+    PgMeetingTranscriptEmbeddingRepository,
     S3RecordingStorage,
     SqsAiJobWorker,
     _database_url,
@@ -37,8 +48,26 @@ from app.meeting_report_runtime import (
     _positive_ms_env,
     _require_env,
 )
+from app.meeting_transcript_embedding_processor import (
+    MeetingTranscriptEmbeddingProcessor,
+    OpenAiTranscriptEmbedder,
+)
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_OPENAI_CANVAS_HTML_TIMEOUT_MS = 180_000
+
+
+def _positive_float_env(key: str, default: float) -> float:
+    value = _optional_env(key)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise RuntimeError(f"{key} must be a positive number") from error
+    if parsed <= 0:
+        raise RuntimeError(f"{key} must be a positive number")
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -51,6 +80,9 @@ class SharedAiWorkerSettings:
     openai_api_key: str
     openai_agent_planner_model: str
     openai_agent_planner_timeout_seconds: float
+    openai_canvas_html_timeout_seconds: float
+    openai_agent_router_model: str
+    openai_agent_router_timeout_seconds: float
     agent_execution_handoff_base_url: str | None
     agent_execution_handoff_token: str | None
     agent_execution_handoff_timeout_seconds: int
@@ -58,6 +90,9 @@ class SharedAiWorkerSettings:
     wait_time_seconds: int
     visibility_timeout_seconds: int
     canvas_embedding_jobs_per_tick: int
+    openai_meeting_transcript_embedding_model: str
+    meeting_transcript_embedding_jobs_per_tick: int
+    openai_indexing_embedding_timeout_seconds: float
     legacy_agent_drain_enabled: bool
     legacy_meeting_drain_enabled: bool
     legacy_meeting_recordings_bucket: str | None
@@ -90,16 +125,27 @@ class SharedAiWorkerSettings:
                 "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
                 DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
             ),
-            agent_execution_handoff_base_url=(
-                _require_env("AGENT_EXECUTION_HANDOFF_BASE_URL")
-                if legacy_agent_drain_enabled
-                else None
+            openai_canvas_html_timeout_seconds=_positive_ms_env(
+                "OPENAI_CANVAS_HTML_TIMEOUT_MS",
+                DEFAULT_OPENAI_CANVAS_HTML_TIMEOUT_MS,
             ),
-            agent_execution_handoff_token=(
-                _require_env("AGENT_EXECUTION_HANDOFF_TOKEN")
-                if legacy_agent_drain_enabled
-                else None
+            openai_agent_router_model=_env(
+                "OPENAI_AGENT_ROUTER_MODEL",
+                _env("OPENAI_AGENT_PLANNER_MODEL", "gpt-5.4-mini"),
             ),
+            openai_agent_router_timeout_seconds=(
+                _positive_ms_env(
+                    "OPENAI_AGENT_ROUTER_TIMEOUT_MS",
+                    DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+                )
+                if _optional_env("OPENAI_AGENT_ROUTER_TIMEOUT_MS") is not None
+                else _positive_ms_env(
+                    "OPENAI_AGENT_PLANNER_TIMEOUT_MS",
+                    DEFAULT_OPENAI_AGENT_PLANNER_TIMEOUT_MS,
+                )
+            ),
+            agent_execution_handoff_base_url=(_optional_env("AGENT_EXECUTION_HANDOFF_BASE_URL")),
+            agent_execution_handoff_token=(_optional_env("AGENT_EXECUTION_HANDOFF_TOKEN")),
             agent_execution_handoff_timeout_seconds=_positive_int_env(
                 "AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS",
                 DEFAULT_AGENT_EXECUTION_HANDOFF_TIMEOUT_SECONDS,
@@ -119,6 +165,18 @@ class SharedAiWorkerSettings:
             canvas_embedding_jobs_per_tick=_positive_int_env(
                 "CANVAS_EMBEDDING_JOBS_PER_TICK",
                 DEFAULT_CANVAS_EMBEDDING_JOBS_PER_TICK,
+            ),
+            openai_meeting_transcript_embedding_model=_env(
+                "OPENAI_MEETING_TRANSCRIPT_EMBEDDING_MODEL",
+                DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_MODEL,
+            ),
+            meeting_transcript_embedding_jobs_per_tick=_positive_int_env(
+                "MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK",
+                DEFAULT_MEETING_TRANSCRIPT_EMBEDDING_JOBS_PER_TICK,
+            ),
+            openai_indexing_embedding_timeout_seconds=_positive_float_env(
+                "OPENAI_INDEXING_EMBEDDING_TIMEOUT_SECONDS",
+                30.0,
             ),
             legacy_agent_drain_enabled=legacy_agent_drain_enabled,
             legacy_meeting_drain_enabled=legacy_meeting_drain_enabled,
@@ -171,7 +229,17 @@ def create_shared_ai_worker(
         resolved_settings.openai_agent_planner_model,
         resolved_settings.openai_agent_planner_timeout_seconds,
     )
-    canvas_agent_planner = OpenAiCanvasAgentPlanner(
+    canvas_agent_intent_classifier = OpenAiCanvasAgentIntentClassifier(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+        resolved_settings.openai_agent_planner_timeout_seconds,
+    )
+    canvas_agent_html_generator = OpenAiCanvasAgentHtmlGenerator(
+        resolved_settings.openai_api_key,
+        resolved_settings.openai_agent_planner_model,
+        resolved_settings.openai_canvas_html_timeout_seconds,
+    )
+    canvas_agent_chat_responder = OpenAiCanvasAgentChatResponder(
         resolved_settings.openai_api_key,
         resolved_settings.openai_agent_planner_model,
         resolved_settings.openai_agent_planner_timeout_seconds,
@@ -180,12 +248,15 @@ def create_shared_ai_worker(
     agent_run_repository = None
     agent_execution_handoff_client = None
     agent_run_processor = None
-    if resolved_settings.legacy_agent_drain_enabled:
+    if (
+        resolved_settings.agent_execution_handoff_base_url is not None
+        or resolved_settings.agent_execution_handoff_token is not None
+    ):
         if (
             resolved_settings.agent_execution_handoff_base_url is None
             or resolved_settings.agent_execution_handoff_token is None
         ):
-            raise RuntimeError("Legacy Agent drain configuration is incomplete")
+            raise RuntimeError("Agent execution handoff configuration is incomplete")
         agent_run_repository = PgAgentRunRepository(
             resolved_settings.database_url,
             resolved_settings.database_ssl,
@@ -195,19 +266,51 @@ def create_shared_ai_worker(
             resolved_settings.agent_execution_handoff_token,
             resolved_settings.agent_execution_handoff_timeout_seconds,
         )
+        agent_router_client = OpenAiAgentRouterClient(
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_agent_router_model,
+            resolved_settings.openai_agent_router_timeout_seconds,
+        )
         agent_run_processor = AgentRunProcessor(
             agent_run_repository,
             agent_planner_client,
             agent_execution_handoff_client,
+            router_client=agent_router_client,
         )
     canvas_agent_processor = CanvasAgentProcessor(
         canvas_agent_repository,
-        canvas_agent_planner,
+        canvas_agent_intent_classifier,
         CanvasSemanticRouter(canvas_agent_repository, canvas_embedder),
+        canvas_agent_html_generator,
+        canvas_agent_chat_responder,
     )
     canvas_embedding_processor = CanvasEmbeddingProcessor(
         canvas_agent_repository,
         canvas_embedder,
+    )
+    meeting_transcript_embedding_repository = PgMeetingTranscriptEmbeddingRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
+    meeting_activity_evidence_embedding_repository = PgMeetingActivityEvidenceEmbeddingRepository(
+        resolved_settings.database_url,
+        resolved_settings.database_ssl,
+    )
+    meeting_transcript_embedding_processor = MeetingTranscriptEmbeddingProcessor(
+        meeting_transcript_embedding_repository,
+        OpenAiTranscriptEmbedder(
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_meeting_transcript_embedding_model,
+            resolved_settings.openai_indexing_embedding_timeout_seconds,
+        ),
+    )
+    meeting_activity_evidence_embedding_processor = MeetingActivityEvidenceEmbeddingProcessor(
+        meeting_activity_evidence_embedding_repository,
+        OpenAiTranscriptEmbedder(
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_meeting_transcript_embedding_model,
+            resolved_settings.openai_indexing_embedding_timeout_seconds,
+        ),
     )
     legacy_meeting_report_processor = None
     if resolved_settings.legacy_meeting_drain_enabled:
@@ -216,18 +319,32 @@ def create_shared_ai_worker(
             boto3.client("s3", **boto_kwargs),
         )
 
+    grounded_answer_processor = None
+    if agent_execution_handoff_client is not None:
+        grounded_answer_processor = AgentGroundedAnswerProcessor(
+            agent_execution_handoff_client,
+            resolved_settings.openai_api_key,
+            resolved_settings.openai_agent_planner_model,
+            resolved_settings.openai_agent_planner_timeout_seconds,
+        )
     dispatcher = create_shared_dispatcher(
         agent_run_processor,
         canvas_agent_processor,
         legacy_meeting_report_processor,
+        grounded_answer_processor,
     )
     return SqsAiJobWorker(
         resolved_settings,
         dispatcher,
         boto3.client("sqs", **boto_kwargs),
         canvas_embedding_processor=canvas_embedding_processor,
+        meeting_transcript_embedding_processor=meeting_transcript_embedding_processor,
+        meeting_activity_evidence_embedding_processor=(
+            meeting_activity_evidence_embedding_processor
+        ),
         stale_execution_recovery=agent_execution_handoff_client,
         agent_retry_exhaustion_recovery=agent_run_repository,
+        agent_grounded_answer_retry_exhaustion_recovery=agent_run_repository,
         canvas_agent_retry_exhaustion_recovery=canvas_agent_repository,
     )
 
@@ -265,10 +382,12 @@ def create_shared_dispatcher(
     agent_run_processor: AgentRunProcessor | None,
     canvas_agent_processor: CanvasAgentProcessor,
     legacy_meeting_report_processor: MeetingReportProcessor | None,
+    grounded_answer_processor: AgentGroundedAnswerProcessor | None = None,
 ) -> JobDispatcher:
     return JobDispatcher(
         meeting_report_processor=legacy_meeting_report_processor,
         agent_run_processor=agent_run_processor,
+        grounded_answer_processor=grounded_answer_processor,
         canvas_agent_processor=canvas_agent_processor,
     )
 

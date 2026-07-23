@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const { HTTP_CODE_METADATA } = require("@nestjs/common/constants");
 const { AgentController } = require(
   "../../dist/modules/agent/agent.controller.js"
 );
@@ -11,18 +13,130 @@ const USER_ID = "11111111-1111-1111-1111-111111111111";
 const OTHER_USER_ID = "99999999-9999-9999-9999-999999999999";
 const WORKSPACE_ID = "22222222-2222-2222-2222-222222222222";
 const RUN_ID = "33333333-3333-3333-3333-333333333333";
+const CONVERSATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const SQL_ERD_SESSION_ID = "77777777-7777-4777-8777-777777777777";
+const PR_REVIEW_SESSION_ID = "99999999-9999-4999-8999-999999999998";
+const CANVAS_ID = "99999999-9999-4999-8999-999999999999";
 const STEP_ID = "44444444-4444-4444-4444-444444444444";
 const CONFIRMATION_ID = "55555555-5555-5555-5555-555555555555";
+const MESSAGE_ID = "66666666-6666-4666-8666-666666666666";
 const CREATED_AT = new Date("2026-07-08T00:00:00.000Z");
 const UPDATED_AT = new Date("2026-07-08T00:01:00.000Z");
 const EXPIRES_AT = new Date("2026-08-07T00:00:00.000Z");
 const CONFIRMATION_EXPIRES_AT = new Date("2026-07-08T00:15:00.000Z");
+
+assert.equal(
+  Reflect.getMetadata(
+    HTTP_CODE_METADATA,
+    AgentController.prototype.routeMessage
+  ),
+  200,
+  "POST /agent/messages must return the documented 200 OK status"
+);
+const contextualExecutionMigration = readFileSync(
+  new URL(
+    "../../../../db/migrations/078_add_agent_contextual_execution.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewRequestContextMigrationPath = new URL(
+  "../../../../db/migrations/093_add_pr_review_agent_request_context.sql",
+  import.meta.url
+);
+
+assert.equal(
+  existsSync(prReviewRequestContextMigrationPath),
+  true,
+  "PR Review request context migration should exist"
+);
+const prReviewRequestContextMigration = readFileSync(
+  prReviewRequestContextMigrationPath,
+  "utf8"
+);
+const canvasRequestContextMigrationPath = new URL(
+  "../../../../db/migrations/096_add_canvas_agent_request_context.sql",
+  import.meta.url
+);
+assert.equal(
+  existsSync(canvasRequestContextMigrationPath),
+  true,
+  "Canvas request context migration should exist"
+);
+const canvasRequestContextMigration = readFileSync(
+  canvasRequestContextMigrationPath,
+  "utf8"
+);
+assert.match(
+  prReviewRequestContextMigration,
+  /request_context_json->>'surface' IN \('sql_erd', 'pr_review'\)/
+);
+assert.match(
+  prReviewRequestContextMigration,
+  /request_context_json - 'surface' - 'sessionId'\) = '\{\}'::jsonb/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /request_context_json->>'surface' = 'canvas'/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /request_context_json \?& ARRAY\['surface', 'canvasId', 'canvasContext'\]/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /request_context_json - 'surface' - 'canvasId' - 'canvasContext'\) = '\{\}'::jsonb/
+);
+assert.match(
+  canvasRequestContextMigration,
+  /octet_length\(request_context_json::text\) <= 262144/
+);
+
+assert.match(
+  contextualExecutionMigration,
+  /ALTER TABLE public\.agent_runs[\s\S]*ADD COLUMN request_context_json JSONB/
+);
+assert.match(
+  contextualExecutionMigration,
+  /ALTER TABLE public\.agent_confirmations[\s\S]*ADD COLUMN selected_choice_id TEXT/
+);
+assert.match(
+  contextualExecutionMigration,
+  /CREATE TABLE public\.sql_erd_agent_session_creations/
+);
+assert.match(
+  contextualExecutionMigration,
+  /UNIQUE \(workspace_id, actor_user_id, agent_run_id\)/
+);
+assert.match(
+  contextualExecutionMigration,
+  /ALTER TABLE public\.sql_erd_agent_session_creations ENABLE ROW LEVEL SECURITY/
+);
+assert.match(
+  contextualExecutionMigration,
+  /agent_runs_request_context_shape_check[\s\S]*\) IS TRUE\)/
+);
+assert.doesNotMatch(
+  contextualExecutionMigration,
+  /jsonb_object_length/,
+  "context validation must use PostgreSQL-supported JSONB operators"
+);
+assert.match(
+  contextualExecutionMigration,
+  /request_context_json \?& ARRAY\['surface', 'sessionId'\]/
+);
+assert.match(
+  contextualExecutionMigration,
+  /request_context_json - 'surface' - 'sessionId'\) = '\{\}'::jsonb/
+);
 function createStoredRun(overrides = {}) {
   return {
     id: RUN_ID,
+    conversationId: CONVERSATION_ID,
     workspaceId: WORKSPACE_ID,
     requestedByUserId: USER_ID,
     clientRequestId: "request-1",
+    requestContext: null,
     status: "planning",
     riskLevel: null,
     prompt: "내일 회의 일정 만들어줘",
@@ -42,9 +156,11 @@ function createStoredRun(overrides = {}) {
 function createRunRow(overrides = {}) {
   return {
     id: RUN_ID,
+    thread_id: CONVERSATION_ID,
     workspace_id: WORKSPACE_ID,
     requested_by_user_id: USER_ID,
     client_request_id: "request-1",
+    request_context_json: null,
     status: "planning",
     risk_level: null,
     prompt: "내일 회의 일정 만들어줘",
@@ -90,7 +206,13 @@ function createStepRow(overrides = {}) {
     },
     output_json: {
       intent: "calendar.list",
-      transcriptText: "must-not-leak"
+      transcriptText: "must-not-leak",
+      candidates: [
+        {
+          selectionToken: "77777777-7777-4777-8777-777777777777",
+          title: "주문 ERD"
+        }
+      ]
     },
     resource_refs: [
       {
@@ -139,6 +261,19 @@ function createConfirmationRow(overrides = {}) {
     rejected_at: null,
     created_at: CREATED_AT,
     updated_at: UPDATED_AT,
+    selected_choice_id: null,
+    ...overrides
+  };
+}
+
+function createMessageRow(overrides = {}) {
+  return {
+    id: MESSAGE_ID,
+    run_id: RUN_ID,
+    sequence: 1,
+    role: "assistant",
+    content: "몇 시에 시작할까요?",
+    created_at: new Date("2026-07-08T00:00:30.000Z"),
     ...overrides
   };
 }
@@ -212,7 +347,8 @@ class FakeDatabaseService {
 
   async transaction(callback) {
     return callback({
-      execute: this.execute.bind(this)
+      execute: this.execute.bind(this),
+      queryOne: this.queryOne.bind(this)
     });
   }
 
@@ -236,6 +372,41 @@ class FakeDatabaseService {
             run.id === runId &&
             run.workspace_id === workspaceId &&
             run.requested_by_user_id === currentUserId
+        ) ?? null
+      );
+    }
+
+    if (text.includes("FROM sql_erd_sessions")) {
+      const [sessionId, workspaceId] = values;
+      return (
+        (this.state.sessionRows ?? []).find(
+          (session) =>
+            session.id === sessionId && session.workspace_id === workspaceId
+        ) ?? null
+      );
+    }
+
+    if (
+      text.includes("FROM pr_review_sessions AS review_session") &&
+      text.includes("JOIN pr_review_rooms AS review_room")
+    ) {
+      const [sessionId, workspaceId] = values;
+      return (
+        (this.state.prReviewSessionRows ?? []).find(
+          (session) =>
+            session.id === sessionId && session.workspace_id === workspaceId
+        ) ?? null
+      );
+    }
+
+    if (text.includes("FROM canvas")) {
+      const [canvasId, workspaceId] = values;
+      return (
+        (this.state.canvasRows ?? []).find(
+          (canvas) =>
+            canvas.id === canvasId &&
+            canvas.workspace_id === workspaceId &&
+            canvas.board_type === "freeform"
         ) ?? null
       );
     }
@@ -264,6 +435,11 @@ class FakeDatabaseService {
       return this.state.stepRows.filter((step) => step.run_id === runId);
     }
 
+    if (text.includes("FROM agent_run_messages")) {
+      const [runId] = values;
+      return this.state.messageRows.filter((message) => message.run_id === runId);
+    }
+
     throw new Error(`Unhandled query: ${text}`);
   }
 }
@@ -277,9 +453,11 @@ function createService({
     listRows: [],
     runRows: [],
     stepRows: [],
+    messageRows: [],
     confirmationRows: []
   },
   agentOutboxPublisherService = new FakeAgentOutboxPublisherService(),
+  canvasDelegationCompletionService,
   loggingError = null
 } = {}) {
   const workspaceService = new FakeWorkspaceService();
@@ -294,7 +472,8 @@ function createService({
       database,
       workspaceService,
       agentLoggingService,
-      agentOutboxPublisherService
+      agentOutboxPublisherService,
+      canvasDelegationCompletionService
     ),
     workspaceService,
     database,
@@ -330,7 +509,7 @@ function errorMessage(error) {
       created: false
     }
   ]);
-  const controller = new AgentController(runService, {});
+  const controller = new AgentController(runService, {}, {});
   const createdReply = {
     statusCode: null,
     status(code) {
@@ -366,6 +545,44 @@ function errorMessage(error) {
 }
 
 {
+  const routedPayload = {
+    outcome: "needs_choice",
+    relationship: "ambiguous",
+    run: null,
+    previousRun: null,
+    clarification: {
+      question: "기존 작업을 이어갈까요, 아니면 새 요청을 시작할까요?",
+      choices: [
+        { disposition: "continue_previous", label: "기존 작업 계속" },
+        { disposition: "start_new", label: "새 요청 시작" }
+      ]
+    }
+  };
+  const calls = [];
+  const controller = new AgentController({}, {}, {
+    async routeMessage(currentUserId, workspaceId, body) {
+      calls.push({ currentUserId, workspaceId, body });
+      return routedPayload;
+    }
+  });
+  const body = {
+    activeRunId: RUN_ID,
+    clientRequestId: "message-request-1",
+    disposition: "auto",
+    message: "그거",
+    requestContext: null,
+    timezone: "Asia/Seoul"
+  };
+
+  const result = await controller.routeMessage(USER_ID, WORKSPACE_ID, body);
+
+  assert.deepEqual(result, { success: true, data: routedPayload });
+  assert.deepEqual(calls, [
+    { currentUserId: USER_ID, workspaceId: WORKSPACE_ID, body }
+  ]);
+}
+
+{
   const { service, agentLoggingService, agentOutboxPublisherService } =
     createService();
   const result = await service.createRun(USER_ID, WORKSPACE_ID, {
@@ -376,7 +593,9 @@ function errorMessage(error) {
 
   assert.equal(result.created, true);
   assert.equal(result.run.id, RUN_ID);
+  assert.equal(result.run.conversationId, CONVERSATION_ID);
   assert.deepEqual(result.run.steps, []);
+  assert.deepEqual(result.run.messages, []);
   assert.equal(result.run.confirmation, null);
   assert.deepEqual(agentLoggingService.calls, [
     {
@@ -385,11 +604,32 @@ function errorMessage(error) {
       input: {
         prompt: "내일 회의 일정 만들어줘",
         timezone: "Asia/Seoul",
-        clientRequestId: "request-1"
+        clientRequestId: "request-1",
+        requestContext: null
       }
     }
   ]);
   assert.deepEqual(agentOutboxPublisherService.calls, [RUN_ID]);
+}
+
+{
+  const { service, agentLoggingService } = createService();
+  await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "새 대화 시작",
+    conversationId: null
+  });
+  assert.equal(agentLoggingService.calls[0].input.conversationId, null);
+}
+
+{
+  const { service } = createService();
+  await assert.rejects(
+    service.createRun(USER_ID, WORKSPACE_ID, {
+      prompt: "잘못된 대화",
+      conversationId: "not-a-uuid"
+    }),
+    (error) => errorCode(error) === "BAD_REQUEST"
+  );
 }
 
 {
@@ -507,15 +747,22 @@ function errorMessage(error) {
   const lifecycleCalls = database.calls.filter(
     (call) => call.method === "execute"
   );
-  assert.equal(lifecycleCalls.length, 2);
+  assert.equal(lifecycleCalls.length, 4);
   assert.deepEqual(lifecycleCalls[0].values, [WORKSPACE_ID, USER_ID]);
   assert.match(lifecycleCalls[0].text, /SET status = 'expired'/);
-  assert.deepEqual(lifecycleCalls[1].values, [
+  assert.deepEqual(lifecycleCalls[1].values, [WORKSPACE_ID, USER_ID]);
+  assert.match(lifecycleCalls[1].text, /status = 'waiting_user_input'/);
+  assert.deepEqual(lifecycleCalls[2].values, [
     WORKSPACE_ID,
     USER_ID,
     100
   ]);
-  assert.match(lifecycleCalls[1].text, /DELETE FROM agent_runs/);
+  assert.match(lifecycleCalls[2].text, /DELETE FROM agent_runs/);
+  assert.deepEqual(lifecycleCalls[3].values, [WORKSPACE_ID, USER_ID]);
+  assert.match(lifecycleCalls[3].text, /DELETE FROM agent_threads/);
+  assert.match(lifecycleCalls[3].text, /thread\.workspace_id = \$1/);
+  assert.match(lifecycleCalls[3].text, /thread\.requested_by_user_id = \$2/);
+  assert.match(lifecycleCalls[3].text, /confirmation\.status = 'pending'/);
 
   const listCalls = database.calls.filter(
     (call) => call.method !== "execute"
@@ -547,6 +794,423 @@ function errorMessage(error) {
   );
 }
 
+class FakeRunInputDatabaseService {
+  constructor({ expired = false, latestStep } = {}) {
+    this.expired = expired;
+    this.calls = [];
+    this.run = createRunRow({
+      status: "waiting_user_input",
+      message: "몇 시에 시작할까요?",
+      final_answer: null
+    });
+    this.messages = [createMessageRow()];
+    this.latestStep = latestStep ?? {
+      tool_name: "focus_sql_erd_tables",
+      output_json: {
+        status: "needs_clarification",
+        reason: "ambiguous_schema_match",
+        question: "집중할 테이블 이름을 알려주세요."
+      }
+    };
+  }
+
+  async transaction(callback) {
+    return callback({
+      execute: this.execute.bind(this),
+      queryOne: this.queryOne.bind(this)
+    });
+  }
+
+  async execute(text, values = []) {
+    this.calls.push({ method: "execute", text, values });
+    if (text.includes("INSERT INTO agent_run_messages")) {
+      this.messages.push(
+        createMessageRow({
+          id: "77777777-7777-4777-8777-777777777777",
+          sequence: values[1],
+          role: "user",
+          content: values[2],
+          created_at: new Date("2026-07-08T00:01:00.000Z")
+        })
+      );
+    }
+    if (
+      text.includes("추가 정보 입력 대기 시간이 만료되었습니다.") &&
+      text.includes("WHERE id = $1")
+    ) {
+      this.run.status = "cancelled";
+    }
+    return { rows: [] };
+  }
+
+  async queryOne(text, values = []) {
+    this.calls.push({ method: "queryOne", text, values });
+    if (text.includes("FROM agent_steps") && text.includes("step_order DESC")) {
+      return this.latestStep;
+    }
+    if (text.includes("COUNT(*)")) return { total: 0 };
+    if (text.includes("MAX(sequence)")) return { sequence: this.messages.length + 1 };
+    if (text.includes("updated_at > now()")) {
+      return this.expired ? null : { id: RUN_ID };
+    }
+    if (text.includes("UPDATE agent_runs") && text.includes("RETURNING id")) {
+      this.run.status = "planning";
+      this.run.message = "추가 정보를 반영하고 있습니다.";
+      return { id: RUN_ID };
+    }
+    if (text.includes("UPDATE agent_run_outbox")) return { id: "outbox-1" };
+    if (text.includes("FROM agent_confirmations")) return null;
+    if (text.includes("FROM agent_runs") && text.includes("WHERE id = $1")) {
+      return this.run;
+    }
+    throw new Error(`Unhandled run input queryOne: ${text}`);
+  }
+
+  async query(text, values = []) {
+    this.calls.push({ method: "query", text, values });
+    if (text.includes("FROM agent_steps")) return [];
+    if (text.includes("FROM agent_run_messages")) return this.messages;
+    throw new Error(`Unhandled run input query: ${text}`);
+  }
+}
+
+
+
+{
+  const meetingCandidateSelectionId = "99999999-9999-4999-8999-999999999999";
+  const database = new FakeRunInputDatabaseService({
+    latestStep: {
+      tool_name: "resolve_meeting_resource",
+      output_json: {
+        status: "needs_clarification",
+        candidateSelections: [
+          {
+            candidateSelectionId: "88888888-8888-4888-8888-888888888888"
+          },
+          { candidateSelectionId: meetingCandidateSelectionId }
+        ]
+      }
+    }
+  });
+  const publisher = new FakeAgentOutboxPublisherService();
+  const candidateSelections = {
+    calls: [],
+    async getLatestCandidateSelectionIdByOrdinalInTransaction(
+      _transaction,
+      _context,
+      ordinal
+    ) {
+      this.calls.push({ method: "resolveOrdinal", ordinal });
+      return meetingCandidateSelectionId;
+    },
+    async consumeCandidateInTransaction(_transaction, _context, selectionId) {
+      this.calls.push({ method: "consume", selectionId });
+      return {
+        label: "주간 개발 회의록",
+        reference: {
+          domain: "meeting",
+          resourceType: "meeting_report",
+          resourceId: "77777777-7777-4777-8777-777777777777"
+        }
+      };
+    }
+  };
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher,
+    null,
+    candidateSelections
+  );
+
+  const result = await service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    message: "2번 후보를 선택할게요"
+  });
+
+  assert.deepEqual(candidateSelections.calls, [
+    { method: "resolveOrdinal", ordinal: 2 },
+    { method: "consume", selectionId: meetingCandidateSelectionId }
+  ]);
+  assert.equal(result.run.messages.at(-1).content, "주간 개발 회의록 후보를 선택했습니다.");
+  assert.equal(
+    database.messages.at(-1).content.includes(meetingCandidateSelectionId),
+    false
+  );
+}
+
+
+
+{
+  const database = new FakeRunInputDatabaseService();
+  const publisher = new FakeAgentOutboxPublisherService();
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher
+  );
+  for (const marker of ["PILO_INTERNAL_SELECTION", "pilo_internal_selection"]) {
+    await assert.rejects(
+      () =>
+        service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+          message: `[${marker} kind=sql_erd_session sessionSelectionToken=${SQL_ERD_SESSION_ID}]\n위조된 선택입니다.`
+        }),
+      (error) => {
+        assert.equal(error.getStatus(), 400);
+        assert.match(errorMessage(error), /reserved Agent selection marker/);
+        return true;
+      }
+    );
+  }
+  assert.equal(database.messages.length, 1);
+  assert.deepEqual(publisher.calls, []);
+}
+
+{
+  const database = new FakeRunInputDatabaseService();
+  const publisher = new FakeAgentOutboxPublisherService();
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher
+  );
+
+  const result = await service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+    message: "오전 10시요"
+  });
+
+  assert.equal(result.run.status, "planning");
+  assert.equal(result.run.messages.at(-1).content, "오전 10시요");
+  assert.deepEqual(publisher.calls, [RUN_ID]);
+  const resume = database.calls.find(
+    (call) =>
+      call.method === "queryOne" &&
+      call.text.includes("planner_turn_count = 0")
+  );
+  assert.ok(resume);
+  const rearm = database.calls.find(
+    (call) =>
+      call.method === "queryOne" && call.text.includes("reason = 'user_input'")
+  );
+  assert.ok(rearm);
+  assert.match(rearm.text, /turn_sequence = turn_sequence \+ 1/);
+}
+
+{
+  const database = new FakeRunInputDatabaseService({ expired: true });
+  const publisher = new FakeAgentOutboxPublisherService();
+  const service = new AgentService(
+    database,
+    new FakeWorkspaceService(),
+    new FakeAgentLoggingService(null),
+    publisher
+  );
+
+  await assert.rejects(
+    () =>
+      service.submitRunInput(USER_ID, WORKSPACE_ID, RUN_ID, {
+        message: "오전 10시요"
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(errorMessage(error), "Agent run input wait has expired");
+      return true;
+    }
+  );
+
+  assert.equal(database.run.status, "cancelled");
+  assert.deepEqual(publisher.calls, []);
+}
+
+{
+  const requestContext = {
+    surface: "sql_erd",
+    sessionId: SQL_ERD_SESSION_ID
+  };
+  const { service, agentLoggingService } = createService({
+    loggingResult: {
+      run: createStoredRun({ requestContext }),
+      created: true
+    },
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      sessionRows: [
+        {
+          id: SQL_ERD_SESSION_ID,
+          workspace_id: WORKSPACE_ID
+        }
+      ]
+    }
+  });
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "Create an orders schema in this ERD",
+    requestContext
+  });
+
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
+  const requestContext = {
+    surface: "pr_review",
+    sessionId: PR_REVIEW_SESSION_ID
+  };
+  const { service, agentLoggingService } = createService({
+    loggingResult: {
+      run: createStoredRun({ requestContext }),
+      created: true
+    },
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      prReviewSessionRows: [
+        {
+          id: PR_REVIEW_SESSION_ID,
+          workspace_id: WORKSPACE_ID
+        }
+      ]
+    }
+  });
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "이 PR에서 먼저 검토할 파일을 추천해줘",
+    requestContext
+  });
+
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
+  const requestContext = {
+    surface: "canvas",
+    canvasId: CANVAS_ID,
+    canvasContext: {
+      presentationMode: "interactive",
+      selectedShapeIds: ["shape:frame"],
+      toolHelpMode: false
+    }
+  };
+  const { service, agentLoggingService } = createService({
+    loggingResult: {
+      run: createStoredRun({ requestContext }),
+      created: true
+    },
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      canvasRows: [
+        {
+          id: CANVAS_ID,
+          workspace_id: WORKSPACE_ID,
+          board_type: "freeform"
+        }
+      ]
+    }
+  });
+
+  const result = await service.createRun(USER_ID, WORKSPACE_ID, {
+    prompt: "선택한 화면을 HTML로 만들어줘",
+    requestContext
+  });
+
+  assert.deepEqual(result.run.requestContext, requestContext);
+  assert.deepEqual(agentLoggingService.calls[0].input.requestContext, requestContext);
+}
+
+{
+  const { service, agentLoggingService } = createService({
+    state: {
+      listRows: [],
+      runRows: [],
+      stepRows: [],
+      confirmationRows: [],
+      prReviewSessionRows: [
+        {
+          id: PR_REVIEW_SESSION_ID,
+          workspace_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        }
+      ]
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "이 PR에서 먼저 검토할 파일을 추천해줘",
+        requestContext: {
+          surface: "pr_review",
+          sessionId: PR_REVIEW_SESSION_ID
+        }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 404);
+      assert.equal(errorMessage(error), "PR Review session not found");
+      return true;
+    }
+  );
+  assert.equal(agentLoggingService.calls.length, 0);
+}
+
+{
+  const { service, agentLoggingService } = createService();
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "Create an orders schema in this ERD",
+        requestContext: {
+          surface: "sql_erd",
+          sessionId: SQL_ERD_SESSION_ID
+        }
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 404);
+      assert.equal(errorMessage(error), "SQLtoERD session not found");
+      return true;
+    }
+  );
+  assert.equal(agentLoggingService.calls.length, 0);
+}
+
+for (const requestContext of [
+  { surface: "board", sessionId: SQL_ERD_SESSION_ID },
+  { surface: "sql_erd", sessionId: "not-a-uuid" },
+  { surface: "sql_erd", sessionId: SQL_ERD_SESSION_ID, extra: true },
+  { surface: "canvas", canvasId: CANVAS_ID, canvasContext: {}, extra: true },
+  { surface: "canvas", canvasId: "not-a-uuid", canvasContext: {} },
+  "sql_erd"
+]) {
+  const { service } = createService();
+
+  await assert.rejects(
+    () =>
+      service.createRun(USER_ID, WORKSPACE_ID, {
+        prompt: "Create an orders schema in this ERD",
+        requestContext
+      }),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(
+        errorMessage(error),
+        "requestContext must be a valid Agent request context"
+      );
+      return true;
+    }
+  );
+}
+
 {
   const { service } = createService();
 
@@ -565,6 +1229,7 @@ function errorMessage(error) {
     listRows: [],
     runRows: [createRunRow()],
     stepRows: [createStepRow()],
+    messageRows: [createMessageRow()],
     confirmationRows: [createConfirmationRow()]
   };
   const { service } = createService({ state });
@@ -576,9 +1241,23 @@ function errorMessage(error) {
   assert.equal(result.run.steps[0].inputSummary.promptLength, 12);
   assert.equal("authorizationToken" in result.run.steps[0].inputSummary, false);
   assert.equal("transcriptText" in result.run.steps[0].outputSummary, false);
+  assert.equal(
+    result.run.steps[0].outputSummary.candidates[0].selectionToken,
+    "77777777-7777-4777-8777-777777777777"
+  );
   assert.equal(result.run.steps[0].resourceRefs[0].metadata.visible, "ok");
   assert.equal("token" in result.run.steps[0].resourceRefs[0].metadata, false);
   assert.equal(result.run.confirmation.id, CONFIRMATION_ID);
+  assert.equal(result.run.confirmation.selectedChoiceId, null);
+  assert.deepEqual(result.run.messages, [
+    {
+      id: MESSAGE_ID,
+      sequence: 1,
+      role: "assistant",
+      content: "몇 시에 시작할까요?",
+      createdAt: "2026-07-08T00:00:30.000Z"
+    }
+  ]);
   assert.equal(result.run.confirmation.plan.after.title, "주간 회의");
   assert.equal(
     "providerRawResponse" in result.run.confirmation.plan.after,
@@ -591,10 +1270,77 @@ function errorMessage(error) {
     listRows: [],
     runRows: [
       createRunRow({
+        status: "failed",
+        error_message: "Agent router invalid schema: secret-internal-detail"
+      })
+    ],
+    stepRows: [
+      createStepRow({
+        status: "failed",
+        error_message: "Agent planner stack trace: secret-internal-detail"
+      })
+    ],
+    messageRows: [],
+    confirmationRows: []
+  };
+  const { service } = createService({ state });
+
+  const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+
+  assert.equal(
+    result.run.errorMessage,
+    "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+  );
+  assert.equal(
+    result.run.steps[0].errorMessage,
+    "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+  );
+  assert.doesNotMatch(JSON.stringify(result.run), /secret-internal-detail/);
+}
+
+{
+  const state = {
+    listRows: [],
+    runRows: [createRunRow({ status: "running" })],
+    stepRows: [],
+    messageRows: [],
+    confirmationRows: []
+  };
+  const reconcileCalls = [];
+  const { service } = createService({
+    state,
+    canvasDelegationCompletionService: {
+      async reconcileRun(scope) {
+        reconcileCalls.push(scope);
+        state.runRows[0].status = "completed";
+        state.runRows[0].final_answer = "대시보드 프레임을 찾았습니다.";
+      }
+    }
+  });
+
+  const result = await service.getRun(USER_ID, WORKSPACE_ID, RUN_ID);
+
+  assert.deepEqual(reconcileCalls, [
+    {
+      agentRunId: RUN_ID,
+      workspaceId: WORKSPACE_ID,
+      requestedByUserId: USER_ID
+    }
+  ]);
+  assert.equal(result.run.status, "completed");
+  assert.equal(result.run.finalAnswer, "대시보드 프레임을 찾았습니다.");
+}
+
+{
+  const state = {
+    listRows: [],
+    runRows: [
+      createRunRow({
         requested_by_user_id: OTHER_USER_ID
       })
     ],
     stepRows: [],
+    messageRows: [],
     confirmationRows: []
   };
   const { service } = createService({ state });

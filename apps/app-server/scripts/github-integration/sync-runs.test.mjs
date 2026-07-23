@@ -44,11 +44,19 @@ class FakeDatabase {
 class FakeWorkspaceService {
   constructor() {
     this.accessChecks = [];
+    this.ownerChecks = [];
+    this.ownerError = null;
   }
 
   async assertWorkspaceAccess(currentUserId, workspaceId) {
     this.accessChecks.push({ currentUserId, workspaceId });
     return { id: workspaceId };
+  }
+
+  async assertWorkspaceOwnerAccess(currentUserId, workspaceId) {
+    this.ownerChecks.push({ currentUserId, workspaceId });
+    if (this.ownerError) throw this.ownerError;
+    return { id: workspaceId, role: "owner" };
   }
 }
 
@@ -221,6 +229,14 @@ function createService(
     {},
     githubAppClient
   );
+  const startGithubSyncRun = service.startGithubSyncRun.bind(service);
+  service.startGithubSyncRun = (...args) => {
+    if (args.length < 5 && (args[3] === undefined || args[3] === "manual")) {
+      return startGithubSyncRun(args[0], args[1], args[2], "manual", "legacy-test-key");
+    }
+
+    return startGithubSyncRun(...args);
+  };
 
   return {
     database,
@@ -256,7 +272,7 @@ function githubProjectOAuthConnectionRow(overrides = {}) {
   return {
     github_login: "Developer-EJ",
     access_token_encrypted: "encrypted-project-oauth-token",
-    token_scope: "read:user,user:email,project",
+    token_scope: "read:user,user:email,project,repo",
     connected_at: "2026-07-05T09:00:00.000Z",
     revoked_at: null,
     ...overrides
@@ -294,6 +310,7 @@ function syncRunRow(overrides = {}) {
     project_v2_id: projectV2Id,
     target: "full",
     status: "success",
+    trigger_source: "manual",
     started_at: "2026-07-05T10:00:00.000Z",
     finished_at: "2026-07-05T10:01:00.000Z",
     fetched_count: 5,
@@ -510,12 +527,14 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.match(text, /status = \$3/i);
         assert.match(text, /repository_id = \$4/i);
         assert.match(text, /project_v2_id = \$5/i);
+        assert.match(text, /trigger_source = \$6/i);
         assert.deepEqual(values, [
           workspaceId,
           "full",
           "success",
           repositoryId,
-          projectV2Id
+          projectV2Id,
+          "manual"
         ]);
         return { total: "1" };
       }
@@ -530,6 +549,7 @@ function projectV2ItemApiItem(overrides = {}) {
           "success",
           repositoryId,
           projectV2Id,
+          "manual",
           20,
           0
         ]);
@@ -546,6 +566,7 @@ function projectV2ItemApiItem(overrides = {}) {
     status: "success",
     repositoryId,
     projectV2Id,
+    triggerSource: "manual",
     page: "1",
     limit: "20"
   });
@@ -557,6 +578,7 @@ function projectV2ItemApiItem(overrides = {}) {
         id: syncRunId,
         target: "full",
         status: "success",
+        triggerSource: "manual",
         installationId,
         repositoryId,
         projectV2Id,
@@ -605,6 +627,7 @@ function projectV2ItemApiItem(overrides = {}) {
     id: syncRunId,
     target: "full",
     status: "success",
+    triggerSource: "manual",
     installationId,
     repositoryId,
     projectV2Id,
@@ -643,12 +666,14 @@ function projectV2ItemApiItem(overrides = {}) {
       },
       (text, values) => {
         assert.match(text, /INSERT INTO github_sync_runs/i);
+        assert.match(text, /trigger_source/i);
         assert.deepEqual(values, [
           workspaceId,
           installationId,
           null,
           null,
-          "repositories"
+          "repositories",
+          "manual"
         ]);
         return syncRunRow({
           target: "repositories",
@@ -701,7 +726,7 @@ function projectV2ItemApiItem(overrides = {}) {
   const syncRun = await service.startGithubSyncRun(currentUserId, workspaceId, {
     target: "repositories",
     installationId
-  });
+  }, "manual", "test-key");
 
   assert.deepEqual(syncRun, {
     id: syncRunId,
@@ -710,6 +735,7 @@ function projectV2ItemApiItem(overrides = {}) {
     installationId,
     repositoryId: null,
     projectV2Id: null,
+    triggerSource: "manual",
     startedAt: "2026-07-05T10:00:00.000Z",
     finishedAt: "2026-07-05T10:01:00.000Z",
     fetchedCount: 2,
@@ -748,7 +774,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           repositoryId,
           null,
-          "issues"
+          "issues",
+          "manual"
         ]);
         return syncRunRow({
           target: "issues",
@@ -839,7 +866,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           repositoryId,
           null,
-          "pull_requests"
+          "pull_requests",
+          "manual"
         ]);
         return syncRunRow({
           target: "pull_requests",
@@ -929,7 +957,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           null,
           null,
-          "full"
+          "full",
+          "manual"
         ]);
         return syncRunRow({
           target: "full",
@@ -1050,7 +1079,9 @@ function projectV2ItemApiItem(overrides = {}) {
       /INSERT INTO github_project_v2_repositories/i.test(query.text)
   );
   assert.ok(projectRepositoryInsert);
-  assert.deepEqual(projectRepositoryInsert.values, [workspaceId, repositoryId, [projectV2Id]]);
+  assert.match(projectRepositoryInsert.text, /SELECT project_v2_id, \$1/i);
+  assert.match(projectRepositoryInsert.text, /unnest\(\$2::uuid\[\]\)/i);
+  assert.deepEqual(projectRepositoryInsert.values, [repositoryId, [projectV2Id]]);
 }
 
 {
@@ -1258,7 +1289,7 @@ function projectV2ItemApiItem(overrides = {}) {
         assert.match(text, /status = 'failed'/i);
         assert.deepEqual(values, [
           syncRunId,
-          "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+          "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
         ]);
         return syncRunRow({
           target: "full",
@@ -1270,7 +1301,7 @@ function projectV2ItemApiItem(overrides = {}) {
           updated_count: 0,
           skipped_count: 0,
           error_message:
-            "GitHub ProjectV2 OAuth connection must be reconnected with project scope",
+            "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes",
           cursor: {}
         });
       }
@@ -1287,7 +1318,7 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(syncRun.status, "failed");
   assert.equal(
     syncRun.errorMessage,
-    "GitHub ProjectV2 OAuth connection must be reconnected with project scope"
+    "GitHub ProjectV2 OAuth connection must be reconnected with project and repo scopes"
   );
   assert.deepEqual(githubAppClient.calls, []);
 }
@@ -1377,7 +1408,8 @@ function projectV2ItemApiItem(overrides = {}) {
           installationId,
           null,
           projectV2Id,
-          "project_v2"
+          "project_v2",
+          "manual"
         ]);
         return syncRunRow({
           target: "project_v2",

@@ -270,6 +270,13 @@ export const CANVAS_AGENT_TOOL_TARGETS = [
     target: "toolbar.redo"
   },
   {
+    aliases: ["파일 드롭", "폴더 드롭", "드래그 앤 드롭", "드래그앤드롭", "파일 import", "파일 가져오기", "폴더 가져오기", "로컬 파일", "로컬 폴더"],
+    description: "파일/폴더 드롭은 로컬의 코드 파일이나 폴더를 캔버스 위로 끌어다 놓으면 코드블럭과 폴더 구조로 바로 반영해주는 기능이야.",
+    label: "파일/폴더 드롭",
+    message: "로컬 파일이나 폴더를 캔버스 위로 드래그 앤 드롭하면 바로 코드블럭과 폴더 구조로 반영할 수 있어.",
+    target: "canvas.drop.file_folder"
+  },
+  {
     aliases: ["ai", "canvas ai", "캔버스 ai", "채팅", "도움", "c"],
     description: "Canvas AI는 캔버스 안에서 도형을 찾고, 화면을 이동하고, 초안을 만들거나 기능 위치를 안내해주는 전용 도우미야.",
     label: "Canvas AI",
@@ -310,12 +317,50 @@ const TOOL_EXPLAIN_TERMS = [
   "왜 써"
 ];
 
+const CANVAS_AGENT_TOOL_HELP_OVERVIEW =
+  [
+    "기능 설명 모드에서는 아래 기능의 위치와 사용법을 물어볼 수 있어요.",
+    ...CANVAS_AGENT_TOOL_TARGETS.map((tool, index) => `${index + 1}. ${tool.label}`),
+    "예를 들면 “펜은 어디 있어?”, “도형은?”, “지우개 기능 설명해줘”처럼 물어보면 돼요."
+  ].join("\n");
+
+function normalizeToolAliasFollowUp(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[?!?.~…\s]/g, "")
+    .replace(/(?:은요|는요|이요|가요|요|은|는|이|가|을|를|도)$/u, "");
+}
+
+function isToolAliasFollowUp(prompt: string, tool: CanvasAgentToolTarget) {
+  const normalizedPrompt = normalizeToolAliasFollowUp(prompt);
+  if (!normalizedPrompt) return false;
+  return [tool.label, ...tool.aliases].some((alias) => normalizedPrompt === normalizeToolAliasFollowUp(alias));
+}
+
+export function readCanvasAgentToolHelpOverview(prompt: string): string | null {
+  const normalized = normalizeToolAliasFollowUp(prompt);
+  if (!normalized) return null;
+  return ["기능", "기능목록", "기능리스트", "목록", "리스트", "도움", "도움말", "사용법"].includes(normalized)
+    || /^(무슨기능|어떤기능|뭐할수|무엇을할수|할수있는것|사용가능한기능)/u.test(normalized)
+    ? CANVAS_AGENT_TOOL_HELP_OVERVIEW
+    : null;
+}
+
+function resolveToolTargetByNumber(prompt: string) {
+  const match = prompt.trim().match(/^(\d+)(?:번)?[.)?！!~\s]*$/u);
+  if (!match) return null;
+  const index = Number(match[1]) - 1;
+  return CANVAS_AGENT_TOOL_TARGETS[index] ?? null;
+}
+
 export function resolveCanvasAgentToolTarget(prompt: string): CanvasAgentToolTargetResolution | null {
   const normalized = prompt.trim().toLowerCase();
   if (!normalized) return null;
+  const numberedTool = resolveToolTargetByNumber(prompt);
+  if (numberedTool) return { mode: "explain", tool: numberedTool };
   const match = CANVAS_AGENT_TOOL_TARGETS
     .flatMap((tool) =>
-      tool.aliases.map((alias) => ({ alias: alias.toLowerCase(), tool }))
+      [tool.label, ...tool.aliases].map((alias) => ({ alias: alias.toLowerCase(), tool }))
     )
     .filter((item) => normalized.includes(item.alias))
     .sort((left, right) => right.alias.length - left.alias.length)[0]?.tool ?? null;
@@ -323,7 +368,9 @@ export function resolveCanvasAgentToolTarget(prompt: string): CanvasAgentToolTar
   const looksLikeToolGuide = TOOL_GUIDE_TERMS.some((term) => normalized.includes(term));
   if (looksLikeToolGuide) return { mode: "guide", tool: match };
   const looksLikeExplanation = TOOL_EXPLAIN_TERMS.some((term) => normalized.includes(term));
-  return looksLikeExplanation ? { mode: "explain", tool: match } : null;
+  return looksLikeExplanation || isToolAliasFollowUp(normalized, match)
+    ? { mode: "explain", tool: match }
+    : null;
 }
 
 export function findCanvasAgentToolTarget(target: string): CanvasAgentToolTarget | null {

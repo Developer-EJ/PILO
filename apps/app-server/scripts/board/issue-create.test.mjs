@@ -21,6 +21,7 @@ const githubIssueUuid = "44444444-4444-4444-8444-444444444444";
 const projectItemId = "55555555-5555-4555-8555-555555555555";
 const piloIssueId = "1001";
 const statusFieldId = "66666666-6666-4666-8666-666666666666";
+const installationId = "99999999-9999-4999-8999-999999999999";
 
 class FakeDatabase {
   constructor({ queryOneRows = [] } = {}) {
@@ -95,7 +96,7 @@ class FakeGithubIssueWriteService {
     this.calls = [];
   }
 
-  async createIssue(input) {
+  async createIssueWithProjectOAuth(input) {
     this.calls.push(input);
     if (this.error) {
       throw this.error;
@@ -196,6 +197,16 @@ class FakeBoardIssueCreateOperationService {
   async markSucceeded() {}
 }
 
+class FakeActivityLogService {
+  constructor() {
+    this.calls = [];
+  }
+
+  async append(transaction, input) {
+    this.calls.push({ input, transaction });
+  }
+}
+
 function createSubject(
   database,
   githubIssueWriteService = new FakeGithubIssueWriteService(),
@@ -203,12 +214,14 @@ function createSubject(
 ) {
   const workspaceService = new FakeWorkspaceService();
   const createQueries = new BoardIssueCreateQueries(database);
+  const activityLogService = new FakeActivityLogService();
   const createService = new BoardIssueCreateService(
     createQueries,
     workspaceService,
     githubIssueWriteService,
     githubProjectV2WriteService,
-    new FakeBoardIssueCreateOperationService()
+    new FakeBoardIssueCreateOperationService(),
+    activityLogService
   );
   const service = new BoardService(
     undefined,
@@ -220,6 +233,7 @@ function createSubject(
   );
 
   return {
+    activityLogService,
     database,
     githubIssueWriteService,
     githubProjectV2WriteService,
@@ -232,9 +246,11 @@ function createTargetRow(overrides = {}) {
   return {
     board_id: boardId,
     repository_id: repositoryId,
+    repository_installation_id: installationId,
     repository_owner_login: "Developer-EJ",
     repository_name: "PILO",
     project_v2_id: "77777777-7777-4777-8777-777777777777",
+    project_installation_id: installationId,
     github_project_node_id: "PVT_kwDOExample",
     status_field_id: statusFieldId,
     github_field_node_id: "PVTSSF_lADOExample",
@@ -315,6 +331,7 @@ function createdIssueRow(overrides = {}) {
     ]
   });
   const {
+    activityLogService,
     database: db,
     githubIssueWriteService,
     githubProjectV2WriteService,
@@ -362,6 +379,21 @@ function createdIssueRow(overrides = {}) {
     }
   ]);
   assert.equal(db.transactions.length, 1);
+  assert.equal(activityLogService.calls.length, 1);
+  assert.equal(activityLogService.calls[0].transaction, db.transactions[0]);
+  assert.deepEqual(activityLogService.calls[0].input, {
+    workspaceId,
+    actor: { type: "user", userId: currentUserId },
+    action: "pilo_issue_created",
+    target: { type: "pilo_issue", id: piloIssueId },
+    dedupeKey:
+      "board:pilo_issue_created:1001:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    metadata: {
+      version: 1,
+      summary: "Board 이슈를 생성했습니다.",
+      data: { boardId }
+    }
+  });
   assert.ok(db.queries.some((query) => /INSERT INTO github_issues/i.test(query.text)));
   assert.ok(
     db.queries.some((query) =>
@@ -418,6 +450,42 @@ function createdIssueRow(overrides = {}) {
   );
 
   assert.equal(database.queries.length, 0);
+}
+
+for (const [targetOverrides, expectedMessage] of [
+  [
+    { repository_installation_id: null },
+    "Board is disconnected from its GitHub installation"
+  ],
+  [
+    { project_installation_id: null },
+    "Board is disconnected from its GitHub installation"
+  ],
+  [
+    { project_installation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    "Board repository and ProjectV2 installations do not match"
+  ]
+]) {
+  const database = new FakeDatabase({
+    queryOneRows: [createTargetRow(targetOverrides)]
+  });
+  const { service } = createSubject(database);
+
+  await assert.rejects(
+    () =>
+      service.validateBoardIssueCreateInput(
+        currentUserId,
+        workspaceId,
+        boardId,
+        { columnId, title: "Installation eligibility validation" }
+      ),
+    (error) => {
+      assert.equal(error.getStatus(), 400);
+      assert.equal(error.getResponse().error.code, "BAD_REQUEST");
+      assert.equal(error.getResponse().error.message, expectedMessage);
+      return true;
+    }
+  );
 }
 
 {

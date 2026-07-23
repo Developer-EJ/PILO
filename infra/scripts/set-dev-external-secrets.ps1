@@ -53,6 +53,7 @@ $jwtSecret = Read-OptionalSecureText "JWT_SECRET"
 $sessionSecret = Read-OptionalSecureText "SESSION_SECRET"
 $googleOAuthClientId = Read-Host "GOOGLE_OAUTH_CLIENT_ID"
 $googleOAuthClientSecret = Read-OptionalSecureText "GOOGLE_OAUTH_CLIENT_SECRET"
+$googleCalendarTokenEncryptionKey = Read-OptionalSecureText "GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY"
 $githubLoginClientId = Read-Host "GITHUB_LOGIN_CLIENT_ID"
 $githubLoginClientSecret = Read-OptionalSecureText "GITHUB_LOGIN_CLIENT_SECRET"
 $githubUserOAuthClientId = Read-Host "GITHUB_USER_OAUTH_CLIENT_ID"
@@ -64,6 +65,7 @@ $githubPrivateKeyPath = Read-Host "GITHUB_APP_PRIVATE_KEY file path"
 $githubWebhookSecret = Read-OptionalSecureText "GITHUB_WEBHOOK_SECRET"
 $githubTokenEncryptionKey = Read-OptionalSecureText "GITHUB_TOKEN_ENCRYPTION_KEY"
 $meetingReportEventToken = Read-OptionalSecureText "MEETING_REPORT_EVENT_TOKEN"
+$realtimeCanvasActivityToken = Read-OptionalSecureText "REALTIME_CANVAS_ACTIVITY_TOKEN"
 $livekitApiKey = Read-OptionalSecureText "LIVEKIT_API_KEY"
 $livekitApiSecret = Read-OptionalSecureText "LIVEKIT_API_SECRET"
 $livekitUrl = Read-Host "LIVEKIT_URL"
@@ -90,6 +92,7 @@ Put-SecretIfPresent "pilo-dev/app-server/SESSION_SECRET" $sessionSecret
 
 Put-SecretIfPresent "pilo-dev/app-server/GOOGLE_OAUTH_CLIENT_ID" $googleOAuthClientId
 Put-SecretIfPresent "pilo-dev/app-server/GOOGLE_OAUTH_CLIENT_SECRET" $googleOAuthClientSecret
+Put-SecretIfPresent "pilo-dev/app-server/GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY" $googleCalendarTokenEncryptionKey
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_LOGIN_CLIENT_ID" $githubLoginClientId
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_LOGIN_CLIENT_SECRET" $githubLoginClientSecret
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_USER_OAUTH_CLIENT_ID" $githubUserOAuthClientId
@@ -106,6 +109,7 @@ Put-SecretIfPresent "pilo-dev/ai-worker/GITHUB_APP_PRIVATE_KEY" $githubPrivateKe
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_WEBHOOK_SECRET" $githubWebhookSecret
 Put-SecretIfPresent "pilo-dev/app-server/GITHUB_TOKEN_ENCRYPTION_KEY" $githubTokenEncryptionKey
 Put-SecretIfPresent "pilo-dev/shared/MEETING_REPORT_EVENT_TOKEN" $meetingReportEventToken
+Put-SecretIfPresent "pilo-dev/shared/REALTIME_CANVAS_ACTIVITY_TOKEN" $realtimeCanvasActivityToken
 
 Put-SecretIfPresent "pilo-dev/app-server/LIVEKIT_API_KEY" $livekitApiKey
 Put-SecretIfPresent "pilo-dev/app-server/LIVEKIT_API_SECRET" $livekitApiSecret

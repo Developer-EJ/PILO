@@ -15,18 +15,22 @@ const [
   boardDataHook,
   boardPanel,
   boardKanban,
+  boardIssueCard,
   boardIssueSheet,
   boardIssueCreateForm,
-  boardIssueCreateDialog
+  boardIssueCreateDialog,
+  boardIssueAssigneeSelector
 ] = await Promise.all([
   readFeatureFile("./types/index.ts"),
   readFeatureFile("./api/client.ts"),
   readFeatureFile("./hooks/use-board-workspace-data.ts"),
   readFeatureFile("./components/board-panel.tsx"),
   readFeatureFile("./components/board-kanban.tsx"),
+  readFeatureFile("./components/board-issue-card.tsx"),
   readFeatureFile("./components/board-issue-sheet.tsx"),
   readFeatureFile("./components/board-issue-create-form.tsx"),
-  readFeatureFile("./components/board-issue-create-dialog.tsx")
+  readFeatureFile("./components/board-issue-create-dialog.tsx"),
+  readFeatureFile("./components/board-issue-assignee-selector.tsx")
 ]);
 
 assert.match(boardTypes, /export type BoardPayload/);
@@ -92,9 +96,13 @@ assert.match(
 assert.match(boardDataHook, /listBoards/);
 assert.match(boardDataHook, /listBoardColumns/);
 assert.match(boardDataHook, /listBoardIssues/);
+assert.match(boardDataHook, /BOARD_ISSUES_PAGE_LIMIT\s*=\s*100/);
+assert.match(boardDataHook, /loadAllBoardIssuePages/);
+assert.match(boardDataHook, /onFirstPage:[\s\S]*setBoardStatus\("success"\)/);
+assert.match(boardDataHook, /createBoardIssueLoadPublicationGuard/);
 assert.match(boardDataHook, /getBoardFilterOptions/);
 assert.match(boardDataHook, /Promise\.all/);
-assert.match(boardDataHook, /reloadBoard/);
+assert.match(boardDataHook, /refreshBoard/);
 assert.match(boardDataHook, /hydrateBoard/);
 assert.match(boardDataHook, /createBoardIssue/);
 assert.match(boardDataHook, /moveIssueStatus/);
@@ -113,37 +121,69 @@ assert.match(boardPanel, /moveIssueStatus/);
 assert.match(boardPanel, /statusMoveError/);
 assert.match(boardPanel, /issueCreateError/);
 assert.match(boardPanel, /isIssueCreateModalOpen/);
-assert.match(boardPanel, /readGithubBoardSelection/);
-assert.match(boardPanel, /githubBoardSelection/);
-assert.match(boardPanel, /targetBoard/);
-assert.match(boardPanel, /hydratingSelectionKey/);
-assert.match(
-  boardPanel,
-  /boardData\.hydrateBoard\(\{\s*projectV2Id: githubBoardSelection\.projectV2Id,\s*repositoryId: githubBoardSelection\.repositoryId\s*\}\)/,
-  "Board should hydrate with the repository and ProjectV2 selected in GitHub"
-);
-assert.match(
-  boardPanel,
-  /targetBoard = useMemo\([\s\S]*board\.repository\.id === githubBoardSelection\.repositoryId[\s\S]*board\.project\.id === githubBoardSelection\.projectV2Id/,
-  "Board should select an existing Board that matches the GitHub selection before hydrating"
-);
+assert.doesNotMatch(boardPanel, /readGithubBoardSelection|boardData\.hydrateBoard/);
+assert.match(boardPanel, /boardData\.activeSource\?\.boardId/);
+assert.doesNotMatch(boardPanel, /boardData\.boards\[0\]|readGithubBoardSelection/);
 assert.doesNotMatch(boardPanel, /BoardHydrationForm/);
 assert.doesNotMatch(boardPanel, /board-hydrate-dock/);
 assert.match(boardPanel, /query/);
 assert.match(boardPanel, /state/);
 assert.match(boardPanel, /assignee/);
 assert.match(boardPanel, /label/);
+assert.match(boardPanel, /이슈 불러오는 중/);
+assert.match(boardPanel, /다시 시도/);
 assert.match(boardPanel, /data-board-main/);
 assert.match(boardPanel, /workspace-board/);
 assert.match(boardPanel, /board-toolbar/);
 assert.match(boardPanel, /board-summary/);
 assert.match(boardPanel, /summary-chip/);
 assert.match(boardPanel, /board-controls/);
+assert.match(boardPanel, />Board</);
+assert.match(boardPanel, /전체/);
+assert.match(boardPanel, /열림/);
+assert.match(boardPanel, /닫힘/);
+assert.match(boardPanel, /마지막 업데이트/);
+assert.match(boardPanel, /SelectTrigger/);
+assert.match(boardPanel, /GitHub 저장소/);
 assert.match(
   boardPanel,
-  /board-controls[\s\S]*placeholder="Search issues"[\s\S]*<select[\s\S]*Board 선택[\s\S]*RefreshCw[\s\S]*setIsIssueCreateModalOpen\(true\)/,
-  "Board toolbar controls should keep search, board selection, refresh, and new issue together"
+  /board-toolbar[\s\S]*RefreshCw[\s\S]*board-controls[\s\S]*placeholder="Search issues"[\s\S]*setIsIssueCreateModalOpen\(true\)/,
+  "Board toolbar should keep search, refresh, and new issue controls"
 );
+assert.doesNotMatch(boardPanel, />Board 선택</);
+assert.match(boardPanel, /text-lg font-semibold/);
+assert.match(boardPanel, /text-xs/);
+assert.match(boardIssueCard, /text-base/);
+assert.match(boardKanban, /lane-name[\s\S]*text-base/);
+assert.match(boardIssueCreateForm, /text-\[21px\]/);
+assert.match(boardIssueCreateDialog, /text-\[27px\]/);
+assert.match(boardIssueSheet, /text-\[27px\]/);
+assert.match(boardIssueAssigneeSelector, /text-\[18px\]/);
+assert.match(boardPanel, /className="h-9"/);
+assert.match(boardIssueSheet, /text-\[19\.2px\]/);
+assert.match(boardIssueAssigneeSelector, /text-\[19\.2px\]/);
+assert.match(
+  boardIssueCreateForm,
+  /<Button\s+type="submit"\s+size="lg"\s+className="[^"]*text-\[21px\]/
+);
+assert.match(
+  boardPanel,
+  /<Input\s+className="[^"]*text-sm[^"]*md:text-sm/
+);
+assert.match(
+  boardIssueCreateForm,
+  /<Input\s+className="[^"]*text-\[18\.75px\][^"]*md:text-\[18\.75px\]/
+);
+assert.match(
+  boardIssueSheet,
+  /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
+);
+assert.match(
+  boardIssueAssigneeSelector,
+  /<Input\s+className="[^"]*text-\[21px\][^"]*md:text-\[21px\]/
+);
+assert.match(boardIssueCard, /avatar[^\n]*size-6[^\n]*text-\[10px\]/);
+assert.doesNotMatch(boardIssueCard, /avatar[^\n]*size-9/);
 assert.doesNotMatch(boardPanel, /board-title/);
 assert.doesNotMatch(boardPanel, /board-icon/);
 assert.doesNotMatch(boardPanel, /board-issue-create-dock/);
@@ -170,7 +210,7 @@ assert.match(boardKanban, /columns/);
 assert.match(boardKanban, /issuesByColumnId/);
 assert.match(boardKanban, /onOpenIssue/);
 assert.match(boardKanban, /onMoveIssue/);
-assert.match(boardKanban, /draggable/);
+assert.match(boardIssueCard, /draggable/);
 assert.match(boardKanban, /onDrop/);
 assert.match(boardKanban, /kanban-scroll/);
 assert.match(boardKanban, /kanban-board/);
@@ -178,6 +218,115 @@ assert.match(boardKanban, /lane-header/);
 assert.match(boardKanban, /lane-stack/);
 assert.match(boardKanban, /issue-card/);
 assert.doesNotMatch(boardKanban, /읽기 전용/);
+assert.match(boardKanban, /orderBoardColumns/);
+assert.match(boardKanban, /resolveMobileBoardColumnId/);
+assert.match(boardKanban, /aria-selected/);
+assert.match(boardKanban, /md:hidden/);
+assert.match(boardKanban, /hidden md:grid/);
+assert.match(boardKanban, /overflow-x-auto/);
+assert.match(boardKanban, /import \{ useIsMobile \} from "@\/hooks\/use-mobile"/);
+assert.match(boardKanban, /const isMobile = useIsMobile\(\)/);
+assert.match(boardKanban, /const \[hasMounted, setHasMounted\] = useState\(false\)/);
+assert.match(boardKanban, /useEffect\(\(\) => \{\s*setHasMounted\(true\);\s*\}, \[\]\)/);
+assert.match(
+  boardKanban,
+  /if \(!hasMounted\) \{[\s\S]*?aria-busy="true"[\s\S]*?\}/,
+  "Hydration must render a neutral placeholder before choosing a viewport variant"
+);
+assert.match(
+  boardKanban,
+  /function renderColumn\(\s*column: BoardColumnPayload,\s*index: number,\s*enableDrop: boolean,\s*enableCursorTarget: boolean/,
+  "Each mounted viewport variant must explicitly expose cursor targets"
+);
+assert.match(boardKanban, /enableCursorTarget\s*\? pageCursorTargetAttributes/);
+assert.match(
+  boardKanban,
+  /isSelected \? renderColumn\(column, index, false, true\) : null/,
+  "The visible mobile lane must expose cursor targets"
+);
+assert.match(
+  boardKanban,
+  /renderColumn\(column, index, true, true\)/,
+  "The visible desktop lanes should retain cursor targets"
+);
+assert.match(boardKanban, /id=\{`board-column-tab-\$\{column.id\}`\}/);
+assert.match(
+  boardKanban,
+  /aria-controls=\{`board-column-panel-\$\{column.id\}`\}/
+);
+assert.match(boardKanban, /tabIndex=\{resolvedMobileColumnId === column.id \? 0 : -1\}/);
+assert.match(boardKanban, /onKeyDown=\{handleMobileTabKeyDown\}/);
+assert.match(boardKanban, /role="tabpanel"/);
+assert.match(
+  boardKanban,
+  /aria-labelledby=\{`board-column-tab-\$\{column.id\}`\}/
+);
+assert.match(boardKanban, /case "ArrowRight":/);
+assert.match(boardKanban, /case "ArrowLeft":/);
+assert.match(boardKanban, /case "Home":/);
+assert.match(boardKanban, /case "End":/);
+assert.match(boardKanban, /nextTab\?\.focus\(\)/);
+assert.match(
+  boardKanban,
+  /isMobile \? \([\s\S]*?\) : \([\s\S]*?renderColumn\(column, index, true, true\)/,
+  "Only one viewport variant should mount while both retain cursor targets"
+);
+assert.match(
+  boardKanban,
+  /orderedColumns\.map\(\(column, index\) => \{[\s\S]*?const isSelected = resolvedMobileColumnId === column.id;[\s\S]*?role="tabpanel"[\s\S]*?hidden=\{!isSelected\}/,
+  "Every mobile tab must retain the panel ID it controls"
+);
+
+assert.match(
+  boardIssueCard,
+  /enableCursorTarget: boolean/,
+  "Issue cards must receive the variant cursor-target policy"
+);
+assert.match(
+  boardIssueCard,
+  /enableCursorTarget\s*\? pageCursorTargetAttributes/,
+  "Issue cursor attributes must be omitted when the rendered variant is hidden"
+);
+
+assert.match(
+  boardPanel,
+  /const ALL_FILTER_VALUE = "filter:all"/,
+  "The all-filter UI value must use a reserved encoded namespace"
+);
+assert.match(boardPanel, /function encodeFilterValue/);
+assert.match(boardPanel, /function decodeFilterValue/);
+assert.match(boardPanel, /encodeURIComponent\(value \?\? ""\)/);
+assert.match(boardPanel, /decodeURIComponent/);
+assert.match(
+  boardPanel,
+  /assignee\s*\? encodeFilterValue\(ASSIGNEE_FILTER_PREFIX, assignee\)\s*: ALL_FILTER_VALUE/
+);
+assert.match(
+  boardPanel,
+  /label\s*\? encodeFilterValue\(LABEL_FILTER_PREFIX, label\)\s*: ALL_FILTER_VALUE/
+);
+assert.match(boardPanel, /decodeFilterValue\(value, ASSIGNEE_FILTER_PREFIX\)/);
+assert.match(boardPanel, /decodeFilterValue\(value, LABEL_FILTER_PREFIX\)/);
+assert.match(
+  boardPanel,
+  /value=\{encodeFilterValue\(ASSIGNEE_FILTER_PREFIX, option.login\)\}/,
+  "A literal __all__ login must remain selectable"
+);
+assert.match(
+  boardPanel,
+  /value=\{encodeFilterValue\(LABEL_FILTER_PREFIX, option.name\)\}/,
+  "Labels named __all__ or __pilo_all_filters__ must remain selectable"
+);
+
+assert.match(boardIssueCard, /from "@\/components\/ui\/card"/);
+assert.match(boardIssueCard, /<Card/);
+assert.match(boardIssueCard, /visibleLabels/);
+assert.match(boardIssueCard, /visibleAssignees/);
+assert.match(boardIssueCard, /담당자 없음/);
+assert.match(boardIssueCard, /role="button"/);
+assert.match(boardIssueCard, /tabIndex=\{0\}/);
+assert.match(boardIssueCard, /Enter/);
+assert.match(boardIssueCard, /application\/x-pilo-board-issue/);
 
 assert.match(boardIssueSheet, /DialogPrimitive/);
 assert.match(boardIssueSheet, /DialogPrimitive\.Popup/);
@@ -187,10 +336,11 @@ assert.match(boardIssueSheet, /overflow-y-auto/);
 assert.doesNotMatch(boardIssueSheet, /@\/components\/ui\/sheet/);
 assert.match(boardIssueSheet, /getBoardIssue/);
 assert.match(boardIssueSheet, /updateBoardIssue/);
-assert.match(boardIssueSheet, /listBoardIssuePullRequests/);
+assert.doesNotMatch(boardIssueSheet, /listBoardIssuePullRequests/);
 assert.match(boardIssueSheet, /isEditing/);
 assert.match(boardIssueSheet, /isSaving/);
 assert.match(boardIssueSheet, /saveError/);
 assert.match(boardIssueSheet, /onIssueUpdated/);
-assert.match(boardIssueSheet, /관련 PR/);
+assert.doesNotMatch(boardIssueSheet, /관련 PR/);
+assert.doesNotMatch(boardIssueSheet, /연결된 PR이 없습니다/);
 assert.match(boardIssueSheet, /htmlUrl/);

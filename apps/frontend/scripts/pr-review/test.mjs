@@ -17,6 +17,13 @@ const prReviewRoutePage = await readFile(
   new URL("../../src/app/(workspace)/pr-review/page.tsx", import.meta.url),
   "utf8"
 );
+const prReviewRoomsRoutePage = await readFile(
+  new URL(
+    "../../src/app/(workspace)/pr-review/rooms/page.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewApiClient = await readFile(
   new URL("../../src/features/pr-review/api/client.ts", import.meta.url),
   "utf8"
@@ -35,6 +42,20 @@ const prReviewAnalysisStatusComponent = await readFile(
 const prReviewPanel = await readFile(
   new URL(
     "../../src/features/pr-review/components/pr-review-panel.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewRoomsPanel = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/pr-review-rooms-panel.tsx",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewRoomVisibility = await readFile(
+  new URL(
+    "../../src/features/pr-review/review-room-visibility.ts",
     import.meta.url
   ),
   "utf8"
@@ -77,6 +98,13 @@ const prReviewCanvasRealtimeBridge = await readFile(
 const prReviewCanvasPresence = await readFile(
   new URL(
     "../../src/features/pr-review/realtime/usePrReviewCanvasPresence.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const prReviewConflictDraftLock = await readFile(
+  new URL(
+    "../../src/features/pr-review/realtime/usePrReviewConflictDraftLock.ts",
     import.meta.url
   ),
   "utf8"
@@ -130,6 +158,13 @@ const prReviewConflictDrafts = await readFile(
   ),
   "utf8"
 );
+const prReviewConflictDraftMerge = await readFile(
+  new URL(
+    "../../src/features/pr-review/components/review-canvas/pr-review-conflict-draft-merge.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const prReviewSubmitReviewModal = await readFile(
   new URL(
     "../../src/features/pr-review/components/review-canvas/PrReviewSubmitReviewModal.tsx",
@@ -155,6 +190,10 @@ const prReviewShapeUtils = await readFile(
 assert.match(prReviewTypes, /export type PrReviewRepository/);
 assert.match(prReviewTypes, /export type PrReviewPullRequest/);
 assert.match(prReviewTypes, /export type PrReviewSession/);
+assert.match(prReviewTypes, /export type PrReviewRoom =/);
+assert.match(prReviewTypes, /analyzingReviewSessionId: string \| null/);
+assert.match(prReviewTypes, /export type PrReviewRoomList =/);
+assert.match(prReviewTypes, /export type PrReviewRoomStart =/);
 assert.match(prReviewTypes, /export type PrReviewAnalysisErrorCode/);
 assert.match(prReviewTypes, /analysisError: PrReviewAnalysisError \| null/);
 assert.match(prReviewTypes, /export type PrReviewSummary/);
@@ -168,6 +207,9 @@ assert.match(prReviewTypes, /export type PrReviewFileDiff =/);
 assert.match(prReviewTypes, /export type PrReviewConflictAnalysis =/);
 assert.match(prReviewTypes, /export type PrReviewConflictFile =/);
 assert.match(prReviewTypes, /export type PrReviewConflictSuggestion =/);
+assert.match(prReviewTypes, /export type PrReviewConflictDraftSuggestion =/);
+assert.match(prReviewTypes, /export type PrReviewConflictDraft =/);
+assert.match(prReviewTypes, /export type UpdatePrReviewConflictDraftInput =/);
 assert.match(prReviewTypes, /export type PrReviewConflictResolvedHunk =/);
 assert.match(prReviewTypes, /export type ApplyPrReviewConflictsInput =/);
 assert.match(prReviewTypes, /export type PrReviewConflictsApplyResult =/);
@@ -185,10 +227,14 @@ assert.match(prReviewTypes, /export type MergePrReviewSessionInput =/);
 assert.match(prReviewTypes, /export type PrReviewMergeResult =/);
 assert.match(prReviewTypes, /pullRequestMergedAt/);
 assert.match(prReviewNavigation, /href: "\/pr-review"/);
+assert.match(prReviewNavigation, /title: "PR 선택"/);
+assert.match(prReviewNavigation, /title: "리뷰 공간", href: "\/pr-review\/rooms"/);
 assert.match(prReviewNavigation, /title: "PR/);
 assert.doesNotMatch(prReviewNavigation, /\/pr-review#/);
 assert.match(prReviewPage, /<PrReviewPanel \/>/);
 assert.match(prReviewRoutePage, /import "tldraw\/tldraw\.css"/);
+assert.match(prReviewRoomsRoutePage, /PrReviewRoomsPage as default/);
+assert.match(prReviewRoomsRoutePage, /import "tldraw\/tldraw\.css"/);
 assert.match(
   prReviewRoutePage,
   /shared\/canvas-realtime\/canvas-realtime\.css/
@@ -197,7 +243,7 @@ assert.match(prReviewApiClient, /createPrReviewApiClient/);
 assert.match(prReviewPanel, /PrReviewCanvasErrorBoundary/);
 assert.match(prReviewCanvasErrorBoundary, /getDerivedStateFromError/);
 assert.match(prReviewCanvasErrorBoundary, /리뷰 Canvas를 열지 못했습니다/);
-assert.match(prReviewCanvasErrorBoundary, /PR 목록으로/);
+assert.match(prReviewCanvasErrorBoundary, /backLabel/);
 assert.match(prReviewErrorMessage, /Pull request is closed or merged/);
 assert.match(
   prReviewErrorMessage,
@@ -222,11 +268,15 @@ assert.match(prReviewApiClient, /retryReviewSession/);
 assert.match(prReviewApiClient, /getReviewSessionSummary/);
 assert.match(prReviewApiClient, /getReviewSessionCanvas/);
 assert.match(prReviewApiClient, /getReviewRoom/);
+assert.match(prReviewApiClient, /listReviewRooms/);
+assert.match(prReviewApiClient, /workspaceGithubPath\(workspaceId, "\/review-rooms"\)/);
 assert.match(prReviewApiClient, /listReviewCanvasShapes/);
 assert.match(prReviewApiClient, /getReviewCanvasShape/);
 assert.match(prReviewApiClient, /updateReviewCanvasFileShape/);
 assert.match(prReviewApiClient, /getReviewSessionConflicts/);
 assert.match(prReviewApiClient, /createReviewFileConflictSuggestion/);
+assert.match(prReviewApiClient, /getReviewFileConflictDraft/);
+assert.match(prReviewApiClient, /updateReviewFileConflictDraft/);
 assert.match(prReviewApiClient, /applyReviewSessionConflictResolutions/);
 assert.match(prReviewApiClient, /getReviewSessionResult/);
 assert.match(prReviewApiClient, /submitReviewSession/);
@@ -237,12 +287,22 @@ assert.match(prReviewApiClient, /updateReviewFileDecision/);
 assert.match(prReviewApiClient, /\/result/);
 assert.match(prReviewApiClient, /\/conflicts/);
 assert.match(prReviewApiClient, /\/conflict-suggestion/);
+assert.match(prReviewApiClient, /\/conflict-draft/);
 assert.match(prReviewApiClient, /\/conflict-apply/);
 assert.match(prReviewApiClient, /\/submissions/);
 assert.match(prReviewApiClient, /\/merge/);
 assert.match(prReviewApiClient, /method: "POST"/);
 assert.match(prReviewApiClient, /\/review-files/);
 assert.match(prReviewApiClient, /method: "PATCH"/);
+assert.match(prReviewConflictDrafts, /buildPrReviewConflictMarkerDraft/);
+assert.match(prReviewConflictDrafts, /getPrReviewConflictHunkLocations/);
+assert.match(prReviewFileDiffDrawer, /코드 편집 시작/);
+assert.match(prReviewFileDiffDrawer, /전체 코드 Conflict 구간 탐색/);
+assert.match(prReviewFileDiffDrawer, /hunkLocation/);
+assert.match(prReviewFileDiffDrawer, /이전/);
+assert.match(prReviewFileDiffDrawer, /다음/);
+assert.match(prReviewResolvedCodeEditor, /cm-conflictMarkerLine/);
+assert.match(prReviewResolvedCodeEditor, /<<<<<<<\|=======\|>>>>>>>/);
 assert.match(prReviewApiClient, /\/review-sessions/);
 assert.match(prReviewApiClient, /\/retry/);
 assert.doesNotMatch(prReviewApiClient, /features\/github-integration/);
@@ -258,6 +318,16 @@ assert.match(prReviewPanel, /workspaceId=\{workspaceId\}/);
 assert.match(prReviewPanel, /onGoToGithub=\{goToGithubPage\}/);
 assert.match(prReviewPanel, /onReviewSessionCreated/);
 assert.match(prReviewPanel, /activeReviewSession/);
+assert.match(prReviewPanel, /view\?: "pull-requests" \| "rooms"/);
+assert.match(prReviewPanel, /<PrReviewRoomsPanel onEnterReviewSession=\{enterReviewSession\} \/>/);
+assert.match(prReviewPanel, /<ReviewSessionLoadErrorState/);
+assert.match(prReviewPanel, /setRequestedReviewSessionId\(null\)/);
+assert.match(prReviewRoomsPanel, /payload\.rooms\.filter\(isVisibleReviewRoom\)/);
+assert.match(prReviewRoomsPanel, /새 버전 분석 중/);
+assert.match(prReviewRoomsPanel, /completionLabel/);
+assert.match(prReviewRoomsPanel, /읽기 전용으로 열립니다/);
+assert.match(prReviewRoomVisibility, /room\.currentReviewSessionId \|\| room\.analyzingReviewSessionId/);
+assert.match(prReviewRoomVisibility, /room\.currentReviewSessionId \?\? room\.analyzingReviewSessionId/);
 assert.match(prReviewPanel, /PrReviewAnalysisStatus/);
 assert.match(prReviewPanel, /AbortController/);
 assert.match(prReviewPanel, /replaceReviewSessionRoute/);
@@ -273,6 +343,11 @@ assert.match(prReviewAnalysisStatus, /PR_REVIEW_ANALYSIS_DELAY_NOTICE_MS = 5 \* 
 assert.match(prReviewAnalysisStatus, /shouldPollPrReviewAnalysis/);
 assert.match(prReviewAnalysisStatus, /isPrReviewAnalysisDelayed/);
 assert.match(prReviewAnalysisStatusComponent, /PR 분석 중/);
+assert.match(prReviewAnalysisStatusComponent, /Pretendard/);
+assert.match(prReviewAnalysisStatusComponent, /Noto Sans KR/);
+assert.match(prReviewAnalysisStatusComponent, /Malgun Gothic/);
+assert.match(prReviewAnalysisStatusComponent, /break-keep text-balance/);
+assert.match(prReviewAnalysisStatusComponent, /자동으로 리뷰 공간을 엽니다/);
 assert.match(prReviewAnalysisStatusComponent, /분석 시간이 예상보다 길어지고 있습니다/);
 assert.match(prReviewAnalysisStatusComponent, /pollingError/);
 assert.match(prReviewAnalysisStatusComponent, /getPrReviewAnalysisRetryLabel/);
@@ -287,16 +362,18 @@ assert.match(prReviewCanvasShell, /Conflict 정보가 오래되었습니다/);
 assert.match(prReviewCanvasShell, /Conflict 정보 다시 불러오기/);
 assert.match(prReviewCanvasShell, /PrReviewCanvasSurface/);
 assert.match(prReviewCanvasShell, /realtimeIdentity=\{realtimeIdentity\}/);
-assert.match(prReviewCanvasShell, /setSelectedReviewFileId/);
+assert.match(prReviewCanvasShell, /setOpenedReviewFileId/);
 assert.match(prReviewCanvasShell, /PrReviewFileDiffDrawer/);
 assert.match(prReviewFileDiffDrawer, /file\.decisionCarriedOver/);
 assert.match(prReviewFileDiffDrawer, /이전 버전에서 유지된 판단입니다/);
 assert.match(prReviewCanvasShell, /applyReviewSessionConflictResolutions/);
 assert.match(prReviewCanvasShell, /buildPrReviewConflictsApplyInput/);
-assert.match(prReviewCanvasShell, /GitHub에 전체 적용/);
-assert.match(prReviewCanvasShell, /해결 준비/);
+assert.match(prReviewCanvasShell, /Conflict 해결안 적용/);
+assert.match(prReviewCanvasShell, /conflictApplyProgress/);
+assert.match(prReviewFileDiffDrawer, /GitHub에 전체 적용/);
+assert.match(prReviewFileDiffDrawer, /onOpenConflictApply/);
+assert.match(prReviewFileDiffDrawer, /conflictApplyDisabledReason/);
 assert.match(prReviewCanvasShell, /pilo-github-oauth-reconnect/);
-assert.match(prReviewCanvasShell, /Conflict 해결안 전체 적용/);
 assert.match(prReviewCanvasShell, /PrReviewSubmitReviewModal/);
 assert.match(prReviewCanvasShell, /setIsSubmitReviewModalOpen/);
 assert.match(prReviewCanvasShell, /createNewReviewSession/);
@@ -310,7 +387,7 @@ assert.match(prReviewCanvasShell, /setSummary/);
 assert.match(prReviewCanvasShell, /updatedFile\.riskLevel/);
 assert.match(
   prReviewCanvasShell,
-  /selectedReviewFileId=\{selectedReviewFileId\}/
+  /onFileOpen=\{handleOpenedReviewFileChange\}/
 );
 assert.match(prReviewCanvasShell, /conflictAnalysis=\{conflictAnalysis\}/);
 assert.match(prReviewCanvasShell, /conflictFile=\{selectedConflictFile\}/);
@@ -365,18 +442,38 @@ assert.match(prReviewCanvasSurface, /createShapeId/);
 assert.match(prReviewCanvasSurface, /canvas\.edges/);
 assert.match(prReviewCanvasSurface, /canvas\.flows/);
 assert.match(prReviewCanvasSurface, /isPrReviewFileNodeShape/);
-assert.match(prReviewCanvasSurface, /selectReviewFileNode/);
-assert.match(prReviewCanvasSurface, /selectedReviewFileId/);
+assert.match(prReviewCanvasSurface, /onFileOpen/);
+assert.match(prReviewCanvasSurface, /window\.addEventListener\("keydown", handleKeyDown\)/);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasPersistenceBridge/);
 assert.match(prReviewCanvasSurface, /usePrReviewCanvasPresence/);
+assert.match(
+  prReviewCanvasSurface,
+  /\[realtimeIdentity, reviewRoom\?\.canvasId, workspaceId\]/,
+);
 assert.match(prReviewCanvasSurface, /PrReviewCanvasRealtimeBridge/);
 assert.match(prReviewCanvasSurface, /reviewRoom\?\.status === "completed"/);
 assert.match(prReviewCanvasSurface, /persistedFileShapeEnabled && !readOnly/);
 assert.match(prReviewCanvasSurface, /registerReviewShapePolicy/);
 assert.match(prReviewCanvasSurface, /updatePrReviewRelationGeometry/);
+assert.match(prReviewCanvasSurface, /PrReviewRelationInspector/);
+assert.match(prReviewCanvasSurface, /collapseStoredSemanticRelationShapes/);
+assert.match(prReviewCanvasSurface, /buildMissingStoredReviewOrderShapes/);
+assert.match(prReviewCanvasSurface, /findMissingPrReviewOrderEdges/);
+assert.match(prReviewCanvasSurface, /buildStoredFlowLabelShapes/);
+assert.match(prReviewCanvasSurface, /roleTypeByReviewFileId/);
+assert.match(prReviewCanvasSurface, /hasPrReviewRelationAnchors/);
+assert.match(prReviewCanvasSurface, /relationCount: details\.length/);
+assert.match(prReviewCanvasSurface, /선택한 관계 \$\{relationDetails\.length\}개/);
+assert.match(prReviewCanvasSurface, /aria-label="선택한 파일 관계"/);
 assert.match(prReviewCanvasSurface, /buildPrReviewFileShapeUpdateInput/);
+assert.match(prReviewCanvasSurface, /buildPrReviewGraphPresentation/);
+assert.match(prReviewCanvasSurface, /createPrReviewFlowLayout/);
+assert.match(prReviewCanvasSurface, /PrReviewGraphControls/);
+assert.match(prReviewCanvasSurface, /pinned: true/);
 assert.match(prReviewCanvasSurface, /riskLevel: fileNodeData\.riskLevel/);
 assert.match(prReviewCanvasSurface, /conflictReason: conflictMetadata\.conflictReason/);
+assert.match(prReviewCanvasSurface, /fileByPath/);
+assert.match(prReviewCanvasSurface, /fileByPath\.get\(shape\.props\.filePath\)/);
 assert.doesNotMatch(prReviewCanvasSurface, /features\/canvas/);
 assert.doesNotMatch(prReviewCanvasSurface, /PiloCanvasRuntime/);
 assert.doesNotMatch(prReviewCanvasSurface, /canvas_freeform_shapes/);
@@ -389,7 +486,12 @@ assert.match(prReviewCanvasPresence, /canvas:sync:required/);
 assert.match(prReviewCanvasPresence, /lastSeenOpSeq/);
 assert.match(prReviewCanvasSurface, /listReviewCanvasOperations/);
 assert.match(prReviewCanvasSurface, /readPrReviewCanvasOperationShape/);
+assert.doesNotMatch(prReviewFileNodeShapeUtil, /<foreignObject/);
 assert.match(prReviewCanvasPresence, /setReadOnly\(payload\.readOnly\)/);
+assert.match(
+  prReviewCanvasPresence,
+  /setReadOnly\(payload\.readOnly\);\s+onRoomJoinedRef\.current\?\.\(\);/,
+);
 assert.match(prReviewCanvasPresence, /STALE_PRESENCE_TIMEOUT_MS = 15_000/);
 assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:lock/);
 assert.doesNotMatch(prReviewCanvasPresence, /canvas:shape:preview/);
@@ -401,15 +503,33 @@ assert.match(prReviewCanvasPersistence, /buildPrReviewFileShapeUpdateInput/);
 assert.match(prReviewCanvasPersistence, /buildPrReviewRelationEdgeGeometry/);
 assert.match(prReviewCanvasSurface, /PrReviewFileNodeActivationBridge/);
 assert.doesNotMatch(prReviewCanvasSurface, /PrReviewSelectionBridge/);
-assert.match(prReviewNodeActivation, /shouldActivatePrReviewFileNode/);
+assert.match(
+  prReviewNodeActivation,
+  /registerPrReviewFileNodeActivationHandler/
+);
+assert.match(prReviewNodeActivation, /activatePrReviewFileNode/);
 assert.doesNotMatch(prReviewCanvasPersistence, /features\/canvas/);
 assert.match(prReviewFileDiffDrawer, /getReviewFileDiff/);
 assert.match(prReviewFileDiffDrawer, /updateReviewFileDecision/);
 assert.match(prReviewFileDiffDrawer, /Conflict 해결/);
 assert.match(prReviewFileDiffDrawer, /AI 해결안 생성/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안 다시 생성/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안 사용/);
+assert.match(prReviewFileDiffDrawer, /AI 해결안 전체 사용/);
+assert.match(prReviewFileDiffDrawer, /선택 취소/);
+assert.match(prReviewFileDiffDrawer, /handleResolutionChoiceReset/);
+assert.match(prReviewFileDiffDrawer, /ConflictAiResolutionPreview/);
+assert.match(prReviewFileDiffDrawer, /기존 선택과 코드는 자동으로 바뀌지 않습니다/);
+assert.match(prReviewFileDiffDrawer, /value === conflictDraft\.resolvedContent/);
+assert.ok(
+  prReviewFileDiffDrawer.indexOf("<ConflictAiResolutionPreview") <
+    prReviewFileDiffDrawer.indexOf("<ConflictUnifiedCodePane")
+);
 assert.match(prReviewFileDiffDrawer, /ConflictSuggestionPreview/);
 assert.match(prReviewFileDiffDrawer, /createReviewFileConflictSuggestion/);
-assert.doesNotMatch(prReviewFileDiffDrawer, /<AlertDialog/);
+assert.match(prReviewFileDiffDrawer, /mergePrReviewConflictDraft/);
+assert.match(prReviewFileDiffDrawer, /직접 수정과 선택 결과가 겹칩니다/);
+assert.match(prReviewFileDiffDrawer, /<AlertDialog/);
 assert.doesNotMatch(prReviewFileDiffDrawer, /applyReviewFileConflictResolution/);
 assert.match(prReviewFileDiffDrawer, /onConflictDraftChange/);
 assert.match(prReviewFileDiffDrawer, /이 파일은 해결 준비됨/);
@@ -425,9 +545,10 @@ assert.match(prReviewFileDiffDrawer, /ConflictUnifiedCodePane/);
 assert.match(prReviewFileDiffDrawer, /ConflictWorkspaceTabs/);
 assert.match(prReviewFileDiffDrawer, /ResolvedDraftWorkspace/);
 assert.match(prReviewFileDiffDrawer, /AI 해결안/);
-assert.match(prReviewFileDiffDrawer, /변경점 보기/);
-assert.match(prReviewFileDiffDrawer, /전체 코드 편집/);
-assert.match(prReviewFileDiffDrawer, /buildPrReviewResolvedCodeDiff/);
+assert.match(prReviewFileDiffDrawer, /전체 코드 보기/);
+assert.match(prReviewFileDiffDrawer, /코드 편집 시작/);
+assert.doesNotMatch(prReviewFileDiffDrawer, /변경점 보기/);
+assert.doesNotMatch(prReviewFileDiffDrawer, /전체 코드 편집/);
 assert.doesNotMatch(
   prReviewFileDiffDrawer,
   /Conflict Resolution|AI RESOLUTION|Resolution progress|Apply resolution/
@@ -455,6 +576,7 @@ assert.match(
 );
 assert.match(prReviewFileDiffDrawer, /setTimeout/);
 assert.match(prReviewFileDiffDrawer, /onCommentBlur/);
+assert.match(prReviewFileDiffDrawer, /isReviewVersionStale/);
 assert.match(prReviewFileDiffDrawer, /const savedFile: PrReviewFile/);
 assert.match(prReviewFileDiffDrawer, /onDecisionSaved\(savedFile, previousStatus\)/);
 assert.match(prReviewFileDiffDrawer, /approved/);
@@ -478,6 +600,8 @@ assert.doesNotMatch(prReviewResolvedCodeEditor, /features\/canvas/);
 assert.match(prReviewResolvedCodeDiff, /diffLines/);
 assert.match(prReviewConflictDrafts, /reconcilePrReviewConflictDrafts/);
 assert.match(prReviewConflictDrafts, /buildPrReviewConflictsApplyInput/);
+assert.match(prReviewConflictDraftMerge, /diff3Merge/);
+assert.match(prReviewConflictDraftMerge, /kind: "overlap"/);
 assert.match(prReviewResolvedCodeDiff, /changedLineNumbers/);
 assert.match(prReviewResolvedCodeDiff, /changeBlocks/);
 assert.match(prReviewConflictResolution, /buildConflictResolutionDraft/);
@@ -502,8 +626,11 @@ assert.match(prReviewFileNodeShapeUtil, /reviewFileId/);
 assert.match(prReviewFileNodeShapeUtil, /workflowOrder/);
 assert.match(prReviewFileNodeShapeUtil, /reviewStatus/);
 assert.match(prReviewFileNodeShapeUtil, /conflictState/);
+assert.match(prReviewFileNodeShapeUtil, /pinned: boolean/);
+assert.match(prReviewFileNodeShapeUtil, /고정된 파일 노드/);
 assert.match(prReviewFileNodeShapeUtil, /conflictBadgeLabels/);
 assert.match(prReviewFileNodeShapeUtil, /conflictNodeClasses/);
+assert.match(prReviewFileNodeShapeUtil, /AlertTriangle/);
 assert.match(prReviewFileNodeShapeUtil, /riskLevel/);
 assert.match(prReviewFileNodeShapeUtil, /riskNodeClasses/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_FLOW_EDGE_SHAPE_TYPE/);
@@ -511,9 +638,32 @@ assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_RELATION_EDGE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /reviewRoomId/);
 assert.match(prReviewFileNodeShapeUtil, /roomFileId/);
 assert.match(prReviewFileNodeShapeUtil, /currentReviewSessionId/);
+assert.match(prReviewFileNodeShapeUtil, /roleType: PrReviewFileRoleType/);
 assert.match(prReviewFileNodeShapeUtil, /fromRoomFileId/);
 assert.match(prReviewFileNodeShapeUtil, /toRoomFileId/);
+assert.match(prReviewFileNodeShapeUtil, /relationCount/);
+assert.match(prReviewFileNodeShapeUtil, /relationDetails/);
+assert.match(prReviewFileNodeShapeUtil, /useFocusedRelationEndpoint/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_FLOW_LABEL_SHAPE_TYPE/);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /grid-cols-\[auto_minmax\(220px,0\.7fr\)_minmax\(320px,1\.3fr\)\]/
+);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /text-2xl font-semibold leading-8 text-slate-950/
+);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /text-base leading-6 text-slate-600/
+);
+assert.match(
+  prReviewFileNodeShapeUtil,
+  /truncate text-base font-semibold text-slate-950/
+);
+assert.match(prReviewFileNodeShapeUtil, /getPrReviewFlowDragShapeIds/);
+assert.match(prReviewFileNodeShapeUtil, /onPointerDownCapture/);
+assert.match(prReviewFileNodeShapeUtil, /cursor-move/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_FLOW_MILESTONE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /PR_REVIEW_ROLE_LANE_SHAPE_TYPE/);
 assert.match(prReviewFileNodeShapeUtil, /PrReviewRoleLaneShapeUtil/);
@@ -525,6 +675,24 @@ assert.match(prReviewShapeUtils, /PrReviewRelationEdgeShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowLabelShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewFlowMilestoneShapeUtil/);
 assert.match(prReviewShapeUtils, /PrReviewRoleLaneShapeUtil/);
+assert.match(prReviewCanvasSurface, /ContextMenu: null/);
+assert.match(prReviewCanvasSurface, /!persistedFileShapeEnabled/);
+assert.match(prReviewCanvasSurface, /layoutPreview !== null/);
+assert.match(prReviewCanvasSurface, /isReviewVersionStale \|\| reviewRoom\?\.status === "completed"/);
+assert.match(prReviewCanvasShell, /createReviewRoomRevision/);
+assert.match(prReviewCanvasShell, /PULL_REQUEST_HEAD_POLL_INTERVAL_MS/);
+assert.match(prReviewCanvasShell, /최신 버전 분석 시작/);
+assert.match(prReviewCanvasSurface, /registerAfterCreateHandler/);
+assert.match(prReviewConflictDraftLock, /const renewEdit = useCallback/);
+assert.match(prReviewConflictDraftLock, /window\.setInterval\(renewEdit, 3_000\)/);
+assert.match(prReviewConflictDraftLock, /setLock\(null\);/);
+assert.match(prReviewCanvasShell, /overlayClassName="z-\[90\]"/);
+assert.match(
+  prReviewCanvasSurface,
+  /editor\.createShapes\(shapes\);\s+updatePrReviewDerivedGeometry\(editor, internalShapeUpdateRef, true\);/
+);
+assert.match(prReviewFileNodeShapeUtil, /override onDoubleClick/);
+assert.match(prReviewFileNodeShapeUtil, /activatePrReviewFileNode/);
 
 await import("./flow-layout.test.mjs");
 await import("./resolved-code-diff.test.mjs");
@@ -535,5 +703,10 @@ await import("./oauth-reconnect-client.test.mjs");
 await import("./canvas-shape-client.test.mjs");
 await import("./canvas-shape-persistence.test.mjs");
 await import("./canvas-shape-index.test.mjs");
+await import("./graph-exploration.test.mjs");
 await import("./canvas-operation-sync.test.mjs");
 await import("./node-activation.test.mjs");
+await import("./system-shape-policy.test.mjs");
+await import("./flow-group-drag.test.mjs");
+await import("../../src/features/pr-review/pr-review-github-source-realtime.test.mjs");
+await import("../../src/features/pr-review/pr-review-pull-request-refresh.test.mjs");

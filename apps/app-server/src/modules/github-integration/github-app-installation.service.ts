@@ -20,6 +20,7 @@ import { githubCallbackBadRequest } from "./github-oauth-callback-error";
 import { validateGithubCallbackReturnUrl } from "./github-return-url";
 import { GithubTokenEncryptionService } from "./github-token-encryption.service";
 import { GithubOAuthConnectionService } from "./github-oauth-connection.service";
+import { GithubOAuthInstallationLookupError, GithubOAuthReconnectRequiredError } from "./github-oauth-installation-lookup.error";
 import { GithubSyncJobEnqueueError } from "./github-sync-job.service";
 import { GithubSyncRunService } from "./github-sync-run.service";
 import type {
@@ -67,7 +68,7 @@ export class GithubAppInstallationService {
     workspaceId: string,
     input: StartGithubAppInstallationRequest | undefined
   ): Promise<GithubAppInstallationStartResult> {
-    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+    await this.workspaceService.assertWorkspaceOwnerAccess(currentUserId, workspaceId);
 
     const config = this.configService.getGithubAppConfig();
     const oauthConfig = this.configService.getGithubOAuthConfig();
@@ -75,9 +76,14 @@ export class GithubAppInstallationService {
       currentUserId,
       oauthConfig
     );
-    await this.githubOAuthClient.assertUserInstallationLookupSupported({
-      accessToken
-    });
+    try {
+      await this.githubOAuthClient.assertUserInstallationLookupSupported({ accessToken });
+    } catch (error) {
+      if (error instanceof GithubOAuthInstallationLookupError && error.failure === "reconnect_required") {
+        throw new GithubOAuthReconnectRequiredError();
+      }
+      throw badRequest("GitHub OAuth installation lookup failed");
+    }
     const returnUrl = validateGithubCallbackReturnUrl(
       input?.returnUrl,
       config.frontendUrl
@@ -136,6 +142,7 @@ export class GithubAppInstallationService {
     if (!storedState.workspaceId) {
       throw badRequest("Invalid GitHub App installation state");
     }
+    await this.assertWorkspaceOwnerForCallback(storedState);
     const githubInstallationId = this.validateCallbackProviderParameters(
       query,
       storedState.returnUrl
@@ -167,6 +174,7 @@ export class GithubAppInstallationService {
     );
 
     let row: GithubInstallationRow | null;
+    await this.assertWorkspaceOwnerForCallback(storedState);
     try {
       row = await this.database.queryOne<GithubInstallationRow>(
         `
@@ -235,10 +243,12 @@ export class GithubAppInstallationService {
 
     let syncRunId: string | null = null;
     try {
+      await this.assertWorkspaceOwnerForCallback(storedState);
       const syncRun = await this.syncRunService.startGithubSyncRun(
         storedState.userId,
         storedState.workspaceId,
-        { installationId: row.id, target: "source" }
+        { installationId: row.id, target: "source" },
+        "automatic"
       );
       syncRunId = syncRun.id;
     } catch (error) {
@@ -263,6 +273,32 @@ export class GithubAppInstallationService {
     const url = new URL(returnUrl);
     url.searchParams.set("github_installation_id", installationId);
     return url.toString();
+  }
+
+  private async assertWorkspaceOwnerForCallback(storedState: {
+    userId: string;
+    workspaceId: string | null;
+    returnUrl: string | null;
+  }): Promise<void> {
+    if (!storedState.workspaceId) {
+      throw badRequest("Invalid GitHub App installation state");
+    }
+
+    try {
+      await this.workspaceService.assertWorkspaceOwnerAccess(
+        storedState.userId,
+        storedState.workspaceId
+      );
+    } catch (error) {
+      if (error instanceof ApiError && (error.getStatus() === 403 || error.getStatus() === 404)) {
+        throw githubCallbackBadRequest(
+          "Workspace owner access is required to install the GitHub App",
+          storedState.returnUrl,
+          "workspace_access_denied"
+        );
+      }
+      throw error;
+    }
   }
 
   private async getConnectedGithubOAuthAccessTokenForCallback(

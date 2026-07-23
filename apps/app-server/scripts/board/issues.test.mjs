@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { BoardReadQueries } = require("../../dist/modules/board/queries/board-read.queries.js");
+const { BoardIssueCreateQueries } = require("../../dist/modules/board/queries/board-issue-create.queries.js");
 const { BoardReadService } = require("../../dist/modules/board/board-read.service.js");
 const { BoardService } = require("../../dist/modules/board/board.service.js");
 
@@ -20,6 +21,7 @@ class FakeDatabase {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
+    this.issueListSql = "";
   }
 
   async queryOne(text, values = []) {
@@ -34,6 +36,9 @@ class FakeDatabase {
 
   async query(text, values = []) {
     this.queries.push({ method: "query", text, values });
+    if (/FROM pilo_issues pi/i.test(text)) {
+      this.issueListSql = text;
+    }
     const next = this.queryRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -57,7 +62,11 @@ class FakeWorkspaceService {
 function createSubject(database = new FakeDatabase()) {
   const workspaceService = new FakeWorkspaceService();
   const readQueries = new BoardReadQueries(database);
-  const readService = new BoardReadService(readQueries, workspaceService);
+  const readService = new BoardReadService(
+    readQueries,
+    workspaceService,
+    new BoardIssueCreateQueries(database)
+  );
   const service = new BoardService(
     { createBoard: () => assert.fail("createBoard should not be called") },
     readService
@@ -198,6 +207,8 @@ function assertNoRemoteGithubCall(database) {
     }
   });
   assertNoRemoteGithubCall(db);
+  assert.match(db.issueListSql, /pi\.title ILIKE/);
+  assert.doesNotMatch(db.issueListSql, /COALESCE\(pi\.body/);
 }
 
 {

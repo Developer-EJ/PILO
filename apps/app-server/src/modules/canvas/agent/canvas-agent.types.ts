@@ -1,7 +1,8 @@
 import { QueryResultRow } from "pg";
-import type { CanvasShapeBatchPayload } from "../canvas.types";
+import type { CanvasShapeBatchPayload } from "../contracts/canvas.types";
 
 export const CANVAS_AGENT_ACTION_NAMES = [
+  "route_intent",
   "find_canvas_tool",
   "find_shapes",
   "select_shapes",
@@ -10,6 +11,15 @@ export const CANVAS_AGENT_ACTION_NAMES = [
   "create_draft",
   "finish"
 ] as const;
+
+export const CANVAS_AGENT_INTENT_NAMES = [
+  "chat",
+  "find_shapes",
+  "generate_html",
+  "import_drive_file",
+  "unsupported"
+] as const;
+export type CanvasAgentIntentName = (typeof CANVAS_AGENT_INTENT_NAMES)[number];
 
 export type CanvasAgentActionName = (typeof CANVAS_AGENT_ACTION_NAMES)[number];
 export type CanvasAgentRunStatus =
@@ -97,8 +107,15 @@ export interface CanvasAgentShapeRow extends QueryResultRow {
   y: number | string;
   width: number | string | null;
   height: number | string | null;
+  parent_shape_id: string | null;
+  rotation: number | string;
   revision: number | string;
   raw_shape: Record<string, unknown>;
+}
+
+export interface CanvasAgentShapeAncestorRow extends CanvasAgentShapeRow {
+  depth: number | string;
+  source_shape_id: string;
 }
 
 export interface CanvasAgentViewport {
@@ -108,13 +125,93 @@ export interface CanvasAgentViewport {
   height: number;
 }
 
+export interface CanvasAgentConversationMessage {
+  role: "assistant" | "user";
+  content: string;
+}
+
+export interface CanvasAgentLastTaskContext {
+  draftId: string | null;
+  draftTitle: string | null;
+  prompt: string;
+  status: string;
+  summary: string | null;
+}
+
+export interface CanvasAgentConversationContext {
+  messages: CanvasAgentConversationMessage[];
+  lastTask: CanvasAgentLastTaskContext | null;
+}
+
+export interface CanvasAgentShapeSummary {
+  id: string;
+  shapeType: string;
+  title: string | null;
+  text: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CanvasAgentSelectedSceneShape {
+  id: string;
+  shapeType: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  depth: number;
+  title: string | null;
+  text: string | null;
+  assetRef: string | null;
+  style: Record<string, string | number | boolean | null>;
+}
+
+export interface CanvasAgentSelectedScene {
+  selectionMode: "frame" | "multi-selection";
+  bounds: { width: number; height: number };
+  rootShapeIds: string[];
+  shapes: CanvasAgentSelectedSceneShape[];
+  options: {
+    styleMode: "faithful";
+    responsive: false;
+    includeJavaScript: false;
+  };
+}
+
+export interface CanvasAgentHtmlArtifact {
+  kind: "html";
+  title: string;
+  html: string;
+  sourceShapeIds: string[];
+}
+
+export interface CanvasAgentDriveFileReference {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+}
+
+export type CanvasAgentClientAction = {
+  type: "insert_drive_file";
+  file: CanvasAgentDriveFileReference;
+};
+
 export interface CreateCanvasAgentRunRequest {
   prompt?: unknown;
   selectedShapeIds?: unknown;
+  shapeSummaries?: unknown;
+  selectedScene?: unknown;
+  selectedSceneError?: unknown;
   presentationMode?: unknown;
   toolHelpMode?: unknown;
   viewport?: unknown;
   clientRequestId?: unknown;
+  conversationContext?: unknown;
 }
 
 export interface ApplyCanvasAgentDraftRequest {
@@ -122,8 +219,12 @@ export interface ApplyCanvasAgentDraftRequest {
 }
 
 export interface CanvasAgentRequestContext {
+  conversationContext: CanvasAgentConversationContext | null;
   presentationMode: CanvasAgentPresentationMode;
   selectedShapeIds: string[];
+  shapeSummaries: CanvasAgentShapeSummary[];
+  selectedScene: CanvasAgentSelectedScene | null;
+  selectedSceneError: string | null;
   toolHelpMode: boolean;
   viewport: CanvasAgentViewport | null;
 }
@@ -131,6 +232,7 @@ export interface CanvasAgentRequestContext {
 export interface CanvasAgentProgressPayload {
   message: string;
   highlightedShapeIds: string[];
+  loadRootShapeIds: string[];
   targetViewport: CanvasAgentViewport | null;
   toolTarget: string | null;
   toolTargetLabel: string | null;
@@ -218,6 +320,8 @@ export interface CanvasAgentRunPayload {
   summary: string | null;
   canvasRevision: number | null;
   progress: CanvasAgentProgressPayload | null;
+  artifact: CanvasAgentHtmlArtifact | null;
+  clientAction: CanvasAgentClientAction | null;
   createdAt: string;
   completedAt: string | null;
   expiresAt: string;

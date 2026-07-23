@@ -112,8 +112,9 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   const projectV2Id = "55555555-5555-4555-8555-555555555555";
   const database = selectionDatabase({ links: [projectV2Id] });
   const service = createService(database, {
-    async startGithubSyncRun(_userId, _workspaceId, input) {
+    async startGithubSyncRun(_userId, _workspaceId, input, triggerSource) {
       assert.deepEqual(input, { installationId, repositoryId, target: "full" });
+      assert.equal(triggerSource, "automatic");
       throw new GithubSyncJobEnqueueError("66666666-6666-4666-8666-666666666666");
     }
   });
@@ -133,6 +134,47 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
 }
 
 {
+  const projectV2Id = "55555555-5555-4555-8555-555555555555";
+  const calls = [];
+  const service = createService({}, {
+    async startGithubSyncRun(userId, currentWorkspaceId, input, triggerSource) {
+      calls.push({ userId, currentWorkspaceId, input, triggerSource });
+    }
+  });
+
+  await service.enqueueWorkspaceBoardProjectV2Sync(currentUserId, workspaceId, {
+    installationId,
+    repositoryId,
+    projectV2Id
+  });
+
+  assert.deepEqual(calls, [
+    {
+      userId: currentUserId,
+      currentWorkspaceId: workspaceId,
+      input: {
+        installationId,
+        repositoryId,
+        projectV2Id,
+        target: "project_v2_fields"
+      },
+      triggerSource: "automatic"
+    },
+    {
+      userId: currentUserId,
+      currentWorkspaceId: workspaceId,
+      input: {
+        installationId,
+        repositoryId,
+        projectV2Id,
+        target: "project_v2_items"
+      },
+      triggerSource: "automatic"
+    }
+  ]);
+}
+
+{
   const root = new URL("../../../..", import.meta.url);
   const source = readFileSync(new URL("apps/app-server/src/modules/github-integration/github-project-v2.service.ts", root), "utf8");
   const dto = readFileSync(new URL("apps/app-server/src/modules/github-integration/dto/index.ts", root), "utf8");
@@ -146,10 +188,16 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
   assert.match(controller, /discoverGithubProjectV2[\s\S]{0,500}@Body\(\) body: DiscoverGithubProjectV2Request/);
   assert.match(source, /DELETE FROM github_project_v2_selections[\s\S]{0,160}repository_id = \$2/);
   assert.match(queries, /FROM github_project_v2_repositories[\s\S]{0,160}repository_id = \$1/);
-  assert.match(source, /repositoryId,\s*target: "full"/);
+  assert.match(source, /repositoryId,\s*target: "full"[\s\S]{0,100}"automatic"/);
   assert.match(executor, /listRepositoryProjectV2s/);
   assert.match(executor, /replaceGithubRepositoryProjectV2Links/);
   assert.match(executor, /links\.repository_id = \$2/);
+  const repositoryLinkInsert = executor.match(
+    /INSERT INTO github_project_v2_repositories \([\s\S]*?\n\s*\);\n\s*}\n\s*\n\s*private async upsertGithubProjectV2/
+  )?.[0];
+  assert.ok(repositoryLinkInsert, "Repository ProjectV2 links must be inserted after discovery");
+  assert.match(repositoryLinkInsert, /SELECT project_v2_id, \$1[\s\S]*?unnest\(\$2::uuid\[\]\)/);
+  assert.match(repositoryLinkInsert, /\[repositoryId, uniqueProjectV2Ids\]/);
   assert.doesNotMatch(executor, /replaceGithubProjectV2RepositoryLinks/);
   assert.match(client, /repository\(owner: \$owner, name: \$name\)/);
   assert.doesNotMatch(source, /DELETE FROM github_projects_v2|DELETE FROM github_project_v2_fields|DELETE FROM github_project_v2_items|DELETE FROM github_issues|DELETE FROM github_pull_requests|DELETE FROM boards/i);
@@ -163,6 +211,25 @@ function selectionDatabase({ repository = { id: repositoryId }, links = ["555555
     source,
     /const repositoryId = this\.readUuid\(query\.repositoryId, "repositoryId"\)/,
     "ProjectV2 listing must require repositoryId"
+  );
+  assert.match(
+    source,
+    /SELECT COUNT\(\*\)::int AS total FROM github_projects_v2 gp WHERE/,
+    "The ProjectV2 count query must expose the same gp alias as the list query"
+  );
+  const listFilterBuilder = source.match(
+    /private buildGithubProjectV2Filters\([\s\S]*?\n  }\n\n  private githubProjectV2SelectSql/
+  )?.[0];
+  assert.ok(listFilterBuilder, "ProjectV2 list filters must remain locally testable");
+  assert.match(
+    listFilterBuilder,
+    /gpr\.project_v2_id = gp\.id/,
+    "The repository-link filter must correlate with the outer ProjectV2 row"
+  );
+  assert.match(
+    listFilterBuilder,
+    /gps\.installation_id = gp\.installation_id[\s\S]{0,120}gps\.project_v2_id = gp\.id/,
+    "The selection filter must correlate with the outer ProjectV2 row"
   );
 }
 

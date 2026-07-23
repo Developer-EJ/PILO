@@ -22,6 +22,8 @@ async function compileSqlErdRuntimeModules() {
   const inspectorOutputPath = join(outputDir, "inspector.mjs");
   const ddlParserOutputPath = join(outputDir, "ddl-parser.mjs");
   const sqlSourceMapOutputPath = join(outputDir, "sql-source-map.mjs");
+  const sourceNavigationOutputPath = join(outputDir, "source-navigation.mjs");
+  const schemaMutationOutputPath = join(outputDir, "schema-mutation.mjs");
   const sqlSourceDecorationOutputPath = join(
     outputDir,
     "sql-source-decoration.mjs"
@@ -55,6 +57,8 @@ async function compileSqlErdRuntimeModules() {
   const tableCardLayoutOutputPath = join(outputDir, "table-card-layout.mjs");
   const autoLayoutOutputPath = join(outputDir, "auto-layout.mjs");
   const canvasShapeSyncOutputPath = join(outputDir, "canvas-shape-sync.mjs");
+  const operationLayoutOutputPath = join(outputDir, "operation-layout.mjs");
+  const operationPatchOutputPath = join(outputDir, "operation-patch.mjs");
 
   try {
     await compileTypeScriptModule(
@@ -117,6 +121,14 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-map.ts",
       sqlSourceMapOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/source-navigation.ts",
+      sourceNavigationOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/schema-mutation.ts",
+      schemaMutationOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/sql-source-decoration.ts",
@@ -220,6 +232,18 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-table-shape"/g,
           'from "./table-shape-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-table-focus-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-selection-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/agent-table-focus"/g,
+          'from "./table-focus-stub.mjs"'
         ]
       ]
     );
@@ -235,6 +259,14 @@ async function compileSqlErdRuntimeModules() {
         [
           /from "@\/features\/sql-erd\/utils\/table-card-layout"/g,
           'from "./table-card-layout.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/components\/sql-erd-table-focus-context"/g,
+          'from "./table-focus-stub.mjs"'
+        ],
+        [
+          /from "@\/features\/sql-erd\/utils\/agent-table-focus"/g,
+          'from "./table-focus-stub.mjs"'
         ]
       ]
     );
@@ -259,6 +291,10 @@ async function compileSqlErdRuntimeModules() {
           'from "./text-shape-stub.mjs"'
         ],
         [
+          /from "@\/features\/sql-erd\/shapes\/sql-erd-stroke-shape"/g,
+          'from "./stroke-shape-stub.mjs"'
+        ],
+        [
           /from "@\/features\/sql-erd\/shapes\/sql-erd-relation-shape"/g,
           'from "./relation-shape-stub.mjs"'
         ],
@@ -275,6 +311,14 @@ async function compileSqlErdRuntimeModules() {
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/canvas-shape-sync.ts",
       canvasShapeSyncOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/operation-layout.ts",
+      operationLayoutOutputPath
+    );
+    await compileTypeScriptModule(
+      "../../src/features/sql-erd/utils/operation-patch.ts",
+      operationPatchOutputPath
     );
     await compileTypeScriptModule(
       "../../src/features/sql-erd/utils/foreign-key-add.ts",
@@ -327,6 +371,10 @@ async function compileSqlErdRuntimeModules() {
       "export function isSqlErdTextShape(shape) { return shape?.type === 'sqltoerd_text'; }\n"
     );
     await writeFile(
+      join(outputDir, "stroke-shape-stub.mjs"),
+      "export function isSqlErdStrokeShape(shape) { return shape?.type === 'sqltoerd_stroke'; }\n"
+    );
+    await writeFile(
       join(outputDir, "table-shape-stub.mjs"),
       "export function isSqlErdTableShape(shape) { return shape?.type === 'sqltoerd_table'; }\n"
     );
@@ -338,6 +386,15 @@ async function compileSqlErdRuntimeModules() {
       join(outputDir, "model-stub.mjs"),
       "export function getTableDisplayName(table) { return table.schemaName ? `${table.schemaName}.${table.name}` : table.name; }\n"
     );
+    await writeFile(
+      join(outputDir, "table-focus-stub.mjs"),
+      [
+        "export function useSqlErdTableFocus() { return null; }",
+        "export function useSqlErdContextRelationIds() { return new Set(); }",
+        "export function getSqlErdFocusedTableRole() { return 'dimmed'; }",
+        "export function getSqlErdFocusedRelationRole() { return 'dimmed'; }"
+      ].join("\n")
+    );
 
     const [
       modelRuntime,
@@ -346,6 +403,8 @@ async function compileSqlErdRuntimeModules() {
       inspectorRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
+      sourceNavigationRuntime,
+      schemaMutationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -364,7 +423,9 @@ async function compileSqlErdRuntimeModules() {
       tablePinRuntime,
       foreignKeyAddRuntime,
       autoLayoutRuntime,
-      canvasShapeSyncRuntime
+      canvasShapeSyncRuntime,
+      operationLayoutRuntime,
+      operationPatchRuntime
     ] = await Promise.all([
       import(pathToFileHref(modelOutputPath)),
       import(pathToFileHref(modelToSqlOutputPath)),
@@ -372,6 +433,8 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(inspectorOutputPath)),
       import(pathToFileHref(ddlParserOutputPath)),
       import(pathToFileHref(sqlSourceMapOutputPath)),
+      import(pathToFileHref(sourceNavigationOutputPath)),
+      import(pathToFileHref(schemaMutationOutputPath)),
       import(pathToFileHref(sqlSourceDecorationOutputPath)),
       import(pathToFileHref(generateSessionOutputPath)),
       import(pathToFileHref(parseWorkerProtocolOutputPath)),
@@ -390,7 +453,9 @@ async function compileSqlErdRuntimeModules() {
       import(pathToFileHref(tablePinOutputPath)),
       import(pathToFileHref(foreignKeyAddOutputPath)),
       import(pathToFileHref(autoLayoutOutputPath)),
-      import(pathToFileHref(canvasShapeSyncOutputPath))
+      import(pathToFileHref(canvasShapeSyncOutputPath)),
+      import(pathToFileHref(operationLayoutOutputPath)),
+      import(pathToFileHref(operationPatchOutputPath))
     ]);
 
     return {
@@ -398,6 +463,8 @@ async function compileSqlErdRuntimeModules() {
       canvasSelectionRuntime,
       ddlParserRuntime,
       sqlSourceMapRuntime,
+      sourceNavigationRuntime,
+      schemaMutationRuntime,
       sqlSourceDecorationRuntime,
       generateSessionRuntime,
       parseWorkerProtocolRuntime,
@@ -418,7 +485,9 @@ async function compileSqlErdRuntimeModules() {
       tablePinRuntime,
       foreignKeyAddRuntime,
       autoLayoutRuntime,
-      canvasShapeSyncRuntime
+      canvasShapeSyncRuntime,
+      operationLayoutRuntime,
+      operationPatchRuntime
     };
   } finally {
     await rm(outputDir, { force: true, recursive: true });
@@ -644,26 +713,26 @@ function createRuntimeTableShape(id, table, tableShapeRuntime, overrides = {}) {
 
 function createRuntimeTableSelectionEditor(shapes) {
   let currentPagePoint = { x: 0, y: 0 };
-  let selectedShapeId = null;
+  let selectedShapeIds = [];
   const runOptions = [];
 
   return {
     getCurrentPageShapes: () => shapes,
     getSelectedShapes: () =>
-      selectedShapeId
-        ? shapes.filter((shape) => shape.id === selectedShapeId)
-        : [],
+      shapes.filter((shape) => selectedShapeIds.includes(shape.id)),
+    getSelectedShapeIds: () => selectedShapeIds,
     getPointInShapeSpace: (_shape, point) => point,
     inputs: {
-      getCurrentPagePoint: () => currentPagePoint
+      getCurrentPagePoint: () => currentPagePoint,
+      shiftKey: false
     },
     run: (callback, options) => {
       runOptions.push(options);
       callback();
     },
     runOptions,
-    select: (shapeId) => {
-      selectedShapeId = shapeId;
+    setSelectedShapes: (shapeIds) => {
+      selectedShapeIds = [...shapeIds];
     },
     setCurrentPagePoint: (point) => {
       currentPagePoint = point;
@@ -719,6 +788,7 @@ const [
   frameShape,
   noteShape,
   textShape,
+  strokeShape,
   annotationToolbar,
   ddlParserUtils,
   sqlEditorDialectUtils,
@@ -758,6 +828,7 @@ const [
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-frame-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-note-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-text-shape.tsx"),
+    readSqlErdFile("../../src/features/sql-erd/shapes/sql-erd-stroke-shape.tsx"),
     readSqlErdFile("../../src/features/sql-erd/components/sql-erd-canvas-toolbar.tsx"),
     readSqlErdFile("../../src/features/sql-erd/utils/ddl-parser.ts"),
     readSqlErdFile("../../src/features/sql-erd/utils/sql-editor-dialect.ts"),
@@ -774,6 +845,8 @@ const {
   canvasSelectionRuntime,
   ddlParserRuntime,
   sqlSourceMapRuntime,
+  sourceNavigationRuntime,
+  schemaMutationRuntime,
   sqlSourceDecorationRuntime,
   generateSessionRuntime,
   parseWorkerProtocolRuntime,
@@ -791,8 +864,264 @@ const {
   tablePinRuntime,
   foreignKeyAddRuntime,
   autoLayoutRuntime,
-  canvasShapeSyncRuntime
+  canvasShapeSyncRuntime,
+  operationLayoutRuntime,
+  operationPatchRuntime
 } = await compileSqlErdRuntimeModules();
+
+assert.equal(
+  typeof canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer,
+  "function"
+);
+assert.equal(
+  typeof canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp,
+  "function"
+);
+
+const createTableShape = (tableId, x, y) => ({
+  id: `shape:${tableId}`,
+  props: { tableId },
+  type: "sqltoerd_table",
+  typeName: "shape",
+  x,
+  y
+});
+const isTableShape = (shape) => shape?.type === "sqltoerd_table";
+const createTableChangeEntry = (source, updates) => ({
+  changes: {
+    added: {},
+    removed: {},
+    updated: Object.fromEntries(
+      updates.map(([before, after]) => [after.id, [before, after]])
+    )
+  },
+  source
+});
+
+const singleTableBuffer =
+  canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer(isTableShape);
+singleTableBuffer.record(
+  createTableChangeEntry("user", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 100, 0)],
+    [createTableShape("table.orders", 0, 0), createTableShape("table.orders", 0, 0)]
+  ])
+);
+const singleTablePositions = singleTableBuffer.flush((tableId) =>
+  tableId === "table.users"
+    ? { tableId, x: 125, y: 0 }
+    : { tableId, x: 0, y: 0 }
+);
+assert.deepEqual(singleTablePositions, [
+  { tableId: "table.users", x: 125, y: 0 }
+]);
+assert.deepEqual(
+  operationPatchRuntime.createSqlErdOperationLayoutPatch(
+    { tablePositions: singleTablePositions },
+    {
+      tableLayouts: [
+        { tableId: "table.users", x: 125, y: 0 },
+        { tableId: "table.orders", x: 0, y: 0 }
+      ],
+      version: 1
+    }
+  ),
+  {
+    tableLayouts: {
+      upsert: [{ tableId: "table.users", x: 125, y: 0 }]
+    }
+  }
+);
+
+const initialConcurrentLayout = {
+  tableLayouts: [
+    { tableId: "table.users", x: 0, y: 0 },
+    { tableId: "table.orders", x: 0, y: 0 }
+  ],
+  version: 1
+};
+const afterDifferentTableMoves = operationLayoutRuntime.applySqlErdOperationLayoutPatch(
+  operationLayoutRuntime.applySqlErdOperationLayoutPatch(initialConcurrentLayout, {
+    tableLayouts: {
+      upsert: [{ tableId: "table.users", x: 100, y: 0 }]
+    }
+  }),
+  {
+    tableLayouts: {
+      upsert: [{ tableId: "table.orders", x: 0, y: 100 }]
+    }
+  }
+);
+assert.deepEqual(afterDifferentTableMoves.tableLayouts, [
+  { tableId: "table.users", x: 100, y: 0 },
+  { tableId: "table.orders", x: 0, y: 100 }
+]);
+assert.deepEqual(
+  operationLayoutRuntime.applySqlErdOperationLayoutPatch(
+    afterDifferentTableMoves,
+    {
+      tableLayouts: {
+        upsert: [{ tableId: "table.users", x: 200, y: 0 }]
+      }
+    }
+  ).tableLayouts,
+  [
+    { tableId: "table.users", x: 200, y: 0 },
+    { tableId: "table.orders", x: 0, y: 100 }
+  ]
+);
+
+const ignoredTableChanges =
+  canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer(isTableShape);
+ignoredTableChanges.record(
+  createTableChangeEntry("remote", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 50, 0)]
+  ])
+);
+ignoredTableChanges.record(
+  createTableChangeEntry("user", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 0, 0)]
+  ])
+);
+assert.deepEqual(ignoredTableChanges.flush(() => null), []);
+
+ignoredTableChanges.record(
+  createTableChangeEntry("user", [
+    [createTableShape("table.users", 0, 0), createTableShape("table.users", 75, 0)]
+  ])
+);
+ignoredTableChanges.cancel();
+assert.deepEqual(ignoredTableChanges.flush(() => null), []);
+
+const autoLayoutTableChanges =
+  canvasShapeSyncRuntime.createSqlErdTablePositionChangeBuffer(isTableShape);
+autoLayoutTableChanges.suppressNext([
+  { tableId: "table.users", x: 100, y: 50 },
+  { tableId: "table.orders", x: 500, y: 50 }
+]);
+const autoLayoutPreviewTableIds = autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 0, 0),
+      createTableShape("table.users", 100, 50)
+    ],
+    [
+      createTableShape("table.orders", 0, 0),
+      createTableShape("table.orders", 500, 50)
+    ]
+  ])
+);
+assert.deepEqual(autoLayoutPreviewTableIds, []);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 999, y: 999 })),
+  []
+);
+const directDragPreviewTableIds = autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 100, 50),
+      createTableShape("table.users", 125, 50)
+    ]
+  ])
+);
+assert.deepEqual(directDragPreviewTableIds, ["table.users"]);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 125, y: 50 })),
+  [{ tableId: "table.users", x: 125, y: 50 }]
+);
+
+autoLayoutTableChanges.suppressNext([
+  { tableId: "table.users", x: 200, y: 50 }
+]);
+autoLayoutTableChanges.clearSuppressed();
+autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 125, 50),
+      createTableShape("table.users", 200, 50)
+    ]
+  ])
+);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 200, y: 50 })),
+  [{ tableId: "table.users", x: 200, y: 50 }]
+);
+
+autoLayoutTableChanges.suppressNext([
+  { tableId: "table.users", x: 250, y: 50 }
+]);
+autoLayoutTableChanges.record(
+  createTableChangeEntry("user", [
+    [
+      createTableShape("table.users", 200, 50),
+      createTableShape("table.users", 275, 50)
+    ]
+  ])
+);
+assert.deepEqual(
+  autoLayoutTableChanges.flush((tableId) => ({ tableId, x: 275, y: 50 })),
+  [{ tableId: "table.users", x: 275, y: 50 }]
+);
+
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "ArrowUp",
+    metaKey: false
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: true,
+    key: "z",
+    metaKey: false
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "Z",
+    metaKey: true
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: true,
+    key: "y",
+    metaKey: false
+  }),
+  true
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "z",
+    metaKey: false
+  }),
+  false
+);
+assert.equal(
+  canvasShapeSyncRuntime.shouldFlushSqlErdTablePositionChangesOnKeyUp({
+    ctrlKey: false,
+    key: "Enter",
+    metaKey: false
+  }),
+  false
+);
+
+const autoLayoutPositions = [
+  { tableId: "table.users", x: 100, y: 50 },
+  { tableId: "table.orders", x: 500, y: 50 }
+];
+assert.deepEqual(
+  operationPatchRuntime.createSqlErdOperationLayoutPatch(
+    { tablePositions: autoLayoutPositions },
+    { tableLayouts: autoLayoutPositions, version: 1 }
+  ),
+  { tableLayouts: { upsert: autoLayoutPositions } }
+);
 
 const initialTablePinState = tablePinRuntime.createSqlErdTablePinState();
 const pinnedOrdersTable = tablePinRuntime.pinSqlErdTable(
@@ -926,6 +1255,269 @@ assert.deepEqual(cameraAfterAnnotationAdd, cameraBeforeAnnotationAdd);
     ["camera", cameraBeforeAnnotationRemove]
   ]);
   const runtimeModel = createRuntimeTestModel();
+const deletedOrdersUserId = schemaMutationRuntime.deleteSqlErdColumn(
+  runtimeModel,
+  "table.orders",
+  "user_id"
+);
+assert.equal(deletedOrdersUserId.ok, true);
+assert.deepEqual(
+  schemaMutationRuntime.applySqlErdSchemaMutation(runtimeModel, {
+    type: "delete_column",
+    tableId: "table.orders",
+    columnId: "user_id"
+  }),
+  deletedOrdersUserId
+);
+assert.equal(deletedOrdersUserId.affectedRelationCount, 1);
+assert.equal(deletedOrdersUserId.affectedConstraintCount, 0);
+assert.deepEqual(
+  deletedOrdersUserId.modelJson.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.map((column) => column.id),
+  ["id"]
+);
+assert.deepEqual(
+  deletedOrdersUserId.modelJson.schema.relations.map((relation) => relation.id),
+  ["relation.users.manager_id.users.id"]
+);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regeneratedAfterColumnDelete =
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect,
+      modelJson: deletedOrdersUserId.modelJson
+    });
+
+  assert.doesNotMatch(regeneratedAfterColumnDelete.sql, /user_id/);
+  assert.equal(
+    ddlParserRuntime.parseSqlDdlToErdModel({
+      dialect,
+      sourceMapModelJson: deletedOrdersUserId.modelJson,
+      sourceText: regeneratedAfterColumnDelete.sql
+    }).ok,
+    true
+  );
+}
+assert.equal(
+  runtimeModel.schema.tables
+    .find((table) => table.id === "table.orders")
+    .columns.length,
+  2
+);
+const deletedUsersId = schemaMutationRuntime.deleteSqlErdColumn(
+  runtimeModel,
+  "table.users",
+  "id"
+);
+assert.equal(deletedUsersId.ok, true);
+assert.equal(deletedUsersId.affectedRelationCount, 2);
+assert.equal(deletedUsersId.affectedConstraintCount, 1);
+assert.equal(
+  deletedUsersId.modelJson.schema.tables[0].columns[0].foreignKey,
+  false
+);
+assert.equal(
+  deletedUsersId.modelJson.schema.tables[1].columns[1].foreignKey,
+  false
+);
+const deletedUsersTable = schemaMutationRuntime.deleteSqlErdTable(
+  runtimeModel,
+  "table.users"
+);
+assert.equal(deletedUsersTable.ok, true);
+assert.equal(deletedUsersTable.affectedRelationCount, 2);
+assert.deepEqual(
+  deletedUsersTable.modelJson.schema.tables.map((table) => table.id),
+  ["table.orders"]
+);
+assert.equal(
+  deletedUsersTable.modelJson.schema.tables[0].columns[1].foreignKey,
+  false
+);
+const batchDeletedUsers = schemaMutationRuntime.applySqlErdBatchSchemaDelete(
+  runtimeModel,
+  {
+    relationIds: [
+      "relation.orders.user_id.users.id",
+      "relation.orders.user_id.users.id"
+    ],
+    tableIds: ["table.users", "table.users"]
+  }
+);
+assert.equal(batchDeletedUsers.ok, true);
+assert.deepEqual(
+  batchDeletedUsers.modelJson.schema.tables.map((table) => table.id),
+  ["table.orders"]
+);
+assert.deepEqual(batchDeletedUsers.modelJson.schema.relations, []);
+assert.equal(batchDeletedUsers.affectedRelationCount, 2);
+assert.deepEqual(
+  schemaMutationRuntime.applySqlErdBatchSchemaDelete(runtimeModel, {
+    relationIds: [],
+    tableIds: ["table.users", "table.orders"]
+  }),
+  { ok: false, reason: "LAST_TABLE" }
+);
+const batchDeletedRelation = schemaMutationRuntime.applySqlErdBatchSchemaDelete(
+  runtimeModel,
+  {
+    relationIds: ["relation.orders.user_id.users.id"],
+    tableIds: []
+  }
+);
+assert.equal(batchDeletedRelation.ok, true);
+assert.deepEqual(
+  batchDeletedRelation.modelJson.schema.relations.map((relation) => relation.id),
+  ["relation.users.manager_id.users.id"]
+);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regeneratedAfterTableDelete =
+    modelToSqlRuntime.generateSqlDdlFromErdModel({
+      dialect,
+      modelJson: deletedUsersTable.modelJson
+    });
+
+  assert.doesNotMatch(regeneratedAfterTableDelete.sql, /CREATE TABLE [`"]users[`"]?/);
+  assert.equal(
+    ddlParserRuntime.parseSqlDdlToErdModel({
+      dialect,
+      sourceMapModelJson: deletedUsersTable.modelJson,
+      sourceText: regeneratedAfterTableDelete.sql
+    }).ok,
+    true
+  );
+}
+assert.deepEqual(
+  schemaMutationRuntime.deleteSqlErdTable(
+    {
+      ...runtimeModel,
+      schema: {
+        relations: [],
+        tables: [runtimeModel.schema.tables[0]]
+      }
+    },
+    "table.users"
+  ),
+  { ok: false, reason: "LAST_TABLE" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdTable(
+    runtimeModel,
+    "table.users",
+    "orders"
+  ),
+  { ok: false, reason: "DUPLICATE_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdColumn(
+    runtimeModel,
+    "table.orders",
+    "id",
+    "user_id"
+  ),
+  { ok: false, reason: "DUPLICATE_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.renameSqlErdTable(
+    runtimeModel,
+    "table.users",
+    " users "
+  ),
+  { ok: false, reason: "INVALID_NAME" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.changeSqlErdColumnType(
+    runtimeModel,
+    "table.orders",
+    "id",
+    "BIGINT; DROP TABLE users"
+  ),
+  { ok: false, reason: "INVALID_DATA_TYPE" }
+);
+assert.deepEqual(
+  schemaMutationRuntime.deleteSqlErdColumn(
+    {
+      ...runtimeModel,
+      schema: {
+        relations: [],
+        tables: [
+          {
+            ...runtimeModel.schema.tables[0],
+            columns: [runtimeModel.schema.tables[0].columns[0]]
+          }
+        ]
+      }
+    },
+    "table.users",
+    "id"
+  ),
+  { ok: false, reason: "LAST_COLUMN" }
+);
+const renamedUsersTable = schemaMutationRuntime.renameSqlErdTable(
+  runtimeModel,
+  "table.users",
+  "accounts"
+);
+assert.equal(renamedUsersTable.ok, true);
+assert.equal(
+  renamedUsersTable.modelJson.schema.tables[0].id,
+  "table.users"
+);
+assert.equal(
+  renamedUsersTable.modelJson.schema.tables[0].name,
+  "accounts"
+);
+const renamedOrdersColumn = schemaMutationRuntime.renameSqlErdColumn(
+  renamedUsersTable.modelJson,
+  "table.orders",
+  "user_id",
+  "account_id"
+);
+assert.equal(renamedOrdersColumn.ok, true);
+const changedOrdersColumnType = schemaMutationRuntime.changeSqlErdColumnType(
+  renamedOrdersColumn.modelJson,
+  "table.orders",
+  "user_id",
+  "BIGINT"
+);
+assert.equal(changedOrdersColumnType.ok, true);
+const updatedOrdersColumn = schemaMutationRuntime.applySqlErdSchemaMutation(
+  runtimeModel,
+  {
+    type: "update_column",
+    tableId: "table.orders",
+    columnId: "user_id",
+    name: "account_id",
+    dataType: "INTEGER"
+  }
+);
+assert.equal(updatedOrdersColumn.ok, true);
+assert.equal(
+  updatedOrdersColumn.modelJson.schema.tables[1].columns[1].name,
+  "account_id"
+);
+assert.equal(
+  updatedOrdersColumn.modelJson.schema.tables[1].columns[1].dataType,
+  "INTEGER"
+);
+for (const dialect of ["postgresql", "mysql", "sqlite"]) {
+  const regenerated = modelToSqlRuntime.generateSqlDdlFromErdModel({
+    dialect,
+    modelJson: changedOrdersColumnType.modelJson
+  });
+  const reparsed = ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect,
+    sourceMapModelJson: changedOrdersColumnType.modelJson,
+    sourceText: regenerated.sql
+  });
+
+  assert.equal(reparsed.ok, true, `${dialect} mutation SQL should reparse`);
+  assert.equal(reparsed.modelJson.schema.tables[0].name, "accounts");
+  assert.equal(
+    reparsed.modelJson.schema.tables[1].columns[1].name,
+    "account_id"
+  );
+}
 const currentCanvasContentKey =
   canvasShapeSyncRuntime.createSqlErdCanvasContentKey({
     modelJson: runtimeModel,
@@ -2202,6 +2794,30 @@ assert.deepEqual(
   }
 );
 assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: false,
+    isSelected: false,
+    selectedOpacityClassName: "opacity-45"
+  }),
+  "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100"
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: true,
+    isSelected: false,
+    selectedOpacityClassName: "opacity-100"
+  }),
+  "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-100"
+);
+assert.equal(
+  tableShapeRuntime.getSqlErdConnectorPortVisibilityClassName({
+    isHighlighted: false,
+    isSelected: true,
+    selectedOpacityClassName: "opacity-45"
+  }),
+  "pointer-events-auto opacity-45 hover:opacity-100"
+);
+assert.equal(
   tableShapeRuntime.isSqlErdColumnPointerDrag(
     { x: 10, y: 10 },
     { x: 13, y: 12 }
@@ -2259,6 +2875,31 @@ assert.equal(runtimeUsersShape.props.selectedColumnId, null);
 assert.equal(runtimeOrdersShape.props.selectedState, "none");
 assert.equal(runtimeOrdersShape.props.selectedColumnId, null);
 
+tableShapeRuntime.selectSqlErdTableShape(
+  runtimeSelectionEditor,
+  runtimeOrdersShape,
+  true,
+  runtimeSelectionEditor.getSelectedShapeIds()
+);
+assert.deepEqual(runtimeSelectionEditor.getSelectedShapeIds(), [
+  "shape:users",
+  "shape:orders"
+]);
+assert.equal(runtimeUsersShape.props.selectedState, "table");
+assert.equal(runtimeOrdersShape.props.selectedState, "table");
+
+tableShapeRuntime.selectSqlErdTableShape(
+  runtimeSelectionEditor,
+  runtimeOrdersShape,
+  true,
+  runtimeSelectionEditor.getSelectedShapeIds()
+);
+assert.deepEqual(runtimeSelectionEditor.getSelectedShapeIds(), [
+  "shape:users"
+]);
+assert.equal(runtimeUsersShape.props.selectedState, "table");
+assert.equal(runtimeOrdersShape.props.selectedState, "none");
+
 const selectedRelationFromCanvas =
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
     {
@@ -2273,6 +2914,208 @@ assert.deepEqual(selectedRelationFromCanvas, {
   type: "relation",
   relationId: "relation.orders.user_id.users.id"
 });
+assert.deepEqual(
+  canvasSelectionRuntime.getSqlErdDeleteBatchFromSelectedShapes([
+    { type: "sqltoerd_table", props: { tableId: "table.users" } },
+    { type: "sqltoerd_table", props: { tableId: "table.users" } },
+    {
+      type: "sqltoerd_relation",
+      props: { relationId: "relation.orders.user_id.users.id" }
+    },
+    { type: "sqltoerd_annotation", props: { annotationId: "link.manual" } },
+    { type: "sqltoerd_note", props: { noteId: "note.todo" } },
+    { type: "sqltoerd_frame", props: { frameId: "frame.scope" } },
+    { type: "sqltoerd_text", props: { textId: "text.title" } },
+    { type: "sqltoerd_stroke", props: { strokeId: "stroke.mark" } }
+  ]),
+  {
+    deleteFrameIds: ["frame.scope"],
+    deleteLinkIds: ["link.manual"],
+    deleteNoteIds: ["note.todo"],
+    deleteStrokeIds: ["stroke.mark"],
+    deleteTextIds: ["text.title"],
+    relationIds: ["relation.orders.user_id.users.id"],
+    tableIds: ["table.users"]
+  }
+);
+const runtimeInteractiveSelectionEditor = {
+  selectedShapeIds: ["shape:sqltoerd-note-existing"],
+  hitShape: {
+    id: "shape:sqltoerd-frame-next",
+    type: "sqltoerd_frame",
+    props: { frameId: "frame.next" }
+  },
+  getShapeAtPoint() {
+    return this.hitShape;
+  },
+  getSelectedShapeIds() {
+    return this.selectedShapeIds;
+  },
+  setSelectedShapes(shapeIds) {
+    this.selectedShapeIds = [...shapeIds];
+  },
+  selectNone() {
+    this.selectedShapeIds = [];
+  }
+};
+
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 120, y: 80 }
+  ),
+  true
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-frame-next"
+]);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-note-existing"
+];
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 120, y: 80 },
+    { toggle: true }
+  ),
+  true
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-note-existing",
+  "shape:sqltoerd-frame-next"
+]);
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 120, y: 80 },
+    { toggle: true }
+  ),
+  true
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-note-existing"
+]);
+runtimeInteractiveSelectionEditor.hitShape = null;
+assert.equal(
+  canvasSelectionRuntime.selectSqlErdCanvasShapeAtPoint(
+    runtimeInteractiveSelectionEditor,
+    { x: 20, y: 20 },
+    { clearOnMiss: true }
+  ),
+  false
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, []);
+const runtimeResizeOverlayEditor = {
+  getShapeAtPoint() {
+    return null;
+  },
+  overlays: {
+    getOverlayAtPoint() {
+      return { id: "selection_fg:bottom_right" };
+    }
+  }
+};
+assert.equal(
+  canvasSelectionRuntime.isSqlErdCanvasBackgroundPoint(
+    runtimeResizeOverlayEditor,
+    { x: 20, y: 20 }
+  ),
+  false
+);
+runtimeResizeOverlayEditor.overlays.getOverlayAtPoint = () => null;
+assert.equal(
+  canvasSelectionRuntime.isSqlErdCanvasBackgroundPoint(
+    runtimeResizeOverlayEditor,
+    { x: 20, y: 20 }
+  ),
+  true
+);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-table-current"
+];
+assert.deepEqual(
+  tableShapeRuntime.primeSqlErdPointerSelection(
+    runtimeInteractiveSelectionEditor,
+    "shape:sqltoerd-table-next"
+  ),
+  ["shape:sqltoerd-table-current"]
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-table-next"
+]);
+runtimeInteractiveSelectionEditor.selectedShapeIds = [
+  "shape:sqltoerd-table-current"
+];
+assert.deepEqual(
+  tableShapeRuntime.primeSqlErdPointerSelection(
+    runtimeInteractiveSelectionEditor,
+    "shape:sqltoerd-table-next",
+    { toggle: true }
+  ),
+  ["shape:sqltoerd-table-current"]
+);
+assert.deepEqual(runtimeInteractiveSelectionEditor.selectedShapeIds, [
+  "shape:sqltoerd-table-current"
+]);
+assert.deepEqual(
+  canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
+    isShapeSelected: false,
+    selection: { type: "table", tableId: "table.users" },
+    tableId: "table.users"
+  }),
+  { selectedColumnId: null, selectedState: "none" }
+);
+assert.deepEqual(
+  canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
+    isShapeSelected: true,
+    selection: { type: "none" },
+    tableId: "table.users"
+  }),
+  { selectedColumnId: null, selectedState: "table" }
+);
+assert.deepEqual(
+  canvasSelectionRuntime.resolveSqlErdTableInteractionSelection({
+    isShapeSelected: true,
+    selection: {
+      type: "column",
+      tableId: "table.users",
+      columnId: "email"
+    },
+    tableId: "table.users"
+  }),
+  { selectedColumnId: "email", selectedState: "column" }
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: false,
+    key: "Delete",
+    selection: { type: "table", tableId: "table.users" }
+  }),
+  true
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: true,
+    key: "Backspace",
+    selection: {
+      type: "column",
+      tableId: "table.users",
+      columnId: "id"
+    }
+  }),
+  false
+);
+assert.equal(
+  canvasSelectionRuntime.shouldHandleSqlErdSchemaDeleteShortcut({
+    isEditableTarget: false,
+    key: "Delete",
+    selection: {
+      type: "relation",
+      relationId: "relation.orders.user_id.users.id"
+    }
+  }),
+  true
+);
 assert.deepEqual(
   canvasSelectionRuntime.getSqlErdSelectionFromSelectedShapes([
     {
@@ -2328,11 +3171,11 @@ const manualReloadFailureAction =
 assert.equal(manualReloadFailureAction.kind, "preserve_current");
 assert.equal(
   manualReloadFailureAction.sessionLoadState.label,
-  "Reload failed"
+  "다시 불러오기 실패"
 );
 assert.equal(
   manualReloadFailureAction.sessionLoadState.message,
-  "Workspace session could not be reloaded. Keep editing the current ERD or try reloading again."
+  "Workspace 세션을 다시 불러오지 못했습니다. 현재 ERD를 계속 편집하거나 다시 시도하세요."
 );
 
 const initialReloadFailureAction =
@@ -2345,8 +3188,8 @@ assert.deepEqual(initialReloadFailureAction.selectedSqlErdObject, {
   type: "none"
 });
 assert.deepEqual(initialReloadFailureAction.sessionLoadState, {
-  label: "Sample",
-  message: "Workspace session could not be loaded. Showing the built-in sample instead.",
+  label: "샘플",
+  message: "Workspace 세션을 불러오지 못해 기본 샘플을 표시합니다.",
   tone: "neutral"
 });
 assert.deepEqual(
@@ -2354,9 +3197,9 @@ assert.deepEqual(
     hasLoadedSession: false
   }),
   {
-    label: "Load failed",
+    label: "불러오기 실패",
     message:
-      "Workspace session could not be loaded. Try again or return to the session list.",
+      "Workspace 세션을 불러오지 못했습니다. 다시 시도하거나 세션 목록으로 돌아가세요.",
     tone: "error"
   }
 );
@@ -2455,6 +3298,13 @@ assert.equal(
   "conflict"
 );
 assert.equal(
+  sessionStateRuntime.getLayoutAutosaveBlockReasonForApiError({
+    code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH",
+    status: 409
+  }),
+  "write_protocol_mismatch"
+);
+assert.equal(
   sessionStateRuntime.getLayoutAutosaveBlockReasonForStatus(401),
   "unauthorized"
 );
@@ -2501,32 +3351,43 @@ assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(1), 4000);
 assert.equal(sessionStateRuntime.getLayoutAutosaveDelayMs(4), 30000);
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("conflict"), {
   canRetry: false,
-  message: "Workspace session changed. Reload the latest session before saving this layout.",
+  message: "Workspace 세션이 변경되었습니다. 이 layout을 저장하기 전에 최신 세션을 다시 불러오세요.",
   reason: "conflict"
 });
+assert.deepEqual(
+  sessionStateRuntime.getLayoutAutosavePausedBanner(
+    "write_protocol_mismatch"
+  ),
+  {
+    canRetry: false,
+    message:
+      "쓰기 프로토콜이 변경되었습니다. 최신 세션을 다시 불러올 때까지 이 탭은 읽기 전용입니다.",
+    reason: "write_protocol_mismatch"
+  }
+);
 assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("unauthorized"),
   {
     canRetry: false,
-    message: "Sign in again, then reload this SQLtoERD session.",
+    message: "다시 로그인한 뒤 SQLtoERD 세션을 불러오세요.",
     reason: "unauthorized"
   }
 );
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("forbidden"), {
   canRetry: false,
-  message: "You do not have permission to save this SQLtoERD session.",
+  message: "이 SQLtoERD 세션을 저장할 권한이 없습니다.",
   reason: "forbidden"
 });
 assert.deepEqual(sessionStateRuntime.getLayoutAutosavePausedBanner("not_found"), {
   canRetry: false,
-  message: "This SQLtoERD session was deleted or cannot be found. Reload the session.",
+  message: "SQLtoERD 세션이 삭제되었거나 존재하지 않습니다. 세션을 다시 불러오세요.",
   reason: "not_found"
 });
 assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("invalid_payload"),
   {
     canRetry: true,
-    message: "Current layout payload cannot be autosaved. Try moving a table again or reload the session.",
+    message: "현재 layout을 자동 저장할 수 없습니다. 테이블을 다시 이동하거나 세션을 다시 불러오세요.",
     reason: "invalid_payload"
   }
 );
@@ -2534,41 +3395,41 @@ assert.deepEqual(
   sessionStateRuntime.getLayoutAutosavePausedBanner("unknown_non_transient"),
   {
     canRetry: true,
-    message: "Autosave stopped after a non-retryable API error. Retry once or reload the session.",
+    message: "재시도할 수 없는 오류로 자동 저장이 중지되었습니다. 한 번 다시 시도하거나 세션을 다시 불러오세요.",
     reason: "unknown_non_transient"
   }
 );
 
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("EMPTY_SOURCE"),
-  "Enter at least one CREATE TABLE statement to generate an ERD."
+  "ERD를 생성하려면 CREATE TABLE 문을 하나 이상 입력하세요."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("UNSUPPORTED_DIALECT"),
-  "This SQL dialect is not supported yet. Choose PostgreSQL, MySQL, or SQLite."
+  "지원하지 않는 SQL dialect입니다. PostgreSQL, MySQL 또는 SQLite를 선택하세요."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("NO_CREATE_TABLE"),
-  "SQLtoERD MVP supports CREATE TABLE DDL. Add at least one CREATE TABLE statement."
+  "SQLtoERD는 CREATE TABLE DDL을 지원합니다. CREATE TABLE 문을 하나 이상 추가하세요."
 );
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("PARSE_FAILED"),
-  "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again."
+  "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요."
 );
 assert.deepEqual(statusCopyRuntime.getSqlErdSignInRequiredState(), {
-  label: "Sign in",
-  message: "Sign in to save this SQLtoERD session in the Workspace.",
+  label: "로그인 필요",
+  message: "SQLtoERD 세션을 Workspace에 저장하려면 로그인하세요.",
   tone: "error"
 });
 assert.deepEqual(statusCopyRuntime.getSqlErdWorkspaceSaveErrorState(), {
-  label: "Save error",
+  label: "저장 오류",
   message:
-    "Workspace session could not be autosaved. Check your connection; SQL changes will retry automatically.",
+    "Workspace 세션을 자동 저장하지 못했습니다. 연결을 확인하면 SQL 변경 사항을 자동으로 다시 저장합니다.",
   tone: "error"
 });
 const fallbackSourceStatus = {
-  label: "Workspace",
-  message: "Workspace session revision 7",
+  label: "저장됨",
+  message: "Workspace 세션 revision 7",
   tone: "success"
 };
 assert.deepEqual(
@@ -2596,8 +3457,8 @@ assert.deepEqual(
     sourceAutosaveState: "saving"
   }),
   {
-    label: "Waiting",
-    message: "Waiting to parse SQL changes",
+    label: "파싱 대기",
+    message: "SQL 변경 사항을 파싱할 때까지 기다리는 중입니다.",
     tone: "neutral"
   }
 );
@@ -2655,9 +3516,9 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Parse error",
+    label: "파싱 오류",
     message:
-      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+      "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요.",
     tone: "error"
   }
 );
@@ -2673,9 +3534,9 @@ assert.deepEqual(
     sourceAutosaveState: "retrying"
   }),
   {
-    label: "Save error",
+    label: "저장 재시도",
     message:
-      "Workspace session could not be autosaved. Retrying parsed SQL changes automatically.",
+      "Workspace 세션을 자동 저장하지 못해 파싱된 SQL 변경 사항을 다시 저장하는 중입니다.",
     tone: "error"
   }
 );
@@ -2692,8 +3553,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Parsing",
-    message: "Parsing SQL DDL",
+    label: "파싱 중",
+    message: "SQL DDL을 파싱하는 중입니다.",
     tone: "neutral"
   }
 );
@@ -2758,8 +3619,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Waiting",
-    message: "Waiting to parse SQL changes",
+    label: "파싱 대기",
+    message: "SQL 변경 사항을 파싱할 때까지 기다리는 중입니다.",
     tone: "neutral"
   }
 );
@@ -2775,8 +3636,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Parsing",
-    message: "Parsing SQL DDL",
+    label: "파싱 중",
+    message: "SQL DDL을 파싱하는 중입니다.",
     tone: "neutral"
   }
 );
@@ -2795,9 +3656,9 @@ assert.deepEqual(
     sourceAutosaveState: "saving"
   }),
   {
-    label: "Parse error",
+    label: "파싱 오류",
     message:
-      "SQL DDL could not be parsed. Check the CREATE TABLE syntax and try again.",
+      "SQL DDL을 파싱하지 못했습니다. CREATE TABLE 문법을 확인한 뒤 다시 시도하세요.",
     tone: "error"
   }
 );
@@ -2813,8 +3674,8 @@ assert.deepEqual(
     sourceAutosaveState: "pending"
   }),
   {
-    label: "Unsaved",
-    message: "Parsed SQL changes will autosave",
+    label: "저장 대기",
+    message: "파싱된 SQL 변경 사항을 자동 저장할 예정입니다.",
     tone: "neutral"
   }
 );
@@ -2830,8 +3691,8 @@ assert.deepEqual(
     sourceAutosaveState: "saving"
   }),
   {
-    label: "Saving",
-    message: "Autosaving parsed SQL changes",
+    label: "저장 중",
+    message: "파싱된 SQL 변경 사항을 자동 저장하는 중입니다.",
     tone: "neutral"
   }
 );
@@ -3162,6 +4023,23 @@ assert.equal(
   normalizedSqlSnapshot.sourceText
 );
 assert.equal(normalizedSqlAppliedState.parse.status, "idle");
+const jsonbReorderedNormalizedSqlAppliedState =
+  sqlEditStateRuntime.reduceSqlErdEditState(successfulSqlEditState, {
+    baseSnapshot: {
+      ...successfulSnapshot,
+      modelJson: {
+        schema: successfulSnapshot.modelJson.schema,
+        version: successfulSnapshot.modelJson.version
+      }
+    },
+    snapshot: normalizedSqlSnapshot,
+    type: "normalized_sql_applied"
+  });
+assert.equal(
+  jsonbReorderedNormalizedSqlAppliedState.lastSuccessfulSnapshot.sourceText,
+  normalizedSqlSnapshot.sourceText,
+  "normalized SQL apply must ignore JSON object key ordering"
+);
 assert.strictEqual(
   sqlEditStateRuntime.reduceSqlErdEditState(successfulSqlEditState, {
     baseSnapshot: { ...successfulSnapshot, revision: 7 },
@@ -3410,6 +4288,67 @@ assert.deepEqual(
   preservedNewerLayoutState.lastSuccessfulSnapshot.layoutJson,
   newerLayout
 );
+
+const layoutRequestBeforeTextOrStroke = locallyChangedLayout;
+const layoutWithTextAddedDuringAutosave = modelRuntime.applySqltoerdLayoutPatch(
+  layoutRequestBeforeTextOrStroke,
+  {
+    textsToAdd: [{
+      id: "text.autosave-race",
+      x: 24,
+      y: 48,
+      width: 240,
+      height: 72,
+      text: "Keep this text",
+      color: "blue"
+    }]
+  }
+);
+const layoutWithStrokeAddedDuringAutosave = modelRuntime.applySqltoerdLayoutPatch(
+  layoutRequestBeforeTextOrStroke,
+  {
+    strokesToAdd: [{
+      id: "stroke.autosave-race",
+      points: [{ x: 24, y: 48 }, { x: 48, y: 72 }],
+      color: "blue",
+      size: 4
+    }]
+  }
+);
+
+for (const layoutChangedDuringAutosave of [
+  layoutWithTextAddedDuringAutosave,
+  layoutWithStrokeAddedDuringAutosave
+]) {
+  assert.equal(
+    modelRuntime.areSqltoerdLayoutsEqual(
+      layoutChangedDuringAutosave,
+      layoutRequestBeforeTextOrStroke
+    ),
+    false
+  );
+
+  const stateWithPendingAnnotationChange = {
+    ...pendingLayoutState,
+    lastSuccessfulSnapshot: {
+      ...pendingLayoutSnapshot,
+      layoutJson: layoutChangedDuringAutosave
+    }
+  };
+  const stateAfterFirstAutosaveResponse = sqlEditStateRuntime.reduceSqlErdEditState(
+    stateWithPendingAnnotationChange,
+    {
+      type: "layout_saved",
+      requestLayoutJson: layoutRequestBeforeTextOrStroke,
+      snapshot: savedLayoutSnapshot
+    }
+  );
+
+  assert.deepEqual(
+    stateAfterFirstAutosaveResponse.lastSuccessfulSnapshot.layoutJson,
+    layoutChangedDuringAutosave
+  );
+}
 
 const monotonicLayoutState = {
   ...newerLayoutState,
@@ -3992,6 +4931,42 @@ assert.deepEqual(
   updateSessionPayload
 );
 
+const updateSqlErdSessionMetadataRequests = [];
+const updateSqlErdSessionMetadataClient = apiClientRuntime.createSqlErdApiClient({
+  fetcher: async (url, init) => {
+    updateSqlErdSessionMetadataRequests.push({ init, url });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: createRuntimeTestSession({ revision: 4, title: "Renamed ERD" })
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200
+      }
+    );
+  }
+});
+const updatedSqlErdSessionMetadata =
+  await updateSqlErdSessionMetadataClient.updateSessionMetadata(
+    "workspace 1",
+    "session 1",
+    { baseRevision: 3, title: "Renamed ERD" }
+  );
+
+assert.equal(updatedSqlErdSessionMetadata.title, "Renamed ERD");
+assert.equal(updateSqlErdSessionMetadataRequests.length, 1);
+assert.equal(
+  updateSqlErdSessionMetadataRequests[0].url,
+  "http://localhost:4000/api/v1/workspaces/workspace%201/sql-erd-sessions/session%201/metadata"
+);
+assert.equal(updateSqlErdSessionMetadataRequests[0].init.method, "PATCH");
+assert.deepEqual(
+  JSON.parse(updateSqlErdSessionMetadataRequests[0].init.body),
+  { baseRevision: 3, title: "Renamed ERD" }
+);
+
 const deleteSqlErdSessionRequests = [];
 const deleteSqlErdSessionClient = apiClientRuntime.createSqlErdApiClient({
   fetcher: async (url, init) => {
@@ -4191,6 +5166,102 @@ assert.deepEqual(
   selectedPostgresRelationRanges.map((range) =>
     postgresSourceText.slice(range.from, range.to)
   ),
+  [
+    "user_id",
+    "id",
+    "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+  ]
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "constraint"
+  ),
+  postgresTableRelationRange.constraintRange
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "from"
+  ),
+  postgresTableRelationRange.fromColumnRanges[0]
+);
+assert.deepEqual(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.orders.user_id.users.id",
+    "to"
+  ),
+  postgresTableRelationRange.toColumnRanges[0]
+);
+assert.equal(
+  sourceNavigationRuntime.resolveSqlErdSourceNavigationTarget(
+    postgresParseResult.sourceMap,
+    "relation.missing",
+    "constraint"
+  ),
+  null
+);
+assert.deepEqual(
+  sourceNavigationRuntime.clampSqlErdSourceNavigationRange(
+    { from: 8, to: 30 },
+    12
+  ),
+  { from: 8, to: 12 }
+);
+assert.equal(
+  sourceNavigationRuntime.clampSqlErdSourceNavigationRange(
+    { from: 20, to: 30 },
+    12
+  ),
+  null
+);
+const postgresAlterTableSourceText = `CREATE TABLE users (
+  id BIGSERIAL PRIMARY KEY
+);
+
+CREATE TABLE orders (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL
+);
+
+ALTER TABLE orders ADD CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id);`;
+const postgresAlterTableParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: postgresAlterTableSourceText
+});
+
+assert.equal(postgresAlterTableParseResult.ok, true);
+const postgresAlterTableRelation =
+  postgresAlterTableParseResult.modelJson.schema.relations[0];
+const postgresAlterTableRelationRanges =
+  postgresAlterTableParseResult.sourceMap.relationsById[
+    postgresAlterTableRelation.id
+  ];
+
+assert.ok(postgresAlterTableRelationRanges);
+assert.equal(
+  postgresAlterTableSourceText.slice(
+    postgresAlterTableRelationRanges.constraintRange.from,
+    postgresAlterTableRelationRanges.constraintRange.to
+  ),
+  "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
+);
+assert.deepEqual(
+  sqlSourceMapRuntime
+    .getSelectedSqlErdRelationSourceRanges({
+      selection: {
+        type: "relation",
+        relationId: postgresAlterTableRelation.id
+      },
+      sourceMap: postgresAlterTableParseResult.sourceMap,
+      sourceText: postgresAlterTableSourceText
+    })
+    .map((range) =>
+      postgresAlterTableSourceText.slice(range.from, range.to)
+    ),
   [
     "user_id",
     "id",
@@ -4414,6 +5485,188 @@ assert.equal(
   "TIMESTAMP WITH TIME ZONE"
 );
 
+const postgresFullSchemaSourceText = `CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM 'CREATE TABLE body_only (id UUID)';
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TYPE account_status AS ENUM ('active', 'disabled');
+
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status account_status NOT NULL
+);
+
+CREATE TABLE sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id)
+);
+
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();`;
+const postgresFullSchemaParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: postgresFullSchemaSourceText
+  });
+
+assert.equal(postgresFullSchemaParseResult.ok, true);
+if (!postgresFullSchemaParseResult.ok) {
+  throw new Error(postgresFullSchemaParseResult.error.message);
+}
+assert.deepEqual(
+  postgresFullSchemaParseResult.modelJson.schema.tables.map(
+    ({ name }) => name
+  ),
+  ["users", "sessions"]
+);
+assert.equal(
+  postgresFullSchemaParseResult.modelJson.schema.relations.length,
+  1
+);
+assert.equal(
+  postgresFullSchemaParseResult.sourceMap.sourceText,
+  postgresFullSchemaSourceText
+);
+
+const invalidPostgresTableWithFunction =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: `CREATE FUNCTION noop() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;
+CREATE TABLE broken_table (id UUID NOT NULL;`
+  });
+
+assert.equal(invalidPostgresTableWithFunction.ok, false);
+if (invalidPostgresTableWithFunction.ok) {
+  throw new Error("Invalid CREATE TABLE must fail");
+}
+assert.equal(invalidPostgresTableWithFunction.error.code, "PARSE_FAILED");
+
+const mysqlFullDumpSourceText = `-- MySQL dump
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+SET @OLD_SQL_MODE=@@SQL_MODE;
+
+DELIMITER $$
+CREATE PROCEDURE rebuild_user_cache()
+BEGIN
+  CREATE TEMPORARY TABLE routine_only (id BIGINT PRIMARY KEY);
+  SET @ddl = 'CREATE TABLE string_only (id BIGINT PRIMARY KEY)';
+  SET @delimiter_text = '$$';
+END$$
+
+CREATE TRIGGER users_before_insert
+BEFORE INSERT ON users
+FOR EACH ROW
+BEGIN
+  SET NEW.email = LOWER(NEW.email);
+END$$
+DELIMITER ;
+
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL
+);
+
+CREATE TEMPORARY TABLE staging_users (
+  id BIGINT PRIMARY KEY
+);
+
+CREATE TABLE sessions (
+  id BIGINT PRIMARY KEY,
+  user_id BIGINT NOT NULL
+);
+
+ALTER TABLE sessions
+  ADD CONSTRAINT fk_sessions_user
+  FOREIGN KEY (user_id) REFERENCES users(id);
+
+LOCK TABLES users WRITE;
+INSERT INTO users VALUES (1, 'USER@example.com');
+UNLOCK TABLES;`;
+const mysqlFullDumpParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: mysqlFullDumpSourceText
+});
+
+assert.equal(mysqlFullDumpParseResult.ok, true);
+if (!mysqlFullDumpParseResult.ok) {
+  throw new Error(mysqlFullDumpParseResult.error.message);
+}
+assert.deepEqual(
+  mysqlFullDumpParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "sessions"]
+);
+assert.equal(mysqlFullDumpParseResult.modelJson.schema.relations.length, 1);
+assert.equal(
+  mysqlFullDumpParseResult.sourceMap.sourceText,
+  mysqlFullDumpSourceText
+);
+
+const mysqlFullDumpAutoParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: mysqlFullDumpSourceText
+});
+
+assert.equal(mysqlFullDumpAutoParseResult.ok, true);
+if (!mysqlFullDumpAutoParseResult.ok) {
+  throw new Error(mysqlFullDumpAutoParseResult.error.message);
+}
+assert.equal(mysqlFullDumpAutoParseResult.resolvedDialect, "mysql");
+assert.deepEqual(
+  mysqlFullDumpAutoParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "sessions"]
+);
+
+const invalidMySqlTableWithRoutine =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "mysql",
+    sourceText: `DELIMITER $$
+CREATE PROCEDURE noop() BEGIN SELECT 1; END$$
+DELIMITER ;
+CREATE TABLE broken_table (id BIGINT NOT NULL;`
+  });
+
+assert.equal(invalidMySqlTableWithRoutine.ok, false);
+if (invalidMySqlTableWithRoutine.ok) {
+  throw new Error("Invalid MySQL CREATE TABLE must fail");
+}
+assert.equal(invalidMySqlTableWithRoutine.error.code, "PARSE_FAILED");
+
+const mysqlRoutineOnlyParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "mysql",
+  sourceText: `DELIMITER $$
+CREATE PROCEDURE noop() BEGIN SELECT '$$'; END$$
+DELIMITER ;`
+});
+
+assert.equal(mysqlRoutineOnlyParseResult.ok, false);
+if (mysqlRoutineOnlyParseResult.ok) {
+  throw new Error("MySQL routine-only dump must not create an ERD");
+}
+assert.equal(mysqlRoutineOnlyParseResult.error.code, "NO_CREATE_TABLE");
+
+const mysqlRoutineOnlyAutoParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "auto",
+    sourceText: `DELIMITER $$
+CREATE PROCEDURE noop() BEGIN SELECT '$$'; END$$
+DELIMITER ;`
+  });
+
+assert.equal(mysqlRoutineOnlyAutoParseResult.ok, false);
+if (mysqlRoutineOnlyAutoParseResult.ok) {
+  throw new Error("Auto MySQL routine-only dump must not create an ERD");
+}
+assert.equal(mysqlRoutineOnlyAutoParseResult.error.code, "NO_CREATE_TABLE");
+
 const mysqlSourceText = `CREATE TABLE users (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
@@ -4471,6 +5724,111 @@ assert.equal(
   ),
   "CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id)"
 );
+
+const sqliteFullDumpSourceText = `PRAGMA foreign_keys=OFF;
+BEGIN TRANSACTION;
+
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  note TEXT
+);
+
+CREATE TEMP TABLE staging_users (
+  id INTEGER PRIMARY KEY
+);
+
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id)
+);
+
+CREATE VIEW user_posts AS
+SELECT users.id, posts.id AS post_id
+FROM users JOIN posts ON posts.user_id = users.id;
+
+CREATE INDEX idx_posts_user_id ON posts(user_id);
+
+CREATE TRIGGER users_after_insert
+AFTER INSERT ON users
+BEGIN
+  UPDATE users
+  SET note = 'CREATE TABLE string_only (id INTEGER);'
+  WHERE id = NEW.id;
+END;
+
+INSERT INTO users VALUES (1, 'seed');
+COMMIT;`;
+const sqliteFullDumpParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "sqlite",
+  sourceText: sqliteFullDumpSourceText
+});
+
+assert.equal(sqliteFullDumpParseResult.ok, true);
+if (!sqliteFullDumpParseResult.ok) {
+  throw new Error(sqliteFullDumpParseResult.error.message);
+}
+assert.deepEqual(
+  sqliteFullDumpParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "posts"]
+);
+assert.equal(sqliteFullDumpParseResult.modelJson.schema.relations.length, 1);
+assert.equal(
+  sqliteFullDumpParseResult.sourceMap.sourceText,
+  sqliteFullDumpSourceText
+);
+
+const sqliteFullDumpAutoParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "auto",
+  sourceText: sqliteFullDumpSourceText
+});
+
+assert.equal(sqliteFullDumpAutoParseResult.ok, true);
+if (!sqliteFullDumpAutoParseResult.ok) {
+  throw new Error(sqliteFullDumpAutoParseResult.error.message);
+}
+assert.equal(sqliteFullDumpAutoParseResult.resolvedDialect, "sqlite");
+assert.deepEqual(
+  sqliteFullDumpAutoParseResult.modelJson.schema.tables.map(({ name }) => name),
+  ["users", "staging_users", "posts"]
+);
+
+const invalidSqliteTableWithPragma =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "sqlite",
+    sourceText: `PRAGMA foreign_keys=ON;
+CREATE TABLE broken_table (id INTEGER NOT NULL;`
+  });
+
+assert.equal(invalidSqliteTableWithPragma.ok, false);
+if (invalidSqliteTableWithPragma.ok) {
+  throw new Error("Invalid SQLite CREATE TABLE must fail");
+}
+assert.equal(invalidSqliteTableWithPragma.error.code, "PARSE_FAILED");
+
+const sqliteMetadataOnlyParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "sqlite",
+  sourceText: `PRAGMA foreign_keys=ON;
+CREATE VIEW empty_view AS SELECT 1;`
+});
+
+assert.equal(sqliteMetadataOnlyParseResult.ok, false);
+if (sqliteMetadataOnlyParseResult.ok) {
+  throw new Error("SQLite metadata-only dump must not create an ERD");
+}
+assert.equal(sqliteMetadataOnlyParseResult.error.code, "NO_CREATE_TABLE");
+
+const sqliteMetadataOnlyAutoParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "auto",
+    sourceText: `PRAGMA foreign_keys=ON;
+CREATE VIEW empty_view AS SELECT 1;`
+  });
+
+assert.equal(sqliteMetadataOnlyAutoParseResult.ok, false);
+if (sqliteMetadataOnlyAutoParseResult.ok) {
+  throw new Error("Auto SQLite metadata-only dump must not create an ERD");
+}
+assert.equal(sqliteMetadataOnlyAutoParseResult.error.code, "NO_CREATE_TABLE");
 
 const sqliteSourceText = `CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4580,6 +5938,34 @@ assert.equal(
   }).ok,
   true
 );
+const uuidModel = structuredClone(mysqlParseResult.modelJson);
+uuidModel.schema.tables[0].columns[0].dataType = "UUID";
+const normalizedUuidMySql = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "mysql",
+  modelJson: uuidModel
+});
+assert.equal(
+  normalizedUuidMySql.modelJson.schema.tables[0].columns[0].dataType,
+  "CHAR(36)"
+);
+assert.match(normalizedUuidMySql.sql, /`id` CHAR\(36\) NOT NULL/);
+assert.match(normalizedUuidMySql.warnings.join(" "), /UUID.*CHAR\(36\)/);
+const normalizedUuidSqlite = modelToSqlRuntime.generateSqlDdlFromErdModel({
+  dialect: "sqlite",
+  modelJson: uuidModel
+});
+assert.equal(
+  normalizedUuidSqlite.modelJson.schema.tables[0].columns[0].dataType,
+  "TEXT"
+);
+assert.match(normalizedUuidSqlite.sql, /"id" TEXT NOT NULL/);
+assert.equal(
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "sqlite",
+    sourceText: normalizedUuidSqlite.sql
+  }).ok,
+  true
+);
 const modelSqlPreviewSession = {
   id: "session.model-sql-preview",
   revision: 7,
@@ -4606,6 +5992,108 @@ assert.equal(modelSqlPreview.baseSnapshot, modelSqlPreviewSession);
 assert.match(modelSqlPreview.generatedSourceText, /CREATE TABLE `users`/);
 assert.equal(modelSqlPreview.hasChanges, true);
 assert.ok(modelSqlPreview.warnings.length > 0);
+assert.match(
+  modelSqlPreview.warnings.join(" "),
+  /정규화된 CREATE TABLE 및 FOREIGN KEY 구문으로 SQL을 재생성합니다/
+);
+const uuidModelSqlPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: uuidModel,
+    resolvedDialect: "mysql",
+    session: { ...modelSqlPreviewSession, modelJson: uuidModel }
+  });
+assert.equal(
+  uuidModelSqlPreview.modelJson.schema.tables[0].columns[0].dataType,
+  "CHAR(36)"
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(uuidModelSqlPreview).ok,
+  true
+);
+const aiGeneratedDecimalModel = structuredClone(mysqlParseResult.modelJson);
+aiGeneratedDecimalModel.schema.tables[0].columns[0].dataType =
+  "DECIMAL(12, 2)";
+const aiGeneratedDecimalPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: aiGeneratedDecimalModel,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      modelJson: aiGeneratedDecimalModel
+    }
+  });
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    aiGeneratedDecimalPreview
+  ).ok,
+  true,
+  "AI-generated DECIMAL precision spacing must survive semantic verification"
+);
+const quotedCommaTypeWithSpace = structuredClone(mysqlParseResult.modelJson);
+quotedCommaTypeWithSpace.schema.tables[0].columns[0].dataType = '"Type, Name"';
+const quotedCommaTypeWithoutSpace = structuredClone(mysqlParseResult.modelJson);
+quotedCommaTypeWithoutSpace.schema.tables[0].columns[0].dataType =
+  '"Type,Name"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedCommaTypeWithSpace
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedCommaTypeWithoutSpace
+  ),
+  "quoted data type identifiers must preserve comma-adjacent whitespace"
+);
+const quotedTypeMixedCase = structuredClone(mysqlParseResult.modelJson);
+quotedTypeMixedCase.schema.tables[0].columns[0].dataType = '"MyType"';
+const quotedTypeUpperCase = structuredClone(mysqlParseResult.modelJson);
+quotedTypeUpperCase.schema.tables[0].columns[0].dataType = '"MYTYPE"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(quotedTypeMixedCase),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(quotedTypeUpperCase),
+  "quoted data type identifiers must preserve case"
+);
+const quotedTypeDoubleSpace = structuredClone(mysqlParseResult.modelJson);
+quotedTypeDoubleSpace.schema.tables[0].columns[0].dataType = '"Type  Name"';
+const quotedTypeSingleSpace = structuredClone(mysqlParseResult.modelJson);
+quotedTypeSingleSpace.schema.tables[0].columns[0].dataType = '"Type Name"';
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedTypeDoubleSpace
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    quotedTypeSingleSpace
+  ),
+  "quoted data type identifiers must preserve repeated whitespace"
+);
+const enumLowerCaseLiterals = structuredClone(mysqlParseResult.modelJson);
+enumLowerCaseLiterals.schema.tables[0].columns[0].dataType =
+  "ENUM('small','large')";
+const enumUpperCaseLiterals = structuredClone(mysqlParseResult.modelJson);
+enumUpperCaseLiterals.schema.tables[0].columns[0].dataType =
+  "ENUM('SMALL','LARGE')";
+assert.notEqual(
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    enumLowerCaseLiterals
+  ),
+  sqlDiffApplyRuntime.createSqlErdSchemaSemanticSignature(
+    enumUpperCaseLiterals
+  ),
+  "quoted enum literals must preserve case"
+);
+const unsupportedTypeModel = structuredClone(mysqlParseResult.modelJson);
+unsupportedTypeModel.schema.tables[0].columns[0].dataType = "USER_ROLE";
+const unsupportedTypeApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+      modelJson: unsupportedTypeModel,
+      resolvedDialect: "mysql",
+      session: { ...modelSqlPreviewSession, modelJson: unsupportedTypeModel }
+    })
+  );
+assert.equal(unsupportedTypeApplyResult.ok, false);
+assert.match(unsupportedTypeApplyResult.error, /생성된 MySQL SQL을 검증하지 못했습니다/);
+assert.match(unsupportedTypeApplyResult.error, /users\.id \(USER_ROLE\)/);
+assert.doesNotMatch(unsupportedTypeApplyResult.error, /Expected/);
 assert.deepEqual(
   sqlDiffApplyRuntime.createSqlErdSqlLineDiff(
     "CREATE TABLE users (\n  id BIGINT\n);",
@@ -4618,6 +6106,128 @@ assert.deepEqual(
     { kind: "unchanged", value: ");" }
   ]
 );
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdSplitDiffRows(
+    "same\nold one\nold two\ntail",
+    "same\nnew one\ntail"
+  ),
+  [
+    {
+      before: { kind: "unchanged", lineNumber: 1, value: "same" },
+      after: { kind: "unchanged", lineNumber: 1, value: "same" }
+    },
+    {
+      before: { kind: "removed", lineNumber: 2, value: "old one" },
+      after: { kind: "added", lineNumber: 2, value: "new one" }
+    },
+    {
+      before: { kind: "removed", lineNumber: 3, value: "old two" },
+      after: { kind: "empty", lineNumber: null, value: "" }
+    },
+    {
+      before: { kind: "unchanged", lineNumber: 4, value: "tail" },
+      after: { kind: "unchanged", lineNumber: 3, value: "tail" }
+    }
+  ]
+);
+const contextualDiffRows = sqlDiffApplyRuntime.createSqlErdSplitDiffRows(
+  Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n"),
+  Array.from({ length: 12 }, (_, index) =>
+    index === 5 ? "line 6 changed" : `line ${index + 1}`
+  ).join("\n")
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdContextualSplitDiffSections(
+    contextualDiffRows,
+    3
+  ),
+  [
+    { endIndex: 2, kind: "collapsed", rowCount: 2, startIndex: 0 },
+    { endIndex: 9, kind: "rows", startIndex: 2 },
+    { endIndex: 12, kind: "collapsed", rowCount: 3, startIndex: 9 }
+  ],
+  "split diff는 변경 행 앞뒤 3줄만 기본 표시한다"
+);
+const nearbyContextualDiffRows =
+  sqlDiffApplyRuntime.createSqlErdSplitDiffRows(
+    Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\n"),
+    Array.from({ length: 10 }, (_, index) =>
+      index === 3 || index === 6
+        ? `line ${index + 1} changed`
+        : `line ${index + 1}`
+    ).join("\n")
+  );
+assert.deepEqual(
+  sqlDiffApplyRuntime.createSqlErdContextualSplitDiffSections(
+    nearbyContextualDiffRows,
+    1
+  ),
+  [
+    { endIndex: 2, kind: "collapsed", rowCount: 2, startIndex: 0 },
+    { endIndex: 8, kind: "rows", startIndex: 2 },
+    { endIndex: 10, kind: "collapsed", rowCount: 2, startIndex: 8 }
+  ],
+  "서로 맞닿는 diff 문맥 범위는 하나의 hunk로 합친다"
+);
+const largeDiffPage = sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+  [{ endIndex: 5000, kind: "rows", startIndex: 0 }],
+  0,
+  1200
+);
+assert.deepEqual(
+  largeDiffPage,
+  {
+    pageCount: 5,
+    pageIndex: 0,
+    rowEndOffset: 1200,
+    rowStartOffset: 0,
+    sections: [{ endIndex: 1200, kind: "rows", startIndex: 0 }],
+    totalVisibleRowCount: 5000
+  },
+  "대규모 전체 diff도 한 페이지에서 1,200행을 넘게 렌더링하지 않는다"
+);
+assert.deepEqual(
+  sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+    [{ endIndex: 5000, kind: "rows", startIndex: 0 }],
+    99,
+    1200
+  ),
+  {
+    pageCount: 5,
+    pageIndex: 4,
+    rowEndOffset: 5000,
+    rowStartOffset: 4800,
+    sections: [{ endIndex: 5000, kind: "rows", startIndex: 4800 }],
+    totalVisibleRowCount: 5000
+  },
+  "마지막 전체 diff 페이지도 남은 행만 렌더링한다"
+);
+const contextualDiffPages = [
+  { endIndex: 100, kind: "collapsed", rowCount: 100, startIndex: 0 },
+  { endIndex: 110, kind: "rows", startIndex: 100 },
+  {
+    endIndex: 5000,
+    kind: "collapsed",
+    rowCount: 4890,
+    startIndex: 110
+  },
+  { endIndex: 5010, kind: "rows", startIndex: 5000 },
+  {
+    endIndex: 5200,
+    kind: "collapsed",
+    rowCount: 190,
+    startIndex: 5010
+  }
+];
+assert.deepEqual(
+  sqlDiffApplyRuntime.paginateSqlErdSplitDiffSections(
+    contextualDiffPages,
+    0,
+    10
+  ).sections,
+  contextualDiffPages.slice(0, 3),
+  "문맥 페이지 경계의 접힌 구간 버튼은 계속 접근할 수 있다"
+);
 const appliedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
   modelSqlPreview
 );
@@ -4626,6 +6236,92 @@ assert.equal(appliedModelSqlPreview.snapshot.sourceText, modelSqlPreview.generat
 assert.deepEqual(
   appliedModelSqlPreview.snapshot.layoutJson.tableLayouts,
   modelSqlPreviewSession.layoutJson.tableLayouts
+);
+const renamedTableMutation = schemaMutationRuntime.renameSqlErdTable(
+  modelSqlPreviewSession.modelJson,
+  "table.users",
+  "accounts"
+);
+assert.equal(renamedTableMutation.ok, true);
+const renamedTablePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: renamedTableMutation.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession
+  });
+const appliedRenamedTablePreview =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(renamedTablePreview);
+assert.equal(
+  appliedRenamedTablePreview.ok,
+  true,
+  "table rename preview must apply with stable IDs"
+);
+assert.equal(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.tables[0].id,
+  "table.users"
+);
+assert.equal(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.tables[0].name,
+  "accounts"
+);
+assert.deepEqual(
+  appliedRenamedTablePreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.deepEqual(
+  appliedRenamedTablePreview.snapshot.modelJson.schema.relations[0],
+  renamedTableMutation.modelJson.schema.relations[0]
+);
+assert.match(
+  appliedRenamedTablePreview.snapshot.sourceText,
+  /REFERENCES `accounts` \(`id`\)/
+);
+
+const renamedColumnMutation = schemaMutationRuntime.renameSqlErdColumn(
+  modelSqlPreviewSession.modelJson,
+  "table.orders",
+  "column.orders.user_id",
+  "account_id"
+);
+assert.equal(renamedColumnMutation.ok, true);
+const renamedColumnPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: renamedColumnMutation.modelJson,
+    resolvedDialect: "mysql",
+    session: modelSqlPreviewSession
+  });
+const appliedRenamedColumnPreview =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(renamedColumnPreview);
+assert.equal(
+  appliedRenamedColumnPreview.ok,
+  true,
+  "column rename preview must apply with stable IDs"
+);
+assert.equal(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].columns[1]
+    .id,
+  "column.orders.user_id"
+);
+assert.equal(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].columns[1]
+    .name,
+  "account_id"
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.layoutJson.tableLayouts,
+  modelSqlPreviewSession.layoutJson.tableLayouts
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.tables[1].constraints,
+  renamedColumnMutation.modelJson.schema.tables[1].constraints
+);
+assert.deepEqual(
+  appliedRenamedColumnPreview.snapshot.modelJson.schema.relations[0],
+  renamedColumnMutation.modelJson.schema.relations[0]
+);
+assert.match(
+  appliedRenamedColumnPreview.snapshot.sourceText,
+  /FOREIGN KEY \(`account_id`\) REFERENCES `users` \(`id`\)/
 );
 assert.equal(
   sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
@@ -4640,6 +6336,98 @@ assert.equal(
     revision: 8
   }),
   false
+);
+const rebasedModelSqlPreview =
+  sqlDiffApplyRuntime.rebaseSqlErdNormalizedSqlPreviewAfterSave(
+    modelSqlPreview,
+    { ...modelSqlPreviewSession, revision: 8 }
+  );
+assert.equal(rebasedModelSqlPreview.baseSnapshot.revision, 8);
+assert.equal(
+  rebasedModelSqlPreview.generatedSourceText,
+  modelSqlPreview.generatedSourceText
+);
+assert.equal(
+  sqlDiffApplyRuntime.rebaseSqlErdNormalizedSqlPreviewAfterSave(
+    modelSqlPreview,
+    { ...modelSqlPreviewSession, revision: 8, sourceText: "SELECT 1;" }
+  ),
+  null
+);
+for (const writeProtocol of ["snapshot", "operations_v1"]) {
+  const jsonbRoundTripSession = {
+    ...modelSqlPreviewSession,
+    latestOpSeq: writeProtocol === "operations_v1" ? 4 : 0,
+    settingsJson: {
+      editor: { showRelationLabels: true, theme: "light" },
+      sqltoerdRelationNotes: {}
+    },
+    writeProtocol
+  };
+  const jsonbRoundTripPreview =
+    sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+      modelJson: jsonbRoundTripSession.modelJson,
+      resolvedDialect: "mysql",
+      session: jsonbRoundTripSession
+    });
+  const savedAfterJsonbRoundTrip = {
+    ...jsonbRoundTripSession,
+    revision: 8,
+    modelJson: {
+      schema: jsonbRoundTripSession.modelJson.schema,
+      version: jsonbRoundTripSession.modelJson.version
+    },
+    settingsJson: {
+      sqltoerdRelationNotes: {},
+      editor: { theme: "light", showRelationLabels: true }
+    }
+  };
+  const rebasedAfterJsonbRoundTrip =
+    sqlDiffApplyRuntime.rebaseSqlErdNormalizedSqlPreviewAfterSave(
+      jsonbRoundTripPreview,
+      savedAfterJsonbRoundTrip
+    );
+
+  assert.notEqual(
+    rebasedAfterJsonbRoundTrip,
+    null,
+    `${writeProtocol} preview must survive JSONB object key reordering`
+  );
+  assert.equal(
+    sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
+      rebasedAfterJsonbRoundTrip,
+      savedAfterJsonbRoundTrip
+    ),
+    true
+  );
+  assert.equal(
+    sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+      rebasedAfterJsonbRoundTrip
+    ).ok,
+    true
+  );
+}
+const snapshotProtocolPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: modelSqlPreviewSession.modelJson,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      latestOpSeq: 0,
+      writeProtocol: "snapshot"
+    }
+  });
+assert.equal(
+  sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(
+    snapshotProtocolPreview,
+    {
+      ...modelSqlPreviewSession,
+      latestOpSeq: 0,
+      writeProtocol: "operations_v1"
+    }
+  ),
+  false,
+  "preview must become stale when the write protocol changes"
 );
 assert.equal(
   sqlDiffApplyRuntime.isSqlErdNormalizedSqlPreviewCurrent(modelSqlPreview, {
@@ -4693,11 +6481,27 @@ const modelSqlPreviewWithoutRelationNote =
     settingsJson: modelSqlPreviewTargetSettings
   });
 assert.deepEqual(modelSqlPreviewWithoutRelationNote.settingsJson, {});
+const semanticallyMismatchedPreviewModel = structuredClone(
+  modelSqlPreview.modelJson
+);
+semanticallyMismatchedPreviewModel.schema.tables[0].name = "renamed_users";
+const semanticallyMismatchedApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
+    ...modelSqlPreview,
+    modelJson: semanticallyMismatchedPreviewModel
+  });
+assert.equal(semanticallyMismatchedApplyResult.ok, false);
+assert.match(
+  semanticallyMismatchedApplyResult.error,
+  /재생성된 SQL이 요청한 ERD 변경과 일치하지 않습니다/
+);
 const failedModelSqlPreview = sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview({
   ...modelSqlPreview,
   generatedSourceText: "CREATE TABLE users ("
 });
 assert.equal(failedModelSqlPreview.ok, false);
+assert.doesNotMatch(failedModelSqlPreview.error, /Expected|but\s+".+"\s+found/iu);
+assert.match(failedModelSqlPreview.error, /생성된 MySQL SQL을 검증하지 못했습니다/);
 assert.equal(modelSqlPreviewSession.sourceText, mysqlSourceText);
 let modelSqlHistory = sqlDiffApplyRuntime.createSqlErdModelSqlHistory();
 modelSqlHistory = sqlDiffApplyRuntime.recordSqlErdModelSqlHistory(
@@ -4747,7 +6551,7 @@ assert.throws(
         }
       }
     }),
-  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+  /지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다/
 );
 const generatedPostgreSql = modelToSqlRuntime.generateSqlDdlFromErdModel({
   dialect: "postgresql",
@@ -4766,6 +6570,10 @@ assert.equal(
   true
 );
 const semanticRoundTripModel = structuredClone(mysqlParseResult.modelJson);
+semanticRoundTripModel.schema.tables[0].columns[1].defaultValue = "TRUE";
+semanticRoundTripModel.schema.tables[1].columns[0].defaultValue =
+  "CURRENT_TIMESTAMP";
+semanticRoundTripModel.schema.tables[1].columns[1].defaultValue = "NULL";
 semanticRoundTripModel.schema.tables[1].columns[2].defaultValue = "'new'";
 semanticRoundTripModel.schema.tables[1].constraints.push({
   id: "constraint.orders.id_status.unique",
@@ -4880,7 +6688,7 @@ assert.throws(
       dialect: "sqlite",
       modelJson: cyclicModel
     }),
-  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+  /지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다/
 );
 const blockedSqlitePreview = sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
   modelJson: cyclicModel,
@@ -4896,7 +6704,7 @@ assert.equal(blockedSqlitePreview.generationBlocked, true);
 assert.equal(blockedSqlitePreview.hasChanges, false);
 assert.match(
   blockedSqlitePreview.warnings.join(" "),
-  /SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE/
+  /지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다/
 );
 assert.deepEqual(
   sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(blockedSqlitePreview),
@@ -5469,6 +7277,29 @@ assert.deepEqual(
 );
 assert.deepEqual(
   relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
+    isHovered: false,
+    isSelected: false
+  }),
+  {
+    stroke: "rgba(37, 99, 235, 0.98)",
+    strokeWidth: 4
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
+    isHovered: true,
+    isSelected: false
+  }),
+  {
+    stroke: "rgba(37, 99, 235, 0.98)",
+    strokeWidth: 4
+  }
+);
+assert.deepEqual(
+  relationShapeRuntime.getSqlErdRelationVisualStyle({
+    isContextual: true,
     isHovered: true,
     isSelected: true
   }),
@@ -5476,6 +7307,24 @@ assert.deepEqual(
     stroke: "rgba(37, 99, 235, 0.98)",
     strokeWidth: 4
   }
+);
+assert.deepEqual(
+  [...canvasSelectionRuntime.getSqlErdContextRelationIds(runtimeModel, {
+    type: "table",
+    tableId: "table.users"
+  })],
+  [
+    "relation.orders.user_id.users.id",
+    "relation.users.manager_id.users.id"
+  ]
+);
+assert.deepEqual(
+  [...canvasSelectionRuntime.getSqlErdContextRelationIds(runtimeModel, {
+    type: "column",
+    tableId: "table.users",
+    columnId: "column.users.id"
+  })],
+  []
 );
 const selectedRelationHighlight = {
   relationId: "relation.orders.user_id.users.id",
@@ -5649,16 +7498,17 @@ assert.equal(
   "BIGINT"
 );
 
-const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
-  dialect: "postgresql",
-  sourceText: `CREATE TYPE order_status AS ENUM ('pending', 'paid');
+const customPostgreSqlTypeSource = `CREATE TYPE order_status AS ENUM ('pending', 'paid');
 CREATE DOMAIN currency_amount AS NUMERIC(12, 2);
 
 CREATE TABLE payments (
   id BIGSERIAL PRIMARY KEY,
   status order_status NOT NULL,
   amount currency_amount
-);`
+);`;
+const customPostgreSqlTypeParseResult = ddlParserRuntime.parseSqlDdlToErdModel({
+  dialect: "postgresql",
+  sourceText: customPostgreSqlTypeSource
 });
 
 assert.equal(customPostgreSqlTypeParseResult.ok, true);
@@ -5669,20 +7519,149 @@ assert.deepEqual(
   ),
   ["BIGSERIAL", "ORDER_STATUS", "CURRENCY_AMOUNT"]
 );
+assert.deepEqual(
+  ddlParserRuntime.collectPostgreSqlUserDefinedTypeStatements(
+    customPostgreSqlTypeSource
+  ),
+  [
+    "CREATE TYPE order_status AS ENUM ('pending', 'paid');",
+    "CREATE DOMAIN currency_amount AS NUMERIC(12, 2);"
+  ]
+);
+const customPostgreSqlTypePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: customPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: customPostgreSqlTypeParseResult.modelJson,
+      sourceText: customPostgreSqlTypeSource
+    }
+  });
+assert.match(
+  customPostgreSqlTypePreview.generatedSourceText,
+  /CREATE TYPE order_status AS ENUM \('pending', 'paid'\);/
+);
+assert.match(
+  customPostgreSqlTypePreview.generatedSourceText,
+  /CREATE DOMAIN currency_amount AS NUMERIC\(12, 2\);/
+);
+const customPostgreSqlTypeApplyResult =
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    customPostgreSqlTypePreview
+  );
+assert.equal(
+  customPostgreSqlTypeApplyResult.ok,
+  true,
+  JSON.stringify({
+    applyResult: customPostgreSqlTypeApplyResult,
+    sourceText: customPostgreSqlTypePreview.generatedSourceText
+  })
+);
+const schemaQualifiedPostgreSqlTypeSource = `CREATE TYPE auth.order_status AS ENUM ('pending');
 
-const caseSensitivePostgreSqlDomainParseResult =
+CREATE TABLE orders (
+  id BIGSERIAL PRIMARY KEY,
+  status auth.order_status NOT NULL
+);`;
+const schemaQualifiedPostgreSqlTypeParseResult =
   ddlParserRuntime.parseSqlDdlToErdModel({
     dialect: "postgresql",
-    sourceText: `CREATE DOMAIN "CaseType570" AS TEXT;
+    sourceText: schemaQualifiedPostgreSqlTypeSource
+  });
+assert.equal(schemaQualifiedPostgreSqlTypeParseResult.ok, true);
+assert.equal(
+  schemaQualifiedPostgreSqlTypeParseResult.modelJson.schema.tables[0]
+    .columns[1].dataType,
+  "auth.order_status"
+);
+const schemaQualifiedPostgreSqlTypePreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: schemaQualifiedPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: schemaQualifiedPostgreSqlTypeParseResult.modelJson,
+      sourceText: schemaQualifiedPostgreSqlTypeSource
+    }
+  });
+assert.match(
+  schemaQualifiedPostgreSqlTypePreview.generatedSourceText,
+  /CREATE TYPE auth\.order_status AS ENUM \('pending'\);/
+);
+assert.match(
+  schemaQualifiedPostgreSqlTypePreview.generatedSourceText,
+  /"status" auth\.order_status NOT NULL/
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    schemaQualifiedPostgreSqlTypePreview
+  ).ok,
+  true
+);
+const customPostgreSqlTypeMySqlPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: customPostgreSqlTypeParseResult.modelJson,
+    resolvedDialect: "mysql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: customPostgreSqlTypeParseResult.modelJson,
+      sourceText: customPostgreSqlTypeSource
+    }
+  });
+assert.doesNotMatch(
+  customPostgreSqlTypeMySqlPreview.generatedSourceText,
+  /CREATE (?:TYPE|DOMAIN)/
+);
+
+const caseSensitivePostgreSqlDomainSource = `CREATE DOMAIN "CaseType570" AS TEXT;
 CREATE DOMAIN "casetype570" AS TEXT;
 
 CREATE TABLE case_sensitive_values (
   upper_value "CaseType570" NOT NULL,
   lower_value "casetype570" NOT NULL
-);`
+);`;
+const caseSensitivePostgreSqlDomainParseResult =
+  ddlParserRuntime.parseSqlDdlToErdModel({
+    dialect: "postgresql",
+    sourceText: caseSensitivePostgreSqlDomainSource
   });
 
 assert.equal(caseSensitivePostgreSqlDomainParseResult.ok, true);
+assert.deepEqual(
+  caseSensitivePostgreSqlDomainParseResult.modelJson.schema.tables[0].columns.map(
+    (column) => column.dataType
+  ),
+  ['"CaseType570"', '"casetype570"']
+);
+const caseSensitivePostgreSqlDomainPreview =
+  sqlDiffApplyRuntime.createSqlErdNormalizedSqlPreview({
+    modelJson: caseSensitivePostgreSqlDomainParseResult.modelJson,
+    resolvedDialect: "postgresql",
+    session: {
+      ...modelSqlPreviewSession,
+      dialect: "postgresql",
+      modelJson: caseSensitivePostgreSqlDomainParseResult.modelJson,
+      sourceText: caseSensitivePostgreSqlDomainSource
+    }
+  });
+assert.match(
+  caseSensitivePostgreSqlDomainPreview.generatedSourceText,
+  /"upper_value" "CaseType570" NOT NULL/
+);
+assert.match(
+  caseSensitivePostgreSqlDomainPreview.generatedSourceText,
+  /"lower_value" "casetype570" NOT NULL/
+);
+assert.equal(
+  sqlDiffApplyRuntime.applySqlErdNormalizedSqlPreview(
+    caseSensitivePostgreSqlDomainPreview
+  ).ok,
+  true
+);
 
 const commentOnlyPostgreSqlTypeParseResult =
   ddlParserRuntime.parseSqlDdlToErdModel({
@@ -5759,7 +7738,7 @@ assert.deepEqual(oversizedSourceParseResult, {
 });
 assert.equal(
   statusCopyRuntime.getSqlErdGenerateErrorMessage("SOURCE_TOO_LARGE"),
-  "SQL source is too large. Keep it at or below 1 MiB and try again."
+  "SQL source가 너무 큽니다. 1 MiB 이하로 줄인 뒤 다시 시도하세요."
 );
 
 const exactLimitSourceParseResult =
@@ -5858,9 +7837,19 @@ assert.match(page, /SqlErdSessionList/);
 assert.doesNotMatch(page, /SqlErdPanel/);
 assert.match(sessionPage, /SqlErdPanel/);
 assert.match(sessionPage, /readSqlErdSessionId/);
-assert.match(sessionPage, /window\.location\.search/);
+assert.match(sessionPage, /useSearchParams/);
+assert.match(sessionPage, /key=\{sessionId\}/);
+assert.doesNotMatch(sessionPage, /window\.location\.search/);
 assert.match(sessionPage, /sql-erd-full-bleed/);
-assert.match(sessionPage, /h-screen/);
+assert.match(
+  sessionPage,
+  /sql-erd-full-bleed h-full min-h-0 overflow-hidden/
+);
+assert.equal(
+  sessionPage.match(/flex h-full min-h-0 items-center justify-center/g)?.length,
+  2
+);
+assert.doesNotMatch(sessionPage, /h-screen/);
 assert.match(sessionRouteBridge, /SqlErdSessionPage as default/);
 assert.match(sessionRouteBridge, /import "tldraw\/tldraw\.css"/);
 assert.doesNotMatch(page, /-m-6/);
@@ -5884,8 +7873,14 @@ assert.match(sessionList, /createSession/);
 assert.match(sessionList, /getSqlErdCreateSessionTitle/);
 assert.match(sessionList, /getSqlErdSessionTitleUpdate/);
 assert.match(sessionList, /updateSqlErdSessionSummaryTitle/);
-assert.match(sessionList, /updateSession/);
+assert.match(sessionList, /updateSessionMetadata/);
 assert.match(sessionList, /baseRevision: session\.revision/);
+const sessionTitleRenameHandler = sessionList.slice(
+  sessionList.indexOf("const handleSaveSessionTitle"),
+  sessionList.indexOf("const handleDeleteSession")
+);
+assert.match(sessionTitleRenameHandler, /apiClient\.updateSessionMetadata/);
+assert.doesNotMatch(sessionTitleRenameHandler, /apiClient\.updateSession\(/);
 assert.match(sessionList, /DialogTitle>새 ERD 만들기/);
 assert.match(sessionList, /제목 수정/);
 assert.match(sessionList, /deleteSession/);
@@ -5924,6 +7919,17 @@ assert.match(sqlDiffApplyUtils, /retainSqltoerdRelationNotesForModel/);
 assert.match(panel, /NormalizedSqlPreviewDialog/);
 assert.match(panel, /normalized_sql_applied/);
 assert.match(panel, /Regenerate SQL/);
+assert.match(panel, /SQL 변경 적용/);
+assert.match(panel, /현재 SQL을 교체하기 전에 생성된 SQL을 검토하세요/);
+assert.match(panel, /SQL 재생성 불가/);
+assert.match(panel, /생성된 SQL이 현재 SQL과 같습니다/);
+assert.match(panel, />\s*취소\s*</);
+assert.match(panel, /적용 중/);
+assert.match(panel, /SQL을 적용하는 동안 세션이 변경되었습니다/);
+assert.match(panel, /미리보기 화면이 열린 동안 세션이 변경되었습니다/);
+assert.doesNotMatch(panel, /Review the generated SQL before replacing the current source/);
+assert.doesNotMatch(panel, /The generated SQL matches the current source/);
+assert.doesNotMatch(panel, /The session changed while SQL was being applied/);
 assert.match(panel, /handlePreviewAnnotationForeignKeyConversion/);
 assert.match(panel, /onConvertAnnotationToForeignKey/);
 assert.match(inspectorUtils, /relationNote/);
@@ -5933,6 +7939,7 @@ assert.match(
   /SQL_ERD_LAYOUT_AUTOSAVE_MAX_RETRY_DELAY_MS = 30000/
 );
 assert.match(sessionStateUtils, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(sessionStateUtils, /getLayoutAutosaveBlockReasonForApiError/);
 assert.match(sessionStateUtils, /isLayoutAutosaveTransientStatus/);
 assert.match(sessionStateUtils, /getLayoutAutosaveDelayMs/);
 assert.match(sessionStateUtils, /getLayoutAutosavePausedBanner/);
@@ -5967,11 +7974,11 @@ assert.match(statusCopyUtils, /getSqlErdGenerateErrorMessage/);
 assert.match(statusCopyUtils, /getSqlErdSignInRequiredState/);
 assert.match(statusCopyUtils, /getSqlErdWorkspaceSaveErrorState/);
 assert.match(statusCopyUtils, /getSqlErdSourceStatus/);
-assert.match(statusCopyUtils, /CREATE TABLE statement/);
+assert.match(statusCopyUtils, /CREATE TABLE 문/);
 assert.doesNotMatch(statusCopyUtils, /try Generate again/);
-assert.match(statusCopyUtils, /retry automatically/);
+assert.match(statusCopyUtils, /자동으로 다시 저장/);
 assert.match(statusCopyUtils, /"retrying"/);
-assert.match(statusCopyUtils, /Retrying parsed SQL changes automatically/);
+assert.match(statusCopyUtils, /파싱된 SQL 변경 사항을 다시 저장/);
 
 assert.match(panel, /SqlErdCanvas/);
 assert.match(panel, /sessionId=\{sessionId\}/);
@@ -6071,17 +8078,141 @@ assert.match(panel, /getSqlErdSourceStatus/);
 assert.match(panel, /autosaveBlockReason: layoutAutosaveBlockReason/);
 assert.match(panel, /aria-live="polite"/);
 assert.doesNotMatch(panel, /sqlErdApiClient\.createSession/);
-assert.match(panel, /"Save conflict"/);
+assert.match(panel, /"저장 충돌"/);
 assert.match(panel, /pendingLayoutAutosaveJson/);
 assert.match(panel, /layoutAutosaveRetryAttempt/);
 assert.match(panel, /type LayoutAutosaveBlockReason/);
 assert.match(panel, /layoutAutosaveBlockReason/);
 assert.match(panel, /getLayoutAutosaveBlockReason/);
 assert.match(panel, /getLayoutAutosavePausedBanner/);
+assert.match(panel, /SQL_ERD_WRITE_PROTOCOL_MISMATCH/);
+assert.match(panel, /write_protocol_mismatch/);
 assert.match(panel, /AutosavePausedBanner/);
-assert.match(panel, /Autosave paused/);
-assert.match(panel, /Reload session/);
-assert.match(panel, /Retry once/);
+assert.match(panel, /자동 저장 중지/);
+assert.match(panel, /세션 다시 불러오기/);
+assert.match(panel, /한 번 다시 시도/);
+for (const englishStatusCopy of [
+  "Loading workspace session",
+  "Reload this session before editing or saving changes.",
+  "Normalized SQL changes will autosave",
+  "Save conflict",
+  "Autosave paused",
+  "Autosaving table layout",
+  "Table layout could not be autosaved. Retrying soon",
+  "Reload session",
+  "Retry once",
+  "Acquiring lock",
+  "Read only",
+  "Acquiring the SQL source lock.",
+  "Table layout changes will autosave",
+  "Canvas changes will sync as workspace operations",
+  "Retrying pending SQLtoERD changes",
+  "Workspace session revision",
+  "Workspace에 저장되었습니다."
+]) {
+  assert.doesNotMatch(
+    panel,
+    new RegExp(englishStatusCopy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    `사용자 노출 상태 문구는 한국어여야 합니다: ${englishStatusCopy}`
+  );
+}
+assert.doesNotMatch(
+  panel,
+  /sourceLock\.status === "read_only"[\s\S]{0,80}\? sourceLock\.message/,
+  "source lock 서버 오류 문구를 사용자 상태에 그대로 노출하지 않는다"
+);
+assert.match(
+  panel,
+  /const isWriteProtocolMismatch =\s*layoutAutosaveBlockReason === "write_protocol_mismatch"/
+);
+assert.match(
+  panel,
+  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /isSourceTextReadOnly=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /<CanvasShell[\s\S]*?isReadOnly=\{isWriteProtocolMismatch\}/
+);
+assert.match(canvasSurface, /isReadOnly\?: boolean/);
+assert.match(
+  canvasSurface,
+  /editor\.updateInstanceState\(\{ isReadonly: isReadOnly \}\)/
+);
+assert.match(
+  canvasSurface,
+  /const onLayoutPatch = isReadOnly \? undefined : onLayoutPatchProp/
+);
+assert.match(
+  canvasSurface,
+  /const handlePointerDownCapture = useCallback\(\s*\(event:[\s\S]*?if \(isReadOnly \|\| !editor/s
+);
+assert.match(panel, /const isWriteProtocolMismatchRef = useRef\(false\)/);
+assert.match(
+  panel,
+  /isWriteProtocolMismatchRef\.current = isWriteProtocolMismatch/
+);
+assert.match(
+  panel,
+  /if \(isWriteProtocolMismatch\) \{[\s\S]*?setNormalizedSqlPreview\(null\)/
+);
+assert.match(
+  panel,
+  /if \(isWriteProtocolMismatchRef\.current\) \{\s*setIsNormalizedSqlApplying\(false\);\s*return;/s
+);
+assert.match(
+  panel,
+  /const handlePreviewNormalizedSql = useCallback\(\(\) => \{[\s\S]*?if \(\s*isWriteProtocolMismatch \|\|\s*!resolvedDialect/s
+);
+assert.match(
+  panel,
+  /const handleApplyNormalizedSql = useCallback\(\(\) => \{[\s\S]*?isWriteProtocolMismatch \|\|/s
+);
+assert.match(
+  panel,
+  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
+);
+assert.match(
+  panel,
+  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
+);
+assert.match(
+  panel,
+  /canPreviewNormalizedSql=\{\s*isSessionReady &&\s*!isWriteProtocolMismatch/s
+);
+assert.match(
+  panel,
+  /canRedoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
+);
+assert.match(
+  panel,
+  /canUndoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
+);
+assert.match(
+  panel,
+  /canAddForeignKey=\{\s*isSessionReady &&\s*!isWriteProtocolMismatch/s
+);
+assert.match(
+  panel,
+  /<NormalizedSqlPreviewDialog[\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1"[\s\S]*?!sourceLock\.canEdit/
+);
+assert.match(panel, /handlePreviewSchemaMutation/);
+assert.match(panel, /createSqltoerdLayoutForModel/);
+assert.match(panel, /createSqlErdVerifiedNormalizedSnapshot/);
+assert.match(panel, /테이블명 SQL diff 보기/);
+assert.match(panel, /테이블 삭제 SQL diff 보기/);
+assert.match(panel, /컬럼 변경 SQL diff 보기/);
+assert.match(panel, /컬럼 삭제 SQL diff 보기/);
+assert.match(canvasSurface, /function SqlErdSchemaDeleteBridge/);
+assert.match(canvasSurface, /registerBeforeDeleteHandler/);
+assert.match(canvasSurface, /shouldHandleSqlErdSchemaDeleteShortcut/);
+assert.match(
+  panel,
+  /disabled=\{[\s\S]*?isReadOnly[\s\S]*?!preview[\s\S]*?!preview\.hasChanges[\s\S]*?isApplying[\s\S]*?isSavePending[\s\S]*?\}/
+);
 assert.match(panel, /handleReloadSession/);
 assert.match(panel, /handleReloadPausedSession/);
 assert.match(panel, /handleRetryLayoutAutosaveOnce/);
@@ -6102,7 +8233,7 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(panel, /isLayoutAutosaveBlocked/);
 assert.match(panel, /isSqlErdApiTransientAutosaveError/);
-assert.match(panel, /getLayoutAutosaveBlockReasonForStatus/);
+assert.match(panel, /getLayoutAutosaveBlockReasonForApiError/);
 assert.match(panel, /isLayoutAutosaveTransientStatus/);
 assert.match(panel, /createSqlErdLayoutAutosaveRequest/);
 assert.match(panel, /getLayoutAutosaveDelayMs\(layoutAutosaveRetryAttempt\)/);
@@ -6161,15 +8292,25 @@ assert.doesNotMatch(panel, /previousModelJson: parseStart\.session\.modelJson/);
 assert.match(panel, /relationSourceCompartmentRef/);
 assert.match(panel, /getSelectedSqlErdRelationSourceRanges/);
 assert.match(panel, /import Link from "next\/link"/);
-assert.match(panel, /\bHome\b/);
-assert.match(panel, /function SqlErdHomeNavigationButton/);
+assert.doesNotMatch(panel, /\bHome\b/);
+assert.doesNotMatch(panel, /function SqlErdHomeNavigationButton/);
 assert.match(panel, /href="\/sql-erd"/);
 assert.match(panel, /세션 목록으로 이동/);
+assert.match(panel, /세션 목록/);
+assert.match(panel, /data-sqltoerd-session-list-footer/);
 assert.match(panel, /function CollapsedSourcePanel/);
-assert.match(panel, /href="\/home"/);
-assert.match(panel, /aria-label="홈으로 이동"/);
+assert.doesNotMatch(panel, /href="\/home"/);
+assert.doesNotMatch(panel, /setIsSourceOpen\(window\.matchMedia/);
+assert.doesNotMatch(panel, /setIsInspectorOpen\(window\.matchMedia/);
 assert.match(panel, /<CollapsedSourcePanel onToggle=\{onToggle\} \/>/);
-assert.doesNotMatch(panel, /scrollIntoView/);
+assert.match(panel, /EditorView\.scrollIntoView/);
+assert.match(panel, /y: "center"/);
+assert.match(panel, /const transaction: TransactionSpec = \{ effects \}/);
+assert.match(panel, /transaction\.selection/);
+assert.match(panel, /참조하는 컬럼 SQL/);
+assert.match(panel, /참조되는 컬럼 SQL/);
+assert.match(canvasSurface, /SqlErdSelectionContextProvider/);
+assert.match(relationShape, /contextual/);
 assert.match(panel, /resolveSqlSourceEditorDialect/);
 assert.match(panel, /setLastResolvedDialect\(parseResult\.resolvedDialect\)/);
 assert.match(panel, /languageCompartmentRef/);
@@ -6178,8 +8319,11 @@ assert.match(panel, /languageCompartment\.of/);
 assert.match(panel, /createSqlSourceEditorDialectReconfigureEffect/);
 assert.match(panel, /EditorState\.readOnly\.of\(readOnly\)/);
 assert.match(panel, /EditorView\.editable\.of\(!readOnly\)/);
-assert.match(panel, /isDialectSelectDisabled=\{!isSessionReady\}/);
-assert.match(panel, /isSourceTextReadOnly=\{!isSessionReady\}/);
+assert.match(panel, /placeholder\("SQL 문을 입력해주세요"\)/);
+assert.match(panel, /isDialectSelectDisabled=\{/);
+assert.match(panel, /!sourceLock\.canEdit/);
+assert.match(panel, /isSourceTextReadOnly=\{/);
+assert.match(panel, /sqlErdViewSession\.writeProtocol === "operations_v1"/);
 assert.doesNotMatch(panel, /\bsql\(\)/);
 assert.doesNotMatch(panel, /<textarea/);
 assert.doesNotMatch(panel, /setSqlErdViewSession/);
@@ -6209,21 +8353,39 @@ assert.match(panel, /aria-valuenow=\{width\}/);
 assert.match(panel, /onPointerDown/);
 assert.match(panel, /sourcePanelWidth/);
 assert.match(panel, /inspectorPanelWidth/);
-assert.match(panel, /emptyState=\{\{/);
-assert.match(panel, /title: sqlErdViewSession\.title/);
+assert.doesNotMatch(panel, /emptyState=\{\{/);
+assert.doesNotMatch(panel, /type InspectorEmptyState/);
 assert.match(panel, /const inspectorSubtitle = getInspectorSubtitle\(viewModel\)/);
 assert.match(panel, /const inspectorTitle = getInspectorTitle\(viewModel\)/);
 assert.match(panel, /\{inspectorTitle\}/);
 assert.match(panel, /inspectorSubtitle \?/);
+assert.match(panel, /data-sqltoerd-inspector-summary/);
+assert.match(panel, /data-sqltoerd-inspector-table-name/);
+assert.match(panel, /data-sqltoerd-inspector-table-counts/);
+assert.match(panel, /data-sqltoerd-inspector-columns/);
+assert.match(panel, /data-sqltoerd-inspector-relationships/);
+assert.match(panel, /캔버스에서 항목을 선택하면 상세 정보를 확인할 수 있습니다/);
+assert.doesNotMatch(panel, />Add column</);
+assert.match(panel, />COLUMNS</);
+assert.match(panel, />RELATIONSHIPS</);
+assert.match(panel, /viewModel\.table\.columns\.map/);
+assert.match(panel, /font-mono/);
 assert.doesNotMatch(panel, /viewModel\.title\}.*table/i);
 assert.doesNotMatch(panel, /min-h-\[calc\(100vh-8\.5rem\)\]/);
 assert.doesNotMatch(panel, /rounded-lg border bg-background shadow-sm/);
 assert.doesNotMatch(panel, /bg-background\/95 px-4 backdrop-blur/);
 assert.match(panel, /상세 정보/);
-assert.match(panel, /선택 정보/);
+assert.doesNotMatch(panel, /선택 정보/);
+assert.doesNotMatch(panel, /선택된 항목이 없습니다/);
 assert.match(panel, /컬럼 정보/);
 assert.match(panel, /테이블 정보/);
-assert.match(panel, /관계 정보/);
+assert.match(panel, /외래 키 관계 정보/);
+assert.doesNotMatch(
+  panel,
+  /<InspectorSectionTitle>컬럼 정보<\/InspectorSectionTitle>/
+);
+assert.doesNotMatch(panel, /return `\$\{getTableDisplayName\(viewModel\.table\)\}\.\$\{viewModel\.column\.name\}`/);
+assert.doesNotMatch(panel, /return "외래 키 관계"/);
 assert.match(panel, /연결 관계/);
 assert.match(panel, /text-xl font-semibold/);
 assert.match(panel, /text-lg/);
@@ -6242,6 +8404,20 @@ assert.match(
 assert.match(panel, /modelJson=\{sqlErdViewSession\.modelJson\}/);
 assert.match(panel, /layoutJson=\{sqlErdViewSession\.layoutJson\}/);
 assert.match(panel, /label=\{sessionLoadState\.label\}/);
+assert.match(panel, /className="sr-only"/);
+assert.match(panel, /from "@\/components\/ui\/button"/);
+assert.match(panel, /from "@\/components\/ui\/card"/);
+assert.doesNotMatch(panel, /border-emerald-|bg-emerald-|text-emerald-/);
+assert.doesNotMatch(panel, /border-red-|bg-red-|text-red-/);
+assert.match(panel, /전체 SQL 보기/);
+assert.match(panel, /위 .*줄 펼치기|중간 .*줄 펼치기|아래 .*줄 펼치기/);
+assert.match(panel, /const SQL_ERD_DIFF_ROWS_PER_PAGE = 1200/);
+assert.match(
+  panel,
+  /const rows = useMemo\([\s\S]*?createSqlErdSplitDiffRows\(beforeSourceText, afterSourceText\)/
+);
+assert.match(panel, /paginateSqlErdSplitDiffSections/);
+assert.match(panel, /data-sqltoerd-diff-pagination/);
 assert.doesNotMatch(panel, /PreviewTableCard/);
 
 assert.match(inspectorUtils, /createSqlErdInspectorViewModel/);
@@ -6263,7 +8439,16 @@ assert.match(canvasSurface, /applySqlErdCanvasIncrementalShapeSync/);
 assert.doesNotMatch(canvasSurface, /function shouldResetSqlErdCanvas/);
 assert.match(canvasSurface, /function sendSqlErdCanvasBackgroundShapesToBack/);
 assert.match(canvasSurface, /editor\.sendToBack\(frameShapeIds\)/);
+assert.match(canvasSurface, /editor\.sendToBack\(noteShapeIds\)/);
 assert.match(canvasSurface, /editor\.sendToBack\(relationShapeIds\)/);
+assert.match(
+  canvasSurface,
+  /onTouchStartCapture=\{handleTouchStartCapture\}/
+);
+assert.match(
+  canvasSurface,
+  /const handleTouchStartCapture[\s\S]*?editorRef\.current\?\.markEventAsHandled\(event\)/
+);
 assert.match(canvasSurface, /createSqlErdCanvasContentKey/);
 assert.match(canvasSurface, /createSqlErdCanvasContentSyncState/);
 assert.match(canvasSurface, /invalidateSqlErdCanvasContentSyncFits/);
@@ -6306,6 +8491,13 @@ assert.doesNotMatch(canvasSurface, /onLayoutChange/);
 assert.match(canvasSurface, /updateSqltoerdLayoutWithTablePositions/);
 assert.match(canvasSurface, /onSelectionChange/);
 assert.match(canvasSurface, /getSqlErdSelectionFromSelectedShapes/);
+assert.match(canvasSurface, /getSqlErdDeleteBatchFromSelectedShapes/);
+assert.match(canvasSurface, /onSchemaDeleteBatch/);
+assert.match(
+  canvasSurface,
+  /const selectedShapes = editor\.getSelectedShapes\(\);[\s\S]*?const deleteBatch = getSqlErdDeleteBatchFromSelectedShapes\(selectedShapes\)/
+);
+assert.match(canvasSurface, /selectSqlErdCanvasShapeAtPoint/);
 assert.match(canvasSurface, /SQLTOERD_COLUMN_SELECT_EVENT/);
 assert.match(canvasSurface, /editor\.getSelectedShapes/);
 assert.match(canvasSurface, /SQLTOERD_TABLE_SHAPE_TYPE/);
@@ -6318,9 +8510,49 @@ assert.match(canvasSurface, /hashSqlErdShapeSourceId/);
 assert.match(canvasSurface, /zoomToFit/);
 assert.match(canvasSurface, /createSqltoerdAutoLayout/);
 assert.match(canvasSurface, /markHistoryStoppingPoint\("sqltoerd auto layout"\)/);
+const autoLayoutImplementation = canvasSurface.slice(
+  canvasSurface.indexOf("function applySqlErdAutoLayout"),
+  canvasSurface.indexOf("type SqlErdCanvasAnnotationSyncProps")
+);
+assert.doesNotMatch(autoLayoutImplementation, /fitSqlErdCanvas\(editor\)/);
 assert.match(canvasSurface, /data-sqltoerd-auto-layout/);
+const autoLayoutButtonSource = canvasSurface.slice(
+  canvasSurface.lastIndexOf(
+    "<button",
+    canvasSurface.indexOf("data-sqltoerd-auto-layout")
+  ),
+  canvasSurface.indexOf(
+    "</button>",
+    canvasSurface.indexOf("data-sqltoerd-auto-layout")
+  )
+);
+assert.match(autoLayoutButtonSource, /absolute left-4 top-4/);
+assert.doesNotMatch(autoLayoutButtonSource, /right-4/);
+assert.match(canvasSurface, /SqlErdTableFocusProvider/);
+assert.match(canvasSurface, /SqlErdTableFocusInteractionGuard/);
+assert.match(canvasSurface, /editor\.setSelectedShapes\(allowedShapeIds\)/);
+assert.match(canvasSurface, /registerBeforeChangeHandler\(\s*"shape"/);
+assert.match(canvasSurface, /registerBeforeDeleteHandler\(\s*"shape"/);
+assert.match(canvasSurface, /getSqlErdFocusedTableRole/);
+assert.match(canvasSurface, /getSqlErdFocusedRelationRole/);
 assert.match(canvasSurface, /SQLTOERD_MINIMUM_READABLE_ZOOM/);
 assert.match(canvasSurface, /resetSqlErdCanvas\(editor, shapes\)/);
+assert.match(
+  canvasSurface,
+  /resetSqlErdCanvas[\s\S]*?fitSqlErdCanvas\(editor, \{[\s\S]*?enforceMinimumReadableZoom: false[\s\S]*?\}\)/
+);
+assert.match(
+  canvasSurface,
+  /function fitSqlErdCanvas\([\s\S]*?editor: Editor,[\s\S]*?enforceMinimumReadableZoom = true/
+);
+assert.match(
+  canvasSurface,
+  /onFit: \(\) => \{[\s\S]*?fitSqlErdCanvas\(editor, \{[\s\S]*?enforceMinimumReadableZoom: false[\s\S]*?\}\);/
+);
+assert.match(
+  canvasSurface,
+  /const handleFitCanvas = useCallback\([\s\S]*?fitSqlErdCanvas\(editor, \{[\s\S]*?enforceMinimumReadableZoom: false[\s\S]*?\}\);/
+);
 assert.match(
   canvasSurface,
   /const handleMount = useCallback\([\s\S]*?editor\.setCurrentTool\("select\.idle"\);[\s\S]*?resetSqlErdCanvas\(editor, shapes\);/
@@ -6365,15 +8597,24 @@ assert.match(tableShape, /function selectSqlErdTableShape/);
 assert.match(tableShape, /editor\.updateShapes\(updates\)/);
 assert.match(
   tableShape,
-  /function handleColumnClick\(columnId: string\) \{[\s\S]*?selectSqlErdTableShapeColumn\(editor, shape, columnId\);[\s\S]*?selectSqlErdColumn\({/
+  /function handleColumnClick\([\s\S]*?toggle = false[\s\S]*?selectSqlErdTableShapeColumn\([\s\S]*?toggle,[\s\S]*?baseSelectedShapeIds[\s\S]*?if \(!toggle\) \{/
 );
 assert.match(tableShape, /aria-pressed=\{isSelected\}/);
 assert.match(tableShape, /function handleTableKeyDown/);
+assert.match(
+  tableShape,
+  /function handleTableClick\([\s\S]*?toggle = false,[\s\S]*?if \(isFocusDimmed\) return;/
+);
+assert.match(
+  tableShape,
+  /function handleColumnClick\([\s\S]*?columnId: string,[\s\S]*?toggle = false,[\s\S]*?if \(isFocusDimmed\) return;/
+);
 assert.match(tableShape, /override onClick\(shape: SqlErdTableShape\)/);
 assert.match(tableShape, /isSqlErdColumnPointerDrag/);
 assert.match(tableShape, /columnPointerStartRef/);
 assert.doesNotMatch(tableShape, /suppressNextColumnClickRef/);
 assert.match(tableShape, /onPointerDownCapture/);
+assert.match(tableShape, /primeSqlErdPointerSelection/);
 assert.doesNotMatch(tableShape, /onPointerUpCapture/);
 assert.doesNotMatch(tableShape, /<article[\s\S]*?onClick=\{handleTableClick\}/);
 assert.doesNotMatch(tableShape, /isSelected \|\| column\.foreignKey\s*\?\s*"border-blue-400 opacity-100"/);
@@ -6381,13 +8622,35 @@ assert.match(tableShape, /isHighlighted/);
 assert.match(tableShape, /data-sqltoerd-column-highlighted/);
 assert.match(tableShape, /data-sqltoerd-table-selected/);
 assert.match(tableShape, /pointer-events-auto/);
-assert.match(tableShape, /pointerEvents: "all"/);
+assert.match(tableShape, /pointerEvents: isFocusDimmed \? "none" : "all"/);
+assert.match(tableShape, /data-sqltoerd-table-focus-role/);
+assert.match(tableShape, /blur\(2px\)/);
 assert.match(tableShape, /justify-self-end/);
-assert.match(tableShape, /minmax\(max-content, 1fr\)/);
+assert.match(tableShape, /minmax\(0, 1fr\)/);
+assert.doesNotMatch(tableShape, /minmax\(max-content, 1fr\)/);
 assert.doesNotMatch(tableShape, /const BADGE_COLUMN_WIDTH = 72/);
 assert.doesNotMatch(tableShape, /gridTemplateColumns: `\$\{BADGE_COLUMN_WIDTH\}px max-content max-content`/);
-assert.doesNotMatch(tableShape, /truncate/);
+assert.match(
+  tableShape,
+  /className="min-w-0 w-full truncate justify-self-end whitespace-nowrap text-right text-slate-400"/
+);
+assert.match(tableShape, /title=\{column\.dataType\}/);
 assert.doesNotMatch(tableShape, /text-overflow/);
+
+assert.match(panel, /data-sqltoerd-inspector-toggle/);
+assert.match(
+  panel,
+  /className="flex min-h-16 items-start justify-between gap-3 border-b border-border bg-card px-5 py-4"[\s\S]*?data-sqltoerd-inspector-summary/
+);
+assert.match(
+  panel,
+  /className="bg-background px-4"[\s\S]*?data-sqltoerd-inspector-column-summary/
+);
+assert.match(
+  panel,
+  /<Button[\s\S]*?data-sqltoerd-inspector-toggle/
+);
+assert.doesNotMatch(panel, /className="absolute top-1\/2 -left-/);
 
 assert.match(relationShape, /SQLTOERD_RELATION_SHAPE_TYPE/);
 assert.match(relationShape, /SQLTOERD_RELATION_HOVER_EVENT/);
@@ -6430,6 +8693,18 @@ assert.match(relationShape, /data-sqltoerd-cardinality-marker/);
 assert.match(relationShape, /getSqlErdCardinalityMarkerGeometry/);
 assert.match(relationShape, /stroke="transparent"/);
 assert.match(relationShape, /SQLTOERD_RELATION_HIT_STROKE_WIDTH/);
+assert.match(relationShape, /data-sqltoerd-relation-focus-role/);
+assert.match(relationShape, /blur\(1px\)/);
+assert.match(panel, /consumeStagedSqlErdAgentTableFocus/);
+assert.match(panel, /revisionValidated/);
+assert.match(panel, /modelJson: sqlErdViewSession\.modelJson/);
+assert.match(panel, /data-sqltoerd-status-banners/);
+assert.match(
+  panel,
+  /data-sqltoerd-status-banners[\s\S]*?AutosavePausedBanner[\s\S]*?AgentTableFocusBanner/
+);
+assert.match(panel, /전체 보기/);
+assert.match(panel, /집중 보기/);
 assert.doesNotMatch(relationShape, /canCull\(\)/);
 
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_SHAPE_TYPE/);
@@ -6445,35 +8720,113 @@ assert.match(annotationShape, /SQLTOERD_ANNOTATION_LABEL_CHANGE_EVENT/);
 assert.match(annotationShape, /SQLTOERD_ANNOTATION_DELETE_EVENT/);
 assert.match(annotationShape, /getSqlErdRelationCurvePathData/);
 assert.match(annotationShape, /getSqlErdRelationCurveMidpoint/);
+assert.match(
+  annotationShape,
+  /const shouldShowLabel = isSelected \|\| shape\.props\.label\.length > 0/
+);
+assert.match(annotationShape, /\{shouldShowLabel \? \(/);
 assert.doesNotMatch(
   annotationShape,
   /\(startPoint\.x \+ endPoint\.x\) \/ 2/
 );
 assert.doesNotMatch(annotationShape, /Cardinality/);
+assert.match(panel, /whitespace-pre-wrap/);
+assert.match(panel, /\[overflow-wrap:anywhere\]/);
+assert.doesNotMatch(panel, /min-w-\[760px\]/);
+assert.doesNotMatch(panel, /<code className="whitespace-pre px-2">/);
+assert.match(panel, /createSqlErdGeneratedSqlParseError\(/);
+assert.doesNotMatch(
+  panel,
+  /setNormalizedSqlApplyError\(parseResult\.error\.message\)/
+);
 assert.match(frameShape, /\{!shape\.props\.isLocked \? \(/);
+assert.match(frameShape, /editor\.select\(shape\.id\)/);
+assert.match(frameShape, /resizeBox/);
+assert.match(frameShape, /onResize/);
+assert.match(frameShape, /isLocked: false/);
+assert.match(canvasSurface, /isLocked: false/);
 assert.doesNotMatch(noteShape, /SQLTOERD_NOTE_DELETE_EVENT/);
+assert.match(noteShape, /useEditor/);
+assert.match(noteShape, /data-sqltoerd-note-id/);
+assert.match(noteShape, /resizeBox/);
+assert.match(noteShape, /onResize/);
 assert.match(textShape, /SQLTOERD_TEXT_SHAPE_TYPE/);
 assert.match(textShape, /SQLTOERD_TEXT_CHANGE_EVENT/);
 assert.match(textShape, /maxLength=\{2000\}/);
+assert.match(textShape, /useEditor/);
+assert.match(textShape, /resizeBox/);
+assert.match(textShape, /onResize/);
+assert.match(strokeShape, /SQLTOERD_STROKE_SHAPE_TYPE/);
+assert.match(strokeShape, /stroke-linecap="round"/);
+assert.match(strokeShape, /canResize\(\)/);
+for (const shapeSource of [
+  annotationShape,
+  frameShape,
+  noteShape,
+  relationShape,
+  strokeShape,
+  tableShape,
+  textShape
+]) {
+  assert.match(shapeSource, /override hideRotateHandle\(\) \{ return true; \}/);
+}
 assert.match(annotationToolbar, /export function SqlErdCanvasToolbar/);
 assert.match(annotationToolbar, /aria-label="선택\/드래그"/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);
 assert.match(annotationToolbar, /aria-label="텍스트 추가"/);
+assert.match(annotationToolbar, /aria-label="펜"/);
+assert.match(annotationToolbar, /aria-label="지우개"/);
 assert.match(annotationToolbar, /aria-label="화면 맞춤"/);
 assert.match(annotationToolbar, /bottom-4 left-1\/2/);
 assert.match(annotationToolbar, /function applyColor/);
 assert.match(canvasSurface, /SqlErdCanvasToolbar/);
 assert.match(canvasSurface, /<SqlErdCanvasToolbar/);
+assert.doesNotMatch(canvasSurface, /getSqlErdTablePositionsFromEditor/);
+assert.match(
+  canvasSurface,
+  /createSqlErdTablePositionChangeBuffer\(/
+);
+assert.match(canvasSurface, /tablePositionChanges\.record\(entry\)/);
+assert.match(
+  canvasSurface,
+  /editor\.store\.mergeRemoteChanges\(\(\) => \{[\s\S]*?applySqlErdCanvasIncrementalShapeSync/
+);
+assert.match(
+  canvasSurface,
+  /markHistoryStoppingPoint\("sqltoerd auto layout"\);[\s\S]*?editor\.run\(\(\) => \{[\s\S]*?editor\.updateShapes\(updates\);[\s\S]*?markHistoryStoppingPoint\("sqltoerd auto layout"\);/
+);
+assert.doesNotMatch(
+  canvasSurface,
+  /markHistoryStoppingPoint\("sqltoerd auto layout"\);\s*editor\.store\.mergeRemoteChanges/
+);
+assert.match(
+  canvasSurface,
+  /tablePositionChanges\.cancel\(\)[\s\S]*?pointercancel", cancelPendingLayoutSync/
+);
+assert.match(
+  canvasSurface,
+  /shouldFlushSqlErdTablePositionChangesOnKeyUp\(event\)[\s\S]*?flushPendingLayoutSync\(\)/
+);
+assert.match(
+  canvasSurface,
+  /addEventListener\("keyup", handleTablePositionKeyUp\)[\s\S]*?removeEventListener\("keyup", handleTablePositionKeyUp\)/
+);
 assert.match(
   canvasSurface,
   /SQLTOERD_FRAME_CHANGE_EVENT[\s\S]*?SqlErdCanvasToolbar/
 );
 assert.match(canvasSurface, /pendingPlacementToolRef/);
+assert.match(canvasSurface, /event\.key !== "Escape"[\s\S]*?pendingPlacementToolRef\.current = null/);
 assert.match(canvasSurface, /editor\.screenToPage/);
 assert.match(canvasSurface, /notesToAdd/);
 assert.match(canvasSurface, /framesToAdd/);
 assert.match(canvasSurface, /textsToAdd/);
+assert.match(canvasSurface, /strokesToAdd/);
+assert.match(canvasSurface, /deleteStrokeIds/);
+assert.match(canvasSurface, /isSqlErdStrokeShape/);
+assert.match(canvasSurface, /isPointNearSqlErdStroke/);
+assert.match(canvasSurface, /getCurrentPageShapes\(\)/);
 assert.match(canvasSurface, /onDoubleClickCapture/);
 assert.match(canvasSurface, /onFit=\{handleFitCanvas\}/);
 assert.match(
@@ -6508,6 +8861,41 @@ assert.match(canvasSurface, /endCardinality: cardinality\?\.to \?\? null/);
 assert.match(panel, /참조 컬럼/);
 assert.match(panel, /대상 컬럼/);
 assert.match(panel, /관계 의미/);
+assert.doesNotMatch(panel, /Workspace source operation/);
+assert.doesNotMatch(panel, /Workspace operation/);
+assert.match(panel, /워크스페이스에 저장되었습니다/);
+assert.doesNotMatch(panel, /기존 snapshot 세션에서는 다른 사용자의 캔버스 변경을 실시간으로/);
+assert.match(panel, /변경 전/);
+assert.match(panel, /변경 후/);
+assert.match(panel, /SQL 편집 잠금을 확인하는 중입니다/);
+assert.match(panel, /handlePreviewSchemaDeleteBatch/);
+assert.match(panel, /setPendingSchemaDeleteLayoutPatch/);
+assert.match(panel, /onSchemaDeleteBatch=\{handlePreviewSchemaDeleteBatch\}/);
+assert.match(panel, /rebaseSqlErdNormalizedSqlPreviewAfterSave/);
+assert.match(
+  panel,
+  /const setNormalizedSqlPreview = useCallback\([\s\S]*?normalizedSqlPreviewRef\.current = nextPreview;[\s\S]*?setNormalizedSqlPreviewState\(nextPreview\)/
+);
+const reconcileNormalizedSqlPreviewImplementation = panel.slice(
+  panel.indexOf("const reconcileNormalizedSqlPreviewAfterSave"),
+  panel.indexOf("const activeAgentTableFocus")
+);
+assert.match(
+  reconcileNormalizedSqlPreviewImplementation,
+  /if \(!rebased\) \{[\s\S]*?setNormalizedSqlPreview\(null\);[\s\S]*?setPendingSchemaDeleteLayoutPatch\(null\);/
+);
+assert.doesNotMatch(
+  panel,
+  /rebaseSqlErdNormalizedSqlPreviewAfterSave[\s\S]*?: currentPreview;/
+);
+assert.match(panel, /이전 변경 저장 중/);
+assert.match(canvasSurface, /onDeleteForeignKey/);
+assert.match(
+  canvasSurface,
+  /selection\.type === "relation"[\s\S]*?onDeleteForeignKeyRef\.current/
+);
+assert.match(sessionPage, /useSearchParams/);
+assert.doesNotMatch(sessionPage, /window\.location\.search/);
 
 assert.match(packageJson, /"node-sql-parser"/);
 assert.match(ddlParserUtils, /parseSqlDdlToErdModel/);
@@ -6534,7 +8922,7 @@ assert.match(apiClient, /credentials: "same-origin"/);
 assert.doesNotMatch(apiSpec, /^- Sticky note$/m);
 assert.doesNotMatch(apiSpec, /^- Group box$/m);
 assert.match(apiSpec, /`notes`는 Sticky note, `frames`는 Group box/);
-assert.match(apiSpec, /`links`, `notes`, `frames`, `texts` 전체에서 중복될 수 없다/);
+assert.match(apiSpec, /`links`, `notes`, `frames`, `texts`, `strokes` 전체에서 중복될 수 없다/);
 
 assert.equal(typeof modelRuntime.applySqltoerdLayoutPatch, "function");
 const patchedLayout = modelRuntime.applySqltoerdLayoutPatch(
@@ -6616,6 +9004,29 @@ assert.deepEqual(
   }).annotations.texts,
   []
 );
+const layoutWithCreatedStroke = modelRuntime.applySqltoerdLayoutPatch(
+  layoutWithCreatedText,
+  {
+    strokesToAdd: [
+      {
+        id: "stroke.billing",
+        points: [
+          { x: 24, y: 48 },
+          { x: 48, y: 72 }
+        ],
+        color: "blue",
+        size: 4
+      }
+    ]
+  }
+);
+assert.equal(layoutWithCreatedStroke.annotations.strokes[0].color, "blue");
+assert.deepEqual(
+  modelRuntime.applySqltoerdLayoutPatch(layoutWithCreatedStroke, {
+    deleteStrokeIds: ["stroke.billing"]
+  }).annotations.strokes,
+  []
+);
 assert.equal(
   modelRuntime.areSqltoerdLayoutsEqual(
     layoutWithCreatedFrame,
@@ -6650,6 +9061,9 @@ assert.deepEqual(
 
 assert.match(canvasSurface, /SqlErdNoteShapeUtil/);
 assert.match(canvasSurface, /SqlErdFrameShapeUtil/);
+assert.match(frameShape, /function getSqlErdFrameControlScale/);
+assert.match(frameShape, /Math\.min\(2, Math\.max\(1,/);
+assert.match(frameShape, /transform: `scale\(\$\{controlScale\}\)`/);
 assert.match(canvasSurface, /SqlErdTextShapeUtil/);
 assert.match(annotationToolbar, /aria-label="메모 추가"/);
 assert.match(annotationToolbar, /aria-label="프레임 추가"/);

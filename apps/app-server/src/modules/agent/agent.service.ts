@@ -1,9 +1,14 @@
 import { HttpException, Injectable, Logger } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest, notFound } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import {
+  DatabaseService,
+  type DatabaseTransaction
+} from "../../database/database.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { agentStorageUnavailable } from "./agent-api-error";
+import { AgentCanvasDelegationCompletionService } from "./agent-canvas-delegation-completion.service";
+import { AGENT_CANDIDATE_SELECTION_KIND } from "./agent-candidate-input";
 import {
   CreateAgentRunResult as StoredCreateAgentRunResult,
   AgentLoggingService,
@@ -12,12 +17,26 @@ import {
   AgentStepPayload as StoredAgentStepPayload
 } from "./agent-logging.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
+import { AgentCandidateSelectionService } from "./agent-candidate-selection.service";
+import {
+  buildStoredMeetingCandidateSelectionMessage,
+  MEETING_CANDIDATE_SELECTION_KIND,
+  toPublicMeetingCandidateSelectionMessage
+} from "./meeting-candidate-selection";
+import {
+  containsReservedAgentSelectionMarker,
+  toPublicAgentMessageContent
+} from "./sql-erd-session-selection";
 import type {
   AgentConfirmationPlan,
   AgentJsonObject,
   AgentResourceRef,
-  AgentRiskLevel
+  AgentRiskLevel,
+  AgentRunRequestContext
 } from "./types/agent-tool.types";
+
+const PUBLIC_AGENT_FAILURE_MESSAGE =
+  "요청 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.";
 
 export interface AgentRunListQuery {
   status?: unknown;
@@ -27,15 +46,32 @@ export interface AgentRunListQuery {
 
 export interface AgentRunCreateInput {
   prompt: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId?: string | null;
+  requestContext: AgentRunRequestContext;
+}
+
+export interface AgentRunInput {
+  message: string;
+  selection?:
+    | {
+        kind: typeof MEETING_CANDIDATE_SELECTION_KIND;
+        candidateSelectionId: string;
+      }
+    | {
+        kind: typeof AGENT_CANDIDATE_SELECTION_KIND;
+        candidateSelectionId: string;
+      };
 }
 
 export interface AgentRunApiPayload {
   id: string;
+  conversationId: string;
   workspaceId: string;
   requestedByUserId: string | null;
   clientRequestId: string | null;
+  requestContext: AgentRunRequestContext;
   status: AgentRunStatus;
   riskLevel: AgentRiskLevel | null;
   prompt: string;
@@ -72,6 +108,14 @@ export interface AgentConfirmationSummaryPayload {
   expiresAt: string;
 }
 
+export interface AgentRunMessageApiPayload {
+  id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
 export interface AgentConfirmationApiPayload
   extends AgentConfirmationSummaryPayload {
   runId: string;
@@ -80,6 +124,7 @@ export interface AgentConfirmationApiPayload
   rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  selectedChoiceId: string | null;
 }
 
 export interface AgentRunListItemPayload extends AgentRunApiPayload {
@@ -88,6 +133,7 @@ export interface AgentRunListItemPayload extends AgentRunApiPayload {
 
 export interface AgentRunDetailItemPayload extends AgentRunApiPayload {
   steps: AgentStepApiPayload[];
+  messages: AgentRunMessageApiPayload[];
   confirmation: AgentConfirmationApiPayload | null;
 }
 
@@ -121,9 +167,11 @@ type AgentConfirmationStatus = "pending" | "approved" | "rejected" | "expired";
 
 interface AgentRunRow extends QueryResultRow {
   id: string;
+  thread_id: string;
   workspace_id: string;
   requested_by_user_id: string | null;
   client_request_id: string | null;
+  request_context_json: AgentRunRequestContext;
   status: AgentRunStatus;
   risk_level: AgentRiskLevel | null;
   prompt: string;
@@ -164,6 +212,20 @@ interface AgentConfirmationRow extends QueryResultRow {
   rejected_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  selected_choice_id: string | null;
+}
+
+interface AgentRunMessageRow extends QueryResultRow {
+  id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: Date | string;
+}
+
+interface AgentLatestToolStepRow extends QueryResultRow {
+  tool_name: string | null;
+  output_json: AgentJsonObject;
 }
 
 interface AgentRunWithConfirmationRow extends AgentRunRow {
@@ -186,10 +248,18 @@ const DEFAULT_TIMEZONE = "Asia/Seoul";
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
 const MAX_PROMPT_BYTES = 32768;
+const MAX_RUN_INPUT_BYTES = 4000;
 const MAX_CLIENT_REQUEST_ID_BYTES = 128;
 const MAX_TIMEZONE_LENGTH = 64;
+const MAX_REQUEST_CONTEXT_BYTES = 196_608;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CANDIDATE_ORDINAL_PATTERN =
+  /^\s*([1-5])\s*번(?:\s*후보)?(?:\s*(?:을|를)?\s*(?:선택(?:할게요|합니다|했어요)?|골라(?:주세요|줘|요)?))?\s*[.!?]*\s*$/;
+const MAX_CANDIDATE_SELECTIONS = 5;
 const AGENT_RUN_STATUSES: AgentRunStatus[] = [
   "planning",
+  "waiting_user_input",
   "waiting_confirmation",
   "running",
   "completed",
@@ -224,7 +294,10 @@ export class AgentService {
     private readonly database: DatabaseService,
     private readonly workspaceService: WorkspaceService,
     private readonly agentLoggingService: AgentLoggingService,
-    private readonly agentOutboxPublisherService: AgentOutboxPublisherService
+    private readonly agentOutboxPublisherService: AgentOutboxPublisherService,
+    private readonly canvasDelegationCompletionService:
+      AgentCanvasDelegationCompletionService,
+    private readonly agentCandidateSelectionService: AgentCandidateSelectionService
   ) {}
 
   async createRun(
@@ -233,6 +306,10 @@ export class AgentService {
     body: unknown
   ): Promise<AgentRunCreateResult> {
     const input = this.normalizeCreateRunInput(body);
+    if (input.requestContext) {
+      await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+      await this.assertRequestContextAccess(workspaceId, input.requestContext);
+    }
     const result = await this.createStoredRun(currentUserId, workspaceId, input);
 
     if (result.created) {
@@ -243,10 +320,187 @@ export class AgentService {
       run: {
         ...this.mapStoredRun(result.run),
         steps: [],
+        messages: [],
         confirmation: null
       },
       created: result.created
     };
+  }
+
+  async submitRunInput(
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    body: unknown
+  ): Promise<AgentRunDetailPayload> {
+    const input = this.normalizeRunInput(body);
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const outcome = await this.database.transaction((transaction) =>
+      this.resumeRunInputInTransaction(
+        transaction,
+        currentUserId,
+        workspaceId,
+        runId,
+        input
+      )
+    );
+    if (outcome === "expired") {
+      throw badRequest("Agent run input wait has expired");
+    }
+    await this.agentOutboxPublisherService.publishCreatedRun(runId);
+    return this.getRun(currentUserId, workspaceId, runId);
+  }
+
+  normalizeRunInputBody(body: unknown): AgentRunInput {
+    return this.normalizeRunInput(body);
+  }
+
+  async isDeterministicCandidateContinuationInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    requestContext: AgentRunRequestContext,
+    input: AgentRunInput
+  ): Promise<boolean> {
+    if (input.selection) return true;
+    return Boolean(
+      await this.resolveOrdinalCandidateSelection(
+        transaction,
+        { currentUserId, workspaceId, runId, requestContext },
+        runId,
+        input.message
+      )
+    );
+  }
+
+  async resumeRunInputInTransaction(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceId: string,
+    runId: string,
+    input: AgentRunInput
+  ): Promise<"accepted" | "expired"> {
+    const run = await transaction.queryOne<AgentRunRow>(
+      `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+          FOR UPDATE
+      `,
+      [runId, workspaceId, currentUserId]
+    );
+    if (!run) throw notFound("Agent run not found");
+    if (run.status !== "waiting_user_input") {
+      throw badRequest("Agent run is not waiting for user input");
+    }
+    const stillWaiting = await transaction.queryOne<{ id: string }>(
+      `SELECT id FROM agent_runs WHERE id = $1 AND updated_at > now() - INTERVAL '24 hours'`,
+      [runId]
+    );
+    if (!stillWaiting) {
+      await transaction.execute(
+        `UPDATE agent_runs SET status = 'cancelled', message = '추가 정보 입력 대기 시간이 만료되었습니다.', completed_at = now(), updated_at = now() WHERE id = $1`,
+        [runId]
+      );
+      return "expired";
+    }
+    const selection =
+      input.selection ??
+      (await this.resolveOrdinalCandidateSelection(
+        transaction,
+        {
+          currentUserId,
+          workspaceId,
+          runId,
+          requestContext: run.request_context_json
+        },
+        runId,
+        input.message
+      ));
+    let storedMessage = input.message;
+    if (selection?.kind === AGENT_CANDIDATE_SELECTION_KIND) {
+      const selected =
+        await this.agentCandidateSelectionService.consumeCandidateInTransaction(
+          transaction,
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext: run.request_context_json
+          },
+          selection.candidateSelectionId
+        );
+      if (selected.reference.domain === "meeting") {
+        storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
+      } else {
+        throw badRequest("Agent candidate domain cannot resume this run");
+      }
+    }
+    if (selection?.kind === MEETING_CANDIDATE_SELECTION_KIND) {
+      const selected =
+        await this.agentCandidateSelectionService.consumeMeetingCandidateInTransaction(
+          transaction,
+          {
+            currentUserId,
+            workspaceId,
+            runId,
+            requestContext: run.request_context_json
+          },
+          selection.candidateSelectionId
+        );
+      storedMessage = buildStoredMeetingCandidateSelectionMessage(selected.label);
+    }
+    const next = await transaction.queryOne<{ sequence: number | string }>(
+      `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM agent_run_messages WHERE run_id = $1`,
+      [runId]
+    );
+    await transaction.execute(
+      `INSERT INTO agent_run_messages (run_id, sequence, role, content) VALUES ($1, $2, 'user', $3)`,
+      [runId, Number(next?.sequence ?? 1), storedMessage]
+    );
+    const resumed = await transaction.queryOne<{ id: string }>(
+      `
+        UPDATE agent_runs
+        SET status = 'planning',
+            message = '추가 정보를 반영하고 있습니다.',
+            final_answer = NULL,
+            error_code = NULL,
+            error_message = NULL,
+            completed_at = NULL,
+            planner_turn_count = 0,
+            tool_call_count = 0,
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'waiting_user_input'
+        RETURNING id
+      `,
+      [runId]
+    );
+    if (!resumed) {
+      throw new Error("Agent run could not resume from user input");
+    }
+    const outbox = await transaction.queryOne<{ id: string }>(
+      `
+        UPDATE agent_run_outbox
+        SET status = 'pending', attempt_count = 0, next_attempt_at = now(),
+            claim_token = NULL, claimed_at = NULL, delivered_at = NULL,
+            error_code = NULL, error_message = NULL,
+            turn_sequence = turn_sequence + 1,
+            planning_started_at = now(),
+            reason = 'user_input'
+        WHERE run_id = $1
+        RETURNING id
+      `,
+      [runId]
+    );
+    if (!outbox) {
+      throw new Error("Agent run outbox could not be re-armed");
+    }
+    return "accepted";
   }
 
   private async createStoredRun(
@@ -395,7 +649,7 @@ export class AgentService {
   ): Promise<AgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     await this.applyRequestTimeLifecycle(currentUserId, workspaceId);
-    const run = await this.database.queryOne<AgentRunRow>(
+    let run = await this.database.queryOne<AgentRunRow>(
       `
         SELECT *
         FROM agent_runs
@@ -410,13 +664,40 @@ export class AgentService {
       throw notFound("Agent run not found");
     }
 
-    const [steps, confirmation] = await Promise.all([
+    if (run.status === "running" && this.canvasDelegationCompletionService) {
+      await this.canvasDelegationCompletionService.reconcileRun({
+        agentRunId: runId,
+        workspaceId,
+        requestedByUserId: currentUserId
+      });
+      run = await this.database.queryOne<AgentRunRow>(
+        `
+          SELECT *
+          FROM agent_runs
+          WHERE id = $1
+            AND workspace_id = $2
+            AND requested_by_user_id = $3
+        `,
+        [runId, workspaceId, currentUserId]
+      ) ?? run;
+    }
+
+    const [steps, messages, confirmation] = await Promise.all([
       this.database.query<AgentStepRow>(
         `
           SELECT *
           FROM agent_steps
           WHERE run_id = $1
           ORDER BY step_order ASC
+        `,
+        [runId]
+      ),
+      this.database.query<AgentRunMessageRow>(
+        `
+          SELECT id, sequence, role, content, created_at
+          FROM agent_run_messages
+          WHERE run_id = $1
+          ORDER BY sequence ASC
         `,
         [runId]
       ),
@@ -438,6 +719,7 @@ export class AgentService {
       run: {
         ...this.mapRun(run),
         steps: steps.map((step) => this.mapStep(step)),
+        messages: messages.map((message) => this.mapMessage(message)),
         confirmation: confirmation
           ? this.mapConfirmation(confirmation)
           : null
@@ -475,6 +757,21 @@ export class AgentService {
 
       await transaction.execute(
         `
+          UPDATE agent_runs
+          SET status = 'cancelled',
+              message = '추가 정보 입력 대기 시간이 만료되었습니다.',
+              completed_at = now(),
+              updated_at = now()
+          WHERE workspace_id = $1
+            AND requested_by_user_id = $2
+            AND status = 'waiting_user_input'
+            AND updated_at <= now() - INTERVAL '24 hours'
+        `,
+        [workspaceId, currentUserId]
+      );
+
+      await transaction.execute(
+        `
           WITH expired_runs AS (
             SELECT id
             FROM agent_runs
@@ -491,7 +788,30 @@ export class AgentService {
         `,
         [workspaceId, currentUserId, RETENTION_CLEANUP_BATCH_SIZE]
       );
+
+      await transaction.execute(
+        `
+          DELETE FROM agent_threads AS thread
+          WHERE thread.workspace_id = $1
+            AND thread.requested_by_user_id = $2
+            AND thread.expires_at <= now()
+            AND NOT EXISTS (
+              SELECT 1
+              FROM agent_runs AS run
+              JOIN agent_confirmations AS confirmation
+                ON confirmation.run_id = run.id
+              WHERE run.thread_id = thread.id
+                AND confirmation.status = 'pending'
+                AND confirmation.expires_at > now()
+            )
+        `,
+        [workspaceId, currentUserId]
+      );
     });
+  }
+
+  normalizeCreateRunBody(body: unknown): AgentRunCreateInput {
+    return this.normalizeCreateRunInput(body);
   }
 
   private normalizeCreateRunInput(body: unknown): AgentRunCreateInput {
@@ -507,13 +827,274 @@ export class AgentService {
 
     return {
       prompt: this.readRequiredText(body.prompt, "prompt", MAX_PROMPT_BYTES),
+      ...("conversationId" in body
+        ? {
+            conversationId: this.readOptionalUuid(
+              body.conversationId,
+              "conversationId"
+            )
+          }
+        : {}),
       timezone: this.readTimezone(body.timezone),
       clientRequestId: this.readOptionalText(
         body.clientRequestId,
         "clientRequestId",
         MAX_CLIENT_REQUEST_ID_BYTES
-      )
+      ),
+      requestContext: this.readRequestContext(body.requestContext)
     };
+  }
+
+  private readRequestContext(value: unknown): AgentRunRequestContext {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (!this.isPlainObject(value)) {
+      throw badRequest("requestContext must be a valid Agent request context");
+    }
+
+    if (value.surface === "canvas") {
+      if (
+        Object.keys(value).length !== 3 ||
+        typeof value.canvasId !== "string" ||
+        !UUID_PATTERN.test(value.canvasId) ||
+        !this.isPlainObject(value.canvasContext) ||
+        Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_REQUEST_CONTEXT_BYTES
+      ) {
+        throw badRequest("requestContext must be a valid Agent request context");
+      }
+      if (this.containsForbiddenJsonKey(value.canvasContext)) {
+        throw badRequest("requestContext.canvasContext contains a forbidden field");
+      }
+      return {
+        surface: "canvas",
+        canvasId: value.canvasId,
+        canvasContext: value.canvasContext
+      };
+    }
+
+    if (
+      Object.keys(value).length !== 2 ||
+      (value.surface !== "sql_erd" && value.surface !== "pr_review") ||
+      typeof value.sessionId !== "string" ||
+      !UUID_PATTERN.test(value.sessionId) ||
+      Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_REQUEST_CONTEXT_BYTES
+    ) {
+      throw badRequest("requestContext must be a valid Agent request context");
+    }
+
+    return {
+      surface: value.surface,
+      sessionId: value.sessionId
+    };
+  }
+
+  private readOptionalUuid(value: unknown, field: string): string | null {
+    if (value === null) return null;
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      throw badRequest(`${field} must be a UUID or null`);
+    }
+    return value;
+  }
+
+  async assertRequestContextAccess(
+    workspaceId: string,
+    requestContext: AgentRunRequestContext
+  ): Promise<void> {
+    if (!requestContext) {
+      return;
+    }
+
+    if (requestContext.surface === "sql_erd") {
+      const session = await this.database.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM sql_erd_sessions
+          WHERE id = $1
+            AND workspace_id = $2
+            AND deleted_at IS NULL
+        `,
+        [requestContext.sessionId, workspaceId]
+      );
+
+      if (!session) {
+        throw notFound("SQLtoERD session not found");
+      }
+      return;
+    }
+
+    if (requestContext.surface === "canvas") {
+      const canvas = await this.database.queryOne<{ id: string }>(
+        `
+          SELECT id
+          FROM canvas
+          WHERE id = $1
+            AND workspace_id = $2
+            AND board_type = 'freeform'
+        `,
+        [requestContext.canvasId, workspaceId]
+      );
+      if (!canvas) {
+        throw notFound("Canvas not found");
+      }
+      return;
+    }
+
+    const session = await this.database.queryOne<{ id: string }>(
+      `
+        SELECT review_session.id
+        FROM pr_review_sessions AS review_session
+        JOIN pr_review_rooms AS review_room
+          ON review_room.id = review_session.room_id
+        WHERE review_session.id = $1
+          AND review_room.workspace_id = $2
+      `,
+      [requestContext.sessionId, workspaceId]
+    );
+
+    if (!session) {
+      throw notFound("PR Review session not found");
+    }
+  }
+
+  private normalizeRunInput(body: unknown): AgentRunInput {
+    if (!this.isPlainObject(body)) throw badRequest("Request body must be an object");
+    if (Object.keys(body).some((key) => !["message", "selection"].includes(key))) {
+      throw badRequest("Only message and selection may be provided");
+    }
+    const message = this.readRequiredText(
+      body.message,
+      "message",
+      MAX_RUN_INPUT_BYTES
+    );
+    if (containsReservedAgentSelectionMarker(message)) {
+      throw badRequest("message contains a reserved Agent selection marker");
+    }
+    if (body.selection === undefined) return { message };
+    if (!this.isPlainObject(body.selection)) {
+      throw badRequest("selection must be a valid Agent selection");
+    }
+    if (
+      body.selection.kind === AGENT_CANDIDATE_SELECTION_KIND &&
+      Object.keys(body.selection).every((key) =>
+        ["kind", "candidateSelectionId"].includes(key)
+      ) &&
+      typeof body.selection.candidateSelectionId === "string" &&
+      UUID_PATTERN.test(body.selection.candidateSelectionId)
+    ) {
+      return {
+        message,
+        selection: {
+          kind: AGENT_CANDIDATE_SELECTION_KIND,
+          candidateSelectionId: body.selection.candidateSelectionId
+        }
+      };
+    }
+    if (
+      body.selection.kind === MEETING_CANDIDATE_SELECTION_KIND &&
+      Object.keys(body.selection).every((key) =>
+        ["kind", "candidateSelectionId"].includes(key)
+      ) &&
+      typeof body.selection.candidateSelectionId === "string" &&
+      UUID_PATTERN.test(body.selection.candidateSelectionId)
+    ) {
+      return {
+        message,
+        selection: {
+          kind: MEETING_CANDIDATE_SELECTION_KIND,
+          candidateSelectionId: body.selection.candidateSelectionId
+        }
+      };
+    }
+    throw badRequest("selection must be a valid Agent selection");
+  }
+
+  private async resolveOrdinalCandidateSelection(
+    transaction: DatabaseTransaction,
+    context: {
+      currentUserId: string;
+      workspaceId: string;
+      runId: string;
+      requestContext: AgentRunRequestContext;
+    },
+    runId: string,
+    message: string
+  ): Promise<AgentRunInput["selection"] | undefined> {
+    const ordinal = this.parseCandidateOrdinal(message);
+    if (ordinal === null) return undefined;
+    const generatedCandidateSelectionId =
+      await this.agentCandidateSelectionService?.getLatestCandidateSelectionIdByOrdinalInTransaction?.(
+        transaction,
+        context,
+        ordinal
+      );
+    if (generatedCandidateSelectionId) {
+      return {
+        kind: AGENT_CANDIDATE_SELECTION_KIND,
+        candidateSelectionId: generatedCandidateSelectionId
+      };
+    }
+    const latestToolStep = await this.getLatestCompletedToolStep(transaction, runId);
+    if (!latestToolStep) return undefined;
+
+    const rawCandidates = latestToolStep.output_json.candidateSelections;
+    if (!Array.isArray(rawCandidates)) return undefined;
+    const candidateSelectionIds = this.parseMeetingCandidateSelectionIds(rawCandidates);
+    const candidateSelectionId = candidateSelectionIds[ordinal - 1];
+    if (!candidateSelectionId) {
+      throw badRequest("Candidate ordinal is invalid, expired, or unavailable");
+    }
+    return {
+      kind: MEETING_CANDIDATE_SELECTION_KIND,
+      candidateSelectionId
+    };
+  }
+
+  private async getLatestCompletedToolStep(
+    transaction: DatabaseTransaction,
+    runId: string
+  ): Promise<AgentLatestToolStepRow | null> {
+    return transaction.queryOne<AgentLatestToolStepRow>(
+      `
+        SELECT tool_name, output_json
+        FROM agent_steps
+        WHERE run_id = $1
+          AND step_type = 'tool'
+          AND status = 'completed'
+        ORDER BY step_order DESC
+        LIMIT 1
+      `,
+      [runId]
+    );
+  }
+
+  private parseCandidateOrdinal(message: string): number | null {
+    const matched = CANDIDATE_ORDINAL_PATTERN.exec(message);
+    return matched ? Number(matched[1]) : null;
+  }
+
+  private parseMeetingCandidateSelectionIds(rawCandidates: unknown[]): string[] {
+    if (
+      rawCandidates.length === 0 ||
+      rawCandidates.length > MAX_CANDIDATE_SELECTIONS
+    ) {
+      return [];
+    }
+    const candidateSelectionIds = rawCandidates.map((candidate) =>
+      this.isPlainObject(candidate) &&
+      typeof candidate.candidateSelectionId === "string" &&
+      UUID_PATTERN.test(candidate.candidateSelectionId)
+        ? candidate.candidateSelectionId
+        : null
+    );
+    if (
+      candidateSelectionIds.some((candidateSelectionId) => !candidateSelectionId) ||
+      new Set(candidateSelectionIds).size !== candidateSelectionIds.length
+    ) {
+      return [];
+    }
+    return candidateSelectionIds as string[];
   }
 
   private normalizePagination(query: AgentRunListQuery): NormalizedPagination {
@@ -665,16 +1246,18 @@ export class AgentService {
   private mapStoredRun(run: StoredAgentRunPayload): AgentRunApiPayload {
     return {
       id: run.id,
+      conversationId: run.conversationId,
       workspaceId: run.workspaceId,
       requestedByUserId: run.requestedByUserId,
       clientRequestId: run.clientRequestId,
+      requestContext: run.requestContext,
       status: run.status,
       riskLevel: run.riskLevel,
       prompt: run.prompt,
       timezone: run.timezone,
       message: run.message,
       finalAnswer: run.finalAnswer,
-      errorMessage: run.errorMessage,
+      errorMessage: run.errorMessage ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       expiresAt: run.expiresAt,
       completedAt: run.completedAt,
       createdAt: run.createdAt,
@@ -685,16 +1268,18 @@ export class AgentService {
   private mapRun(row: AgentRunRow): AgentRunApiPayload {
     return {
       id: row.id,
+      conversationId: row.thread_id,
       workspaceId: row.workspace_id,
       requestedByUserId: row.requested_by_user_id,
       clientRequestId: row.client_request_id,
+      requestContext: row.request_context_json,
       status: row.status,
       riskLevel: row.risk_level,
       prompt: row.prompt,
       timezone: row.timezone,
       message: row.message,
       finalAnswer: row.final_answer,
-      errorMessage: row.error_message,
+      errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       expiresAt: this.toIso(row.expires_at),
       completedAt: this.toIsoOrNull(row.completed_at),
       createdAt: this.toIso(row.created_at),
@@ -714,9 +1299,21 @@ export class AgentService {
       inputSummary: this.sanitizeJsonObject(row.input_json),
       outputSummary: this.sanitizeJsonObject(row.output_json),
       resourceRefs: this.sanitizeResourceRefs(row.resource_refs),
-      errorMessage: row.error_message,
+      errorMessage: row.error_message ? PUBLIC_AGENT_FAILURE_MESSAGE : null,
       startedAt: this.toIsoOrNull(row.started_at),
       completedAt: this.toIsoOrNull(row.completed_at)
+    };
+  }
+
+  private mapMessage(row: AgentRunMessageRow): AgentRunMessageApiPayload {
+    return {
+      id: row.id,
+      sequence: row.sequence,
+      role: row.role,
+      content: toPublicMeetingCandidateSelectionMessage(
+        toPublicAgentMessageContent(row.content)
+      ),
+      createdAt: this.toIso(row.created_at)
     };
   }
 
@@ -733,7 +1330,8 @@ export class AgentService {
       approvedAt: this.toIsoOrNull(row.approved_at),
       rejectedAt: this.toIsoOrNull(row.rejected_at),
       createdAt: this.toIso(row.created_at),
-      updatedAt: this.toIso(row.updated_at)
+      updatedAt: this.toIso(row.updated_at),
+      selectedChoiceId: row.selected_choice_id
     };
   }
 
@@ -754,7 +1352,10 @@ export class AgentService {
       const sanitized: AgentJsonObject = {};
 
       for (const [key, child] of Object.entries(value)) {
-        if (this.isForbiddenJsonKey(key)) {
+        if (
+          this.isForbiddenJsonKey(key) &&
+          !this.isSafeSelectionToken(key, child)
+        ) {
           continue;
         }
 
@@ -770,6 +1371,31 @@ export class AgentService {
   private isForbiddenJsonKey(key: string): boolean {
     const normalized = key.replace(/[_-]/g, "").toLowerCase();
     return FORBIDDEN_JSON_KEY_PARTS.some((part) => normalized.includes(part));
+  }
+
+  private isSafeSelectionToken(key: string, value: unknown): boolean {
+    const normalized = key.replace(/[_-]/g, "").toLowerCase();
+    return (
+      normalized === "selectiontoken" &&
+      typeof value === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+      )
+    );
+  }
+
+  private containsForbiddenJsonKey(value: unknown): boolean {
+    if (Array.isArray(value)) {
+      return value.some((item) => this.containsForbiddenJsonKey(item));
+    }
+    if (!this.isPlainObject(value)) {
+      return false;
+    }
+    return Object.entries(value).some(
+      ([key, child]) =>
+        (this.isForbiddenJsonKey(key) && !this.isSafeSelectionToken(key, child)) ||
+        this.containsForbiddenJsonKey(child)
+    );
   }
 
   private isPlainObject(value: unknown): value is AgentJsonObject {

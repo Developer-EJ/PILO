@@ -11,7 +11,10 @@ import { CanvasAgentActionService } from "./canvas-agent-action.service";
 import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
 import { CANVAS_AGENT_SCHEMA_VERSION, CanvasAgentJobService } from "./canvas-agent-job.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
-import { resolveCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
+import {
+  readCanvasAgentToolHelpOverview,
+  resolveCanvasAgentToolTarget
+} from "./canvas-agent-tool-targets";
 import type {
   ApplyCanvasAgentDraftRequest,
   CanvasAgentDraftApplyPayload,
@@ -50,7 +53,10 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.actionTimer = setInterval(() => void this.processNextAction(), ACTION_POLL_INTERVAL_MS);
+    this.actionTimer = setInterval(
+      () => void this.processPendingAction(),
+      ACTION_POLL_INTERVAL_MS
+    );
     this.activeRunSweepTimer = setInterval(() => void this.expireStaleActiveRuns(), ACTIVE_RUN_SWEEP_INTERVAL_MS);
   }
 
@@ -67,6 +73,44 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     canvasId: string,
     input: CreateCanvasAgentRunRequest
   ): Promise<CanvasAgentRunPayload> {
+    return this.createRunWithOrigin(currentUserId, workspaceId, canvasId, input, {
+      parentAgentRunId: null,
+      source: "canvas_chat"
+    });
+  }
+
+  async createDelegatedRun(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    parentAgentRunId: string,
+    input: CreateCanvasAgentRunRequest
+  ): Promise<CanvasAgentRunPayload> {
+    if (
+      !(await this.repository.isOwnedParentAgentRun(
+        parentAgentRunId,
+        workspaceId,
+        currentUserId
+      ))
+    ) {
+      throw notFound("Parent Agent run not found");
+    }
+    return this.createRunWithOrigin(currentUserId, workspaceId, canvasId, input, {
+      parentAgentRunId,
+      source: "general_agent_delegate"
+    });
+  }
+
+  private async createRunWithOrigin(
+    currentUserId: string,
+    workspaceId: string,
+    canvasId: string,
+    input: CreateCanvasAgentRunRequest,
+    origin: {
+      parentAgentRunId: string | null;
+      source: "canvas_chat" | "general_agent_delegate";
+    }
+  ): Promise<CanvasAgentRunPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const values = validateCanvasAgentRunRequest(input);
     const canvasRevision = await this.repository.getCanvasLatestOpSeq(workspaceId, canvasId);
@@ -75,7 +119,12 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     if (values.clientRequestId) {
       const existing = await this.repository.findRunByClientRequestId(workspaceId, canvasId, currentUserId, values.clientRequestId);
       if (existing) {
-        if (existing.prompt !== values.prompt || JSON.stringify(this.normalizeContext(existing.context_json)) !== JSON.stringify(values.context)) {
+        if (
+          existing.prompt !== values.prompt ||
+          existing.source !== origin.source ||
+          existing.parent_agent_run_id !== origin.parentAgentRunId ||
+          JSON.stringify(this.normalizeContext(existing.context_json)) !== JSON.stringify(values.context)
+        ) {
           throw canvasAgentClientRequestIdConflict("Canvas Agent clientRequestId was already used for a different request");
         }
         return this.mapRun(existing);
@@ -88,7 +137,9 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       clientRequestId: values.clientRequestId,
       context: values.context,
       currentUserId,
+      parentAgentRunId: origin.parentAgentRunId,
       prompt: values.prompt,
+      source: origin.source,
       workspaceId
     });
 
@@ -105,6 +156,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
             progress: {
               message: localAction.message,
               highlightedShapeIds: values.context.selectedShapeIds,
+              loadRootShapeIds: [],
               targetViewport: null,
               toolTarget: typeof localAction.input.toolTarget === "string" ? localAction.input.toolTarget : null,
               toolTargetLabel: typeof localAction.input.toolTargetLabel === "string" ? localAction.input.toolTargetLabel : null
@@ -127,8 +179,22 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     runId: string
   ): Promise<CanvasAgentRunDetailPayload> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
-    const run = await this.repository.findRunForRequester(currentUserId, workspaceId, canvasId, runId);
+    let run = await this.repository.findRunForRequester(
+      currentUserId,
+      workspaceId,
+      canvasId,
+      runId
+    );
     if (!run) throw notFound("Canvas Agent run not found");
+    if (run.status === "executing") {
+      await this.processPendingAction(run.id);
+      run = await this.repository.findRunForRequester(
+        currentUserId,
+        workspaceId,
+        canvasId,
+        runId
+      ) ?? run;
+    }
     const [steps, drafts] = await Promise.all([
       this.repository.listSteps(run.id),
       this.repository.listDrafts(run.id)
@@ -173,7 +239,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       currentUserId,
       workspaceId,
       canvasId,
-      this.drafts.toShapeBatch(draft.draft_spec_json, clientOperationId)
+      this.drafts.toShapeBatch(draft.draft_spec_json, clientOperationId),
+      "agent"
     );
     const shapeIds = batch.shapes.map((shape) => shape.id);
     const applied = await this.repository.markDraftApplied(draft.id, shapeIds);
@@ -184,6 +251,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       progress: {
         message: "Canvas AI 초안을 적용했습니다.",
         highlightedShapeIds: shapeIds,
+        loadRootShapeIds: [],
         targetViewport: null,
         toolTarget: null,
         toolTargetLabel: null
@@ -213,6 +281,7 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       progress: {
         message: "Canvas AI 초안을 폐기했습니다.",
         highlightedShapeIds: [],
+        loadRootShapeIds: [],
         targetViewport: null,
         toolTarget: null,
         toolTargetLabel: null
@@ -222,47 +291,24 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     return this.mapDraft(discarded);
   }
 
-  private async processNextAction(): Promise<void> {
+  async processPendingAction(runId: string | null = null): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
     try {
-      const claimed = await this.repository.claimNextPendingStep();
+      const claimed = await this.repository.claimNextPendingStep(runId);
       if (!claimed) return;
       const currentStatus = await this.repository.statusForRun(claimed.run.id);
       if (currentStatus !== "executing") return;
 
       try {
         const result = await this.actions.execute(claimed.run, claimed.step);
-        let resourceRefs = result.resourceRefs;
-        if (result.draftSpec) {
-          const draft = await this.repository.createDraft({
-            runId: claimed.run.id,
-            canvasId: claimed.run.canvas_id,
-            currentUserId: claimed.run.requested_by_user_id,
-            spec: result.draftSpec
-          });
-          resourceRefs = [...resourceRefs, draft.id];
-        }
-        let createdShapeIds: string[] = [];
-        let latestOpSeq: number | null = null;
-        if (result.shapeBatch) {
-          const batch = await this.canvasService.syncShapesBatch(
-            claimed.run.requested_by_user_id,
-            claimed.run.workspace_id,
-            claimed.run.canvas_id,
-            result.shapeBatch
-          );
-          createdShapeIds = batch.shapes.map((shape) => shape.id);
-          latestOpSeq = Math.max(0, ...batch.shapes.map((shape) => shape.opSeq ?? 0));
-          resourceRefs = [...resourceRefs, ...createdShapeIds];
-        }
-        const output = { progress: result.progress, summary: result.summary, createdShapeIds, latestOpSeq };
-        await this.repository.completeStep(claimed.step.id, output, resourceRefs);
-
-        if (result.draftSpec) {
-          await this.repository.markRunDraftReady(claimed.run.id, result.summary, output);
-          return;
-        }
+        const output = {
+          progress: result.progress,
+          summary: result.summary,
+          ...(result.artifact ? { artifact: result.artifact } : {}),
+          ...(result.clientAction ? { clientAction: result.clientAction } : {})
+        };
+        await this.repository.completeStep(claimed.step.id, output, result.resourceRefs);
         if (result.shouldContinue) {
           const steps = await this.repository.listSteps(claimed.run.id);
           if (steps.length >= MAX_CANVAS_AGENT_STEPS) {
@@ -310,13 +356,16 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
   private planDeterministicAction(
     prompt: string,
-    selectedShapeIds: string[],
+    _selectedShapeIds: string[],
     toolHelpMode = false
   ): CanvasAgentPlannedAction | null {
+    if (!toolHelpMode) return null;
+
     const normalized = prompt.trim();
-    const toolResolution = toolHelpMode ? resolveCanvasAgentToolTarget(normalized) : null;
-    if (toolHelpMode && !toolResolution) {
-      const message = "아직 알고 있는 Canvas 기능과 맞지 않습니다. 메모, 도형, 색상, 휴지통처럼 툴바에 있는 기능 이름으로 물어봐 주세요.";
+    const toolResolution = resolveCanvasAgentToolTarget(normalized);
+    if (!toolResolution) {
+      const message = readCanvasAgentToolHelpOverview(normalized)
+        ?? "아직 알고 있는 Canvas 기능과 맞지 않습니다. 메모, 도형, 색상, 휴지통처럼 툴바에 있는 기능 이름으로 물어봐 주세요.";
       return {
         actionName: "finish",
         input: { summary: message, suppressProgress: true },
@@ -339,31 +388,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
         message: toolResolution.tool.message
       };
     }
-    if (!toolHelpMode && selectedShapeIds.length === 2 && this.isConnectPrompt(normalized)) {
-      const connectionKind = this.isLineConnectPrompt(normalized) ? "line" : "arrow";
-      const message = connectionKind === "line"
-        ? "선택한 두 도형을 선으로 연결할게요."
-        : "선택한 두 도형을 화살표로 연결할게요.";
-      return {
-        actionName: "connect_shapes",
-        input: {
-          fromShapeId: selectedShapeIds[0],
-          toShapeId: selectedShapeIds[1],
-          connectionKind
-        },
-        message
-      };
-    }
 
     return null;
-  }
-
-  private isConnectPrompt(value: string): boolean {
-    return /(연결|이어|이어서|화살표|커넥터|선으로|선으?로\s*이어)/.test(value);
-  }
-
-  private isLineConnectPrompt(value: string): boolean {
-    return /(선으로|선으?로\s*이어|연결선)/.test(value) && !/(화살표)/.test(value);
   }
 
   private async assertDraftSourcesCurrent(canvasId: string, draft: CanvasAgentDraftRow): Promise<void> {
@@ -390,6 +416,8 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
       summary: row.result_summary,
       canvasRevision: row.canvas_revision === null ? null : Number(row.canvas_revision),
       progress,
+      artifact: this.readHtmlArtifact(row.result_json),
+      clientAction: this.readClientAction(row.result_json),
       createdAt: this.iso(row.created_at),
       completedAt: row.completed_at === null ? null : this.iso(row.completed_at),
       expiresAt: this.iso(row.expires_at)
@@ -398,10 +426,21 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
 
   private normalizeContext(context: Record<string, unknown>) {
     return {
+      conversationContext: this.readContextConversation(context.conversationContext),
       presentationMode: context.presentationMode === "background" ? "background" as const : "interactive" as const,
       selectedShapeIds: Array.isArray(context.selectedShapeIds)
         ? context.selectedShapeIds.filter((item): item is string => typeof item === "string")
         : [],
+      shapeSummaries: Array.isArray(context.shapeSummaries)
+        ? context.shapeSummaries.filter(
+            (item): item is Record<string, unknown> =>
+              typeof item === "object" && item !== null && !Array.isArray(item)
+          )
+        : [],
+      selectedScene: context.selectedScene && typeof context.selectedScene === "object" && !Array.isArray(context.selectedScene)
+        ? context.selectedScene
+        : null,
+      selectedSceneError: typeof context.selectedSceneError === "string" ? context.selectedSceneError : null,
       toolHelpMode: context.toolHelpMode === true,
       viewport: this.readContextViewport(context.viewport)
     };
@@ -438,6 +477,11 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     const highlightedShapeIds = Array.isArray(payload.highlightedShapeIds)
       ? payload.highlightedShapeIds.filter((item): item is string => typeof item === "string")
       : [];
+    const loadRootShapeIds = Array.isArray(payload.loadRootShapeIds)
+      ? payload.loadRootShapeIds.filter(
+          (item): item is string => typeof item === "string"
+        )
+      : [];
     const target = payload.targetViewport;
     const targetViewport = target && typeof target === "object" && !Array.isArray(target)
       && ["x", "y", "width", "height"].every((key) => typeof (target as Record<string, unknown>)[key] === "number")
@@ -449,7 +493,58 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     const toolTargetLabel = typeof payload.toolTargetLabel === "string" && payload.toolTargetLabel.trim()
       ? payload.toolTargetLabel.trim()
       : null;
-    return { message: payload.message, highlightedShapeIds, targetViewport, toolTarget, toolTargetLabel };
+    return {
+      message: payload.message,
+      highlightedShapeIds,
+      loadRootShapeIds,
+      targetViewport,
+      toolTarget,
+      toolTargetLabel
+    };
+  }
+
+  private readHtmlArtifact(value: Record<string, unknown>) {
+    const artifact = value.artifact;
+    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) return null;
+    const payload = artifact as Record<string, unknown>;
+    if (payload.kind !== "html" || typeof payload.title !== "string" || typeof payload.html !== "string") {
+      return null;
+    }
+    const sourceShapeIds = Array.isArray(payload.sourceShapeIds)
+      ? payload.sourceShapeIds.filter((item): item is string => typeof item === "string").slice(0, 160)
+      : [];
+    return { kind: "html" as const, title: payload.title, html: payload.html, sourceShapeIds };
+  }
+
+  private readClientAction(value: Record<string, unknown>) {
+    const action = value.clientAction;
+    if (!action || typeof action !== "object" || Array.isArray(action)) return null;
+    const payload = action as Record<string, unknown>;
+    const file = payload.file;
+    if (payload.type !== "insert_drive_file"
+      || !file
+      || typeof file !== "object"
+      || Array.isArray(file)) {
+      return null;
+    }
+    const filePayload = file as Record<string, unknown>;
+    if (typeof filePayload.fileId !== "string"
+      || typeof filePayload.fileName !== "string"
+      || typeof filePayload.mimeType !== "string") {
+      return null;
+    }
+    const fileId = filePayload.fileId.trim();
+    const fileName = filePayload.fileName.trim().slice(0, 255);
+    const mimeType = filePayload.mimeType.trim().slice(0, 255);
+    if (!fileId || !fileName || !mimeType) return null;
+    return {
+      type: "insert_drive_file" as const,
+      file: {
+        fileId,
+        fileName,
+        mimeType
+      }
+    };
   }
 
   private readContextViewport(value: unknown) {
@@ -458,6 +553,27 @@ export class CanvasAgentService implements OnModuleDestroy, OnModuleInit {
     return ["x", "y", "width", "height"].every((key) => typeof payload[key] === "number")
       ? payload as { x: number; y: number; width: number; height: number }
       : null;
+  }
+
+  private readContextConversation(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const payload = value as Record<string, unknown>;
+    return {
+      messages: Array.isArray(payload.messages)
+        ? payload.messages
+            .filter((item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === "object" && !Array.isArray(item)
+            )
+            .map((item) => ({
+              role: item.role === "assistant" ? "assistant" as const : "user" as const,
+              content: typeof item.content === "string" ? item.content : ""
+            }))
+            .filter((item) => item.content)
+        : [],
+      lastTask: payload.lastTask && typeof payload.lastTask === "object" && !Array.isArray(payload.lastTask)
+        ? payload.lastTask
+        : null
+    };
   }
 
   private iso(value: Date | string): string {

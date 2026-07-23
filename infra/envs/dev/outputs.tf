@@ -46,12 +46,24 @@ output "rds_endpoint" {
   value = module.rds.endpoint
 }
 
+output "db_migration_task_definition_arn" {
+  value = module.db_migrations.task_definition_arn
+}
+
+output "db_migration_log_group_name" {
+  value = module.db_migrations.log_group_name
+}
+
 output "redis_endpoint" {
   value = module.redis.endpoint
 }
 
 output "github_actions_role_arn" {
   value = module.iam.github_actions_role_arn
+}
+
+output "db_migration_publisher_role_arn" {
+  value = module.iam.github_actions_db_migration_publisher_role_arn
 }
 
 output "terraform_plan_role_arn" {

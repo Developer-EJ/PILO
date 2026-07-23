@@ -1,7 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest, notFound } from "../../common/api-error";
 import { WorkspaceService } from "../workspace/workspace.service";
+import {
+  isBoardIssueCreateTargetValid,
+  type ValidBoardIssueCreateTarget
+} from "./board-issue-create-target";
 import type { ListBoardIssuesQuery, ListBoardsQuery } from "./dto";
+import { BoardIssueCreateQueries } from "./queries/board-issue-create.queries";
+import type { BoardIssueCreateTargetRow } from "./queries/board-issue-create.queries";
 import { BoardReadQueries } from "./queries/board-read.queries";
 import type {
   BoardColumnRow,
@@ -24,6 +30,12 @@ interface NormalizedPagination {
   offset: number;
 }
 
+export interface BoardDeliveryOptionPayload {
+  id: string;
+  name: string;
+  columns: Array<{ id: string; name: string }>;
+}
+
 interface PaginationInput {
   page?: unknown;
   limit?: unknown;
@@ -43,7 +55,8 @@ const MAX_PAGE_LIMIT = 100;
 export class BoardReadService {
   constructor(
     private readonly boardReadQueries: BoardReadQueries,
-    private readonly workspaceService: WorkspaceService
+    private readonly workspaceService: WorkspaceService,
+    private readonly boardIssueCreateQueries: BoardIssueCreateQueries
   ) {}
 
   async listBoards(
@@ -106,6 +119,18 @@ export class BoardReadService {
     const rows = await this.boardReadQueries.listBoardColumns(normalizedBoardId);
 
     return rows.map((row) => this.mapBoardColumn(row));
+  }
+
+  async listBoardDeliveryOptions(
+    currentUserId: string,
+    workspaceId: string
+  ): Promise<BoardDeliveryOptionPayload[]> {
+    await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
+
+    const rows = await this.boardIssueCreateQueries.listIssueCreateTargets(workspaceId);
+    return this.mapBoardDeliveryOptions(
+      rows.filter(isBoardIssueCreateTargetValid)
+    );
   }
 
   async listBoardIssues(
@@ -328,6 +353,28 @@ export class BoardReadService {
       color: row.color,
       issueCount: this.toInteger(row.issue_count, "Invalid board column issue count")
     };
+  }
+
+  private mapBoardDeliveryOptions(
+    rows: Array<ValidBoardIssueCreateTarget<BoardIssueCreateTargetRow>>
+  ): BoardDeliveryOptionPayload[] {
+    const boards = new Map<string, BoardDeliveryOptionPayload>();
+
+    for (const row of rows) {
+      const id = String(row.board_id);
+      const board = boards.get(id) ?? {
+        id,
+        name: row.board_name,
+        columns: []
+      };
+      board.columns.push({
+        id: String(row.target_column_id),
+        name: row.target_column_name
+      });
+      boards.set(id, board);
+    }
+
+    return [...boards.values()];
   }
 
   private mapBoardIssue(row: BoardIssueRow): BoardIssueCardPayload {

@@ -88,6 +88,7 @@ jobs:
       TF_VAR_app_server_desired_count: ${{ vars.TF_PLAN_APP_SERVER_DESIRED_COUNT }}
       TF_VAR_realtime_server_desired_count: ${{ vars.TF_PLAN_REALTIME_SERVER_DESIRED_COUNT }}
       TF_VAR_ai_worker_desired_count: ${{ vars.TF_PLAN_AI_WORKER_DESIRED_COUNT }}
+      TF_VAR_sql_erd_operations_v1_enabled: ${{ vars.TF_PLAN_SQL_ERD_OPERATIONS_V1_ENABLED }}
       TF_VAR_github_owner: ${{ vars.TF_PLAN_GITHUB_OWNER }}
       TF_VAR_github_repo: ${{ vars.TF_PLAN_GITHUB_REPO }}
       TF_VAR_livekit_ami_id: ${{ vars.LIVEKIT_AMI_ID }}
@@ -112,6 +113,7 @@ jobs:
             TF_VAR_app_server_desired_count
             TF_VAR_realtime_server_desired_count
             TF_VAR_ai_worker_desired_count
+            TF_VAR_sql_erd_operations_v1_enabled
             TF_VAR_github_owner
             TF_VAR_github_repo
             TF_VAR_livekit_ami_id

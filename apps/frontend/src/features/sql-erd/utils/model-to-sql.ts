@@ -12,6 +12,7 @@ export type SqltoerdModelToSqlInput = {
 };
 
 export type SqltoerdModelToSqlResult = {
+  modelJson: SqltoerdModelJsonV1;
   sql: string;
   warnings: string[];
 };
@@ -21,7 +22,7 @@ export class SqltoerdModelToSqlGenerationError extends Error {
 
   constructor(readonly relationIds: string[]) {
     super(
-      "SQLite cannot regenerate FOREIGN KEY relations that require ALTER TABLE. Reorder the tables or edit the SQL source directly."
+      "지원하지 않는 ALTER TABLE FOREIGN KEY 구문이 필요해 SQLite DDL로 재생성할 수 없습니다. 테이블 순서를 조정하거나 SQL 원문을 직접 수정하세요."
     );
     this.name = "SqltoerdModelToSqlGenerationError";
   }
@@ -30,15 +31,17 @@ export class SqltoerdModelToSqlGenerationError extends Error {
 export function generateSqlDdlFromErdModel(
   input: SqltoerdModelToSqlInput
 ): SqltoerdModelToSqlResult {
-  const tablesById = new Map(input.modelJson.schema.tables.map((table) => [table.id, table]));
+  const normalized = normalizeSqlErdModelDataTypes(input.modelJson, input.dialect);
+  const modelJson = normalized.modelJson;
+  const tablesById = new Map(modelJson.schema.tables.map((table) => [table.id, table]));
   const tableIndexById = new Map(
-    input.modelJson.schema.tables.map((table, index) => [table.id, index])
+    modelJson.schema.tables.map((table, index) => [table.id, index])
   );
   const deferredRelationIds = new Set(
-    input.modelJson.schema.relations
+    modelJson.schema.relations
       .filter(
         (relation) =>
-          isCyclicRelation(relation, input.modelJson.schema.relations) ||
+          isCyclicRelation(relation, modelJson.schema.relations) ||
           isForwardReference(relation, tableIndexById)
       )
       .map((relation) => relation.id)
@@ -47,8 +50,8 @@ export function generateSqlDdlFromErdModel(
   if (input.dialect === "sqlite" && deferredRelationIds.size > 0) {
     throw new SqltoerdModelToSqlGenerationError([...deferredRelationIds]);
   }
-  const relationsByTableId = groupRelationsByTableId(input.modelJson.schema.relations);
-  const createStatements = input.modelJson.schema.tables.map((table) =>
+  const relationsByTableId = groupRelationsByTableId(modelJson.schema.relations);
+  const createStatements = modelJson.schema.tables.map((table) =>
     renderCreateTable(
       table,
       relationsByTableId.get(table.id) ?? [],
@@ -57,16 +60,72 @@ export function generateSqlDdlFromErdModel(
       input.dialect
     )
   );
-  const alterStatements = input.modelJson.schema.relations
+  const alterStatements = modelJson.schema.relations
     .filter((relation) => deferredRelationIds.has(relation.id))
     .map((relation) => renderAlterTableRelation(relation, tablesById, input.dialect));
 
   return {
+    modelJson,
     sql: [...createStatements, ...alterStatements].join("\n\n"),
     warnings: [
-      "The generator emits normalized CREATE TABLE and FOREIGN KEY statements; source formatting, comments, and unsupported statements are not preserved."
+      "정규화된 CREATE TABLE 및 FOREIGN KEY 구문으로 SQL을 재생성합니다. 기존 SQL의 서식, 주석, 지원하지 않는 구문은 보존되지 않을 수 있습니다.",
+      ...normalized.warnings
     ]
   };
+}
+
+function normalizeSqlErdModelDataTypes(
+  modelJson: SqltoerdModelJsonV1,
+  dialect: SqltoerdResolvedDialect
+) {
+  const warnings: string[] = [];
+  let hasChanges = false;
+  const tables = modelJson.schema.tables.map((table) => ({
+    ...table,
+    columns: table.columns.map((column) => {
+      const dataType = normalizeSqlErdDataType(column.dataType, dialect);
+
+      if (dataType === column.dataType) {
+        return column;
+      }
+
+      hasChanges = true;
+      warnings.push(
+        `${getTableDisplayName(table)}.${column.name}의 UUID 타입을 ${dataType}(으)로 정규화했습니다.`
+      );
+      return { ...column, dataType };
+    })
+  }));
+
+  return {
+    modelJson: hasChanges
+      ? { ...modelJson, schema: { ...modelJson.schema, tables } }
+      : modelJson,
+    warnings
+  };
+}
+
+function normalizeSqlErdDataType(
+  dataType: string,
+  dialect: SqltoerdResolvedDialect
+) {
+  if (dataType.trim().toUpperCase() !== "UUID") {
+    return dataType;
+  }
+
+  if (dialect === "mysql") {
+    return "CHAR(36)";
+  }
+
+  if (dialect === "sqlite") {
+    return "TEXT";
+  }
+
+  return dataType;
+}
+
+function getTableDisplayName(table: ErdTable) {
+  return table.schemaName ? `${table.schemaName}.${table.name}` : table.name;
 }
 
 function isForwardReference(

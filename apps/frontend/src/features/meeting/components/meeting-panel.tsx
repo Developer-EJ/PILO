@@ -7,6 +7,8 @@ import {
   Loader2,
   Mic,
   MicOff,
+  Volume2,
+  VolumeX,
   Phone,
   PhoneOff,
   Pencil,
@@ -24,8 +26,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
-  useSyncExternalStore
+  useState
 } from "react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -50,10 +51,17 @@ import {
   type MeetingReportStatusFilter
 } from "@/features/meeting/components/meeting-report-section";
 import { useMeetingRooms } from "@/features/meeting/hooks/use-meeting-rooms";
+import { MeetingWorkspaceLocationAdapter } from "@/features/meeting/meeting-workspace-location-adapter";
 import { useMeetingWorkspaceData } from "@/features/meeting/hooks/use-meeting-workspace-data";
 import { meetingNavigation } from "@/features/meeting/navigation";
 import { useMeetingRuntime } from "@/features/meeting/runtime/meeting-runtime-provider";
+import { useWorkspacePresence } from "@/shared/workspace-presence/workspace-presence-provider";
 import { setHeaderMeetingRecordingStatus } from "@/features/meeting/stores/header-meeting-status-store";
+import {
+  consumeMeetingConnectionAction,
+  type MeetingConnectionAction,
+  subscribeMeetingConnectionAction
+} from "@/features/meeting/stores/meeting-connection-action-store";
 import { useMeetingStateInvalidation } from "@/features/meeting/stores/meeting-state-invalidation-store";
 import type {
   MeetingParticipant,
@@ -87,59 +95,6 @@ const CURRENT_MEETING_RELOAD_FAILED_MESSAGE =
 
 function getInitial(name: string | null | undefined) {
   return (name?.trim().slice(0, 1) || "?").toUpperCase();
-}
-
-function getMeetingSectionFromHash(hash: string): MeetingSection {
-  return hash === "#report" ? "report" : "room";
-}
-
-function getMeetingSectionSnapshot(): MeetingSection {
-  if (typeof window === "undefined") {
-    return "room";
-  }
-
-  return getMeetingSectionFromHash(window.location.hash);
-}
-
-function getMeetingSectionServerSnapshot(): MeetingSection {
-  return "room";
-}
-
-function subscribeToMeetingSection(onStoreChange: () => void) {
-  const frameIds: number[] = [];
-  const timeoutIds: number[] = [];
-
-  function scheduleSectionSync(delayMs = 50) {
-    const timeoutId = window.setTimeout(() => {
-      const frameId = window.requestAnimationFrame(onStoreChange);
-      frameIds.push(frameId);
-    }, delayMs);
-
-    timeoutIds.push(timeoutId);
-  }
-
-  function syncSectionAfterNavigationClick() {
-    scheduleSectionSync(50);
-    scheduleSectionSync(150);
-    scheduleSectionSync(300);
-  }
-
-  function syncSectionAfterNavigationChange() {
-    scheduleSectionSync();
-  }
-
-  scheduleSectionSync();
-  window.addEventListener("click", syncSectionAfterNavigationClick, true);
-  window.addEventListener("hashchange", syncSectionAfterNavigationChange);
-  window.addEventListener("popstate", syncSectionAfterNavigationChange);
-
-  return () => {
-    timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    frameIds.forEach((frameId) => window.cancelAnimationFrame(frameId));
-    window.removeEventListener("click", syncSectionAfterNavigationClick, true);
-    window.removeEventListener("hashchange", syncSectionAfterNavigationChange);
-    window.removeEventListener("popstate", syncSectionAfterNavigationChange);
-  };
 }
 
 function getParticipantName(participant: MeetingParticipant) {
@@ -316,7 +271,7 @@ function ToastMessage({
   );
 }
 
-export function MeetingPanel() {
+export function MeetingPanel({ section = "room" }: { section?: MeetingSection }) {
   const authSession = useAuthSession();
   const workspaceId = authSession?.activeWorkspaceId ?? "";
   const accessToken = authSession?.accessToken.trim() ?? "";
@@ -328,11 +283,8 @@ export function MeetingPanel() {
     () => createMeetingApiClient({ accessToken }),
     [accessToken]
   );
-  const activeSection = useSyncExternalStore(
-    subscribeToMeetingSection,
-    getMeetingSectionSnapshot,
-    getMeetingSectionServerSnapshot
-  );
+  const { onlineUsers } = useWorkspacePresence();
+  const activeSection = section;
   const [reportStatusFilter, setReportStatusFilter] =
     useState<MeetingReportStatusFilter>("ALL");
   const [reportSearchQuery, setReportSearchQuery] = useState("");
@@ -372,6 +324,7 @@ export function MeetingPanel() {
   });
   const {
     error: meetingRoomsError,
+    loadedWorkspaceId: meetingRoomsWorkspaceId,
     reloadMeetingRooms,
     rooms: meetingRooms,
     selectMeetingRoom,
@@ -412,6 +365,8 @@ export function MeetingPanel() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<ActionStatus>("idle");
   const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
+  const [inviteeUserId, setInviteeUserId] = useState("");
+  const [isInvitationPending, setIsInvitationPending] = useState(false);
   const [participantError, setParticipantError] = useState<string | null>(null);
   const [participantStatus, setParticipantStatus] =
     useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -430,6 +385,40 @@ export function MeetingPanel() {
   const [editingMeetingRoomName, setEditingMeetingRoomName] = useState("");
   const [restoredMeetingRoomId, setRestoredMeetingRoomId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [pendingMeetingConnectionAction, setPendingMeetingConnectionAction] =
+    useState<MeetingConnectionAction | null>(null);
+  const [
+    reconcilingMeetingConnectionActionId,
+    setReconcilingMeetingConnectionActionId
+  ] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (section !== "room" || typeof window === "undefined") return;
+
+    if (window.location.hash === "#report") {
+      window.location.replace("/report");
+      return;
+    }
+    if (window.location.hash === "#room") {
+      window.history.replaceState(null, "", "/meeting");
+    }
+  }, [section]);
+
+  useEffect(() => {
+    if (section !== "room") {
+      return;
+    }
+
+    const receiveAction = () => {
+      const action = consumeMeetingConnectionAction();
+      if (action) {
+        setPendingMeetingConnectionAction(action);
+      }
+    };
+
+    receiveAction();
+    return subscribeMeetingConnectionAction(receiveAction);
+  }, [section]);
 
   const activeParticipants = useMemo(
     () => participants.filter((participant) => participant.isActive),
@@ -439,6 +428,15 @@ export function MeetingPanel() {
     (participant) => participant.userId === currentUserId
   );
   const isCurrentUserActive = Boolean(currentUserActiveParticipant);
+  const inviteableOnlineUsers = useMemo(
+    () =>
+      onlineUsers.filter(
+        (user) =>
+          user.userId !== currentUserId &&
+          !activeParticipants.some((participant) => participant.userId === user.userId)
+      ),
+    [activeParticipants, currentUserId, onlineUsers]
+  );
   const shouldLeaveMeeting = isCurrentUserActive;
   const canReconnect =
     isCurrentUserActive &&
@@ -455,6 +453,25 @@ export function MeetingPanel() {
   const selectedMeetingRoom = meetingRooms.find(
     (room) => room.id === selectedMeetingRoomId
   );
+  const availableMeetingRoomIds = useMemo(
+    () => meetingRooms.map((room) => room.id),
+    [meetingRooms]
+  );
+
+  const handleInviteOnlineUser = useCallback(async () => {
+    if (!meeting || !inviteeUserId || isInvitationPending) return;
+    setIsInvitationPending(true);
+    setActionError(null);
+    try {
+      await meetingClient.createMeetingInvitation(workspaceId, meeting.id, inviteeUserId);
+      setInviteeUserId("");
+      setToastMessage("회의 초대를 보냈습니다.");
+    } catch (error) {
+      setActionError(getErrorMessage(error));
+    } finally {
+      setIsInvitationPending(false);
+    }
+  }, [inviteeUserId, isInvitationPending, meeting, meetingClient, workspaceId]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -489,6 +506,186 @@ export function MeetingPanel() {
       selectMeetingRoom(restoredMeetingRoomId);
     }
   }, [meetingRooms, restoredMeetingRoomId, selectMeetingRoom]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (!action || action.workspaceId === workspaceId) {
+      return;
+    }
+
+    if (
+      !authSession?.workspaces.some(
+        (workspace) => workspace.id === action.workspaceId
+      )
+    ) {
+      setPendingMeetingConnectionAction(null);
+      setToastMessage("Agent가 요청한 Workspace에 접근할 수 없습니다.");
+      return;
+    }
+
+    authSession.setActiveWorkspaceId(action.workspaceId);
+  }, [authSession, pendingMeetingConnectionAction, workspaceId]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (
+      !action ||
+      action.workspaceId !== workspaceId ||
+      action.meetingRoomId ||
+      !accessToken
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void meetingClient
+      .getCurrentUserActiveMeeting()
+      .then((result) => {
+        if (
+          cancelled ||
+          result.meeting?.id !== action.meetingId ||
+          !result.meetingRoom
+        ) {
+          return;
+        }
+
+        const meetingRoomId = result.meetingRoom.id;
+        setPendingMeetingConnectionAction((current) =>
+          current?.actionId === action.actionId
+            ? { ...current, meetingRoomId }
+            : current
+        );
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accessToken,
+    meetingClient,
+    pendingMeetingConnectionAction,
+    workspaceId
+  ]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (!action) {
+      return;
+    }
+
+    const remainingMs = action.expiresAtMs - Date.now();
+    if (remainingMs <= 0) {
+      setPendingMeetingConnectionAction(null);
+      setToastMessage(
+        "회의 연결 요청이 만료되었습니다. 회의 참여 버튼으로 다시 시도해주세요."
+      );
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPendingMeetingConnectionAction((current) =>
+        current?.actionId === action.actionId ? null : current
+      );
+      setToastMessage(
+        "회의 연결 요청이 만료되었습니다. 회의 참여 버튼으로 다시 시도해주세요."
+      );
+    }, remainingMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pendingMeetingConnectionAction]);
+
+  useEffect(() => {
+    const action = pendingMeetingConnectionAction;
+    if (
+      !action ||
+      action.workspaceId !== workspaceId ||
+      !action.meetingRoomId
+    ) {
+      return;
+    }
+
+    if (Date.now() >= action.expiresAtMs) {
+      return;
+    }
+
+    if (
+      meetingRoomsStatus !== "success" ||
+      meetingRoomsWorkspaceId !== action.workspaceId
+    ) {
+      return;
+    }
+
+    if (!meetingRooms.some((room) => room.id === action.meetingRoomId)) {
+      setPendingMeetingConnectionAction(null);
+      setToastMessage("Agent가 선택한 회의방을 찾을 수 없습니다.");
+      return;
+    }
+
+    if (selectedMeetingRoomId !== action.meetingRoomId) {
+      selectMeetingRoom(action.meetingRoomId);
+      return;
+    }
+
+    if (meeting?.id !== action.meetingId) {
+      return;
+    }
+
+    if (reconcilingMeetingConnectionActionId) {
+      return;
+    }
+
+    if (activeMeetingId && activeMeetingId !== action.meetingId) {
+      setReconcilingMeetingConnectionActionId(action.actionId);
+      void disconnectFromMeeting()
+        .catch(() => {
+          setPendingMeetingConnectionAction((current) =>
+            current?.actionId === action.actionId ? null : current
+          );
+          setToastMessage(
+            "기존 음성 연결을 정리하지 못했습니다. 다시 시도해주세요."
+          );
+        })
+        .finally(() => {
+          setReconcilingMeetingConnectionActionId((current) =>
+            current === action.actionId ? null : current
+          );
+        });
+      return;
+    }
+
+    if (
+      activeMeetingId === action.meetingId &&
+      (liveKitRoom.status === "connected" ||
+        liveKitRoom.status === "connecting" ||
+        liveKitRoom.status === "reconnecting")
+    ) {
+      setPendingMeetingConnectionAction(null);
+      return;
+    }
+
+    if (prejoinAction || actionStatus !== "idle") {
+      return;
+    }
+
+    setPendingMeetingConnectionAction(null);
+    setPrejoinAction("reconnect");
+  }, [
+    actionStatus,
+    activeMeetingId,
+    disconnectFromMeeting,
+    liveKitRoom.status,
+    meeting?.id,
+    meetingRooms,
+    meetingRoomsStatus,
+    meetingRoomsWorkspaceId,
+    pendingMeetingConnectionAction,
+    prejoinAction,
+    reconcilingMeetingConnectionActionId,
+    selectMeetingRoom,
+    selectedMeetingRoomId,
+    workspaceId
+  ]);
 
   useEffect(() => {
     setHeaderMeetingRecordingStatus(currentRecording?.status ?? null);
@@ -883,6 +1080,14 @@ export function MeetingPanel() {
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-6">
+        {activeSection === "room" ? (
+          <MeetingWorkspaceLocationAdapter
+            availableRoomIds={availableMeetingRoomIds}
+            roomsReady={meetingRoomsStatus === "success"}
+            selectedMeetingRoomId={selectedMeetingRoomId || null}
+            selectMeetingRoom={selectMeetingRoom}
+          />
+        ) : null}
         {toastMessage && (
           <ToastMessage
             message={toastMessage}
@@ -1091,14 +1296,14 @@ export function MeetingPanel() {
                 <div className="flex items-center border-b px-4 py-3 sm:px-6">
                   <Button
                     aria-haspopup="dialog"
-                    className="h-9 rounded-none border-r pr-6 pl-0 text-base font-semibold"
+                    className="shrink-0"
                     disabled={
                       meetingRoomsStatus !== "success" ||
                       isActionPending ||
                       isMeetingRoomSwitching
                     }
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     onClick={() => {
                       setMeetingRoomManagementError(null);
                       setIsMeetingRoomDialogOpen(true);
@@ -1106,7 +1311,7 @@ export function MeetingPanel() {
                   >
                     회의방 목록
                   </Button>
-                  <h2 className="min-w-0 truncate pl-6 text-2xl font-semibold">
+                  <h2 className="min-w-0 truncate pl-3 text-2xl font-semibold">
                     {selectedMeetingRoom?.name ?? "회의방을 선택하세요"}
                   </h2>
                 </div>
@@ -1151,6 +1356,34 @@ export function MeetingPanel() {
                       </span>
                     </div>
                   ) : null}
+                  {isCurrentUserActive && meeting ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3">
+                      <label className="text-sm font-medium" htmlFor="meeting-invitee">
+                        온라인 사용자 초대
+                      </label>
+                      <select
+                        className="h-9 min-w-40 flex-1 rounded-md border bg-background px-2 text-sm"
+                        id="meeting-invitee"
+                        value={inviteeUserId}
+                        onChange={(event) => setInviteeUserId(event.target.value)}
+                      >
+                        <option value="">초대할 사용자 선택</option>
+                        {inviteableOnlineUsers.map((user) => (
+                          <option key={user.userId} value={user.userId}>
+                            {user.displayName}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        disabled={!inviteeUserId || isInvitationPending}
+                        onClick={() => void handleInviteOnlineUser()}
+                        size="sm"
+                        type="button"
+                      >
+                        {isInvitationPending ? "전송 중" : "초대"}
+                      </Button>
+                    </div>
+                  ) : null}
                   {participantStatus === "loading" &&
                   participants.length === 0 ? (
                     <>
@@ -1168,6 +1401,10 @@ export function MeetingPanel() {
                         isCurrentUser && liveKitRoom.status === "connected";
                       const isMicEnabled =
                         hasKnownMicState && liveKitRoom.isMicrophoneEnabled;
+                      const remoteAudioSettings =
+                        liveKitRoom.remoteParticipantAudioSettings[
+                          participant.livekitIdentity
+                        ] ?? { muted: false, volume: 100 };
 
                       return (
                         <div
@@ -1203,32 +1440,102 @@ export function MeetingPanel() {
                               )}
                             </div>
                           </div>
-                          <Tooltip>
-                            <TooltipTrigger
-                              aria-label={
-                                isMicEnabled ? "마이크 켜짐" : "마이크 상태 대기"
-                              }
-                              className={cn(
-                                "flex size-9 items-center justify-center rounded-full border",
-                                isMicEnabled
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-border bg-card text-muted-foreground"
-                              )}
-                            >
-                              {isMicEnabled ? (
-                                <Mic className="size-4" />
-                              ) : (
-                                <MicOff className="size-4" />
-                              )}
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {isCurrentUser
-                                ? isMicEnabled
-                                  ? "마이크 켜짐"
-                                  : "마이크 상태 대기"
-                                : "원격 마이크 상태는 LiveKit 이벤트 기준으로 표시됩니다."}
-                            </TooltipContent>
-                          </Tooltip>
+                          {!isCurrentUser ? (
+                            <div className="flex shrink-0 items-center gap-2">
+                              <label className="sr-only" htmlFor={`participant-volume-${participant.id}`}>
+                                {getParticipantName(participant)} 수신 음량
+                              </label>
+                              <input
+                                aria-label={`${getParticipantName(participant)} 수신 음량`}
+                                className="h-2 w-20 accent-primary"
+                                id={`participant-volume-${participant.id}`}
+                                max="100"
+                                min="0"
+                                type="range"
+                                value={remoteAudioSettings.volume}
+                                onChange={(event) =>
+                                  liveKitRoom.setRemoteParticipantAudioSettings(
+                                    participant.livekitIdentity,
+                                    { volume: Number(event.target.value) }
+                                  )
+                                }
+                              />
+                              <Tooltip>
+                                <TooltipTrigger
+                                  aria-label={
+                                    remoteAudioSettings.muted
+                                      ? `${getParticipantName(participant)} 수신 음소거 해제`
+                                      : `${getParticipantName(participant)} 수신 음소거`
+                                  }
+                                  className="flex size-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground"
+                                  onClick={() =>
+                                    liveKitRoom.setRemoteParticipantAudioSettings(
+                                      participant.livekitIdentity,
+                                      { muted: !remoteAudioSettings.muted }
+                                    )
+                                  }
+                                >
+                                  {remoteAudioSettings.muted ? (
+                                    <VolumeX className="size-4" />
+                                  ) : (
+                                    <Volume2 className="size-4" />
+                                  )}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {remoteAudioSettings.muted
+                                    ? "내 수신 음소거 해제"
+                                    : "내 수신 음소거"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          ) : null}
+                          {isCurrentUser ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                aria-label={
+                                  hasKnownMicState
+                                    ? isMicEnabled
+                                      ? "마이크 끄기"
+                                      : "마이크 켜기"
+                                    : "마이크 상태 대기"
+                                }
+                                className={cn(
+                                  "flex size-9 items-center justify-center rounded-full border transition-colors",
+                                  isMicEnabled
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : "border-border bg-card text-muted-foreground",
+                                  hasKnownMicState &&
+                                    "cursor-pointer hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                                )}
+                                disabled={!hasKnownMicState}
+                                onClick={() => {
+                                  if (!hasKnownMicState) return;
+
+                                  void liveKitRoom
+                                    .setMicrophoneEnabled(!isMicEnabled)
+                                    .catch((error) => {
+                                      const message = getErrorMessage(error);
+                                      setActionError(message);
+                                      setToastMessage(message);
+                                    });
+                                }}
+                                type="button"
+                              >
+                                {isMicEnabled ? (
+                                  <Mic className="size-4" />
+                                ) : (
+                                  <MicOff className="size-4" />
+                                )}
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {hasKnownMicState
+                                  ? isMicEnabled
+                                    ? "클릭하여 마이크 끄기"
+                                    : "클릭하여 마이크 켜기"
+                                  : "마이크 상태 대기"}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : null}
                         </div>
                       );
                     })
@@ -1349,6 +1656,7 @@ export function MeetingPanel() {
           <MeetingReportSection
             meetingData={meetingData}
             statusFilter={reportStatusFilter}
+            currentPage={reportCursorHistory.length + 1}
             onStatusFilterChange={(status) => {
               setReportStatusFilter(status);
               setReportCursorHistory([]);
@@ -1356,6 +1664,21 @@ export function MeetingPanel() {
             onListFiltersChange={handleReportListFiltersChange}
             onNextPage={() => {
               if (meetingData.nextReportCursor) {
+                setReportCursorHistory((history) => [
+                  ...history,
+                  meetingData.nextReportCursor as string
+                ]);
+              }
+            }}
+            onPageChange={(page) => {
+              const currentPage = reportCursorHistory.length + 1;
+
+              if (page < currentPage) {
+                setReportCursorHistory((history) => history.slice(0, page - 1));
+                return;
+              }
+
+              if (page > currentPage && meetingData.nextReportCursor) {
                 setReportCursorHistory((history) => [
                   ...history,
                   meetingData.nextReportCursor as string

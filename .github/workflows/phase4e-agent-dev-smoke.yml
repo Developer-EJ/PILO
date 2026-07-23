@@ -1,0 +1,101 @@
+name: Phase 4-E Agent Dev Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_mode:
+        description: Expected Agent Worker retrieval mode
+        required: true
+        type: choice
+        default: llm_router
+        options:
+          - llm_router
+          - shadow
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-northeast-2
+
+jobs:
+  ecs-agent-worker:
+    name: ecs-agent-worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev rollout contract
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify stable Agent Worker mode
+        env:
+          ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          ECS_AGENT_WORKER_SERVICE: ${{ vars.ECS_AGENT_WORKER_SERVICE }}
+          EXPECTED_MODE: ${{ inputs.expected_mode }}
+        run: |
+          set -euo pipefail
+          test -n "$ECS_CLUSTER_NAME"
+          test -n "$ECS_AGENT_WORKER_SERVICE"
+
+          service_json=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_AGENT_WORKER_SERVICE")
+          desired_count=$(jq -r '.services[0].desiredCount' <<<"$service_json")
+          running_count=$(jq -r '.services[0].runningCount' <<<"$service_json")
+          deployment_count=$(jq -r '.services[0].deployments | length' <<<"$service_json")
+          task_definition=$(jq -r '.services[0].taskDefinition' <<<"$service_json")
+
+          test "$desired_count" -gt 0
+          test "$running_count" -eq "$desired_count"
+          test "$deployment_count" -eq 1
+          test -n "$task_definition"
+          test "$task_definition" != "null"
+
+          actual_mode=$(aws ecs describe-task-definition \
+            --task-definition "$task_definition" \
+            --query 'taskDefinition.containerDefinitions[0].environment[?name==`AGENT_TOOL_RETRIEVAL_MODE`].value | [0]' \
+            --output text)
+          test "$actual_mode" = "$EXPECTED_MODE"
+
+          jq -n \
+            --arg mode "$actual_mode" \
+            --argjson desired "$desired_count" \
+            --argjson running "$running_count" \
+            '{format:"phase4e-agent-dev-smoke:v1",passed:true,mode:$mode,service:{desiredCount:$desired,runningCount:$running,stable:true}}' \
+            > "$RUNNER_TEMP/phase4e-agent-dev-ecs-state.json"
+
+      - name: Run actual Agent read and write-boundary smoke
+        working-directory: apps/ai-worker
+        env:
+          PHASE4E_DEV_AGENT_TOKEN: ${{ secrets.PHASE4E_DEV_AGENT_TOKEN }}
+          DEV_APP_SERVER_URL: ${{ vars.DEV_APP_SERVER_URL }}
+          PHASE4E_DEV_WORKSPACE_ID: ${{ vars.PHASE4E_DEV_WORKSPACE_ID }}
+        run: >-
+          PYTHONPATH=. python scripts/run_phase4e_dev_agent_smoke.py
+          --base-url "$DEV_APP_SERVER_URL"
+          --workspace-id "$PHASE4E_DEV_WORKSPACE_ID"
+          --expected-mode "${{ inputs.expected_mode }}"
+          --output "$RUNNER_TEMP/phase4e-agent-dev-smoke.json"
+
+      - name: Upload privacy-safe dev smoke result
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4e-agent-dev-smoke-${{ inputs.expected_mode }}
+          path: |
+            ${{ runner.temp }}/phase4e-agent-dev-ecs-state.json
+            ${{ runner.temp }}/phase4e-agent-dev-smoke.json
+          if-no-files-found: error
+          retention-days: 30

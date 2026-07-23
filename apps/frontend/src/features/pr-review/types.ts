@@ -147,6 +147,13 @@ export type PrReviewDecisionUpdatedEvent = {
   reviewedAt: string | null;
 };
 
+export type PrReviewRoomDeletedEvent = {
+  event: "pr-review:room:deleted";
+  workspaceId: string;
+  canvasId: string;
+  reviewRoomId: string;
+};
+
 export type PrReviewSubmitType = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
 
 export type PrReviewGithubSubmitStatus =
@@ -174,12 +181,51 @@ export type PrReviewSession = {
   updatedAt: string;
 };
 
-export type PrReviewRoomCanvas = {
+export type PrReviewRoom = {
   id: string;
+  workspaceId: string;
+  pullRequestId: string;
   canvasId: string;
   currentReviewSessionId: string | null;
+  analyzingReviewSessionId: string | null;
   status: "active" | "completed";
+  completionReason: "merged" | "closed" | null;
+  completedAt: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  pullRequest: {
+    githubNumber: number;
+    title: string;
+    headBranch: string | null;
+    baseBranch: string | null;
+    githubUrl: string;
+    state: "open" | "closed";
+    mergedAt: string | null;
+  };
+  currentRevision: {
+    reviewSessionId: string;
+    headSha: string;
+    status: PrReviewSessionStatus;
+  } | null;
+  revisionCount: number;
 };
+
+export type PrReviewRoomList = {
+  rooms: PrReviewRoom[];
+};
+
+export type PrReviewRoomStart = {
+  room: PrReviewRoom;
+  revision: PrReviewSession;
+  roomCreated: boolean;
+  revisionCreated: boolean;
+};
+
+export type PrReviewRoomCanvas = Pick<
+  PrReviewRoom,
+  "id" | "canvasId" | "currentReviewSessionId" | "status"
+>;
 
 export type PrReviewCanvasShape = {
   id: string;
@@ -463,9 +509,34 @@ export type PrReviewConflictSuggestion = {
   stored: false;
 };
 
+export type PrReviewConflictDraft = {
+  reviewFileId: string;
+  sourceHeadBlobSha: string;
+  resolvedContent: string;
+  resolutionState: PrReviewConflictDraftResolutionState;
+  draftVersion: number;
+  updatedByUserId: string;
+  updatedAt: string;
+};
+
+export type UpdatePrReviewConflictDraftInput = {
+  sourceHeadBlobSha: string;
+  resolvedContent: string;
+  resolutionState: PrReviewConflictDraftResolutionState;
+  expectedDraftVersion: number;
+};
+
 export type PrReviewConflictResolvedHunk = {
   hunkId: string;
   resolvedText: string;
+};
+
+export type PrReviewConflictDraftSuggestion = {
+  status: PrReviewConflictSuggestionStatus;
+  aiSummary: string;
+  aiSuggestion: string;
+  resolvedHunks: PrReviewConflictResolvedHunk[];
+  validationMessages: string[];
 };
 
 export type PrReviewConflictDraftSource =
@@ -474,6 +545,14 @@ export type PrReviewConflictDraftSource =
   | "target"
   | "both"
   | "manual";
+
+export type PrReviewConflictDraftResolutionState = {
+  resolutionChoices: Record<string, PrReviewConflictDraftSource>;
+  acceptedAiResolvedTexts: Record<string, string>;
+  manualResolvedTexts: Record<string, string>;
+  suggestion: PrReviewConflictDraftSuggestion | null;
+  isCustomized: boolean;
+};
 
 export type CreatePrReviewConflictSuggestionInput = {
   currentDraft?: {

@@ -1,22 +1,31 @@
 import type {
   ApplyPrReviewConflictsInput,
   PrReviewConflictAnalysis,
+  PrReviewConflictDraftResolutionState,
+  PrReviewConflictDraftSuggestion,
   PrReviewConflictFile,
-  PrReviewConflictSuggestion
 } from "@/features/pr-review/types";
 import type { PrReviewConflictResolutionChoice } from "./pr-review-conflict-resolution";
 
 export type PrReviewConflictDraft = {
   sourceHeadBlobSha: string;
+  draftVersion: number;
+  updatedByUserId: string | null;
+  updatedAt: string | null;
   resolutionChoices: Record<string, PrReviewConflictResolutionChoice>;
   acceptedAiResolvedTexts: Record<string, string>;
   manualResolvedTexts: Record<string, string>;
-  suggestion: PrReviewConflictSuggestion | null;
+  suggestion: PrReviewConflictDraftSuggestion | null;
   resolvedContent: string;
   isCustomized: boolean;
 };
 
 export type PrReviewConflictDraftMap = Record<string, PrReviewConflictDraft>;
+
+export type PrReviewConflictHunkLocation = {
+  startLine: number;
+  lineCount: number;
+};
 
 const CONFLICT_MARKER_PATTERN = /(^|\n)(<<<<<<<|=======|>>>>>>>)(?:\s|$)/;
 
@@ -25,12 +34,41 @@ export function createPrReviewConflictDraft(
 ): PrReviewConflictDraft {
   return {
     sourceHeadBlobSha: file.headBlobSha,
+    draftVersion: 0,
+    updatedByUserId: null,
+    updatedAt: null,
     resolutionChoices: {},
     acceptedAiResolvedTexts: {},
     manualResolvedTexts: {},
     suggestion: null,
-    resolvedContent: file.headContent,
+    resolvedContent: buildPrReviewConflictMarkerDraft(file),
     isCustomized: false
+  };
+}
+
+export function toPrReviewConflictDraftResolutionState(
+  draft: PrReviewConflictDraft
+): PrReviewConflictDraftResolutionState {
+  return {
+    resolutionChoices: draft.resolutionChoices,
+    acceptedAiResolvedTexts: draft.acceptedAiResolvedTexts,
+    manualResolvedTexts: draft.manualResolvedTexts,
+    suggestion: draft.suggestion,
+    isCustomized: draft.isCustomized
+  };
+}
+
+export function applyPrReviewConflictDraftResolutionState(
+  draft: PrReviewConflictDraft,
+  resolutionState: PrReviewConflictDraftResolutionState
+): PrReviewConflictDraft {
+  return {
+    ...draft,
+    resolutionChoices: resolutionState.resolutionChoices,
+    acceptedAiResolvedTexts: resolutionState.acceptedAiResolvedTexts,
+    manualResolvedTexts: resolutionState.manualResolvedTexts,
+    suggestion: resolutionState.suggestion ?? null,
+    isCustomized: resolutionState.isCustomized
   };
 }
 
@@ -70,17 +108,110 @@ export function isPrReviewConflictDraftReady(
     return false;
   }
 
-  return file.hunks.every((hunk) => {
-    const choice = draft.resolutionChoices[hunk.id];
-    if (!choice) {
-      return false;
+  return true;
+}
+
+export function buildPrReviewConflictMarkerDraft(
+  file: PrReviewConflictFile,
+  resolvedHunkTexts: Record<string, string> = {}
+): string {
+  const lines = file.headContent.replace(/\r\n/g, "\n").split("\n");
+  const hunks = [...file.hunks].sort(
+    (left, right) => right.incomingStartLine - left.incomingStartLine
+  );
+
+  for (const hunk of hunks) {
+    const start = Math.max(0, hunk.incomingStartLine - 1);
+    const replacementLines = getConflictHunkReplacementLines(
+      hunk,
+      resolvedHunkTexts
+    );
+
+    lines.splice(
+      start,
+      Math.max(0, hunk.incomingLineCount),
+      ...replacementLines
+    );
+  }
+
+  return lines.join("\n");
+}
+
+export function getPrReviewConflictHunkLocations(
+  file: PrReviewConflictFile,
+  resolvedHunkTexts: Record<string, string> = {}
+): Record<string, PrReviewConflictHunkLocation> {
+  const locations: Record<string, PrReviewConflictHunkLocation> = {};
+  const hunks = [...file.hunks].sort(
+    (left, right) => right.incomingStartLine - left.incomingStartLine
+  );
+
+  for (const hunk of hunks) {
+    const start = Math.max(0, hunk.incomingStartLine - 1);
+    const replacementLines = getConflictHunkReplacementLines(
+      hunk,
+      resolvedHunkTexts
+    );
+    const lineDelta = replacementLines.length - Math.max(0, hunk.incomingLineCount);
+
+    for (const location of Object.values(locations)) {
+      if (location.startLine > start) {
+        location.startLine += lineDelta;
+      }
     }
-    return choice === "ai"
-      ? Object.hasOwn(draft.acceptedAiResolvedTexts, hunk.id)
-      : choice === "manual"
-        ? Object.hasOwn(draft.manualResolvedTexts, hunk.id)
-        : true;
-  });
+
+    locations[hunk.id] = {
+      startLine: start + 1,
+      lineCount: replacementLines.length
+    };
+  }
+
+  return locations;
+}
+
+function getConflictHunkReplacementLines(
+  hunk: PrReviewConflictFile["hunks"][number],
+  resolvedHunkTexts: Record<string, string>
+) {
+  if (Object.hasOwn(resolvedHunkTexts, hunk.id)) {
+    const resolvedText = resolvedHunkTexts[hunk.id]
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+
+    return resolvedText.length === 0 ? [] : resolvedText.split("\n");
+  }
+
+  return [
+    "<<<<<<< PR branch",
+    ...hunk.incomingText.split("\n"),
+    "=======",
+    ...hunk.currentText.split("\n"),
+    ">>>>>>> target branch"
+  ];
+}
+
+export function applyPrReviewConflictMarkerChoice(input: {
+  hunk: PrReviewConflictFile["hunks"][number];
+  choice: "pr" | "target" | "both";
+  value: string;
+}): string | null {
+  const markerBlock = [
+    "<<<<<<< PR branch",
+    input.hunk.incomingText,
+    "=======",
+    input.hunk.currentText,
+    ">>>>>>> target branch"
+  ].join("\n");
+  const replacement =
+    input.choice === "pr"
+      ? input.hunk.incomingText
+      : input.choice === "target"
+        ? input.hunk.currentText
+        : `${input.hunk.incomingText}\n${input.hunk.currentText}`;
+
+  return input.value.includes(markerBlock)
+    ? input.value.replace(markerBlock, replacement)
+    : null;
 }
 
 export function getPrReviewConflictDraftProgress(

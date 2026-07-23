@@ -1,4 +1,7 @@
-import { readCanvasStorage, writeCanvasStorage } from "../utils/canvas-storage";
+import {
+  readCanvasStorage,
+  writeCanvasStorage,
+} from "../persistence/canvas-storage";
 import type {
   CanvasBoardDetail,
   CanvasOperationsCatchupPayload,
@@ -20,9 +23,10 @@ function readMockBoards(workspaceId: string): CanvasBoardDetail[] {
   const boards = readCanvasStorage(mockBoardListStorageScope, workspaceId);
 
   return Array.isArray(boards)
-    ? boards.filter(isRecord).map((board) =>
-        normalizeCanvasBoardDetail(board, { workspaceId }),
-      )
+    ? boards
+        .filter(isRecord)
+        .filter((board) => board.engineType !== "tldraw_sync")
+        .map((board) => normalizeCanvasBoardDetail(board, { workspaceId }))
     : [];
 }
 
@@ -69,7 +73,10 @@ export function createMockCanvasClient() {
       } = {},
     ) {
       const boards = readMockBoards(workspaceId);
-      const board = createMockBlankBoard(workspaceId, body.title);
+      const board = createMockBlankBoard(
+        workspaceId,
+        body.title,
+      );
 
       writeMockBoards(workspaceId, [board, ...boards]);
 

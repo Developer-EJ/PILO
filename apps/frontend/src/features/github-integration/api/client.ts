@@ -2,6 +2,7 @@ import type {
   GithubAppInstallation,
   GithubAppInstallationDelete,
   GithubAppInstallationStart,
+  GithubActiveBoardSource,
   GithubOAuthDisconnect,
   GithubOAuthStart,
   GithubOAuthStatus,
@@ -83,6 +84,7 @@ export class GithubIntegrationApiError extends Error {
   status?: number;
   path?: string;
   code?: string;
+  retryAfterSeconds?: number;
 
   constructor(
     message: string,
@@ -90,6 +92,7 @@ export class GithubIntegrationApiError extends Error {
       status?: number;
       path?: string;
       code?: string;
+      retryAfterSeconds?: number;
     } = {}
   ) {
     super(message);
@@ -97,6 +100,7 @@ export class GithubIntegrationApiError extends Error {
     this.status = options.status;
     this.path = options.path;
     this.code = options.code;
+    this.retryAfterSeconds = options.retryAfterSeconds;
   }
 }
 
@@ -110,6 +114,13 @@ function readApiErrorMessage(payload: unknown) {
     return {
       code:
         typeof payload.error.code === "string" ? payload.error.code : undefined,
+      retryAfterSeconds:
+        isRecord(payload.error.details) &&
+        typeof payload.error.details.retryAfterSeconds === "number" &&
+        Number.isFinite(payload.error.details.retryAfterSeconds) &&
+        payload.error.details.retryAfterSeconds > 0
+          ? Math.ceil(payload.error.details.retryAfterSeconds)
+          : undefined,
       message: payload.error.message
     };
   }
@@ -254,7 +265,8 @@ async function requestGithubIntegrationPayload<T>(
       {
         code: apiError?.code,
         path,
-        status: response.status
+        status: response.status,
+        retryAfterSeconds: apiError?.retryAfterSeconds
       }
     );
   }
@@ -317,6 +329,10 @@ function workspaceGithubPath(workspaceId: string, path: string) {
   return `/workspaces/${encodeURIComponent(
     workspaceId
   )}/github${path}` as const;
+}
+
+function workspaceActiveBoardPath(workspaceId: string) {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/boards/active` as const;
 }
 
 function repositoryGithubPath(workspaceId: string, repositoryId: string) {
@@ -527,6 +543,27 @@ export function createGithubIntegrationApiClient({
       );
     },
 
+    async getWorkspaceActiveBoardSource(workspaceId: string) {
+      return requestGithubIntegrationData<GithubActiveBoardSource | null>(
+        workspaceActiveBoardPath(workspaceId),
+        undefined,
+        requestOptions
+      );
+    },
+
+    async activateWorkspaceBoardSource(
+      workspaceId: string,
+      body: { repositoryId: string; projectV2Id: string }
+    ) {
+      return requestGithubIntegrationData<{
+        boardId: string;
+      }>(
+        workspaceActiveBoardPath(workspaceId),
+        withJsonBody(body, { method: "PUT" }),
+        requestOptions
+      );
+    },
+
     async getGithubProjectV2AccessStatus(
       workspaceId: string,
       projectV2Id: string
@@ -540,11 +577,15 @@ export function createGithubIntegrationApiClient({
 
     async startGithubSyncRun(
       workspaceId: string,
-      body: StartGithubSyncRunInput
+      body: StartGithubSyncRunInput,
+      idempotencyKey: string
     ) {
       return requestGithubIntegrationData<GithubSyncRun>(
         workspaceGithubPath(workspaceId, "/sync-runs"),
-        withJsonBody(body, { method: "POST" }),
+        withJsonBody(body, {
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey }
+        }),
         requestOptions
       );
     },

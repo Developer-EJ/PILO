@@ -15,10 +15,13 @@ import {
   type Editor,
   type TLBaseShape,
   type TLShape,
+  type TLShapeId,
   type TLShapePartial
 } from "tldraw";
 
 import type { ErdColumn, ErdTable } from "@/features/sql-erd/types";
+import { useSqlErdTableFocus } from "@/features/sql-erd/components/sql-erd-table-focus-context";
+import { getSqlErdFocusedTableRole } from "@/features/sql-erd/utils/agent-table-focus";
 import {
   getSqltoerdTableBadgeColumnWidth,
   getSqltoerdTableCardSize,
@@ -147,6 +150,24 @@ export function isSqlErdColumnPointerDrag(
   );
 }
 
+export function getSqlErdConnectorPortVisibilityClassName({
+  isHighlighted,
+  isSelected,
+  selectedOpacityClassName
+}: {
+  isHighlighted: boolean;
+  isSelected: boolean;
+  selectedOpacityClassName: "opacity-45" | "opacity-100";
+}) {
+  if (isSelected) {
+    return `pointer-events-auto ${selectedOpacityClassName} hover:opacity-100`;
+  }
+  if (isHighlighted) {
+    return "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-100";
+  }
+  return "pointer-events-none opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100";
+}
+
 export function selectSqlErdColumn(detail: SqlErdColumnSelectEventDetail) {
   window.dispatchEvent(
     new CustomEvent(SQLTOERD_COLUMN_SELECT_EVENT, {
@@ -193,9 +214,11 @@ export function getSqlErdTableShapeSelectionUpdates(
       }
     | {
         type: "table";
-      }
+      },
+  selectedShapeIds: readonly TLShapeId[] = [selectedTableShape.id]
 ) {
   const updates: TLShapePartial<SqlErdTableShape>[] = [];
+  const selectedShapeIdSet = new Set(selectedShapeIds);
 
   for (const shape of editor.getCurrentPageShapes()) {
     if (!isSqlErdTableShape(shape)) {
@@ -203,11 +226,14 @@ export function getSqlErdTableShapeSelectionUpdates(
     }
 
     const isSelectedTable = shape.id === selectedTableShape.id;
-    const selectedState: SqlErdTableSelectionState = isSelectedTable
-      ? selection.type
-      : "none";
+    const isShapeSelected = selectedShapeIdSet.has(shape.id);
+    const selectedState: SqlErdTableSelectionState = !isShapeSelected
+      ? "none"
+      : isSelectedTable
+        ? selection.type
+        : "table";
     const selectedColumnId =
-      isSelectedTable && selection.type === "column"
+      isShapeSelected && isSelectedTable && selection.type === "column"
         ? selection.columnId
         : null;
 
@@ -232,14 +258,55 @@ export function getSqlErdTableShapeSelectionUpdates(
   return updates;
 }
 
+function getNextSqlErdSelectedShapeIds(
+  editor: Pick<Editor, "getSelectedShapeIds">,
+  shapeId: TLShapeId,
+  toggle: boolean,
+  baseSelectedShapeIds?: readonly TLShapeId[]
+) {
+  if (!toggle) {
+    return [shapeId];
+  }
+
+  const selectedShapeIds = Array.from(
+    baseSelectedShapeIds ?? editor.getSelectedShapeIds()
+  );
+  return selectedShapeIds.includes(shapeId)
+    ? selectedShapeIds.filter((selectedShapeId) => selectedShapeId !== shapeId)
+    : [...selectedShapeIds, shapeId];
+}
+
+export function primeSqlErdPointerSelection(
+  editor: Pick<Editor, "getSelectedShapeIds" | "setSelectedShapes">,
+  shapeId: TLShapeId,
+  options: { toggle?: boolean } = {}
+) {
+  const selectedShapeIds = Array.from(editor.getSelectedShapeIds());
+
+  if (!options.toggle && !selectedShapeIds.includes(shapeId)) {
+    editor.setSelectedShapes([shapeId]);
+  }
+
+  return selectedShapeIds;
+}
+
 export function selectSqlErdTableShape(
   editor: Editor,
-  selectedTableShape: SqlErdTableShape
+  selectedTableShape: SqlErdTableShape,
+  toggle = false,
+  baseSelectedShapeIds?: readonly TLShapeId[]
 ) {
+  const selectedShapeIds = getNextSqlErdSelectedShapeIds(
+    editor,
+    selectedTableShape.id,
+    toggle,
+    baseSelectedShapeIds
+  );
   const updates = getSqlErdTableShapeSelectionUpdates(
     editor,
     selectedTableShape,
-    { type: "table" }
+    { type: "table" },
+    selectedShapeIds
   );
 
   editor.run(
@@ -248,7 +315,7 @@ export function selectSqlErdTableShape(
         editor.updateShapes(updates);
       }
 
-      editor.select(selectedTableShape.id);
+      editor.setSelectedShapes(selectedShapeIds);
     },
     { history: "ignore" }
   );
@@ -257,15 +324,24 @@ export function selectSqlErdTableShape(
 export function selectSqlErdTableShapeColumn(
   editor: Editor,
   selectedTableShape: SqlErdTableShape,
-  columnId: string
+  columnId: string,
+  toggle = false,
+  baseSelectedShapeIds?: readonly TLShapeId[]
 ) {
+  const selectedShapeIds = getNextSqlErdSelectedShapeIds(
+    editor,
+    selectedTableShape.id,
+    toggle,
+    baseSelectedShapeIds
+  );
   const updates = getSqlErdTableShapeSelectionUpdates(
     editor,
     selectedTableShape,
     {
       type: "column",
       columnId
-    }
+    },
+    selectedShapeIds
   );
 
   editor.run(
@@ -274,7 +350,7 @@ export function selectSqlErdTableShapeColumn(
         editor.updateShapes(updates);
       }
 
-      editor.select(selectedTableShape.id);
+      editor.setSelectedShapes(selectedShapeIds);
     },
     { history: "ignore" }
   );
@@ -376,16 +452,37 @@ export function getSqlErdColumnRowVisualStyle({
 
 function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
   const editor = useEditor();
-  const columnPointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const tableFocus = useSqlErdTableFocus();
+  const tablePointerSelectionRef = useRef<TLShapeId[] | null>(null);
+  const columnPointerStartRef = useRef<{
+    selectedShapeIds: TLShapeId[];
+    x: number;
+    y: number;
+  } | null>(null);
   const displayName = shape.props.schemaName
     ? `${shape.props.schemaName}.${shape.props.tableName}`
     : shape.props.tableName;
   const selectedState = shape.props.selectedState ?? "none";
   const highlightedColumnIds = shape.props.highlightedColumnIds ?? [];
+  const focusRole = tableFocus
+    ? getSqlErdFocusedTableRole(tableFocus, shape.props.tableId)
+    : null;
+  const isFocusDimmed = focusRole === "dimmed";
 
-  function handleTableClick() {
-    selectSqlErdTableShape(editor, shape);
-    selectSqlErdTable({ tableId: shape.props.tableId });
+  function handleTableClick(
+    toggle = false,
+    baseSelectedShapeIds?: readonly TLShapeId[]
+  ) {
+    if (isFocusDimmed) return;
+    selectSqlErdTableShape(
+      editor,
+      shape,
+      toggle,
+      baseSelectedShapeIds
+    );
+    if (!toggle) {
+      selectSqlErdTable({ tableId: shape.props.tableId });
+    }
   }
 
   function handleTableKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -398,16 +495,33 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     handleTableClick();
   }
 
-  function handleColumnClick(columnId: string) {
-    selectSqlErdTableShapeColumn(editor, shape, columnId);
-    selectSqlErdColumn({
+  function handleColumnClick(
+    columnId: string,
+    toggle = false,
+    baseSelectedShapeIds?: readonly TLShapeId[]
+  ) {
+    if (isFocusDimmed) return;
+    selectSqlErdTableShapeColumn(
+      editor,
+      shape,
       columnId,
-      tableId: shape.props.tableId
-    });
+      toggle,
+      baseSelectedShapeIds
+    );
+    if (!toggle) {
+      selectSqlErdColumn({
+        columnId,
+        tableId: shape.props.tableId
+      });
+    }
   }
 
   function handleColumnPointerDown(event: PointerEvent<HTMLDivElement>) {
+    const selectedShapeIds = primeSqlErdPointerSelection(editor, shape.id, {
+      toggle: event.shiftKey
+    });
     columnPointerStartRef.current = {
+      selectedShapeIds,
       x: event.clientX,
       y: event.clientY
     };
@@ -431,15 +545,29 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
     }
 
     event.stopPropagation();
-    handleColumnClick(columnId);
+    handleColumnClick(
+      columnId,
+      event.shiftKey,
+      pointerStart?.selectedShapeIds
+    );
   }
 
   return (
     <HTMLContainer
       className="pointer-events-auto overflow-visible"
       style={{
+        filter: isFocusDimmed ? "blur(2px) saturate(0.45)" : undefined,
         height: shape.props.h,
-        pointerEvents: "all",
+        opacity:
+          isFocusDimmed
+            ? 0.2
+            : focusRole === "related"
+              ? 0.86
+              : focusRole === "context"
+                ? 0.92
+                : 1,
+        pointerEvents: isFocusDimmed ? "none" : "all",
+        transition: "filter 160ms ease, opacity 160ms ease",
         width: shape.props.w
       }}
     >
@@ -450,7 +578,16 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
             : selectedState === "column"
               ? "border-blue-300"
               : "border-slate-200"
+        } ${
+          focusRole === "primary"
+            ? "outline outline-4 outline-blue-400 outline-offset-4"
+            : focusRole === "related"
+              ? "outline outline-2 outline-sky-300 outline-offset-2"
+              : focusRole === "context"
+                ? "outline outline-2 outline-amber-300 outline-offset-2"
+              : ""
         }`}
+        data-sqltoerd-table-focus-role={focusRole ?? undefined}
         data-sqltoerd-table-selected={
           selectedState === "table" ? "true" : undefined
         }
@@ -466,22 +603,33 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
           data-sqltoerd-table-id={shape.props.tableId}
           onClick={(event) => {
             event.stopPropagation();
-            handleTableClick();
+            handleTableClick(
+              event.shiftKey,
+              tablePointerSelectionRef.current ?? undefined
+            );
+            tablePointerSelectionRef.current = null;
           }}
           onKeyDown={handleTableKeyDown}
           role="button"
-          tabIndex={0}
+          tabIndex={isFocusDimmed ? -1 : 0}
+          onPointerDownCapture={(event) => {
+            tablePointerSelectionRef.current = primeSqlErdPointerSelection(
+              editor,
+              shape.id,
+              { toggle: event.shiftKey }
+            );
+          }}
         >
           {(["left", "right"] as const).map((side) => (
             <button
               aria-label={`테이블 설명 관계 ${side === "left" ? "시작" : "끝"}`}
               className={`absolute top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
                 side === "left" ? "left-[-10px]" : "right-[-10px]"
-              } ${
-                selectedState === "table"
-                  ? "pointer-events-auto opacity-45 hover:opacity-100"
-                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
-              }`}
+              } ${getSqlErdConnectorPortVisibilityClassName({
+                isHighlighted: false,
+                isSelected: selectedState === "table",
+                selectedOpacityClassName: "opacity-45"
+              })}`}
               data-sqltoerd-table-port={side}
               data-sqltoerd-table-port-hit
               data-sqltoerd-table-id={shape.props.tableId}
@@ -560,28 +708,27 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                     isSelected
                   }),
                   columnGap: ROW_COLUMN_GAP,
-                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(max-content, 1fr)`
+                  gridTemplateColumns: `${shape.props.badgeColumnWidth}px max-content minmax(0, 1fr)`
                 }}
-                tabIndex={0}
+                tabIndex={isFocusDimmed ? -1 : 0}
               >
                 {(["left", "right"] as const).map((side) => {
-                  const isPortActive =
-                    isSelected || isHighlighted || selectedState === "table";
+                  const isPortSelected =
+                    isSelected || selectedState === "table";
 
                   return (
                     <button
                       aria-hidden="true"
                       className={`absolute top-1/2 z-10 flex size-5 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
                         side === "left" ? "left-[-10px]" : "right-[-10px]"
-                      } ${
-                        isPortActive
-                          ? `pointer-events-auto ${
-                              isSelected || isHighlighted
-                                ? "opacity-100"
-                                : "opacity-45"
-                            }`
-                          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:pointer-events-auto group-focus-visible:opacity-100"
-                      }`}
+                      } ${getSqlErdConnectorPortVisibilityClassName({
+                        isHighlighted,
+                        isSelected: isPortSelected,
+                        selectedOpacityClassName:
+                          isSelected || isHighlighted
+                            ? "opacity-100"
+                            : "opacity-45"
+                      })}`}
                       data-sqltoerd-column-id={column.id}
                       data-sqltoerd-column-port={side}
                       data-sqltoerd-column-port-hit
@@ -631,7 +778,10 @@ function SqlErdTableCard({ shape }: { shape: SqlErdTableShape }) {
                 <span className="whitespace-nowrap text-slate-700">
                   {column.name}
                 </span>
-                <span className="justify-self-end whitespace-nowrap text-right text-slate-400">
+                <span
+                  className="min-w-0 w-full truncate justify-self-end whitespace-nowrap text-right text-slate-400"
+                  title={column.dataType}
+                >
                   {column.dataType.toLowerCase()}
                 </span>
               </div>
@@ -673,6 +823,8 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
     return false;
   }
 
+  override hideRotateHandle() { return true; }
+
   override canResize() {
     return false;
   }
@@ -696,8 +848,19 @@ export class SqlErdTableShapeUtil extends ShapeUtil<SqlErdTableShape> {
       return;
     }
 
+    const toggle = this.editor.inputs.shiftKey;
+
+    if (toggle) {
+      return;
+    }
+
     if (selection.type === "column") {
-      selectSqlErdTableShapeColumn(this.editor, shape, selection.columnId);
+      selectSqlErdTableShapeColumn(
+        this.editor,
+        shape,
+        selection.columnId,
+        false
+      );
       selectSqlErdColumn({
         columnId: selection.columnId,
         tableId: shape.props.tableId

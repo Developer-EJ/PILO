@@ -1,23 +1,26 @@
 import { Injectable } from "@nestjs/common";
 import { badRequest } from "../../../common/api-error";
-import type { SyncCanvasShapesBatchRequest } from "../canvas.types";
-import { CanvasAgentDraftService } from "./canvas-agent-draft.service";
+import { DriveService } from "../../drive/drive.service";
 import { CanvasAgentRepository } from "./canvas-agent.repository";
 import { findCanvasAgentToolTarget } from "./canvas-agent-tool-targets";
+import { CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE } from "./canvas-agent.constants";
+import { buildCanvasAgentSearchFocus } from "./canvas-agent-geometry";
 import type {
+  CanvasAgentHtmlArtifact,
+  CanvasAgentClientAction,
   CanvasAgentProgressPayload,
   CanvasAgentRunRow,
+  CanvasAgentShapeSummary,
   CanvasAgentShapeRow,
   CanvasAgentStepRow,
-  CanvasAgentViewport,
-  CanvasDraftSpec
+  CanvasAgentViewport
 } from "./canvas-agent.types";
 
 export type CanvasAgentActionResult = {
-  draftSpec?: CanvasDraftSpec;
+  artifact?: CanvasAgentHtmlArtifact | null;
+  clientAction?: CanvasAgentClientAction | null;
   progress: CanvasAgentProgressPayload | null;
   resourceRefs: string[];
-  shapeBatch?: SyncCanvasShapesBatchRequest;
   shouldContinue: boolean;
   summary: string;
 };
@@ -25,8 +28,8 @@ export type CanvasAgentActionResult = {
 @Injectable()
 export class CanvasAgentActionService {
   constructor(
-    private readonly drafts: CanvasAgentDraftService,
-    private readonly repository: CanvasAgentRepository
+    private readonly repository: CanvasAgentRepository,
+    private readonly driveService: DriveService
   ) {}
 
   async execute(
@@ -34,6 +37,8 @@ export class CanvasAgentActionService {
     step: CanvasAgentStepRow
   ): Promise<CanvasAgentActionResult> {
     switch (step.action_name) {
+      case "route_intent":
+        return this.routeIntent(run, step.input_json);
       case "find_canvas_tool":
         return this.findCanvasTool(step.input_json);
       case "find_shapes":
@@ -43,9 +48,8 @@ export class CanvasAgentActionService {
       case "focus_viewport":
         return this.focusViewport(run, step.input_json);
       case "connect_shapes":
-        return this.connectShapes(run, step);
       case "create_draft":
-        return this.createDraft(run, step.input_json, "diagram");
+        throw badRequest("Canvas Agent shape creation is disabled");
       case "finish":
         const summary = this.readText(step.input_json.summary) || "Canvas AI 작업을 완료했습니다.";
         return {
@@ -59,6 +63,151 @@ export class CanvasAgentActionService {
       default:
         throw badRequest("Canvas Agent action is invalid");
     }
+  }
+
+  private async routeIntent(
+    run: CanvasAgentRunRow,
+    input: Record<string, unknown>
+  ): Promise<CanvasAgentActionResult> {
+    const intent = this.readText(input.intent);
+    const argumentsValue = input.arguments;
+    const intentArguments = argumentsValue && typeof argumentsValue === "object" && !Array.isArray(argumentsValue)
+      ? argumentsValue as Record<string, unknown>
+      : null;
+    if (!intentArguments) throw badRequest("Canvas Agent intent arguments are required");
+
+    switch (intent) {
+      case "chat": {
+        const answer = this.readText(intentArguments.answer);
+        const contextScope = this.readText(intentArguments.contextScope);
+        const reasonCode = this.readText(intentArguments.reasonCode);
+        if (!answer || Buffer.byteLength(answer, "utf8") > 12_000) {
+          throw badRequest("Canvas Agent chat answer is invalid");
+        }
+        if (contextScope !== "none" && contextScope !== "selected_scene") {
+          throw badRequest("Canvas Agent chat contextScope is invalid");
+        }
+        if (!["general_question", "selection_question", "follow_up_question"].includes(reasonCode)) {
+          throw badRequest("Canvas Agent chat reasonCode is invalid");
+        }
+        return {
+          artifact: null,
+          summary: answer,
+          resourceRefs: [],
+          shouldContinue: false,
+          progress: this.progress(answer, [], null)
+        };
+      }
+      case "find_shapes": {
+        const query = this.readText(intentArguments.query);
+        if (!query) throw badRequest("Canvas Agent find_shapes intent query is required");
+        return this.findShapes(run, { ...intentArguments, query });
+      }
+      case "generate_html": {
+        const selectionError = this.readText(intentArguments.selectionError);
+        if (intentArguments.missingSelection === true || selectionError) {
+          const summary = selectionError || "HTML로 만들 캔버스 영역을 먼저 선택해주세요.";
+          return {
+            artifact: null,
+            summary,
+            resourceRefs: [],
+            shouldContinue: false,
+            progress: this.progress(summary, [], null)
+          };
+        }
+        const artifact = this.readHtmlArtifact(intentArguments.artifact);
+        const selectedSceneIds = this.readSelectedSceneIds(run.context_json.selectedScene);
+        if (!selectedSceneIds.length
+          || artifact.sourceShapeIds.some((shapeId) => !selectedSceneIds.includes(shapeId))) {
+          throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+        }
+        const summary = "선택한 영역의 정적 HTML/CSS 초안을 만들었습니다.";
+        return {
+          artifact,
+          summary,
+          resourceRefs: artifact.sourceShapeIds,
+          shouldContinue: false,
+          progress: this.progress(summary, [], null)
+        };
+      }
+      case "import_drive_file": {
+        const query = this.readText(intentArguments.query).slice(0, 120);
+        if (!query) throw badRequest("Canvas Agent import_drive_file intent query is required");
+        return this.importDriveFile(run, query);
+      }
+      case "unsupported": {
+        const summary = "현재 Canvas AI는 기존 도형 찾기, Drive 이미지 가져오기, 선택 영역의 정적 HTML/CSS 생성을 지원합니다.";
+        return {
+          artifact: null,
+          summary,
+          resourceRefs: [],
+          shouldContinue: false,
+          progress: this.progress(summary, [], null)
+        };
+      }
+      default:
+        throw badRequest("Canvas Agent intent is not supported");
+    }
+  }
+
+  private async importDriveFile(
+    run: CanvasAgentRunRow,
+    query: string
+  ): Promise<CanvasAgentActionResult> {
+    const matches = await this.driveService.searchReadyImagesForCanvas(
+      run.requested_by_user_id,
+      run.workspace_id,
+      query,
+      5
+    );
+    if (!matches.length) {
+      const summary = `공유 드라이브에서 “${query}” 관련 이미지를 찾지 못했습니다.`;
+      return {
+        clientAction: null,
+        summary,
+        resourceRefs: [],
+        shouldContinue: false,
+        progress: this.progress(summary, [], null)
+      };
+    }
+
+    const [bestMatch, nextMatch] = matches;
+    const confident = Boolean(
+      bestMatch
+      && (
+        matches.length === 1
+        || bestMatch.score >= 500
+        || !nextMatch
+        || bestMatch.score - nextMatch.score >= 100
+      )
+    );
+    if (!bestMatch || !confident) {
+      const candidates = matches.slice(0, 3).map((match) => match.fileName).join(", ");
+      const summary = `공유 드라이브에서 비슷한 이미지가 여러 개 발견됐습니다: ${candidates}. 파일명을 더 구체적으로 알려주세요.`;
+      return {
+        clientAction: null,
+        summary,
+        resourceRefs: matches.map((match) => match.fileId),
+        shouldContinue: false,
+        progress: this.progress(summary, [], null)
+      };
+    }
+
+    const summary = `공유 드라이브의 “${bestMatch.fileName}” 이미지를 Canvas에 추가합니다.`;
+    return {
+      clientAction: {
+        type: "insert_drive_file",
+        file: {
+          fileId: bestMatch.fileId,
+          fileName: bestMatch.fileName,
+          mimeType: bestMatch.mimeType
+        }
+      },
+      summary,
+      resourceRefs: [bestMatch.fileId],
+      shouldContinue: false,
+      progress: this.progress(summary, [], null)
+    };
   }
 
   private findCanvasTool(input: Record<string, unknown>): CanvasAgentActionResult {
@@ -82,11 +231,9 @@ export class CanvasAgentActionService {
     if (!query) throw badRequest("Canvas Agent find_shapes query is required");
 
     const explicitIds = this.readStringArray(input.shapeIds);
-    const shapes = explicitIds.length
-      ? await this.repository.findShapesByIds(run.canvas_id, explicitIds)
-      : await this.repository.searchShapes(run.canvas_id, query);
+    const shapes = await this.resolveShapes(run, explicitIds, input);
     const shapeIds = shapes.map((shape) => shape.id);
-    const viewport = this.viewportForShapes(shapes);
+    const focus = await this.searchFocus(run, shapes, input);
     const routingPrefix = this.routingPrefix(input);
     const summary = shapes.length
       ? `${routingPrefix}“${query}” 관련 도형 ${shapes.length}개를 찾았습니다.`
@@ -96,7 +243,14 @@ export class CanvasAgentActionService {
       summary,
       resourceRefs: shapeIds,
       shouldContinue: input.continuePlanning === true && shapes.length === 0,
-      progress: this.progress(summary, shapeIds, viewport)
+      progress: this.progress(
+        shapes.length ? "검색 결과를 불러오고 있습니다." : summary,
+        focus.highlightedShapeIds,
+        focus.targetViewport,
+        null,
+        null,
+        focus.loadRootShapeIds
+      )
     };
   }
 
@@ -106,6 +260,7 @@ export class CanvasAgentActionService {
   ): Promise<CanvasAgentActionResult> {
     const shapes = await this.selectedShapes(run, input);
     const shapeIds = shapes.map((shape) => shape.id);
+    const focus = await this.searchFocus(run, shapes, input);
     const summary = shapeIds.length
       ? `${shapeIds.length}개 도형을 선택했습니다.`
       : "선택할 도형을 찾지 못했습니다.";
@@ -113,7 +268,14 @@ export class CanvasAgentActionService {
       summary,
       resourceRefs: shapeIds,
       shouldContinue: false,
-      progress: this.progress(summary, shapeIds, this.viewportForShapes(shapes))
+      progress: this.progress(
+        summary,
+        focus.highlightedShapeIds,
+        focus.targetViewport,
+        null,
+        null,
+        focus.loadRootShapeIds
+      )
     };
   }
 
@@ -122,93 +284,23 @@ export class CanvasAgentActionService {
     input: Record<string, unknown>
   ): Promise<CanvasAgentActionResult> {
     const shapes = await this.selectedShapes(run, input);
-    const viewport = this.viewportForShapes(shapes);
+    const focus = await this.searchFocus(run, shapes, input);
     const shapeIds = shapes.map((shape) => shape.id);
-    const summary = viewport
+    const summary = focus.targetViewport
       ? "요청한 도형 위치로 화면을 이동했습니다."
       : "이동할 도형을 찾지 못했습니다.";
     return {
       summary,
       resourceRefs: shapeIds,
       shouldContinue: false,
-      progress: this.progress(summary, shapeIds, viewport)
-    };
-  }
-
-  private async createDraft(
-    run: CanvasAgentRunRow,
-    input: Record<string, unknown>,
-    defaultKind: "diagram" | "code"
-  ): Promise<CanvasAgentActionResult> {
-    const requestedIds = this.readStringArray(input.sourceShapeIds);
-    const contextShapeIds = this.readStringArray(run.context_json.selectedShapeIds);
-    const sourceShapes = await this.repository.findShapesByIds(
-      run.canvas_id,
-      requestedIds.length ? requestedIds : contextShapeIds
-    );
-    const kind = input.kind === "code" ? "code" : defaultKind;
-    const viewport = this.readViewport(run.context_json.viewport);
-    const spec = this.drafts.createDraftSpec({
-      kind,
-      prompt: run.prompt,
-      sourceShapes,
-      viewport,
-      connections: input.connections,
-      nodes: input.nodes,
-      recommendedColors: input.recommendedColors,
-      summary: this.readText(input.summary) || undefined,
-      style: this.readText(input.style) || undefined,
-      title: this.readText(input.title) || undefined,
-      code: this.readText(input.code) || undefined
-    });
-    const summary = `${this.routingPrefix(input)}${spec.summary}을 만들었습니다. 적용하거나 폐기할 수 있습니다.`;
-
-    return {
-      draftSpec: spec,
-      summary,
-      resourceRefs: spec.sourceShapeIds,
-      shouldContinue: false,
-      progress: this.progress(summary, spec.sourceShapeIds, this.viewportForSpec(spec))
-    };
-  }
-
-  private async connectShapes(
-    run: CanvasAgentRunRow,
-    step: CanvasAgentStepRow
-  ): Promise<CanvasAgentActionResult> {
-    const selectedIds = this.readStringArray(run.context_json.selectedShapeIds);
-    const fromShapeId = this.readText(step.input_json.fromShapeId) || selectedIds[0] || "";
-    const toShapeId = this.readText(step.input_json.toShapeId) || selectedIds[1] || "";
-    if (!fromShapeId || !toShapeId || fromShapeId === toShapeId) {
-      throw badRequest("Canvas Agent connect_shapes requires two different shape ids");
-    }
-
-    const shapes = await this.repository.findShapesByIds(run.canvas_id, [fromShapeId, toShapeId]);
-    if (shapes.length !== 2) throw badRequest("Canvas Agent connect_shapes target shapes were not found");
-    const connectionKind = step.input_json.connectionKind === "line" ? "line" : "arrow";
-    const label = this.readText(step.input_json.label) || null;
-    const routingPrefix = this.routingPrefix(step.input_json);
-    const summary = connectionKind === "line"
-      ? `${routingPrefix}요청한 두 도형을 선으로 연결했습니다.`
-      : `${routingPrefix}요청한 두 도형을 화살표로 연결했습니다.`;
-    const shapeBatch = this.drafts.createConnectionBatch({
-      clientOperationId: `canvas-agent:${step.id}:connect`,
-      connectionKind,
-      from: shapes[0],
-      label,
-      to: shapes[1]
-    });
-    const connectionShapeIds = (shapeBatch.operations as Array<{ shapeId?: unknown }>)
-      .map((operation) => operation.shapeId)
-      .filter((shapeId): shapeId is string => typeof shapeId === "string");
-    const highlightedShapeIds = [fromShapeId, toShapeId, ...connectionShapeIds];
-
-    return {
-      progress: this.progress(summary, highlightedShapeIds, this.viewportForShapes(shapes)),
-      resourceRefs: highlightedShapeIds,
-      shapeBatch,
-      shouldContinue: false,
-      summary
+      progress: this.progress(
+        summary,
+        focus.highlightedShapeIds,
+        focus.targetViewport,
+        null,
+        null,
+        focus.loadRootShapeIds
+      )
     };
   }
 
@@ -219,10 +311,68 @@ export class CanvasAgentActionService {
     const explicitIds = this.readStringArray(input.shapeIds);
     const contextIds = this.readStringArray(run.context_json.selectedShapeIds);
     const ids = explicitIds.length ? explicitIds : contextIds;
-    if (ids.length) return this.repository.findShapesByIds(run.canvas_id, ids);
+    return ids.length ? this.resolveShapes(run, ids, input) : [];
+  }
 
-    const query = this.readText(input.query);
-    return query ? this.repository.searchShapes(run.canvas_id, query) : [];
+  private async resolveShapes(
+    run: CanvasAgentRunRow,
+    ids: string[],
+    input: Record<string, unknown>
+  ): Promise<CanvasAgentShapeRow[]> {
+    if (!ids.length) return [];
+    if (input.routingSource !== "client_shape_context") {
+      return this.repository.findShapesByIds(run.canvas_id, ids);
+    }
+
+    const summaries = this.readShapeSummaries(run.context_json.shapeSummaries);
+    const summariesById = new Map(summaries.map((summary) => [summary.id, summary]));
+    return ids.flatMap((id) => {
+      const summary = summariesById.get(id);
+      return summary ? [this.shapeRowFromSummary(summary)] : [];
+    });
+  }
+
+  private readShapeSummaries(value: unknown): CanvasAgentShapeSummary[] {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const summary = item as Record<string, unknown>;
+      const id = this.readText(summary.id);
+      const shapeType = this.readText(summary.shapeType);
+      const x = Number(summary.x);
+      const y = Number(summary.y);
+      const width = Number(summary.width);
+      const height = Number(summary.height);
+      if (!id || !shapeType || ![x, y, width, height].every(Number.isFinite)) return [];
+      if (width <= 0 || height <= 0) return [];
+      return [{
+        id,
+        shapeType,
+        title: this.readNullableText(summary.title),
+        text: this.readNullableText(summary.text),
+        x,
+        y,
+        width,
+        height
+      }];
+    });
+  }
+
+  private shapeRowFromSummary(summary: CanvasAgentShapeSummary): CanvasAgentShapeRow {
+    return {
+      id: summary.id,
+      title: summary.title,
+      text_content: summary.text,
+      shape_type: summary.shapeType,
+      x: summary.x,
+      y: summary.y,
+      width: summary.width,
+      height: summary.height,
+      parent_shape_id: null,
+      rotation: 0,
+      revision: 0,
+      raw_shape: {}
+    };
   }
 
   private progress(
@@ -230,27 +380,29 @@ export class CanvasAgentActionService {
     highlightedShapeIds: string[],
     targetViewport: CanvasAgentViewport | null,
     toolTarget: string | null = null,
-    toolTargetLabel: string | null = null
+    toolTargetLabel: string | null = null,
+    loadRootShapeIds: string[] = []
   ): CanvasAgentProgressPayload {
-    return { message, highlightedShapeIds, targetViewport, toolTarget, toolTargetLabel };
+    return {
+      message,
+      highlightedShapeIds,
+      loadRootShapeIds,
+      targetViewport,
+      toolTarget,
+      toolTargetLabel
+    };
   }
 
-  private viewportForShapes(shapes: CanvasAgentShapeRow[]): CanvasAgentViewport | null {
-    if (!shapes.length) return null;
-    const left = Math.min(...shapes.map((shape) => Number(shape.x)));
-    const top = Math.min(...shapes.map((shape) => Number(shape.y)));
-    const right = Math.max(...shapes.map((shape) => Number(shape.x) + Number(shape.width ?? 180)));
-    const bottom = Math.max(...shapes.map((shape) => Number(shape.y) + Number(shape.height ?? 100)));
-    return { x: left - 80, y: top - 80, width: Math.max(320, right - left + 160), height: Math.max(240, bottom - top + 160) };
-  }
-
-  private viewportForSpec(spec: CanvasDraftSpec): CanvasAgentViewport | null {
-    if (!spec.nodes.length) return null;
-    const left = Math.min(...spec.nodes.map((node) => node.x));
-    const top = Math.min(...spec.nodes.map((node) => node.y));
-    const right = Math.max(...spec.nodes.map((node) => node.x + node.width));
-    const bottom = Math.max(...spec.nodes.map((node) => node.y + node.height));
-    return { x: left - 80, y: top - 80, width: right - left + 160, height: bottom - top + 160 };
+  private async searchFocus(
+    run: CanvasAgentRunRow,
+    shapes: CanvasAgentShapeRow[],
+    input: Record<string, unknown>
+  ) {
+    const shapeIds = shapes.map((shape) => shape.id);
+    const ancestors = shapeIds.length && input.routingSource !== "client_shape_context"
+      ? await this.repository.findShapeAncestors(run.canvas_id, shapeIds)
+      : [];
+    return buildCanvasAgentSearchFocus(shapes, ancestors);
   }
 
   private queryFromPrompt(prompt: string): string {
@@ -259,8 +411,10 @@ export class CanvasAgentActionService {
   }
 
   private routingPrefix(input: Record<string, unknown>): string {
+    if (input.routingSource === "client_shape_context") return "현재 캔버스에서 ";
     if (input.routingSource === "shape_embedding") return "임베딩 검색으로 ";
-    if (input.routingSource === "llm_planner") return "Canvas Planner가 판단해서 ";
+    if (input.routingSource === "database_text") return "DB 검색으로 ";
+    if (input.routingSource === "llm_intent_classifier") return "Canvas AI가 검색어를 해석해서 ";
     return "";
   }
 
@@ -268,16 +422,50 @@ export class CanvasAgentActionService {
     return typeof value === "string" ? value.trim().slice(0, 12000) : "";
   }
 
-  private readStringArray(value: unknown): string[] {
-    if (!Array.isArray(value)) return [];
-    return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))).slice(0, 40);
+  private readNullableText(value: unknown): string | null {
+    const text = this.readText(value);
+    return text || null;
   }
 
-  private readViewport(value: unknown): CanvasAgentViewport | null {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const candidate = value as Record<string, unknown>;
-    if ([candidate.x, candidate.y, candidate.width, candidate.height].some((item) => typeof item !== "number" || !Number.isFinite(item))) return null;
-    if ((candidate.width as number) <= 0 || (candidate.height as number) <= 0) return null;
-    return { x: candidate.x as number, y: candidate.y as number, width: candidate.width as number, height: candidate.height as number };
+  private readStringArray(value: unknown, maxItems = 40): string[] {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()))).slice(0, maxItems);
   }
+
+  private readHtmlArtifact(value: unknown): CanvasAgentHtmlArtifact {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    const artifact = value as Record<string, unknown>;
+    const title = this.readText(artifact.title).slice(0, 200);
+    const html = typeof artifact.html === "string" ? artifact.html.trim() : "";
+    const sourceShapeIds = this.readStringArray(artifact.sourceShapeIds, 160);
+    if (artifact.kind !== "html" || !title || !html || !sourceShapeIds.length) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    if (Buffer.byteLength(html, "utf8") > 250_000) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    if (/<\s*(script|iframe|object|embed|base)\b/i.test(html)
+      || /\son[a-z]+\s*=/i.test(html)
+      || /javascript\s*:/i.test(html)
+      || /<meta\b[^>]*http-equiv/i.test(html)
+      || /<\s*link\b|@import\b|url\(\s*['"]?\s*(?:https?:|\/\/)/i.test(html)
+      || /\s(?:src|href|action|formaction)\s*=\s*['"]?\s*(?:https?:|\/\/)/i.test(html)) {
+      throw badRequest(CANVAS_AGENT_CODE_GENERATION_FAILURE_MESSAGE);
+    }
+    return { kind: "html", title, html, sourceShapeIds };
+  }
+
+  private readSelectedSceneIds(value: unknown): string[] {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const shapes = (value as Record<string, unknown>).shapes;
+    if (!Array.isArray(shapes)) return [];
+    return shapes.flatMap((shape) => {
+      if (!shape || typeof shape !== "object" || Array.isArray(shape)) return [];
+      const id = (shape as Record<string, unknown>).id;
+      return typeof id === "string" && id.trim() ? [id.trim()] : [];
+    }).slice(0, 160);
+  }
+
 }

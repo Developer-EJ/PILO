@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./workspace/deletion-lifecycle.test.mjs";
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -36,6 +37,11 @@ const calendarController = await readSource(
 );
 const calendarModule = await readSource("../src/modules/calendar/calendar.module.ts");
 const calendarService = await readSource("../src/modules/calendar/calendar.service.ts");
+const googleCalendarController = await readSource("../src/modules/calendar/google-calendar.controller.ts");
+const googleCalendarSyncService = await readSource("../src/modules/calendar/google-calendar-sync.service.ts");
+const googleCalendarClient = await readSource("../src/modules/calendar/google-calendar.client.ts");
+const googleCalendarMigration = await readSource("../../../db/migrations/092_fix_google_calendar_sync_delivery.sql");
+const appServerSecretsTerraform = await readSource("../../../infra/modules/secrets/main.tf");
 const userController = await readSource("../src/modules/user/user.controller.ts");
 const userService = await readSource("../src/modules/user/user.service.ts");
 const settingsController = await readSource(
@@ -52,19 +58,66 @@ const canvasModule = await readSource("../src/modules/canvas/canvas.module.ts");
 const canvasController = await readSource(
   "../src/modules/canvas/canvas.controller.ts"
 );
-const canvasService = await readSource("../src/modules/canvas/canvas.service.ts");
-const canvasTypes = await readSource("../src/modules/canvas/canvas.types.ts");
+const canvasServiceFacade = await readSource(
+  "../src/modules/canvas/canvas.service.ts"
+);
+const canvasBoardService = await readSource(
+  "../src/modules/canvas/board/canvas-board.service.ts"
+);
+const canvasAccessService = await readSource(
+  "../src/modules/canvas/policies/canvas-access.service.ts"
+);
+const canvasOperationQueryService = await readSource(
+  "../src/modules/canvas/operation/canvas-operation-query.service.ts"
+);
+const canvasShapeCommandService = await readSource(
+  "../src/modules/canvas/shape/canvas-shape-command.service.ts"
+);
+const canvasShapeQueryService = await readSource(
+  "../src/modules/canvas/shape/canvas-shape-query.service.ts"
+);
+const canvasShapeCleanupService = await readSource(
+  "../src/modules/canvas/infrastructure/canvas-shape-cleanup.service.ts"
+);
+const canvasUserStateService = await readSource(
+  "../src/modules/canvas/user-state/canvas-user-state.service.ts"
+);
+const canvasService = [
+  canvasServiceFacade,
+  canvasAccessService,
+  canvasBoardService,
+  canvasOperationQueryService,
+  canvasShapeCleanupService,
+  canvasShapeCommandService,
+  canvasShapeQueryService,
+  canvasUserStateService
+].join("\n");
+const canvasTypes = await readSource(
+  "../src/modules/canvas/contracts/canvas.types.ts"
+);
 const canvasShapeValidation = await readSource(
-  "../src/modules/canvas/canvas-shape.validation.ts"
+  "../src/modules/canvas/shape/canvas-shape.validation.ts"
 );
 const canvasShapeMapper = await readSource(
-  "../src/modules/canvas/canvas-shape.mapper.ts"
+  "../src/modules/canvas/shape/canvas-shape.mapper.ts"
 );
 const canvasShapeHash = await readSource(
-  "../src/modules/canvas/canvas-shape-hash.ts"
+  "../src/modules/canvas/shape/canvas-shape-hash.ts"
 );
 const canvasOperationPublisher = await readSource(
-  "../src/modules/canvas/canvas-operation-publisher.service.ts"
+  "../src/modules/canvas/operation/canvas-operation-publisher.service.ts"
+);
+const canvasAgentRepository = await readSource(
+  "../src/modules/canvas/agent/canvas-agent.repository.ts"
+);
+const canvasAgentActionService = await readSource(
+  "../src/modules/canvas/agent/canvas-agent-action.service.ts"
+);
+const canvasAgentDraftService = await readSource(
+  "../src/modules/canvas/agent/canvas-agent-draft.service.ts"
+);
+const canvasAgentConstants = await readSource(
+  "../src/modules/canvas/agent/canvas-agent.constants.ts"
 );
 const meetingController = await readSource(
   "../src/modules/meeting/meeting.controller.ts"
@@ -122,6 +175,9 @@ const canvasShapeOperationMigration = await readSource(
 const canvasShapeParentMigration = await readSource(
   "../../../db/migrations/016_canvas_shape_parent_relation.sql"
 );
+const canvasSyncStorageRemovalMigration = await readSource(
+  "../../../db/migrations/105_remove_unused_canvas_sync_storage.sql"
+);
 const devTerraformMain = await readSource("../../../infra/envs/dev/main.tf");
 const terraformSecretsModule = await readSource(
   "../../../infra/modules/secrets/main.tf"
@@ -171,7 +227,10 @@ assert.match(main, /enableCors/);
 assert.match(main, /credentials: true/);
 assert.match(main, /FRONTEND_URL/);
 assert.match(main, /methods: \["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"\]/);
-assert.match(main, /allowedHeaders: \["Authorization", "Content-Type", "Accept"\]/);
+assert.match(
+  main,
+  /allowedHeaders: \["Authorization", "Content-Type", "Accept", "Idempotency-Key"\]/
+);
 assert.match(controller, /@Get\("health"\)/);
 assert.match(service, /pilo-app-server/);
 assert.match(service, /status: "ok"/);
@@ -202,7 +261,10 @@ assert.match(meetingService, /ensureWorkspaceRecordingConsent/);
 assert.match(meetingService, /assertAllActiveParticipantsHaveRecordingConsent/);
 assert.match(meetingService, /workspace_recording_consents/);
 assert.match(meetingService, /workspace_members\.role = 'owner'/);
-assert.match(meetingService, /meeting_participants\.user_id = \$3::uuid/);
+assert.match(meetingService, /async getReport\(/);
+assert.match(meetingService, /await this\.assertWorkspaceAccess\(currentUserId, workspaceId\);/);
+assert.match(meetingService, /WHERE meetings\.workspace_id = \$1\s+AND meeting_reports\.id = \$3/);
+assert.doesNotMatch(meetingService, /meeting_participants\.user_id = \$3::uuid/);
 assert.match(meetingService, /assertWorkspaceOwnerAccess/);
 assert.match(meetingRoomsMigration, /CREATE TABLE public\.meeting_rooms/);
 assert.match(meetingRoomsMigration, /unique_active_meeting_room_key/);
@@ -247,6 +309,25 @@ assert.match(calendarService, /assertWorkspaceAccess/);
 assert.match(calendarService, /calendar_events/);
 assert.match(calendarService, /createdByUser/);
 assert.match(calendarService, /addOneHour/);
+assert.match(calendarService, /enqueueUpdatedEventInTransaction/);
+assert.match(calendarService, /enqueueDeletedEventInTransaction/);
+assert.match(googleCalendarController, /calendar\/google/);
+assert.match(googleCalendarController, /google-sync/);
+assert.match(googleCalendarSyncService, /calendar_google_sync_outbox/);
+assert.match(googleCalendarSyncService, /access_type/);
+assert.match(googleCalendarSyncService, /refresh/);
+assert.match(googleCalendarSyncService, /CLAIM_TIMEOUT_SECONDS/);
+assert.match(googleCalendarSyncService, /pg_advisory_xact_lock/);
+assert.match(googleCalendarSyncService, /withAdvisoryLock/);
+assert.match(googleCalendarSyncService, /pilo\$\{event\.id\}/);
+assert.match(googleCalendarClient, /calendar\/v3\/calendars/);
+assert.match(googleCalendarClient, /response\.status === 404 \|\| response\.status === 410/);
+assert.match(googleCalendarSyncService, /google_calendar_id/);
+assert.match(googleCalendarSyncService, /retryEventSync/);
+assert.match(googleCalendarSyncService, /requeueFailedSyncInTransaction/);
+assert.match(googleCalendarMigration, /google_calendar_id/);
+assert.match(googleCalendarMigration, /google_calendar_connections/);
+assert.match(appServerSecretsTerraform, /GOOGLE_CALENDAR_TOKEN_ENCRYPTION_KEY/);
 assert.match(calendarService, /const endTime = shouldNormalizeEndTime\s*\?\s*null/);
 assert.match(userController, /@Controller\("me"\)/);
 assert.match(userController, /@UseGuards\(AuthGuard\)/);
@@ -333,7 +414,8 @@ assert.match(workspaceController, /@Patch\(":workspaceId"\)/);
 assert.match(workspaceController, /@Delete\(":workspaceId"\)/);
 assert.match(workspaceService, /us\.job_title AS user_job_title/);
 assert.match(workspaceService, /us\.bio AS user_bio/);
-assert.match(workspaceService, /DELETE FROM workspaces WHERE id = \$1/);
+assert.match(workspaceService, /INSERT INTO workspace_deletion_jobs/);
+assert.match(workspaceService, /deletion_status = 'deleting'/);
 assert.match(workspaceService, /other_member_exists/);
 assert.match(workspaceService, /user_id <> \$2/);
 assert.match(userSettingsMigration, /CREATE TABLE public\.user_settings/);
@@ -354,9 +436,13 @@ assert.match(workspaceMembershipMigration, /UNIQUE \(workspace_id, user_id\)/);
 assert.match(workspaceMembershipMigration, /unique_pending_workspace_invitation_email/);
 assert.match(workspaceMembershipMigration, /ENABLE ROW LEVEL SECURITY/);
 assert.match(workspaceMembershipMigration, /ON CONFLICT \(workspace_id, user_id\) DO NOTHING/);
-assert.match(canvasModule, /controllers: \[CanvasController\]/);
+assert.match(canvasModule, /controllers: \[CanvasController, CanvasRecordingActivityController\]/);
+assert.match(canvasModule, /CanvasRecordingActivityService/);
 assert.match(canvasModule, /CanvasOperationPublisherService/);
-assert.match(canvasModule, /providers: \[CanvasOperationPublisherService, CanvasService\]/);
+assert.match(canvasModule, /CanvasShapeCommandService/);
+assert.match(canvasModule, /CanvasShapeQueryService/);
+assert.doesNotMatch(canvasModule, /CanvasSyncDocumentService/);
+assert.match(canvasModule, /CanvasUserStateService/);
 assert.match(canvasController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(canvasController, /@Get\("canvases"\)/);
 assert.match(canvasController, /@Post\("canvases"\)/);
@@ -378,7 +464,10 @@ assert.match(canvasService, /CANVAS_SHAPE_CLEANUP_INTERVAL_MS = 10 \* 60 \* 1000
 assert.match(canvasService, /canvasShapeCleanupInterval/);
 assert.match(canvasService, /cleanupDeletedFreeformShapes/);
 assert.match(canvasService, /FROM canvas c/);
-assert.match(canvasService, /INSERT INTO canvas \(workspace_id, title, board_type, created_by\)/);
+assert.match(canvasService, /INSERT INTO canvas \(\s*workspace_id,\s*title,\s*board_type,\s*created_by\s*\)/);
+assert.doesNotMatch(canvasService, /canvas_sync_documents/);
+assert.doesNotMatch(canvasController, /engine-conversions/);
+assert.doesNotMatch(canvasController, /sync-document/);
 assert.match(canvasService, /UPDATE canvas/);
 assert.match(canvasService, /viewport_x =/);
 assert.match(canvasService, /INSERT INTO canvas_freeform_shapes/);
@@ -386,6 +475,10 @@ assert.match(canvasService, /UPDATE canvas_freeform_shapes s/);
 assert.match(canvasService, /parent_shape_id/);
 assert.match(canvasService, /child_counts\.child_shape_count/);
 assert.match(canvasService, /s\.parent_shape_id IS NULL/);
+assert.match(
+  canvasService,
+  /COALESCE\(s\.raw_shape ->> 'parentId', ''\) NOT LIKE 'shape:%'/,
+);
 assert.match(canvasService, /s\.parent_shape_id = \$2/);
 assert.match(canvasService, /parent_shape_id = \$3/);
 assert.match(canvasService, /content_hash/);
@@ -459,6 +552,22 @@ assert.match(canvasShapeHashMigration, /idx_canvas_freeform_shapes_order_active/
 assert.match(canvasOperationPublisher, /CANVAS_OPERATION_REDIS_CHANNEL = "canvas:operations"/);
 assert.match(canvasOperationPublisher, /REDIS_URL/);
 assert.match(canvasOperationPublisher, /publishOperation/);
+assert.match(canvasAgentRepository, /async discardDraft/);
+assert.match(canvasAgentRepository, /WITH RECURSIVE shape_ancestors/);
+assert.match(canvasAgentRepository, /parent\.id = target\.parent_shape_id/);
+assert.match(canvasAgentRepository, /ancestors\.depth < 12/);
+assert.match(canvasAgentRepository, /DELETE FROM canvas_agent_drafts/);
+assert.doesNotMatch(canvasAgentRepository, /SET status = 'discarded'/);
+assert.match(canvasAgentConstants, /코드 생성 중 오류가 났어요\. 다시 시도해 주세요\./);
+assert.match(canvasAgentConstants, /Canvas AI 작업을 완료하지 못했습니다\./);
+assert.doesNotMatch(canvasAgentRepository, /디자인 초안을 만드는 중 오류/);
+assert.doesNotMatch(canvasAgentRepository, /prompt ~\*/);
+assert.match(canvasAgentActionService, /Canvas Agent shape creation is disabled/);
+assert.doesNotMatch(canvasAgentActionService, /shouldCreateCodeDraft/);
+assert.doesNotMatch(canvasAgentActionService, /createConnectionBatch/);
+assert.match(canvasAgentDraftService, /canvasAgentDraftToShapeBatch/);
+assert.doesNotMatch(canvasAgentDraftService, /createDraftSpec/);
+assert.doesNotMatch(canvasAgentDraftService, /createConnectionBatch/);
 assert.match(canvasShapeOperationMigration, /ALTER TABLE public\.canvas/);
 assert.match(canvasShapeOperationMigration, /latest_op_seq/);
 assert.match(canvasShapeOperationMigration, /CREATE TABLE public\.canvas_shape_operations/);
@@ -467,6 +576,45 @@ assert.match(canvasShapeOperationMigration, /UNIQUE \(canvas_id, actor_user_id, 
 assert.match(canvasShapeParentMigration, /ADD COLUMN parent_shape_id TEXT/);
 assert.match(canvasShapeParentMigration, /idx_canvas_freeform_shapes_parent_active/);
 assert.match(canvasShapeParentMigration, /canvas_id, parent_shape_id/);
+assert.match(canvasSyncStorageRemovalMigration, /engine_type = 'tldraw_sync'/);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /LOCK TABLE public\.canvas, public\.canvas_sync_documents/
+);
+assert.match(canvasSyncStorageRemovalMigration, /FROM public\.canvas_sync_documents/);
+assert.match(canvasSyncStorageRemovalMigration, /source_canvas_id IS NOT NULL/);
+assert.match(canvasSyncStorageRemovalMigration, /engine_version <> 1/);
+assert.match(canvasSyncStorageRemovalMigration, /DROP TABLE public\.canvas_sync_documents/);
+assert.match(canvasSyncStorageRemovalMigration, /DROP INDEX public\.idx_canvas_source_canvas_id/);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_source_canvas_id_fkey/
+);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_source_canvas_not_self_check/
+);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_engine_version_positive_check/
+);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /DROP CONSTRAINT canvas_engine_type_check/
+);
+assert.match(canvasSyncStorageRemovalMigration, /DROP COLUMN source_canvas_id/);
+assert.match(canvasSyncStorageRemovalMigration, /DROP COLUMN engine_version/);
+assert.match(canvasSyncStorageRemovalMigration, /CHECK \(engine_type = 'classic'\)/);
+assert.match(
+  canvasSyncStorageRemovalMigration,
+  /COMMENT ON COLUMN public\.canvas\.engine_type/
+);
+assert.doesNotMatch(canvasSyncStorageRemovalMigration, /DROP COLUMN engine_type/);
+assert.doesNotMatch(
+  canvasSyncStorageRemovalMigration,
+  /^\s*(?:BEGIN|COMMIT|ROLLBACK)\s*;/gim
+);
+assert.doesNotMatch(canvasSyncStorageRemovalMigration, /^\s*\\/m);
 assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);
@@ -548,11 +696,48 @@ await import("./meeting/livekit-egress.test.mjs");
 await import("./auth/test.mjs");
 await import("./meeting/livekit-token.test.mjs");
 await import("./meeting/livekit-webhook.test.mjs");
+await import("./meeting/membership-revocation.test.mjs");
 await import("./meeting/meeting-report-job.test.mjs");
 await import("./calendar/test.mjs");
+await import("./common/activity-log.test.mjs");
+await import("./drive/document-schema.test.mjs");
+await import("./drive/document-lifecycle.test.mjs");
+await import("./drive/document-editor.test.mjs");
+await import("./drive/document-lifecycle-mutations.test.mjs");
+await import("./canvas/activity-log.test.mjs");
 await import("./canvas/review-canvas-access.test.mjs");
 await import("./meeting/test.mjs");
+if (process.env.DATABASE_URL) {
+  await import("./meeting/participant-session-postgres.test.mjs");
+  await import("./agent/thread-postgres.test.mjs");
+  await import("./agent/message-lifecycle-postgres.test.mjs");
+}
 await import("./github-integration/test.mjs");
+await import("./github-integration/source-webhook-reconcile.test.mjs");
 await import("./pr-review/test.mjs");
 await import("./board/test.mjs");
 await import("./sqltoerd/test.mjs");
+await import("./sqltoerd/operation-delivery.test.mjs");
+await import("./sqltoerd/source-snapshot.test.mjs");
+await import("./sqltoerd/operation-publisher.test.mjs");
+await import("./sqltoerd/operations-v1-cutover-manifest.test.mjs");
+await import("./chat/schema.test.mjs");
+await import("./chat/idempotency.test.mjs");
+await import("./chat/service.test.mjs");
+await import("./chat/contract.test.mjs");
+await import("./chat/publisher.test.mjs");
+await import("./workspace/membership-revocation.test.mjs");
+await import("./workspace/membership-revocation-publisher.test.mjs");
+await import("./workspace/membership-revocation-outbox.test.mjs");
+await import("./user/account-deletion-revocation.test.mjs");
+if (process.env.CHAT_POSTGRES_TEST_URL) {
+  await import("./chat/postgres.test.mjs");
+}
+await import("./sqltoerd/schema-generator.test.mjs");
+if (process.env.DATABASE_URL) {
+  await import("./sqltoerd/schema-generator-postgres.test.mjs");
+}
+if (process.env.MYSQL_TEST_URL) {
+  await import("./sqltoerd/schema-generator-mysql.test.mjs");
+}
+await import("./sqltoerd/schema-mutation.test.mjs");

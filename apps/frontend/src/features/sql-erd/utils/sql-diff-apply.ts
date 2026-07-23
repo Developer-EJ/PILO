@@ -1,16 +1,21 @@
+import { diffLines } from "diff";
+
 import type {
   SqltoerdLayoutJsonV1,
   SqltoerdModelJsonV1,
   SqltoerdResolvedDialect,
   SqltoerdSettingsJson
 } from "@/features/sql-erd/types";
-import { parseSqlDdlToErdModel } from "@/features/sql-erd/utils/ddl-parser";
+import {
+  collectPostgreSqlUserDefinedTypeStatements,
+  parseSqlDdlToErdModel
+} from "@/features/sql-erd/utils/ddl-parser";
 import { retainSqltoerdRelationNotesForModel } from "@/features/sql-erd/utils/foreign-key-add";
-import { createSqltoerdLayoutForModel } from "@/features/sql-erd/utils/model";
 import {
   generateSqlDdlFromErdModel,
   SqltoerdModelToSqlGenerationError
 } from "@/features/sql-erd/utils/model-to-sql";
+import { areSqlErdJsonValuesEqual } from "@/features/sql-erd/utils/model";
 import type { SqlErdViewSession } from "@/features/sql-erd/utils/session-state";
 
 const SQL_ERD_MODEL_SQL_HISTORY_LIMIT = 20;
@@ -37,6 +42,35 @@ export type SqlErdModelSqlApplyResult =
       ok: false;
     };
 
+export function createSqlErdVerifiedNormalizedSnapshot({
+  parsedModelJson,
+  targetModelJson,
+  targetSnapshot
+}: {
+  parsedModelJson: SqltoerdModelJsonV1;
+  targetModelJson: SqltoerdModelJsonV1;
+  targetSnapshot: SqlErdViewSession;
+}): SqlErdModelSqlApplyResult {
+  if (
+    createSqlErdSchemaSemanticSignature(parsedModelJson) !==
+    createSqlErdSchemaSemanticSignature(targetModelJson)
+  ) {
+    return {
+      error:
+        "재생성된 SQL이 요청한 ERD 변경과 일치하지 않습니다. 변경 내용을 다시 확인하세요.",
+      ok: false
+    };
+  }
+
+  return {
+    ok: true,
+    snapshot: {
+      ...targetSnapshot,
+      modelJson: targetModelJson
+    }
+  };
+}
+
 export type SqlErdModelSqlHistory = {
   future: SqlErdViewSession[];
   past: SqlErdViewSession[];
@@ -50,6 +84,33 @@ export type SqlErdModelSqlHistoryTransition = {
 export type SqlErdSqlDiffLine = {
   kind: "added" | "removed" | "unchanged";
   value: string;
+};
+
+export type SqlErdSplitDiffCell = {
+  kind: "added" | "empty" | "removed" | "unchanged";
+  lineNumber: number | null;
+  value: string;
+};
+
+export type SqlErdSplitDiffRow = {
+  after: SqlErdSplitDiffCell;
+  before: SqlErdSplitDiffCell;
+};
+
+export type SqlErdContextualSplitDiffSection = {
+  endIndex: number;
+  kind: "collapsed" | "rows";
+  rowCount?: number;
+  startIndex: number;
+};
+
+export type SqlErdPaginatedSplitDiffSections = {
+  pageCount: number;
+  pageIndex: number;
+  rowEndOffset: number;
+  rowStartOffset: number;
+  sections: SqlErdContextualSplitDiffSection[];
+  totalVisibleRowCount: number;
 };
 
 export function createSqlErdNormalizedSqlPreview({
@@ -70,18 +131,29 @@ export function createSqlErdNormalizedSqlPreview({
       dialect: resolvedDialect,
       modelJson
     });
+    const generatedSourceText =
+      resolvedDialect === "postgresql"
+        ? [
+            ...collectPostgreSqlUserDefinedTypeStatements(
+              session.sourceText
+            ),
+            generated.sql
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+        : generated.sql;
 
     return {
       baseSnapshot: session,
       generationBlocked: false,
-      generatedSourceText: generated.sql,
-      hasChanges: generated.sql !== session.sourceText,
+      generatedSourceText,
+      hasChanges: generatedSourceText !== session.sourceText,
       layoutJson: layoutJson ?? session.layoutJson,
-      modelJson,
+      modelJson: generated.modelJson,
       resolvedDialect,
       settingsJson: retainSqltoerdRelationNotesForModel(
         settingsJson ?? session.settingsJson,
-        modelJson
+        generated.modelJson
       ),
       warnings: generated.warnings
     };
@@ -151,6 +223,251 @@ export function createSqlErdSqlLineDiff(
   ];
 }
 
+export function createSqlErdSplitDiffRows(
+  beforeSourceText: string,
+  afterSourceText: string
+): SqlErdSplitDiffRow[] {
+  const rows: SqlErdSplitDiffRow[] = [];
+  let beforeLineNumber = 1;
+  let afterLineNumber = 1;
+  let removedCells: SqlErdSplitDiffCell[] = [];
+  let addedCells: SqlErdSplitDiffCell[] = [];
+
+  const flushChangedRows = () => {
+    const rowCount = Math.max(removedCells.length, addedCells.length);
+
+    for (let index = 0; index < rowCount; index += 1) {
+      rows.push({
+        before: removedCells[index] ?? createEmptyDiffCell(),
+        after: addedCells[index] ?? createEmptyDiffCell()
+      });
+    }
+
+    removedCells = [];
+    addedCells = [];
+  };
+
+  for (const change of diffLines(beforeSourceText, afterSourceText)) {
+    const lines = splitSqlDiffLines(change.value);
+
+    if (change.removed) {
+      removedCells.push(
+        ...lines.map((value) => ({
+          kind: "removed" as const,
+          lineNumber: beforeLineNumber++,
+          value
+        }))
+      );
+      continue;
+    }
+
+    if (change.added) {
+      addedCells.push(
+        ...lines.map((value) => ({
+          kind: "added" as const,
+          lineNumber: afterLineNumber++,
+          value
+        }))
+      );
+      continue;
+    }
+
+    flushChangedRows();
+    for (const value of lines) {
+      rows.push({
+        before: {
+          kind: "unchanged",
+          lineNumber: beforeLineNumber++,
+          value
+        },
+        after: {
+          kind: "unchanged",
+          lineNumber: afterLineNumber++,
+          value
+        }
+      });
+    }
+  }
+
+  flushChangedRows();
+  return rows;
+}
+
+export function createSqlErdContextualSplitDiffSections(
+  rows: readonly SqlErdSplitDiffRow[],
+  contextLines = 3
+): SqlErdContextualSplitDiffSection[] {
+  const normalizedContextLines = Math.max(0, Math.floor(contextLines));
+  const changedRowIndexes = rows.flatMap((row, index) =>
+    row.before.kind === "unchanged" && row.after.kind === "unchanged"
+      ? []
+      : [index]
+  );
+
+  if (!changedRowIndexes.length) {
+    return rows.length
+      ? [{ endIndex: rows.length, kind: "rows", startIndex: 0 }]
+      : [];
+  }
+
+  const visibleRanges = changedRowIndexes.reduce<
+    Array<{ endIndex: number; startIndex: number }>
+  >((ranges, changedRowIndex) => {
+    const nextRange = {
+      endIndex: Math.min(
+        rows.length,
+        changedRowIndex + normalizedContextLines + 1
+      ),
+      startIndex: Math.max(0, changedRowIndex - normalizedContextLines)
+    };
+    const previousRange = ranges.at(-1);
+
+    if (previousRange && nextRange.startIndex <= previousRange.endIndex) {
+      previousRange.endIndex = Math.max(
+        previousRange.endIndex,
+        nextRange.endIndex
+      );
+      return ranges;
+    }
+
+    ranges.push(nextRange);
+    return ranges;
+  }, []);
+  const sections: SqlErdContextualSplitDiffSection[] = [];
+  let cursor = 0;
+
+  for (const range of visibleRanges) {
+    if (cursor < range.startIndex) {
+      sections.push({
+        endIndex: range.startIndex,
+        kind: "collapsed",
+        rowCount: range.startIndex - cursor,
+        startIndex: cursor
+      });
+    }
+
+    sections.push({
+      endIndex: range.endIndex,
+      kind: "rows",
+      startIndex: range.startIndex
+    });
+    cursor = range.endIndex;
+  }
+
+  if (cursor < rows.length) {
+    sections.push({
+      endIndex: rows.length,
+      kind: "collapsed",
+      rowCount: rows.length - cursor,
+      startIndex: cursor
+    });
+  }
+
+  return sections;
+}
+
+export function paginateSqlErdSplitDiffSections(
+  sections: readonly SqlErdContextualSplitDiffSection[],
+  requestedPageIndex: number,
+  maxRowsPerPage: number
+): SqlErdPaginatedSplitDiffSections {
+  const normalizedMaxRowsPerPage = Math.max(
+    1,
+    Math.floor(Number.isFinite(maxRowsPerPage) ? maxRowsPerPage : 1)
+  );
+  const totalVisibleRowCount = sections.reduce(
+    (total, section) =>
+      section.kind === "rows"
+        ? total + Math.max(0, section.endIndex - section.startIndex)
+        : total,
+    0
+  );
+  const pageCount = Math.max(
+    1,
+    Math.ceil(totalVisibleRowCount / normalizedMaxRowsPerPage)
+  );
+  const normalizedRequestedPageIndex = Math.floor(
+    Number.isFinite(requestedPageIndex) ? requestedPageIndex : 0
+  );
+  const pageIndex = Math.min(
+    pageCount - 1,
+    Math.max(0, normalizedRequestedPageIndex)
+  );
+  const rowStartOffset = pageIndex * normalizedMaxRowsPerPage;
+  const rowEndOffset = Math.min(
+    totalVisibleRowCount,
+    rowStartOffset + normalizedMaxRowsPerPage
+  );
+  const pageSections: SqlErdContextualSplitDiffSection[] = [];
+  let visibleRowOffset = 0;
+
+  for (const section of sections) {
+    if (section.kind === "collapsed") {
+      if (
+        visibleRowOffset >= rowStartOffset &&
+        visibleRowOffset <= rowEndOffset
+      ) {
+        pageSections.push(section);
+      }
+      continue;
+    }
+
+    const sectionVisibleStartOffset = visibleRowOffset;
+    const sectionVisibleRowCount = Math.max(
+      0,
+      section.endIndex - section.startIndex
+    );
+    const sectionVisibleEndOffset =
+      sectionVisibleStartOffset + sectionVisibleRowCount;
+    const intersectionStartOffset = Math.max(
+      rowStartOffset,
+      sectionVisibleStartOffset
+    );
+    const intersectionEndOffset = Math.min(
+      rowEndOffset,
+      sectionVisibleEndOffset
+    );
+
+    if (intersectionStartOffset < intersectionEndOffset) {
+      const sectionOffset =
+        intersectionStartOffset - sectionVisibleStartOffset;
+      pageSections.push({
+        endIndex:
+          section.startIndex +
+          sectionOffset +
+          (intersectionEndOffset - intersectionStartOffset),
+        kind: "rows",
+        startIndex: section.startIndex + sectionOffset
+      });
+    }
+
+    visibleRowOffset = sectionVisibleEndOffset;
+  }
+
+  return {
+    pageCount,
+    pageIndex,
+    rowEndOffset,
+    rowStartOffset,
+    sections: pageSections,
+    totalVisibleRowCount
+  };
+}
+
+function splitSqlDiffLines(value: string) {
+  const lines = value.split("\n");
+
+  if (value.endsWith("\n")) {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function createEmptyDiffCell(): SqlErdSplitDiffCell {
+  return { kind: "empty", lineNumber: null, value: "" };
+}
+
 export function applySqlErdNormalizedSqlPreview(
   preview: SqlErdNormalizedSqlPreview
 ): SqlErdModelSqlApplyResult {
@@ -158,7 +475,7 @@ export function applySqlErdNormalizedSqlPreview(
     return {
       error:
         preview.warnings[0] ??
-        "SQL regeneration is unavailable for the current ERD model.",
+        "현재 ERD model에서는 SQL을 재생성할 수 없습니다.",
       ok: false
     };
   }
@@ -171,25 +488,211 @@ export function applySqlErdNormalizedSqlPreview(
 
   if (!parseResult.ok) {
     return {
-      error: parseResult.error.message,
+      error: createSqlErdGeneratedSqlParseError(preview, parseResult.error.message),
       ok: false
     };
   }
 
-  return {
-    ok: true,
-    snapshot: {
+  return createSqlErdVerifiedNormalizedSnapshot({
+    parsedModelJson: parseResult.modelJson,
+    targetModelJson: preview.modelJson,
+    targetSnapshot: {
       ...preview.baseSnapshot,
       dialect: preview.resolvedDialect,
-      layoutJson: createSqltoerdLayoutForModel(
-        parseResult.modelJson,
-        preview.layoutJson
-      ),
-      modelJson: parseResult.modelJson,
+      layoutJson: preview.layoutJson,
       settingsJson: preview.settingsJson,
       sourceText: preview.generatedSourceText
     }
+  });
+}
+
+export function createSqlErdGeneratedSqlParseError(
+  preview: Pick<
+    SqlErdNormalizedSqlPreview,
+    "modelJson" | "resolvedDialect"
+  >,
+  parserMessage: string
+) {
+  const dialectLabel =
+    preview.resolvedDialect === "postgresql"
+      ? "PostgreSQL"
+      : preview.resolvedDialect === "mysql"
+        ? "MySQL"
+        : "SQLite";
+  const unexpectedToken = /but\s+"([^"]+)"\s+found/iu.exec(parserMessage)?.[1]
+    ?.trim()
+    .toUpperCase();
+  const candidates = preview.modelJson.schema.tables
+    .flatMap((table) =>
+      table.columns.map((column) => ({
+        label: `${table.schemaName ? `${table.schemaName}.` : ""}${table.name}.${column.name} (${column.dataType})`,
+        type: column.dataType.trim().toUpperCase()
+      }))
+    )
+    .filter(
+      (column) =>
+        unexpectedToken && column.type.startsWith(unexpectedToken)
+    )
+    .slice(0, 3)
+    .map((column) => column.label);
+  const candidateMessage = candidates.length
+    ? ` 확인할 컬럼: ${candidates.join(", ")}.`
+    : "";
+
+  return `생성된 ${dialectLabel} SQL을 검증하지 못했습니다. 선택한 dialect에서 지원되지 않는 컬럼 타입 또는 기본값이 있는지 확인하세요.${candidateMessage}`;
+}
+
+export function createSqlErdSchemaSemanticSignature(
+  modelJson: SqltoerdModelJsonV1
+) {
+  const tableNamesById = new Map(
+    modelJson.schema.tables.map((table) => [
+      table.id,
+      { name: table.name, schemaName: table.schemaName }
+    ])
+  );
+  const columnNamesByTableId = new Map(
+    modelJson.schema.tables.map((table) => [
+      table.id,
+      new Map(table.columns.map((column) => [column.id, column.name]))
+    ])
+  );
+  const resolveTableName = (tableId: string) =>
+    tableNamesById.get(tableId) ?? { missingTableId: tableId };
+  const resolveColumnNames = (tableId: string, columnIds: string[]) => {
+    const columnNamesById = columnNamesByTableId.get(tableId);
+
+    return columnIds.map(
+      (columnId) =>
+        columnNamesById?.get(columnId) ?? { missingColumnId: columnId }
+    );
   };
+  const tables = modelJson.schema.tables
+    .map((table) => ({
+      columns: table.columns
+        .map((column) => ({
+          dataType: normalizeSqlDataTypeSemanticText(column.dataType),
+          defaultValue:
+            column.defaultValue === null
+              ? null
+              : normalizeSqlSemanticText(column.defaultValue),
+          foreignKey: column.foreignKey,
+          name: column.name,
+          nullable: column.nullable,
+          primaryKey: column.primaryKey,
+          unique: column.unique
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      constraints: table.constraints
+        .map((constraint) => ({
+          columnNames: resolveColumnNames(table.id, constraint.columnIds),
+          kind: constraint.kind,
+          name: constraint.name
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right))
+        ),
+      name: table.name,
+      schemaName: table.schemaName
+    }))
+    .sort((left, right) =>
+      JSON.stringify([left.schemaName, left.name]).localeCompare(
+        JSON.stringify([right.schemaName, right.name])
+      )
+    );
+  const relations = modelJson.schema.relations
+    .map((relation) => ({
+      constraintName: relation.constraintName,
+      fromColumnNames: resolveColumnNames(
+        relation.fromTableId,
+        relation.fromColumnIds
+      ),
+      fromTable: resolveTableName(relation.fromTableId),
+      kind: relation.kind,
+      toColumnNames: resolveColumnNames(
+        relation.toTableId,
+        relation.toColumnIds
+      ),
+      toTable: resolveTableName(relation.toTableId)
+    }))
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right))
+    );
+
+  return JSON.stringify({ relations, tables });
+}
+
+function normalizeSqlDataTypeSemanticText(value: string) {
+  const normalized = value.trim();
+  let quote: '"' | "'" | null = null;
+  let result = "";
+  let hasPendingWhitespace = false;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+
+    if (quote) {
+      result += character;
+      if (character === quote) {
+        if (normalized[index + 1] === quote) {
+          result += normalized[index + 1];
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (/\s/u.test(character)) {
+      hasPendingWhitespace = true;
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      if (
+        hasPendingWhitespace &&
+        result.length > 0 &&
+        result.at(-1) !== "(" &&
+        result.at(-1) !== ","
+      ) {
+        result += " ";
+      }
+      hasPendingWhitespace = false;
+      quote = character;
+      result += character;
+      continue;
+    }
+
+    if (character === "(" || character === ",") {
+      result = `${result.trimEnd()}${character}`;
+      hasPendingWhitespace = false;
+      continue;
+    }
+
+    if (character === ")") {
+      result = `${result.trimEnd()})`;
+      hasPendingWhitespace = false;
+      continue;
+    }
+
+    if (
+      hasPendingWhitespace &&
+      result.length > 0 &&
+      result.at(-1) !== "(" &&
+      result.at(-1) !== ","
+    ) {
+      result += " ";
+    }
+    hasPendingWhitespace = false;
+    result += character.toUpperCase();
+  }
+
+  return result;
+}
+
+function normalizeSqlSemanticText(value: string) {
+  return value.trim().replace(/\s+/gu, " ").toUpperCase();
 }
 
 export function isSqlErdNormalizedSqlPreviewCurrent(
@@ -197,6 +700,25 @@ export function isSqlErdNormalizedSqlPreviewCurrent(
   session: SqlErdViewSession
 ) {
   return isSqlErdViewSessionCurrent(preview.baseSnapshot, session);
+}
+
+export function rebaseSqlErdNormalizedSqlPreviewAfterSave(
+  preview: SqlErdNormalizedSqlPreview,
+  savedSession: SqlErdViewSession
+): SqlErdNormalizedSqlPreview | null {
+  const base = preview.baseSnapshot;
+  const hasSameSourceState =
+    base.id === savedSession.id &&
+    base.dialect === savedSession.dialect &&
+    base.sourceFormat === savedSession.sourceFormat &&
+    base.sourceText === savedSession.sourceText &&
+    base.writeProtocol === savedSession.writeProtocol &&
+    areSqlErdJsonValuesEqual(base.modelJson, savedSession.modelJson) &&
+    areSqlErdJsonValuesEqual(base.settingsJson, savedSession.settingsJson);
+
+  return hasSameSourceState
+    ? { ...preview, baseSnapshot: savedSession }
+    : null;
 }
 
 export function isSqlErdViewSessionCurrent(
@@ -207,10 +729,12 @@ export function isSqlErdViewSessionCurrent(
     base.id === session.id &&
     base.revision === session.revision &&
     base.dialect === session.dialect &&
+    base.sourceFormat === session.sourceFormat &&
     base.sourceText === session.sourceText &&
-    JSON.stringify(base.modelJson) === JSON.stringify(session.modelJson) &&
-    JSON.stringify(base.layoutJson) === JSON.stringify(session.layoutJson) &&
-    JSON.stringify(base.settingsJson) === JSON.stringify(session.settingsJson)
+    base.writeProtocol === session.writeProtocol &&
+    areSqlErdJsonValuesEqual(base.modelJson, session.modelJson) &&
+    areSqlErdJsonValuesEqual(base.layoutJson, session.layoutJson) &&
+    areSqlErdJsonValuesEqual(base.settingsJson, session.settingsJson)
   );
 }
 

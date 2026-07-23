@@ -1,5 +1,6 @@
 export type AgentRunStatus =
   | "planning"
+  | "waiting_user_input"
   | "waiting_confirmation"
   | "running"
   | "completed"
@@ -21,10 +22,42 @@ export type AgentConfirmationStatus =
 
 export type AgentRiskLevel = "low" | "medium" | "high";
 
+export type AgentRunRequestContext =
+  | {
+      surface: "sql_erd";
+      sessionId: string;
+    }
+  | {
+      surface: "pr_review";
+      sessionId: string;
+    }
+  | {
+      surface: "canvas";
+      canvasId: string;
+      canvasContext: {
+        presentationMode: "interactive" | "background";
+        selectedShapeIds?: string[];
+        shapeSummaries?: unknown[];
+        selectedScene?: Record<string, unknown> | null;
+        selectedSceneError?: string | null;
+        toolHelpMode?: boolean;
+        viewport?: {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        } | null;
+      };
+    }
+  | null;
+
 export type AgentResourceRef = {
-  id?: string | number | null;
-  type?: string | null;
+  domain?: string | null;
   label?: string | null;
+  metadata?: Record<string, unknown> | null;
+  resourceId?: string | null;
+  resourceType?: string | null;
+  status?: string | null;
   url?: string | null;
   [key: string]: unknown;
 };
@@ -45,7 +78,8 @@ export type AgentStep = {
   completedAt: string | null;
 };
 
-export type AgentConfirmationPlan = {
+export type AgentApprovalConfirmationPlan = {
+  kind?: "approval";
   toolName: string;
   summary: string;
   target: Record<string, unknown>;
@@ -53,6 +87,24 @@ export type AgentConfirmationPlan = {
   after: Record<string, unknown>;
   call: Record<string, unknown>;
 };
+
+export type AgentChoiceConfirmationPlan = {
+  kind: "choice";
+  toolName: string;
+  summary: string;
+  target: Record<string, unknown>;
+  call: Record<string, unknown>;
+  choices: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    input: Record<string, unknown>;
+  }>;
+};
+
+export type AgentConfirmationPlan =
+  | AgentApprovalConfirmationPlan
+  | AgentChoiceConfirmationPlan;
 
 export type AgentConfirmation = {
   id: string;
@@ -65,13 +117,24 @@ export type AgentConfirmation = {
   rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  selectedChoiceId: string | null;
+};
+
+export type AgentRunMessage = {
+  id: string;
+  sequence: number;
+  role: "assistant" | "user";
+  content: string;
+  createdAt: string;
 };
 
 export type AgentRun = {
   id: string;
+  conversationId: string;
   workspaceId: string;
   requestedByUserId: string;
   clientRequestId: string | null;
+  requestContext: AgentRunRequestContext;
   status: AgentRunStatus;
   riskLevel: AgentRiskLevel | null;
   prompt: string;
@@ -83,14 +146,64 @@ export type AgentRun = {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  messages: AgentRunMessage[];
   steps: AgentStep[];
   confirmation: AgentConfirmation | null;
 };
 
 export type CreateAgentRunInput = {
   prompt: string;
+  conversationId?: string | null;
   timezone?: string;
   clientRequestId?: string;
+  requestContext?: AgentRunRequestContext;
+};
+
+export type AgentConfirmationApproveInput = {
+  choiceId: string;
+};
+
+export type AgentRunInputSelection = {
+  kind: "candidate";
+  candidateSelectionId: string;
+} | {
+  kind: "meeting_candidate";
+  candidateSelectionId: string;
+};
+
+export type SubmitAgentRunInput = {
+  message: string;
+  selection?: AgentRunInputSelection;
+};
+
+export type AgentMessageDisposition =
+  | "auto"
+  | "continue_previous"
+  | "start_new";
+
+export type RouteAgentMessageInput = {
+  message: string;
+  conversationId: string | null;
+  timezone?: string;
+  clientRequestId: string;
+  activeRunId: string | null;
+  requestContext?: AgentRunRequestContext;
+  disposition?: AgentMessageDisposition;
+  selection?: AgentRunInputSelection;
+};
+
+export type AgentMessagePayload = {
+  outcome: "continued" | "started_new" | "needs_choice" | "cancelled";
+  relationship: "continuation" | "new_intent" | "cancel" | "ambiguous";
+  run: AgentRun | null;
+  previousRun: AgentRun | null;
+  clarification: {
+    question: string;
+    choices: Array<{
+      disposition: "continue_previous" | "start_new";
+      label: string;
+    }>;
+  } | null;
 };
 
 export type AgentRunDetailPayload = {
@@ -107,6 +220,7 @@ export type AgentConfirmationActionPayload = {
       status: AgentConfirmationStatus;
       approvedAt: string | null;
       rejectedAt: string | null;
+      selectedChoiceId: string | null;
     };
   };
 };
