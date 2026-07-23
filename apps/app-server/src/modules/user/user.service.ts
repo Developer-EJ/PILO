@@ -335,6 +335,11 @@ export class UserService {
               )
           )
         );
+        await this.workspaceService.scheduleOwnedWorkspacesForAccountDeletion(
+          transaction,
+          currentUserId,
+          workspacePreparation.workspaceIdsToDelete
+        );
         return {
           outboxIds,
           shouldRequestWorkspaceSweep: workspacePreparation.shouldRequestSweep
