@@ -161,7 +161,11 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
     "meeting",
     ["list_meeting_reports", "search_meeting_transcript"],
     "명시된 MeetingReport 제목을 exact 확인한 뒤 그 report의 transcript 발언, 결정 이유 또는 Activity 근거로 답할 때",
-    ["제목이 없는 전체 회의 내용 검색", "단순 회의록 목록, 상태, 상세 또는 요약 조회"],
+    [
+      "제목이 없는 전체 회의 내용 검색",
+      "서로 다른 명시적 회의록 제목을 한 번에 검색하는 요청",
+      "단순 회의록 목록, 상태, 상세 또는 요약 조회"
+    ],
     [
       "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
       "제목이 ‘API 설계 회의’인 회의록에서 인증 방식 논의를 찾아줘"
@@ -171,11 +175,15 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
     "meeting.evidence.search",
     "meeting",
     ["search_meeting_transcript"],
-    "명확한 MeetingReport 제목 후보 없이 Workspace의 회의 발언, 주제, 이유 또는 Activity 근거를 검색할 때",
-    ["명시된 회의록 제목을 먼저 exact 확인해야 하는 내용 검색", "결정 item에 직접 연결된 근거만 요청할 때"],
+    "명확한 MeetingReport 제목 후보 없이 Workspace의 회의 발언, 주제, 이유 또는 Activity 근거를 검색하거나 그 근거를 요약·정리할 때",
     [
-      "배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘",
-      "API v2를 언급한 회의 찾아줘"
+      "명시된 회의록 제목을 먼저 exact 확인해야 하는 내용 검색",
+      "결정 item에 직접 연결된 근거만 요청할 때",
+      "별도 근거 요구가 없는 단순 회의록 요약"
+    ],
+    [
+      "API v2를 언급한 회의 찾아줘",
+      "배포 일정이 미뤄진 이유를 논의한 회의 내용을 요약해줘"
     ]
   ),
   capability("meeting.decision.evidence", "meeting", ["list_meeting_reports", "get_meeting_decision_evidence"], "특정 결정사항의 직접 근거를 확인할 때", ["일반 회의 대화 검색 요청"]),

@@ -1417,6 +1417,9 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   불명확하면 clarification으로 종료하며 `list_meeting_reports({})`나 `limit: 1` 최신 회의록 조회로
   대체하지 않는다. App Server도 같은 capability와 `list_meeting_reports` 조합을 실행 직전에 다시
   검증하고 `limit`을 제거한다.
+- 서로 다른 명시적 제목이 한 요청에 둘 이상 있으면 그중 하나를 임의 선택하거나 Workspace 전체 검색으로
+  범위를 확대하지 않는다. 먼저 검색할 제목 하나를 사용자에게 선택받은 뒤 해당 제목의 hybrid workflow를
+  시작한다. 같은 제목을 문장 안에서 반복한 경우는 하나의 제목 후보로 정규화한다.
 - `meeting.report.hybrid_search`와 `list_meeting_reports`를 사용하는 다른 capability를 한 요청에서 함께
   선택하면 서로 다른 목록 입력을 tool 이름만으로 구분할 수 없으므로 Router가 실행하지 않고 어떤 작업을
   먼저 처리할지 묻는다. 이 경계에서도 hybrid 제목 조회로 판정된 `list_meeting_reports` 입력의 `limit`은
@@ -1438,7 +1441,9 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   `search_meeting_transcript`를 직접 호출하며 제목 조회를 선행하지 않는다. 예를 들어 현재 화면과 무관하게
   “배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘”는 Workspace 범위 transcript/Activity 검색이다.
   Router가 이를 목록 조회로 분류해도 내용 검색 판정이 명확하면 evidence search로 보정하며, 최신 회의록
-  1건을 대신 조회하지 않는다. 반대로 목록, 상태, 제목 상세, 요약만 요구한 요청에는 transcript 검색을
+  1건을 대신 조회하지 않는다. `요약해줘`, `정리해줘`, `핵심만 알려줘`는 답변 형식일 뿐이므로 논의,
+  발언, 결정 이유, 담당자 같은 근거 요구가 함께 있으면 evidence search를 유지한다. 반대로 “회의록
+  요약해줘”처럼 별도 근거 요구가 없는 목록, 상태, 제목 상세, 단순 요약 요청에는 transcript 검색을
   추가하지 않는다.
 - 최초 Router가 선택한 capability chain은 완료 전까지 기존 planner step의 서버 검증 routing metadata로
   이어간다. 다음 turn에는 Router를 다시 호출하지 않고 첫 번째 미완료 tool만 Planner에 노출하되 Planner

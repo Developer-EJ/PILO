@@ -3704,11 +3704,28 @@ def _normalize_meeting_report_search_routing(
         MEETING_EVIDENCE_SEARCH_CAPABILITY_ID,
         MEETING_REPORT_LIST_CAPABILITY_ID,
         "meeting.report.detail",
+        "meeting.report.summary",
+        "meeting.decision.evidence",
     }
     if not meeting_search_capability_ids.intersection(decision.capability_ids):
         return decision
 
     explicit_titles = _explicit_meeting_report_titles(prompt)
+    if len(explicit_titles) > 1:
+        return replace(
+            decision,
+            status="needs_clarification",
+            domains=(),
+            capability_ids=(),
+            intent_summary="여러 회의록 제목 중 먼저 검색할 범위를 확인해야 합니다.",
+            confidence="high",
+            clarification_question=(
+                "여러 회의록 제목이 함께 지정되어 있습니다. "
+                "먼저 내용을 검색할 회의록 제목 하나를 선택해 주세요."
+            ),
+            unsupported_reason=None,
+        )
+
     target_capability_id = (
         MEETING_REPORT_HYBRID_CAPABILITY_ID
         if len(explicit_titles) == 1
@@ -3742,20 +3759,68 @@ def _normalize_meeting_report_search_routing(
 
 def _is_meeting_content_search_request(prompt: str) -> bool:
     normalized = re.sub(r"\s+", " ", prompt).strip().lower()
-    if not re.search(r"(?:회의록|회의|미팅|meeting)", normalized):
+    if not re.search(
+        r"(?:회의록|회의|미팅|meeting|대화|발언|트랜스크립트|transcript)",
+        normalized,
+    ):
         return False
-    if re.search(r"(?:목록|상태|상세|열어|요약(?:해|만|을|해서)?)", normalized):
-        return False
-    content_cue = re.search(
-        r"(?:논의|언급|발언|대화|말(?:했|한|하던)|결정\s*(?:이유|근거|과정)|"
-        r"이유|어떻게\s*(?:정|결정)|담당자|누가|근거|transcript|activity)",
+    operational_report_cue = re.search(
+        r"회의록(?:이|은|는|의)?\s*"
+        r"(?:생성|처리|변환|녹음|업로드|재생성|검색)"
+        r".{0,20}(?:실패|오류|안\s*되|못\s*하|상태|이유|원인)",
         normalized,
     )
-    search_cue = re.search(
-        r"(?:찾아|검색|어느\s*회의|어떤\s*회의|나온\s*회의|했던\s*회의|" r"있는\s*회의|알려|확인)",
+    discourse_cue = re.search(
+        r"(?:논의|토론|언급|발언|대화|이야기|얘기|다뤘|다룬)",
         normalized,
     )
-    return content_cue is not None and search_cue is not None
+    if operational_report_cue is not None and discourse_cue is None:
+        return False
+    evidence_cue = re.search(
+        r"(?:"
+        r"논의|토론|언급|발언|"
+        r"말(?:했|한|하던|했던|씀|이\s*오갔)|"
+        r"(?:이야기|얘기)(?:했|한|하던|했던|가|를|내용|오갔)|"
+        r"뭐라고\s*(?:했|말했|나왔)|"
+        r"다뤘|다룬|검토|제안|의견|질문|답변|우려|찬성|반대|합의|"
+        r"설명(?:했|한|하던|했던|된)|"
+        r"공유(?:했|한|하던|했던|된)|"
+        r"리뷰(?:했|한|하던|했던|한\s*내용)|"
+        r"브레인스토밍|피드백|문제\s*제기|"
+        r"결정(?!\s*사항)|선택(?:했|한|된|하게|하기|이유|근거|과정)|"
+        r"확정(?:했|한|된|하게|하기)|"
+        r"결론(?:이|을|은|으로)?\s*(?:났|내|정|합의|뭐|무엇)|"
+        r"방향(?:을|은|으로)?\s*(?:정|잡|선택|합의)|"
+        r"이유|원인|배경|근거|경위|사유|까닭|"
+        r"담당자|담당으로|맡(?:기|았|은|기로|게)|오너|owner|"
+        r"누가\s*(?:담당|말|발언|제안|반대|찬성|결정)|"
+        r"언제(?:까지)?\s*(?:배포|출시|릴리스|진행|완료|하기로)|"
+        r"(?:배포|출시|릴리스|release)\s*일정|"
+        r"(?:배포|출시|릴리스|release)\s*(?:시점|기한|날짜)|"
+        r"일정(?:이|을|은|가)?\s*"
+        r"(?:미뤄|미룬|밀려|밀린|연기|늦춰|늦어진|지연|변경|확정|정해|결정)|"
+        r"transcript|activity"
+        r")",
+        normalized,
+    )
+    if evidence_cue is not None:
+        return True
+
+    topic_scope_cue = re.search(
+        r"(?:"
+        r"(?:관련|관한|관해|대해|주제로|안건으로).{0,20}"
+        r"(?:회의록|회의|미팅|대화|발언|내용)|"
+        r"(?:회의록|회의|미팅|대화|발언)(?:에서|의)?\s*.{0,40}"
+        r"(?:관련|관한|관해|대해|주제로|안건으로)"
+        r")",
+        normalized,
+    )
+    request_cue = re.search(
+        r"(?:찾아|검색|요약|정리|알려|보여|확인|어디|뭐|무엇|어떤)",
+        normalized,
+    )
+    simple_lookup_cue = re.search(r"(?:목록|상태|상세|열어)", normalized)
+    return topic_scope_cue is not None and request_cue is not None and simple_lookup_cue is None
 
 
 def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:

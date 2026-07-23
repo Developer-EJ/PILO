@@ -2196,6 +2196,267 @@ def test_content_discussion_request_corrects_report_list_to_workspace_evidence_s
     assert corrected.capability_ids == ("meeting.evidence.search",)
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "배포 일정이 미뤄진 이유를 논의한 회의 내용을 요약해줘",
+        "API v2를 언급했던 미팅 내용을 정리 부탁해",
+        "인증 방식에 대해 무슨 이야기가 오갔는지 회의에서 알려줘",
+        "진호가 문서 담당자로 정해진 대화를 찾아줘",
+        "OAuth 방식을 검토했던 회의록을 찾아줘",
+        "출시 연기 배경이 나온 회의가 어디야",
+        "성능 문제를 누가 우려했는지 회의에서 찾아줘",
+        "Redis와 Kafka 중 무엇을 선택했는지 회의 내용 요약",
+        "백엔드 배포에 관해 토론한 미팅 보여줘",
+        "로그 수집 방식을 제안한 회의록",
+        "회의에서 뭐라고 말했는지 핵심만 정리해줘",
+        "release 일정이 변경된 이유를 회의에서 확인해줘",
+        "배포 일정이 왜 밀렸는지 회의록에서 정리해줘",
+        "문서 정리는 누가 맡기로 했는지 회의에서 알려줘",
+        "최종 결론이 뭐였는지 회의록에서 확인해줘",
+        "로드맵을 공유했던 미팅 찾아줘",
+        "아키텍처를 설명했던 회의가 뭐야",
+        "신규 화면을 리뷰했던 회의록",
+        "고객 피드백을 다룬 회의 정리해줘",
+        "API v2를 언급한 발언을 찾아줘",
+        "출시가 늦어진 까닭을 이야기한 회의 찾아줘",
+        "배포 시점을 언제로 잡았는지 논의한 회의록",
+        "배포 관련 회의 내용을 요약해줘",
+        "인증 방식을 주제로 한 미팅 찾아줘",
+        "회의에서 캐시 정책에 대해 정리해줘",
+        "회의록 생성 실패 원인을 논의한 회의 찾아줘",
+    ],
+)
+def test_natural_meeting_evidence_requests_correct_list_routing(
+    prompt: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.reports.list",),
+            intent_summary="회의록 목록 조회",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert corrected.capability_ids == ("meeting.evidence.search",)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "회의록 요약해줘",
+        "가장 최근 회의 내용을 요약해줘",
+        "‘온보딩 회의’ 회의록 요약해줘",
+        "실패한 회의록 상태 보여줘",
+        "제목이 ‘API 설계 회의’인 회의록 상세 열어줘",
+        "지난 회의 결정사항 요약해줘",
+        "지난 회의 결정 사항 요약해줘",
+        "회의록 후속 작업 요약해줘",
+        "회의 참석자가 누군지 알려줘",
+        "다음 회의가 언제인지 알려줘",
+        "이 대화 요약해줘",
+        "회의록 생성이 실패한 이유를 알려줘",
+        "회의록 검색이 안 되는 원인을 확인해줘",
+        "관련 회의록 목록 보여줘",
+    ],
+)
+def test_simple_meeting_report_requests_keep_summary_or_lookup_routing(
+    prompt: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+    original = AgentRoutingDecision(
+        status="routed",
+        domains=("meeting",),
+        capability_ids=("meeting.report.summary",),
+        intent_summary="회의록 요약",
+        confidence="high",
+        clarification_question=None,
+        unsupported_reason=None,
+    )
+
+    corrected = _normalize_meeting_report_search_routing(
+        original,
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert corrected == original
+
+
+def test_evidence_question_with_summary_format_corrects_summary_routing() -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.report.summary",),
+            intent_summary="회의록 요약",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt="배포 일정이 미뤄진 이유를 논의한 회의 내용을 요약해줘",
+    )
+
+    assert corrected.capability_ids == ("meeting.evidence.search",)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "‘온보딩 회의’에서 논의한 배포 일정을 요약해줘",
+        '"온보딩 회의"에서 결정 이유를 찾고 "온보딩 회의"의 발언도 요약해줘',
+    ],
+)
+def test_explicit_title_evidence_question_with_summary_format_uses_hybrid(
+    prompt: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.report.summary",),
+            intent_summary="회의록 요약",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert corrected.capability_ids == ("meeting.report.hybrid_search",)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        '"온보딩 회의"에서 담당자를 찾고 "배포 회의"에서 지연 이유를 찾아줘',
+        "제목이 ‘온보딩 회의’인 회의록의 발언과 "
+        "제목이 ‘배포 회의’인 회의록의 결정 이유를 알려줘",
+    ],
+)
+def test_multiple_explicit_report_titles_require_clarification(
+    prompt: str,
+) -> None:
+    tools = [
+        tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
+        tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(tools=tools, toolCapabilityCatalog=meeting_search_catalog(tools))
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.reports.list",),
+            intent_summary="회의록 목록 조회",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt=prompt,
+    )
+
+    assert corrected.status == "needs_clarification"
+    assert corrected.domains == ()
+    assert corrected.capability_ids == ()
+    assert "제목 하나" in (corrected.clarification_question or "")
+
+
+def test_processor_does_not_search_workspace_for_multiple_explicit_titles() -> None:
+    tools = [
+        tool_snapshot(
+            name="list_meeting_reports",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        tool_snapshot(
+            name="search_meeting_transcript",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
+        ),
+    ]
+    prompt = '"온보딩 회의"에서 담당자를 찾고 "배포 회의"에서 지연 이유를 찾아줘'
+    repository = FakeAgentRunRepository(context=run_context(prompt=prompt))
+    planner = FakePlannerClient()
+    router = FakeRouterClient(
+        decision=routing_decision(
+            domains=("meeting",),
+            capability_ids=("meeting.reports.list",),
+        )
+    )
+    handoff = FakeExecutionHandoffClient()
+    processor = create_processor(
+        repository,
+        planner,
+        handoff,
+        router,
+        TOOL_RETRIEVAL_MODE_LLM_ROUTER,
+    )
+
+    result = processor.process_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_catalog(tools),
+        )
+    )
+
+    assert result.reason == "agent_router_needs_clarification"
+    assert len(router.requests) == 1
+    assert planner.requests == []
+    assert handoff.calls == []
+    assert repository.waiting_user_input_updates[0][0] == RUN_ID
+    assert "제목 하나" in repository.waiting_user_input_updates[0][1]
+
+
 def test_processor_routes_content_discussion_to_workspace_search_from_other_surface() -> None:
     tools = [
         tool_snapshot(
