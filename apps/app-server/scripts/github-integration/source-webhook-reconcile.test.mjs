@@ -70,6 +70,11 @@ assert.deepEqual(
 assert.equal(parseGithubSourceWebhookContext("issue_comment", webhookBody("issue")), null);
 assert.equal(parseGithubSourceWebhookContext("repository", webhookBody("issue")), null);
 
+function sourceClaimAllowsActivePublishingLease(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return /status='received' AND \( error_message='GitHub webhook enqueue is publishing' OR lease_expires_at IS NULL OR lease_expires_at < now\(\) \)/i.test(normalized);
+}
+
 {
   const webhookSecret = "source-webhook-secret";
   let insertedValues = null;
@@ -118,9 +123,14 @@ assert.equal(parseGithubSourceWebhookContext("repository", webhookBody("issue"))
 }
 
 class SourceDatabase {
-  constructor(eventName, { activeReceivedLease = false, targetCount = 1 } = {}) {
+  constructor(eventName, {
+    activeReceivedLease = false,
+    receivedErrorMessage = null,
+    targetCount = 1,
+  } = {}) {
     this.activeReceivedLease = activeReceivedLease;
     this.boardLookupSql = null;
+    this.claimed = 0;
     this.claimSql = null;
     this.committed = false;
     this.events = [];
@@ -130,6 +140,7 @@ class SourceDatabase {
     this.pullRequestSql = null;
     this.pullRequestValues = null;
     this.processed = 0;
+    this.receivedErrorMessage = receivedErrorMessage;
     this.retried = 0;
     this.targetCount = targetCount;
   }
@@ -137,9 +148,17 @@ class SourceDatabase {
   async queryOne(text, values = []) {
     if (/UPDATE github_webhook_deliveries[\s\S]*RETURNING/i.test(text)) {
       this.claimSql = text;
-      if (this.activeReceivedLease) {
+      const publishingLeaseIsClaimable = sourceClaimAllowsActivePublishingLease(text);
+      if (
+        this.activeReceivedLease &&
+        (
+          this.receivedErrorMessage !== "GitHub webhook enqueue is publishing" ||
+          !publishingLeaseIsClaimable
+        )
+      ) {
         return null;
       }
+      this.claimed += 1;
       return {
         content_number: "56",
         delivery_id: values[0],
@@ -347,8 +366,9 @@ function createService({ database, githubAppClient, published, publisherFails = 
   assert.doesNotMatch(database.boardLookupSql, /content_issue_id/);
   assert.match(
     database.claimSql,
-    /status='received' AND \(lease_expires_at IS NULL OR lease_expires_at < now\(\)\)/,
+    /status='received'[\s\S]*error_message='GitHub webhook enqueue is publishing'[\s\S]*lease_expires_at IS NULL[\s\S]*lease_expires_at < now\(\)/,
   );
+  assert.equal(sourceClaimAllowsActivePublishingLease(database.claimSql), true);
   assert.deepEqual(published[0], {
     repositoryId,
     sourceId: issueId,
@@ -394,7 +414,10 @@ function createService({ database, githubAppClient, published, publisherFails = 
 }
 
 {
-  const database = new SourceDatabase("issues", { activeReceivedLease: true });
+  const database = new SourceDatabase("issues", {
+    activeReceivedLease: true,
+    receivedErrorMessage: "GitHub source webhook reconcile failed",
+  });
   let lookupCalls = 0;
   const service = createService({
     database,
@@ -408,10 +431,42 @@ function createService({ database, githubAppClient, published, publisherFails = 
   });
   assert.equal(await service.processDelivery("cooldown-delivery"), "terminal");
   assert.equal(lookupCalls, 0, "an active retry cooldown cannot be reclaimed");
+  assert.equal(database.claimed, 0);
   assert.match(
     database.claimSql,
-    /status='received' AND \(lease_expires_at IS NULL OR lease_expires_at < now\(\)\)/,
+    /status='received'[\s\S]*error_message='GitHub webhook enqueue is publishing'[\s\S]*lease_expires_at IS NULL[\s\S]*lease_expires_at < now\(\)/,
   );
+  assert.equal(sourceClaimAllowsActivePublishingLease(database.claimSql), true);
+}
+
+{
+  const database = new SourceDatabase("issues", {
+    activeReceivedLease: true,
+    receivedErrorMessage: "GitHub webhook enqueue is publishing",
+  });
+  let lookupCalls = 0;
+  const published = [];
+  const service = createService({
+    database,
+    githubAppClient: {
+      getRepositoryIssue: async () => {
+        lookupCalls += 1;
+        return issueSnapshot();
+      },
+    },
+    published,
+  });
+  assert.equal(await service.processDelivery("publishing-lease-delivery"), "terminal");
+  assert.equal(database.claimed, 1, "publishing source delivery must be claimed from its SQS message");
+  assert.equal(lookupCalls, 1);
+  assert.equal(database.processed, 1);
+  assert.equal(database.retried, 0);
+  assert.equal(published[0].sourceId, issueId);
+  assert.match(
+    database.claimSql,
+    /error_message='GitHub webhook enqueue is publishing'/,
+  );
+  assert.equal(sourceClaimAllowsActivePublishingLease(database.claimSql), true);
 }
 
 {
