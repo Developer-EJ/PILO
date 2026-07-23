@@ -79,7 +79,11 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   };
 
   try {
-    observability.emitWorkerPollRetry(1500, "database_session_pool_exhausted");
+    observability.emitWorkerPollRetry(
+      "sync_jobs",
+      1500,
+      "database_session_pool_exhausted"
+    );
   } finally {
     process.stdout.write = originalWrite;
   }
@@ -91,6 +95,7 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     deliveryId: null,
     target: "worker_poll",
     attemptCount: null,
+    queueKind: "sync_jobs",
     failureKind: "database_session_pool_exhausted",
     retryAfterSeconds: 2,
     rateLimitRemaining: null
@@ -114,10 +119,11 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   };
 
   await runGithubSyncWorkerLoop(
-    worker,
+    "sync_jobs",
+    () => worker.pollOnce(),
     {
-      emitWorkerPollRetry: (retryAfterMilliseconds, failureKind) => {
-        observed.push({ retryAfterMilliseconds, failureKind });
+      emitWorkerPollRetry: (queueKind, retryAfterMilliseconds, failureKind) => {
+        observed.push({ queueKind, retryAfterMilliseconds, failureKind });
       }
     },
     () => calls >= 3,
@@ -127,8 +133,12 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.equal(calls, 3, "the worker must retry a failed poll instead of exiting");
   assert.deepEqual(delays, [1000, 2000]);
   assert.deepEqual(observed, [
-    { retryAfterMilliseconds: 1000, failureKind: "database_session_pool_exhausted" },
-    { retryAfterMilliseconds: 2000, failureKind: "unknown" }
+    {
+      queueKind: "sync_jobs",
+      retryAfterMilliseconds: 1000,
+      failureKind: "database_session_pool_exhausted"
+    },
+    { queueKind: "sync_jobs", retryAfterMilliseconds: 2000, failureKind: "unknown" }
   ]);
   assert.equal(
     classifyGithubSyncWorkerFailure(new Error("password=not-logged")),

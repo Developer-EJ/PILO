@@ -2,12 +2,12 @@ export type GithubSyncWorkerFailureKind =
   | "database_session_pool_exhausted"
   | "unknown";
 
-export interface GithubSyncWorkerPoller {
-  pollOnce(): Promise<void>;
-}
+export type GithubSyncWorkerQueueKind = "sync_jobs" | "webhooks";
+export type GithubSyncWorkerPollOnce = () => Promise<void>;
 
 export interface GithubSyncWorkerPollObserver {
   emitWorkerPollRetry(
+    queueKind: GithubSyncWorkerQueueKind,
     retryAfterMilliseconds: number,
     failureKind: GithubSyncWorkerFailureKind
   ): void;
@@ -16,24 +16,62 @@ export interface GithubSyncWorkerPollObserver {
 const INITIAL_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 15_000;
 
+type GithubSyncWorkerWait = (milliseconds: number) => Promise<void>;
+type LegacyGithubSyncWorkerPoller = {
+  pollOnce(): Promise<void>;
+};
+
 export async function runGithubSyncWorkerLoop(
-  worker: GithubSyncWorkerPoller,
+  queueKind: GithubSyncWorkerQueueKind,
+  pollOnce: GithubSyncWorkerPollOnce,
   observer: GithubSyncWorkerPollObserver,
   isStopping: () => boolean,
-  wait: (milliseconds: number) => Promise<void> = waitForRetry
+  wait?: GithubSyncWorkerWait
+): Promise<void>;
+export async function runGithubSyncWorkerLoop(
+  worker: LegacyGithubSyncWorkerPoller,
+  observer: GithubSyncWorkerPollObserver,
+  isStopping: () => boolean,
+  wait?: GithubSyncWorkerWait
+): Promise<void>;
+export async function runGithubSyncWorkerLoop(
+  queueKindOrWorker: GithubSyncWorkerQueueKind | LegacyGithubSyncWorkerPoller,
+  pollOnceOrObserver: GithubSyncWorkerPollOnce | GithubSyncWorkerPollObserver,
+  observerOrIsStopping: GithubSyncWorkerPollObserver | (() => boolean),
+  isStoppingOrWait?: (() => boolean) | GithubSyncWorkerWait,
+  wait?: GithubSyncWorkerWait
 ): Promise<void> {
+  const queueKind =
+    typeof queueKindOrWorker === "string" ? queueKindOrWorker : "sync_jobs";
+  const pollOnce =
+    typeof queueKindOrWorker === "string"
+      ? (pollOnceOrObserver as GithubSyncWorkerPollOnce)
+      : () => queueKindOrWorker.pollOnce();
+  const observer =
+    typeof queueKindOrWorker === "string"
+      ? (observerOrIsStopping as GithubSyncWorkerPollObserver)
+      : (pollOnceOrObserver as GithubSyncWorkerPollObserver);
+  const isStopping =
+    typeof queueKindOrWorker === "string"
+      ? (isStoppingOrWait as () => boolean)
+      : (observerOrIsStopping as () => boolean);
+  const waitForDelay =
+    typeof queueKindOrWorker === "string"
+      ? wait ?? waitForRetry
+      : (isStoppingOrWait as GithubSyncWorkerWait | undefined) ?? waitForRetry;
   let retryDelayMs = INITIAL_RETRY_DELAY_MS;
 
   while (!isStopping()) {
     try {
-      await worker.pollOnce();
+      await pollOnce();
       retryDelayMs = INITIAL_RETRY_DELAY_MS;
     } catch (error) {
       observer.emitWorkerPollRetry(
+        queueKind,
         retryDelayMs,
         classifyGithubSyncWorkerFailure(error)
       );
-      await wait(retryDelayMs);
+      await waitForDelay(retryDelayMs);
       retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
     }
   }

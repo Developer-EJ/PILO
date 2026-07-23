@@ -215,6 +215,7 @@ await import("./manual-sync-controller-facade.test.mjs");
 await import("./source-sync-repository-selection.test.mjs");
 await import("./repository-scoped-project-v2.test.mjs");
 await import("./async-sync-worker.test.mjs");
+await import("./github-sync-worker-loop.test.mjs");
 await import("./project-v2-setup.test.mjs");
 await import("./project-v2-write.test.mjs");
 await import("./webhook.test.mjs");
