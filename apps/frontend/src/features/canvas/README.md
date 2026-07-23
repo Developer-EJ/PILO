@@ -27,11 +27,11 @@ WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 
 - `components/screen/`: 화면 배치, toolbar, dialog, runtime 선택
 - `engine/canvas-engine-types.ts`: engine 내부에서 공유하는 shape/view 타입
-- `runtime/`: 저장, hydration, sync queue, local/API mode
-- `editor/`: Canvas 전용 tldraw editor 조립, 배경, reporter, overlay
-- `shapes/`: shape 등록, shape factory, shape type guard, shape별 ShapeUtil/UI
-- `interactions/`: placement, smart guide, selection stacking
-- `assets/`: image/video asset 생성과 복원
+- `engine/runtime/`: 저장, hydration, sync queue, local/API mode
+- `engine/editor/`: Canvas 전용 tldraw editor 조립, 배경, reporter, overlay
+- `engine/shapes/`: shape 등록, shape factory, shape type guard, shape별 ShapeUtil/UI
+- `engine/interactions/`: placement, smart guide, selection stacking
+- `engine/assets/`: image/video asset 생성과 복원
 - `collaboration/`: room presence, preview, operation catch-up hook
 - `persistence/`: local storage, shape diff, batch queue와 retry
 - `imports/`: 파일과 폴더 탐색, 코드 파일 검증과 import 데이터 생성
@@ -41,12 +41,12 @@ WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 roomState에는 `fileId`, 파일명, MIME type만 남기고 presigned URL과 파일 원문은
 브라우저 메모리에서만 사용한다.
 
-`shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
+`engine/shapes/code-block/`은 code block shape의 tldraw 연결과 editor UI 책임을 파일 단위로
 분리한다. `PiloCodeBlockShapeUtil`은 shape props schema, geometry, resize,
 component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-block 하위
 컴포넌트/타입 파일에서 담당한다.
 
-`runtime/`은 `ClassicCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
+`engine/runtime/`은 `ClassicCanvasRuntime`을 조립자로 두고 책임별 파일을 평평하게 나눈다.
 
 - `useCanvasRuntimeHydration`: board 변경 시 초기 shape 복원과 고정 시작 카메라 reset
 - `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어

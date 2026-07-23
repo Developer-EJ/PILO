@@ -367,6 +367,11 @@ assert.match(meetingPanel, /현재 참여 인원/);
 assert.match(meetingPanel, /setMicrophoneEnabled\(!isMicEnabled\)/);
 assert.match(meetingPanel, /클릭하여 마이크 끄기/);
 assert.match(meetingPanel, /클릭하여 마이크 켜기/);
+assert.match(
+  meetingPanel,
+  /\{isCurrentUser \? \(\s*<Tooltip>[\s\S]*?setMicrophoneEnabled\(!isMicEnabled\)/
+);
+assert.doesNotMatch(meetingPanel, /원격 마이크 상태/);
 assert.doesNotMatch(meetingPanel, /remoteAudioContainerRef/);
 assert.match(meetingPanel, /MeetingReportSection/);
 assert.match(meetingPanel, /activeSection/);

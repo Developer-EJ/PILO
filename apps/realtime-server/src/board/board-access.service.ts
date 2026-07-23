@@ -25,7 +25,14 @@ export function createBoardAccessService(
       if (!context.userId || !UUID_PATTERN.test(workspaceId)) return false;
       if (!database) return true;
       return Boolean(await database.queryOne<{ id: string }>(
-        `SELECT workspace_id AS id FROM workspace_members WHERE workspace_id = $1::uuid AND user_id = $2::uuid LIMIT 1`,
+        `SELECT member.workspace_id AS id
+         FROM workspace_members AS member
+         JOIN workspaces AS workspace
+           ON workspace.id = member.workspace_id
+          AND workspace.deletion_status = 'active'
+         WHERE member.workspace_id = $1::uuid
+           AND member.user_id = $2::uuid
+         LIMIT 1`,
         [workspaceId, context.userId]
       ));
     },
@@ -47,6 +54,9 @@ export function createBoardAccessService(
           JOIN workspace_members wm
             ON wm.workspace_id = b.workspace_id
            AND wm.user_id = $3
+          JOIN workspaces AS workspace
+            ON workspace.id = b.workspace_id
+           AND workspace.deletion_status = 'active'
           WHERE b.workspace_id = $1
             AND b.id = $2::bigint
           LIMIT 1

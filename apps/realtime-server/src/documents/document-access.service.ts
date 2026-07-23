@@ -37,6 +37,9 @@ export function createDocumentAccessService({
           JOIN workspace_members wm
             ON wm.workspace_id = document.workspace_id
            AND wm.user_id = $3
+          JOIN workspaces AS workspace
+            ON workspace.id = document.workspace_id
+           AND workspace.deletion_status = 'active'
           WHERE document.workspace_id = $1
             AND document.id = $2
             AND document.deleted_at IS NULL

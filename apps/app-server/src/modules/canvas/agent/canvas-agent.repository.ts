@@ -6,7 +6,6 @@ import type {
   CanvasAgentRunRow,
   CanvasAgentShapeRow,
   CanvasAgentStepRow,
-  CanvasDraftSpec,
   CanvasAgentActionName,
   CanvasAgentRequestContext,
   CanvasAgentRunStatus
@@ -398,23 +397,6 @@ export class CanvasAgentRepository {
     );
   }
 
-  async markRunDraftReady(
-    runId: string,
-    summary: string,
-    result: Record<string, unknown>
-  ): Promise<void> {
-    await this.database.execute(
-      `
-        UPDATE canvas_agent_runs
-        SET status = 'draft_ready', result_summary = $2, result_json = $3::jsonb,
-          error_code = NULL, error_message = NULL
-        WHERE id = $1
-          AND status NOT IN ('cancelled', 'expired')
-      `,
-      [runId, summary, JSON.stringify(result)]
-    );
-  }
-
   async failRun(runId: string, message: string): Promise<void> {
     const safeMessage = message.slice(0, 4096);
     const userMessage =
@@ -483,26 +465,6 @@ export class CanvasAgentRepository {
       `,
       [runId, workspaceId, canvasId, currentUserId]
     );
-  }
-
-  async createDraft(input: {
-    canvasId: string;
-    currentUserId: string;
-    runId: string;
-    spec: CanvasDraftSpec;
-  }): Promise<CanvasAgentDraftRow> {
-    const draft = await this.database.queryOne<CanvasAgentDraftRow>(
-      `
-        INSERT INTO canvas_agent_drafts (
-          run_id, canvas_id, created_by_user_id, status, draft_spec_json
-        )
-        VALUES ($1, $2, $3, 'preview', $4::jsonb)
-        RETURNING *
-      `,
-      [input.runId, input.canvasId, input.currentUserId, JSON.stringify(input.spec)]
-    );
-    if (!draft) throw new Error("Canvas Agent draft could not be created");
-    return draft;
   }
 
   async findDraftForRequester(
