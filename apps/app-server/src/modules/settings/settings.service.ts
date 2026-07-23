@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
-import { badRequest, forbidden } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { badRequest, forbidden, unauthorized } from "../../common/api-error";
+import {
+  DatabaseService,
+  DatabaseTransaction
+} from "../../database/database.service";
 
 export type SettingsTheme = "system" | "light" | "dark";
 export type SettingsDensity = "comfortable" | "compact";
@@ -63,7 +66,14 @@ export class SettingsService {
   constructor(private readonly database: DatabaseService) {}
 
   async getSettings(currentUserId: string): Promise<SettingsPayload> {
-    const row = await this.database.queryOne<SettingsRow>(
+    return this.getSettingsFrom(this.database, currentUserId);
+  }
+
+  private async getSettingsFrom(
+    database: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<SettingsPayload> {
+    const row = await database.queryOne<SettingsRow>(
       `
         SELECT
           theme,
@@ -85,9 +95,13 @@ export class SettingsService {
 
     if (
       row.default_workspace_id &&
-      !(await this.hasWorkspaceAccess(currentUserId, row.default_workspace_id))
+      !(await this.hasWorkspaceAccess(
+        database,
+        currentUserId,
+        row.default_workspace_id
+      ))
     ) {
-      await this.database.execute(
+      await database.execute(
         `UPDATE user_settings SET default_workspace_id = NULL WHERE user_id = $1`,
         [currentUserId]
       );
@@ -102,75 +116,82 @@ export class SettingsService {
     request: UpdateSettingsRequest | undefined
   ): Promise<SettingsPayload> {
     const input = this.readRequest(request);
-    const current = await this.getSettings(currentUserId);
-    const next = {
-      theme:
-        "theme" in input ? this.readTheme(input.theme) : current.theme,
-      density:
-        "density" in input ? this.readDensity(input.density) : current.density,
-      defaultWorkspaceId:
-        "defaultWorkspaceId" in input
-          ? this.readDefaultWorkspaceId(input.defaultWorkspaceId)
-          : current.defaultWorkspaceId,
-      defaultLandingPage:
-        "defaultLandingPage" in input
-          ? this.readLandingPage(input.defaultLandingPage)
-          : current.defaultLandingPage,
-      restoreLastWorkspace:
-        "restoreLastWorkspace" in input
-          ? this.readBoolean(input.restoreLastWorkspace, "restoreLastWorkspace")
-          : current.restoreLastWorkspace
-    };
+    return this.database.transaction(async transaction => {
+      await this.lockActiveUser(transaction, currentUserId);
+      const current = await this.getSettingsFrom(transaction, currentUserId);
+      const next = {
+        theme:
+          "theme" in input ? this.readTheme(input.theme) : current.theme,
+        density:
+          "density" in input ? this.readDensity(input.density) : current.density,
+        defaultWorkspaceId:
+          "defaultWorkspaceId" in input
+            ? this.readDefaultWorkspaceId(input.defaultWorkspaceId)
+            : current.defaultWorkspaceId,
+        defaultLandingPage:
+          "defaultLandingPage" in input
+            ? this.readLandingPage(input.defaultLandingPage)
+            : current.defaultLandingPage,
+        restoreLastWorkspace:
+          "restoreLastWorkspace" in input
+            ? this.readBoolean(input.restoreLastWorkspace, "restoreLastWorkspace")
+            : current.restoreLastWorkspace
+      };
 
-    if (
-      next.defaultWorkspaceId &&
-      !(await this.hasWorkspaceAccess(currentUserId, next.defaultWorkspaceId))
-    ) {
-      throw forbidden("Default Workspace access denied");
-    }
+      if (
+        next.defaultWorkspaceId &&
+        !(await this.hasWorkspaceAccess(
+          transaction,
+          currentUserId,
+          next.defaultWorkspaceId
+        ))
+      ) {
+        throw forbidden("Default Workspace access denied");
+      }
 
-    const row = await this.database.queryOne<SettingsRow>(
-      `
-        INSERT INTO user_settings (
-          user_id,
-          theme,
-          density,
-          default_workspace_id,
-          default_landing_page,
-          restore_last_workspace
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (user_id) DO UPDATE
-        SET
-          theme = EXCLUDED.theme,
-          density = EXCLUDED.density,
-          default_workspace_id = EXCLUDED.default_workspace_id,
-          default_landing_page = EXCLUDED.default_landing_page,
-          restore_last_workspace = EXCLUDED.restore_last_workspace
-        RETURNING
-          theme,
-          density,
-          default_workspace_id,
-          default_landing_page,
-          restore_last_workspace,
-          created_at,
-          updated_at
-      `,
-      [
-        currentUserId,
-        next.theme,
-        next.density,
-        next.defaultWorkspaceId,
-        next.defaultLandingPage,
-        next.restoreLastWorkspace
-      ]
-    );
+      const row = await transaction.queryOne<SettingsRow>(
+        `
+          INSERT INTO user_settings (
+            user_id,
+            theme,
+            density,
+            default_workspace_id,
+            default_landing_page,
+            restore_last_workspace
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (user_id) DO UPDATE
+          SET
+            theme = EXCLUDED.theme,
+            density = EXCLUDED.density,
+            default_workspace_id = EXCLUDED.default_workspace_id,
+            default_landing_page = EXCLUDED.default_landing_page,
+            restore_last_workspace = EXCLUDED.restore_last_workspace
+          RETURNING
+            theme,
+            density,
+            default_workspace_id,
+            default_landing_page,
+            restore_last_workspace,
+            created_at,
+            updated_at
+        `,
+        [
+          currentUserId,
+          next.theme,
+          next.density,
+          next.defaultWorkspaceId,
+          next.defaultLandingPage,
+          next.restoreLastWorkspace
+        ]
+      );
 
-    if (!row) {
-      throw new Error("Settings could not be saved");
-    }
+      if (!row) {
+        throw new Error("Settings could not be saved");
+      }
 
-    return this.mapSettings(row);
+      return this.mapSettings(row);
+    });
   }
 
   private readRequest(
@@ -235,10 +256,11 @@ export class SettingsService {
   }
 
   private async hasWorkspaceAccess(
+    database: DatabaseTransaction,
     currentUserId: string,
     workspaceId: string
   ): Promise<boolean> {
-    const membership = await this.database.queryOne<MembershipRow>(
+    const membership = await database.queryOne<MembershipRow>(
       `
         SELECT id
         FROM workspace_members
@@ -247,6 +269,24 @@ export class SettingsService {
       [currentUserId, workspaceId]
     );
     return Boolean(membership);
+  }
+
+  private async lockActiveUser(
+    transaction: DatabaseTransaction,
+    currentUserId: string
+  ): Promise<void> {
+    const user = await transaction.queryOne<{ id: string }>(
+      `
+        SELECT id
+        FROM users
+        WHERE id = $1 AND deleted_at IS NULL
+        FOR UPDATE
+      `,
+      [currentUserId]
+    );
+    if (!user) {
+      throw unauthorized("Current user not found");
+    }
   }
 
   private mapSettings(row: SettingsRow): SettingsPayload {

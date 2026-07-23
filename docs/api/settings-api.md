@@ -139,6 +139,9 @@ Request Body:
 - 지원하지 않는 field가 있으면 `400 BAD_REQUEST`를 반환한다.
 - body가 없거나 지원 필드가 하나도 없으면 `400 BAD_REQUEST`를 반환한다.
 - validation이 끝난 뒤 현재 사용자 기준으로 `user_settings`를 upsert한다.
+- upsert transaction은 `users.deleted_at IS NULL`인 현재 사용자 row를 먼저 잠근다.
+  계정 탈퇴와 동시에 시작된 요청은 탈퇴보다 먼저 완료되거나 `401 UNAUTHORIZED`로
+  실패하며, 탈퇴 commit 뒤 Settings row를 다시 만들 수 없다.
 - `defaultWorkspaceId`가 문자열이면 UUID여야 하고 현재 사용자가 해당 Workspace의
   owner 또는 member여야 한다.
 - 접근할 수 없는 Workspace를 기본값으로 지정하면 `403 FORBIDDEN`을 반환한다.

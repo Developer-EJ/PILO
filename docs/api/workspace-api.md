@@ -37,6 +37,9 @@ Workspace 역할/멤버십과 email 초대 모델은
   차단한다.
 - Workspace 삭제는 DB의 Workspace FK cascade뿐 아니라 Drive object와 Meeting 녹음
   object를 durable cleanup job으로 정리한 뒤 최종 hard delete한다.
+- 계정 탈퇴 시 Owner 본인 외의 member와 기존 삭제 blocker가 없는 owner Workspace는
+  같은 deletion lifecycle을 자동으로 시작한다. blocker가 있는 Workspace가 하나라도
+  있으면 계정 탈퇴와 모든 자동 삭제 요청을 함께 rollback한다.
 
 ## API 목록
 

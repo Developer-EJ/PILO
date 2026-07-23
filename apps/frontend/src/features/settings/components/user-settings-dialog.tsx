@@ -72,7 +72,10 @@ import { useAuthSession } from "@/features/auth/auth-session";
 import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
 import { cn } from "@/lib/utils";
 import {
+  type AccountDeletionConflictDetails,
+  type AccountDeletionWorkspaceBlocker,
   deleteCurrentAccount,
+  SettingsApiError,
   updateCurrentProfile,
   updateCurrentSettings
 } from "@/features/settings/api/client";
@@ -262,6 +265,12 @@ function AccountView(props: UserDialogProps) {
   >("idle");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [accountDeleteError, setAccountDeleteError] = useState<string | null>(
+    null
+  );
+  const [accountDeleteBlockers, setAccountDeleteBlockers] = useState<
+    AccountDeletionWorkspaceBlocker[]
+  >([]);
   const initials = getInitials(displayName, email);
 
   useEffect(() => {
@@ -307,6 +316,8 @@ function AccountView(props: UserDialogProps) {
     if (!authSession) return;
     setActionStatus("deleting");
     setNotice(null);
+    setAccountDeleteError(null);
+    setAccountDeleteBlockers([]);
     try {
       if (isDevPreviewAccessToken(authSession.accessToken)) {
         setDeleteOpen(false);
@@ -317,10 +328,10 @@ function AccountView(props: UserDialogProps) {
       setDeleteOpen(false);
       await authSession.logout();
     } catch (error) {
-      setDeleteOpen(false);
-      setNotice(
-        error instanceof Error ? error.message : "계정을 탈퇴하지 못했습니다."
-      );
+      const message =
+        error instanceof Error ? error.message : "계정을 탈퇴하지 못했습니다.";
+      setAccountDeleteError(message);
+      setAccountDeleteBlockers(readAccountDeletionBlockers(error));
     } finally {
       setActionStatus("idle");
     }
@@ -476,16 +487,27 @@ function AccountView(props: UserDialogProps) {
 
       <div className="scroll-mt-8" id="account-danger">
         <DangerZone
-          description="계정을 탈퇴하면 개인 설정과 세션이 제거됩니다. 소유 중인 Workspace가 있으면 먼저 소유권을 이전하거나 삭제해야 합니다."
+          description="계정을 탈퇴하면 참여 중인 Workspace에서는 자동으로 나갑니다. 본인만 남은 소유 Workspace는 자동 삭제하며, 다른 멤버나 진행 중인 작업이 있으면 먼저 정리해야 합니다."
           onAction={() => {
             setDeleteConfirmation("");
+            setAccountDeleteError(null);
+            setAccountDeleteBlockers([]);
             setDeleteOpen(true);
           }}
           title="계정 탈퇴"
         />
       </div>
 
-      <AlertDialog onOpenChange={setDeleteOpen} open={deleteOpen}>
+      <AlertDialog
+        onOpenChange={(nextOpen) => {
+          setDeleteOpen(nextOpen);
+          if (!nextOpen) {
+            setAccountDeleteError(null);
+            setAccountDeleteBlockers([]);
+          }
+        }}
+        open={deleteOpen}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-destructive/10 text-destructive">
@@ -493,7 +515,8 @@ function AccountView(props: UserDialogProps) {
             </AlertDialogMedia>
             <AlertDialogTitle>정말 계정을 탈퇴할까요?</AlertDialogTitle>
             <AlertDialogDescription>
-              이 작업은 되돌릴 수 없습니다. 확인하려면 아래에
+              참여 중인 Workspace에서는 자동으로 나가고, 혼자 소유한 Workspace는
+              삭제가 예약됩니다. 이 작업은 되돌릴 수 없습니다. 확인하려면 아래에
               <strong className="text-foreground"> 계정 탈퇴</strong>를 입력하세요.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -503,13 +526,33 @@ function AccountView(props: UserDialogProps) {
             placeholder="계정 탈퇴"
             value={deleteConfirmation}
           />
+          {accountDeleteError ? (
+            <div
+              className="grid gap-2 text-sm font-medium text-destructive"
+              role="alert"
+            >
+              <p>{accountDeleteError}</p>
+              {accountDeleteBlockers.length > 0 ? (
+                <ul className="grid list-disc gap-1 pl-5">
+                  {accountDeleteBlockers.map((workspace) => (
+                    <li key={workspace.workspaceId}>
+                      {workspace.name}: {accountDeletionBlockerLabel(workspace)}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction
               disabled={
                 deleteConfirmation !== "계정 탈퇴" || actionStatus !== "idle"
               }
-              onClick={() => void handleDeleteAccount()}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleDeleteAccount();
+              }}
               variant="destructive"
             >
               {actionStatus === "deleting" ? (
@@ -1249,6 +1292,37 @@ function DangerZone({
       </CardFooter>
     </Card>
   );
+}
+
+function readAccountDeletionBlockers(
+  error: unknown
+): AccountDeletionWorkspaceBlocker[] {
+  if (!(error instanceof SettingsApiError) || error.status !== 409) {
+    return [];
+  }
+  const details = error.details as Partial<AccountDeletionConflictDetails> | null;
+  return Array.isArray(details?.blockedWorkspaces)
+    ? details.blockedWorkspaces
+    : [];
+}
+
+function accountDeletionBlockerLabel(
+  workspace: AccountDeletionWorkspaceBlocker
+): string {
+  const labels: string[] = [];
+  if (workspace.reasons.includes("MEMBERS_REMAIN")) {
+    labels.push(`다른 멤버 ${workspace.memberCount}명`);
+  }
+  if (workspace.reasons.includes("GITHUB_INSTALLATION_ACTIVE")) {
+    labels.push("GitHub App 연결");
+  }
+  if (workspace.reasons.includes("MEETING_ACTIVE")) {
+    labels.push("진행 중인 회의");
+  }
+  if (workspace.reasons.includes("SYNC_ACTIVE")) {
+    labels.push("진행 중인 동기화");
+  }
+  return labels.join(", ");
 }
 
 function getInitials(name: string, email: string) {

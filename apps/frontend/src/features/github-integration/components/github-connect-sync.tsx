@@ -99,6 +99,7 @@ export function GithubConnectSync({
               동기화 대상
             </span>
             <Select
+              disabled={isLoading || isSyncing}
               onValueChange={(value) => {
                 if (value) onSyncTargetChange(value as GithubSyncTarget);
               }}

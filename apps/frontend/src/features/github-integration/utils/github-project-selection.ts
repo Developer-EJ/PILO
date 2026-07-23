@@ -19,6 +19,13 @@ type GithubActiveBoardSelectionInput = {
   preferredProjectV2Id?: string;
 };
 
+type ActivateDefaultGithubBoardInput = {
+  projects: ReadonlyArray<Pick<GithubProjectV2, "id" | "repositoryIds">>;
+  repositoryId: string;
+  preferredProjectV2Id?: string;
+  activate: (source: GithubActiveBoardSelection) => Promise<unknown>;
+};
+
 export type GithubActiveBoardSelection = {
   repositoryId: string;
   projectV2Id: string;
@@ -88,4 +95,24 @@ export function resolveGithubActiveBoardSelection({
       allowFallbackSelection: false
     })
   };
+}
+
+export async function activateDefaultGithubBoardForRepository({
+  projects,
+  repositoryId,
+  preferredProjectV2Id,
+  activate
+}: ActivateDefaultGithubBoardInput): Promise<string> {
+  const projectV2Id = selectProjectV2IdForRepository({
+    projects,
+    preferredProjectV2Id,
+    repositoryId
+  });
+
+  if (!projectV2Id) {
+    return "";
+  }
+
+  await activate({ repositoryId, projectV2Id });
+  return projectV2Id;
 }

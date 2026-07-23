@@ -231,6 +231,150 @@ const claim = {
 }
 
 {
+  const ownedWorkspaces = [
+    {
+      id: "66666666-6666-4666-8666-666666666666",
+      name: "Solo workspace",
+      icon: null,
+      owner_user_id: "55555555-5555-4555-8555-555555555555",
+      role: "owner",
+      deletion_status: "active",
+      created_at: "2026-07-23T00:00:00.000Z",
+      updated_at: "2026-07-23T00:00:00.000Z"
+    },
+    {
+      id: "77777777-7777-4777-8777-777777777777",
+      name: "Already deleting",
+      icon: null,
+      owner_user_id: "55555555-5555-4555-8555-555555555555",
+      role: "owner",
+      deletion_status: "deleting",
+      created_at: "2026-07-23T00:00:00.000Z",
+      updated_at: "2026-07-23T00:00:00.000Z"
+    }
+  ];
+  const calls = [];
+  const transaction = {
+    async query(text) {
+      calls.push({ method: "query", text });
+      assert.match(text, /wm\.role = 'owner'/);
+      assert.match(text, /ORDER BY w\.id/);
+      assert.match(text, /FOR UPDATE OF w/);
+      return ownedWorkspaces;
+    },
+    async queryOne(text, values) {
+      calls.push({ method: "queryOne", text, values });
+      if (text.includes("other_member_count")) {
+        return {
+          other_member_exists: false,
+          other_member_count: 0,
+          github_installation_exists: false,
+          active_meeting_exists: false,
+          active_sync_exists: false
+        };
+      }
+      if (text.includes("INSERT INTO workspace_deletion_jobs")) {
+        return { id: "88888888-8888-4888-8888-888888888888" };
+      }
+      return null;
+    },
+    async execute(text, values) {
+      calls.push({ method: "execute", text, values });
+      return { rowCount: 1 };
+    }
+  };
+  const workspace = new WorkspaceService(
+    {},
+    {},
+    { requestSweep: () => undefined }
+  );
+
+  assert.deepEqual(
+    await workspace.prepareOwnedWorkspacesForAccountDeletion(
+      transaction,
+      "55555555-5555-4555-8555-555555555555"
+    ),
+    { blockedWorkspaces: [], shouldRequestSweep: true }
+  );
+  assert.equal(
+    calls.filter(({ text }) => text.includes("INSERT INTO workspace_deletion_jobs"))
+      .length,
+    1
+  );
+  assert.equal(
+    calls.some(
+      ({ text, values }) =>
+        text.includes("deletion_status = 'deleting'") &&
+        values?.[0] === ownedWorkspaces[0].id
+    ),
+    true
+  );
+}
+
+{
+  const workspaceId = "99999999-9999-4999-8999-999999999999";
+  const calls = [];
+  const transaction = {
+    async query(text) {
+      calls.push({ method: "query", text });
+      return [
+        {
+          id: workspaceId,
+          name: "Members remain",
+          icon: null,
+          owner_user_id: "55555555-5555-4555-8555-555555555555",
+          role: "owner",
+          deletion_status: "active",
+          created_at: "2026-07-23T00:00:00.000Z",
+          updated_at: "2026-07-23T00:00:00.000Z"
+        }
+      ];
+    },
+    async queryOne(text) {
+      calls.push({ method: "queryOne", text });
+      return {
+        other_member_exists: true,
+        other_member_count: 2,
+        github_installation_exists: false,
+        active_meeting_exists: false,
+        active_sync_exists: false
+      };
+    },
+    async execute(text) {
+      calls.push({ method: "execute", text });
+      return { rowCount: 1 };
+    }
+  };
+  const workspace = new WorkspaceService(
+    {},
+    {},
+    { requestSweep: () => undefined }
+  );
+
+  assert.deepEqual(
+    await workspace.prepareOwnedWorkspacesForAccountDeletion(
+      transaction,
+      "55555555-5555-4555-8555-555555555555"
+    ),
+    {
+      blockedWorkspaces: [
+        {
+          workspaceId,
+          name: "Members remain",
+          memberCount: 2,
+          reasons: ["MEMBERS_REMAIN"]
+        }
+      ],
+      shouldRequestSweep: false
+    }
+  );
+  assert.equal(
+    calls.some(({ text }) => text.includes("INSERT INTO workspace_deletion_jobs")),
+    false
+  );
+}
+
+{
   const database = new FakeDatabase({ claim });
   const client = new FakeS3Client();
   const service = new TestWorkspaceDeletionService(database, client);
@@ -320,6 +464,10 @@ assert.match(
 assert.match(workspaceServiceSource, /deletion_status = 'deleting'/);
 assert.match(deletionServiceSource, /FOR UPDATE SKIP LOCKED/);
 assert.match(deletionServiceSource, /target\.status <> 'completed'/);
+assert.match(
+  deletionServiceSource,
+  /workspace_membership_revocation_outbox/
+);
 assert.doesNotMatch(
   deletionServiceSource,
   /logger\.(?:log|warn|error)\([^)]*(?:object_key|bucket)/s

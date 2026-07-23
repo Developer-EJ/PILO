@@ -37,11 +37,11 @@ assert.match(panel, /repositoryId:\s*selectedRepositoryId/);
 assert.match(panel, /selectedRepositoryIdRef\.current = repositoryId/);
 assert.match(
   panel,
-  /if \(selectedRepositoryIdRef\.current !== repositoryId\) \{[\s\S]{0,80}return;/
+  /if \(selectedRepositoryIdRef\.current !== repositoryId\) \{[\s\S]{0,80}return null;/
 );
 assert.match(
   panel,
-  /async function handleDiscoverGithubProjectV2[\s\S]{0,1200}const discovery = await[\s\S]{0,600}if \(selectedRepositoryIdRef\.current !== repositoryId\) \{\s*return;[\s\S]{0,400}if \(discovery\.connectionRequired\)/
+  /async function handleDiscoverGithubProjectV2[\s\S]{0,1200}const discovery = await[\s\S]{0,600}if \(selectedRepositoryIdRef\.current !== repositoryId\) \{\s*return null;[\s\S]{0,400}if \(discovery\.connectionRequired\)/
 );
 assert.match(
   panel,
@@ -79,7 +79,12 @@ assert.match(
 );
 assert.match(
   repositorySelectionHandler,
-  /handleDiscoverGithubProjectV2\(repository\.installationId, repositoryId\)/
+  /handleDiscoverGithubProjectV2\([\s\S]{0,120}repository\.installationId,[\s\S]{0,80}repositoryId/
+);
+assert.match(
+  repositorySelectionHandler,
+  /activateDefaultGithubBoardForRepository\([\s\S]*?activateWorkspaceBoardSource/,
+  "selecting a repository must persist its default ProjectV2 as the active Board"
 );
 const projectActivationHandler =
   panel.match(

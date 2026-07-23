@@ -1795,6 +1795,12 @@ def normalize_agent_planner_decision(
         current_date=current_date,
         timezone=timezone,
     )
+    decision = _normalize_named_meeting_report_read_selector(
+        decision,
+        job,
+        prompt=prompt,
+        routed_capability_ids=routed_capability_ids,
+    )
     decision = _normalize_meeting_report_hybrid_title_lookup(
         decision,
         prompt=prompt,
@@ -3166,6 +3172,70 @@ def _meeting_candidate_resume_clarification(field: str) -> AgentPlannerDecision:
     )
 
 
+def _normalize_named_meeting_report_read_selector(
+    decision: AgentPlannerDecision,
+    job: AgentRunJob,
+    *,
+    prompt: str,
+    routed_capability_ids: tuple[str, ...],
+) -> AgentPlannerDecision:
+    if (
+        MEETING_REPORT_HYBRID_CAPABILITY_ID in routed_capability_ids
+        or decision.status not in {"tool_candidate", "needs_clarification"}
+        or not _is_named_meeting_report_summary_request(prompt)
+    ):
+        return decision
+
+    titles = _explicit_meeting_report_titles(prompt)
+    if len(titles) != 1:
+        return decision
+    if (
+        decision.status == "needs_clarification"
+        and "meeting_report_date_range" in decision.missing_fields
+        and _has_unresolved_meeting_report_date_expression(
+            _meeting_report_prompt_without_report_titles(prompt)
+        )
+    ):
+        return decision
+
+    available_tool_names = {tool.name for tool in job.tools}
+    if "summarize_meeting_report" in available_tool_names:
+        tool_name = "summarize_meeting_report"
+    elif (
+        decision.status == "tool_candidate"
+        and decision.tool_name in {"get_meeting_report", "list_meeting_reports"}
+        and decision.tool_name in available_tool_names
+    ):
+        tool_name = decision.tool_name
+    elif "get_meeting_report" in available_tool_names:
+        tool_name = "get_meeting_report"
+    elif "list_meeting_reports" in available_tool_names:
+        tool_name = "list_meeting_reports"
+    else:
+        return decision
+
+    tool_input: dict[str, object] = {}
+    if decision.status == "tool_candidate" and decision.tool_name == tool_name:
+        sections = decision.tool_input.get("sections")
+        if tool_name == "summarize_meeting_report" and isinstance(sections, list):
+            tool_input["sections"] = sections
+        for selector_key in ("from", "to"):
+            selector_value = decision.tool_input.get(selector_key)
+            if isinstance(selector_value, str) and selector_value.strip():
+                tool_input[selector_key] = selector_value
+    tool_input["reportTitle"] = titles[0][:500]
+    return AgentPlannerDecision(
+        status="tool_candidate",
+        message="명확한 회의록 표시 제목으로 요청한 내용을 조회합니다.",
+        final_answer_draft="해당 제목의 회의록 내용을 확인합니다.",
+        tool_name=tool_name,
+        tool_input=tool_input,
+        requires_confirmation=False,
+        missing_fields=(),
+        unsupported_reason=None,
+    )
+
+
 def _normalize_meeting_report_relative_date_query(
     decision: AgentPlannerDecision,
     job: AgentRunJob,
@@ -3243,9 +3313,11 @@ def _normalize_meeting_report_relative_date_query(
 
 def _is_meeting_report_read_request(prompt: str) -> bool:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip().lower()
-    if not re.search(r"(?:회의록|미팅\s*(?:보고서|리포트)|meeting\s*report)", normalized_prompt):
-        return False
-    return bool(re.search(r"(?:보여|알려|조회|목록|확인|찾아|요약)", normalized_prompt))
+    explicit_report_request = re.search(
+        r"(?:회의록|미팅\s*(?:보고서|리포트)|meeting\s*report)",
+        normalized_prompt,
+    ) and re.search(r"(?:보여|알려|조회|목록|확인|찾아|요약)", normalized_prompt)
+    return bool(explicit_report_request or _is_named_meeting_report_summary_request(prompt))
 
 
 def _supported_meeting_report_selector(
@@ -3281,7 +3353,8 @@ def _supported_meeting_report_selector(
             timezone,
         )
 
-    if _has_unresolved_meeting_report_date_expression(normalized_prompt):
+    date_expression_prompt = _meeting_report_prompt_without_report_titles(normalized_prompt)
+    if _has_unresolved_meeting_report_date_expression(date_expression_prompt):
         return None
 
     if re.search(r"(?<![가-힣])지난\s*주(?!말)", normalized_prompt):
@@ -3388,6 +3461,13 @@ def _has_unresolved_meeting_report_date_expression(prompt: str) -> bool:
         or re.search(r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일", remaining_prompt)
         or re.search(r"\b\d+\s*(?:일|주|개월|달|년)\b", remaining_prompt)
     )
+
+
+def _meeting_report_prompt_without_report_titles(prompt: str) -> str:
+    normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
+    for report_title in _explicit_meeting_report_titles(normalized_prompt):
+        normalized_prompt = normalized_prompt.replace(report_title, " ", 1)
+    return re.sub(r"\s+", " ", normalized_prompt).strip()
 
 
 def _has_invalid_meeting_report_count_expression(prompt: str) -> bool:
@@ -3696,6 +3776,11 @@ def _normalize_meeting_report_search_routing(
     *,
     prompt: str,
 ) -> AgentRoutingDecision:
+    decision = _normalize_named_meeting_report_summary_routing(
+        decision,
+        catalog,
+        prompt=prompt,
+    )
     if decision.status != "routed" or not _is_meeting_content_search_request(prompt):
         return decision
     if (
@@ -3762,10 +3847,94 @@ def _normalize_meeting_report_search_routing(
     )
 
 
+def _normalize_named_meeting_report_summary_routing(
+    decision: AgentRoutingDecision,
+    catalog: ToolCapabilityCatalog,
+    *,
+    prompt: str,
+) -> AgentRoutingDecision:
+    if decision.status not in {"routed", "needs_clarification"} or not (
+        _is_named_meeting_report_summary_request(prompt)
+    ):
+        return decision
+
+    titles = _explicit_meeting_report_titles(prompt)
+    named_read_capability_ids = {
+        MEETING_REPORT_LIST_CAPABILITY_ID,
+        "meeting.report.detail",
+        "meeting.report.summary",
+    }
+    if decision.status == "routed" and not named_read_capability_ids.intersection(
+        decision.capability_ids
+    ):
+        return decision
+    if len(titles) > 1:
+        return replace(
+            decision,
+            status="needs_clarification",
+            domains=(),
+            capability_ids=(),
+            intent_summary="여러 회의록 제목 중 먼저 확인할 범위를 선택해야 합니다.",
+            confidence="high",
+            clarification_question=(
+                "여러 회의록 제목이 함께 지정되어 있습니다. "
+                "먼저 내용을 확인할 회의록 제목 하나를 선택해 주세요."
+            ),
+            unsupported_reason=None,
+        )
+    if len(titles) != 1:
+        return decision
+
+    capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
+    target = capability_by_id.get("meeting.report.summary")
+    if target is None or target.availability != "supported":
+        return decision
+    normalized_ids = (
+        ("meeting.report.summary",)
+        if decision.status == "needs_clarification"
+        else tuple(
+            dict.fromkeys(
+                "meeting.report.summary" if value in named_read_capability_ids else value
+                for value in decision.capability_ids
+            )
+        )
+    )
+    normalized_capabilities = [
+        capability_by_id[value] for value in normalized_ids if value in capability_by_id
+    ]
+    return replace(
+        decision,
+        status="routed",
+        domains=tuple(dict.fromkeys(capability.domain for capability in normalized_capabilities)),
+        capability_ids=normalized_ids,
+        intent_summary="명확한 표시 제목의 회의록 요약 내용을 조회합니다.",
+        confidence="high",
+        clarification_question=None,
+        unsupported_reason=None,
+    )
+
+
+def _is_named_meeting_report_summary_request(prompt: str) -> bool:
+    titles = _explicit_meeting_report_titles(prompt)
+    if not titles or _is_meeting_content_search_request(prompt):
+        return False
+    normalized = re.sub(r"\s+", " ", prompt).strip().lower()
+    if re.search(r"(?:상세|열어)", normalized):
+        return False
+    return bool(
+        re.search(
+            r"(?:내용|요약|요점|핵심|논의\s*사항|결정\s*사항|후속\s*작업|회의록)",
+            normalized,
+        )
+        and re.search(r"(?:알려|보여|뭐|무엇|요약|정리|설명)", normalized)
+    )
+
+
 def _is_meeting_content_search_request(prompt: str) -> bool:
     normalized = re.sub(r"\s+", " ", prompt).strip().lower()
     if not re.search(
-        r"(?:회의록|회의|미팅|meeting|대화|발언|트랜스크립트|transcript)",
+        r"(?:회의록|회의|미팅|meeting|스크럼|스탠드\s*업|stand[\s-]?up|"
+        r"대화|발언|트랜스크립트|transcript)",
         normalized,
     ):
         return False
@@ -3909,7 +4078,116 @@ def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:
     for index, (_start, _end, title) in enumerate(spans):
         if index in explicit_indexes and title not in candidates:
             candidates.append(title)
+    for title in _natural_meeting_report_titles(normalized):
+        if title not in candidates:
+            candidates.append(title)
     return tuple(candidates)
+
+
+_NATURAL_MEETING_TITLE_KIND = (
+    r"(?:회의|미팅|스크럼|스탠드\s*업|stand[\s-]?up|데일리|싱크|sync|회고)"
+)
+
+
+def _natural_meeting_report_titles(prompt: str) -> tuple[str, ...]:
+    normalized = re.sub(r"\s+", " ", prompt).strip()
+    patterns = (
+        re.compile(
+            rf"^(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND})\s*"
+            r"(?:회의록\s*)?(?:의\s*)?"
+            r"(?:내용|요약|요점|핵심|논의\s*사항|결정\s*사항|후속\s*작업)"
+            r"(?:이|가|은|는|을|를|과|와|\s|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            rf"^(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND})\s+"
+            r"회의록(?:이|가|은|는|을|를)?\s*"
+            r"(?:알려|보여|확인|찾아|열어|요약|정리|뭐|무엇)",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            rf"^(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND})\s*" r"(?:회의록\s*)?에서",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            rf"^(?:회의록\s*)?제목(?:이|은|는)?\s*[:=]?\s*"
+            rf"(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND})\s*"
+            r"(?:이라는|라는|이란|란|인)\s*회의록",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(normalized)
+        if match is None:
+            continue
+        raw_title = re.sub(r"\s+", " ", match.group("title")).strip(" ,.:;\"'‘’“”")
+        raw_title = re.sub(r"^(?:혹시|그러면|그럼|저기)\s+", "", raw_title)
+        raw_title = _strip_natural_meeting_title_date_prefix(raw_title)
+        parts = [
+            re.sub(r"\s+", " ", value).strip()
+            for value in re.split(
+                r"\s*(?:와|과|및|하고|그리고)\s*",
+                raw_title,
+                flags=re.IGNORECASE,
+            )
+        ]
+        if len(parts) > 1 and all(
+            re.search(rf"{_NATURAL_MEETING_TITLE_KIND}$", value, re.IGNORECASE) for value in parts
+        ):
+            candidates = parts
+        else:
+            candidates = [raw_title]
+        filtered = tuple(
+            value
+            for value in candidates
+            if value and not _is_generic_meeting_report_title_candidate(value)
+        )
+        if filtered:
+            return tuple(dict.fromkeys(filtered))
+    return ()
+
+
+def _strip_natural_meeting_title_date_prefix(value: str) -> str:
+    date_prefix = re.compile(
+        r"^(?:"
+        r"\d{4}-\d{1,2}-\d{1,2}|"
+        r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일|"
+        r"오늘|어제|내일|모레|글피|"
+        r"작년|올해|내년|"
+        r"(?:지지난|저저번|지난|저번|이번|다음|다다음)\s*"
+        r"(?:주말|주|달|월|년)|"
+        r"최근\s*7\s*일|며칠\s*전|"
+        r"(?:\d+|한|두|세|네)\s*(?:일|주|개월|달|년)\s*(?:전|후)"
+        r")\s+",
+        re.IGNORECASE,
+    )
+    return date_prefix.sub("", value, count=1).strip()
+
+
+def _is_generic_meeting_report_title_candidate(value: str) -> bool:
+    normalized = re.sub(r"\s+", " ", value).strip().lower()
+    if re.search(
+        r"(?:논의|토론|언급|발언|이야기|얘기|다뤘|검토|제안|의견|우려|"
+        r"누가|무엇|뭐|어떻게|왜|언제|했는지|하는지|됐는지|인지|"
+        r"이유|원인|배경|근거|경위|사유|관련|관한|관해|대해|주제로|"
+        r"선택|결정|합의|담당|맡기|미뤄|밀려|연기|지연|변경)",
+        normalized,
+    ):
+        return True
+    if re.fullmatch(_NATURAL_MEETING_TITLE_KIND, normalized, re.IGNORECASE):
+        return True
+    if re.match(
+        r"^(?:가장\s*)?(?:최근|지난|저번|이전|이번|오늘|어제|직전|마지막)(?:\s|$)",
+        normalized,
+    ):
+        return True
+    if re.fullmatch(
+        rf"(?:월|화|수|목|금|토|일)요일\s*{_NATURAL_MEETING_TITLE_KIND}",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
 
 
 def _meeting_report_hybrid_has_shared_lookup(
@@ -3939,7 +4217,11 @@ def _agent_router_system_prompt() -> str:
         "combined with a question about actual speech, a decision reason, or activity evidence "
         "must use the catalog's hybrid title-and-evidence capability; a content-only Meeting "
         "search must use the direct evidence capability, and a title-only detail request must "
-        "not use hybrid search. Do not combine the hybrid capability with another capability "
+        "not use hybrid search. A clear natural name before '내용' or '회의록', such as "
+        "'금요일 데일리 스크럼 내용 알려줘', is a named report summary even without quotes; "
+        "do not reinterpret a weekday inside that name as a date selector. "
+        "A request for '최근 회의 요약' still means the latest report without a title selector. "
+        "Do not combine the hybrid capability with another capability "
         "whose chain uses list_meeting_reports; ask which request to handle first so separate "
         "list inputs cannot be confused. Use unsupported only when the "
         "catalog explicitly cannot satisfy the request. Write intentSummary and "
@@ -4323,6 +4605,10 @@ def _agent_planner_system_prompt() -> str:
         "App Server defaults it to the latest one by createdAt descending. For a MeetingReport "
         "detail or summary request, use get_meeting_report or summarize_meeting_report with "
         "no input for the latest report, or with from, to, status, or roomName selectors. "
+        "For a clear natural report name before '내용' or '회의록', pass that complete name as "
+        "reportTitle even when it is not quoted; do not move a weekday inside the name into a "
+        "date selector. Keep '최근 회의 요약과 결정사항' unscoped so it resolves the latest "
+        "report. "
         "When the request contains a clear MeetingReport title plus a question about actual "
         "speech, a decision reason, or Activity evidence, first call list_meeting_reports with "
         "only the explicit reportTitle and any explicit status/date/room filters; omit limit so "
