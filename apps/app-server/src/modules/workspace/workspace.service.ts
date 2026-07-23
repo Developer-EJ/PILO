@@ -98,6 +98,7 @@ export interface AccountDeletionWorkspaceBlocker {
 
 export interface AccountDeletionWorkspacePreparation {
   blockedWorkspaces: AccountDeletionWorkspaceBlocker[];
+  workspaceIdsToDelete: string[];
   shouldRequestSweep: boolean;
 }
 
@@ -463,22 +464,34 @@ export class WorkspaceService {
     }
 
     if (blockedWorkspaces.length > 0) {
-      return { blockedWorkspaces, shouldRequestSweep: false };
-    }
-
-    for (const workspace of ownedWorkspaces) {
-      if (workspace.deletion_status === "deleting") continue;
-      await this.enqueueWorkspaceDeletionInTransaction(
-        transaction,
-        workspace.id,
-        currentUserId
-      );
+      return {
+        blockedWorkspaces,
+        workspaceIdsToDelete: [],
+        shouldRequestSweep: false
+      };
     }
 
     return {
       blockedWorkspaces: [],
+      workspaceIdsToDelete: ownedWorkspaces
+        .filter(workspace => workspace.deletion_status === "active")
+        .map(workspace => workspace.id),
       shouldRequestSweep: ownedWorkspaces.length > 0
     };
+  }
+
+  async scheduleOwnedWorkspacesForAccountDeletion(
+    transaction: DatabaseTransaction,
+    currentUserId: string,
+    workspaceIds: string[]
+  ): Promise<void> {
+    for (const workspaceId of workspaceIds) {
+      await this.enqueueWorkspaceDeletionInTransaction(
+        transaction,
+        workspaceId,
+        currentUserId
+      );
+    }
   }
 
   requestDeletionSweep(): void {

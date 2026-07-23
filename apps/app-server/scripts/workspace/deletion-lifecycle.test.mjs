@@ -294,7 +294,22 @@ const claim = {
       transaction,
       "55555555-5555-4555-8555-555555555555"
     ),
-    { blockedWorkspaces: [], shouldRequestSweep: true }
+    {
+      blockedWorkspaces: [],
+      workspaceIdsToDelete: [ownedWorkspaces[0].id],
+      shouldRequestSweep: true
+    }
+  );
+  assert.equal(
+    calls.filter(({ text }) => text.includes("INSERT INTO workspace_deletion_jobs"))
+      .length,
+    0
+  );
+
+  await workspace.scheduleOwnedWorkspacesForAccountDeletion(
+    transaction,
+    "55555555-5555-4555-8555-555555555555",
+    [ownedWorkspaces[0].id]
   );
   assert.equal(
     calls.filter(({ text }) => text.includes("INSERT INTO workspace_deletion_jobs"))
@@ -365,6 +380,7 @@ const claim = {
           reasons: ["MEMBERS_REMAIN"]
         }
       ],
+      workspaceIdsToDelete: [],
       shouldRequestSweep: false
     }
   );
