@@ -1387,9 +1387,12 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 - Agent는 MeetingReport 목록/상세를 읽고 요약할 수 있다.
 - 목록 응답의 요약 필드를 우선 사용한다.
 - `list_meeting_reports`는 `from`, `to`, `status`, Agent 내부 `reportTitle`, `roomName`, `limit`을
-  지원한다. `reportTitle`은 1~500자의 Agent 전용 exact selector이며
+  지원한다. `reportTitle`은 1~500자의 Agent 전용 exact-first selector이며
   `COALESCE(user_title, title)`에 기존 `MeetingService`의 앞뒤 공백 제거, 연속 공백 축약, 대소문자
-  정규화를 그대로 적용한다. status/date/roomName/limit과 조합할 수 있다. 제목 selector 없이 기간과
+  정규화를 그대로 적용한다. exact 결과가 0건일 때만 공백, 콜론, 대시 등 구분자 경계로 이어지는
+  제목 prefix 후보를 최대 selector 한도 안에서 조회한다. 따라서 `금요일 데일리 스크럼`은
+  `금요일 데일리 스크럼: 워커 분리, ...`를 후보로 찾지만 제목 중간의 임의 substring이나 fuzzy
+  match는 허용하지 않는다. status/date/roomName/limit과 조합할 수 있다. 제목 selector 없이 기간과
   개수를 생략하면 `createdAt DESC, id ASC` 정렬의 최신 report 1개를 반환한다. `reportTitle`과
   `roomName`은 Agent 내부 도메인 조회 전용이며 공개 Meeting REST API의 request/response/endpoint는
   변경하지 않는다.
@@ -1446,6 +1449,11 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   발언, 결정 이유, 담당자 같은 근거 요구가 함께 있으면 evidence search를 유지한다. 반대로 “회의록
   요약해줘”처럼 별도 근거 요구가 없는 목록, 상태, 제목 상세, 단순 요약 요청에는 transcript 검색을
   추가하지 않는다.
+- `search_meeting_transcript`는 embedding 유사도 후보와 함께 사용자 query에서 추출한 최대 8개의
+  bounded literal term을 transcript/Activity의 안전한 chunk 본문에서 조회한다. literal 일치 후보는
+  낮은 embedding 점수만으로 탈락시키지 않고 우선 보존하며, 권한 경계와 최신 completed index 조건은
+  vector 후보와 동일하게 적용한다. 제목을 제거한 hybrid fallback query에 `내용`, `요약` 같은 일반
+  형식 표현만 남으면 요청한 제목을 query로 복구한다.
 - 순번이 있는 결정이나 “결정사항의 직접 근거”처럼 MeetingReport decision item에 직접 연결된 근거를
   요구하면 Router가 선택한 `meeting.decision.evidence`를 유지한다. 반면 “왜 그렇게 결정했는지”처럼
   일반 대화 맥락의 결정 이유를 묻는 요청은 제목 유무에 따라 evidence search 또는 hybrid search를 쓴다.

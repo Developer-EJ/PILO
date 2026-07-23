@@ -5815,6 +5815,25 @@ def test_hybrid_search_exact_zero_falls_back_to_workspace_content_query() -> Non
     }
 
 
+def test_hybrid_search_exact_zero_uses_title_when_only_generic_content_word_remains() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_transcript",
+            tool_input={"query": "금요일 데일리 스크럼 내용"},
+        ),
+        _meeting_transcript_search_job(),
+        prompt="금요일 데일리 스크럼 내용 알려줘",
+        planning_context=(
+            "user: 금요일 데일리 스크럼 내용 알려줘\n"
+            + meeting_hybrid_lookup_line("금요일 데일리 스크럼", 0, reports=[])
+        ),
+        routed_capability_ids=("meeting.report.hybrid_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {"query": "금요일 데일리 스크럼"}
+
+
 def test_unrelated_zero_count_list_is_not_hybrid_workspace_fallback() -> None:
     normalized = normalize_agent_planner_decision(
         planner_decision(

@@ -2338,6 +2338,61 @@ async function assertError(action, messagePattern) {
     new FakeDatabase({
       queryRows: [
         (text, values) => {
+          assert.match(
+            text,
+            /lower\(regexp_replace\(BTRIM\(COALESCE\(meeting_reports\.user_title, meeting_reports\.title\)\), '\\s\+', ' ', 'g'\)\) = \$3/
+          );
+          assert.deepEqual(values, [
+            workspaceId,
+            currentUserId,
+            "금요일 데일리 스크럼",
+            5
+          ]);
+          return [];
+        },
+        (text, values) => {
+          assert.match(
+            text,
+            /left\(lower\(regexp_replace\(BTRIM\(COALESCE\(meeting_reports\.user_title, meeting_reports\.title\)\), '\\s\+', ' ', 'g'\)\), char_length\(\$3\)\) = \$3/
+          );
+          assert.match(text, /substring\(lower\(regexp_replace/);
+          assert.deepEqual(values, [
+            workspaceId,
+            currentUserId,
+            "금요일 데일리 스크럼",
+            5
+          ]);
+          return [
+            meetingReportRow({
+              id: reportId,
+              title:
+                "금요일 데일리 스크럼: 워커 분리, 배포/롤백 검토",
+              user_title:
+                "금요일 데일리 스크럼: 워커 분리, 배포/롤백 검토"
+            })
+          ];
+        }
+      ]
+    })
+  );
+
+  const result = await service.listReportsForAgent(currentUserId, workspaceId, {
+    reportTitle: "금요일 데일리 스크럼",
+    limit: 4
+  });
+
+  assert.equal(database.queries.length, 2);
+  assert.equal(
+    result.reports[0].title,
+    "금요일 데일리 스크럼: 워커 분리, 배포/롤백 검토"
+  );
+}
+
+{
+  const { database, service } = createSubject(
+    new FakeDatabase({
+      queryRows: [
+        (text, values) => {
           assert.match(text, /LEFT JOIN meeting_rooms/);
           assert.match(text, /ORDER BY meeting_reports\.created_at DESC/);
           assert.match(text, /LIMIT \$3/);
