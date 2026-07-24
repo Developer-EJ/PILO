@@ -204,6 +204,13 @@ const claim = {
     ),
     true
   );
+  const deletionTargetInsert = database.calls.find(({ text }) =>
+    text.includes("INSERT INTO workspace_deletion_targets")
+  );
+  assert.equal(
+    deletionTargetInsert.text.match(/\$2::uuid/g)?.length,
+    2
+  );
   assert.equal(
     database.calls.some(({ text }) =>
       text.includes("deletion_status = 'deleting'")
