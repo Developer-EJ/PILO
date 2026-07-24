@@ -2023,6 +2023,160 @@ function assertProviderEventDoesNotLeak(event) {
   const originalFetch = globalThis.fetch;
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetImmediate = globalThis.setImmediate;
+  const privateKeyPem = createPrivateKeyPem();
+  const refreshDeferred = createDeferred();
+  const timeoutCallbacks = [];
+  const timeoutHandles = [];
+  const graphqlRequestTokens = [];
+  const refreshSignals = [];
+  let tokenPosts = 0;
+  let graphqlCalls = 0;
+  let boundedGuardTriggered = false;
+
+  globalThis.setTimeout = (callback, delay) => {
+    assert.equal(delay, 30_000);
+    timeoutCallbacks.push(callback);
+    const handle = Symbol(`ProjectV2 shared refresh timeout ${timeoutCallbacks.length}`);
+    timeoutHandles.push(handle);
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    assert.ok(timeoutHandles.includes(handle));
+  };
+  globalThis.setImmediate = (callback, ...args) => originalSetImmediate(callback, ...args);
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      refreshSignals.push(options.signal);
+      if (tokenPosts === 1) {
+        return jsonResponse(201, {
+          token: "graphql-shared-timeout-token-0",
+          expires_at: "2026-07-04T13:00:00.000Z"
+        });
+      }
+
+      await refreshDeferred.promise;
+      return jsonResponse(201, {
+        token: "graphql-shared-timeout-token-1",
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    graphqlCalls += 1;
+    graphqlRequestTokens.push(options.headers?.Authorization);
+    if (graphqlCalls === 1) {
+      assert.equal(options.headers?.Authorization, "Bearer graphql-shared-timeout-token-0");
+      return jsonResponse(200, {
+        data: {
+          repository: {
+            projectsV2: {
+              nodes: [projectNode()],
+              pageInfo: {
+                hasNextPage: false,
+                endCursor: null
+              }
+            }
+          }
+        }
+      });
+    }
+
+    if (options.headers?.Authorization === "Bearer graphql-shared-timeout-token-0") {
+      return jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    assert.equal(options.headers?.Authorization, "Bearer graphql-shared-timeout-token-1");
+    return jsonResponse(200, {
+      data: {
+        repository: {
+          projectsV2: {
+            nodes: [projectNode()],
+            pageInfo: {
+              hasNextPage: false,
+              endCursor: null
+            }
+          }
+        }
+      }
+    });
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryProjectV2s(input);
+    const callerA = client.listRepositoryProjectV2s(input);
+    const callerB = client.listRepositoryProjectV2s(input);
+    await waitFor(() => tokenPosts === 2, "caller A should start shared refresh P1");
+    await waitFor(() => graphqlRequestTokens.length === 3, "caller B should receive T0 GraphQL 401 before joining P1");
+    assert.equal(tokenPosts, 2, "caller B must join P1 without a second refresh POST");
+    assert.equal(refreshSignals[1], undefined, "shared refresh token POST must not receive GraphQL AbortSignal");
+
+    timeoutCallbacks[1]();
+    await Promise.race([
+      assert.rejects(
+        () => callerA,
+        (error) => {
+          assert.equal(error?.response?.error?.message, "GitHub ProjectV2 discovery timed out");
+          return true;
+        }
+      ),
+      new Promise((resolve, reject) =>
+        originalSetImmediate(() => {
+          boundedGuardTriggered = true;
+          reject(new Error("caller A remained pending after its timeout callback"));
+        })
+      )
+    ]);
+
+    assert.equal(boundedGuardTriggered, false);
+    assert.equal(tokenPosts, 2, "caller A timeout must not cancel shared refresh P1");
+
+    const callerBStillPending = await Promise.race([
+      callerB.then(() => false, () => false),
+      new Promise((resolve) => originalSetImmediate(() => resolve(true)))
+    ]);
+    assert.equal(callerBStillPending, true, "caller B should remain pending while P1 is unresolved");
+
+    refreshDeferred.resolve();
+    const projectsB = await callerB;
+    assert.equal(projectsB[0]?.id, "PVT_kwDOExample");
+    assert.equal(tokenPosts, 2, "caller B should complete through the single shared refresh P1");
+
+    const laterProjects = await client.listRepositoryProjectV2s(input);
+    assert.equal(laterProjects[0]?.id, "PVT_kwDOExample");
+    assert.equal(tokenPosts, 2, "later caller should reuse T1 from completed shared refresh");
+    assert.deepEqual(graphqlRequestTokens, [
+      "Bearer graphql-shared-timeout-token-0",
+      "Bearer graphql-shared-timeout-token-0",
+      "Bearer graphql-shared-timeout-token-0",
+      "Bearer graphql-shared-timeout-token-1",
+      "Bearer graphql-shared-timeout-token-1"
+    ]);
+  } finally {
+    refreshDeferred.resolve();
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    globalThis.setImmediate = originalSetImmediate;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
   const privateKeyPem = createPrivateKeyPem();
   const timeoutHandle = Symbol("ProjectV2 GraphQL timeout");
   let timeoutCallback;

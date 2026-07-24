@@ -2526,10 +2526,14 @@ export class GithubAppClient {
       const initialUnauthorizedResponse = response;
       let refreshedToken: { token: string; expiresAt: string | null } | null = null;
       try {
-        refreshedToken = await this.createInstallationAccessToken(
-          auth.installationTokenRetry.input
+        refreshedToken = await this.awaitSharedPromiseWithSignal(
+          this.createInstallationAccessToken(auth.installationTokenRetry.input),
+          signal
         );
-      } catch {
+      } catch (error) {
+        if (this.isAbortError(error)) {
+          throw error;
+        }
         response = initialUnauthorizedResponse;
       }
 
@@ -2599,6 +2603,60 @@ export class GithubAppClient {
     const rateLimitRemaining = this.rateLimitRemaining(response);
     if (rateLimitRemaining !== null) this.observability?.emitRateLimitObserved(rateLimitRemaining);
     return data;
+  }
+
+  private async awaitSharedPromiseWithSignal<T>(
+    sharedPromise: Promise<T>,
+    signal?: AbortSignal
+  ): Promise<T> {
+    if (!signal) {
+      return sharedPromise;
+    }
+
+    sharedPromise.catch(() => undefined);
+
+    if (signal.aborted) {
+      throw this.abortError();
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
+      const settle = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+      const onAbort = () => {
+        settle(() => reject(this.abortError()));
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      sharedPromise.then(
+        (value) => settle(() => resolve(value)),
+        (error) => settle(() => reject(error))
+      );
+    });
+  }
+
+  private abortError(): Error {
+    if (typeof DOMException !== "undefined") {
+      return new DOMException("The operation was aborted", "AbortError");
+    }
+    const error = new Error("The operation was aborted");
+    error.name = "AbortError";
+    return error;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
   }
 
   private graphqlErrorContext(
