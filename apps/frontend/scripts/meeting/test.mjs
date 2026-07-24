@@ -420,6 +420,7 @@ assert.match(meetingStateRealtimeHook, /meeting:state:updated/);
 assert.match(meetingStateRealtimeHook, /meeting:subscribed/);
 assert.match(meetingStateRealtimeHook, /isMeetingStateRealtimeEvent/);
 assert.match(meetingStateRealtimeHook, /socket\.emit\("meeting:subscribe"/);
+assert.match(meetingStateRealtimeHook, /transports: \["websocket"\]/);
 assert.match(meetingStateInvalidationStore, /useMeetingStateInvalidation/);
 assert.match(meetingStateInvalidationStore, /reloadQueued/);
 assert.match(meetingConnectionActionStore, /enqueueMeetingConnectionAction/);
@@ -629,6 +630,7 @@ assert.match(meetingReportRealtimeHook, /workspaceId: normalizedWorkspaceId/);
 assert.match(meetingReportRealtimeHook, /socket\.on\("connect", subscribe\)/);
 assert.match(meetingReportRealtimeHook, /socket\.disconnect\(\)/);
 assert.match(meetingReportRealtimeHook, /isMeetingReportRealtimeEvent/);
+assert.match(meetingReportRealtimeHook, /transports: \["websocket"\]/);
 
 assert.match(meetingAudioPreflightHook, /useMeetingAudioPreflight/);
 assert.match(meetingAudioPreflightHook, /getUserMedia/);
