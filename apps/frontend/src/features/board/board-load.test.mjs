@@ -70,8 +70,8 @@ assert.match(
 
 assert.match(
   githubPanel,
-  /if\s*\(\s*projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id\s*\)\s*\{\s*body\.projectV2Id\s*=\s*selectedProjectV2Id;\s*\}/,
-  "Only explicit ProjectV2 sync targets should use the local Board ProjectV2 selection"
+  /if\s*\(\s*projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*browsingProjectV2Id\s*\)\s*\{\s*body\.projectV2Id\s*=\s*browsingProjectV2Id;\s*\}/,
+  "Only explicit ProjectV2 sync targets should use the browsing ProjectV2 selection"
 );
 assert.doesNotMatch(
   githubPanel,
@@ -126,11 +126,11 @@ assert.doesNotMatch(
 );
 assert.match(
   githubPanel,
-  /const\s+requiresSelectedRepository\s*=\s*syncTarget\s*!==\s*"source";\s*if\s*\(\s*requiresSelectedRepository\s*&&\s*!selectedRepositoryId\s*\)/,
+  /const\s+requiresSelectedRepository\s*=\s*syncTarget\s*!==\s*"source";\s*if\s*\(\s*requiresSelectedRepository\s*&&\s*!browsingRepositoryId\s*\)/,
   "Only source sync may run before a repository is selected"
 );
 assert.match(
   githubPanel,
-  /if\s*\(\s*requiresSelectedRepository\s*&&\s*selectedRepositoryId\s*\)\s*\{\s*body\.repositoryId\s*=\s*selectedRepositoryId;\s*\}/,
+  /if\s*\(\s*requiresSelectedRepository\s*&&\s*browsingRepositoryId\s*\)\s*\{\s*body\.repositoryId\s*=\s*browsingRepositoryId;\s*\}/,
   "Repository-scoped sync targets should include the selected repository"
 );
