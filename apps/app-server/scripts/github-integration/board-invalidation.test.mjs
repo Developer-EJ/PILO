@@ -98,9 +98,12 @@ function createHydrationDatabase() {
     }
   });
 
-  await executor.hydrateExistingBoardsForGithubProjectV2(
+  const invalidations = await executor.hydrateExistingBoardsForGithubProjectV2(
     createHydrationContext()
   );
+
+  assert.deepEqual(published, []);
+  await executor.publishBoardInvalidations(invalidations);
 
   assert.deepEqual(published, [
     {
@@ -124,8 +127,12 @@ function createHydrationDatabase() {
   console.error = () => {};
 
   try {
+    const invalidations = await executor.hydrateExistingBoardsForGithubProjectV2(
+      createHydrationContext()
+    );
+    assert.equal(publishAttempts, 0);
     await assert.doesNotReject(() =>
-      executor.hydrateExistingBoardsForGithubProjectV2(createHydrationContext())
+      executor.publishBoardInvalidations(invalidations)
     );
   } finally {
     console.error = originalConsoleError;
