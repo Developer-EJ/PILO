@@ -32,13 +32,14 @@ github_manual_sync_rate_window_seconds = 600
 github_manual_sync_cooldown_seconds    = 30
 github_manual_sync_max_queued_jobs     = 100
 
-# Dev images are available in ECR, so each service runs one task by default.
-app_server_desired_count            = 1
-realtime_server_desired_count       = 1
-ai_worker_desired_count             = 1
-agent_worker_desired_count          = 1
-meeting_worker_desired_count        = 1
-pr_review_ai_worker_desired_count   = 1
+# Run two tasks per service for demo capacity and Availability Zone redundancy.
+app_server_desired_count            = 2
+realtime_server_desired_count       = 2
+ai_worker_desired_count             = 2
+agent_worker_desired_count          = 2
+meeting_worker_desired_count        = 2
+pr_review_ai_worker_desired_count   = 2
+github_sync_worker_desired_count    = 2
 # Keep true during AP-19 cutover. Set false only after legacy ai-jobs MeetingReport jobs are drained.
 legacy_meeting_drain_enabled        = true
 legacy_agent_drain_enabled          = true

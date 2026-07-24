@@ -136,19 +136,19 @@ variable "ai_worker_port" {
 variable "app_server_desired_count" {
   description = "Dev app server task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "realtime_server_desired_count" {
   description = "Dev realtime server task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "ai_worker_desired_count" {
   description = "Dev AI worker task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "legacy_meeting_drain_enabled" {
@@ -166,25 +166,25 @@ variable "legacy_agent_drain_enabled" {
 variable "agent_worker_desired_count" {
   description = "Dev Agent worker task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "meeting_worker_desired_count" {
   description = "Dev MeetingReport-only worker task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "pr_review_ai_worker_desired_count" {
-  description = "Dev PR Review AI worker task count. Keep one worker running while PR Review analysis is enabled."
+  description = "Dev PR Review AI worker task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "github_sync_worker_desired_count" {
   description = "Dev GitHub sync worker task count."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "github_manual_sync_user_limit" {
