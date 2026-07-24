@@ -146,6 +146,7 @@ class SourceDatabase {
     this.processed = 0;
     this.receivedErrorMessage = receivedErrorMessage;
     this.retried = 0;
+    this.status = "received";
     this.targetCount = targetCount;
   }
 
@@ -153,6 +154,9 @@ class SourceDatabase {
     if (/UPDATE github_webhook_deliveries[\s\S]*RETURNING/i.test(text)) {
       this.claimSql = text;
       const publishingLeaseIsClaimable = sourceClaimAllowsActivePublishingLease(text);
+      if (this.status !== "received") {
+        return null;
+      }
       if (
         this.activeReceivedLease &&
         (
@@ -163,6 +167,7 @@ class SourceDatabase {
         return null;
       }
       this.claimed += 1;
+      this.status = "processing";
       return {
         content_number: "56",
         delivery_id: values[0],
@@ -237,10 +242,12 @@ class SourceDatabase {
     if (/status='processed'/i.test(text)) {
       this.events.push("mark-processed");
       this.processed += 1;
+      this.status = "processed";
       return { rowCount: 1 };
     }
     if (/status='received'[\s\S]*lease_expires_at=now\(\) \+ interval '6 minutes'/i.test(text)) {
       this.retried += 1;
+      this.status = "received";
       return { rowCount: 1 };
     }
     throw new Error(`Unexpected execute: ${text}`);
@@ -596,7 +603,7 @@ function createService({ database, githubAppClient, published, publisherFails = 
     await assert.rejects(
       () => client.getPullRequestWebhookSnapshot(request),
       (error) => error instanceof GithubSourceSnapshotNotFoundError,
-      "the webhook snapshot lookup maps a source-not-found response for retry",
+      "the webhook snapshot lookup maps a source-not-found response",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -604,20 +611,73 @@ function createService({ database, githubAppClient, published, publisherFails = 
 }
 
 {
+  const database = new SourceDatabase("issues");
+  const published = [];
+  let lookupCalls = 0;
+  const service = createService({
+    database,
+    githubAppClient: {
+      getRepositoryIssue: async () => {
+        lookupCalls += 1;
+        throw new GithubSourceSnapshotNotFoundError();
+      },
+    },
+    published,
+  });
+  assert.equal(await service.processDelivery("missing-issue-delivery"), "terminal");
+  assert.equal(database.processed, 1);
+  assert.equal(database.retried, 0);
+  assert.equal(database.status, "processed");
+  assert.equal(database.issueValues, null, "404 must retain the existing local issue cache");
+  assert.equal(database.boardLookupSql, null, "404 must not hydrate issue boards");
+  assert.deepEqual(published, []);
+  assert.equal(await service.processDelivery("missing-issue-delivery"), "terminal");
+  assert.equal(lookupCalls, 1, "a processed 404 delivery must not fetch GitHub again");
+}
+
+{
   const database = new SourceDatabase("pull_request");
+  const published = [];
+  let lookupCalls = 0;
   const service = createService({
     database,
     githubAppClient: {
       getPullRequestWebhookSnapshot: async () => {
+        lookupCalls += 1;
         throw new GithubSourceSnapshotNotFoundError();
+      },
+    },
+    published,
+  });
+  assert.equal(await service.processDelivery("missing-pr-delivery"), "terminal");
+  assert.equal(database.processed, 1);
+  assert.equal(database.retried, 0);
+  assert.equal(database.status, "processed");
+  assert.equal(database.pullRequestValues, null, "404 must retain the existing local PR cache");
+  assert.deepEqual(published, []);
+  assert.equal(await service.processDelivery("missing-pr-delivery"), "terminal");
+  assert.equal(lookupCalls, 1, "a processed 404 delivery must not fetch GitHub again");
+}
+
+{
+  const database = new SourceDatabase("issues");
+  let lookupCalls = 0;
+  const service = createService({
+    database,
+    githubAppClient: {
+      getRepositoryIssue: async () => {
+        lookupCalls += 1;
+        throw new Error("GitHub issue lookup failed");
       },
     },
     published: [],
   });
-  assert.equal(await service.processDelivery("missing-delivery"), "retry");
-  assert.equal(database.pullRequestValues, null, "404 must retain the existing local cache");
+  assert.equal(await service.processDelivery("lookup-failure-delivery"), "retry");
+  assert.equal(lookupCalls, 1);
   assert.equal(database.processed, 0);
   assert.equal(database.retried, 1);
+  assert.equal(database.status, "received");
+  assert.equal(database.issueValues, null, "failed lookup must retain the existing local cache");
   assert.deepEqual(database.events, ["targets"]);
 }
 

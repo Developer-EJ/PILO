@@ -6,6 +6,7 @@ import {
 } from "../../database/database.service";
 import {
   GithubAppClient,
+  GithubSourceSnapshotNotFoundError,
   type GithubIssueApiItem,
   type GithubPullRequestApiItem
 } from "./github-app.client";
@@ -93,7 +94,7 @@ export class GithubSourceWebhookReconcileService {
       if (targets.length === 0) {
         throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
       }
-      const snapshot = await this.fetchSourceSnapshot(
+      const snapshot = await this.fetchSourceSnapshotOrNull(
         targets,
         kind,
         contentNumber
@@ -103,6 +104,10 @@ export class GithubSourceWebhookReconcileService {
         const currentTargets = await this.listTargets(transaction, claim);
         if (currentTargets.length === 0) {
           throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
+        }
+        if (!snapshot) {
+          await this.markProcessed(transaction, claim);
+          return this.emptyReconcileResult();
         }
         const result = await this.applySourceSnapshot(
           transaction,
@@ -148,6 +153,21 @@ export class GithubSourceWebhookReconcileService {
       "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
       [lockKey]
     );
+  }
+
+  private async fetchSourceSnapshotOrNull(
+    targets: GithubSourceWebhookTarget[],
+    kind: GithubSourceWebhookKind,
+    contentNumber: number
+  ): Promise<GithubIssueApiItem | GithubPullRequestApiItem | null> {
+    try {
+      return await this.fetchSourceSnapshot(targets, kind, contentNumber);
+    } catch (error) {
+      if (error instanceof GithubSourceSnapshotNotFoundError) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async fetchSourceSnapshot(
