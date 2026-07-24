@@ -243,6 +243,7 @@ interface AgentStepRow extends QueryResultRow {
 
 const DEFAULT_TIMEZONE = "Asia/Seoul";
 const DEFAULT_RUN_MESSAGE = "요청을 분석하고 있습니다.";
+const COMPLETED_RUN_MESSAGE = "요청을 완료했습니다.";
 const EXECUTION_LEASE_SECONDS = positiveIntegerEnvironment(
   "AGENT_EXECUTION_LEASE_SECONDS",
   180
@@ -1255,7 +1256,7 @@ export class AgentLoggingService {
                 tool_call_count = LEAST(tool_call_count + 1, 5),
                 risk_level = COALESCE($2, risk_level),
                 message = $3,
-                final_answer = $3,
+                final_answer = $4,
                 error_code = NULL,
                 error_message = NULL,
                 completed_at = now(),
@@ -1266,10 +1267,10 @@ export class AgentLoggingService {
             WHERE id = $1
               AND status = 'running'
               AND (
-                $4::uuid IS NULL
+                $5::uuid IS NULL
                 OR (
-                  execution_lease_token = $4::uuid
-                  AND execution_lease_generation = $5
+                  execution_lease_token = $5::uuid
+                  AND execution_lease_generation = $6
                 )
               )
             RETURNING *
@@ -1277,6 +1278,7 @@ export class AgentLoggingService {
           [
             input.runId,
             input.riskLevel ?? null,
+            COMPLETED_RUN_MESSAGE,
             waitingMessage,
             input.executionLease?.token ?? null,
             input.executionLease?.generation ?? 0
