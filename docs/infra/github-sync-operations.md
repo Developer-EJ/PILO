@@ -36,10 +36,62 @@ The worker writes one raw JSON event per stdout line so CloudWatch JSON filters 
 - `github_sync_rate_limit_terminal_failure`
 - `github_sync_rate_limit_observed`
 - `github_sync_worker_poll_retry`
+- `github_provider_request_observed`
+- `github_installation_token_cache`
 
 Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`. A failed worker poll emits `github_sync_worker_poll_retry` with `target: "worker_poll"`, `queueKind: "sync_jobs" | "webhooks"`, bounded backoff, and a safe `failureKind`; it never includes the underlying database error text. Worker poll retry delays remain queue-local, so a retry backoff in one polling loop does not pause the other polling loop.
 
-Never log access tokens, webhook payloads, provider raw errors, or secrets. Use event identifiers and DB state for investigation; do not add credentials or payloads to logs or incident evidence.
+`github_provider_request_observed` is emitted once for every observed GitHub provider network request. If code performs an actual retry, each attempt emits a separate provider request event. The event fields are `operation`, `authKind`, `outcome`, `status`, `durationMs`, `rateLimitLimit`, `rateLimitRemaining`, `rateLimitUsed`, `rateLimitReset`, and `rateLimitResource`. `operation` is a bounded value such as `github_app_installation_token_create`, `github_installation_rest_request`, `github_user_rest_request`, `github_graphql_project_v2_read`, or `github_graphql_project_v2_write`. `authKind` is one of `installation`, `user_oauth`, `app_jwt`, or `personal_project_v2_oauth`. `outcome` is `success` or `failure`; `status` is null only when the request fails before an HTTP response is available. Rate-limit fields are populated only from safe GitHub response headers.
+
+`github_installation_token_cache` is emitted for GitHub App installation-token cache lookups. Its only fields are `event` and `result`. `result` is one of `hit`, `miss`, `inflight_join`, `refresh`, or `error`. The cache is process-local to the `GithubAppClient` singleton, so a process restart creates a cold cache. The internal cache key is `appId:installationId`, but that key is never logged. Tokens are refreshed five minutes before provider expiry, concurrent cache misses for the same key use single-flight, and token creation responses with missing, invalid, or already-stale expiry metadata are not cached. A cached installation token that receives `401` is evicted only if the cache entry still matches that token, then the request is retried once with a refreshed token. `403` does not trigger token refresh. Deleting an installation evicts the cache entry when GitHub returns success or an already-deleted `404`. User OAuth tokens and Personal ProjectV2 OAuth tokens are excluded from this installation-token cache.
+
+`github_sync_rate_limit_observed` remains as a legacy GraphQL-only signal. Existing Terraform metrics and alarms still read GraphQL `RateLimitRemaining` from that event only; provider request/cache events are available for investigation and post-change baselining until separate Infra review adds metrics or alarms.
+
+Never log access tokens, OAuth tokens, GitHub App JWTs, private keys, webhook payloads, provider request bodies, GraphQL queries, GraphQL variables, repository names, provider URLs, installation identifiers, `appId:installationId` cache keys, raw provider errors, database URLs, passwords, or secrets. Use event identifiers, bounded enum fields, response status, safe rate-limit headers, and DB state for investigation; do not add credentials, payloads, or raw provider responses to logs or incident evidence.
+
+## GitHub provider request and token-cache log queries
+
+Use these CloudWatch Logs Insights queries against `/ecs/${name_prefix}/github-sync-worker` for investigation. They are log-derived diagnostics, not currently Terraform alarms.
+
+Provider request count, average duration, and p95 duration by operation/auth kind/outcome/status:
+
+```sql
+fields @timestamp, event, operation, authKind, outcome, status, durationMs
+| filter event = "github_provider_request_observed"
+| stats count() as requestCount, avg(durationMs) as avgDurationMs, pct(durationMs, 95) as p95DurationMs by operation, authKind, outcome, status
+| sort requestCount desc
+```
+
+Remaining budget and latest reset by rate-limit resource and operation:
+
+```sql
+fields @timestamp, event, operation, rateLimitResource, rateLimitRemaining, rateLimitReset
+| filter event = "github_provider_request_observed"
+| filter ispresent(rateLimitRemaining)
+| stats min(rateLimitRemaining) as minRemaining, latest(rateLimitRemaining) as latestRemaining, latest(rateLimitReset) as latestReset by rateLimitResource, operation
+| sort minRemaining asc
+```
+
+Installation-token cache lookup count by result:
+
+```sql
+fields @timestamp, event, result
+| filter event = "github_installation_token_cache"
+| stats count() as lookupCount by result
+| sort lookupCount desc
+```
+
+Token-create and installation-authenticated request count by operation/auth kind/outcome/status:
+
+```sql
+fields @timestamp, event, operation, authKind, outcome, status, durationMs, rateLimitRemaining
+| filter event = "github_provider_request_observed"
+| filter operation = "github_app_installation_token_create" or authKind = "installation"
+| stats count() as requestCount, avg(durationMs) as avgDurationMs, pct(durationMs, 95) as p95DurationMs, latest(rateLimitRemaining) as latestRemaining by operation, authKind, outcome, status
+| sort requestCount desc
+```
+
+For cache effectiveness, calculate warm hit ratio as `hit / (hit + miss + inflight_join + refresh)`. Report `error` separately; do not include `error` in the denominator because it represents token lookup failure rather than a cacheable lookup outcome.
 
 ## DLQ recovery procedure
 
@@ -97,14 +149,17 @@ For revoked or invalid GitHub App/OAuth credentials, verify the workspace instal
 
 At `RateLimitRemaining` Warning from `github_sync_rate_limit_observed`, check remaining budget and request patterns before exhaustion. At Critical 0 or `github_sync_rate_limit_terminal_failure`, do not increase GraphQL traffic: wait for GitHub reset/backoff. A polling rate-limit failure schedules a retry after 30 minutes; do not immediately redrive an entire DLQ. After quota recovers, verify a bounded sample and DB terminal state.
 
+Use `github_provider_request_observed` to identify which provider operations are consuming quota and whether retries are adding duplicate attempts. A `401` retry should produce two provider request events for the same operation/auth kind around the same handler flow. A `403` should not be paired with a new `github_app_installation_token_create` request caused by token refresh. Keep sync/webhook DB terminal-state checks in the same investigation; provider request logs explain external calls but do not replace consistency checks.
+
 ## Dev smoke checklist
 
 After deployment or worker changes, collect evidence for both dev flows:
 
 1. Run one successful sync. Confirm CloudWatch queue age/backlog returns to normal, the ECS task is healthy, worker raw JSON logs are safe, and `github_sync_runs`/`github_sync_jobs` reach `success` terminal state.
 2. Cause one safe retryable failure. Confirm `github_sync_retry`, `retryAfterSeconds`, CloudWatch `RetryCount`, queue age/backlog, and that the DB run/job did not incorrectly become terminal before retry.
+3. For installation-token cache verification, use a deterministic focused test with 100 repeated installation-authenticated operations against the same installation. Confirm warm cache hit ratio is at least 95% and installation-token POST requests fall by at least 95%. A simple expected-shape example is 20 repeated operations: before cache, 20 token POSTs plus 20 downstream GETs equals 40 GitHub provider requests; after cache, 1 token POST plus 20 downstream GETs equals 21 GitHub provider requests. In production logs, treat the new provider/cache events as a post-cache baseline only unless pre-change evidence was captured before deployment.
 
-Do not use a real credential revoke, actual rate-limit exhaustion, or a bulk dev/production DLQ redrive as a smoke test. In both flows, retain logs, CloudWatch observations, and DB-state evidence without access tokens, webhook payloads, provider raw errors, or secrets.
+Do not use a real credential revoke, actual rate-limit exhaustion, or a bulk dev/production DLQ redrive as a smoke test. Verify `401` retry behavior with a controlled mock or bounded safe fixture that produces two provider request events, verify `403` does not trigger token refresh, and verify sync/webhook consistency through DB terminal state. In all flows, retain logs, CloudWatch observations, and DB-state evidence without access tokens, webhook payloads, provider raw errors, or secrets.
 
 ## LocalStack queue configuration verification
 
