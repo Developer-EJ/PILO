@@ -69,6 +69,22 @@ assert.equal(
   }),
   true
 );
+assert.equal(
+  isGithubActiveBoardProject({
+    activeBoardSource,
+    repositoryId: "repo-other",
+    projectV2Id: "project-active"
+  }),
+  false
+);
+assert.equal(
+  isGithubActiveBoardProject({
+    activeBoardSource,
+    repositoryId: "repo-active",
+    projectV2Id: "project-other"
+  }),
+  false
+);
 
 const result = await activateDefaultGithubBoardForRepository({
   projects: [{ id: "project-next", repositoryIds: ["repo-next"] }],

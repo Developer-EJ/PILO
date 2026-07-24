@@ -768,7 +768,7 @@ export function GithubPanel() {
         return;
       }
 
-      const nextProjectV2Id = await activateDefaultGithubBoardForRepository({
+      const activatedSource = await activateDefaultGithubBoardForRepository({
         projects,
         preferredProjectV2Id: selectedProjectV2Id,
         repositoryId,
@@ -776,12 +776,14 @@ export function GithubPanel() {
           apiClient.activateWorkspaceBoardSource(workspaceId, source)
       });
 
-      if (!nextProjectV2Id) {
+      if (!activatedSource) {
         setActionError(
           "선택한 repository에 연결된 ProjectV2를 찾을 수 없습니다."
         );
         return;
       }
+
+      const nextProjectV2Id = activatedSource.project.id;
 
       setSelectedRepositoryId(repositoryId);
       selectedRepositoryIdRef.current = repositoryId;
