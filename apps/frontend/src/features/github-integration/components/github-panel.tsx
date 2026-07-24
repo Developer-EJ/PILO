@@ -35,6 +35,7 @@ import {
   resolveGithubBrowsingSelection,
   shouldApplyGithubBrowsingResult
 } from "@/features/github-integration/utils/github-project-selection";
+import { createGithubActiveBoardRevisionGuard } from "@/features/github-integration/utils/github-active-board-revision";
 import { collectGithubPages } from "@/features/github-integration/utils/github-page-collector";
 import {
   createGithubSyncPollLoop,
@@ -222,6 +223,9 @@ export function GithubPanel() {
   const [repositoryPage, setRepositoryPage] = useState(1);
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
   const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
+  const activeBoardRevisionGuardRef = useRef(
+    createGithubActiveBoardRevisionGuard()
+  );
   const browsingRepositoryIdRef = useRef("");
   const browsingProjectV2IdRef = useRef("");
   const loadedWorkspaceIdRef = useRef("");
@@ -342,6 +346,8 @@ export function GithubPanel() {
 
     const snapshotRequestGeneration = snapshotRequestGateRef.current.begin();
     const syncRunsRequestGeneration = syncRunsRequestGateRef.current.begin();
+    const activeBoardSnapshotRevision =
+      activeBoardRevisionGuardRef.current.captureSnapshot();
 
     try {
       const [
@@ -469,7 +475,13 @@ export function GithubPanel() {
         return;
       }
 
-      setActiveBoardSource(activeBoardSource);
+      if (
+        activeBoardRevisionGuardRef.current.isSnapshotCurrent(
+          activeBoardSnapshotRevision
+        )
+      ) {
+        setActiveBoardSource(activeBoardSource);
+      }
       setSnapshot((current) => ({
         oauth,
         projectOAuth,
@@ -768,8 +780,10 @@ export function GithubPanel() {
     }
   }
 
-  function applyActivatedGithubBoardSource(activatedSource: GithubActiveBoardSource) {
-    snapshotRequestGateRef.current.invalidate();
+  function applyActivatedGithubBoardSource(
+    activatedSource: GithubActiveBoardSource
+  ) {
+    activeBoardRevisionGuardRef.current.recordActivation();
     setActiveBoardSource(activatedSource);
   }
 

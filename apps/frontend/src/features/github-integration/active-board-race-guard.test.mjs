@@ -4,6 +4,15 @@ import { readFile } from "node:fs/promises";
 const selectionModule = await import(
   new URL("./utils/github-project-selection.ts", import.meta.url)
 );
+let revisionModule = null;
+let revisionImportError = null;
+try {
+  revisionModule = await import(
+    new URL("./utils/github-active-board-revision.ts", import.meta.url)
+  );
+} catch (error) {
+  revisionImportError = error;
+}
 const panel = await readFile(
   new URL("./components/github-panel.tsx", import.meta.url),
   "utf8"
@@ -30,6 +39,33 @@ assert.equal(
   false,
   "a repository A result must not update repository B browsing state"
 );
+
+assert.equal(
+  revisionImportError,
+  null,
+  "active Board revision guard module must exist"
+);
+assert.equal(
+  typeof revisionModule?.createGithubActiveBoardRevisionGuard,
+  "function",
+  "active Board revision guard must expose a tested factory"
+);
+{
+  const revisionGuard = revisionModule.createGithubActiveBoardRevisionGuard();
+  const staleSnapshotRevision = revisionGuard.captureSnapshot();
+  revisionGuard.recordActivation();
+  assert.equal(
+    revisionGuard.isSnapshotCurrent(staleSnapshotRevision),
+    false,
+    "a snapshot captured before a successful activation must not apply active source"
+  );
+  const freshSnapshotRevision = revisionGuard.captureSnapshot();
+  assert.equal(
+    revisionGuard.isSnapshotCurrent(freshSnapshotRevision),
+    true,
+    "a snapshot captured after the latest activation may apply active source"
+  );
+}
 
 const selectRepositoryStart = panel.indexOf(
   "async function handleSelectRepository"
@@ -128,8 +164,13 @@ assert.doesNotMatch(
 );
 assert.match(
   applyActivatedBoardSource,
-  /snapshotRequestGateRef\.current\.invalidate\(\)[\s\S]{0,160}setActiveBoardSource\(activatedSource\)/,
-  "successful PUT responses must invalidate stale snapshot GETs before setting active Board source"
+  /activeBoardRevisionGuardRef\.current\.recordActivation\(\)[\s\S]{0,160}setActiveBoardSource\(activatedSource\)/,
+  "successful PUT responses must record active Board revision before setting active Board source"
+);
+assert.doesNotMatch(
+  applyActivatedBoardSource,
+  /snapshotRequestGateRef\.current\.invalidate\(\)/,
+  "successful PUT responses must not invalidate the whole snapshot loader gate"
 );
 assert.doesNotMatch(
   snapshotLoader.match(/catch \(error\) \{[\s\S]*?\n    \}/)?.[0] ?? "",
@@ -143,8 +184,18 @@ assert.match(
 );
 assert.match(
   snapshotLoader,
-  /setActiveBoardSource\(activeBoardSource\)/,
-  "successful snapshot GETs must keep applying the server active Board source"
+  /const activeBoardSnapshotRevision =\s*activeBoardRevisionGuardRef\.current\.captureSnapshot\(\)/,
+  "snapshot loading must capture the active Board revision at request start"
+);
+assert.match(
+  snapshotLoader,
+  /if \(\s*activeBoardRevisionGuardRef\.current\.isSnapshotCurrent\(\s*activeBoardSnapshotRevision\s*\)\s*\) \{[\s\S]{0,160}setActiveBoardSource\(activeBoardSource\)/,
+  "successful snapshot GETs may apply active Board source only when its active revision is current"
+);
+assert.match(
+  snapshotLoader,
+  /setSnapshot\(\(current\) => \(\{[\s\S]*?setPanelStatus\("ready"\)/,
+  "stale active source must not prevent the snapshot loader from applying list state and reaching ready"
 );
 
 console.log("active Board race guard tests passed");
