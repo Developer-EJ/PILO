@@ -9,6 +9,7 @@ from app.canvas_agent.types import (
     CanvasAgentRunContext,
     CanvasSemanticShapeMatch,
 )
+from app.meeting_report_processor import InfrastructureError
 
 CODE_GENERATION_FAILURE_MESSAGE = "코드 생성 중 오류가 났어요. 다시 시도해 주세요."
 CODE_GENERATION_TIMEOUT_MESSAGE = "코드 생성 시간이 초과됐어요. 다시 시도해 주세요."
@@ -23,22 +24,57 @@ class PgCanvasAgentRepository:
         kwargs: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
         if database_ssl:
             kwargs["sslmode"] = "require"
-        self.connection = psycopg.connect(database_url, **kwargs)
+        self._operational_error_type = psycopg.OperationalError
+        self._connection_factory = lambda: psycopg.connect(database_url, **kwargs)
+        self.connection = self._connection_factory()
 
     def close(self) -> None:
-        self.connection.close()
+        connection = getattr(self, "connection", None)
+        if connection is not None and not getattr(connection, "closed", False):
+            connection.close()
+
+    def _ensure_connection(self):
+        if getattr(self.connection, "closed", False) or getattr(self.connection, "broken", False):
+            self._replace_connection()
+        return self.connection
+
+    def _replace_connection(self) -> None:
+        previous = getattr(self, "connection", None)
+        if previous is not None and not getattr(previous, "closed", False):
+            try:
+                previous.close()
+            except Exception:
+                pass
+        try:
+            self.connection = self._connection_factory()
+        except self._operational_error_type as error:
+            raise InfrastructureError("Canvas Agent database reconnect failed") from error
+
+    def _execute(
+        self,
+        query: str,
+        parameters: tuple[object, ...] | None = None,
+    ):
+        connection = self._ensure_connection()
+        try:
+            if parameters is None:
+                return connection.execute(query)
+            return connection.execute(query, parameters)
+        except self._operational_error_type as error:
+            self._replace_connection()
+            raise InfrastructureError("Canvas Agent database connection was lost") from error
 
     def try_acquire_run_lock(self, run_id: str) -> bool:
-        row = self.connection.execute(
+        row = self._execute(
             "SELECT pg_try_advisory_lock(%s) AS acquired", (_advisory_lock_key(run_id),)
         ).fetchone()
         return bool(row["acquired"])
 
     def release_run_lock(self, run_id: str) -> None:
-        self.connection.execute("SELECT pg_advisory_unlock(%s)", (_advisory_lock_key(run_id),))
+        self._execute("SELECT pg_advisory_unlock(%s)", (_advisory_lock_key(run_id),))
 
     def get_run_context(self, job: CanvasAgentJob) -> CanvasAgentRunContext | None:
-        row = self.connection.execute(
+        row = self._execute(
             """
             SELECT id, workspace_id, canvas_id, requested_by_user_id, status, prompt, context_json
             FROM canvas_agent_runs
@@ -53,7 +89,7 @@ class PgCanvasAgentRepository:
         if row is None:
             return None
 
-        previous = self.connection.execute(
+        previous = self._execute(
             """
             SELECT action_name, input_json, output_json, resource_refs
             FROM canvas_agent_steps
@@ -100,7 +136,7 @@ class PgCanvasAgentRepository:
     ) -> list[dict[str, object]]:
         if not shape_ids:
             return []
-        rows = self.connection.execute(
+        rows = self._execute(
             """
             SELECT id, title, text_content, shape_type, raw_shape
             FROM canvas_freeform_shapes
@@ -133,7 +169,7 @@ class PgCanvasAgentRepository:
             "intent": intent,
             "arguments": arguments,
         }
-        self.connection.execute(
+        self._execute(
             """
             WITH next_step AS (
               SELECT COALESCE(MAX(step_order), 0) + 1 AS step_order
@@ -156,7 +192,7 @@ class PgCanvasAgentRepository:
                 model_name,
             ),
         )
-        self.connection.execute(
+        self._execute(
             """
             UPDATE canvas_agent_runs
             SET status = 'executing', result_summary = %s,
@@ -181,7 +217,7 @@ class PgCanvasAgentRepository:
         )
 
     def update_progress(self, run_id: str, message: str) -> None:
-        self.connection.execute(
+        self._execute(
             """
             UPDATE canvas_agent_runs
             SET result_summary = %s,
@@ -215,7 +251,7 @@ class PgCanvasAgentRepository:
             in {CODE_GENERATION_FAILURE_MESSAGE, CODE_GENERATION_TIMEOUT_MESSAGE}
             else GENERIC_FAILURE_MESSAGE
         )
-        self.connection.execute(
+        self._execute(
             """
             UPDATE canvas_agent_runs
             SET status = 'failed', error_code = 'CANVAS_AGENT_PLANNER_FAILED',
@@ -225,7 +261,7 @@ class PgCanvasAgentRepository:
                     COALESCE(result_json, '{}'::jsonb),
                     '{progress}',
                     jsonb_build_object(
-                        'message', %s,
+                        'message', %s::text,
                         'highlightedShapeIds', '[]'::jsonb,
                         'targetViewport', NULL,
                         'toolTarget', NULL,
@@ -249,7 +285,7 @@ class PgCanvasAgentRepository:
         if not self.try_acquire_run_lock(run_id):
             return False
         try:
-            cursor = self.connection.execute(
+            cursor = self._execute(
                 """
                 UPDATE canvas_agent_runs
                 SET status = 'failed',
@@ -260,7 +296,7 @@ class PgCanvasAgentRepository:
                         COALESCE(result_json, '{}'::jsonb),
                         '{progress}',
                         jsonb_build_object(
-                            'message', %s,
+                            'message', %s::text,
                             'highlightedShapeIds', '[]'::jsonb,
                             'targetViewport', NULL,
                             'toolTarget', NULL,
@@ -283,7 +319,7 @@ class PgCanvasAgentRepository:
             self.release_run_lock(run_id)
 
     def has_semantic_shapes(self, workspace_id: str, canvas_id: str) -> bool:
-        row = self.connection.execute(
+        row = self._execute(
             """
             SELECT 1
             FROM canvas_agent_shape_embeddings embedding
@@ -312,7 +348,7 @@ class PgCanvasAgentRepository:
 
         exact_pattern = f"%{_escape_like(normalized)}%"
         term_patterns = [f"%{_escape_like(term)}%" for term in _search_terms(normalized)]
-        rows = self.connection.execute(
+        rows = self._execute(
             """
             WITH scoped_shapes AS MATERIALIZED (
               SELECT
@@ -382,7 +418,7 @@ class PgCanvasAgentRepository:
         query_embedding: list[float],
         limit: int = 4,
     ) -> list[CanvasSemanticShapeMatch]:
-        rows = self.connection.execute(
+        rows = self._execute(
             """
             WITH canvas_embeddings AS MATERIALIZED (
               SELECT
@@ -432,32 +468,37 @@ class PgCanvasAgentRepository:
         ]
 
     def claim_embedding_job(self) -> dict[str, object] | None:
-        with self.connection.transaction():
-            return self.connection.execute(
-                """
-                WITH candidate AS (
-                  SELECT id
-                  FROM canvas_agent_shape_embedding_jobs
-                  WHERE status = 'pending'
-                  ORDER BY created_at ASC
-                  FOR UPDATE SKIP LOCKED
-                  LIMIT 1
-                )
-                UPDATE canvas_agent_shape_embedding_jobs job
-                SET
-                  status = 'processing',
-                  attempt_count = attempt_count + 1,
-                  claimed_at = now(),
-                  error_code = NULL,
-                  error_message = NULL
-                FROM candidate
-                WHERE job.id = candidate.id
-                RETURNING job.*
-                """
-            ).fetchone()
+        connection = self._ensure_connection()
+        try:
+            with connection.transaction():
+                return connection.execute(
+                    """
+                    WITH candidate AS (
+                      SELECT id
+                      FROM canvas_agent_shape_embedding_jobs
+                      WHERE status = 'pending'
+                      ORDER BY created_at ASC
+                      FOR UPDATE SKIP LOCKED
+                      LIMIT 1
+                    )
+                    UPDATE canvas_agent_shape_embedding_jobs job
+                    SET
+                      status = 'processing',
+                      attempt_count = attempt_count + 1,
+                      claimed_at = now(),
+                      error_code = NULL,
+                      error_message = NULL
+                    FROM candidate
+                    WHERE job.id = candidate.id
+                    RETURNING job.*
+                    """
+                ).fetchone()
+        except self._operational_error_type as error:
+            self._replace_connection()
+            raise InfrastructureError("Canvas Agent database connection was lost") from error
 
     def get_shape_embedding_source(self, job: dict[str, object]) -> dict[str, object] | None:
-        return self.connection.execute(
+        return self._execute(
             """
             SELECT
               shape.id,
@@ -505,7 +546,7 @@ class PgCanvasAgentRepository:
         model_version: str,
     ) -> bool:
         source_hash = str(job["expected_source_text_hash"])
-        result = self.connection.execute(
+        result = self._execute(
             """
             INSERT INTO canvas_agent_shape_embeddings (
               shape_id,
@@ -574,13 +615,13 @@ class PgCanvasAgentRepository:
         return result.rowcount == 1
 
     def delete_shape_embedding(self, shape_id: str) -> None:
-        self.connection.execute(
+        self._execute(
             "DELETE FROM canvas_agent_shape_embeddings WHERE shape_id = %s",
             (shape_id,),
         )
 
     def complete_embedding_job(self, job_id: str) -> None:
-        self.connection.execute(
+        self._execute(
             """
             UPDATE canvas_agent_shape_embedding_jobs
             SET status = 'completed', completed_at = now()
@@ -591,7 +632,7 @@ class PgCanvasAgentRepository:
         )
 
     def supersede_embedding_job(self, job_id: str) -> None:
-        self.connection.execute(
+        self._execute(
             """
             UPDATE canvas_agent_shape_embedding_jobs
             SET status = 'superseded', completed_at = now()
@@ -602,7 +643,7 @@ class PgCanvasAgentRepository:
         )
 
     def fail_embedding_job(self, job_id: str, message: str) -> None:
-        self.connection.execute(
+        self._execute(
             """
             UPDATE canvas_agent_shape_embedding_jobs
             SET status = 'failed', error_code = 'CANVAS_EMBEDDING_FAILED',

@@ -27,6 +27,21 @@ def test_parse_intent_classification_accepts_existing_shape_search() -> None:
     assert result.arguments == {"query": "로그인 흐름", "shapeIds": []}
 
 
+def test_parse_intent_classification_falls_back_when_message_is_empty() -> None:
+    result = parse_canvas_agent_intent_classification(
+        json.dumps(
+            {
+                "intent": "find_shapes",
+                "message": "",
+                "arguments": {"query": "로그인 흐름", "shapeIds": []},
+            }
+        )
+    )
+
+    assert result.intent == "find_shapes"
+    assert result.message == "관련 도형을 찾고 있습니다."
+
+
 @pytest.mark.parametrize("intent", ["create_shapes", "connect_shapes", "delete_shapes"])
 def test_parse_intent_classification_rejects_shape_mutation_intents(intent: str) -> None:
     with pytest.raises(CanvasAgentIntentClassifierError):

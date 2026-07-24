@@ -17,6 +17,15 @@ class CanvasAgentIntentClassifierError(Exception):
     pass
 
 
+_FALLBACK_MESSAGES = {
+    "find_shapes": "관련 도형을 찾고 있습니다.",
+    "import_drive_file": "Drive 파일을 찾고 있습니다.",
+    "generate_html": "HTML 생성을 준비하고 있습니다.",
+    "chat": "답변을 준비하고 있습니다.",
+    "unsupported": "요청을 확인했습니다.",
+}
+
+
 class OpenAiCanvasAgentIntentClassifier:
     def __init__(self, api_key: str, model: str, timeout_seconds: float | None = None) -> None:
         from openai import OpenAI
@@ -87,7 +96,7 @@ def parse_canvas_agent_intent_classification(
     valid_intents = allowed_intents or CANVAS_AGENT_INTENTS
     if not isinstance(intent, str) or intent not in valid_intents:
         raise CanvasAgentIntentClassifierError("Canvas Agent intent is invalid")
-    if not isinstance(message, str) or not message.strip():
+    if not isinstance(message, str):
         raise CanvasAgentIntentClassifierError("Canvas Agent intent message is invalid")
     if not isinstance(arguments, dict):
         raise CanvasAgentIntentClassifierError("Canvas Agent intent arguments are invalid")
@@ -135,7 +144,7 @@ def parse_canvas_agent_intent_classification(
     return CanvasAgentIntentClassification(
         intent=intent,
         arguments=sanitized_arguments,
-        message=message.strip()[:1000],
+        message=(message.strip() or _FALLBACK_MESSAGES[intent])[:1000],
     )
 
 
