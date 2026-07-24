@@ -32,6 +32,11 @@ type ActiveBoardProjectInput = {
   projectV2Id: string;
 };
 
+type GithubBrowsingResultInput = {
+  currentRepositoryId: string;
+  requestedRepositoryId: string;
+};
+
 export type GithubBoardSelection = {
   repositoryId: string;
   projectV2Id: string;
@@ -117,6 +122,13 @@ export function isGithubActiveBoardProject({
       activeBoardSource.repository.id === repositoryId &&
       activeBoardSource.project.id === projectV2Id
   );
+}
+
+export function shouldApplyGithubBrowsingResult({
+  currentRepositoryId,
+  requestedRepositoryId
+}: GithubBrowsingResultInput): boolean {
+  return currentRepositoryId === requestedRepositoryId;
 }
 
 export async function activateDefaultGithubBoardForRepository({

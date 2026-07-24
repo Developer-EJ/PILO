@@ -184,12 +184,12 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler,
-  /setBrowsingProjectV2Id\(source\.projectV2Id\)/,
-  "repository selection must set browsing ProjectV2 from the requested activation source"
+  /shouldApplyGithubBrowsingResult[\s\S]{0,260}setBrowsingProjectV2Id\(source\.projectV2Id\)/,
+  "repository selection must set browsing ProjectV2 from the requested activation source only while still browsing it"
 );
 assert.match(
   selectRepositoryHandler,
-  /setActiveBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(activatedSource\)/,
   "repository selection must store only the returned active Board source after activation succeeds"
 );
 assert.match(

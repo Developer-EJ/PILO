@@ -198,12 +198,12 @@ assert.ok(
 );
 assert.match(
   repositoryHandler,
-  /activate: \(source\) => \{[\s\S]{0,160}setBrowsingProjectV2Id\(source\.projectV2Id\)[\s\S]{0,160}activateWorkspaceBoardSource/,
-  "default activation must move browsing ProjectV2 to the requested ProjectV2 before PUT"
+  /activate: \(source\) => \{[\s\S]{0,320}shouldApplyGithubBrowsingResult[\s\S]{0,320}setBrowsingProjectV2Id\(source\.projectV2Id\)[\s\S]{0,320}activateWorkspaceBoardSource/,
+  "default activation must move browsing ProjectV2 only when the requested repository is still browsed before PUT"
 );
 assert.match(
   repositoryHandler,
-  /setActiveBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(activatedSource\)/,
   "successful default activation must store only the returned active Board source"
 );
 assert.doesNotMatch(
@@ -233,7 +233,7 @@ assert.match(
 );
 assert.match(
   manualActivationHandler,
-  /setActiveBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(activatedSource\)/,
   "manual activation must store only the returned active Board source"
 );
 assert.doesNotMatch(

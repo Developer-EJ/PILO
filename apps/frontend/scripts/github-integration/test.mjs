@@ -199,6 +199,7 @@ await import("../../src/features/github-integration/github-manual-sync-execution
 await import("../../src/features/github-integration/github-connect-format.test.mjs");
 await import("../../src/features/github-integration/repository-scoped-sync.test.mjs");
 await import("../../src/features/github-integration/active-board-browsing-separation.test.mjs");
+await import("../../src/features/github-integration/active-board-race-guard.test.mjs");
 await import("../../src/features/github-integration/active-board-ui-boundary.test.mjs");
 await import("../../src/features/github-integration/active-board-selection-persistence.test.mjs");
 await import("../../src/features/github-integration/repository-default-board-activation.test.mjs");

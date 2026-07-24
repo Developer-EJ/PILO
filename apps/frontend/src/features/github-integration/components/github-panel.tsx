@@ -32,7 +32,8 @@ import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integrati
 import { buildGithubSettingsReturnUrl } from "@/features/github-integration/utils/github-settings-entry";
 import {
   activateDefaultGithubBoardForRepository,
-  resolveGithubBrowsingSelection
+  resolveGithubBrowsingSelection,
+  shouldApplyGithubBrowsingResult
 } from "@/features/github-integration/utils/github-project-selection";
 import { collectGithubPages } from "@/features/github-integration/utils/github-page-collector";
 import {
@@ -509,7 +510,6 @@ export function GithubPanel() {
       setErrorMessage(getErrorMessage(error));
       setSnapshot(emptySnapshot);
       setRestoredRepository(null);
-      setActiveBoardSource(null);
       setBrowsingRepositoryId("");
       browsingRepositoryIdRef.current = "";
       setSelectedInstallationId("");
@@ -768,6 +768,11 @@ export function GithubPanel() {
     }
   }
 
+  function applyActivatedGithubBoardSource(activatedSource: GithubActiveBoardSource) {
+    snapshotRequestGateRef.current.invalidate();
+    setActiveBoardSource(activatedSource);
+  }
+
   async function handleSelectRepository(repositoryId: string) {
     if (!workspaceId) return;
 
@@ -817,8 +822,13 @@ export function GithubPanel() {
         preferredProjectV2Id: browsingProjectV2IdRef.current,
         repositoryId,
         activate: (source) => {
-          setBrowsingProjectV2Id(source.projectV2Id);
-          browsingProjectV2IdRef.current = source.projectV2Id;
+          if (shouldApplyGithubBrowsingResult({
+            currentRepositoryId: browsingRepositoryIdRef.current,
+            requestedRepositoryId: repositoryId
+          })) {
+            setBrowsingProjectV2Id(source.projectV2Id);
+            browsingProjectV2IdRef.current = source.projectV2Id;
+          }
           return apiClient.activateWorkspaceBoardSource(workspaceId, source);
         }
       });
@@ -830,12 +840,17 @@ export function GithubPanel() {
         return;
       }
 
-      setActiveBoardSource(activatedSource);
-      setSnapshot((current) => ({
-        ...current,
-        projects,
-        projectsTotal: projects.length
-      }));
+      applyActivatedGithubBoardSource(activatedSource);
+      if (shouldApplyGithubBrowsingResult({
+        currentRepositoryId: browsingRepositoryIdRef.current,
+        requestedRepositoryId: repositoryId
+      })) {
+        setSnapshot((current) => ({
+          ...current,
+          projects,
+          projectsTotal: projects.length
+        }));
+      }
       setActionMessage("활성 Board를 변경했습니다.");
       void refreshGithubSyncRuns().catch(() => undefined);
     } catch (error) {
@@ -897,7 +912,7 @@ export function GithubPanel() {
           projectV2Id
         }
       );
-      setActiveBoardSource(activatedSource);
+      applyActivatedGithubBoardSource(activatedSource);
       setActionMessage("활성 Board를 변경했습니다.");
       void refreshGithubSyncRuns().catch(() => undefined);
     } catch (error) {
