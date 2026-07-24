@@ -89,18 +89,26 @@ export class GithubSourceWebhookReconcileService {
     try {
       const kind = this.readKind(claim.event_name);
       const contentNumber = this.toPositiveInteger(claim.content_number);
+      const targets = await this.listTargets(this.database, claim);
+      if (targets.length === 0) {
+        throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
+      }
+      const snapshot = await this.fetchSourceSnapshot(
+        targets,
+        kind,
+        contentNumber
+      );
       const result = await this.database.transaction(async (transaction) => {
         await this.acquireSourceLock(transaction, claim, kind, contentNumber);
-        const targets = await this.listTargets(transaction, claim);
-        if (targets.length === 0) {
+        const currentTargets = await this.listTargets(transaction, claim);
+        if (currentTargets.length === 0) {
           throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
         }
-
-        const result = await this.reconcileSource(
+        const result = await this.applySourceSnapshot(
           transaction,
-          targets,
+          currentTargets,
           kind,
-          contentNumber
+          snapshot
         );
         await this.markProcessed(transaction, claim);
         return result;
@@ -142,12 +150,11 @@ export class GithubSourceWebhookReconcileService {
     );
   }
 
-  private async reconcileSource(
-    transaction: DatabaseTransaction,
+  private async fetchSourceSnapshot(
     targets: GithubSourceWebhookTarget[],
     kind: GithubSourceWebhookKind,
     contentNumber: number
-  ): Promise<GithubSourceReconcileResult> {
+  ): Promise<GithubIssueApiItem | GithubPullRequestApiItem> {
     const config = this.configService.getGithubAppConfig();
     const firstTarget = targets[0];
     const request = {
@@ -158,13 +165,30 @@ export class GithubSourceWebhookReconcileService {
       privateKey: config.privateKey,
       repo: firstTarget.repository_name
     };
-    const result = this.emptyReconcileResult();
 
     if (kind === "issue") {
-      const issue = await this.githubAppClient.getRepositoryIssue({
+      return this.githubAppClient.getRepositoryIssue({
         ...request,
         issueNumber: contentNumber
       });
+    }
+
+    return this.githubAppClient.getPullRequestWebhookSnapshot({
+      ...request,
+      pullNumber: contentNumber
+    });
+  }
+
+  private async applySourceSnapshot(
+    transaction: DatabaseTransaction,
+    targets: GithubSourceWebhookTarget[],
+    kind: GithubSourceWebhookKind,
+    snapshot: GithubIssueApiItem | GithubPullRequestApiItem
+  ): Promise<GithubSourceReconcileResult> {
+    const result = this.emptyReconcileResult();
+
+    if (kind === "issue") {
+      const issue = snapshot as GithubIssueApiItem;
       for (const target of targets) {
         const row = await this.upsertIssue(transaction, target, issue);
         result.boardInvalidations.push(
@@ -182,11 +206,7 @@ export class GithubSourceWebhookReconcileService {
       return result;
     }
 
-    const pullRequest =
-      await this.githubAppClient.getPullRequestWebhookSnapshot({
-        ...request,
-        pullNumber: contentNumber
-      });
+    const pullRequest = snapshot as GithubPullRequestApiItem;
     for (const target of targets) {
       const row = await this.upsertPullRequest(
         transaction,
@@ -224,7 +244,14 @@ export class GithubSourceWebhookReconcileService {
           error_message=NULL
         WHERE delivery_id=$1
           AND (
-            (status='received' AND (lease_expires_at IS NULL OR lease_expires_at < now()))
+            (
+              status='received'
+              AND (
+                error_message='GitHub webhook enqueue is publishing'
+                OR lease_expires_at IS NULL
+                OR lease_expires_at < now()
+              )
+            )
             OR (status='processing' AND lease_expires_at < now())
           )
         RETURNING
@@ -239,10 +266,10 @@ export class GithubSourceWebhookReconcileService {
   }
 
   private async listTargets(
-    transaction: DatabaseTransaction,
+    database: Pick<DatabaseService, "query"> | Pick<DatabaseTransaction, "query">,
     claim: GithubSourceWebhookDeliveryClaim
   ): Promise<GithubSourceWebhookTarget[]> {
-    return transaction.query<GithubSourceWebhookTarget>(
+    return database.query<GithubSourceWebhookTarget>(
       `
         SELECT
           installation.workspace_id,
@@ -302,6 +329,11 @@ export class GithubSourceWebhookReconcileService {
           last_synced_at=now(),
           raw=EXCLUDED.raw,
           updated_at=now()
+        WHERE github_issues.github_updated_at IS NULL
+          OR (
+            EXCLUDED.github_updated_at IS NOT NULL
+            AND EXCLUDED.github_updated_at >= github_issues.github_updated_at
+          )
         RETURNING id, updated_at
       `,
       [
@@ -325,6 +357,25 @@ export class GithubSourceWebhookReconcileService {
         issue.closed_at ?? null,
         serializeGithubJsonb(issue)
       ]
+    );
+    if (!row) {
+      return this.findExistingIssue(transaction, target, issue);
+    }
+    return row;
+  }
+
+  private async findExistingIssue(
+    transaction: DatabaseTransaction,
+    target: GithubSourceWebhookTarget,
+    issue: GithubIssueApiItem
+  ): Promise<UpsertedSourceRow> {
+    const row = await transaction.queryOne<UpsertedSourceRow>(
+      `
+        SELECT id, updated_at
+        FROM github_issues
+        WHERE workspace_id=$1 AND github_issue_id=$2
+      `,
+      [target.workspace_id, issue.id]
     );
     if (!row) {
       throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
@@ -377,6 +428,11 @@ export class GithubSourceWebhookReconcileService {
           last_synced_at=now(),
           raw=EXCLUDED.raw,
           updated_at=now()
+        WHERE github_pull_requests.github_updated_at IS NULL
+          OR (
+            EXCLUDED.github_updated_at IS NOT NULL
+            AND EXCLUDED.github_updated_at >= github_pull_requests.github_updated_at
+          )
         RETURNING id, updated_at
       `,
       [
@@ -404,6 +460,25 @@ export class GithubSourceWebhookReconcileService {
         pullRequest.merged_at ?? null,
         serializeGithubJsonb(pullRequest)
       ]
+    );
+    if (!row) {
+      return this.findExistingPullRequest(transaction, target, pullRequest);
+    }
+    return row;
+  }
+
+  private async findExistingPullRequest(
+    transaction: DatabaseTransaction,
+    target: GithubSourceWebhookTarget,
+    pullRequest: GithubPullRequestApiItem
+  ): Promise<UpsertedSourceRow> {
+    const row = await transaction.queryOne<UpsertedSourceRow>(
+      `
+        SELECT id, updated_at
+        FROM github_pull_requests
+        WHERE workspace_id=$1 AND github_pull_request_id=$2
+      `,
+      [target.workspace_id, pullRequest.id]
     );
     if (!row) {
       throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
