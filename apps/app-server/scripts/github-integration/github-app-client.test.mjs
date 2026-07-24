@@ -69,6 +69,34 @@ function githubIssuePayload(overrides = {}) {
     ...overrides
   };
 }
+function githubRepositoryPayload(overrides = {}) {
+  return {
+    id: 1000,
+    node_id: "R_kgDOExample",
+    owner: {
+      login: "Developer-EJ"
+    },
+    name: "PILO",
+    full_name: "Developer-EJ/PILO",
+    private: true,
+    archived: false,
+    default_branch: "main",
+    html_url: "https://github.com/Developer-EJ/PILO",
+    ...overrides
+  };
+}
+function githubPullRequestPayload(overrides = {}) {
+  return {
+    id: 2000,
+    node_id: "PR_kwDOExample",
+    number: 17,
+    title: "Review token refresh",
+    body: "Refresh pagination token state",
+    html_url: "https://github.com/Developer-EJ/PILO/pull/17",
+    state: "open",
+    ...overrides
+  };
+}
 function githubContentPayload(overrides = {}) {
   return {
     type: "file",
@@ -1238,6 +1266,124 @@ function assertInstallationTokenCacheEventDoesNotLeak(event) {
       "Bearer recover-token-1",
       "Bearer recover-token-2"
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+for (const scenario of [
+  {
+    name: "installation repositories",
+    endpoint: "/installation/repositories",
+    pagePayload(page) {
+      return {
+        repositories: page === "1"
+          ? Array.from({ length: 100 }, (_, index) => githubRepositoryPayload({
+              id: 1000 + index,
+              node_id: `R_kgDORestPage${index}`,
+              name: `PILO-${index}`,
+              full_name: `Developer-EJ/PILO-${index}`,
+              html_url: `https://github.com/Developer-EJ/PILO-${index}`
+            }))
+          : []
+      };
+    },
+    run(client, input) {
+      return client.listInstallationRepositories(input);
+    }
+  },
+  {
+    name: "repository issues",
+    endpoint: "/repos/Developer-EJ/PILO/issues",
+    pagePayload(page) {
+      return page === "1"
+        ? Array.from({ length: 100 }, (_, index) => githubIssuePayload({
+            id: 3000 + index,
+            node_id: `I_kwDORestPage${index}`,
+            number: index + 1,
+            title: `Issue ${index + 1}`,
+            html_url: `https://github.com/Developer-EJ/PILO/issues/${index + 1}`
+          }))
+        : [];
+    },
+    run(client, input) {
+      return client.listRepositoryIssues(input);
+    }
+  },
+  {
+    name: "repository pull requests",
+    endpoint: "/repos/Developer-EJ/PILO/pulls",
+    pagePayload(page) {
+      return page === "1"
+        ? Array.from({ length: 100 }, (_, index) => githubPullRequestPayload({
+            id: 4000 + index,
+            node_id: `PR_kwDORestPage${index}`,
+            number: index + 1,
+            title: `Pull request ${index + 1}`,
+            html_url: `https://github.com/Developer-EJ/PILO/pull/${index + 1}`
+          }))
+        : [];
+    },
+    run(client, input) {
+      return client.listRepositoryPullRequests(input);
+    }
+  }
+]) {
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  const requestTokens = [];
+  const requestPages = [];
+  let tokenPosts = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `rest-pagination-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes(scenario.endpoint)) {
+      const request = new URL(requestUrl);
+      requestTokens.push(options.headers?.Authorization);
+      requestPages.push(request.searchParams.get("page"));
+      if (options.headers?.Authorization === "Bearer rest-pagination-token-1") {
+        return jsonResponse(401, { message: "Bad credentials" });
+      }
+
+      assert.equal(options.headers?.Authorization, "Bearer rest-pagination-token-2");
+      return jsonResponse(200, scenario.pagePayload(request.searchParams.get("page")));
+    }
+
+    throw new Error(`Unexpected provider request for ${scenario.name}: ${requestUrl}`);
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    const result = await scenario.run(client, input);
+
+    assert.equal(result.length, 100, `${scenario.name} should return the first page after refresh`);
+    assert.equal(tokenPosts, 2, `${scenario.name} should only issue T0 and T1`);
+    assert.deepEqual(
+      requestTokens,
+      [
+        "Bearer rest-pagination-token-1",
+        "Bearer rest-pagination-token-2",
+        "Bearer rest-pagination-token-2"
+      ],
+      `${scenario.name} page 2 must start with refreshed T1`
+    );
+    assert.deepEqual(requestPages, ["1", "1", "2"]);
   } finally {
     globalThis.fetch = originalFetch;
   }

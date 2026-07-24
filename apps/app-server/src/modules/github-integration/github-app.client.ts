@@ -1445,6 +1445,10 @@ export class GithubAppClient {
     input: GithubInstallationRepositoriesRequest
   ): Promise<GithubInstallationRepositoryApiItem[]> {
     const installationToken = await this.createInstallationAccessToken(input);
+    const installationTokenRetry = this.installationAccessTokenRetryContext(
+      input,
+      installationToken.token
+    );
     const repositories: GithubInstallationRepositoryApiItem[] = [];
 
     for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
@@ -1454,14 +1458,14 @@ export class GithubAppClient {
 
       const payload = await this.fetchJsonWithToken(
         url,
-        installationToken.token,
+        installationTokenRetry.token,
         "GitHub repositories sync failed",
         undefined,
         false,
         false,
         "github_installation_repositories_list",
         "installation",
-        this.installationAccessTokenRetryContext(input, installationToken.token)
+        installationTokenRetry
       );
       if (!this.isInstallationRepositoriesPayload(payload)) {
         throw badRequest("GitHub repositories sync failed");
@@ -1480,6 +1484,10 @@ export class GithubAppClient {
     input: GithubRepositoryIssuesRequest
   ): Promise<GithubIssueApiItem[]> {
     const installationToken = await this.createInstallationAccessToken(input);
+    const installationTokenRetry = this.installationAccessTokenRetryContext(
+      input,
+      installationToken.token
+    );
     const issues: GithubIssueApiItem[] = [];
 
     for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
@@ -1492,14 +1500,14 @@ export class GithubAppClient {
 
       const payload = await this.fetchJsonWithToken(
         url,
-        installationToken.token,
+        installationTokenRetry.token,
         "GitHub issues sync failed",
         undefined,
         false,
         false,
         "github_repository_issues_list",
         "installation",
-        this.installationAccessTokenRetryContext(input, installationToken.token)
+        installationTokenRetry
       );
       if (!Array.isArray(payload)) {
         throw badRequest("GitHub issues sync failed");
@@ -1781,6 +1789,10 @@ export class GithubAppClient {
     input: GithubRepositoryPullRequestsRequest
   ): Promise<GithubPullRequestApiItem[]> {
     const installationToken = await this.createInstallationAccessToken(input);
+    const installationTokenRetry = this.installationAccessTokenRetryContext(
+      input,
+      installationToken.token
+    );
     const pullRequests: GithubPullRequestApiItem[] = [];
 
     for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
@@ -1793,14 +1805,14 @@ export class GithubAppClient {
 
       const payload = await this.fetchJsonWithToken(
         url,
-        installationToken.token,
+        installationTokenRetry.token,
         "GitHub pull requests sync failed",
         undefined,
         false,
         false,
         "github_repository_pull_requests_list",
         "installation",
-        this.installationAccessTokenRetryContext(input, installationToken.token)
+        installationTokenRetry
       );
       if (!Array.isArray(payload) || !payload.every((item) => this.isPullRequestPayload(item))) {
         throw badRequest("GitHub pull requests sync failed");
@@ -3599,6 +3611,7 @@ export class GithubAppClient {
       }
 
       if (refreshedToken) {
+        installationTokenRetry.token = refreshedToken.token;
         response = await this.fetchWithTokenResponse(
           url,
           refreshedToken.token,
