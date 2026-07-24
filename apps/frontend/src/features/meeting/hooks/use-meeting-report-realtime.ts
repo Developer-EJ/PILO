@@ -79,7 +79,10 @@ export function useMeetingReportRealtime({
       return;
     }
 
-    const socket = io(realtimeUrl, { auth: { token } });
+    const socket = io(realtimeUrl, {
+      auth: { token },
+      transports: ["websocket"]
+    });
     const subscribe = () => {
       socket.emit("meeting:subscribe", { workspaceId: normalizedWorkspaceId });
     };
