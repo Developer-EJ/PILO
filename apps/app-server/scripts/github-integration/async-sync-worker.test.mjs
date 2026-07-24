@@ -9,6 +9,7 @@ const { resolveDatabasePoolSettings } = require("../../dist/database/database.se
 const { GithubSyncRunService } = require("../../dist/modules/github-integration/github-sync-run.service.js");
 const { forbidden } = require("../../dist/common/api-error.js");
 const { GithubSyncJobService } = require("../../dist/modules/github-integration/github-sync-job.service.js");
+const { GithubSyncExecutorService } = require("../../dist/modules/github-integration/github-sync-executor.service.js");
 const { GithubSyncWorkerModule } = require("../../dist/modules/github-integration/github-sync-worker.module.js");
 const { GithubSyncObservabilityService } = require("../../dist/modules/github-integration/github-sync-observability.service.js");
 const {
@@ -445,6 +446,35 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.deepEqual(commands.slice(-2), ["ReceiveMessageCommand", "DeleteMessageCommand"]);
 }
 
+{
+  const received = [{ Body: JSON.stringify({ jobId: "job-delete-ack-fails" }), ReceiptHandle: "receipt-delete-ack-fails" }];
+  const commands = [];
+  const warnings = [];
+  let handlerCalls = 0;
+  const worker = new GithubSyncJobService({ query: async () => [] }, {}, {}, {});
+  worker.logger = { warn: (message) => warnings.push(message) };
+  worker.client = () => ({
+    send: async (command) => {
+      commands.push(command.constructor.name);
+      if (command.constructor.name === "ReceiveMessageCommand") {
+        return { Messages: received.splice(0, 1) };
+      }
+      if (command.constructor.name === "DeleteMessageCommand") {
+        throw new Error("delete ack failed");
+      }
+      return {};
+    }
+  });
+
+  await worker.pollQueue("queue-url", "jobId", async () => {
+    handlerCalls += 1;
+    return "terminal";
+  });
+
+  assert.equal(handlerCalls, 1);
+  assert.deepEqual(commands, ["ReceiveMessageCommand", "DeleteMessageCommand"]);
+  assert.deepEqual(warnings, ["GitHub queue message will be retried: delete ack failed"]);
+}
 {
   const events = [];
   const recoveredSyncRunId = "55555555-5555-4555-8555-555555555555";
@@ -1320,4 +1350,121 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
   assert.equal(writes.length, 0, "worker recovery must not update webhook delivery lifecycle state");
 }
 
+{
+  const received = [{ Body: JSON.stringify({ jobId: "job-lease-fails" }), ReceiptHandle: "receipt-lease-fails" }];
+  const commands = [];
+  const visibilityCommands = [];
+  const worker = new GithubSyncJobService({ query: async () => [] }, {}, {}, {});
+  worker.client = () => ({
+    send: async (command) => {
+      commands.push(command.constructor.name);
+      if (command.constructor.name === "ReceiveMessageCommand") {
+        return { Messages: received.splice(0, 1) };
+      }
+      if (command.constructor.name === "ChangeMessageVisibilityCommand") {
+        visibilityCommands.push(command.input);
+      }
+      return {};
+    }
+  });
+
+  await assert.rejects(
+    () => worker.pollQueue("queue-url", "jobId", async () => {
+      throw new Error("lease acquisition connection timeout");
+    }),
+    /lease acquisition connection timeout/
+  );
+
+  assert.deepEqual(commands, ["ReceiveMessageCommand", "ChangeMessageVisibilityCommand"]);
+  assert.deepEqual(visibilityCommands, [{
+    QueueUrl: "queue-url",
+    ReceiptHandle: "receipt-lease-fails",
+    VisibilityTimeout: 30,
+  }]);
+}
+
+{
+  const database = {
+    issue: {
+      id: "issue-existing",
+      title: "Fresh issue title",
+      github_updated_at: "2026-07-16T00:00:00.000Z",
+    },
+    pullRequest: {
+      id: "pr-existing",
+      title: "Fresh PR title",
+      github_updated_at: "2026-07-16T00:00:00.000Z",
+    },
+    async queryOne(text, values = []) {
+      if (/INSERT INTO github_issues/i.test(text)) {
+        if (/WHERE[\s\S]*github_issues\.github_updated_at IS NULL/i.test(text)) {
+          return null;
+        }
+        this.issue = { ...this.issue, title: values[5], github_updated_at: values[16] };
+        return { id: this.issue.id, created: false, skipped: true };
+      }
+      if (/FROM github_issues/i.test(text)) {
+        assert.deepEqual(values, [workspaceId, 101]);
+        return { id: this.issue.id, created: false, skipped: true };
+      }
+      if (/INSERT INTO github_pull_requests/i.test(text)) {
+        if (/WHERE[\s\S]*github_pull_requests\.github_updated_at IS NULL/i.test(text)) {
+          return null;
+        }
+        this.pullRequest = { ...this.pullRequest, title: values[5], github_updated_at: values[19] };
+        return { id: this.pullRequest.id, created: false, skipped: true };
+      }
+      if (/FROM github_pull_requests/i.test(text)) {
+        assert.deepEqual(values, [workspaceId, 202]);
+        return { id: this.pullRequest.id, created: false, skipped: true };
+      }
+      throw new Error(`Unexpected durable source query: ${text}`);
+    }
+  };
+  const executor = new GithubSyncExecutorService(database, {});
+
+  const issueResult = await executor.upsertGithubIssue(workspaceId, "repo-id", {
+    id: 101,
+    node_id: "I_stale",
+    number: 11,
+    title: "Stale issue title",
+    body: null,
+    state: "open",
+    state_reason: null,
+    user: { login: "octocat", avatar_url: "https://avatars.test/octocat" },
+    html_url: "https://github.test/pilo/repo/issues/11",
+    labels: [],
+    assignees: [],
+    milestone: null,
+    created_at: "2026-07-15T00:00:00.000Z",
+    updated_at: "2026-07-15T23:00:00.000Z",
+    closed_at: null,
+  });
+  const pullRequestResult = await executor.upsertGithubPullRequest(workspaceId, "repo-id", {
+    id: 202,
+    node_id: "PR_stale",
+    number: 12,
+    title: "Stale PR title",
+    body: null,
+    user: { login: "octocat", avatar_url: "https://avatars.test/octocat" },
+    head: { ref: "feature" },
+    base: { ref: "main" },
+    changed_files: 1,
+    additions: 2,
+    deletions: 3,
+    commits: 4,
+    comments: 5,
+    review_comments: 6,
+    html_url: "https://github.test/pilo/repo/pull/12",
+    created_at: "2026-07-15T00:00:00.000Z",
+    updated_at: null,
+    closed_at: null,
+    merged_at: null,
+  });
+
+  assert.deepEqual(issueResult, { id: "issue-existing", created: false, skipped: true });
+  assert.deepEqual(pullRequestResult, { id: "pr-existing", created: false, skipped: true });
+  assert.equal(database.issue.title, "Fresh issue title");
+  assert.equal(database.pullRequest.title, "Fresh PR title");
+}
 console.log("GitHub async sync worker behavioral tests passed");

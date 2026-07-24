@@ -125,6 +125,8 @@ function sourceClaimAllowsActivePublishingLease(text) {
 class SourceDatabase {
   constructor(eventName, {
     activeReceivedLease = false,
+    existingIssue = null,
+    existingPullRequest = null,
     receivedErrorMessage = null,
     targetCount = 1,
   } = {}) {
@@ -135,6 +137,8 @@ class SourceDatabase {
     this.committed = false;
     this.events = [];
     this.eventName = eventName;
+    this.existingIssue = existingIssue;
+    this.existingPullRequest = existingPullRequest;
     this.issueValues = null;
     this.lockKey = null;
     this.pullRequestSql = null;
@@ -170,13 +174,33 @@ class SourceDatabase {
     if (/INSERT INTO github_issues/i.test(text)) {
       this.events.push("upsert");
       this.issueValues = values;
+      if (this.existingIssue) {
+        assert.match(text, /WHERE[\s\S]*github_issues\.github_updated_at IS NULL/i);
+        assert.match(text, /EXCLUDED\.github_updated_at IS NOT NULL/i);
+        assert.match(text, /EXCLUDED\.github_updated_at >= github_issues\.github_updated_at/i);
+        return null;
+      }
       return { id: issueId, updated_at: updatedAt };
     }
     if (/INSERT INTO github_pull_requests/i.test(text)) {
       this.events.push("upsert");
       this.pullRequestSql = text;
       this.pullRequestValues = values;
+      if (this.existingPullRequest) {
+        assert.match(text, /WHERE[\s\S]*github_pull_requests\.github_updated_at IS NULL/i);
+        assert.match(text, /EXCLUDED\.github_updated_at IS NOT NULL/i);
+        assert.match(text, /EXCLUDED\.github_updated_at >= github_pull_requests\.github_updated_at/i);
+        return null;
+      }
       return { id: pullRequestId, updated_at: updatedAt };
+    }
+    if (/FROM github_issues/i.test(text)) {
+      assert.ok(this.existingIssue, "stale issue upsert must read the retained row");
+      return this.existingIssue;
+    }
+    if (/FROM github_pull_requests/i.test(text)) {
+      assert.ok(this.existingPullRequest, "stale PR upsert must read the retained row");
+      return this.existingPullRequest;
     }
     throw new Error(`Unexpected queryOne: ${text}`);
   }
@@ -314,12 +338,7 @@ function createService({ database, githubAppClient, published, publisherFails = 
   assert.equal(await service.processDelivery("unresolved-target-delivery"), "retry");
   assert.equal(database.processed, 0);
   assert.equal(database.retried, 1);
-  assert.deepEqual(database.events, [
-    "transaction:start",
-    "lock",
-    "targets",
-    "transaction:rollback",
-  ]);
+  assert.deepEqual(database.events, ["targets"]);
 }
 
 {
@@ -348,11 +367,12 @@ function createService({ database, githubAppClient, published, publisherFails = 
   assert.equal(database.processed, 1);
   assert.equal(database.retried, 0);
   assert.equal(database.lockKey, "github-source-webhook:12:34:issue:56");
-  assert.deepEqual(database.events.slice(0, 7), [
+  assert.deepEqual(database.events.slice(0, 8), [
+    "targets",
+    "rest-fetch",
     "transaction:start",
     "lock",
     "targets",
-    "rest-fetch",
     "upsert",
     "mark-processed",
     "transaction:commit",
@@ -413,6 +433,82 @@ function createService({ database, githubAppClient, published, publisherFails = 
   assert.equal(published[0].sourceId, pullRequestId);
 }
 
+
+{
+  const database = new SourceDatabase("issues", {
+    existingIssue: {
+      id: issueId,
+      updated_at: "2026-07-16T00:00:00.000Z",
+    },
+  });
+  const published = [];
+  const staleIssue = {
+    ...issueSnapshot(),
+    title: "Stale issue title",
+    updated_at: "2026-07-15T23:00:00.000Z",
+  };
+  const service = createService({
+    database,
+    githubAppClient: {
+      getRepositoryIssue: async () => {
+        database.events.push("rest-fetch");
+        return staleIssue;
+      },
+    },
+    published,
+  });
+
+  assert.equal(await service.processDelivery("stale-issue-delivery"), "terminal");
+  assert.equal(database.processed, 1);
+  assert.deepEqual(database.events.slice(0, 8), [
+    "targets",
+    "rest-fetch",
+    "transaction:start",
+    "lock",
+    "targets",
+    "upsert",
+    "mark-processed",
+    "transaction:commit",
+  ]);
+  assert.equal(
+    published[0].updatedAt,
+    "2026-07-16T00:00:00.000Z",
+    "a stale issue webhook must publish the retained fresh row timestamp"
+  );
+}
+
+{
+  const database = new SourceDatabase("pull_request", {
+    existingPullRequest: {
+      id: pullRequestId,
+      updated_at: "2026-07-16T00:00:00.000Z",
+    },
+  });
+  const published = [];
+  const stalePullRequest = {
+    ...pullRequestSnapshot(),
+    title: "Stale PR title",
+    updated_at: null,
+  };
+  const service = createService({
+    database,
+    githubAppClient: {
+      getPullRequestWebhookSnapshot: async () => {
+        database.events.push("rest-fetch");
+        return stalePullRequest;
+      },
+    },
+    published,
+  });
+
+  assert.equal(await service.processDelivery("stale-pr-delivery"), "terminal");
+  assert.equal(database.processed, 1);
+  assert.equal(
+    published[0].updatedAt,
+    "2026-07-16T00:00:00.000Z",
+    "a null-updated PR webhook snapshot must not overwrite a retained fresh row"
+  );
+}
 {
   const database = new SourceDatabase("issues", {
     activeReceivedLease: true,
@@ -438,6 +534,7 @@ function createService({ database, githubAppClient, published, publisherFails = 
   );
   assert.equal(sourceClaimAllowsActivePublishingLease(database.claimSql), true);
 }
+
 
 {
   const database = new SourceDatabase("issues", {
@@ -521,7 +618,7 @@ function createService({ database, githubAppClient, published, publisherFails = 
   assert.equal(database.pullRequestValues, null, "404 must retain the existing local cache");
   assert.equal(database.processed, 0);
   assert.equal(database.retried, 1);
-  assert.equal(database.events.at(-1), "transaction:rollback");
+  assert.deepEqual(database.events, ["targets"]);
 }
 
 {
