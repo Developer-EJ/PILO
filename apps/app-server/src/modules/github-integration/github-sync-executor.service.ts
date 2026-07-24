@@ -53,6 +53,7 @@ export interface GithubSyncProjectV2ContextRow extends QueryResultRow {
 interface GithubSyncUpsertResultRow extends QueryResultRow {
   id: string;
   created: boolean;
+  skipped?: boolean;
 }
 
 interface CountRow extends QueryResultRow {
@@ -427,6 +428,7 @@ export class GithubSyncExecutorService {
     let fetchedCount = 0;
     let createdCount = 0;
     let updatedCount = 0;
+    let skippedCount = 0;
 
     for (const repository of repositories) {
       const issues = await this.githubAppClient.listRepositoryIssues({
@@ -443,6 +445,8 @@ export class GithubSyncExecutorService {
         const row = await this.upsertGithubIssue(context.workspaceId, repository.id, issue);
         if (row.created) {
           createdCount += 1;
+        } else if (row.skipped) {
+          skippedCount += 1;
         } else {
           updatedCount += 1;
         }
@@ -454,7 +458,8 @@ export class GithubSyncExecutorService {
     return this.createGithubSyncSummary({
       fetchedCount,
       createdCount,
-      updatedCount
+      updatedCount,
+      skippedCount
     });
   }
 
@@ -465,6 +470,7 @@ export class GithubSyncExecutorService {
     let fetchedCount = 0;
     let createdCount = 0;
     let updatedCount = 0;
+    let skippedCount = 0;
 
     for (const repository of repositories) {
       const pullRequests = await this.githubAppClient.listRepositoryPullRequests({
@@ -501,6 +507,8 @@ export class GithubSyncExecutorService {
         );
         if (row.created) {
           createdCount += 1;
+        } else if (row.skipped) {
+          skippedCount += 1;
         } else {
           updatedCount += 1;
         }
@@ -512,7 +520,8 @@ export class GithubSyncExecutorService {
     return this.createGithubSyncSummary({
       fetchedCount,
       createdCount,
-      updatedCount
+      updatedCount,
+      skippedCount
     });
   }
 
@@ -1531,6 +1540,11 @@ export class GithubSyncExecutorService {
           last_synced_at = now(),
           raw = EXCLUDED.raw,
           updated_at = now()
+        WHERE github_issues.github_updated_at IS NULL
+          OR (
+            EXCLUDED.github_updated_at IS NOT NULL
+            AND EXCLUDED.github_updated_at >= github_issues.github_updated_at
+          )
         RETURNING id, (xmax = 0) AS created
       `,
       [
@@ -1554,6 +1568,26 @@ export class GithubSyncExecutorService {
         issue.closed_at ?? null,
         serializeGithubJsonb(issue)
       ]
+    );
+
+    if (!row) {
+      return this.findExistingGithubIssue(workspaceId, issue.id);
+    }
+
+    return row;
+  }
+
+  private async findExistingGithubIssue(
+    workspaceId: string,
+    githubIssueId: number
+  ): Promise<GithubSyncUpsertResultRow> {
+    const row = await this.database.queryOne<GithubSyncUpsertResultRow>(
+      `
+        SELECT id, false AS created, true AS skipped
+        FROM github_issues
+        WHERE workspace_id=$1 AND github_issue_id=$2
+      `,
+      [workspaceId, githubIssueId]
     );
 
     if (!row) {
@@ -1647,6 +1681,11 @@ export class GithubSyncExecutorService {
           last_synced_at = now(),
           raw = EXCLUDED.raw,
           updated_at = now()
+        WHERE github_pull_requests.github_updated_at IS NULL
+          OR (
+            EXCLUDED.github_updated_at IS NOT NULL
+            AND EXCLUDED.github_updated_at >= github_pull_requests.github_updated_at
+          )
         RETURNING id, (xmax = 0) AS created
       `,
       [
@@ -1674,6 +1713,26 @@ export class GithubSyncExecutorService {
         pullRequest.merged_at ?? null,
         serializeGithubJsonb(pullRequest)
       ]
+    );
+
+    if (!row) {
+      return this.findExistingGithubPullRequest(workspaceId, pullRequest.id);
+    }
+
+    return row;
+  }
+
+  private async findExistingGithubPullRequest(
+    workspaceId: string,
+    githubPullRequestId: number
+  ): Promise<GithubSyncUpsertResultRow> {
+    const row = await this.database.queryOne<GithubSyncUpsertResultRow>(
+      `
+        SELECT id, false AS created, true AS skipped
+        FROM github_pull_requests
+        WHERE workspace_id=$1 AND github_pull_request_id=$2
+      `,
+      [workspaceId, githubPullRequestId]
     );
 
     if (!row) {

@@ -1,4 +1,5 @@
 import {
+  ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
@@ -27,6 +28,8 @@ import { GithubSyncObservabilityService } from "./github-sync-observability.serv
 import type { GithubSyncTarget } from "./types";
 
 type GithubSqsClient = Pick<SQSClient, "send"> & Partial<Pick<SQSClient, "destroy">>;
+
+const SYNC_JOB_RETRY_VISIBILITY_TIMEOUT_SECONDS = 30;
 
 interface SyncJobRow extends QueryResultRow {
   id: string;
@@ -236,10 +239,13 @@ export class GithubSyncJobService implements OnModuleDestroy {
     return result;
   }
 
-  async pollOnce(): Promise<void> {
-    await this.recoverWebhookOutbox();
+  async pollSyncJobQueueOnce(): Promise<void> {
     await this.enqueueDueProjectV2PollingSchedules();
     await this.pollQueue(this.requireEnv("SQS_GITHUB_SYNC_JOBS_QUEUE_URL"), "jobId", (id) => this.processSyncJob(id));
+  }
+
+  async pollWebhookQueueOnce(): Promise<void> {
+    await this.recoverWebhookOutbox();
     await this.pollQueue(this.requireEnv("SQS_GITHUB_WEBHOOKS_QUEUE_URL"), "deliveryId", (id) => this.processWebhookDelivery(id));
   }
 
@@ -248,13 +254,41 @@ export class GithubSyncJobService implements OnModuleDestroy {
   private async pollQueue(queueUrl: string, field: "jobId" | "deliveryId", handler: (id: string) => Promise<"terminal" | "retry">): Promise<void> {
     const response = await this.client().send(new ReceiveMessageCommand({ QueueUrl: queueUrl, MaxNumberOfMessages: 1, WaitTimeSeconds: 10 }));
     for (const message of response.Messages ?? []) {
+      let id: unknown;
       try {
         const value = JSON.parse(message.Body ?? "{}") as Record<string, unknown>;
-        const id = value[field];
-        if (typeof id !== "string" || !id || await handler(id) !== "terminal") continue;
-        if (message.ReceiptHandle) await this.client().send(new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle }));
-      } catch (error) { this.logger.warn(`GitHub queue message will be retried: ${this.errorMessage(error)}`); }
+        id = value[field];
+      } catch (error) {
+        this.logger.warn(`GitHub queue message will be retried: ${this.errorMessage(error)}`);
+        continue;
+      }
+      if (typeof id !== "string" || !id) continue;
+
+      let result: "terminal" | "retry";
+      try {
+        result = await handler(id);
+      } catch (error) {
+        this.logger.warn(`GitHub queue message will be retried: ${this.errorMessage(error)}`);
+        await this.deferSyncJobRetry(queueUrl, field, message.ReceiptHandle);
+        throw error;
+      }
+      if (result !== "terminal") continue;
+      if (!message.ReceiptHandle) continue;
+      try {
+        await this.client().send(new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: message.ReceiptHandle }));
+      } catch (error) {
+        this.logger.warn(`GitHub queue message will be retried: ${this.errorMessage(error)}`);
+      }
     }
+  }
+
+  private async deferSyncJobRetry(queueUrl: string, field: "jobId" | "deliveryId", receiptHandle?: string): Promise<void> {
+    if (field !== "jobId" || !receiptHandle) return;
+    await this.client().send(new ChangeMessageVisibilityCommand({
+      QueueUrl: queueUrl,
+      ReceiptHandle: receiptHandle,
+      VisibilityTimeout: SYNC_JOB_RETRY_VISIBILITY_TIMEOUT_SECONDS
+    }));
   }
 
   private async recoverWebhookOutbox(): Promise<void> {

@@ -1340,7 +1340,7 @@ export class WorkspaceService {
           next_attempt_at
         )
         SELECT
-          $2,
+          $2::uuid,
           drive_item.workspace_id,
           'drive_object',
           drive_item.id,
@@ -1356,7 +1356,7 @@ export class WorkspaceService {
         UNION ALL
 
         SELECT
-          $2,
+          $2::uuid,
           meeting.workspace_id,
           'meeting_recording',
           recording.id,
