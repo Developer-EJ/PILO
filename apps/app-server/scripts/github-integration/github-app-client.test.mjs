@@ -955,6 +955,106 @@ function assertProviderEventDoesNotLeak(event) {
     if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
       tokenPosts += 1;
       return jsonResponse(201, {
+        token: `concurrent-recover-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return issueRequestTokens.length === 2 || issueRequestTokens.length === 3
+        ? jsonResponse(401, { message: "Bad credentials" })
+        : jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await Promise.all([client.listRepositoryIssues(input), client.listRepositoryIssues(input)]);
+
+    assert.equal(tokenPosts, 2, "simultaneous cached-token 401s should share one refresh token POST");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer concurrent-recover-token-1",
+      "Bearer concurrent-recover-token-1",
+      "Bearer concurrent-recover-token-1",
+      "Bearer concurrent-recover-token-2",
+      "Bearer concurrent-recover-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return tokenPosts === 1
+        ? jsonResponse(201, {
+            token: "refresh-failure-token-1",
+            expires_at: "2026-07-04T13:00:00.000Z"
+          })
+        : jsonResponse(500, { message: "token endpoint unavailable" });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await assert.rejects(
+      () => client.listRepositoryIssues(input),
+      (error) => error?.response?.error?.message === "GitHub issues sync failed"
+    );
+
+    assert.equal(tokenPosts, 2, "refresh failure should still attempt exactly one refresh token POST");
+    assert.deepEqual(issueRequestTokens, ["Bearer refresh-failure-token-1"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
         token: `second-401-token-${tokenPosts}`,
         expires_at: "2026-07-04T13:00:00.000Z"
       });
@@ -992,6 +1092,59 @@ function assertProviderEventDoesNotLeak(event) {
       "Bearer second-401-token-1",
       "Bearer second-401-token-1",
       "Bearer second-401-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `retry-invalid-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return issueRequestTokens.length <= 2
+        ? jsonResponse(401, { message: "Bad credentials" })
+        : jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await assert.rejects(
+      () => client.listRepositoryIssues(input),
+      (error) => error?.response?.error?.message === "GitHub issues sync failed"
+    );
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 3, "second 401 must evict the refreshed token before the next operation");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer retry-invalid-token-1",
+      "Bearer retry-invalid-token-2",
+      "Bearer retry-invalid-token-3"
     ]);
   } finally {
     globalThis.fetch = originalFetch;

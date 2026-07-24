@@ -3439,17 +3439,32 @@ export class GithubAppClient {
         installationTokenRetry.cacheKey,
         installationTokenRetry.token
       );
-      const refreshedToken = await this.createInstallationAccessToken(
-        installationTokenRetry.input
-      );
-      response = await this.fetchWithTokenResponse(
-        url,
-        refreshedToken.token,
-        errorMessage,
-        signal,
-        operation,
-        authKind
-      );
+      const initialUnauthorizedResponse = response;
+      let refreshedToken: { token: string; expiresAt: string | null } | null = null;
+      try {
+        refreshedToken = await this.createInstallationAccessToken(
+          installationTokenRetry.input
+        );
+      } catch {
+        response = initialUnauthorizedResponse;
+      }
+
+      if (refreshedToken) {
+        response = await this.fetchWithTokenResponse(
+          url,
+          refreshedToken.token,
+          errorMessage,
+          signal,
+          operation,
+          authKind
+        );
+        if (response.status === 401) {
+          this.evictInstallationAccessTokenCacheIfTokenMatches(
+            installationTokenRetry.cacheKey,
+            refreshedToken.token
+          );
+        }
+      }
     }
 
     if (response.status === 404 && sourceNotFoundError) {
