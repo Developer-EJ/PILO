@@ -863,6 +863,282 @@ function assertProviderEventDoesNotLeak(event) {
 {
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `recover-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      if (issueRequestTokens.length === 2) {
+        return jsonResponse(401, { message: "Bad credentials" });
+      }
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 2, "cached token 401 should refresh once");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer recover-token-1",
+      "Bearer recover-token-1",
+      "Bearer recover-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `second-401-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return issueRequestTokens.length === 1
+        ? jsonResponse(200, [])
+        : jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await assert.rejects(
+      () => client.listRepositoryIssues(input),
+      (error) => error?.response?.error?.message === "GitHub issues sync failed"
+    );
+
+    assert.equal(tokenPosts, 2, "second 401 must not trigger a third token POST");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer second-401-token-1",
+      "Bearer second-401-token-1",
+      "Bearer second-401-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `forbidden-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return issueRequestTokens.length === 2
+        ? jsonResponse(403, { message: "Forbidden" })
+        : jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await assert.rejects(
+      () => client.listRepositoryIssues(input),
+      (error) => error?.response?.error?.message === "GitHub issues sync failed"
+    );
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 1, "403 must not refresh the cached installation token");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer forbidden-token-1",
+      "Bearer forbidden-token-1",
+      "Bearer forbidden-token-1"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  let deferNextTokenOneIssue = false;
+  let deferredIssueResponseResolve;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `race-token-${tokenPosts}`,
+        expires_at: tokenPosts === 1
+          ? "2026-07-04T12:56:00.000Z"
+          : "2026-07-04T13:57:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      if (deferNextTokenOneIssue && options.headers?.Authorization === "Bearer race-token-1") {
+        deferNextTokenOneIssue = false;
+        return await new Promise((resolve) => {
+          deferredIssueResponseResolve = resolve;
+        });
+      }
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    deferNextTokenOneIssue = true;
+    const oldTokenRequest = client.listRepositoryIssues(input);
+    while (typeof deferredIssueResponseResolve !== "function") {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    await client.listRepositoryIssues({
+      ...input,
+      now: () => new Date("2026-07-04T12:52:00.000Z")
+    });
+    deferredIssueResponseResolve(jsonResponse(401, { message: "Bad credentials" }));
+    await oldTokenRequest;
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 2, "older 401 must not evict a newer cached token");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer race-token-1",
+      "Bearer race-token-1",
+      "Bearer race-token-2",
+      "Bearer race-token-2",
+      "Bearer race-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const compareRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `unexpected-explicit-refresh-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/compare/")) {
+      compareRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().getRepositoryMergeBase({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          installationAccessToken: "caller-provided-token",
+          owner: "Developer-EJ",
+          repo: "PILO",
+          baseRef: "main",
+          headRef: "feature",
+          now: () => fixedNow
+        }),
+      (error) => error?.response?.error?.message === "GitHub repository compare lookup failed"
+    );
+
+    assert.equal(tokenPosts, 0, "explicit installationAccessToken must not be refreshed");
+    assert.deepEqual(compareRequestTokens, ["Bearer caller-provided-token"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
   const graphqlRequests = [];
 
   globalThis.fetch = async (url, options = {}) => {
@@ -1787,6 +2063,84 @@ function assertProviderEventDoesNotLeak(event) {
   }
 }
 
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  const tokenPostsByInstallation = new Map();
+  const issueRequestTokens = [];
+  const deleteStatuses = [204, 404];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    const tokenMatch = requestUrl.match(/\/app\/installations\/(\d+)\/access_tokens$/);
+    if (tokenMatch) {
+      const installationId = tokenMatch[1];
+      const nextCount = (tokenPostsByInstallation.get(installationId) ?? 0) + 1;
+      tokenPostsByInstallation.set(installationId, nextCount);
+      return jsonResponse(201, {
+        token: `delete-${installationId}-token-${nextCount}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/repos/Developer-EJ/PILO/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    if (requestUrl.endsWith("/app/installations/12345678") && options.method === "DELETE") {
+      const status = deleteStatuses.shift();
+      return jsonResponse(status ?? 500, {});
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const base = {
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues({ ...base, installationId: 12345678 });
+    await client.listRepositoryIssues({ ...base, installationId: 87654321 });
+    await client.deleteInstallation({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      now: () => fixedNow
+    });
+    await client.listRepositoryIssues({ ...base, installationId: 12345678 });
+    await client.listRepositoryIssues({ ...base, installationId: 87654321 });
+    await client.deleteInstallation({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      now: () => fixedNow
+    });
+    await client.listRepositoryIssues({ ...base, installationId: 12345678 });
+    await client.listRepositoryIssues({ ...base, installationId: 87654321 });
+
+    assert.deepEqual([...tokenPostsByInstallation.entries()], [
+      ["12345678", 3],
+      ["87654321", 1]
+    ]);
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer delete-12345678-token-1",
+      "Bearer delete-87654321-token-1",
+      "Bearer delete-12345678-token-2",
+      "Bearer delete-87654321-token-1",
+      "Bearer delete-12345678-token-3",
+      "Bearer delete-87654321-token-1"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
 {
   const { privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048
