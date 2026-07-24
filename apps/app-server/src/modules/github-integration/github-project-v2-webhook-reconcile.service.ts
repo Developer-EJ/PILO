@@ -146,6 +146,24 @@ export class GithubProjectV2WebhookReconcileService {
          AND error_message = 'GitHub webhook enqueue is publishing'
          AND lease_expires_at < now()
        ) OR (
+         status = 'received'
+         AND processed_at IS NULL
+         AND error_message IS NULL
+         AND github_installation_id IS NOT NULL
+         AND project_v2_node_id IS NOT NULL
+         AND project_item_node_id IS NOT NULL
+         AND (
+           event_name = 'projects_v2_item'
+           OR event_name IN ('issues', 'issue_comment', 'pull_request', 'pull_request_review', 'pull_request_review_comment')
+         )
+         AND (
+           lease_expires_at < now()
+           OR (
+             lease_expires_at IS NULL
+             AND received_at < now() - interval '2 minutes'
+           )
+         )
+       ) OR (
          status = 'processing'
          AND lease_expires_at < now()
        )
@@ -330,6 +348,25 @@ export class GithubProjectV2WebhookReconcileService {
             AND error_message='GitHub webhook enqueue is publishing'
             AND lease_expires_at < now()
           )
+          OR (
+            status='received'
+            AND processed_at IS NULL
+            AND error_message IS NULL
+            AND github_installation_id IS NOT NULL
+            AND project_v2_node_id IS NOT NULL
+            AND project_item_node_id IS NOT NULL
+            AND (
+              event_name = 'projects_v2_item'
+              OR event_name IN ('issues', 'issue_comment', 'pull_request', 'pull_request_review', 'pull_request_review_comment')
+            )
+            AND (
+              lease_expires_at < now()
+              OR (
+                lease_expires_at IS NULL
+                AND received_at < now() - interval '2 minutes'
+              )
+            )
+          )
           OR (status='processing' AND lease_expires_at < now())
         )
       `,
@@ -349,7 +386,7 @@ export class GithubProjectV2WebhookReconcileService {
         SET
           error_message=NULL,
           lease_owner=NULL,
-          lease_expires_at=NULL
+          lease_expires_at=now() + interval '2 minutes'
         WHERE delivery_id=$1
           AND status='received'
           AND error_message='GitHub webhook enqueue is publishing'

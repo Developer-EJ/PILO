@@ -72,7 +72,7 @@ assert.equal(parseGithubSourceWebhookContext("repository", webhookBody("issue"))
 
 function sourceClaimAllowsActivePublishingLease(text) {
   const normalized = text.replace(/\s+/g, " ").trim();
-  return /status='received' AND \( error_message='GitHub webhook enqueue is publishing' OR lease_expires_at IS NULL OR lease_expires_at < now\(\) \)/i.test(normalized);
+  return /status='received' AND \( error_message IS NULL OR error_message='GitHub webhook enqueue is publishing' OR lease_expires_at IS NULL OR lease_expires_at < now\(\) \)/i.test(normalized);
 }
 
 {
@@ -160,7 +160,7 @@ class SourceDatabase {
       if (
         this.activeReceivedLease &&
         (
-          this.receivedErrorMessage !== "GitHub webhook enqueue is publishing" ||
+          ![null, "GitHub webhook enqueue is publishing"].includes(this.receivedErrorMessage) ||
           !publishingLeaseIsClaimable
         )
       ) {
@@ -573,6 +573,31 @@ function createService({ database, githubAppClient, published, publisherFails = 
   assert.equal(sourceClaimAllowsActivePublishingLease(database.claimSql), true);
 }
 
+{
+  const database = new SourceDatabase("issues", {
+    activeReceivedLease: true,
+    receivedErrorMessage: null,
+  });
+  let lookupCalls = 0;
+  const published = [];
+  const service = createService({
+    database,
+    githubAppClient: {
+      getRepositoryIssue: async () => {
+        lookupCalls += 1;
+        return issueSnapshot();
+      },
+    },
+    published,
+  });
+  assert.equal(await service.processDelivery("clean-published-deadline-delivery"), "terminal");
+  assert.equal(database.claimed, 1, "a clean published source delivery must be claimed from its SQS message even while the recovery deadline is active");
+  assert.equal(lookupCalls, 1);
+  assert.equal(database.processed, 1);
+  assert.equal(database.retried, 0);
+  assert.equal(published[0].sourceId, issueId);
+  assert.equal(sourceClaimAllowsActivePublishingLease(database.claimSql), true);
+}
 {
   const client = new GithubAppClient();
   client.createInstallationAccessToken = async () => ({
