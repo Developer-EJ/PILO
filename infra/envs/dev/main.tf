@@ -439,7 +439,7 @@ module "ecs" {
       image              = "${module.ecr.repository_urls["pilo-ai-worker"]}:latest"
       cpu                = var.ai_worker_cpu
       memory             = var.ai_worker_memory
-      desired_count      = 1
+      desired_count      = 2
       container_port     = null
       command            = ["python", "-m", "app.workspace_indexing_worker_runtime"]
       security_group_ids = [module.security_groups.ai_worker_security_group_id]

@@ -75,7 +75,8 @@ resource "aws_ecs_service" "service" {
   desired_count   = each.value.desired_count
   launch_type     = "FARGATE"
 
-  deployment_minimum_healthy_percent = 0
+  availability_zone_rebalancing      = "ENABLED"
+  deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
   health_check_grace_period_seconds  = each.value.target_group_arn == null ? null : 60
 
