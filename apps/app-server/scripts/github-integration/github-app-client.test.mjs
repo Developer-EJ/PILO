@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
 const { GithubAppClient } = require("../../dist/modules/github-integration/github-app.client.js");
+const {
+  GithubSyncObservabilityService
+} = require("../../dist/modules/github-integration/github-sync-observability.service.js");
 
 const fixedNow = new Date("2026-07-04T12:00:00.000Z");
 
@@ -64,6 +68,276 @@ function githubIssuePayload(overrides = {}) {
     milestone: null,
     ...overrides
   };
+}
+function headers(values = {}) {
+  const normalized = Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key.toLowerCase(), value])
+  );
+
+  return {
+    get(name) {
+      return normalized[name.toLowerCase()] ?? null;
+    }
+  };
+}
+
+function jsonResponse(status, payload, headerValues = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: headers(headerValues),
+    async json() {
+      return payload;
+    }
+  };
+}
+
+function assertProviderEventDoesNotLeak(event) {
+  const serialized = JSON.stringify(event);
+  for (const secret of [
+    "https://api.github.com",
+    "Developer-EJ",
+    "PILO",
+    "12345678",
+    "12345",
+    "installation-token-secret",
+    "user-oauth-token-secret",
+    "raw provider permission details",
+    "query Pilo",
+    "variables",
+    "assignees",
+    "private key"
+  ]) {
+    assert.equal(serialized.includes(secret), false, `${secret} must not be logged`);
+  }
+
+  for (const disallowedKey of [
+    "url",
+    "path",
+    "owner",
+    "repo",
+    "installationId",
+    "appId",
+    "userId",
+    "workspaceId",
+    "authorization",
+    "token",
+    "privateKey",
+    "query",
+    "variables",
+    "payload",
+    "body",
+    "error",
+    "message"
+  ]) {
+    assert.equal(
+      Object.hasOwn(event, disallowedKey),
+      false,
+      `provider request event must not include ${disallowedKey}`
+    );
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const providerEvents = [];
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) {
+      providerEvents.push(JSON.parse(payload));
+    }
+    if (typeof encoding === "function") {
+      encoding();
+    }
+    if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      return jsonResponse(
+        201,
+        {
+          token: "installation-token-secret",
+          expires_at: "2026-07-04T13:00:00.000Z"
+        },
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "4999",
+          "x-ratelimit-used": "1",
+          "x-ratelimit-reset": "1783170000",
+          "x-ratelimit-resource": "core"
+        }
+      );
+    }
+
+    if (requestUrl.includes("/issues/609") && options.method === "PATCH") {
+      return jsonResponse(
+        403,
+        {
+          message: "raw provider permission details"
+        },
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "4997",
+          "x-ratelimit-used": "3",
+          "x-ratelimit-reset": "1783170002",
+          "x-ratelimit-resource": "core"
+        }
+      );
+    }
+
+    if (requestUrl.includes("/issues")) {
+      return jsonResponse(
+        200,
+        [githubIssuePayload()],
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "4998",
+          "x-ratelimit-used": "2",
+          "x-ratelimit-reset": "1783170001",
+          "x-ratelimit-resource": "core"
+        }
+      );
+    }
+
+    if (requestUrl === "https://api.github.com/graphql") {
+      const requestBody = JSON.parse(options.body);
+      assert.match(requestBody.query, /mutation PiloAddProjectV2ItemById/);
+      assert.deepEqual(requestBody.variables, {
+        contentId: "I_kwDOExample",
+        projectId: "PVT_kwDOExample"
+      });
+      return jsonResponse(
+        200,
+        {
+          data: {
+            addProjectV2ItemById: {
+              item: {
+                id: "PVTI_lADOExample"
+              }
+            }
+          }
+        },
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "4996",
+          "x-ratelimit-used": "4",
+          "x-ratelimit-reset": "1783170003",
+          "x-ratelimit-resource": "graphql"
+        }
+      );
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient(new GithubSyncObservabilityService());
+    await client.listRepositoryIssues({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    });
+    await client.addProjectV2ItemByContentId({
+      contentNodeId: "I_kwDOExample",
+      projectNodeId: "PVT_kwDOExample",
+      userAccessToken: "user-oauth-token-secret"
+    });
+    await assert.rejects(
+      () =>
+        client.updateRepositoryIssue({
+          issueNumber: 609,
+          owner: "Developer-EJ",
+          repo: "PILO",
+          title: "Updated title",
+          userAccessToken: "user-oauth-token-secret"
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub Issue write permission is required"
+    );
+
+    const requestEvents = providerEvents.filter(
+      (event) => event.event === "github_provider_request_observed"
+    );
+    assert.equal(requestEvents.length, 4);
+    assert.deepEqual(
+      requestEvents.map((event) => [
+        event.event,
+        event.operation,
+        event.authKind,
+        event.outcome,
+        event.status
+      ]),
+      [
+        [
+          "github_provider_request_observed",
+          "github_app_installation_token_create",
+          "app_jwt",
+          "success",
+          201
+        ],
+        [
+          "github_provider_request_observed",
+          "github_repository_issues_list",
+          "installation",
+          "success",
+          200
+        ],
+        [
+          "github_provider_request_observed",
+          "github_graphql_project_v2_write",
+          "personal_project_v2_oauth",
+          "success",
+          200
+        ],
+        [
+          "github_provider_request_observed",
+          "github_repository_issue_update",
+          "user_oauth",
+          "failure",
+          403
+        ]
+      ]
+    );
+
+    for (const event of requestEvents) {
+      assert.equal(typeof event.durationMs, "number");
+      assert.ok(event.durationMs >= 0);
+      assert.equal(event.rateLimitLimit, 5000);
+      assert.match(event.rateLimitResource, /^(core|graphql)$/);
+      assert.equal(typeof event.rateLimitRemaining, "number");
+      assert.equal(typeof event.rateLimitUsed, "number");
+      assert.equal(typeof event.rateLimitReset, "number");
+      assertProviderEventDoesNotLeak(event);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+
+{
+  const clientSource = readFileSync(
+    new URL("../../src/modules/github-integration/github-app.client.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(clientSource, /private async observedFetch/);
+  assert.equal(
+    [...clientSource.matchAll(/\bawait fetch\(/g)].length,
+    1,
+    "GithubAppClient provider requests must pass through the observed fetch boundary"
+  );
 }
 
 {

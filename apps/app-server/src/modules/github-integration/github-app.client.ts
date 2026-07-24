@@ -4,7 +4,11 @@ import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
 import { GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE } from "./github-oauth-refresh.error";
 import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
-import { GithubSyncObservabilityService } from "./github-sync-observability.service";
+import {
+  GithubSyncObservabilityService,
+  type GithubProviderRequestAuthKind,
+  type GithubProviderRequestOperation
+} from "./github-sync-observability.service";
 
 export interface GithubAppInstallationLookupRequest {
   installationId: number;
@@ -446,6 +450,14 @@ interface GithubRepositoryContentApiPayload {
 }
 
 type GithubProjectV2GraphqlTokenSource = "user" | "installation";
+
+type GithubObservedFetchRateLimit = {
+  rateLimitLimit: number | null;
+  rateLimitRemaining: number | null;
+  rateLimitUsed: number | null;
+  rateLimitReset: number | null;
+  rateLimitResource: string | null;
+};
 
 interface GithubProjectV2GraphqlAuth {
   token: string;
@@ -1043,13 +1055,85 @@ const GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION = `
 export class GithubAppClient {
   constructor(@Optional() private readonly observability?: GithubSyncObservabilityService) {}
 
+  private async observedFetch(
+    operation: GithubProviderRequestOperation,
+    authKind: GithubProviderRequestAuthKind,
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(input, init);
+      this.emitProviderRequestObserved(
+        operation,
+        authKind,
+        response.ok ? "success" : "failure",
+        response.status,
+        Date.now() - startedAt,
+        response
+      );
+      return response;
+    } catch (error) {
+      this.emitProviderRequestObserved(
+        operation,
+        authKind,
+        "failure",
+        null,
+        Date.now() - startedAt
+      );
+      throw error;
+    }
+  }
+
+  private emitProviderRequestObserved(
+    operation: GithubProviderRequestOperation,
+    authKind: GithubProviderRequestAuthKind,
+    outcome: "success" | "failure",
+    status: number | null,
+    durationMs: number,
+    response?: Response
+  ): void {
+    this.observability?.emitProviderRequestObserved({
+      operation,
+      authKind,
+      outcome,
+      status,
+      durationMs: Math.max(0, durationMs),
+      ...this.readProviderRateLimit(response)
+    });
+  }
+
+  private readProviderRateLimit(response?: Response): GithubObservedFetchRateLimit {
+    return {
+      rateLimitLimit: this.safeIntegerHeader(response, "x-ratelimit-limit"),
+      rateLimitRemaining: this.safeIntegerHeader(response, "x-ratelimit-remaining"),
+      rateLimitUsed: this.safeIntegerHeader(response, "x-ratelimit-used"),
+      rateLimitReset: this.safeIntegerHeader(response, "x-ratelimit-reset"),
+      rateLimitResource: this.safeResourceHeader(response, "x-ratelimit-resource")
+    };
+  }
+
+  private safeIntegerHeader(response: Response | undefined, name: string): number | null {
+    const value = response?.headers?.get?.(name) ?? null;
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  private safeResourceHeader(response: Response | undefined, name: string): string | null {
+    const value = response?.headers?.get?.(name) ?? null;
+    return value !== null && /^[a-z_]+$/.test(value) ? value : null;
+  }
+
   async getInstallation(
     input: GithubAppInstallationLookupRequest
   ): Promise<GithubAppInstallationDetails> {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_app_installation_get",
+        "app_jwt",
         `https://api.github.com/app/installations/${input.installationId}`,
         {
           headers: {
@@ -1092,7 +1176,9 @@ export class GithubAppClient {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_app_installation_delete",
+        "app_jwt",
         `https://api.github.com/app/installations/${input.installationId}`,
         {
           method: "DELETE",
@@ -1130,7 +1216,9 @@ export class GithubAppClient {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_app_installation_token_create",
+        "app_jwt",
         `https://api.github.com/app/installations/${input.installationId}/access_tokens`,
         {
           method: "POST",
@@ -1177,7 +1265,12 @@ export class GithubAppClient {
       const payload = await this.fetchJsonWithToken(
         url,
         installationToken.token,
-        "GitHub repositories sync failed"
+        "GitHub repositories sync failed",
+        undefined,
+        false,
+        false,
+        "github_installation_repositories_list",
+        "installation"
       );
       if (!this.isInstallationRepositoriesPayload(payload)) {
         throw badRequest("GitHub repositories sync failed");
@@ -1209,7 +1302,12 @@ export class GithubAppClient {
       const payload = await this.fetchJsonWithToken(
         url,
         installationToken.token,
-        "GitHub issues sync failed"
+        "GitHub issues sync failed",
+        undefined,
+        false,
+        false,
+        "github_repository_issues_list",
+        "installation"
       );
       if (!Array.isArray(payload)) {
         throw badRequest("GitHub issues sync failed");
@@ -1241,7 +1339,10 @@ export class GithubAppClient {
       installationToken.token,
       "GitHub issue lookup failed",
       undefined,
-      true
+      true,
+      false,
+      "github_repository_issue_get",
+      "installation"
     );
 
     if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
@@ -1274,7 +1375,9 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_repository_issue_update",
+        "user_oauth",
         `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}`,
         {
           method: "PATCH",
@@ -1333,7 +1436,9 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_repository_issue_assignees_update",
+        "user_oauth",
         `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/assignees`,
         {
           method,
@@ -1401,7 +1506,9 @@ export class GithubAppClient {
           "GitHub issue assignee lookup failed",
           controller.signal,
           false,
-          true
+          true,
+          "github_repository_assignees_list",
+          "user_oauth"
         );
         if (
           !Array.isArray(payload) ||
@@ -1438,7 +1545,9 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_repository_issue_create",
+        "user_oauth",
         `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues`,
         {
           method: "POST",
@@ -1492,7 +1601,12 @@ export class GithubAppClient {
       const payload = await this.fetchJsonWithToken(
         url,
         installationToken.token,
-        "GitHub pull requests sync failed"
+        "GitHub pull requests sync failed",
+        undefined,
+        false,
+        false,
+        "github_repository_pull_requests_list",
+        "installation"
       );
       if (!Array.isArray(payload) || !payload.every((item) => this.isPullRequestPayload(item))) {
         throw badRequest("GitHub pull requests sync failed");
@@ -1791,7 +1905,11 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await this.observedFetch(
+        "github_pull_request_files_list",
+        "installation",
+        url,
+        {
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${installationToken.token}`,
@@ -1907,7 +2025,10 @@ export class GithubAppClient {
       installationToken.token,
       "GitHub pull request lookup failed",
       undefined,
-      sourceNotFoundError
+      sourceNotFoundError,
+      false,
+      "github_pull_request_get",
+      "installation"
     );
 
     if (!this.isPullRequestPayload(payload)) {
@@ -1927,7 +2048,12 @@ export class GithubAppClient {
     const payload = await this.fetchJsonWithToken(
       url,
       installationToken,
-      "GitHub repository compare lookup failed"
+      "GitHub repository compare lookup failed",
+      undefined,
+      false,
+      false,
+      "github_repository_compare_get",
+      "installation"
     );
 
     if (
@@ -2051,7 +2177,11 @@ export class GithubAppClient {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await this.observedFetch(
+          "github_repository_file_content_get",
+          "installation",
+          url,
+          {
           headers: {
             Accept: "application/vnd.github+json",
             Authorization: `Bearer ${accessToken}`,
@@ -2176,7 +2306,15 @@ export class GithubAppClient {
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await fetch("https://api.github.com/graphql", {
+      response = await this.observedFetch(
+        context?.writePermissionMessage
+          ? "github_graphql_project_v2_write"
+          : "github_graphql_project_v2_read",
+        context?.tokenSource === "installation"
+          ? "installation"
+          : "personal_project_v2_oauth",
+        "https://api.github.com/graphql",
+        {
         method: "POST",
         headers: {
           Accept: "application/vnd.github+json",
@@ -3090,11 +3228,19 @@ export class GithubAppClient {
     errorMessage: string,
     signal?: AbortSignal,
     sourceNotFoundError = false,
-    userTokenOperation = false
+    userTokenOperation = false,
+    operation: GithubProviderRequestOperation = userTokenOperation
+      ? "github_user_rest_request"
+      : "github_installation_rest_request",
+    authKind: GithubProviderRequestAuthKind = userTokenOperation ? "user_oauth" : "installation"
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await this.observedFetch(
+        operation,
+        authKind,
+        url,
+        {
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${token}`,

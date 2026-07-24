@@ -2,6 +2,52 @@ import { Injectable } from "@nestjs/common";
 import type { GithubSyncWorkerQueueKind } from "./github-sync-worker-loop";
 import type { GithubSyncTarget } from "./types";
 
+export type GithubProviderRequestOperation =
+  | "github_app_installation_get"
+  | "github_app_installation_delete"
+  | "github_app_installation_token_create"
+  | "github_installation_rest_request"
+  | "github_installation_repositories_list"
+  | "github_repository_issues_list"
+  | "github_repository_issue_get"
+  | "github_repository_issue_update"
+  | "github_repository_issue_create"
+  | "github_repository_issue_assignees_update"
+  | "github_repository_assignees_list"
+  | "github_repository_pull_requests_list"
+  | "github_pull_request_files_list"
+  | "github_pull_request_get"
+  | "github_repository_compare_get"
+  | "github_repository_file_content_get"
+  | "github_user_rest_request"
+  | "github_graphql_project_v2_read"
+  | "github_graphql_project_v2_write";
+
+export type GithubProviderRequestAuthKind =
+  | "installation"
+  | "user_oauth"
+  | "app_jwt"
+  | "personal_project_v2_oauth";
+
+type GithubProviderRequestOutcome = "success" | "failure";
+
+export interface GithubProviderRequestObservedInput {
+  operation: GithubProviderRequestOperation;
+  authKind: GithubProviderRequestAuthKind;
+  outcome: GithubProviderRequestOutcome;
+  status: number | null;
+  durationMs: number;
+  rateLimitLimit: number | null;
+  rateLimitRemaining: number | null;
+  rateLimitUsed: number | null;
+  rateLimitReset: number | null;
+  rateLimitResource: string | null;
+}
+
+type GithubProviderRequestObservedEvent = GithubProviderRequestObservedInput & {
+  event: "github_provider_request_observed";
+};
+
 type GithubSyncOperationEventName =
   | "github_sync_retry"
   | "github_sync_terminal_failure"
@@ -86,6 +132,13 @@ export class GithubSyncObservabilityService {
     });
   }
 
+  emitProviderRequestObserved(input: GithubProviderRequestObservedInput): void {
+    this.emit({
+      event: "github_provider_request_observed",
+      ...input
+    });
+  }
+
   emitWorkerPollRetry(
     queueKind: GithubSyncWorkerQueueKind,
     retryAfterMilliseconds: number,
@@ -128,7 +181,12 @@ export class GithubSyncObservabilityService {
     this.emit({ event: "github_manual_sync_queue_saturated", retryAfterSeconds });
   }
 
-  private emit(event: GithubSyncOperationEvent | GithubManualSyncObservabilityEvent): void {
+  private emit(
+    event:
+      | GithubSyncOperationEvent
+      | GithubManualSyncObservabilityEvent
+      | GithubProviderRequestObservedEvent
+  ): void {
     process.stdout.write(`${JSON.stringify(event)}\n`);
   }
 }
