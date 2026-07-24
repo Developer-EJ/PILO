@@ -207,6 +207,15 @@ callback 성공 redirect를 실패로 바꾸지 않는다.
   stored selections receive fields, items, and Board hydration. `repositoryId`
   can limit repository discovery but never expands the selected ProjectV2 detail
   scope.
+- ProjectV2 field and field option cache treats each GitHub fetch as the current snapshot.
+  Field rows absent from the fetched ProjectV2 are deleted, and option rows absent from each
+  retained field snapshot are deleted. An empty option list is a valid snapshot that deletes
+  all existing options for that field.
+- The `project_v2_fields` target and the selected ProjectV2 field stage in `full` sync fetch
+  GitHub data before opening the DB transaction, then apply field/option upserts, stale-row
+  deletion, and existing Board hydration in one DB transaction. Board invalidation is published
+  best-effort only after commit; publish failure does not rollback committed source cache or
+  Board hydration.
 - ProjectV2 fields/items 동기화가 끝나면 서버는 같은 workspace의 기존 Board
   cache 중 해당 ProjectV2와 repository 조합으로 이미 생성된 board만 다시
   hydrate한다. 이 동작은 새 board를 자동 생성하지 않는다.
@@ -837,7 +846,7 @@ github_app_authorization
 - worker는 선택 상태를 다시 확인한 뒤 `processing` lease와 함께 delivery를 claim하고, `attempt_count`를 증가시킨다. 성공하면 lease를 해제하고 내부 완료 상태인 `processed`로 기록한다. An unselected queued delivery is internally processed without GitHub GraphQL.
 - claim된 worker는 delivery의 remote installation과 ProjectV2 node에 일치하는 모든 선택 repository target을 다시 조회한다. Each target is one selected `github_project_v2_selections` `(repository_id, project_v2_id)` tuple, and its repository context is retained through Board hydration. One GitHub GraphQL target-item fetch is fanned out to all matching selected repository targets under the one delivery lease; `processed`는 모든 target reconcile 또는 archive가 성공한 뒤에만 기록한다. 선택 target이 남아 있지 않으면 GraphQL 없이 delivery를 `processed`로 완료한다.
 - The worker performs a projectItemNodeId-only GitHub GraphQL source-of-truth fetch. target item이 있으면 해당 item cache를 reconcile한다. For a missing target, the worker archives the matching local item before it hydrates the existing Board cache.
-- ProjectV2 item field values are a current GitHub snapshot: values absent from a fetched item are deleted from its local cache before the remaining values are upserted and before Board hydration.
+- ProjectV2 item field values are a current GitHub snapshot: values absent from a fetched item are deleted from its local cache before the remaining values are upserted and before Board hydration. ProjectV2 field/option snapshots use the same current-snapshot rule at project scope: absent fields/options are deleted before existing Boards are hydrated.
 - 처리 실패 시 worker는 delivery를 `received`로 되돌리고 기존 lease column에 6분 cooldown을
   기록한다. cooldown이 만료된 delivery만 DB recovery가 다시 queue할 수 있으며, legacy row처럼
   lease가 없는 delivery도 recovery 대상이다. lease 갱신에 실패한 경우에는 기존 processing
