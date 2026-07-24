@@ -267,7 +267,8 @@ export class GithubSourceWebhookReconcileService {
             (
               status='received'
               AND (
-                error_message='GitHub webhook enqueue is publishing'
+                error_message IS NULL
+                OR error_message='GitHub webhook enqueue is publishing'
                 OR lease_expires_at IS NULL
                 OR lease_expires_at < now()
               )
