@@ -321,7 +321,7 @@ export class GithubWebhookService {
         SET
           error_message=NULL,
           lease_owner=NULL,
-          lease_expires_at=NULL
+          lease_expires_at=now() + interval '2 minutes'
         WHERE delivery_id=$1
           AND status='received'
           AND error_message='GitHub webhook enqueue is publishing'

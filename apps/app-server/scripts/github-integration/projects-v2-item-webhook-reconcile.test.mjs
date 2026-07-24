@@ -85,6 +85,11 @@ class FakeDatabase {
       delivery.status = "received";
       delivery.processed_at = null;
       delivery.error_message = null;
+      if (/SET[\s\S]*error_message=NULL/i.test(text)) {
+        assertPublicationAckSetsRecoveryDeadline(text);
+        delivery.lease_owner = null;
+        delivery.lease_expires_at = "2026-07-11T09:02:00.000Z";
+      }
     }
 
     return { rowCount: 1 };
@@ -946,6 +951,135 @@ class ConcurrentPendingRecoveryFakeDatabase {
   }
 }
 
+function assertRecoveredOrphanPublicationSql(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  assert.match(normalized, /status\s*=\s*'received' AND processed_at IS NULL AND error_message IS NULL/i);
+  assert.match(normalized, /github_installation_id IS NOT NULL/i);
+  assert.match(normalized, /project_v2_node_id IS NOT NULL/i);
+  assert.match(normalized, /project_item_node_id IS NOT NULL/i);
+  assert.match(normalized, /event_name\s*=\s*'projects_v2_item'/i);
+  assert.match(normalized, /event_name IN \('issues', 'issue_comment', 'pull_request', 'pull_request_review', 'pull_request_review_comment'\)/i);
+  assert.match(normalized, /lease_expires_at < now\(\)/i);
+  assert.match(normalized, /lease_expires_at IS NULL AND received_at < now\(\) - interval '2 minutes'/i);
+}
+
+function assertPublicationAckSetsRecoveryDeadline(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  assert.match(normalized, /error_message=NULL/i);
+  assert.match(normalized, /lease_owner=NULL/i);
+  assert.match(normalized, /lease_expires_at=now\(\) \+ interval '2 minutes'/i);
+}
+
+class OrphanRecoveryFakeDatabase {
+  constructor() {
+    this.deliveries = new Map([
+      ["legacy-project-orphan", this.delivery({
+        delivery_id: "legacy-project-orphan",
+        event_name: "projects_v2_item",
+        received_at: "2026-07-11T08:57:00.000Z",
+        lease_expires_at: null,
+      })],
+      ["legacy-source-orphan", this.delivery({
+        delivery_id: "legacy-source-orphan",
+        event_name: "pull_request",
+        received_at: "2026-07-11T08:57:00.000Z",
+        lease_expires_at: null,
+      })],
+      ["future-deadline", this.delivery({
+        delivery_id: "future-deadline",
+        event_name: "projects_v2_item",
+        received_at: "2026-07-11T08:57:00.000Z",
+        lease_expires_at: "2026-07-11T09:01:00.000Z",
+      })],
+      ["fresh-legacy-null", this.delivery({
+        delivery_id: "fresh-legacy-null",
+        event_name: "projects_v2_item",
+        received_at: "2026-07-11T08:59:30.000Z",
+        lease_expires_at: null,
+      })],
+      ["generic-without-locator", this.delivery({
+        delivery_id: "generic-without-locator",
+        event_name: "ping",
+        received_at: "2026-07-11T08:57:00.000Z",
+        lease_expires_at: null,
+        github_installation_id: null,
+        project_v2_node_id: null,
+        project_item_node_id: null,
+      })],
+    ]);
+    this.claimSqls = [];
+    this.ackSqls = [];
+  }
+
+  delivery(overrides) {
+    return {
+      status: "received",
+      processed_at: null,
+      error_message: null,
+      lease_owner: null,
+      github_installation_id: context.githubInstallationId,
+      project_v2_node_id: context.projectV2NodeId,
+      project_item_node_id: context.projectItemNodeId,
+      ...overrides,
+    };
+  }
+
+  isEligibleOrphan(delivery) {
+    const sourceEvents = new Set([
+      "issues",
+      "issue_comment",
+      "pull_request",
+      "pull_request_review",
+      "pull_request_review_comment",
+    ]);
+    const hasLocator = delivery.github_installation_id !== null &&
+      delivery.project_v2_node_id !== null &&
+      delivery.project_item_node_id !== null &&
+      (delivery.event_name === "projects_v2_item" || sourceEvents.has(delivery.event_name));
+    const deadlineExpired = delivery.lease_expires_at === receivedAt;
+    const legacyGraceExpired = delivery.lease_expires_at === null &&
+      new Date(delivery.received_at).getTime() < new Date("2026-07-11T08:58:00.000Z").getTime();
+    return delivery.status === "received" &&
+      delivery.processed_at === null &&
+      delivery.error_message === null &&
+      hasLocator &&
+      (deadlineExpired || legacyGraceExpired);
+  }
+
+  async query(text) {
+    assertRecoveredOrphanPublicationSql(text);
+    return [...this.deliveries.values()]
+      .filter((delivery) => this.isEligibleOrphan(delivery))
+      .map((delivery) => ({ delivery_id: delivery.delivery_id }));
+  }
+
+  async execute(text, values = []) {
+    const delivery = this.deliveries.get(values[0]);
+    if (!delivery) return { rowCount: 0 };
+
+    if (/SET\s+status='received',[\s\S]*error_message='GitHub webhook enqueue is publishing'/i.test(text)) {
+      this.claimSqls.push(text);
+      assertRecoveredOrphanPublicationSql(text);
+      if (!this.isEligibleOrphan(delivery)) return { rowCount: 0 };
+      delivery.error_message = "GitHub webhook enqueue is publishing";
+      delivery.lease_owner = values[1];
+      delivery.lease_expires_at = "2026-07-11T09:10:00.000Z";
+      return { rowCount: 1 };
+    }
+
+    if (/SET\s+error_message=NULL/i.test(text)) {
+      this.ackSqls.push(text);
+      assertPublicationAckSetsRecoveryDeadline(text);
+      if (delivery.error_message !== "GitHub webhook enqueue is publishing") return { rowCount: 0 };
+      delivery.error_message = null;
+      delivery.lease_owner = null;
+      delivery.lease_expires_at = "2026-07-11T09:02:00.000Z";
+      return { rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected execute: ${text}`);
+  }
+}
 class ReconcileFailedRecoveryFakeDatabase {
   constructor() {
     this.delivery = {
@@ -1166,6 +1300,11 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.match(apiContract, /publishing lease/i);
   assert.match(apiContract, /one GitHub GraphQL target-item fetch.*all matching selected repository targets/i);
   assert.match(apiContract, /GitHub ProjectV2 webhook reconcile failed[\s\S]*recoverable/i);
+  assert.match(apiContract, /lease_expires_at`?\s*(?:to|=).*now\(\)\+?2 minutes/i);
+  assert.match(apiContract, /legacy clean rows[\s\S]*lease_expires_at IS NULL[\s\S]*received_at[\s\S]*older than 2 minutes/i);
+  assert.match(apiContract, /Clean orphan recovery[\s\S]*processed_at IS NULL[\s\S]*error_message IS NULL[\s\S]*non-null durable locator/i);
+  assert.match(apiContract, /generic webhook rows without locators[\s\S]*never republished/i);
+  assert.match(apiContract, /source worker[\s\S]*clean published source delivery[\s\S]*recovery deadline[\s\S]*claim/i);
   assert.match(apiContract, /\(repository_id, project_v2_id\).*Board hydration/i);
   assert.match(apiContract, /field values are a current GitHub snapshot[\s\S]*before Board hydration/i);
   assert.match(apiContract, /6분 cooldown[\s\S]*DB recovery.*다시 queue/i);
@@ -1176,6 +1315,28 @@ function createDeliveryReconcileService(database, { getProjectV2Item, reconcile,
   assert.match(reconcileSource, /status\s*=\s*'processing'\s+AND lease_expires_at < now\(\)/i);
 }
 
+{
+  const database = new OrphanRecoveryFakeDatabase();
+  const reconcileService = createDeliveryReconcileService(database, {
+    getProjectV2Item: async () => ({ item: { id: context.projectItemNodeId } }),
+    reconcile: async () => {},
+    archive: async () => {},
+  });
+  const published = [];
+
+  await reconcileService.recoverDeliveries(async (deliveryId) => {
+    published.push(deliveryId);
+  });
+
+  assert.deepEqual(published, ["legacy-project-orphan", "legacy-source-orphan"]);
+  assert.equal(database.claimSqls.length, 2);
+  assert.equal(database.ackSqls.length, 2);
+  assert.equal(database.deliveries.get("legacy-project-orphan").lease_expires_at, "2026-07-11T09:02:00.000Z");
+  assert.equal(database.deliveries.get("legacy-source-orphan").lease_expires_at, "2026-07-11T09:02:00.000Z");
+  assert.equal(database.deliveries.get("future-deadline").error_message, null);
+  assert.equal(database.deliveries.get("fresh-legacy-null").error_message, null);
+  assert.equal(database.deliveries.get("generic-without-locator").error_message, null);
+}
 {
   const database = new RepositoryScopedDeliveryFakeDatabase("repository-scoped-delivery");
   let graphqlLookups = 0;

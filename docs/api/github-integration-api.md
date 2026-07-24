@@ -842,15 +842,21 @@ github_app_authorization
   Issue/PR 원격 삭제 동기화는 지원하지 않는다. 그 외 일시적 lookup/reconcile 실패는
   delivery retry 대상이다.
 - A selected `projects_v2_item` delivery는 먼저 내부 pending publication marker를 가진 `received`로 기록한 뒤 `SQS_GITHUB_WEBHOOKS_QUEUE_URL`에 `deliveryId`를 queue한다. 이때 `received`는 선택된 delivery가 비동기 reconcile에 수락되었다는 의미이며, source table 동기화 완료를 의미하지 않는다. pending/publishing marker는 receiver 응답의 `received` message를 바꾸지 않으며 raw payload나 token을 포함하지 않는다.
-- Publication은 delivery별 publishing lease를 원자적으로 claim한 publisher만 수행한다. SQS send가 성공한 뒤 그 publisher의 guarded acknowledgement가 marker와 lease를 해제한다. send, acknowledgement, 또는 release가 실패하면 pending marker 또는 만료 가능한 publishing lease가 남아 recovery 대상이 되므로 `received` delivery가 unqueued 상태로 고립되지 않는다. Lease 만료 뒤의 duplicate publication은 worker delivery claim/idempotency로 안전하게 처리된다.
-- worker는 선택 상태를 다시 확인한 뒤 `processing` lease와 함께 delivery를 claim하고, `attempt_count`를 증가시킨다. 성공하면 lease를 해제하고 내부 완료 상태인 `processed`로 기록한다. An unselected queued delivery is internally processed without GitHub GraphQL.
+- Publication은 delivery별 publishing lease를 원자적으로 claim한 publisher만 수행한다. SQS send가 성공한 뒤 그 publisher의 guarded acknowledgement는 `error_message=NULL`, `lease_owner=NULL`, `lease_expires_at=now()+2 minutes`로 기록한다. 이 `lease_expires_at`은 처리 lease가 아니라 SQS publication 성공 뒤 worker가 claim하지 못한 delivery를 다시 찾기 위한 recovery deadline이다. send, acknowledgement, 또는 release가 실패하면 pending marker 또는 만료 가능한 publishing lease가 남아 recovery 대상이 되므로 `received` delivery가 unqueued 상태로 고립되지 않는다. Lease 만료 뒤의 duplicate publication은 worker delivery claim/idempotency로 안전하게 처리된다.
+- worker는 선택 상태를 다시 확인한 뒤 `processing` lease와 함께 delivery를 claim하고, `attempt_count`를 증가시킨다. ProjectV2 worker는 queued `projects_v2_item` delivery를 claim할 수 있으며, source worker는 SQS message를 받은 clean published source delivery(`error_message IS NULL`)가 미래 recovery deadline을 가지고 있어도 즉시 claim할 수 있다. 성공하면 lease를 해제하고 내부 완료 상태인 `processed`로 기록한다. An unselected queued delivery is internally processed without GitHub GraphQL.
 - claim된 worker는 delivery의 remote installation과 ProjectV2 node에 일치하는 모든 선택 repository target을 다시 조회한다. Each target is one selected `github_project_v2_selections` `(repository_id, project_v2_id)` tuple, and its repository context is retained through Board hydration. One GitHub GraphQL target-item fetch is fanned out to all matching selected repository targets under the one delivery lease; `processed`는 모든 target reconcile 또는 archive가 성공한 뒤에만 기록한다. 선택 target이 남아 있지 않으면 GraphQL 없이 delivery를 `processed`로 완료한다.
 - The worker performs a projectItemNodeId-only GitHub GraphQL source-of-truth fetch. target item이 있으면 해당 item cache를 reconcile한다. For a missing target, the worker archives the matching local item before it hydrates the existing Board cache.
 - ProjectV2 item field values are a current GitHub snapshot: values absent from a fetched item are deleted from its local cache before the remaining values are upserted and before Board hydration. ProjectV2 field/option snapshots use the same current-snapshot rule at project scope: absent fields/options are deleted before existing Boards are hydrated.
 - 처리 실패 시 worker는 delivery를 `received`로 되돌리고 기존 lease column에 6분 cooldown을
-  기록한다. cooldown이 만료된 delivery만 DB recovery가 다시 queue할 수 있으며, legacy row처럼
-  lease가 없는 delivery도 recovery 대상이다. lease 갱신에 실패한 경우에는 기존 processing
-  lease가 만료된 뒤 DB recovery가 다시 queue할 수 있다.
+  기록한다. cooldown이 만료된 delivery만 DB recovery가 다시 queue할 수 있으며, 이
+  reconcile-failed cooldown은 source worker의 immediate claim 규칙보다 우선한다. 정상
+  publication ack 후 `error_message IS NULL`인 delivery는 recovery deadline이 만료된 뒤에만
+  DB recovery가 다시 queue한다. DB recovery는 `processed_at IS NULL`, `error_message IS NULL`,
+  필수 locator가 있는 `projects_v2_item` 또는 source webhook event만 orphan 후보로 보며,
+  일반 generic webhook처럼 locator가 없는 `received` row는 재발행하지 않는다. legacy row처럼
+  `lease_expires_at IS NULL`인 clean delivery는 `received_at` 이후 2분 grace가 지난 뒤에만
+  orphan 후보가 된다. lease 갱신에 실패한 경우에는 기존 processing lease가 만료된 뒤 DB
+  recovery가 다시 queue할 수 있다.
 - 그 밖의 지원 event는 `received`로 기록한다. 지원하지 않는 event는 오류 없이 `ignored`로 기록하고 `processedAt`을 기록한다.
 
 Webhook endpoint의 공개 응답 shape은 계속 `GithubWebhookDeliveryPayload`이다. `received`와
@@ -1120,9 +1126,16 @@ Webhook outbox recovery republishes deliveries with status `failed` and the
 internal pending-publication marker, `received` publishing claims whose lease
 has expired, and `processing` deliveries whose lease has expired. Recovery first
 claims a delivery-specific publishing lease, so concurrent recovery attempts do
-not publish the same pending delivery at the same time. A normally received
-delivery without the pending marker is never republished by recovery or by a
-duplicate webhook request. An expired publishing or `processing` lease is
+not publish the same pending delivery at the same time. A successful normal or
+recovery publication acknowledgement clears `error_message` and `lease_owner`,
+then sets `lease_expires_at` to `now()+2 minutes` as the recovery deadline.
+Clean `received` deliveries are recovered only after that deadline expires. For
+legacy clean rows with `lease_expires_at IS NULL`, recovery waits until
+`received_at` is older than 2 minutes. Clean orphan recovery also requires
+`processed_at IS NULL`, `error_message IS NULL`, non-null durable locator columns,
+and a supported `projects_v2_item` or source webhook `event_name`; normally
+received generic webhook rows without locators are never republished by recovery
+or by a duplicate webhook request. An expired publishing or `processing` lease is
 eligible for recovery and requeue. A `received` delivery with the
 `GitHub ProjectV2 webhook reconcile failed` 또는
 `GitHub source webhook reconcile failed` marker is recoverable by DB recovery after its cooldown expires.
