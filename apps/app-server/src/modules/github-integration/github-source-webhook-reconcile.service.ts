@@ -6,6 +6,7 @@ import {
 } from "../../database/database.service";
 import {
   GithubAppClient,
+  GithubSourceSnapshotNotFoundError,
   type GithubIssueApiItem,
   type GithubPullRequestApiItem
 } from "./github-app.client";
@@ -96,14 +97,22 @@ export class GithubSourceWebhookReconcileService {
           throw new Error(SOURCE_WEBHOOK_RECONCILE_ERROR_MESSAGE);
         }
 
-        const result = await this.reconcileSource(
-          transaction,
-          targets,
-          kind,
-          contentNumber
-        );
-        await this.markProcessed(transaction, claim);
-        return result;
+        try {
+          const result = await this.reconcileSource(
+            transaction,
+            targets,
+            kind,
+            contentNumber
+          );
+          await this.markProcessed(transaction, claim);
+          return result;
+        } catch (error) {
+          if (error instanceof GithubSourceSnapshotNotFoundError) {
+            await this.markProcessed(transaction, claim);
+            return this.emptyReconcileResult();
+          }
+          throw error;
+        }
       });
 
       for (const payload of result.boardInvalidations) {
