@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { GithubSyncWorkerQueueKind } from "./github-sync-worker-loop";
 import type { GithubSyncTarget } from "./types";
 
 type GithubSyncOperationEventName =
@@ -15,6 +16,7 @@ interface GithubSyncOperationEvent {
   deliveryId: string | null;
   target: GithubSyncTarget | "webhook_delivery" | "graphql" | "worker_poll";
   attemptCount: number | null;
+  queueKind?: GithubSyncWorkerQueueKind;
   failureKind?: "database_session_pool_exhausted" | "unknown";
   retryAfterSeconds?: number;
   rateLimitRemaining: number | null;
@@ -85,6 +87,7 @@ export class GithubSyncObservabilityService {
   }
 
   emitWorkerPollRetry(
+    queueKind: GithubSyncWorkerQueueKind,
     retryAfterMilliseconds: number,
     failureKind: "database_session_pool_exhausted" | "unknown"
   ): void {
@@ -95,6 +98,7 @@ export class GithubSyncObservabilityService {
       deliveryId: null,
       target: "worker_poll",
       attemptCount: null,
+      queueKind,
       failureKind,
       retryAfterSeconds: Math.ceil(retryAfterMilliseconds / 1_000),
       rateLimitRemaining: null

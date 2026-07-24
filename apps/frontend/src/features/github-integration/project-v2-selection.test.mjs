@@ -63,7 +63,7 @@ assert.match(panel, /discovery\.connectionRequired/);
 assert.match(panel, /handleStartGithubProjectOAuth/);
 assert.match(
   panel,
-  /projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id[\s\S]*?body\.projectV2Id/,
+  /projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*browsingProjectV2Id[\s\S]*?body\.projectV2Id/,
   "only an explicit ProjectV2 sync may use the Board navigation selection"
 );
 

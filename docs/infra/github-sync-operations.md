@@ -1,6 +1,6 @@
 # GitHub Sync Operations
 
-`github-sync-worker` is the single worker for GitHub webhook deliveries and durable sync jobs. This runbook covers dev monitoring and human recovery. It does not introduce a second event worker, autoscaling, or a new queue.
+`github-sync-worker` remains one ECS worker task for GitHub webhook deliveries and durable sync jobs. Inside that one process, the worker owns two independent long-lived polling loops: one for `github-webhooks` and one for `github-sync-jobs`. Each queue loop awaits one handler at a time, so queue-local handler concurrency stays 1; across the process, up to two handlers can be active. One queue's long poll or retry backoff does not block the other queue. This runbook covers dev monitoring and human recovery. It does not introduce a second event worker, autoscaling, or a new queue.
 
 ## Metrics and alarms
 
@@ -37,7 +37,7 @@ The worker writes one raw JSON event per stdout line so CloudWatch JSON filters 
 - `github_sync_rate_limit_observed`
 - `github_sync_worker_poll_retry`
 
-Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`. A failed worker poll emits `github_sync_worker_poll_retry` with `target: "worker_poll"`, bounded backoff, and a safe `failureKind`; it never includes the underlying database error text.
+Every event contains `event`, `jobId`, `syncRunId`, `deliveryId`, `target`, `attemptCount`, and nullable `rateLimitRemaining`. Job events retain `deliveryId: null`. Retry events include `retryAfterSeconds` when known: 900 seconds for a sync job and 120 seconds for a webhook delivery. A webhook retry records its `deliveryId` and can have null `jobId`, `syncRunId`, and `attemptCount`. A successful GraphQL response with a numeric `x-ratelimit-remaining` header emits `github_sync_rate_limit_observed`; its identifiers are null and its target is `graphql`. A failed worker poll emits `github_sync_worker_poll_retry` with `target: "worker_poll"`, `queueKind: "sync_jobs" | "webhooks"`, bounded backoff, and a safe `failureKind`; it never includes the underlying database error text. Worker poll retry delays remain queue-local, so a retry backoff in one polling loop does not pause the other polling loop.
 
 Never log access tokens, webhook payloads, provider raw errors, or secrets. Use event identifiers and DB state for investigation; do not add credentials or payloads to logs or incident evidence.
 
@@ -76,6 +76,8 @@ The dev Supabase session pool has 15 sessions. Reserve 3 sessions for operator a
 | Agent worker | 1 | 1 persistent connection | 1 |
 | Meeting worker | 1 | 1 persistent connection | 1 |
 | **Total** |  |  | **9** |
+
+The GitHub sync worker may run up to two active handlers at once because the webhook and sync-job polling loops are independent. The task's DB connection cap remains one because `DATABASE_POOL_MAX=1` still limits the process to a single Supabase session-pool connection. Measure DB contention before considering a separate Infra or DB schema/capacity change.
 
 The shared AI worker replacement is the largest single-service overlap: 9 + 3 = 12, which stays within the application budget. Deploy DB-using ECS services one at a time; concurrent replacements can exceed the 12-session budget even when each task follows its individual cap.
 

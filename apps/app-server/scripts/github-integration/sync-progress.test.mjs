@@ -340,6 +340,9 @@ function fullSyncContext(reportProgress) {
         rows: [],
         rowCount: 1
       };
+    },
+    async transaction(callback) {
+      return callback(this);
     }
   };
   const githubAppClient = {

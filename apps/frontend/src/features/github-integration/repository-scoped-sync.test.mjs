@@ -27,25 +27,25 @@ assert.match(
 );
 assert.match(
   panel,
-  /apiClient\.discoverGithubProjectV2\([\s\S]{0,160}\{\s*repositoryId\s*\}/
+  /apiClient\.discoverGithubProjectV2\([\s\S]{0,180}\{\s*repositoryId: requestedRepositoryId\s*\}/
 );
 assert.doesNotMatch(
   panel,
   /searchParams\.get\("github_installation_id"\)[\s\S]{0,400}handleDiscoverGithubProjectV2/
 );
-assert.match(panel, /repositoryId:\s*selectedRepositoryId/);
-assert.match(panel, /selectedRepositoryIdRef\.current = repositoryId/);
+assert.match(panel, /body\.repositoryId = browsingRepositoryId/);
+assert.match(panel, /browsingRepositoryIdRef\.current = repositoryId/);
 assert.match(
   panel,
-  /if \(selectedRepositoryIdRef\.current !== repositoryId\) \{[\s\S]{0,80}return null;/
+  /shouldApplyGithubRepositoryRequestResult\(\{[\s\S]{0,260}currentRepositoryId: browsingRepositoryIdRef\.current,[\s\S]{0,260}requestedRepositoryId/
 );
 assert.match(
   panel,
-  /async function handleDiscoverGithubProjectV2[\s\S]{0,1200}const discovery = await[\s\S]{0,600}if \(selectedRepositoryIdRef\.current !== repositoryId\) \{\s*return null;[\s\S]{0,400}if \(discovery\.connectionRequired\)/
+  /async function handleDiscoverGithubProjectV2[\s\S]{0,1400}const discovery = await[\s\S]{0,700}shouldApplyGithubRepositoryRequestResult\([\s\S]{0,500}if \(discovery\.connectionRequired\)/
 );
 assert.match(
   panel,
-  /const requiresSelectedRepository = syncTarget !== "source";[\s\S]{0,300}requiresSelectedRepository && !selectedRepositoryId/
+  /const requiresSelectedRepository = syncTarget !== "source";[\s\S]{0,300}requiresSelectedRepository && !browsingRepositoryId/
 );
 assert.match(sync, /option\.value !== "source"/);
 assert.match(
@@ -92,7 +92,7 @@ const projectActivationHandler =
   )?.[0] ?? "";
 assert.match(
   projectActivationHandler,
-  /activateWorkspaceBoardSource\([\s\S]*?repositoryId: selectedRepositoryId[\s\S]*?projectV2Id/,
+  /activateWorkspaceBoardSource\([\s\S]*?repositoryId: requestedRepositoryId[\s\S]*?projectV2Id/,
   "the selected repository and ProjectV2 must become the active Board source"
 );
 assert.doesNotMatch(projectActivationHandler, /projectIdsByInstallation/);

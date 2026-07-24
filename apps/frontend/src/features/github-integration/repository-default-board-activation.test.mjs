@@ -24,17 +24,39 @@ function createProjects() {
   ];
 }
 
+function createActiveBoardSource(source) {
+  return {
+    boardId: `board-${source.projectV2Id}`,
+    workspaceId: "workspace-target",
+    repository: {
+      id: source.repositoryId,
+      fullName: `owner/${source.repositoryId}`,
+      htmlUrl: `https://github.com/owner/${source.repositoryId}`
+    },
+    project: {
+      id: source.projectV2Id,
+      githubProjectNodeId: `PVT_${source.projectV2Id}`,
+      projectNumber: 1,
+      title: source.projectV2Id,
+      url: `https://github.com/orgs/owner/projects/${source.projectV2Id}`
+    },
+    updatedByUserId: "user-target",
+    updatedAt: "2026-07-24T00:00:00.000Z"
+  };
+}
+
 {
   const activatedSources = [];
-  const projectV2Id = await activateDefaultGithubBoardForRepository({
+  const activatedSource = await activateDefaultGithubBoardForRepository({
     projects: createProjects(),
     repositoryId: "repo-target",
     activate: async (source) => {
       activatedSources.push(source);
+      return createActiveBoardSource(source);
     }
   });
 
-  assert.equal(projectV2Id, "project-linked-first");
+  assert.equal(activatedSource.project.id, "project-linked-first");
   assert.deepEqual(activatedSources, [
     {
       repositoryId: "repo-target",
@@ -45,16 +67,17 @@ function createProjects() {
 
 {
   const activatedSources = [];
-  const projectV2Id = await activateDefaultGithubBoardForRepository({
+  const activatedSource = await activateDefaultGithubBoardForRepository({
     projects: createProjects(),
     preferredProjectV2Id: "project-linked-preferred",
     repositoryId: "repo-target",
     activate: async (source) => {
       activatedSources.push(source);
+      return createActiveBoardSource(source);
     }
   });
 
-  assert.equal(projectV2Id, "project-linked-preferred");
+  assert.equal(activatedSource.project.id, "project-linked-preferred");
   assert.deepEqual(activatedSources, [
     {
       repositoryId: "repo-target",
@@ -65,7 +88,7 @@ function createProjects() {
 
 {
   let didActivate = false;
-  const projectV2Id = await activateDefaultGithubBoardForRepository({
+  const activatedSource = await activateDefaultGithubBoardForRepository({
     projects: [],
     repositoryId: "repo-target",
     activate: async () => {
@@ -73,7 +96,7 @@ function createProjects() {
     }
   });
 
-  assert.equal(projectV2Id, "");
+  assert.equal(activatedSource, null);
   assert.equal(didActivate, false);
 }
 
@@ -134,12 +157,12 @@ const activationCallIndex = selectRepositoryHandler.indexOf(
   "activateDefaultGithubBoardForRepository"
 );
 const selectedCommitIndex = selectRepositoryHandler.indexOf(
-  "setSelectedRepositoryId(repositoryId)"
+  "setBrowsingRepositoryId(repositoryId)"
 );
 assert.ok(
   activationCallIndex >= 0 &&
-    selectedCommitIndex > activationCallIndex,
-  "repository selection must commit selected state only after activation succeeds"
+    selectedCommitIndex < activationCallIndex,
+  "repository selection must commit browsing state before activation starts"
 );
 assert.match(
   selectRepositoryHandler,
@@ -161,8 +184,13 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler,
-  /setSelectedRepositoryId\(repositoryId\)/,
-  "repository selection should mark the repository selected after activation succeeds"
+  /shouldApplyGithubBrowsingResult[\s\S]{0,260}setBrowsingProjectV2Id\(source\.projectV2Id\)/,
+  "repository selection must set browsing ProjectV2 from the requested activation source only while still browsing it"
+);
+assert.match(
+  selectRepositoryHandler,
+  /applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)/,
+  "repository selection must store only the returned active Board source after activation succeeds"
 );
 assert.match(
   selectRepositoryHandler,

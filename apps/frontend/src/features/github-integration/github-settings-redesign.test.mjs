@@ -207,7 +207,7 @@ assert.match(projectSource, /활성 Board 변경/);
 assert.match(projectSource, /await onActivateProjectV2\(project\.id\)/);
 assert.match(
   projectSource,
-  /activeProject\.ownerType === "Organization" \? "Organization" : "Personal"/
+  /activeRepository\.fullName/
 );
 assert.match(
   panelSource,
