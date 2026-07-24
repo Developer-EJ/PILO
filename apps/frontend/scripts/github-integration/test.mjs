@@ -137,13 +137,13 @@ assert.match(
 );
 assert.match(
   githubPanel,
-  /projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*selectedProjectV2Id/
+  /projectScopedSyncTargets\.has\(syncTarget\)\s*&&\s*browsingProjectV2Id/
 );
 assert.doesNotMatch(
   githubPanel,
   /\(syncTarget === "full" \|\| projectScopedSyncTargets\.has\(syncTarget\)\)/
 );
-assert.match(githubPanel, /setSelectedRepositoryId/);
+assert.match(githubPanel, /setBrowsingRepositoryId/);
 assert.match(githubPanel, /GithubConnectLayout/);
 assert.doesNotMatch(githubPanel, /function StatusPill/);
 assert.doesNotMatch(githubPanel, /function LoadingRows/);
@@ -198,6 +198,10 @@ await import("../../src/features/github-integration/utils/github-manual-sync-err
 await import("../../src/features/github-integration/github-manual-sync-execution.test.mjs");
 await import("../../src/features/github-integration/github-connect-format.test.mjs");
 await import("../../src/features/github-integration/repository-scoped-sync.test.mjs");
+await import("../../src/features/github-integration/active-board-browsing-separation.test.mjs");
+await import("../../src/features/github-integration/active-board-selection-persistence.test.mjs");
+await import("../../src/features/github-integration/repository-default-board-activation.test.mjs");
+await import("../../src/features/github-integration/project-v2-selection.test.mjs");
 await import("../../src/features/github-integration/repository-pagination.test.mjs");
 await import("../../src/features/github-integration/github-settings-status.test.mjs");
 await import("../../src/features/github-integration/github-project-oauth-scope.test.mjs");

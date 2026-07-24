@@ -157,12 +157,12 @@ const activationCallIndex = selectRepositoryHandler.indexOf(
   "activateDefaultGithubBoardForRepository"
 );
 const selectedCommitIndex = selectRepositoryHandler.indexOf(
-  "setSelectedRepositoryId(repositoryId)"
+  "setBrowsingRepositoryId(repositoryId)"
 );
 assert.ok(
   activationCallIndex >= 0 &&
-    selectedCommitIndex > activationCallIndex,
-  "repository selection must commit selected state only after activation succeeds"
+    selectedCommitIndex < activationCallIndex,
+  "repository selection must commit browsing state before activation starts"
 );
 assert.match(
   selectRepositoryHandler,
@@ -184,13 +184,13 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler,
-  /const nextProjectV2Id = activatedSource\.project\.id/,
-  "repository selection must keep string state derived from the activated Board source"
+  /setBrowsingProjectV2Id\(source\.projectV2Id\)/,
+  "repository selection must set browsing ProjectV2 from the requested activation source"
 );
 assert.match(
   selectRepositoryHandler,
-  /setSelectedRepositoryId\(repositoryId\)/,
-  "repository selection should mark the repository selected after activation succeeds"
+  /setActiveBoardSource\(activatedSource\)/,
+  "repository selection must store only the returned active Board source after activation succeeds"
 );
 assert.match(
   selectRepositoryHandler,
