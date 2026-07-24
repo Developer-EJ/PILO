@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { QueryResultRow } from "pg";
 import { badRequest } from "../../common/api-error";
-import { DatabaseService } from "../../database/database.service";
+import { DatabaseService, type DatabaseTransaction } from "../../database/database.service";
 import {
   GithubAppClient,
   type GithubInstallationRepositoryApiItem,
@@ -133,6 +133,17 @@ interface HydratedBoardUpdatedAtRow extends QueryResultRow {
   updated_at: Date | string | null;
 }
 
+interface BoardInvalidationMetadata {
+  workspaceId: string;
+  boardId: string;
+  updatedAt: string;
+}
+
+type GithubSyncQueryExecutor = Pick<
+  DatabaseTransaction,
+  "query" | "queryOne" | "execute"
+>;
+
 interface GithubProjectV2SelectionRow extends QueryResultRow {
   project_v2_id: string;
   repository_id: string;
@@ -245,7 +256,9 @@ export class GithubSyncExecutorService {
       }
     }
 
-    await this.hydrateExistingBoardsForGithubProjectV2(context);
+    await this.publishBoardInvalidations(
+      await this.hydrateExistingBoardsForGithubProjectV2(context)
+    );
   }
 
   async archiveGithubProjectV2WebhookItem(
@@ -265,7 +278,9 @@ export class GithubSyncExecutorService {
       `,
       [context.workspaceId, projectV2.id, itemNodeId]
     );
-    await this.hydrateExistingBoardsForGithubProjectV2(context);
+    await this.publishBoardInvalidations(
+      await this.hydrateExistingBoardsForGithubProjectV2(context)
+    );
   }
 
   private async syncGithubFull(
@@ -337,7 +352,7 @@ export class GithubSyncExecutorService {
       await startProjectStep("project_v2_fields");
       summary = this.mergeGithubSyncSummaries(
         summary,
-        await this.syncGithubProjectV2Fields(projectContext)
+        await this.syncGithubProjectV2FieldsAndHydrate(projectContext)
       );
       completedProjectSteps += 1;
       await startProjectStep("project_v2_items");
@@ -355,9 +370,11 @@ export class GithubSyncExecutorService {
         projectV2Context.projectV2
       );
       await startProjectStep("board_hydration");
-      await this.hydrateExistingBoardsForGithubProjectV2(
-        projectContext,
-        projectV2Context.repositoryId
+      await this.publishBoardInvalidations(
+        await this.hydrateExistingBoardsForGithubProjectV2(
+          projectContext,
+          projectV2Context.repositoryId
+        )
       );
       completedProjectSteps += 1;
     }
@@ -608,11 +625,11 @@ export class GithubSyncExecutorService {
     });
   }
 
-  private async syncGithubProjectV2Fields(
+  private async fetchGithubProjectV2Fields(
     context: GithubSyncRunContext
-  ): Promise<GithubSyncRunSummary> {
+  ): Promise<GithubProjectV2FieldApiItem[]> {
     const projectV2 = this.requireGithubSyncProjectV2(context);
-    const fields = await this.githubAppClient.listProjectV2Fields({
+    return this.githubAppClient.listProjectV2Fields({
       installationId: this.toNumber(context.installation.github_installation_id),
       appId: context.config.appId,
       privateKey: context.config.privateKey,
@@ -621,27 +638,75 @@ export class GithubSyncExecutorService {
       accountType: context.installation.account_type,
       now: context.config.now
     });
+  }
+
+  private async applyGithubProjectV2FieldSnapshot(
+    context: GithubSyncRunContext,
+    fields: GithubProjectV2FieldApiItem[],
+    database: GithubSyncQueryExecutor
+  ): Promise<{ summary: GithubSyncRunSummary; invalidations: BoardInvalidationMetadata[] }> {
+    const projectV2 = this.requireGithubSyncProjectV2(context);
     let createdCount = 0;
     let updatedCount = 0;
 
+    const fieldNodeIds = fields.map((field) => field.id);
+    await this.deleteGithubProjectV2FieldsNotInSnapshot(
+      database,
+      projectV2.id,
+      fieldNodeIds
+    );
+    await this.releaseGithubProjectV2FieldNames(
+      database,
+      projectV2.id,
+      fieldNodeIds
+    );
+
     for (const field of fields) {
-      const row = await this.upsertGithubProjectV2Field(projectV2.id, field);
+      const row = await this.upsertGithubProjectV2Field(
+        database,
+        projectV2.id,
+        field
+      );
       if (row.created) {
         createdCount += 1;
       } else {
         updatedCount += 1;
       }
 
+      const optionIds = field.options.map((option) => option.id);
+      await this.deleteGithubProjectV2FieldOptionsNotInSnapshot(
+        database,
+        row.id,
+        optionIds
+      );
+      await this.releaseGithubProjectV2FieldOptionNames(
+        database,
+        row.id,
+        optionIds
+      );
       for (const option of field.options) {
-        await this.upsertGithubProjectV2FieldOption(row.id, option);
+        await this.upsertGithubProjectV2FieldOption(
+          database,
+          row.id,
+          option
+        );
       }
     }
 
-    return this.createGithubSyncSummary({
-      fetchedCount: fields.length,
-      createdCount,
-      updatedCount
-    });
+    const invalidations = await this.hydrateExistingBoardsForGithubProjectV2(
+      context,
+      context.repository?.id,
+      database
+    );
+
+    return {
+      summary: this.createGithubSyncSummary({
+        fetchedCount: fields.length,
+        createdCount,
+        updatedCount
+      }),
+      invalidations
+    };
   }
 
   private async syncGithubProjectV2Items(
@@ -716,6 +781,80 @@ export class GithubSyncExecutorService {
     );
   }
 
+  private async deleteGithubProjectV2FieldOptionsNotInSnapshot(
+    database: GithubSyncQueryExecutor,
+    fieldId: string,
+    optionIds: string[]
+  ): Promise<void> {
+    await database.execute(
+      `
+        DELETE FROM github_project_v2_field_options
+        WHERE field_id = $1
+          AND NOT (github_option_id = ANY($2::text[]))
+      `,
+      [fieldId, optionIds]
+    );
+  }
+
+  private async deleteGithubProjectV2FieldsNotInSnapshot(
+    database: GithubSyncQueryExecutor,
+    projectV2Id: string,
+    fieldNodeIds: string[]
+  ): Promise<void> {
+    await database.execute(
+      `
+        DELETE FROM github_project_v2_fields
+        WHERE project_v2_id = $1
+          AND NOT (github_field_node_id = ANY($2::text[]))
+      `,
+      [projectV2Id, fieldNodeIds]
+    );
+  }
+
+  private async releaseGithubProjectV2FieldNames(
+    database: GithubSyncQueryExecutor,
+    projectV2Id: string,
+    fieldNodeIds: string[]
+  ): Promise<void> {
+    await database.execute(
+      `
+        UPDATE github_project_v2_fields
+        SET field_name = concat(
+              '__pilo_sync_release__',
+              id::text,
+              '__',
+              gen_random_uuid()::text
+            ),
+            updated_at = now()
+        WHERE project_v2_id = $1
+          AND github_field_node_id = ANY($2::text[])
+      `,
+      [projectV2Id, fieldNodeIds]
+    );
+  }
+
+  private async releaseGithubProjectV2FieldOptionNames(
+    database: GithubSyncQueryExecutor,
+    fieldId: string,
+    optionIds: string[]
+  ): Promise<void> {
+    await database.execute(
+      `
+        UPDATE github_project_v2_field_options
+        SET normalized_name = concat(
+              '__pilo_sync_release__',
+              id::text,
+              '__',
+              gen_random_uuid()::text
+            ),
+            updated_at = now()
+        WHERE field_id = $1
+          AND github_option_id = ANY($2::text[])
+      `,
+      [fieldId, optionIds]
+    );
+  }
+
   private async archiveGithubProjectV2ItemsNotInSnapshot(
     context: GithubSyncRunContext,
     itemNodeIds: string[]
@@ -739,8 +878,14 @@ export class GithubSyncExecutorService {
   private async syncGithubProjectV2FieldsAndHydrate(
     context: GithubSyncRunContext
   ): Promise<GithubSyncRunSummary> {
-    const summary = await this.syncGithubProjectV2Fields(context);
-    await this.hydrateExistingBoardsForGithubProjectV2(context);
+    const fields = await this.fetchGithubProjectV2Fields(context);
+    const { summary, invalidations } = await this.database.transaction(
+      async (transaction) => {
+        await this.assertGithubSyncLease(context);
+        return this.applyGithubProjectV2FieldSnapshot(context, fields, transaction);
+      }
+    );
+    await this.publishBoardInvalidations(invalidations);
     return summary;
   }
 
@@ -749,7 +894,8 @@ export class GithubSyncExecutorService {
   ): Promise<GithubSyncRunSummary> {
     const summary = await this.syncGithubProjectV2Items(context);
     await this.assertGithubSyncLease(context);
-    await this.hydrateExistingBoardsForGithubProjectV2(context);
+    const invalidations = await this.hydrateExistingBoardsForGithubProjectV2(context);
+    await this.publishBoardInvalidations(invalidations);
     return summary;
   }
 
@@ -948,10 +1094,11 @@ export class GithubSyncExecutorService {
   }
 
   private async upsertGithubProjectV2Field(
+    database: GithubSyncQueryExecutor,
     projectV2Id: string,
     field: GithubProjectV2FieldApiItem
   ): Promise<GithubProjectV2FieldSyncRow> {
-    const row = await this.database.queryOne<GithubProjectV2FieldSyncRow>(
+    const row = await database.queryOne<GithubProjectV2FieldSyncRow>(
       `
         INSERT INTO github_project_v2_fields (
           project_v2_id,
@@ -995,10 +1142,11 @@ export class GithubSyncExecutorService {
   }
 
   private async upsertGithubProjectV2FieldOption(
+    database: GithubSyncQueryExecutor,
     fieldId: string,
     option: GithubProjectV2FieldOptionApiItem
   ): Promise<GithubProjectV2FieldOptionSyncRow> {
-    const row = await this.database.queryOne<GithubProjectV2FieldOptionSyncRow>(
+    const row = await database.queryOne<GithubProjectV2FieldOptionSyncRow>(
       `
         INSERT INTO github_project_v2_field_options (
           field_id,
@@ -1872,14 +2020,16 @@ export class GithubSyncExecutorService {
 
   private async hydrateExistingBoardsForGithubProjectV2(
     context: GithubSyncRunContext,
-    repositoryId = context.repository?.id
-  ): Promise<void> {
+    repositoryId = context.repository?.id,
+    database: GithubSyncQueryExecutor = this.database
+  ): Promise<BoardInvalidationMetadata[]> {
     const projectV2 = this.requireGithubSyncProjectV2(context);
+    const invalidations: BoardInvalidationMetadata[] = [];
     const values: unknown[] = [context.workspaceId, projectV2.id];
     const repositoryFilter = repositoryId
       ? `AND b.repository_id = $${values.push(repositoryId)}`
       : "";
-    const boards = await this.database.query<ExistingBoardHydrationRow>(
+    const boards = await database.query<ExistingBoardHydrationRow>(
       `
         SELECT
           b.project_v2_id,
@@ -1895,7 +2045,7 @@ export class GithubSyncExecutorService {
 
     for (const board of boards) {
       await this.assertGithubSyncLease(context);
-      const hydrated = await this.database.queryOne<HydratedBoardRow>(
+      const hydrated = await database.queryOne<HydratedBoardRow>(
         `
           SELECT hydrate_pilo_board_from_github($1::uuid, $2::uuid)::text AS board_id
         `,
@@ -1906,26 +2056,36 @@ export class GithubSyncExecutorService {
         continue;
       }
 
+      const hydratedBoard = await database.queryOne<HydratedBoardUpdatedAtRow>(
+        `
+          SELECT updated_at
+          FROM boards
+          WHERE workspace_id = $1
+            AND id = $2::bigint
+        `,
+        [context.workspaceId, String(hydrated.board_id)]
+      );
+
+      if (!hydratedBoard?.updated_at) {
+        continue;
+      }
+
+      invalidations.push({
+        workspaceId: context.workspaceId,
+        boardId: String(hydrated.board_id),
+        updatedAt: this.toIsoString(hydratedBoard.updated_at)
+      });
+    }
+
+    return invalidations;
+  }
+
+  private async publishBoardInvalidations(
+    invalidations: BoardInvalidationMetadata[]
+  ): Promise<void> {
+    for (const invalidation of invalidations) {
       try {
-        const hydratedBoard = await this.database.queryOne<HydratedBoardUpdatedAtRow>(
-          `
-            SELECT updated_at
-            FROM boards
-            WHERE workspace_id = $1
-              AND id = $2::bigint
-          `,
-          [context.workspaceId, String(hydrated.board_id)]
-        );
-
-        if (!hydratedBoard?.updated_at) {
-          continue;
-        }
-
-        await this.boardInvalidationPublisher.publishInvalidation({
-          workspaceId: context.workspaceId,
-          boardId: String(hydrated.board_id),
-          updatedAt: this.toIsoString(hydratedBoard.updated_at)
-        });
+        await this.boardInvalidationPublisher.publishInvalidation(invalidation);
       } catch (error) {
         console.error("Board invalidation publish failed", error);
       }

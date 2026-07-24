@@ -19,11 +19,11 @@ assert.match(
 );
 assert.match(
   syncExecutorFile,
-  /const uniqueProjectV2s =[\s\S]*new Map\([\s\S]*projectV2\.id[\s\S]*for \(const projectV2 of uniqueProjectV2s\) \{[\s\S]*await this\.syncGithubProjectV2Fields\(projectContext\)[\s\S]*await this\.syncGithubProjectV2Items\(projectContext\)[\s\S]*\}/
+  /const uniqueProjectV2s =[\s\S]*new Map\([\s\S]*projectV2\.id[\s\S]*for \(const projectV2 of uniqueProjectV2s\) \{[\s\S]*await this\.syncGithubProjectV2FieldsAndHydrate\(projectContext\)[\s\S]*await this\.syncGithubProjectV2Items\(projectContext\)[\s\S]*\}/
 );
 assert.match(
   syncExecutorFile,
-  /for \(const projectV2Context of projectV2Contexts\) \{[\s\S]*await this\.hydrateExistingBoardsForGithubProjectV2\(\s*projectContext,\s*projectV2Context\.repositoryId\s*\);/
+  /for \(const projectV2Context of projectV2Contexts\) \{[\s\S]*await this\.publishBoardInvalidations\(\s*await this\.hydrateExistingBoardsForGithubProjectV2\(\s*projectContext,\s*projectV2Context\.repositoryId\s*\)\s*\);/
 );
 assert.match(
   syncExecutorFile,

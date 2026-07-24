@@ -129,6 +129,7 @@ The database schema source of truth is the migration history in `db/migrations/`
 - `migrations/101_add_agent_outbox_planning_started_at.sql` records the server-owned start time of each Agent planning turn so publisher claim/retry updates cannot extend its terminal deadline.
 - `migrations/105_remove_unused_canvas_sync_storage.sql` removes unused tldraw sync document storage and engine source/version metadata after verifying that no sync Canvas data remains, while retaining the temporary Classic-only engine guard.
 - `migrations/106_fix_pilo_issue_hydration_position_offset.sql` serializes same-Board issue hydration and moves cached positions into a source-count-aware high band before dense position upserts.
+- `migrations/108_reconcile_project_v2_field_board_snapshots.sql` redefines Board hydration for current ProjectV2 Status option snapshots: stale remote columns are deleted by stable GitHub option identity, retained columns are reordered through a collision-free high-band phase, one local Unmapped column is retained, and issue refresh runs after stale columns are gone.
 
 ## Operational Data Repairs
 

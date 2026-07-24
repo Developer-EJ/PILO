@@ -129,7 +129,7 @@ async function assertFullSyncOnlyDetailsSelectedProjects(
   });
   executor.syncGithubIssues = async () => summary();
   executor.syncGithubPullRequests = async () => summary();
-  executor.syncGithubProjectV2Fields = async (context) => {
+  executor.syncGithubProjectV2FieldsAndHydrate = async (context) => {
     detailedProjectIds.push(`fields:${context.projectV2.id}`);
     return summary();
   };
@@ -139,6 +139,7 @@ async function assertFullSyncOnlyDetailsSelectedProjects(
   };
   executor.hydrateExistingBoardsForGithubProjectV2 = async (context, selectedRepositoryId) => {
     hydratedProjectSelections.push(`${context.projectV2.id}:${selectedRepositoryId}`);
+    return [];
   };
 
   await executor.runGithubSyncTarget("full", {
