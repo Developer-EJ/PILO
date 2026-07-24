@@ -27,7 +27,7 @@ assert.match(
 );
 assert.match(
   panel,
-  /apiClient\.discoverGithubProjectV2\([\s\S]{0,160}\{\s*repositoryId\s*\}/
+  /apiClient\.discoverGithubProjectV2\([\s\S]{0,180}\{\s*repositoryId: requestedRepositoryId\s*\}/
 );
 assert.doesNotMatch(
   panel,
@@ -37,11 +37,11 @@ assert.match(panel, /body\.repositoryId = browsingRepositoryId/);
 assert.match(panel, /browsingRepositoryIdRef\.current = repositoryId/);
 assert.match(
   panel,
-  /if \(browsingRepositoryIdRef\.current !== repositoryId\) \{[\s\S]{0,80}return null;/
+  /shouldApplyGithubRepositoryRequestResult\(\{[\s\S]{0,260}currentRepositoryId: browsingRepositoryIdRef\.current,[\s\S]{0,260}requestedRepositoryId/
 );
 assert.match(
   panel,
-  /async function handleDiscoverGithubProjectV2[\s\S]{0,1200}const discovery = await[\s\S]{0,600}if \(browsingRepositoryIdRef\.current !== repositoryId\) \{\s*return null;[\s\S]{0,400}if \(discovery\.connectionRequired\)/
+  /async function handleDiscoverGithubProjectV2[\s\S]{0,1400}const discovery = await[\s\S]{0,700}shouldApplyGithubRepositoryRequestResult\([\s\S]{0,500}if \(discovery\.connectionRequired\)/
 );
 assert.match(
   panel,

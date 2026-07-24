@@ -71,6 +71,69 @@ assert.equal(
   false,
   "a workspace B response must not update a workspace A request"
 );
+assert.equal(
+  typeof selectionModule.getWorkspaceScopedGithubActiveBoardSource,
+  "function",
+  "visible active Board source must live in a tested pure helper"
+);
+{
+  const source = {
+    workspaceId: "workspace-a",
+    repository: { id: "repository-a" },
+    project: { id: "project-a" }
+  };
+  assert.equal(
+    selectionModule.getWorkspaceScopedGithubActiveBoardSource({
+      activeBoardSource: source,
+      workspaceId: "workspace-a"
+    }),
+    source,
+    "an active Board source from the current workspace must remain visible"
+  );
+  assert.equal(
+    selectionModule.getWorkspaceScopedGithubActiveBoardSource({
+      activeBoardSource: source,
+      workspaceId: "workspace-b"
+    }),
+    null,
+    "an active Board source from an old workspace must not remain visible"
+  );
+}
+assert.equal(
+  typeof selectionModule.shouldApplyGithubRepositoryRequestResult,
+  "function",
+  "repository request attribution must live in a tested pure helper"
+);
+assert.equal(
+  selectionModule.shouldApplyGithubRepositoryRequestResult({
+    currentWorkspaceId: "workspace-a",
+    requestedWorkspaceId: "workspace-a",
+    currentRepositoryId: "repository-a",
+    requestedRepositoryId: "repository-a"
+  }),
+  true,
+  "a repository request may write UI state only in the original workspace and repository"
+);
+assert.equal(
+  selectionModule.shouldApplyGithubRepositoryRequestResult({
+    currentWorkspaceId: "workspace-b",
+    requestedWorkspaceId: "workspace-a",
+    currentRepositoryId: "repository-a",
+    requestedRepositoryId: "repository-a"
+  }),
+  false,
+  "a repository request from an old workspace must not write current UI state"
+);
+assert.equal(
+  selectionModule.shouldApplyGithubRepositoryRequestResult({
+    currentWorkspaceId: "workspace-a",
+    requestedWorkspaceId: "workspace-a",
+    currentRepositoryId: "repository-b",
+    requestedRepositoryId: "repository-a"
+  }),
+  false,
+  "a repository request from an old repository must not write current UI state"
+);
 
 assert.equal(
   revisionImportError,
@@ -242,8 +305,8 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler.match(/catch \(error\) \{[\s\S]*?\n    \}/)?.[0] ?? "",
-  /if \(currentWorkspaceIdRef\.current === requestedWorkspaceId\) \{[\s\S]{0,120}setActionError\(getErrorMessage\(error\)\)/,
-  "old workspace default activation failure must not write actionError into the current workspace"
+  /shouldApplyGithubRepositoryRequestResult\(\{[\s\S]{0,260}currentWorkspaceId: currentWorkspaceIdRef\.current,[\s\S]{0,260}requestedWorkspaceId,[\s\S]{0,260}currentRepositoryId: browsingRepositoryIdRef\.current,[\s\S]{0,260}requestedRepositoryId: repositoryId/,
+  "old workspace or repository default activation failure must not write actionError into the current browsing context"
 );
 assert.match(
   activateProjectHandler.match(/catch \(error\) \{[\s\S]*?\n    \}/)?.[0] ?? "",
@@ -274,6 +337,16 @@ assert.match(
   snapshotLoader,
   /setSnapshot\(\(current\) => \(\{[\s\S]*?setPanelStatus\("ready"\)/,
   "stale active source must not prevent the snapshot loader from applying list state and reaching ready"
+);
+assert.match(
+  panel,
+  /const visibleActiveBoardSource = getWorkspaceScopedGithubActiveBoardSource\(\{[\s\S]{0,160}activeBoardSource,[\s\S]{0,160}workspaceId/,
+  "the rendered active Board source must be scoped to the current workspace"
+);
+assert.match(
+  panel,
+  /activeBoardSource=\{visibleActiveBoardSource\}/,
+  "the layout must receive the workspace-scoped visible active Board source"
 );
 
 console.log("active Board race guard tests passed");

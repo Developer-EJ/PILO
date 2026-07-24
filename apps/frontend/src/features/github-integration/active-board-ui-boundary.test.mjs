@@ -50,8 +50,8 @@ const repositoryRowButton =
 
 assert.match(
   panelSource,
-  /activeBoardSource=\{activeBoardSource\}/,
-  "GithubPanel must pass the server-confirmed active source to layout"
+  /activeBoardSource=\{visibleActiveBoardSource\}/,
+  "GithubPanel must pass the workspace-scoped active source to layout"
 );
 assert.match(
   layoutSource,

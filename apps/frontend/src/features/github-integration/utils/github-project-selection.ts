@@ -43,6 +43,18 @@ type GithubWorkspaceResultInput = {
   responseWorkspaceId: string;
 };
 
+type WorkspaceScopedActiveBoardSourceInput = {
+  activeBoardSource: GithubActiveBoardSource | null;
+  workspaceId: string;
+};
+
+type GithubRepositoryRequestResultInput = {
+  currentWorkspaceId: string;
+  requestedWorkspaceId: string;
+  currentRepositoryId: string;
+  requestedRepositoryId: string;
+};
+
 export type GithubBoardSelection = {
   repositoryId: string;
   projectV2Id: string;
@@ -135,6 +147,32 @@ export function shouldApplyGithubBrowsingResult({
   requestedRepositoryId
 }: GithubBrowsingResultInput): boolean {
   return currentRepositoryId === requestedRepositoryId;
+}
+
+export function getWorkspaceScopedGithubActiveBoardSource({
+  activeBoardSource,
+  workspaceId
+}: WorkspaceScopedActiveBoardSourceInput): GithubActiveBoardSource | null {
+  if (activeBoardSource?.workspaceId !== workspaceId) {
+    return null;
+  }
+
+  return activeBoardSource;
+}
+
+export function shouldApplyGithubRepositoryRequestResult({
+  currentWorkspaceId,
+  requestedWorkspaceId,
+  currentRepositoryId,
+  requestedRepositoryId
+}: GithubRepositoryRequestResultInput): boolean {
+  return (
+    currentWorkspaceId === requestedWorkspaceId &&
+    shouldApplyGithubBrowsingResult({
+      currentRepositoryId,
+      requestedRepositoryId
+    })
+  );
 }
 
 export function shouldApplyGithubWorkspaceResult({

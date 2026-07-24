@@ -32,8 +32,10 @@ import { hasRequiredGithubProjectOAuthScopes } from "@/features/github-integrati
 import { buildGithubSettingsReturnUrl } from "@/features/github-integration/utils/github-settings-entry";
 import {
   activateDefaultGithubBoardForRepository,
+  getWorkspaceScopedGithubActiveBoardSource,
   resolveGithubBrowsingSelection,
   shouldApplyGithubBrowsingResult,
+  shouldApplyGithubRepositoryRequestResult,
   shouldApplyGithubWorkspaceResult
 } from "@/features/github-integration/utils/github-project-selection";
 import { createGithubActiveBoardRevisionGuard } from "@/features/github-integration/utils/github-active-board-revision";
@@ -236,12 +238,15 @@ export function GithubPanel() {
   const manualSyncIdempotencyRef = useRef(createGithubManualSyncIdempotency());
   const selectedRepositoryId = browsingRepositoryId;
   const selectedProjectV2Id = browsingProjectV2Id;
-
+  const visibleActiveBoardSource = getWorkspaceScopedGithubActiveBoardSource({
+    activeBoardSource,
+    workspaceId
+  });
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
   const connected = snapshot.oauth?.connected === true;
   const isSyncActive = isSyncing || hasRunningSyncRun;
-  const activeBoardRepositoryId = activeBoardSource?.repository.id ?? "";
+  const activeBoardRepositoryId = visibleActiveBoardSource?.repository.id ?? "";
   const selectedRepository =
     snapshot.repositories.find(
       (repository) => repository.id === selectedRepositoryId
@@ -658,15 +663,24 @@ export function GithubPanel() {
       return null;
     }
     setActionError(null);
+    const requestedWorkspaceId = workspaceId;
+    const requestedRepositoryId = repositoryId;
     try {
       const discovery = await apiClient.discoverGithubProjectV2(
-        workspaceId,
+        requestedWorkspaceId,
         installationId,
         {
-          repositoryId
+          repositoryId: requestedRepositoryId
         }
       );
-      if (browsingRepositoryIdRef.current !== repositoryId) {
+      if (
+        !shouldApplyGithubRepositoryRequestResult({
+          currentWorkspaceId: currentWorkspaceIdRef.current,
+          requestedWorkspaceId,
+          currentRepositoryId: browsingRepositoryIdRef.current,
+          requestedRepositoryId
+        })
+      ) {
         return null;
       }
       if (discovery.connectionRequired) {
@@ -675,13 +689,29 @@ export function GithubPanel() {
         );
         return null;
       }
-      const projects = await listAllGithubProjectsV2(repositoryId);
-      if (browsingRepositoryIdRef.current !== repositoryId) {
+      const projects = await listAllGithubProjectsV2(requestedRepositoryId);
+      if (
+        !shouldApplyGithubRepositoryRequestResult({
+          currentWorkspaceId: currentWorkspaceIdRef.current,
+          requestedWorkspaceId,
+          currentRepositoryId: browsingRepositoryIdRef.current,
+          requestedRepositoryId
+        })
+      ) {
         return null;
       }
       return projects;
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      if (
+        shouldApplyGithubRepositoryRequestResult({
+          currentWorkspaceId: currentWorkspaceIdRef.current,
+          requestedWorkspaceId,
+          currentRepositoryId: browsingRepositoryIdRef.current,
+          requestedRepositoryId
+        })
+      ) {
+        setActionError(getErrorMessage(error));
+      }
       return null;
     }
   }
@@ -869,9 +899,18 @@ export function GithubPanel() {
       });
 
       if (!activatedSource) {
-        setActionError(
-          "선택한 repository에 연결된 ProjectV2를 찾을 수 없습니다."
-        );
+        if (
+          shouldApplyGithubRepositoryRequestResult({
+            currentWorkspaceId: currentWorkspaceIdRef.current,
+            requestedWorkspaceId,
+            currentRepositoryId: browsingRepositoryIdRef.current,
+            requestedRepositoryId: repositoryId
+          })
+        ) {
+          setActionError(
+            "선택한 repository에 연결된 ProjectV2를 찾을 수 없습니다."
+          );
+        }
         return;
       }
 
@@ -896,7 +935,14 @@ export function GithubPanel() {
       setActionMessage("활성 Board를 변경했습니다.");
       void refreshGithubSyncRuns().catch(() => undefined);
     } catch (error) {
-      if (currentWorkspaceIdRef.current === requestedWorkspaceId) {
+      if (
+        shouldApplyGithubRepositoryRequestResult({
+          currentWorkspaceId: currentWorkspaceIdRef.current,
+          requestedWorkspaceId,
+          currentRepositoryId: browsingRepositoryIdRef.current,
+          requestedRepositoryId: repositoryId
+        })
+      ) {
         setActionError(getErrorMessage(error));
       }
     } finally {
@@ -1080,7 +1126,7 @@ export function GithubPanel() {
     <GithubConnectLayout
       actionError={actionError ?? syncPollingError}
       actionMessage={actionMessage}
-      activeBoardSource={activeBoardSource}
+      activeBoardSource={visibleActiveBoardSource}
       connected={connected}
       errorMessage={errorMessage}
       hasNextRepositoryPage={hasNextRepositoryPage}
