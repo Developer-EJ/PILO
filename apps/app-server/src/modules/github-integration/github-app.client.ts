@@ -1113,15 +1113,25 @@ export class GithubAppClient {
     };
   }
 
+  private safeHeader(response: Response | undefined, name: string): string | null {
+    try {
+      const headers = response?.headers;
+      const get = headers?.get;
+      return typeof get === "function" ? get.call(headers, name) : null;
+    } catch {
+      return null;
+    }
+  }
+
   private safeIntegerHeader(response: Response | undefined, name: string): number | null {
-    const value = response?.headers?.get?.(name) ?? null;
+    const value = this.safeHeader(response, name);
     if (value === null || !/^\d+$/.test(value)) return null;
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) ? parsed : null;
   }
 
   private safeResourceHeader(response: Response | undefined, name: string): string | null {
-    const value = response?.headers?.get?.(name) ?? null;
+    const value = this.safeHeader(response, name);
     return value !== null && /^[a-z_]+$/.test(value) ? value : null;
   }
 

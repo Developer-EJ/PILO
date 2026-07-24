@@ -328,6 +328,95 @@ function assertProviderEventDoesNotLeak(event) {
 }
 
 {
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const providerEvents = [];
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) {
+      providerEvents.push(JSON.parse(payload));
+    }
+    if (typeof encoding === "function") {
+      encoding();
+    }
+    if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+
+  globalThis.fetch = async (url) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      return jsonResponse(
+        201,
+        {
+          token: "installation-token-secret",
+          expires_at: "2026-07-04T13:00:00.000Z"
+        },
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "4999"
+        }
+      );
+    }
+
+    if (requestUrl.includes("/issues")) {
+      return {
+        ok: true,
+        status: 200,
+        get headers() {
+          throw new Error("headers unavailable");
+        },
+        async json() {
+          return [githubIssuePayload()];
+        }
+      };
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient(new GithubSyncObservabilityService());
+    const issues = await client.listRepositoryIssues({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    });
+
+    assert.equal(issues.length, 1);
+    const requestEvents = providerEvents.filter(
+      (event) => event.event === "github_provider_request_observed"
+    );
+    assert.equal(requestEvents.length, 2, "header extraction failure must not emit twice");
+    assert.deepEqual(requestEvents[1], {
+      event: "github_provider_request_observed",
+      operation: "github_repository_issues_list",
+      authKind: "installation",
+      outcome: "success",
+      status: 200,
+      durationMs: requestEvents[1].durationMs,
+      rateLimitLimit: null,
+      rateLimitRemaining: null,
+      rateLimitUsed: null,
+      rateLimitReset: null,
+      rateLimitResource: null
+    });
+    assert.equal(typeof requestEvents[1].durationMs, "number");
+    assertProviderEventDoesNotLeak(requestEvents[1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+
+{
   const clientSource = readFileSync(
     new URL("../../src/modules/github-integration/github-app.client.ts", import.meta.url),
     "utf8"
