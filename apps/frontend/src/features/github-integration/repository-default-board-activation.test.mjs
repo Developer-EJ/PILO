@@ -189,7 +189,7 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler,
-  /applyActivatedGithubBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)/,
   "repository selection must store only the returned active Board source after activation succeeds"
 );
 assert.match(

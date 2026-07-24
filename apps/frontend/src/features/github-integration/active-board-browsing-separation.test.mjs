@@ -203,7 +203,7 @@ assert.match(
 );
 assert.match(
   repositoryHandler,
-  /applyActivatedGithubBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)/,
   "successful default activation must store only the returned active Board source"
 );
 assert.doesNotMatch(
@@ -233,7 +233,7 @@ assert.match(
 );
 assert.match(
   manualActivationHandler,
-  /applyActivatedGithubBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)/,
   "manual activation must store only the returned active Board source"
 );
 assert.doesNotMatch(

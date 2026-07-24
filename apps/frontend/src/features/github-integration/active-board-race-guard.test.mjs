@@ -39,6 +39,38 @@ assert.equal(
   false,
   "a repository A result must not update repository B browsing state"
 );
+assert.equal(
+  typeof selectionModule.shouldApplyGithubWorkspaceResult,
+  "function",
+  "GitHub workspace result attribution must live in a tested pure helper"
+);
+assert.equal(
+  selectionModule.shouldApplyGithubWorkspaceResult({
+    currentWorkspaceId: "workspace-a",
+    requestedWorkspaceId: "workspace-a",
+    responseWorkspaceId: "workspace-a"
+  }),
+  true,
+  "a workspace A result may update workspace A state"
+);
+assert.equal(
+  selectionModule.shouldApplyGithubWorkspaceResult({
+    currentWorkspaceId: "workspace-b",
+    requestedWorkspaceId: "workspace-a",
+    responseWorkspaceId: "workspace-a"
+  }),
+  false,
+  "a workspace A result must not update workspace B state"
+);
+assert.equal(
+  selectionModule.shouldApplyGithubWorkspaceResult({
+    currentWorkspaceId: "workspace-a",
+    requestedWorkspaceId: "workspace-a",
+    responseWorkspaceId: "workspace-b"
+  }),
+  false,
+  "a workspace B response must not update a workspace A request"
+);
 
 assert.equal(
   revisionImportError,
@@ -124,7 +156,7 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler,
-  /if \(shouldApplyGithubBrowsingResult\([\s\S]{0,240}setBrowsingProjectV2Id\(source\.projectV2Id\)/,
+  /if \([\s\S]{0,220}currentWorkspaceIdRef\.current === requestedWorkspaceId[\s\S]{0,260}shouldApplyGithubBrowsingResult\([\s\S]{0,260}setBrowsingProjectV2Id\(source\.projectV2Id\)/,
   "default activation must write browsing ProjectV2 only when the requested repository is still being browsed"
 );
 assert.match(
@@ -134,8 +166,13 @@ assert.match(
 );
 assert.match(
   selectRepositoryHandler,
-  /applyActivatedGithubBoardSource\(activatedSource\)/,
+  /applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)/,
   "default activation success must still update the active Board source even after browsing moved elsewhere"
+);
+assert.match(
+  selectRepositoryHandler,
+  /const requestedWorkspaceId = workspaceId[\s\S]{0,1800}activateWorkspaceBoardSource\(\s*requestedWorkspaceId/,
+  "default activation must capture the requested workspace and use it for the PUT"
 );
 assert.match(
   selectRepositoryHandler,
@@ -149,7 +186,12 @@ assert.doesNotMatch(
 );
 assert.match(
   activateProjectHandler,
-  /applyActivatedGithubBoardSource\(activatedSource\)/,
+  /const requestedWorkspaceId = workspaceId[\s\S]{0,700}activateWorkspaceBoardSource\(\s*requestedWorkspaceId,/,
+  "manual activation must capture the requested workspace and use it for the PUT"
+);
+assert.match(
+  activateProjectHandler,
+  /applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)/,
   "manual activation success must use the shared active Board apply boundary"
 );
 assert.match(
@@ -164,13 +206,49 @@ assert.doesNotMatch(
 );
 assert.match(
   applyActivatedBoardSource,
-  /activeBoardRevisionGuardRef\.current\.recordActivation\(\)[\s\S]{0,160}setActiveBoardSource\(activatedSource\)/,
+  /requestedWorkspaceId: string/,
+  "active Board apply boundary must receive the requested workspace"
+);
+assert.match(
+  applyActivatedBoardSource,
+  /shouldApplyGithubWorkspaceResult\(\{[\s\S]{0,260}currentWorkspaceId: currentWorkspaceIdRef\.current,[\s\S]{0,260}requestedWorkspaceId,[\s\S]{0,260}responseWorkspaceId: activatedSource\.workspaceId/,
+  "active Board apply boundary must attribute the result before recording revision"
+);
+assert.ok(
+  applyActivatedBoardSource.indexOf("shouldApplyGithubWorkspaceResult") >= 0 &&
+    applyActivatedBoardSource.indexOf("shouldApplyGithubWorkspaceResult") <
+      applyActivatedBoardSource.indexOf("activeBoardRevisionGuardRef.current.recordActivation()"),
+  "active Board apply boundary must guard workspace before recording revision"
+);
+assert.match(
+  applyActivatedBoardSource,
+  /activeBoardRevisionGuardRef\.current\.recordActivation\(\)[\s\S]{0,160}setActiveBoardSource\(activatedSource\)[\s\S]{0,80}return true/,
   "successful PUT responses must record active Board revision before setting active Board source"
 );
 assert.doesNotMatch(
   applyActivatedBoardSource,
   /snapshotRequestGateRef\.current\.invalidate\(\)/,
   "successful PUT responses must not invalidate the whole snapshot loader gate"
+);
+assert.match(
+  selectRepositoryHandler,
+  /const didApplyActivatedSource = applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)[\s\S]{0,120}if \(!didApplyActivatedSource\) \{[\s\S]{0,80}return;/,
+  "stale default activation success must return before writing current workspace UI"
+);
+assert.match(
+  activateProjectHandler,
+  /const didApplyActivatedSource = applyActivatedGithubBoardSource\(\s*activatedSource,\s*requestedWorkspaceId\s*\)[\s\S]{0,120}if \(!didApplyActivatedSource\) \{[\s\S]{0,80}return;/,
+  "stale manual activation success must return before writing current workspace UI"
+);
+assert.match(
+  selectRepositoryHandler.match(/catch \(error\) \{[\s\S]*?\n    \}/)?.[0] ?? "",
+  /if \(currentWorkspaceIdRef\.current === requestedWorkspaceId\) \{[\s\S]{0,120}setActionError\(getErrorMessage\(error\)\)/,
+  "old workspace default activation failure must not write actionError into the current workspace"
+);
+assert.match(
+  activateProjectHandler.match(/catch \(error\) \{[\s\S]*?\n    \}/)?.[0] ?? "",
+  /if \(currentWorkspaceIdRef\.current === requestedWorkspaceId\) \{[\s\S]{0,120}setActionError\(getErrorMessage\(error\)\)/,
+  "old workspace manual activation failure must not write actionError into the current workspace"
 );
 assert.doesNotMatch(
   snapshotLoader.match(/catch \(error\) \{[\s\S]*?\n    \}/)?.[0] ?? "",

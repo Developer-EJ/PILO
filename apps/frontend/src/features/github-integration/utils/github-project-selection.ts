@@ -37,6 +37,12 @@ type GithubBrowsingResultInput = {
   requestedRepositoryId: string;
 };
 
+type GithubWorkspaceResultInput = {
+  currentWorkspaceId: string;
+  requestedWorkspaceId: string;
+  responseWorkspaceId: string;
+};
+
 export type GithubBoardSelection = {
   repositoryId: string;
   projectV2Id: string;
@@ -129,6 +135,17 @@ export function shouldApplyGithubBrowsingResult({
   requestedRepositoryId
 }: GithubBrowsingResultInput): boolean {
   return currentRepositoryId === requestedRepositoryId;
+}
+
+export function shouldApplyGithubWorkspaceResult({
+  currentWorkspaceId,
+  requestedWorkspaceId,
+  responseWorkspaceId
+}: GithubWorkspaceResultInput): boolean {
+  return (
+    currentWorkspaceId === requestedWorkspaceId &&
+    requestedWorkspaceId === responseWorkspaceId
+  );
 }
 
 export async function activateDefaultGithubBoardForRepository({
