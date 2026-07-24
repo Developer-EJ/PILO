@@ -432,6 +432,437 @@ function assertProviderEventDoesNotLeak(event) {
 {
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `installation-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 1, "same appId:installationId must reuse one installation token");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer installation-token-1",
+      "Bearer installation-token-1"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.includes("/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `cross-key-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const base = {
+      installationId: 12345678,
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues({ ...base, appId: "12345" });
+    await client.listRepositoryIssues({ ...base, appId: "12345" });
+    await client.listRepositoryIssues({ ...base, appId: "67890" });
+
+    assert.equal(tokenPosts, 2, "cache key must include the exact appId and installationId pair");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer cross-key-token-1",
+      "Bearer cross-key-token-1",
+      "Bearer cross-key-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `stale-token-${tokenPosts}`,
+        expires_at: tokenPosts === 1
+          ? "2026-07-04T12:05:00.000Z"
+          : "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 2, "token expiring at the five-minute margin must be refreshed");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer stale-token-1",
+      "Bearer stale-token-2",
+      "Bearer stale-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+  const expiresAtValues = [undefined, "not-a-date", "2026-07-04T13:00:00.000Z"];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      const payload = { token: `expiry-token-${tokenPosts}` };
+      if (expiresAtValues[tokenPosts - 1] !== undefined) {
+        payload.expires_at = expiresAtValues[tokenPosts - 1];
+      }
+      return jsonResponse(201, payload);
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 3, "missing or invalid expires_at must not be cached");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer expiry-token-1",
+      "Bearer expiry-token-2",
+      "Bearer expiry-token-3",
+      "Bearer expiry-token-3"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+      return jsonResponse(201, {
+        token: `single-flight-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await Promise.all([
+      client.listRepositoryIssues(input),
+      client.listRepositoryIssues(input),
+      client.listRepositoryIssues(input)
+    ]);
+
+    assert.equal(tokenPosts, 1, "concurrent cache misses for one key must share one token POST");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer single-flight-token-1",
+      "Bearer single-flight-token-1",
+      "Bearer single-flight-token-1"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      if (tokenPosts === 1) {
+        return jsonResponse(500, { message: "temporary provider failure" });
+      }
+      return jsonResponse(201, {
+        token: "retry-token-2",
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await assert.rejects(
+      () => client.listRepositoryIssues(input),
+      (error) => error?.response?.error?.message === "GitHub App installation token lookup failed"
+    );
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 2, "failed in-flight token lookup must be cleared for retry");
+    assert.deepEqual(issueRequestTokens, ["Bearer retry-token-2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  let tokenPosts = 0;
+  const authorizations = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.includes("/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: "unexpected-installation-token",
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    authorizations.push(options.headers?.Authorization);
+    if (requestUrl.includes("/issues/609")) {
+      return jsonResponse(200, githubIssuePayload());
+    }
+
+    if (requestUrl === "https://api.github.com/graphql") {
+      return jsonResponse(200, {
+        data: {
+          addProjectV2ItemById: {
+            item: {
+              id: "PVTI_lADOExample"
+            }
+          }
+        }
+      });
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    await client.updateRepositoryIssue({
+      owner: "Developer-EJ",
+      repo: "PILO",
+      issueNumber: 609,
+      title: "No cache",
+      userAccessToken: "user-oauth-token-1"
+    });
+    await client.updateRepositoryIssue({
+      owner: "Developer-EJ",
+      repo: "PILO",
+      issueNumber: 609,
+      title: "No cache",
+      userAccessToken: "user-oauth-token-2"
+    });
+    await client.addProjectV2ItemByContentId({
+      contentNodeId: "I_kwDOExample",
+      projectNodeId: "PVT_kwDOExample",
+      userAccessToken: "personal-project-token-1"
+    });
+    await client.addProjectV2ItemByContentId({
+      contentNodeId: "I_kwDOExample",
+      projectNodeId: "PVT_kwDOExample",
+      userAccessToken: "personal-project-token-2"
+    });
+
+    assert.equal(tokenPosts, 0, "user OAuth and personal ProjectV2 OAuth must never use installation token cache");
+    assert.deepEqual(authorizations, [
+      "Bearer user-oauth-token-1",
+      "Bearer user-oauth-token-2",
+      "Bearer personal-project-token-1",
+      "Bearer personal-project-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  let issueRequests = 0;
+  const operationCount = 100;
+
+  globalThis.fetch = async (url) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: "warm-workload-token",
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/issues")) {
+      issueRequests += 1;
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    for (let index = 0; index < operationCount; index += 1) {
+      await client.listRepositoryIssues(input);
+    }
+
+    const cacheHitRatio = (operationCount - tokenPosts) / operationCount;
+    const tokenPostReduction = (operationCount - tokenPosts) / operationCount;
+    assert.equal(issueRequests, operationCount);
+    assert.ok(cacheHitRatio >= 0.95, `warm cache hit ratio ${cacheHitRatio} must be at least 95%`);
+    assert.ok(tokenPostReduction >= 0.95, `token POST reduction ${tokenPostReduction} must be at least 95%`);
+    assert.equal(tokenPosts, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
   const graphqlRequests = [];
 
   globalThis.fetch = async (url, options = {}) => {

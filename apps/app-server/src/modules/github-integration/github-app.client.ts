@@ -476,6 +476,7 @@ const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_READ_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS = 30_000;
+const GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
   "GitHub ProjectV2 owner could not be resolved";
 const GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE =
@@ -1053,6 +1054,15 @@ const GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION = `
 
 @Injectable()
 export class GithubAppClient {
+  private readonly installationAccessTokenCache = new Map<
+    string,
+    { token: string; expiresAt: string; expiresAtMs: number }
+  >();
+  private readonly installationAccessTokenInflight = new Map<
+    string,
+    Promise<{ token: string; expiresAt: string | null }>
+  >();
+
   constructor(@Optional() private readonly observability?: GithubSyncObservabilityService) {}
 
   private async observedFetch(
@@ -1223,6 +1233,38 @@ export class GithubAppClient {
   async createInstallationAccessToken(
     input: GithubAppInstallationTokenRequest
   ): Promise<{ token: string; expiresAt: string | null }> {
+    const cacheKey = this.installationAccessTokenCacheKey(input);
+    const cached = this.installationAccessTokenCache.get(cacheKey);
+    if (cached && !this.isCachedInstallationAccessTokenStale(cached, input)) {
+      return {
+        token: cached.token,
+        expiresAt: cached.expiresAt
+      };
+    }
+    if (cached) {
+      this.installationAccessTokenCache.delete(cacheKey);
+    }
+
+    const inflight = this.installationAccessTokenInflight.get(cacheKey);
+    if (inflight) {
+      return inflight;
+    }
+
+    const tokenLookup = this.createInstallationAccessTokenUncached(input)
+      .then((token) => {
+        this.cacheInstallationAccessToken(cacheKey, token, input);
+        return token;
+      })
+      .finally(() => {
+        this.installationAccessTokenInflight.delete(cacheKey);
+      });
+    this.installationAccessTokenInflight.set(cacheKey, tokenLookup);
+    return tokenLookup;
+  }
+
+  private async createInstallationAccessTokenUncached(
+    input: GithubAppInstallationTokenRequest
+  ): Promise<{ token: string; expiresAt: string | null }> {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
@@ -1259,6 +1301,60 @@ export class GithubAppClient {
       token: payload.token,
       expiresAt: typeof payload.expires_at === "string" ? payload.expires_at : null
     };
+  }
+
+  private installationAccessTokenCacheKey(
+    input: GithubAppInstallationLookupRequest
+  ): string {
+    return `${input.appId}:${input.installationId}`;
+  }
+
+  private cacheInstallationAccessToken(
+    cacheKey: string,
+    token: { token: string; expiresAt: string | null },
+    input: GithubAppInstallationLookupRequest
+  ): void {
+    const expiresAtMs = this.parseInstallationAccessTokenExpiresAt(token.expiresAt);
+    if (
+      token.token.length === 0 ||
+      token.expiresAt === null ||
+      expiresAtMs === null ||
+      this.isInstallationAccessTokenStaleAt(expiresAtMs, input)
+    ) {
+      this.installationAccessTokenCache.delete(cacheKey);
+      return;
+    }
+
+    this.installationAccessTokenCache.set(cacheKey, {
+      token: token.token,
+      expiresAt: token.expiresAt,
+      expiresAtMs
+    });
+  }
+
+  private isCachedInstallationAccessTokenStale(
+    token: { expiresAtMs: number },
+    input: GithubAppInstallationLookupRequest
+  ): boolean {
+    return this.isInstallationAccessTokenStaleAt(token.expiresAtMs, input);
+  }
+
+  private isInstallationAccessTokenStaleAt(
+    expiresAtMs: number,
+    input: GithubAppInstallationLookupRequest
+  ): boolean {
+    return (
+      expiresAtMs - (input.now ? input.now() : new Date()).getTime() <=
+      GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_MS
+    );
+  }
+
+  private parseInstallationAccessTokenExpiresAt(value: string | null): number | null {
+    if (value === null) {
+      return null;
+    }
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   async listInstallationRepositories(
