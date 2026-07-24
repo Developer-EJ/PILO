@@ -49,7 +49,7 @@ assert.match(
   panel,
   /function handleRepositoryPageChange\(page: number\) \{[\s\S]{0,240}clearRepositorySelection\(\)/
 );
-assert.match(panel, /function clearRepositorySelection\(\) \{[\s\S]{0,240}setSelectedRepositoryId\(""\)/);
+assert.match(panel, /function clearRepositorySelection\(\) \{[\s\S]{0,240}setBrowsingRepositoryId\(""\)/);
 assert.match(repositories, /<span>보관 상태<\/span>/);
 assert.match(repositories, /<span>마지막 동기화<\/span>/);
 assert.match(repositories, /<span>선택<\/span>/);

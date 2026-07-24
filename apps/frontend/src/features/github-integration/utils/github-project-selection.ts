@@ -23,13 +23,44 @@ type ActivateDefaultGithubBoardInput = {
   projects: ReadonlyArray<Pick<GithubProjectV2, "id" | "repositoryIds">>;
   repositoryId: string;
   preferredProjectV2Id?: string;
-  activate: (source: GithubActiveBoardSelection) => Promise<unknown>;
+  activate: (source: GithubBoardSelection) => Promise<GithubActiveBoardSource>;
 };
 
-export type GithubActiveBoardSelection = {
+type ActiveBoardProjectInput = {
+  activeBoardSource: GithubActiveBoardSource | null;
   repositoryId: string;
   projectV2Id: string;
 };
+
+type GithubBrowsingResultInput = {
+  currentRepositoryId: string;
+  requestedRepositoryId: string;
+};
+
+type GithubWorkspaceResultInput = {
+  currentWorkspaceId: string;
+  requestedWorkspaceId: string;
+  responseWorkspaceId: string;
+};
+
+type WorkspaceScopedActiveBoardSourceInput = {
+  activeBoardSource: GithubActiveBoardSource | null;
+  workspaceId: string;
+};
+
+type GithubRepositoryRequestResultInput = {
+  currentWorkspaceId: string;
+  requestedWorkspaceId: string;
+  currentRepositoryId: string;
+  requestedRepositoryId: string;
+};
+
+export type GithubBoardSelection = {
+  repositoryId: string;
+  projectV2Id: string;
+};
+
+export type GithubActiveBoardSelection = GithubBoardSelection;
 
 export function selectProjectV2IdForRepository({
   projects,
@@ -63,13 +94,13 @@ export function selectProjectV2IdForRepository({
     "";
 }
 
-export function resolveGithubActiveBoardSelection({
+export function resolveGithubBrowsingSelection({
   repositories,
   projects,
   activeBoardSource,
   preferredRepositoryId,
   preferredProjectV2Id
-}: GithubActiveBoardSelectionInput): GithubActiveBoardSelection {
+}: GithubActiveBoardSelectionInput): GithubBoardSelection {
   const requestedRepositoryId =
     preferredRepositoryId !== undefined
       ? preferredRepositoryId
@@ -97,12 +128,70 @@ export function resolveGithubActiveBoardSelection({
   };
 }
 
+export const resolveGithubActiveBoardSelection = resolveGithubBrowsingSelection;
+
+export function isGithubActiveBoardProject({
+  activeBoardSource,
+  repositoryId,
+  projectV2Id
+}: ActiveBoardProjectInput): boolean {
+  return Boolean(
+    activeBoardSource &&
+      activeBoardSource.repository.id === repositoryId &&
+      activeBoardSource.project.id === projectV2Id
+  );
+}
+
+export function shouldApplyGithubBrowsingResult({
+  currentRepositoryId,
+  requestedRepositoryId
+}: GithubBrowsingResultInput): boolean {
+  return currentRepositoryId === requestedRepositoryId;
+}
+
+export function getWorkspaceScopedGithubActiveBoardSource({
+  activeBoardSource,
+  workspaceId
+}: WorkspaceScopedActiveBoardSourceInput): GithubActiveBoardSource | null {
+  if (activeBoardSource?.workspaceId !== workspaceId) {
+    return null;
+  }
+
+  return activeBoardSource;
+}
+
+export function shouldApplyGithubRepositoryRequestResult({
+  currentWorkspaceId,
+  requestedWorkspaceId,
+  currentRepositoryId,
+  requestedRepositoryId
+}: GithubRepositoryRequestResultInput): boolean {
+  return (
+    currentWorkspaceId === requestedWorkspaceId &&
+    shouldApplyGithubBrowsingResult({
+      currentRepositoryId,
+      requestedRepositoryId
+    })
+  );
+}
+
+export function shouldApplyGithubWorkspaceResult({
+  currentWorkspaceId,
+  requestedWorkspaceId,
+  responseWorkspaceId
+}: GithubWorkspaceResultInput): boolean {
+  return (
+    currentWorkspaceId === requestedWorkspaceId &&
+    requestedWorkspaceId === responseWorkspaceId
+  );
+}
+
 export async function activateDefaultGithubBoardForRepository({
   projects,
   repositoryId,
   preferredProjectV2Id,
   activate
-}: ActivateDefaultGithubBoardInput): Promise<string> {
+}: ActivateDefaultGithubBoardInput): Promise<GithubActiveBoardSource | null> {
   const projectV2Id = selectProjectV2IdForRepository({
     projects,
     preferredProjectV2Id,
@@ -110,9 +199,8 @@ export async function activateDefaultGithubBoardForRepository({
   });
 
   if (!projectV2Id) {
-    return "";
+    return null;
   }
 
-  await activate({ repositoryId, projectV2Id });
-  return projectV2Id;
+  return activate({ repositoryId, projectV2Id });
 }

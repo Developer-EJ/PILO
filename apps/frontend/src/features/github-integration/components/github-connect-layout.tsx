@@ -3,6 +3,7 @@ import { CheckCircle2, XCircle } from "lucide-react";
 
 import type {
   GithubAppInstallation,
+  GithubActiveBoardSource,
   GithubOAuthStatus,
   GithubProjectOAuthStatus,
   GithubProjectV2,
@@ -39,6 +40,7 @@ export type GithubConnectLayoutProps = {
   selectedRepository: GithubRepository | undefined;
   restoredRepository: GithubRepository | null;
   projects: GithubProjectV2[];
+  activeBoardSource: GithubActiveBoardSource | null;
   selectedProjectV2Id: string;
   isLoading: boolean;
   isDisconnecting: boolean;
@@ -90,6 +92,7 @@ export function GithubConnectLayout({
   selectedRepository,
   restoredRepository,
   projects,
+  activeBoardSource,
   selectedProjectV2Id,
   isLoading,
   isDisconnecting,
@@ -180,7 +183,6 @@ export function GithubConnectLayout({
           enabled={installations.length > 0}
           hasNextRepositoryPage={hasNextRepositoryPage}
           activatingRepositoryId={activatingRepositoryId}
-          isActivating={isActivatingProjectV2}
           isLoading={isLoading}
           isWorkspaceOwner={isWorkspaceOwner}
           onRepositoryPageChange={onRepositoryPageChange}
@@ -198,7 +200,7 @@ export function GithubConnectLayout({
           selectedRepositoryId={selectedRepositoryId}
         />
         <GithubConnectProject
-          activeProjectV2Id={selectedProjectV2Id}
+          activeBoardSource={activeBoardSource}
           isActivating={isActivatingProjectV2}
           isWorkspaceOwner={isWorkspaceOwner}
           onActivateProjectV2={onActivateProjectV2}

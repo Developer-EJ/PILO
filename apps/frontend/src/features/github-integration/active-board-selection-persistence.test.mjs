@@ -122,7 +122,7 @@ assert.match(
 );
 assert.match(
   snapshotLoader,
-  /resolveGithubActiveBoardSelection\(\{[\s\S]*?activeBoardSource,[\s\S]*?preferredRepositoryId,[\s\S]*?preferredProjectV2Id/,
+  /resolveGithubBrowsingSelection\(\{[\s\S]*?activeBoardSource,[\s\S]*?preferredRepositoryId,[\s\S]*?preferredProjectV2Id/,
   "snapshot loading must delegate restoration decisions to the tested utility"
 );
 assert.match(

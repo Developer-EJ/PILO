@@ -555,9 +555,7 @@ export function createGithubIntegrationApiClient({
       workspaceId: string,
       body: { repositoryId: string; projectV2Id: string }
     ) {
-      return requestGithubIntegrationData<{
-        boardId: string;
-      }>(
+      return requestGithubIntegrationData<GithubActiveBoardSource>(
         workspaceActiveBoardPath(workspaceId),
         withJsonBody(body, { method: "PUT" }),
         requestOptions
