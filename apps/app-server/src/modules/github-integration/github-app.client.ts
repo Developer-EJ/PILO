@@ -2250,10 +2250,38 @@ export class GithubAppClient {
     );
     url.searchParams.set("ref", input.ref);
 
-    const response = await this.fetchRepositoryFileContentWithRetry(
+    const installationTokenRetry = input.installationAccessToken
+      ? undefined
+      : this.installationAccessTokenRetryContext(input, installationToken);
+    let response = await this.fetchRepositoryFileContentWithRetry(
       url,
       installationToken
     );
+
+    if (response.status === 401 && installationTokenRetry) {
+      this.evictInstallationAccessTokenCacheIfTokenMatches(
+        installationTokenRetry.cacheKey,
+        installationTokenRetry.token
+      );
+      try {
+        const refreshedToken = await this.createInstallationAccessToken(
+          installationTokenRetry.input
+        );
+        response = await this.fetchRepositoryFileContentWithRetry(
+          url,
+          refreshedToken.token
+        );
+        if (response.status === 401) {
+          this.evictInstallationAccessTokenCacheIfTokenMatches(
+            installationTokenRetry.cacheKey,
+            refreshedToken.token
+          );
+        }
+      } catch {
+        // Preserve the original content 401 so the existing mapper returns
+        // "GitHub App installation token is invalid" instead of token lookup details.
+      }
+    }
 
     if (response.status === 404) {
       return null;

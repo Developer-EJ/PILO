@@ -69,6 +69,17 @@ function githubIssuePayload(overrides = {}) {
     ...overrides
   };
 }
+function githubContentPayload(overrides = {}) {
+  return {
+    type: "file",
+    path: "README.md",
+    sha: "abc123",
+    size: 5,
+    encoding: "base64",
+    content: Buffer.from("hello").toString("base64"),
+    ...overrides
+  };
+}
 function headers(values = {}) {
   const normalized = Object.fromEntries(
     Object.entries(values).map(([key, value]) => [key.toLowerCase(), value])
@@ -1113,6 +1124,62 @@ function assertProviderEventDoesNotLeak(event) {
   }
 }
 {
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const contentRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `content-recover-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.includes("/repos/Developer-EJ/PILO/contents/README.md")) {
+      contentRequestTokens.push(options.headers?.Authorization);
+      return contentRequestTokens.length === 1
+        ? jsonResponse(401, { message: "Bad credentials" })
+        : jsonResponse(200, githubContentPayload());
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      path: "README.md",
+      ref: "main",
+      now: () => fixedNow
+    };
+
+    await client.createInstallationAccessToken(input);
+    const contentDetails = await client.getRepositoryFileContent(input);
+
+    assert.deepEqual(contentDetails, {
+      path: "README.md",
+      sha: "abc123",
+      size: 5,
+      content: "hello"
+    });
+    assert.equal(tokenPosts, 2, "content 401 should refresh the cached installation token once");
+    assert.deepEqual(contentRequestTokens, [
+      "Bearer content-recover-token-1",
+      "Bearer content-recover-token-2"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}{
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
   let tokenPosts = 0;
