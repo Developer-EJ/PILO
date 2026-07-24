@@ -1455,6 +1455,88 @@ function assertProviderEventDoesNotLeak(event) {
 {
   const originalFetch = globalThis.fetch;
   const privateKeyPem = createPrivateKeyPem();
+  const graphqlRequestTokens = [];
+  const graphqlCursors = [];
+  let tokenPosts = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `graphql-pagination-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    const body = JSON.parse(options.body);
+    graphqlRequestTokens.push(options.headers?.Authorization);
+    graphqlCursors.push(body.variables.cursor);
+
+    if (options.headers?.Authorization === "Bearer graphql-pagination-token-1") {
+      return jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    assert.equal(options.headers?.Authorization, "Bearer graphql-pagination-token-2");
+    const cursor = body.variables.cursor;
+    const id = cursor === "projects-page-2"
+      ? "PVT_kwDOSecond"
+      : cursor === "projects-page-3"
+        ? "PVT_kwDOThird"
+        : "PVT_kwDOExample";
+    const nextCursor = cursor === null
+      ? "projects-page-2"
+      : cursor === "projects-page-2"
+        ? "projects-page-3"
+        : null;
+
+    return jsonResponse(200, {
+      data: {
+        repository: {
+          projectsV2: {
+            nodes: [projectNode({ id })],
+            pageInfo: {
+              hasNextPage: nextCursor !== null,
+              endCursor: nextCursor
+            }
+          }
+        }
+      }
+    });
+  };
+
+  try {
+    const projects = await new GithubAppClient().listRepositoryProjectV2s({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    });
+
+    assert.equal(tokenPosts, 2, "GraphQL pagination recovery should only issue T0 and T1");
+    assert.deepEqual(graphqlRequestTokens, [
+      "Bearer graphql-pagination-token-1",
+      "Bearer graphql-pagination-token-2",
+      "Bearer graphql-pagination-token-2",
+      "Bearer graphql-pagination-token-2"
+    ]);
+    assert.deepEqual(graphqlCursors, [null, null, "projects-page-2", "projects-page-3"]);
+    assert.deepEqual(projects.map((project) => project.id), [
+      "PVT_kwDOExample",
+      "PVT_kwDOSecond",
+      "PVT_kwDOThird"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
   const requests = [];
 
   globalThis.fetch = async (url, options = {}) => {
