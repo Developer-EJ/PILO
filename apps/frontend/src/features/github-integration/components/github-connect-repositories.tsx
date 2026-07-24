@@ -24,7 +24,6 @@ type GithubConnectRepositoriesProps = {
   selectedRepositoryId: string;
   restoredRepository: GithubRepository | null;
   activatingRepositoryId: string;
-  isActivating: boolean;
   isLoading: boolean;
   isWorkspaceOwner: boolean;
   enabled: boolean;
@@ -42,7 +41,6 @@ export function GithubConnectRepositories({
   selectedRepositoryId,
   restoredRepository,
   activatingRepositoryId,
-  isActivating,
   isLoading,
   isWorkspaceOwner,
   enabled,
@@ -73,7 +71,6 @@ export function GithubConnectRepositories({
             <Search className="size-4 shrink-0 text-[#8b95a7]" />
             <Input
               className="h-10 border-0 bg-transparent px-0 text-[14px] shadow-none focus-visible:ring-0"
-              disabled={isActivating}
               onChange={(event) => onRepositoryQueryChange(event.target.value)}
               placeholder="Repository 검색"
               value={repositoryQuery}
@@ -112,7 +109,6 @@ export function GithubConnectRepositories({
                 {repositories.map((repository) => (
                   <RepositoryRow
                     activatingRepositoryId={activatingRepositoryId}
-                    isActivating={isActivating}
                     isSelected={repository.id === selectedRepositoryId}
                     isWorkspaceOwner={isWorkspaceOwner}
                     key={repository.id}
@@ -127,7 +123,7 @@ export function GithubConnectRepositories({
           {repositoriesTotal > 0 ? (
             <div className="mt-3 flex items-center justify-end gap-2">
               <Button
-                disabled={isLoading || isActivating || repositoryPage === 1}
+                disabled={isLoading || repositoryPage === 1}
                 onClick={() => onRepositoryPageChange(repositoryPage - 1)}
                 size="sm"
                 type="button"
@@ -139,7 +135,7 @@ export function GithubConnectRepositories({
                 {repositoryPage}페이지
               </span>
               <Button
-                disabled={isLoading || isActivating || !hasNextRepositoryPage}
+                disabled={isLoading || !hasNextRepositoryPage}
                 onClick={() => onRepositoryPageChange(repositoryPage + 1)}
                 size="sm"
                 type="button"
@@ -159,14 +155,12 @@ function RepositoryRow({
   repository,
   isSelected,
   activatingRepositoryId,
-  isActivating,
   isWorkspaceOwner,
   onSelect
 }: {
   repository: GithubRepository;
   isSelected: boolean;
   activatingRepositoryId: string;
-  isActivating: boolean;
   isWorkspaceOwner: boolean;
   onSelect: () => void;
 }) {
@@ -205,7 +199,7 @@ function RepositoryRow({
       </div>
       <Button
         className="col-start-2 row-start-1 h-8 rounded-[8px] px-3 @[48rem]:col-start-auto @[48rem]:row-start-auto"
-        disabled={isActivating || !isWorkspaceOwner}
+        disabled={isRepositoryActivating || !isWorkspaceOwner}
         onClick={onSelect}
         size="sm"
         type="button"

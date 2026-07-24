@@ -13,9 +13,11 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import type {
+  GithubActiveBoardSource,
   GithubProjectV2,
   GithubRepository
 } from "@/features/github-integration/types";
+import { isGithubActiveBoardProject } from "@/features/github-integration/utils/github-project-selection";
 
 import {
   GithubConnectEmptyState,
@@ -25,7 +27,7 @@ import {
 
 type GithubConnectProjectProps = {
   projects: GithubProjectV2[];
-  activeProjectV2Id: string;
+  activeBoardSource: GithubActiveBoardSource | null;
   selectedRepository: GithubRepository | undefined;
   projectOAuthConnected: boolean;
   isWorkspaceOwner: boolean;
@@ -35,7 +37,7 @@ type GithubConnectProjectProps = {
 
 export function GithubConnectProject({
   projects,
-  activeProjectV2Id,
+  activeBoardSource,
   selectedRepository,
   projectOAuthConnected,
   isWorkspaceOwner,
@@ -44,7 +46,8 @@ export function GithubConnectProject({
 }: GithubConnectProjectProps) {
   const [open, setOpen] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const activeProject = projects.find((project) => project.id === activeProjectV2Id);
+  const activeProject = activeBoardSource?.project ?? null;
+  const activeRepository = activeBoardSource?.repository ?? null;
 
   async function handleProjectChoice(projectV2Id: string) {
     setDialogError(null);
@@ -110,7 +113,11 @@ export function GithubConnectProject({
                   선택한 repository에 연결된 Project v2가 없습니다.
                 </GithubConnectEmptyState>
               ) : projects.map((project) => {
-                const isActive = project.id === activeProjectV2Id;
+                const isActive = isGithubActiveBoardProject({
+                  activeBoardSource,
+                  repositoryId: selectedRepository?.id ?? "",
+                  projectV2Id: project.id
+                });
                 const projectOAuthRequired = needsProjectOAuth(project);
                 return (
                   <div
@@ -151,23 +158,23 @@ export function GithubConnectProject({
       title="Projects v2"
       tone="project"
     >
-      {!selectedRepository ? (
-        <GithubConnectEmptyState>
-          repository를 선택하면 연결된 Project v2를 확인할 수 있습니다.
-        </GithubConnectEmptyState>
-      ) : activeProject ? (
+      {activeProject && activeRepository ? (
         <div className="rounded-[8px] border border-[#d9dee8] bg-[#fbfcfe] p-3">
           <p className="text-[12px] text-[#7a8497]">현재 활성 Board</p>
           <p className="mt-1 text-sm font-semibold text-[#101828]">
             {activeProject.title}
           </p>
           <p className="mt-1 text-[12px] text-[#7a8497]">
-            {activeProject.ownerLogin} · #{activeProject.projectNumber}
+            {activeRepository.fullName} · #{activeProject.projectNumber}
           </p>
           <GithubConnectPill className="mt-2" tone="info">
-            {activeProject.ownerType === "Organization" ? "Organization" : "Personal"}
+            {activeRepository.fullName}
           </GithubConnectPill>
         </div>
+      ) : !selectedRepository ? (
+        <GithubConnectEmptyState>
+          repository를 선택하면 연결된 Project v2를 확인할 수 있습니다.
+        </GithubConnectEmptyState>
       ) : projects.length === 0 ? (
         <GithubConnectEmptyState>
           선택한 repository에 연결된 Project v2가 없습니다.

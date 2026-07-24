@@ -1009,6 +1009,7 @@ export function GithubPanel() {
     <GithubConnectLayout
       actionError={actionError ?? syncPollingError}
       actionMessage={actionMessage}
+      activeBoardSource={activeBoardSource}
       connected={connected}
       errorMessage={errorMessage}
       hasNextRepositoryPage={hasNextRepositoryPage}
