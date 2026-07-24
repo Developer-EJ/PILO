@@ -1551,6 +1551,356 @@ function assertProviderEventDoesNotLeak(event) {
 
 {
   const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const providerEvents = [];
+  const graphqlRequestTokens = [];
+  let tokenPosts = 0;
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) {
+      providerEvents.push(JSON.parse(payload));
+    }
+    if (typeof encoding === "function") {
+      encoding();
+    }
+    if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `graphql-recover-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    graphqlRequestTokens.push(options.headers?.Authorization);
+    if (options.headers?.Authorization === "Bearer graphql-recover-token-1") {
+      return jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    assert.equal(options.headers?.Authorization, "Bearer graphql-recover-token-2");
+    const body = JSON.parse(options.body);
+    assert.match(body.query, /repository\(owner: \$owner, name: \$name\)/);
+    assert.deepEqual(body.variables, {
+      owner: "my-team",
+      name: "pilo",
+      cursor: null
+    });
+
+    return jsonResponse(
+      200,
+      {
+        data: {
+          repository: {
+            projectsV2: {
+              nodes: [projectNode()],
+              pageInfo: {
+                hasNextPage: false,
+                endCursor: null
+              }
+            }
+          }
+        }
+      },
+      {
+        "x-ratelimit-remaining": "4998"
+      }
+    );
+  };
+
+  try {
+    const projects = await new GithubAppClient(
+      new GithubSyncObservabilityService()
+    ).listRepositoryProjectV2s({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    });
+
+    assert.equal(tokenPosts, 2, "GraphQL 401 should refresh the cached installation token once");
+    assert.deepEqual(graphqlRequestTokens, [
+      "Bearer graphql-recover-token-1",
+      "Bearer graphql-recover-token-2"
+    ]);
+    assert.equal(projects[0]?.id, "PVT_kwDOExample");
+    assert.deepEqual(
+      providerEvents
+        .filter((event) => event.event === "github_provider_request_observed")
+        .map((event) => [event.operation, event.authKind, event.status]),
+      [
+        ["github_app_installation_token_create", "app_jwt", 201],
+        ["github_graphql_project_v2_read", "installation", 401],
+        ["github_app_installation_token_create", "app_jwt", 201],
+        ["github_graphql_project_v2_read", "installation", 200]
+      ]
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  const graphqlRequestTokens = [];
+  let tokenPosts = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `graphql-second-401-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    graphqlRequestTokens.push(options.headers?.Authorization);
+    if (options.headers?.Authorization !== "Bearer graphql-second-401-token-3") {
+      return jsonResponse(401, { message: "Bad credentials" });
+    }
+
+    return jsonResponse(200, {
+      data: {
+        repository: {
+          projectsV2: {
+            nodes: [projectNode()],
+            pageInfo: {
+              hasNextPage: false,
+              endCursor: null
+            }
+          }
+        }
+      }
+    });
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    };
+
+    await assert.rejects(
+      () => client.listRepositoryProjectV2s(input),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub App installation token cannot access organization ProjectV2"
+    );
+    assert.equal(tokenPosts, 2, "second GraphQL 401 must not trigger a third token POST in one operation");
+
+    const projects = await client.listRepositoryProjectV2s(input);
+    assert.equal(projects[0]?.id, "PVT_kwDOExample");
+    assert.equal(tokenPosts, 3, "second GraphQL 401 must evict refreshed token before the next operation");
+    assert.deepEqual(graphqlRequestTokens, [
+      "Bearer graphql-second-401-token-1",
+      "Bearer graphql-second-401-token-2",
+      "Bearer graphql-second-401-token-3"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  const graphqlRequestTokens = [];
+  let tokenPosts = 0;
+  let graphqlCalls = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `graphql-forbidden-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    graphqlCalls += 1;
+    graphqlRequestTokens.push(options.headers?.Authorization);
+    if (graphqlCalls === 1) {
+      return jsonResponse(403, { message: "Resource not accessible by integration" });
+    }
+
+    return jsonResponse(200, {
+      data: {
+        repository: {
+          projectsV2: {
+            nodes: [projectNode()],
+            pageInfo: {
+              hasNextPage: false,
+              endCursor: null
+            }
+          }
+        }
+      }
+    });
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "my-team",
+      repo: "pilo",
+      accountType: "Organization",
+      now: () => fixedNow
+    };
+
+    await assert.rejects(
+      () => client.listRepositoryProjectV2s(input),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub App installation token cannot access organization ProjectV2"
+    );
+    await client.listRepositoryProjectV2s(input);
+
+    assert.equal(tokenPosts, 1, "GraphQL 403 must not refresh the cached installation token");
+    assert.deepEqual(graphqlRequestTokens, [
+      "Bearer graphql-forbidden-token-1",
+      "Bearer graphql-forbidden-token-1"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return tokenPosts === 1
+        ? jsonResponse(201, {
+            token: "graphql-refresh-failure-token-1",
+            expires_at: "2026-07-04T13:00:00.000Z"
+          })
+        : jsonResponse(500, { message: "token endpoint unavailable" });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    assert.equal(options.headers?.Authorization, "Bearer graphql-refresh-failure-token-1");
+    return jsonResponse(401, { message: "Bad credentials" });
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new GithubAppClient().listRepositoryProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: privateKeyPem,
+          owner: "my-team",
+          repo: "pilo",
+          accountType: "Organization",
+          now: () => fixedNow
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub App installation token cannot access organization ProjectV2"
+    );
+
+    assert.equal(tokenPosts, 2, "GraphQL 401 recovery should attempt exactly one refresh token POST");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  let tokenPosts = 0;
+  const graphqlRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.includes("/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: "unexpected-graphql-installation-token",
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    assert.equal(requestUrl, "https://api.github.com/graphql");
+    graphqlRequestTokens.push(options.headers?.Authorization);
+    const status = options.headers?.Authorization === "Bearer user-oauth-401" ? 401 : 403;
+    return jsonResponse(status, { message: "Bad credentials" });
+  };
+
+  try {
+    const client = new GithubAppClient();
+    await assert.rejects(
+      () =>
+        client.listRepositoryProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: "unused",
+          owner: "my-team",
+          repo: "pilo",
+          accountType: "Organization",
+          userAccessToken: "user-oauth-401"
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub ProjectV2 OAuth token cannot access this ProjectV2"
+    );
+    await assert.rejects(
+      () =>
+        client.listRepositoryProjectV2s({
+          installationId: 12345678,
+          appId: "12345",
+          privateKey: "unused",
+          owner: "my-user",
+          repo: "pilo",
+          accountType: "User",
+          userAccessToken: "personal-project-oauth-403"
+        }),
+      (error) =>
+        error?.response?.error?.message ===
+        "GitHub ProjectV2 OAuth token lacks permission to read personal ProjectV2"
+    );
+
+    assert.equal(tokenPosts, 0, "user OAuth GraphQL 401/403 must not use installation token refresh");
+    assert.deepEqual(graphqlRequestTokens, [
+      "Bearer user-oauth-401",
+      "Bearer personal-project-oauth-403"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+{
+  const originalFetch = globalThis.fetch;
   let requestSignal;
   globalThis.fetch = async (_url, options = {}) => {
     requestSignal = options.signal;

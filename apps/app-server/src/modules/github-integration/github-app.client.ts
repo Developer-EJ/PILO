@@ -469,12 +469,14 @@ interface GithubProjectV2GraphqlAuth {
   token: string;
   source: GithubProjectV2GraphqlTokenSource;
   accountType?: "User" | "Organization";
+  installationTokenRetry?: GithubInstallationAccessTokenRetryContext;
 }
 
 interface GithubProjectV2GraphqlErrorContext {
   tokenSource: GithubProjectV2GraphqlTokenSource;
   accountType?: "User" | "Organization";
   writePermissionMessage?: string;
+  installationTokenRetry?: GithubInstallationAccessTokenRetryContext;
 }
 
 const GITHUB_SYNC_PER_PAGE = 100;
@@ -1812,7 +1814,8 @@ export class GithubAppClient {
         "GitHub ProjectV2 discovery failed",
         {
           tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
+          accountType: graphqlAuth.accountType,
+          installationTokenRetry: graphqlAuth.installationTokenRetry
         }
       );
       const connection = this.readRepositoryProjectV2Connection(data, "GitHub ProjectV2 discovery failed");
@@ -1843,7 +1846,8 @@ export class GithubAppClient {
       "GitHub ProjectV2 sync failed",
       {
         tokenSource: graphqlAuth.source,
-        accountType: graphqlAuth.accountType
+        accountType: graphqlAuth.accountType,
+        installationTokenRetry: graphqlAuth.installationTokenRetry
       }
     );
     const project = this.readProjectV2Node(data, "GitHub ProjectV2 sync failed");
@@ -1887,7 +1891,8 @@ export class GithubAppClient {
         "GitHub ProjectV2 fields sync failed",
         {
           tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
+          accountType: graphqlAuth.accountType,
+          installationTokenRetry: graphqlAuth.installationTokenRetry
         }
       );
       const connection = this.readProjectV2Connection(
@@ -1920,7 +1925,8 @@ export class GithubAppClient {
         "GitHub ProjectV2 items sync failed",
         {
           tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
+          accountType: graphqlAuth.accountType,
+          installationTokenRetry: graphqlAuth.installationTokenRetry
         }
       );
       const connection = this.readProjectV2Connection(
@@ -1968,7 +1974,8 @@ export class GithubAppClient {
       errorMessage,
       {
         tokenSource: graphqlAuth.source,
-        accountType: graphqlAuth.accountType
+        accountType: graphqlAuth.accountType,
+        installationTokenRetry: graphqlAuth.installationTokenRetry
       }
     );
     if (this.toObject(data).node === null) {
@@ -2441,7 +2448,11 @@ export class GithubAppClient {
     return {
       token: installationToken.token,
       source: "installation",
-      accountType: input.accountType
+      accountType: input.accountType,
+      installationTokenRetry: this.installationAccessTokenRetryContext(
+        input,
+        installationToken.token
+      )
     };
   }
 
@@ -2494,32 +2505,46 @@ export class GithubAppClient {
     context?: GithubProjectV2GraphqlErrorContext,
     signal?: AbortSignal
   ): Promise<unknown> {
-    let response: Response;
-    try {
-      response = await this.observedFetch(
-        context?.writePermissionMessage
-          ? "github_graphql_project_v2_write"
-          : "github_graphql_project_v2_read",
-        context?.tokenSource === "installation"
-          ? "installation"
-          : "personal_project_v2_oauth",
-        "https://api.github.com/graphql",
-        {
-        method: "POST",
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-GitHub-Api-Version": GITHUB_API_VERSION
-        },
-        body: JSON.stringify({
+    let response = await this.fetchGraphqlResponseWithToken(
+      token,
+      query,
+      variables,
+      errorMessage,
+      context,
+      signal
+    );
+
+    if (response.status === 401 && context?.installationTokenRetry) {
+      this.evictInstallationAccessTokenCacheIfTokenMatches(
+        context.installationTokenRetry.cacheKey,
+        context.installationTokenRetry.token
+      );
+      const initialUnauthorizedResponse = response;
+      let refreshedToken: { token: string; expiresAt: string | null } | null = null;
+      try {
+        refreshedToken = await this.createInstallationAccessToken(
+          context.installationTokenRetry.input
+        );
+      } catch {
+        response = initialUnauthorizedResponse;
+      }
+
+      if (refreshedToken) {
+        response = await this.fetchGraphqlResponseWithToken(
+          refreshedToken.token,
           query,
-          variables
-        }),
-        ...(signal ? { signal } : {})
-      });
-    } catch {
-      throw badRequest(errorMessage);
+          variables,
+          errorMessage,
+          context,
+          signal
+        );
+        if (response.status === 401) {
+          this.evictInstallationAccessTokenCacheIfTokenMatches(
+            context.installationTokenRetry.cacheKey,
+            refreshedToken.token
+          );
+        }
+      }
     }
 
     if (this.isGraphqlRateLimitedResponse(response)) {
@@ -2563,6 +2588,43 @@ export class GithubAppClient {
     const rateLimitRemaining = this.rateLimitRemaining(response);
     if (rateLimitRemaining !== null) this.observability?.emitRateLimitObserved(rateLimitRemaining);
     return data;
+  }
+
+  private async fetchGraphqlResponseWithToken(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+    errorMessage: string,
+    context?: GithubProjectV2GraphqlErrorContext,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    try {
+      return await this.observedFetch(
+        context?.writePermissionMessage
+          ? "github_graphql_project_v2_write"
+          : "github_graphql_project_v2_read",
+        context?.tokenSource === "installation"
+          ? "installation"
+          : "personal_project_v2_oauth",
+        "https://api.github.com/graphql",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          body: JSON.stringify({
+            query,
+            variables
+          }),
+          ...(signal ? { signal } : {})
+        }
+      );
+    } catch {
+      throw badRequest(errorMessage);
+    }
   }
 
   private isGraphqlRateLimitedResponse(response: Response): boolean {
@@ -2609,7 +2671,8 @@ export class GithubAppClient {
         "GitHub ProjectV2 discovery failed",
         {
           tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
+          accountType: graphqlAuth.accountType,
+          installationTokenRetry: graphqlAuth.installationTokenRetry
         }
       );
       const page = this.readProjectV2RepositoryConnection(
@@ -2684,7 +2747,8 @@ export class GithubAppClient {
         "GitHub ProjectV2 items sync failed",
         {
           tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
+          accountType: graphqlAuth.accountType,
+          installationTokenRetry: graphqlAuth.installationTokenRetry
         }
       );
       const item = this.readProjectV2ItemNode(
