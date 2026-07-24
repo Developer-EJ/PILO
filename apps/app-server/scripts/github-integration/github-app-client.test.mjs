@@ -92,6 +92,28 @@ function jsonResponse(status, payload, headerValues = {}) {
   };
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
+async function waitFor(condition, message, maxTicks = 20) {
+  for (let tick = 0; tick < maxTicks; tick += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.fail(message);
+}
+
 function assertProviderEventDoesNotLeak(event) {
   const serialized = JSON.stringify(event);
   for (const secret of [
@@ -2141,24 +2163,166 @@ function assertProviderEventDoesNotLeak(event) {
     globalThis.fetch = originalFetch;
   }
 }
-{
-  const { privateKey } = generateKeyPairSync("rsa", {
-    modulusLength: 2048
-  });
-  const privateKeyPem = privateKey.export({
-    type: "pkcs8",
-    format: "pem"
-  });
+for (const deleteStatus of [204, 404]) {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({
-    ok: false,
-    status: 403
-  });
+  const privateKeyPem = createPrivateKeyPem();
+  const tokenPostsByInstallation = new Map();
+  const deferredTokenResponses = [];
+  const issueRequestTokens = [];
+
+  const tokenRequestCount = (installationId) =>
+    tokenPostsByInstallation.get(String(installationId)) ?? 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    const tokenMatch = requestUrl.match(/\/app\/installations\/(\d+)\/access_tokens$/);
+    if (tokenMatch) {
+      const installationId = tokenMatch[1];
+      const nextCount = tokenRequestCount(installationId) + 1;
+      tokenPostsByInstallation.set(installationId, nextCount);
+
+      if (installationId === "12345678") {
+        const deferred = createDeferred();
+        deferredTokenResponses.push(deferred);
+        return deferred.promise;
+      }
+
+      return jsonResponse(201, {
+        token: `other-${installationId}-token-${nextCount}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.endsWith("/app/installations/12345678") && options.method === "DELETE") {
+      return jsonResponse(deleteStatus, {});
+    }
+
+    if (requestUrl.includes("/repos/Developer-EJ/PILO/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
 
   try {
+    const client = new GithubAppClient();
+    const base = {
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+    const input = { ...base, installationId: 12345678 };
+    const otherInput = { ...base, installationId: 87654321 };
+
+    const preDeleteCaller = client.listRepositoryIssues(input);
+    await waitFor(
+      () => deferredTokenResponses.length === 1,
+      `delete ${deleteStatus} should start pre-delete token issuance P1`
+    );
+
+    await client.listRepositoryIssues(otherInput);
+    await client.deleteInstallation({
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      now: () => fixedNow
+    });
+
+    const postDeleteCaller = client.listRepositoryIssues(input);
+    await waitFor(
+      () => deferredTokenResponses.length === 2,
+      `delete ${deleteStatus} must detach pre-delete token issuance so post-delete callers start P2`
+    );
+
+    deferredTokenResponses[0].resolve(
+      jsonResponse(201, {
+        token: `delete-${deleteStatus}-p1`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      })
+    );
+    await preDeleteCaller;
+
+    const overlappingPostDeleteCaller = client.listRepositoryIssues(input);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      tokenRequestCount(12345678),
+      2,
+      `delete ${deleteStatus} resolving P1 must not remove post-delete P2 in-flight`
+    );
+
+    await client.listRepositoryIssues(otherInput);
+    deferredTokenResponses[1].resolve(
+      jsonResponse(201, {
+        token: `delete-${deleteStatus}-p2`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      })
+    );
+    await Promise.all([postDeleteCaller, overlappingPostDeleteCaller]);
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(otherInput);
+
+    assert.equal(tokenRequestCount(12345678), 2);
+    assert.equal(tokenRequestCount(87654321), 1, "other installation cache must remain unaffected");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer other-87654321-token-1",
+      `Bearer delete-${deleteStatus}-p1`,
+      "Bearer other-87654321-token-1",
+      `Bearer delete-${deleteStatus}-p2`,
+      `Bearer delete-${deleteStatus}-p2`,
+      `Bearer delete-${deleteStatus}-p2`,
+      "Bearer other-87654321-token-1"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const privateKeyPem = createPrivateKeyPem();
+  let tokenPosts = 0;
+  const issueRequestTokens = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `delete-403-warm-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+
+    if (requestUrl.endsWith("/app/installations/12345678") && options.method === "DELETE") {
+      return jsonResponse(403, { message: "Forbidden" });
+    }
+
+    if (requestUrl.includes("/repos/Developer-EJ/PILO/issues")) {
+      issueRequestTokens.push(options.headers?.Authorization);
+      return jsonResponse(200, []);
+    }
+
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient();
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
     await assert.rejects(
       () =>
-        new GithubAppClient().deleteInstallation({
+        client.deleteInstallation({
           installationId: 12345678,
           appId: "12345",
           privateKey: privateKeyPem,
@@ -2168,6 +2332,13 @@ function assertProviderEventDoesNotLeak(event) {
         error?.response?.error?.message ===
         "GitHub App installation uninstall failed"
     );
+    await client.listRepositoryIssues(input);
+
+    assert.equal(tokenPosts, 1, "403 deletion failure must not invalidate cached token");
+    assert.deepEqual(issueRequestTokens, [
+      "Bearer delete-403-warm-token-1",
+      "Bearer delete-403-warm-token-1"
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

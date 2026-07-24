@@ -1066,8 +1066,12 @@ export class GithubAppClient {
   >();
   private readonly installationAccessTokenInflight = new Map<
     string,
-    Promise<{ token: string; expiresAt: string | null }>
+    {
+      generation: number;
+      promise: Promise<{ token: string; expiresAt: string | null }>;
+    }
   >();
+  private readonly installationAccessTokenGeneration = new Map<string, number>();
 
   constructor(@Optional() private readonly observability?: GithubSyncObservabilityService) {}
 
@@ -1253,20 +1257,33 @@ export class GithubAppClient {
       this.installationAccessTokenCache.delete(cacheKey);
     }
 
+    const generation = this.currentInstallationAccessTokenGeneration(cacheKey);
     const inflight = this.installationAccessTokenInflight.get(cacheKey);
+    if (inflight && inflight.generation === generation) {
+      return inflight.promise;
+    }
     if (inflight) {
-      return inflight;
+      this.installationAccessTokenInflight.delete(cacheKey);
     }
 
-    const tokenLookup = this.createInstallationAccessTokenUncached(input)
+    let tokenLookup: Promise<{ token: string; expiresAt: string | null }>;
+    tokenLookup = this.createInstallationAccessTokenUncached(input)
       .then((token) => {
-        this.cacheInstallationAccessToken(cacheKey, token, input);
+        if (this.currentInstallationAccessTokenGeneration(cacheKey) === generation) {
+          this.cacheInstallationAccessToken(cacheKey, token, input);
+        }
         return token;
       })
       .finally(() => {
-        this.installationAccessTokenInflight.delete(cacheKey);
+        const currentInflight = this.installationAccessTokenInflight.get(cacheKey);
+        if (currentInflight?.promise === tokenLookup) {
+          this.installationAccessTokenInflight.delete(cacheKey);
+        }
       });
-    this.installationAccessTokenInflight.set(cacheKey, tokenLookup);
+    this.installationAccessTokenInflight.set(cacheKey, {
+      generation,
+      promise: tokenLookup
+    });
     return tokenLookup;
   }
 
@@ -1331,9 +1348,17 @@ export class GithubAppClient {
   private evictInstallationAccessTokenCache(
     input: GithubAppInstallationLookupRequest
   ): void {
-    this.installationAccessTokenCache.delete(
-      this.installationAccessTokenCacheKey(input)
+    const cacheKey = this.installationAccessTokenCacheKey(input);
+    this.installationAccessTokenGeneration.set(
+      cacheKey,
+      this.currentInstallationAccessTokenGeneration(cacheKey) + 1
     );
+    this.installationAccessTokenCache.delete(cacheKey);
+    this.installationAccessTokenInflight.delete(cacheKey);
+  }
+
+  private currentInstallationAccessTokenGeneration(cacheKey: string): number {
+    return this.installationAccessTokenGeneration.get(cacheKey) ?? 0;
   }
 
   private evictInstallationAccessTokenCacheIfTokenMatches(
