@@ -10,6 +10,7 @@ import {
 import { GithubConnectLayout } from "@/features/github-integration/components/github-connect-layout";
 import type {
   GithubAppInstallation,
+  GithubActiveBoardSource,
   GithubOAuthStatus,
   GithubProjectOAuthStatus,
   GithubProjectV2,
@@ -208,9 +209,10 @@ export function GithubPanel() {
     useState<GithubIntegrationSnapshot>(emptySnapshot);
   const [restoredRepository, setRestoredRepository] =
     useState<GithubRepository | null>(null);
-  const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
+  const [activeBoardSource, setActiveBoardSource] = useState<GithubActiveBoardSource | null>(null);
+  const [browsingRepositoryId, setBrowsingRepositoryId] = useState("");
+  const [browsingProjectV2Id, setBrowsingProjectV2Id] = useState("");
   const [selectedInstallationId, setSelectedInstallationId] = useState("");
-  const [selectedProjectV2Id, setSelectedProjectV2Id] = useState("");
   const [isSavingProjectV2Selections, setIsSavingProjectV2Selections] =
     useState(false);
   const [activatingRepositoryId, setActivatingRepositoryId] = useState("");
@@ -219,18 +221,35 @@ export function GithubPanel() {
   const [repositoryPage, setRepositoryPage] = useState(1);
   const snapshotRequestGateRef = useRef(createGithubSyncRequestGate());
   const syncRunsRequestGateRef = useRef(createGithubSyncRequestGate());
-  const selectedRepositoryIdRef = useRef("");
+  const browsingRepositoryIdRef = useRef("");
+  const browsingProjectV2IdRef = useRef("");
+  const selectedRepositoryIdRef = browsingRepositoryIdRef;
+  const loadedWorkspaceIdRef = useRef("");
   const isSavingProjectV2SelectionsRef = useRef(false);
   const manualSyncIdempotencyRef = useRef(createGithubManualSyncIdempotency());
+  const selectedRepositoryId = browsingRepositoryId;
+  const selectedProjectV2Id = browsingProjectV2Id;
+
+  function setSelectedRepositoryId(repositoryId: string) {
+    browsingRepositoryIdRef.current = repositoryId;
+    setBrowsingRepositoryId(repositoryId);
+  }
+
+  function setSelectedProjectV2Id(projectV2Id: string) {
+    browsingProjectV2IdRef.current = projectV2Id;
+    setBrowsingProjectV2Id(projectV2Id);
+  }
 
   const isLoading = panelStatus === "loading" || panelStatus === "idle";
   const connected = snapshot.oauth?.connected === true;
   const isSyncActive = isSyncing || hasRunningSyncRun;
+  const activeBoardRepositoryId = activeBoardSource?.repository.id ?? "";
   const selectedRepository =
     snapshot.repositories.find(
       (repository) => repository.id === selectedRepositoryId
     ) ??
-    (restoredRepository?.id === selectedRepositoryId
+    (restoredRepository?.id === selectedRepositoryId &&
+    (!activeBoardRepositoryId || activeBoardRepositoryId === selectedRepositoryId)
       ? restoredRepository
       : undefined);
   const selectedInstallation = snapshot.installations.find(
@@ -288,8 +307,8 @@ export function GithubPanel() {
   }
 
   async function loadGithubIntegrationSnapshot(
-    preferredRepositoryId?: string,
-    preferredProjectV2Id?: string
+    requestedPreferredRepositoryId?: string,
+    requestedPreferredProjectV2Id?: string
   ) {
     if (!workspaceId) {
       snapshotRequestGateRef.current.invalidate();
@@ -297,12 +316,15 @@ export function GithubPanel() {
       setPanelStatus("ready");
       setSnapshot(emptySnapshot);
       setRestoredRepository(null);
+      setActiveBoardSource(null);
       setHasRunningSyncRun(false);
       setSyncPollingError(null);
-      setSelectedRepositoryId("");
-      selectedRepositoryIdRef.current = "";
+      setBrowsingRepositoryId("");
+      browsingRepositoryIdRef.current = "";
       setSelectedInstallationId("");
-      setSelectedProjectV2Id("");
+      setBrowsingProjectV2Id("");
+      browsingProjectV2IdRef.current = "";
+      loadedWorkspaceIdRef.current = "";
       setIsInstallationDeleteRequested(false);
       return;
     }
@@ -311,6 +333,21 @@ export function GithubPanel() {
     setErrorMessage(null);
     setActionError(null);
     setSyncPollingError(null);
+
+    const isFirstWorkspaceEntry = loadedWorkspaceIdRef.current !== workspaceId;
+    const hasPreferredBrowsingSelection =
+      requestedPreferredRepositoryId !== undefined ||
+      requestedPreferredProjectV2Id !== undefined;
+    const preferredRepositoryId = hasPreferredBrowsingSelection
+      ? (requestedPreferredRepositoryId ?? "")
+      : isFirstWorkspaceEntry
+        ? undefined
+        : browsingRepositoryIdRef.current;
+    const preferredProjectV2Id = hasPreferredBrowsingSelection
+      ? (requestedPreferredProjectV2Id ?? "")
+      : isFirstWorkspaceEntry
+        ? undefined
+        : browsingProjectV2IdRef.current;
 
     const snapshotRequestGeneration = snapshotRequestGateRef.current.begin();
     const syncRunsRequestGeneration = syncRunsRequestGateRef.current.begin();
@@ -441,6 +478,7 @@ export function GithubPanel() {
         return;
       }
 
+      setActiveBoardSource(activeBoardSource);
       setSnapshot((current) => ({
         oauth,
         projectOAuth,
@@ -460,9 +498,11 @@ export function GithubPanel() {
           queuedSyncRuns.meta.total > 0 || runningSyncRuns.meta.total > 0
         );
       }
-      setSelectedRepositoryId(nextRepositoryId);
-      selectedRepositoryIdRef.current = nextRepositoryId;
-      setSelectedProjectV2Id(nextProjectV2Id);
+      setBrowsingRepositoryId(nextRepositoryId);
+      browsingRepositoryIdRef.current = nextRepositoryId;
+      setBrowsingProjectV2Id(nextProjectV2Id);
+      browsingProjectV2IdRef.current = nextProjectV2Id;
+      loadedWorkspaceIdRef.current = workspaceId;
       setSelectedInstallationId(nextInstallationId);
       setIsInstallationDeleteRequested(false);
       setPanelStatus("ready");
@@ -479,10 +519,13 @@ export function GithubPanel() {
       setErrorMessage(getErrorMessage(error));
       setSnapshot(emptySnapshot);
       setRestoredRepository(null);
-      setSelectedRepositoryId("");
-      selectedRepositoryIdRef.current = "";
+      setActiveBoardSource(null);
+      setBrowsingRepositoryId("");
+      browsingRepositoryIdRef.current = "";
       setSelectedInstallationId("");
-      setSelectedProjectV2Id("");
+      setBrowsingProjectV2Id("");
+      browsingProjectV2IdRef.current = "";
+      loadedWorkspaceIdRef.current = "";
       if (syncRunsRequestGateRef.current.isCurrent(syncRunsRequestGeneration)) {
         setHasRunningSyncRun(false);
       }
