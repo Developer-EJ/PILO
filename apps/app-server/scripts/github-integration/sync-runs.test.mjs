@@ -4,16 +4,20 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const { GithubIntegrationService } = require("../../dist/modules/github-integration/github-integration.service.js");
+const { GithubSyncExecutorService } = require("../../dist/modules/github-integration/github-sync-executor.service.js");
 
 class FakeDatabase {
   constructor({ queryOneRows = [], queryRows = [] } = {}) {
     this.queryOneRows = [...queryOneRows];
     this.queryRows = [...queryRows];
     this.queries = [];
+    this.transactions = [];
+    this.inTransaction = false;
+    this.beforeTransaction = null;
   }
 
   async queryOne(text, values = []) {
-    this.queries.push({ method: "queryOne", text, values });
+    this.queries.push({ method: "queryOne", text, values, inTransaction: this.inTransaction });
     const next = this.queryOneRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -23,7 +27,10 @@ class FakeDatabase {
   }
 
   async query(text, values = []) {
-    this.queries.push({ method: "query", text, values });
+    this.queries.push({ method: "query", text, values, inTransaction: this.inTransaction });
+    if (/FROM github_sync_runs/i.test(text) && /status IN \('queued', 'running'\)/i.test(text)) {
+      return [];
+    }
     const next = this.queryRows.shift();
     if (typeof next === "function") {
       return next(text, values);
@@ -33,11 +40,29 @@ class FakeDatabase {
   }
 
   async execute(text, values = []) {
-    this.queries.push({ method: "execute", text, values });
+    this.queries.push({ method: "execute", text, values, inTransaction: this.inTransaction });
     return {
       rows: [],
       rowCount: 0
     };
+  }
+
+  async transaction(callback) {
+    this.beforeTransaction?.();
+    const transaction = { startedAtQueryIndex: this.queries.length, committed: false };
+    this.transactions.push(transaction);
+    this.inTransaction = true;
+    try {
+      const result = await callback(this);
+      transaction.committed = true;
+      transaction.committedAtQueryIndex = this.queries.length;
+      return result;
+    } catch (error) {
+      transaction.rolledBack = true;
+      throw error;
+    } finally {
+      this.inTransaction = false;
+    }
   }
 }
 
@@ -200,6 +225,21 @@ class FakeGithubAppClient {
   }
 }
 
+class FakeBoardInvalidationPublisher {
+  constructor(database) {
+    this.database = database;
+    this.published = [];
+  }
+
+  async publishInvalidation(payload) {
+    this.published.push({
+      ...payload,
+      transactionCount: this.database.transactions.length,
+      lastTransactionCommitted: this.database.transactions.at(-1)?.committed ?? false,
+      queryIndex: this.database.queries.length
+    });
+  }
+}
 const currentUserId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const installationId = "33333333-3333-4333-8333-333333333333";
@@ -216,7 +256,8 @@ const issueId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function createService(
   database = new FakeDatabase(),
-  githubAppClient = new FakeGithubAppClient()
+  githubAppClient = new FakeGithubAppClient(),
+  boardInvalidationPublisher = undefined
 ) {
   const workspaceService = new FakeWorkspaceService();
   const service = new GithubIntegrationService(
@@ -227,7 +268,9 @@ function createService(
     new FakeConfigService(),
     workspaceService,
     {},
-    githubAppClient
+    githubAppClient,
+    ...Array(16).fill(undefined),
+    boardInvalidationPublisher
   );
   const startGithubSyncRun = service.startGithubSyncRun.bind(service);
   service.startGithubSyncRun = (...args) => {
@@ -1542,6 +1585,412 @@ function projectV2ItemApiItem(overrides = {}) {
   assert.equal(githubAppClient.calls[0].input.projectNodeId, projectNodeId);
 }
 
+{
+  const githubAppClient = new FakeGithubAppClient({
+    fields: [
+      projectV2FieldApiItem({
+        options: []
+      })
+    ]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: [
+      (text, values) => {
+        assert.match(text, /INSERT INTO github_project_v2_fields/i);
+        assert.equal(values[0], projectV2Id);
+        assert.equal(values[1], "PVTSSF_lADOExample");
+        return { id: statusFieldId, created: false };
+      },
+      (text, values) => {
+        assert.match(text, /hydrate_pilo_board_from_github/i);
+        assert.deepEqual(values, [projectV2Id, repositoryId]);
+        return { board_id: "123" };
+      },
+      (text, values) => {
+        assert.match(text, /FROM boards/i);
+        assert.deepEqual(values, [workspaceId, "123"]);
+        return { updated_at: "2026-07-05T10:02:00.000Z" };
+      },
+
+    ],
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /FROM boards b/i);
+        assert.deepEqual(values, [workspaceId, projectV2Id]);
+        return [{ project_v2_id: projectV2Id, repository_id: repositoryId }];
+      }
+    ]
+  });
+  database.beforeTransaction = () => {
+    assert.equal(githubAppClient.calls.length, 1);
+    assert.equal(githubAppClient.calls[0].method, "listProjectV2Fields");
+  };
+  const publisher = new FakeBoardInvalidationPublisher(database);
+  const executor = new GithubSyncExecutorService(
+    database,
+    githubAppClient,
+    publisher
+  );
+
+  const summary = await executor.runGithubSyncTarget("project_v2_fields", {
+    currentUserId,
+    workspaceId,
+    installation: installationRow(),
+    repository: null,
+    projectV2: projectV2ContextRow(),
+    githubUserAccessToken: null,
+    config: new FakeConfigService().getGithubAppConfig()
+  });
+
+  assert.equal(summary.fetchedCount, 1);
+  assert.equal(summary.updatedCount, 1);
+  assert.equal(database.transactions.length, 1);
+  const optionDelete = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /DELETE FROM github_project_v2_field_options/i.test(query.text)
+  );
+  assert.ok(optionDelete, "field sync must delete options absent from an empty field snapshot");
+  assert.deepEqual(optionDelete.values, [statusFieldId, []]);
+  assert.equal(optionDelete.inTransaction, true);
+  const fieldDelete = database.queries.find(
+    (query) =>
+      query.method === "execute" &&
+      /DELETE FROM github_project_v2_fields/i.test(query.text)
+  );
+  assert.ok(fieldDelete, "field sync must delete fields absent from the project snapshot");
+  assert.deepEqual(fieldDelete.values, [projectV2Id, ["PVTSSF_lADOExample"]]);
+  assert.equal(fieldDelete.inTransaction, true);
+  const hydrateQuery = database.queries.find((query) => /hydrate_pilo_board_from_github/i.test(query.text));
+  assert.ok(hydrateQuery);
+  assert.equal(hydrateQuery.inTransaction, true);
+  assert.ok(database.queries.indexOf(optionDelete) < database.queries.indexOf(hydrateQuery));
+  assert.ok(database.queries.indexOf(fieldDelete) < database.queries.indexOf(hydrateQuery));
+  assert.deepEqual(publisher.published, [
+    {
+      workspaceId,
+      boardId: "123",
+      updatedAt: "2026-07-05T10:02:00.000Z",
+      transactionCount: 1,
+      lastTransactionCommitted: true,
+      queryIndex: database.transactions[0].committedAtQueryIndex
+    }
+  ]);
+}
+
+{
+  const priorityFieldId = "bbbbbbbb-bbbb-4bbb-9bbb-bbbbbbbbbbbb";
+  const todoOptionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const doneOptionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const lowOptionId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const highOptionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const githubAppClient = new FakeGithubAppClient({
+    fields: [
+      projectV2FieldApiItem({
+        id: "PVTSSF_Status",
+        name: "Priority",
+        options: [
+          {
+            id: "status-todo",
+            name: "Done",
+            color: "BLUE",
+            description: "Ready to start",
+            position: 1
+          },
+          {
+            id: "status-done",
+            name: "Todo",
+            color: "GREEN",
+            description: "Finished",
+            position: 2
+          }
+        ]
+      }),
+      projectV2FieldApiItem({
+        id: "PVTSSF_Priority",
+        name: "Status",
+        dataType: "SINGLE_SELECT",
+        options: [
+          {
+            id: "priority-low",
+            name: "High",
+            color: "YELLOW",
+            description: "Can wait",
+            position: 1
+          },
+          {
+            id: "priority-high",
+            name: "Low",
+            color: "RED",
+            description: "Needs attention",
+            position: 2
+          }
+        ]
+      })
+    ]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: Array(8).fill((text, values) => {
+      if (/INSERT INTO github_project_v2_fields/i.test(text)) {
+        if (values[1] === "PVTSSF_Status") {
+          assert.deepEqual(values.slice(0, 3), [projectV2Id, "PVTSSF_Status", "Priority"]);
+          return { id: statusFieldId, created: false };
+        }
+        if (values[1] === "PVTSSF_Priority") {
+          assert.deepEqual(values.slice(0, 3), [projectV2Id, "PVTSSF_Priority", "Status"]);
+          return { id: priorityFieldId, created: false };
+        }
+      }
+      if (/INSERT INTO github_project_v2_field_options/i.test(text)) {
+        if (values[1] === "status-todo") {
+          assert.deepEqual(values.slice(0, 4), [
+            statusFieldId,
+            "status-todo",
+            "Done",
+            "done"
+          ]);
+          return { id: todoOptionId, created: false };
+        }
+        if (values[1] === "status-done") {
+          assert.deepEqual(values.slice(0, 4), [
+            statusFieldId,
+            "status-done",
+            "Todo",
+            "todo"
+          ]);
+          return { id: doneOptionId, created: false };
+        }
+        if (values[1] === "priority-low") {
+          assert.deepEqual(values.slice(0, 4), [
+            priorityFieldId,
+            "priority-low",
+            "High",
+            "high"
+          ]);
+          return { id: lowOptionId, created: false };
+        }
+        if (values[1] === "priority-high") {
+          assert.deepEqual(values.slice(0, 4), [
+            priorityFieldId,
+            "priority-high",
+            "Low",
+            "low"
+          ]);
+          return { id: highOptionId, created: false };
+        }
+      }
+      if (/hydrate_pilo_board_from_github/i.test(text)) {
+        assert.deepEqual(values, [projectV2Id, repositoryId]);
+        return { board_id: "123" };
+      }
+      if (/FROM boards/i.test(text)) {
+        assert.deepEqual(values, [workspaceId, "123"]);
+        return { updated_at: "2026-07-05T10:02:00.000Z" };
+      }
+      assert.fail(`unexpected queryOne: ${text}`);
+    }),
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /FROM boards b/i);
+        assert.deepEqual(values, [workspaceId, projectV2Id]);
+        return [{ project_v2_id: projectV2Id, repository_id: repositoryId }];
+      }
+    ]
+  });
+  const publisher = new FakeBoardInvalidationPublisher(database);
+  const executor = new GithubSyncExecutorService(
+    database,
+    githubAppClient,
+    publisher
+  );
+
+  const summary = await executor.runGithubSyncTarget("project_v2_fields", {
+    currentUserId,
+    workspaceId,
+    installation: installationRow(),
+    repository: null,
+    projectV2: projectV2ContextRow(),
+    githubUserAccessToken: null,
+    config: new FakeConfigService().getGithubAppConfig()
+  });
+
+  assert.equal(summary.fetchedCount, 2);
+  assert.equal(summary.updatedCount, 2);
+  assert.equal(database.transactions.length, 1);
+  const fieldDeleteIndex = database.queries.findIndex(
+    (query) =>
+      query.method === "execute" &&
+      /DELETE FROM github_project_v2_fields/i.test(query.text)
+  );
+  const fieldReleaseIndex = database.queries.findIndex(
+    (query) =>
+      query.method === "execute" &&
+      /UPDATE github_project_v2_fields/i.test(query.text) &&
+      /field_name/i.test(query.text) &&
+      /github_field_node_id = ANY/i.test(query.text)
+  );
+  const firstFieldUpsertIndex = database.queries.findIndex(
+    (query) =>
+      query.method === "queryOne" &&
+      /INSERT INTO github_project_v2_fields/i.test(query.text)
+  );
+  assert.notEqual(fieldDeleteIndex, -1, "field sync must delete stale fields");
+  assert.notEqual(fieldReleaseIndex, -1, "field sync must release retained field names");
+  assert.ok(
+    fieldDeleteIndex < fieldReleaseIndex,
+    "stale fields must be deleted before retained field names are released"
+  );
+  assert.ok(
+    fieldReleaseIndex < firstFieldUpsertIndex,
+    "retained field names must be released before final field upserts"
+  );
+
+  for (const fieldId of [statusFieldId, priorityFieldId]) {
+    const optionDeleteIndex = database.queries.findIndex(
+      (query) =>
+        query.method === "execute" &&
+        /DELETE FROM github_project_v2_field_options/i.test(query.text) &&
+        query.values[0] === fieldId
+    );
+    const optionReleaseIndex = database.queries.findIndex(
+      (query) =>
+        query.method === "execute" &&
+        /UPDATE github_project_v2_field_options/i.test(query.text) &&
+        /normalized_name/i.test(query.text) &&
+        query.values[0] === fieldId
+    );
+    const optionUpsertIndex = database.queries.findIndex(
+      (query) =>
+        query.method === "queryOne" &&
+        /INSERT INTO github_project_v2_field_options/i.test(query.text) &&
+        query.values[0] === fieldId
+    );
+    assert.notEqual(optionDeleteIndex, -1, "field sync must delete stale options per retained field");
+    assert.notEqual(optionReleaseIndex, -1, "field sync must release retained option names per field");
+    assert.ok(
+      optionDeleteIndex < optionReleaseIndex,
+      "stale options must be deleted before retained option names are released"
+    );
+    assert.ok(
+      optionReleaseIndex < optionUpsertIndex,
+      "retained option names must be released before final option upserts"
+    );
+  }
+
+  const hydrateQuery = database.queries.find((query) => /hydrate_pilo_board_from_github/i.test(query.text));
+  assert.ok(hydrateQuery);
+  assert.equal(hydrateQuery.inTransaction, true);
+  assert.ok(fieldReleaseIndex < database.queries.indexOf(hydrateQuery));
+  assert.deepEqual(publisher.published, [
+    {
+      workspaceId,
+      boardId: "123",
+      updatedAt: "2026-07-05T10:02:00.000Z",
+      transactionCount: 1,
+      lastTransactionCommitted: true,
+      queryIndex: database.transactions[0].committedAtQueryIndex
+    }
+  ]);
+}
+{
+  const lostLeaseError = new Error("lost project_v2_fields lease at transaction start");
+  let leaseChecks = 0;
+  const githubAppClient = new FakeGithubAppClient({
+    fields: [
+      projectV2FieldApiItem({
+        options: [
+          {
+            id: "status-ready",
+            name: "Ready",
+            color: "GREEN",
+            description: "Ready for work",
+            position: 1
+          }
+        ]
+      })
+    ]
+  });
+  const database = new FakeDatabase({
+    queryOneRows: Array(2).fill((text, values) => {
+      if (/INSERT INTO github_project_v2_fields/i.test(text)) {
+        assert.deepEqual(values.slice(0, 3), [
+          projectV2Id,
+          "PVTSSF_lADOExample",
+          "Status"
+        ]);
+        return { id: statusFieldId, created: false };
+      }
+      if (/INSERT INTO github_project_v2_field_options/i.test(text)) {
+        assert.deepEqual(values.slice(0, 4), [
+          statusFieldId,
+          "status-ready",
+          "Ready",
+          "ready"
+        ]);
+        return { id: backlogOptionId, created: false };
+      }
+      assert.fail(`unexpected queryOne after lost lease: ${text}`);
+    }),
+    queryRows: [
+      (text, values) => {
+        assert.match(text, /FROM boards b/i);
+        assert.deepEqual(values, [workspaceId, projectV2Id]);
+        return [];
+      }
+    ]
+  });
+  database.beforeTransaction = () => {
+    assert.equal(githubAppClient.calls.length, 1);
+    assert.equal(githubAppClient.calls[0].method, "listProjectV2Fields");
+  };
+  const publisher = new FakeBoardInvalidationPublisher(database);
+  const executor = new GithubSyncExecutorService(
+    database,
+    githubAppClient,
+    publisher
+  );
+
+  await assert.rejects(
+    () =>
+      executor.runGithubSyncTarget("project_v2_fields", {
+        currentUserId,
+        workspaceId,
+        installation: installationRow(),
+        repository: null,
+        projectV2: projectV2ContextRow(),
+        githubUserAccessToken: null,
+        config: new FakeConfigService().getGithubAppConfig(),
+        assertLease: async () => {
+          leaseChecks += 1;
+          if (leaseChecks === 3) {
+            throw lostLeaseError;
+          }
+        }
+      }),
+    lostLeaseError
+  );
+
+  assert.equal(leaseChecks, 3);
+  assert.equal(database.transactions.length, 1);
+  assert.equal(
+    database.transactions[0].rolledBack,
+    true,
+    "lease loss at transaction start must roll back the transaction"
+  );
+  assert.equal(database.transactions[0].committed, false);
+  const fieldMutationQueries = database.queries.filter(
+    (query) =>
+      query.inTransaction &&
+      /\b(INSERT|UPDATE|DELETE)\b/i.test(query.text) &&
+      /github_project_v2_(fields|field_options)/i.test(query.text)
+  );
+  assert.deepEqual(
+    fieldMutationQueries,
+    [],
+    "lease loss at transaction start must prevent field and option writes"
+  );
+  assert.deepEqual(publisher.published, []);
+}
 {
   const githubAppClient = new FakeGithubAppClient({
     items: [

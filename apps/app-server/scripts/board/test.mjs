@@ -294,9 +294,11 @@ await import("./project-v2-repository-links.test.mjs");
 await import("./project-item-position-hydration.test.mjs");
 await import("./pilo-issue-position-sync-migration.test.mjs");
 await import("./board-hydration-timestamp-migration.test.mjs");
+await import("./project-v2-board-snapshot-migration.test.mjs");
 await import("./delivery-options.test.mjs");
 await import("./project-v2-board-data-repair.test.mjs");
 if (process.env.BOARD_POSTGRES_TEST_URL) {
   await import("./project-v2-board-data-repair-postgres.test.mjs");
   await import("./pilo-issue-position-sync-postgres.test.mjs");
 }
+await import("./project-v2-board-snapshot-postgres.test.mjs");
