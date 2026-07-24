@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 from app.canvas_agent.repository import (
     CODE_GENERATION_FAILURE_MESSAGE,
     GENERIC_FAILURE_MESSAGE,
     PgCanvasAgentRepository,
 )
+from app.meeting_report_processor import InfrastructureError
+
+
+class FakeOperationalError(Exception):
+    pass
 
 
 class FakeCursor:
@@ -21,16 +28,29 @@ class FakeConnection:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         self.rows: list[dict[str, object]] = []
+        self.closed = False
+        self.broken = False
 
     def execute(self, query: str, parameters: tuple[object, ...]) -> FakeCursor:
         self.calls.append((query, parameters))
         return FakeCursor(self.rows)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FailingConnection(FakeConnection):
+    def execute(self, query: str, parameters: tuple[object, ...]) -> FakeCursor:
+        self.calls.append((query, parameters))
+        raise FakeOperationalError("connection is lost")
 
 
 def repository() -> tuple[PgCanvasAgentRepository, FakeConnection]:
     connection = FakeConnection()
     result = object.__new__(PgCanvasAgentRepository)
     result.connection = connection
+    result._connection_factory = lambda: connection
+    result._operational_error_type = FakeOperationalError
     return result, connection
 
 
@@ -41,6 +61,7 @@ def test_mark_failed_does_not_infer_design_failure_from_prompt() -> None:
 
     query, parameters = connection.calls[-1]
     assert "prompt ~*" not in query
+    assert "'message', %s::text" in query
     assert parameters == (
         "intent classifier failed",
         GENERIC_FAILURE_MESSAGE,
@@ -59,6 +80,25 @@ def test_mark_failed_preserves_explicit_code_generation_failure() -> None:
         CODE_GENERATION_FAILURE_MESSAGE,
         CODE_GENERATION_FAILURE_MESSAGE,
     )
+
+
+def test_operational_error_replaces_connection_without_replaying_query() -> None:
+    canvas_repository, _ = repository()
+    failing_connection = FailingConnection()
+    replacement_connection = FakeConnection()
+    canvas_repository.connection = failing_connection
+    canvas_repository._connection_factory = lambda: replacement_connection
+
+    with pytest.raises(InfrastructureError):
+        canvas_repository.mark_failed("run-1", "intent classifier failed")
+
+    assert len(failing_connection.calls) == 1
+    assert replacement_connection.calls == []
+    assert canvas_repository.connection is replacement_connection
+
+    canvas_repository.mark_failed("run-1", "intent classifier failed")
+
+    assert len(replacement_connection.calls) == 1
 
 
 def test_retry_exhaustion_uses_generic_failure_message() -> None:
