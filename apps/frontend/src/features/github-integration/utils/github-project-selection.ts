@@ -23,13 +23,21 @@ type ActivateDefaultGithubBoardInput = {
   projects: ReadonlyArray<Pick<GithubProjectV2, "id" | "repositoryIds">>;
   repositoryId: string;
   preferredProjectV2Id?: string;
-  activate: (source: GithubActiveBoardSelection) => Promise<unknown>;
+  activate: (source: GithubBoardSelection) => Promise<GithubActiveBoardSource>;
 };
 
-export type GithubActiveBoardSelection = {
+type ActiveBoardProjectInput = {
+  activeBoardSource: GithubActiveBoardSource | null;
   repositoryId: string;
   projectV2Id: string;
 };
+
+export type GithubBoardSelection = {
+  repositoryId: string;
+  projectV2Id: string;
+};
+
+export type GithubActiveBoardSelection = GithubBoardSelection;
 
 export function selectProjectV2IdForRepository({
   projects,
@@ -63,13 +71,13 @@ export function selectProjectV2IdForRepository({
     "";
 }
 
-export function resolveGithubActiveBoardSelection({
+export function resolveGithubBrowsingSelection({
   repositories,
   projects,
   activeBoardSource,
   preferredRepositoryId,
   preferredProjectV2Id
-}: GithubActiveBoardSelectionInput): GithubActiveBoardSelection {
+}: GithubActiveBoardSelectionInput): GithubBoardSelection {
   const requestedRepositoryId =
     preferredRepositoryId !== undefined
       ? preferredRepositoryId
@@ -97,12 +105,26 @@ export function resolveGithubActiveBoardSelection({
   };
 }
 
+export const resolveGithubActiveBoardSelection = resolveGithubBrowsingSelection;
+
+export function isGithubActiveBoardProject({
+  activeBoardSource,
+  repositoryId,
+  projectV2Id
+}: ActiveBoardProjectInput): boolean {
+  return Boolean(
+    activeBoardSource &&
+      activeBoardSource.repository.id === repositoryId &&
+      activeBoardSource.project.id === projectV2Id
+  );
+}
+
 export async function activateDefaultGithubBoardForRepository({
   projects,
   repositoryId,
   preferredProjectV2Id,
   activate
-}: ActivateDefaultGithubBoardInput): Promise<string> {
+}: ActivateDefaultGithubBoardInput): Promise<GithubActiveBoardSource | null> {
   const projectV2Id = selectProjectV2IdForRepository({
     projects,
     preferredProjectV2Id,
@@ -110,9 +132,8 @@ export async function activateDefaultGithubBoardForRepository({
   });
 
   if (!projectV2Id) {
-    return "";
+    return null;
   }
 
-  await activate({ repositoryId, projectV2Id });
-  return projectV2Id;
+  return activate({ repositoryId, projectV2Id });
 }
