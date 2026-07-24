@@ -47,6 +47,21 @@ export interface GithubProviderRequestObservedInput {
 type GithubProviderRequestObservedEvent = GithubProviderRequestObservedInput & {
   event: "github_provider_request_observed";
 };
+export type GithubInstallationTokenCacheResult =
+  | "hit"
+  | "miss"
+  | "inflight_join"
+  | "refresh"
+  | "error";
+
+export interface GithubInstallationTokenCacheObservedInput {
+  result: GithubInstallationTokenCacheResult;
+}
+
+type GithubInstallationTokenCacheObservedEvent =
+  GithubInstallationTokenCacheObservedInput & {
+    event: "github_installation_token_cache";
+  };
 
 type GithubSyncOperationEventName =
   | "github_sync_retry"
@@ -138,6 +153,14 @@ export class GithubSyncObservabilityService {
       ...input
     });
   }
+  emitInstallationTokenCacheObserved(
+    input: GithubInstallationTokenCacheObservedInput
+  ): void {
+    this.emit({
+      event: "github_installation_token_cache",
+      ...input
+    });
+  }
 
   emitWorkerPollRetry(
     queueKind: GithubSyncWorkerQueueKind,
@@ -186,6 +209,7 @@ export class GithubSyncObservabilityService {
       | GithubSyncOperationEvent
       | GithubManualSyncObservabilityEvent
       | GithubProviderRequestObservedEvent
+      | GithubInstallationTokenCacheObservedEvent
   ): void {
     process.stdout.write(`${JSON.stringify(event)}\n`);
   }

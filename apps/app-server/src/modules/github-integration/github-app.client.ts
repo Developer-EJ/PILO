@@ -6,6 +6,7 @@ import { GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE } from "./github-oauth-refresh.
 import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
 import {
   GithubSyncObservabilityService,
+  type GithubInstallationTokenCacheResult,
   type GithubProviderRequestAuthKind,
   type GithubProviderRequestOperation
 } from "./github-sync-observability.service";
@@ -1130,6 +1131,11 @@ export class GithubAppClient {
       ...this.readProviderRateLimit(response)
     });
   }
+  private emitInstallationTokenCacheObserved(
+    result: GithubInstallationTokenCacheResult
+  ): void {
+    this.observability?.emitInstallationTokenCacheObserved({ result });
+  }
 
   private readProviderRateLimit(response?: Response): GithubObservedFetchRateLimit {
     return {
@@ -1256,11 +1262,13 @@ export class GithubAppClient {
     const cacheKey = this.installationAccessTokenCacheKey(input);
     const cached = this.installationAccessTokenCache.get(cacheKey);
     if (cached && !this.isCachedInstallationAccessTokenStale(cached, input)) {
+      this.emitInstallationTokenCacheObserved("hit");
       return {
         token: cached.token,
         expiresAt: cached.expiresAt
       };
     }
+    const cacheResult: GithubInstallationTokenCacheResult = cached ? "refresh" : "miss";
     if (cached) {
       this.installationAccessTokenCache.delete(cacheKey);
     }
@@ -1268,6 +1276,7 @@ export class GithubAppClient {
     const generation = this.currentInstallationAccessTokenGeneration(cacheKey);
     const inflight = this.installationAccessTokenInflight.get(cacheKey);
     if (inflight && inflight.generation === generation) {
+      this.emitInstallationTokenCacheObserved("inflight_join");
       return inflight.promise;
     }
     if (inflight) {
@@ -1280,7 +1289,12 @@ export class GithubAppClient {
         if (this.currentInstallationAccessTokenGeneration(cacheKey) === generation) {
           this.cacheInstallationAccessToken(cacheKey, token, input);
         }
+        this.emitInstallationTokenCacheObserved(cacheResult);
         return token;
+      })
+      .catch((error: unknown) => {
+        this.emitInstallationTokenCacheObserved("error");
+        throw error;
       })
       .finally(() => {
         const currentInflight = this.installationAccessTokenInflight.get(cacheKey);

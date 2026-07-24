@@ -170,6 +170,53 @@ function assertProviderEventDoesNotLeak(event) {
     );
   }
 }
+function assertInstallationTokenCacheEventDoesNotLeak(event) {
+  assert.deepEqual(Object.keys(event).sort(), ["event", "result"]);
+  const serialized = JSON.stringify(event);
+  for (const secret of [
+    "https://api.github.com",
+    "Developer-EJ",
+    "PILO",
+    "12345678",
+    "12345",
+    "installation-token-secret",
+    "cache-event-token",
+    "2026-07-04T13:00:00.000Z",
+    "Authorization",
+    "privateKey",
+    "raw provider permission details"
+  ]) {
+    assert.equal(serialized.includes(secret), false, `${secret} must not be logged`);
+  }
+
+  for (const disallowedKey of [
+    "url",
+    "path",
+    "owner",
+    "repo",
+    "installationId",
+    "appId",
+    "userId",
+    "workspaceId",
+    "authorization",
+    "token",
+    "expiresAt",
+    "expires_at",
+    "privateKey",
+    "query",
+    "variables",
+    "payload",
+    "body",
+    "error",
+    "message"
+  ]) {
+    assert.equal(
+      Object.hasOwn(event, disallowedKey),
+      false,
+      `installation token cache event must not include ${disallowedKey}`
+    );
+  }
+}
 
 {
   const originalFetch = globalThis.fetch;
@@ -460,6 +507,257 @@ function assertProviderEventDoesNotLeak(event) {
     1,
     "GithubAppClient provider requests must pass through the observed fetch boundary"
   );
+}
+{
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const observedEvents = [];
+  let tokenPosts = 0;
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) observedEvents.push(JSON.parse(payload));
+    if (typeof encoding === "function") encoding();
+    if (typeof callback === "function") callback();
+    return true;
+  };
+
+  globalThis.fetch = async (url) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `cache-event-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+    if (requestUrl.includes("/issues")) return jsonResponse(200, []);
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient(new GithubSyncObservabilityService());
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+
+    const cacheEvents = observedEvents.filter(
+      (event) => event.event === "github_installation_token_cache"
+    );
+    assert.deepEqual(cacheEvents, [
+      { event: "github_installation_token_cache", result: "miss" },
+      { event: "github_installation_token_cache", result: "hit" }
+    ]);
+    assert.equal(tokenPosts, 1);
+    for (const event of cacheEvents) assertInstallationTokenCacheEventDoesNotLeak(event);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const observedEvents = [];
+  let tokenPosts = 0;
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) observedEvents.push(JSON.parse(payload));
+    if (typeof encoding === "function") encoding();
+    if (typeof callback === "function") callback();
+    return true;
+  };
+
+  globalThis.fetch = async (url) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+      return jsonResponse(201, {
+        token: `cache-concurrent-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+    if (requestUrl.includes("/issues")) return jsonResponse(200, []);
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient(new GithubSyncObservabilityService());
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    await Promise.all([
+      client.listRepositoryIssues(input),
+      client.listRepositoryIssues(input),
+      client.listRepositoryIssues(input)
+    ]);
+
+    const cacheEvents = observedEvents.filter(
+      (event) => event.event === "github_installation_token_cache"
+    );
+    assert.deepEqual(cacheEvents.map((event) => event.result), [
+      "inflight_join",
+      "inflight_join",
+      "miss"
+    ]);
+    assert.equal(tokenPosts, 1);
+    for (const event of cacheEvents) assertInstallationTokenCacheEventDoesNotLeak(event);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const observedEvents = [];
+  let tokenPosts = 0;
+  let currentNow = fixedNow;
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) observedEvents.push(JSON.parse(payload));
+    if (typeof encoding === "function") encoding();
+    if (typeof callback === "function") callback();
+    return true;
+  };
+
+  globalThis.fetch = async (url) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      return jsonResponse(201, {
+        token: `cache-refresh-token-${tokenPosts}`,
+        expires_at: tokenPosts === 1
+          ? "2026-07-04T13:00:00.000Z"
+          : "2026-07-04T14:00:00.000Z"
+      });
+    }
+    if (requestUrl.includes("/issues")) return jsonResponse(200, []);
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient(new GithubSyncObservabilityService());
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => currentNow
+    };
+
+    await client.listRepositoryIssues(input);
+    currentNow = new Date("2026-07-04T12:55:00.000Z");
+    await client.listRepositoryIssues(input);
+    await client.listRepositoryIssues(input);
+
+    const cacheEvents = observedEvents.filter(
+      (event) => event.event === "github_installation_token_cache"
+    );
+    assert.deepEqual(cacheEvents.map((event) => event.result), ["miss", "refresh", "hit"]);
+    assert.equal(tokenPosts, 2);
+    for (const event of cacheEvents) assertInstallationTokenCacheEventDoesNotLeak(event);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = process.stdout.write;
+  const privateKeyPem = createPrivateKeyPem();
+  const observedEvents = [];
+  const deferredTokenResponses = [];
+  let tokenPosts = 0;
+
+  process.stdout.write = function write(chunk, encoding, callback) {
+    const payload = String(chunk).trim();
+    if (payload) observedEvents.push(JSON.parse(payload));
+    if (typeof encoding === "function") encoding();
+    if (typeof callback === "function") callback();
+    return true;
+  };
+
+  globalThis.fetch = async (url) => {
+    const requestUrl = url.toString();
+    if (requestUrl.endsWith("/app/installations/12345678/access_tokens")) {
+      tokenPosts += 1;
+      if (tokenPosts === 1) {
+        const deferred = createDeferred();
+        deferredTokenResponses.push(deferred);
+        return deferred.promise;
+      }
+      return jsonResponse(201, {
+        token: `cache-error-recovery-token-${tokenPosts}`,
+        expires_at: "2026-07-04T13:00:00.000Z"
+      });
+    }
+    if (requestUrl.includes("/issues")) return jsonResponse(200, []);
+    throw new Error("Unexpected provider request");
+  };
+
+  try {
+    const client = new GithubAppClient(new GithubSyncObservabilityService());
+    const input = {
+      installationId: 12345678,
+      appId: "12345",
+      privateKey: privateKeyPem,
+      owner: "Developer-EJ",
+      repo: "PILO",
+      now: () => fixedNow
+    };
+
+    const first = client.listRepositoryIssues(input);
+    await waitFor(
+      () => deferredTokenResponses.length === 1,
+      "first cache error caller should start token issuance"
+    );
+    const second = client.listRepositoryIssues(input);
+    await new Promise((resolve) => setImmediate(resolve));
+    deferredTokenResponses[0].resolve(
+      jsonResponse(500, { message: "temporary provider failure" })
+    );
+    await Promise.allSettled([first, second]);
+    await client.listRepositoryIssues(input);
+
+    const cacheEvents = observedEvents.filter(
+      (event) => event.event === "github_installation_token_cache"
+    );
+    assert.deepEqual(cacheEvents.map((event) => event.result), [
+      "inflight_join",
+      "error",
+      "miss"
+    ]);
+    assert.equal(tokenPosts, 2);
+    for (const event of cacheEvents) assertInstallationTokenCacheEventDoesNotLeak(event);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdout.write = originalStdoutWrite;
+  }
 }
 
 {
