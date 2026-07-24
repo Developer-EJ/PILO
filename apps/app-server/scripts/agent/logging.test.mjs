@@ -409,7 +409,10 @@ class FakeTransaction {
       const completesAfterTool = text.includes("tool_call_count = LEAST");
       const riskLevel = completesAfterTool ? values[1] : values[2];
       const message = completesAfterTool ? values[2] : values[3];
-      const finalAnswer = completesAfterTool ? values[2] : values[4];
+      const finalAnswer = completesAfterTool ? values[3] : values[4];
+      if (Buffer.byteLength(message, "utf8") > 1000) {
+        throw new Error("agent_runs.message exceeds 1000 bytes");
+      }
       run.status = "completed";
       run.risk_level = riskLevel ?? run.risk_level;
       run.message = message;
@@ -579,6 +582,50 @@ function errorMessage(error) {
   assert.deepEqual(workspaceService.calls, [
     { currentUserId: USER_ID, workspaceId: WORKSPACE_ID }
   ]);
+}
+
+{
+  const longAnswer = Array.from(
+    { length: 30 },
+    () => "회의의 핵심 결정사항과 후속 작업을 담당자별로 정리했습니다."
+  ).join(" ");
+  assert.ok(Buffer.byteLength(longAnswer, "utf8") > 1000);
+  const state = {
+    runs: [createRun({ status: "running", tool_call_count: 0 })],
+    steps: [createStep({ tool_name: "summarize_meeting_report" })],
+    logs: [],
+    messages: [],
+    outbox: [
+      {
+        id: "outbox-1",
+        run_id: RUN_ID,
+        workspace_id: WORKSPACE_ID,
+        status: "delivered",
+        turn_sequence: 1,
+        reason: "run_created"
+      }
+    ]
+  };
+  const { service } = createService(state);
+
+  const result = await service.completeToolStepAndAdvance(
+    USER_ID,
+    WORKSPACE_ID,
+    {
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      riskLevel: "low",
+      outputSummary: { reportCount: 1 },
+      resourceRefs: [],
+      waitingMessage: longAnswer,
+      postExecutionDisposition: "complete_run"
+    }
+  );
+
+  assert.equal(result.run.message, "요청을 완료했습니다.");
+  assert.ok(Buffer.byteLength(result.run.message, "utf8") <= 1000);
+  assert.equal(result.run.finalAnswer, longAnswer);
+  assert.equal(state.messages[0].content, longAnswer);
 }
 
 {
