@@ -15,11 +15,11 @@ type RuntimeRef<T> = {
 
 type UseCanvasRuntimeHydrationOptions = {
   board: CanvasBoardDetail;
-  freeformShapesRef: RuntimeRef<PiloCanvasFreeformShape[]>;
+  committedShapeMapRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
+  publishedShapeMapRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   pendingLocalShapeVersionsRef: RuntimeRef<Map<string, number>>;
   setCameraResetVersion: (updater: (version: number) => number) => void;
   setCanvasHydrationVersion: (updater: (version: number) => number) => void;
-  setFreeformShapes: (shapes: PiloCanvasFreeformShape[]) => void;
   shapeDetailCacheRef: RuntimeRef<Map<string, PiloCanvasFreeformShape>>;
   storageMode: CanvasRuntimeStorageMode;
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
@@ -27,11 +27,11 @@ type UseCanvasRuntimeHydrationOptions = {
 
 export function useCanvasRuntimeHydration({
   board,
-  freeformShapesRef,
+  committedShapeMapRef,
+  publishedShapeMapRef,
   pendingLocalShapeVersionsRef,
   setCameraResetVersion,
   setCanvasHydrationVersion,
-  setFreeformShapes,
   shapeDetailCacheRef,
   storageMode,
   viewportShapeLoadRequestSeqRef,
@@ -53,8 +53,14 @@ export function useCanvasRuntimeHydration({
       shapeDetailCacheRef.current.clear();
       viewportShapeLoadRequestSeqRef.current += 1;
       pendingLocalShapeVersionsRef.current.clear();
-      freeformShapesRef.current = storedFreeformShapes;
-      setFreeformShapes(storedFreeformShapes);
+      committedShapeMapRef.current = new Map(
+        storedFreeformShapes.flatMap((shape) =>
+          typeof shape.id === "string" ? [[shape.id, shape]] : [],
+        ),
+      );
+      publishedShapeMapRef.current = new Map(
+        committedShapeMapRef.current,
+      );
 
       setCanvasHydrationVersion((version) => version + 1);
       setCameraResetVersion((version) => version + 1);
@@ -66,11 +72,11 @@ export function useCanvasRuntimeHydration({
   }, [
     board.id,
     board.shapes,
-    freeformShapesRef,
+    committedShapeMapRef,
+    publishedShapeMapRef,
     pendingLocalShapeVersionsRef,
     setCameraResetVersion,
     setCanvasHydrationVersion,
-    setFreeformShapes,
     shapeDetailCacheRef,
     storageMode,
     viewportShapeLoadRequestSeqRef,

@@ -43,27 +43,49 @@ export function buildFreeformShapeMap(shapes: PiloCanvasFreeformShape[]) {
   return shapeMap;
 }
 
+export function readFreeformShapeMap(
+  shapeMap: ReadonlyMap<string, PiloCanvasFreeformShape>,
+) {
+  return Array.from(shapeMap.values());
+}
+
+export function replaceFreeformShapeMap(
+  shapeMap: Map<string, PiloCanvasFreeformShape>,
+  shapes: PiloCanvasFreeformShape[],
+) {
+  shapeMap.clear();
+
+  shapes.forEach((shape) => {
+    const shapeId = getFreeformShapeId(shape);
+
+    if (shapeId) {
+      shapeMap.set(shapeId, shape);
+    }
+  });
+}
+
 export function getChangedFreeformShapeIds(
   currentShapes: PiloCanvasFreeformShape[],
   nextShapes: PiloCanvasFreeformShape[],
+  candidateShapeIds?: Iterable<string>,
 ) {
   const currentShapeMap = buildFreeformShapeMap(currentShapes);
   const nextShapeMap = buildFreeformShapeMap(nextShapes);
   const changedShapeIds = new Set<string>();
+  const candidates = candidateShapeIds
+    ? Array.from(new Set(candidateShapeIds))
+    : new Set([...currentShapeMap.keys(), ...nextShapeMap.keys()]);
 
-  nextShapeMap.forEach((nextShape, shapeId) => {
+  candidates.forEach((shapeId) => {
     const currentShape = currentShapeMap.get(shapeId);
+    const nextShape = nextShapeMap.get(shapeId);
 
-    if (
-      !currentShape ||
-      hasCanvasFreeformShapeChanged(currentShape, nextShape)
-    ) {
+    if (!currentShape && !nextShape) return;
+    if (!currentShape || !nextShape) {
       changedShapeIds.add(shapeId);
+      return;
     }
-  });
-
-  currentShapeMap.forEach((_currentShape, shapeId) => {
-    if (!nextShapeMap.has(shapeId)) {
+    if (hasCanvasFreeformShapeChanged(currentShape, nextShape)) {
       changedShapeIds.add(shapeId);
     }
   });
