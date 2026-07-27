@@ -4,7 +4,12 @@ import { ApiError, badRequest, forbidden } from "../../common/api-error";
 import { GITHUB_API_VERSION } from "./github-api.constants";
 import { GITHUB_OAUTH_INVALID_CONNECTION_MESSAGE } from "./github-oauth-refresh.error";
 import { GITHUB_PROJECT_OAUTH_SCOPE_ERROR_MESSAGE } from "./github-project-oauth-scope";
-import { GithubSyncObservabilityService } from "./github-sync-observability.service";
+import {
+  GithubSyncObservabilityService,
+  type GithubInstallationTokenCacheResult,
+  type GithubProviderRequestAuthKind,
+  type GithubProviderRequestOperation
+} from "./github-sync-observability.service";
 
 export interface GithubAppInstallationLookupRequest {
   installationId: number;
@@ -426,6 +431,12 @@ interface GithubInstallationTokenApiPayload {
   expires_at?: unknown;
 }
 
+type GithubInstallationAccessTokenRetryContext = {
+  input: GithubAppInstallationTokenRequest;
+  cacheKey: string;
+  token: string;
+};
+
 interface GithubInstallationRepositoriesApiPayload {
   repositories?: unknown;
 }
@@ -447,16 +458,32 @@ interface GithubRepositoryContentApiPayload {
 
 type GithubProjectV2GraphqlTokenSource = "user" | "installation";
 
-interface GithubProjectV2GraphqlAuth {
-  token: string;
-  source: GithubProjectV2GraphqlTokenSource;
-  accountType?: "User" | "Organization";
-}
+type GithubObservedFetchRateLimit = {
+  rateLimitLimit: number | null;
+  rateLimitRemaining: number | null;
+  rateLimitUsed: number | null;
+  rateLimitReset: number | null;
+  rateLimitResource: string | null;
+};
+
+type GithubProjectV2GraphqlAuth =
+  | {
+      source: "user";
+      token: string;
+      accountType?: "User" | "Organization";
+    }
+  | {
+      source: "installation";
+      token: string;
+      accountType?: "User" | "Organization";
+      installationTokenRetry: GithubInstallationAccessTokenRetryContext;
+    };
 
 interface GithubProjectV2GraphqlErrorContext {
   tokenSource: GithubProjectV2GraphqlTokenSource;
   accountType?: "User" | "Organization";
   writePermissionMessage?: string;
+  installationTokenRetry?: GithubInstallationAccessTokenRetryContext;
 }
 
 const GITHUB_SYNC_PER_PAGE = 100;
@@ -464,6 +491,7 @@ const GITHUB_SYNC_MAX_PAGES = 100;
 const GITHUB_ASSIGNEE_LOOKUP_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_READ_TIMEOUT_MS = 30_000;
 const GITHUB_PROJECT_V2_ITEM_STATUS_TIMEOUT_MS = 30_000;
+const GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const GITHUB_PROJECT_V2_OWNER_RESOLUTION_ERROR_MESSAGE =
   "GitHub ProjectV2 owner could not be resolved";
 const GITHUB_PROJECT_V2_PERSONAL_USER_PERMISSION_ERROR_MESSAGE =
@@ -1041,7 +1069,105 @@ const GITHUB_PROJECT_V2_CLEAR_ITEM_STATUS_MUTATION = `
 
 @Injectable()
 export class GithubAppClient {
+  private readonly installationAccessTokenCache = new Map<
+    string,
+    { token: string; expiresAt: string; expiresAtMs: number }
+  >();
+  private readonly installationAccessTokenInflight = new Map<
+    string,
+    {
+      generation: number;
+      promise: Promise<{ token: string; expiresAt: string | null }>;
+    }
+  >();
+  private readonly installationAccessTokenGeneration = new Map<string, number>();
+
   constructor(@Optional() private readonly observability?: GithubSyncObservabilityService) {}
+
+  private async observedFetch(
+    operation: GithubProviderRequestOperation,
+    authKind: GithubProviderRequestAuthKind,
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(input, init);
+      this.emitProviderRequestObserved(
+        operation,
+        authKind,
+        response.ok ? "success" : "failure",
+        response.status,
+        Date.now() - startedAt,
+        response
+      );
+      return response;
+    } catch (error) {
+      this.emitProviderRequestObserved(
+        operation,
+        authKind,
+        "failure",
+        null,
+        Date.now() - startedAt
+      );
+      throw error;
+    }
+  }
+
+  private emitProviderRequestObserved(
+    operation: GithubProviderRequestOperation,
+    authKind: GithubProviderRequestAuthKind,
+    outcome: "success" | "failure",
+    status: number | null,
+    durationMs: number,
+    response?: Response
+  ): void {
+    this.observability?.emitProviderRequestObserved({
+      operation,
+      authKind,
+      outcome,
+      status,
+      durationMs: Math.max(0, durationMs),
+      ...this.readProviderRateLimit(response)
+    });
+  }
+  private emitInstallationTokenCacheObserved(
+    result: GithubInstallationTokenCacheResult
+  ): void {
+    this.observability?.emitInstallationTokenCacheObserved({ result });
+  }
+
+  private readProviderRateLimit(response?: Response): GithubObservedFetchRateLimit {
+    return {
+      rateLimitLimit: this.safeIntegerHeader(response, "x-ratelimit-limit"),
+      rateLimitRemaining: this.safeIntegerHeader(response, "x-ratelimit-remaining"),
+      rateLimitUsed: this.safeIntegerHeader(response, "x-ratelimit-used"),
+      rateLimitReset: this.safeIntegerHeader(response, "x-ratelimit-reset"),
+      rateLimitResource: this.safeResourceHeader(response, "x-ratelimit-resource")
+    };
+  }
+
+  private safeHeader(response: Response | undefined, name: string): string | null {
+    try {
+      const headers = response?.headers;
+      const get = headers?.get;
+      return typeof get === "function" ? get.call(headers, name) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private safeIntegerHeader(response: Response | undefined, name: string): number | null {
+    const value = this.safeHeader(response, name);
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  private safeResourceHeader(response: Response | undefined, name: string): string | null {
+    const value = this.safeHeader(response, name);
+    return value !== null && /^[a-z_]+$/.test(value) ? value : null;
+  }
 
   async getInstallation(
     input: GithubAppInstallationLookupRequest
@@ -1049,7 +1175,9 @@ export class GithubAppClient {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_app_installation_get",
+        "app_jwt",
         `https://api.github.com/app/installations/${input.installationId}`,
         {
           headers: {
@@ -1092,7 +1220,9 @@ export class GithubAppClient {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_app_installation_delete",
+        "app_jwt",
         `https://api.github.com/app/installations/${input.installationId}`,
         {
           method: "DELETE",
@@ -1108,6 +1238,7 @@ export class GithubAppClient {
     }
 
     if (response.status === 404) {
+      this.evictInstallationAccessTokenCache(input);
       return {
         deleted: true,
         alreadyDeleted: true
@@ -1118,6 +1249,7 @@ export class GithubAppClient {
       throw badRequest("GitHub App installation uninstall failed");
     }
 
+    this.evictInstallationAccessTokenCache(input);
     return {
       deleted: true,
       alreadyDeleted: false
@@ -1127,10 +1259,65 @@ export class GithubAppClient {
   async createInstallationAccessToken(
     input: GithubAppInstallationTokenRequest
   ): Promise<{ token: string; expiresAt: string | null }> {
+    const cacheKey = this.installationAccessTokenCacheKey(input);
+    const cached = this.installationAccessTokenCache.get(cacheKey);
+    if (cached && !this.isCachedInstallationAccessTokenStale(cached, input)) {
+      this.emitInstallationTokenCacheObserved("hit");
+      return {
+        token: cached.token,
+        expiresAt: cached.expiresAt
+      };
+    }
+    const cacheResult: GithubInstallationTokenCacheResult = cached ? "refresh" : "miss";
+    if (cached) {
+      this.installationAccessTokenCache.delete(cacheKey);
+    }
+
+    const generation = this.currentInstallationAccessTokenGeneration(cacheKey);
+    const inflight = this.installationAccessTokenInflight.get(cacheKey);
+    if (inflight && inflight.generation === generation) {
+      this.emitInstallationTokenCacheObserved("inflight_join");
+      return inflight.promise;
+    }
+    if (inflight) {
+      this.installationAccessTokenInflight.delete(cacheKey);
+    }
+
+    let tokenLookup: Promise<{ token: string; expiresAt: string | null }>;
+    tokenLookup = this.createInstallationAccessTokenUncached(input)
+      .then((token) => {
+        if (this.currentInstallationAccessTokenGeneration(cacheKey) === generation) {
+          this.cacheInstallationAccessToken(cacheKey, token, input);
+        }
+        this.emitInstallationTokenCacheObserved(cacheResult);
+        return token;
+      })
+      .catch((error: unknown) => {
+        this.emitInstallationTokenCacheObserved("error");
+        throw error;
+      })
+      .finally(() => {
+        const currentInflight = this.installationAccessTokenInflight.get(cacheKey);
+        if (currentInflight?.promise === tokenLookup) {
+          this.installationAccessTokenInflight.delete(cacheKey);
+        }
+      });
+    this.installationAccessTokenInflight.set(cacheKey, {
+      generation,
+      promise: tokenLookup
+    });
+    return tokenLookup;
+  }
+
+  private async createInstallationAccessTokenUncached(
+    input: GithubAppInstallationTokenRequest
+  ): Promise<{ token: string; expiresAt: string | null }> {
     const appJwt = this.createAppJwt(input);
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_app_installation_token_create",
+        "app_jwt",
         `https://api.github.com/app/installations/${input.installationId}/access_tokens`,
         {
           method: "POST",
@@ -1163,10 +1350,105 @@ export class GithubAppClient {
     };
   }
 
+  private installationAccessTokenCacheKey(
+    input: GithubAppInstallationLookupRequest
+  ): string {
+    return `${input.appId}:${input.installationId}`;
+  }
+
+  private installationAccessTokenRetryContext(
+    input: GithubAppInstallationTokenRequest,
+    token: string
+  ): GithubInstallationAccessTokenRetryContext {
+    return {
+      input,
+      cacheKey: this.installationAccessTokenCacheKey(input),
+      token
+    };
+  }
+
+  private evictInstallationAccessTokenCache(
+    input: GithubAppInstallationLookupRequest
+  ): void {
+    const cacheKey = this.installationAccessTokenCacheKey(input);
+    this.installationAccessTokenGeneration.set(
+      cacheKey,
+      this.currentInstallationAccessTokenGeneration(cacheKey) + 1
+    );
+    this.installationAccessTokenCache.delete(cacheKey);
+    this.installationAccessTokenInflight.delete(cacheKey);
+  }
+
+  private currentInstallationAccessTokenGeneration(cacheKey: string): number {
+    return this.installationAccessTokenGeneration.get(cacheKey) ?? 0;
+  }
+
+  private evictInstallationAccessTokenCacheIfTokenMatches(
+    cacheKey: string,
+    token: string
+  ): void {
+    const cached = this.installationAccessTokenCache.get(cacheKey);
+    if (cached?.token === token) {
+      this.installationAccessTokenCache.delete(cacheKey);
+    }
+  }
+
+  private cacheInstallationAccessToken(
+    cacheKey: string,
+    token: { token: string; expiresAt: string | null },
+    input: GithubAppInstallationLookupRequest
+  ): void {
+    const expiresAtMs = this.parseInstallationAccessTokenExpiresAt(token.expiresAt);
+    if (
+      token.token.length === 0 ||
+      token.expiresAt === null ||
+      expiresAtMs === null ||
+      this.isInstallationAccessTokenStaleAt(expiresAtMs, input)
+    ) {
+      this.installationAccessTokenCache.delete(cacheKey);
+      return;
+    }
+
+    this.installationAccessTokenCache.set(cacheKey, {
+      token: token.token,
+      expiresAt: token.expiresAt,
+      expiresAtMs
+    });
+  }
+
+  private isCachedInstallationAccessTokenStale(
+    token: { expiresAtMs: number },
+    input: GithubAppInstallationLookupRequest
+  ): boolean {
+    return this.isInstallationAccessTokenStaleAt(token.expiresAtMs, input);
+  }
+
+  private isInstallationAccessTokenStaleAt(
+    expiresAtMs: number,
+    input: GithubAppInstallationLookupRequest
+  ): boolean {
+    return (
+      expiresAtMs - (input.now ? input.now() : new Date()).getTime() <=
+      GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_MS
+    );
+  }
+
+  private parseInstallationAccessTokenExpiresAt(value: string | null): number | null {
+    if (value === null) {
+      return null;
+    }
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
   async listInstallationRepositories(
     input: GithubInstallationRepositoriesRequest
   ): Promise<GithubInstallationRepositoryApiItem[]> {
     const installationToken = await this.createInstallationAccessToken(input);
+    const installationTokenRetry = this.installationAccessTokenRetryContext(
+      input,
+      installationToken.token
+    );
     const repositories: GithubInstallationRepositoryApiItem[] = [];
 
     for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
@@ -1176,8 +1458,14 @@ export class GithubAppClient {
 
       const payload = await this.fetchJsonWithToken(
         url,
-        installationToken.token,
-        "GitHub repositories sync failed"
+        installationTokenRetry.token,
+        "GitHub repositories sync failed",
+        undefined,
+        false,
+        false,
+        "github_installation_repositories_list",
+        "installation",
+        installationTokenRetry
       );
       if (!this.isInstallationRepositoriesPayload(payload)) {
         throw badRequest("GitHub repositories sync failed");
@@ -1196,6 +1484,10 @@ export class GithubAppClient {
     input: GithubRepositoryIssuesRequest
   ): Promise<GithubIssueApiItem[]> {
     const installationToken = await this.createInstallationAccessToken(input);
+    const installationTokenRetry = this.installationAccessTokenRetryContext(
+      input,
+      installationToken.token
+    );
     const issues: GithubIssueApiItem[] = [];
 
     for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
@@ -1208,8 +1500,14 @@ export class GithubAppClient {
 
       const payload = await this.fetchJsonWithToken(
         url,
-        installationToken.token,
-        "GitHub issues sync failed"
+        installationTokenRetry.token,
+        "GitHub issues sync failed",
+        undefined,
+        false,
+        false,
+        "github_repository_issues_list",
+        "installation",
+        installationTokenRetry
       );
       if (!Array.isArray(payload)) {
         throw badRequest("GitHub issues sync failed");
@@ -1241,7 +1539,11 @@ export class GithubAppClient {
       installationToken.token,
       "GitHub issue lookup failed",
       undefined,
-      true
+      true,
+      false,
+      "github_repository_issue_get",
+      "installation",
+        this.installationAccessTokenRetryContext(input, installationToken.token)
     );
 
     if (!this.isIssuePayload(payload) || this.isPullRequestIssue(payload)) {
@@ -1274,7 +1576,9 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_repository_issue_update",
+        "user_oauth",
         `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}`,
         {
           method: "PATCH",
@@ -1333,7 +1637,9 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_repository_issue_assignees_update",
+        "user_oauth",
         `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/assignees`,
         {
           method,
@@ -1401,7 +1707,9 @@ export class GithubAppClient {
           "GitHub issue assignee lookup failed",
           controller.signal,
           false,
-          true
+          true,
+          "github_repository_assignees_list",
+          "user_oauth"
         );
         if (
           !Array.isArray(payload) ||
@@ -1438,7 +1746,9 @@ export class GithubAppClient {
 
     let response: Response;
     try {
-      response = await fetch(
+      response = await this.observedFetch(
+        "github_repository_issue_create",
+        "user_oauth",
         `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues`,
         {
           method: "POST",
@@ -1479,6 +1789,10 @@ export class GithubAppClient {
     input: GithubRepositoryPullRequestsRequest
   ): Promise<GithubPullRequestApiItem[]> {
     const installationToken = await this.createInstallationAccessToken(input);
+    const installationTokenRetry = this.installationAccessTokenRetryContext(
+      input,
+      installationToken.token
+    );
     const pullRequests: GithubPullRequestApiItem[] = [];
 
     for (let page = 1; page <= GITHUB_SYNC_MAX_PAGES; page += 1) {
@@ -1491,8 +1805,14 @@ export class GithubAppClient {
 
       const payload = await this.fetchJsonWithToken(
         url,
-        installationToken.token,
-        "GitHub pull requests sync failed"
+        installationTokenRetry.token,
+        "GitHub pull requests sync failed",
+        undefined,
+        false,
+        false,
+        "github_repository_pull_requests_list",
+        "installation",
+        installationTokenRetry
       );
       if (!Array.isArray(payload) || !payload.every((item) => this.isPullRequestPayload(item))) {
         throw badRequest("GitHub pull requests sync failed");
@@ -1515,19 +1835,15 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchProjectV2ReadGraphqlWithToken(
-        graphqlAuth.token,
+      const data = await this.fetchProjectV2ReadGraphql(
+        graphqlAuth,
         GITHUB_REPOSITORY_PROJECT_V2S_QUERY,
         {
           owner: input.owner,
           name: input.repo,
           cursor
         },
-        "GitHub ProjectV2 discovery failed",
-        {
-          tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
-        }
+        "GitHub ProjectV2 discovery failed"
       );
       const connection = this.readRepositoryProjectV2Connection(data, "GitHub ProjectV2 discovery failed");
 
@@ -1548,17 +1864,13 @@ export class GithubAppClient {
     input: GithubProjectV2LookupRequest
   ): Promise<GithubProjectV2ApiItem> {
     const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
-    const data = await this.fetchProjectV2ReadGraphqlWithToken(
-      graphqlAuth.token,
+    const data = await this.fetchProjectV2ReadGraphql(
+      graphqlAuth,
       GITHUB_PROJECT_V2_QUERY,
       {
         projectId: input.projectNodeId
       },
-      "GitHub ProjectV2 sync failed",
-      {
-        tokenSource: graphqlAuth.source,
-        accountType: graphqlAuth.accountType
-      }
+      "GitHub ProjectV2 sync failed"
     );
     const project = this.readProjectV2Node(data, "GitHub ProjectV2 sync failed");
 
@@ -1591,18 +1903,14 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchProjectV2ReadGraphqlWithToken(
-        graphqlAuth.token,
+      const data = await this.fetchProjectV2ReadGraphql(
+        graphqlAuth,
         GITHUB_PROJECT_V2_FIELDS_QUERY,
         {
           projectId: input.projectNodeId,
           cursor
         },
-        "GitHub ProjectV2 fields sync failed",
-        {
-          tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
-        }
+        "GitHub ProjectV2 fields sync failed"
       );
       const connection = this.readProjectV2Connection(
         data,
@@ -1624,18 +1932,14 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchProjectV2ReadGraphqlWithToken(
-        graphqlAuth.token,
+      const data = await this.fetchProjectV2ReadGraphql(
+        graphqlAuth,
         GITHUB_PROJECT_V2_ITEMS_QUERY,
         {
           projectId: input.projectNodeId,
           cursor
         },
-        "GitHub ProjectV2 items sync failed",
-        {
-          tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
-        }
+        "GitHub ProjectV2 items sync failed"
       );
       const connection = this.readProjectV2Connection(
         data,
@@ -1675,15 +1979,11 @@ export class GithubAppClient {
   ): Promise<GithubProjectV2ItemReconcileApiItem | null> {
     const graphqlAuth = await this.getProjectV2GraphqlAuth(input);
     const errorMessage = "GitHub ProjectV2 item lookup failed";
-    const data = await this.fetchProjectV2ReadGraphqlWithToken(
-      graphqlAuth.token,
+    const data = await this.fetchProjectV2ReadGraphql(
+      graphqlAuth,
       GITHUB_PROJECT_V2_ITEM_LOOKUP_QUERY,
       { itemId: input.projectItemNodeId },
-      errorMessage,
-      {
-        tokenSource: graphqlAuth.source,
-        accountType: graphqlAuth.accountType
-      }
+      errorMessage
     );
     if (this.toObject(data).node === null) {
       return null;
@@ -1789,26 +2089,16 @@ export class GithubAppClient {
     url.searchParams.set("page", String(input.page));
     url.searchParams.set("per_page", String(input.perPage));
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${installationToken.token}`,
-          "X-GitHub-Api-Version": GITHUB_API_VERSION
-        }
-      });
-    } catch {
-      throw badRequest("GitHub pull request files lookup failed");
-    }
-
-    if (!response.ok) {
-      throw badRequest("GitHub pull request files lookup failed");
-    }
-
-    const payload = await this.readJson(
-      response,
-      "GitHub pull request files lookup failed"
+    const payload = await this.fetchJsonWithToken(
+      url,
+      installationToken.token,
+      "GitHub pull request files lookup failed",
+      undefined,
+      false,
+      false,
+      "github_pull_request_files_list",
+      "installation",
+        this.installationAccessTokenRetryContext(input, installationToken.token)
     );
     if (!Array.isArray(payload) || !payload.every((item) => this.isFilePayload(item))) {
       throw badRequest("GitHub pull request files lookup failed");
@@ -1907,7 +2197,11 @@ export class GithubAppClient {
       installationToken.token,
       "GitHub pull request lookup failed",
       undefined,
-      sourceNotFoundError
+      sourceNotFoundError,
+      false,
+      "github_pull_request_get",
+      "installation",
+        this.installationAccessTokenRetryContext(input, installationToken.token)
     );
 
     if (!this.isPullRequestPayload(payload)) {
@@ -1927,7 +2221,15 @@ export class GithubAppClient {
     const payload = await this.fetchJsonWithToken(
       url,
       installationToken,
-      "GitHub repository compare lookup failed"
+      "GitHub repository compare lookup failed",
+      undefined,
+      false,
+      false,
+      "github_repository_compare_get",
+      "installation",
+      input.installationAccessToken
+        ? undefined
+        : this.installationAccessTokenRetryContext(input, installationToken)
     );
 
     if (
@@ -1962,10 +2264,38 @@ export class GithubAppClient {
     );
     url.searchParams.set("ref", input.ref);
 
-    const response = await this.fetchRepositoryFileContentWithRetry(
+    const installationTokenRetry = input.installationAccessToken
+      ? undefined
+      : this.installationAccessTokenRetryContext(input, installationToken);
+    let response = await this.fetchRepositoryFileContentWithRetry(
       url,
       installationToken
     );
+
+    if (response.status === 401 && installationTokenRetry) {
+      this.evictInstallationAccessTokenCacheIfTokenMatches(
+        installationTokenRetry.cacheKey,
+        installationTokenRetry.token
+      );
+      try {
+        const refreshedToken = await this.createInstallationAccessToken(
+          installationTokenRetry.input
+        );
+        response = await this.fetchRepositoryFileContentWithRetry(
+          url,
+          refreshedToken.token
+        );
+        if (response.status === 401) {
+          this.evictInstallationAccessTokenCacheIfTokenMatches(
+            installationTokenRetry.cacheKey,
+            refreshedToken.token
+          );
+        }
+      } catch {
+        // Preserve the original content 401 so the existing mapper returns
+        // "GitHub App installation token is invalid" instead of token lookup details.
+      }
+    }
 
     if (response.status === 404) {
       return null;
@@ -2051,7 +2381,11 @@ export class GithubAppClient {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await this.observedFetch(
+          "github_repository_file_content_get",
+          "installation",
+          url,
+          {
           headers: {
             Accept: "application/vnd.github+json",
             Authorization: `Bearer ${accessToken}`,
@@ -2121,16 +2455,19 @@ export class GithubAppClient {
     return {
       token: installationToken.token,
       source: "installation",
-      accountType: input.accountType
+      accountType: input.accountType,
+      installationTokenRetry: this.installationAccessTokenRetryContext(
+        input,
+        installationToken.token
+      )
     };
   }
 
-  private async fetchProjectV2ReadGraphqlWithToken(
-    token: string,
+  private async fetchProjectV2ReadGraphql(
+    auth: GithubProjectV2GraphqlAuth,
     query: string,
     variables: Record<string, unknown>,
-    errorMessage: string,
-    context?: GithubProjectV2GraphqlErrorContext
+    errorMessage: string
   ): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -2139,12 +2476,11 @@ export class GithubAppClient {
     );
 
     try {
-      return await this.fetchGraphqlWithToken(
-        token,
+      return await this.fetchGraphqlWithAuth(
+        auth,
         query,
         variables,
         errorMessage,
-        context,
         controller.signal
       );
     } catch (error) {
@@ -2174,25 +2510,83 @@ export class GithubAppClient {
     context?: GithubProjectV2GraphqlErrorContext,
     signal?: AbortSignal
   ): Promise<unknown> {
-    let response: Response;
-    try {
-      response = await fetch("https://api.github.com/graphql", {
-        method: "POST",
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-GitHub-Api-Version": GITHUB_API_VERSION
-        },
-        body: JSON.stringify({
+    return this.fetchGraphqlWithAuth(
+      {
+        source: context?.tokenSource === "installation" ? "installation" : "user",
+        token,
+        accountType: context?.accountType,
+        ...(context?.tokenSource === "installation" && context.installationTokenRetry
+          ? { installationTokenRetry: context.installationTokenRetry }
+          : {})
+      } as GithubProjectV2GraphqlAuth,
+      query,
+      variables,
+      errorMessage,
+      signal,
+      context
+    );
+  }
+
+  private async fetchGraphqlWithAuth(
+    auth: GithubProjectV2GraphqlAuth,
+    query: string,
+    variables: Record<string, unknown>,
+    errorMessage: string,
+    signal?: AbortSignal,
+    contextOverride?: GithubProjectV2GraphqlErrorContext
+  ): Promise<unknown> {
+    let response = await this.fetchGraphqlResponseWithToken(
+      auth.token,
+      query,
+      variables,
+      errorMessage,
+      contextOverride ?? this.graphqlErrorContext(auth),
+      signal
+    );
+
+    if (response.status === 401 && auth.source === "installation") {
+      this.evictInstallationAccessTokenCacheIfTokenMatches(
+        auth.installationTokenRetry.cacheKey,
+        auth.installationTokenRetry.token
+      );
+      const initialUnauthorizedResponse = response;
+      let refreshedToken: { token: string; expiresAt: string | null } | null = null;
+      try {
+        refreshedToken = await this.awaitSharedPromiseWithSignal(
+          this.createInstallationAccessToken(auth.installationTokenRetry.input),
+          signal
+        );
+      } catch (error) {
+        if (this.isAbortError(error)) {
+          throw error;
+        }
+        response = initialUnauthorizedResponse;
+      }
+
+      if (refreshedToken) {
+        auth.token = refreshedToken.token;
+        auth.installationTokenRetry = {
+          ...auth.installationTokenRetry,
+          token: refreshedToken.token
+        };
+        response = await this.fetchGraphqlResponseWithToken(
+          auth.token,
           query,
-          variables
-        }),
-        ...(signal ? { signal } : {})
-      });
-    } catch {
-      throw badRequest(errorMessage);
+          variables,
+          errorMessage,
+          this.graphqlErrorContext(auth),
+          signal
+        );
+        if (response.status === 401) {
+          this.evictInstallationAccessTokenCacheIfTokenMatches(
+            auth.installationTokenRetry.cacheKey,
+            auth.token
+          );
+        }
+      }
     }
+
+    const context = contextOverride ?? this.graphqlErrorContext(auth);
 
     if (this.isGraphqlRateLimitedResponse(response)) {
       throw new GithubGraphqlRateLimitError(errorMessage, this.rateLimitRemaining(response));
@@ -2237,6 +2631,109 @@ export class GithubAppClient {
     return data;
   }
 
+  private async awaitSharedPromiseWithSignal<T>(
+    sharedPromise: Promise<T>,
+    signal?: AbortSignal
+  ): Promise<T> {
+    if (!signal) {
+      return sharedPromise;
+    }
+
+    sharedPromise.catch(() => undefined);
+
+    if (signal.aborted) {
+      throw this.abortError();
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
+      const settle = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+      const onAbort = () => {
+        settle(() => reject(this.abortError()));
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      sharedPromise.then(
+        (value) => settle(() => resolve(value)),
+        (error) => settle(() => reject(error))
+      );
+    });
+  }
+
+  private abortError(): Error {
+    if (typeof DOMException !== "undefined") {
+      return new DOMException("The operation was aborted", "AbortError");
+    }
+    const error = new Error("The operation was aborted");
+    error.name = "AbortError";
+    return error;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
+  }
+
+  private graphqlErrorContext(
+    auth: GithubProjectV2GraphqlAuth
+  ): GithubProjectV2GraphqlErrorContext {
+    return {
+      tokenSource: auth.source,
+      accountType: auth.accountType,
+      ...(auth.source === "installation"
+        ? { installationTokenRetry: auth.installationTokenRetry }
+        : {})
+    };
+  }
+
+  private async fetchGraphqlResponseWithToken(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+    errorMessage: string,
+    context?: GithubProjectV2GraphqlErrorContext,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    try {
+      return await this.observedFetch(
+        context?.writePermissionMessage
+          ? "github_graphql_project_v2_write"
+          : "github_graphql_project_v2_read",
+        context?.tokenSource === "installation"
+          ? "installation"
+          : "personal_project_v2_oauth",
+        "https://api.github.com/graphql",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          body: JSON.stringify({
+            query,
+            variables
+          }),
+          ...(signal ? { signal } : {})
+        }
+      );
+    } catch {
+      throw badRequest(errorMessage);
+    }
+  }
+
   private isGraphqlRateLimitedResponse(response: Response): boolean {
     return response.status === 429 || (
       response.status === 403 &&
@@ -2271,18 +2768,14 @@ export class GithubAppClient {
     let nextCursor = hasNextPage ? cursor : null;
 
     while (nextCursor) {
-      const data = await this.fetchProjectV2ReadGraphqlWithToken(
-        graphqlAuth.token,
+      const data = await this.fetchProjectV2ReadGraphql(
+        graphqlAuth,
         GITHUB_PROJECT_V2_REPOSITORIES_QUERY,
         {
           projectId: projectNodeId,
           cursor: nextCursor
         },
-        "GitHub ProjectV2 discovery failed",
-        {
-          tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
-        }
+        "GitHub ProjectV2 discovery failed"
       );
       const page = this.readProjectV2RepositoryConnection(
         data,
@@ -2306,19 +2799,19 @@ export class GithubAppClient {
     let cursor: string | null = null;
 
     do {
-      const data = await this.fetchProjectV2ReadGraphqlWithToken(
-        input.userAccessToken,
+      const data = await this.fetchProjectV2ReadGraphql(
+        {
+          source: "user",
+          token: input.userAccessToken,
+          accountType: input.ownerType
+        },
         query,
         {
           cursor,
           login: input.ownerLogin,
           minPermissionLevel: permission
         },
-        "GitHub ProjectV2 permission lookup failed",
-        {
-          accountType: input.ownerType,
-          tokenSource: "user"
-        }
+        "GitHub ProjectV2 permission lookup failed"
       );
       const page = this.readProjectV2PermissionPage(
         data,
@@ -2346,18 +2839,14 @@ export class GithubAppClient {
     let nextCursor = hasNextPage ? cursor : null;
 
     while (nextCursor) {
-      const data = await this.fetchProjectV2ReadGraphqlWithToken(
-        graphqlAuth.token,
+      const data = await this.fetchProjectV2ReadGraphql(
+        graphqlAuth,
         GITHUB_PROJECT_V2_ITEM_FIELD_VALUES_QUERY,
         {
           itemId: itemNodeId,
           cursor: nextCursor
         },
-        "GitHub ProjectV2 items sync failed",
-        {
-          tokenSource: graphqlAuth.source,
-          accountType: graphqlAuth.accountType
-        }
+        "GitHub ProjectV2 items sync failed"
       );
       const item = this.readProjectV2ItemNode(
         data,
@@ -3090,20 +3579,54 @@ export class GithubAppClient {
     errorMessage: string,
     signal?: AbortSignal,
     sourceNotFoundError = false,
-    userTokenOperation = false
+    userTokenOperation = false,
+    operation: GithubProviderRequestOperation = userTokenOperation
+      ? "github_user_rest_request"
+      : "github_installation_rest_request",
+    authKind: GithubProviderRequestAuthKind = userTokenOperation ? "user_oauth" : "installation",
+    installationTokenRetry?: GithubInstallationAccessTokenRetryContext
   ): Promise<unknown> {
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          Accept: "application/vnd.github+json",
-          Authorization: `Bearer ${token}`,
-          "X-GitHub-Api-Version": GITHUB_API_VERSION
-        },
-        ...(signal ? { signal } : {})
-      });
-    } catch {
-      throw badRequest(errorMessage);
+    let response = await this.fetchWithTokenResponse(
+      url,
+      token,
+      errorMessage,
+      signal,
+      operation,
+      authKind
+    );
+
+    if (response.status === 401 && installationTokenRetry) {
+      this.evictInstallationAccessTokenCacheIfTokenMatches(
+        installationTokenRetry.cacheKey,
+        installationTokenRetry.token
+      );
+      const initialUnauthorizedResponse = response;
+      let refreshedToken: { token: string; expiresAt: string | null } | null = null;
+      try {
+        refreshedToken = await this.createInstallationAccessToken(
+          installationTokenRetry.input
+        );
+      } catch {
+        response = initialUnauthorizedResponse;
+      }
+
+      if (refreshedToken) {
+        installationTokenRetry.token = refreshedToken.token;
+        response = await this.fetchWithTokenResponse(
+          url,
+          refreshedToken.token,
+          errorMessage,
+          signal,
+          operation,
+          authKind
+        );
+        if (response.status === 401) {
+          this.evictInstallationAccessTokenCacheIfTokenMatches(
+            installationTokenRetry.cacheKey,
+            refreshedToken.token
+          );
+        }
+      }
     }
 
     if (response.status === 404 && sourceNotFoundError) {
@@ -3119,6 +3642,33 @@ export class GithubAppClient {
     }
 
     return this.readJson(response, errorMessage);
+  }
+
+  private async fetchWithTokenResponse(
+    url: URL,
+    token: string,
+    errorMessage: string,
+    signal: AbortSignal | undefined,
+    operation: GithubProviderRequestOperation,
+    authKind: GithubProviderRequestAuthKind
+  ): Promise<Response> {
+    try {
+      return await this.observedFetch(
+        operation,
+        authKind,
+        url,
+        {
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${token}`,
+            "X-GitHub-Api-Version": GITHUB_API_VERSION
+          },
+          ...(signal ? { signal } : {})
+        }
+      );
+    } catch {
+      throw badRequest(errorMessage);
+    }
   }
 
   private createAppJwt(input: GithubAppInstallationLookupRequest): string {

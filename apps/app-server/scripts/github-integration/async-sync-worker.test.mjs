@@ -102,6 +102,34 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     rateLimitRemaining: null
   }]);
 }
+{
+  const output = [];
+  const originalWrite = process.stdout.write;
+  const observability = new GithubSyncObservabilityService();
+  process.stdout.write = (chunk, encoding, callback) => {
+    output.push(String(chunk));
+    const done = typeof encoding === "function" ? encoding : callback;
+    if (typeof done === "function") done();
+    return true;
+  };
+
+  try {
+    observability.emitInstallationTokenCacheObserved({ result: "hit" });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const events = output.map((line) => JSON.parse(line));
+  assert.deepEqual(events, [{
+    event: "github_installation_token_cache",
+    result: "hit"
+  }]);
+  const serialized = output.join("");
+  assert.doesNotMatch(
+    serialized,
+    /https:\/\/api\.github\.com|Developer-EJ|PILO|12345678|12345|installation-token-secret|expires_at|Authorization|privateKey|query|variables|payload|error|message/
+  );
+}
 
 {
   const observed = [];
@@ -215,15 +243,33 @@ const syncRunId = "44444444-4444-4444-8444-444444444444";
     process.stdout.write = originalWrite;
   }
 
-  assert.deepEqual(output.map((line) => JSON.parse(line)), [{
-    event: "github_sync_rate_limit_observed",
-    jobId: null,
-    syncRunId: null,
-    deliveryId: null,
-    target: "graphql",
-    attemptCount: null,
-    rateLimitRemaining: 42
-  }]);
+  const graphqlEvents = output.map((line) => JSON.parse(line));
+  assert.deepEqual(graphqlEvents, [
+    {
+      event: "github_provider_request_observed",
+      operation: "github_graphql_project_v2_read",
+      authKind: "personal_project_v2_oauth",
+      outcome: "success",
+      status: 200,
+      durationMs: graphqlEvents[0].durationMs,
+      rateLimitLimit: null,
+      rateLimitRemaining: 42,
+      rateLimitUsed: null,
+      rateLimitReset: null,
+      rateLimitResource: null
+    },
+    {
+      event: "github_sync_rate_limit_observed",
+      jobId: null,
+      syncRunId: null,
+      deliveryId: null,
+      target: "graphql",
+      attemptCount: null,
+      rateLimitRemaining: 42
+    }
+  ]);
+  assert.equal(typeof graphqlEvents[0].durationMs, "number");
+  assert.ok(graphqlEvents[0].durationMs >= 0);
   assert.doesNotMatch(output.join(""), /test-user-access-token|viewer/);
 }
 
