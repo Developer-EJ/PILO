@@ -16,6 +16,10 @@
 
 ## 시작해서 읽을 파일
 
-`useCanvasRoom.ts`
+1. `useCanvasRoom.ts`
+2. `canvas-presence-normalization.ts`
 
 이 hook은 Canvas room의 외부 인터페이스를 제공하며 한 runtime에서 한 번만 호출한다.
+Socket lifecycle, operation catch-up과 roomState event 순서는 `useCanvasRoom.ts`가
+소유한다. 다양한 서버 payload를 remote presence로 정규화하고 동일 room인지 판정하는
+순수 규칙은 `canvas-presence-normalization.ts`가 담당한다.

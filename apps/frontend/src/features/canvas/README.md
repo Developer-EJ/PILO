@@ -56,6 +56,9 @@ component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-bl
 - `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
 - `useCanvasViewportQueries`: viewport shape summary 조회와 shape detail lazy loading
 - `useCanvasApiLifecycle`: Canvas enter/leave와 unmount 시 shape queue flush
+- `canvas-deferred-remote-operations`: local interaction 중 원격 operation 보호와 대기열 압축
+- `canvas-room-shape-serialization`: roomState shape의 revision/content hash 직렬화
+- `canvas-viewport-load-policy`: viewport coverage와 frame lazy-load 대상 판정
 - `CanvasZoomControls`: smart guide와 zoom controls UI
 - `canvas-runtime-utils`: runtime hook들이 공유하는 순수 계산 helper와 query key
 - `canvas-runtime-types`: runtime 내부 client/storage mode 타입

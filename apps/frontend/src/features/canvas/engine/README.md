@@ -15,9 +15,11 @@
 ## 읽는 순서
 
 1. `runtime/ClassicCanvasRuntime.tsx`
-2. `editor/CanvasEditor.tsx`
-3. `canvas-engine-types.ts`
-4. `shapes/`
+2. `runtime/useCanvasViewportQueries.ts`
+3. `runtime/canvas-viewport-load-policy.ts`
+4. `editor/CanvasEditor.tsx`
+5. `canvas-engine-types.ts`
+6. `shapes/`
 
 `ClassicCanvasRuntime`은 저장과 collaboration 모듈을 연결하고,
 `CanvasEditor`는 tldraw editor 안에서 발생하는 동작을 조립한다.
@@ -34,3 +36,14 @@
 
 파일과 폴더 읽기·검증은 `imports/`가 담당하고, `CanvasFileDropImporter`는 editor 좌표와
 Shape 배치만 담당한다. Socket 연결과 room lifecycle은 `collaboration/`에 남긴다.
+
+## runtime 내부 책임
+
+`ClassicCanvasRuntime.tsx`는 hook과 상태 ref를 조립하고 effect/callback 실행 순서를
+유지한다. 원격 변경을 보호하는 규칙은 `canvas-deferred-remote-operations.ts`,
+roomState에 revision과 content hash를 보존하는 변환은
+`canvas-room-shape-serialization.ts`가 담당한다.
+
+`useCanvasViewportQueries.ts`는 viewport와 frame 자식의 실제 요청 순서를 소유한다.
+`canvas-viewport-load-policy.ts`는 이미 불러온 viewport 범위 판정, frame 자식 조회 대상
+판정, persisted metadata 읽기처럼 요청 순서와 무관한 순수 규칙만 제공한다.

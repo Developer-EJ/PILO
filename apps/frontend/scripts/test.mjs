@@ -97,13 +97,15 @@ const workspaceCreationRoute = await readFile(
   new URL("../src/app/workspace/new/page.tsx", import.meta.url),
   "utf8"
 );
-const canvasRuntime = await readFile(
-  new URL(
-    "../src/features/canvas/engine/runtime/ClassicCanvasRuntime.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
+const canvasRuntime = (
+  await Promise.all(
+    [
+      "../src/features/canvas/engine/runtime/ClassicCanvasRuntime.tsx",
+      "../src/features/canvas/engine/runtime/canvas-deferred-remote-operations.ts",
+      "../src/features/canvas/engine/runtime/canvas-room-shape-serialization.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasRuntimeTypes = await readFile(
   new URL(
     "../src/features/canvas/engine/runtime/canvas-runtime-types.ts",
@@ -153,13 +155,14 @@ const canvasInitialCamera = await readFile(
   ),
   "utf8"
 );
-const canvasViewportQueries = await readFile(
-  new URL(
-    "../src/features/canvas/engine/runtime/useCanvasViewportQueries.ts",
-    import.meta.url
-  ),
-  "utf8"
-);
+const canvasViewportQueries = (
+  await Promise.all(
+    [
+      "../src/features/canvas/engine/runtime/useCanvasViewportQueries.ts",
+      "../src/features/canvas/engine/runtime/canvas-viewport-load-policy.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasZoomControls = await readFile(
   new URL(
     "../src/features/canvas/engine/runtime/CanvasZoomControls.tsx",
@@ -282,10 +285,14 @@ const canvasRealtimeClient = await readFile(
   new URL("../src/shared/canvas-realtime/canvas-realtime-client.ts", import.meta.url),
   "utf8"
 );
-const canvasPresenceHook = await readFile(
-  new URL("../src/features/canvas/collaboration/useCanvasRoom.ts", import.meta.url),
-  "utf8"
-);
+const canvasPresenceHook = (
+  await Promise.all(
+    [
+      "../src/features/canvas/collaboration/useCanvasRoom.ts",
+      "../src/features/canvas/collaboration/canvas-presence-normalization.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasRemoteShapePreviewStore = await readFile(
   new URL(
     "../src/features/canvas/collaboration/canvas-remote-shape-preview-store.ts",
