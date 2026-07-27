@@ -83,6 +83,7 @@ import {
 } from "@/features/sql-erd/realtime/sql-erd-table-move-preview";
 import { useSqlErdOperationSync } from "@/features/sql-erd/realtime/use-sql-erd-operation-sync";
 import { useSqlErdSourceLock } from "@/features/sql-erd/realtime/use-sql-erd-source-lock";
+import { shouldHoldSqlErdSourceLock } from "@/features/sql-erd/realtime/source-lock-state";
 import { applySqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-layout";
 import { createSqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-patch";
 import {
@@ -178,6 +179,7 @@ import {
   getSqlErdWorkspaceSaveErrorState
 } from "@/features/sql-erd/utils/status-copy";
 import type { SqlErdSourceAutosaveState } from "@/features/sql-erd/utils/status-copy";
+import { classifySqlErdSourceAutosaveError } from "@/features/sql-erd/utils/source-autosave-error";
 import {
   createSqlSourceEditorDialectReconfigureEffect,
   getSqlSourceEditorLanguageExtension,
@@ -392,6 +394,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   const isWriteProtocolMismatchRef = useRef(false);
   currentSessionIdRef.current = sessionId;
   const [isSourceOpen, setIsSourceOpen] = useState(false);
+  const [isSourceEditorEngaged, setIsSourceEditorEngaged] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [panelContainerWidth, setPanelContainerWidth] = useState(0);
   const [sourcePanelWidth, setSourcePanelWidth] = useState(
@@ -697,11 +700,18 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     }),
     [accessToken, activeWorkspaceId, sqlErdViewSession.id]
   );
-  const sourceLock = useSqlErdSourceLock({
-    active:
-      isSourceOpen &&
+  const shouldHoldSourceLock = shouldHoldSqlErdSourceLock({
+    enabled:
       isSessionReady &&
       sqlErdViewSession.writeProtocol === "operations_v1",
+    hasDirtyDraft: isSqlErdDraftDirty(sqlErdEditState),
+    hasPendingSave: isSourceMutationSavePending,
+    isEditorEngaged: isSourceEditorEngaged,
+    isMutationApplying: isNormalizedSqlApplying,
+    isMutationPreviewOpen: normalizedSqlPreview !== null
+  });
+  const sourceLock = useSqlErdSourceLock({
+    active: shouldHoldSourceLock,
     client: sourceLockClient
   });
   const recordCommittedTableMove = useCallback(
@@ -849,7 +859,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         tone: "neutral" as const
       }
     : sqlErdViewSession.writeProtocol === "operations_v1" &&
-    isSourceOpen &&
+    shouldHoldSourceLock &&
     !sourceLock.canEdit
       ? {
           label: sourceLock.status === "acquiring" ? "잠금 확인 중" : "읽기 전용",
@@ -2107,26 +2117,21 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
-        if (isSqlErdWriteProtocolMismatchError(error)) {
-          setSourceAutosaveRetryAttempt(0);
-          setLayoutAutosaveBlockReason("write_protocol_mismatch");
-          setSessionLoadState({
-            label: "읽기 전용",
-            message: getLayoutAutosavePausedBanner("write_protocol_mismatch")
-              .message,
-            tone: "error"
-          });
-          return;
-        }
+        const sourceAutosaveError = classifySqlErdSourceAutosaveError({
+          code: error instanceof SqlErdApiError ? error.code : undefined,
+          path: error instanceof SqlErdApiError ? error.path : undefined,
+          status: error instanceof SqlErdApiError ? error.status : undefined
+        });
 
-        const autosaveBlockReason = getLayoutAutosaveBlockReason(error);
-
-        if (autosaveBlockReason) {
+        if (sourceAutosaveError.kind === "layout_block") {
+          const autosaveBlockReason = sourceAutosaveError.reason;
           setSourceAutosaveRetryAttempt(0);
           setLayoutAutosaveBlockReason(autosaveBlockReason);
           setSessionLoadState({
             label:
-              autosaveBlockReason === "conflict"
+              autosaveBlockReason === "write_protocol_mismatch"
+                ? "읽기 전용"
+                : autosaveBlockReason === "conflict"
                 ? "저장 충돌"
                 : "자동 저장 중지",
             message: getLayoutAutosavePausedBanner(autosaveBlockReason)
@@ -2136,13 +2141,26 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
           return;
         }
 
-        if (isSqlErdApiTransientAutosaveError(error)) {
+        if (sourceAutosaveError.kind === "source_conflict") {
           setSourceAutosaveState("retrying");
           setSourceAutosaveRetryAttempt(
             (currentAttempt) => currentAttempt + 1
           );
-          setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
+          setSessionLoadState({
+            label: "잠금 재확인",
+            message:
+              "SQL source 편집 잠금이 변경되어 다시 확인합니다. 캔버스 변경 사항은 계속 저장됩니다.",
+            tone: "neutral"
+          });
+          void sourceLock.recover();
+          return;
         }
+
+        setSourceAutosaveState("retrying");
+        setSourceAutosaveRetryAttempt(
+          (currentAttempt) => currentAttempt + 1
+        );
+        setSessionLoadState(getSqlErdWorkspaceSaveErrorState());
       } finally {
         completeAutosave(requestLifecycleGeneration);
       }
@@ -2621,6 +2639,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         onDialectChange={handleDialectChange}
         onPreviewNormalizedSql={handlePreviewNormalizedSql}
         onRedoNormalizedSql={handleRedoNormalizedSql}
+        onSourceEditIntentChange={setIsSourceEditorEngaged}
         onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
         onUndoNormalizedSql={handleUndoNormalizedSql}
@@ -2634,6 +2653,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         sourceText={sqlErdEditState.draftSourceText}
         resolvedDialect={sourceEditorDialect}
         relationSourceRanges={selectedRelationSourceRanges}
+        requestFocusWhenEditable={isSourceEditorEngaged}
         sourceNavigationRequest={sourceNavigationRequest}
         width={clampedSourcePanelWidth}
       />
@@ -3133,12 +3153,14 @@ type SourcePanelProps = PanelToggleProps & {
   onDialectChange: (dialect: SqltoerdDialect) => void;
   onPreviewNormalizedSql: () => void;
   onRedoNormalizedSql: () => void;
+  onSourceEditIntentChange: (engaged: boolean) => void;
   onSourceTextChange: (sourceText: string) => void;
   onUndoNormalizedSql: () => void;
   sessionLoadState: SqlErdSessionLoadState;
   sourceText: string;
   resolvedDialect: SqltoerdResolvedDialect;
   relationSourceRanges: SqltoerdSourceRange[];
+  requestFocusWhenEditable: boolean;
   sourceNavigationRequest: SqlErdSourceNavigationRequest | null;
   width: number;
 };
@@ -3155,6 +3177,7 @@ function SourcePanel({
   onDialectChange,
   onPreviewNormalizedSql,
   onRedoNormalizedSql,
+  onSourceEditIntentChange,
   onSourceTextChange,
   onToggle,
   onUndoNormalizedSql,
@@ -3162,6 +3185,7 @@ function SourcePanel({
   sourceText,
   resolvedDialect,
   relationSourceRanges,
+  requestFocusWhenEditable,
   sourceNavigationRequest,
   width
 }: SourcePanelProps) {
@@ -3271,9 +3295,11 @@ function SourcePanel({
         </p>
         <SqlSourceEditor
           dialect={resolvedDialect}
+          onEditIntentChange={onSourceEditIntentChange}
           onChange={onSourceTextChange}
           readOnly={isSourceTextReadOnly}
           relationSourceRanges={relationSourceRanges}
+          requestFocusWhenEditable={requestFocusWhenEditable}
           navigationRequest={sourceNavigationRequest}
           value={sourceText}
         />
@@ -3346,18 +3372,22 @@ function CollapsedSourcePanel({ onToggle }: { onToggle: () => void }) {
 type SqlSourceEditorProps = {
   dialect: SqltoerdResolvedDialect;
   navigationRequest: SqlErdSourceNavigationRequest | null;
+  onEditIntentChange: (engaged: boolean) => void;
   onChange: (sourceText: string) => void;
   readOnly: boolean;
   relationSourceRanges: SqltoerdSourceRange[];
+  requestFocusWhenEditable: boolean;
   value: string;
 };
 
 function SqlSourceEditor({
   dialect,
   navigationRequest,
+  onEditIntentChange,
   onChange,
   readOnly,
   relationSourceRanges,
+  requestFocusWhenEditable,
   value
 }: SqlSourceEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -3368,10 +3398,15 @@ function SqlSourceEditor({
   const isApplyingExternalValueRef = useRef(false);
   const lastNavigationRequestIdRef = useRef<number | null>(null);
   const onChangeRef = useRef(onChange);
+  const onEditIntentChangeRef = useRef(onEditIntentChange);
 
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  useEffect(() => {
+    onEditIntentChangeRef.current = onEditIntentChange;
+  }, [onEditIntentChange]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -3426,6 +3461,7 @@ function SqlSourceEditor({
     viewRef.current = view;
 
     return () => {
+      onEditIntentChangeRef.current(false);
       view.destroy();
       viewRef.current = null;
     };
@@ -3512,7 +3548,10 @@ function SqlSourceEditor({
         EditorView.editable.of(!readOnly)
       ])
     });
-  }, [readOnly]);
+    if (!readOnly && requestFocusWhenEditable) {
+      viewRef.current?.focus();
+    }
+  }, [readOnly, requestFocusWhenEditable]);
 
   return (
     <div
@@ -3521,7 +3560,18 @@ function SqlSourceEditor({
         "min-h-0 flex-1 overflow-hidden border-0 bg-white text-slate-900",
         readOnly && "cursor-progress opacity-80"
       )}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          onEditIntentChange(false);
+        }
+      }}
+      onFocusCapture={() => onEditIntentChange(true)}
+      onPointerDownCapture={(event) => {
+        event.currentTarget.focus({ preventScroll: true });
+        onEditIntentChange(true);
+      }}
       ref={containerRef}
+      tabIndex={0}
     />
   );
 }

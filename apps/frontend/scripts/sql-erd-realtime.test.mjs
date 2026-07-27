@@ -29,6 +29,11 @@ async function loadOperationSyncRuntime() {
     outputDir,
     "source-lock-controller.mjs"
   );
+  const sessionStateOutputPath = join(outputDir, "session-state.mjs");
+  const sourceAutosaveErrorOutputPath = join(
+    outputDir,
+    "source-autosave-error.mjs"
+  );
   try {
     await compileRuntimeModule(
       "../src/features/sql-erd/realtime/operation-sync-state.ts",
@@ -43,9 +48,22 @@ async function loadOperationSyncRuntime() {
       sourceLockControllerOutputPath,
       [[/from "\.\/source-lock-state"/g, 'from "./source-lock-state.mjs"']]
     );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/utils/session-state.ts",
+      sessionStateOutputPath
+    );
+    await compileRuntimeModule(
+      "../src/features/sql-erd/utils/source-autosave-error.ts",
+      sourceAutosaveErrorOutputPath,
+      [[
+        /from "@\/features\/sql-erd\/utils\/session-state"/g,
+        'from "./session-state.mjs"'
+      ]]
+    );
 
     return {
       operationSync: await import(`${new URL(`file:///${outputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      sourceAutosaveError: await import(`${new URL(`file:///${sourceAutosaveErrorOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       sourceLock: await import(`${new URL(`file:///${sourceLockOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       sourceLockController: await import(`${new URL(`file:///${sourceLockControllerOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       outputDir
@@ -526,6 +544,7 @@ assert.equal(
   const {
     operationSync,
     outputDir,
+    sourceAutosaveError,
     sourceLock,
     sourceLockController
   } = await loadOperationSyncRuntime();
@@ -630,6 +649,35 @@ assert.equal(
       }),
       false,
       "operations_v1이 아니면 편집 의도가 있어도 source lock을 사용하지 않는다"
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/source-snapshots",
+        status: 409
+      }),
+      { kind: "source_conflict" }
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/operations",
+        status: 409
+      }),
+      { kind: "layout_block", reason: "conflict" }
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        code: "SQL_ERD_WRITE_PROTOCOL_MISMATCH",
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/source-snapshots",
+        status: 409
+      }),
+      { kind: "layout_block", reason: "write_protocol_mismatch" }
+    );
+    assert.deepEqual(
+      sourceAutosaveError.classifySqlErdSourceAutosaveError({
+        path: "/workspaces/workspace-1/sql-erd/sessions/session-1/source-snapshots",
+        status: 503
+      }),
+      { kind: "retry" }
     );
 
     const heldLeases = new Map();
