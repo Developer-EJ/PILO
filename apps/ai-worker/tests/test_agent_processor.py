@@ -382,6 +382,61 @@ def meeting_search_catalog(tools: list[dict[str, object]]) -> dict[str, object]:
     return catalog
 
 
+def meeting_search_with_unified_catalog(
+    tools: list[dict[str, object]],
+) -> dict[str, object]:
+    catalog = tool_capability_catalog(tools)
+    catalog["version"] = "agent-tool-capabilities:v3"
+    for capability, descriptor in zip(
+        catalog["capabilities"],
+        catalog["descriptors"],
+        strict=True,
+    ):
+        tool_name = descriptor["toolName"]
+        capability_id = (
+            "meeting.report.unified_search"
+            if tool_name == "search_meeting_reports"
+            else "meeting.evidence.search"
+        )
+        examples = [
+            {"kind": "canonical", "utterance": "배포 지연 회의 근거 찾아줘"},
+            {"kind": "paraphrase", "utterance": "API v2 발언을 검색해줘"},
+            {"kind": "typo", "utterance": "회의 근거 찿아줘"},
+            {"kind": "honorific", "utterance": "회의 근거를 찾아주세요"},
+            {"kind": "abbreviation", "utterance": "회의 RAG"},
+        ]
+        capability.update(
+            {
+                "id": capability_id,
+                "domain": "meeting",
+                "toolNames": [tool_name],
+                "whenToUse": "회의 제목과 실제 내용 근거를 검색할 때",
+                "mustNotUseFor": ["단순 회의록 목록"],
+                "positiveExamples": [example["utterance"] for example in examples],
+                "examples": examples,
+                "selectorKinds": ["meeting_report", "query"],
+                "requiresConfirmation": False,
+                "availability": "supported",
+            }
+        )
+        descriptor.update(
+            {
+                "domain": "meeting",
+                "operation": "read",
+                "capabilityIds": [capability_id],
+                "whenToUse": "회의 제목과 실제 내용 근거를 검색할 때",
+                "mustNotUseFor": ["단순 회의록 목록"],
+                "selectorKinds": ["meeting_report", "query"],
+                "prerequisiteToolNames": [],
+                "followUpToolNames": [],
+            }
+        )
+    catalog["sha256"] = compute_tool_capability_catalog_sha(
+        catalog["version"], catalog["capabilities"], catalog["descriptors"]
+    )
+    return catalog
+
+
 def meeting_search_and_summary_catalog(
     tools: list[dict[str, object]],
 ) -> dict[str, object]:
@@ -2244,6 +2299,96 @@ def test_content_discussion_request_corrects_report_list_to_workspace_evidence_s
     )
 
     assert corrected.capability_ids == ("meeting.evidence.search",)
+
+
+def test_meeting_content_routing_prefers_unified_search_when_available() -> None:
+    tools = [
+        tool_snapshot(
+            name="search_meeting_transcript",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {"query": {"type": "string"}},
+            },
+        ),
+        tool_snapshot(
+            name="search_meeting_reports",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "reportTitle": {"type": "string"},
+                },
+            },
+        ),
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_with_unified_catalog(tools),
+        )
+    )
+    assert job.tool_capability_catalog is not None
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="routed",
+            domains=("meeting",),
+            capability_ids=("meeting.evidence.search",),
+            intent_summary="회의 내용 근거 검색",
+            confidence="high",
+            clarification_question=None,
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt="‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+    )
+
+    assert corrected.capability_ids == ("meeting.report.unified_search",)
+
+
+def test_unified_meeting_search_normalizes_title_and_content_query() -> None:
+    tools = [
+        tool_snapshot(
+            name="search_meeting_reports",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "reportTitle": {"type": "string"},
+                },
+            },
+        )
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_with_unified_catalog(tools),
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        AgentPlannerDecision(
+            status="tool_candidate",
+            message="회의 근거 검색",
+            final_answer_draft="검색합니다.",
+            tool_name="search_meeting_reports",
+            tool_input={"query": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?"},
+            requires_confirmation=False,
+            missing_fields=(),
+            unsupported_reason=None,
+        ),
+        job,
+        prompt="‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.output_summary["toolName"] == "search_meeting_reports"
+    assert normalized.output_summary["input"]["reportTitle"] == "온보딩 주간회의"
+    assert normalized.output_summary["input"]["query"] == "API 배포 일정을 어떻게 정했어?"
 
 
 @pytest.mark.parametrize(

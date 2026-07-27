@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AgentToolDefinition } from "./types/agent-tool.types";
 
 export const AGENT_TOOL_CAPABILITY_CATALOG_VERSION =
-  "agent-tool-capabilities:v2";
+  "agent-tool-capabilities:v3";
 
 export type AgentCapabilityAvailability = "supported" | "unsupported";
 
@@ -89,6 +89,7 @@ const TOOL_DOMAIN_BY_NAME: Readonly<Record<string, string>> = {
   resolve_board_context: "board",
   resolve_meeting_resource: "meeting",
   search_board_issues: "board",
+  search_meeting_reports: "meeting",
   search_meeting_transcript: "meeting",
   search_workspace_documents: "drive",
   start_meeting_in_room: "meeting",
@@ -128,6 +129,7 @@ const TOOL_OPERATION_BY_NAME: Readonly<Record<string, AgentToolOperation>> = {
   resolve_board_context: "read",
   resolve_meeting_resource: "read",
   search_board_issues: "read",
+  search_meeting_reports: "read",
   search_meeting_transcript: "read",
   search_workspace_documents: "read",
   start_meeting_in_room: "write",
@@ -156,6 +158,20 @@ const CAPABILITY_DEFINITIONS: AgentCapabilityDefinition[] = [
   capability("meeting.reports.list", "meeting", ["list_meeting_reports"], "최신 N건, 기간별 또는 exact 제목 회의록 목록을 조회할 때", ["실제 발언, 결정 이유 또는 활동 근거를 찾는 요청"], ["최근 회의록 보여줘", "최근 3건 회의록"]),
   capability("meeting.report.detail", "meeting", ["list_meeting_reports", "get_meeting_report"], "특정 회의록의 상태나 상세를 확인할 때", ["실제 발언, 결정 이유 또는 활동 근거를 찾는 요청"]),
   capability("meeting.report.summary", "meeting", ["summarize_meeting_report"], "회의록의 요약, 결정사항, 논의, 후속 작업을 요청할 때", ["원문 근거 검색 요청"]),
+  capability(
+    "meeting.report.unified_search",
+    "meeting",
+    ["search_meeting_reports"],
+    "MeetingReport 제목, 회의 시작 날짜와 실제 transcript·Activity 내용을 한 요청에서 검색할 때. exact 제목, 유사 제목, 하이브리드 내용 검색을 서버가 순서대로 수행하며 새 검색에서는 이 capability를 우선 사용",
+    [
+      "근거 검색이 필요 없는 단순 최신 회의록 목록",
+      "회의록 수정, 재생성 또는 후속 작업 변경"
+    ],
+    [
+      "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+      "지난주 회의에서 API v2를 언급한 내용 찾아줘"
+    ]
+  ),
   capability(
     "meeting.report.hybrid_search",
     "meeting",

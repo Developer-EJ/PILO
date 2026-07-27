@@ -2357,6 +2357,7 @@ for (const testCase of [
     "leave_meeting",
     "start_meeting_recording",
     "end_meeting_recording",
+    "search_meeting_reports",
     "list_meeting_reports",
     "get_meeting_report",
     "summarize_meeting_report",

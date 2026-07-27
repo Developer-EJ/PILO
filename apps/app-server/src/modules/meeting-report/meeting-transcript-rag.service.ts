@@ -9,6 +9,8 @@ import {
 import { WorkspaceService } from "../workspace/workspace.service";
 
 const MAX_RESULTS = 5;
+const MAX_CANDIDATE_RESULTS = 20;
+const MAX_REPORT_SCOPE = 500;
 const MAX_LEXICAL_TERMS = 8;
 const DIRECT_REFERENCE_DISTANCE_BOOST = 0.08;
 const SEMANTIC_DUPLICATE_DISTANCE = 0.12;
@@ -48,7 +50,15 @@ const LEXICAL_STOP_WORDS = new Set([
   "for"
 ]);
 
-export interface MeetingTranscriptSearchInput { query: string; reportId?: string }
+export interface MeetingTranscriptSearchInput {
+  query: string;
+  /** @deprecated Use reportIds for new callers. */
+  reportId?: string;
+  reportIds?: string[];
+  /** Meeting occurrence range. These filters use meetings.started_at. */
+  from?: string;
+  to?: string;
+}
 export type MeetingEvidenceSourceType = "transcript" | "activity";
 export interface MeetingEvidenceSource {
   sourceId: string;
@@ -78,69 +88,145 @@ export class MeetingTranscriptRagService {
   async search(currentUserId: string, workspaceId: string, input: MeetingTranscriptSearchInput): Promise<MeetingEvidenceSource[]> {
     await this.workspaceService.assertWorkspaceAccess(currentUserId, workspaceId);
     const query = input.query.trim();
-    if (!query || query.length > 1000 || (input.reportId && !UUID.test(input.reportId))) throw badRequest("Invalid Meeting evidence search input");
+    const hasExplicitReportScope =
+      input.reportId !== undefined || input.reportIds !== undefined;
+    const reportIds = [
+      ...new Set([
+        ...(input.reportId ? [input.reportId] : []),
+        ...(input.reportIds ?? [])
+      ])
+    ];
+    const from = this.normalizeDate(input.from, "from");
+    const to = this.normalizeDate(input.to, "to");
+    if (
+      !query ||
+      query.length > 1000 ||
+      reportIds.length > MAX_REPORT_SCOPE ||
+      reportIds.some((reportId) => !UUID.test(reportId)) ||
+      (from && to && Date.parse(from) >= Date.parse(to))
+    ) {
+      throw badRequest("Invalid Meeting evidence search input");
+    }
+    if (hasExplicitReportScope && reportIds.length === 0) return [];
     const embedding = await embedGroundingQuery(query);
     const vector = `[${embedding.join(",")}]`;
     const minimumSimilarity = meetingRagMinimumSimilarity();
     const lexicalTerms = this.extractLexicalTerms(query);
     const [transcriptRows, activityRows] = await Promise.all([
       this.database.query<{ id: string; meeting_report_id: string; started_at_ms: number; ended_at_ms: number; content: string; distance: number; lexical_match: boolean }>(`
-        SELECT chunk.id, chunk.meeting_report_id, chunk.started_at_ms, chunk.ended_at_ms, chunk.content,
-          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance,
-          EXISTS (
-            SELECT 1
-            FROM unnest($7::text[]) lexical_term
-            WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
-          ) AS lexical_match
-        FROM meeting_report_transcript_chunks chunk
-        JOIN meeting_reports report ON report.id = chunk.meeting_report_id
-        JOIN meetings meeting ON meeting.id = report.meeting_id
-        WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
-          AND ${this.latestCompletedTranscriptIndexWhere()}
-          AND (
-            1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
-            OR EXISTS (
+        WITH candidates AS (
+          SELECT
+            chunk.id,
+            chunk.meeting_report_id,
+            chunk.started_at_ms,
+            chunk.ended_at_ms,
+            chunk.content,
+            chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
+              AS distance,
+            EXISTS (
               SELECT 1
               FROM unnest($7::text[]) lexical_term
               WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+            ) AS lexical_match
+          FROM meeting_report_transcript_chunks chunk
+          JOIN meeting_reports report ON report.id = chunk.meeting_report_id
+          JOIN meetings meeting ON meeting.id = report.meeting_id
+          WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
+            AND ${this.latestCompletedTranscriptIndexWhere()}
+            AND (
+              1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
+              OR EXISTS (
+                SELECT 1
+                FROM unnest($7::text[]) lexical_term
+                WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+              )
             )
-          )
-        ORDER BY lexical_match DESC,
-          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
+        ),
+        ranked AS (
+          SELECT
+            candidates.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY candidates.meeting_report_id
+              ORDER BY candidates.lexical_match DESC, candidates.distance,
+                candidates.id
+            ) AS report_rank
+          FROM candidates
+        )
+        SELECT
+          id,
+          meeting_report_id,
+          started_at_ms,
+          ended_at_ms,
+          content,
+          distance,
+          lexical_match
+        FROM ranked
+        WHERE report_rank <= 3
+        ORDER BY lexical_match DESC, distance, id
         LIMIT $5
-      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity, lexicalTerms]),
+      `, [workspaceId, reportIds.length === 0 ? null : reportIds, currentUserId, vector, MAX_CANDIDATE_RESULTS, minimumSimilarity, lexicalTerms, from ?? null, to ?? null]),
       this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; distance: number; directly_referenced: boolean; lexical_match: boolean }>(`
-        SELECT chunk.id, chunk.meeting_report_id, chunk.occurred_at, chunk.action, chunk.summary, chunk.content,
-          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector AS distance,
-          EXISTS (
-            SELECT 1
-            FROM unnest($7::text[]) lexical_term
-            WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
-          ) AS lexical_match,
-          EXISTS (
-            SELECT 1
-            FROM meeting_report_activity_evidence_references reference
-            WHERE reference.meeting_report_id = chunk.meeting_report_id
-              AND reference.activity_evidence_id = chunk.activity_evidence_id
-              AND reference.source_type IN ('decision', 'action_item')
-          ) AS directly_referenced
-        FROM meeting_report_activity_evidence_chunks chunk
-        JOIN meeting_reports report ON report.id = chunk.meeting_report_id
-        JOIN meetings meeting ON meeting.id = report.meeting_id
-        WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
-          AND ${this.latestCompletedActivityIndexWhere()}
-          AND (
-            1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
-            OR EXISTS (
+        WITH candidates AS (
+          SELECT
+            chunk.id,
+            chunk.meeting_report_id,
+            chunk.occurred_at,
+            chunk.action,
+            chunk.summary,
+            chunk.content,
+            chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
+              AS distance,
+            EXISTS (
               SELECT 1
               FROM unnest($7::text[]) lexical_term
               WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+            ) AS lexical_match,
+            EXISTS (
+              SELECT 1
+              FROM meeting_report_activity_evidence_references reference
+              WHERE reference.meeting_report_id = chunk.meeting_report_id
+                AND reference.activity_evidence_id = chunk.activity_evidence_id
+                AND reference.source_type IN ('decision', 'action_item')
+            ) AS directly_referenced
+          FROM meeting_report_activity_evidence_chunks chunk
+          JOIN meeting_reports report ON report.id = chunk.meeting_report_id
+          JOIN meetings meeting ON meeting.id = report.meeting_id
+          WHERE ${this.authorizedReportWhere("chunk.embedding IS NOT NULL")}
+            AND ${this.latestCompletedActivityIndexWhere()}
+            AND (
+              1 - (chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector) >= $6
+              OR EXISTS (
+                SELECT 1
+                FROM unnest($7::text[]) lexical_term
+                WHERE lower(chunk.content) LIKE '%' || lexical_term || '%'
+              )
             )
-          )
-        ORDER BY lexical_match DESC,
-          chunk.embedding OPERATOR(extensions.<=>) $4::extensions.vector
+        ),
+        ranked AS (
+          SELECT
+            candidates.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY candidates.meeting_report_id
+              ORDER BY candidates.lexical_match DESC, candidates.distance,
+                candidates.id
+            ) AS report_rank
+          FROM candidates
+        )
+        SELECT
+          id,
+          meeting_report_id,
+          occurred_at,
+          action,
+          summary,
+          content,
+          distance,
+          directly_referenced,
+          lexical_match
+        FROM ranked
+        WHERE report_rank <= 3
+        ORDER BY lexical_match DESC, distance, id
         LIMIT $5
-      `, [workspaceId, input.reportId ?? null, currentUserId, vector, MAX_RESULTS, minimumSimilarity, lexicalTerms])
+      `, [workspaceId, reportIds.length === 0 ? null : reportIds, currentUserId, vector, MAX_CANDIDATE_RESULTS, minimumSimilarity, lexicalTerms, from ?? null, to ?? null])
     ]);
     const candidates: CandidateSource[] = [
       ...transcriptRows.map((row) => ({ sourceId: `transcript:${row.id}`, sourceType: "transcript" as const, reportId: row.meeting_report_id, startedAtMs: Number(row.started_at_ms), endedAtMs: Number(row.ended_at_ms), content: row.content.slice(0, 600), directlyReferenced: false, distance: Number(row.distance), lexicalMatch: Boolean(row.lexical_match) })),
@@ -168,7 +254,7 @@ export class MeetingTranscriptRagService {
         FROM meeting_report_transcript_chunks chunk
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
-        WHERE chunk.id = ANY($4::uuid[]) AND ${this.authorizedReportWhere("true")}
+        WHERE chunk.id = ANY($4::uuid[]) AND ${this.authorizedReportWhere("true", false)}
           AND ${this.latestCompletedTranscriptIndexWhere()}
       `, [workspaceId, null, currentUserId, transcriptIds]),
       activityIds.length === 0 ? Promise.resolve([]) : this.database.query<{ id: string; meeting_report_id: string; occurred_at: Date | string; action: string; summary: string; content: string; directly_referenced: boolean }>(`
@@ -182,7 +268,7 @@ export class MeetingTranscriptRagService {
         FROM meeting_report_activity_evidence_chunks chunk
         JOIN meeting_reports report ON report.id = chunk.meeting_report_id
         JOIN meetings meeting ON meeting.id = report.meeting_id
-        WHERE chunk.id = ANY($4::uuid[]) AND ${this.authorizedReportWhere("true")}
+        WHERE chunk.id = ANY($4::uuid[]) AND ${this.authorizedReportWhere("true", false)}
           AND ${this.latestCompletedActivityIndexWhere()}
       `, [workspaceId, null, currentUserId, activityIds])
     ]);
@@ -207,9 +293,16 @@ export class MeetingTranscriptRagService {
     }))];
   }
 
-  private authorizedReportWhere(indexedCondition: string): string {
+  private authorizedReportWhere(
+    indexedCondition: string,
+    includeMeetingDateRange = true
+  ): string {
     return `meeting.workspace_id = $1::uuid
-      AND ($2::uuid IS NULL OR report.id = $2::uuid)
+      AND ($2::uuid[] IS NULL OR report.id = ANY($2::uuid[]))
+      ${includeMeetingDateRange
+        ? `AND ($8::timestamptz IS NULL OR meeting.started_at >= $8::timestamptz)
+      AND ($9::timestamptz IS NULL OR meeting.started_at < $9::timestamptz)`
+        : ""}
       AND ${indexedCondition}
       AND (
         EXISTS (SELECT 1 FROM workspace_members member WHERE member.workspace_id = meeting.workspace_id AND member.user_id = $3::uuid AND member.role = 'owner')
@@ -310,18 +403,31 @@ export class MeetingTranscriptRagService {
         return candidatesForType.length === 0 ? [] : [candidatesForType[0]];
       })
     );
+    const ranked = representatives.sort(compare);
     const selected: CandidateSource[] = [];
+    const selectedIds = new Set<string>();
+    const selectedReportIds = new Set<string>();
+    const add = (candidate: CandidateSource | undefined) => {
+      if (!candidate || selectedIds.has(candidate.sourceId)) return;
+      selected.push(candidate);
+      selectedIds.add(candidate.sourceId);
+      selectedReportIds.add(candidate.reportId);
+    };
+
+    add(ranked[0]);
     for (const sourceType of ["transcript", "activity"] as const) {
-      const bestForType = representatives.filter((candidate) => candidate.sourceType === sourceType).sort(compare)[0];
-      if (bestForType) selected.push(bestForType);
-    }
-    const selectedIds = new Set(selected.map((candidate) => candidate.sourceId));
-    for (const candidate of representatives.sort(compare)) {
-      if (selected.length === MAX_RESULTS) break;
-      if (!selectedIds.has(candidate.sourceId)) {
-        selected.push(candidate);
-        selectedIds.add(candidate.sourceId);
+      if (selected.some((candidate) => candidate.sourceType === sourceType)) {
+        continue;
       }
+      add(ranked.find((candidate) => candidate.sourceType === sourceType));
+    }
+    for (const candidate of ranked) {
+      if (selected.length === MAX_RESULTS) break;
+      if (!selectedReportIds.has(candidate.reportId)) add(candidate);
+    }
+    for (const candidate of ranked) {
+      if (selected.length === MAX_RESULTS) break;
+      add(candidate);
     }
     return selected.map(({ distance, lexicalMatch: _lexicalMatch, ...source }) => ({
       ...source,
@@ -353,6 +459,17 @@ export class MeetingTranscriptRagService {
 
   private relevanceScore(candidate: CandidateSource): number {
     return candidate.distance - (candidate.directlyReferenced ? DIRECT_REFERENCE_DISTANCE_BOOST : 0);
+  }
+
+  private normalizeDate(
+    value: string | undefined,
+    field: "from" | "to"
+  ): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+      throw badRequest(`${field} must be an ISO 8601 date-time`);
+    }
+    return value;
   }
 
 }

@@ -144,7 +144,7 @@ def _job() -> AgentRunJob:
         run_id="00000000-0000-4000-8000-000000000001",
         workspace_id="00000000-0000-4000-8000-000000000002",
         requested_by_user_id="00000000-0000-4000-8000-000000000003",
-        tool_schema_version="agent-tools:v8",
+        tool_schema_version="agent-tools:v9",
         turn_sequence=1,
         tools=(tool,),
         tool_capability_catalog=catalog,

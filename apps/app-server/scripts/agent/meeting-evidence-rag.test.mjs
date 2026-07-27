@@ -24,6 +24,9 @@ const TRANSCRIPT_ID = "55555555-5555-4555-8555-555555555555";
 const ACTIVITY_ID = "66666666-6666-4666-8666-666666666666";
 const SECOND_TRANSCRIPT_ID = "77777777-7777-4777-8777-777777777777";
 const SECOND_ACTIVITY_ID = "88888888-8888-4888-8888-888888888888";
+const SECOND_REPORT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+const THIRD_REPORT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+const FOURTH_REPORT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
 
 {
   const previousThreshold = process.env.MEETING_RAG_MIN_SIMILARITY;
@@ -79,9 +82,14 @@ class FakeDatabase {
   }
 }
 
-const transcript = (id, distance, lexicalMatch = false) => ({
+const transcript = (
   id,
-  meeting_report_id: REPORT_ID,
+  distance,
+  lexicalMatch = false,
+  reportId = REPORT_ID
+) => ({
+  id,
+  meeting_report_id: reportId,
   started_at_ms: 1000,
   ended_at_ms: 2000,
   content: "다음 주로 미루기로 했습니다.",
@@ -92,10 +100,11 @@ const activity = (
   id,
   distance,
   directlyReferenced = true,
-  lexicalMatch = false
+  lexicalMatch = false,
+  reportId = REPORT_ID
 ) => ({
   id,
-  meeting_report_id: REPORT_ID,
+  meeting_report_id: reportId,
   occurred_at: "2026-07-16T01:00:00.000Z",
   action: "calendar_event_updated",
   summary: "디자인 리뷰 일정을 다음 주로 변경했습니다.",
@@ -148,11 +157,62 @@ try {
   assert.match(database.queries[1].text, /meeting_report_activity_evidence_embedding_jobs/);
   assert.match(database.queries[0].text, />= \$6/);
   assert.equal(database.queries[0].values[5], 0.23);
+  assert.equal(database.queries[0].values[4], 20);
+  assert.equal(database.queries[0].values[1], null);
   assert.deepEqual(database.queries[0].values[6], ["일정", "미뤄졌어"]);
   assert.match(database.queries[0].text, /unnest\(\$7::text\[\]\)/);
   assert.match(database.queries[1].text, /unnest\(\$7::text\[\]\)/);
+  assert.match(database.queries[0].text, /report\.id = ANY\(\$2::uuid\[\]\)/);
+  assert.match(database.queries[0].text, /meeting\.started_at >= \$8/);
+  assert.match(database.queries[0].text, /meeting\.started_at < \$9/);
+  assert.match(
+    database.queries[0].text,
+    /PARTITION BY candidates\.meeting_report_id/
+  );
+  assert.match(database.queries[0].text, /report_rank <= 3/);
   assert.match(database.queries[2].text, /transcript\.embedding OPERATOR\(extensions\.<=>\) activity\.embedding <= \$3/);
   assert.equal(workspaceService.calls.length, 1);
+
+  const scopedDatabase = new FakeDatabase({
+    transcripts: [transcript(TRANSCRIPT_ID, 0.1)],
+    activities: []
+  });
+  await new MeetingTranscriptRagService(
+    scopedDatabase,
+    workspaceService
+  ).search(USER_ID, WORKSPACE_ID, {
+    query: "배포 일정",
+    reportIds: [REPORT_ID, SECOND_REPORT_ID],
+    from: "2026-07-01T00:00:00.000Z",
+    to: "2026-08-01T00:00:00.000Z"
+  });
+  assert.deepEqual(scopedDatabase.queries[0].values[1], [
+    REPORT_ID,
+    SECOND_REPORT_ID
+  ]);
+  assert.equal(
+    scopedDatabase.queries[0].values[7],
+    "2026-07-01T00:00:00.000Z"
+  );
+  assert.equal(
+    scopedDatabase.queries[0].values[8],
+    "2026-08-01T00:00:00.000Z"
+  );
+  const emptyScopeDatabase = {
+    async query() {
+      throw new Error("an empty explicit report scope must not broaden search");
+    }
+  };
+  assert.deepEqual(
+    await new MeetingTranscriptRagService(
+      emptyScopeDatabase,
+      workspaceService
+    ).search(USER_ID, WORKSPACE_ID, {
+      query: "배포 일정",
+      reportIds: []
+    }),
+    []
+  );
 
   const lexicalDatabase = new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.9, true)],
@@ -194,6 +254,46 @@ try {
   assert.equal(crowdedSources.length, 5);
   assert.equal(crowdedSources.length, 5);
   assert.ok(crowdedSources.every((source) => source.sourceType === "activity"));
+
+  const diverseSources = await new MeetingTranscriptRagService(
+    new FakeDatabase({
+      transcripts: [
+        transcript(TRANSCRIPT_ID, 0.1),
+        transcript(SECOND_TRANSCRIPT_ID, 0.11),
+        transcript("99999999-9999-4999-8999-999999999999", 0.12),
+        transcript(
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+          0.13,
+          false,
+          SECOND_REPORT_ID
+        ),
+        transcript(
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5",
+          0.14,
+          false,
+          THIRD_REPORT_ID
+        ),
+        transcript(
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6",
+          0.15,
+          false,
+          FOURTH_REPORT_ID
+        )
+      ],
+      activities: []
+    }),
+    workspaceService
+  ).search(USER_ID, WORKSPACE_ID, {
+    query: "일정이 왜 미뤄졌어?"
+  });
+  assert.equal(diverseSources.length, 5);
+  assert.equal(
+    new Set(diverseSources.map((source) => source.reportId)).size,
+    4
+  );
+  assert.ok(
+    diverseSources.some((source) => source.reportId === FOURTH_REPORT_ID)
+  );
 
   const transcriptOnlySources = await new MeetingTranscriptRagService(new FakeDatabase({
     transcripts: [transcript(TRANSCRIPT_ID, 0.1)],

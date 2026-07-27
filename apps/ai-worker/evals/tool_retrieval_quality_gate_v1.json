@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92",
-    "catalogSha256": "186bb984659bc3fb67eaf68895fecacf91a953ea7ecf99956dbee4fd9a7ec482",
-    "eligibleSnapshotSha256": "13adc52ac165c9946c5ec66801aa2585fb0fcd5524c2917fe4f6330c83f67156"
+    "inventorySha256": "fc654d2599f9fd63be28ef597426195cc6ece4a2bb720584494513c4f8d3094a",
+    "catalogSha256": "9a2f47a39d7d1ed8c6b0d80a740cd69afc6d40885a67a0d3059ccfa0212222e0",
+    "eligibleSnapshotSha256": "7563b7d794777298980148a4df714d6c147021f1c69fe52216d58be16940b40b"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -1152,6 +1152,64 @@
         }
       }
     },
+    "search_meeting_reports": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "contextRef": {
+          "type": "string",
+          "pattern": "^ctx_[0-9a-f]{24}$"
+        },
+        "from": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "to": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "QUEUED",
+            "TRANSCRIBING",
+            "SUMMARIZING",
+            "PROCESSING",
+            "COMPLETED",
+            "FAILED"
+          ]
+        },
+        "reportTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "회의록 화면에 표시되는 제목입니다. 회의방 이름과 구분해 사용합니다."
+        },
+        "roomName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+        },
+        "useSelectedMeetingReportCandidate": {
+          "type": "boolean",
+          "const": true
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
     "search_meeting_transcript": {
       "type": "object",
       "required": [
@@ -1475,8 +1533,8 @@
     }
   },
   "toolCapabilityCatalog": {
-    "version": "agent-tool-capabilities:v2",
-    "sha256": "186bb984659bc3fb67eaf68895fecacf91a953ea7ecf99956dbee4fd9a7ec482",
+    "version": "agent-tool-capabilities:v3",
+    "sha256": "9a2f47a39d7d1ed8c6b0d80a740cd69afc6d40885a67a0d3059ccfa0212222e0",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -1932,6 +1990,52 @@
           {
             "kind": "abbreviation",
             "utterance": "meeting summary 요청"
+          }
+        ],
+        "selectorKinds": [
+          "meeting_report"
+        ],
+        "requiresConfirmation": false,
+        "availability": "supported"
+      },
+      {
+        "id": "meeting.report.unified_search",
+        "domain": "meeting",
+        "toolNames": [
+          "search_meeting_reports"
+        ],
+        "whenToUse": "MeetingReport 제목, 회의 시작 날짜와 실제 transcript·Activity 내용을 한 요청에서 검색할 때. exact 제목, 유사 제목, 하이브리드 내용 검색을 서버가 순서대로 수행하며 새 검색에서는 이 capability를 우선 사용",
+        "mustNotUseFor": [
+          "근거 검색이 필요 없는 단순 최신 회의록 목록",
+          "회의록 수정, 재생성 또는 후속 작업 변경"
+        ],
+        "positiveExamples": [
+          "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?",
+          "지난주 회의에서 API v2를 언급한 내용 찾아줘",
+          "‘온보딩주간회의’에서API배포일정을어떻게정했어?",
+          "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어? 부탁드려요",
+          "meeting unified_search 요청"
+        ],
+        "examples": [
+          {
+            "kind": "canonical",
+            "utterance": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?"
+          },
+          {
+            "kind": "paraphrase",
+            "utterance": "지난주 회의에서 API v2를 언급한 내용 찾아줘"
+          },
+          {
+            "kind": "typo",
+            "utterance": "‘온보딩주간회의’에서API배포일정을어떻게정했어?"
+          },
+          {
+            "kind": "honorific",
+            "utterance": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어? 부탁드려요"
+          },
+          {
+            "kind": "abbreviation",
+            "utterance": "meeting unified_search 요청"
           }
         ],
         "selectorKinds": [
@@ -4311,6 +4415,41 @@
         "inputSchemaSha256": "ebf7db5e86ac71fb7c255141af66d5afb2bb610738ddd707535588204a803c4a"
       },
       {
+        "toolName": "search_meeting_reports",
+        "domain": "meeting",
+        "action": "search_meeting_reports",
+        "operation": "read",
+        "capabilityIds": [
+          "meeting.report.unified_search"
+        ],
+        "whenToUse": "MeetingReport 제목, 회의 시작 날짜와 실제 transcript·Activity 내용을 한 요청에서 검색할 때. exact 제목, 유사 제목, 하이브리드 내용 검색을 서버가 순서대로 수행하며 새 검색에서는 이 capability를 우선 사용",
+        "mustNotUseFor": [
+          "근거 검색이 필요 없는 단순 최신 회의록 목록",
+          "회의록 수정, 재생성 또는 후속 작업 변경"
+        ],
+        "acceptedSelectorFields": [
+          "contextRef",
+          "from",
+          "limit",
+          "query",
+          "reportTitle",
+          "roomName",
+          "status",
+          "to",
+          "useSelectedMeetingReportCandidate"
+        ],
+        "selectorKinds": [
+          "meeting_report"
+        ],
+        "prerequisiteToolNames": [],
+        "followUpToolNames": [],
+        "riskLevel": "low",
+        "executionMode": "contextual",
+        "requiresConfirmation": false,
+        "contextSurface": null,
+        "inputSchemaSha256": "cbd8e1a432802e69bbeb9f41b3c5580298c01a4567167e614edd6dd16f2b6780"
+      },
+      {
         "toolName": "search_meeting_transcript",
         "domain": "meeting",
         "action": "search_meeting_transcript",
@@ -4722,6 +4861,7 @@
         "resolve_board_context",
         "resolve_meeting_resource",
         "search_board_issues",
+        "search_meeting_reports",
         "search_meeting_transcript",
         "search_workspace_documents",
         "start_meeting_in_room",
@@ -4785,6 +4925,7 @@
         "resolve_board_context",
         "resolve_meeting_resource",
         "search_board_issues",
+        "search_meeting_reports",
         "search_meeting_transcript",
         "search_workspace_documents",
         "start_meeting_in_room",
@@ -4834,6 +4975,7 @@
         "resolve_board_context",
         "resolve_meeting_resource",
         "search_board_issues",
+        "search_meeting_reports",
         "search_meeting_transcript",
         "search_workspace_documents",
         "start_meeting_in_room",
@@ -4881,6 +5023,7 @@
         "resolve_board_context",
         "resolve_meeting_resource",
         "search_board_issues",
+        "search_meeting_reports",
         "search_meeting_transcript",
         "search_workspace_documents",
         "start_meeting_in_room",
@@ -4928,6 +5071,7 @@
         "resolve_board_context",
         "resolve_meeting_resource",
         "search_board_issues",
+        "search_meeting_reports",
         "search_meeting_transcript",
         "search_workspace_documents",
         "start_meeting_in_room",

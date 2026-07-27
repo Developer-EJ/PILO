@@ -34,19 +34,19 @@ def test_quality_gate_records_reproducible_passing_baseline_without_sensitive_in
     assert report["metadata"] == {
         "suiteVersion": "tool-retrieval-quality-suite:v1",
         "suiteSha256": fixture_sha256(FIXTURE_PATH),
-        "catalogVersion": "agent-tool-capabilities:v2",
+        "catalogVersion": "agent-tool-capabilities:v3",
         "catalogSha256": fixture.catalog.sha256,
         "eligibleSnapshotSha256": (
-            "13adc52ac165c9946c5ec66801aa2585fb0fcd5524c2917fe4f6330c83f67156"
+            "7563b7d794777298980148a4df714d6c147021f1c69fe52216d58be16940b40b"
         ),
         "registryInventorySha256": (
-            "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92"
+            "fc654d2599f9fd63be28ef597426195cc6ece4a2bb720584494513c4f8d3094a"
         ),
         "registryCatalogSha256": (
-            "186bb984659bc3fb67eaf68895fecacf91a953ea7ecf99956dbee4fd9a7ec482"
+            "9a2f47a39d7d1ed8c6b0d80a740cd69afc6d40885a67a0d3059ccfa0212222e0"
         ),
         "registryEligibleSnapshotSha256": (
-            "13adc52ac165c9946c5ec66801aa2585fb0fcd5524c2917fe4f6330c83f67156"
+            "7563b7d794777298980148a4df714d6c147021f1c69fe52216d58be16940b40b"
         ),
         "modelVersion": "deterministic:no-provider",
         "retrieverVersion": "agent-tool-metadata-overlap:v5",

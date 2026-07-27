@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import "./delivery-options-contract.test.mjs";
+import "./meeting-report-search.test.mjs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 

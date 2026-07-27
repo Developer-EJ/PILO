@@ -12,6 +12,11 @@ import {
   MeetingReportSummaryPayload
 } from "../../meeting-report/meeting-report.service";
 import {
+  MeetingReportSearchService,
+  type MeetingReportSearchCandidate,
+  type MeetingReportSearchInput
+} from "../../meeting-report/meeting-report-search.service";
+import {
   MeetingActionItemDeliveryInput,
   MeetingActionItemDeliveryService
 } from "../../meeting-report/meeting-action-item-delivery.service";
@@ -135,6 +140,11 @@ interface ResolvedJoinMeetingInput extends MeetingIdInput {
 
 interface SearchMeetingTranscriptInput extends MeetingReportSelectorInput {
   query: string;
+}
+
+interface SearchMeetingReportsInput extends MeetingReportSelectorInput {
+  query: string;
+  limit: number;
 }
 
 interface FindActionItemsInput {
@@ -303,6 +313,11 @@ const JOIN_MEETING_INPUT_FIELDS = [
   "recordingConsent"
 ];
 const SEARCH_TRANSCRIPT_INPUT_FIELDS = ["query", ...REPORT_SELECTOR_INPUT_FIELDS];
+const SEARCH_MEETING_REPORTS_INPUT_FIELDS = [
+  "query",
+  ...REPORT_SELECTOR_INPUT_FIELDS,
+  "limit"
+];
 const FIND_ACTION_ITEMS_INPUT_FIELDS = [
   "contextRef",
   "useSelectedMeetingReportCandidate",
@@ -393,7 +408,9 @@ export class MeetingAgentToolsService {
     private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
     private readonly meetingAgentResourceResolver?: MeetingAgentResourceResolver,
     private readonly agentCandidateSelectionService?: AgentCandidateSelectionService,
-    @Optional() private readonly documentSearchService?: DocumentSearchService
+    @Optional() private readonly documentSearchService?: DocumentSearchService,
+    @Optional()
+    private readonly meetingReportSearchService?: MeetingReportSearchService
   ) {}
 
   listDefinitions(): AgentToolDefinition<unknown>[] {
@@ -407,6 +424,7 @@ export class MeetingAgentToolsService {
       this.leaveMeetingDefinition(),
       this.startMeetingRecordingDefinition(),
       this.endMeetingRecordingDefinition(),
+      this.searchMeetingReportsDefinition(),
       this.listMeetingReportsDefinition(),
       this.getMeetingReportDefinition(),
       this.summarizeMeetingReportDefinition(),
@@ -873,6 +891,38 @@ export class MeetingAgentToolsService {
     };
   }
 
+  private searchMeetingReportsDefinition(): AgentToolDefinition<unknown> {
+    return {
+      name: "search_meeting_reports",
+      description:
+        "MeetingReport 검색의 단일 진입점입니다. 회의 시작 시각 범위 안에서 표시 제목 exact, pg_trgm 유사 제목, transcript·Activity 하이브리드 근거 검색을 순서대로 수행합니다. 제목 후보가 여러 개이거나 단일 유사 후보의 신뢰도가 부족하면 근거 검색 전에 사용자 선택을 요청합니다.",
+      riskLevel: "low",
+      executionMode: "contextual",
+      requiresGroundedAnswer: true,
+      inputSchema: {
+        type: "object",
+        required: ["query"],
+        additionalProperties: false,
+        properties: {
+          query: { type: "string", minLength: 1, maxLength: 1000 },
+          ...this.meetingReportSelectorSchema(),
+          limit: { type: "integer", minimum: 1, maximum: 20 }
+        }
+      },
+      validateInput: (input) => this.validateSearchMeetingReportsInput(input),
+      prepareExecution: async (context, input) =>
+        this.prepareSearchMeetingReportsExecution(
+          context,
+          this.validateSearchMeetingReportsInput(input)
+        ),
+      execute: async (context, input) =>
+        this.executeSearchMeetingReports(
+          context,
+          this.validateSearchMeetingReportsInput(input)
+        )
+    };
+  }
+
   private searchMeetingTranscriptDefinition(): AgentToolDefinition<unknown> {
     return {
       name: "search_meeting_transcript",
@@ -967,6 +1017,197 @@ export class MeetingAgentToolsService {
     };
   }
 
+  private async prepareSearchMeetingReportsExecution(
+    context: AgentToolContext,
+    input: SearchMeetingReportsInput
+  ): Promise<{ kind: "execute" } | AgentToolClarificationResult> {
+    if (input.contextRef || input.useSelectedMeetingReportCandidate) {
+      return this.prepareMeetingReportSelectorExecution(context, input);
+    }
+    if (!input.reportTitle) {
+      return { kind: "execute" };
+    }
+
+    const result = await this.requireMeetingReportSearchService().search(
+      context.currentUserId,
+      context.workspaceId,
+      this.toMeetingReportSearchInput(input, false)
+    );
+    if (
+      result.status !== "candidates" ||
+      (result.matchedBy !== "exact_title" &&
+        result.matchedBy !== "fuzzy_title")
+    ) {
+      return { kind: "execute" };
+    }
+
+    return {
+      kind: "needs_clarification",
+      outputSummary: {
+        status: "needs_clarification",
+        matchedBy: result.matchedBy,
+        candidateCount:
+          result.matchedBy === "exact_title"
+            ? result.diagnostics.exactTitleCount
+            : result.diagnostics.fuzzyTitleCount,
+        question:
+          result.reports.length === 1
+            ? "입력한 제목과 정확히 일치하지 않습니다. 아래 유사 회의록으로 검색할지 확인해 주세요."
+            : "제목이 비슷한 회의록이 여러 개입니다. 검색할 회의록을 선택해 주세요."
+      },
+      resourceRefs: [],
+      candidateResources: result.reports.map((report) =>
+        this.toMeetingReportSearchCandidateResource(report)
+      )
+    };
+  }
+
+  private async executeSearchMeetingReports(
+    context: AgentToolContext,
+    input: SearchMeetingReportsInput
+  ): Promise<AgentToolExecutionResult> {
+    let reportIds: string[] | undefined;
+    if (input.contextRef || input.useSelectedMeetingReportCandidate) {
+      reportIds = [
+        (await this.requireResolvedReport(context, input)).resourceId
+      ];
+    }
+    const result = await this.requireMeetingReportSearchService().search(
+      context.currentUserId,
+      context.workspaceId,
+      this.toMeetingReportSearchInput(input, true, reportIds)
+    );
+    if (result.status === "candidates") {
+      throw badRequest(
+        "Meeting report title became ambiguous; choose a candidate and retry"
+      );
+    }
+
+    const meetingGroundingSources = result.evidence.map((source) => ({
+      sourceType:
+        source.sourceType === "transcript"
+          ? ("meeting_transcript" as const)
+          : ("meeting_activity" as const),
+      sourceRef: source.sourceId,
+      excerpt: source.content,
+      score: source.score ?? 0,
+      resourceRef: this.toMeetingReportResourceRef(source.reportId)
+    }));
+    const relatedDocuments = await this.searchRelatedDocuments(
+      context,
+      input.query,
+      result.evidence
+    );
+    const documentGroundingSources = relatedDocuments.map((document) => ({
+      sourceType: "drive_document" as const,
+      sourceRef: `drive_chunk:${document.chunkId}`,
+      title: document.title,
+      excerpt: document.excerpt,
+      score: document.score,
+      resourceRef: {
+        domain: "drive",
+        resourceType: "document",
+        resourceId: document.documentId,
+        label: document.title,
+        url: `/files?documentId=${encodeURIComponent(document.documentId)}`,
+        metadata: { headingPath: document.headingPath }
+      }
+    }));
+    const groundingSources = [
+      ...meetingGroundingSources,
+      ...documentGroundingSources
+    ];
+    const reportResourceRefs = new Map(
+      [
+        ...result.reports.map((report) => report.reportId),
+        ...result.evidence.map((source) => source.reportId)
+      ].map((reportId) => [
+        reportId,
+        this.toMeetingReportResourceRef(reportId)
+      ])
+    );
+    return {
+      outputSummary: {
+        status: "grounding_queued",
+        searchStatus: result.status,
+        matchedBy: result.matchedBy,
+        diagnostics: {
+          exactTitleCount: result.diagnostics.exactTitleCount,
+          fuzzyTitleCount: result.diagnostics.fuzzyTitleCount,
+          hybridReportCount: result.diagnostics.hybridReportCount
+        },
+        reports: result.reports.map((report) => ({
+          reportId: report.reportId,
+          title: this.boundText(report.title, 500),
+          status: report.status,
+          meetingStartedAt: report.meetingStartedAt,
+          roomName: this.boundText(report.roomName, 100),
+          ...(report.titleSimilarity === undefined
+            ? {}
+            : { titleSimilarity: report.titleSimilarity })
+        })),
+        groundingOutcome:
+          groundingSources.length === 0
+            ? "no_relevant_sources"
+            : "sources_found",
+        sourceCount: groundingSources.length,
+        sourceTypes: [
+          ...new Set(
+            groundingSources.map((source) => source.sourceType)
+          )
+        ].sort()
+      },
+      groundingSources,
+      resourceRefs: [
+        ...reportResourceRefs.values(),
+        ...documentGroundingSources.map((source) => source.resourceRef)
+      ],
+      status: "grounding_queued"
+    };
+  }
+
+  private toMeetingReportSearchInput(
+    input: SearchMeetingReportsInput,
+    includeContentQuery: boolean,
+    reportIds?: string[]
+  ): MeetingReportSearchInput {
+    return {
+      ...(reportIds
+        ? { reportIds }
+        : input.reportTitle
+          ? { title: input.reportTitle }
+          : {}),
+      ...(includeContentQuery ? { contentQuery: input.query } : {}),
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.to ? { to: input.to } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.roomName ? { roomName: input.roomName } : {}),
+      limit: input.limit
+    };
+  }
+
+  private toMeetingReportSearchCandidateResource(
+    report: MeetingReportSearchCandidate
+  ): NonNullable<AgentToolClarificationResult["candidateResources"]>[number] {
+    const description = [
+      report.meetingStartedAt,
+      report.roomName
+    ].filter((value): value is string => Boolean(value)).join(" · ");
+    return {
+      reference: {
+        domain: "meeting",
+        resourceType: "meeting_report",
+        resourceId: report.reportId
+      },
+      candidate: {
+        resourceType: "meeting_report",
+        label: report.title ?? "제목 없는 회의록",
+        description: description || null,
+        status: report.status
+      }
+    };
+  }
+
   private async searchRelatedDocuments(
     context: AgentToolContext,
     query: string,
@@ -1005,6 +1246,13 @@ export class MeetingAgentToolsService {
       resourceId: reportId,
       url: `/report?reportId=${encodeURIComponent(reportId)}`
     };
+  }
+
+  private requireMeetingReportSearchService(): MeetingReportSearchService {
+    if (!this.meetingReportSearchService) {
+      throw new Error("MeetingReportSearchService is required");
+    }
+    return this.meetingReportSearchService;
   }
 
   private listMeetingReportsDefinition(): AgentToolDefinition<unknown> {
@@ -3241,6 +3489,46 @@ export class MeetingAgentToolsService {
         useSelectedMeetingReportCandidate:
           object.useSelectedMeetingReportCandidate
       })
+    };
+  }
+
+  private validateSearchMeetingReportsInput(
+    input: unknown
+  ): SearchMeetingReportsInput {
+    const object = this.requirePlainObject(
+      input,
+      "Meeting report search input"
+    );
+    this.rejectForbiddenMeetingToolFields(object);
+    this.assertOnlyAllowedFields(
+      object,
+      SEARCH_MEETING_REPORTS_INPUT_FIELDS,
+      "Meeting report search input"
+    );
+    const query = this.boundText(
+      typeof object.query === "string" ? object.query : null,
+      1000
+    );
+    if (query === null) {
+      throw badRequest("query must be a non-empty string");
+    }
+    const limit = this.readOptionalLimit(object.limit) ?? 5;
+    if (limit > 20) {
+      throw badRequest("limit must be between 1 and 20");
+    }
+    return {
+      query,
+      ...this.validateMeetingReportSelectorInput({
+        contextRef: object.contextRef,
+        from: object.from,
+        to: object.to,
+        status: object.status,
+        reportTitle: object.reportTitle,
+        roomName: object.roomName,
+        useSelectedMeetingReportCandidate:
+          object.useSelectedMeetingReportCandidate
+      }),
+      limit
     };
   }
 
