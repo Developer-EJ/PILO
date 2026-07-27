@@ -586,6 +586,51 @@ assert.equal(
 
     assert.equal(sourceLock.getSourceLockIntervalRequest("held"), "renew");
     assert.equal(sourceLock.getSourceLockIntervalRequest("read_only"), "acquire");
+    assert.equal(
+      sourceLock.shouldHoldSqlErdSourceLock({
+        enabled: true,
+        hasDirtyDraft: false,
+        hasPendingSave: false,
+        isEditorEngaged: false,
+        isMutationApplying: false,
+        isMutationPreviewOpen: false
+      }),
+      false,
+      "Source 패널을 보기만 하는 상태는 lock을 유지하지 않는다"
+    );
+    for (const activeIntent of [
+      "hasDirtyDraft",
+      "hasPendingSave",
+      "isEditorEngaged",
+      "isMutationApplying",
+      "isMutationPreviewOpen"
+    ]) {
+      assert.equal(
+        sourceLock.shouldHoldSqlErdSourceLock({
+          enabled: true,
+          hasDirtyDraft: false,
+          hasPendingSave: false,
+          isEditorEngaged: false,
+          isMutationApplying: false,
+          isMutationPreviewOpen: false,
+          [activeIntent]: true
+        }),
+        true,
+        `${activeIntent} 상태는 source lock을 유지한다`
+      );
+    }
+    assert.equal(
+      sourceLock.shouldHoldSqlErdSourceLock({
+        enabled: false,
+        hasDirtyDraft: true,
+        hasPendingSave: true,
+        isEditorEngaged: true,
+        isMutationApplying: true,
+        isMutationPreviewOpen: true
+      }),
+      false,
+      "operations_v1이 아니면 편집 의도가 있어도 source lock을 사용하지 않는다"
+    );
 
     const heldLeases = new Map();
     const requests = [];
@@ -653,6 +698,65 @@ assert.equal(
       "acquire:second:second-lease-4",
       "release:second:second-lease-4"
     ]);
+
+    const transitionRequests = [];
+    let finishRelease;
+    let transitionLeaseNumber = 0;
+    const transitionController =
+      sourceLockController.createSqlErdSourceLockController({
+        client: {
+          acquireSourceLock: async (leaseId) => {
+            transitionRequests.push(`acquire:${leaseId}`);
+            return { leaseId };
+          },
+          releaseSourceLock: async (leaseId) => {
+            transitionRequests.push(`release:start:${leaseId}`);
+            await new Promise((resolve) => {
+              finishRelease = resolve;
+            });
+            transitionRequests.push(`release:end:${leaseId}`);
+          },
+          renewSourceLock: async (leaseId) => ({ leaseId })
+        },
+        createLeaseId: () => `transition-lease-${++transitionLeaseNumber}`
+      });
+
+    await transitionController.start();
+    const stopTransition = transitionController.stop();
+    const restartTransition = transitionController.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(transitionRequests, [
+      "acquire:transition-lease-1",
+      "release:start:transition-lease-1"
+    ]);
+    finishRelease();
+    await Promise.all([stopTransition, restartTransition]);
+    assert.deepEqual(transitionRequests, [
+      "acquire:transition-lease-1",
+      "release:start:transition-lease-1",
+      "release:end:transition-lease-1",
+      "acquire:transition-lease-2"
+    ]);
+
+    finishRelease = undefined;
+    const recoverTransition = transitionController.recover();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.deepEqual(transitionRequests.slice(-1), [
+      "release:start:transition-lease-2"
+    ]);
+    finishRelease();
+    await recoverTransition;
+    assert.deepEqual(transitionRequests.slice(-3), [
+      "release:start:transition-lease-2",
+      "release:end:transition-lease-2",
+      "acquire:transition-lease-3"
+    ]);
+    const finalStop = transitionController.stop();
+    await Promise.resolve();
+    finishRelease();
+    await finalStop;
   } finally {
     await rm(outputDir, { force: true, recursive: true });
   }
