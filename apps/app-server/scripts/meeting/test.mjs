@@ -6,11 +6,17 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { MeetingService } = require("../../dist/modules/meeting/meeting.service.js");
 const {
+  MeetingReportService
+} = require("../../dist/modules/meeting-report/meeting-report.service.js");
+const {
+  MeetingReportLifecycleService
+} = require("../../dist/modules/meeting-report/meeting-report-lifecycle.service.js");
+const {
   MeetingReportEventGuard
-} = require("../../dist/modules/meeting/meeting-report-event.guard.js");
+} = require("../../dist/modules/meeting-report/meeting-report-event.guard.js");
 const {
   MeetingReportInternalController
-} = require("../../dist/modules/meeting/meeting-report-internal.controller.js");
+} = require("../../dist/modules/meeting-report/meeting-report-internal.controller.js");
 const {
   MeetingRecordingRetentionService
 } = require("../../dist/modules/meeting/meeting-recording-retention.service.js");
@@ -30,9 +36,30 @@ const meetingControllerSource = await readFile(
   new URL("../../src/modules/meeting/meeting.controller.ts", import.meta.url),
   "utf8"
 );
+const meetingReportServiceSource = await readFile(
+  new URL(
+    "../../src/modules/meeting-report/meeting-report.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingReportLifecycleServiceSource = await readFile(
+  new URL(
+    "../../src/modules/meeting-report/meeting-report-lifecycle.service.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
+const meetingReportControllerSource = await readFile(
+  new URL(
+    "../../src/modules/meeting-report/meeting-report.controller.ts",
+    import.meta.url
+  ),
+  "utf8"
+);
 const meetingActionItemDeliverySource = await readFile(
   new URL(
-    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    "../../src/modules/meeting-report/meeting-action-item-delivery.service.ts",
     import.meta.url
   ),
   "utf8"
@@ -70,12 +97,12 @@ assert.match(
   /active_participant AS \(\s+SELECT meeting_participants\.\*/s
 );
 assert.match(
-  meetingControllerSource,
+  meetingReportControllerSource,
   /action-items\/:actionItemId\/delivery-options/,
   "Meeting API must provide Board and Column delivery options without a frontend Board dependency"
 );
 assert.match(
-  meetingControllerSource,
+  meetingReportControllerSource,
   /action-items\/:actionItemId\/deliveries/,
   "Meeting API must expose the composite action item delivery command"
 );
@@ -95,7 +122,7 @@ assert.match(
   "Pilo issue delivery must preserve the action item body and append the linked GitHub mention"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /getActionItemDeliverySuggestion/,
   "Meeting detail must expose the AI delivery suggestion for the approval UI"
 );
@@ -110,21 +137,31 @@ assert.match(
   /WHERE id = \$1\s+AND left_at IS NULL/
 );
 assert.match(meetingServiceSource, /COUNT\(DISTINCT user_id\)::int/);
-assert.match(meetingServiceSource, /SELECT DISTINCT ON \(meeting_participants\.user_id\)/);
+assert.match(
+  meetingReportLifecycleServiceSource,
+  /SELECT DISTINCT ON \(meeting_participants\.user_id\)/
+);
 assert.match(participantSessionMigration, /is_legacy_session boolean NOT NULL DEFAULT false/);
 assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_code TEXT/);
 assert.match(meetingReportContentEditsMigration, /ADD COLUMN title TEXT/);
 assert.match(meetingReportContentEditsMigration, /ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1/);
 assert.match(meetingReportContentEditsMigration, /ADD COLUMN user_text TEXT/);
 assert.match(meetingReportContentEditsMigration, /ENABLE ROW LEVEL SECURITY/);
-assert.match(meetingControllerSource, /@Patch\("meeting-reports\/:reportId"\)/);
-assert.match(meetingServiceSource, /updateMeetingReportContent/);
-assert.match(meetingServiceSource, /content_version = content_version \+ 1/);
-assert.match(meetingServiceSource, /Only the workspace owner or a meeting participant can edit this report/);
+assert.match(meetingReportControllerSource, /@Patch\("meeting-reports\/:reportId"\)/);
+assert.match(meetingReportServiceSource, /updateMeetingReportContent/);
+assert.doesNotMatch(meetingServiceSource, /INSERT INTO meeting_reports/);
+assert.doesNotMatch(meetingServiceSource, /INSERT INTO meeting_report_outbox/);
+assert.match(meetingReportLifecycleServiceSource, /INSERT INTO meeting_reports/);
+assert.match(
+  meetingReportLifecycleServiceSource,
+  /INSERT INTO meeting_report_outbox/
+);
+assert.match(meetingReportServiceSource, /content_version = content_version \+ 1/);
+assert.match(meetingReportServiceSource, /Only the workspace owner or a meeting participant can edit this report/);
 assert.match(meetingReportFailureDiagnosticsMigration, /ADD COLUMN failure_detail JSONB/);
 assert.match(meetingReportFailureDiagnosticsMigration, /failure_detail - ARRAY\['category', 'retryable', 'providerStatusCode'\]/);
-assert.match(meetingServiceSource, /failure_code = NULL/);
-assert.match(meetingServiceSource, /failure_detail = NULL/);
+assert.match(meetingReportServiceSource, /failure_code = NULL/);
+assert.match(meetingReportServiceSource, /failure_detail = NULL/);
 assert.match(participantSessionMigration, /UPDATE meeting_participants\s+SET is_legacy_session = true/s);
 assert.match(participantSessionMigration, /DROP CONSTRAINT IF EXISTS unique_meeting_participant/);
 assert.match(participantSessionMigration, /unique_active_meeting_participant/);
@@ -148,7 +185,7 @@ const leftAt = new Date("2026-07-05T00:10:00.000Z");
 const endedAt = new Date("2026-07-05T00:10:01.000Z");
 
 {
-  const service = Object.create(MeetingService.prototype);
+  const service = Object.create(MeetingReportService.prototype);
   const suggestion = service.mapMeetingReportActionItem({
     id: actionItemId,
     source_index: 0,
@@ -452,20 +489,38 @@ function createSubject(
   meetingReportJobService = new FakeMeetingReportJobService()
 ) {
   const workspaceService = new FakeWorkspaceService();
+  const meetingReportLifecycleService = new MeetingReportLifecycleService(
+    database,
+    meetingReportJobService
+  );
   const service = new MeetingService(
     database,
     workspaceService,
     liveKitTokenService,
     liveKitEgressService,
+    meetingReportLifecycleService
+  );
+  const meetingReportService = new MeetingReportService(
+    database,
+    workspaceService,
     meetingReportJobService
   );
+  const subject = new Proxy(service, {
+    get(target, property) {
+      const owner = property in target ? target : meetingReportService;
+      const value = owner[property];
+      return typeof value === "function" ? value.bind(owner) : value;
+    }
+  });
   return {
     database,
-    service,
+    service: subject,
+    meetingReportService,
     workspaceService,
     liveKitTokenService,
     liveKitEgressService,
-    meetingReportJobService
+    meetingReportJobService,
+    meetingReportLifecycleService
   };
 }
 
@@ -1290,6 +1345,10 @@ async function assertError(action, messagePattern) {
 {
   const database = new FakeDatabase();
   const liveKitTokenService = new FakeLiveKitTokenService();
+  const meetingReportLifecycleService = new MeetingReportLifecycleService(
+    database,
+    new FakeMeetingReportJobService()
+  );
   const service = new MeetingService(
     database,
     {
@@ -1299,7 +1358,7 @@ async function assertError(action, messagePattern) {
     },
     liveKitTokenService,
     new FakeLiveKitEgressService(),
-    new FakeMeetingReportJobService()
+    meetingReportLifecycleService
   );
 
   await assertError(
@@ -2814,10 +2873,10 @@ async function assertError(action, messagePattern) {
   assert.equal(database.transactionRolledBack, true);
 }
 
-assert.match(meetingServiceSource, /FROM meeting_report_activity_evidence/);
-assert.match(meetingServiceSource, /activityEvidence/);
-assert.match(meetingServiceSource, /AS activity_references/);
-assert.doesNotMatch(meetingServiceSource, /AS references\b/);
+assert.match(meetingReportServiceSource, /FROM meeting_report_activity_evidence/);
+assert.match(meetingReportServiceSource, /activityEvidence/);
+assert.match(meetingReportServiceSource, /AS activity_references/);
+assert.doesNotMatch(meetingReportServiceSource, /AS references\b/);
 
 {
   const { database, service } = createSubject(

@@ -124,8 +124,20 @@ const meetingController = await readSource(
 );
 const meetingModule = await readSource("../src/modules/meeting/meeting.module.ts");
 const meetingService = await readSource("../src/modules/meeting/meeting.service.ts");
+const meetingReportController = await readSource(
+  "../src/modules/meeting-report/meeting-report.controller.ts"
+);
+const meetingReportModule = await readSource(
+  "../src/modules/meeting-report/meeting-report.module.ts"
+);
+const meetingReportService = await readSource(
+  "../src/modules/meeting-report/meeting-report.service.ts"
+);
+const meetingReportLifecycleService = await readSource(
+  "../src/modules/meeting-report/meeting-report-lifecycle.service.ts"
+);
 const meetingReportJobService = await readSource(
-  "../src/modules/meeting/meeting-report-job.service.ts"
+  "../src/modules/meeting-report/meeting-report-job.service.ts"
 );
 const liveKitEgressService = await readSource(
   "../src/modules/meeting/livekit-egress.service.ts"
@@ -260,11 +272,11 @@ assert.match(meetingService, /async startMeetingInRoom\(/);
 assert.match(meetingService, /ensureWorkspaceRecordingConsent/);
 assert.match(meetingService, /assertAllActiveParticipantsHaveRecordingConsent/);
 assert.match(meetingService, /workspace_recording_consents/);
-assert.match(meetingService, /workspace_members\.role = 'owner'/);
-assert.match(meetingService, /async getReport\(/);
-assert.match(meetingService, /await this\.assertWorkspaceAccess\(currentUserId, workspaceId\);/);
-assert.match(meetingService, /WHERE meetings\.workspace_id = \$1\s+AND meeting_reports\.id = \$3/);
-assert.doesNotMatch(meetingService, /meeting_participants\.user_id = \$3::uuid/);
+assert.match(meetingReportService, /workspace_members\.role = 'owner'/);
+assert.match(meetingReportService, /async getReport\(/);
+assert.match(meetingReportService, /await this\.assertWorkspaceAccess\(currentUserId, workspaceId\);/);
+assert.match(meetingReportService, /WHERE meetings\.workspace_id = \$1\s+AND meeting_reports\.id = \$3/);
+assert.doesNotMatch(meetingReportService, /meeting_participants\.user_id = \$3::uuid/);
 assert.match(meetingService, /assertWorkspaceOwnerAccess/);
 assert.match(meetingRoomsMigration, /CREATE TABLE public\.meeting_rooms/);
 assert.match(meetingRoomsMigration, /unique_active_meeting_room_key/);
@@ -619,7 +631,11 @@ assert.match(meetingModule, /DatabaseModule/);
 assert.match(meetingModule, /WorkspaceModule/);
 assert.match(meetingModule, /LiveKitEgressService/);
 assert.match(meetingModule, /LiveKitTokenService/);
-assert.match(meetingModule, /MeetingReportJobService/);
+assert.match(meetingModule, /MeetingReportModule/);
+assert.match(meetingReportModule, /MeetingReportJobService/);
+assert.match(meetingReportModule, /MeetingReportLifecycleService/);
+assert.match(meetingReportController, /@Controller\("workspaces\/:workspaceId"\)/);
+assert.match(meetingReportController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Controller\("workspaces\/:workspaceId"\)/);
 assert.match(meetingController, /@UseGuards\(AuthGuard\)/);
 assert.match(meetingController, /@Get\("meetings\/current"\)/);
@@ -634,11 +650,15 @@ assert.match(meetingService, /INSERT INTO meeting_participants/);
 assert.match(meetingService, /createJoinToken/);
 assert.match(meetingService, /startRoomAudioOnlyEgress/);
 assert.match(meetingService, /stopEgress/);
-assert.match(meetingService, /INSERT INTO meeting_reports/);
-assert.match(meetingService, /PROCESSING/);
-assert.match(meetingService, /MeetingReportJobService/);
-assert.match(meetingService, /enqueueMeetingReportJob/);
-assert.match(meetingService, /jobType: "meeting_report"/);
+assert.doesNotMatch(meetingService, /INSERT INTO meeting_reports/);
+assert.doesNotMatch(meetingService, /INSERT INTO meeting_report_outbox/);
+assert.doesNotMatch(meetingService, /MeetingReportJobService/);
+assert.match(meetingReportLifecycleService, /INSERT INTO meeting_reports/);
+assert.match(meetingReportLifecycleService, /INSERT INTO meeting_report_outbox/);
+assert.match(meetingReportLifecycleService, /PROCESSING/);
+assert.match(meetingReportLifecycleService, /MeetingReportJobService/);
+assert.match(meetingReportLifecycleService, /enqueueMeetingReportJob/);
+assert.match(meetingReportLifecycleService, /jobType: "meeting_report"/);
 assert.match(meetingService, /LIVEKIT_EGRESS_S3_PREFIX/);
 assert.match(meetingService, /audio_file_url = NULL/);
 assert.doesNotMatch(meetingService, /livekit:\s*null/);

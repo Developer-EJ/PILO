@@ -16,7 +16,7 @@ const { AgentCandidateSelectionService } = require(
   "../../dist/modules/agent/agent-candidate-selection.service.js"
 );
 const { MeetingActionItemDeliveryService } = require(
-  "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
+  "../../dist/modules/meeting-report/meeting-action-item-delivery.service.js"
 );
 const { EmbeddingTemporarilyUnavailableError } = require(
   "../../dist/modules/agent/grounding/query-embedding.js"
@@ -68,13 +68,20 @@ const deliveryAttemptActorIndexMigration = await readFile(
 );
 const meetingActionItemDeliverySource = await readFile(
   new URL(
-    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    "../../src/modules/meeting-report/meeting-action-item-delivery.service.ts",
     import.meta.url
   ),
   "utf8"
 );
 const meetingServiceSource = await readFile(
   new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
+  "utf8"
+);
+const meetingReportServiceSource = await readFile(
+  new URL(
+    "../../src/modules/meeting-report/meeting-report.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const candidateSelectionMigration = await readFile(
@@ -161,7 +168,7 @@ assert.match(
   "Delivery failures must expose a safe reconnection action for ProjectV2 OAuth"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /approveMeetingReportActionItem[\s\S]*?transitionMeetingReportActionItem\([\s\S]*?"APPROVED"/,
   "The legacy approval endpoint must remain compatible during the delivery rollout"
 );
@@ -171,17 +178,17 @@ assert.match(
   "Meeting resolver reads must scope every Meeting query to the current Workspace"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /async listActionItemsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
   "Action item resolver reads must scope every query to the current Workspace"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /async listActionItemsForAgent[\s\S]*?meeting_reports\.created_at >=[\s\S]*?meeting_reports\.created_at <[\s\S]*?ORDER BY meeting_reports\.created_at \$\{reportOrder\}/,
   "Workspace action item search must keep bounded date and deterministic sort selectors"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /action_items\.title\)[\s\S]*?LIKE '%' \|\|/,
   "Action item title search must support a bounded normalized partial match"
 );
@@ -576,10 +583,10 @@ class FakeWorkspaceService {
 function createRegistry() {
   const meetingService = new FakeMeetingService();
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
-    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
   );
   const registry = new AgentToolRegistryService(undefined, meetingTools);
 
@@ -603,10 +610,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   const registry = new AgentToolRegistryService(
     undefined,
     new MeetingAgentToolsService(
-      meetingService,
+      meetingService, meetingService,
       ragService,
       undefined,
-      new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+      new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
     )
   );
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -689,10 +696,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   const registry = new AgentToolRegistryService(
     undefined,
     new MeetingAgentToolsService(
-      meetingService,
+      meetingService, meetingService,
       new FakeMeetingTranscriptRagService([]),
       undefined,
-      new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+      new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
     )
   );
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -721,10 +728,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   ]);
   const documentSearchService = new FakeDocumentSearchService();
   const tools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     ragService,
     undefined,
-    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService()),
+    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService()),
     undefined,
     documentSearchService
   );
@@ -772,10 +779,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     }
   };
   const tools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
-    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService()),
+    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService()),
     undefined,
     documentSearchService
   );
@@ -1045,7 +1052,7 @@ class FakeCandidateSelectionDatabase {
     }
   };
   const tools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     {},
     {},
     {
@@ -1094,7 +1101,7 @@ class FakeCandidateSelectionDatabase {
     const meetingService = new FakeMeetingService();
     const workspaceService = new FakeWorkspaceService();
     const resolver = new MeetingAgentResourceResolver(
-      meetingService,
+      meetingService, meetingService,
       workspaceService,
       {
         async resolveMeetingReference(_context, contextRef) {
@@ -1135,7 +1142,7 @@ class FakeCandidateSelectionDatabase {
     );
 
     const contextTools = new MeetingAgentToolsService(
-      meetingService,
+      meetingService, meetingService,
       new FakeMeetingTranscriptRagService(),
       undefined,
       resolver
@@ -1523,11 +1530,11 @@ class FakeCandidateSelectionDatabase {
   process.env.SESSION_SECRET = "meeting-action-item-selector-test-secret";
   const meetingService = new FakeMeetingService();
   const resolver = new MeetingAgentResourceResolver(
-    meetingService,
+    meetingService, meetingService,
     new FakeWorkspaceService()
   );
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
     resolver
@@ -1674,11 +1681,11 @@ function errorCode(error) {
   const meetingService = new FakeMeetingService();
   const workspaceService = new FakeWorkspaceService();
   const resolver = new MeetingAgentResourceResolver(
-    meetingService,
+    meetingService, meetingService,
     workspaceService
   );
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
     resolver
@@ -1713,7 +1720,7 @@ function errorCode(error) {
   process.env.SESSION_SECRET = "meeting-tool-sequential-selection-test-secret";
   const meetingService = new FakeMeetingService();
   const resolver = new MeetingAgentResourceResolver(
-    meetingService,
+    meetingService, meetingService,
     new FakeWorkspaceService()
   );
   const selectedMemberId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -1733,7 +1740,7 @@ function errorCode(error) {
     }
   };
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
     resolver,

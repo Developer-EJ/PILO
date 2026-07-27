@@ -37,10 +37,9 @@ const outputPath = outputIndex >= 0 ? process.argv[outputIndex + 1] : null;
 if (!outputPath) {
   throw new Error("--output is required");
 }
-
 const registry = new AgentToolRegistryService(
   new CalendarAgentToolsService({}),
-  new MeetingAgentToolsService({}),
+  new MeetingAgentToolsService({}, {}),
   new BoardAgentToolsService({}),
   new SqlErdAgentToolsService({}),
   new PrReviewAgentToolsService({}),

@@ -59,7 +59,6 @@ function plannerOutput(overrides = {}) {
     ...overrides
   };
 }
-
 function confirmationPlan() {
   return {
     toolName: "create_calendar_event",
@@ -1006,7 +1005,7 @@ function createSmokeRegistry() {
   const boardContextResolver = new BoardContextResolverService(boardService);
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService(calendarService),
-    new MeetingAgentToolsService(meetingService),
+    new MeetingAgentToolsService(meetingService, meetingService),
     new BoardAgentToolsService(boardService, boardContextResolver),
     new SqlErdAgentToolsService(sqlErdService)
   );
