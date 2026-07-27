@@ -13,7 +13,7 @@ import { AgentExecutionHandoffGuard } from "./agent-execution-handoff.guard";
 import { AgentConfirmationService } from "./agent-confirmation.service";
 import { AgentGroundedAnswerService } from "./agent-grounded-answer.service";
 import { AgentOutboxPublisherService } from "./agent-outbox-publisher.service";
-import { MeetingActionItemDeliveryService } from "../meeting/meeting-action-item-delivery.service";
+import { MeetingActionItemDeliveryService } from "../meeting-report/meeting-action-item-delivery.service";
 
 @Controller("internal/agent")
 @UseGuards(AgentExecutionHandoffGuard)

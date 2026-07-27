@@ -5,6 +5,7 @@ import { BoardModule } from "../board/board.module";
 import { CalendarModule } from "../calendar/calendar.module";
 import { DriveModule } from "../drive/drive.module";
 import { MeetingModule } from "../meeting/meeting.module";
+import { MeetingReportModule } from "../meeting-report/meeting-report.module";
 import { PrReviewModule } from "../pr-review/pr-review.module";
 import { SqlErdModule } from "../sql-erd/sql-erd.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
@@ -47,6 +48,7 @@ import { DriveAgentToolsService } from "./tools/drive-agent-tools.service";
     CalendarModule,
     DriveModule,
     MeetingModule,
+    MeetingReportModule,
     BoardModule,
     SqlErdModule,
     PrReviewModule,

@@ -53,7 +53,6 @@ import {
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -62,12 +61,6 @@ import {
   type ReactNode,
 } from "react";
 
-import {
-  createCanvasClient,
-  createMockCanvasBoardDetail,
-  resolveCanvasClientMode,
-} from "@/features/canvas/api/canvas-client";
-import { useAuthSession } from "@/features/auth";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -77,16 +70,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { isDevPreviewAccessToken } from "@/features/auth/session-storage";
-import {
-  ClassicCanvasRuntime,
-  type CanvasBoardDetail,
-} from "@/features/canvas/engine/runtime/ClassicCanvasRuntime";
+import { ClassicCanvasRuntime } from "@/features/canvas/engine/runtime/ClassicCanvasRuntime";
 import {
   canvasAgentToolTargetEventName,
   getCanvasAgentToolTargetPopover,
 } from "@/features/canvas/agent/canvas-agent-tool-targets";
-import type { CanvasRealtimeConfig } from "@/shared/canvas-realtime/canvas-realtime-types";
 import {
   type PiloCanvasActions,
   type PiloCanvasColor,
@@ -105,28 +93,17 @@ import {
 } from "@/features/canvas/engine/editor/canvas-editor-contracts";
 import type { PiloInsertableTool } from "@/features/canvas/engine/shapes/pilo-canvas-shape-factory";
 import { CanvasDriveFilePicker } from "@/features/canvas/integrations/drive/CanvasDriveFilePicker";
-import {
-  shouldReuseLoadedCanvasBoard,
-  type LoadedCanvasBoardIdentity,
-} from "./canvas-board-load-policy";
+import { useWorkspaceCanvasBoard } from "./useWorkspaceCanvasBoard";
 import {
   CanvasPopoverMenuButton as PopoverMenuButton,
   CanvasToolButton as ToolButton,
 } from "./toolbar/CanvasToolButtons";
-
-type CanvasBoardState = {
-  board: CanvasBoardDetail | null;
-  source: "mock" | "api";
-  status: "loading" | "ready" | "fallback";
-};
 
 type CanvasUrlInsertTool = Extract<PiloInsertableTool, "bookmark" | "embed">;
 type CanvasGeoDrawingPreset = Exclude<
   PiloDrawingPreset,
   "pen" | "highlight" | "eraser"
 >;
-
-const MOCK_CANVAS_WORKSPACE_ID = "pilo-local-workspace";
 
 const canvasColorOptions: {
   label: string;
@@ -205,27 +182,17 @@ function getDefaultInsertUrl(tool: PiloInsertableTool) {
     : "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 }
 
-function resolveCanvasWorkspaceId(
-  canvasClientMode: CanvasBoardState["source"],
-  authWorkspaceId: string | undefined,
-) {
-  if (authWorkspaceId) {
-    return authWorkspaceId;
-  }
-
-  return canvasClientMode === "mock" ? MOCK_CANVAS_WORKSPACE_ID : "";
-}
-
 export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
-  const authSession = useAuthSession();
+  const {
+    authSession,
+    board,
+    canvasClient,
+    canvasRealtimeConfig,
+    shouldUseCanvasApi,
+    workspaceId,
+  } = useWorkspaceCanvasBoard(boardId);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
-  const loadedBoardIdentityRef = useRef<LoadedCanvasBoardIdentity | null>(null);
-  const [boardState, setBoardState] = useState<CanvasBoardState>({
-    board: null,
-    source: "mock",
-    status: "loading",
-  });
   const [canvasActions, setCanvasActions] = useState<PiloCanvasActions | null>(
     null,
   );
@@ -268,66 +235,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
     | "line"
     | null
   >(null);
-  const canvasClientMode = resolveCanvasClientMode();
-  const canvasClient = useMemo(
-    () =>
-      createCanvasClient({
-        authToken: authSession?.accessToken ?? null,
-        mode: canvasClientMode,
-      }),
-    [authSession?.accessToken, canvasClientMode],
-  );
-  const workspaceId = resolveCanvasWorkspaceId(
-    canvasClientMode,
-    authSession?.activeWorkspaceId,
-  );
-  const fallbackBoard = useMemo(
-    () =>
-      createMockCanvasBoardDetail(
-        workspaceId || MOCK_CANVAS_WORKSPACE_ID,
-      ) as CanvasBoardDetail,
-    [workspaceId],
-  );
-  const activeBoard =
-    boardState.board &&
-    boardState.board.workspaceId === workspaceId &&
-    (!boardId || boardState.board.id === boardId)
-      ? boardState.board
-      : null;
-  const board = activeBoard ?? fallbackBoard;
-  const shouldUseCanvasApi =
-    boardState.source === "api" &&
-    boardState.status === "ready" &&
-    activeBoard !== null;
-  const canvasRealtimeConfig = useMemo<CanvasRealtimeConfig>(
-    () => ({
-      enabled: Boolean(
-        shouldUseCanvasApi &&
-          authSession?.accessToken &&
-          !isDevPreviewAccessToken(authSession.accessToken) &&
-          authSession.user.id &&
-          workspaceId &&
-          board.id,
-      ),
-      workspaceId,
-      canvasId: board.id,
-      authToken: authSession?.accessToken ?? null,
-      currentUser: authSession
-        ? {
-            userId: authSession.user.id,
-            displayName:
-              authSession.user.name ?? authSession.user.email ?? "PILO",
-            avatarUrl: authSession.user.avatarUrl,
-          }
-        : null,
-    }),
-    [
-      authSession,
-      board.id,
-      shouldUseCanvasApi,
-      workspaceId,
-    ],
-  );
   const isCanvasToolActive = (tool: PiloCanvasTool) =>
     openPopover === null && activeCanvasTool === tool;
   const activeColor =
@@ -339,90 +246,6 @@ export function WorkspaceCanvas({ boardId }: { boardId?: string }) {
 
     setCanvasUserPreferences(canvasActions.getUserPreferences());
   }, [canvasActions]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadCanvasBoard() {
-      if (
-        shouldReuseLoadedCanvasBoard({
-          client: canvasClient,
-          loadedBoard: loadedBoardIdentityRef.current,
-          requestedBoardId: boardId,
-          workspaceId,
-        })
-      ) {
-        return;
-      }
-
-      loadedBoardIdentityRef.current = null;
-
-      if (!workspaceId) {
-        setBoardState({
-          board: null,
-          source: canvasClientMode,
-          status: "loading",
-        });
-        return;
-      }
-
-      setBoardState({
-        board: null,
-        source: canvasClientMode,
-        status: "loading",
-      });
-
-      try {
-        const boards = await canvasClient.listBoards(workspaceId);
-        let targetBoardId = boardId ?? boards[0]?.id;
-
-        if (!targetBoardId) {
-          const createdBoard = await canvasClient.createBoard(workspaceId, {
-            title: "PILO Canvas",
-          });
-
-          targetBoardId =
-            typeof createdBoard === "object" &&
-            createdBoard !== null &&
-            "id" in createdBoard &&
-            typeof createdBoard.id === "string"
-              ? createdBoard.id
-              : fallbackBoard.id;
-        }
-
-        const detail = (await canvasClient.getBoardDetail(targetBoardId, {
-          workspaceId,
-        })) as CanvasBoardDetail;
-
-        if (cancelled) return;
-
-        loadedBoardIdentityRef.current = {
-          boardId: detail.id,
-          client: canvasClient,
-          workspaceId: detail.workspaceId,
-        };
-        setBoardState({
-          board: detail,
-          source: canvasClientMode,
-          status: "ready",
-        });
-      } catch (error) {
-        if (cancelled) return;
-
-        setBoardState({
-          board: fallbackBoard,
-          source: canvasClientMode,
-          status: "fallback",
-        });
-      }
-    }
-
-    void loadCanvasBoard();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [boardId, canvasClient, canvasClientMode, fallbackBoard, workspaceId]);
 
   useEffect(() => {
     function handleCanvasAgentToolTarget(event: Event) {

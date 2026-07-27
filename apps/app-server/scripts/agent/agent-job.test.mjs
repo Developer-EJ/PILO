@@ -67,9 +67,8 @@ const originalEnv = {
     "AgentToolRegistryService must retain AgentDomainFeatureFlagService Nest DI metadata"
   );
 }
-
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
-  "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92";
+  "fc654d2599f9fd63be28ef597426195cc6ece4a2bb720584494513c4f8d3094a";
 
 const payload = {
   jobType: "agent_run_requested",
@@ -120,7 +119,7 @@ const payload = {
   );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
-    new MeetingAgentToolsService({}),
+    new MeetingAgentToolsService({}, {}),
     new BoardAgentToolsService({}),
     new SqlErdAgentToolsService({}),
     undefined,
@@ -142,7 +141,7 @@ const payload = {
   assert.deepEqual(suite.tools, actualSnapshot);
 
   const capabilityCatalog = registry.listCapabilityCatalogForContext(null);
-  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v2");
+  assert.equal(capabilityCatalog.version, "agent-tool-capabilities:v3");
   assert.match(capabilityCatalog.sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(
     capabilityCatalog.descriptors.map((descriptor) => descriptor.toolName),
@@ -156,6 +155,12 @@ const payload = {
       (capability) => capability.id === "meeting.report.hybrid_search"
     )?.toolNames,
     ["list_meeting_reports", "search_meeting_transcript"]
+  );
+  assert.deepEqual(
+    capabilityCatalog.capabilities.find(
+      (capability) => capability.id === "meeting.report.unified_search"
+    )?.toolNames,
+    ["search_meeting_reports"]
   );
   assert.deepEqual(
     capabilityCatalog.capabilities.find(
@@ -265,7 +270,7 @@ const payload = {
 
 const fullRegistry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
-    new MeetingAgentToolsService({}),
+    new MeetingAgentToolsService({}, {}),
     new BoardAgentToolsService({}),
     new SqlErdAgentToolsService({}),
     new PrReviewAgentToolsService({}),
@@ -395,7 +400,7 @@ const fullRegistry = new AgentToolRegistryService(
     process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED = "false";
     const gatedRegistry = new AgentToolRegistryService(
       undefined,
-      new MeetingAgentToolsService({}),
+      new MeetingAgentToolsService({}, {}),
       undefined,
       undefined,
       undefined,
@@ -477,8 +482,8 @@ const inventory = fullRegistry.listToolInventory();
     AGENT_TOOL_INVENTORY_BASELINE_SHA256,
     "registered tool inventory drift must update the recorded legacy baseline"
   );
-  assert.equal(inventory.totalTools, 36);
-  assert.equal(inventory.tools.length, 36);
+  assert.equal(inventory.totalTools, 37);
+  assert.equal(inventory.tools.length, 37);
   assert.equal(
     inventory.tools.filter((tool) => tool.operation === "write").length,
     16

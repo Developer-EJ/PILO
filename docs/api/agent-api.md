@@ -115,8 +115,12 @@ LLM Router가 반환한 `domains`는 신뢰 경계가 아니다. Worker는 검�
 metadata retrieval 경로도 검증된 `capabilityIds`와 실제 planner tool이 같은 catalog chain에 속할
 때에만 동일한 terminal 판정을 사용한다. unsupported capability는 사용자의 명시적인 intent cue가
 일치할 때만 지원 불가로 판정하며 날짜·도메인 단어의 겹침만으로 정상 조회를 가로채지 않는다.
-`meeting.report.hybrid_search`는 예외가 아니라 동일한 일반 chain 규칙을 사용하며,
-`list_meeting_reports`가 prerequisite, `search_meeting_transcript`가 terminal tool이다.
+현재 Agent job schema는 `agent-tools:v9`, capability catalog는
+`agent-tool-capabilities:v3`이다. `meeting.report.unified_search`는
+`search_meeting_reports` 하나를 terminal tool로 사용한다. 새 tool을 사용할 수 없는 registry에서만
+`meeting.report.hybrid_search`의
+`list_meeting_reports → search_meeting_transcript` chain을 호환 fallback으로 유지한다.
+두 경로를 같은 요청에서 동시에 실행하거나 결과를 비교하는 online shadow는 수행하지 않는다.
 
 `delegate_canvas_agent`가 실행되면 일반 Agent run은 `running`을 유지하고 Canvas Agent child run의
 terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt를 수정하거나 요약하지 않고 child run에
@@ -182,7 +186,7 @@ sweep에서 terminal 처리하므로 Worker 종료나 handoff 유실이 run을 �
   MeetingReport raw ID planner step은
   `get_meeting_report`, `summarize_meeting_report`, `find_action_items`,
   `get_meeting_decision_evidence`, `regenerate_meeting_report`에 한해 server-only compatibility adapter로
-  실행한다. 새 `agent-tools:v8` planner output은 같은 raw ID를 제출해도 adapter를 사용할 수 없다.
+  실행한다. 새 `agent-tools:v9` planner output은 같은 raw ID를 제출해도 adapter를 사용할 수 없다.
   이미 만들어진 confirmation plan은 저장된 raw ID를 승인 시점에 다시 검증한 뒤에만 실행한다.
 - `find_action_items`, `get_meeting_decision_evidence`, `regenerate_meeting_report`도 planner-facing
   `reportId`를 받지 않고 공통 MeetingReport selector의 `contextRef`를 App Server에서 해소한다.
@@ -1402,66 +1406,45 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
   않는다. selector가 없으면 최신 report 1개를 해소하고, filter 결과가 여러 개면 같은 run의 후보 버튼으로
   선택을 요청한다. 후보 label은 요약문 대신 회의록 제목을 사용한다.
 - 상세 조회의 `transcriptText`는 답변 생성에 사용할 수 있지만 Agent run/step/confirmation에는 전문 저장하지 않는다.
-- `search_meeting_transcript`는 `query`와 선택 MeetingReport selector를 받는다. raw `reportId`는
-  planner-facing schema에 허용하지 않는다. transcript 원문과 raw Activity Log를 Agent run/step에 저장하지
-  않고, 권한 있는 namespaced source ID만 grounded-answer 경로에 전달한다. 검색 근거가 된 MeetingReport는
-  항상 `/report?reportId=...` 링크를 제공하고, 관련도 임계값을 통과한 Drive 문서가 있으면
-  `/files?documentId=...` 링크도 함께 제공한다. 링크 resource ref에는 원문이나 excerpt를 저장하지 않는다.
-- 명시적인 회의록 제목과 실제 발언·결정 이유·Activity 내용 질문이 함께 있으면 Router는
-  `meeting.report.hybrid_search`를 선택한다. Planner는 먼저 `list_meeting_reports({ reportTitle })`로
-  exact 조회하고, 첫 Planner turn에는 이 prerequisite만 노출한다. 조회 완료 뒤 다음 turn에는
-  `search_meeting_transcript`만 노출하며, 제목 결과만으로 질문에 답하거나 완료하지 않는다. exact 1건이면 같은 tool step이 만든
-  서버 소유 opaque `contextRef`로 `search_meeting_transcript`를 이어 호출한다. planner-facing input은
-  raw `reportId`를 받거나 생성하지 않는다. Hybrid prerequisite에서는 모델이 `limit`을 제출해도 제거해
-  동일 제목 후보를 임의의 1건으로 축소하지 않는다. 제목 조회 결과와 그 step의 `contextRef`는 하나의
-  workflow block으로 취급하므로 중간에 다른 도메인 tool이 실행돼도 검색 범위를 잃지 않는다.
-- Hybrid 첫 단계는 non-empty `reportTitle`을 반드시 요구한다. Planner가 빠뜨린 경우에도 따옴표 제목,
-  `제목이 “…”인`, `“…” 회의록에서`처럼 경계가 명확한 단일 제목만 사용자 문장에서 복구한다. 복수이거나
-  불명확하면 clarification으로 종료하며 `list_meeting_reports({})`나 `limit: 1` 최신 회의록 조회로
-  대체하지 않는다. App Server도 같은 capability와 `list_meeting_reports` 조합을 실행 직전에 다시
-  검증하고 `limit`을 제거한다.
-- 서로 다른 명시적 제목이 한 요청에 둘 이상 있으면 그중 하나를 임의 선택하거나 Workspace 전체 검색으로
-  범위를 확대하지 않는다. 먼저 검색할 제목 하나를 사용자에게 선택받은 뒤 해당 제목의 hybrid workflow를
-  시작한다. `“A”와 “B”에서`, `“A”, “B” 및 “C”에서`처럼 접속된 따옴표 제목도 각각의 제목으로
-  분리하며, 같은 제목을 문장 안에서 반복한 경우는 하나의 제목 후보로 정규화한다.
-- `meeting.report.hybrid_search`와 `list_meeting_reports`를 사용하는 다른 capability를 한 요청에서 함께
-  선택하면 서로 다른 목록 입력을 tool 이름만으로 구분할 수 없으므로 Router가 실행하지 않고 어떤 작업을
-  먼저 처리할지 묻는다. 이 경계에서도 hybrid 제목 조회로 판정된 `list_meeting_reports` 입력의 `limit`은
-  제거해 동일 제목 다건을 임의의 1건으로 축소하지 않는다.
-- exact 제목 결과가 0건이면 오류나 사용자 입력 대기로 전환하지 않고
-  `count: 0, reports: []`로 완료한다. Planner는 같은 run에서 report selector 없이 Workspace 범위
-  `search_meeting_transcript`를 호출한다. 별도 내용 질문은 제목·날짜·명령 표현을 제거한 content-focused
-  query를 사용하고, 제목만 남는 경우에만 제목 문자열로 fallback할 수 있다. 근거가 발견된 최종 답변에는
-  정확한 제목이 없어서 Workspace 전체 내용 검색으로 전환했다는 사실을 자연스럽게 밝힌다. 이 fallback
-  정보는 해당 search step과 answer step에 서버 소유 metadata로 직접 연결하며, run의 다른 `count: 0`
-  목록 조회로 추론하지 않는다. 검색 근거도 0건이면 정확한 제목이 없었다는 사실과 Workspace 전체에서도
-  관련 근거를 찾지 못했다는 사실을 함께 안내한다.
-- exact 제목 결과가 여러 건이면 `search_meeting_transcript`의 기존 MeetingReport candidate selection을
-  사용해 날짜, 상태, 제목과 bounded 설명을 보여주고 사용자가 하나를 고르게 한다. 최초 exact 조회에
-  명시한 `from`, `to`, `status`, `roomName`은 후보 조회에도 그대로 유지한다. 선택 전에는 서로 다른
-  회의록의 내용을 합치지 않는다. 선택 뒤에는 `useSelectedMeetingReportCandidate=true`로 원래 검색을
-  재개한다.
-- 명확한 제목 후보가 없는 주제·발언·결정·이유·담당자 내용 검색은 `meeting.evidence.search`로
-  `search_meeting_transcript`를 직접 호출하며 제목 조회를 선행하지 않는다. 예를 들어 현재 화면과 무관하게
-  “배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘”는 Workspace 범위 transcript/Activity 검색이다.
-  Router가 이를 목록 조회로 분류해도 내용 검색 판정이 명확하면 evidence search로 보정하며, 최신 회의록
-  1건을 대신 조회하지 않는다. `요약해줘`, `정리해줘`, `핵심만 알려줘`는 답변 형식일 뿐이므로 논의,
-  발언, 결정 이유, 담당자 같은 근거 요구가 함께 있으면 evidence search를 유지한다. 반대로 “회의록
-  요약해줘”처럼 별도 근거 요구가 없는 목록, 상태, 제목 상세, 단순 요약 요청에는 transcript 검색을
-  추가하지 않는다.
-- `search_meeting_transcript`는 embedding 유사도 후보와 함께 사용자 query에서 추출한 최대 8개의
+- `search_meeting_reports`는 MeetingReport 내용·근거 검색의 기본 단일 진입점이다. planner-facing
+  schema는 필수 `query`와 선택 `reportTitle`, `[from, to)`, `status`, `roomName`, `limit`,
+  server-owned `contextRef`/후보 선택 플래그만 허용하며 raw `reportId`를 받지 않는다.
+- `from`과 `to`는 회의록 생성 시각이 아니라 `meetings.started_at`에 적용한다. App Server는 Workspace
+  접근 권한을 확인한 뒤 각 Meeting의 Workspace owner 또는 participant 권한을 다시 검증한다.
+- `reportTitle`이 있으면 정규화 제목 exact 검색을 먼저 수행한다. exact 결과가 한 건이면 해당 report
+  범위에서 RAG를 실행하고, 여러 건이면 선택 전 내용을 합치지 않고 사용자에게 후보를 제시한다.
+- exact 결과가 없으면 `pg_trgm` fuzzy 검색을 수행한다. `extensions.similarity`의 `0.35`는 후보 포함
+  임계값이고 `0.70`은 단일 후보 자동 확정 임계값이다. fuzzy 후보가 여러 건이거나 단일 후보 점수가
+  `0.70` 미만이면 RAG 범위를 고정하지 않고 clarification으로 전환한다. 단일 후보가 `0.70` 이상일
+  때만 사용자 확인 없이 해당 report 범위에서 검색한다.
+- exact와 fuzzy 후보가 모두 없으면 같은 tool 호출에서 transcript·Activity 하이브리드 검색으로
+  전환한다. 제목이 없는 내용 질문은 처음부터 이 단계로 진입한다. 날짜 범위는 RAG에 직접 적용하고,
+  `status` 또는 `roomName`이 있으면 권한 있는 report ID 집합으로 검색 범위를 제한한다.
+- 후보 선택은 제목, 회의 시작 시각, 상태와 bounded 설명을 제공한다. 선택 뒤에는
+  `useSelectedMeetingReportCandidate=true` 또는 같은 후보의 opaque `contextRef`로 원래
+  `search_meeting_reports`를 재개하고, App Server가 report 접근 권한을 다시 검증한다.
+- 서로 다른 명시적 제목이 한 요청에 둘 이상 있으면 하나를 임의 선택하거나 Workspace 전체로 범위를
+  확대하지 않는다. 먼저 검색할 제목 하나를 사용자에게 선택받는다. 같은 제목의 반복은 하나로
+  정규화한다.
+- Router는 `search_meeting_reports`가 registry에 있으면 내용·근거 검색에
+  `meeting.report.unified_search`를 우선 선택한다. 기존
+  `meeting.report.hybrid_search`의
+  `list_meeting_reports → search_meeting_transcript` chain은 새 tool을 사용할 수 없는 경우에만
+  호환 fallback으로 유지한다. 두 경로를 동시에 실행해 검색 결과를 비교하거나 측정하는
+  shadow/comparison 로직은 현재 없다.
+- `search_meeting_transcript`는 기존 호환 경로와 명시적으로 선택된 report의 근거 검색에 남아 있다.
+  두 검색 tool 모두 transcript 원문과 raw Activity Log를 Agent run/step에 저장하지 않고, 권한 있는
+  namespaced source ID만 grounded-answer 경로에 전달한다. 검색 근거가 된 MeetingReport는
+  `/report?reportId=...` 링크를 제공하고, 관련도 임계값을 통과한 Drive 문서는
+  `/files?documentId=...` 링크를 제공한다. 링크 resource ref에는 원문이나 excerpt를 저장하지 않는다.
+- 두 검색 tool이 사용하는 RAG는 embedding 유사도 후보와 함께 사용자 query에서 추출한 최대 8개의
   bounded literal term을 transcript/Activity의 안전한 chunk 본문에서 조회한다. literal 일치 후보는
   낮은 embedding 점수만으로 탈락시키지 않고 우선 보존하며, 권한 경계와 최신 completed index 조건은
-  vector 후보와 동일하게 적용한다. 제목을 제거한 hybrid fallback query에 `내용`, `요약` 같은 일반
-  형식 표현만 남으면 요청한 제목을 query로 복구한다.
+  vector 후보와 동일하게 적용한다. report별 상위 후보를 제한하고 최종 결과에 서로 다른 report와
+  source type이 포함되도록 다양성을 적용한다.
 - 순번이 있는 결정이나 “결정사항의 직접 근거”처럼 MeetingReport decision item에 직접 연결된 근거를
   요구하면 Router가 선택한 `meeting.decision.evidence`를 유지한다. 반면 “왜 그렇게 결정했는지”처럼
-  일반 대화 맥락의 결정 이유를 묻는 요청은 제목 유무에 따라 evidence search 또는 hybrid search를 쓴다.
-- 최초 Router가 선택한 capability chain은 완료 전까지 기존 planner step의 서버 검증 routing metadata로
-  이어간다. 다음 turn에는 Router를 다시 호출하지 않고 첫 번째 미완료 tool만 Planner에 노출하되 Planner
-  LLM 호출 자체는 계속 수행한다. 관측 metadata는 최초 선택을 `initial_llm_router`, 이어진 실행을
-  `continued_workflow`로 구분한다. Hybrid list 결과는 일반 `count: 0` 출력이 아니라 해당 step에 저장한
-  서버 소유 `meetingReportHybridLookup` metadata가 있을 때만 후속 검색 범위와 fallback 근거로 인정한다.
+  일반 대화 맥락의 결정 이유는 `meeting.report.unified_search`를 사용한다.
 - transcript/Activity 근거가 없으면 제목이나 MeetingReport summary를 근거처럼 사용해 실제 발언이나
   결정 이유를 추론하지 않고, 관련 근거를 찾지 못했다고 답한다. 기존 grounded citation 검증과 검색된
   MeetingReport resource link 경로는 그대로 유지한다.

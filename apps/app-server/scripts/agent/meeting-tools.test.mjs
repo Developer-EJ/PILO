@@ -16,7 +16,7 @@ const { AgentCandidateSelectionService } = require(
   "../../dist/modules/agent/agent-candidate-selection.service.js"
 );
 const { MeetingActionItemDeliveryService } = require(
-  "../../dist/modules/meeting/meeting-action-item-delivery.service.js"
+  "../../dist/modules/meeting-report/meeting-action-item-delivery.service.js"
 );
 const { EmbeddingTemporarilyUnavailableError } = require(
   "../../dist/modules/agent/grounding/query-embedding.js"
@@ -68,13 +68,20 @@ const deliveryAttemptActorIndexMigration = await readFile(
 );
 const meetingActionItemDeliverySource = await readFile(
   new URL(
-    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    "../../src/modules/meeting-report/meeting-action-item-delivery.service.ts",
     import.meta.url
   ),
   "utf8"
 );
 const meetingServiceSource = await readFile(
   new URL("../../src/modules/meeting/meeting.service.ts", import.meta.url),
+  "utf8"
+);
+const meetingReportServiceSource = await readFile(
+  new URL(
+    "../../src/modules/meeting-report/meeting-report.service.ts",
+    import.meta.url
+  ),
   "utf8"
 );
 const candidateSelectionMigration = await readFile(
@@ -161,7 +168,7 @@ assert.match(
   "Delivery failures must expose a safe reconnection action for ProjectV2 OAuth"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /approveMeetingReportActionItem[\s\S]*?transitionMeetingReportActionItem\([\s\S]*?"APPROVED"/,
   "The legacy approval endpoint must remain compatible during the delivery rollout"
 );
@@ -171,17 +178,17 @@ assert.match(
   "Meeting resolver reads must scope every Meeting query to the current Workspace"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /async listActionItemsForAgent[\s\S]*?WHERE meetings\.workspace_id = \$1/,
   "Action item resolver reads must scope every query to the current Workspace"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /async listActionItemsForAgent[\s\S]*?meeting_reports\.created_at >=[\s\S]*?meeting_reports\.created_at <[\s\S]*?ORDER BY meeting_reports\.created_at \$\{reportOrder\}/,
   "Workspace action item search must keep bounded date and deterministic sort selectors"
 );
 assert.match(
-  meetingServiceSource,
+  meetingReportServiceSource,
   /action_items\.title\)[\s\S]*?LIKE '%' \|\|/,
   "Action item title search must support a bounded normalized partial match"
 );
@@ -524,6 +531,29 @@ class FakeMeetingTranscriptRagService {
   }
 }
 
+class FakeMeetingReportSearchService {
+  constructor({ preflightResult, result } = {}) {
+    this.calls = [];
+    this.preflightResult = preflightResult ?? {
+      status: "resolved",
+      matchedBy: "exact_title",
+      reports: [],
+      evidence: [],
+      diagnostics: {
+        exactTitleCount: 1,
+        fuzzyTitleCount: 0,
+        hybridReportCount: 0
+      }
+    };
+    this.result = result ?? this.preflightResult;
+  }
+
+  async search(currentUserId, workspaceId, input) {
+    this.calls.push({ currentUserId, workspaceId, input });
+    return input.contentQuery ? this.result : this.preflightResult;
+  }
+}
+
 class FakeDocumentSearchService {
   constructor(results = [
     {
@@ -576,10 +606,10 @@ class FakeWorkspaceService {
 function createRegistry() {
   const meetingService = new FakeMeetingService();
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
-    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
   );
   const registry = new AgentToolRegistryService(undefined, meetingTools);
 
@@ -598,15 +628,224 @@ const context = {
 process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 
 {
+  const report = {
+    reportId: REPORT_ID,
+    meetingId: MEETING_ID,
+    recordingId: RECORDING_ID,
+    status: "COMPLETED",
+    title: "API 설계 회의",
+    summary: "API 설계를 검토했습니다.",
+    discussionPoints: "인증 구조",
+    decisions: "OAuth를 사용합니다.",
+    meetingStartedAt: "2026-07-15T01:00:00.000Z",
+    reportCreatedAt: "2026-07-15T02:00:00.000Z",
+    roomName: "개발 회의실"
+  };
+  const searchService = new FakeMeetingReportSearchService({
+    preflightResult: {
+      status: "resolved",
+      matchedBy: "exact_title",
+      reports: [report],
+      evidence: [],
+      diagnostics: {
+        exactTitleCount: 1,
+        fuzzyTitleCount: 0,
+        hybridReportCount: 0
+      }
+    },
+    result: {
+      status: "resolved",
+      matchedBy: "exact_title",
+      reports: [report],
+      evidence: [
+        {
+          sourceId:
+            "transcript:99999999-9999-4999-8999-999999999999",
+          sourceType: "transcript",
+          reportId: REPORT_ID,
+          content: "OAuth를 사용하기로 정했습니다.",
+          directlyReferenced: false,
+          score: 0.91
+        }
+      ],
+      diagnostics: {
+        exactTitleCount: 1,
+        fuzzyTitleCount: 0,
+        hybridReportCount: 1
+      }
+    }
+  });
+  const meetingTools = new MeetingAgentToolsService(
+    new FakeMeetingService(),
+    new FakeMeetingService(),
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    searchService
+  );
+  const tool = meetingTools
+    .listDefinitions()
+    .find((definition) => definition.name === "search_meeting_reports");
+  const input = tool.validateInput({
+    query: "인증 방식을 왜 OAuth로 정했어?",
+    reportTitle: "API 설계 회의",
+    from: "2026-07-15T00:00:00.000Z",
+    to: "2026-07-16T00:00:00.000Z"
+  });
+  const preparation = await tool.prepareExecution(context, input);
+  assert.deepEqual(preparation, { kind: "execute" });
+  assert.deepEqual(searchService.calls[0].input, {
+    title: "API 설계 회의",
+    from: "2026-07-15T00:00:00.000Z",
+    to: "2026-07-16T00:00:00.000Z",
+    limit: 5
+  });
+
+  const result = await tool.execute(context, input);
+  assert.equal(tool.requiresGroundedAnswer, true);
+  assert.equal(result.outputSummary.matchedBy, "exact_title");
+  assert.equal(result.outputSummary.sourceCount, 1);
+  assert.equal(result.groundingSources[0].sourceType, "meeting_transcript");
+  assert.deepEqual(searchService.calls[1].input, {
+    title: "API 설계 회의",
+    contentQuery: "인증 방식을 왜 OAuth로 정했어?",
+    from: "2026-07-15T00:00:00.000Z",
+    to: "2026-07-16T00:00:00.000Z",
+    limit: 5
+  });
+}
+
+{
+  const candidate = (reportId, title, startedAt) => ({
+    reportId,
+    meetingId: MEETING_ID,
+    recordingId: RECORDING_ID,
+    status: "COMPLETED",
+    title,
+    summary: null,
+    discussionPoints: null,
+    decisions: null,
+    meetingStartedAt: startedAt,
+    reportCreatedAt: startedAt,
+    roomName: "개발 회의실"
+  });
+  const searchService = new FakeMeetingReportSearchService({
+    preflightResult: {
+      status: "candidates",
+      matchedBy: "fuzzy_title",
+      reports: [
+        candidate(REPORT_ID, "API 설계 회의", "2026-07-15T01:00:00.000Z"),
+        candidate(
+          SECOND_REPORT_ID,
+          "API 설계 주간회의",
+          "2026-07-08T01:00:00.000Z"
+        )
+      ],
+      evidence: [],
+      diagnostics: {
+        exactTitleCount: 0,
+        fuzzyTitleCount: 2,
+        hybridReportCount: 0
+      }
+    }
+  });
+  const tool = new MeetingAgentToolsService(
+    new FakeMeetingService(),
+    new FakeMeetingService(),
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    searchService
+  )
+    .listDefinitions()
+    .find((definition) => definition.name === "search_meeting_reports");
+  const preparation = await tool.prepareExecution(
+    context,
+    tool.validateInput({
+      query: "배포 일정은?",
+      reportTitle: "API 설게 회의"
+    })
+  );
+  assert.equal(preparation.kind, "needs_clarification");
+  assert.equal(preparation.outputSummary.matchedBy, "fuzzy_title");
+  assert.equal(preparation.outputSummary.candidateCount, 2);
+  assert.equal(preparation.candidateResources.length, 2);
+  assert.deepEqual(
+    preparation.candidateResources.map(
+      (item) => item.reference.resourceId
+    ),
+    [REPORT_ID, SECOND_REPORT_ID]
+  );
+}
+
+{
+  const report = {
+    reportId: REPORT_ID,
+    meetingId: MEETING_ID,
+    recordingId: RECORDING_ID,
+    status: "COMPLETED",
+    title: "API 설계 회의",
+    summary: null,
+    discussionPoints: null,
+    decisions: null,
+    meetingStartedAt: "2026-07-15T01:00:00.000Z",
+    reportCreatedAt: "2026-07-15T02:00:00.000Z",
+    roomName: "개발 회의실",
+    titleSimilarity: 0.42
+  };
+  const searchService = new FakeMeetingReportSearchService({
+    preflightResult: {
+      status: "candidates",
+      matchedBy: "fuzzy_title",
+      reports: [report],
+      evidence: [],
+      diagnostics: {
+        exactTitleCount: 0,
+        fuzzyTitleCount: 1,
+        hybridReportCount: 0
+      }
+    }
+  });
+  const tool = new MeetingAgentToolsService(
+    new FakeMeetingService(),
+    new FakeMeetingService(),
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    searchService
+  )
+    .listDefinitions()
+    .find((definition) => definition.name === "search_meeting_reports");
+  const preparation = await tool.prepareExecution(
+    context,
+    tool.validateInput({
+      query: "인증 방식은?",
+      reportTitle: "API 변경 회의"
+    })
+  );
+
+  assert.equal(preparation.kind, "needs_clarification");
+  assert.equal(preparation.outputSummary.candidateCount, 1);
+  assert.match(preparation.outputSummary.question, /정확히 일치하지 않습니다/);
+  assert.equal(preparation.candidateResources.length, 1);
+}
+
+{
   const meetingService = new FakeMeetingService();
   const ragService = new FakeMeetingTranscriptRagService();
   const registry = new AgentToolRegistryService(
     undefined,
     new MeetingAgentToolsService(
-      meetingService,
+      meetingService, meetingService,
       ragService,
       undefined,
-      new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+      new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
     )
   );
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -689,10 +928,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   const registry = new AgentToolRegistryService(
     undefined,
     new MeetingAgentToolsService(
-      meetingService,
+      meetingService, meetingService,
       new FakeMeetingTranscriptRagService([]),
       undefined,
-      new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService())
+      new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService())
     )
   );
   const tool = registry.getDefinition("search_meeting_transcript");
@@ -721,10 +960,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
   ]);
   const documentSearchService = new FakeDocumentSearchService();
   const tools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     ragService,
     undefined,
-    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService()),
+    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService()),
     undefined,
     documentSearchService
   );
@@ -772,10 +1011,10 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
     }
   };
   const tools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
-    new MeetingAgentResourceResolver(meetingService, new FakeWorkspaceService()),
+    new MeetingAgentResourceResolver(meetingService, meetingService, new FakeWorkspaceService()),
     undefined,
     documentSearchService
   );
@@ -1045,7 +1284,7 @@ class FakeCandidateSelectionDatabase {
     }
   };
   const tools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     {},
     {},
     {
@@ -1094,7 +1333,7 @@ class FakeCandidateSelectionDatabase {
     const meetingService = new FakeMeetingService();
     const workspaceService = new FakeWorkspaceService();
     const resolver = new MeetingAgentResourceResolver(
-      meetingService,
+      meetingService, meetingService,
       workspaceService,
       {
         async resolveMeetingReference(_context, contextRef) {
@@ -1135,7 +1374,7 @@ class FakeCandidateSelectionDatabase {
     );
 
     const contextTools = new MeetingAgentToolsService(
-      meetingService,
+      meetingService, meetingService,
       new FakeMeetingTranscriptRagService(),
       undefined,
       resolver
@@ -1523,11 +1762,11 @@ class FakeCandidateSelectionDatabase {
   process.env.SESSION_SECRET = "meeting-action-item-selector-test-secret";
   const meetingService = new FakeMeetingService();
   const resolver = new MeetingAgentResourceResolver(
-    meetingService,
+    meetingService, meetingService,
     new FakeWorkspaceService()
   );
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
     resolver
@@ -1655,6 +1894,7 @@ function errorCode(error) {
     "leave_meeting",
     "start_meeting_recording",
     "end_meeting_recording",
+    "search_meeting_reports",
     "list_meeting_reports",
     "get_meeting_report",
     "summarize_meeting_report",
@@ -1674,11 +1914,11 @@ function errorCode(error) {
   const meetingService = new FakeMeetingService();
   const workspaceService = new FakeWorkspaceService();
   const resolver = new MeetingAgentResourceResolver(
-    meetingService,
+    meetingService, meetingService,
     workspaceService
   );
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
     resolver
@@ -1713,7 +1953,7 @@ function errorCode(error) {
   process.env.SESSION_SECRET = "meeting-tool-sequential-selection-test-secret";
   const meetingService = new FakeMeetingService();
   const resolver = new MeetingAgentResourceResolver(
-    meetingService,
+    meetingService, meetingService,
     new FakeWorkspaceService()
   );
   const selectedMemberId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -1733,7 +1973,7 @@ function errorCode(error) {
     }
   };
   const meetingTools = new MeetingAgentToolsService(
-    meetingService,
+    meetingService, meetingService,
     new FakeMeetingTranscriptRagService(),
     undefined,
     resolver,

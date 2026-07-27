@@ -35,6 +35,7 @@ export type AgentPlannerToolName =
   | "create_calendar_event"
   | "update_calendar_event"
   | "list_meeting_reports"
+  | "search_meeting_reports"
   | "summarize_meeting_report"
   | "start_meeting_in_room"
   | "join_meeting"

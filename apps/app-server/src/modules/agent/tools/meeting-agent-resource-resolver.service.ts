@@ -9,10 +9,13 @@ import {
 import { Injectable } from "@nestjs/common";
 import {
   MeetingService,
-  type MeetingAgentActionItemSearchPayload,
-  type MeetingAgentMeetingSearchPayload,
-  type MeetingReportSummaryPayload
+  type MeetingAgentMeetingSearchPayload
 } from "../../meeting/meeting.service";
+import {
+  MeetingReportService,
+  type MeetingAgentActionItemSearchPayload,
+  type MeetingReportSummaryPayload
+} from "../../meeting-report/meeting-report.service";
 import { WorkspaceService } from "../../workspace/workspace.service";
 import { AgentThreadContextService } from "../agent-thread-context.service";
 import type { AgentToolContext } from "../types/agent-tool.types";
@@ -101,6 +104,7 @@ interface SelectionTokenPayload {
 export class MeetingAgentResourceResolver {
   constructor(
     private readonly meetingService: MeetingService,
+    private readonly meetingReportService: MeetingReportService,
     private readonly workspaceService: WorkspaceService,
     private readonly threadContextService?: AgentThreadContextService
   ) {}
@@ -204,7 +208,7 @@ export class MeetingAgentResourceResolver {
     context: AgentToolContext,
     selector: MeetingAgentReportSelector
   ): Promise<MeetingAgentResourceResolution> {
-    const reports = await this.meetingService.listReportsForAgent(
+    const reports = await this.meetingReportService.listReportsForAgent(
       context.currentUserId,
       context.workspaceId,
       { ...selector, limit: RESOLUTION_QUERY_LIMIT }
@@ -218,7 +222,7 @@ export class MeetingAgentResourceResolver {
   async resolveLatestReport(
     context: AgentToolContext
   ): Promise<MeetingAgentResourceResolution> {
-    const reports = await this.meetingService.listReportsForAgent(
+    const reports = await this.meetingReportService.listReportsForAgent(
       context.currentUserId,
       context.workspaceId,
       { limit: 1 }
@@ -265,7 +269,7 @@ export class MeetingAgentResourceResolver {
     ) {
       return this.notFound();
     }
-    const result = await this.meetingService.listActionItemsForAgent(
+    const result = await this.meetingReportService.listActionItemsForAgent(
       context.currentUserId,
       context.workspaceId,
       {
@@ -327,7 +331,7 @@ export class MeetingAgentResourceResolver {
           return reference;
         }
         case "meeting_report": {
-          await this.meetingService.getReport(
+          await this.meetingReportService.getReport(
             context.currentUserId,
             context.workspaceId,
             reference.resourceId
@@ -347,7 +351,7 @@ export class MeetingAgentResourceResolver {
           if (!reference.reportId) {
             return null;
           }
-          const report = await this.meetingService.getReport(
+          const report = await this.meetingReportService.getReport(
             context.currentUserId,
             context.workspaceId,
             reference.reportId

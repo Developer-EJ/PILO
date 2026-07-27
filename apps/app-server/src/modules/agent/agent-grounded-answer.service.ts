@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Injectable, Optional } from "@nestjs/common";
 import { DatabaseService } from "../../database/database.service";
 import { DocumentSearchService } from "../drive/document-search.service";
-import { MeetingTranscriptRagService } from "../meeting/meeting-transcript-rag.service";
+import { MeetingTranscriptRagService } from "../meeting-report/meeting-transcript-rag.service";
 import type { AgentExecutionLease } from "./agent-logging.service";
 import type {
   AgentGroundingSourceCandidate,

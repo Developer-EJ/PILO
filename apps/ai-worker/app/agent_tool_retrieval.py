@@ -10,7 +10,11 @@ from typing import Protocol
 _SHA256_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 _TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣_]+")
 _SUPPORTED_CATALOG_VERSIONS = frozenset(
-    {"agent-tool-capabilities:v1", "agent-tool-capabilities:v2"}
+    {
+        "agent-tool-capabilities:v1",
+        "agent-tool-capabilities:v2",
+        "agent-tool-capabilities:v3",
+    }
 )
 TOOL_RETRIEVER_VERSION = "agent-tool-metadata-overlap:v5"
 _KOREAN_PARTICLES = (
@@ -207,7 +211,10 @@ def parse_tool_capability_catalog(
     if not hmac.compare_digest(sha256, expected_sha256):
         raise ValueError("Invalid toolCapabilityCatalog SHA")
 
-    strict_v2 = version == "agent-tool-capabilities:v2"
+    strict_v2 = version in {
+        "agent-tool-capabilities:v2",
+        "agent-tool-capabilities:v3",
+    }
     capabilities = tuple(_parse_capability(item, strict_v2=strict_v2) for item in raw_capabilities)
     descriptors = tuple(_parse_descriptor(item, strict_v2=strict_v2) for item in raw_descriptors)
     tool_names = {descriptor.tool_name for descriptor in descriptors}

@@ -16,5 +16,10 @@
 ## 시작해서 읽을 파일
 
 1. `WorkspaceCanvas.tsx`
-2. `../../engine/runtime/ClassicCanvasRuntime.tsx`
-3. `../../engine/editor/CanvasEditor.tsx`
+2. `useWorkspaceCanvasBoard.ts`
+3. `toolbar/CanvasToolButtons.tsx`
+4. `../../engine/runtime/ClassicCanvasRuntime.tsx`
+5. `../../engine/editor/CanvasEditor.tsx`
+
+`WorkspaceCanvas`는 toolbar와 runtime을 조립한다. 인증 세션, Canvas client mode,
+board 재사용·생성·조회와 realtime 실행 설정은 `useWorkspaceCanvasBoard`가 담당한다.

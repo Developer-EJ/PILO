@@ -1,0 +1,19 @@
+/* Canvas screen shell */
+
+.canvas-feature {
+  color-scheme: light;
+  --pilo-ink: #0f1422;
+  --pilo-bg: #eceef3;
+  --pilo-surface: #ffffff;
+  --pilo-primary: #6d5bd6;
+  --pilo-primary-2: #8b5cf6;
+  --pilo-muted: #8a93a6;
+  --pilo-text-soft: #5b6478;
+  --pilo-line: rgba(15, 20, 34, 0.09);
+  --pilo-line-strong: rgba(15, 20, 34, 0.14);
+  --pilo-success: #2e9e5b;
+  --pilo-warning: #d9941f;
+  --pilo-danger: #e5484d;
+  --pilo-shadow: 0 12px 28px rgba(15, 20, 34, 0.075);
+  --pilo-shadow-soft: 0 2px 8px rgba(15, 20, 34, 0.055);
+}

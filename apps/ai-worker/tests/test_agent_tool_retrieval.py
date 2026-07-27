@@ -182,7 +182,16 @@ def test_catalog_accepts_v1_compatibility_payload_and_rejects_unknown_version() 
     assert legacy is not None
     assert legacy.version == "agent-tool-capabilities:v1"
 
-    unknown = legacy_catalog_payload("agent-tool-capabilities:v3")
+    current = catalog_payload()
+    current["version"] = "agent-tool-capabilities:v3"
+    current["sha256"] = compute_tool_capability_catalog_sha(
+        current["version"], current["capabilities"], current["descriptors"]
+    )
+    assert (
+        parse_tool_capability_catalog(current, TOOL_SCHEMAS).version == "agent-tool-capabilities:v3"
+    )
+
+    unknown = legacy_catalog_payload("agent-tool-capabilities:v4")
     with pytest.raises(ValueError, match="Unsupported toolCapabilityCatalog version"):
         parse_tool_capability_catalog(unknown, TOOL_SCHEMAS)
 

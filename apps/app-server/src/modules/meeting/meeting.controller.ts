@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   UseGuards
 } from "@nestjs/common";
 import { apiResponse, ApiSuccessResponse } from "../../common/api-response";
@@ -22,24 +21,12 @@ import {
   MeetingDetailPayload,
   MeetingRoomListPayload,
   MeetingRoomMutationPayload,
-  MeetingReportDetailResponsePayload,
-  MeetingReportContentMutationPayload,
-  MeetingReportDeletionPayload,
-  MeetingReportActionItemMutationPayload,
-  MeetingReportActionItemExtractionRetryPayload,
-  MeetingReportListPayload,
-  MeetingReportRegenerationPayload,
   MeetingService,
   ParticipantListPayload,
   RecordingListPayload,
   StartRecordingPayload,
   StartMeetingPayload
 } from "./meeting.service";
-import {
-  MeetingActionItemDeliveryOptionsPayload,
-  MeetingActionItemDeliveryPayload,
-  MeetingActionItemDeliveryService
-} from "./meeting-action-item-delivery.service";
 import { MeetingNotificationService } from "./meeting-notification.service";
 
 @Controller("workspaces/:workspaceId")
@@ -47,7 +34,6 @@ import { MeetingNotificationService } from "./meeting-notification.service";
 export class MeetingController {
   constructor(
     private readonly meetingService: MeetingService,
-    private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
     private readonly meetingNotificationService: MeetingNotificationService
   ) {}
 
@@ -308,202 +294,6 @@ export class MeetingController {
         workspaceId,
         meetingId,
         invitationId
-      )
-    );
-  }
-
-  @Get("meeting-reports")
-  async listReports(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Query("cursor") cursor: unknown,
-    @Query("from") from: unknown,
-    @Query("q") q: unknown,
-    @Query("status") status: unknown,
-    @Query("to") to: unknown,
-    @Query("limit") limit: unknown
-  ): Promise<ApiSuccessResponse<MeetingReportListPayload>> {
-    const result = await this.meetingService.listReports(currentUserId, workspaceId, {
-      cursor,
-      from,
-      q,
-      status,
-      to,
-      limit
-    });
-    return apiResponse(result);
-  }
-
-  @Get("meeting-reports/:reportId")
-  async getReport(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string
-  ): Promise<ApiSuccessResponse<MeetingReportDetailResponsePayload>> {
-    const result = await this.meetingService.getReport(
-      currentUserId,
-      workspaceId,
-      reportId
-    );
-    return apiResponse(result);
-  }
-
-  @Patch("meeting-reports/:reportId")
-  async updateReportContent(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string,
-    @Body() body: unknown
-  ): Promise<ApiSuccessResponse<MeetingReportContentMutationPayload>> {
-    return apiResponse(
-      await this.meetingService.updateMeetingReportContent(
-        currentUserId,
-        workspaceId,
-        reportId,
-        body
-      )
-    );
-  }
-
-  @Delete("meeting-reports/:reportId")
-  async deleteReport(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string
-  ): Promise<ApiSuccessResponse<MeetingReportDeletionPayload>> {
-    return apiResponse(
-      await this.meetingService.deleteReport(currentUserId, workspaceId, reportId)
-    );
-  }
-
-  @Patch("meeting-reports/:reportId/action-items/:actionItemId")
-  async updateReportActionItem(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string,
-    @Param("actionItemId") actionItemId: string,
-    @Body() body: unknown
-  ): Promise<ApiSuccessResponse<MeetingReportActionItemMutationPayload>> {
-    return apiResponse(
-      await this.meetingService.updateMeetingReportActionItem(
-        currentUserId,
-        workspaceId,
-        reportId,
-        actionItemId,
-        body
-      )
-    );
-  }
-
-  @Post("meeting-reports/:reportId/action-items/:actionItemId/approve")
-  async approveReportActionItem(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string,
-    @Param("actionItemId") actionItemId: string
-  ): Promise<ApiSuccessResponse<MeetingReportActionItemMutationPayload>> {
-    return apiResponse(
-      await this.meetingService.approveMeetingReportActionItem(
-        currentUserId,
-        workspaceId,
-        reportId,
-        actionItemId
-      )
-    );
-  }
-
-  @Get("meeting-reports/:reportId/action-items/:actionItemId/delivery-options")
-  async getReportActionItemDeliveryOptions(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string,
-    @Param("actionItemId") actionItemId: string
-  ): Promise<ApiSuccessResponse<MeetingActionItemDeliveryOptionsPayload>> {
-    return apiResponse(
-      await this.meetingActionItemDeliveryService.listIssueDeliveryOptions(
-        currentUserId,
-        workspaceId,
-        reportId,
-        actionItemId
-      )
-    );
-  }
-
-  @Post("meeting-reports/:reportId/action-items/:actionItemId/deliveries")
-  async deliverReportActionItem(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string,
-    @Param("actionItemId") actionItemId: string,
-    @Body() body: unknown
-  ): Promise<ApiSuccessResponse<MeetingActionItemDeliveryPayload>> {
-    return apiResponse(
-      await this.meetingActionItemDeliveryService.deliver(
-        currentUserId,
-        workspaceId,
-        reportId,
-        actionItemId,
-        body
-      )
-    );
-  }
-
-  @Post("meeting-reports/:reportId/action-items/:actionItemId/dismiss")
-  async dismissReportActionItem(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string,
-    @Param("actionItemId") actionItemId: string
-  ): Promise<ApiSuccessResponse<MeetingReportActionItemMutationPayload>> {
-    return apiResponse(
-      await this.meetingService.dismissMeetingReportActionItem(
-        currentUserId,
-        workspaceId,
-        reportId,
-        actionItemId
-      )
-    );
-  }
-
-  @Get("meetings/:meetingId/reports")
-  async listMeetingReports(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("meetingId") meetingId: string
-  ): Promise<ApiSuccessResponse<MeetingReportListPayload>> {
-    const result = await this.meetingService.listMeetingReports(
-      currentUserId,
-      workspaceId,
-      meetingId
-    );
-    return apiResponse(result);
-  }
-
-  @Post("meeting-reports/:reportId/regeneration-jobs")
-  async requestReportRegeneration(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string
-  ): Promise<ApiSuccessResponse<MeetingReportRegenerationPayload>> {
-    const result = await this.meetingService.requestReportRegeneration(
-      currentUserId,
-      workspaceId,
-      reportId
-    );
-    return apiResponse(result);
-  }
-
-  @Post("meeting-reports/:reportId/action-item-extractions/retry")
-  async retryReportActionItemExtraction(
-    @CurrentUserId() currentUserId: string,
-    @Param("workspaceId") workspaceId: string,
-    @Param("reportId") reportId: string
-  ): Promise<ApiSuccessResponse<MeetingReportActionItemExtractionRetryPayload>> {
-    return apiResponse(
-      await this.meetingService.retryMeetingReportActionItemExtraction(
-        currentUserId,
-        workspaceId,
-        reportId
       )
     );
   }

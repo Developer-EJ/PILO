@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const deliveryService = await readFile(
   new URL(
-    "../../src/modules/meeting/meeting-action-item-delivery.service.ts",
+    "../../src/modules/meeting-report/meeting-action-item-delivery.service.ts",
     import.meta.url
   ),
   "utf8"

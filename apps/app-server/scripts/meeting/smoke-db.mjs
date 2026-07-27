@@ -9,6 +9,9 @@ if (!process.env.DATABASE_URL) {
 
 const require = createRequire(import.meta.url);
 const { MeetingService } = require("../../dist/modules/meeting/meeting.service.js");
+const {
+  MeetingReportLifecycleService
+} = require("../../dist/modules/meeting-report/meeting-report-lifecycle.service.js");
 const { WorkspaceService } = require(
   "../../dist/modules/workspace/workspace.service.js"
 );
@@ -82,12 +85,16 @@ try {
 
   const database = createTransactionDatabase(client);
   const workspaceService = new WorkspaceService(database);
+  const meetingReportLifecycleService = new MeetingReportLifecycleService(
+    database,
+    meetingReportJobService
+  );
   const meetingService = new MeetingService(
     database,
     workspaceService,
     liveKitTokenService,
     liveKitEgressService,
-    meetingReportJobService
+    meetingReportLifecycleService
   );
 
   await database.execute(
