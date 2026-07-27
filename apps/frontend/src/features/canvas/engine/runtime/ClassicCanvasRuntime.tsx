@@ -45,6 +45,8 @@ import {
   clampZoom,
   DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
   getFreeformShapeId,
+  readFreeformShapeMap,
+  replaceFreeformShapeMap,
 } from "./canvas-runtime-utils";
 
 export type { CanvasBoardDetail, CanvasViewSetting } from "./canvas-runtime-types";
@@ -296,10 +298,12 @@ function ClassicCanvasRuntimeInner({
   const [canvasActions, setCanvasActions] = useState<PiloCanvasActions | null>(
     null,
   );
-  const [freeformShapes, setFreeformShapes] = useState<
-    PiloCanvasFreeformShape[]
-  >([]);
-  const freeformShapesRef = useRef<PiloCanvasFreeformShape[]>([]);
+  const committedShapeMapRef = useRef(
+    new Map<string, PiloCanvasFreeformShape>(),
+  );
+  const publishedShapeMapRef = useRef(
+    new Map<string, PiloCanvasFreeformShape>(),
+  );
   const [viewSetting, setViewSetting] = useState<CanvasViewSetting>(
     INITIAL_CANVAS_VIEW_SETTING,
   );
@@ -452,7 +456,9 @@ function ClassicCanvasRuntimeInner({
       const sortedOperations = operations
         .slice()
         .sort((a, b) => a.opSeq - b.opSeq);
-      let nextFreeformShapes = freeformShapesRef.current;
+      let nextFreeformShapes = readFreeformShapeMap(
+        committedShapeMapRef.current,
+      );
       let hasVisibleShapeChange = false;
       const frameIdsToLoad = new Set<string>();
       const surfaceDeletedShapeIds = new Set<string>();
@@ -591,8 +597,14 @@ function ClassicCanvasRuntimeInner({
         return;
       }
 
-      freeformShapesRef.current = nextFreeformShapes;
-      setFreeformShapes(nextFreeformShapes);
+      replaceFreeformShapeMap(
+        committedShapeMapRef.current,
+        nextFreeformShapes,
+      );
+      replaceFreeformShapeMap(
+        publishedShapeMapRef.current,
+        nextFreeformShapes,
+      );
       queueCanvasSurfaceShapePatch({
         deletedShapeIds: [...surfaceDeletedShapeIds],
         upsertShapes: nextFreeformShapes.filter((shape) => {
@@ -677,7 +689,7 @@ function ClassicCanvasRuntimeInner({
         deletedShapeIdsRef.current.delete(shapeId);
       });
       const result = applyCanvasRoomShapePatch({
-        currentShapes: freeformShapesRef.current,
+        currentShapes: readFreeformShapeMap(committedShapeMapRef.current),
         deletedShapeIds: patch.deletedShapeIds,
         pendingShapeIds: unloadedShapeIdsRef.current,
         respectViewport: patch.respectViewport,
@@ -713,8 +725,14 @@ function ClassicCanvasRuntimeInner({
         return;
       }
 
-      freeformShapesRef.current = result.nextShapes;
-      setFreeformShapes(result.nextShapes);
+      replaceFreeformShapeMap(
+        committedShapeMapRef.current,
+        result.nextShapes,
+      );
+      replaceFreeformShapeMap(
+        publishedShapeMapRef.current,
+        result.nextShapes,
+      );
     },
     [
       markShapeDeleted,
@@ -788,7 +806,9 @@ function ClassicCanvasRuntimeInner({
       patch.deletedShapeIds.forEach((shapeId) => {
         if (
           isRemoteShapeDeletionProtected({
-            currentShapes: freeformShapesRef.current,
+            currentShapes: readFreeformShapeMap(
+              committedShapeMapRef.current,
+            ),
             protectedShapeIds,
             shapeDetailCache: shapeDetailCacheRef.current,
             shapeId,
@@ -860,7 +880,9 @@ function ClassicCanvasRuntimeInner({
       if (!change.shape) {
         if (
           isRemoteShapeDeletionProtected({
-            currentShapes: freeformShapesRef.current,
+            currentShapes: readFreeformShapeMap(
+              committedShapeMapRef.current,
+            ),
             protectedShapeIds,
             shapeDetailCache: shapeDetailCacheRef.current,
             shapeId,
@@ -1020,11 +1042,11 @@ function ClassicCanvasRuntimeInner({
 
   useCanvasRuntimeHydration({
     board,
-    freeformShapesRef,
+    committedShapeMapRef,
+    publishedShapeMapRef,
     pendingLocalShapeVersionsRef,
     setCameraResetVersion,
     setCanvasHydrationVersion,
-    setFreeformShapes,
     shapeDetailCacheRef,
     storageMode,
     viewportShapeLoadRequestSeqRef,
@@ -1072,7 +1094,8 @@ function ClassicCanvasRuntimeInner({
   } = useCanvasShapePersistence({
     board,
     canvasClient,
-    freeformShapesRef,
+    committedShapeMapRef,
+    publishedShapeMapRef,
     localShapeVersionRef,
     onLocalShapeSyncIdle: flushDeferredRemoteChanges,
     onLoadedShapesMerged: handleLoadedShapesMerged,
@@ -1082,7 +1105,6 @@ function ClassicCanvasRuntimeInner({
     persistThroughRoomState,
     remoteShapeRevisionRef,
     roomStateShapeIdsRef,
-    setFreeformShapes,
     shapeDetailCacheRef,
     shapeSyncQueueRef,
     storageMode,
@@ -1208,6 +1230,14 @@ function ClassicCanvasRuntimeInner({
 
     return snapshots;
   }, []);
+  const getCommittedFreeformShapeSnapshots = useCallback(
+    () => readFreeformShapeMap(committedShapeMapRef.current),
+    [],
+  );
+  const getPublishedFreeformShapeSnapshots = useCallback(
+    () => readFreeformShapeMap(publishedShapeMapRef.current),
+    [],
+  );
 
   const handleSnapStateChange = useCallback(
     (state: PiloCanvasSnapState) => {
@@ -1240,7 +1270,12 @@ function ClassicCanvasRuntimeInner({
           board={board}
           cameraResetVersion={cameraResetVersion}
           consumeShapePatch={consumeCanvasSurfaceShapePatch}
-          freeformShapes={freeformShapes}
+          getCommittedFreeformShapeSnapshots={
+            getCommittedFreeformShapeSnapshots
+          }
+          getPublishedFreeformShapeSnapshots={
+            getPublishedFreeformShapeSnapshots
+          }
           hydrationVersion={canvasHydrationVersion}
           loadingFrameIds={loadingFrameIds}
           onReady={setCanvasActions}
