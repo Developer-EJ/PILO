@@ -789,6 +789,11 @@ assert.equal(
 
     finishRelease = undefined;
     const recoverTransition = transitionController.recover();
+    assert.equal(
+      transitionController.getState().status,
+      "acquiring",
+      "recover가 시작되면 stale lease로 publish할 수 없게 즉시 held 상태를 닫는다"
+    );
     await Promise.resolve();
     await Promise.resolve();
     assert.deepEqual(transitionRequests.slice(-1), [

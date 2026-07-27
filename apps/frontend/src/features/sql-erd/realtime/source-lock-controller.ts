@@ -90,6 +90,7 @@ export function createSqlErdSourceLockController({
     getState: () => state,
     recover: async () => {
       currentLeaseId = null;
+      if (active) setState({ status: "acquiring" });
       await enqueueTransition(async () => {
         const leaseId = heldLeaseId;
         heldLeaseId = null;
