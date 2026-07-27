@@ -370,13 +370,29 @@ for (const { mergeable, conflictStatus, message } of [
     }
   );
 
-  assert.equal(tokenRequests.length, 1);
-  assert.equal(mergeBaseRequests[0].installationAccessToken, "shared-installation-token");
+  assert.equal(tokenRequests.length, 0);
+  assert.equal(mergeBaseRequests[0].installationAccessToken, undefined);
+  assert.deepEqual(mergeBaseRequests[0], {
+    installationId: 998877,
+    appId: "12345",
+    privateKey: "test-private-key",
+    owner: "my-team",
+    repo: "pilo",
+    baseRef: "base-sha",
+    headRef: "head-sha",
+    now: githubAppConfig.now
+  });
   assert.equal(contentRequests.length, 3);
   assert.ok(
     contentRequests.every(
       (request) =>
-        request.installationAccessToken === "shared-installation-token"
+        request.installationAccessToken === undefined &&
+        request.installationId === 998877 &&
+        request.appId === "12345" &&
+        request.privateKey === "test-private-key" &&
+        request.owner === "my-team" &&
+        request.repo === "pilo" &&
+        request.now === githubAppConfig.now
     )
   );
   assert.deepEqual(result, {

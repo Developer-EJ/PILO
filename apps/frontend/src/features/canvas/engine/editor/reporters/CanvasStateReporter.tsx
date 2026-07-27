@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useEditor, type Editor, type TLShape } from "tldraw";
+import {
+  useEditor,
+  type Editor,
+  type TLShape,
+  type TLShapeId,
+} from "tldraw";
 import { useValue } from "@tldraw/state-react";
 import type {
   PiloCanvasFreeformShape,
@@ -144,18 +149,6 @@ function getChangedCanvasShapeRecordIds(entry?: CanvasStoreListenEntry) {
   return { assetIds, shapeIds };
 }
 
-function getShapeAssetId(shape: PiloCanvasFreeformShape) {
-  if (!shape.props || typeof shape.props !== "object") return null;
-
-  const assetId = (shape.props as { assetId?: unknown }).assetId;
-
-  return typeof assetId === "string" ? assetId : null;
-}
-
-function getFreeformSnapshotSignature(shapes: PiloCanvasFreeformShape[]) {
-  return JSON.stringify(shapes);
-}
-
 export function CanvasStateReporter({
   onFreeformShapesDraftChange,
   onFreeformShapesChange,
@@ -187,7 +180,6 @@ export function CanvasStateReporter({
     null,
   );
   const lastFreeformSnapshotAtRef = useRef(0);
-  const lastFreeformSnapshotSignatureRef = useRef<string | null>(null);
   const freeformPersistSequenceRef = useRef(0);
   const pendingChangedAssetIdsRef = useRef(new Set<string>());
   const pendingDraftChangedShapeIdsRef = useRef(new Set<string>());
@@ -251,9 +243,17 @@ export function CanvasStateReporter({
   }, [camera.x, camera.y, camera.z, editor, onViewChange, onViewportBoundsChange]);
 
   useEffect(() => {
-    function readFreeformShapes() {
-      return editor
-        .getCurrentPageShapes()
+    const shapeIdsByAssetId = editor.store.query.index(
+      "shape",
+      "props\\assetId",
+    );
+
+    shapeIdsByAssetId.get();
+
+    function readFreeformShapes(shapeIds: Iterable<string>) {
+      return Array.from(new Set(shapeIds))
+        .map((shapeId) => editor.getShape(shapeId as TLShapeId))
+        .filter((shape): shape is TLShape => Boolean(shape))
         .filter(isPersistableFreeformShape)
         .map((shape) => {
           const snapshot = toFreeformSnapshot(editor, shape);
@@ -316,51 +316,39 @@ export function CanvasStateReporter({
       freeformSnapshotTimerRef.current = setTimeout(() => {
         freeformSnapshotTimerRef.current = null;
         lastFreeformSnapshotAtRef.current = Date.now();
+        if (pendingChangedAssetIdsRef.current.size) {
+          const assetShapeIndex = shapeIdsByAssetId.get();
+
+          pendingChangedAssetIdsRef.current.forEach((assetId) => {
+            assetShapeIndex.get(assetId)?.forEach((shapeId) => {
+              pendingDraftChangedShapeIdsRef.current.add(String(shapeId));
+              pendingPersistChangedShapeIdsRef.current.add(String(shapeId));
+            });
+          });
+          pendingChangedAssetIdsRef.current.clear();
+        }
+        const draftChangedShapeIds = Array.from(
+          pendingDraftChangedShapeIdsRef.current,
+        );
+        const draftDeletedShapeIds = Array.from(
+          pendingDraftDeletedShapeIdsRef.current,
+        );
+
+        if (!draftChangedShapeIds.length && !draftDeletedShapeIds.length) {
+          return;
+        }
         let nextFreeformShapes: PiloCanvasFreeformShape[];
 
         try {
-          nextFreeformShapes = readFreeformShapes();
+          nextFreeformShapes = readFreeformShapes(draftChangedShapeIds);
         } catch (error) {
           console.error("Canvas shape snapshot read failed", error);
           return;
         }
 
-        const nextSnapshotSignature =
-          getFreeformSnapshotSignature(nextFreeformShapes);
-
-        if (pendingChangedAssetIdsRef.current.size) {
-          nextFreeformShapes.forEach((shape) => {
-            const assetId = getShapeAssetId(shape);
-
-            if (
-              !assetId ||
-              !pendingChangedAssetIdsRef.current.has(assetId) ||
-              typeof shape.id !== "string"
-            ) {
-              return;
-            }
-
-            pendingDraftChangedShapeIdsRef.current.add(shape.id);
-            pendingPersistChangedShapeIdsRef.current.add(shape.id);
-          });
-          pendingChangedAssetIdsRef.current.clear();
-        }
-
-        if (
-          lastFreeformSnapshotSignatureRef.current === nextSnapshotSignature &&
-          !pendingExplicitDeletedShapeIdsRef.current.size
-        ) {
-          return;
-        }
-
-        lastFreeformSnapshotSignatureRef.current = nextSnapshotSignature;
         const draftChange: PiloCanvasLocalShapeChange = {
-          changedShapeIds: Array.from(
-            pendingDraftChangedShapeIdsRef.current,
-          ),
-          deletedShapeIds: Array.from(
-            pendingDraftDeletedShapeIdsRef.current,
-          ),
+          changedShapeIds: draftChangedShapeIds,
+          deletedShapeIds: draftDeletedShapeIds,
           isFreehandDrawing: isDrawing,
         };
 
@@ -395,7 +383,9 @@ export function CanvasStateReporter({
 
             if (pendingFreehandPersistRef.current) {
               try {
-                persistFreeformShapes = readFreeformShapes();
+                persistFreeformShapes = readFreeformShapes(
+                  pendingPersistChangedShapeIdsRef.current,
+                );
               } catch (error) {
                 console.error("Canvas final freehand snapshot read failed", error);
                 scheduleFreeformPersist();

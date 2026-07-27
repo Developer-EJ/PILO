@@ -772,10 +772,15 @@ assert.match(canvasRuntimeTypes, /CanvasViewSettingApiClient/);
 assert.match(canvasRuntimeUtils, /hasCanvasFreeformShapeChanged/);
 assert.match(canvasRuntimeUtils, /buildFrameChildrenQueryKey/);
 assert.match(canvasRuntimeUtils, /getChangedFreeformShapeIds/);
+assert.match(canvasRuntimeUtils, /candidateShapeIds\?: Iterable<string>/);
 assert.match(canvasRuntimeUtils, /mergeLocalFreeformShapeChanges/);
 assert.match(canvasRuntimeUtils, /changedShapeIdSet\.has\(shapeId\)/);
+assert.match(canvasRuntimeUtils, /readFreeformShapeMap/);
+assert.match(canvasRuntimeUtils, /replaceFreeformShapeMap/);
 assert.match(canvasRuntimeHydration, /readCanvasStorage\("freeform-shapes"/);
 assert.doesNotMatch(canvasRuntimeHydration, /readCanvasStorage\("view-setting"/);
+assert.match(canvasRuntimeHydration, /committedShapeMapRef/);
+assert.match(canvasRuntimeHydration, /publishedShapeMapRef/);
 assert.match(canvasApiLifecycle, /createCanvasShapeSyncQueue/);
 assert.match(canvasApiLifecycle, /queryClient\s*\.\s*invalidateQueries/);
 assert.match(canvasApiLifecycle, /enterCanvas/);
@@ -783,15 +788,24 @@ assert.match(canvasApiLifecycle, /leaveCanvas/);
 assert.match(canvasApiLifecycle, /shapeSyncQueue\.flush/);
 assert.match(canvasShapePersistence, /syncCanvasFreeformShapes/);
 assert.match(canvasShapePersistence, /shapeSyncQueue\.enqueue/);
-assert.match(canvasShapePersistence, /areCanvasFreeformShapesEqual/);
+assert.doesNotMatch(canvasShapePersistence, /areCanvasFreeformShapesEqual/);
+assert.doesNotMatch(canvasShapePersistence, /setFreeformShapes/);
+assert.match(canvasShapePersistence, /committedShapeMapRef/);
+assert.match(canvasShapePersistence, /publishedShapeMapRef/);
 assert.match(canvasRuntime, /captureDraftFreeformShapes/);
+assert.doesNotMatch(canvasRuntime, /const \[freeformShapes,\s*setFreeformShapes\]/);
+assert.match(canvasRuntime, /committedShapeMapRef/);
+assert.match(canvasRuntime, /publishedShapeMapRef/);
 assert.match(canvasShapePersistence, /shapeDetailCacheRef\.current\.set\(shapeId, nextShape\)/);
 assert.match(canvasShapePersistence, /deletedShapeIdsRef\.current\.add\(shapeId\)/);
 assert.match(canvasShapePersistence, /deletedShapeIdsRef\.current\.has\(shapeId\)/);
 assert.match(canvasShapePersistence, /unloadedShapeIdsRef/);
 assert.match(canvasShapePersistence, /buildPersistableLocalShapes/);
 assert.match(canvasShapePersistence, /nextShapes: buildPersistableLocalShapes\(nextFreeformShapes\)/);
-assert.match(canvasShapePersistence, /previousShapes: buildPersistableLocalShapes\(currentFreeformShapes\)/);
+assert.match(
+  canvasShapePersistence,
+  /previousShapes: buildPersistableLocalShapes\(\s*currentPublishedShapes/,
+);
 assert.match(canvasShapePersistence, /pendingLocalShapeVersionsRef\.current\.has\(shapeId\)/);
 assert.match(canvasShapePersistence, /normalizedChange\.changedShapeIds/);
 assert.match(canvasShapePersistence, /mergeLocalSnapshot/);
@@ -1446,7 +1460,7 @@ assert.doesNotMatch(canvasEditorStateReporters, /editor\.getCurrentToolId\(\)/);
 assert.match(piloTldrawCanvas, /getCanvasInteractionToolPath\(editor\)/);
 assert.doesNotMatch(canvasEditorStateReporters, /getProtectedShapeIds/);
 assert.match(piloTldrawCanvas, /onLocalInteractionStateChange/);
-assert.match(piloTldrawCanvas, /freeformShapesRef\.current/);
+assert.match(piloTldrawCanvas, /getCommittedFreeformShapeSnapshots/);
 assert.match(piloTldrawCanvas, /pendingArrowBindingsRef/);
 assert.match(piloTldrawCanvas, /piloDefaultArrowKindHydrationGuardRef/);
 assert.match(piloTldrawCanvas, /readSerializedArrowBindings/);
@@ -1486,16 +1500,31 @@ assert.match(piloCanvasStateReporter, /getChangedCanvasShapeRecordIds/);
 assert.match(piloCanvasStateReporter, /isFreehandDrawing: isDrawing/);
 assert.match(
   piloCanvasStateReporter,
-  /if \(pendingFreehandPersistRef\.current\) \{[\s\S]*persistFreeformShapes = readFreeformShapes\(\)/,
+  /editor\.store\.query\.index\(\s*"shape",\s*"props\\\\assetId"/,
+);
+assert.match(piloCanvasStateReporter, /editor\.getShape\(shapeId as TLShapeId\)/);
+assert.doesNotMatch(piloCanvasStateReporter, /getCurrentPageShapes/);
+assert.doesNotMatch(piloCanvasStateReporter, /getFreeformSnapshotSignature/);
+assert.doesNotMatch(piloCanvasStateReporter, /lastFreeformSnapshotSignatureRef/);
+assert.match(
+  piloCanvasStateReporter,
+  /if \(pendingFreehandPersistRef\.current\) \{[\s\S]*persistFreeformShapes = readFreeformShapes\(\s*pendingPersistChangedShapeIdsRef\.current/,
 );
 assert.doesNotMatch(
   piloCanvasStateReporter,
   /onFreeformShapesChangeRef\.current\(nextFreeformShapes, persistChange\)/,
 );
-assert.match(
-  piloCanvasStateReporter,
-  /lastFreeformSnapshotSignatureRef\.current === nextSnapshotSignature &&\s*!pendingExplicitDeletedShapeIdsRef\.current\.size/,
+assert.match(piloTldrawCanvas, /collectPendingPreviewGroupShapeIds/);
+assert.match(piloTldrawCanvas, /withPiloMediaAsset/);
+assert.doesNotMatch(piloTldrawCanvas, /freeformShapesRef/);
+const pendingPreviewHeartbeatSource = piloTldrawCanvas.slice(
+  piloTldrawCanvas.indexOf("const heartbeatTimer"),
+  piloTldrawCanvas.indexOf(
+    "return () => window.clearInterval(heartbeatTimer)",
+  ),
 );
+assert.match(pendingPreviewHeartbeatSource, /editor\.getShape/);
+assert.doesNotMatch(pendingPreviewHeartbeatSource, /getCurrentPageShapes/);
 assert.match(piloTldrawCanvas, /mergeRemoteChanges/);
 assert.doesNotMatch(piloTldrawCanvas, /CANVAS_SHAPE_LOCK_RELEASE_GRACE_MS/);
 assert.doesNotMatch(piloTldrawCanvas, /scheduleShapeLockRelease/);
