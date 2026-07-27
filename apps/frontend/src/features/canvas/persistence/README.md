@@ -15,5 +15,10 @@
 ## 시작해서 읽을 파일
 
 1. `canvas-shape-sync.ts`
-2. `canvas-storage.ts`
-3. `../engine/runtime/useCanvasShapePersistence.ts`
+2. `canvas-shape-operations.ts`
+3. `canvas-storage.ts`
+4. `../engine/runtime/useCanvasShapePersistence.ts`
+
+`canvas-shape-operations.ts`는 snapshot diff, API payload 변환과 create/update/delete
+operation 생성을 담당하는 순수 계산 모듈이다. `canvas-shape-sync.ts`는 이 operation을
+batch API, retry와 직렬 queue에 연결하며 기존 persistence public import 경로를 유지한다.

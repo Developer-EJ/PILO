@@ -97,13 +97,15 @@ const workspaceCreationRoute = await readFile(
   new URL("../src/app/workspace/new/page.tsx", import.meta.url),
   "utf8"
 );
-const canvasRuntime = await readFile(
-  new URL(
-    "../src/features/canvas/engine/runtime/ClassicCanvasRuntime.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
+const canvasRuntime = (
+  await Promise.all(
+    [
+      "../src/features/canvas/engine/runtime/ClassicCanvasRuntime.tsx",
+      "../src/features/canvas/engine/runtime/canvas-deferred-remote-operations.ts",
+      "../src/features/canvas/engine/runtime/canvas-room-shape-serialization.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasRuntimeTypes = await readFile(
   new URL(
     "../src/features/canvas/engine/runtime/canvas-runtime-types.ts",
@@ -153,13 +155,14 @@ const canvasInitialCamera = await readFile(
   ),
   "utf8"
 );
-const canvasViewportQueries = await readFile(
-  new URL(
-    "../src/features/canvas/engine/runtime/useCanvasViewportQueries.ts",
-    import.meta.url
-  ),
-  "utf8"
-);
+const canvasViewportQueries = (
+  await Promise.all(
+    [
+      "../src/features/canvas/engine/runtime/useCanvasViewportQueries.ts",
+      "../src/features/canvas/engine/runtime/canvas-viewport-load-policy.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasZoomControls = await readFile(
   new URL(
     "../src/features/canvas/engine/runtime/CanvasZoomControls.tsx",
@@ -167,10 +170,14 @@ const canvasZoomControls = await readFile(
   ),
   "utf8"
 );
-const canvasWorkspace = await readFile(
-  new URL("../src/features/canvas/components/screen/WorkspaceCanvas.tsx", import.meta.url),
-  "utf8"
-);
+const canvasWorkspace = (
+  await Promise.all(
+    [
+      "../src/features/canvas/components/screen/WorkspaceCanvas.tsx",
+      "../src/features/canvas/components/screen/useWorkspaceCanvasBoard.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasAiChatOverlay = await readFile(
   new URL(
     "../src/features/canvas/engine/editor/overlays/CanvasAiChatOverlay.tsx",
@@ -182,30 +189,48 @@ const canvasHtmlArtifactPreview = await readFile(
   new URL("../src/components/canvas-html-artifact-preview.tsx", import.meta.url),
   "utf8"
 );
-const canvasShapeSync = await readFile(
-  new URL("../src/features/canvas/persistence/canvas-shape-sync.ts", import.meta.url),
-  "utf8"
-);
+const canvasShapeSync = (
+  await Promise.all(
+    [
+      "../src/features/canvas/persistence/canvas-shape-sync.ts",
+      "../src/features/canvas/persistence/canvas-shape-operations.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasShapeMetadata = await readFile(
   new URL("../src/features/canvas/engine/shapes/canvas-shape-metadata.ts", import.meta.url),
   "utf8"
 );
-const canvasCss = await readFile(
-  new URL("../src/features/canvas/styles/canvas.css", import.meta.url),
-  "utf8"
-);
+const canvasCss = (
+  await Promise.all(
+    [
+      "../src/features/canvas/styles/canvas.css",
+      "../src/features/canvas/styles/canvas-shell.css",
+      "../src/features/canvas/styles/canvas-file-node.css",
+      "../src/features/canvas/styles/canvas-screen.css",
+      "../src/features/canvas/styles/canvas-selection.css",
+      "../src/features/canvas/styles/canvas-editor-overlays.css",
+      "../src/features/canvas/styles/canvas-code-block.css",
+      "../src/features/canvas/styles/canvas-controls.css",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const packageJson = await readFile(new URL("../package.json", import.meta.url), "utf8");
 const tldrawSurface = await readFile(
   new URL("../src/shared/tldraw/TldrawSurface.tsx", import.meta.url),
   "utf8"
 );
-const piloTldrawCanvas = await readFile(
-  new URL(
-    "../src/features/canvas/engine/editor/CanvasEditor.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
+const piloTldrawCanvas = (
+  await Promise.all(
+    [
+      "../src/features/canvas/engine/editor/CanvasEditor.tsx",
+      "../src/features/canvas/engine/editor/CanvasFileDropImporter.tsx",
+      "../src/features/canvas/engine/editor/canvas-editor-shape-hydration.ts",
+      "../src/features/canvas/engine/editor/realtime/CanvasRealtimePreviewApplier.tsx",
+      "../src/features/canvas/engine/editor/reporters/CanvasPresenceReporter.tsx",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const piloCanvasStateReporter = await readFile(
   new URL(
     "../src/features/canvas/engine/editor/reporters/CanvasStateReporter.tsx",
@@ -260,10 +285,14 @@ const canvasRealtimeClient = await readFile(
   new URL("../src/shared/canvas-realtime/canvas-realtime-client.ts", import.meta.url),
   "utf8"
 );
-const canvasPresenceHook = await readFile(
-  new URL("../src/features/canvas/collaboration/useCanvasRoom.ts", import.meta.url),
-  "utf8"
-);
+const canvasPresenceHook = (
+  await Promise.all(
+    [
+      "../src/features/canvas/collaboration/useCanvasRoom.ts",
+      "../src/features/canvas/collaboration/canvas-presence-normalization.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasRemoteShapePreviewStore = await readFile(
   new URL(
     "../src/features/canvas/collaboration/canvas-remote-shape-preview-store.ts",

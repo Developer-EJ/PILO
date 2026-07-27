@@ -37,6 +37,10 @@ WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 - `imports/`: 파일과 폴더 탐색, 코드 파일 검증과 import 데이터 생성
 - `integrations/`: Canvas가 다른 도메인의 안정적인 식별자를 참조하는 연결 adapter
 
+`engine/editor/CanvasEditor.tsx`는 surface 조립자이며 Shape hydrate, realtime preview 적용,
+presence 보고와 code file drop 처리는 같은 폴더의 전용 모듈로 분리한다. editor 모듈은
+tldraw store를 다룰 수 있지만 Socket lifecycle이나 파일 시스템 탐색 자체를 소유하지 않는다.
+
 `integrations/drive/`는 Drive 파일 선택과 preview URL 발급을 Canvas 언어로 변환한다.
 roomState에는 `fileId`, 파일명, MIME type만 남기고 presigned URL과 파일 원문은
 브라우저 메모리에서만 사용한다.
@@ -52,6 +56,9 @@ component 연결만 담당하고, CodeMirror 설정과 code editor UI는 code-bl
 - `useCanvasShapePersistence`: freeform shape 변경 감지, local/API 저장, dirty shape 방어
 - `useCanvasViewportQueries`: viewport shape summary 조회와 shape detail lazy loading
 - `useCanvasApiLifecycle`: Canvas enter/leave와 unmount 시 shape queue flush
+- `canvas-deferred-remote-operations`: local interaction 중 원격 operation 보호와 대기열 압축
+- `canvas-room-shape-serialization`: roomState shape의 revision/content hash 직렬화
+- `canvas-viewport-load-policy`: viewport coverage와 frame lazy-load 대상 판정
 - `CanvasZoomControls`: smart guide와 zoom controls UI
 - `canvas-runtime-utils`: runtime hook들이 공유하는 순수 계산 helper와 query key
 - `canvas-runtime-types`: runtime 내부 client/storage mode 타입

@@ -9,7 +9,7 @@ const instantShape = readSource("../interactions/pilo-canvas-instant-shape.ts");
 const shapeFactory = readSource("./pilo-canvas-shape-factory.ts");
 const codeBlockTypes = readSource("./code-block/PiloCodeBlockShapeTypes.ts");
 const fileNodeTypes = readSource("./file-node/PiloFileNodeShapeTypes.ts");
-const canvasEditor = readSource("../editor/CanvasEditor.tsx");
+const canvasFileDropImporter = readSource("../editor/CanvasFileDropImporter.tsx");
 
 assert.match(instantShape, /frame: \{ height: 360, width: 640 \}/);
 assert.match(instantShape, /note: \{ height: 400, width: 400 \}/);
@@ -39,5 +39,5 @@ assert.match(shapeFactory, /const width = 840;\s+const height = 560;/);
 assert.match(codeBlockTypes, /PILO_COLLAPSED_CODE_BLOCK_SIZE = \{\s+h: 144,\s+w: 360/);
 assert.match(codeBlockTypes, /DEFAULT_PILO_CODE_BLOCK_PROPS[\s\S]*w: 840,\s+h: 520/);
 assert.match(fileNodeTypes, /DEFAULT_PILO_FILE_NODE_PROPS[\s\S]*w: 840,\s+h: 560/);
-assert.match(canvasEditor, /PILO_CODE_IMPORT_GRID_GAP_X = 112/);
-assert.match(canvasEditor, /PILO_CODE_IMPORT_GRID_GAP_Y = 128/);
+assert.match(canvasFileDropImporter, /PILO_CODE_IMPORT_GRID_GAP_X = 112/);
+assert.match(canvasFileDropImporter, /PILO_CODE_IMPORT_GRID_GAP_Y = 128/);

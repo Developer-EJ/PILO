@@ -25,19 +25,21 @@ import {
   runCanvasLazyLoadWithRetry,
   shouldRetryCanvasLazyLoad,
 } from "./canvas-lazy-load-retry";
+import {
+  createViewportShapeLoadBounds,
+  doesLoadedViewportCoverBounds,
+  isPersistedShapeRecord,
+  type LoadedViewportShapeBounds,
+  MAX_LOADED_VIEWPORT_BOUNDS,
+  readPersistedContentHash,
+  readPersistedRevision,
+  shouldLoadFrameChildren,
+} from "./canvas-viewport-load-policy";
 
 type RuntimeRef<T> = {
   current: T;
 };
 
-type LoadedViewportShapeBounds = {
-  bottom: number;
-  left: number;
-  right: number;
-  top: number;
-};
-
-const MAX_LOADED_VIEWPORT_BOUNDS = 24;
 const CANVAS_LAZY_LOAD_RECOVERY_DELAY_MS = 30_000;
 
 export type CanvasInitialViewportLoadStatus =
@@ -77,52 +79,6 @@ type UseCanvasViewportQueriesOptions = {
   viewportShapeLoadRequestSeqRef: RuntimeRef<number>;
   viewportShapeLoadTimerRef: RuntimeRef<ReturnType<typeof setTimeout> | null>;
 };
-
-function shouldLoadFrameChildren(
-  shape: PiloCanvasFreeformShape,
-): shape is PiloCanvasFreeformShape & { id: string; type: "frame" } {
-  return (
-    shape.type === "frame" &&
-    typeof shape.id === "string"
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readPersistedRevision(value: unknown) {
-  return typeof value === "number" && Number.isInteger(value) && value > 0
-    ? value
-    : null;
-}
-
-function readPersistedContentHash(value: unknown) {
-  return typeof value === "string" && value ? value : null;
-}
-
-function createViewportShapeLoadBounds(
-  bounds: PiloCanvasViewportBounds,
-): LoadedViewportShapeBounds {
-  return {
-    bottom: bounds.y + bounds.height + DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
-    left: bounds.x - DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
-    right: bounds.x + bounds.width + DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
-    top: bounds.y - DEFAULT_VIEWPORT_SHAPE_LOAD_MARGIN,
-  };
-}
-
-function doesLoadedViewportCoverBounds(
-  loadedBounds: LoadedViewportShapeBounds,
-  viewportBounds: PiloCanvasViewportBounds,
-) {
-  return (
-    loadedBounds.left <= viewportBounds.x &&
-    loadedBounds.top <= viewportBounds.y &&
-    loadedBounds.right >= viewportBounds.x + viewportBounds.width &&
-    loadedBounds.bottom >= viewportBounds.y + viewportBounds.height
-  );
-}
 
 export function useCanvasViewportQueries({
   board,
@@ -289,7 +245,7 @@ export function useCanvasViewportQueries({
       const shapes = Array.isArray(value) ? value : [value];
 
       shapes.forEach((shape) => {
-        if (!isRecord(shape) || typeof shape.id !== "string") {
+        if (!isPersistedShapeRecord(shape) || typeof shape.id !== "string") {
           return;
         }
         if (!shouldAcceptPersistedCanvasShape({

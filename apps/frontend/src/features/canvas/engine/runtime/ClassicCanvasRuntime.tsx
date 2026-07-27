@@ -28,8 +28,20 @@ import { CanvasZoomControls } from "./CanvasZoomControls";
 import {
   applyCanvasRemoteOperation,
   applyCanvasRoomShapePatch,
-  collectCanvasFrameDescendantShapeIds,
 } from "./canvas-remote-operations";
+import {
+  type DeferredRemoteOperation,
+  isRemoteOperationProtectedByLocalInteraction,
+  isRemoteShapeDeletionProtected,
+  queueDeferredRemoteOperation,
+  readDeferredRemoteOperations,
+} from "./canvas-deferred-remote-operations";
+import {
+  readCanvasRoomStateContentHash,
+  readCanvasRoomStateRevision,
+  serializeCanvasRoomStateShape,
+  serializeCanvasRoomStateShapes,
+} from "./canvas-room-shape-serialization";
 import type {
   CanvasBoardDetail,
   CanvasRuntimeStorageMode,
@@ -86,181 +98,10 @@ const initialLocalInteractionState: PiloCanvasLocalInteractionState = {
   isFocused: false,
   selectedShapeIds: [],
 };
-const MAX_DEFERRED_REMOTE_OPERATIONS = 80;
-
-type DeferredRemoteOperationReason = "local-interaction" | "pending-local-sync";
-
-type DeferredRemoteOperation = {
-  deferredAt: number;
-  operation: CanvasShapeOperationPayload;
-  reason: DeferredRemoteOperationReason;
-};
-
 type DeferredRoomShapeChange = {
   respectViewport: boolean;
   shape: PiloCanvasFreeformShape | null;
 };
-
-type CanvasShapeSerializableMetadata = {
-  contentHash?: unknown;
-  revision?: unknown;
-};
-
-type CanvasRoomShapeMetadataFallback = {
-  contentHashes?: Map<string, string>;
-  revisions?: Map<string, number>;
-};
-
-function readCanvasRoomStateRevision(value: unknown) {
-  return typeof value === "number" && Number.isInteger(value) && value > 0
-    ? value
-    : null;
-}
-
-function readCanvasRoomStateContentHash(value: unknown) {
-  return typeof value === "string" && value ? value : null;
-}
-
-function serializeCanvasRoomStateShape(
-  shape: PiloCanvasFreeformShape,
-  fallback: CanvasRoomShapeMetadataFallback = {},
-) {
-  const shapeRecord = shape as Record<string, unknown> &
-    CanvasShapeSerializableMetadata;
-  const serializedShape: Record<string, unknown> = { ...shapeRecord };
-  const shapeId = typeof shapeRecord.id === "string" ? shapeRecord.id : null;
-  const revision =
-    readCanvasRoomStateRevision(shapeRecord.revision) ??
-    (shapeId ? fallback.revisions?.get(shapeId) ?? null : null);
-  const contentHash =
-    readCanvasRoomStateContentHash(shapeRecord.contentHash) ??
-    (shapeId ? fallback.contentHashes?.get(shapeId) ?? null : null);
-
-  if (revision !== null) {
-    serializedShape.revision = revision;
-  }
-
-  if (contentHash) {
-    serializedShape.contentHash = contentHash;
-  }
-
-  return serializedShape;
-}
-
-function serializeCanvasRoomStateShapes(
-  shapes: PiloCanvasFreeformShape[],
-  fallback?: CanvasRoomShapeMetadataFallback,
-) {
-  return shapes.map((shape) => serializeCanvasRoomStateShape(shape, fallback));
-}
-
-function isRemoteOperationProtectedByLocalInteraction({
-  localInteractionState,
-  operation,
-}: {
-  localInteractionState: PiloCanvasLocalInteractionState;
-  operation: CanvasShapeOperationPayload;
-}) {
-  return localInteractionState.activeMutationShapeIds.includes(
-    operation.shapeId,
-  );
-}
-
-function isRemoteShapeDeletionProtected({
-  currentShapes,
-  protectedShapeIds,
-  shapeDetailCache,
-  shapeId,
-}: {
-  currentShapes: PiloCanvasFreeformShape[];
-  protectedShapeIds: ReadonlySet<string>;
-  shapeDetailCache: Map<string, PiloCanvasFreeformShape>;
-  shapeId: string;
-}) {
-  if (protectedShapeIds.has(shapeId)) {
-    return true;
-  }
-
-  const shape =
-    currentShapes.find((candidate) => getFreeformShapeId(candidate) === shapeId) ??
-    shapeDetailCache.get(shapeId);
-
-  if (shape?.type !== "frame") {
-    return false;
-  }
-
-  const descendantIds = collectCanvasFrameDescendantShapeIds(
-    [...shapeDetailCache.values(), ...currentShapes],
-    shapeId,
-  );
-
-  return [...descendantIds].some((descendantId) =>
-    protectedShapeIds.has(descendantId),
-  );
-}
-
-function queueDeferredRemoteOperation(
-  queue: Map<number, DeferredRemoteOperation>,
-  operation: CanvasShapeOperationPayload,
-  reason: DeferredRemoteOperationReason,
-) {
-  queue.forEach((deferredOperation, opSeq) => {
-    if (
-      deferredOperation.operation.shapeId === operation.shapeId &&
-      opSeq < operation.opSeq
-    ) {
-      queue.delete(opSeq);
-    }
-  });
-
-  queue.set(operation.opSeq, {
-    deferredAt: Date.now(),
-    operation,
-    reason,
-  });
-
-  if (queue.size <= MAX_DEFERRED_REMOTE_OPERATIONS) {
-    return;
-  }
-
-  const orderedEntries = Array.from(queue.entries()).sort(
-    ([, left], [, right]) => left.operation.opSeq - right.operation.opSeq,
-  );
-  const latestOpSeqByShapeId = new Map<string, number>();
-
-  orderedEntries.forEach(([opSeq, deferredOperation]) => {
-    latestOpSeqByShapeId.set(deferredOperation.operation.shapeId, opSeq);
-  });
-
-  for (const [opSeq, deferredOperation] of orderedEntries) {
-    if (queue.size <= MAX_DEFERRED_REMOTE_OPERATIONS) break;
-    if (deferredOperation.operation.operationType === "delete") continue;
-    if (latestOpSeqByShapeId.get(deferredOperation.operation.shapeId) === opSeq) {
-      continue;
-    }
-
-    queue.delete(opSeq);
-  }
-
-  for (const [opSeq] of orderedEntries) {
-    if (queue.size <= MAX_DEFERRED_REMOTE_OPERATIONS) break;
-    queue.delete(opSeq);
-  }
-
-  console.warn("Canvas deferred remote operation queue was compacted.", {
-    limit: MAX_DEFERRED_REMOTE_OPERATIONS,
-    reason,
-    shapeId: operation.shapeId,
-  });
-}
-
-function readDeferredRemoteOperations(
-  queue: Map<number, DeferredRemoteOperation>,
-) {
-  return Array.from(queue.values())
-    .sort((left, right) => left.operation.opSeq - right.operation.opSeq)
-    .map(({ operation }) => operation);
-}
 
 export function ClassicCanvasRuntime({
   ...props
