@@ -37,6 +37,10 @@ WorkspaceCanvas -> ClassicCanvasRuntime -> CanvasEditor -> TldrawSurface
 - `imports/`: 파일과 폴더 탐색, 코드 파일 검증과 import 데이터 생성
 - `integrations/`: Canvas가 다른 도메인의 안정적인 식별자를 참조하는 연결 adapter
 
+`engine/editor/CanvasEditor.tsx`는 surface 조립자이며 Shape hydrate, realtime preview 적용,
+presence 보고와 code file drop 처리는 같은 폴더의 전용 모듈로 분리한다. editor 모듈은
+tldraw store를 다룰 수 있지만 Socket lifecycle이나 파일 시스템 탐색 자체를 소유하지 않는다.
+
 `integrations/drive/`는 Drive 파일 선택과 preview URL 발급을 Canvas 언어로 변환한다.
 roomState에는 `fileId`, 파일명, MIME type만 남기고 presigned URL과 파일 원문은
 브라우저 메모리에서만 사용한다.

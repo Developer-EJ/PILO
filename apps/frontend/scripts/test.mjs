@@ -199,13 +199,17 @@ const tldrawSurface = await readFile(
   new URL("../src/shared/tldraw/TldrawSurface.tsx", import.meta.url),
   "utf8"
 );
-const piloTldrawCanvas = await readFile(
-  new URL(
-    "../src/features/canvas/engine/editor/CanvasEditor.tsx",
-    import.meta.url
-  ),
-  "utf8"
-);
+const piloTldrawCanvas = (
+  await Promise.all(
+    [
+      "../src/features/canvas/engine/editor/CanvasEditor.tsx",
+      "../src/features/canvas/engine/editor/CanvasFileDropImporter.tsx",
+      "../src/features/canvas/engine/editor/canvas-editor-shape-hydration.ts",
+      "../src/features/canvas/engine/editor/realtime/CanvasRealtimePreviewApplier.tsx",
+      "../src/features/canvas/engine/editor/reporters/CanvasPresenceReporter.tsx",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const piloCanvasStateReporter = await readFile(
   new URL(
     "../src/features/canvas/engine/editor/reporters/CanvasStateReporter.tsx",
