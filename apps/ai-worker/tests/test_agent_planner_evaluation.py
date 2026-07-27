@@ -938,6 +938,7 @@ def test_fixed_korean_suite_loads() -> None:
         "resolve_meeting_resource",
         "get_active_meeting",
         "get_meeting_participants",
+        "search_meeting_reports",
         "list_meeting_reports",
         "get_meeting_report",
         "summarize_meeting_report",

@@ -14,6 +14,7 @@ import { MeetingReportLifecycleService } from "./meeting-report-lifecycle.servic
 import { MeetingReportOutboxPublisherService } from "./meeting-report-outbox-publisher.service";
 import { MeetingReportOutboxRecoveryService } from "./meeting-report-outbox-recovery.service";
 import { MeetingReportRealtimePublisherService } from "./meeting-report-realtime-publisher.service";
+import { MeetingReportSearchService } from "./meeting-report-search.service";
 import { MeetingTranscriptRagService } from "./meeting-transcript-rag.service";
 import { MeetingReportController } from "./meeting-report.controller";
 import { MeetingReportService } from "./meeting-report.service";
@@ -30,6 +31,7 @@ import { MeetingReportService } from "./meeting-report.service";
   controllers: [MeetingReportController, MeetingReportInternalController],
   providers: [
     MeetingReportService,
+    MeetingReportSearchService,
     MeetingActionItemDeliveryService,
     MeetingTranscriptRagService,
     MeetingReportJobService,
@@ -42,6 +44,7 @@ import { MeetingReportService } from "./meeting-report.service";
   ],
   exports: [
     MeetingReportService,
+    MeetingReportSearchService,
     MeetingActionItemDeliveryService,
     MeetingTranscriptRagService,
     MeetingReportJobService,

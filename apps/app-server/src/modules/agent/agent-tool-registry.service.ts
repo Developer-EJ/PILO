@@ -23,6 +23,7 @@ import type {
 
 const AMBIENT_MEETING_SEARCH_TOOLS = new Set([
   "list_meeting_reports",
+  "search_meeting_reports",
   "search_meeting_transcript"
 ]);
 
