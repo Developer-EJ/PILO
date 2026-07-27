@@ -1,0 +1,74 @@
+/* Canvas background grid */
+
+.pilo-canvas-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: paint;
+  background: radial-gradient(
+      circle at 18% 16%,
+      rgba(109, 91, 214, 0.08),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 86% 72%,
+      rgba(46, 158, 91, 0.07),
+      transparent 34%
+    ),
+    #f7f8fa;
+  --pilo-grid-small-size: 32px;
+  --pilo-grid-large-size: 128px;
+  --pilo-grid-small-x: 0px;
+  --pilo-grid-small-y: 0px;
+  --pilo-grid-large-x: 0px;
+  --pilo-grid-large-y: 0px;
+}
+
+.pilo-canvas-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-remote-world-preview-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2147483000;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-remote-connection-preview-layer,
+.canvas-remote-freehand-preview-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.canvas-coordinate-hud {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 60;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid rgb(148 163 184 / 28%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 82%);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 8%);
+  color: #64748b;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  pointer-events: auto;
+  user-select: none;
+  backdrop-filter: blur(4px);
+}

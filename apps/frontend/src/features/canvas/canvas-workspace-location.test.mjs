@@ -62,12 +62,12 @@ test("이미 열린 Canvas 링크는 현재 보드를 재사용한다", () => {
 });
 
 test("WorkspaceCanvas는 동일한 Canvas 링크에서 현재 런타임을 유지한다", async () => {
-  const workspaceCanvas = await readFile(
-    new URL("./components/screen/WorkspaceCanvas.tsx", import.meta.url),
+  const workspaceBoard = await readFile(
+    new URL("./components/screen/useWorkspaceCanvasBoard.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(workspaceCanvas, /shouldReuseLoadedCanvasBoard/);
+  assert.match(workspaceBoard, /shouldReuseLoadedCanvasBoard/);
 });
 
 test("Canvas는 camera와 다중 selection만 capture/restore한다", async () => {

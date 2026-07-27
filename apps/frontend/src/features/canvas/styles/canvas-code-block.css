@@ -1,0 +1,368 @@
+/* PILO custom shape containers */
+
+.pilo-code-block-shape {
+  contain: layout paint;
+  pointer-events: none;
+}
+
+.pilo-code-block-shape.is-editing {
+  pointer-events: all;
+}
+
+.pilo-code-block-shape.is-collapsed {
+  contain: strict;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-block {
+  grid-template-rows: 34px 38px;
+  border-color: #d8e0ec;
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.1),
+    0 14px 34px rgba(15, 23, 42, 0.14);
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-block header {
+  border-bottom-color: rgba(148, 163, 184, 0.22);
+  background: #f8fafc;
+  gap: 5px;
+  padding: 5px 7px;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-block header strong {
+  flex: 1;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 11px;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-block header small {
+  display: none;
+  background: rgba(79, 70, 229, 0.08);
+  color: #4338ca;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.pilo-code-block-shape:not(.is-editing) .pilo-code-block {
+  pointer-events: auto;
+}
+
+.pilo-code-block-shape:not(.is-editing) .pilo-code-block header {
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.pilo-code-block-shape:not(.is-editing) .pilo-code-block header:active {
+  cursor: grabbing;
+}
+
+/* Code block shape */
+
+.pilo-code-block {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-rows: 42px 1fr;
+  overflow: hidden;
+  border: 1px solid #d8e0ec;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 18px 42px rgba(15, 23, 42, 0.14);
+  color: #1e293b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.pilo-code-block header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  background: #f8fafc;
+  padding: 0 12px;
+}
+
+.pilo-code-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.pilo-code-dot.is-red {
+  background: #ff5f57;
+}
+
+.pilo-code-dot.is-yellow {
+  background: #ffbd2e;
+}
+
+.pilo-code-dot.is-green {
+  background: #28c840;
+}
+
+.pilo-code-block header strong {
+  overflow: hidden;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-code-block header small {
+  border-radius: 4px;
+  background: rgba(79, 70, 229, 0.08);
+  color: #4338ca;
+  font-size: 10px;
+  font-weight: 850;
+  padding: 3px 6px;
+}
+
+.pilo-code-block-shape.is-remotely-selected .pilo-code-block {
+  border-color: rgba(20, 184, 166, 0.64);
+  box-shadow:
+    0 0 0 2px rgba(20, 184, 166, 0.22),
+    0 18px 42px rgba(15, 23, 42, 0.24);
+}
+
+.pilo-code-block-shape.is-remotely-editing .pilo-code-block {
+  border-color: rgba(251, 146, 60, 0.7);
+  box-shadow:
+    0 0 0 2px rgba(251, 146, 60, 0.24),
+    0 18px 42px rgba(15, 23, 42, 0.26);
+}
+
+.pilo-code-remote-presence-badge {
+  max-width: 130px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.12);
+  color: #0f766e;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 5px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-code-remote-edit-badge {
+  max-width: 150px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid rgba(251, 191, 36, 0.44);
+  border-radius: 999px;
+  background: rgba(251, 146, 60, 0.14);
+  color: #c2410c;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 5px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-code-copy-button {
+  margin-left: auto;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 5px;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.pilo-code-collapse-button {
+  margin-left: auto;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 5px;
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.pilo-code-collapse-button + .pilo-code-copy-button {
+  margin-left: 0;
+}
+
+.pilo-code-copy-button:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.pilo-code-collapse-button:hover {
+  background: #ecfeff;
+  color: #0f766e;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-collapse-button {
+  border-color: rgba(148, 163, 184, 0.32);
+  background: #ffffff;
+  color: #334155;
+  padding: 5px 7px;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-collapse-button:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-copy-button {
+  display: none;
+}
+
+.pilo-code-block input,
+.pilo-code-block select {
+  min-width: 0;
+  height: 26px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 5px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 11px;
+  outline: 0;
+  padding: 0 8px;
+}
+
+.pilo-code-block input {
+  flex: 1;
+}
+
+.pilo-code-block select {
+  width: 72px;
+}
+
+.pilo-code-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  background:
+    linear-gradient(rgba(15, 23, 42, 0.025) 50%, transparent 0) 0 0 / 100%
+      48px,
+    #ffffff;
+  color: #1e293b;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  outline: 0;
+  padding: 14px 16px;
+  resize: none;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.pilo-code-editor {
+  overflow: hidden;
+  padding: 0;
+}
+
+.pilo-code-mirror,
+.pilo-code-mirror .cm-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.pilo-code-mirror {
+  overflow: hidden;
+}
+
+.pilo-code-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+  color: #1e293b;
+  padding: 14px 16px;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-preview {
+  padding: 5px 8px 7px;
+}
+
+.pilo-code-preview div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-family:
+    Pretendard,
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-preview div {
+  gap: 5px;
+  margin-bottom: 3px;
+}
+
+.pilo-code-preview span {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 5px;
+  background: #f8fafc;
+  padding: 5px 7px;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-preview span {
+  overflow: hidden;
+  max-width: 72px;
+  padding: 3px 5px;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilo-code-preview pre {
+  display: -webkit-box;
+  max-height: calc(100% - 32px);
+  overflow: hidden;
+  color: #1e293b;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.pilo-code-block-shape.is-collapsed .pilo-code-preview pre {
+  overflow: hidden;
+  color: #475569;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: 1;
+}

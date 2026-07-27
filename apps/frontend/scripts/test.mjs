@@ -167,10 +167,14 @@ const canvasZoomControls = await readFile(
   ),
   "utf8"
 );
-const canvasWorkspace = await readFile(
-  new URL("../src/features/canvas/components/screen/WorkspaceCanvas.tsx", import.meta.url),
-  "utf8"
-);
+const canvasWorkspace = (
+  await Promise.all(
+    [
+      "../src/features/canvas/components/screen/WorkspaceCanvas.tsx",
+      "../src/features/canvas/components/screen/useWorkspaceCanvasBoard.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasAiChatOverlay = await readFile(
   new URL(
     "../src/features/canvas/engine/editor/overlays/CanvasAiChatOverlay.tsx",
@@ -182,18 +186,32 @@ const canvasHtmlArtifactPreview = await readFile(
   new URL("../src/components/canvas-html-artifact-preview.tsx", import.meta.url),
   "utf8"
 );
-const canvasShapeSync = await readFile(
-  new URL("../src/features/canvas/persistence/canvas-shape-sync.ts", import.meta.url),
-  "utf8"
-);
+const canvasShapeSync = (
+  await Promise.all(
+    [
+      "../src/features/canvas/persistence/canvas-shape-sync.ts",
+      "../src/features/canvas/persistence/canvas-shape-operations.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const canvasShapeMetadata = await readFile(
   new URL("../src/features/canvas/engine/shapes/canvas-shape-metadata.ts", import.meta.url),
   "utf8"
 );
-const canvasCss = await readFile(
-  new URL("../src/features/canvas/styles/canvas.css", import.meta.url),
-  "utf8"
-);
+const canvasCss = (
+  await Promise.all(
+    [
+      "../src/features/canvas/styles/canvas.css",
+      "../src/features/canvas/styles/canvas-shell.css",
+      "../src/features/canvas/styles/canvas-file-node.css",
+      "../src/features/canvas/styles/canvas-screen.css",
+      "../src/features/canvas/styles/canvas-selection.css",
+      "../src/features/canvas/styles/canvas-editor-overlays.css",
+      "../src/features/canvas/styles/canvas-code-block.css",
+      "../src/features/canvas/styles/canvas-controls.css",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const packageJson = await readFile(new URL("../package.json", import.meta.url), "utf8");
 const tldrawSurface = await readFile(
   new URL("../src/shared/tldraw/TldrawSurface.tsx", import.meta.url),
