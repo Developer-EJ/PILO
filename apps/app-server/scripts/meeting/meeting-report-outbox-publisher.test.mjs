@@ -4,10 +4,10 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   MeetingReportOutboxPublisherService
-} = require("../../dist/modules/meeting/meeting-report-outbox-publisher.service.js");
+} = require("../../dist/modules/meeting-report/meeting-report-outbox-publisher.service.js");
 const {
   MeetingReportOutboxRecoveryService
-} = require("../../dist/modules/meeting/meeting-report-outbox-recovery.service.js");
+} = require("../../dist/modules/meeting-report/meeting-report-outbox-recovery.service.js");
 
 const claim = {
   id: "11111111-1111-1111-1111-111111111111",

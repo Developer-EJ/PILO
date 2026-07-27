@@ -3,16 +3,19 @@ import { badRequest } from "../../../common/api-error";
 import { DocumentSearchService } from "../../drive/document-search.service";
 import {
   MeetingPayload,
-  MeetingReportDetailPayload,
-  MeetingReportSummaryPayload,
   MeetingRoomPayload,
   MeetingService
 } from "../../meeting/meeting.service";
 import {
+  MeetingReportDetailPayload,
+  MeetingReportService,
+  MeetingReportSummaryPayload
+} from "../../meeting-report/meeting-report.service";
+import {
   MeetingActionItemDeliveryInput,
   MeetingActionItemDeliveryService
-} from "../../meeting/meeting-action-item-delivery.service";
-import { MeetingTranscriptRagService } from "../../meeting/meeting-transcript-rag.service";
+} from "../../meeting-report/meeting-action-item-delivery.service";
+import { MeetingTranscriptRagService } from "../../meeting-report/meeting-transcript-rag.service";
 import { AgentCandidateSelectionService } from "../agent-candidate-selection.service";
 import {
   EmbeddingTemporarilyUnavailableError,
@@ -385,6 +388,7 @@ const MAX_RELATED_DOCUMENT_QUERY_LENGTH = 1000;
 export class MeetingAgentToolsService {
   constructor(
     private readonly meetingService: MeetingService,
+    private readonly meetingReportService: MeetingReportService,
     private readonly meetingTranscriptRagService: MeetingTranscriptRagService,
     private readonly meetingActionItemDeliveryService: MeetingActionItemDeliveryService,
     private readonly meetingAgentResourceResolver?: MeetingAgentResourceResolver,
@@ -1128,7 +1132,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ListMeetingReportsInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.listReportsForAgent(
+    const result = await this.meetingReportService.listReportsForAgent(
       context.currentUserId,
       context.workspaceId,
       input
@@ -1159,7 +1163,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ResolvedFindActionItemsInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.listActionItemsForAgent(
+    const result = await this.meetingReportService.listActionItemsForAgent(
       context.currentUserId,
       context.workspaceId,
       input
@@ -1190,13 +1194,13 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: DecisionEvidenceInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.getReport(
+    const result = await this.meetingReportService.getReport(
       context.currentUserId,
       context.workspaceId,
       input.reportId
     );
     const decisionIndex = input.decisionIndex ?? 0;
-    const decision = await this.meetingService.getMeetingReportDecisionItem(
+    const decision = await this.meetingReportService.getMeetingReportDecisionItem(
       context.currentUserId,
       context.workspaceId,
       input.reportId,
@@ -1242,7 +1246,7 @@ export class MeetingAgentToolsService {
     input: UpdateActionItemInput
   ): Promise<AgentToolExecutionResult> {
     const revalidated = await this.revalidateActionItemExecutionInput(context, input);
-    const result = await this.meetingService.updateMeetingReportActionItem(
+    const result = await this.meetingReportService.updateMeetingReportActionItem(
       context.currentUserId,
       context.workspaceId,
       revalidated.reportId,
@@ -1261,7 +1265,7 @@ export class MeetingAgentToolsService {
     input: ActionItemInput
   ): Promise<AgentToolExecutionResult> {
     const revalidated = await this.revalidateActionItemExecutionInput(context, input);
-    const result = await this.meetingService.dismissMeetingReportActionItem(
+    const result = await this.meetingReportService.dismissMeetingReportActionItem(
       context.currentUserId,
       context.workspaceId,
       revalidated.reportId,
@@ -1316,7 +1320,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ReportIdInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.requestReportRegeneration(
+    const result = await this.meetingReportService.requestReportRegeneration(
       context.currentUserId,
       context.workspaceId,
       input.reportId
@@ -1333,7 +1337,7 @@ export class MeetingAgentToolsService {
     toolName: string,
     input: ActionItemInput | UpdateActionItemInput | ApproveActionItemInput
   ): Promise<AgentConfirmationPlan> {
-    const report = await this.meetingService.getReport(context.currentUserId, context.workspaceId, input.reportId);
+    const report = await this.meetingReportService.getReport(context.currentUserId, context.workspaceId, input.reportId);
     const actionItem = report.report.actionItems.find((item) => item.id === input.actionItemId);
     if (!actionItem) throw badRequest("Meeting report action item not found");
 
@@ -1541,7 +1545,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ReportIdInput
   ): Promise<AgentConfirmationPlan> {
-    const result = await this.meetingService.getReport(context.currentUserId, context.workspaceId, input.reportId);
+    const result = await this.meetingReportService.getReport(context.currentUserId, context.workspaceId, input.reportId);
     return {
       toolName: "regenerate_meeting_report",
       summary: "실패한 회의록의 재생성을 요청합니다.",
@@ -1723,7 +1727,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ReportIdInput
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.getReport(
+    const result = await this.meetingReportService.getReport(
       context.currentUserId,
       context.workspaceId,
       input.reportId
@@ -1745,7 +1749,7 @@ export class MeetingAgentToolsService {
     context: AgentToolContext,
     input: ReportIdInput & Pick<SummarizeMeetingReportInput, "sections">
   ): Promise<AgentToolExecutionResult> {
-    const result = await this.meetingService.getReport(
+    const result = await this.meetingReportService.getReport(
       context.currentUserId,
       context.workspaceId,
       input.reportId
@@ -2609,7 +2613,7 @@ export class MeetingAgentToolsService {
       throw badRequest("Meeting report action item is no longer available");
     }
     if (input.expectedStatus !== undefined || input.expectedUpdatedAt !== undefined) {
-      const report = await this.meetingService.getReport(
+      const report = await this.meetingReportService.getReport(
         context.currentUserId,
         context.workspaceId,
         input.reportId

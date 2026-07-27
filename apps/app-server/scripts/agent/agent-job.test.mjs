@@ -67,7 +67,6 @@ const originalEnv = {
     "AgentToolRegistryService must retain AgentDomainFeatureFlagService Nest DI metadata"
   );
 }
-
 const AGENT_TOOL_INVENTORY_BASELINE_SHA256 =
   "e64156b4c0ce0da7086005bf01df58e0ccfb4c24cf00cd957275f30b42113e92";
 
@@ -120,7 +119,7 @@ const payload = {
   );
   const registry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
-    new MeetingAgentToolsService({}),
+    new MeetingAgentToolsService({}, {}),
     new BoardAgentToolsService({}),
     new SqlErdAgentToolsService({}),
     undefined,
@@ -265,7 +264,7 @@ const payload = {
 
 const fullRegistry = new AgentToolRegistryService(
     new CalendarAgentToolsService({}),
-    new MeetingAgentToolsService({}),
+    new MeetingAgentToolsService({}, {}),
     new BoardAgentToolsService({}),
     new SqlErdAgentToolsService({}),
     new PrReviewAgentToolsService({}),
@@ -395,7 +394,7 @@ const fullRegistry = new AgentToolRegistryService(
     process.env.AGENT_DOMAIN_MEETING_WRITE_ENABLED = "false";
     const gatedRegistry = new AgentToolRegistryService(
       undefined,
-      new MeetingAgentToolsService({}),
+      new MeetingAgentToolsService({}, {}),
       undefined,
       undefined,
       undefined,

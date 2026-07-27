@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   MeetingTranscriptRagService
-} = require("../../dist/modules/meeting/meeting-transcript-rag.service.js");
+} = require("../../dist/modules/meeting-report/meeting-transcript-rag.service.js");
 const {
   AgentGroundedAnswerService
 } = require("../../dist/modules/agent/agent-grounded-answer.service.js");

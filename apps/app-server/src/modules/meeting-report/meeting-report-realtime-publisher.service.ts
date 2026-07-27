@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { createClient, type RedisClientType } from "redis";
 import { DatabaseService } from "../../database/database.service";
-import { MeetingNotificationService } from "./meeting-notification.service";
+import { MeetingNotificationService } from "../meeting/meeting-notification.service";
 
 export const MEETING_REPORT_REDIS_CHANNEL = "meeting:report-events";
 export type MeetingReportRealtimeStatus =

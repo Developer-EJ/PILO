@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { MeetingReportJobService } = require(
-  "../../dist/modules/meeting/meeting-report-job.service.js"
+  "../../dist/modules/meeting-report/meeting-report-job.service.js"
 );
 
 const originalEnv = {
