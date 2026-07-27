@@ -412,9 +412,7 @@ def meeting_search_with_unified_catalog(
                 "toolNames": [tool_name],
                 "whenToUse": "회의 제목과 실제 내용 근거를 검색할 때",
                 "mustNotUseFor": ["단순 회의록 목록"],
-                "positiveExamples": [
-                    example["utterance"] for example in examples
-                ],
+                "positiveExamples": [example["utterance"] for example in examples],
                 "examples": examples,
                 "selectorKinds": ["meeting_report", "query"],
                 "requiresConfirmation": False,
@@ -2378,9 +2376,7 @@ def test_unified_meeting_search_normalizes_title_and_content_query() -> None:
             message="회의 근거 검색",
             final_answer_draft="검색합니다.",
             tool_name="search_meeting_reports",
-            tool_input={
-                "query": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?"
-            },
+            tool_input={"query": "‘온보딩 주간회의’에서 API 배포 일정을 어떻게 정했어?"},
             requires_confirmation=False,
             missing_fields=(),
             unsupported_reason=None,

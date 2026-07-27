@@ -2603,8 +2603,7 @@ def _normalize_meeting_report_unified_search(
     routed_capability_ids: tuple[str, ...],
 ) -> AgentPlannerDecision:
     if (
-        MEETING_REPORT_UNIFIED_SEARCH_CAPABILITY_ID
-        not in routed_capability_ids
+        MEETING_REPORT_UNIFIED_SEARCH_CAPABILITY_ID not in routed_capability_ids
         or decision.status not in {"tool_candidate", "needs_clarification"}
         or not any(tool.name == "search_meeting_reports" for tool in job.tools)
     ):
@@ -2614,11 +2613,7 @@ def _normalize_meeting_report_unified_search(
     if len(titles) > 1:
         return _meeting_context_clarification("meeting_report_title")
 
-    tool_input = (
-        dict(decision.tool_input)
-        if decision.status == "tool_candidate"
-        else {}
-    )
+    tool_input = dict(decision.tool_input) if decision.status == "tool_candidate" else {}
     allowed_fields = {
         "contextRef",
         "from",
@@ -2630,14 +2625,9 @@ def _normalize_meeting_report_unified_search(
         "to",
         "useSelectedMeetingReportCandidate",
     }
-    tool_input = {
-        key: value
-        for key, value in tool_input.items()
-        if key in allowed_fields
-    }
+    tool_input = {key: value for key, value in tool_input.items() if key in allowed_fields}
     if titles and not (
-        tool_input.get("contextRef")
-        or tool_input.get("useSelectedMeetingReportCandidate") is True
+        tool_input.get("contextRef") or tool_input.get("useSelectedMeetingReportCandidate") is True
     ):
         tool_input["reportTitle"] = titles[0][:500]
 
@@ -3272,8 +3262,7 @@ def _normalize_named_meeting_report_read_selector(
     if (
         (
             MEETING_REPORT_HYBRID_CAPABILITY_ID in routed_capability_ids
-            or MEETING_REPORT_UNIFIED_SEARCH_CAPABILITY_ID
-            in routed_capability_ids
+            or MEETING_REPORT_UNIFIED_SEARCH_CAPABILITY_ID in routed_capability_ids
         )
         or decision.status not in {"tool_candidate", "needs_clarification"}
         or not _is_named_meeting_report_summary_request(prompt)

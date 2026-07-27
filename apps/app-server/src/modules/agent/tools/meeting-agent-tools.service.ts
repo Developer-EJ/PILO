@@ -895,7 +895,7 @@ export class MeetingAgentToolsService {
     return {
       name: "search_meeting_reports",
       description:
-        "MeetingReport 검색의 단일 진입점입니다. 회의 시작 시각 범위 안에서 표시 제목 exact, pg_trgm 유사 제목, transcript·Activity 하이브리드 근거 검색을 순서대로 수행합니다. 제목 후보가 여러 개면 근거 검색 전에 사용자 선택을 요청합니다.",
+        "MeetingReport 검색의 단일 진입점입니다. 회의 시작 시각 범위 안에서 표시 제목 exact, pg_trgm 유사 제목, transcript·Activity 하이브리드 근거 검색을 순서대로 수행합니다. 제목 후보가 여러 개이거나 단일 유사 후보의 신뢰도가 부족하면 근거 검색 전에 사용자 선택을 요청합니다.",
       riskLevel: "low",
       executionMode: "contextual",
       requiresGroundedAnswer: true,
@@ -1050,7 +1050,10 @@ export class MeetingAgentToolsService {
           result.matchedBy === "exact_title"
             ? result.diagnostics.exactTitleCount
             : result.diagnostics.fuzzyTitleCount,
-        question: "제목이 비슷한 회의록이 여러 개입니다. 검색할 회의록을 선택해 주세요."
+        question:
+          result.reports.length === 1
+            ? "입력한 제목과 정확히 일치하지 않습니다. 아래 유사 회의록으로 검색할지 확인해 주세요."
+            : "제목이 비슷한 회의록이 여러 개입니다. 검색할 회의록을 선택해 주세요."
       },
       resourceRefs: [],
       candidateResources: result.reports.map((report) =>

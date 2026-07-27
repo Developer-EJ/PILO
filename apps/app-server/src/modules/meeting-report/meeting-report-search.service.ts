@@ -13,7 +13,8 @@ const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 20;
 const MAX_REPORT_IDS = 100;
 const MAX_CONTENT_SCOPE_REPORTS = 500;
-const FUZZY_TITLE_THRESHOLD = 0.35;
+const FUZZY_TITLE_CANDIDATE_THRESHOLD = 0.35;
+const FUZZY_TITLE_AUTO_RESOLVE_THRESHOLD = 0.7;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MEETING_REPORT_STATUSES = new Set<MeetingReportStatus>([
@@ -220,6 +221,13 @@ export class MeetingReportSearchService {
       }
       if (fuzzyTitleCount === 1) {
         const reports = fuzzy.rows.map((row) => this.mapCandidate(row));
+        if (!this.isConfidentSingleFuzzyMatch(fuzzy.rows)) {
+          return this.result("candidates", "fuzzy_title", reports, [], {
+            exactTitleCount,
+            fuzzyTitleCount,
+            hybridReportCount: 0
+          });
+        }
         return normalized.contentQuery
           ? this.searchHybridContent(
               currentUserId,
@@ -381,7 +389,8 @@ export class MeetingReportSearchService {
         AND report.normalized_title = $${values.push(mode.title)}::text`;
     } else if (mode.kind === "fuzzy") {
       const titleParameter = `$${values.push(mode.title)}`;
-      const thresholdParameter = `$${values.push(FUZZY_TITLE_THRESHOLD)}`;
+      const thresholdParameter =
+        `$${values.push(FUZZY_TITLE_CANDIDATE_THRESHOLD)}`;
       similarityExpression =
         `extensions.similarity(report.normalized_title, ${titleParameter}::text)`;
       modeCondition = `AND report.normalized_title <> ''
@@ -458,6 +467,19 @@ export class MeetingReportSearchService {
       rows,
       totalCount: rows.length === 0 ? 0 : Number(rows[0].total_count)
     };
+  }
+
+  private isConfidentSingleFuzzyMatch(
+    rows: MeetingReportSearchRow[]
+  ): boolean {
+    if (rows.length !== 1) {
+      return false;
+    }
+    const similarity = Number(rows[0].title_similarity);
+    return (
+      Number.isFinite(similarity) &&
+      similarity >= FUZZY_TITLE_AUTO_RESOLVE_THRESHOLD
+    );
   }
 
   private reportResult(

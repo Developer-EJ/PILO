@@ -162,6 +162,42 @@ class FakeRagService {
 }
 
 {
+  const database = new FakeDatabase({
+    fuzzy: [
+      reportRow({
+        title: "API 설계 회의",
+        similarity: 0.42
+      })
+    ]
+  });
+  const rag = new FakeRagService([
+    {
+      sourceId: "transcript:99999999-9999-4999-8999-999999999999",
+      sourceType: "transcript",
+      reportId: REPORT_ID,
+      content: "낮은 신뢰도의 제목 후보로 검색 범위를 고정하면 안 됩니다.",
+      directlyReferenced: false,
+      score: 0.91
+    }
+  ]);
+  const service = new MeetingReportSearchService(
+    database,
+    new FakeWorkspaceService(),
+    rag
+  );
+  const result = await service.search(USER_ID, WORKSPACE_ID, {
+    title: "API 변경 회의",
+    contentQuery: "인증 방식은?"
+  });
+
+  assert.equal(result.status, "candidates");
+  assert.equal(result.matchedBy, "fuzzy_title");
+  assert.equal(result.diagnostics.fuzzyTitleCount, 1);
+  assert.equal(result.reports[0].titleSimilarity, 0.42);
+  assert.equal(rag.calls.length, 0);
+}
+
+{
   const evidence = [
     {
       sourceId: "transcript:99999999-9999-4999-8999-999999999999",

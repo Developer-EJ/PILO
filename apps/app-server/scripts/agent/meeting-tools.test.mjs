@@ -783,6 +783,60 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
 }
 
 {
+  const report = {
+    reportId: REPORT_ID,
+    meetingId: MEETING_ID,
+    recordingId: RECORDING_ID,
+    status: "COMPLETED",
+    title: "API 설계 회의",
+    summary: null,
+    discussionPoints: null,
+    decisions: null,
+    meetingStartedAt: "2026-07-15T01:00:00.000Z",
+    reportCreatedAt: "2026-07-15T02:00:00.000Z",
+    roomName: "개발 회의실",
+    titleSimilarity: 0.42
+  };
+  const searchService = new FakeMeetingReportSearchService({
+    preflightResult: {
+      status: "candidates",
+      matchedBy: "fuzzy_title",
+      reports: [report],
+      evidence: [],
+      diagnostics: {
+        exactTitleCount: 0,
+        fuzzyTitleCount: 1,
+        hybridReportCount: 0
+      }
+    }
+  });
+  const tool = new MeetingAgentToolsService(
+    new FakeMeetingService(),
+    new FakeMeetingService(),
+    new FakeMeetingTranscriptRagService(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    searchService
+  )
+    .listDefinitions()
+    .find((definition) => definition.name === "search_meeting_reports");
+  const preparation = await tool.prepareExecution(
+    context,
+    tool.validateInput({
+      query: "인증 방식은?",
+      reportTitle: "API 변경 회의"
+    })
+  );
+
+  assert.equal(preparation.kind, "needs_clarification");
+  assert.equal(preparation.outputSummary.candidateCount, 1);
+  assert.match(preparation.outputSummary.question, /정확히 일치하지 않습니다/);
+  assert.equal(preparation.candidateResources.length, 1);
+}
+
+{
   const meetingService = new FakeMeetingService();
   const ragService = new FakeMeetingTranscriptRagService();
   const registry = new AgentToolRegistryService(

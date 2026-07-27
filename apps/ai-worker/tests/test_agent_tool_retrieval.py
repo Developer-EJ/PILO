@@ -188,8 +188,7 @@ def test_catalog_accepts_v1_compatibility_payload_and_rejects_unknown_version() 
         current["version"], current["capabilities"], current["descriptors"]
     )
     assert (
-        parse_tool_capability_catalog(current, TOOL_SCHEMAS).version
-        == "agent-tool-capabilities:v3"
+        parse_tool_capability_catalog(current, TOOL_SCHEMAS).version == "agent-tool-capabilities:v3"
     )
 
     unknown = legacy_catalog_payload("agent-tool-capabilities:v4")
