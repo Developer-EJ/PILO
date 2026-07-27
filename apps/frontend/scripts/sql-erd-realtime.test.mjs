@@ -29,6 +29,10 @@ async function loadOperationSyncRuntime() {
     outputDir,
     "source-lock-controller.mjs"
   );
+  const sourceMutationIntentOutputPath = join(
+    outputDir,
+    "source-mutation-intent.mjs"
+  );
   const sessionStateOutputPath = join(outputDir, "session-state.mjs");
   const sourceAutosaveErrorOutputPath = join(
     outputDir,
@@ -49,6 +53,10 @@ async function loadOperationSyncRuntime() {
       [[/from "\.\/source-lock-state"/g, 'from "./source-lock-state.mjs"']]
     );
     await compileRuntimeModule(
+      "../src/features/sql-erd/realtime/source-mutation-intent.ts",
+      sourceMutationIntentOutputPath
+    );
+    await compileRuntimeModule(
       "../src/features/sql-erd/utils/session-state.ts",
       sessionStateOutputPath
     );
@@ -66,6 +74,7 @@ async function loadOperationSyncRuntime() {
       sourceAutosaveError: await import(`${new URL(`file:///${sourceAutosaveErrorOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       sourceLock: await import(`${new URL(`file:///${sourceLockOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       sourceLockController: await import(`${new URL(`file:///${sourceLockControllerOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
+      sourceMutationIntent: await import(`${new URL(`file:///${sourceMutationIntentOutputPath.replace(/\\\\/g, "/")}`).href}?${Date.now()}`),
       outputDir
     };
   } catch (error) {
@@ -546,7 +555,8 @@ assert.equal(
     outputDir,
     sourceAutosaveError,
     sourceLock,
-    sourceLockController
+    sourceLockController,
+    sourceMutationIntent
   } = await loadOperationSyncRuntime();
   const operations = Array.from({ length: 101 }, (_, index) => ({
     id: `operation-${index + 1}`,
@@ -605,6 +615,99 @@ assert.equal(
 
     assert.equal(sourceLock.getSourceLockIntervalRequest("held"), "renew");
     assert.equal(sourceLock.getSourceLockIntervalRequest("read_only"), "acquire");
+    const engagedControlIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+        { engaged: true, type: "control_engagement_changed" }
+      );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        engagedControlIntent
+      ),
+      true,
+      "moving focus from the editor to a mutation control keeps lock intent"
+    );
+    const pendingDialectIntent = sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+      sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+      {
+        action: { dialect: "mysql", type: "dialect" },
+        type: "request"
+      }
+    );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        pendingDialectIntent
+      ),
+      true,
+      "a queued dialect change keeps the lock intent active"
+    );
+    assert.equal(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        pendingDialectIntent,
+        false
+      ),
+      null,
+      "a queued mutation does not run before the source lock is held"
+    );
+    const blurredPendingDialectIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        pendingDialectIntent,
+        { engaged: false, type: "control_engagement_changed" }
+      );
+    assert.equal(
+      sourceMutationIntent.shouldHoldSqlErdSourceMutationIntent(
+        blurredPendingDialectIntent
+      ),
+      true,
+      "control blur must not discard a mutation waiting for the source lock"
+    );
+    assert.deepEqual(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        blurredPendingDialectIntent,
+        true
+      ),
+      { dialect: "mysql", type: "dialect" },
+      "the pending mutation becomes runnable after the source lock is held"
+    );
+    const consumedDialectIntent =
+      sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+        blurredPendingDialectIntent,
+        { type: "consume" }
+      );
+    assert.equal(
+      sourceMutationIntent.getRunnableSqlErdSourceMutation(
+        consumedDialectIntent,
+        true
+      ),
+      null,
+      "the queued mutation is consumed exactly once"
+    );
+    for (const action of [{ type: "undo" }, { type: "redo" }]) {
+      const pendingIntent =
+        sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+          sourceMutationIntent.createSqlErdSourceMutationIntentState(),
+          { action, type: "request" }
+        );
+      assert.deepEqual(
+        sourceMutationIntent.getRunnableSqlErdSourceMutation(
+          pendingIntent,
+          true
+        ),
+        action,
+        `${action.type} becomes runnable after the source lock is held`
+      );
+      assert.equal(
+        sourceMutationIntent.getRunnableSqlErdSourceMutation(
+          sourceMutationIntent.reduceSqlErdSourceMutationIntent(
+            pendingIntent,
+            { type: "consume" }
+          ),
+          true
+        ),
+        null,
+        `${action.type} is consumed exactly once`
+      );
+    }
     assert.equal(
       sourceLock.shouldHoldSqlErdSourceLock({
         enabled: true,

@@ -1,8 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState
+} from "react";
 import type {
+  FocusEvent as ReactFocusEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode
@@ -84,6 +92,13 @@ import {
 import { useSqlErdOperationSync } from "@/features/sql-erd/realtime/use-sql-erd-operation-sync";
 import { useSqlErdSourceLock } from "@/features/sql-erd/realtime/use-sql-erd-source-lock";
 import { shouldHoldSqlErdSourceLock } from "@/features/sql-erd/realtime/source-lock-state";
+import {
+  createSqlErdSourceMutationIntentState,
+  getRunnableSqlErdSourceMutation,
+  reduceSqlErdSourceMutationIntent,
+  shouldHoldSqlErdSourceMutationIntent,
+  type SqlErdSourceMutation
+} from "@/features/sql-erd/realtime/source-mutation-intent";
 import { applySqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-layout";
 import { createSqlErdOperationLayoutPatch } from "@/features/sql-erd/utils/operation-patch";
 import {
@@ -395,6 +410,12 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
   currentSessionIdRef.current = sessionId;
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isSourceEditorEngaged, setIsSourceEditorEngaged] = useState(false);
+  const [sourceMutationIntent, dispatchSourceMutationIntent] = useReducer(
+    reduceSqlErdSourceMutationIntent,
+    undefined,
+    createSqlErdSourceMutationIntentState
+  );
+  const executedSourceMutationRef = useRef<SqlErdSourceMutation | null>(null);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [panelContainerWidth, setPanelContainerWidth] = useState(0);
   const [sourcePanelWidth, setSourcePanelWidth] = useState(
@@ -706,7 +727,9 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       sqlErdViewSession.writeProtocol === "operations_v1",
     hasDirtyDraft: isSqlErdDraftDirty(sqlErdEditState),
     hasPendingSave: isSourceMutationSavePending,
-    isEditorEngaged: isSourceEditorEngaged,
+    isEditorEngaged:
+      isSourceEditorEngaged ||
+      shouldHoldSqlErdSourceMutationIntent(sourceMutationIntent),
     isMutationApplying: isNormalizedSqlApplying,
     isMutationPreviewOpen: normalizedSqlPreview !== null
   });
@@ -1002,6 +1025,7 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     setSourceNavigationRequest(null);
     sourceNavigationRequestIdRef.current = 0;
     lastAutoNavigatedRelationIdRef.current = null;
+    dispatchSourceMutationIntent({ type: "reset" });
   }, [sessionId]);
 
   useEffect(() => {
@@ -1026,20 +1050,45 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       type: "draft_source_changed"
     });
   }, [applySqlErdEditAction, isWriteProtocolMismatch]);
-  const handleDialectChange = useCallback((dialect: SqltoerdDialect) => {
-    if (isWriteProtocolMismatch) {
-      return;
-    }
+  const applyDialectChange = useCallback(
+    (dialect: SqltoerdDialect) => {
+      if (isWriteProtocolMismatch) {
+        return;
+      }
 
-    setSqlSourceMap(null);
-    setNormalizedSqlPreview(null);
-    setNormalizedSqlApplyError(null);
-    setModelSqlHistory(createSqlErdModelSqlHistory());
-    applySqlErdEditAction({
-      dialect,
-      type: "draft_dialect_changed"
-    });
-  }, [applySqlErdEditAction, isWriteProtocolMismatch]);
+      setSqlSourceMap(null);
+      setNormalizedSqlPreview(null);
+      setNormalizedSqlApplyError(null);
+      setModelSqlHistory(createSqlErdModelSqlHistory());
+      applySqlErdEditAction({
+        dialect,
+        type: "draft_dialect_changed"
+      });
+    },
+    [applySqlErdEditAction, isWriteProtocolMismatch]
+  );
+  const handleDialectChange = useCallback(
+    (dialect: SqltoerdDialect) => {
+      if (isWriteProtocolMismatch) {
+        return;
+      }
+
+      if (sqlErdViewSession.writeProtocol === "operations_v1") {
+        dispatchSourceMutationIntent({
+          action: { dialect, type: "dialect" },
+          type: "request"
+        });
+        return;
+      }
+
+      applyDialectChange(dialect);
+    },
+    [
+      applyDialectChange,
+      isWriteProtocolMismatch,
+      sqlErdViewSession.writeProtocol
+    ]
+  );
   const applyNormalizedSqlSnapshot = useCallback(
     ({
       baseSnapshot,
@@ -1573,13 +1622,8 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
       setIsSourceOpen(true);
     }
   }, [normalizedSqlPreview, sqlErdViewSession.writeProtocol]);
-  const handleUndoNormalizedSql = useCallback(() => {
-    if (
-      isWriteProtocolMismatch ||
-      isNormalizedSqlApplying ||
-      (sqlErdViewSession.writeProtocol === "operations_v1" &&
-        !sourceLock.canEdit)
-    ) {
+  const applyUndoNormalizedSql = useCallback(() => {
+    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
       return;
     }
 
@@ -1603,17 +1647,30 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     applyNormalizedSqlSnapshot,
     isNormalizedSqlApplying,
     isWriteProtocolMismatch,
-    modelSqlHistory,
-    sourceLock.canEdit,
+    modelSqlHistory
+  ]);
+  const handleUndoNormalizedSql = useCallback(() => {
+    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
+      return;
+    }
+
+    if (sqlErdViewSession.writeProtocol === "operations_v1") {
+      dispatchSourceMutationIntent({
+        action: { type: "undo" },
+        type: "request"
+      });
+      return;
+    }
+
+    applyUndoNormalizedSql();
+  }, [
+    applyUndoNormalizedSql,
+    isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
     sqlErdViewSession.writeProtocol
   ]);
-  const handleRedoNormalizedSql = useCallback(() => {
-    if (
-      isWriteProtocolMismatch ||
-      isNormalizedSqlApplying ||
-      (sqlErdViewSession.writeProtocol === "operations_v1" &&
-        !sourceLock.canEdit)
-    ) {
+  const applyRedoNormalizedSql = useCallback(() => {
+    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
       return;
     }
 
@@ -1637,9 +1694,58 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
     applyNormalizedSqlSnapshot,
     isNormalizedSqlApplying,
     isWriteProtocolMismatch,
-    modelSqlHistory,
-    sourceLock.canEdit,
+    modelSqlHistory
+  ]);
+  const handleRedoNormalizedSql = useCallback(() => {
+    if (isWriteProtocolMismatch || isNormalizedSqlApplying) {
+      return;
+    }
+
+    if (sqlErdViewSession.writeProtocol === "operations_v1") {
+      dispatchSourceMutationIntent({
+        action: { type: "redo" },
+        type: "request"
+      });
+      return;
+    }
+
+    applyRedoNormalizedSql();
+  }, [
+    applyRedoNormalizedSql,
+    isNormalizedSqlApplying,
+    isWriteProtocolMismatch,
     sqlErdViewSession.writeProtocol
+  ]);
+  useEffect(() => {
+    const pendingMutation = getRunnableSqlErdSourceMutation(
+      sourceMutationIntent,
+      sourceLock.canEdit
+    );
+    if (!pendingMutation) {
+      return;
+    }
+    if (executedSourceMutationRef.current === pendingMutation) {
+      return;
+    }
+
+    executedSourceMutationRef.current = pendingMutation;
+    dispatchSourceMutationIntent({ type: "consume" });
+    switch (pendingMutation.type) {
+      case "dialect":
+        applyDialectChange(pendingMutation.dialect);
+        return;
+      case "redo":
+        applyRedoNormalizedSql();
+        return;
+      case "undo":
+        applyUndoNormalizedSql();
+    }
+  }, [
+    applyDialectChange,
+    applyRedoNormalizedSql,
+    applyUndoNormalizedSql,
+    sourceLock.canEdit,
+    sourceMutationIntent
   ]);
   const handleLayoutChange = useCallback(
     (layoutJson: SqltoerdLayoutJsonV1) => {
@@ -2616,15 +2722,11 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         canRedoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
-          (sqlErdViewSession.writeProtocol !== "operations_v1" ||
-            sourceLock.canEdit) &&
           modelSqlHistory.future.length > 0
         }
         canUndoNormalizedSql={
           !isWriteProtocolMismatch &&
           !isNormalizedSqlApplying &&
-          (sqlErdViewSession.writeProtocol !== "operations_v1" ||
-            sourceLock.canEdit) &&
           modelSqlHistory.past.length > 0
         }
         counts={sessionCounts}
@@ -2632,13 +2734,17 @@ export function SqlErdPanel({ sessionId }: { sessionId: string }) {
         isOpen={isSourceOpen}
         isDialectSelectDisabled={
           !isSessionReady ||
-          isWriteProtocolMismatch ||
-          (sqlErdViewSession.writeProtocol === "operations_v1" &&
-            !sourceLock.canEdit)
+          isWriteProtocolMismatch
         }
         onDialectChange={handleDialectChange}
         onPreviewNormalizedSql={handlePreviewNormalizedSql}
         onRedoNormalizedSql={handleRedoNormalizedSql}
+        onSourceControlIntentChange={(engaged) =>
+          dispatchSourceMutationIntent({
+            engaged,
+            type: "control_engagement_changed"
+          })
+        }
         onSourceEditIntentChange={setIsSourceEditorEngaged}
         onSourceTextChange={handleSourceTextChange}
         onToggle={() => setIsSourceOpen((current) => !current)}
@@ -3153,6 +3259,7 @@ type SourcePanelProps = PanelToggleProps & {
   onDialectChange: (dialect: SqltoerdDialect) => void;
   onPreviewNormalizedSql: () => void;
   onRedoNormalizedSql: () => void;
+  onSourceControlIntentChange: (engaged: boolean) => void;
   onSourceEditIntentChange: (engaged: boolean) => void;
   onSourceTextChange: (sourceText: string) => void;
   onUndoNormalizedSql: () => void;
@@ -3177,6 +3284,7 @@ function SourcePanel({
   onDialectChange,
   onPreviewNormalizedSql,
   onRedoNormalizedSql,
+  onSourceControlIntentChange,
   onSourceEditIntentChange,
   onSourceTextChange,
   onToggle,
@@ -3189,6 +3297,14 @@ function SourcePanel({
   sourceNavigationRequest,
   width
 }: SourcePanelProps) {
+  const handleMutationControlBlur = (
+    event: ReactFocusEvent<HTMLDivElement>
+  ) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      onSourceControlIntentChange(false);
+    }
+  };
+
   if (!isOpen) {
     return <CollapsedSourcePanel onToggle={onToggle} />;
   }
@@ -3231,11 +3347,17 @@ function SourcePanel({
           size="sm"
         >
           <SelectorLabel label="Format" value="SQL" />
-          <DialectSelect
-            disabled={isDialectSelectDisabled}
-            onChange={onDialectChange}
-            value={dialect}
-          />
+          <div
+            onBlurCapture={handleMutationControlBlur}
+            onFocusCapture={() => onSourceControlIntentChange(true)}
+            onPointerDownCapture={() => onSourceControlIntentChange(true)}
+          >
+            <DialectSelect
+              disabled={isDialectSelectDisabled}
+              onChange={onDialectChange}
+              value={dialect}
+            />
+          </div>
         </Card>
       </div>
 
@@ -3244,7 +3366,12 @@ function SourcePanel({
           <span className="text-xs font-medium text-muted-foreground">
             Source text
           </span>
-          <div className="flex items-center gap-1">
+          <div
+            className="flex items-center gap-1"
+            onBlurCapture={handleMutationControlBlur}
+            onFocusCapture={() => onSourceControlIntentChange(true)}
+            onPointerDownCapture={() => onSourceControlIntentChange(true)}
+          >
             <Tooltip>
               <TooltipTrigger
                 render={
