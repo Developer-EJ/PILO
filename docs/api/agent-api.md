@@ -136,7 +136,8 @@ AI Worker는 매 사용자 턴의 제목·날짜·상태·회의방·intent·lat
 제거하고, 모든 MeetingReport tool은 이 Scope를 App Server의 공통 후보 검색기에 전달한다. Router가
 선택한 list/summary/evidence tool은 자연어의 특정 단어를 근거로 정규화 단계에서 강제 교체하지 않는다.
 `fallback` 기본값은 `none`이며, 제목 0건 뒤 Workspace 전체 근거 검색은 사용자가 명시적으로 허용한
-`evidence` 요청에서만 `workspace_evidence`로 실행한다.
+`evidence` 요청에서만 `workspace_evidence`로 실행한다. fallback에서도 제목만 제거하며 날짜·상태·
+회의방·latest·limit은 유지한다. 날짜와 개수는 독립 슬롯으로 추출해 함께 전달한다.
 
 `delegate_canvas_agent`가 실행되면 일반 Agent run은 `running`을 유지하고 Canvas Agent child run의
 terminal 상태를 기다린다. App Server는 사용자의 최신 원문 prompt를 수정하거나 요약하지 않고 child run에
@@ -1433,8 +1434,10 @@ request의 status, 배포 시각, gateway 응답 여부를 확인한다. `ok=fal
 - exact와 fuzzy 후보가 모두 없으면 기본 `fallback=none`에서는 `not_found`로 종료한다. 사용자가
   “제목이 없으면 Workspace 전체 회의록에서 찾아줘”처럼 범위 확대를 명시해
   `fallback=workspace_evidence`가 된 경우에만 transcript·Activity Workspace 검색으로 전환한다.
-  제목이 없는 내용 질문은 처음부터 Workspace evidence 단계로 진입한다. 날짜 범위는 RAG에 직접
-  적용하고, `status`, `roomName`, `latest`가 있으면 공통 후보 검색기가 권한 있는 report ID 집합으로
+  fallback은 제목 조건만 제거하고 `[from, to)`, `status`, `roomName`, `latest`, `limit`을 그대로
+  적용해 권한 있는 report ID 집합을 다시 구한 뒤 그 범위에서만 RAG를 수행한다. 제목이 없는 내용
+  질문은 처음부터 Workspace evidence 단계로 진입한다. 날짜 범위는 RAG에 직접 적용하고,
+  `status`, `roomName`, `latest`, `limit`이 있으면 공통 후보 검색기가 권한 있는 report ID 집합으로
   범위를 제한한다.
 - 후보 선택은 제목, 회의 시작 시각, 상태와 bounded 설명을 제공한다. 선택 뒤에는
   `useSelectedMeetingReportCandidate=true` 또는 같은 후보의 opaque `contextRef`로 원래

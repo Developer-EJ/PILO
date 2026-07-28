@@ -124,11 +124,32 @@ export class MeetingReportSearchService {
       if (normalized.scope.fallback !== "workspace_evidence") {
         return this.fromCandidateResult(titleResult);
       }
+      const fallbackScope = this.withoutTitle(normalized.scope);
+      const fallbackScopeResult =
+        await this.meetingReportCandidateService.searchScope(
+          currentUserId,
+          workspaceId,
+          fallbackScope,
+          { limit: this.contentScopeCandidateLimit(fallbackScope) }
+        );
+      if (fallbackScopeResult.status === "not_found") {
+        return this.result(
+          "not_found",
+          "none",
+          [],
+          [],
+          {
+            ...titleResult.diagnostics,
+            hybridReportCount: 0
+          },
+          true
+        );
+      }
       return this.searchHybridContent(
         currentUserId,
         workspaceId,
         normalized,
-        undefined,
+        fallbackScopeResult.reports,
         "hybrid_content",
         titleResult.diagnostics,
         true
@@ -136,21 +157,20 @@ export class MeetingReportSearchService {
     }
 
     if (normalized.contentQuery) {
-      const needsExplicitScope = Boolean(
+      const needsCandidateScope = Boolean(
         normalized.scope.latest ||
           normalized.scope.status ||
-          normalized.scope.roomName
+          normalized.scope.roomName ||
+          normalized.scope.limit !== undefined
       );
       const filterResult = await this.meetingReportCandidateService.searchScope(
         currentUserId,
         workspaceId,
         normalized.scope,
         {
-          limit: normalized.scope.latest
-            ? 1
-            : needsExplicitScope
-              ? MAX_CONTENT_SCOPE_REPORTS
-              : 1
+          limit: needsCandidateScope
+            ? this.contentScopeCandidateLimit(normalized.scope)
+            : 1
         }
       );
       if (filterResult.status === "not_found") {
@@ -160,7 +180,7 @@ export class MeetingReportSearchService {
         currentUserId,
         workspaceId,
         normalized,
-        needsExplicitScope ? filterResult.reports : undefined,
+        needsCandidateScope ? filterResult.reports : undefined,
         "hybrid_content",
         filterResult.diagnostics
       );
@@ -262,6 +282,21 @@ export class MeetingReportSearchService {
       },
       false
     );
+  }
+
+  private withoutTitle(
+    scope: MeetingReportSearchScope
+  ): MeetingReportSearchScope {
+    const fallbackScope = { ...scope };
+    delete fallbackScope.title;
+    return fallbackScope;
+  }
+
+  private contentScopeCandidateLimit(
+    scope: MeetingReportSearchScope
+  ): number {
+    if (scope.latest) return 1;
+    return scope.limit ?? MAX_CONTENT_SCOPE_REPORTS;
   }
 
   private requireCandidateMatch(

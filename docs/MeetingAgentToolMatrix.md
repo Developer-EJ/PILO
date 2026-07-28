@@ -116,7 +116,9 @@ tool 종류와 무관하게 App Server는 현재 사용자 턴마다 다음 `Mee
 - `exists`는 존재 여부, `list`는 후보 목록, `summary`는 선택된 회의록 projection,
   `evidence`는 선택된 범위의 RAG만 수행한다.
 - 제목 후보가 0건이어도 기본 `fallback=none`이면 종료한다. 사용자가 Workspace 전체 검색을 명시한
-  `evidence` 요청만 `fallback=workspace_evidence`를 허용한다.
+  `evidence` 요청만 `fallback=workspace_evidence`를 허용한다. 이때 제목 조건만 제거하고 날짜·상태·
+  회의방·latest·limit 조건으로 권한 있는 report ID를 다시 계산한 뒤 그 범위에서만 RAG를 수행한다.
+- 자연어의 날짜와 개수는 독립적으로 추출하므로 “지난주 회의록 3건”처럼 한 요청에서 함께 사용할 수 있다.
 - `latest=true`는 날짜·상태·회의방 필터를 적용한 뒤 `meetings.started_at` 기준 최신 1건을 뜻한다.
 - 자연어의 “논의”, “근거”, “내용” 같은 단어로 이미 선택된 tool을 강제 교체하지 않는다. Router가
   intent를 선택하고, 이후 정규화기는 현재 턴 Scope만 검증·보정한다.

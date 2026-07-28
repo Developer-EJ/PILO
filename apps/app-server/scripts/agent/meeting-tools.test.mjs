@@ -811,7 +811,6 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
       to: "2026-07-16T00:00:00.000Z",
       intent: "evidence",
       sort: "latest",
-      limit: 5,
       fallback: "none"
     }
   });
@@ -833,10 +832,32 @@ process.env.SESSION_SECRET ??= "meeting-agent-tools-test-secret";
       to: "2026-07-16T00:00:00.000Z",
       intent: "evidence",
       sort: "latest",
-      limit: 5,
       fallback: "none"
     },
     contentQuery: "인증 방식을 왜 OAuth로 정했어?",
+  });
+
+  const limitedInput = tool.validateInput({
+    query: "배포 논의",
+    from: "2026-07-15T00:00:00.000Z",
+    to: "2026-07-16T00:00:00.000Z",
+    limit: 3
+  });
+  assert.deepEqual(
+    await tool.prepareExecution(context, limitedInput),
+    { kind: "execute" }
+  );
+  await tool.execute(context, limitedInput);
+  assert.deepEqual(searchService.calls[2].input, {
+    scope: {
+      from: "2026-07-15T00:00:00.000Z",
+      to: "2026-07-16T00:00:00.000Z",
+      intent: "evidence",
+      sort: "latest",
+      limit: 3,
+      fallback: "none"
+    },
+    contentQuery: "배포 논의"
   });
 }
 

@@ -155,7 +155,7 @@ interface SearchMeetingTranscriptInput extends MeetingReportSelectorInput {
 interface SearchMeetingReportsInput extends MeetingReportSelectorInput {
   query: string;
   fallback: MeetingReportSearchFallback;
-  limit: number;
+  limit?: number;
 }
 
 interface FindActionItemsInput {
@@ -3714,8 +3714,8 @@ export class MeetingAgentToolsService {
     if (query === null) {
       throw badRequest("query must be a non-empty string");
     }
-    const limit = this.readOptionalLimit(object.limit) ?? 5;
-    if (limit > 20) {
+    const limit = this.readOptionalLimit(object.limit);
+    if (limit !== undefined && limit > 20) {
       throw badRequest("limit must be between 1 and 20");
     }
     const fallback = object.fallback ?? "none";
@@ -3736,7 +3736,7 @@ export class MeetingAgentToolsService {
           object.useSelectedMeetingReportCandidate
       }),
       fallback,
-      limit
+      ...(limit === undefined ? {} : { limit })
     };
   }
 

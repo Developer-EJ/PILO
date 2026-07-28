@@ -5767,6 +5767,7 @@ def _meeting_unified_search_scope_job() -> AgentRunJob:
                             },
                             "from": {"type": "string"},
                             "latest": {"type": "boolean"},
+                            "limit": {"type": "integer"},
                             "reportTitle": {"type": "string"},
                             "roomName": {"type": "string"},
                             "status": {"type": "string"},
@@ -5806,6 +5807,31 @@ def test_current_turn_search_scope_drops_stale_selectors_and_keeps_current_date(
         "fallback": "none",
         "from": "2026-07-16T15:00:00.000Z",
         "to": "2026-07-17T15:00:00.000Z",
+    }
+
+
+def test_current_turn_evidence_scope_keeps_date_and_count_together() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "배포 논의",
+                "fallback": "none",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt="지난주 회의록 3건에서 배포 논의 찾아줘",
+        current_date="2026-07-28",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.output_summary["input"] == {
+        "query": "배포 논의",
+        "fallback": "none",
+        "from": "2026-07-19T15:00:00.000Z",
+        "limit": 3,
+        "to": "2026-07-26T15:00:00.000Z",
     }
 
 

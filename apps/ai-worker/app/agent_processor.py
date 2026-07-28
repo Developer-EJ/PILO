@@ -2629,33 +2629,37 @@ def _normalize_meeting_report_current_turn_scope(
         if report_title is not None and supports("reportTitle"):
             tool_input["reportTitle"] = report_title[:500]
 
-        date_selector: dict[str, int | str] = {}
+        requested_count = _meeting_report_requested_count(prompt)
+        if requested_count is not None and not 1 <= requested_count <= 100:
+            return AgentPlannerDecision(
+                status="needs_clarification",
+                message="회의록 조회 개수는 1건부터 100건까지 지정할 수 있습니다.",
+                final_answer_draft="조회할 회의록 개수를 1건부터 100건 사이로 알려주세요.",
+                tool_name=None,
+                tool_input={},
+                requires_confirmation=False,
+                missing_fields=("meeting_report_limit",),
+                unsupported_reason=None,
+            )
+
+        date_selector: dict[str, str] = {}
         if current_date is not None:
-            parsed_selector = _supported_meeting_report_selector(
+            parsed_selector = _supported_meeting_report_date_selector(
                 prompt,
                 current_date,
                 timezone,
             )
             if parsed_selector is None:
-                invalid_count = _has_invalid_meeting_report_count_expression(prompt)
                 return AgentPlannerDecision(
                     status="needs_clarification",
-                    message=(
-                        "회의록 조회 개수는 1건부터 100건까지 지정할 수 있습니다."
-                        if invalid_count
-                        else "현재 요청의 회의 날짜 범위를 해석할 수 없습니다."
-                    ),
+                    message="현재 요청의 회의 날짜 범위를 해석할 수 없습니다.",
                     final_answer_draft=(
-                        "조회할 회의록 개수를 1건부터 100건 사이로 알려주세요."
-                        if invalid_count
-                        else "현재 요청에서 사용할 날짜나 기간을 조금 더 구체적으로 알려주세요."
+                        "현재 요청에서 사용할 날짜나 기간을 조금 더 구체적으로 알려주세요."
                     ),
                     tool_name=None,
                     tool_input={},
                     requires_confirmation=False,
-                    missing_fields=(
-                        "meeting_report_limit" if invalid_count else "meeting_report_date_range",
-                    ),
+                    missing_fields=("meeting_report_date_range",),
                     unsupported_reason=None,
                 )
             date_selector = parsed_selector
@@ -2663,6 +2667,9 @@ def _normalize_meeting_report_current_turn_scope(
             value = date_selector.get(field)
             if supports(field) and isinstance(value, str):
                 tool_input[field] = value
+
+        if requested_count is not None and supports("limit"):
+            tool_input["limit"] = requested_count
 
         status = _current_turn_meeting_report_status(prompt)
         if status is not None and supports("status"):
@@ -2684,9 +2691,6 @@ def _normalize_meeting_report_current_turn_scope(
                 tool_input.pop("latest", None)
 
         if decision.tool_name == "list_meeting_reports":
-            requested_count = _meeting_report_requested_count(prompt)
-            if requested_count is not None and supports("limit"):
-                tool_input["limit"] = requested_count
             if supports("intent"):
                 tool_input["intent"] = (
                     "exists" if _current_turn_meeting_report_exists_intent(prompt) else "list"
@@ -3580,20 +3584,16 @@ def _meeting_candidate_resume_clarification(field: str) -> AgentPlannerDecision:
     )
 
 
-def _supported_meeting_report_selector(
+def _supported_meeting_report_date_selector(
     prompt: str,
     current_date: str,
     timezone: str,
-) -> dict[str, int | str] | None:
+) -> dict[str, str] | None:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
     try:
         base_date = date.fromisoformat(current_date)
     except ValueError:
         return None
-
-    count = _meeting_report_requested_count(normalized_prompt)
-    if count is not None:
-        return {"limit": count} if 1 <= count <= 100 else None
 
     absolute_date_range = _meeting_report_absolute_date_range(
         normalized_prompt,
@@ -3730,14 +3730,9 @@ def _meeting_report_prompt_without_report_titles(prompt: str) -> str:
     return re.sub(r"\s+", " ", normalized_prompt).strip()
 
 
-def _has_invalid_meeting_report_count_expression(prompt: str) -> bool:
-    count = _meeting_report_requested_count(prompt)
-    return count is not None and not 1 <= count <= 100
-
-
 def _meeting_report_requested_count(prompt: str) -> int | None:
     count_match = re.search(
-        r"(?<!\d)(\d+)\s*(?:건|개)(?=\s|$|만|를|을|씩)",
+        r"(?<!\d)(\d+)\s*(?:건|개)(?=\s|$|만|를|을|씩|에서|중|의|내|안|으로|에)",
         prompt,
     )
     return int(count_match.group(1)) if count_match is not None else None

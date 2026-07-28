@@ -14,6 +14,7 @@ const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const REPORT_ID = "33333333-3333-4333-8333-333333333333";
 const SECOND_REPORT_ID = "44444444-4444-4444-8444-444444444444";
+const THIRD_REPORT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 function searchScope(values = {}, intent = "summary") {
   return {
@@ -30,7 +31,9 @@ function reportRow({
   similarity = null,
   wholeSimilarity = undefined,
   totalCount = 1,
-  startedAt = "2026-07-15T01:00:00.000Z"
+  startedAt = "2026-07-15T01:00:00.000Z",
+  status = "COMPLETED",
+  roomName = "개발 회의실"
 } = {}) {
   return {
     id,
@@ -42,14 +45,14 @@ function reportRow({
       id === REPORT_ID
         ? "77777777-7777-4777-8777-777777777777"
         : "88888888-8888-4888-8888-888888888888",
-    status: "COMPLETED",
+    status,
     title,
     summary: "API 설계를 검토했습니다.",
     discussion_points: "인증 구조",
     decisions: "OAuth를 사용합니다.",
     meeting_started_at: startedAt,
     report_created_at: "2026-07-15T02:00:00.000Z",
-    room_name: "개발 회의실",
+    room_name: roomName,
     title_similarity: similarity,
     whole_title_similarity: wholeSimilarity,
     total_count: totalCount
@@ -297,7 +300,13 @@ class FakeRagService {
     }
   ];
   const database = new FakeDatabase({
-    ids: [reportRow({ id: SECOND_REPORT_ID })]
+    filters: [
+      reportRow({
+        id: SECOND_REPORT_ID,
+        status: "FAILED",
+        roomName: "Backend"
+      })
+    ]
   });
   const rag = new FakeRagService(evidence);
   const service = new MeetingReportSearchService(
@@ -313,6 +322,9 @@ class FakeRagService {
         title: "존재하지 않는 제목",
         from: "2026-07-01T00:00:00.000Z",
         to: "2026-08-01T00:00:00.000Z",
+        status: "FAILED",
+        roomName: "Backend",
+        latest: true,
         fallback: "workspace_evidence"
       },
       "evidence"
@@ -329,9 +341,19 @@ class FakeRagService {
   assert.equal(result.reports[0].reportId, SECOND_REPORT_ID);
   assert.deepEqual(rag.calls[0].input, {
     query: "API v2 배포 일정을 어떻게 정했어?",
+    reportIds: [SECOND_REPORT_ID],
     from: "2026-07-01T00:00:00.000Z",
     to: "2026-08-01T00:00:00.000Z"
   });
+  assert.deepEqual(database.queries.at(-1).values, [
+    WORKSPACE_ID,
+    USER_ID,
+    "FAILED",
+    "2026-07-01T00:00:00.000Z",
+    "2026-08-01T00:00:00.000Z",
+    "backend",
+    1
+  ]);
 }
 
 {
@@ -405,6 +427,59 @@ class FakeRagService {
 
   assert.deepEqual(rag.calls[0].input.reportIds, [REPORT_ID]);
   assert.equal(database.queries[0].values.at(-1), 1);
+}
+
+{
+  const reports = [
+    reportRow({ totalCount: 3 }),
+    reportRow({
+      id: SECOND_REPORT_ID,
+      totalCount: 3,
+      startedAt: "2026-07-14T01:00:00.000Z"
+    }),
+    reportRow({
+      id: THIRD_REPORT_ID,
+      totalCount: 3,
+      startedAt: "2026-07-13T01:00:00.000Z"
+    })
+  ];
+  const database = new FakeDatabase({ filters: reports });
+  const rag = new FakeRagService([
+    {
+      sourceId: "transcript:99999999-9999-4999-8999-999999999997",
+      sourceType: "transcript",
+      reportId: SECOND_REPORT_ID,
+      content: "지난주 회의에서 배포 방식을 논의했습니다.",
+      directlyReferenced: false,
+      score: 0.86
+    }
+  ]);
+  const service = new MeetingReportSearchService(
+    new MeetingReportCandidateService(
+      database,
+      new FakeWorkspaceService()
+    ),
+    rag
+  );
+  await service.search(USER_ID, WORKSPACE_ID, {
+    scope: searchScope(
+      {
+        from: "2026-07-19T15:00:00.000Z",
+        to: "2026-07-26T15:00:00.000Z",
+        limit: 3
+      },
+      "evidence"
+    ),
+    contentQuery: "배포 논의"
+  });
+
+  assert.equal(database.queries[0].values.at(-1), 3);
+  assert.deepEqual(rag.calls[0].input, {
+    query: "배포 논의",
+    reportIds: [REPORT_ID, SECOND_REPORT_ID, THIRD_REPORT_ID],
+    from: "2026-07-19T15:00:00.000Z",
+    to: "2026-07-26T15:00:00.000Z"
+  });
 }
 
 {
