@@ -3876,9 +3876,88 @@ def _meeting_report_prompt_without_report_titles(
         if report_titles is None
         else report_titles
     )
+    title_spans: set[tuple[int, int]] = set()
     for report_title in titles:
-        normalized_prompt = normalized_prompt.replace(report_title, " ")
-    return re.sub(r"\s+", " ", normalized_prompt).strip()
+        normalized_title = re.sub(r"\s+", " ", report_title).strip()
+        if normalized_title:
+            title_spans.update(
+                _meeting_report_title_occurrence_spans(
+                    normalized_prompt,
+                    normalized_title,
+                )
+            )
+
+    masked_prompt = list(normalized_prompt)
+    for start, end in title_spans:
+        masked_prompt[start:end] = [" "] * (end - start)
+    return re.sub(r"\s+", " ", "".join(masked_prompt)).strip()
+
+
+def _meeting_report_title_occurrence_spans(
+    prompt: str,
+    report_title: str,
+) -> tuple[tuple[int, int], ...]:
+    occurrences = tuple(
+        match.span()
+        for match in re.finditer(
+            re.escape(report_title),
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
+    explicit_spans = tuple(
+        span for span in occurrences if _is_explicit_meeting_report_title_occurrence(prompt, *span)
+    )
+    if explicit_spans:
+        return explicit_spans
+    return tuple(
+        span
+        for span in occurrences
+        if _is_contextual_meeting_report_title_occurrence(prompt, *span)
+    )
+
+
+def _is_explicit_meeting_report_title_occurrence(
+    prompt: str,
+    start: int,
+    end: int,
+) -> bool:
+    quote_pairs = {("‘", "’"), ("“", "”"), ('"', '"'), ("'", "'")}
+    if start > 0 and end < len(prompt) and (prompt[start - 1], prompt[end]) in quote_pairs:
+        return True
+
+    prefix = prompt[max(0, start - 32) : start]
+    return bool(
+        re.search(
+            r"(?:회의록\s*)?제목(?:이|은|는)?\s*[:=]?\s*$",
+            prefix,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _is_contextual_meeting_report_title_occurrence(
+    prompt: str,
+    start: int,
+    end: int,
+) -> bool:
+    if start > 0 and (prompt[start - 1].isalnum() or prompt[start - 1] == "_"):
+        return False
+
+    suffix = prompt[end:]
+    return bool(
+        re.match(
+            r"\s*(?:"
+            r"(?:(?:이라는|라는|이란|란|인)\s*)?(?:회의록|회의|미팅)"
+            r"(?:에서|의|은|는|이|가|을|를)?(?=\s|$)|"
+            r"(?:에서|의|은|는|이|가|을|를)(?=\s|$)|"
+            r"(?:내용|요약|요점|핵심|논의\s*사항|결정\s*사항|후속\s*작업|"
+            r"알려|보여|확인|찾아|열어|정리|뭐|무엇|보기)"
+            r")",
+            suffix,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _meeting_report_requested_count(prompt: str) -> int | None:

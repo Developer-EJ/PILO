@@ -5943,6 +5943,74 @@ def test_current_turn_scope_masks_every_repeated_title_before_date_parsing() -> 
 
 
 @pytest.mark.parametrize(
+    ("report_title", "prompt"),
+    [
+        (
+            "월",
+            '제목이 "월"인 회의록에서 7월 17일 이후 결정사항 찾아줘',
+        ),
+        (
+            "월",
+            "제목이 월인 회의록에서 7월 17일 이후 결정사항 찾아줘",
+        ),
+        (
+            "2026",
+            '제목이 "2026"인 회의록에서 2026-07-17 이후 결정사항 찾아줘',
+        ),
+    ],
+)
+def test_current_turn_scope_preserves_date_containing_short_report_title(
+    report_title: str,
+    prompt: str,
+) -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "결정사항",
+                "fallback": "none",
+                "reportTitle": report_title,
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt=prompt,
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    normalized_input = normalized.output_summary["input"]
+    assert normalized_input["reportTitle"] == report_title
+    assert normalized_input["from"] == "2026-07-16T15:00:00.000Z"
+    assert normalized_input["to"] == "2026-07-17T15:00:00.000Z"
+
+
+def test_current_turn_scope_preserves_relative_date_matching_report_title() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "결정사항",
+                "fallback": "none",
+                "reportTitle": "월요일",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt='제목이 "월요일"인 회의록에서 다음주 월요일 결정사항 찾아줘',
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    normalized_input = normalized.output_summary["input"]
+    assert normalized_input["reportTitle"] == "월요일"
+    assert normalized_input["from"] == "2026-08-02T15:00:00.000Z"
+    assert normalized_input["to"] == "2026-08-03T15:00:00.000Z"
+
+
+@pytest.mark.parametrize(
     ("prompt", "planner_title", "query"),
     [
         (
