@@ -3217,11 +3217,25 @@ def _meeting_hybrid_content_query(
     planner_query_provided = bool(query)
     if not query:
         query = prompt.strip()
-    title_pattern = r"\s+".join(
-        re.escape(part) for part in re.split(r"\s+", report_title.strip()) if part
+    title_spans = _meeting_report_query_title_occurrence_spans(
+        query,
+        re.sub(r"\s+", " ", report_title).strip(),
     )
-    query_includes_title = bool(re.search(title_pattern, query, flags=re.IGNORECASE))
-    query = re.sub(title_pattern, " ", query, flags=re.IGNORECASE)
+    query_includes_title = bool(title_spans)
+    if title_spans:
+        masked_query = list(query)
+        for start, end in title_spans:
+            masked_query[start:end] = [" "] * (end - start)
+            title_particle = re.match(
+                r"[\"'‘’“”]*\s*"
+                r"(?:(?:이라는|라는|이란|란|인)"
+                r"(?=\s|$|회의록|회의|미팅)\s*|(?:에서|의)(?=\s|$))",
+                query[end:],
+            )
+            if title_particle is not None:
+                particle_end = end + title_particle.end()
+                masked_query[end:particle_end] = [" "] * (particle_end - end)
+        query = "".join(masked_query)
     query = re.sub(
         r"[\"'‘’“”]|(?:제목(?:이|은|는)?\s*)|(?:해당|그|이|저|선택한|방금\s*선택한)\s*회의록|회의록",
         " ",
@@ -3229,9 +3243,13 @@ def _meeting_hybrid_content_query(
         flags=re.IGNORECASE,
     )
     query = re.sub(
+        r"(?:"
         r"\b\d{4}-\d{1,2}-\d{1,2}\b|"
         r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일|"
-        r"(?:오늘|어제|최근\s*\d+\s*일|지난\s*주|이번\s*주|다음\s*주)",
+        r"오늘|어제|최근\s*\d+\s*일|"
+        r"(?:지난|저번|이번|다음)\s*주"
+        r"(?:\s*(?:월|화|수|목|금|토|일)요일)?"
+        r")\s*(?:이후|이전|부터|까지)?",
         " ",
         query,
     )
@@ -3805,11 +3823,15 @@ def _meeting_report_absolute_date_range(
     base_date: date,
     timezone: str,
 ) -> dict[str, str] | None:
-    matches: list[tuple[int, date]] = []
+    matches: list[tuple[int, int, date]] = []
     for match in re.finditer(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", prompt):
         try:
             matches.append(
-                (match.start(), date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+                (
+                    match.start(),
+                    match.end(),
+                    date(int(match.group(1)), int(match.group(2)), int(match.group(3))),
+                )
             )
         except ValueError:
             return None
@@ -3818,6 +3840,7 @@ def _meeting_report_absolute_date_range(
             matches.append(
                 (
                     match.start(),
+                    match.end(),
                     date(
                         int(match.group(1)) if match.group(1) else base_date.year,
                         int(match.group(2)),
@@ -3829,14 +3852,25 @@ def _meeting_report_absolute_date_range(
             return None
     if not matches:
         return None
-    ordered_dates = [value for _, value in sorted(matches)]
+    ordered_matches = sorted(matches)
+    ordered_dates = [value for _, _, value in ordered_matches]
     if len(ordered_dates) > 2 or (len(ordered_dates) == 2 and ordered_dates[0] > ordered_dates[1]):
         return None
-    return _meeting_report_date_range(
+    date_range = _meeting_report_date_range(
         ordered_dates[0],
         ordered_dates[-1] + timedelta(days=1),
         timezone,
     )
+    if len(ordered_matches) == 1:
+        _start, end, _value = ordered_matches[0]
+        suffix = prompt[end:]
+        if re.match(r"\s*(?:이후|부터)", suffix):
+            return {"from": date_range["from"]}
+        if re.match(r"\s*(?:이전|전까지)", suffix):
+            return {"to": date_range["from"]}
+        if re.match(r"\s*까지", suffix):
+            return {"to": date_range["to"]}
+    return date_range
 
 
 def _has_unresolved_meeting_report_date_expression(prompt: str) -> bool:
@@ -3917,6 +3951,47 @@ def _meeting_report_title_occurrence_spans(
     )
 
 
+def _meeting_report_query_title_occurrence_spans(
+    query: str,
+    report_title: str,
+) -> tuple[tuple[int, int], ...]:
+    scoped_spans = _meeting_report_title_occurrence_spans(query, report_title)
+    if scoped_spans:
+        return scoped_spans
+
+    return tuple(
+        (start, end)
+        for start, end in (
+            match.span()
+            for match in re.finditer(
+                re.escape(report_title),
+                query,
+                flags=re.IGNORECASE,
+            )
+        )
+        if (start == 0 or not (query[start - 1].isalnum() or query[start - 1] == "_"))
+        and (end == len(query) or not (query[end].isalnum() or query[end] == "_"))
+        and not _is_meeting_report_date_component_occurrence(query, start, end)
+    )
+
+
+def _is_meeting_report_date_component_occurrence(
+    prompt: str,
+    start: int,
+    end: int,
+) -> bool:
+    date_patterns = (
+        r"\b\d{4}-\d{1,2}-\d{1,2}\b",
+        r"(?:(?:\d{4})년\s*)?\d{1,2}월\s*\d{1,2}일",
+        r"(?<![가-힣])(?:지난|저번|이번|다음)\s*주\s*" r"(?:월|화|수|목|금|토|일)요일",
+    )
+    return any(
+        match.start() <= start and end <= match.end()
+        for pattern in date_patterns
+        for match in re.finditer(pattern, prompt)
+    )
+
+
 def _is_explicit_meeting_report_title_occurrence(
     prompt: str,
     start: int,
@@ -3942,6 +4017,9 @@ def _is_contextual_meeting_report_title_occurrence(
     end: int,
 ) -> bool:
     if start > 0 and (prompt[start - 1].isalnum() or prompt[start - 1] == "_"):
+        return False
+
+    if _is_meeting_report_date_component_occurrence(prompt, start, end):
         return False
 
     suffix = prompt[end:]
@@ -4261,7 +4339,7 @@ def _normalize_meeting_report_search_routing(
     *,
     prompt: str,
 ) -> AgentRoutingDecision:
-    if decision.status != "routed":
+    if decision.status not in {"routed", "needs_clarification"}:
         return decision
 
     meeting_search_capability_ids = {
@@ -4270,6 +4348,16 @@ def _normalize_meeting_report_search_routing(
         MEETING_REPORT_UNIFIED_SEARCH_CAPABILITY_ID,
     }
     explicit_titles = _current_turn_meeting_report_titles(prompt, None)
+    unfiltered_titles = _explicit_meeting_report_titles(prompt)
+    recovered_cancelled_title_clarification = (
+        decision.status == "needs_clarification"
+        and "meeting" in decision.domains
+        and len(explicit_titles) == 1
+        and len(unfiltered_titles) > len(explicit_titles)
+    )
+    if decision.status == "needs_clarification" and not recovered_cancelled_title_clarification:
+        return decision
+
     meeting_report_scope_capability_ids = {
         *meeting_search_capability_ids,
         "meeting.report.detail",
@@ -4292,7 +4380,10 @@ def _normalize_meeting_report_search_routing(
             ),
             unsupported_reason=None,
         )
-    if not meeting_search_capability_ids.intersection(decision.capability_ids):
+    if (
+        not recovered_cancelled_title_clarification
+        and not meeting_search_capability_ids.intersection(decision.capability_ids)
+    ):
         return decision
 
     capability_by_id = {capability.capability_id: capability for capability in catalog.capabilities}
@@ -4310,10 +4401,14 @@ def _normalize_meeting_report_search_routing(
     if target is None or target.availability != "supported":
         return decision
 
-    normalized_ids = tuple(
-        dict.fromkeys(
-            target_capability_id if value in meeting_search_capability_ids else value
-            for value in decision.capability_ids
+    normalized_ids = (
+        (target_capability_id,)
+        if recovered_cancelled_title_clarification
+        else tuple(
+            dict.fromkeys(
+                target_capability_id if value in meeting_search_capability_ids else value
+                for value in decision.capability_ids
+            )
         )
     )
     normalized_capabilities = [
@@ -4321,6 +4416,7 @@ def _normalize_meeting_report_search_routing(
     ]
     return replace(
         decision,
+        status="routed",
         domains=tuple(dict.fromkeys(capability.domain for capability in normalized_capabilities)),
         capability_ids=normalized_ids,
         intent_summary=(
@@ -4328,6 +4424,9 @@ def _normalize_meeting_report_search_routing(
             if len(explicit_titles) == 1
             else "Workspace 전체 회의 내용에서 요청한 논의와 발언 근거를 검색합니다."
         ),
+        confidence=("medium" if recovered_cancelled_title_clarification else decision.confidence),
+        clarification_question=None,
+        unsupported_reason=None,
     )
 
 

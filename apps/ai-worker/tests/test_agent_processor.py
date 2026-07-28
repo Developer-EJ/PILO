@@ -2774,6 +2774,49 @@ def test_cancelled_explicit_report_title_does_not_require_router_clarification()
     assert corrected.intent_summary.startswith("명시한 회의록 제목")
 
 
+def test_cancelled_title_recovers_router_clarification_with_unified_search() -> None:
+    tools = [
+        tool_snapshot(
+            name="search_meeting_reports",
+            executionMode="contextual",
+            inputSchema={
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "reportTitle": {"type": "string"},
+                },
+            },
+        )
+    ]
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=tools,
+            toolCapabilityCatalog=meeting_search_with_unified_catalog(tools),
+        )
+    )
+    assert job.tool_capability_catalog is not None
+
+    corrected = _normalize_meeting_report_search_routing(
+        AgentRoutingDecision(
+            status="needs_clarification",
+            domains=("meeting",),
+            capability_ids=(),
+            intent_summary="두 회의록 제목 중 검색할 대상을 확인해야 합니다.",
+            confidence="low",
+            clarification_question="두 제목 중 어떤 회의록을 찾을까요?",
+            unsupported_reason=None,
+        ),
+        job.tool_capability_catalog,
+        prompt='제목이 "온보딩 회의"인 회의록 말고 제목이 "배포 회의"인 회의록 찾아줘',
+    )
+
+    assert corrected.status == "routed"
+    assert corrected.capability_ids == ("meeting.report.unified_search",)
+    assert corrected.confidence == "medium"
+    assert corrected.clarification_question is None
+
+
 @pytest.mark.parametrize(
     ("prompt", "expected"),
     [
@@ -5938,8 +5981,33 @@ def test_current_turn_scope_masks_every_repeated_title_before_date_parsing() -> 
     normalized_input = normalized.output_summary["input"]
     assert normalized_input["fallback"] == "none"
     assert normalized_input["reportTitle"] == report_title
+    assert normalized_input["query"] == "결정 이유를 찾고 발언도 요약해줘"
     assert "from" not in normalized_input
     assert "to" not in normalized_input
+
+
+def test_current_turn_scope_removes_title_grammar_from_lookup_query() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": '제목이 "배포 회의"인 회의록 찾아줘',
+                "reportTitle": "배포 회의",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt='제목이 "온보딩 회의"인 회의록 말고 ' '제목이 "배포 회의"인 회의록 찾아줘',
+        current_date="2026-07-29",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.status == "tool_candidate"
+    assert normalized.output_summary["input"] == {
+        "query": "배포 회의",
+        "reportTitle": "배포 회의",
+        "fallback": "none",
+    }
 
 
 @pytest.mark.parametrize(
@@ -5983,7 +6051,7 @@ def test_current_turn_scope_preserves_date_containing_short_report_title(
     normalized_input = normalized.output_summary["input"]
     assert normalized_input["reportTitle"] == report_title
     assert normalized_input["from"] == "2026-07-16T15:00:00.000Z"
-    assert normalized_input["to"] == "2026-07-17T15:00:00.000Z"
+    assert "to" not in normalized_input
 
 
 def test_current_turn_scope_preserves_relative_date_matching_report_title() -> None:
@@ -5991,7 +6059,7 @@ def test_current_turn_scope_preserves_relative_date_matching_report_title() -> N
         planner_decision(
             tool_name="search_meeting_reports",
             tool_input={
-                "query": "결정사항",
+                "query": "다음주 월요일 결정사항",
                 "fallback": "none",
                 "reportTitle": "월요일",
             },
@@ -6006,6 +6074,7 @@ def test_current_turn_scope_preserves_relative_date_matching_report_title() -> N
     assert normalized.status == "tool_candidate"
     normalized_input = normalized.output_summary["input"]
     assert normalized_input["reportTitle"] == "월요일"
+    assert normalized_input["query"] == "결정사항"
     assert normalized_input["from"] == "2026-08-02T15:00:00.000Z"
     assert normalized_input["to"] == "2026-08-03T15:00:00.000Z"
 
