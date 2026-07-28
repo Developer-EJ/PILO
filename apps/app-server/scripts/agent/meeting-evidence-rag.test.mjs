@@ -449,7 +449,8 @@ try {
     groundingStepId: "88888888-8888-4888-8888-888888888888",
     retrievalContext: {
       requestedReportTitle: "온보딩 주간회의",
-      exactTitleMatchFound: false
+      exactTitleMatchFound: false,
+      workspaceFallbackApplied: true
     }
   });
   const outboxInsert = executed.find((call) =>
@@ -714,7 +715,8 @@ try {
         source_ids: [sourceId],
         retrieval_context: {
           requestedReportTitle: "온보딩 주간회의",
-          exactTitleMatchFound: false
+          exactTitleMatchFound: false,
+          workspaceFallbackApplied: true
         }
       };
     }
@@ -738,7 +740,8 @@ try {
 
   assert.deepEqual(context.retrievalContext, {
     requestedReportTitle: "온보딩 주간회의",
-    exactTitleMatchFound: false
+    exactTitleMatchFound: false,
+    workspaceFallbackApplied: true
   });
   assert.match(contextQuery, /step_type = 'answer'/);
   assert.match(contextQuery, /input_json->'retrievalContext'/);
@@ -756,7 +759,8 @@ try {
         source_ids: [],
         retrieval_context: {
           requestedReportTitle: "온보딩 주간회의",
-          exactTitleMatchFound: false
+          exactTitleMatchFound: false,
+          workspaceFallbackApplied: true
         }
       };
     },

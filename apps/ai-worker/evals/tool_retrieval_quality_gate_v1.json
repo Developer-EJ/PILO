@@ -4,9 +4,9 @@
   "topK": 8,
   "schemaTokenBudget": 8000,
   "registrySnapshot": {
-    "inventorySha256": "fc654d2599f9fd63be28ef597426195cc6ece4a2bb720584494513c4f8d3094a",
-    "catalogSha256": "9a2f47a39d7d1ed8c6b0d80a740cd69afc6d40885a67a0d3059ccfa0212222e0",
-    "eligibleSnapshotSha256": "7563b7d794777298980148a4df714d6c147021f1c69fe52216d58be16940b40b"
+    "inventorySha256": "0ed4c458270724069247acab557e4fe1781fbe5938a35ac1f634dd9f9dbe3e0c",
+    "catalogSha256": "4867e45f8edf5e47b950a4b943bed2e9e28fce17669bcee2c1db75fc2d557771",
+    "eligibleSnapshotSha256": "40b4dea0370ed0961792010e0170b97ac7fd9efe15f4116410b78a4e21fdcaab"
   },
   "privacySensitiveValues": [
     "11111111-1111-4111-8111-111111111111",
@@ -754,6 +754,11 @@
           "maxLength": 100,
           "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
+        },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
@@ -825,6 +830,11 @@
           "minLength": 1,
           "maxLength": 100,
           "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+        },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -920,6 +930,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "intent": {
+          "type": "string",
+          "enum": [
+            "exists",
+            "list"
+          ],
+          "description": "존재 여부만 확인하면 exists, 후보 목록을 반환하면 list입니다."
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -943,12 +961,17 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 500,
-          "description": "Agent 전용 MeetingReport 표시 제목 exact-first selector. exact 0건일 때만 구분자 경계의 prefix 후보를 허용하며, 앞뒤/연속 공백과 대소문자는 기존 MeetingService 규칙으로 정규화합니다."
+          "description": "Agent 전용 MeetingReport 표시 제목 selector. 공백과 대소문자를 정규화한 exact 검색 후 pg_trgm 유사 제목 검색을 수행합니다."
         },
         "roomName": {
           "type": "string",
           "minLength": 1,
           "maxLength": 100
+        },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "상태·날짜·회의방 필터를 적용한 뒤 가장 최신 회의록 하나를 선택합니다. 제목 중복 해소에는 사용하지 않습니다."
         },
         "limit": {
           "type": "integer",
@@ -1050,6 +1073,11 @@
           "minLength": 1,
           "maxLength": 100,
           "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+        },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -1199,9 +1227,22 @@
           "maxLength": 100,
           "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
         },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
+        },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
           "const": true
+        },
+        "fallback": {
+          "type": "string",
+          "enum": [
+            "none",
+            "workspace_evidence"
+          ],
+          "description": "제목 후보가 0건일 때의 동작입니다. 사용자가 Workspace 전체 검색을 명시하지 않았다면 none을 사용합니다."
         },
         "limit": {
           "type": "integer",
@@ -1256,6 +1297,11 @@
           "minLength": 1,
           "maxLength": 100,
           "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+        },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -1388,6 +1434,11 @@
           "minLength": 1,
           "maxLength": 100,
           "description": "회의록 제목이 아니라 회의가 열린 회의방 이름입니다."
+        },
+        "latest": {
+          "type": "boolean",
+          "const": true,
+          "description": "제목이 아닌 상태·날짜·회의방 범위에서 가장 최신 회의록 하나를 선택합니다."
         },
         "useSelectedMeetingReportCandidate": {
           "type": "boolean",
@@ -1534,7 +1585,7 @@
   },
   "toolCapabilityCatalog": {
     "version": "agent-tool-capabilities:v3",
-    "sha256": "9a2f47a39d7d1ed8c6b0d80a740cd69afc6d40885a67a0d3059ccfa0212222e0",
+    "sha256": "4867e45f8edf5e47b950a4b943bed2e9e28fce17669bcee2c1db75fc2d557771",
     "capabilities": [
       {
         "id": "meeting.rooms.list",
@@ -3958,6 +4009,7 @@
           "contextRef",
           "decisionIndex",
           "from",
+          "latest",
           "reportTitle",
           "roomName",
           "status",
@@ -3975,7 +4027,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "8b436926a39463970d61c8c295ee3bf8e926438c59621642d4f2bfd937322219"
+        "inputSchemaSha256": "712d1eb6d52082ab994522c1b0828826909f9e0fd9d06148a1e0e577416e299b"
       },
       {
         "toolName": "get_meeting_participants",
@@ -4023,6 +4075,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "latest",
           "reportTitle",
           "roomName",
           "status",
@@ -4040,7 +4093,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "618ed357eb3772d671823acdc5817d1e99280dbcc68f92227b310ceabfd00dbb"
+        "inputSchemaSha256": "955520f55979d89c9f2d33f5f0d0b1cc3dd097972b3d10ac57a92335756684a0"
       },
       {
         "toolName": "join_meeting",
@@ -4162,6 +4215,8 @@
         ],
         "acceptedSelectorFields": [
           "from",
+          "intent",
+          "latest",
           "limit",
           "reportTitle",
           "roomName",
@@ -4184,7 +4239,7 @@
         "executionMode": "auto",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "b4d6fe5f72505c48b6bc40b3395f5582e2d5ab92d51790880d6de6fe83c7f4ac"
+        "inputSchemaSha256": "b3bb091b4a32a66b0c1d8ce38a409d60f7c6d8dd559ad885a22643db50063cc2"
       },
       {
         "toolName": "list_meeting_rooms",
@@ -4288,6 +4343,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "latest",
           "reportTitle",
           "roomName",
           "status",
@@ -4305,7 +4361,7 @@
         "executionMode": "confirmation_required",
         "requiresConfirmation": true,
         "contextSurface": null,
-        "inputSchemaSha256": "618ed357eb3772d671823acdc5817d1e99280dbcc68f92227b310ceabfd00dbb"
+        "inputSchemaSha256": "955520f55979d89c9f2d33f5f0d0b1cc3dd097972b3d10ac57a92335756684a0"
       },
       {
         "toolName": "resolve_board_context",
@@ -4429,7 +4485,9 @@
         ],
         "acceptedSelectorFields": [
           "contextRef",
+          "fallback",
           "from",
+          "latest",
           "limit",
           "query",
           "reportTitle",
@@ -4447,7 +4505,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "cbd8e1a432802e69bbeb9f41b3c5580298c01a4567167e614edd6dd16f2b6780"
+        "inputSchemaSha256": "b74d0553950d416ce8ce177fa65a155feb5fa936fdefec2bf0ce1bbdaeedb7d2"
       },
       {
         "toolName": "search_meeting_transcript",
@@ -4470,6 +4528,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "latest",
           "query",
           "reportTitle",
           "roomName",
@@ -4489,7 +4548,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "aeaeff84c2f71bb0fdc59f19069c07e7fd43941e94055e08065482de0a83a220"
+        "inputSchemaSha256": "e8b10170b49f2fbf2fb34fddc2021c182d8d6ac6e1077ad91db985ef3baecf37"
       },
       {
         "toolName": "search_workspace_documents",
@@ -4596,6 +4655,7 @@
         "acceptedSelectorFields": [
           "contextRef",
           "from",
+          "latest",
           "reportTitle",
           "roomName",
           "sections",
@@ -4612,7 +4672,7 @@
         "executionMode": "contextual",
         "requiresConfirmation": false,
         "contextSurface": null,
-        "inputSchemaSha256": "1f3564a81f12b4ade1defaea11440e2923fc4c3264d0e564a79d2918f76ae274"
+        "inputSchemaSha256": "22a60411ec9e0c766a9ba22e11eed15a1f93a2bebd40eeccafcb6afb5fdccbb5"
       },
       {
         "toolName": "update_calendar_event",

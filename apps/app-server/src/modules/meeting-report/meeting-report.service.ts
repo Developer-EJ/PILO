@@ -139,12 +139,6 @@ interface MeetingReportListQuery {
   limit?: unknown;
 }
 
-/** Internal Agent query. Keep reportTitle and roomName out of the public Meeting REST contract. */
-interface MeetingAgentReportListQuery extends MeetingReportListQuery {
-  reportTitle?: unknown;
-  roomName?: unknown;
-}
-
 interface MeetingReportCursor {
   createdAt: string;
   id: string;
@@ -334,51 +328,45 @@ export class MeetingReportService {
     };
   }
 
-  async listReportsForAgent(
+  async listReportsByIdsForAgent(
     currentUserId: string,
     workspaceId: string,
-    query: MeetingAgentReportListQuery
+    reportIds: readonly string[]
   ): Promise<MeetingReportListPayload> {
-    await this.assertWorkspaceAccess(currentUserId, workspaceId);
-    const cursor = this.normalizeMeetingReportCursor(query.cursor);
-    const from = this.normalizeMeetingReportDate(query.from, "from");
-    const to = this.normalizeMeetingReportDate(query.to, "to");
-    const status = this.normalizeMeetingReportStatus(query.status);
-    const limit = this.normalizeAgentMeetingReportLimit(query.limit);
-    const reportTitle = query.reportTitle === undefined
-      ? null
-      : this.normalizeAgentResolutionText(String(query.reportTitle));
-    const roomName = query.roomName === undefined
-      ? null
-      : this.normalizeAgentResolutionText(String(query.roomName));
-    if (from !== null && to !== null && from >= to) {
-      throw badRequest("from must be before to");
-    }
-    let page = await this.listWorkspaceMeetingReportRows(
-      workspaceId,
-      currentUserId,
-      status,
-      limit,
-      { cursor, from, searchQuery: null, to, reportTitle, roomName }
-    );
-    if (reportTitle !== null && page.reports.length === 0) {
-      page = await this.listWorkspaceMeetingReportRows(
-        workspaceId,
-        currentUserId,
-        status,
-        limit,
-        {
-          cursor,
-          from,
-          searchQuery: null,
-          to,
-          reportTitlePrefix: reportTitle,
-          roomName
-        }
+    if (
+      !Array.isArray(reportIds) ||
+      reportIds.length > MAX_MEETING_REPORT_LIMIT ||
+      reportIds.some(
+        (reportId) =>
+          typeof reportId !== "string" || !UUID_PATTERN.test(reportId)
+      )
+    ) {
+      throw badRequest(
+        `reportIds must contain at most ${MAX_MEETING_REPORT_LIMIT} valid MeetingReport UUIDs`
       );
     }
+    const uniqueReportIds = [...new Set(reportIds)];
+    if (uniqueReportIds.length === 0) {
+      return { nextCursor: null, reports: [] };
+    }
+
+    await this.assertWorkspaceAccess(currentUserId, workspaceId);
+    const page = await this.listWorkspaceMeetingReportRows(
+      workspaceId,
+      currentUserId,
+      null,
+      uniqueReportIds.length,
+      {
+        cursor: null,
+        from: null,
+        searchQuery: null,
+        to: null,
+        reportIds: uniqueReportIds,
+        restrictToAccessibleReports: true
+      }
+    );
     return {
-      nextCursor: page.nextCursor,
+      nextCursor: null,
       reports: page.reports.map((report) => this.mapMeetingReportSummary(report))
     };
   }
@@ -1219,9 +1207,8 @@ export class MeetingReportService {
       from: string | null;
       searchQuery: string | null;
       to: string | null;
-      reportTitle?: string | null;
-      reportTitlePrefix?: string | null;
-      roomName?: string | null;
+      reportIds?: string[];
+      restrictToAccessibleReports?: boolean;
     }
   ): Promise<{ nextCursor: string | null; reports: MeetingReportRow[] }> {
     const values: unknown[] = [workspaceId, currentUserId];
@@ -1241,25 +1228,6 @@ export class MeetingReportService {
       filters.to === null
         ? ""
         : `AND meeting_reports.created_at < $${values.push(filters.to)}::timestamptz`;
-    const roomNameCondition =
-      filters.roomName === null || filters.roomName === undefined
-        ? ""
-        : `AND lower(regexp_replace(BTRIM(meeting_rooms.name), '\\s+', ' ', 'g')) = $${values.push(filters.roomName)}`;
-    const reportTitleCondition =
-      filters.reportTitle === null || filters.reportTitle === undefined
-        ? ""
-        : `AND lower(regexp_replace(BTRIM(COALESCE(meeting_reports.user_title, meeting_reports.title)), '\\s+', ' ', 'g')) = $${values.push(filters.reportTitle)}`;
-    const reportTitlePrefixCondition =
-      filters.reportTitlePrefix === null || filters.reportTitlePrefix === undefined
-        ? ""
-        : (() => {
-            const titleParameter = `$${values.push(filters.reportTitlePrefix)}`;
-            const normalizedTitle =
-              "lower(regexp_replace(BTRIM(COALESCE(meeting_reports.user_title, meeting_reports.title)), '\\s+', ' ', 'g'))";
-            return `AND left(${normalizedTitle}, char_length(${titleParameter})) = ${titleParameter}
-              AND substring(${normalizedTitle} FROM char_length(${titleParameter}) + 1 FOR 1)
-                IN (' ', ':', '：', '-', '–', '—', '|', '/', '·')`;
-          })();
     const cursorCondition =
       filters.cursor === null
         ? ""
@@ -1268,7 +1236,37 @@ export class MeetingReportService {
             const idParameter = `$${values.push(filters.cursor.id)}`;
             return `AND (meeting_reports.created_at < ${createdAtParameter}::timestamptz OR (meeting_reports.created_at = ${createdAtParameter}::timestamptz AND meeting_reports.id > ${idParameter}::uuid))`;
           })();
+    const reportIdsParameter =
+      filters.reportIds === undefined
+        ? null
+        : `$${values.push(filters.reportIds)}`;
+    const reportIdsCondition =
+      reportIdsParameter === null
+        ? ""
+        : `AND meeting_reports.id = ANY(${reportIdsParameter}::uuid[])`;
+    const accessibleReportCondition =
+      filters.restrictToAccessibleReports === true
+        ? `AND (
+            EXISTS (
+              SELECT 1
+              FROM workspace_members accessible_member
+              WHERE accessible_member.workspace_id = meetings.workspace_id
+                AND accessible_member.user_id = $2
+                AND accessible_member.role = 'owner'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM meeting_participants accessible_participant
+              WHERE accessible_participant.meeting_id = meeting_reports.meeting_id
+                AND accessible_participant.user_id = $2
+            )
+          )`
+        : "";
     const limitParameter = `$${values.push(limit + 1)}`;
+    const orderBy =
+      reportIdsParameter === null
+        ? "meeting_reports.created_at DESC, meeting_reports.id ASC"
+        : `array_position(${reportIdsParameter}::uuid[], meeting_reports.id), meeting_reports.id ASC`;
 
     const rows = await this.database.query<MeetingReportRow>(
       `
@@ -1328,9 +1326,6 @@ export class MeetingReportService {
         FROM meeting_reports
         JOIN meetings
           ON meetings.id = meeting_reports.meeting_id
-        LEFT JOIN meeting_rooms
-          ON meeting_rooms.workspace_id = meetings.workspace_id
-          AND meeting_rooms.room_key = meetings.room_key
         LEFT JOIN meeting_report_action_item_extractions AS extraction
           ON extraction.meeting_report_id = meeting_reports.id
         LEFT JOIN LATERAL (
@@ -1344,11 +1339,10 @@ export class MeetingReportService {
           ${searchCondition}
           ${fromCondition}
           ${toCondition}
-          ${roomNameCondition}
-          ${reportTitleCondition}
-          ${reportTitlePrefixCondition}
           ${cursorCondition}
-        ORDER BY meeting_reports.created_at DESC, meeting_reports.id ASC
+          ${reportIdsCondition}
+          ${accessibleReportCondition}
+        ORDER BY ${orderBy}
         LIMIT ${limitParameter}
       `,
       values
@@ -2226,28 +2220,6 @@ export class MeetingReportService {
     }
 
     return Math.min(integerLimit, MAX_MEETING_REPORT_LIMIT);
-  }
-
-/**
-   * Agent retrieval needs an exact bounded result count for selector resolution.
-   * Keep the public Meeting API's legacy 20-item minimum unchanged.
-   */
-  private normalizeAgentMeetingReportLimit(limit: unknown): number {
-    if (limit === undefined || limit === null || limit === "") {
-      return 1;
-    }
-    if (Array.isArray(limit)) {
-      throw badRequest("Agent meeting report limit must be a positive integer");
-    }
-    const rawLimit = typeof limit === "number" ? String(limit) : limit;
-    if (typeof rawLimit !== "string") {
-      throw badRequest("Agent meeting report limit must be a positive integer");
-    }
-    const parsed = Number(rawLimit.trim());
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_MEETING_REPORT_LIMIT) {
-      throw badRequest("Agent meeting report limit must be between 1 and 100");
-    }
-    return parsed;
   }
 
   private toJsonArray(value: unknown): unknown[] {

@@ -1236,6 +1236,7 @@ def test_grounded_answer_discloses_exact_title_miss_before_fallback_evidence() -
             "retrievalContext": {
                 "requestedReportTitle": "온보딩 주간회의",
                 "exactTitleMatchFound": False,
+                "workspaceFallbackApplied": True,
             },
             "sources": [
                 {
@@ -1272,6 +1273,7 @@ def test_grounded_answer_does_not_confuse_missing_evidence_with_exact_title_miss
             "retrievalContext": {
                 "requestedReportTitle": "온보딩 주간회의",
                 "exactTitleMatchFound": False,
+                "workspaceFallbackApplied": True,
             },
             "sources": [
                 {
@@ -1303,6 +1305,40 @@ def test_grounded_answer_does_not_confuse_missing_evidence_with_exact_title_miss
     assert handoff.completed[0][1].startswith(
         "제목이 정확히 ‘온보딩 주간회의’인 회의록은 없었습니다."
     )
+
+
+def test_grounded_answer_does_not_claim_workspace_fallback_when_it_was_not_used() -> None:
+    handoff = FakeGroundedAnswerHandoffClient(
+        {
+            "prompt": "'온보딩 주간회의'에서 배포 일정 찾아줘",
+            "retrievalContext": {
+                "requestedReportTitle": "온보딩 주간회의",
+                "exactTitleMatchFound": False,
+                "workspaceFallbackApplied": False,
+            },
+            "sources": [
+                {
+                    "citationId": "citation_valid",
+                    "sourceType": "meeting_transcript",
+                    "excerpt": "요청한 제목의 회의록을 찾지 못했습니다.",
+                }
+            ],
+        }
+    )
+    processor = FakeGroundedAnswerProcessor(
+        handoff,
+        api_key="unused",
+        model="unused",
+        timeout_seconds=1,
+        answers=[("요청한 제목의 회의록을 찾지 못했습니다.", ["citation_valid"])],
+    )
+
+    result = processor.process_payload(
+        {"jobType": "agent_grounded_answer_requested", "runId": RUN_ID}
+    )
+
+    assert result.reason == "grounded_answer_completed"
+    assert "Workspace 전체 회의 내용" not in handoff.completed[0][1]
 
 
 def create_processor(
@@ -2275,7 +2311,7 @@ def test_meeting_evidence_capability_is_available_from_every_surface(
     assert "meeting.report.hybrid_search" in capability_ids
 
 
-def test_content_discussion_request_corrects_report_list_to_workspace_evidence_search() -> None:
+def test_content_words_do_not_override_router_selected_report_list() -> None:
     tools = [
         tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
         tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
@@ -2298,7 +2334,7 @@ def test_content_discussion_request_corrects_report_list_to_workspace_evidence_s
         prompt="배포 일정이 미뤄진 이유를 논의했던 회의록을 찾아줘",
     )
 
-    assert corrected.capability_ids == ("meeting.evidence.search",)
+    assert corrected.capability_ids == ("meeting.reports.list",)
 
 
 def test_meeting_content_routing_prefers_unified_search_when_available() -> None:
@@ -2400,7 +2436,7 @@ def test_unified_meeting_search_normalizes_title_and_content_query() -> None:
         ("금요일 데일리 스크럼 회의록 알려줘", "금요일 데일리 스크럼"),
     ],
 )
-def test_natural_named_meeting_summary_corrects_list_routing(
+def test_natural_named_meeting_summary_does_not_override_list_routing(
     prompt: str,
     expected_title: str,
 ) -> None:
@@ -2442,7 +2478,7 @@ def test_natural_named_meeting_summary_corrects_list_routing(
     )
 
     assert _explicit_meeting_report_titles(prompt) == (expected_title,)
-    assert corrected.capability_ids == ("meeting.report.summary",)
+    assert corrected.capability_ids == ("meeting.reports.list",)
 
 
 @pytest.mark.parametrize(
@@ -2462,7 +2498,7 @@ def test_natural_named_meeting_summary_corrects_list_routing(
         ),
     ],
 )
-def test_natural_named_meeting_evidence_request_uses_hybrid_routing(
+def test_natural_named_evidence_words_do_not_override_list_routing(
     prompt: str,
     expected_title: str,
 ) -> None:
@@ -2490,7 +2526,7 @@ def test_natural_named_meeting_evidence_request_uses_hybrid_routing(
     )
 
     assert _explicit_meeting_report_titles(prompt) == (expected_title,)
-    assert corrected.capability_ids == ("meeting.report.hybrid_search",)
+    assert corrected.capability_ids == ("meeting.reports.list",)
 
 
 @pytest.mark.parametrize(
@@ -2524,7 +2560,7 @@ def test_natural_named_meeting_evidence_request_uses_hybrid_routing(
         "회의록 생성 실패 원인을 논의한 회의 찾아줘",
     ],
 )
-def test_natural_meeting_evidence_requests_correct_list_routing(
+def test_natural_meeting_evidence_words_do_not_override_list_routing(
     prompt: str,
 ) -> None:
     tools = [
@@ -2550,7 +2586,7 @@ def test_natural_meeting_evidence_requests_correct_list_routing(
         prompt=prompt,
     )
 
-    assert corrected.capability_ids == ("meeting.evidence.search",)
+    assert corrected.capability_ids == ("meeting.reports.list",)
 
 
 @pytest.mark.parametrize(
@@ -2603,7 +2639,7 @@ def test_simple_meeting_report_requests_keep_summary_or_lookup_routing(
     assert corrected == original
 
 
-def test_evidence_question_with_summary_format_corrects_summary_routing() -> None:
+def test_evidence_words_do_not_override_router_selected_summary() -> None:
     tools = [
         tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
         tool_snapshot(name="search_meeting_transcript", inputSchema={"type": "object"}),
@@ -2627,7 +2663,7 @@ def test_evidence_question_with_summary_format_corrects_summary_routing() -> Non
         prompt="배포 일정이 미뤄진 이유를 논의한 회의 내용을 요약해줘",
     )
 
-    assert corrected.capability_ids == ("meeting.evidence.search",)
+    assert corrected.capability_ids == ("meeting.report.summary",)
 
 
 @pytest.mark.parametrize(
@@ -2637,7 +2673,7 @@ def test_evidence_question_with_summary_format_corrects_summary_routing() -> Non
         '"온보딩 회의"에서 결정 이유를 찾고 "온보딩 회의"의 발언도 요약해줘',
     ],
 )
-def test_explicit_title_evidence_question_with_summary_format_uses_hybrid(
+def test_explicit_title_evidence_words_do_not_override_summary_routing(
     prompt: str,
 ) -> None:
     tools = [
@@ -2663,7 +2699,7 @@ def test_explicit_title_evidence_question_with_summary_format_uses_hybrid(
         prompt=prompt,
     )
 
-    assert corrected.capability_ids == ("meeting.report.hybrid_search",)
+    assert corrected.capability_ids == ("meeting.report.summary",)
 
 
 @pytest.mark.parametrize(
@@ -2751,6 +2787,10 @@ def test_multiple_explicit_report_titles_require_clarification(
         (
             "금요일 데일리 스크럼에서 “API v2”를 누가 언급했어?",
             ("금요일 데일리 스크럼",),
+        ),
+        (
+            "4분 설명 챌린지 회의 내용이 뭐야",
+            ("4분 설명 챌린지 회의",),
         ),
         (
             "7월 18일 백엔드 회의 내용 알려줘",
@@ -2874,15 +2914,15 @@ def test_direct_decision_evidence_requests_keep_routed_capability(
     [
         (
             "일반적으로 결정한 이유를 회의에서 찾아줘",
-            "meeting.evidence.search",
+            "meeting.decision.evidence",
         ),
         (
             "‘온보딩 회의’에서 배포 방식을 결정한 이유를 찾아줘",
-            "meeting.report.hybrid_search",
+            "meeting.decision.evidence",
         ),
     ],
 )
-def test_general_decision_reason_requests_use_transcript_search(
+def test_general_decision_words_do_not_override_direct_evidence_routing(
     prompt: str,
     expected_capability_id: str,
 ) -> None:
@@ -2912,7 +2952,7 @@ def test_general_decision_reason_requests_use_transcript_search(
     assert corrected.capability_ids == (expected_capability_id,)
 
 
-def test_processor_routes_content_discussion_to_workspace_search_from_other_surface() -> None:
+def test_processor_respects_report_list_routing_from_other_surface() -> None:
     tools = [
         tool_snapshot(
             name="list_meeting_reports",
@@ -2932,8 +2972,8 @@ def test_processor_routes_content_discussion_to_workspace_search_from_other_surf
     repository = FakeAgentRunRepository(context=run_context(prompt=prompt))
     planner = FakePlannerClient(
         decision=planner_decision(
-            tool_name="search_meeting_transcript",
-            tool_input={"query": "배포 일정이 미뤄진 이유"},
+            tool_name="list_meeting_reports",
+            tool_input={},
         )
     )
     router = FakeRouterClient(
@@ -2961,8 +3001,8 @@ def test_processor_routes_content_discussion_to_workspace_search_from_other_surf
 
     assert result.reason == "agent_execution_handoff_completed"
     assert len(router.requests) == 1
-    assert [tool.name for tool in planner.requests[0].tools] == ["search_meeting_transcript"]
-    assert planner.requests[0].routing.capability_ids == ("meeting.evidence.search",)
+    assert [tool.name for tool in planner.requests[0].tools] == ["list_meeting_reports"]
+    assert planner.requests[0].routing.capability_ids == ("meeting.reports.list",)
     assert repository.completed_steps[0][2]["toolRouting"]["source"] == ("initial_llm_router")
     assert handoff.calls == [RUN_ID]
 
@@ -2975,7 +3015,7 @@ def test_processor_routes_content_discussion_to_workspace_search_from_other_surf
         ("금요일 데일리 스크럼 회의록 알려줘", "금요일 데일리 스크럼"),
     ],
 )
-def test_processor_recovers_natural_named_summary_after_router_and_planner_misclassification(
+def test_processor_builds_title_scope_for_router_selected_summary(
     prompt: str,
     expected_title: str,
 ) -> None:
@@ -3000,16 +3040,14 @@ def test_processor_recovers_natural_named_summary_after_router_and_planner_miscl
     repository = FakeAgentRunRepository(context=run_context(prompt=prompt))
     planner = FakePlannerClient(
         decision=planner_decision(
-            status="needs_clarification",
-            tool_name=None,
+            tool_name="summarize_meeting_report",
             tool_input={},
-            missing_fields=("reportTitle",),
         )
     )
     router = FakeRouterClient(
         decision=routing_decision(
             domains=("meeting",),
-            capability_ids=("meeting.reports.list",),
+            capability_ids=("meeting.report.summary",),
         )
     )
     handoff = FakeExecutionHandoffClient()
@@ -3038,7 +3076,7 @@ def test_processor_recovers_natural_named_summary_after_router_and_planner_miscl
     assert handoff.calls == [RUN_ID]
 
 
-def test_processor_replaces_prior_named_summary_scope_after_router_clarification() -> None:
+def test_processor_replaces_prior_named_summary_scope_with_current_turn_title() -> None:
     prompt = "백엔드 회의 내용 알려줘"
     tools = [
         tool_snapshot(name="list_meeting_reports", inputSchema={"type": "object"}),
@@ -3066,18 +3104,14 @@ def test_processor_replaces_prior_named_summary_scope_after_router_clarification
     )
     planner = FakePlannerClient(
         decision=planner_decision(
-            status="needs_clarification",
-            tool_name=None,
-            tool_input={},
-            missing_fields=("reportTitle",),
+            tool_name="summarize_meeting_report",
+            tool_input={"reportTitle": "금요일 데일리 스크럼"},
         )
     )
     router = FakeRouterClient(
         decision=routing_decision(
-            status="needs_clarification",
-            domains=(),
-            capability_ids=(),
-            clarification_question="어느 금요일 데일리 스크럼인지 알려주세요.",
+            domains=("meeting",),
+            capability_ids=("meeting.report.summary",),
         )
     )
     handoff = FakeExecutionHandoffClient()
@@ -5090,7 +5124,10 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
                     inputSchema={
                         "type": "object",
                         "additionalProperties": False,
-                        "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+                        "properties": {
+                            "latest": {"type": "boolean"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
                     },
                 )
             ]
@@ -5102,16 +5139,17 @@ def test_normalizer_keeps_latest_meeting_report_list_candidate() -> None:
             tool_input={"limit": 1},
         ),
         job,
+        prompt="최신 회의록 1건 보여줘",
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"] == {"limit": 1}
+    assert normalized.output_summary["input"] == {"latest": True, "limit": 1}
 
 
 @pytest.mark.parametrize(
     ("prompt", "current_date", "expected_input"),
     [
-        ("최근 회의록 보여줘", "2026-07-15", {}),
+        ("최근 회의록 보여줘", "2026-07-15", {"latest": True}),
         ("최근 3건 회의록 보여줘", "2026-07-15", {"limit": 3}),
         (
             "오늘 회의록 보여줘",
@@ -5187,6 +5225,7 @@ def test_normalizer_resolves_meeting_report_defaults_and_relative_dates(
                         "properties": {
                             "from": {"type": "string", "format": "date-time"},
                             "to": {"type": "string", "format": "date-time"},
+                            "latest": {"type": "boolean"},
                             "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                         },
                     },
@@ -5196,10 +5235,8 @@ def test_normalizer_resolves_meeting_report_defaults_and_relative_dates(
     )
     normalized = normalize_agent_planner_decision(
         planner_decision(
-            status="needs_clarification",
-            tool_name=None,
+            tool_name="list_meeting_reports",
             tool_input={},
-            missing_fields=("meetingReport",),
         ),
         job,
         prompt=prompt,
@@ -5223,7 +5260,9 @@ def test_normalizer_enforces_latest_one_for_unqualified_meeting_report_list() ->
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {
+                            "latest": {"type": "boolean"},
                             "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                            "roomName": {"type": "string"},
                         },
                     },
                 )
@@ -5247,7 +5286,7 @@ def test_normalizer_enforces_latest_one_for_unqualified_meeting_report_list() ->
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"] == {"roomName": "디자인 회의실"}
+    assert normalized.output_summary["input"] == {"latest": True}
 
 
 def test_normalizer_prioritizes_explicit_count_over_date_range_and_keeps_room() -> None:
@@ -5412,10 +5451,8 @@ def test_normalizer_recovers_natural_named_meeting_summary_selector(
 
     normalized = normalize_agent_planner_decision(
         planner_decision(
-            status="needs_clarification",
-            tool_name=None,
+            tool_name="summarize_meeting_report",
             tool_input={},
-            missing_fields=("meeting_report_date_range",),
         ),
         job,
         prompt=prompt,
@@ -5567,6 +5604,7 @@ def test_normalizer_keeps_latest_summary_and_decisions_unscoped() -> None:
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {
+                            "latest": {"type": "boolean"},
                             "reportTitle": {"type": "string"},
                             "sections": {"type": "array"},
                         },
@@ -5591,6 +5629,7 @@ def test_normalizer_keeps_latest_summary_and_decisions_unscoped() -> None:
     assert normalized.status == "tool_candidate"
     assert normalized.output_summary["toolName"] == "summarize_meeting_report"
     assert normalized.output_summary["input"] == {
+        "latest": True,
         "sections": ["summary", "decisions"],
     }
 
@@ -5691,7 +5730,11 @@ def _meeting_transcript_search_job() -> AgentRunJob:
                         "properties": {
                             "query": {"type": "string"},
                             "contextRef": {"type": "string"},
+                            "from": {"type": "string"},
                             "reportTitle": {"type": "string"},
+                            "roomName": {"type": "string"},
+                            "status": {"type": "string"},
+                            "to": {"type": "string"},
                             "useSelectedMeetingReportCandidate": {
                                 "type": "boolean",
                                 "const": True,
@@ -5702,6 +5745,183 @@ def _meeting_transcript_search_job() -> AgentRunJob:
             ]
         )
     )
+
+
+def _meeting_unified_search_scope_job() -> AgentRunJob:
+    return parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="search_meeting_reports",
+                    description="MeetingReport 통합 검색",
+                    executionMode="contextual",
+                    inputSchema={
+                        "type": "object",
+                        "required": ["query"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "query": {"type": "string"},
+                            "fallback": {
+                                "type": "string",
+                                "enum": ["none", "workspace_evidence"],
+                            },
+                            "from": {"type": "string"},
+                            "latest": {"type": "boolean"},
+                            "limit": {"type": "integer"},
+                            "reportTitle": {"type": "string"},
+                            "roomName": {"type": "string"},
+                            "status": {"type": "string"},
+                            "to": {"type": "string"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+
+
+def test_current_turn_search_scope_drops_stale_selectors_and_keeps_current_date() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "이전 배포 논의",
+                "fallback": "workspace_evidence",
+                "from": "2026-07-01T00:00:00.000Z",
+                "latest": True,
+                "reportTitle": "이전 회의",
+                "roomName": "Backend",
+                "status": "FAILED",
+                "to": "2026-07-02T00:00:00.000Z",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt="7월 17일 회의 내용 알려줘",
+        current_date="2026-07-28",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.output_summary["input"] == {
+        "query": "7월 17일 회의 내용 알려줘",
+        "fallback": "none",
+        "from": "2026-07-16T15:00:00.000Z",
+        "to": "2026-07-17T15:00:00.000Z",
+    }
+
+
+def test_current_turn_evidence_scope_keeps_date_and_count_together() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "배포 논의",
+                "fallback": "none",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt="지난주 회의록 3건에서 배포 논의 찾아줘",
+        current_date="2026-07-28",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.output_summary["input"] == {
+        "query": "배포 논의",
+        "fallback": "none",
+        "from": "2026-07-19T15:00:00.000Z",
+        "limit": 3,
+        "to": "2026-07-26T15:00:00.000Z",
+    }
+
+
+def test_latest_completed_scope_keeps_status_and_latest_together() -> None:
+    job = parse_agent_run_job_payload(
+        agent_payload(
+            tools=[
+                tool_snapshot(
+                    name="list_meeting_reports",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "intent": {"type": "string"},
+                            "latest": {"type": "boolean"},
+                            "reportTitle": {"type": "string"},
+                            "status": {"type": "string"},
+                        },
+                    },
+                )
+            ]
+        )
+    )
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="list_meeting_reports",
+            tool_input={"reportTitle": "이전 회의", "status": "FAILED"},
+        ),
+        job,
+        prompt="완료된 가장 최신 회의록 알려줘",
+        current_date="2026-07-28",
+        timezone="Asia/Seoul",
+    )
+
+    assert normalized.output_summary["input"] == {
+        "intent": "list",
+        "latest": True,
+        "status": "COMPLETED",
+    }
+
+
+def test_workspace_fallback_requires_explicit_current_turn_request() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "배포 일정",
+                "fallback": "workspace_evidence",
+                "reportTitle": "온보딩 회의",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt="‘온보딩 회의’에서 배포 일정 찾아줘",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    assert normalized.output_summary["input"] == {
+        "query": "배포 일정",
+        "fallback": "none",
+        "reportTitle": "온보딩 회의",
+    }
+
+
+def test_explicit_scope_continuation_preserves_previous_search_filters() -> None:
+    normalized = normalize_agent_planner_decision(
+        planner_decision(
+            tool_name="search_meeting_reports",
+            tool_input={
+                "query": "배포 일정",
+                "fallback": "none",
+                "from": "2026-07-16T15:00:00.000Z",
+                "reportTitle": "온보딩 회의",
+                "roomName": "Backend",
+                "status": "COMPLETED",
+                "to": "2026-07-17T15:00:00.000Z",
+            },
+        ),
+        _meeting_unified_search_scope_job(),
+        prompt="같은 검색 조건을 그대로 유지해서 회의록 다시 찾아줘",
+        current_date="2026-07-28",
+        timezone="Asia/Seoul",
+        routed_capability_ids=("meeting.report.unified_search",),
+    )
+
+    scope = normalized.output_summary["input"]
+    assert scope["fallback"] == "none"
+    assert scope["from"] == "2026-07-16T15:00:00.000Z"
+    assert scope["reportTitle"] == "온보딩 회의"
+    assert scope["roomName"] == "Backend"
+    assert scope["status"] == "COMPLETED"
+    assert scope["to"] == "2026-07-17T15:00:00.000Z"
 
 
 def test_hybrid_title_lookup_ignores_model_limit_to_detect_duplicate_titles() -> None:
@@ -5798,7 +6018,10 @@ def test_hybrid_title_lookup_recovers_explicit_quoted_title_after_other_normaliz
             tools=[
                 tool_snapshot(
                     name="list_meeting_reports",
-                    inputSchema={"type": "object", "properties": {}},
+                    inputSchema={
+                        "type": "object",
+                        "properties": {"reportTitle": {"type": "string"}},
+                    },
                 )
             ]
         )
@@ -5844,7 +6067,10 @@ def test_hybrid_title_lookup_keeps_natural_title_with_quoted_content_term(
             tools=[
                 tool_snapshot(
                     name="list_meeting_reports",
-                    inputSchema={"type": "object", "properties": {}},
+                    inputSchema={
+                        "type": "object",
+                        "properties": {"reportTitle": {"type": "string"}},
+                    },
                 )
             ]
         )
@@ -5953,7 +6179,10 @@ def test_hybrid_search_exact_zero_falls_back_to_workspace_content_query() -> Non
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"] == {"query": "API 배포 일정 결정"}
+    assert normalized.output_summary["input"] == {
+        "query": "API 배포 일정 결정",
+        "reportTitle": "온보딩 주간회의",
+    }
     assert normalized.output_summary["meetingReportHybridContext"] == {
         "requestedReportTitle": "온보딩 주간회의",
         "exactMatchCount": 0,
@@ -5976,7 +6205,10 @@ def test_hybrid_search_exact_zero_uses_title_when_only_generic_content_word_rema
     )
 
     assert normalized.status == "tool_candidate"
-    assert normalized.output_summary["input"] == {"query": "금요일 데일리 스크럼"}
+    assert normalized.output_summary["input"] == {
+        "query": "금요일 데일리 스크럼",
+        "reportTitle": "금요일 데일리 스크럼",
+    }
 
 
 def test_unrelated_zero_count_list_is_not_hybrid_workspace_fallback() -> None:
@@ -6047,7 +6279,10 @@ def test_hybrid_workspace_fallback_removes_title_date_and_command_wording() -> N
             },
         ),
         _meeting_transcript_search_job(),
-        prompt="7월 18일 ‘온보딩 주간회의’에서 API 배포 일정 찾아줘",
+        prompt=(
+            "7월 18일 ‘온보딩 주간회의’에서 API 배포 일정 찾아줘. "
+            "제목이 없으면 Workspace 전체 회의록에서 검색해줘"
+        ),
         planning_context=(
             "user: 7월 18일 ‘온보딩 주간회의’에서 API 배포 일정 찾아줘\n"
             + meeting_hybrid_lookup_line("온보딩 주간회의", 0, reports=[])
@@ -6382,7 +6617,10 @@ def test_normalizer_projects_only_requested_meeting_report_summary_sections(
                     inputSchema={
                         "type": "object",
                         "additionalProperties": False,
-                        "properties": {"sections": {"type": "array"}},
+                        "properties": {
+                            "contextRef": {"type": "string"},
+                            "sections": {"type": "array"},
+                        },
                     },
                 )
             ]
