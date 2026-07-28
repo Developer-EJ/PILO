@@ -102,6 +102,11 @@ MEETING_REPORT_SCOPE_FIELDS = {
     "to",
     "useSelectedMeetingReportCandidate",
 }
+MEETING_REPORT_SCOPE_TRACE_FIELDS = {
+    *MEETING_REPORT_SCOPE_FIELDS,
+    "query",
+    "sections",
+}
 USER_VISIBLE_UUID_PATTERN = re.compile(
     r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![0-9a-f])",
     re.IGNORECASE,
@@ -1805,6 +1810,7 @@ def normalize_agent_planner_decision(
     completion_tool_names: tuple[str, ...] = (),
     routed_capability_ids: tuple[str, ...] = (),
 ) -> NormalizedPlannerDecision:
+    planner_decision = decision
     decision = _normalize_calendar_relative_date_query(
         decision,
         job,
@@ -1989,6 +1995,15 @@ def normalize_agent_planner_decision(
         output_summary["unsupportedReason"] = unsupported_reason or "unknown_intent"
         final_answer = final_answer or "현재 Agent 1차 범위에서 지원하지 않는 요청입니다."
 
+    scope_normalization = _meeting_report_scope_normalization_observation(
+        planner_decision,
+        normalized_status=status,
+        normalized_tool_name=decision.tool_name,
+        normalized_input=tool_input,
+    )
+    if scope_normalization is not None:
+        output_summary["meetingReportScopeTrace"] = scope_normalization
+
     return NormalizedPlannerDecision(
         status=status,
         message=message,
@@ -1996,6 +2011,92 @@ def normalize_agent_planner_decision(
         output_summary=output_summary,
         risk_level=risk_level,
     )
+
+
+def _meeting_report_scope_normalization_observation(
+    planner_decision: AgentPlannerDecision,
+    *,
+    normalized_status: str,
+    normalized_tool_name: str | None,
+    normalized_input: dict[str, object],
+) -> dict[str, object] | None:
+    if (
+        planner_decision.tool_name not in MEETING_REPORT_SCOPE_TOOLS
+        and normalized_tool_name not in MEETING_REPORT_SCOPE_TOOLS
+    ):
+        return None
+
+    planner_scope = {
+        key: value
+        for key, value in planner_decision.tool_input.items()
+        if key in MEETING_REPORT_SCOPE_TRACE_FIELDS
+    }
+    normalized_scope = {
+        key: value
+        for key, value in normalized_input.items()
+        if key in MEETING_REPORT_SCOPE_TRACE_FIELDS
+    }
+    planner_fields = set(planner_scope)
+    normalized_fields = set(normalized_scope)
+    shared_fields = planner_fields & normalized_fields
+    preserved_fields = sorted(
+        field for field in shared_fields if planner_scope[field] == normalized_scope[field]
+    )
+    replaced_fields = sorted(
+        field for field in shared_fields if planner_scope[field] != normalized_scope[field]
+    )
+    added_fields = sorted(normalized_fields - planner_fields)
+    removed_fields = sorted(planner_fields - normalized_fields)
+    changes = [
+        {
+            "field": field,
+            "action": action,
+            "reason": _meeting_report_scope_change_reason(field),
+        }
+        for field, action in sorted(
+            [
+                *((field, "added") for field in added_fields),
+                *((field, "removed") for field in removed_fields),
+                *((field, "replaced") for field in replaced_fields),
+            ]
+        )
+    ]
+    normalization_applied = bool(
+        planner_decision.status != normalized_status
+        or planner_decision.tool_name != normalized_tool_name
+        or added_fields
+        or removed_fields
+        or replaced_fields
+    )
+
+    return {
+        "plannerStatus": planner_decision.status,
+        "normalizedStatus": normalized_status,
+        "plannerToolName": planner_decision.tool_name,
+        "normalizedToolName": normalized_tool_name,
+        "plannerInputFields": sorted(planner_fields),
+        "normalizedInputFields": sorted(normalized_fields),
+        "preservedFields": preserved_fields,
+        "addedFields": added_fields,
+        "removedFields": removed_fields,
+        "replacedFields": replaced_fields,
+        "changes": changes,
+        "normalizationApplied": normalization_applied,
+    }
+
+
+def _meeting_report_scope_change_reason(field: str) -> str:
+    if field == "reportTitle":
+        return "current_turn_title_validation"
+    if field in {"from", "to"}:
+        return "current_turn_date_resolution"
+    if field == "query":
+        return "content_query_normalization"
+    if field == "fallback":
+        return "explicit_fallback_policy"
+    if field in {"contextRef", "reportId", "useSelectedMeetingReportCandidate"}:
+        return "server_context_validation"
+    return "current_turn_scope_rebuild"
 
 
 def _missing_required_tool_input_fields(
@@ -2602,7 +2703,10 @@ def _normalize_meeting_report_current_turn_scope(
     ):
         tool_input["contextRef"] = context_ref
     else:
-        titles = _explicit_meeting_report_titles(prompt)
+        titles = _current_turn_meeting_report_titles(
+            prompt,
+            original_input.get("reportTitle"),
+        )
         if len(titles) > 1:
             return _meeting_context_clarification("meeting_report_title")
 
@@ -2613,19 +2717,6 @@ def _normalize_meeting_report_current_turn_scope(
             and _current_turn_workspace_evidence_fallback(prompt)
         ):
             report_title = None
-        planner_title = original_input.get("reportTitle")
-        if (
-            report_title is None
-            and not (
-                decision.tool_name == "search_meeting_transcript"
-                and MEETING_REPORT_HYBRID_CAPABILITY_ID in routed_capability_ids
-                and _current_turn_workspace_evidence_fallback(prompt)
-            )
-            and isinstance(planner_title, str)
-            and planner_title.strip()
-            and _normalized_text_occurs_in_prompt(planner_title, prompt)
-        ):
-            report_title = planner_title.strip()[:500]
         if report_title is not None and supports("reportTitle"):
             tool_input["reportTitle"] = report_title[:500]
 
@@ -2648,6 +2739,7 @@ def _normalize_meeting_report_current_turn_scope(
                 prompt,
                 current_date,
                 timezone,
+                report_titles=((report_title,) if report_title is not None else ()),
             )
             if parsed_selector is None:
                 return AgentPlannerDecision(
@@ -2728,7 +2820,10 @@ def _normalize_meeting_report_current_turn_scope(
         scoped_title = tool_input.get("reportTitle")
         query_title = scoped_title if isinstance(scoped_title, str) else None
         if query_title is None and _current_turn_workspace_evidence_fallback(prompt):
-            prompt_titles = _explicit_meeting_report_titles(prompt)
+            prompt_titles = _current_turn_meeting_report_titles(
+                prompt,
+                original_input.get("reportTitle"),
+            )
             if len(prompt_titles) == 1:
                 query_title = prompt_titles[0]
         if isinstance(query_title, str):
@@ -2939,7 +3034,10 @@ def _normalize_meeting_report_unified_search(
     ):
         return decision
 
-    titles = _explicit_meeting_report_titles(prompt)
+    titles = _current_turn_meeting_report_titles(
+        prompt,
+        decision.tool_input.get("reportTitle"),
+    )
     if len(titles) > 1:
         return _meeting_context_clarification("meeting_report_title")
 
@@ -3056,7 +3154,10 @@ def _normalize_meeting_report_hybrid_title_lookup(
     completion_tool_names: tuple[str, ...],
     routed_capability_ids: tuple[str, ...],
 ) -> AgentPlannerDecision:
-    explicit_titles = _explicit_meeting_report_titles(prompt)
+    explicit_titles = _current_turn_meeting_report_titles(
+        prompt,
+        decision.tool_input.get("reportTitle"),
+    )
     legacy_hybrid_lookup = (
         not routed_capability_ids
         and set(completion_tool_names) == {"search_meeting_transcript"}
@@ -3075,12 +3176,7 @@ def _normalize_meeting_report_hybrid_title_lookup(
     if decision.status == "tool_candidate" and decision.tool_name != "list_meeting_reports":
         return decision
 
-    planner_title = decision.tool_input.get("reportTitle")
-    report_title = (
-        planner_title.strip() if isinstance(planner_title, str) and planner_title.strip() else None
-    )
-    if report_title is None and len(explicit_titles) == 1:
-        report_title = explicit_titles[0]
+    report_title = explicit_titles[0] if len(explicit_titles) == 1 else None
 
     if report_title is None:
         return AgentPlannerDecision(
@@ -3118,11 +3214,13 @@ def _meeting_hybrid_content_query(
     report_title: str,
 ) -> str:
     query = value.strip() if isinstance(value, str) else ""
+    planner_query_provided = bool(query)
     if not query:
         query = prompt.strip()
     title_pattern = r"\s+".join(
         re.escape(part) for part in re.split(r"\s+", report_title.strip()) if part
     )
+    query_includes_title = bool(re.search(title_pattern, query, flags=re.IGNORECASE))
     query = re.sub(title_pattern, " ", query, flags=re.IGNORECASE)
     query = re.sub(
         r"[\"'‘’“”]|(?:제목(?:이|은|는)?\s*)|(?:해당|그|이|저|선택한|방금\s*선택한)\s*회의록|회의록",
@@ -3149,7 +3247,7 @@ def _meeting_hybrid_content_query(
         r"(?:내용|요약|요점|핵심|논의\s*사항|결정\s*사항|후속\s*작업)",
         query,
         flags=re.IGNORECASE,
-    ):
+    ) and (not planner_query_provided or query_includes_title):
         query = ""
     return query[:1000] if query else report_title.strip()[:1000]
 
@@ -3588,6 +3686,8 @@ def _supported_meeting_report_date_selector(
     prompt: str,
     current_date: str,
     timezone: str,
+    *,
+    report_titles: tuple[str, ...] = (),
 ) -> dict[str, str] | None:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
     try:
@@ -3595,29 +3695,71 @@ def _supported_meeting_report_date_selector(
     except ValueError:
         return None
 
-    absolute_date_range = _meeting_report_absolute_date_range(
+    date_expression_prompt = _meeting_report_prompt_without_report_titles(
         normalized_prompt,
+        report_titles=report_titles,
+    )
+    absolute_date_range = _meeting_report_absolute_date_range(
+        date_expression_prompt,
         base_date,
         timezone,
     )
     if absolute_date_range is not None:
         return absolute_date_range
 
-    if re.search(r"(?:^|\s)오늘(?:\s|$)", normalized_prompt):
+    if re.search(r"(?:^|\s)오늘(?:\s|$)", date_expression_prompt):
         return _meeting_report_date_range(base_date, base_date + timedelta(days=1), timezone)
 
-    if re.search(r"(?:^|\s)어제(?:\s|$)", normalized_prompt):
+    if re.search(r"(?:^|\s)어제(?:\s|$)", date_expression_prompt):
         return _meeting_report_date_range(
             base_date - timedelta(days=1),
             base_date,
             timezone,
         )
 
-    date_expression_prompt = _meeting_report_prompt_without_report_titles(normalized_prompt)
+    relative_weekday_matches = list(
+        re.finditer(
+            r"(?<![가-힣])(?P<week>지난|저번|이번|다음)\s*주\s*"
+            r"(?P<weekday>월|화|수|목|금|토|일)요일",
+            date_expression_prompt,
+        )
+    )
+    if relative_weekday_matches:
+        if len(relative_weekday_matches) != 1:
+            return None
+        relative_weekday = relative_weekday_matches[0]
+        week_offsets = {
+            "지난": -7,
+            "저번": -7,
+            "이번": 0,
+            "다음": 7,
+        }
+        weekday_offsets = {
+            "월": 0,
+            "화": 1,
+            "수": 2,
+            "목": 3,
+            "금": 4,
+            "토": 5,
+            "일": 6,
+        }
+        current_week_start = base_date - timedelta(days=base_date.weekday())
+        target_date = current_week_start + timedelta(
+            days=(
+                week_offsets[relative_weekday.group("week")]
+                + weekday_offsets[relative_weekday.group("weekday")]
+            )
+        )
+        return _meeting_report_date_range(
+            target_date,
+            target_date + timedelta(days=1),
+            timezone,
+        )
+
     if _has_unresolved_meeting_report_date_expression(date_expression_prompt):
         return None
 
-    if re.search(r"(?<![가-힣])지난\s*주(?!말)", normalized_prompt):
+    if re.search(r"(?<![가-힣])지난\s*주(?!말)", date_expression_prompt):
         current_week_start = base_date - timedelta(days=base_date.weekday())
         return _meeting_report_date_range(
             current_week_start - timedelta(days=7),
@@ -3625,7 +3767,7 @@ def _supported_meeting_report_date_selector(
             timezone,
         )
 
-    if re.search(r"(?<![가-힣])다음\s*주(?!말)", normalized_prompt):
+    if re.search(r"(?<![가-힣])다음\s*주(?!말)", date_expression_prompt):
         current_week_start = base_date - timedelta(days=base_date.weekday())
         next_week_start = current_week_start + timedelta(days=7)
         return _meeting_report_date_range(
@@ -3634,9 +3776,9 @@ def _supported_meeting_report_date_selector(
             timezone,
         )
 
-    if not re.search(r"(?:지난|저번|다음)\s*주말", normalized_prompt) and re.search(
+    if not re.search(r"(?:지난|저번|다음)\s*주말", date_expression_prompt) and re.search(
         r"(?:(?:다가오는|이번)\s*)?주말",
-        normalized_prompt,
+        date_expression_prompt,
     ):
         days_until_weekend = 5 - base_date.weekday()
         if days_until_weekend <= 0:
@@ -3648,7 +3790,7 @@ def _supported_meeting_report_date_selector(
             timezone,
         )
 
-    if re.search(r"최근\s*7\s*일|며칠\s*전", normalized_prompt):
+    if re.search(r"최근\s*7\s*일|며칠\s*전", date_expression_prompt):
         return _meeting_report_date_range(
             base_date - timedelta(days=6),
             base_date + timedelta(days=1),
@@ -3723,9 +3865,18 @@ def _has_unresolved_meeting_report_date_expression(prompt: str) -> bool:
     )
 
 
-def _meeting_report_prompt_without_report_titles(prompt: str) -> str:
+def _meeting_report_prompt_without_report_titles(
+    prompt: str,
+    *,
+    report_titles: tuple[str, ...] | None = None,
+) -> str:
     normalized_prompt = re.sub(r"\s+", " ", prompt).strip()
-    for report_title in _explicit_meeting_report_titles(normalized_prompt):
+    titles = (
+        _explicit_meeting_report_titles(normalized_prompt)
+        if report_titles is None
+        else report_titles
+    )
+    for report_title in titles:
         normalized_prompt = normalized_prompt.replace(report_title, " ", 1)
     return re.sub(r"\s+", " ", normalized_prompt).strip()
 
@@ -4101,7 +4252,7 @@ def _normalize_meeting_report_search_routing(
     )
 
 
-def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:
+def _marked_meeting_report_titles(prompt: str) -> tuple[str, ...]:
     normalized = re.sub(r"\s+", " ", prompt).strip()
     quote_pairs = (("‘", "’"), ("“", "”"), ('"', '"'), ("'", "'"))
     spans: list[tuple[int, int, str]] = []
@@ -4159,10 +4310,89 @@ def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:
     for index, (_start, _end, title) in enumerate(spans):
         if index in explicit_indexes and title not in candidates:
             candidates.append(title)
+    return tuple(candidates)
+
+
+def _explicit_meeting_report_titles(prompt: str) -> tuple[str, ...]:
+    normalized = re.sub(r"\s+", " ", prompt).strip()
+    candidates = list(_marked_meeting_report_titles(normalized))
     for title in _natural_meeting_report_titles(normalized):
         if title not in candidates:
             candidates.append(title)
     return tuple(candidates)
+
+
+def _current_turn_meeting_report_titles(
+    prompt: str,
+    planner_title: object,
+) -> tuple[str, ...]:
+    marked_titles = tuple(
+        title
+        for title in _marked_meeting_report_titles(prompt)
+        if not _meeting_report_title_conflicts_with_prompt(title, prompt)
+    )
+    if len(marked_titles) > 1:
+        return marked_titles
+    if len(marked_titles) == 1:
+        return marked_titles
+
+    natural_titles = _natural_meeting_report_titles(prompt)
+    if len(natural_titles) > 1:
+        return natural_titles
+
+    validated_planner_title = _validated_current_turn_meeting_report_title(
+        planner_title,
+        prompt,
+    )
+    if validated_planner_title is not None:
+        return (validated_planner_title,)
+    return natural_titles
+
+
+def _validated_current_turn_meeting_report_title(
+    value: object,
+    prompt: str,
+) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    candidate = re.sub(r"\s+", " ", value).strip(" ,.:;\"'‘’“”")
+    if not candidate or not _normalized_text_occurs_in_prompt(candidate, prompt):
+        return None
+    if _meeting_report_title_conflicts_with_prompt(candidate, prompt):
+        return None
+
+    candidate = re.sub(
+        r"\s*(?:회의록\s*)?" r"(?:내용|요약|요점|핵심|논의\s*사항|결정\s*사항|후속\s*작업)\s*$",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    ).strip()
+    candidate = _strip_natural_meeting_title_date_prefix(candidate)
+    if not candidate or _is_generic_meeting_report_title_candidate(candidate):
+        return None
+    return candidate[:500]
+
+
+def _meeting_report_title_conflicts_with_prompt(
+    candidate: str,
+    prompt: str,
+) -> bool:
+    candidate_pattern = r"\s+".join(re.escape(part) for part in re.split(r"\s+", candidate) if part)
+    return bool(
+        re.search(
+            rf"{candidate_pattern}[\"'‘’“”]*\s*(?:은|는|이|가|을|를)?\s*"
+            r"(?:말고|아니라|제외|취소|사용하지)",
+            prompt,
+            re.IGNORECASE,
+        )
+        or re.search(
+            rf"{candidate_pattern}[\"'‘’“”]*\s*(?:와|과|에|와의|과의)?\s*관련"
+            r"(?:된|한|해서|하여|있는)",
+            prompt,
+            re.IGNORECASE,
+        )
+    )
 
 
 _NATURAL_MEETING_TITLE_KIND = (
@@ -4173,6 +4403,11 @@ _NATURAL_MEETING_TITLE_KIND = (
 def _natural_meeting_report_titles(prompt: str) -> tuple[str, ...]:
     normalized = re.sub(r"\s+", " ", prompt).strip()
     patterns = (
+        re.compile(
+            rf"^(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND}\s*:\s*.{{1,400}}?)\s*"
+            r"(?:회의록\s*)?에서",
+            re.IGNORECASE,
+        ),
         re.compile(
             rf"^(?P<title>.{{1,500}}?{_NATURAL_MEETING_TITLE_KIND})\s*"
             r"(?:회의록\s*)?(?:의\s*)?"
@@ -4239,7 +4474,7 @@ def _strip_natural_meeting_title_date_prefix(value: str) -> str:
         r"(?:주말|주|달|월|년)|"
         r"최근\s*7\s*일|며칠\s*전|"
         r"(?:\d+|한|두|세|네)\s*(?:일|주|개월|달|년)\s*(?:전|후)"
-        r")\s+",
+        r")\s*(?:에(?:서)?|부터|까지|의)?\s*",
         re.IGNORECASE,
     )
     return date_prefix.sub("", value, count=1).strip()
@@ -4248,17 +4483,34 @@ def _strip_natural_meeting_title_date_prefix(value: str) -> str:
 def _is_generic_meeting_report_title_candidate(value: str) -> bool:
     normalized = re.sub(r"\s+", " ", value).strip().lower()
     if re.search(
-        r"(?:논의|토론|언급|발언|이야기|얘기|다뤘|검토|제안|의견|우려|"
-        r"누가|무엇|뭐|어떻게|왜|언제|했는지|하는지|됐는지|인지|"
-        r"이유|원인|배경|근거|경위|사유|관련|관한|관해|대해|주제로|"
-        r"선택|결정|합의|담당|맡기|미뤄|밀려|연기|지연|변경)",
+        r"(?:누가|무엇|뭐|무슨|어떻게|왜|언제|어디|"
+        r"했는지|하는지|됐는지|인지|이유|원인|배경|근거|경위|사유)",
         normalized,
+    ):
+        return True
+    if re.search(
+        r"(?:논의|토론|언급|발언|이야기|얘기|다루|검토|제안|공유|우려|"
+        r"선택|결정|합의|담당|맡기|미루|밀리|연기|지연|변경|관련)"
+        r"(?:했|한|하는|된|됐|했던|하던|되었던|되어|해서|하여|있는|있었던|나온|오간)",
+        normalized,
+    ):
+        return True
+    if re.search(
+        r"(?:시작|열리|진행|끝나|종료)(?:한|된|했던|되었던|하는)\s*"
+        rf"{_NATURAL_MEETING_TITLE_KIND}$",
+        normalized,
+        re.IGNORECASE,
     ):
         return True
     if re.fullmatch(_NATURAL_MEETING_TITLE_KIND, normalized, re.IGNORECASE):
         return True
     if re.match(
-        r"^(?:가장\s*)?(?:최근|지난|저번|이전|이번|오늘|어제|직전|마지막)(?:\s|$)",
+        r"^(?:가장\s*)?(?:최근|지난|저번|이전|이번|오늘|어제|직전|마지막)" r"(?:에는|에서|의|\s|$)",
+        normalized,
+    ):
+        return True
+    if "아니라" in normalized or re.match(
+        r"^(?:이전|앞선|기존)\s*(?:요청|조건|검색|제목|범위)",
         normalized,
     ):
         return True
