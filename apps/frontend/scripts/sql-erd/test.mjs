@@ -8127,7 +8127,7 @@ assert.match(
 );
 assert.match(
   panel,
-  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|/s
+  /isDialectSelectDisabled=\{\s*!isSessionReady \|\|\s*isWriteProtocolMismatch \|\|\s*sourceMutationIntent\.pendingMutation !== null\s*\}/s
 );
 assert.match(
   panel,
@@ -8173,11 +8173,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /const handleUndoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
+  /const handleUndoNormalizedSql = useCallback\(\(\) => \{[\s\S]*?if \(sqlErdViewSession\.writeProtocol === "operations_v1"\) \{[\s\S]*?type: "undo"/s
 );
 assert.match(
   panel,
-  /const handleRedoNormalizedSql = useCallback\(\(\) => \{\s*if \([\s\S]*?sqlErdViewSession\.writeProtocol === "operations_v1" &&\s*!sourceLock\.canEdit/s
+  /const handleRedoNormalizedSql = useCallback\(\(\) => \{[\s\S]*?if \(sqlErdViewSession\.writeProtocol === "operations_v1"\) \{[\s\S]*?type: "redo"/s
 );
 assert.match(
   panel,
@@ -8185,11 +8185,11 @@ assert.match(
 );
 assert.match(
   panel,
-  /canRedoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
+  /canRedoNormalizedSql=\{[\s\S]*?sourceMutationIntent\.pendingMutation === null[\s\S]*?modelSqlHistory\.future\.length > 0/s
 );
 assert.match(
   panel,
-  /canUndoNormalizedSql=\{[\s\S]*?sqlErdViewSession\.writeProtocol !== "operations_v1" \|\|\s*sourceLock\.canEdit/s
+  /canUndoNormalizedSql=\{[\s\S]*?sourceMutationIntent\.pendingMutation === null[\s\S]*?modelSqlHistory\.past\.length > 0/s
 );
 assert.match(
   panel,
@@ -8265,6 +8265,10 @@ assert.doesNotMatch(
   /setPendingLayoutAutosaveJson\(null\)/
 );
 assert.match(panel, /handleDialectChange/);
+assert.match(
+  panel,
+  /const handleDialectChange = useCallback\([\s\S]*?if \(sqlErdViewSession\.writeProtocol === "operations_v1"\) \{[\s\S]*?action: \{ dialect, type: "dialect" \}/s
+);
 assert.match(panel, /onDialectChange=\{handleDialectChange\}/);
 assert.match(panel, /DialectSelect/);
 assert.match(panel, /value=\{dialect\}/);

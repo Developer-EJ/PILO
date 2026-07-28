@@ -31,6 +31,16 @@ export function createSqlErdSourceLockController({
   let state: SqlErdSourceLockState = { status: "disabled" };
   let currentLeaseId: string | null = null;
   let heldLeaseId: string | null = null;
+  let transitionTail: Promise<unknown> = Promise.resolve();
+
+  function enqueueTransition<T>(transition: () => Promise<T> | T) {
+    const result = transitionTail.then(transition, transition);
+    transitionTail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
 
   function setState(nextState: SqlErdSourceLockState) {
     state = nextState;
@@ -59,7 +69,7 @@ export function createSqlErdSourceLockController({
     }
   }
 
-  async function renew() {
+  async function renewLease() {
     const leaseId = heldLeaseId;
     if (!leaseId) return;
 
@@ -78,25 +88,50 @@ export function createSqlErdSourceLockController({
 
   return {
     getState: () => state,
-    renew,
+    recover: async () => {
+      currentLeaseId = null;
+      if (active) setState({ status: "acquiring" });
+      await enqueueTransition(async () => {
+        const leaseId = heldLeaseId;
+        heldLeaseId = null;
+        if (leaseId) {
+          await client.releaseSourceLock(leaseId).catch(() => undefined);
+        }
+        if (!active) {
+          setState({ status: "disabled" });
+          return;
+        }
+        await acquire();
+      });
+    },
+    renew: () => enqueueTransition(renewLease),
     start: async () => {
       active = true;
-      await acquire();
+      await enqueueTransition(async () => {
+        if (!active || heldLeaseId || state.status === "acquiring") return;
+        await acquire();
+      });
     },
     stop: async () => {
       active = false;
       currentLeaseId = null;
-      const leaseId = heldLeaseId;
-      heldLeaseId = null;
       setState({ status: "disabled" });
-      if (leaseId) await client.releaseSourceLock(leaseId).catch(() => undefined);
+      await enqueueTransition(async () => {
+        const leaseId = heldLeaseId;
+        heldLeaseId = null;
+        if (leaseId) {
+          await client.releaseSourceLock(leaseId).catch(() => undefined);
+        }
+      });
     },
     tick: async () => {
-      if (!active) return;
+      await enqueueTransition(async () => {
+        if (!active) return;
 
-      const request = getSourceLockIntervalRequest(state.status);
-      if (request === "acquire") await acquire();
-      if (request === "renew") await renew();
+        const request = getSourceLockIntervalRequest(state.status);
+        if (request === "acquire") await acquire();
+        if (request === "renew") await renewLease();
+      });
     }
   };
 }

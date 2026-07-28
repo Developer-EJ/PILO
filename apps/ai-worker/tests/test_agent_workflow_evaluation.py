@@ -104,13 +104,22 @@ def test_workflow_rejects_wrong_tool_output_or_terminal_state() -> None:
 
 
 def test_workflow_hides_fixture_result_when_task_critical_input_is_wrong() -> None:
+    matched_decisions = _successful_decisions()
+    matched_decisions[0] = replace(
+        matched_decisions[0],
+        tool_input={"roomName": "디자인 회의실"},
+    )
     scenario = replace(
         _scenario(),
+        prompt="디자인 회의실 최근 회의록과 오늘 일정을 알려줘",
         fixtures=(
             replace(
                 _scenario().fixtures[0],
                 outcome_input_assertions=(
-                    OutcomeInputAssertion(path=("limit",), contains_all=("1",)),
+                    OutcomeInputAssertion(
+                        path=("roomName",),
+                        contains_all=("디자인 회의실",),
+                    ),
                 ),
             ),
             _scenario().fixtures[1],
@@ -121,10 +130,13 @@ def test_workflow_hides_fixture_result_when_task_critical_input_is_wrong() -> No
         ),
     )
     mismatched_decisions = _successful_decisions()
-    mismatched_decisions[0] = replace(mismatched_decisions[0], tool_input={"limit": 2})
+    mismatched_decisions[0] = replace(
+        mismatched_decisions[0],
+        tool_input={"roomName": "Backend"},
+    )
 
     matched = evaluate_workflow_suite(
-        ScriptedPlanner(_successful_decisions()),
+        ScriptedPlanner(matched_decisions),
         ScriptedRouter(),
         _job(),
         (scenario,),
@@ -522,7 +534,7 @@ def _scenario() -> WorkflowScenario:
         fixtures=(
             WorkflowToolFixture(
                 tool_name="list_meeting_reports",
-                input_contains={"limit": 1},
+                input_contains={"latest": True},
                 output={"reports": [{"title": "주간 회의록"}]},
             ),
             WorkflowToolFixture(
